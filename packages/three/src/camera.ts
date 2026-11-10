@@ -10,6 +10,7 @@ import type {
   CameraDriverEvent,
   CameraDriverInput,
   CameraDriverSnapshot,
+  CameraMachine,
   CameraMachineInput,
 } from '@taucad/camera/machine';
 import { fromThreeRenderPoint, toThreeRenderPoint } from '#spatial.js';
@@ -66,12 +67,18 @@ export const readThreeCameraState = ({ camera, target, renderFrame }: ReadThreeC
 };
 
 /** Options for {@link createThreeCameraRig}. */
-type ThreeCameraRigOptions = Pick<CameraMachineInput, 'initialView' | 'pixelBudget'> &
+type ThreeCameraRigOptions = Partial<Pick<CameraMachineInput, 'initialView' | 'pixelBudget'>> &
   Pick<CameraActorOptions, 'clock' | 'inspect' | 'onRejectedEvent'> &
   Readonly<{
     clipPlanes?: ThreeCameraClipPlanePolicy;
     renderFrame?: RenderFrame;
     onUpdate?: (camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void;
+    /**
+     * A running camera actor the rig presents instead of creating its own, such as a graphics actor's child. The rig
+     * takes its view, frame and policy, follows it only while {@link ThreeCameraRig.connect | connected}, and never
+     * stops it. `initialView`, `pixelBudget` and the actor options are then unused.
+     */
+    actorRef?: Actor<CameraMachine>;
   }>;
 
 /** Host clipping policy applied after each bounds-derived endpoint synchronization. */
@@ -93,6 +100,11 @@ export type ThreeCameraRig = Readonly<{
   setRenderFrame: (renderFrame: RenderFrame) => void;
   readState: () => CameraState;
   setClipPlanes: (clipPlanes: ThreeCameraClipPlanePolicy | undefined) => void;
+  /**
+   * Follows a given `actorRef` until the returned function is called: presents each of its changes and sends it the
+   * rig's frame and policy. A rig that created its own actor follows it from the start, and this does nothing.
+   */
+  connect: () => () => void;
   dispose: () => void;
 }>;
 
@@ -395,33 +407,38 @@ const sameClipPlanes = (
 export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCameraRig => {
   const perspectiveCamera = new PerspectiveCamera();
   const orthographicCamera = new OrthographicCamera();
-  const initialView = createCameraView(options.initialView);
+  const given = options.actorRef;
+  const givenSnapshot = given && selectCameraDriverSnapshot(given.getSnapshot());
+  const initialView = givenSnapshot?.view ?? createCameraView(options.initialView!);
   /*
    * The mirror: the rig's render frame and clip policy, which the native cameras present with the latest camera
    * snapshot's view. A rig setter changes the mirror and presents at once.
    *
-   * The reconciliation rule, the only one, per kind (frame, policy), keeps at most one rig value in flight to the rig's
-   * own actor. The rig sends that actor the mirror (at start, after a setter, after a snapshot) only while the actor runs
-   * (started, neither stopped nor errored), nothing of that kind is in flight and the actor's last snapshot does not
-   * already carry it, so a later snapshot always carries the sent value, even when the actor answers it as a duplicate.
-   * While a value is in flight, a snapshot that carries it confirms it (the rig then sends the mirror if it has moved
-   * on) and one that differs is stale and is ignored; with nothing in flight, a snapshot that differs from the mirror is
-   * a change the actor took from elsewhere and becomes the mirror. Another actor run on this driver, such as one
-   * restored from a persisted snapshot, is sent the mirror when it starts and never changes it.
+   * The reconciliation rule, the only one, per kind (frame, policy), keeps at most one rig value in flight to the
+   * followed actor (the rig's own, or a given one while connected). The rig sends that actor the mirror (at start or
+   * connect, after a setter, after a snapshot) only while the actor runs (started, neither stopped nor errored), nothing
+   * of that kind is in flight and the actor's last snapshot does not already carry it, so a later snapshot always
+   * carries the sent value, even when the actor answers it as a duplicate. While a value is in flight, a snapshot that
+   * carries it confirms it (the rig then sends the mirror if it has moved on) and one that differs is stale and is
+   * ignored; with nothing in flight, a snapshot that differs from the mirror is a change the actor took from elsewhere
+   * and becomes the mirror. Another actor run on the rig's driver, such as one restored from a persisted snapshot, is
+   * sent the mirror when it starts and never changes it.
    */
   let renderFrame = validateRenderFrameForView(
-    options.renderFrame ?? identityRenderFrame(initialView.frameId),
+    options.renderFrame ?? givenSnapshot?.renderFrame ?? identityRenderFrame(initialView.frameId),
     initialView.frameId,
   );
-  let clipPlanes = options.clipPlanes ? validateClipPlanes(options.clipPlanes) : undefined;
+  let clipPlanes = options.clipPlanes
+    ? validateClipPlanes(options.clipPlanes)
+    : (givenSnapshot?.clipPolicy as ThreeCameraClipPlanePolicy | undefined);
   let activeCamera: ThreeCamera =
     initialView.requestedVerticalFieldOfView === 0 ? orthographicCamera : perspectiveCamera;
-  // The value of each kind in flight to the rig's own actor, boxed because no clip policy is a value.
+  // The value of each kind in flight to the followed actor, boxed because no clip policy is a value.
   let sentFrame: readonly [RenderFrame] | undefined;
   let sentClip: readonly [ThreeCameraClipPlanePolicy | undefined] | undefined;
-  // The last snapshot of the rig's own actor, once it started.
+  // The last snapshot of the followed actor, while the rig follows it.
   let held: CameraDriverSnapshot | undefined;
-  /* Sends the rig's own actor each mirrored value the rule allows. */
+  /* Sends the followed actor each mirrored value the rule allows. */
   const flush = (): void => {
     if (!held || actorRef.getSnapshot().status !== 'active') {
       return;
@@ -453,6 +470,28 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
     }
   };
 
+  /* A snapshot of the followed actor: confirm or adopt each mirrored kind, then present. */
+  const follow = (snapshot: CameraDriverSnapshot): void => {
+    held = snapshot;
+    if (!sentFrame) {
+      if (!sameRenderFrame(snapshot.renderFrame, renderFrame)) {
+        ({ renderFrame } = snapshot);
+      }
+    } else if (sameRenderFrame(snapshot.renderFrame, sentFrame[0])) {
+      sentFrame = undefined;
+    }
+    if (!sentClip) {
+      if (!sameClipPlanes(snapshot.clipPolicy, clipPlanes)) {
+        clipPlanes = snapshot.clipPolicy;
+      }
+    } else if (sameClipPlanes(snapshot.clipPolicy, sentClip[0])) {
+      sentClip = undefined;
+    }
+    latest = snapshot;
+    flush();
+    present();
+  };
+
   const cameraDriver = createCallbackLogic<CameraDriverEvent, CameraDriverInput>(
     ({ input, receive, sendBack, system }) => {
       // The driver is shared by every actor made from this logic, such as one restored from a persisted snapshot.
@@ -471,37 +510,30 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
       receive(({ snapshot }) => {
         // Another actor never changes the mirror.
         if (own) {
-          held = snapshot;
-          if (!sentFrame) {
-            if (!sameRenderFrame(snapshot.renderFrame, renderFrame)) {
-              ({ renderFrame } = snapshot);
-            }
-          } else if (sameRenderFrame(snapshot.renderFrame, sentFrame[0])) {
-            sentFrame = undefined;
-          }
-          if (!sentClip) {
-            if (!sameClipPlanes(snapshot.clipPolicy, clipPlanes)) {
-              clipPlanes = snapshot.clipPolicy;
-            }
-          } else if (sameClipPlanes(snapshot.clipPolicy, sentClip[0])) {
-            sentClip = undefined;
-          }
+          follow(snapshot);
+        } else {
+          latest = snapshot;
+          flush();
+          present();
         }
-        latest = snapshot;
-        flush();
-        present();
       });
     },
   );
-  const actorRef = createCameraActor({
-    machine: cameraMachine.provide({ actors: { cameraDriver } }),
-    input: { initialView, pixelBudget: options.pixelBudget, renderFrame, clipPolicy: clipPlanes },
-    clock: options.clock,
-    inspect: options.inspect,
-    onRejectedEvent: options.onRejectedEvent,
-  });
-  let latest = selectCameraDriverSnapshot(actorRef.getSnapshot());
+  const actorRef =
+    given ??
+    createCameraActor({
+      machine: cameraMachine.provide({ actors: { cameraDriver } }),
+      input: { initialView, pixelBudget: options.pixelBudget, renderFrame, clipPolicy: clipPlanes },
+      clock: options.clock,
+      inspect: options.inspect,
+      onRejectedEvent: options.onRejectedEvent,
+    });
+  let latest = givenSnapshot ?? selectCameraDriverSnapshot(actorRef.getSnapshot());
   present(false);
+  let unfollow: (() => void) | undefined;
+  // Whether a setter changed each kind while a given actor was not followed: connecting sends it rather than adopt.
+  let setFrame = false;
+  let setClip = false;
 
   return {
     perspectiveCamera,
@@ -519,10 +551,16 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
         return;
       }
       renderFrame = validated;
+      setFrame = !held;
       present();
       flush();
     },
     readState() {
+      if (given && !unfollow) {
+        // Not followed: read the given actor as it is now.
+        latest = selectCameraDriverSnapshot(given.getSnapshot());
+        present(false);
+      }
       return readThreeCameraState({
         camera: activeCamera,
         target: toThreeRenderPoint({ renderFrame, pointMeters: latest.view.target }),
@@ -535,15 +573,54 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
         return;
       }
       clipPlanes = validated;
+      setClip = !held;
       present();
       flush();
+    },
+    connect() {
+      if (given === undefined || unfollow !== undefined || disposed) {
+        return () => undefined;
+      }
+      const snapshot = selectCameraDriverSnapshot(given.getSnapshot());
+      if (!setFrame) {
+        ({ renderFrame } = snapshot);
+      }
+      if (!setClip) {
+        clipPlanes = snapshot.clipPolicy;
+      }
+      setFrame = false;
+      setClip = false;
+      held = snapshot;
+      latest = snapshot;
+      presented = undefined;
+      // Subscribed before the mirror is sent, so the snapshot that confirms it is followed.
+      const subscription = given.subscribe((next) => {
+        follow(selectCameraDriverSnapshot(next));
+      });
+      flush();
+      present();
+      const stop = (): void => {
+        if (unfollow === stop) {
+          subscription.unsubscribe();
+          unfollow = undefined;
+          held = undefined;
+          sentFrame = undefined;
+          sentClip = undefined;
+        }
+      };
+      unfollow = stop;
+      return stop;
     },
     dispose() {
       if (disposed) {
         return;
       }
       disposed = true;
-      actorRef.stop();
+      if (given) {
+        unfollow?.();
+      } else {
+        actorRef.stop();
+      }
     },
   };
 };

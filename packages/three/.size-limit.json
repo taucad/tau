@@ -1,7 +1,7 @@
 [
   {
-    "name": "@taucad/three runtime — measured 3.18 kB brotli on 2026-11-10 (the rig presents its render frame and clip policy with the camera actor's view, G3)",
+    "name": "@taucad/three runtime — measured 3.35 kB brotli on 2026-11-10 (the rig presents a given camera actor, such as a graphics child, while connected, G4)",
     "path": "dist/**/*.mjs",
-    "limit": "3.2 kB"
+    "limit": "3.4 kB"
   }
 ]

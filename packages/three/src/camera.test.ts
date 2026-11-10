@@ -679,7 +679,8 @@ describe('createThreeCameraRig', () => {
     const rig = createThreeCameraRig({ initialView });
     rig.actorRef.start();
     rig.actorRef.send({
-      type: 'setView',
+      type: 'poseObserved',
+      source: 'input',
       target: initialView.target,
       direction: [1, -1, -0.7],
       up: initialView.up,
@@ -944,7 +945,8 @@ describe('createThreeCameraRig', () => {
     protectedRig.actorRef.start();
     const events = [
       {
-        type: 'setView',
+        type: 'poseObserved',
+        source: 'input',
         target: transitionView.target,
         direction: [1, -1, 0.01],
         up: transitionView.up,
@@ -953,7 +955,8 @@ describe('createThreeCameraRig', () => {
       },
       { type: 'setVerticalFieldOfView', verticalFieldOfView: 0 },
       {
-        type: 'setView',
+        type: 'poseObserved',
+        source: 'input',
         target: transitionView.target,
         direction: [1, -1, -0.01],
         up: transitionView.up,

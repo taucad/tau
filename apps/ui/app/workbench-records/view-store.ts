@@ -165,7 +165,9 @@ export function createWorkbenchViewStore(
     }
   });
   on('failed', ({ error }) => {
-    input.onError(error);
+    if (!fenced()) {
+      input.onError(error);
+    }
   });
   on('healthChanged', ({ health }) => {
     if (!fenced()) {

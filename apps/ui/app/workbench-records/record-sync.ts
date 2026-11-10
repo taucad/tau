@@ -116,7 +116,19 @@ export function createRecordSync<T, P>(
     waiting.clear();
   };
   // Every region is final once the store is closed and its last write has answered: nothing answers after that.
-  actor.subscribe({ complete: settleAll, error: settleAll });
+  // MC-R12: a fault discards the step that raised it, and the requests that step would have answered with it, so
+  // every request waiting at a fault is answered `false`; the store goes on answering what comes after.
+  let faults = 0;
+  actor.subscribe({
+    next: (snapshot) => {
+      if (snapshot.context.faults !== faults) {
+        ({ faults } = snapshot.context);
+        settleAll();
+      }
+    },
+    complete: settleAll,
+    error: settleAll,
+  });
   const stopped = (): boolean => actor.getSnapshot().status !== 'active';
   const fenced = (): boolean => stopped() || actor.getSnapshot().context.closeFenced;
   /** Send a request and wait for its answer; a closed actor answers `false` without a send. */
@@ -130,12 +142,7 @@ export function createRecordSync<T, P>(
     }
     return new Promise<boolean>((resolve) => {
       waiting.set(requestId, resolve);
-      const { faults } = actor.getSnapshot().context;
       send(requestId);
-      // MC-R12: a step that faulted dropped the request with it, so nothing else would answer it.
-      if (actor.getSnapshot().context.faults !== faults && waiting.delete(requestId)) {
-        resolve(false);
-      }
     });
   };
   return {

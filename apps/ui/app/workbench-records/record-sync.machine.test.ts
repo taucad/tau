@@ -1192,6 +1192,43 @@ describe('recordSync', () => {
       expect(await commands.edit({ name: 'Front' })).toBe(true);
     });
 
+    it('should answer a request waiting when a port reply faults (MC-R12)', async () => {
+      const throwing: RecordPolicy<Fields, Fields> = {
+        ...policy,
+        diff(base, next) {
+          if ('explode' in next) {
+            throw new Error('diff defect');
+          }
+          return policy.diff(base, next);
+        },
+      };
+      const reads: Array<(outcome: RecordReadOutcome) => void> = [];
+      const { actor, commands } = createRecordSync({
+        machine: createRecordSyncMachine(throwing),
+        ports: {
+          read: async () =>
+            new Promise<RecordReadOutcome>((resolve) => {
+              reads.push(resolve);
+            }),
+          write: async ({ data }) => ({ status: 'applied', content: bytesOf(data) }),
+        },
+      });
+      actor.start();
+      const ensured = commands.ensure({ explode: 'yes' });
+      await flush();
+      reads.at(-1)?.({ status: 'read', bytes: null });
+      await flush();
+
+      expect(actor.getSnapshot().context.fault).toBe('diff defect');
+      expect(await ensured).toBe(false);
+
+      const read = commands.read();
+      await flush();
+      reads.at(-1)?.({ status: 'read', bytes: null });
+
+      expect(await read).toBe(false);
+    });
+
     it('should hold nothing but data in context at every step (D4)', async () => {
       const recorder = recordTransitions();
       const store = harness({ inspect: recorder.inspect });

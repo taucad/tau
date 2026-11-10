@@ -1406,4 +1406,28 @@ describe('workbench view checked store', () => {
     expect(await edited).toBe(true);
     expect(onHealth).not.toHaveBeenCalled();
   });
+
+  it('should report no error after dispose when the write on the wire fails later', async () => {
+    const data = memory();
+    const onError = vi.fn();
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-error001',
+      files: data.files,
+      onChange: () => undefined,
+      onError,
+    });
+    await store.read();
+    const failing = Promise.withResolvers<CheckedFileWriteResult>();
+    data.writes.mockImplementationOnce(async () => failing.promise);
+    const edited = store.edit({ ...seed(), name: 'Front' });
+    await vi.waitFor(() => {
+      expect(data.writes).toHaveBeenCalledTimes(1);
+    });
+    store.dispose();
+    failing.reject(new Error('offline'));
+
+    expect(await edited).toBe(false);
+    expect(onError).not.toHaveBeenCalled();
+  });
 });

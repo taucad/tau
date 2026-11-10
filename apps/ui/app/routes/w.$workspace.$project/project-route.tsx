@@ -1,5 +1,16 @@
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
-import { createContext, lazy, Suspense, use, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  lazy,
+  Suspense,
+  use,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useLocation, useMatch, useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
 import type { Handle } from '#types/matches.types.js';
@@ -207,13 +218,6 @@ export function ProjectRouteGate({
                 },
           );
         }
-        if (access.status === 'ready') {
-          /* Open it with the answer rather than from the effect below, after the commit that stores
-           * it: in between, a ready project that is not live yet derives `closed`, and its notice
-           * ("Project closed … Reopen project") painted for about 26 ms on a direct open. Opening a
-           * live project is a touch, so the effect's own open stays harmless. */
-          sessions.send({ type: 'open', projectId: requestedProjectId });
-        }
         setResolved({
           projectId: requestedProjectId,
           access,
@@ -240,7 +244,7 @@ export function ProjectRouteGate({
      * Finding 2). The manager's value carries `libraryRevision`, so it moves
      * with the library and `projectManager` alone re-runs this effect (P66).
      */
-  }, [requestedProjectId, projectManager, loadAttempt, sessions]);
+  }, [requestedProjectId, projectManager, loadAttempt]);
 
   /*
    * Liveness is orthogonal to navigation (A35, I22).
@@ -251,7 +255,11 @@ export function ProjectRouteGate({
    * navigated away from keeps its file manager, its kernel and its revision
    * port, so a running agent settles and returning is instant.
    */
-  useEffect(() => {
+  /* A layout effect, not a passive one: until `open` lands, a ready project that is not live derives
+   * `closed`, and a passive effect let that commit paint its notice ("Project closed … Reopen
+   * project") for about 26 ms on a direct open. The registry update this sends re-renders before
+   * the browser paints. */
+  useLayoutEffect(() => {
     if (
       requestedProjectId === undefined ||
       resolved?.access.status !== 'ready' ||

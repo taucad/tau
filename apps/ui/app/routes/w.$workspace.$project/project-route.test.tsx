@@ -333,7 +333,6 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
  * non-editor state so these tests stay about what the *gate* derives and
  * whether the app shell survived it.
  */
-const renderedNoticeKinds = vi.hoisted((): string[] => []);
 vi.mock('#routes/w.$workspace.$project/project-route-notices.js', async () => {
   const { useContext } = await import('react');
   const { ProjectRouteRetryContext } = await import('#routes/w.$workspace.$project/project-route-state.js');
@@ -341,7 +340,6 @@ vi.mock('#routes/w.$workspace.$project/project-route-notices.js', async () => {
     ProjectRouteRetryContext,
     ProjectRouteNotice: ({ state }: { readonly state: { kind: string; error?: Error } }) => {
       const retry = useContext(ProjectRouteRetryContext);
-      renderedNoticeKinds.push(state.kind);
       return (
         <div>
           <p>Notice: {state.kind}</p>
@@ -929,21 +927,32 @@ describe('project route session identity', () => {
     expect(focusedSessionId()).toBe(projectA);
   });
 
-  it('should never render the closed notice while a ready project is opening', async () => {
+  it('should never leave the closed notice on screen between tasks while a ready project opens', async () => {
     const pendingA = deferred<ProjectRouteAccess>();
     getProjectRouteAccess.mockReturnValue(pendingA.promise);
-    renderedNoticeKinds.length = 0;
     renderRouteProvider();
+    expect(screen.getByText('Notice: resolving')).toBeInTheDocument();
 
-    await act(async () => {
+    /* Outside `act`, React renders on its own schedule, so the DOM between tasks is what a browser
+     * could paint. Opening the session in a passive effect left `closed` committed for a task. */
+    const previous = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+    const seen: string[] = [];
+    try {
       pendingA.resolve(ready(projectA));
-      await pendingA.promise;
-    });
-    await screen.findAllByTestId('project-session');
+      for (let task = 0; task < 50 && screen.queryAllByTestId('project-session').length === 0; task++) {
+        // oxlint-disable-next-line no-await-in-loop -- one sample per task, in order, is the point
+        await new Promise<void>((resolve) => {
+          globalThis.setTimeout(resolve, 0);
+        });
+        seen.push(document.body.textContent);
+      }
+    } finally {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = previous;
+    }
 
-    /* Opening the session in an effect after the access commit derived `closed` for one commit. */
-    expect(renderedNoticeKinds).toContain('resolving');
-    expect(renderedNoticeKinds).not.toContain('closed');
+    await screen.findAllByTestId('project-session');
+    expect(seen.some((text) => text.includes('Notice: closed'))).toBe(false);
   });
 
   it('should leave the initial loader for a retryable access error', async () => {

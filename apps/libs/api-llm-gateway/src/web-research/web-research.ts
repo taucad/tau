@@ -1,7 +1,7 @@
 /**
- * Server-side work behind the agent's `web_search` and `web_browser` tools (LangChain-plane regression review R1).
+ * Server-side work behind the agent's `web_search` and `web_browser` tools (server-agent regression review R1).
  *
- * Both ran inside the API on the LangChain plane. The Pi agent host runs on the device, so the tools call these
+ * Both ran inside the API in the former server-side agent loop. The Pi agent host runs on the device, so the tools call these
  * functions through `POST /v1/llm/tools/*`: the search key stays on the server, and page fetches leave from the API.
  * Because the API fetches URLs the model chose, every hop is checked to resolve to a public address first.
  *

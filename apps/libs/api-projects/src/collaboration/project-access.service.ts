@@ -1,7 +1,7 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and DI metadata needs runtime class imports */
 import { createHash, randomBytes } from 'node:crypto';
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { DatabaseService } from '@taucad/api-database';
 import { assertActiveProjectLocked, assertProjectActive } from '@taucad/api-database/project-lifecycle';
 import { project, projectCollaborator, projectInvitation, user } from '@taucad/api-database/schema';
@@ -26,6 +26,24 @@ export type ProjectCollaboratorEntry = {
   readonly status: 'pending' | 'accepted' | 'revoked';
   readonly acceptedAt: string | undefined;
   readonly expiresAt: string;
+};
+
+/**
+ * One person in a project's member directory (Q2): an account id and the name
+ * to show for it. Never an address: a name that looks like one is left out.
+ */
+export type ProjectMemberName = {
+  readonly accountId: string;
+  /** Absent when the account has no name to show. */
+  readonly name?: string;
+  /** The role held now; absent for an account named on request that is no longer a member. */
+  readonly role?: ProjectRole;
+};
+
+/** A display name that is an email address is not shown: the address is the identifying half. */
+const shownName = (name: string): { name?: string } => {
+  const trimmed = name.trim();
+  return trimmed === '' || trimmed.includes('@') ? {} : { name: trimmed };
 };
 
 /** How long an invitation link stays usable. Milliseconds. */
@@ -376,6 +394,54 @@ export class ProjectAccessService {
       acceptedAt: row.acceptedAt?.toISOString(),
       expiresAt: row.expiresAt.toISOString(),
     }));
+  }
+
+  /**
+   * The project's member directory (Q2): the owner and every collaborator,
+   * each with the name to show, plus the names of any other accounts the
+   * caller names — a former member who pushed, for instance.
+   *
+   * Readable by any member: it carries account ids, names and roles, never
+   * an email address, so it is safe beside a push record.
+   *
+   * @param projectId - The project.
+   * @param alsoNamed - Further account ids to name, when they are not members.
+   * @returns The owner first, then collaborators, then the further names.
+   */
+  public async directory(projectId: string, alsoNamed: readonly string[] = []): Promise<readonly ProjectMemberName[]> {
+    const { database } = this.databaseService;
+    const [owners, collaborators] = await Promise.all([
+      database
+        .select({ accountId: user.id, name: user.name })
+        .from(project)
+        .innerJoin(user, eq(user.id, project.ownerId))
+        .where(eq(project.id, projectId))
+        .limit(1),
+      database
+        .select({ accountId: projectCollaborator.userId, name: user.name, role: projectCollaborator.role })
+        .from(projectCollaborator)
+        .innerJoin(user, eq(user.id, projectCollaborator.userId))
+        .where(eq(projectCollaborator.projectId, projectId))
+        .orderBy(projectCollaborator.createdAt),
+    ]);
+    const members: ProjectMemberName[] = [
+      ...owners.map((row): ProjectMemberName => ({ accountId: row.accountId, ...shownName(row.name), role: 'owner' })),
+      ...collaborators.flatMap((row): ProjectMemberName[] =>
+        row.role === 'write' || row.role === 'read'
+          ? [{ accountId: row.accountId, ...shownName(row.name), role: row.role }]
+          : [],
+      ),
+    ];
+    const known = new Set(members.map((member) => member.accountId));
+    const missing = [...new Set(alsoNamed)].filter((accountId) => !known.has(accountId));
+    if (missing.length === 0) {
+      return members;
+    }
+    const others = await database
+      .select({ accountId: user.id, name: user.name })
+      .from(user)
+      .where(inArray(user.id, missing));
+    return [...members, ...others.map((row) => ({ accountId: row.accountId, ...shownName(row.name) }))];
   }
 
   /**

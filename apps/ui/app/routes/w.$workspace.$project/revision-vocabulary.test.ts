@@ -1,6 +1,34 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { backupCopy, selectStripVerbs } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+
+/**
+ * A2: who made an entry is a name or nothing. The label that described an
+ * account it could not name is gone from every file of the app, tests
+ * included, so no surface can bring it back.
+ */
+describe('the who line', () => {
+  const appRoot = join(import.meta.dirname, '../../..');
+  const generated = new Set(['node_modules', 'build', 'dist', '.react-router', '.netlify', 'coverage']);
+  const filesUnder = (directory: string): string[] =>
+    readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        return generated.has(entry.name) ? [] : filesUnder(path);
+      }
+      return /\.(?:[cm]?[jt]sx?|json|mdx?|html|css)$/u.test(entry.name) ? [path] : [];
+    });
+
+  it('never says an entry is by an account it cannot name', () => {
+    const label = ['Another', 'account'].join(' ');
+    const files = filesUnder(appRoot);
+    /* The walk reached the app's sources, this file among them. */
+    expect(files).toContain(join(appRoot, 'app/routes/w.$workspace.$project/revision-vocabulary.ts'));
+    expect(files.filter((path) => readFileSync(path, 'utf8').includes(label))).toEqual([]);
+  });
+});
 
 /**
  * D17 on the strip: a storage refusal's *Upgrade* belongs to the owner whose

@@ -334,6 +334,8 @@ export type UiBrowserCommands = {
     /** A phone's touch input: `(pointer: coarse)` matches and taps work. */
     readonly hasTouch?: boolean;
     readonly isMobile?: boolean;
+    /** Show the app's first-visit analytics banner; other specs open with Do Not Track, which hides it. */
+    readonly consentBanner?: boolean;
   }): Promise<void>;
   uiPressTarget(selector: string, key: string, surface?: TargetSurface): Promise<void>;
   uiQualifyWebGpu(profile: TargetWebGpuProfile): Promise<TargetWebGpuQualificationReport>;

@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { postService } from '#adapter-transport/adapter-transport.js';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
+import { CorruptBytesError } from '#compute-worker/errors.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createRevisionHttpClient } from '#http-client.js';
 import type { RevisionHttpClient } from '#http-client.js';
@@ -831,6 +832,60 @@ describe.runIf(gitToolchainOnPath)('after a cold open, over smart HTTP and past 
     expect(largeRanges.some(([start, end]) => end - start === maximumRangeBytes)).toBe(true);
     expect(served.wholePackReads()).toBe(0);
   }, 240_000);
+});
+
+/*
+ * A pack the indexer refuses is not the end of a fetch (iPhone, staging, "The pack does not index."): where a
+ * catalogue serves the remote, the fetch takes the wanted objects from it one by one, as it does past the ceiling.
+ */
+describe.runIf(gitToolchainOnPath)('a fetch whose pack does not index', () => {
+  it('takes the objects from the catalogue, and the project opens', async () => {
+    const own = await host();
+    const root = await mkdtemp(join(tmpdir(), 'tau-pack-refused-'));
+    const remote = await startGitHttpBackend({ root });
+    try {
+      own.git('push', '-q', '--force', remote.repositoryPath, 'refs/heads/main:refs/heads/main');
+      const inline = createInlineCompute();
+      let refuse = false;
+      const compute: ComputeWorker = {
+        ...inline,
+        indexPack: async (pack) => {
+          if (refuse) {
+            throw new CorruptBytesError('The pack does not index.', { cause: new TypeError('a WebKit-only failure') });
+          }
+          return inline.indexPack(pack);
+        },
+      };
+      const served = serve(own);
+      const port = createIsomorphicGitRevisionPort({
+        filesystem: await createMemoryProvider(),
+        http: createRevisionHttpClient(),
+        compute,
+        catalogue: { url: () => catalogueUrl, fetch: served.fetch },
+      });
+      await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+      await port.setRemote({ name: 'origin', url: remote.url });
+      await port.fetch({ remote: 'origin', refs: ['refs/heads/main'] });
+
+      /* A store that holds refs fetches over smart HTTP; this time the indexer refuses what arrives. */
+      await own.write('notes.txt', 'one\n');
+      own.git('add', '-A');
+      own.git('commit', '-q', '-m', 'Next');
+      const next = own.git('rev-parse', 'refs/heads/main');
+      own.git('push', '-q', '--force', remote.repositoryPath, 'refs/heads/main:refs/heads/main');
+      await own.publish();
+      refuse = true;
+      await port.fetch({ remote: 'origin', refs: ['refs/heads/main'] });
+
+      expect(await port.readRef('refs/remotes/origin/main')).toBe(next);
+      const log = await port.log({ heads: [revisionId(next)] });
+      expect(log[0]?.id).toBe(next);
+    } finally {
+      await remote.close();
+      await rm(root, { recursive: true, force: true });
+      await rm(own.directory, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
 
 describe.runIf(gitToolchainOnPath)('an object-by-object import of a long, wide history', () => {

@@ -1,6 +1,6 @@
 {
   "name": "@taucad/app",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
@@ -135,6 +135,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@electron/asar": "4.3.0",
     "@fumadocs/tailwind": "catalog:",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",

@@ -1569,9 +1569,13 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await finish(session, turnKey(1));
     await turnFinalized(alpha, 'turn-1');
 
+    /* The hidden save cut nothing: the log is the turn's result over its base cut, and the base cut is the
+     * person's (blueprint A5), so the agent's write is never read as theirs. */
     const rows = await root.log();
-    expect(rows.map((row) => row.source)).not.toContain('user');
-    expect(rows[0]?.turnId).toBe('turn-1');
+    expect(rows.map((row) => [row.source, row.trigger, row.turnId])).toEqual([
+      ['agent', 'turn', 'turn-1'],
+      ['user', 'turn', 'turn-1'],
+    ]);
   });
 
   /*

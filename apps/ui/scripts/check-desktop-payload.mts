@@ -314,9 +314,7 @@ export const isForbiddenDesktopSurfaceModule = (moduleId: string): boolean => {
   const path = moduleId.replaceAll('\\', '/');
   return (
     /apps\/ui\/app\/root\.tsx(?:\?|$)/u.test(path) ||
-    /apps\/ui\/app\/components\/(?:build-skew-banner|cookie-consent|layout\/(?:page-footer|route-footer))\.tsx(?:\?|$)/u.test(
-      path,
-    ) ||
+    /apps\/ui\/app\/components\/(?:cookie-consent|layout\/(?:page-footer|route-footer))\.tsx(?:\?|$)/u.test(path) ||
     /apps\/ui\/app\/(?:hooks\/use-cookie-consent|lib\/cookie-consent\.lib|lib\/web-posthog\.lib|providers\/web-analytics-provider)\.tsx?(?:\?|$)/u.test(
       path,
     ) ||

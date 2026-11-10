@@ -5,7 +5,7 @@ import type { MyUIMessage } from '@taucad/chat';
 import { initialChatProjection, reduceChatProjection } from '#machines/chat-projection.logic.js';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import { lifecycleRow } from '#machines/chat-projection.fixture.js';
-import { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
 
 describe('sdkWatch', () => {

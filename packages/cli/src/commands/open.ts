@@ -2,7 +2,7 @@
  * `tau open` — the launcher (charter D29, C1 R3).
  *
  * One step from a terminal to a place a person can look at a project, as `code .` and `gh browse` do. A folder or
- * file is served with `tau serve` (local-first, loopback only) with the digest-pinned Tau UI from the payload store
+ * file is served with `tau serve` (local-first, loopback only) with the digest-pinned Tau UI from the dependency store
  * (prepared on first use, W18) or `--ui <dir>`, and its URL opened in the browser, which is the default
  * hand-off because the same-origin served page needs no secret in its URL and no Local Network Access prompt (C1 R6).
  * A URL is opened as it is. `--print` prints the URL instead of opening it.
@@ -120,7 +120,7 @@ export const openCommand = defineCommand({
     ui: {
       type: 'string',
       description:
-        'Directory of a prebuilt Tau UI to serve the folder with instead of the pinned one from the payload store (TAU_HOST_UI_DIR)',
+        'Directory of a prebuilt Tau UI to serve the folder with instead of the pinned one from the dependency store (TAU_HOST_UI_DIR)',
       required: false,
       default: process.env['TAU_HOST_UI_DIR'],
     },

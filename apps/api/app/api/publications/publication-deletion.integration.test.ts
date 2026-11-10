@@ -7,21 +7,24 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
-import type { RepositoryLease } from '#api/git/store/lease.js';
+import type { RepositoryLease } from '@taucad/api-git-core/store/lease';
 import {
   releaseDeletedProjectPublicationReferences,
   publicationManifestReadTimeout,
-} from '#api/publications/publication-deletion.js';
-import { collectZeroCountBlobs } from '#api/git/maintenance/blob-collector.js';
-import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
-import { materializePublication, materializePublishedTags } from '#api/publications/publication-materializer.js';
-import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
-import { PublicationsService } from '#api/publications/publications.service.js';
-import type { StoredPublicationManifest } from '#api/publications/publications.dto.js';
+} from '@taucad/api-projects/publications/publication-deletion';
+import { collectZeroCountBlobs } from '@taucad/api-git-mirror/maintenance/blob-collector';
+import { blobKeyFromSha256Hex, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
+import {
+  materializePublication,
+  materializePublishedTags,
+} from '@taucad/api-projects/publications/publication-materializer';
+import type { MaterializerDependencies } from '@taucad/api-projects/publications/publication-materializer';
+import { PublicationsService } from '@taucad/api-projects/publications/publications.service';
+import type { StoredPublicationManifest } from '@taucad/api-projects/publications/publications.dto';
 import type { DatabaseService, DatabaseType } from '@taucad/api-database';
 import { lockProjectLifecycle } from '@taucad/api-database/project-lifecycle';
 import * as schema from '@taucad/api-database/schema';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
 import { createScratchDatabase } from '@taucad/api-database/testing/scratch-database';
 import type { ScratchDatabase } from '@taucad/api-database/testing/scratch-database';
 import { databaseReachable } from '@taucad/api-database/testing/database-reachable';

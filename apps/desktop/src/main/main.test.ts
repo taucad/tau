@@ -338,7 +338,7 @@ vi.mock('@taucad/host', async (importOriginal) => {
     await importOriginal<typeof Host>();
   return {
     defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
-    defaultPayloadStore: vi.fn(() => join(state.userData, 'store')),
+    defaultDependencyStore: vi.fn(() => join(state.userData, 'store')),
     discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
     externalAgentDescriptors: vi.fn(() => []),
     keepAwakeWhileStreaming,
@@ -2074,7 +2074,7 @@ describe('desktop main machine store', () => {
   );
 
   it(
-    'reads the shared payload store and posts its native composition to the kernel utilities, with no resource roots',
+    'reads the shared dependency store and posts its native composition to the kernel utilities, with no resource roots',
     async () => {
       await boot();
       await vi.waitFor(() => {

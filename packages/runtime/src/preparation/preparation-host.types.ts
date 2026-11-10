@@ -7,7 +7,7 @@ import type {
   Integrity,
   PluginDeployment,
   PreparationErrorCode,
-  ReceiptFile,
+  InstalledFile,
   VariantAxis,
   DependencyVariant,
 } from '#preparation/preparation.types.js';
@@ -34,9 +34,9 @@ export type VariantSelection =
 export type SelectVariantOptions = {
   /** The realm's runtime; default `'native'`. */
   readonly runtime?: 'native' | 'browser';
-  /** Canonical `<os>-<arch>[-<libc>]` key that replaces the host's own (`TAU_PAYLOAD_TARGET`); never guessed. */
+  /** Canonical `<os>-<arch>[-<libc>]` key that replaces the host's own (`TAU_DEPENDENCY_TARGET`); never guessed. */
   readonly target?: string;
-  /** `false` disables the Rosetta 2 and Windows x64 emulation fallback (`TAU_PAYLOAD_EMULATION=0`). Default `true`. */
+  /** `false` disables the Rosetta 2 and Windows x64 emulation fallback (`TAU_DEPENDENCY_EMULATION=0`). Default `true`. */
   readonly emulation?: boolean;
 };
 
@@ -70,12 +70,12 @@ export type PreparationState =
   | {
       readonly status: 'preparing';
       readonly attemptId: string;
-      /** `sealing` runs the plugin's seal step (such as bytecode compilation) after every payload is unpacked. */
+      /** `sealing` runs the plugin's seal step (such as bytecode compilation) after every dependency file is unpacked. */
       readonly phase: 'downloading' | 'verifying' | 'extracting' | 'sealing';
-      /** Name of the payload the phase is about; the dependency's name while `sealing`. */
-      readonly payload: string;
-      readonly completedPayloads: number;
-      readonly totalPayloads: number;
+      /** Name of the dependency file the phase is about; the dependency's name while `sealing`. */
+      readonly dependencyFile: string;
+      readonly completedDependencyFiles: number;
+      readonly totalDependencyFiles: number;
       readonly completedBytes: number;
       readonly totalBytes: number;
     }
@@ -146,7 +146,7 @@ export type PrepareOutcome = Extract<PreparationState, { status: 'ready' | 'bloc
  * @public
  */
 export type VerifyInput = PluginSelection & {
-  /** Re-unpack, from verified blobs, only the payloads whose files differ, and remove files the receipt does not list. */
+  /** Re-unpack, from verified blobs, only the dependency files whose unpacked files differ, and remove files the receipt does not list. */
   readonly repair?: boolean;
   /** When a repair needs a blob the store no longer holds, refuse instead of downloading it. */
   readonly offline?: boolean;
@@ -157,8 +157,8 @@ export type VerifyInput = PluginSelection & {
  * What a full re-verification found for one dependency's sealed closure.
  *
  * - `intact`: every file matches its receipt row and no other file exists.
- * - `stale`: some files differ (`receipt-stale`); `payloads` names the payloads that wrote them.
- * - `repaired`: it was stale and the differing payloads were re-unpacked.
+ * - `stale`: some files differ (`receipt-stale`); `dependencyFiles` names the dependency files they were unpacked from.
+ * - `repaired`: it was stale and the differing dependency files were re-unpacked.
  * - `absent`: no sealed closure for the selected variant.
  * @public
  */
@@ -167,8 +167,8 @@ export type ClosureVerification = {
   readonly dependency: string;
   readonly closureIntegrity?: Integrity;
   readonly status: 'intact' | 'stale' | 'repaired' | 'absent';
-  /** Payload names whose files differ, in manifest order. */
-  readonly payloads: readonly string[];
+  /** Dependency file names whose files differ, in manifest order. */
+  readonly dependencyFiles: readonly string[];
   /** Closure-relative paths that differ, are missing or are not in the receipt; at most 100. */
   readonly files: readonly string[];
 };
@@ -217,13 +217,13 @@ export type ClosureDescription = {
   /** The closure a launch would use (`ready`, `stale`) or `prepare` would create (`absent`). */
   readonly closureIntegrity?: Integrity;
   readonly target?: DependencyTarget;
-  /** Bytes `prepare` would download at most: the selected variant's payload sizes. */
+  /** Bytes `prepare` would download at most: the selected variant's dependency file sizes. */
   readonly byteLength?: number;
   readonly betterVariantAvailable?: DependencyTarget;
 };
 
 /**
- * The preparation host (API 4) for Node hosts: downloads, verifies, unpacks and seals runtime payload closures into
+ * The preparation host (API 4) for Node hosts: downloads, verifies, unpacks and seals runtime dependency closures into
  * one digest-keyed store shared by every Tau host on the machine.
  * @public
  */
@@ -268,12 +268,12 @@ export type SealClosureInput = {
   readonly target: DependencyTarget;
   /**
    * Absolute closure root: the staging directory while preparing, the sealed closure while repairing. It holds only
-   * the payloads' files and what an earlier run of the step added: the host's own `receipt.json` and launch index are
+   * the dependency files' contents and what an earlier run of the step added: the host's own `receipt.json` and launch index are
    * never there while the step runs.
    */
   readonly root: string;
-  /** Rows of the files the payloads wrote, sorted by path. */
-  readonly files: readonly ReceiptFile[];
+  /** Rows of the files unpacked from the dependency files, sorted by path. */
+  readonly files: readonly InstalledFile[];
   readonly signal: AbortSignal;
 };
 
@@ -297,11 +297,11 @@ export type PreparationPlugin = {
   readonly package: string;
   /** The parsed `tau-plugin.json`. */
   readonly deployment: PluginDeployment;
-  /** Absolute package root; required when a payload's origin is `packagePath` or `packageAsset`. */
+  /** Absolute package root; required when a dependency file's origin is `packagePath` or `packageAsset`. */
   readonly directory?: string;
   /**
-   * Seal-time compute, run after every payload of a closure is unpacked and before its receipt is written: it may
-   * only add files, which the host receipts (with no payload name, regular files normalised to mode `0o644`, or
+   * Seal-time compute, run after every dependency file of a closure is unpacked and before its receipt is written: it may
+   * only add files, which the host receipts (with no dependency file name, regular files normalised to mode `0o644`, or
    * `0o755` when executable) so `treeIntegrity` covers them. A repair that touches the closure runs it again in place.
    * It runs verified bytes only and must be deterministic: the same closure must give the same files on every host.
    * @param input - The closure being sealed.
@@ -316,7 +316,7 @@ export type PreparationPlugin = {
    * @param files - Every row of the closure being sealed.
    * @returns Paths that `files` lists.
    */
-  readonly launchSet?: (files: readonly ReceiptFile[]) => readonly string[];
+  readonly launchSet?: (files: readonly InstalledFile[]) => readonly string[];
 };
 
 /**
@@ -341,13 +341,13 @@ export type LaunchInspection =
  */
 export type CreatePreparationHostOptions = {
   readonly plugins: readonly PreparationPlugin[];
-  /** Absolute digest-keyed store root: `defaultPayloadStore()` for the CLI, `tau mcp`, the daemon and the desktop. */
+  /** Absolute digest-keyed store root: `defaultDependencyStore()` for the CLI, `tau mcp`, the daemon and the desktop. */
   readonly store: string;
   /** Absolute path that identifies this host installation; its `links/` entry roots the closures it uses. */
   readonly hostPath?: string;
   /** The host's indicators; default {@link detectHostIndicators}. */
   readonly indicators?: HostIndicators;
-  /** `TAU_PAYLOAD_TARGET` and `TAU_PAYLOAD_EMULATION`; absent selects on the host's own indicators. */
+  /** `TAU_DEPENDENCY_TARGET` and `TAU_DEPENDENCY_EMULATION`; absent selects on the host's own indicators. */
   readonly selection?: { readonly target?: string; readonly emulation?: boolean };
   /** Transport for mirrors and origins; default the global `fetch`. */
   readonly fetch?: typeof fetch;
@@ -374,7 +374,7 @@ export type ManagedPreparation = {
   readonly mirror?: { readonly baseUrl: string; readonly noFallback: boolean };
   readonly seed?: string;
   readonly selection: { readonly target?: string; readonly emulation?: boolean };
-  /** `locked` without a mirror: payloads come from the store and the seed only. */
+  /** `locked` without a mirror: dependency files come from the store and the seed only. */
   readonly offline: boolean;
 };
 
@@ -397,7 +397,7 @@ export type EffectiveProfile = {
   /** Which certificate authorities Node trusts for downloads. */
   readonly ca: 'bundled' | 'extra' | 'system';
   /**
-   * The managed variables (`TAU_ACQUISITION`, `TAU_PAYLOAD_*`, `TAU_CONFIG_DIR`) and the proxy and CA variables set in
+   * The managed variables (`TAU_ACQUISITION`, `TAU_DEPENDENCY_*`, `TAU_CONFIG_DIR`) and the proxy and CA variables set in
    * this environment, by name only: a proxy URL can carry a credential.
    */
   readonly variables: readonly string[];

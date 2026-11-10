@@ -86,6 +86,58 @@ export const recordRateLimitAutoResume = (runId: string, attempt: number): void 
   resumedAttempts.set(runId, resumed);
 };
 
+// ── Provider unavailable ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * The provider refusal code that resumes once on its own (server agent plane regression review R6).
+ *
+ * The server agent plane's provider client retried a transient failure twice before the person saw it. The Pi gateway
+ * transport retries none, because each retry is a billed attempt, so a brief provider 5xx paused the turn for a click.
+ * One automatic resume restores the common case without hiding a real outage.
+ *
+ * @public
+ */
+export const autoResumableProviderUnavailableCode = 'PROVIDER_UNAVAILABLE';
+
+/** Automatic resumes one run gets for a provider outage before the card waits for a click. @public */
+export const maximumProviderUnavailableAutoResumes = 1;
+
+/** The wait before that resume. Milliseconds. @public */
+export const providerUnavailableRetryDelayMilliseconds = 2000;
+
+/* Attempts of each run this page already resumed after a provider outage. */
+const resumedUnavailableAttempts = new Map<string, Set<number>>();
+
+/**
+ * The retry number an automatic resume of this provider outage would be.
+ *
+ * @param runId - The failed run.
+ * @param attempt - The run's failed attempt.
+ * @returns The 1-based retry number, or `undefined` once the run's budget is spent or this attempt was resumed.
+ * @public
+ */
+export const nextProviderUnavailableRetry = (runId: string, attempt: number): number | undefined => {
+  const resumed = resumedUnavailableAttempts.get(runId);
+  if (resumed?.has(attempt)) {
+    return undefined;
+  }
+  const retry = (resumed?.size ?? 0) + 1;
+  return retry > maximumProviderUnavailableAutoResumes ? undefined : retry;
+};
+
+/**
+ * Records that this page resumed a provider outage automatically, spending the run's retry.
+ *
+ * @param runId - The failed run.
+ * @param attempt - The run's failed attempt.
+ * @public
+ */
+export const recordProviderUnavailableAutoResume = (runId: string, attempt: number): void => {
+  const resumed = resumedUnavailableAttempts.get(runId) ?? new Set<number>();
+  resumed.add(attempt);
+  resumedUnavailableAttempts.set(runId, resumed);
+};
+
 // ── Model attempt pending ────────────────────────────────────────────────────────────────────────
 
 /**
@@ -204,6 +256,7 @@ export const lookUpModelAttempt = async ({
  */
 export const resetAutoResumes = (): void => {
   resumedAttempts.clear();
+  resumedUnavailableAttempts.clear();
   pendingSince.clear();
   resumedPendingAttempts.clear();
 };

@@ -113,4 +113,32 @@ describe('telemetry test boundary', () => {
 
     expect(inputs.filter((input) => /packages\//u.test(input))).toEqual([]);
   });
+
+  /*
+   * Wave 0M, AF-4: Nx marks a project affected by any changed file that matches a `{workspaceRoot}` input of any of
+   * its targets, and every dependent with it. The Grafana contract and rule-evaluation suites read `infra/grafana`
+   * and the API's OTel bootstrap, so they live here too: a dashboard edit selects `scripts`, not `telemetry`,
+   * `host`, the CLI and the native rows behind them.
+   */
+  it('should name no workspace-root path in any telemetry target input', () => {
+    const project = JSON.parse(source(`${telemetryRoot}/project.json`)) as {
+      targets: Record<string, { inputs?: unknown[] }>;
+    };
+    const inputs = Object.values(project.targets).flatMap(({ inputs: targetInputs = [] }) =>
+      targetInputs.map((input) => JSON.stringify(input)),
+    );
+    expect(inputs.length).toBeGreaterThan(0);
+
+    expect(inputs.filter((input) => input.includes('{workspaceRoot}'))).toEqual([]);
+  });
+
+  it('should keep every file under libs/telemetry from reading infra/grafana or another project by path', () => {
+    const files = globSync(`${telemetryRoot}/{src,scripts}/**/*.{ts,mts,tsx}`, { cwd: workspaceRoot });
+    expect(files.length).toBeGreaterThan(0);
+    const readers = files.filter((file) =>
+      /infra\/grafana|\.\.\/\.\.\/\.\.\/(?:apps|libs|packages)\//u.test(source(file)),
+    );
+
+    expect(readers).toEqual([]);
+  });
 });

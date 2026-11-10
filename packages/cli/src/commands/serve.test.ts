@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { defaultPayloadStore } from '@taucad/host';
+import { defaultDependencyStore } from '@taucad/host';
 import type { PreparationReport } from '@taucad/host/telemetry';
 import { startNativeWorker } from '@taucad/native-process-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -188,7 +188,7 @@ describe('serveNativeKernels', () => {
     expect(nativeKernels.inspectReportedClosure).toHaveBeenCalledWith(request);
     expect(kernels.native.start).toBe(startNativeWorker);
     /* The broker resolves the store's real path itself, so a store under a link launches (macOS's `/tmp`). */
-    expect(kernels.native.store).toBe(defaultPayloadStore());
+    expect(kernels.native.store).toBe(defaultDependencyStore());
     expect(kernels.preparableKernels()).toEqual([]);
     await reported(kernels);
     expect(kernels.preparableKernels().map(({ kernel }) => kernel)).toEqual(['build123d', 'rustcad']);
@@ -421,7 +421,7 @@ describe('prepareStoreUi', () => {
       expect(written).toContain('Tau UI: 12.0 MB of 120.0 MB (10%)');
       expect(written).not.toContain('13.0 MB');
       expect(written).toContain('Tau UI: 120.0 MB of 120.0 MB (100%)');
-      expect(written).toContain('The Tau UI is verified and sealed in the payload store.');
+      expect(written).toContain('The Tau UI is verified and sealed in the dependency store.');
     } finally {
       stderr.mockRestore();
     }

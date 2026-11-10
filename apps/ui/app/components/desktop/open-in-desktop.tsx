@@ -22,7 +22,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { osClass } from '#telemetry/platform-class.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { desktopDeepLink } from '#lib/desktop-deep-link.js';

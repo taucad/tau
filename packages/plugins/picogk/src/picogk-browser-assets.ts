@@ -31,8 +31,16 @@ export const picogkBrowserManifestSchema = z.object({
   multi: variant.optional(),
 });
 
+/** A manifest served from a digest mirror: `<base>/blobs/sha256/<manifest sha256>`, one blob per file. */
+const digestLayout = /^(?<base>.*\/)blobs\/sha256\/(?<sha256>[a-f\d]{64})$/u;
+
 /**
  * Admit an immutable browser host manifest and select only an available, supported execution mode.
+ *
+ * A manifest URL in the digest layout (`<base>/blobs/sha256/<its own sha256>`) selects digest mode: every
+ * file is fetched from `<base>/blobs/sha256/<file sha256>` on the same mirror, while runtime files keep
+ * their manifest-relative URL as the identity the generated .NET loader resolves against. Any other URL
+ * resolves each file beside the manifest (`new URL(path, manifestUrl)`), the same-origin seed layout.
  * @internal
  * @param options - Manifest content identity, desired threading policy and host isolation admission.
  * @returns The exact runtime/compiler resources passed to the worker, plus the selected mode.
@@ -49,6 +57,12 @@ export const loadPicogkBrowserAssets = async (options: {
     throw new Error('Invalid PicoGK browser manifest URL.');
   }
   digest.parse(options.manifest.sha256);
+  const mirror = digestLayout.exec(url.pathname)?.groups;
+  if (mirror && (mirror['sha256'] !== options.manifest.sha256 || url.search)) {
+    throw new Error('Invalid PicoGK browser manifest URL.');
+  }
+  const blob = (entry: { readonly sha256: string }): string | undefined =>
+    mirror ? new URL(`${mirror['base']}blobs/sha256/${entry.sha256}`, url).href : undefined;
   const response = await fetch(url.href, { signal: options.signal, redirect: 'error' });
   if (!response.ok) {
     throw new Error(`PicoGK browser manifest download failed: ${response.status}.`);
@@ -85,8 +99,11 @@ export const loadPicogkBrowserAssets = async (options: {
     assets: {
       bootstrapUrl: new URL(selected.bootstrap, url).href,
       compilerIdentity: selected.compilerIdentity,
-      runtimeFiles: selected.runtimeFiles.map((entry) => ({ ...entry, url: new URL(entry.path, url).href })),
-      references: selected.references.map((entry) => ({ ...entry, url: new URL(entry.path, url).href })),
+      runtimeFiles: selected.runtimeFiles.map((entry) => {
+        const source = blob(entry);
+        return { ...entry, url: new URL(entry.path, url).href, ...(source ? { source } : {}) };
+      }),
+      references: selected.references.map((entry) => ({ ...entry, url: blob(entry) ?? new URL(entry.path, url).href })),
     },
   };
 };

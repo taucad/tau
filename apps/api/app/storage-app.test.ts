@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { storageEnvironmentSchema } from '#config/storage-environment.config.js';
-import { commitDeadlineMilliseconds } from '#api/git/store/limits.js';
-import { receiptRoutePath } from '#api/git/worker/receipt-channel.js';
+import { storageEnvironmentSchema } from '@taucad/api-git-core/storage-environment.config';
+import { commitDeadlineMilliseconds } from '@taucad/api-git-core/store/limits';
+import { receiptRoutePath } from '@taucad/api-git-core/worker/receipt-channel';
 import { apiRoot } from '#testing/module-graph.js';
 
 /**

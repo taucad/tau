@@ -1,17 +1,17 @@
 import { PreparationError } from '#preparation/preparation-error.js';
 import type {
-  DependencyPayload,
+  DependencyFile,
   DependencyTarget,
   DependencyVariant,
   KernelDeployment,
-  PayloadFormat,
-  PayloadOrigin,
+  DependencyFileFormat,
+  DependencyFileOrigin,
   PluginDeployment,
 } from '#preparation/preparation.types.js';
 
 type Json = Readonly<Record<string, unknown>>;
 
-const payloadFormats: readonly PayloadFormat[] = ['raw', 'tar.gz', 'zip', 'wheel'];
+const dependencyFileFormats: readonly DependencyFileFormat[] = ['raw', 'tar.gz', 'zip', 'wheel'];
 // Padded base64 of exactly 32, 48 or 64 bytes.
 const sriPatterns = {
   sha256: /^sha256-[A-Za-z\d+/]{43}=$/u,
@@ -135,7 +135,7 @@ const readTarget = (value: unknown, field: string): DependencyTarget => {
   return { runtime, os, arch, ...(floor.value === undefined ? {} : { minimumOsVersion: floor.value }) };
 };
 
-const readOrigin = (value: unknown, field: string): PayloadOrigin => {
+const readOrigin = (value: unknown, field: string): DependencyFileOrigin => {
   const kind = oneOf(isRecord(value) ? value['kind'] : undefined, `${field}.kind`, [
     'url',
     'packagePath',
@@ -164,18 +164,18 @@ const readOrigin = (value: unknown, field: string): PayloadOrigin => {
   return { kind, specifier };
 };
 
-const readIntegrity = (value: unknown, field: string): DependencyPayload['integrity'] => {
+const readIntegrity = (value: unknown, field: string): DependencyFile['integrity'] => {
   if (typeof value !== 'string' || !Object.values(sriPatterns).some((pattern) => pattern.test(value))) {
     throw new ManifestProblem(
       field,
       `${JSON.stringify(value)} is not an SRI string (sha256-, sha384- or sha512- with padded base64 of the digest)`,
     );
   }
-  return value as DependencyPayload['integrity'];
+  return value as DependencyFile['integrity'];
 };
 
-const readPayload = (value: unknown, field: string): DependencyPayload => {
-  const payload = record(value, field, [
+const readDependencyFile = (value: unknown, field: string): DependencyFile => {
+  const dependencyFile = record(value, field, [
     'name',
     'integrity',
     'byteLength',
@@ -185,31 +185,34 @@ const readPayload = (value: unknown, field: string): DependencyPayload => {
     'stripComponents',
     'unpackedByteLength',
   ]);
-  const name = matching(payload['name'], `${field}.name`, { pattern: namePattern, description: 'a payload name' });
-  const integrity = readIntegrity(payload['integrity'], `${field}.integrity`);
-  const byteLength = positiveInteger(payload['byteLength'], `${field}.byteLength`);
-  const format = oneOf(payload['format'], `${field}.format`, payloadFormats);
-  const origin = readOrigin(payload['origin'], `${field}.origin`);
+  const name = matching(dependencyFile['name'], `${field}.name`, {
+    pattern: namePattern,
+    description: 'a dependency file name',
+  });
+  const integrity = readIntegrity(dependencyFile['integrity'], `${field}.integrity`);
+  const byteLength = positiveInteger(dependencyFile['byteLength'], `${field}.byteLength`);
+  const format = oneOf(dependencyFile['format'], `${field}.format`, dependencyFileFormats);
+  const origin = readOrigin(dependencyFile['origin'], `${field}.origin`);
   const destination =
-    payload['destination'] === '.' && format === 'raw'
+    dependencyFile['destination'] === '.' && format === 'raw'
       ? '.'
-      : relativePath(payload['destination'], `${field}.destination`);
+      : relativePath(dependencyFile['destination'], `${field}.destination`);
   if (format === 'wheel' && !sitePackagesPattern.test(destination)) {
     throw new ManifestProblem(
       `${field}.destination`,
       `"${destination}" is not a site-packages directory (<prefix>/lib/pythonX.Y/site-packages or <prefix>/Lib/site-packages)`,
     );
   }
-  const strip = optional(payload['stripComponents'], (present) => {
+  const strip = optional(dependencyFile['stripComponents'], (present) => {
     if (format !== 'tar.gz' && format !== 'zip') {
-      throw new ManifestProblem(`${field}.stripComponents`, 'applies only to tar.gz and zip payloads');
+      throw new ManifestProblem(`${field}.stripComponents`, 'applies only to tar.gz and zip dependency files');
     }
     if (!Number.isSafeInteger(present) || (present as number) < 0) {
       throw new ManifestProblem(`${field}.stripComponents`, 'must be a non-negative integer');
     }
     return present as number;
   });
-  const unpacked = optional(payload['unpackedByteLength'], (present) =>
+  const unpacked = optional(dependencyFile['unpackedByteLength'], (present) =>
     positiveInteger(present, `${field}.unpackedByteLength`),
   );
   return {
@@ -246,23 +249,26 @@ const targetFloor = (target: DependencyTarget): string =>
       : (target.minimumOsVersion ?? '');
 
 const readVariant = (value: unknown, field: string): DependencyVariant => {
-  const variant = record(value, field, ['target', 'payloads']);
+  if (isRecord(value) && 'payloads' in value) {
+    throw new ManifestProblem(`${field}.payloads`, 'was renamed to "files"; rename the field and keep its entries');
+  }
+  const variant = record(value, field, ['target', 'files']);
   const target = readTarget(variant['target'], `${field}.target`);
-  const payloads = nonEmptyArray(variant['payloads'], `${field}.payloads`).map((payload, index) =>
-    readPayload(payload, `${field}.payloads[${index}]`),
+  const files = nonEmptyArray(variant['files'], `${field}.files`).map((file, index) =>
+    readDependencyFile(file, `${field}.files[${index}]`),
   );
   const names = new Map<string, number>();
-  for (const [index, payload] of payloads.entries()) {
-    const earlier = names.get(payload.name);
+  for (const [index, file] of files.entries()) {
+    const earlier = names.get(file.name);
     if (earlier !== undefined) {
       throw new ManifestProblem(
-        `${field}.payloads[${index}].name`,
-        `"${payload.name}" repeats ${field}.payloads[${earlier}].name`,
+        `${field}.files[${index}].name`,
+        `"${file.name}" repeats ${field}.files[${earlier}].name`,
       );
     }
-    names.set(payload.name, index);
+    names.set(file.name, index);
   }
-  return { target, payloads: payloads as [DependencyPayload, ...DependencyPayload[]] };
+  return { target, files: files as [DependencyFile, ...DependencyFile[]] };
 };
 
 const readDependencies = (value: unknown): PluginDeployment['dependencies'] => {
@@ -326,7 +332,7 @@ const readKernels = (value: unknown, dependencies: PluginDeployment['dependencie
 /**
  * Validate a parsed `tau-plugin.json` against schema v1 and return it typed. Unknown fields are refused (a top-level
  * `"//"` comment string is the one exception), as are integrities that are not SRI, paths that escape the closure
- * root, `"."` on a non-raw payload, a wheel outside a `site-packages` directory, a kernel that requires an
+ * root, `"."` on a non-raw dependency file, a wheel outside a `site-packages` directory, a kernel that requires an
  * undeclared dependency, a Linux target without `libc` and two variants of one dependency with the same target key
  * and floor.
  * @param value - The parsed JSON.

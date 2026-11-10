@@ -1,11 +1,11 @@
 // @vitest-environment node
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
-import { writeChatPlacement } from '#db/chat-placements.js';
+import { writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { KeyedMutex } from '#db/keyed-mutex.js';
-import { chatMessageQueuePath } from '#db/chat-message-queue-store.js';
+import { KeyedMutex } from '@taucad/utils/keyed-mutex';
+import { chatMessageQueuePath } from '@taucad/chat-ui/db/chat-message-queue-store';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,7 +15,7 @@ import { createNodeChatStore } from '@taucad/agent-host/node';
 import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
 import { createAgentHostClient } from '#services/agent-host-client.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
-import type { AgentHostTransport } from '#services/agent-host-transport.js';
+import type { AgentHostTransport } from '@taucad/chat-ui/services/agent-host-transport';
 import { pathToFileURL } from 'node:url';
 import { createActor } from 'xstate';
 import type { Chat as ChatEntity, ModelSupport, MyUIMessage } from '@taucad/chat';

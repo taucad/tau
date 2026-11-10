@@ -16,7 +16,7 @@ type Receipt = {
   readonly closureIntegrity: string;
   readonly treeIntegrity: string;
   readonly files: unknown[];
-  readonly payloads: ReadonlyArray<{
+  readonly dependencyFiles: ReadonlyArray<{
     readonly name: string;
     readonly sha256: string;
     readonly acquiredFrom: { readonly kind: string; readonly location: string };
@@ -42,7 +42,7 @@ const mirror = async (store: string, target: string, omit: number | undefined): 
   const omitted: string[] = [];
   let index = 0;
   for (const { receipt } of await receiptsOf(store)) {
-    for (const payload of receipt.payloads) {
+    for (const payload of receipt.dependencyFiles) {
       if (!/^https?:/u.test(payload.acquiredFrom.location)) {
         continue;
       }
@@ -75,7 +75,7 @@ const compare = async (storeA: string, storeB: string): Promise<void> => {
       return { closure: key, present: false };
     }
     const sources = (value: Receipt): string[] =>
-      [...new Set(value.payloads.map((p) => p.acquiredFrom.kind))].toSorted();
+      [...new Set(value.dependencyFiles.map((p) => p.acquiredFrom.kind))].toSorted();
     return {
       closure: key,
       present: true,
@@ -84,8 +84,8 @@ const compare = async (storeA: string, storeB: string): Promise<void> => {
       closureIntegrity: receipt.closureIntegrity === other.closureIntegrity ? receipt.closureIntegrity : 'DIFFERS',
       treeIntegrity: receipt.treeIntegrity === other.treeIntegrity ? receipt.treeIntegrity : 'DIFFERS',
       payloadPinsIdentical:
-        JSON.stringify(receipt.payloads.map(({ name, sha256 }) => [name, sha256])) ===
-        JSON.stringify(other.payloads.map(({ name, sha256 }) => [name, sha256])),
+        JSON.stringify(receipt.dependencyFiles.map(({ name, sha256 }) => [name, sha256])) ===
+        JSON.stringify(other.dependencyFiles.map(({ name, sha256 }) => [name, sha256])),
       differingReceiptFields: differingKeys(receipt, other),
       payloadSourcesA: sources(receipt),
       payloadSourcesB: sources(other),

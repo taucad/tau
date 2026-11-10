@@ -1,0 +1,7 @@
+{
+  "name": "project-workspace",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/project-workspace",
+  "projectType": "library",
+  "tags": ["scope:ui", "type:app-lib", "layer:feature"]
+}

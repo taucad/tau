@@ -6,7 +6,7 @@ import {
   ChatInterfaceSessionGate,
   FocusedChatErrorPanel,
 } from '#routes/w.$workspace.$project/focused-chat-gate.js';
-import { ChatPaneSkeleton } from '#routes/w.$workspace.$project/chat-pane-skeleton.js';
+import { ChatPaneSkeleton } from '@taucad/project-workspace/components/chat-pane-skeleton';
 
 type StateValue = string | { [key: string]: StateValue };
 

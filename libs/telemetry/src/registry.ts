@@ -6,6 +6,7 @@ import {
   agentCompactionLanes,
   agentCompactionOutcomes,
   agentCompactionTiers,
+  agentPrefixBreakCauses,
   agentSafeguardPatterns,
   agentToolKinds,
   builtInSkillSlugs,
@@ -129,11 +130,13 @@ const ceilingThresholds = ['0.5', '0.8', '0.95', '1.0'] as const;
 const repositorySizeBounds = [...Array.from({ length: 15 }, (_, step) => String(65_536 * 2 ** step)), '+Inf'] as const;
 
 /**
- * `tau.r2.bucket`: which of Tau's buckets a figure is for, by role. The environment's two configured
- * buckets are `public` (`TAU_S3_BUCKET`) and `private` (`TAU_S3_PRIVATE_BUCKET`); every other bucket in
- * the account, another environment's included, is `other`.
+ * `tau.r2.bucket`: which of Tau's buckets a figure is for, by role. The environment's buckets are `public`
+ * (`TAU_S3_BUCKET`), `private` (`TAU_S3_PRIVATE_BUCKET`), `downloads` (`TAU_CLOUDFLARE_DOWNLOADS_BUCKET`,
+ * the desktop installers and update feeds) and `dependencies` (`TAU_CLOUDFLARE_DEPENDENCIES_BUCKET`, the
+ * locked release dependency bucket); every other bucket in the account, another environment's included, is
+ * `other`. A bucket name never becomes a label value.
  */
-const r2Buckets = ['public', 'private', 'other'] as const;
+const r2Buckets = ['public', 'private', 'downloads', 'dependencies', 'other'] as const;
 
 /** `tau.r2.action`: R2's billed `actionType` values (R2 pricing); any other is `other`. */
 const r2Actions = [
@@ -968,6 +971,34 @@ export const TauMetrics = {
       'compaction.lane': z.enum(agentCompactionLanes),
       'compaction.tier': z.enum(agentCompactionTiers),
       'compaction.outcome': z.enum(agentCompactionOutcomes),
+    }),
+  }),
+
+  /**
+   * Requests that did not reproduce the previous request's prompt prefix (provider reasoning replay contract, P1),
+   * folded from the break each reply's row records. Read it against `tau.agent.turns`: a counter has no series until
+   * it first fires, so a missing series is not a zero.
+   */
+  agentPrefixBreaks: defineCounter({
+    name: 'tau.agent.prefix_breaks',
+    unit: '{break}',
+    description:
+      'Requests that did not reproduce the previous request prefix, by cause and provider (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'prefix_break.cause': z.enum(agentPrefixBreakCauses),
+      'gen_ai.provider.name': z.enum(llmGatewayProviders),
+    }),
+  }),
+
+  /** Native reasoning a prefix break made unreplayable (P2): left out of the request, never erased from the log. */
+  agentReasoningOmittedBlocks: defineCounter({
+    name: 'tau.agent.reasoning_omitted_blocks',
+    unit: '{block}',
+    description: 'Native reasoning blocks left out of a request after a prefix break, by cause (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'prefix_break.cause': z.enum(agentPrefixBreakCauses),
     }),
   }),
 

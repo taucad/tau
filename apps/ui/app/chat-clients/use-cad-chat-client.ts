@@ -9,7 +9,7 @@ import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { attachmentSendBlockReason, buildUserMessage } from '#utils/chat.utils.js';
-import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
+import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import { useModels } from '#hooks/use-models.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 

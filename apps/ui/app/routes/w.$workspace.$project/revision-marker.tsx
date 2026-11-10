@@ -56,10 +56,10 @@ import {
 import { cn } from '@taucad/ui/utils/cn';
 import type { RevisionDiffEntry } from '@taucad/revisions';
 import type { RevisionComparisonNotice } from '@taucad/revisions/algorithms';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { DiffViewer } from '#components/code/diff-viewer.js';
-import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
+import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { ActionButton, ActionsRow, disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
 import {
@@ -78,7 +78,7 @@ import { useRevisionChanges, useRevisionChangesSince, useRevisionFileComparison 
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { consumeRevisionReveal, useRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
+import { consumeRevisionReveal, useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import type { AffectedPublication } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import { revisionName, revisionTriggerLabel } from '#routes/w.$workspace.$project/revision-vocabulary.js';

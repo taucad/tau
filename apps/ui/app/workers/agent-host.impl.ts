@@ -879,6 +879,8 @@ const composeProjectHost = async (
     model: provide.model,
     /* The funded (cloud) build checks an attempt's account against it (W11 GI-Q6); self-host ignores it. */
     principal: () => provide.principal,
+    /* A prompt or tool text change under another release is a `definitions` prefix break, not a mode change. */
+    release: hostBuildOf(provide.release),
   };
   /* T3: set as a release drains. A new start is refused HOST_CLOSED; another tab that forwarded it keeps it for this
    * host's release or a successor (M2, C11). */

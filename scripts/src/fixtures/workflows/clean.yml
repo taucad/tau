@@ -25,6 +25,8 @@ jobs:
           pnpm nx affected -t lint test build typecheck \
             --exclude=tag:type:e2e
           echo "affected done"
+      - name: Test the affected projects of one tag
+        run: pnpm nx affected -t test --exclude '*,!tag:scope:api' --parallel=1
       - name: Audit everything that has the target
         run: pnpm nx run-many -t audit-public-surface --projects=*
 

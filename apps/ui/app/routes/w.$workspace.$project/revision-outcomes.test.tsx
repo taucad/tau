@@ -48,7 +48,7 @@ vi.mock('#hooks/use-revision-status.js', async () => {
 });
 
 const errors: Array<{ title: string; description?: string }> = [];
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: {
     error: (title: string, options?: { description?: string }) => {
       errors.push({ title, ...(options?.description === undefined ? {} : { description: options.description }) });

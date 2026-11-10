@@ -78,7 +78,7 @@
       },
       "inputs": [
         "default",
-        "^default",
+        "^production",
         "{workspaceRoot}/eslint.config.mjs",
         "{workspaceRoot}/.oxlintrc.json",
         "{workspaceRoot}/libs/oxlint/src/**/*",
@@ -186,7 +186,12 @@
     "projects": ["tag:type:package"],
     "projectsRelationship": "fixed",
     "versionPlans": {
-      "ignorePatternsForPlanCheck": ["**/*.spec.ts", "**/*.test.ts", "**/*.md"]
+      "ignorePatternsForPlanCheck": [
+        "**/*.spec.ts",
+        "**/*.test.ts",
+        "**/*.md",
+        "packages/plugins/picogk/browser-host.pin.json"
+      ]
     },
     "version": {
       "preVersionCommand": "pnpm nx run-many -t build --projects=tag:type:package",

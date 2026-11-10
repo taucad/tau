@@ -307,7 +307,7 @@ describe('exportCommand', () => {
       });
     });
 
-    it('reads no payload store in this process', async () => {
+    it('reads no dependency store in this process', async () => {
       exportFunction.mockResolvedValueOnce(buildSuccessResult(new Uint8Array([1])));
       const command = await importExportCommand();
 

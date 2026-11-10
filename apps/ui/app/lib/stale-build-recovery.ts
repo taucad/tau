@@ -9,8 +9,9 @@
  * "Failed to fetch dynamically imported module", Firefox "error loading
  * dynamically imported module", Vite's preloader "Unable to preload CSS".
  *
- * React Router already reloads on a failed route-module import and on a
- * `/__manifest` version mismatch; this covers every other lazy import. On such
+ * React Router already reloads on a failed route-module import (its `/__manifest`
+ * version check never runs, because route discovery is eager); this covers every
+ * other lazy import. On such
  * a failure the page asks the server which build it runs (`/health/build`):
  *
  * - The same build, or no answer: the failure is genuine (`current`) and is reported.

@@ -15,8 +15,8 @@ import {
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { hostDeviceOf, UseAuth, User } from '@taucad/api-auth';
-import { FileLinksService } from '#storage/file-links.service.js';
-import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
+import { FileLinksService } from '@taucad/api-object-storage/file-links';
+import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '@taucad/api-object-storage';
 import {
   buildCatalogue,
   catalogueFamilies,
@@ -26,11 +26,11 @@ import {
   parseCatalogueFamilies,
 } from '#api/git/catalogue.js';
 import type { Catalogue } from '#api/git/catalogue.js';
-import { repositoryStoreKey } from '#api/git/git.constants.js';
+import { repositoryStoreKey } from '@taucad/api-git-core/git.constants';
 import { GitRepositoryService } from '#api/git/git.service.js';
-import { decodeManifest, isTombstoned } from '#api/git/store/manifest.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
-import { repositoryObjectKey } from '#api/git/store/repository-key.js';
+import { decodeManifest, isTombstoned } from '@taucad/api-git-core/store/manifest';
+import type { RepositoryStore } from '@taucad/api-git-core/store/port';
+import { repositoryObjectKey } from '@taucad/api-git-core/store/repository-key';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
 
 const catalogueWindowSeconds = 60;

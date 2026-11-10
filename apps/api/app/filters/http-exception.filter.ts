@@ -10,28 +10,13 @@ import { wirePaymentActionSchema } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import { httpHeader } from '@taucad/api-core/constants/http-header';
 import { resolveRequestId } from '#middlewares/request-id.middleware.js';
-import { LlmGatewayError } from '@taucad/api-llm-gateway';
+import { fundedRetryAfterSeconds, LlmGatewayError } from '@taucad/api-llm-gateway';
 import { ReadinessRefusalException } from '#api/health/readiness-refusal.exception.js';
 import { isRetryableGitRefusal, reportServerError } from '@taucad/api-observability/sentry';
 
 /**
- * Bounded retry estimates for the funded-admission refusals (B9 `:292`).
- *
- * Neither denial carries a per-request estimate, so each value is the blueprint's
- * own bound for the condition: 30 seconds is B9's due-to-terminal p99 target
- * (`llm-admission-failsafe-and-recovery-blueprint.md:251`), after which a saturating
- * funded operation has reached terminal; 60 seconds is the recovery claim lease
- * (`credit-ledger.service.ts:1069`), after which another claimant's lease expires.
- */
-export const fundedRetryAfterSeconds: ReadonlyMap<string, number> = new Map<string, number>([
-  ['FUNDED_OPERATION_LIMIT', 30],
-  ['FUNDED_HELPER_LIMIT', 30],
-  ['BILLING_RECOVERY_UNAVAILABLE', 60],
-]);
-
-/**
  * The retry estimate a gateway refusal answers with: the upstream's own seconds when
- * the relay carried one, otherwise this file's bound for that refusal type.
+ * the relay carried one, otherwise the gateway's `fundedRetryAfterSeconds` bound for that refusal type.
  *
  * @param error - The typed envelope's `error` member.
  * @returns Seconds for the `retry-after` header, or undefined when there is no estimate.

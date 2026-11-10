@@ -19,12 +19,12 @@ import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor, AsyncActorLogic } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
-import type { AttachmentStore } from '#db/attachment-store.js';
-import type { ComposerRecord, ComposerRecordStore } from '#db/composer-record-store.js';
+import type { AttachmentStore } from '@taucad/chat-ui/db/attachment-store';
+import type { ComposerRecord, ComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
 import { createEmptyDraftMessage } from '#hooks/draft.machine.js';
 import type { DraftHydration } from '#hooks/draft.machine.js';
 import { composerRecordActors, composerRecordMachine } from '#machines/composer-record.machine.js';
-import type { StoredAttachment } from '#utils/attachment.utils.js';
+import type { StoredAttachment } from '@taucad/chat-ui/utils/attachment.utils';
 
 /** A running record actor, as every consumer of this seam holds it; its owners start and stop it. */
 export type ComposerRecordRef = Actor<typeof composerRecordMachine>;

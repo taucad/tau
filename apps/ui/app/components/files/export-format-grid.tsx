@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { Check } from 'lucide-react';
 import type { FileExtension } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
-import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
+import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { groupExportFormatsByFidelity } from '@taucad/workbench-panes/export/export-source';

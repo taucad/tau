@@ -1,22 +1,22 @@
-// Fixtures of the desktop's native-kernel tests: the frame main posts once it has read the payload store, naming
+// Fixtures of the desktop's native-kernel tests: the frame main posts once it has read the dependency store, naming
 // closures whose launch-index rows the kernel option mappers accept. Nothing on disk backs them.
-import type { ReceiptFile } from '@taucad/runtime/preparation/node';
+import type { InstalledFile } from '@taucad/runtime/preparation/node';
 
 import { nativeKernelsFrameType } from '#tau/native-kernels-frame.js';
 import type { NativeKernelSlot, NativeKernelsFrame } from '#tau/native-kernels-frame.js';
 
-const row = (path: string, digit: string): ReceiptFile => ({
+const row = (path: string, digit: string): InstalledFile => ({
   path,
   byteLength: 1,
   sha256: digit.repeat(64),
   mode: 0o755,
 });
 
-/** The payload store the fixture's frame names. */
-export const fixturePayloadStore = '/store';
+/** The dependency store the fixture's frame names. */
+export const fixtureDependencyStore = '/store';
 
 /** Where the fixture's closures claim to live. */
-export const fixtureStore = `${fixturePayloadStore}/closures/sha256`;
+export const fixtureStore = `${fixtureDependencyStore}/closures/sha256`;
 
 const picogkSlot: NativeKernelSlot = {
   kernel: 'picogk',
@@ -45,7 +45,7 @@ const picogkSlot: NativeKernelSlot = {
  */
 export const nativeKernelsFixture = (options: { readonly picogk: boolean }): NativeKernelsFrame => ({
   type: nativeKernelsFrameType,
-  store: fixturePayloadStore,
+  store: fixtureDependencyStore,
   kernels: [
     {
       kernel: 'build123d',

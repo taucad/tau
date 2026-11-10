@@ -5,14 +5,14 @@ import { readUIMessageStream } from 'ai';
 import type { UIMessageChunk } from 'ai';
 import type { MyUIMessage } from '@taucad/chat';
 import { initialChatProjection, materializeTranscript, reduceChatProjection } from '#machines/chat-projection.logic.js';
-import { projectAgentHostEvent, projectAgentHostLiveEvent } from '#services/agent-host-event-projection.js';
+import { projectAgentHostEvent, projectAgentHostLiveEvent } from '@taucad/chat-ui/services/agent-host-event-projection';
 import {
   activityFamily,
   classifyActivityPart,
   describeActivity,
   findLastMeaningfulPartIndex,
   groupAssistantParts,
-} from '#utils/assistant-message-activity.js';
+} from '@taucad/chat-ui/utils/assistant-message-activity';
 import { finalizeInterruptedToolParts } from '#utils/chat.utils.js';
 import pingPongTurnLog from '#utils/__fixtures__/in-project-ping-pong-turn.jsonl?raw';
 

@@ -23,7 +23,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from '#comp
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
 import type { TypedUiMatchWithHandle } from '#types/matches.types.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { Compose } from '#components/ui/utils/compose.js';
+import { Compose } from '@taucad/ui-kit/utils/compose';
 import { CommandPaletteProvider, RouteCommandPaletteItems } from '#components/layout/command-palette.js';
 import { SettingsDialog } from '#components/settings/settings-dialog.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
@@ -251,7 +251,9 @@ const selectPhoneTopBar = (hasTitle: boolean, hasAction: boolean): PhoneTopBar =
  * Where the route header sits. The phone top bar (D11) is decided from route facts
  * alone and placed by CSS (`md:hidden`, `md:[--header-height:0px]`), so the server
  * markup already paints a phone's bar and the page's hidden title: nothing moves
- * after hydration. `isMobile` only keeps the legacy trigger strip on untitled routes.
+ * after hydration. An untitled route gets the bar too, holding only the sidebar trigger: it
+ * used to be reserved from `isMobile`, which the server cannot know, so on a phone the whole
+ * page moved down 48px when the app hydrated. `isMobile` now only matters to the desktop app.
  */
 const resolveHeaderLayout = ({
   enablePageHeader,
@@ -268,8 +270,8 @@ const resolveHeaderLayout = ({
   readonly hasTitle: boolean;
   readonly hasAction: boolean;
 }): HeaderLayout => {
-  const hasPhoneBar = enablePageHeader && !isDesktopTarget && (hasTitle || hasAction);
-  const reserveHeader = enablePageHeader && (hasPageHeaderChrome || isMobile || hasPhoneBar);
+  const hasPhoneBar = enablePageHeader && !isDesktopTarget;
+  const reserveHeader = enablePageHeader && (hasPageHeaderChrome || (isDesktopTarget && isMobile) || hasPhoneBar);
   const isPhoneOnly = hasPhoneBar && !hasPageHeaderChrome;
   const phone = { phoneTopBar: selectPhoneTopBar(hasPhoneBar && hasTitle, hasPhoneBar && hasAction) };
   if (!reserveHeader) {

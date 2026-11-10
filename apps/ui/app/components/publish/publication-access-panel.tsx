@@ -3,7 +3,7 @@ import { Loader } from '@taucad/ui/components/loader';
 import { Trash2 } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { CopyButton } from '@taucad/ui/components/copy-button';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { PublicationEmailTagsField, getPublicationEmailTagsError } from '#components/publish/publication-email-tags.js';

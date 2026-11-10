@@ -42,8 +42,8 @@ export const { releaseTag: layerReleaseTag } = rule;
 /** The URLs the manifest pins for a layer: the CDN URL, then the GitHub Release asset URL. @internal */
 export const { urls: layerUrls } = rule;
 
-/** The `worker` payload of the record target's variant for a layer record. @internal */
-export const { payload: layerPayload } = rule;
+/** The `worker` dependency file of the record target's variant for a layer record. @internal */
+export const { dependencyFile: layerDependencyFile } = rule;
 
 /**
  * Replace the `worker` pin of the record target's `runtime` variant and keep every other byte of the manifest; a target

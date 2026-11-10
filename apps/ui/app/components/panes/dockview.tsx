@@ -5,7 +5,7 @@ import { DockviewReact } from 'dockview-react';
 import { DockviewStyles } from '#components/panes/dockview-styles.js';
 import { DockviewTabOverflowPicker } from '#components/panes/dockview-tab-overflow-picker.js';
 import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
-import { OmniScroller } from '#components/ui/omni-scroller.js';
+import { OmniScroller } from '@taucad/ui-kit/components/omni-scroller';
 import { cn } from '@taucad/ui/utils/cn';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { useResizeHandles } from '@taucad/workbench-panes/paneview/use-resize-handles';

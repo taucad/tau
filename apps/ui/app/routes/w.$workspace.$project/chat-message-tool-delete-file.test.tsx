@@ -10,7 +10,7 @@ import { ChatMessageToolDeleteFile } from '#routes/w.$workspace.$project/chat-me
 vi.mock('#hooks/use-cookie.js', () => ({
   useCookie: () => [false, vi.fn(), vi.fn()],
 }));
-vi.mock('#components/icons/file-extension-icon.js', () => ({ FileExtensionIcon: () => undefined }));
+vi.mock('@taucad/ui-kit/icons/file-extension-icon', () => ({ FileExtensionIcon: () => undefined }));
 vi.mock('#components/code/diff-viewer.js', () => ({
   DiffViewer: ({ originalContent }: { readonly originalContent: string }) => <pre>{originalContent}</pre>,
   getFirstChangedLine: () => 1,

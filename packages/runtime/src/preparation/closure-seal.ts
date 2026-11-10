@@ -4,7 +4,7 @@ import { join, relative, sep } from 'node:path';
 
 import { hashFile } from '#preparation/preparation-store.js';
 import type { PreparationPlugin, SealClosureRefusal } from '#preparation/preparation-host.types.js';
-import type { DependencyTarget, ReceiptFile } from '#preparation/preparation.types.js';
+import type { DependencyTarget, InstalledFile } from '#preparation/preparation.types.js';
 
 const hashConcurrency = 8;
 const executableBits = 0o111;
@@ -23,14 +23,14 @@ const receiptAddedFiles = async (
   root: string,
   known: ReadonlySet<string>,
   signal: AbortSignal,
-): Promise<ReceiptFile[]> => {
+): Promise<InstalledFile[]> => {
   const entries = await readdir(root, { recursive: true, withFileTypes: true });
   const added = entries
     .filter((entry) => !entry.isDirectory())
     .map((entry) => join(entry.parentPath, entry.name))
     .map((path) => ({ path, relativePath: posix(relative(root, path)) }))
     .filter(({ relativePath }) => relativePath !== 'receipt.json' && !known.has(relativePath));
-  const rows: ReceiptFile[] = [];
+  const rows: InstalledFile[] = [];
   let next = 0;
   const lane = async (): Promise<void> => {
     while (next < added.length) {
@@ -40,7 +40,7 @@ const receiptAddedFiles = async (
       // oxlint-disable-next-line no-await-in-loop -- each lane hashes one file at a time
       const stats = await lstat(path);
       if (stats.isSymbolicLink()) {
-        // A link is receipted as the file it resolves to, as the payload writer does.
+        // A link is receipted as the file it resolves to, as the dependency file writer does.
         // oxlint-disable-next-line no-await-in-loop -- ditto
         const [symlinkTarget, sha256, resolved] = await Promise.all([
           readlink(path),
@@ -85,7 +85,7 @@ export class SealRefused extends Error {
 /**
  * Run a plugin's seal step over a closure root and receipt the files it added.
  * @internal
- * @param input - The plugin, the closure and the payload rows already receipted.
+ * @param input - The plugin, the closure and the dependency file rows already receipted.
  * @returns The added rows, or the plugin's refusal.
  */
 export const runSealStep = async (input: {
@@ -93,9 +93,9 @@ export const runSealStep = async (input: {
   readonly dependency: string;
   readonly target: DependencyTarget;
   readonly root: string;
-  readonly files: readonly ReceiptFile[];
+  readonly files: readonly InstalledFile[];
   readonly signal: AbortSignal;
-}): Promise<{ readonly rows: readonly ReceiptFile[] } | { readonly refusal: SealClosureRefusal }> => {
+}): Promise<{ readonly rows: readonly InstalledFile[] } | { readonly refusal: SealClosureRefusal }> => {
   const { plugin, root, files, signal } = input;
   if (plugin.seal === undefined) {
     return { rows: [] };

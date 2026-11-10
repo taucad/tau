@@ -5,7 +5,7 @@ import type { ToolInvocation } from '@taucad/chat';
 import type { toolName } from '@taucad/chat/constants';
 import { ChatMessageToolListDirectory } from '#routes/w.$workspace.$project/chat-message-tool-list-directory.js';
 
-vi.mock('#components/chat/chat-tool-card.js', () => ({
+vi.mock('@taucad/chat-ui/components/chat-tool-card', () => ({
   ChatToolCard({
     children,
     status,
@@ -64,13 +64,13 @@ vi.mock('#components/chat/chat-tool-card.js', () => ({
   },
 }));
 
-vi.mock('#components/chat/chat-tool-text.js', () => ({
+vi.mock('@taucad/chat-ui/components/chat-tool-text', () => ({
   ChatToolDescription({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
     return <span data-testid='chat-tool-description'>{children}</span>;
   },
 }));
 
-vi.mock('#components/chat/chat-tool-label.js', () => ({
+vi.mock('@taucad/chat-ui/components/chat-tool-label', () => ({
   ChatToolLabel({
     verb,
     children,
@@ -93,7 +93,7 @@ vi.mock('#components/chat/chat-tool-error.js', () => ({
   },
 }));
 
-vi.mock('#components/icons/file-extension-icon.js', () => ({
+vi.mock('@taucad/ui-kit/icons/file-extension-icon', () => ({
   FileExtensionIcon({ filename }: { readonly filename: string }): React.JSX.Element {
     return <span data-testid='file-extension-icon' data-filename={filename} />;
   },

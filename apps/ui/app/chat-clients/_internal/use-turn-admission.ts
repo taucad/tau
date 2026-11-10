@@ -5,12 +5,12 @@ import { awaitAgentHostAvailability } from '#hooks/use-cad-agent-config.js';
 import { useCreditPreflight } from '#hooks/use-credit-preflight.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { parseAdmissionFailureForPersistence } from '#utils/error.utils.js';
+import { parseAdmissionFailureForPersistence } from '@taucad/chat-ui/utils/error.utils';
 import { useProject } from '#hooks/use-project.js';
 import { isBrowserAgentHostProviderKind } from '#services/agent-host-client.js';
 import { daemonPlacementOf, unplaceableExecutionReason } from '#lib/agent-host-placement.js';
 import { useModels } from '#hooks/use-models.js';
-import { tauModelReadiness, tauModelRefusal } from '#utils/new-chat-execution.js';
+import { tauModelReadiness, tauModelRefusal } from '@taucad/chat-ui/utils/new-chat-execution';
 import { randomUuid } from '@taucad/utils/id';
 
 /**

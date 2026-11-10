@@ -2,12 +2,12 @@ import { ConfigService } from '@nestjs/config';
 import { HealthIndicatorService } from '@nestjs/terminus';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Environment } from '@taucad/api-core';
-import { inProcessGitToolchain } from '#api/git/forwarding/in-process-executor.js';
+import { inProcessGitToolchain } from '@taucad/api-git-core/forwarding/in-process-executor';
 import { GitToolchainHealthIndicator } from '#api/health/git-toolchain-health.indicator.js';
 
 /* The probe is stubbed, never left to `PATH`: a runner with git anywhere it
    can resolve must not decide what this test sees. */
-vi.mock('#api/git/forwarding/in-process-executor.js', () => ({
+vi.mock('@taucad/api-git-core/forwarding/in-process-executor', () => ({
   inProcessGitToolchain: vi.fn(async () => ({ git: undefined, lfs: undefined })),
 }));
 

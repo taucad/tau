@@ -16,8 +16,8 @@ import type {
   SpanNode,
   TelemetryTrace,
   ViewMode,
-} from '#routes/w.$workspace.$project/chat-kernel-types.js';
-import { defaultDisplaySettings } from '#routes/w.$workspace.$project/chat-kernel-types.js';
+} from '@taucad/project-workspace/utils/chat-kernel-types';
+import { defaultDisplaySettings } from '@taucad/project-workspace/utils/chat-kernel-types';
 import {
   applyVisibility,
   buildPipelineLanes,

@@ -164,10 +164,10 @@ const runPrepare = async (store: string, events: string, cancelAt: number | unde
       ...(state.status === 'preparing'
         ? {
             phase: state.phase,
-            payload: state.payload,
+            dependencyFile: state.dependencyFile,
             completedBytes: state.completedBytes,
             totalBytes: state.totalBytes,
-            completedPayloads: state.completedPayloads,
+            completedDependencyFiles: state.completedDependencyFiles,
           }
         : {}),
     };
@@ -340,7 +340,7 @@ const cliSigintLeg = async (rate: number, root: string, summary: Summary): Promi
     configDirectory,
     env: proxyEnvironment(port),
     onStderr: (text) => {
-      // "downloading <payload> (12.3 MB of 193.7 MB, ...)"
+      // "downloading <dependency file> (12.3 MB of 193.7 MB, ...)"
       const match = /\((?<done>[\d.]+) MB of (?<total>[\d.]+) MB/u.exec(text);
       if (!sent && match !== null && Number(match.groups!['done']) >= 0.4 * Number(match.groups!['total'])) {
         sent = true;
@@ -353,7 +353,7 @@ const cliSigintLeg = async (rate: number, root: string, summary: Summary): Promi
   });
   proxy.kill('SIGTERM');
   await exited(proxy);
-  const leftovers = stagingEntries(join(configDirectory, 'payloads'));
+  const leftovers = stagingEntries(join(configDirectory, 'dependencies'));
   const record = {
     leg,
     sigintSent: sent,

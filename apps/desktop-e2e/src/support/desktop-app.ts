@@ -60,7 +60,7 @@ const isAnyProcessNaming = async (pattern: string): Promise<boolean> => {
 /**
  * Remove a throwaway root the app wrote into, once nothing is still writing there.
  *
- * Main's children outlive it: a kernel's first-use preparation unpacks into the payload store under the profile and
+ * Main's children outlive it: a kernel's first-use preparation unpacks into the dependency store under the profile and
  * runs the package's seal step there (`apps/desktop/src/tau/native-preparation.ts`), and when the fixture stops main
  * with `app.exit` or `SIGKILL` a seal step can keep adding files, so a recursive remove meets a directory it has just
  * emptied filled again (`ENOTEMPTY`). Every such process names the root in its arguments. Native workers do too, since
@@ -282,7 +282,7 @@ export type DesktopSession = {
   readonly application: ElectronApplication;
   /** The app's node-backed Home, `<userData>/home`. */
   readonly homeRoot: string;
-  /** The launch's `TAU_CONFIG_DIR`, whose `payloads` is main's native payload store. */
+  /** The launch's `TAU_CONFIG_DIR`, whose `dependencies` is main's native dependency store. */
   readonly configRoot: string;
   readonly page: Page;
   /**
@@ -416,10 +416,10 @@ export const launchDesktopApp = async (options: {
   const snapshots = manual || configuredSnapshots !== 'false';
   const userData = options.profileRoot ?? (await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-')));
   const configRoot = options.env?.['TAU_CONFIG_DIR'] ?? join(userData, 'config');
-  const payloadStore = join(configRoot, 'payloads');
+  const dependencyStore = join(configRoot, 'dependencies');
   const preparedKernels = options.preparedKernels !== false;
   if (preparedKernels) {
-    await restorePreparedKernels(payloadStore);
+    await restorePreparedKernels(dependencyStore);
   }
   const startupNetworkLogPath = options.captureStartupNetwork ? join(userData, 'startup-network.json') : undefined;
   /* A fixed, already-lowercase leaf inside the random parent: the workspace
@@ -850,7 +850,7 @@ export const launchDesktopApp = async (options: {
     if (preparedKernels) {
       /* Before the roots go, and before a failure keeps them: a closure this launch sealed spares the next spec its
        * download. The cache is only an optimisation, so a failed copy never fails the spec. */
-      await savePreparedKernels(payloadStore).catch((error: unknown) => {
+      await savePreparedKernels(dependencyStore).catch((error: unknown) => {
         console.warn('DESKTOP PREPARED KERNELS', 'could not keep the prepared kernels', error);
       });
     }

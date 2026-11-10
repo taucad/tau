@@ -5,8 +5,8 @@ import { cn } from '@taucad/ui/utils/cn';
 import { defaultMarkdownControls, MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { rehypeAtReferences } from '#components/markdown/rehype-at-references.js';
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
-import { useAtReferenceContext } from '#components/chat/at-reference-context.js';
-import { escapeDollarInvocations } from '#utils/at-reference.utils.js';
+import { useAtReferenceContext } from '@taucad/chat-ui/components/at-reference-context';
+import { escapeDollarInvocations } from '@taucad/chat-ui/utils/at-reference.utils';
 import { ChatStreamingBlock, ChatStreamingFadeProvider } from '#components/markdown/chat-streaming-block.js';
 import { ChatMarkdownHyperlink, rehypeChatFileLinks } from '#components/markdown/chat-markdown-hyperlink.js';
 

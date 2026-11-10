@@ -11,7 +11,7 @@ Use this skill when adding, updating, enabling, or evaluating an LLM in Tau's mo
 
 Chat turns do not run in the API. The API is a relay: the portable agent host builds the provider request in the browser or desktop host and the API's model gateway forwards it to the provider with the operator's or Tau Cloud's credentials. A new model therefore has to be correct in three places: the catalog row, the gateway route, and the host transport that chooses the wire and the reasoning options.
 
-The API's LangChain providers (`ProviderService`) survive for one narrow case only: self-host helper surfaces (`project_name`, `commit_name`, `code_completion`) executed by `DirectModelInvocationService.invokeHelper`. Do not treat that path as the chat path.
+The API calls a provider itself in one narrow case only: self-host helper surfaces (`project_name`, `commit_name`) executed by `DirectModelInvocationService.invokeHelper`. It resolves the selected catalog row's gateway route, builds a native request with the helper codec (`providers/helper-wire.ts`: one request builder and one stream reader per wire, mapping the row's `configuration` to that wire) and sends it through the same `executeGatewayProviderRequest` transport. A new wire or a new request option a helper must forward is a codec change there; there are no per-provider client classes. Do not treat that path as the chat path.
 
 ## Workflow
 

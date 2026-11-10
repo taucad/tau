@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { manifestText } from '@taucad/dotnet-kernel-core/layer';
 import { describe, expect, it } from 'vitest';
 
-import { composeManifest, layerPayload, picogkLayerRecordSchema } from '#picogk-layer.js';
+import { composeManifest, layerDependencyFile, picogkLayerRecordSchema } from '#picogk-layer.js';
 import type { PicogkLayerRecord } from '#picogk-layer.js';
 
 const record: PicogkLayerRecord = {
@@ -36,7 +36,7 @@ const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, '../tau-pl
 
 describe('picogk layer record', () => {
   it('pins the layer by its digest at the CDN key and the release named after it', () => {
-    expect(layerPayload(record)).toEqual({
+    expect(layerDependencyFile(record)).toEqual({
       name: 'worker',
       integrity: `sha256-${Buffer.from(record.sha256, 'hex').toString('base64')}`,
       byteLength: 40_000_000,
@@ -63,14 +63,14 @@ describe('picogk layer record', () => {
     expect(manifestText(manifest)).not.toBe(text);
   });
 
-  it('refuses a manifest without a darwin-arm64 worker payload', () => {
+  it('refuses a manifest without a darwin-arm64 worker dependency file', () => {
     expect(() => composeManifest({ dependencies: {} }, record)).toThrow(/no darwin-arm64 runtime variant/u);
     expect(() =>
       composeManifest(
-        { dependencies: { runtime: [{ target: { runtime: 'native', os: 'darwin', arch: 'arm64' }, payloads: {} }] } },
+        { dependencies: { runtime: [{ target: { runtime: 'native', os: 'darwin', arch: 'arm64' }, files: {} }] } },
         record,
       ),
-    ).toThrow(/worker payload/u);
+    ).toThrow(/worker dependency file/u);
   });
 
   it('accepts only a complete darwin-arm64 record', () => {

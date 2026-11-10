@@ -10,7 +10,7 @@
  * Usage:
  *   tau-python-kernel generate --package <dir> [--seed <dir>]     write tau-plugin.json, pylocks, SBOM, tau_kernel copy
  *   tau-python-kernel check --package <dir> [--seed <dir>]        fail when any generated file differs
- *   tau-python-kernel seed --package <dir> [--target <key>]       fill the payload seed
+ *   tau-python-kernel seed --package <dir> [--target <key>]       fill the dependency file seed
  *   tau-python-kernel golden --package <dir> [--store <dir>]      record this host's golden receipt
  *   tau-python-kernel template --package <dir> [--check]          write (or check) the project template
  *   tau-python-kernel test [--package <dir>] [--python <exe>]     the Python unit tests under the coverage gate

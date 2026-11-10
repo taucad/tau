@@ -3,7 +3,7 @@ import { ArrowRight } from 'lucide-react';
 import { NavLink, useNavigation } from 'react-router';
 import type { ReactNode } from 'react';
 import type { ProjectListItem } from '#types/project-library.types.js';
-import { DataTableColumnHeader } from '#components/ui/data-table.js';
+import { DataTableColumnHeader } from '@taucad/ui-kit/components/data-table';
 import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { formatRelativeTime } from '#utils/date.utils.js';

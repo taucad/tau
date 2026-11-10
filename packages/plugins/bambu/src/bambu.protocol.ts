@@ -600,6 +600,7 @@ const boundedArray = (value: unknown, maximum: number): readonly unknown[] => {
 /** Parse one bounded, untrusted Bambu LAN discovery advertisement.
  * @param input - Datagram plus host-clock observation and expiry.
  * @returns One normalized candidate.
+ * @public
  */
 export const parseBambuDiscoveryDatagram = (
   input: Readonly<{

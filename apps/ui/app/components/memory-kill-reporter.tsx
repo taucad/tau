@@ -4,53 +4,90 @@
  *
  * Mounted under the sessions registry and the chat store so the marker carries the counts that
  * matter on a phone: how many projects were live and how many chats were loaded when the tab died.
- * A detected kill goes to the error tracker as a `TabKilledError` (`#lib/tab-kill-reporting`) and
- * leaves the marker only once its report is handed over, so a kill loop still reports its first
- * kill (G17).
+ * A detected kill goes to the error tracker as a `TabKilledError` (`#lib/tab-kill-reporting`) only
+ * when "Share usage and diagnostics" resolves to `granted` (crash capture blueprint). While the
+ * consent is `unknown` (a signed-in preference still loading) the kill waits in the marker's
+ * `pending` list and is sent if it resolves to on in this tab; on `denied` it is settled and dropped
+ * at once. It leaves the marker only once handed over or dropped, so a kill loop still reports its
+ * first kill (G17). Nothing about reporting is shown in any state.
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useLiveProjectIds } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { offerCrashFeedback } from '#lib/crash-feedback.js';
 import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
 import { getDocumentMemoryKillSignal, killHeartbeatMilliseconds } from '#lib/memory-kill-signal.js';
 import { setLiveCountsReader } from '#lib/memory-sampler.js';
 import { readRouteId } from '#lib/sentry-context.lib.js';
 import { reportDetectedKill } from '#lib/tab-kill-reporting.js';
-import type { MemoryKillSignal } from '#lib/memory-kill-signal.js';
+import type { DetectedMemoryKill, MemoryKillSignal } from '#lib/memory-kill-signal.js';
+import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
+import type { ReportingConsent } from '@taucad/telemetry/client';
+
+/** Where the reporter reads the telemetry consent: the page composition's one rule. @public */
+export type KillReportConsent = Readonly<{
+  read: () => ReportingConsent;
+  /** Listen for each resolved change; returns the unsubscribe. */
+  subscribe: (listener: () => void) => () => void;
+}>;
+
+/** The page composition's consent; `unknown` (wait) where there is none, as during SSR. */
+const pageConsent: KillReportConsent = {
+  read: () => pageTelemetry()?.consent() ?? 'unknown',
+  subscribe: (listener) => pageTelemetry()?.onConsentChange(listener) ?? (() => undefined),
+};
 
 export function MemoryKillReporter({
   signal,
   liveProjectCount,
   chatCount,
+  consent = pageConsent,
 }: {
   readonly signal: MemoryKillSignal | undefined;
   readonly liveProjectCount: number;
   readonly chatCount: number;
+  readonly consent?: KillReportConsent;
 }): undefined {
-  const reported = useRef(false);
+  const waiting = useRef<DetectedMemoryKill[] | undefined>(undefined);
 
   useEffect(() => {
-    if (signal === undefined || reported.current) {
-      return;
+    if (signal === undefined) {
+      return undefined;
     }
-    reported.current = true;
-    const report = async (): Promise<void> => {
-      for (const kill of signal.takeDetectedKills()) {
-        // Each kill in turn; one whose report does not land stays pending for the next load (G17).
-        // eslint-disable-next-line no-await-in-loop -- the reports share one delivery path.
-        const { delivered, eventId } = await reportDetectedKill(kill);
-        if (delivered) {
-          signal.settleKill(kill.id);
-          // Ask what the person was doing, where it is theirs to answer (SB12).
-          offerCrashFeedback(kill, eventId);
+    waiting.current ??= [...signal.takeDetectedKills()];
+    let isSending = false;
+    const process = async (): Promise<void> => {
+      const decided = consent.read();
+      const queue = waiting.current ?? [];
+      if (isSending || decided === 'unknown' || queue.length === 0) {
+        return;
+      }
+      isSending = true;
+      try {
+        for (const kill of queue.splice(0)) {
+          if (decided === 'denied') {
+            // Off means off: the kill never leaves the device and is not kept waiting.
+            signal.settleKill(kill.id);
+            continue;
+          }
+          // Each kill in turn; one whose report does not land stays pending for the next load (G17).
+          // eslint-disable-next-line no-await-in-loop -- the reports share one delivery path.
+          if (await reportDetectedKill(kill)) {
+            signal.settleKill(kill.id);
+          }
         }
+      } finally {
+        isSending = false;
       }
     };
+    const unsubscribe = consent.subscribe(() => {
+      // async-iife: bootstrap -- a consent change re-checks what waits; it never blocks the change.
+      void process();
+    });
     // async-iife: bootstrap -- reporting the previous page's kills never blocks this page's render.
-    void report();
-  }, [signal]);
+    void process();
+    return unsubscribe;
+  }, [consent, signal]);
 
   useEffect(() => {
     signal?.setCounts({ liveProjectCount, chatCount });

@@ -29,7 +29,7 @@ vi.mock('#components/filesystem/workspace-selector.js', () => ({
   WorkspaceSelector: () => <p>Home in this browser</p>,
 }));
 
-vi.mock('#components/ui/sonner.js', () => ({ toast: toastMock }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: toastMock }));
 
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({ createProject: createProjectMock }),

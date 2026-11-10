@@ -6,12 +6,7 @@
   "tags": ["scope:shared", "type:lib"],
   "targets": {
     "test": {
-      "inputs": [
-        "default",
-        "^production",
-        "{workspaceRoot}/infra/grafana/**/*",
-        "{workspaceRoot}/apps/libs/api-observability/src/otel.ts"
-      ]
+      "inputs": ["default", "^production"]
     },
     "generate-runtime-vocabulary": {
       "executor": "nx:run-commands",

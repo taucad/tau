@@ -12,11 +12,11 @@ import type { AnyRuntimeDefinition } from '@taucad/runtime';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { computeTreeIntegrity } from '@taucad/runtime/preparation/node';
-import type { ReceiptFile } from '@taucad/runtime/preparation/node';
+import type { InstalledFile } from '@taucad/runtime/preparation/node';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { fixturePayloadStore, nativeKernelsFixture } from '#tau/native-kernels.fixture.js';
+import { fixtureDependencyStore, nativeKernelsFixture } from '#tau/native-kernels.fixture.js';
 import {
   awaitNativeKernels,
   desktopClosureResolver,
@@ -26,11 +26,11 @@ import {
   verifyDesktopClosure,
 } from '#tau/native-kernels.js';
 
-const refusal = 'Tau could not open its payload store at /tmp/tau/payloads: EACCES: permission denied';
+const refusal = 'Tau could not open its dependency store at /tmp/tau/dependencies: EACCES: permission denied';
 
 const refusedFrame = {
   type: 'tau:native-kernels',
-  store: fixturePayloadStore,
+  store: fixtureDependencyStore,
   kernels: [{ kernel: 'build123d', package: '@taucad/build123d', extensions: ['py'], refusal }],
 } as const;
 
@@ -163,7 +163,7 @@ describe('desktop native kernels', () => {
     cleanups.push(async () => rm(root, { recursive: true, force: true }));
     await mkdir(join(root, 'python', 'bin'), { recursive: true });
     await writeFile(join(root, 'python', 'bin', 'python3'), 'tampered', { mode: 0o755 });
-    const files: ReceiptFile[] = [
+    const files: InstalledFile[] = [
       {
         path: 'python/bin/python3',
         byteLength: 8,

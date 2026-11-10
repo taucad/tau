@@ -10,7 +10,7 @@ import type {
   ChatTextareaSubmitPayload,
 } from '#components/chat/chat-textarea-types.js';
 import type { CadChatSubmitInput } from '#chat-clients/use-cad-chat-client.js';
-import { storedRef } from '#utils/attachment.test-utils.js';
+import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 
 // `useKernel` must NOT be called from chat-history anymore — guard with a
@@ -158,7 +158,7 @@ vi.mock('#routes/w.$workspace.$project/chat-revision-marker.js', () => ({
   }) => <div data-testid='turn-revision' data-user-message-id={userMessageId} data-latest={String(isLatestTurn)} />,
 }));
 
-vi.mock('#routes/w.$workspace.$project/scroll-down-button.js', () => ({
+vi.mock('@taucad/project-workspace/components/scroll-down-button', () => ({
   ScrollDownButton: () => <button type='button' aria-label='Scroll to bottom' />,
 }));
 
@@ -180,7 +180,7 @@ vi.mock('#routes/w.$workspace.$project/chat-title-bar.js', () => ({
   ),
 }));
 
-vi.mock('#routes/w.$workspace.$project/chat-history-empty.js', () => ({
+vi.mock('@taucad/project-workspace/components/chat-history-empty', () => ({
   ChatHistoryEmpty: () => null,
 }));
 
@@ -210,7 +210,7 @@ vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: () => ({ formattedKeyCombination: 'Ctrl+C' }),
 }));
 
-vi.mock('#components/chat/at-reference-context.js', () => ({
+vi.mock('@taucad/chat-ui/components/at-reference-context', () => ({
   AtReferenceProvider: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
 

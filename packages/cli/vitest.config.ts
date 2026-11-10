@@ -5,10 +5,9 @@ export default defineConfig({
     environment: 'node',
     passWithNoTests: true,
     /*
-     * The dist-smoke test spawns the built CLI against the real birdhouse
-     * fixture; the cold path includes WASM init for the replicad kernel.
-     * 60s gives plenty of headroom on slow CI runners while keeping the
-     * default short for the rest of the suite.
+     * A few unit suites (cold start, serve) spawn the built CLI; the cold path
+     * includes WASM init. 60s gives plenty of headroom on slow CI runners. The
+     * end-to-end suites live in `apps/cli-e2e`.
      */
     testTimeout: 60_000,
     typecheck: {

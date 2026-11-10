@@ -1,4 +1,4 @@
-import type { ClosureReceipt, ReceiptFile } from '@taucad/runtime/preparation/node';
+import type { ClosureReceipt, InstalledFile } from '@taucad/runtime/preparation/node';
 import { describe, expect, it } from 'vitest';
 
 import { smlibpyLaunchSet, smlibpyOptionsFromClosure, sealSmlibpyClosure } from '#smlibpy-closure.js';
@@ -6,17 +6,17 @@ import { smlibpyOptionsSchema } from '#smlibpy.schemas.js';
 import { smlibpyNative } from '#native.js';
 
 const hex = (digit: string): string => digit.repeat(64);
-const row = (path: string, digit: string, mode = 0o644): ReceiptFile => ({
+const row = (path: string, digit: string, mode = 0o644): InstalledFile => ({
   path,
   byteLength: 1,
   sha256: hex(digit),
   mode,
-  payload: 'payload',
+  dependencyFile: 'wheel',
 });
 
 const target = { runtime: 'native', os: 'linux', arch: 'x64', libc: 'glibc' } as const;
 
-const receiptOf = (files: readonly ReceiptFile[]): ClosureReceipt => ({
+const receiptOf = (files: readonly InstalledFile[]): ClosureReceipt => ({
   package: '@taucad/smlibpy',
   dependency: 'engine',
   target,
@@ -29,7 +29,7 @@ const receiptOf = (files: readonly ReceiptFile[]): ClosureReceipt => ({
   closureIntegrity: 'sha256-AAAA',
   treeIntegrity: 'sha256-BBBB',
   files,
-  payloads: [],
+  dependencyFiles: [],
   preparedAt: '2026-10-15T00:00:00.000Z',
   tauVersion: '0.0.0',
 });

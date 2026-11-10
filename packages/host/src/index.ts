@@ -30,7 +30,7 @@ export type {
   HostJobRunnerRegistration,
 } from '#job-attempt-host.js';
 export type { HostCredential } from '#credential-store.js';
-export { defaultConfigDirectory, defaultPayloadStore } from '#credential-store.js';
+export { defaultConfigDirectory, defaultDependencyStore } from '#credential-store.js';
 export {
   handOffMintPath,
   handOffSessionPath,

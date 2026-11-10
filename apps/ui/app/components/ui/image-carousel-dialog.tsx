@@ -11,7 +11,7 @@ import {
 import type { CarouselApi } from '@taucad/ui/components/carousel';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '@taucad/ui/components/dialog';
 import { cn } from '@taucad/ui/utils/cn';
-import { ViewerLayer, ViewerLayerPortal } from '#components/ui/viewer-layer.js';
+import { ViewerLayer, ViewerLayerPortal } from '@taucad/ui-kit/components/viewer-layer';
 import { attachmentAbsentLabel, attachmentDownloadName, useAttachmentSource } from '#hooks/use-attachment-source.js';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 

@@ -50,7 +50,7 @@ export const pendingKillLimit = 3;
 
 /**
  * Kills in a row that make a kill loop: the point at which Safari starts telling the user "A problem
- * repeatedly occurred", the report rises to `error` (A11) and the crash prompt holds off (SB12).
+ * repeatedly occurred" and the report rises to `error` (A11).
  */
 export const killLoopThreshold = 2;
 
@@ -105,6 +105,57 @@ type AliveMarker = {
 };
 
 const markerKey = 'tau:alive';
+
+/** Where the live kill context goes as Sentry tags; installed by the desktop renderer SDK only (D13). */
+type KillContextSink = (tags: Readonly<Record<string, string>>) => void;
+
+let killContextSink: KillContextSink | undefined;
+let publishedKillContext: Readonly<Record<string, string>> | undefined;
+let publishedKillContextKey = '';
+
+/**
+ * The marker's crash context as Sentry tag values, named as the `TabKilledError` report names them
+ * (`#lib/tab-kill-reporting`), so a desktop minidump and a browser kill report are searched alike.
+ */
+const killContextTags = (marker: AliveMarker): Readonly<Record<string, string>> => {
+  /* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names, filtered on by operators. */
+  const tags: Record<string, string | undefined> = {
+    route: marker.route,
+    last_activity: marker.trail.at(-1)?.name,
+    live_project_count: String(marker.liveProjectCount),
+    chat_count: String(marker.chatCount),
+    device_class: marker.deviceClass,
+  };
+  /* eslint-enable @typescript-eslint/naming-convention -- Sentry tag names, filtered on by operators. */
+  return Object.fromEntries(Object.entries(tags).filter((entry): entry is [string, string] => entry[1] !== undefined));
+};
+
+/** Hand the current kill context to the sink, only when it changed: each change crosses IPC to main. */
+const publishKillContext = (marker: AliveMarker): void => {
+  const tags = killContextTags(marker);
+  const key = JSON.stringify(tags);
+  if (key === publishedKillContextKey) {
+    return;
+  }
+  publishedKillContextKey = key;
+  publishedKillContext = tags;
+  killContextSink?.(tags);
+};
+
+/**
+ * Keep the live kill context on the error tracker's scope (D13). On desktop the renderer's scope
+ * tags sync to main, and main puts them on the native minidump of a renderer that dies, which is
+ * that crash's one report. The browser has no such report and installs no sink.
+ *
+ * @param sink - Sets the tags on the SDK's scope, or `undefined` to stop.
+ * @public
+ */
+export const setKillContextSink = (sink: KillContextSink | undefined): void => {
+  killContextSink = sink;
+  if (sink !== undefined && publishedKillContext !== undefined) {
+    sink(publishedKillContext);
+  }
+};
 
 type MemoryKillSignalOptions = Readonly<{
   storage: Storage | undefined;
@@ -277,6 +328,7 @@ export const createMemoryKillSignal = ({
   };
   let taken = false;
   const write = (): void => {
+    publishKillContext(marker);
     try {
       storage?.setItem(markerKey, serializeMarker(marker));
     } catch {

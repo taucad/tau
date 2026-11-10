@@ -14,7 +14,7 @@ import type {
   TurnFinalizedLogEvent,
   TurnPlacement,
 } from '#log/event-types.js';
-import type { InvocationResolution } from '#wire/gateway.js';
+import type { GatewayTurnLabels, InvocationResolution } from '#wire/gateway.js';
 
 /** W1: ordered, durable event-log port owned by the active host. @public */
 export type DurableEventLog = EventLogAppender;
@@ -158,6 +158,13 @@ export type ModelStreamRequest = {
   readonly chatId?: string | undefined;
   /** Why this distinct provider invocation exists. */
   readonly invocationPurpose: 'generation' | 'compaction';
+  /**
+   * Which step of its user turn a generation is, and the pause before the turn, for the gateway's turn-step series.
+   * Sent as the `x-tau-turn-step` and `x-tau-turn-gap` headers, never in the body, so the prompt bytes and the
+   * billing request digest are the same with or without it. Absent on a compaction and from a caller that does not
+   * track turns; the gateway then records no turn labels for the call.
+   */
+  readonly turn?: GatewayTurnLabels | undefined;
   /** Called after the response header is validated and before its stream is consumed. */
   readonly onInvocationBound?: ((binding: ModelInvocationBinding) => Promise<void>) | undefined;
   /** Gateway or local-provider model identity. */
@@ -287,6 +294,36 @@ export type HostToolInvocation = {
    * surface, rather than failing or, worse, proceeding.
    */
   readonly approve?: HostToolApproval | undefined;
+  /**
+   * The share of the current batch's aggregate tool-result budget this call may spend (regression review R4).
+   *
+   * A session sets it so a fan-out of parallel calls cannot put more than the batch budget into context at once. A
+   * registry that can retain a complete result where the model can read it back asks `admit` for the result's size,
+   * and on refusal retains the result and `charge`s only the preview it returns. Absent, only the registry's own
+   * per-tool limits apply.
+   */
+  readonly resultBudget?: HostToolResultBudget | undefined;
+};
+
+/**
+ * One batch's aggregate tool-result budget, in serialized characters (regression review R4).
+ *
+ * @public
+ */
+export type HostToolResultBudget = {
+  /**
+   * Reserve room for a result of this size.
+   *
+   * @param characters - The result's serialized length.
+   * @returns `true` when it fits and is now counted; `false` when it would overrun the batch, and nothing is counted.
+   */
+  admit(characters: number): boolean;
+  /**
+   * Count characters that are going into context regardless, such as the preview of a retained result.
+   *
+   * @param characters - The serialized length that reaches the model.
+   */
+  charge(characters: number): void;
 };
 
 /**

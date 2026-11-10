@@ -252,6 +252,22 @@ describe('createPageTelemetry', () => {
     expect(page.context()).toMatchObject({ route: 'desktop', platform: 'electron' });
   });
 
+  it('should tell consent listeners each resolved change, and stop after unsubscribe', () => {
+    const { page, setDevice } = harness();
+    const heard: string[] = [];
+    const stop = page.onConsentChange((consent) => heard.push(consent));
+
+    page.setIdentity({ kind: 'signed-out' });
+    page.onConsentInputsChanged({ updatePending: false });
+    setDevice('off');
+    page.onConsentInputsChanged({ updatePending: false });
+    stop();
+    setDevice('on');
+    page.onConsentInputsChanged({ updatePending: false });
+
+    expect(heard).toEqual(['granted', 'denied']);
+  });
+
   it('should deny on GPC and on a declined analytics decision', () => {
     const gpc = harness({ globalPrivacyControl: () => true });
     gpc.page.setIdentity({ kind: 'signed-out' });

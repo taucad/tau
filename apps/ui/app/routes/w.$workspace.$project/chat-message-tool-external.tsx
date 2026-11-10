@@ -29,18 +29,18 @@ import {
   ChatToolCardList,
   ChatToolCardListItem,
   ChatToolCardTitle,
-} from '#components/chat/chat-tool-card.js';
-import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
-import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
+} from '@taucad/chat-ui/components/chat-tool-card';
+import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
+import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { CollapsibleFileOperation } from '#components/chat/chat-tool-file-operation.js';
 import { CodeBlockContent, Pre } from '#components/code/code-block.js';
 import { FileLink } from '#components/files/file-link.js';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 import type { ChatMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
-import { summarizeExternalCall, summaryNoun } from '#utils/external-call-summary.js';
-import { externalToolOutputText } from '#utils/external-tool-output.js';
-import { externalCommandOf } from '#utils/shell-command-summary.js';
+import { summarizeExternalCall, summaryNoun } from '@taucad/chat-ui/utils/external-call-summary';
+import { externalToolOutputText } from '@taucad/chat-ui/utils/external-tool-output';
+import { externalCommandOf } from '@taucad/chat-ui/utils/shell-command-summary';
 
 /** ACP's whole `ToolKind` taxonomy, in the order the protocol declares it. @see https://agentclientprotocol.com */
 export const externalToolKinds = [

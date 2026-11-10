@@ -163,10 +163,12 @@ export const publishable = (workspaceValue: Workspace): WorkspaceProject[] =>
  * vocabulary. Application libraries additionally carry exactly one `layer:`;
  * other projects may carry one. API server libraries (`scope:api type:app-lib`)
  * also carry exactly one `api:`, which names them in the dependency-direction
- * constraints; no other project may carry one. Host, release and deploy tags are
- * optional but must be unique and valid. `ci:` lane tags are optional and may
- * repeat with different values, one per lane, but each must be valid and none
- * may be listed twice.
+ * constraints; no other project may carry one. A `shell:` tag is optional and
+ * only for private libraries (`type:lib` or `type:app-lib`): the published
+ * owners that bundle them are selected by other tags. Host, release and deploy
+ * tags are optional but must be unique and valid. `ci:` lane tags are optional
+ * and may repeat with different values, one per lane, but each must be valid
+ * and none may be listed twice.
  * The returned strings are the violations.
  *
  * @public
@@ -191,6 +193,7 @@ export const validateTags = (workspaceValue: Workspace): string[] =>
         dimension !== 'host' &&
         dimension !== 'release' &&
         dimension !== 'deploy' &&
+        dimension !== 'shell' &&
         (dimension !== 'layer' || tags.includes('type:app-lib')) &&
         (dimension !== 'api' || apiLibrary);
       if ((required && tag === undefined) || extra.length > 0) {
@@ -199,6 +202,10 @@ export const validateTags = (workspaceValue: Workspace): string[] =>
 
       if (dimension === 'api' && tag !== undefined && !apiLibrary) {
         return [`unexpected tag "${tag}" (api: is only for scope:api type:app-lib projects)`];
+      }
+
+      if (dimension === 'shell' && tag !== undefined && !tags.includes('type:lib') && !tags.includes('type:app-lib')) {
+        return [`unexpected tag "${tag}" (shell: is only for type:lib or type:app-lib projects)`];
       }
 
       if (tag === undefined) {

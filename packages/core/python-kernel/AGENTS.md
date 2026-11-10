@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Shared Python language-kernel worker, session, closure and payload-generator helpers for Tau's native Python kernels
+Shared Python language-kernel worker, session, closure and dependency-manifest generator helpers for Tau's native Python kernels
 
 - Nx project: `python-kernel-core`
 - Project root: `packages/core/python-kernel`
@@ -53,5 +53,5 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 ## Project notes
 
 - Nothing here imports a CAD library: a kernel's library calls stay in its own worker module.
-- A change to `python/tau_kernel/` changes every Python kernel's raw payloads. Run each kernel's `generate-tau-plugin` target, which rewrites its pinned `python/tau_kernel/` copy and its `tau-plugin.json`; the golden receipts then need the kernel's dispatch workflow.
-- `tau_kernel` is a namespace package: a raw payload name cannot be `__init__.py`.
+- A change to `python/tau_kernel/` changes every Python kernel's raw dependency files. Run each kernel's `generate-tau-plugin` target, which rewrites its pinned `python/tau_kernel/` copy and its `tau-plugin.json`; the golden receipts then need the kernel's dispatch workflow.
+- `tau_kernel` is a namespace package: a raw dependency file name cannot be `__init__.py`.

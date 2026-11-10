@@ -15,7 +15,7 @@ import {
 } from '#components/ui/floating-panel.js';
 import { Input } from '@taucad/ui/components/input';
 import { Textarea } from '@taucad/ui/components/textarea';
-import { Tags, TagsTrigger } from '#components/ui/input-tags.js';
+import { Tags, TagsTrigger } from '@taucad/ui-kit/components/input-tags';
 import { FileSelector } from '#components/files/file-selector.js';
 import { ChatDetailsUsage } from '#routes/w.$workspace.$project/chat-details-usage.js';
 import { PackagesPanel } from '#routes/w.$workspace.$project/packages-panel.js';

@@ -90,7 +90,7 @@ Configuration names are declared by `apps/api/app/config/environment.config.ts`;
 environment carries is operational and lives in the private handbook.
 
 These are code constants rather than configuration, in
-`apps/api/app/api/git/store/limits.ts` unless a row names another file:
+`apps/libs/api-git-core/src/store/limits.ts` unless a row names another file:
 
 | Constant                                                                     | Value               | Why                                                                                                    |
 | ---------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -134,7 +134,7 @@ hook's report-status bytes verbatim (NI13), and the client classifies the D20 ce
 D17 plan-quota refusal by the fixed markers the hook opens them with:
 
 ```ts
-// packages/revisions/src/refusal-markers.ts:20 and :30 — and apps/api/app/api/git/git.constants.ts:244
+// packages/revisions/src/refusal-markers.ts:20 and :30 — and apps/libs/api-git-core/src/git.constants.ts:244
 // and :61, which name this leaf as their source. Two copies of each, because the API does not depend
 // on the package; each is tested, and they change together.
 const ceilingRefusalMarker = 'Tau: repository size limit exceeded';

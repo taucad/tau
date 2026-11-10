@@ -19,7 +19,7 @@ vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   desktopBridge: () => undefined,
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { error: mocks.error } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: mocks.error } }));
 vi.mock('#hooks/use-theme.js', () => ({ useTheme: () => ({ isHighContrast: false }) }));
 
 describe('chat file links in Chromium', () => {

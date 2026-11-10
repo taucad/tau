@@ -7,7 +7,7 @@ import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
 import { useDraftImageErrorToast } from '#hooks/use-draft-image-error-toast.js';
 
 const toastError = vi.hoisted(() => vi.fn());
-vi.mock('#components/ui/sonner.js', () => ({ toast: { error: toastError } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: toastError } }));
 
 const textOnly: DraftAttachmentModel = {
   name: 'Text Model',

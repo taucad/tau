@@ -35,10 +35,16 @@
       "path": "./packages/units"
     },
     {
+      "path": "./apps/libs/api-agent-observability"
+    },
+    {
       "path": "./apps/libs/api-auth"
     },
     {
       "path": "./apps/libs/api-billing"
+    },
+    {
+      "path": "./apps/libs/api-chat"
     },
     {
       "path": "./apps/libs/api-core"
@@ -50,6 +56,12 @@
       "path": "./apps/libs/api-email"
     },
     {
+      "path": "./apps/libs/api-git-core"
+    },
+    {
+      "path": "./apps/libs/api-git-mirror"
+    },
+    {
       "path": "./apps/libs/api-hosts"
     },
     {
@@ -59,10 +71,19 @@
       "path": "./apps/libs/api-llm-gateway"
     },
     {
+      "path": "./apps/libs/api-object-storage"
+    },
+    {
       "path": "./apps/libs/api-observability"
     },
     {
+      "path": "./apps/libs/api-projects"
+    },
+    {
       "path": "./apps/libs/api-redis"
+    },
+    {
+      "path": "./apps/libs/api-testing"
     },
     {
       "path": "./apps/libs/billing"

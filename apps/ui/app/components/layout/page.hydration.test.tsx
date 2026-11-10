@@ -46,10 +46,10 @@ vi.mock('@taucad/ui/components/breadcrumb', () => ({
   BreadcrumbSeparator: () => null,
 }));
 vi.mock('@taucad/ui/components/separator', () => ({ Separator: () => null }));
-vi.mock('#components/ui/utils/compose.js', () => ({
+vi.mock('@taucad/ui-kit/utils/compose', () => ({
   Compose: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
 }));
-vi.mock('#components/icons/tau-wordmark.js', () => ({ TauWordmark: () => <svg /> }));
+vi.mock('@taucad/ui-kit/icons/tau-wordmark', () => ({ TauWordmark: () => <svg /> }));
 vi.mock('#components/settings/settings-dialog.js', () => ({ SettingsDialog: () => null }));
 
 const { Page } = await import('#components/layout/page.js');

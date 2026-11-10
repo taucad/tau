@@ -12,7 +12,7 @@ import { WorkbenchToggle } from '#routes/w.$workspace.$project/workbench-toggle.
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import { ProjectManifestIssueBanner } from '#routes/w.$workspace.$project/project-manifest-issue-banner.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
-import { ChatContextInsertionProvider } from '#components/chat/chat-context-insertion.js';
+import { ChatContextInsertionProvider } from '@taucad/chat-ui/components/chat-context-insertion';
 import { useSidebar } from '#components/ui/sidebar.js';
 import { useProject } from '#hooks/use-project.js';
 import {

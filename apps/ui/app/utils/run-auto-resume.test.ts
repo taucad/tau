@@ -3,6 +3,9 @@ import {
   canAutoResumeModelPending,
   lookUpModelAttempt,
   maximumRateLimitAutoResumes,
+  nextProviderUnavailableRetry,
+  providerUnavailableRetryDelayMilliseconds,
+  recordProviderUnavailableAutoResume,
   modelPendingAutoResumeBoundMilliseconds,
   modelPendingResumeBy,
   nextRateLimitRetry,
@@ -148,5 +151,25 @@ describe('lookUpModelAttempt', () => {
         throw new TypeError('Failed to fetch');
       }),
     ).resolves.toBe('waiting');
+  });
+});
+
+/* Regression review R6: the server agent plane retried a transient provider failure twice; the Pi gateway retries none. */
+describe('nextProviderUnavailableRetry', () => {
+  beforeEach(() => {
+    resetAutoResumes();
+  });
+
+  it('should allow one automatic resume per run, then wait for a click', () => {
+    expect(nextProviderUnavailableRetry('run-1', 1)).toBe(1);
+    recordProviderUnavailableAutoResume('run-1', 1);
+
+    expect(nextProviderUnavailableRetry('run-1', 1)).toBeUndefined();
+    expect(nextProviderUnavailableRetry('run-1', 2)).toBeUndefined();
+    expect(nextProviderUnavailableRetry('run-2', 1)).toBe(1);
+  });
+
+  it('should wait a couple of seconds before resuming', () => {
+    expect(providerUnavailableRetryDelayMilliseconds).toBe(2000);
   });
 });

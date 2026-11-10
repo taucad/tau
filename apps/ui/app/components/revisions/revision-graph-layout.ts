@@ -17,7 +17,7 @@
  *   same shape, dashed.
  * - A branch with no entries yet ends at its open end, and the fork ends on it.
  *
- * The rows come from `readRevisionGraph` (`@taucad/revisions`): a row's `line`
+ * The rows come from the History graph read, which lands with its first consumer: a row's `line`
  * is the node's `branch` here, so a side no branch names takes a lane like any
  * other.
  */

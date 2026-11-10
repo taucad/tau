@@ -518,15 +518,35 @@ describe('trackAgentTurn', () => {
     expect(detail).not.toHaveProperty('prefixBreaks');
   });
 
-  it('counts the attempt’s prefix breaks by cause and provider, with the reasoning they left out', () => {
-    const reply = (id: string, provider: string, prefix: Record<string, unknown>) =>
+  it('counts the attempt’s prefix breaks by cause, provider and cache outcome, with the reasoning they left out', () => {
+    /** One reply row; `cacheRead` gives it a usage of 100 uncached prompt tokens beside that many cached ones. */
+    const reply = (
+      id: string,
+      provider: string,
+      { cacheRead, ...prefix }: Record<string, unknown> & { cacheRead?: number },
+    ) =>
       logRow(0, {
         type: 'message.appended',
         message: {
           id,
           role: 'assistant',
           content: [{ type: 'text', text: 'Done.' }],
-          metadata: { provider, prefix: { digest: 'd', system: 's', tools: 't', settings: 'high', ...prefix } },
+          metadata: {
+            provider,
+            prefix: { digest: 'd', system: 's', tools: 't', settings: 'high', ...prefix },
+            ...(cacheRead === undefined
+              ? {}
+              : {
+                  usage: {
+                    input: 100,
+                    cacheRead,
+                    cacheWrite: 0,
+                    output: 1,
+                    totalTokens: 0,
+                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                  },
+                }),
+          },
         },
       });
     const attemptOne = [
@@ -544,18 +564,20 @@ describe('trackAgentTurn', () => {
     publish([logRow(0, { type: 'run.lifecycle', state: 'running', attempt: 2 })], 1300);
     publish(
       [
-        reply('reply-1', 'anthropic', { break: 'clearing', dropped: 9 }),
+        reply('reply-1', 'anthropic', { break: 'clearing', dropped: 9, cacheRead: 0 }),
         reply('reply-2', 'anthropic', {}),
-        reply('reply-3', 'anthropic', { break: 'clearing', dropped: 2 }),
+        reply('reply-3', 'anthropic', { break: 'clearing', dropped: 2, cacheRead: 0 }),
         reply('reply-4', 'a-provider-of-tomorrow', { break: 'settings' }),
+        reply('reply-5', 'anthropic', { break: 'clearing', dropped: 1, cacheRead: 900 }),
         logRow(0, { type: 'run.lifecycle', state: 'completed', attempt: 2 }),
       ],
       1800,
     );
     const { detail } = report.mock.calls[0]![0] as Extract<ClientMetricEntry, { name: 'agent.turn' }>;
     expect(detail.prefixBreaks).toEqual([
-      { cause: 'clearing', provider: 'anthropic', count: 2, reasoningOmitted: 11 },
-      { cause: 'settings', provider: 'other', count: 1, reasoningOmitted: 0 },
+      { cause: 'clearing', provider: 'anthropic', outcome: 'miss', count: 2, reasoningOmitted: 11 },
+      { cause: 'settings', provider: 'other', outcome: 'unreported', count: 1, reasoningOmitted: 0 },
+      { cause: 'clearing', provider: 'anthropic', outcome: 'hit', count: 1, reasoningOmitted: 1 },
     ]);
   });
 

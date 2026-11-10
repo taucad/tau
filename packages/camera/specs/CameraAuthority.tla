@@ -232,12 +232,13 @@ Labels ==
 \* adopted (I6). A `foreign` one is sent to the camera, which applies it at the gate and otherwise drops
 \* it (D15) or, as built, queues it. On a drop the binding re-issues the camera's current pose as an edit
 \* when a person made it, so the person's pose is saved over the foreign one (D15, last writer wins); the
-\* step is labelled `AdoptDropped:resaved` unless that edit is already in flight. This re-save is deliberately outside the G6 camera rule
-\* as worded (written only when `lastChange.source` is a person source and the revision is newer than
-\* `lastWrittenRevision`): it may write again a revision that was already written, and the camera's
-\* latest source may by then be `viewport` or `bounds`, which keep the pose. The binding must therefore
-\* hold the source of the last pose-changing change itself (`poseBy`); `lastChange` alone does not give
-\* it. The charter's I7, its incident-path step 2 and the G6 camera rule record this one exception.
+\* step is labelled `AdoptDropped:resaved` unless that edit is already in flight. This re-save is
+\* deliberately outside the G6 camera rule as worded (written only when `lastChange.source` is a person
+\* source and the revision is newer than `lastWrittenRevision`): it may write again a revision that was
+\* already written, and the camera's latest source may by then be `viewport` or `bounds`, which keep the
+\* pose. The binding must therefore hold the source of the last pose-changing change itself (`poseBy`);
+\* `lastChange` alone does not give it. The charter's I7, its incident-path step 2 and the G6 camera rule
+\* record this one exception.
 Observe(label) ==
   /\ file.pose # seen
   /\ label \in Labels

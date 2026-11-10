@@ -3,7 +3,7 @@
     "RecordSync.target.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "I5, I12 and the snapshot and fence properties over a reliable reply channel: 3 writes, 2 foreign writes, 2 repeated change events"
+      "ref": "I5, I12 and the snapshot and fence properties over a reliable reply channel: 3 writes, 2 foreign writes, 2 repeated change events, 1 forced read"
     },
     "RecordSync.target-lost-reply.cfg": {
       "tier": "pr",
@@ -13,7 +13,7 @@
     "RecordSync.liveness-flush.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "EditEventuallySettled and EventuallyCurrent under weak fairness of the store, the authority and the watch; one reply may be lost"
+      "ref": "EditEventuallySettled and EventuallyCurrent under weak fairness of the store, the authority and the watch; one reply may be lost, and the lost write need not land"
     },
     "RecordSync.today-slots.cfg": {
       "tier": "pr",
@@ -27,12 +27,12 @@
     "RecordSync.today-slots-ForeignStaysForeign.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "The two-slot stores keep I12, also with one lost reply"
+      "ref": "The two-slot stores keep I12, also with one lost reply and one forced read"
     },
     "RecordSync.post-1602-slots.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "Handoff review R17: over a reliable reply channel the three-slot view store has no OwnWriteAttributed counterexample at 3 writes, 2 foreign writes and 2 repeated change events"
+      "ref": "Handoff review R17: over a reliable reply channel and with no forced read, the three-slot view store has no OwnWriteAttributed counterexample at 3 writes, 2 foreign writes and 2 repeated change events; the pass rests on publish returning early for bytes already shown"
     },
     "RecordSync.post-1602-lost-reply.cfg": {
       "tier": "pr",
@@ -43,13 +43,22 @@
       "ref": "Handoff review R17: the three-slot view store forgets a write whose reply was lost once the read-back returns, even when a watch read superseded that read-back; the watch read then publishes the lost write's bytes as foreign",
       "fixedBy": "graphics-event-driven-state-charter G1"
     },
+    "RecordSync.post-1602-forced-read.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OwnWriteAttributed"
+      },
+      "kind": "defect",
+      "ref": "Handoff review R17: a forced read (retryRead, or the first read after a failed one) publishes even when its bytes are already shown; after the reply of a write no read overlapped, no slot holds the write, so the forced read publishes the store's own bytes as foreign",
+      "fixedBy": "graphics-event-driven-state-charter G1"
+    },
     "RecordSync.post-1602-ForeignStaysForeign.cfg": {
       "tier": "pr",
       "expect": {
         "violated": "ForeignStaysForeign"
       },
       "kind": "defect",
-      "ref": "The three-slot view store keeps the acknowledged slot when a read matches the write in flight; a later foreign write of the acknowledged bytes is attributed own although the store has read other bytes since",
+      "ref": "The three-slot view store: a change event supersedes the refresh read of an overlapped write, so the acknowledged slot stays; the reply of the next write, which no read overlapped, publishes it and leaves the slot, and one foreign write of the earlier write's bytes is then attributed own",
       "fixedBy": "graphics-event-driven-state-charter G1"
     },
     "RecordSync.post-1602-SnapshotMonotone.cfg": {
@@ -132,6 +141,14 @@
       },
       "kind": "witness",
       "ref": "Refresh off: an overlapped write is never published and no read follows, so the snapshot stays behind the file"
+    },
+    "RecordSync.no-wait-latest-read.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EditEventuallySettled"
+      },
+      "kind": "witness",
+      "ref": "WaitLatestRead off: a watch read that supersedes the conflict or refresh read frees the writer, which issues its next write on a base it already knows is stale, and that write and its retry conflict until the write bound runs out"
     },
     "RecordSync.no-fence.cfg": {
       "tier": "pr",

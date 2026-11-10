@@ -226,9 +226,9 @@ describe('the compute worker seam', () => {
   /* A refusal seen only on a phone is diagnosed from its toast: the indexer's own reason crosses the port with it. */
   it('names why a pack does not index, across the port', async () => {
     const remote = remoteCompute();
-    const notAPack = encoder.encode('PACK\u0000\u0000\u0000\u0009\u0000\u0000\u0000\u0001'.padEnd(64, 'x'));
+    const garbage = encoder.encode('PACK\u0000\u0000\u0000\u0009\u0000\u0000\u0000\u0001'.padEnd(64, 'x'));
 
-    const refusal = await remote.indexPack(new Uint8Array(notAPack)).catch((error: unknown) => error);
+    const refusal = await remote.indexPack(new Uint8Array(garbage)).catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(CorruptBytesError);
     expect((refusal as Error).message).toMatch(/^The pack does not index: .*packfile version/u);

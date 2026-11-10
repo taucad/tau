@@ -1,4 +1,5 @@
 import { act, cleanup, render } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import * as THREE from 'three';
@@ -76,6 +77,8 @@ type HarnessOptions = Readonly<{
    * event. Otherwise R3F listens on the canvas's parent, and presses land on the canvas.
    */
   hasEventSource?: boolean;
+  /** Mount under `<StrictMode>`, which runs every effect twice. */
+  isStrict?: boolean;
 }>;
 
 type Harness = Readonly<{
@@ -108,6 +111,7 @@ const mountHandles = ({
   up = [0, 0, 1],
   compileAsync = async (scene) => scene,
   hasEventSource = false,
+  isStrict = false,
 }: HarnessOptions = {}): Harness => {
   const actor = createGraphicsActor();
   actor.start();
@@ -172,7 +176,15 @@ const mountHandles = ({
   };
   mocks.state = state;
 
-  const rendered = render(<SectionHandles planePicker={planePicker} />);
+  const element = (): React.JSX.Element =>
+    isStrict ? (
+      <StrictMode>
+        <SectionHandles planePicker={planePicker} />
+      </StrictMode>
+    ) : (
+      <SectionHandles planePicker={planePicker} />
+    );
+  const rendered = render(element());
   act(() => {
     mocks.frame?.({ camera, size: state.size });
   });
@@ -217,7 +229,7 @@ const mountHandles = ({
       act(() => {
         mocks.renderFrame = next;
         mocks.retarget?.(next);
-        rendered.rerender(<SectionHandles planePicker={planePicker} />);
+        rendered.rerender(element());
       });
     },
     pointer: (type, { x, y, buttons = type === 'pointerup' || type === 'click' ? 0 : 1, target }) => {
@@ -360,6 +372,24 @@ describe('SectionHandles', () => {
     expect(isHoverSuppressed(harness)).toBe(false);
   });
 
+  it('should listen on the surface once under StrictMode, giving a press back once', async () => {
+    const added = vi.spyOn(EventTarget.prototype, 'addEventListener');
+    harness = mountHandles({ isStrict: true });
+    // StrictMode's second effect pass cancels the first one's stop, so one adapter runs.
+    await Promise.resolve();
+    const capturedPresses = added.mock.calls.filter(
+      ([type, , options]) => type === 'pointerdown' && typeof options === 'object' && options.capture === true,
+    );
+    expect(capturedPresses).toHaveLength(1);
+
+    harness.pointer('pointerdown', { x: 400, y: 300 });
+    harness.pointer('pointermove', { x: 400, y: 250 });
+    harness.pointer('pointerup', { x: 400, y: 250 });
+    expect(isHoverSuppressed(harness)).toBe(false);
+    expect(harness.controls.enabled).toBe(true);
+    expect(harness.toolEvents).toEqual([]);
+  });
+
   it('should keep a dragged plane within the bounds centre ± 2 × radius along its axis', () => {
     harness = mountHandles();
     harness.send({ type: 'sceneRadiusUpdated', radius: 0.01, centerMeters: [0, 0, 0.005] });
@@ -449,7 +479,7 @@ describe('SectionHandles', () => {
       ],
     };
 
-    type Exit = Readonly<{ exit: string; drag: DragPath; end: (harness: Harness) => void }>;
+    type Exit = Readonly<{ exit: string; drag: DragPath; end: (harness: Harness) => void | Promise<void> }>;
 
     it.each<Exit>([
       {
@@ -504,11 +534,13 @@ describe('SectionHandles', () => {
       {
         exit: 'an unmount',
         drag: planeDrag,
-        end: () => {
+        end: async () => {
           cleanup();
+          // The section input stops a microtask after its unmount, as every `useActorRef` actor does.
+          await Promise.resolve();
         },
       },
-    ])('should give everything back and land no later step on $exit', ({ drag, end }) => {
+    ])('should give everything back and land no later step on $exit', async ({ drag, end }) => {
       const current = mountHandles(drag.options);
       harness = current;
       const [firstStep, waitingStep, laterStep] = drag.steps;
@@ -521,7 +553,7 @@ describe('SectionHandles', () => {
       expect(current.surface.hasPointerCapture(1)).toBe(true);
       current.pointer('pointermove', waitingStep);
 
-      end(current);
+      await end(current);
       const afterExit = current.cuts();
 
       expect(current.controls.enabled).toBe(true);

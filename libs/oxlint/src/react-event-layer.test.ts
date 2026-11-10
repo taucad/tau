@@ -18,7 +18,7 @@ function summary(source: string, fileName = 'fixture.tsx'): string[] {
 }
 
 describe('countReactEventLayerSites', () => {
-  it('counts each effect that sends, subscribes or times once', () => {
+  it('should count each effect that sends, subscribes or times once', () => {
     expect(
       summary(`import { useEffect, useLayoutEffect } from 'react';
 useEffect(() => { actor.send({ type: 'a' }); actor.send({ type: 'b' }); }, [actor]);
@@ -44,7 +44,7 @@ useEffect(() => { send({ type: 'a' }); on('change', listener); }, [send]);
     ]);
   });
 
-  it('ignores effects that do none of those, and the same calls outside effects', () => {
+  it('should ignore effects that do none of those, and the same calls outside effects', () => {
     expect(
       summary(`import { useEffect } from 'react';
 useEffect(() => { document.title = name; }, [name]);
@@ -55,7 +55,7 @@ useMemo(() => actor.send({ type: 'x' }), []);
     ).toEqual([]);
   });
 
-  it('recognizes aliased, namespaced and insertion effects', () => {
+  it('should recognize aliased, namespaced and insertion effects', () => {
     expect(
       summary(`import React, { useEffect as effect, useInsertionEffect } from 'react';
 effect(() => actor.send({ type: 'a' }), []);
@@ -65,7 +65,7 @@ useInsertionEffect(() => { setTimeout(run); });
     ).toEqual(['2 effect .send', '3 effect .send', '4 effect setTimeout']);
   });
 
-  it('follows an effect callback declared as a function in the same file', () => {
+  it('should follow an effect callback declared as a function in the same file', () => {
     expect(
       summary(`import { useEffect } from 'react';
 function start() { return actor.subscribe(listener).unsubscribe; }
@@ -83,7 +83,7 @@ useEffect(idle, [idle]);
     ).toEqual(['4 effect .subscribe', '5 effect .send', '10 effect .send', '11 effect requestAnimationFrame']);
   });
 
-  it('counts getSnapshot() calls outside module-level select* helpers', () => {
+  it('should count getSnapshot() calls outside module-level select* helpers', () => {
     expect(
       summary(
         `const value = actor.getSnapshot().context.value;
@@ -109,7 +109,7 @@ function selection(actor) { return actor.getSnapshot(); }
     ]);
   });
 
-  it('resolves a named effect callback in its own scope, not the first binding in the file', () => {
+  it('should resolve a named effect callback in its own scope, not the first binding in the file', () => {
     expect(
       summary(`import { useCallback, useEffect } from 'react';
 function First() {
@@ -137,11 +137,11 @@ describe('reactEventLayerViolations', () => {
     ['app/b.tsx', [{ kind: 'effect', line: 1, column: 1, calls: ['setTimeout'] }]],
   ]);
 
-  it('passes counts at or below the ceiling', () => {
+  it('should pass counts at or below the ceiling', () => {
     expect(reactEventLayerViolations(measured, { 'app/a.tsx': 2, 'app/b.tsx': 4 }, 'm.json')).toEqual([]);
   });
 
-  it('names each site of a file over its ceiling, and treats an absent line as 0', () => {
+  it('should name each site of a file over its ceiling and treat an absent line as 0', () => {
     expect(reactEventLayerViolations(measured, { 'app/a.tsx': 1 }, 'm.json')).toEqual([
       [
         'app/a.tsx: 2 React event-layer site(s) exceeds its ceiling of 1 in m.json. Move the work into an actor.',
@@ -157,11 +157,11 @@ describe('reactEventLayerViolations', () => {
 });
 
 describe('reactEventLayerManifestProblems', () => {
-  it('accepts a sorted manifest of positive integers inside its scope', () => {
+  it('should accept a sorted manifest of positive integers inside its scope', () => {
     expect(reactEventLayerManifestProblems({ 'app/a.tsx': 1, 'app/b/c.tsx': 3 }, ['app'])).toEqual([]);
   });
 
-  it('rejects unsorted, zero, fractional and out-of-scope lines', () => {
+  it('should reject unsorted, zero, fractional and out-of-scope lines', () => {
     expect(
       reactEventLayerManifestProblems({ 'app/b.tsx': 1, 'app/a.tsx': 0, 'app/c.tsx': 1.5, 'other/d.tsx': 1 }, ['app']),
     ).toEqual([
@@ -182,7 +182,7 @@ describe('checkReactEventLayerCeiling', () => {
     }
   });
 
-  it('measures production files only and reports workspace-relative paths', () => {
+  it('should measure production files only and report workspace-relative paths', () => {
     workspace = mkdtempSync(join(tmpdir(), 'react-event-layer-'));
     writeFileSync(join(workspace, 'pnpm-workspace.yaml'), 'packages: []\n');
     const source = join(workspace, 'pkg', 'src');

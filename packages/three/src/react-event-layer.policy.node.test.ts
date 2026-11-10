@@ -7,14 +7,14 @@
  * its line with it (charter D21). The counter is `@taucad/oxlint/react-event-layer`.
  */
 
-// Test-only tooling import: kept out of the Nx graph so lint-rule churn in libs/oxlint does not mark this
-// project affected; nx.json lists the helper as a `test` and `typecheck` input instead.
+// Test-only tooling import: kept out of the Nx graph so lint-rule churn in libs/oxlint does not invalidate this
+// project's test and typecheck cache; nx.json lists the helper as a `test` and `typecheck` input instead.
 // nx-ignore-next-line
 import { checkReactEventLayerCeiling } from '@taucad/oxlint/react-event-layer';
 import { describe, expect, it } from 'vitest';
 
 describe('React event layer ceiling', () => {
-  it('holds every file at or below its committed ceiling', () => {
+  it('should hold every file at or below its committed ceiling', () => {
     const problems = checkReactEventLayerCeiling({
       manifest: new URL('react-event-layer.ceiling.json', import.meta.url),
       directories: [new URL('.', import.meta.url)],

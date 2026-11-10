@@ -73,6 +73,7 @@ const baseConfig: UserConfig = {
     'src/components/toggle-group.tsx',
     'src/components/toggle.tsx',
     'src/components/tooltip.tsx',
+    'src/components/view-stack.tsx',
     'src/hooks/use-mobile.ts',
     'src/hooks/use-platform.ts',
     'src/hooks/use-tick-animation.ts',

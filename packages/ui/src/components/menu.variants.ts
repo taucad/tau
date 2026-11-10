@@ -296,3 +296,57 @@ export const menuSwitchRowVariants = cva('justify-between', {
  * ```
  */
 export const menuSwitchRowDescriptionClass = 'text-xs font-medium text-muted-foreground/80';
+
+/**
+ * The view-stack Back row: a full-width row as tall as the list rows, its ChevronLeft and the open view's title muted.
+ *
+ * @public
+ *
+ * @example <caption>Style a Back row</caption>
+ * ```typescript
+ * import { menuViewBackClass } from '@taucad/ui/components/menu.variants';
+ *
+ * export const className = menuViewBackClass;
+ * ```
+ */
+export const menuViewBackClass = 'w-full gap-2 text-muted-foreground';
+
+/**
+ * The trailing ChevronRight of a row that opens a sub-view. A disclosure row's chevron points down instead.
+ *
+ * @public
+ *
+ * @example <caption>Style a sub-view trigger's chevron</caption>
+ * ```typescript
+ * import { menuViewTriggerChevronClass } from '@taucad/ui/components/menu.variants';
+ *
+ * export const className = menuViewTriggerChevronClass;
+ * ```
+ */
+export const menuViewTriggerChevronClass = 'ml-auto size-3.5 shrink-0 text-muted-foreground';
+
+/**
+ * The short horizontal slide a view enters with: from the right when it opens, from the left on a step back, none on
+ * the first paint. Motion is skipped when the person prefers reduced motion.
+ *
+ * @public
+ *
+ * @example <caption>Slide a sub-view in</caption>
+ * ```typescript
+ * import { menuViewEnterVariants } from '@taucad/ui/components/menu.variants';
+ *
+ * export const className = menuViewEnterVariants({ direction: 'forward' });
+ * ```
+ */
+export const menuViewEnterVariants = cva('', {
+  variants: {
+    direction: {
+      forward: 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-2',
+      back: 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2',
+      none: '',
+    },
+  },
+  defaultVariants: {
+    direction: 'none',
+  },
+});

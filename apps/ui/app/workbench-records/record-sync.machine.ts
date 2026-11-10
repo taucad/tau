@@ -40,7 +40,7 @@
 /* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 import { createAsyncLogic, matchesState, setup, types } from 'xstate';
 import type { StateValue } from 'xstate';
-import { eventSchemas } from '#lib/xstate.lib.js';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { maxReadAttempts, slowWriteMilliseconds } from '#workbench-records/record-health.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
 import { sameBytes } from '#workbench-records/record-sync-policy.js';

@@ -2808,6 +2808,7 @@ describe('authentication, initialize and prompt content', () => {
     expect(first?.indexOf('noask')).toBeLessThan(first?.indexOf('tau://agent-guidance') ?? -1);
     expect(first).toContain('tau://agent-guidance');
     expect(first).toContain('native skill loader');
+    expect(first).toContain('If the project has no model file, choose a kernel before writing one.');
     expect(first).not.toContain('tau://system-prompt');
     expect(first).not.toContain('The kernel is OpenSCAD.');
     expect(first).toContain('tau://skills');

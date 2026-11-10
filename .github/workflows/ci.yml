@@ -19,6 +19,8 @@ env:
   pnpm_config_verify_deps_before_run: warn
   # Nx remote cache, provisioned by tau-cloud `tau-ci-cache`. The server is set only when a
   # token is present (fork and Dependabot runs get none, and Nx fails on a tokenless 403).
+  # Same-repository pull request jobs granted `id-token: write` swap the read token for a session that
+  # writes only their own pull request's entries (tau-cloud CP-5b; setup-nx `nx-guard.ts`, item 5).
   NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
   NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
   TAU_API_URL: http://localhost:4000
@@ -209,6 +211,7 @@ jobs:
     # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
     environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     permissions:
+      id-token: write # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: read
       actions: read
     steps:
@@ -265,6 +268,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: 'read'
       actions: 'read'
       pull-requests: 'read'
@@ -509,6 +513,7 @@ jobs:
     if: needs.plan.outputs.formal == 'true'
     timeout-minutes: 15
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: 'read'
       actions: 'read'
       pull-requests: 'read'
@@ -557,6 +562,7 @@ jobs:
     if: needs.plan.outputs.geospec-examples == 'true'
     timeout-minutes: 30
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: 'read'
       actions: 'read'
       pull-requests: 'read'
@@ -941,6 +947,7 @@ jobs:
     # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
     environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: 'read'
       actions: 'read'
       pull-requests: 'read'

@@ -4,8 +4,8 @@ import { modelFamilySchema, providerIdSchema } from '#model-catalog/provider.sch
 
 export const modelSupportSchema = z.object({
   /*
-   * A capability, not a request option: `configuration` is spread into the
-   * LangChain constructor on the name/commit path, `support` is not. The
+   * A capability, not a request option: `configuration` is read into the
+   * provider request on the name/commit path, `support` is not. The
    * default level stays in `configuration`, where each provider's shape lives.
    */
   reasoning: z

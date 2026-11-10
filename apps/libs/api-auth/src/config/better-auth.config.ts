@@ -1,6 +1,6 @@
 import type { BetterAuthOptions, LogLevel as BetterAuthLogLevel, ModelNames } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { APIError } from 'better-auth/api';
+import { APIError, createAuthMiddleware, createEmailVerificationToken } from 'better-auth/api';
 import { apiKey } from '@better-auth/api-key';
 import { bearer, magicLink, oneTimeToken } from 'better-auth/plugins';
 import type { ConfigService } from '@nestjs/config';
@@ -19,11 +19,12 @@ import { staticAuthConfig } from '#config/auth-static.config.js';
 import { cliDeviceAuthorization } from '#config/cli-device-authorization.js';
 import { emailDomainNotAllowed, isEmailDomainAllowed } from '#email-domain-allowlist.js';
 import type { EmailService } from '@taucad/api-email';
-import type { AccountDeletionGate, AccountDeletionHook } from '#auth-extensions.js';
+import type { AccountDeletionGate, AccountDeletionHook, AuthRateLimitStore } from '#auth-extensions.js';
 import {
   buildFrontendForgotPasswordUrl,
   buildFrontendMagicLinkVerifyUrl,
   buildFrontendResetPasswordUrl,
+  buildFrontendSignInUrl,
   buildFrontendVerificationUrl,
   deviceFromRequest,
   tokenLifetimeSeconds,
@@ -75,6 +76,52 @@ const deletionRefusal = (error: unknown): unknown => {
   return new APIError('CONFLICT', body);
 };
 
+/** The `callbackURL` a sign-up request carried, read from a clone so the request itself is untouched. */
+const callbackFromRequest = async (request: Request | undefined): Promise<string> => {
+  try {
+    const body: unknown = await request?.clone().json();
+    if (typeof body === 'object' && body !== null && 'callbackURL' in body && typeof body.callbackURL === 'string') {
+      return body.callbackURL;
+    }
+  } catch {
+    // No body or not JSON: the verification link falls back to the home page.
+  }
+  return '/';
+};
+
+/**
+ * Better Auth writes addresses into its own messages ("Sign-up attempt for existing email: …"). Logs carry the
+ * domain only, as `EmailService` already does for recipients.
+ */
+export const redactEmailAddresses = (message: string): string =>
+  message.replaceAll(/[\w.+-]+@([\w-]+(?:\.[\w-]+)+)/gu, 'recipient@$1');
+
+type RateLimitStorage = NonNullable<NonNullable<BetterAuthOptions['rateLimit']>['customStorage']>;
+
+/**
+ * Better Auth's rate limits on the shared store, so both Machines count the same requests. A store error lets the
+ * request through: Redis being down already takes the Machine out of rotation, and locking every user out of
+ * sign-in on top of that would turn a degraded API into an outage.
+ */
+const sharedRateLimitStorage = (store: AuthRateLimitStore, logger: Logger): RateLimitStorage => ({
+  async consume(key, rule) {
+    try {
+      const result = await store.consume({
+        key: `auth:rl:${key}`,
+        limit: rule.max,
+        windowSeconds: rule.window,
+      });
+      return {
+        allowed: result.allowed,
+        retryAfter: result.allowed ? null : result.retryAfterSeconds,
+      };
+    } catch (error) {
+      logger.warn(`Auth rate limit store unavailable; allowing the request: ${String(error)}`);
+      return { allowed: true, retryAfter: null };
+    }
+  },
+});
+
 /**
  * Mapping between BetterAuth models and ID prefixes.
  */
@@ -116,6 +163,8 @@ type BetterAuthConfigOptions = {
    * erasing its agent evidence after it (T13).
    */
   deletionHooks?: readonly AccountDeletionHook[] | undefined;
+  /** Shared rate-limit counter; without it Better Auth counts in this process only. */
+  rateLimitStore?: AuthRateLimitStore | undefined;
 };
 
 /**
@@ -130,6 +179,22 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
   const baseURL = configService.get('AUTH_URL', { infer: true });
   const secureCookies = new URL(baseURL).protocol === 'https:';
   const allowedEmailDomains = configService.get('TAU_AUTH_ALLOWED_EMAIL_DOMAINS', { infer: true });
+  const frontendURL = configService.get('TAU_FRONTEND_URL', { infer: true });
+  const authSecret = configService.get('AUTH_SECRET', { infer: true });
+
+  const sendVerification = async (user: { readonly email: string }, generatedUrl: string, token: string) =>
+    emailService.sendVerification({
+      email: user.email,
+      url: buildFrontendVerificationUrl({ frontendURL, generatedUrl, token }),
+    });
+
+  const sendPasswordChanged = async (user: { readonly email: string }, request: Request | Headers | undefined) =>
+    emailService.sendPasswordChanged({
+      email: user.email,
+      changedAt: formatChangedAt(new Date()),
+      url: buildFrontendForgotPasswordUrl({ frontendURL }),
+      device: deviceFromRequest(request),
+    });
 
   /**
    * Runtime plugin configuration with custom options.
@@ -270,6 +335,35 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     // Override with runtime-configured plugins
     plugins: runtimePlugins,
 
+    rateLimit: {
+      ...staticAuthConfig.rateLimit,
+      ...(options.rateLimitStore
+        ? {
+            customStorage: sharedRateLimitStorage(options.rateLimitStore, logger),
+          }
+        : {}),
+    },
+
+    hooks: {
+      // A password changed from Settings gets the same notice as one changed by reset, so a hijacked session
+      // cannot change it silently. Only a successful change has a user in its answer.
+      after: createAuthMiddleware(async (context) => {
+        if (context.path !== '/change-password') {
+          return;
+        }
+        const returned: unknown = context.context.returned;
+        const user = context.context.session?.user;
+        if (!user || typeof returned !== 'object' || returned === null || !('user' in returned)) {
+          return;
+        }
+        try {
+          await sendPasswordChanged(user, context.request ?? context.headers);
+        } catch (error) {
+          logger.error(`Password-changed notice failed for ${user.id}: ${String(error)}`);
+        }
+      }),
+    },
+
     // Runtime-specific configuration
     database: drizzleAdapter(databaseService.database, {
       provider: 'pg',
@@ -278,11 +372,11 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     logger: {
       // Configured to use NestJS logger
       log(level, message, ...args: unknown[]) {
-        logger[loggerFromLogLevel[level]](message, ...args);
+        logger[loggerFromLogLevel[level]](redactEmailAddresses(message), ...args);
       },
     },
 
-    secret: configService.get('AUTH_SECRET', { infer: true }),
+    secret: authSecret,
     baseURL,
     // The same web origins CORS admits (`main.ts`), so a configured extra host such as the
     // site's netlify.app address can sign in and be named as a callback, not only TAU_FRONTEND_URL.
@@ -299,43 +393,54 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       async sendResetPassword({ user, token }, request) {
         await emailService.sendResetPassword({
           email: user.email,
-          url: buildFrontendResetPasswordUrl({
-            frontendURL: configService.get('TAU_FRONTEND_URL', { infer: true }),
-            token,
-          }),
+          url: buildFrontendResetPasswordUrl({ frontendURL, token }),
           device: deviceFromRequest(request),
         });
       },
       // Fires immediately before `revokeSessionsOnPasswordReset` drops the other sessions, so the
       // email and the revocation describe the same moment.
       async onPasswordReset({ user }, request) {
-        logger.log(`Password reset completed for ${user.email}`);
-        await emailService.sendPasswordChanged({
+        logger.log(`Password reset completed for ${user.id}`);
+        await sendPasswordChanged(user, request);
+      },
+      /*
+       * A sign-up for an address that already has an account answers like a new one, so it cannot reveal which
+       * addresses exist; the owner hears about it by email instead of nothing arriving. Unverified: a fresh
+       * verification link, the only way back in for someone whose first link was lost. Verified: a note with
+       * sign-in and reset links.
+       */
+      async onExistingUserSignUp({ user }, request) {
+        if (!user.emailVerified) {
+          const token = await createEmailVerificationToken(
+            authSecret,
+            user.email,
+            undefined,
+            tokenLifetimeSeconds.verifyEmail,
+          );
+          const callbackURL = encodeURIComponent(await callbackFromRequest(request));
+          await sendVerification(
+            user,
+            `${baseURL}/v1/auth/verify-email?token=${token}&callbackURL=${callbackURL}`,
+            token,
+          );
+          return;
+        }
+        await emailService.sendAccountExists({
           email: user.email,
-          changedAt: formatChangedAt(new Date()),
-          url: buildFrontendForgotPasswordUrl({
-            frontendURL: configService.get('TAU_FRONTEND_URL', { infer: true }),
-          }),
+          url: buildFrontendSignInUrl({ frontendURL }),
+          resetUrl: buildFrontendForgotPasswordUrl({ frontendURL }),
           device: deviceFromRequest(request),
         });
       },
     },
     emailVerification: {
-      sendOnSignUp: true,
-      sendOnSignIn: true,
-      autoSignInAfterVerification: true,
+      // Spread so the static `expiresIn` (shared with the email copy) is not dropped.
+      ...staticAuthConfig.emailVerification,
       async sendVerificationEmail({ user, url, token }) {
-        await emailService.sendVerification({
-          email: user.email,
-          url: buildFrontendVerificationUrl({
-            frontendURL: configService.get('TAU_FRONTEND_URL', { infer: true }),
-            generatedUrl: url,
-            token,
-          }),
-        });
+        await sendVerification(user, url, token);
       },
       async afterEmailVerification(user) {
-        logger.log(`User ${user.email} has been verified`);
+        logger.log(`User ${user.id} has been verified`);
       },
     },
 

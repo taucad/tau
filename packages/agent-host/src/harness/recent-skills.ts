@@ -1,7 +1,7 @@
 /**
- * Recently activated skills, folded from the chat's own event log (LangChain plane regression review R2).
+ * Recently activated skills, folded from the chat's own event log (server agent plane regression review R2).
  *
- * The LangChain plane wrote every `use_skill` activation to a store and re-injected the last eight after compaction,
+ * The server agent plane wrote every `use_skill` activation to a store and re-injected the last eight after compaction,
  * so the model kept the instructions it had loaded. The Pi host kept the injection (`createTurnContextSnapshot`) but no
  * host supplied a store. The event log already holds every activation's result, and compaction only replaces envelopes,
  * never the appended rows, so it is the store.
@@ -11,7 +11,7 @@
 import type { RecentSkill, RecentSkillsPort } from '#harness/cad-middleware.js';
 import type { AgentLogEvent, JsonObject, JsonValue } from '#log/event-types.js';
 
-/** Activations kept, newest first; the LangChain plane's bound. */
+/** Activations kept, newest first; the server agent plane's bound. */
 export const maxRecentSkills = 8;
 
 const isJsonObject = (value: JsonValue | undefined): value is JsonObject =>

@@ -32,14 +32,6 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@ai-sdk/langchain": "2.0.181",
-    "@langchain/anthropic": "catalog:",
-    "@langchain/cerebras": "catalog:",
-    "@langchain/core": "catalog:",
-    "@langchain/google-vertexai": "catalog:",
-    "@langchain/ollama": "catalog:",
-    "@langchain/openai": "catalog:",
-    "@langchain/xai": "catalog:",
     "@nestjs/common": "catalog:",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "catalog:",

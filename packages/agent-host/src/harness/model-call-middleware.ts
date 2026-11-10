@@ -9,7 +9,7 @@ export type ModelCallRequest = {
   readonly options?: SimpleStreamOptions | undefined;
 };
 
-/** Tau's portable equivalent of LangChain's `wrapModelCall`. @public */
+/** Wraps one model call before it enters the provider transport. @public */
 export type ModelCallMiddleware = (
   request: ModelCallRequest,
   next: (request: ModelCallRequest) => Promise<AssistantMessageEventStream>,

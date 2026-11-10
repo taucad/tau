@@ -14,13 +14,23 @@ import type {
   OpenAIResponsesOptions,
 } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
+import { isClearedToolResult, isCompactionSummaryRow } from '#harness/compaction.js';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
 import { fitAttachmentBudget, rewriteDocuments } from '#transport/document-payload.js';
+import { readPrefixStamp } from '#log/prefix-stamp.js';
+import type { PrefixStamp } from '#log/prefix-stamp.js';
+import { stampPrefix } from '#transport/prefix-stamp.js';
 import { createVertexResponseShim, echoThoughtSignatures } from '#transport/vertex-completions-shim.js';
 import { modelTelemetryParent, modelTelemetrySubject } from '#transport/model-telemetry.js';
 import { modelRequestObserver, observeModelStream } from '#transport/model-observation.js';
 import type { ModelTelemetrySeam } from '#transport/model-telemetry.js';
-import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock, ProviderMessage } from '#log/event-types.js';
+import type {
+  JsonObject,
+  ModelProviderKind,
+  ModelReasoningConfig,
+  ModelSystemPromptBlock,
+  ProviderMessage,
+} from '#log/event-types.js';
 import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 import { gatewayProviderKinds } from '#wire/admission.schema.js';
 import { gatewayErrorCodes } from '#wire/gateway.js';
@@ -184,6 +194,11 @@ export type GatewayModelTransportOptions = {
       }
     | undefined;
   readonly fetch?: typeof globalThis.fetch | undefined;
+  /**
+   * The composing build's release label. A prefix break under another release is one of `definitions`: the prompt or
+   * tool text a release changed. A composition that names none reports such a break as `instructions` or `tools`.
+   */
+  readonly release?: string | undefined;
   /** Optional funded-operation protocol supplied only by a managed Cloud composition. */
   readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
   /**
@@ -924,10 +939,17 @@ const replayInterruptedCalls = (messages: readonly ProviderMessage[]): readonly 
     };
   });
 
-const piContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Context => {
+/** A request's pi context, and the prefix stamp each of its messages' durable rows carries, by message index. */
+type StampedContext = { readonly context: Context; readonly stamps: ReadonlyArray<PrefixStamp | undefined> };
+
+const piContextFor = (request: ModelStreamRequest, model: PiGatewayModel): StampedContext => {
   const identities = new MessageIdentities(() => 'transport-message');
+  const stamps: Array<PrefixStamp | undefined> = [];
   const messages = replayInterruptedCalls(request.messages).flatMap((message): Context['messages'] => {
     const hydrated = providerMessageToPi(message, model as Model<Api>, identities);
+    if (hydrated) {
+      stamps.push(message.role === 'assistant' ? readPrefixStamp(message.metadata?.['prefix']) : undefined);
+    }
     if (
       hydrated?.role === 'assistant' &&
       (hydrated.provider !== model.provider || hydrated.api !== model.api || hydrated.model !== model.id)
@@ -953,7 +975,7 @@ const piContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Conte
     description: tool.description,
     parameters: tool.inputSchema as PiTool['parameters'],
   }));
-  return { systemPrompt: request.systemPrompt, messages, tools };
+  return { context: { systemPrompt: request.systemPrompt, messages, tools }, stamps };
 };
 
 /**
@@ -961,17 +983,62 @@ const piContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Conte
  *
  * @param request - The model stream request.
  * @param model - The pi model the context is built for.
- * @returns The fitted context.
+ * @returns The fitted context, its rows' stamps and how many attachments the budget omitted.
  */
-const budgetedContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Context => {
-  const fitted = fitAttachmentBudget(piContextFor(request, model), request.documents);
+const budgetedContextFor = (
+  request: ModelStreamRequest,
+  model: PiGatewayModel,
+): StampedContext & { readonly evicted: number } => {
+  const { context, stamps } = piContextFor(request, model);
+  const fitted = fitAttachmentBudget(context, request.documents);
   if (fitted.omitted > 0) {
     // Ponytail: warned per request, since the transport keeps no session state.
     console.warn(
       `Tau model gateway: ${fitted.omitted} older attachment(s) exceed this request's budget and were omitted.`,
     );
   }
-  return fitted.context;
+  return { context: fitted.context, stamps, evicted: fitted.omitted };
+};
+
+/**
+ * The reasoning level a request runs at, as the prefix stamp records it: the level is part of the prompt-cache key on
+ * every wire but Anthropic's system and tools tiers.
+ *
+ * @param reasoning - The request's reasoning configuration.
+ * @returns The effort, the thinking budget, or `none`.
+ */
+const reasoningSetting = (reasoning: ModelReasoningConfig | undefined): string =>
+  reasoning?.effort ?? (reasoning?.budgetTokens === undefined ? 'none' : `budget:${String(reasoning.budgetTokens)}`);
+
+/**
+ * Stamp a generation request's prefix (P1). A compaction call is not a step of the chat's prefix and is not stamped.
+ *
+ * @param input - The request, the pi model and context it is sent as, and the composing build's release label.
+ * @returns The stamp, with the break the request suffered, or `undefined` for a compaction call.
+ */
+const prefixStampFor = (input: {
+  readonly request: ModelStreamRequest;
+  readonly model: PiGatewayModel;
+  readonly fitted: ReturnType<typeof budgetedContextFor>;
+  readonly release: string | undefined;
+}): PrefixStamp | undefined => {
+  const { request, model, fitted } = input;
+  if (request.invocationPurpose !== 'generation') {
+    return undefined;
+  }
+  return stampPrefix({
+    model: { api: model.api, provider: model.provider, id: model.id },
+    system: [request.systemPrompt, ...(request.systemPromptBlocks ?? []).map((block) => block.text)],
+    tools: fitted.context.tools ?? [],
+    messages: fitted.context.messages,
+    stamps: fitted.stamps,
+    settings: reasoningSetting(request.reasoning),
+    release: input.release,
+    summary: request.messages.findLast((message) => isCompactionSummaryRow(message))?.id,
+    cleared: fitted.context.messages.filter((message) => message.role === 'toolResult' && isClearedToolResult(message))
+      .length,
+    evicted: fitted.evicted,
+  });
 };
 
 const metadataFor = (message: AssistantMessage): JsonObject | undefined => {
@@ -1056,10 +1123,19 @@ const streamPiEvents = async function* (options: {
   readonly signal: AbortSignal;
   /** Gemini thought signatures captured off the wire by the Vertex shim. */
   readonly thoughtSignatures: ReadonlyMap<string, string>;
+  /** The request's prefix stamp, for the reply's durable row. */
+  readonly prefix: PrefixStamp | undefined;
 }): AsyncGenerator<ModelStreamEvent> {
   const emittedSignatures = new Map<number, string>();
   let terminal = false;
+  let unsentStamp = options.prefix;
   for await (const event of options.events) {
+    /* With the codec's first event, whatever it is: the reply's row records the request's prefix even when the
+     * stream then fails, and a caller that stops reading here still closes the codec stream. */
+    if (unsentStamp !== undefined) {
+      yield { type: 'message-metadata', metadata: { prefix: unsentStamp } };
+      unsentStamp = undefined;
+    }
     if (event.type === 'text_start') {
       yield { type: 'text-start', contentIndex: event.contentIndex };
       continue;
@@ -1187,7 +1263,9 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
     }
     const model = piModelFor({ request, transport: options });
     const state: GatewayFetchState = {};
-    const context = budgetedContextFor(request, model);
+    const fitted = budgetedContextFor(request, model);
+    const { context } = fitted;
+    const prefix = prefixStampFor({ request, model, fitted, release: options.release });
     const thoughtSignatures = new Map<string, string>();
     const rewrite = rewriteDocuments(request.documents, model.api);
     const echo = request.providerKind === 'vertexai' ? echoThoughtSignatures(context) : undefined;
@@ -1345,6 +1423,7 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
     });
     yield* streamPiEvents({
       events: observer === undefined ? events : observeModelStream(events, observer),
+      prefix,
       state,
       signal: request.signal,
       thoughtSignatures,

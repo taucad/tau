@@ -35,6 +35,7 @@ export {
   agentCompactionLanes,
   agentCompactionTiers,
   agentCompactionOutcomes,
+  agentPrefixBreakCauses,
   lfsTransports,
   workerTimingSpanNames,
 } from '#ingest.js';

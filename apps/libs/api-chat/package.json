@@ -37,7 +37,6 @@
   "dependencies": {
     "@ai-sdk/openai": "catalog:",
     "@ai-sdk/provider-utils": "catalog:",
-    "@langchain/core": "catalog:",
     "@nestjs/common": "catalog:",
     "@taucad/api-auth": "workspace:*",
     "@taucad/api-core": "workspace:*",

@@ -48,7 +48,9 @@ type Ink = {
 const roles = {
   // --muted in light, --background in dark.
   canvas: { light: { lightness: 'l-surface' }, dark: { lightness: 'l-base' } },
-  surface: { light: { lightness: 'l-base' }, dark: { lightness: 'l-surface' } }, // --background / --muted
+  // --background / --muted. Light sits one step under pure white: clients that force-invert decide on pure
+  // #ffffff, so an off-white card keeps the authored dark rules in charge (email readiness R21).
+  surface: { light: { lightness: 0.997 }, dark: { lightness: 'l-surface' } },
   // --muted in light, --accent in dark.
   detail: { light: { lightness: 'l-surface' }, dark: { lightness: 0.295 } },
   foreground: { light: { lightness: 'l-deepest' }, dark: { lightness: 'l-deepest' } },

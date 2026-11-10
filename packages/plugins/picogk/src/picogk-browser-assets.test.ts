@@ -123,6 +123,86 @@ describe('PicoGK browser bundle admission', () => {
     value.single.runtimeFiles = [resource('runtime.wasm')];
     await expect(loadPicogkBrowserAssets(setup(value).options)).rejects.toThrow('bootstrap module');
   });
+  describe('digest mirror layout', () => {
+    const base = 'https://mirror.test/payloads/';
+    const mirrored = (value: unknown = manifest()) => {
+      const { fetcher, options } = setup(value);
+      return {
+        fetcher,
+        options: {
+          ...options,
+          manifest: { ...options.manifest, url: `${base}blobs/sha256/${options.manifest.sha256}` },
+        },
+      };
+    };
+
+    it('should fetch every file by its digest while runtime files keep their manifest-relative identity', async () => {
+      const value = manifest();
+      value.single.runtimeFiles.push({ ...resource('_framework/runtime.wasm'), sha256: 'd'.repeat(64) });
+      const { fetcher, options } = mirrored(value);
+      const result = await loadPicogkBrowserAssets(options);
+      const identity = `${base}blobs/sha256/`;
+      expect(result.assets.bootstrapUrl).toBe(`${identity}_framework/dotnet.js`);
+      expect(result.assets.runtimeFiles).toEqual([
+        {
+          ...resource('_framework/dotnet.js'),
+          url: `${identity}_framework/dotnet.js`,
+          source: `${base}blobs/sha256/${'a'.repeat(64)}`,
+        },
+        {
+          ...resource('_framework/runtime.wasm'),
+          sha256: 'd'.repeat(64),
+          url: `${identity}_framework/runtime.wasm`,
+          source: `${base}blobs/sha256/${'d'.repeat(64)}`,
+        },
+      ]);
+      expect(result.assets.references).toEqual([
+        { ...resource('refs/PicoGK.dll'), url: `${base}blobs/sha256/${'a'.repeat(64)}` },
+      ]);
+      expect(fetcher).toHaveBeenCalledExactlyOnceWith(options.manifest.url, {
+        signal: options.signal,
+        redirect: 'error',
+      });
+    });
+
+    it('should resolve the threaded variant on the same mirror', async () => {
+      const { options } = mirrored({ ...manifest(), multi: variant() });
+      const result = await loadPicogkBrowserAssets({ ...options, isolated: true });
+      expect(result.mode).toBe('multi');
+      expect(result.assets.runtimeFiles[0]!.source).toBe(`${base}blobs/sha256/${'a'.repeat(64)}`);
+    });
+
+    it.each([
+      ['another digest', () => `${base}blobs/sha256/${'0'.repeat(64)}`],
+      ['a query', (sha256: string) => `${base}blobs/sha256/${sha256}?v=1`],
+    ])('should refuse a mirror manifest URL naming %s before fetching', async (_name, locate) => {
+      const { fetcher, options } = mirrored();
+      await expect(
+        loadPicogkBrowserAssets({
+          ...options,
+          manifest: { ...options.manifest, url: locate(options.manifest.sha256) },
+        }),
+      ).rejects.toThrow('Invalid PicoGK browser manifest URL');
+      expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it('should refuse HTTP failure, a redirect and changed manifest bytes from the mirror', async () => {
+      const { fetcher, options } = mirrored();
+      fetcher.mockResolvedValueOnce(new Response(null, { status: 404 }));
+      await expect(loadPicogkBrowserAssets(options)).rejects.toThrow('download failed: 404');
+      fetcher.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+      await expect(loadPicogkBrowserAssets(options)).rejects.toThrow(TypeError);
+      expect(fetcher).toHaveBeenLastCalledWith(options.manifest.url, { signal: options.signal, redirect: 'error' });
+      fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ ...manifest(), protocolVersion: 9 }) + ' '));
+      await expect(loadPicogkBrowserAssets(options)).rejects.toThrow('integrity mismatch');
+    });
+
+    it('should refuse case-colliding resources from the mirror', async () => {
+      const value = manifest();
+      value.single.references.push(resource('REFS/PICOGK.DLL'));
+      await expect(loadPicogkBrowserAssets(mirrored(value).options)).rejects.toThrow('duplicate resource paths');
+    });
+  });
   it('should cancel before fetching and before returning a completed download', async () => {
     const { fetcher, options } = setup();
     const controller = new AbortController();

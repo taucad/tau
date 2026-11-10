@@ -1,4 +1,6 @@
-import { kernelRoutingCopy, kernelRoutingRules, kernelRoutingZones, resolveKernel } from '@taucad/types/constants';
+import { kernelConfigurations, kernelRoutingCopy, kernelRoutingRules, kernelRoutingZones, resolveKernel } from '@taucad/types/constants';
+import { snapshotKernelUnavailableReason } from '#schemas/metadata.schema.js';
+import type { SnapshotKernel } from '#types/message-metadata.types.js';
 import type { KernelId, KernelPreference, KernelRepresentation, KernelRouting } from '@taucad/types/constants';
 
 /*
@@ -251,3 +253,22 @@ export const groupKernelsByRepresentation = (kernels: readonly KernelId[]): Kern
       kernels: kernels.filter((id) => resolveKernel(id).representation === representation),
     }))
     .filter(({ kernels: grouped }) => grouped.length > 0);
+
+/**
+ * The snapshot's `kernel` object (D4, AKS-7) for one state: the same preference, owner and profile the per-turn text
+ * renders from, every other catalog kernel with the neutral reason, and that text. It names no plan.
+ *
+ * @param input - Preference, owner and the host's profile.
+ * @returns The object `tau://snapshot` carries.
+ * @public
+ */
+export const buildSnapshotKernel = (input: KernelGuidanceInput): SnapshotKernel => ({
+  preference: input.preference,
+  ...(input.owner === undefined ? {} : { owner: { kernel: input.owner.kernel, entryPath: input.owner.entryPath } }),
+  available: [...input.profile.available],
+  unavailable: kernelConfigurations
+    .map(({ id }) => id)
+    .filter((id) => !input.profile.available.includes(id))
+    .map((kernel) => ({ kernel, reason: snapshotKernelUnavailableReason })),
+  guidance: renderKernelGuidance(input),
+});

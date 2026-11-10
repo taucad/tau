@@ -12,9 +12,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 config({ path: path.resolve(__dirname, '.env') });
 // A cloud agent session reserves ANTHROPIC_API_KEY for its own harness, so a live Anthropic credential arrives there
 // as TAU_TEST_ANTHROPIC_API_KEY. It wins when set, so the suites never run on the harness's key.
-const testAnthropicKey = process.env['TAU_TEST_ANTHROPIC_API_KEY'];
+const testAnthropicKey = process.env.TAU_TEST_ANTHROPIC_API_KEY;
 if (testAnthropicKey) {
-  process.env['ANTHROPIC_API_KEY'] = testAnthropicKey;
+  process.env.ANTHROPIC_API_KEY = testAnthropicKey;
 }
 const setBeforeTestDefaults = new Set(Object.keys(process.env));
 config({ path: path.resolve(__dirname, '.env.test') });

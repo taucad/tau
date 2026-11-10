@@ -7177,6 +7177,28 @@ describe('ChatSessionStore — the chat resumes on its own (audit R5)', () => {
     store.release(session.chatId);
   });
 
+  it('should end a resume the host never takes, so the card does not wait on it for good', async () => {
+    const { clock, store, session } = await openOnClock('chat_r5_undispatched');
+    // Admitted, but no host connector is published, so the dispatch fails.
+    publishAdmission(session.chatId, (gesture) => {
+      admitted.push(gesture);
+      return { kind: 'continue' } as ChatRequest;
+    });
+    publishLogRows(store, session.chatId, rateLimitedRows('run_r5_undispatched'));
+
+    clock.advance(3000);
+    await vi.waitFor(() => {
+      expect(continues()).toEqual([{ kind: 'continue' }]);
+      expect(session.stateActorRef.getSnapshot().matches({ autoResume: 'idle' })).toBe(true);
+    });
+
+    clock.advance(600_000);
+    await Promise.resolve();
+    expect(continues()).toHaveLength(1);
+    expect(session.stateActorRef.getSnapshot().context.autoResume).toBeUndefined();
+    store.release(session.chatId);
+  });
+
   it('should wait anew when the resumed run fails again on its next attempt', async () => {
     const { clock, store, session } = await openOnClock('chat_r5_again');
     const admission = Promise.withResolvers<never>();

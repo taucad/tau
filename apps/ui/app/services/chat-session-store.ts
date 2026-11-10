@@ -3019,14 +3019,23 @@ export class ChatSessionStore {
       landed = false;
       /* After this emit settles, so the gesture is admitted rather than queued behind it, and its refusal is heard. */
       queueMicrotask(() => {
-        void this.requestTurn(chatId, { kind: 'continue' }).finally(() => {
-          // A refused resume leaves the failure in place: the wait ends, spent, and the card offers Resume again.
-          if (resumed === plan && !landed && live() && !this.#isAdmittingTurn(session)) {
-            resumed = undefined;
-            offered = undefined;
-            stateActorRef.send({ type: 'autoResumeWithdrawn' });
+        void (async () => {
+          try {
+            await this.requestTurn(chatId, { kind: 'continue' });
+            if (landed) {
+              await session.dispatchTask;
+            }
+          } finally {
+            // A resume refused at admission or at dispatch leaves the failure in place: the wait ends, spent, and the
+            // card offers Resume again. A resume that reached the host waits for its run to report instead.
+            const refused = !landed || stateActorRef.getSnapshot().matches({ run: 'failed' });
+            if (resumed === plan && refused && live() && !this.#isAdmittingTurn(session)) {
+              resumed = undefined;
+              offered = undefined;
+              stateActorRef.send({ type: 'autoResumeWithdrawn' });
+            }
           }
-        });
+        })();
       });
     });
     const resumeLanded = stateActorRef.on('startTurnRequest', () => {

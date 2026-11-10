@@ -1238,7 +1238,7 @@ const syncMachineDefinition = setup({
   },
 }).createMachine({
   id: 'sync',
-  version: '6',
+  version: '7',
   context: ({ input }) => ({
     projectId: input.projectId,
     branch: input.branch ?? defaultBranch,
@@ -1305,7 +1305,8 @@ const syncMachineDefinition = setup({
     quiesce: ({ context, event, value, guards }, enq) => {
       if (event.phase === 'release') {
         const session = context.pendingSession && guards.hasRemote(context);
-        if (session) {
+        /* `failed.settled` opens again on its own once quiescing ends. */
+        if (session && (typeof value === 'string' || value['failed'] === undefined)) {
           /* A session change held through the close is pulled now (audit R6). */
           enq.raise({ type: 'remoteMoved', generation: 0, refs: [] });
         }
@@ -1816,6 +1817,9 @@ const syncMachineDefinition = setup({
           pendingFlush: false,
         },
       }),
+      /* A manual remote pulls on nothing but a request: a session change remembered while busy is read now (audit R6). */
+      always: ({ context, guards }) =>
+        context.pendingSession && !context.quiescing && guards.hasRemote(context) ? { target: 'opening' } : undefined,
       on: {
         pushNow: ({ context, event }) =>
           context.online
@@ -1954,6 +1958,8 @@ const syncMachineDefinition = setup({
           context: {
             pendingMint: false,
             pendingFlush: false,
+            /* A push that starts now runs under the session in force: a refusal of it is this session's (audit R6). */
+            pendingSession: false,
             explicitPush: false,
             ahead: false,
             pushIds: [...context.pushIds, ...context.nextPushIds],
@@ -2475,14 +2481,6 @@ const syncMachineDefinition = setup({
      */
     failed: {
       entry: ({ context }, enq) => ({ context: settleEveryPush(context, enq, 'failed') }),
-      /* A refusal answered under the last session (audit R6): this session opens again, the stream watched afresh. */
-      always: ({ context, guards }, enq) => {
-        if (!context.pendingSession || context.quiescing || !guards.hasRemote(context)) {
-          return undefined;
-        }
-        enq.sendTo('remoteMoves', { type: 'unwatch' });
-        return { target: 'opening' };
-      },
       on: {
         sessionChanged: ({ context, guards }, enq) => {
           if (!guards.hasRemote(context)) {
@@ -2515,28 +2513,36 @@ const syncMachineDefinition = setup({
       initial: 'settled',
       states: {
         settled: {
-          always: ({ context }) =>
-            owesUnrecordedMint(context)
-              ? {
-                  target: 'recording',
-                  context: {
-                    pending: nextPending({
-                      pending: context.pending,
-                      outcomes: [
-                        {
-                          name: historyRefOf(context.branch),
-                          status: 'rejected',
-                          head: context.localHead,
-                          ...(context.error === undefined ? {} : { reason: context.error }),
-                        },
-                      ],
-                      leases: context.leases,
-                      remote: context.remote,
-                      now: Date.now(),
-                    }),
-                  },
-                }
-              : undefined,
+          /* After any owed entry is recorded, a refusal answered under the last
+           * session opens again under this one, the stream watched afresh (audit R6). */
+          always: ({ context, guards }, enq) => {
+            if (owesUnrecordedMint(context)) {
+              return {
+                target: 'recording',
+                context: {
+                  pending: nextPending({
+                    pending: context.pending,
+                    outcomes: [
+                      {
+                        name: historyRefOf(context.branch),
+                        status: 'rejected',
+                        head: context.localHead,
+                        ...(context.error === undefined ? {} : { reason: context.error }),
+                      },
+                    ],
+                    leases: context.leases,
+                    remote: context.remote,
+                    now: Date.now(),
+                  }),
+                },
+              };
+            }
+            if (!context.pendingSession || context.quiescing || !guards.hasRemote(context)) {
+              return undefined;
+            }
+            enq.sendTo('remoteMoves', { type: 'unwatch' });
+            return { target: '#sync.opening' };
+          },
         },
         recording: {
           invoke: {

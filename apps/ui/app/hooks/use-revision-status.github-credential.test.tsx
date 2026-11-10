@@ -606,6 +606,31 @@ describe('an identity change on the open client (audit R6)', () => {
     expect(scripted.client.close).not.toHaveBeenCalled();
   });
 
+  it('should have a remote refused just before the root took the change try the new credential', async () => {
+    githubToken.mockResolvedValue({ accessToken: 'fresh', expiresAt: expiringIn(eightHours), generation: 3 });
+    const scripted = mountBound();
+    await vi.waitFor(() => {
+      expect(scripted.client.open).toHaveBeenCalledOnce();
+    });
+    scripted.show({ ...githubRemote, phase: 'connecting' });
+    scripted.client.send.mockClear();
+    const taken = Promise.withResolvers<void>();
+    scripted.client.sessionChanged.mockReturnValueOnce(taken.promise);
+
+    setRevisionSessionUser({ id: 'user-2', name: 'Grace' });
+    await vi.waitFor(() => {
+      expect(scripted.client.sessionChanged).toHaveBeenCalledOnce();
+    });
+    expect(scripted.sent()).toStrictEqual([]);
+    /* The last credential's validation is refused after the change was sent, before the root took it. */
+    scripted.show({ ...githubRemote, phase: 'reconnectRequired' });
+    taken.resolve();
+
+    await vi.waitFor(() => {
+      expect(scripted.sent()).toStrictEqual([{ command: 'authorizeRemote' }]);
+    });
+  });
+
   it('should open only once the newest identity has its frame (D36)', async () => {
     const first = Promise.withResolvers<Token>();
     githubToken.mockReturnValueOnce(first.promise);

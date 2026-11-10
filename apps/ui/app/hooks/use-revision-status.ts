@@ -956,7 +956,8 @@ const revisionIdentityCommands = (
    */
   const announceSession = (): void => {
     /* Taken by the root before the change, so its answer follows it too. */
-    if (client().status()?.remote.phase === 'reconnectRequired') {
+    const reauthorized = client().status()?.remote.phase === 'reconnectRequired';
+    if (reauthorized) {
       client().send({ command: 'authorizeRemote' });
     }
     awaitingAnswer = true;
@@ -968,8 +969,14 @@ const revisionIdentityCommands = (
       } catch {
         /* The connection closed: `release` has already ended the wait. */
       }
-      if (asked === generation) {
-        awaitingAnswer = false;
+      if (asked !== generation) {
+        return;
+      }
+      awaitingAnswer = false;
+      /* A refusal that reached `reconnectRequired` after the change was sent,
+       * but before the root took it, was the last credential's: try the new one. */
+      if (!reauthorized && client().status()?.remote.phase === 'reconnectRequired') {
+        client().send({ command: 'authorizeRemote' });
       }
     })();
   };

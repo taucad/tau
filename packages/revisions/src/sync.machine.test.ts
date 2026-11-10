@@ -2794,6 +2794,91 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
     harness.stop();
   });
 
+  it('leaves a refusal of a push made under the new session terminal (audit R6)', async () => {
+    const harness = start();
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+    harness.actor.send({ type: 'sessionChanged' });
+    harness.actor.send({ type: 'syncNow' });
+    harness.effects.settle('fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'ahead' } satisfies SyncFetchActorOutput,
+    });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.effects.settle('push', {
+      error: Object.assign(new Error('Forbidden.'), { code: 'REMOTE_FORBIDDEN' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    harness.clock.advance(60_000);
+    await Promise.resolve();
+
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches);
+    harness.stop();
+  });
+
+  it('reads a manual remote again after a session change it was busy for (audit R6)', async () => {
+    const h = start({ automaticPush: false, remote: 'github' });
+    try {
+      await vi.waitFor(() => {
+        expect(h.effects.running('fetch')).toBe(1);
+      });
+      h.actor.send({ type: 'sessionChanged' });
+      h.effects.settle('fetch', { output: { integration: 'upToDate', leases: {}, ahead: false } });
+
+      await vi.waitFor(() => {
+        expect(h.effects.inputsFor('fetch')).toHaveLength(2);
+      });
+      await settleWhenRunning(h.effects, 'fetch', { output: { integration: 'upToDate', leases: {}, ahead: false } });
+      await vi.waitFor(() => {
+        expect(h.actor.getSnapshot().matches('manual')).toBe(true);
+      });
+      expect(h.actor.getSnapshot().context.pendingSession).toBe(false);
+    } finally {
+      h.stop();
+    }
+  });
+
+  it('pulls once when a held session change is released in failed (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      error: Object.assign(new Error('Forbidden.'), { code: 'REMOTE_FORBIDDEN' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.actor.send({ type: 'quiesce', phase: 'hold' });
+    harness.actor.send({ type: 'sessionChanged' });
+    harness.actor.send({ type: 'quiesce', phase: 'release' });
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+    });
+    /* The pull it opens pushes the refused work again; the held pull is not made a second time. */
+    await settleWhenRunning(harness.effects, 'push', { output: pushResult() });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
+    expect(harness.effects.running('fetch')).toBe(0);
+    harness.stop();
+  });
+
   it('holds a session change through quiescing and pulls on release (audit R6)', async () => {
     const harness = start();
     await openCleanly(harness);

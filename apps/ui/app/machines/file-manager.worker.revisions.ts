@@ -1645,6 +1645,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         case 'sessionChanged': {
           actor.send({ type: 'remote', event: { type: 'sessionChanged' } });
           actor.send({ type: 'sync', event: { type: 'sessionChanged' } });
+          /* A large-object fill refused under the last session tries again under this one; a healthy fill ignores it. */
+          largeObjects.get(selectRevisionStatus(actor.getSnapshot()).checkoutId ?? '')?.retry();
           return;
         }
         case 'retryLargeObjects': {

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- circuit JSON field names are snake_case. */
 import { Document } from '@gltf-transform/core';
+import type { ExtensionProperty } from '@gltf-transform/core';
 import { describe, expect, it } from 'vitest';
 
 import { buildPresentationBoard } from '#board-geometry.js';
@@ -133,6 +134,22 @@ describe('buildPresentationBoard', () => {
     const finish = factor(blue, 'pcb-finish')!;
     // HASL is tin: a neutral grey, not ENIG gold.
     expect(Math.abs(finish[0] - finish[2])).toBeLessThan(0.1);
+  });
+
+  it('should author every solder mask as matte, with no clearcoat and reduced specular', async () => {
+    const document = new Document();
+    await buildPresentationBoard(document, circuitJson);
+    const materials = document.getRoot().listMaterials();
+
+    for (const name of ['pcb-mask-top', 'pcb-mask-bottom', 'pcb-mask-copper-top', 'pcb-mask-copper-bottom']) {
+      const material = materials.find((candidate) => candidate.getName() === name)!;
+      expect(material.getRoughnessFactor(), name).toBe(0.6);
+      expect(material.getExtension('KHR_materials_clearcoat'), name).toBeNull();
+      const specular = material.getExtension<ExtensionProperty & { getSpecularFactor: () => number }>(
+        'KHR_materials_specular',
+      );
+      expect(specular?.getSpecularFactor(), name).toBe(0.5);
+    }
   });
 
   it('drills the board through: the mounting hole removes core area', async () => {

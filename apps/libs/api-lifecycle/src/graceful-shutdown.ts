@@ -10,10 +10,15 @@ export type ShutdownPhases = {
   readonly cut: number;
   /** Tracked work still pending is abandoned and modules close. */
   readonly abandon: number;
+  /**
+   * Milliseconds after a repeated stop signal at which tracked work is
+   * abandoned; requests and upgraded sockets are cut at the repeat itself.
+   */
+  readonly lastCall: number;
 };
 
 /**
- * Fly allows 120 s (`kill_timeout` in `fly.*.toml`) from SIGTERM to SIGKILL,
+ * Fly allows 120 s (`kill_timeout` in `fly.*.toml`) before it kills a Machine,
  * sized so a model step still streaming at a deploy usually finishes rather
  * than being cut. Requests get until 105 s; work they leave behind (and
  * whatever the cut itself starts, such as a cut model step's settlement) until
@@ -21,8 +26,15 @@ export type ShutdownPhases = {
  * remains with 3 s to spare. Every phase ends as soon as its work is done, so
  * the window costs a deploy time only while a request is still running.
  * `kill_timeout` and these phases change together.
+ *
+ * During a rolling deploy Fly starts that clock when it updates the Machine,
+ * and the first SIGTERM arrives 29 to 48 s later (staging, 2026-11-05 to
+ * 2026-11-10). When the clock runs out Fly sends SIGTERM again and kills the
+ * VM about 5 s after, so the phases above are only a backstop: the repeated
+ * signal is the real deadline, and {@link closeGracefullyOnSignal} cuts at it
+ * and gives the cut's settlement `lastCall` before modules close.
  */
-export const shutdownPhases: ShutdownPhases = { cut: 105_000, abandon: 112_000 };
+export const shutdownPhases: ShutdownPhases = { cut: 105_000, abandon: 112_000, lastCall: 2500 };
 
 /**
  * Fastify options the drain depends on. A request that reaches a closing
@@ -53,12 +65,15 @@ const logger = new Logger('Shutdown');
  *
  * @param app - The started API application.
  * @param phases - When each phase gives up, in milliseconds after the call.
- * @param signal - The stop signal that started the stop, for the log line.
+ * @param options - How the stop started and how it can be hurried.
+ * @param options.signal - The stop signal that started the stop, for the log line.
+ * @param options.hurry - Aborts when the stop must end now: what is still open
+ *   is cut at once and tracked work gets `phases.lastCall`.
  */
 export async function closeGracefully(
   app: NestFastifyApplication,
   phases: ShutdownPhases = shutdownPhases,
-  signal?: NodeJS.Signals,
+  { signal, hurry }: { readonly signal?: NodeJS.Signals; readonly hurry?: AbortSignal } = {},
 ): Promise<void> {
   const started = Date.now();
   const shutdown = app.get(ShutdownService);
@@ -76,9 +91,23 @@ export async function closeGracefully(
   const cutReached = new Promise<'cut'>((resolve) => {
     cutTimer = setTimeout(resolve, phases.cut, 'cut');
   });
-  const outcome = await Promise.race([closed, cutReached]);
+  let onHurry: (() => void) | undefined;
+  const hurried = new Promise<'cut'>((resolve) => {
+    onHurry = () => {
+      resolve('cut');
+    };
+    if (hurry?.aborted) {
+      onHurry();
+    } else {
+      hurry?.addEventListener('abort', onHurry, { once: true });
+    }
+  });
+  const outcome = await Promise.race([closed, cutReached, hurried]);
   clearInterval(idleSweep);
   clearTimeout(cutTimer);
+  if (onHurry) {
+    hurry?.removeEventListener('abort', onHurry);
+  }
   let upgradedSocketsCut = 0;
   if (outcome === 'cut') {
     fastify.server.closeAllConnections();
@@ -87,7 +116,10 @@ export async function closeGracefully(
   }
   const drainedIn = Date.now() - started;
 
-  const workAbandoned = await shutdown.settled(started + phases.abandon);
+  const workAbandoned = await shutdown.settled(
+    started + phases.abandon,
+    hurry ? { signal: hurry, within: phases.lastCall } : undefined,
+  );
   const summary = { drainedIn, cut: outcome === 'cut', upgradedSocketsCut, workAbandoned };
   if (summary.cut || workAbandoned > 0) {
     logger.warn(summary, 'Shutdown drained with cuts; closing modules');
@@ -105,9 +137,11 @@ export async function closeGracefully(
  * the way it would have without a handler.
  *
  * Both listeners stay installed for the whole drain, so a repeated SIGTERM or
- * SIGINT is logged and ignored rather than killing the process by Node's
- * default disposition: Fly init has sent a second SIGTERM 72 s into a drain,
- * well inside `kill_timeout`. Only SIGKILL ends a stop early. Once
+ * SIGINT never kills the process by Node's default disposition. A repeat is
+ * Fly's last call: its `kill_timeout` clock started at the Machine update, not
+ * at the first signal, and the VM dies about 5 s later. So the repeat cuts
+ * what is still open at once, gives the cut's settlement `phases.lastCall`
+ * and closes the modules (see {@link shutdownPhases}). Once
  * `app.close()` returns the listeners are removed and the first signal is
  * re-raised once. The re-raise ends the process only while no other listener
  * for that signal exists; the signal-path test fails the day one is added.
@@ -117,19 +151,23 @@ export async function closeGracefully(
  */
 export function closeGracefullyOnSignal(app: NestFastifyApplication, phases: ShutdownPhases = shutdownPhases): void {
   const signals = ['SIGTERM', 'SIGINT'] as const;
-  let stopping: { readonly signal: NodeJS.Signals; readonly at: number } | undefined;
+  let stopping: { readonly signal: NodeJS.Signals; readonly at: number; readonly hurry: AbortController } | undefined;
   const onSignal = async (signal: NodeJS.Signals): Promise<void> => {
     if (stopping) {
-      logger.warn(
-        { signal, firstSignal: stopping.signal, sinceFirst: Date.now() - stopping.at },
-        'Shutdown signal repeated during the drain; ignored',
-      );
+      if (!stopping.hurry.signal.aborted) {
+        logger.warn(
+          { signal, firstSignal: stopping.signal, sinceFirst: Date.now() - stopping.at, lastCall: phases.lastCall },
+          'Shutdown signal repeated during the drain; cutting now',
+        );
+        stopping.hurry.abort();
+      }
+
       return;
     }
 
-    stopping = { signal, at: Date.now() };
+    stopping = { signal, at: Date.now(), hurry: new AbortController() };
     try {
-      await closeGracefully(app, phases, signal);
+      await closeGracefully(app, phases, { signal, hurry: stopping.hurry.signal });
     } catch (error) {
       logger.error(error, 'Graceful shutdown failed');
     } finally {

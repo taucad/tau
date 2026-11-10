@@ -5,6 +5,7 @@ import { flushSync } from 'react-dom';
 import type { ActorRefFrom } from 'xstate';
 import type { RefCallback } from 'react';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
+import type { RendererInstance } from '#graphics/three/renderer.js';
 import { RenderFpsOverlay } from '#graphics/three/render-fps-overlay.jsx';
 import { renderLoopObservers } from '#graphics/three/render-loop-observer.js';
 import { ActorBridge } from '#graphics/three/actor-bridge.jsx';
@@ -262,7 +263,12 @@ export function ThreeCanvasInstance({
       rootRef.current = held;
       installTauPointerRays(state);
       const created = canvasHostCreated(held);
-      viewerRendererCreated(created.backend);
+      // R3F types its renderer as WebGL even when the factory supplies WebGPU.
+      const renderer = state.gl as RendererInstance;
+      viewerRendererCreated(created.backend, () => ({
+        geometries: renderer.info.memory.geometries,
+        textures: renderer.info.memory.textures,
+      }));
       sendToCanvas(created);
     },
     [glProperty, sendToCanvas],

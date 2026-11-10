@@ -228,6 +228,17 @@ describe('runtime.late, runtime.viewer and telemetry.delivery', () => {
     ).toBeDefined();
   });
 
+  it('should admit a runtime.kill entry and refuse free text in it', () => {
+    const kill = {
+      name: RuntimeEntryName.KILL,
+      duration: 0,
+      detail: { kernel: 'replicad', phase: 'mesh', classification: 'foreground', route: 'browser', release },
+    };
+    expect(parseRuntimeEntry(kill)).toMatchObject({ detail: { phase: 'mesh' } });
+    expect(parseRuntimeEntry({ ...kill, detail: { ...kill.detail, path: '/s/github-gist~x' } })).toBeUndefined();
+    expect(parseRuntimeEntry({ ...kill, duration: 5 })).toBeUndefined();
+  });
+
   it('should answer undefined for an unknown entry name', () => {
     expect(parseRuntimeEntry({ name: 'runtime.unknown' })).toBeUndefined();
     expect(runtimeEntryEnvelopeSchema.safeParse({ name: 'observability.createGeometry' }).success).toBe(false);

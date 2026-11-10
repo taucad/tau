@@ -977,17 +977,20 @@ export const TauMetrics = {
   /**
    * Requests that did not reproduce the previous request's prompt prefix (provider reasoning replay contract, P1),
    * folded from the break each reply's row records. Read it against `tau.agent.turns`: a counter has no series until
-   * it first fires, so a missing series is not a zero.
+   * it first fires, so a missing series is not a zero. `tau.prompt_cache.outcome` is what the break cost: the cache
+   * share of the breaking request, by the gateway's rule, from the usage its reply reported to the client;
+   * `unreported` when the client sent none.
    */
   agentPrefixBreaks: defineCounter({
     name: 'tau.agent.prefix_breaks',
     unit: '{break}',
     description:
-      'Requests that did not reproduce the previous request prefix, by cause and provider (reported by client)',
+      'Requests that did not reproduce the previous request prefix, by cause, provider and prompt-cache outcome (reported by client)',
     attributes: z.object({
       'agent.id': z.string(),
       'prefix_break.cause': z.enum(agentPrefixBreakCauses),
       'gen_ai.provider.name': z.enum(llmGatewayProviders),
+      'tau.prompt_cache.outcome': z.enum(promptCacheOutcomes),
     }),
   }),
 

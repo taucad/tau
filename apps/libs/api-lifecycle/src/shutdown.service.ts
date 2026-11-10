@@ -57,12 +57,28 @@ export class ShutdownService {
    * waiting, or until `deadline`.
    *
    * @param deadline - Epoch milliseconds to give up at.
+   * @param hurry - Brings the deadline forward to `within` milliseconds after it aborts, if that is sooner.
    * @returns How many tracked promises were still pending at the deadline.
    */
-  public async settled(deadline: number): Promise<number> {
+  public async settled(
+    deadline: number,
+    hurry?: { readonly signal: AbortSignal; readonly within: number },
+  ): Promise<number> {
     let deadlineTimer: NodeJS.Timeout | undefined;
+    let hurryTimer: NodeJS.Timeout | undefined;
+    let onHurry: (() => void) | undefined;
     const expired = new Promise<'expired'>((resolve) => {
       deadlineTimer = setTimeout(resolve, Math.max(0, deadline - Date.now()), 'expired');
+      if (hurry) {
+        onHurry = () => {
+          hurryTimer = setTimeout(resolve, Math.max(0, Math.min(hurry.within, deadline - Date.now())), 'expired');
+        };
+        if (hurry.signal.aborted) {
+          onHurry();
+        } else {
+          hurry.signal.addEventListener('abort', onHurry, { once: true });
+        }
+      }
     });
     try {
       while (this.#work.size > 0) {
@@ -73,6 +89,10 @@ export class ShutdownService {
       }
     } finally {
       clearTimeout(deadlineTimer);
+      clearTimeout(hurryTimer);
+      if (hurry && onHurry) {
+        hurry.signal.removeEventListener('abort', onHurry);
+      }
     }
     return this.#work.size;
   }

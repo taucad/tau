@@ -29,6 +29,7 @@ import {
   expectVisible,
   fileTreeItemOf,
   openViewerIssues,
+  pressModelTreeShortcut,
   renderCycleCount,
   selectChatModel,
   selectKernel,
@@ -362,7 +363,7 @@ const validateStep = (path: string): readonly number[] => {
 };
 
 const openFirstProjectCardPreview = async (page: Page): Promise<Locator> => {
-  await page.getByRole('link', { name: 'All projects', exact: true }).click();
+  await page.getByRole('link', { name: 'Projects', exact: true }).click();
   await page.waitForURL((url) => url.pathname === '/projects', { timeout: 60_000 });
   await expectVisible(page.getByPlaceholder('Search projects…'), 60_000);
   const card = page
@@ -487,8 +488,8 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     await expectRenderCycleSince(page, beforeParameter);
     await expectGeometryFramed(page);
 
-    await page.keyboard.press('Control+a');
-    await expectVisible(page.getByText('Model', { exact: true }), 30_000);
+    await pressModelTreeShortcut(page);
+    await expectVisible(page.getByText('Model tree', { exact: true }), 30_000);
     await expectVisible(page.getByRole('button', { name: 'Left', exact: true }), 60_000);
     await expectVisible(page.getByRole('button', { name: 'Right', exact: true }), 60_000);
 
@@ -681,7 +682,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     await radius.press('Tab');
     await expectRenderCycleSince(page, beforeParameter);
 
-    await page.keyboard.press('Control+a');
+    await pressModelTreeShortcut(page);
     const body = page.locator('[data-model-component-row]').getByRole('button', { name: 'Shape 1', exact: true });
     const sphere = page.locator('[data-model-component-row]').getByRole('button', { name: 'Shape 2', exact: true });
     await expectVisible(body, 60_000);

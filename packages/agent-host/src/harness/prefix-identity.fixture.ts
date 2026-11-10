@@ -152,9 +152,32 @@ export type ScriptedReply = Readonly<{ inputTokens?: number | undefined }> &
  *
  * @param reply - The reply to script.
  * @param index - A per-stream counter, so ids differ between steps.
+ * @param signature - When given, the reply thinks first: a signed thinking block the next request has to replay.
  * @returns The event-stream body.
  */
-export const anthropicReply = (reply: ScriptedReply, index: number): string => {
+export const anthropicReply = (reply: ScriptedReply, index: number, signature?: string): string => {
+  const frame = (event: string, data: unknown): string => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  /* The reply's own block follows the thinking block when there is one. */
+  const at = signature === undefined ? 0 : 1;
+  const thinking =
+    signature === undefined
+      ? ''
+      : frame('content_block_start', {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'thinking', thinking: '', signature: '' },
+        }) +
+        frame('content_block_delta', {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'thinking_delta', thinking: `reasoning ${signature}` },
+        }) +
+        frame('content_block_delta', {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'signature_delta', signature },
+        }) +
+        frame('content_block_stop', { type: 'content_block_stop', index: 0 });
   const head = `event: message_start\ndata: ${JSON.stringify({
     type: 'message_start',
     message: {
@@ -175,54 +198,69 @@ export const anthropicReply = (reply: ScriptedReply, index: number): string => {
   })}\n\n`;
   const body =
     'tool' in reply
-      ? `event: content_block_start\ndata: ${JSON.stringify({
+      ? frame('content_block_start', {
           type: 'content_block_start',
-          index: 0,
+          index: at,
           content_block: { type: 'tool_use', id: `call-${String(index)}`, name: reply.tool, input: {} },
-        })}\n\n` +
-        `event: content_block_delta\ndata: ${JSON.stringify({
+        }) +
+        frame('content_block_delta', {
           type: 'content_block_delta',
-          index: 0,
+          index: at,
           delta: { type: 'input_json_delta', partial_json: JSON.stringify(reply.input) },
-        })}\n\n` +
-        'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n' +
+        }) +
+        frame('content_block_stop', { type: 'content_block_stop', index: at }) +
         'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":4}}\n\n'
-      : 'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n' +
-        `event: content_block_delta\ndata: ${JSON.stringify({
+      : frame('content_block_start', {
+          type: 'content_block_start',
+          index: at,
+          content_block: { type: 'text', text: '' },
+        }) +
+        frame('content_block_delta', {
           type: 'content_block_delta',
-          index: 0,
+          index: at,
           delta: { type: 'text_delta', text: reply.text },
-        })}\n\n` +
-        'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n' +
+        }) +
+        frame('content_block_stop', { type: 'content_block_stop', index: at }) +
         'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":2}}\n\n';
-  return `${head}${body}event: message_stop\ndata: {"type":"message_stop"}\n\n`;
+  return `${head}${thinking}${body}event: message_stop\ndata: {"type":"message_stop"}\n\n`;
 };
 
 /** One captured request body. */
 export type CapturedBody = Readonly<Record<string, unknown>>;
+
+/** One request of a chat, and the signature of the thinking block its reply minted. */
+export type SentRequest = Readonly<{ body: CapturedBody; minted: string }>;
 
 /**
  * A `fetch` that records every request body and answers each with the next scripted reply.
  *
  * @param replies - The replies, consumed in order; a request past the end fails the stream.
  * @param captured - Receives each parsed request body.
+ * @param chat - When given, every reply thinks first under a signature unique in the chat, and each request is
+ * recorded here with the signature its reply minted, for {@link bindingViolations}.
  * @returns The fetch.
  */
 export const recordingFetch = (
   replies: readonly ScriptedReply[],
   captured: CapturedBody[],
+  chat?: SentRequest[],
 ): typeof globalThis.fetch => {
   const queue = [...replies];
   let index = 0;
   return (async (_input: unknown, init?: RequestInit) => {
     const raw = typeof init?.body === 'string' ? init.body : '';
-    captured.push(JSON.parse(raw) as CapturedBody);
+    const body = JSON.parse(raw) as CapturedBody;
+    captured.push(body);
     const reply = queue.shift();
     if (reply === undefined) {
       throw new Error('scripted replies exhausted');
     }
     index += 1;
-    return new Response(anthropicReply(reply, index), {
+    const signature = chat === undefined ? undefined : `sig-${String(chat.length + 1)}`;
+    if (signature !== undefined) {
+      chat?.push({ body, minted: signature });
+    }
+    return new Response(anthropicReply(reply, index, signature), {
       status: 200,
       headers: { 'content-type': 'text/event-stream' },
     });
@@ -268,3 +306,112 @@ export const stepBoundaries = (bodies: readonly CapturedBody[]): BoundaryVerdict
   const canon = bodies.map((body) => canonicalize(body));
   return canon.slice(1).map((next, index) => classifyBoundary(canon[index]!, next));
 };
+
+type WireBlock = Readonly<Record<string, unknown>>;
+const blocksOf = (message: WireBlock): WireBlock[] =>
+  (Array.isArray(message['content'])
+    ? message['content']
+    : [{ type: 'text', text: message['content'] }]) as WireBlock[];
+const isThinking = (block: WireBlock): boolean => block['type'] === 'thinking' || block['type'] === 'redacted_thinking';
+const messagesOf = (body: CapturedBody): WireBlock[] => (body['messages'] ?? []) as WireBlock[];
+
+/**
+ * What a provider binds a reasoning block to: the tools by name, the system text and the messages before it, with
+ * reasoning itself left out.
+ *
+ * @param body - A request body.
+ * @param messageCount - How many messages the prefix holds; all of them when absent.
+ * @param blockCount - How many blocks of the last of those messages it holds; all of them when absent.
+ * @returns The bound prefix, serialised.
+ */
+const boundPrefix = (body: CapturedBody, messageCount?: number, blockCount?: number): string => {
+  const messages = messagesOf(body).slice(0, messageCount);
+  const rendered = messages.map((message, index) => ({
+    role: message['role'],
+    content: blocksOf(message)
+      .slice(0, messageCount !== undefined && index === messages.length - 1 ? blockCount : undefined)
+      .filter((block) => !isThinking(block)),
+  }));
+  const tools = ((body['tools'] ?? []) as WireBlock[]).toSorted((left, right) =>
+    String(left['name']).localeCompare(String(right['name'])),
+  );
+  const system = Array.isArray(body['system'])
+    ? (body['system'] as WireBlock[]).map((block) => block['text']).join('\u0000')
+    : body['system'];
+  return JSON.stringify(withoutCacheMarkers({ tools, system, rendered }));
+};
+
+/** The thinking blocks a request replays, by signature. */
+export const replayedSignatures = (body: CapturedBody): string[] =>
+  messagesOf(body).flatMap((message) =>
+    blocksOf(message)
+      .filter((block) => isThinking(block))
+      .map((block) => String(block['signature'])),
+  );
+
+/**
+ * The reasoning binding oracle (P2): the hermetic twin of Anthropic's `prefix_mismatch_behavior: "error"`. A replayed
+ * thinking block must follow exactly the tools, system text and messages the request that minted it sent, and the
+ * same thinking blocks.
+ *
+ * @param sent - Every request of one chat in send order, from {@link recordingFetch}.
+ * @returns One line per replayed block whose prefix is not the one it was minted under.
+ */
+export const bindingViolations = (sent: readonly SentRequest[]): string[] =>
+  sent.flatMap((request, index) =>
+    messagesOf(request.body).flatMap((message, messageIndex) =>
+      blocksOf(message).flatMap((block, blockIndex) => {
+        if (!isThinking(block)) {
+          return [];
+        }
+        const at = `request ${String(index + 1)}: messages.${String(messageIndex)}.content.${String(blockIndex)}`;
+        const origin = sent.find((candidate) => candidate.minted === block['signature']);
+        if (origin === undefined) {
+          return [`${at} has an unknown signature`];
+        }
+        /* Everything before the block: the earlier messages, then the blocks before it in its own message. */
+        const minted = JSON.parse(boundPrefix(origin.body)) as { tools: unknown; system: unknown; rendered: unknown[] };
+        const expected = JSON.stringify({
+          ...minted,
+          rendered: [...minted.rendered, { role: 'assistant', content: [] }],
+        });
+        /* A block is linked to the reasoning before it too: the same blocks must precede it as when it was minted. */
+        const earlier = replayedSignatures({ messages: messagesOf(request.body).slice(0, messageIndex) });
+        return boundPrefix(request.body, messageIndex + 1, blockIndex) === expected &&
+          JSON.stringify(earlier) === JSON.stringify(replayedSignatures(origin.body))
+          ? []
+          : [`${at} (${String(block['signature'])}) is replayed after an edited prefix`];
+      }),
+    ),
+  );
+
+/** The request parameters a provider's prompt cache keys on besides the prefix. */
+const cacheParameters = (body: CapturedBody): string =>
+  JSON.stringify({ model: body['model'], thinking: body['thinking'], output_config: body['output_config'] });
+
+/**
+ * The prefix contract (P1): a request reproduces the previous one's prefix and cache parameters exactly when its reply
+ * records no typed break, and a break is recorded only when one of them changed.
+ *
+ * @param sent - Every request of one chat in send order.
+ * @param breaks - The typed break each request's reply recorded, by request; `undefined` where none.
+ * @returns One line per request whose recorded break disagrees with what it sent.
+ */
+export const prefixContractViolations = (
+  sent: readonly SentRequest[],
+  breaks: ReadonlyArray<string | undefined>,
+): string[] =>
+  sent.slice(1).flatMap((next, index) => {
+    const previous = sent[index]!;
+    const verdict = classifyBoundary(canonicalize(previous.body), canonicalize(next.body));
+    const changed = !verdict.identicalThroughHistory || cacheParameters(previous.body) !== cacheParameters(next.body);
+    const recorded = breaks[index + 1];
+    if (changed === (recorded !== undefined)) {
+      return [];
+    }
+    return [
+      changed
+        ? `request ${String(index + 2)}: the prefix or its cache parameters changed (${verdict.divergence?.label ?? 'parameters'}) with no typed break`
+        : `request ${String(index + 2)}: a ${String(recorded)} break is recorded and nothing changed`,
+    ];
+  });

@@ -34,4 +34,11 @@ describe('ChatMessageText', () => {
     view.rerender(<ChatMessageText part={part('streaming')} isMessageActive={false} />);
     expect(screen.getByTestId('markdown')).toHaveAttribute('data-streaming-fade', 'false');
   });
+
+  it('should hand the renderer dollar-delimited math for a reply stored with LaTeX delimiters', () => {
+    const stored: TextUIPart = { type: 'text', text: 'So \\(x^2\\) and `\\(code\\)`', state: 'done' };
+    render(<ChatMessageText part={stored} isMessageActive={false} />);
+
+    expect(screen.getByTestId('markdown')).toHaveTextContent('So $x^2$ and `\\(code\\)`');
+  });
 });

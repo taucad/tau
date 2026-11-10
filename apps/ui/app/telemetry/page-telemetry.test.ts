@@ -252,6 +252,22 @@ describe('createPageTelemetry', () => {
     expect(page.context()).toMatchObject({ route: 'desktop', platform: 'electron' });
   });
 
+  it('should tell consent listeners each resolved change, and stop after unsubscribe', () => {
+    const { page, setDevice } = harness();
+    const heard: string[] = [];
+    const stop = page.onConsentChange((consent) => heard.push(consent));
+
+    page.setIdentity({ kind: 'signed-out' });
+    page.onConsentInputsChanged({ updatePending: false });
+    setDevice('off');
+    page.onConsentInputsChanged({ updatePending: false });
+    stop();
+    setDevice('on');
+    page.onConsentInputsChanged({ updatePending: false });
+
+    expect(heard).toEqual(['granted', 'denied']);
+  });
+
   it('should deny on GPC and on a declined analytics decision', () => {
     const gpc = harness({ globalPrivacyControl: () => true });
     gpc.page.setIdentity({ kind: 'signed-out' });
@@ -345,6 +361,28 @@ describe('createPageTelemetry', () => {
     expect(viewer.map((entry) => entry.detail)).toEqual([
       expect.objectContaining({ event: 'first-frame', backend: 'webgpu', triangles: 5000, route: 'browser' }),
       expect.objectContaining({ event: 'download', backend: 'webgl', format: 'glb' }),
+    ]);
+  });
+
+  it('should count a detected tab kill by kernel and phase, with nothing else about the model', async () => {
+    const { page, posts } = harness();
+    page.setIdentity({ kind: 'signed-out' });
+    page.recordKill({ kernel: 'replicad', phase: 'gpu-upload', classification: 'foreground' });
+    await vi.advanceTimersByTimeAsync(reporterBounds.interval);
+
+    const kills = posts()
+      .flatMap((post) => post.entries)
+      .filter((entry) => entry.name === 'runtime.kill');
+    expect(kills.map((entry) => entry.detail)).toEqual([
+      {
+        kernel: 'replicad',
+        phase: 'gpu-upload',
+        classification: 'foreground',
+        route: 'browser',
+        release: 'abcdef012345',
+        device: 'standard',
+        platform: 'chromium',
+      },
     ]);
   });
 

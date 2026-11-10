@@ -52,6 +52,36 @@ export const infiniteGridOpacity = 0.3;
 export const infiniteGridOpacityHighContrast = 0.7;
 
 /**
+ * Infinite grid line widths in framebuffer pixels, minor then major. Shared by the WebGL and WebGPU grid
+ * materials and the SVG viewer's grid, so every viewer draws the same lines.
+ */
+export const infiniteGridSmallThickness = 1.25;
+export const infiniteGridLargeThickness = 2;
+
+/**
+ * The grid tint and line opacity for a theme: the single source for the 3D grid and the SVG viewer's grid.
+ *
+ * @param theme - The colour scheme and whether high contrast is on.
+ * @returns The sRGB hex tint and the line opacity.
+ */
+export const resolveInfiniteGridTint = ({
+  colorScheme,
+  isHighContrast,
+}: {
+  readonly colorScheme: 'light' | 'dark';
+  readonly isHighContrast: boolean;
+}): { readonly color: number; readonly opacity: number } =>
+  isHighContrast
+    ? {
+        color: colorScheme === 'light' ? infiniteGridColorHighContrastLightMode : infiniteGridColorHighContrastDarkMode,
+        opacity: infiniteGridOpacityHighContrast,
+      }
+    : {
+        color: colorScheme === 'light' ? infiniteGridColorLightMode : infiniteGridColorDarkMode,
+        opacity: infiniteGridOpacity,
+      };
+
+/**
  * GLTF characteristic-edge tint, **light theme**. sRGB hex.
  *
  * Black matches the runtime edge middleware default and reads clearly over

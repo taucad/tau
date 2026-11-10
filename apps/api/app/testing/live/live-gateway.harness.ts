@@ -7,7 +7,12 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { Auth } from 'better-auth';
-import { createAgentSession, createGatewayModelTransport, requestedMaxTokens } from '@taucad/agent-host';
+import {
+  chatStateMessage,
+  createAgentSession,
+  createGatewayModelTransport,
+  requestedMaxTokens,
+} from '@taucad/agent-host';
 import type {
   AgentSession,
   AgentSessionModel,
@@ -23,7 +28,9 @@ import { createChatToolRegistry } from '@taucad/agent-tools/registry';
 import type { ChatToolRegistryOptions } from '@taucad/agent-tools/registry';
 import { toolName } from '@taucad/chat/constants';
 import type { ChatMode } from '@taucad/chat/constants';
-import { getCadSystemPrompt } from '@taucad/chat/prompts';
+import { getCadSystemPrompt, getChatStateNote } from '@taucad/chat/prompts';
+import { getProviderFacingToolGrant } from '@taucad/chat/schemas';
+import type { ToolSelection } from '@taucad/chat';
 import type { KernelId } from '@taucad/types/constants';
 import { authInstanceKey } from '@taucad/api-auth';
 import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
@@ -218,6 +225,36 @@ export const liveCadSystemPrompt = (options: {
     },
   );
   return [prompt.static, prompt.dynamic].join('\n\n');
+};
+
+/** A chat's settings, as the composer holds them; each absent one is at its default. */
+export type LiveChatSettings = {
+  readonly mode?: ChatMode | undefined;
+  readonly testingEnabled?: boolean | undefined;
+  readonly toolChoice?: ToolSelection | undefined;
+};
+
+/**
+ * What a browser turn carries for the chat's settings (ruling U10), composed by the functions the browser composes it
+ * with: the system prompt of the defaults, every tool the model supports declared, the tool choice that masks what
+ * the settings turn off, and the state note that says them. Use it with a registry that lists the test tools.
+ *
+ * @param options - The chat, its model and its settings.
+ * @returns The session options a settings-aware leg spreads.
+ */
+export const liveChatSettings = (
+  options: LiveChatSettings & { readonly chatId: string; readonly modelId: string },
+): Pick<CreateAgentSessionOptions, 'systemPrompt' | 'toolChoice' | 'allowedTools' | 'contextMessages'> => {
+  const settings = {
+    mode: options.mode ?? 'agent',
+    testingEnabled: options.testingEnabled ?? true,
+    toolChoice: options.toolChoice ?? 'auto',
+  };
+  return {
+    systemPrompt: liveCadSystemPrompt({ chatId: options.chatId, modelId: options.modelId, testingEnabled: true }),
+    ...getProviderFacingToolGrant({ ...settings, modelSupport: row(options.modelId).support }),
+    contextMessages: [chatStateMessage(getChatStateNote(settings))],
+  };
 };
 
 /**

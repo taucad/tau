@@ -22,6 +22,7 @@ import type {
 import { createChatToolRegistry } from '@taucad/agent-tools/registry';
 import type { ChatToolRegistryOptions } from '@taucad/agent-tools/registry';
 import { toolName } from '@taucad/chat/constants';
+import type { ChatMode } from '@taucad/chat/constants';
 import { getCadSystemPrompt } from '@taucad/chat/prompts';
 import type { KernelId } from '@taucad/types/constants';
 import { authInstanceKey } from '@taucad/api-auth';
@@ -193,23 +194,29 @@ export const liveCompletionCeiling = (modelId: string): number =>
 /**
  * The real CAD system prompt a browser turn carries.
  *
- * @param options - Kernel, chat identity and the model row the prompt describes.
+ * @param options - Kernel, chat mode, chat identity and the model row the prompt describes.
  * @returns The static and dynamic sections joined the way the browser joins them.
  */
 export const liveCadSystemPrompt = (options: {
   readonly kernel?: KernelId;
+  readonly mode?: ChatMode | undefined;
   readonly chatId: string;
   readonly modelId: string;
   readonly testingEnabled?: boolean;
 }): string => {
   const entry = row(options.modelId);
-  const prompt = getCadSystemPrompt(options.kernel ?? 'replicad', 'agent', options.testingEnabled ?? false, {
-    chatId: options.chatId,
-    modelId: entry.id,
-    contextWindow: entry.details.contextWindow,
-    ...(entry.details.knowledgeCutoff === undefined ? {} : { knowledgeCutoff: entry.details.knowledgeCutoff }),
-    supportsImageInput: entry.support?.modalities?.input.includes('image') ?? false,
-  });
+  const prompt = getCadSystemPrompt(
+    options.kernel ?? 'replicad',
+    options.mode ?? 'agent',
+    options.testingEnabled ?? false,
+    {
+      chatId: options.chatId,
+      modelId: entry.id,
+      contextWindow: entry.details.contextWindow,
+      ...(entry.details.knowledgeCutoff === undefined ? {} : { knowledgeCutoff: entry.details.knowledgeCutoff }),
+      supportsImageInput: entry.support?.modalities?.input.includes('image') ?? false,
+    },
+  );
   return [prompt.static, prompt.dynamic].join('\n\n');
 };
 

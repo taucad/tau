@@ -135,19 +135,36 @@ test('[completed-artifact] captures SVG and GLB geometry and reports GeoSpec pas
     const drawingCapture = page.getByRole('img', { name: 'drawing view' });
     await expectCount(isometricCapture, 1);
     await expectCount(drawingCapture, 1);
-    expect(
-      await isometricCapture.or(drawingCapture).evaluateAll((images) =>
-        images.every((image) => {
+    /* Captures are chat attachments (#917): each image shows an object URL over the bytes of
+     * `attachments/<sha256>.<ext>`, so the decoded image is tied to its stored file by digest. */
+    const renderedCaptures = await isometricCapture.or(drawingCapture).evaluateAll(async (images) =>
+      Promise.all(
+        images.map(async (image) => {
           const element = image as HTMLImageElement;
-          return (
-            element.complete &&
-            element.naturalWidth >= 32 &&
-            element.naturalHeight >= 32 &&
-            element.currentSrc.length > 100
-          );
+          const response = await fetch(element.currentSrc);
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) =>
+            byte.toString(16).padStart(2, '0'),
+          ).join('');
+          return {
+            complete: element.complete,
+            naturalWidth: element.naturalWidth,
+            naturalHeight: element.naturalHeight,
+            scheme: new URL(element.currentSrc).protocol,
+            byteLength: bytes.byteLength,
+            digest,
+          };
         }),
       ),
-    ).toBe(true);
+    );
+    expect(renderedCaptures).toHaveLength(2);
+    for (const capture of renderedCaptures) {
+      expect(capture).toMatchObject({ complete: true, scheme: 'blob:' });
+      expect(capture.naturalWidth).toBeGreaterThanOrEqual(32);
+      expect(capture.naturalHeight).toBeGreaterThanOrEqual(32);
+      expect(capture.byteLength).toBeGreaterThan(100);
+    }
+    expect(new Set(renderedCaptures.map(({ digest }) => digest)).size).toBe(2);
     await page.getByRole('button', { name: 'Ran tests', exact: true }).click();
     await expectVisible(page.getByText('Tested 2 requirements', { exact: true }), 300_000);
     const results = page.locator('[data-target-file="checks.geospec.ts"]');
@@ -172,6 +189,12 @@ test('[completed-artifact] captures SVG and GLB geometry and reports GeoSpec pas
       throw new Error('export_model did not persist a GLB under .tau/artifacts.');
     }
     validateGlbData(new Uint8Array(await readFile(join(projectRoot, exportedGlb))));
+    for (const { digest } of renderedCaptures) {
+      const stored = projectEntries
+        .map(String)
+        .find((entry) => new RegExp(`^\\.tau/chats/[^/]+/attachments/${digest}\\.(?:png|webp)$`, 'u').test(entry));
+      expect(stored, `no chat attachment holds the rendered capture ${digest}`).toBeDefined();
+    }
     const offeredToolNames = fixture.gatewayRequests.flatMap((request) => {
       const tools = (request as { readonly tools?: ReadonlyArray<{ readonly name?: unknown }> }).tools ?? [];
       return tools.flatMap((tool) => (typeof tool.name === 'string' ? [tool.name] : []));

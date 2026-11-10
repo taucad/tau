@@ -66,6 +66,7 @@ import { installBufferGlobal } from '#buffer-global.js';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import { settleBounded } from '#chat-projection-pool.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
+import { CorruptBytesError } from '#compute-worker/errors.js';
 import { createObjectStore, gitFilesOf, isMissing, PackCeilingError } from '#object-store/object-store.js';
 import { coldOpenFromCatalogue, importReachableFromCatalogue } from '#object-store/cold-open.js';
 import type { CatalogueFamily, ColdOpenOptions, ColdOpenReport } from '#object-store/cold-open.js';
@@ -1244,7 +1245,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
             // async-iife: bootstrap -- the first reader's transfer, told to this one as it lands; a failure is collected below.
             void (async (): Promise<void> => {
               try {
-                delivered(pointer.oid, await inFlight);
+                /* A copy: the first reader holds the same bytes, and either may transfer what it was given. */
+                const landed = await inFlight;
+                delivered(pointer.oid, new Uint8Array(landed));
               } catch {
                 /* Collected below, where this reader fetches what the other did not deliver. */
               }
@@ -1291,7 +1294,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     for (const [oid, { pointer, inFlight }] of shared) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- the transfers run together; this only collects them.
-        contents.set(oid, await inFlight);
+        const landed = await inFlight;
+        contents.set(oid, new Uint8Array(landed));
       } catch {
         orphaned.set(oid, pointer);
       }
@@ -2448,7 +2452,22 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           pack.byteLength > 32 &&
           new DataView(pack.buffer, pack.byteOffset + 8, 4).getUint32(0) > 0
         ) {
-          await objects.addPack(pack);
+          try {
+            await objects.addPack(pack);
+          } catch (error) {
+            /*
+             * A pack the indexer refuses is a verdict on these bytes, not on
+             * the objects: where a catalogue serves the remote they come from
+             * it one by one, as past the ceiling. Anywhere else the refusal
+             * stands, with the indexer's reason in its sentence.
+             */
+            if (
+              !(error instanceof CorruptBytesError) ||
+              !(await importFromCatalogue({ url, families: coldFamilies, signal: input.signal, wants }))
+            ) {
+              throw error;
+            }
+          }
           await objects.repackIfDue();
         }
         /* What arrived may complete a boundary commit's history. */

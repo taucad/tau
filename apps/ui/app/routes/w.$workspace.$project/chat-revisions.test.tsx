@@ -1302,7 +1302,7 @@ describe('Revisions pane vocabulary and History', () => {
 
     const { container } = render(<RevisionsPanelBody />, { wrapper });
 
-    expect(await screen.findByText('Tau agent')).toBeInTheDocument();
+    expect(await screen.findByText('Agent')).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/claude-opus-4|user_2abc|anon:/u);
   });
 });

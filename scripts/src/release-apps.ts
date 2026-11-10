@@ -355,6 +355,12 @@ const prepare = (project: string | undefined): void => {
     const changelogPath = join(workspaceRoot, release.root, 'CHANGELOG.md');
     const existing = existsSync(changelogPath) ? readFileSync(changelogPath, 'utf8') : undefined;
     writeFileSync(changelogPath, prependChangelog(existing, 'Changelog', changelogSection(release, today())));
+    // Commit subjects are raw Markdown (`/__manifest` reads as emphasis), so let the repository formatter settle the
+    // section exactly as `validate-format` checks it; otherwise the release pull request fails CI.
+    execFileSync(join(workspaceRoot, 'node_modules', '.bin', 'oxfmt'), [changelogPath], {
+      cwd: workspaceRoot,
+      stdio: 'ignore',
+    });
   }
 
   console.log(

@@ -16,9 +16,7 @@ import type { DesktopSession } from '#support/desktop-app.js';
  * is not edited here. This module adds the two things a *sync* run needs on top
  * and says plainly why each one is seeded rather than driven:
  *
- *  - a **paid plan**, because `storageLimitBytesByTier.free` is zero and
- *    `canSyncFiles` is false, so a free owner's every push is
- *    `403 GIT_SYNC_NOT_ENTITLED` and nothing about sync would be observable;
+ *  - a **paid plan**, for the Pro allowance and plan rows the suites assert;
  *    buying one has a Stripe leg this suite must not drive;
  *  - a **registered project**, which stands in for a product path that does not
  *    exist (W18 defect DEF-1) and is pinned red separately.

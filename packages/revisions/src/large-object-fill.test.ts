@@ -22,7 +22,14 @@ const parts = { 'models/a.step': 'solid a', 'models/b.step': 'solid bb' } as con
 const pointerOf = (content: string): ReturnType<typeof lfsPointerFor> => lfsPointerFor(encoder.encode(content));
 
 /* A checkout as a map of files, a fence that runs in turn, and a port whose transfer the test drives. */
-const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: number; byOid?: boolean }> = {}) => {
+const setup = (
+  options: Readonly<{
+    flushBytes?: number;
+    flushMilliseconds?: number;
+    byOid?: boolean;
+    retryMilliseconds?: number[];
+  }> = {},
+) => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>([['main.scad', encoder.encode('import("models/a.step");')]]);
   for (const [path, content] of Object.entries(parts)) {
     files.set(path, pointerOf(content).bytes);
@@ -96,6 +103,8 @@ const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: numb
     report: (report) => reports.push(report),
     flushMilliseconds: options.flushMilliseconds ?? 1,
     reportMilliseconds: 1,
+    /* A failed fill retries on its own; a test that does not drive it waits longer than it runs. */
+    retryMilliseconds: options.retryMilliseconds ?? [60_000],
     ...(options.flushBytes === undefined ? {} : { flushBytes: options.flushBytes }),
   });
   const land = (path: keyof typeof parts): void => {
@@ -103,6 +112,9 @@ const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: numb
   };
   const text = (path: string): string => decoder.decode(files.get(path));
   return {
+    onLargeObject: (oid: string, content: Uint8Array<ArrayBuffer>): void => {
+      onLargeObject?.(oid, content);
+    },
     files,
     reports,
     readTree,
@@ -486,6 +498,99 @@ describe('large-object fill', () => {
       expect(harness.reports.at(-1)?.facet).toBeUndefined();
     });
     expect(harness.text('models/b.step')).toBe('solid bb');
+  });
+
+  it('tries a failed fill again on its own, keeping what arrived, until it lands', async () => {
+    const harness = setup({ retryMilliseconds: [1] });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.land('models/a.step');
+    harness.fail(new Error('The remote did not answer in time.'));
+    await done;
+    expect(harness.reports.at(-1)?.facet).toMatchObject({ phase: 'failed' });
+    /* Nobody presses Try again: the fill starts over by itself, and what it wrote stays written. */
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalledTimes(2);
+    });
+    expect(harness.text('models/a.step')).toBe('solid a');
+    harness.fail(new Error('Still no answer.'));
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalledTimes(3);
+    });
+    harness.finish(harness.fullTree());
+    await vi.waitFor(() => {
+      expect(harness.reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(harness.text('models/b.step')).toBe('solid bb');
+  });
+
+  it('hands readers a copy, so a reply that transfers it never empties the bytes the fill still has to write', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.land('models/a.step');
+    const { oid } = pointerOf(parts['models/a.step']).pointer;
+    const looked = harness.fill.look(place.id, oid)?.bytes;
+    const waited = await harness.fill.arrival(place.id, oid);
+    expect(decoder.decode(looked)).toBe('solid a');
+    /* A worker reply transfers what it returns, detaching it; the other reader's copy is untouched. */
+    structuredClone(looked, { transfer: [looked!.buffer] });
+    expect(looked!.byteLength).toBe(0);
+    expect(decoder.decode(waited)).toBe('solid a');
+    harness.land('models/b.step');
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.text('models/a.step')).toBe('solid a');
+    expect(harness.text('models/b.step')).toBe('solid bb');
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  it('fetches again an object whose landed bytes were emptied, instead of failing on them for good', async () => {
+    const harness = setup({ flushMilliseconds: 60_000, retryMilliseconds: [20] });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    /* A reader that shared the very bytes the fill keeps, and transferred them away. */
+    const { oid } = pointerOf(parts['models/a.step']).pointer;
+    const shared = encoder.encode(parts['models/a.step']);
+    harness.onLargeObject(oid, shared);
+    structuredClone(shared, { transfer: [shared.buffer] });
+    harness.land('models/b.step');
+    harness.finish(harness.fullTree());
+    await done;
+    await vi.waitFor(() => {
+      expect(harness.readTree.mock.calls.length).toBeGreaterThan(1);
+    });
+    harness.land('models/a.step');
+    harness.land('models/b.step');
+    harness.finish(harness.fullTree());
+    await vi.waitFor(() => {
+      expect(harness.text('models/a.step')).toBe('solid a');
+    });
+    expect(harness.text('models/b.step')).toBe('solid bb');
+    await vi.waitFor(() => {
+      expect(harness.reports.at(-1)?.facet).toBeUndefined();
+    });
+  });
+
+  it('stops retrying a failed fill once the checkout is forgotten', async () => {
+    const harness = setup({ retryMilliseconds: [20] });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.fail(new Error('The remote did not answer in time.'));
+    await done;
+    harness.fill.forget(place.id);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 60);
+    });
+    expect(harness.readTree).toHaveBeenCalledTimes(1);
   });
 
   it('resumes from the checkout itself, and does nothing when it holds no placeholder', async () => {

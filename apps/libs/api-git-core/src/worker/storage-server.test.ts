@@ -220,12 +220,28 @@ describe('tau-storage refuses a grant before it reads the body (DC1)', () => {
   });
 
   it('should refuse a grant issued more than 30 s in the future or the past', async () => {
-    const ahead = mintGrant(factsFor('git-receive-pack'), { key: grantKey, now: Date.now() + 31_000 });
-    const behind = mintGrant(factsFor('git-receive-pack'), { key: grantKey, now: Date.now() - 31_000 });
-    expect(await sendUnfinished(pushPath, ahead.token)).toEqual({ status: 401, connection: 'close', body: '' });
-    expect(await sendUnfinished(pushPath, behind.token)).toEqual({ status: 401, connection: 'close', body: '' });
-    expect(rejected.map((entry) => entry.reason)).toEqual(['iat_skew', 'iat_skew']);
-    noOperationRan();
+    /* `iat` is whole seconds, so on a live clock a grant minted 31 s ahead is only 30 s ahead once the request lands
+       in the next second. The worker reads the instant the grants were minted against instead. */
+    const now = Date.now();
+    const worker = await serve(grantContractVersion, { now: () => now });
+    try {
+      const ahead = mintGrant(factsFor('git-receive-pack'), { key: grantKey, now: now + 31_000 });
+      const behind = mintGrant(factsFor('git-receive-pack'), { key: grantKey, now: now - 31_000 });
+      expect(await sendUnfinished(pushPath, ahead.token, worker.url)).toEqual({
+        status: 401,
+        connection: 'close',
+        body: '',
+      });
+      expect(await sendUnfinished(pushPath, behind.token, worker.url)).toEqual({
+        status: 401,
+        connection: 'close',
+        body: '',
+      });
+      expect(rejected.map((entry) => entry.reason)).toEqual(['iat_skew', 'iat_skew']);
+      noOperationRan();
+    } finally {
+      await worker.close();
+    }
   });
 
   it('should refuse a grant presented at another repository’s path, or naming a path its project does not build', async () => {

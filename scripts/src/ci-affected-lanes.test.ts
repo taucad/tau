@@ -37,7 +37,7 @@ type Workflow = {
   readonly on?: {
     readonly pull_request?: { readonly types?: readonly string[] };
     readonly push?: { readonly paths?: readonly string[] };
-    readonly workflow_call?: { readonly inputs?: Record<string, { readonly type?: string }> } | null;
+    readonly workflow_call?: { readonly inputs?: Record<string, { readonly type?: string }> };
   };
   readonly concurrency?: { readonly group?: string };
   readonly jobs: Record<string, Job>;

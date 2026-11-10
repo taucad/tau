@@ -16,7 +16,7 @@ const workbenchBodyTokens = 2400;
  * each package's own manifest, so asserting over it covers exactly what the app
  * actually loads.
  */
-const packageSkills = systemSkillsCatalog.filter(({ slug }) => slug !== 'create-skill' && slug !== 'create-model');
+const packageSkills = systemSkillsCatalog.filter(({ slug }) => slug !== 'create-skill');
 
 /** Doctrine plus the generated Core API section and reference map (`maxSkillBodyTokens` in api-extractor). */
 const kernelSkillBodyTokens = 6000;
@@ -48,24 +48,6 @@ const assertSkillBudget = (
   }
 };
 
-const getCreateModelSkillMarkdown = (): string => {
-  const skillMarkdown = systemSkillsCatalog.find(({ slug }) => slug === 'create-model')?.skillMarkdown;
-  if (!skillMarkdown) {
-    throw new Error('create-model is not registered');
-  }
-  return skillMarkdown;
-};
-
-const assertCreateModelSelectionRows = (skillMarkdown: string): void => {
-  const lines = skillMarkdown.split('\n');
-  for (const { id } of kernelConfigurations) {
-    const rowPrefix = `| \`cad-${id}\` |`;
-    if (lines.filter((line) => line.startsWith(rowPrefix)).length !== 1) {
-      throw new Error(`create-model requires exactly one selection row for ${id}`);
-    }
-  }
-};
-
 describe('progressive-disclosure system skill budgets', () => {
   it.each(packageSkills.map((skill) => [skill.slug, skill.skillMarkdown] as const))(
     'should keep %s within its body and description budgets',
@@ -82,31 +64,6 @@ describe('progressive-disclosure system skill budgets', () => {
     expect(packageSkills.length).toBeGreaterThanOrEqual(kernelConfigurations.length);
     expect(packageSkills.map((skill) => skill.slug)).toContain('geospec-authoring');
     expect(packageSkills.every((skill) => skill.skillMarkdown.startsWith('---\n'))).toBe(true);
-  });
-
-  it('should keep create-model within its 900-token body budget', () => {
-    expect(() => {
-      assertSkillBudget('create-model', getCreateModelSkillMarkdown(), 900);
-    }).not.toThrow();
-  });
-
-  it('should include exactly one generated selection row for every configured kernel', () => {
-    expect(() => {
-      assertCreateModelSelectionRows(getCreateModelSkillMarkdown());
-    }).not.toThrow();
-  });
-
-  it('should reject selection guidance with a deliberately omitted kernel row', () => {
-    const skillMarkdown = getCreateModelSkillMarkdown();
-    const omittedKernel = kernelConfigurations[0];
-    const incompleteSkillMarkdown = skillMarkdown
-      .split('\n')
-      .filter((line) => !line.startsWith(`| \`cad-${omittedKernel.id}\` |`))
-      .join('\n');
-
-    expect(() => {
-      assertCreateModelSelectionRows(incompleteSkillMarkdown);
-    }).toThrow(`create-model requires exactly one selection row for ${omittedKernel.id}`);
   });
 
   it('should reject a deliberately oversized fixture body', () => {

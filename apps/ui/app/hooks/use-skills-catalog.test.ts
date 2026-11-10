@@ -704,13 +704,13 @@ describe('useSkillsCatalog over the composed user view', () => {
 
     const { result } = renderHook(() => useSkillsCatalog());
     await waitFor(() => {
-      expect(result.current).toHaveLength(16);
+      expect(result.current).toHaveLength(15);
     });
 
     expect(overlayRead).not.toHaveBeenCalled();
     expect(resourceReader).not.toHaveBeenCalled();
     expect(mockReadFile.mock.calls.map(([path]) => path)).toStrictEqual(['.agents/plugins/installed.json']);
-    expect(systemSkillsCatalog).toHaveLength(16);
+    expect(systemSkillsCatalog).toHaveLength(15);
     expect(result.current.every((skill) => skill.source === 'system')).toBe(true);
     const fingerprints = new Map(result.current.map((skill) => [skill.name, skill.fingerprint]));
     for (const bundle of systemSkillBundles) {
@@ -758,7 +758,7 @@ describe('useSkillsCatalog over the composed user view', () => {
 
     const { result } = renderHook(() => useSkillsCatalog());
     await waitFor(() => {
-      expect(result.current).toHaveLength(15);
+      expect(result.current).toHaveLength(14);
     });
 
     expect(overlayRead).not.toHaveBeenCalled();

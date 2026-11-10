@@ -136,7 +136,7 @@ describe('closeGracefully', () => {
     const inFlight = fetch(`${base}/slow`);
     await entered.promise;
 
-    const closing = closeGracefully(app, { cut: 60_000, abandon: 60_000 });
+    const closing = closeGracefully(app, { cut: 60_000, abandon: 60_000, lastCall: 3000 });
     await vi.waitFor(() => {
       expect(app.getHttpServer().listening).toBe(false);
     });
@@ -162,7 +162,7 @@ describe('closeGracefully', () => {
     const inFlight = fetch(`${base}/slow`);
     await entered.promise;
 
-    await closeGracefully(app, { cut: 50, abandon: 100 });
+    await closeGracefully(app, { cut: 50, abandon: 100, lastCall: 3000 });
 
     await expect(inFlight).rejects.toThrow('fetch failed');
     expect(events).toEqual(['database closed']);
@@ -172,7 +172,7 @@ describe('closeGracefully', () => {
     const replied = await fetch(`${base}/after-reply`);
     await replied.json();
 
-    const closing = closeGracefully(app, { cut: 60_000, abandon: 60_000 });
+    const closing = closeGracefully(app, { cut: 60_000, abandon: 60_000, lastCall: 3000 });
     await vi.waitFor(() => {
       expect(app.getHttpServer().listening).toBe(false);
     });
@@ -187,8 +187,51 @@ describe('closeGracefully', () => {
     const replied = await fetch(`${base}/after-reply`);
     await replied.json();
 
-    await closeGracefully(app, { cut: 50, abandon: 100 });
+    await closeGracefully(app, { cut: 50, abandon: 100, lastCall: 3000 });
 
+    expect(events).toEqual(['database closed']);
+  });
+
+  it('should cut a request in flight at once when the stop is hurried', async () => {
+    const inFlight = fetch(`${base}/slow`);
+    await entered.promise;
+    const hurry = new AbortController();
+
+    const closing = closeGracefully(app, { cut: 60_000, abandon: 60_000, lastCall: 100 }, { hurry: hurry.signal });
+    await vi.waitFor(() => {
+      expect(app.getHttpServer().listening).toBe(false);
+    });
+    hurry.abort();
+
+    const settled = await Promise.race([
+      closing.then(() => 'closed'),
+      new Promise((resolve) => {
+        setTimeout(resolve, 2000, 'held open');
+      }),
+    ]);
+    expect(settled).toBe('closed');
+    await expect(inFlight).rejects.toThrow('fetch failed');
+    expect(events).toEqual(['database closed']);
+  });
+
+  it('should abandon work still running once the last call after a hurry runs out', async () => {
+    const replied = await fetch(`${base}/after-reply`);
+    await replied.json();
+    const hurry = new AbortController();
+
+    const closing = closeGracefully(app, { cut: 60_000, abandon: 60_000, lastCall: 100 }, { hurry: hurry.signal });
+    await vi.waitFor(() => {
+      expect(app.getHttpServer().listening).toBe(false);
+    });
+    hurry.abort();
+
+    const settled = await Promise.race([
+      closing.then(() => 'closed'),
+      new Promise((resolve) => {
+        setTimeout(resolve, 2000, 'held open');
+      }),
+    ]);
+    expect(settled).toBe('closed');
     expect(events).toEqual(['database closed']);
   });
 
@@ -202,7 +245,7 @@ describe('closeGracefully', () => {
     });
 
     const outcome = await Promise.race([
-      closeGracefully(app, { cut: 100, abandon: 150 }).then(() => 'closed'),
+      closeGracefully(app, { cut: 100, abandon: 150, lastCall: 3000 }).then(() => 'closed'),
       new Promise((resolve) => {
         setTimeout(resolve, 3000, 'still stopping');
       }),
@@ -228,7 +271,7 @@ describe('closeGracefully', () => {
   it('should serve a request that arrives on an open connection once closing began, with Connection: close', async () => {
     const exchange = await rawExchange(port, 'GET /slow HTTP/1.1\r\nHost: localhost\r\n\r\n');
     await entered.promise;
-    const closing = closeGracefully(app, { cut: 60_000, abandon: 60_000 });
+    const closing = closeGracefully(app, { cut: 60_000, abandon: 60_000, lastCall: 3000 });
     await vi.waitFor(() => {
       expect(app.getHttpServer().listening).toBe(false);
     });

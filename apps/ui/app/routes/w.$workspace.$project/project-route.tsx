@@ -1,5 +1,16 @@
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
-import { createContext, lazy, Suspense, use, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  lazy,
+  Suspense,
+  use,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useLocation, useMatch, useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
 import type { Handle } from '#types/matches.types.js';
@@ -244,7 +255,11 @@ export function ProjectRouteGate({
    * navigated away from keeps its file manager, its kernel and its revision
    * port, so a running agent settles and returning is instant.
    */
-  useEffect(() => {
+  /* A layout effect, not a passive one: until `open` lands, a ready project that is not live derives
+   * `closed`, and a passive effect let that commit paint its notice ("Project closed … Reopen
+   * project") for about 26 ms on a direct open. The registry update this sends re-renders before
+   * the browser paints. */
+  useLayoutEffect(() => {
     if (
       requestedProjectId === undefined ||
       resolved?.access.status !== 'ready' ||

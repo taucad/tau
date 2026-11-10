@@ -927,6 +927,34 @@ describe('project route session identity', () => {
     expect(focusedSessionId()).toBe(projectA);
   });
 
+  it('should never leave the closed notice on screen between tasks while a ready project opens', async () => {
+    const pendingA = deferred<ProjectRouteAccess>();
+    getProjectRouteAccess.mockReturnValue(pendingA.promise);
+    renderRouteProvider();
+    expect(screen.getByText('Notice: resolving')).toBeInTheDocument();
+
+    /* Outside `act`, React renders on its own schedule, so the DOM between tasks is what a browser
+     * could paint. Opening the session in a passive effect left `closed` committed for a task. */
+    const previous = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+    const seen: string[] = [];
+    try {
+      pendingA.resolve(ready(projectA));
+      for (let task = 0; task < 50 && screen.queryAllByTestId('project-session').length === 0; task++) {
+        // oxlint-disable-next-line no-await-in-loop -- one sample per task, in order, is the point
+        await new Promise<void>((resolve) => {
+          globalThis.setTimeout(resolve, 0);
+        });
+        seen.push(document.body.textContent);
+      }
+    } finally {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = previous;
+    }
+
+    await screen.findAllByTestId('project-session');
+    expect(seen.some((text) => text.includes('Notice: closed'))).toBe(false);
+  });
+
   it('should leave the initial loader for a retryable access error', async () => {
     getProjectRouteAccess.mockRejectedValueOnce(new Error('discovery failed')).mockResolvedValueOnce(ready(projectA));
     renderRouteProvider();

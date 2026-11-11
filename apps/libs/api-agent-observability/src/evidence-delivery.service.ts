@@ -30,7 +30,7 @@ import {
   pseudonymKey,
   receiptSpanId,
 } from '#langfuse-observation.js';
-import type { LangfuseScore } from '#langfuse-observation.js';
+import type { LangfuseScore, OtlpSpan } from '#langfuse-observation.js';
 
 /** Delivery pacing. Fixed and low: vendor availability never gates the API. */
 export const deliveryTiming = Object.freeze({
@@ -90,6 +90,15 @@ const reasonOf = (outcomes: readonly ScoreOutcome[], kind: 'not-sent' | 'rejecte
   }
   return undefined;
 };
+
+/**
+ * The Langfuse units one accepted request wrote (LW24): an observation for each span, and a trace as well for each span
+ * with no parent, a run's root or a helper or direct call.
+ */
+const spanUnits = (spans: readonly OtlpSpan[]): Readonly<{ observations: number; traces: number }> => ({
+  observations: spans.length,
+  traces: spans.filter((span) => span.parentSpanId === undefined).length,
+});
 
 const supersededReason: Readonly<Record<'object' | 'no-object', AgentEvidenceSupersededReason>> = {
   object: 'object',
@@ -337,6 +346,14 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     return 'reason' in settlement ? `${settlement.kind}:${settlement.reason}` : settlement.kind;
   }
 
+  /** Add the units Langfuse is known to hold, once per object, to `tau.agent_evidence.langfuse_units`. */
+  private countUnits({ observations, traces }: Readonly<{ observations: number; traces: number }>): void {
+    this.metrics.agentEvidenceLangfuseUnits.add(observations, { kind: 'observation' });
+    if (traces > 0) {
+      this.metrics.agentEvidenceLangfuseUnits.add(traces, { kind: 'trace' });
+    }
+  }
+
   private open(row: LeasedDelivery): Evidence | 'unsealable' | 'invalid' | 'key-unavailable' {
     const version = Number(row.payload?.split('.', 1)[0]);
     if (!this.keys.has(version)) {
@@ -466,7 +483,12 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     }
     switch (outcome.kind) {
       case 'accepted': {
-        return this.settle(row, { kind: 'sent', reason: 'acknowledged' });
+        const settled = await this.settle(row, { kind: 'sent', reason: 'acknowledged' });
+        /* A worker that lost its lease leaves the row abandoned, and reconciliation counts it once it is found. */
+        if (settled !== 'lease-lost') {
+          this.countUnits(spanUnits(observation.spans));
+        }
+        return settled;
       }
       case 'uncertain': {
         return this.settle(row, { kind: 'sent', reason: outcome.reason });
@@ -517,6 +539,9 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       'tau.agent_evidence.score_configured': configured ? 'true' : 'false',
       outcome: scoreOutcome[outcome.kind],
     });
+    if (outcome.kind === 'accepted') {
+      this.metrics.agentEvidenceLangfuseUnits.add(1, { kind: 'score' });
+    }
   }
 
   /**
@@ -553,7 +578,15 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       this.shutdown.signal,
     );
     if (found === 'present') {
-      return this.settle(row, { kind: 'confirmed' });
+      const settled = await this.settle(row, { kind: 'confirmed' });
+      /*
+       * An acknowledged send was counted at its answer; one whose answer was uncertain is counted once it is found.
+       * Its payload is gone by then, so only the object read back is counted.
+       */
+      if (settled !== 'lease-lost' && row.reason !== 'acknowledged') {
+        this.countUnits({ observations: 1, traces: 0 });
+      }
+      return settled;
     }
     const sentAt = row.sentAt?.getTime() ?? 0;
     if (found === 'absent' && now.getTime() - sentAt >= deliveryTiming.gapAfterMilliseconds) {

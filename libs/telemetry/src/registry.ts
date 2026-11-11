@@ -251,6 +251,12 @@ const agentEvidenceScoreNames = ['user-rating', 'run-termination', 'task-success
  */
 const agentEvidenceScoreOutcomes = ['accepted', 'rejected', 'uncertain', 'not_sent'] as const;
 
+/**
+ * `kind` of one Langfuse billable unit (Langfuse blueprint LW24, ruling 13): Langfuse counts traces, observations and
+ * scores against the plan's monthly units.
+ */
+const agentEvidenceLangfuseUnitKinds = ['trace', 'observation', 'score'] as const;
+
 /** `outcome` of one Langfuse trace deletion request; an `accepted` delete settles the trace (nothing is read back). */
 const agentEvidenceErasureOutcomes = ['accepted', 'retry', 'lease_lost'] as const;
 
@@ -2056,6 +2062,16 @@ export const TauMetrics = {
       /* `false`: the deployment names no config id for the score, so it was written without one. */
       'tau.agent_evidence.score_configured': z.enum(['true', 'false']),
       outcome: z.enum(agentEvidenceScoreOutcomes),
+    }),
+  }),
+
+  agentEvidenceLangfuseUnits: defineCounter({
+    name: 'tau.agent_evidence.langfuse_units',
+    unit: '{unit}',
+    description:
+      'Langfuse billable units Tau wrote, by kind: an observation per span and a score per score Langfuse holds, and a trace per span with no parent, each counted once',
+    attributes: z.object({
+      kind: z.enum(agentEvidenceLangfuseUnitKinds),
     }),
   }),
 

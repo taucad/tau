@@ -42,7 +42,12 @@ const PaymentConflict = vi.hoisted(
     },
 );
 const CollectionUnavailable = vi.hoisted(() => class extends Error {});
-const entitlements = vi.hoisted(() => ({
+type TestEntitlements = {
+  isResolved: boolean;
+  paymentCollectionAvailable: boolean;
+  paymentMethod?: { brand: string; last4: string };
+};
+const entitlements = vi.hoisted((): { current: TestEntitlements } => ({
   current: { isResolved: true, paymentCollectionAvailable: true, paymentMethod: { brand: 'visa', last4: '4242' } },
 }));
 const invalidateQueries = vi.hoisted(() => vi.fn());
@@ -50,7 +55,7 @@ vi.mock('#lib/billing-payment-client.js', () => ({
   ...client,
   BillingPaymentConflict: PaymentConflict,
   BillingCollectionUnavailable: CollectionUnavailable,
-  purchasesUnavailableMessage: 'Purchases are not available yet.',
+  purchasesUnavailableMessage: 'You can’t buy credits yet. We’re still setting up payments.',
   createPaymentRequestId: () => 'request_1',
 }));
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
@@ -113,6 +118,11 @@ const wireAction = (state: string) => ({
     paymentMethod: { brand: 'visa', last4: '4242' },
   },
 });
+/** A request still in flight for the whole test. */
+const neverSettles = async (): Promise<never> =>
+  new Promise<never>(() => {
+    // Left pending on purpose.
+  });
 const renderModal = (Modal: typeof TopupModal = TopupModal) =>
   render(
     <MemoryRouter>
@@ -157,9 +167,9 @@ describe('TopupModal', () => {
     );
     const view = renderModal();
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /review purchase with saved card/i })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled();
     });
-    await userEvent.click(screen.getByRole('button', { name: /review purchase with saved card/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
     session.current = { ...session.current, userId: 'user-b' };
     view.rerender(
       <MemoryRouter>
@@ -174,7 +184,7 @@ describe('TopupModal', () => {
     );
     settle(wireAction('prepared'));
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Confirm quote' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Pay $27.50' })).toBeNull();
     });
     expect(client.followPaymentRedirect).not.toHaveBeenCalled();
   });
@@ -182,7 +192,7 @@ describe('TopupModal', () => {
   it('hides an owned action immediately on logout while GET is pending', async () => {
     client.getUnresolvedPaymentActions.mockResolvedValue([wireAction('processing')]);
     const view = renderModal();
-    expect(await screen.findByText(/payment is still processing/i)).toBeInTheDocument();
+    expect(await screen.findByText(/processing payment/i)).toBeInTheDocument();
     client.getUnresolvedPaymentActions.mockReturnValue(
       new Promise(() => {
         // Intentionally unresolved to exercise logout invalidation.
@@ -194,7 +204,7 @@ describe('TopupModal', () => {
         <TopupModal isOpen onOpenChange={vi.fn()} />
       </MemoryRouter>,
     );
-    expect(screen.queryByText(/payment is still processing/i)).toBeNull();
+    expect(screen.queryByText(/processing payment/i)).toBeNull();
   });
 
   it('preserves owner switching in the compiled component', async () => {
@@ -230,7 +240,7 @@ describe('TopupModal', () => {
       }),
     );
     const view = renderModal();
-    await userEvent.click(await screen.findByRole('button', { name: 'Discard quote' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Back' }));
     client.followPaymentRedirect.mockClear();
     session.current = { ...session.current, userId: 'user-b' };
     view.rerender(
@@ -282,9 +292,9 @@ describe('TopupModal', () => {
     client.prepareTopup.mockResolvedValue(wireAction('prepared'));
     renderModal();
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /review purchase with saved card/i })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled();
     });
-    await userEvent.click(screen.getByRole('button', { name: /review purchase with saved card/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(client.prepareTopup).toHaveBeenCalledWith(
       {
         apiBaseUrl: 'https://api.tau.new',
@@ -293,20 +303,20 @@ describe('TopupModal', () => {
       },
       expect.objectContaining({ amountMinor: '2500', method: 'saved_card' }),
     );
-    expect(await screen.findByText('US$27.50')).toBeInTheDocument();
-    expect(screen.getByText('2,500')).toBeInTheDocument();
-    expect(screen.getByText('US$25.00')).toBeInTheDocument();
-    expect(screen.getByText('US$2.50')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Confirm quote' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Discard quote' })).toBeEnabled();
+    expect(await screen.findByText('$27.50 USD')).toBeInTheDocument();
+    expect(screen.getByText('2,500 credits')).toBeInTheDocument();
+    expect(screen.getByText('$25.00')).toBeInTheDocument();
+    expect(screen.getByText('$2.50')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pay $27.50' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Back' })).toBeEnabled();
   });
 
   it('prepares a custom amount through the current owner binding', async () => {
     client.prepareTopup.mockResolvedValue(wireAction('prepared'));
     renderModal();
     await userEvent.click(screen.getByRole('button', { name: 'Other' }));
-    await userEvent.type(screen.getByRole('spinbutton', { name: 'Custom amount' }), '31.25');
-    await userEvent.click(screen.getByRole('button', { name: /review purchase with saved card/i }));
+    await userEvent.type(screen.getByRole('spinbutton', { name: 'Amount (USD)' }), '31.25');
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(client.prepareTopup).toHaveBeenCalledWith(
       {
         apiBaseUrl: 'https://api.tau.new',
@@ -320,7 +330,7 @@ describe('TopupModal', () => {
   it('reopens the owned unresolved purchase', async () => {
     client.getUnresolvedPaymentActions.mockResolvedValue([wireAction('processing')]);
     renderModal();
-    expect(await screen.findByText(/payment is still processing/i)).toBeInTheDocument();
+    expect(await screen.findByText(/processing payment/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /review/i })).toBeNull();
   });
 
@@ -333,7 +343,7 @@ describe('TopupModal', () => {
         receipt: { revision: '1', grantedCreditAtoms: '25000000', chargedPaymentMethod: null },
       });
       renderModal();
-      expect(await screen.findByText(/payment is still processing/i)).toBeInTheDocument();
+      expect(await screen.findByText(/processing payment/i)).toBeInTheDocument();
       await vi.advanceTimersByTimeAsync(2000);
       expect(await screen.findByText('Credits added')).toBeInTheDocument();
       expect(client.getPaymentAction).toHaveBeenCalledWith(
@@ -353,7 +363,7 @@ describe('TopupModal', () => {
     client.getUnresolvedPaymentActions.mockResolvedValue([redirect]);
     client.cancelPaymentAction.mockResolvedValue(wireAction('canceled'));
     renderModal();
-    await userEvent.click(await screen.findByRole('button', { name: 'Cancel payment' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel purchase' }));
     expect(client.cancelPaymentAction).toHaveBeenCalledWith(expect.objectContaining({ ownerId: 'user-a' }), 'topup_1');
     expect(client.followPaymentRedirect).not.toHaveBeenCalled();
   });
@@ -370,9 +380,9 @@ describe('TopupModal', () => {
       receipt: { revision: '1', grantedCreditAtoms: '25000000', chargedPaymentMethod: null },
     });
     renderModal();
-    await userEvent.click(await screen.findByRole('button', { name: 'Cancel payment' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel purchase' }));
     await waitFor(() => {
-      expect(toast.warning).toHaveBeenCalledWith('This payment can no longer be cancelled.');
+      expect(toast.warning).toHaveBeenCalledWith('This payment can’t be canceled anymore.');
     });
     expect(await screen.findByText('Credits added')).toBeInTheDocument();
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['billing'] });
@@ -385,12 +395,15 @@ describe('TopupModal', () => {
     );
     renderModal();
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /review purchase with saved card/i })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled();
     });
-    await userEvent.click(screen.getByRole('button', { name: /review purchase with saved card/i }));
-    expect(await screen.findByRole('status')).toHaveTextContent('Automatic reload is handling this purchase.');
-    expect(screen.queryByRole('button', { name: 'Confirm quote' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Discard quote' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(await screen.findByRole('heading', { name: 'Auto-reload in progress' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Auto-reload is buying these credits now. You don’t need to do anything.',
+    );
+    expect(screen.queryByRole('button', { name: 'Pay $27.50' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
     // The dialog's own bootstrap reads only manual top-ups; a reload surfaces through the refusal it causes.
     expect(client.getUnresolvedPaymentActions).not.toHaveBeenCalledWith(expect.anything(), 'automatic_topup');
   });
@@ -402,7 +415,7 @@ describe('TopupModal', () => {
     };
     client.getUnresolvedPaymentActions.mockResolvedValue([redirect]);
     renderModal();
-    const resume = await screen.findByRole('button', { name: 'Resume Checkout' });
+    const resume = await screen.findByRole('button', { name: 'Continue to payment' });
     expect(client.followPaymentRedirect).not.toHaveBeenCalled();
     await userEvent.click(resume);
     expect(client.followPaymentRedirect).toHaveBeenCalledWith(redirect);
@@ -413,7 +426,7 @@ describe('TopupModal', () => {
     client.getUnresolvedPaymentActions.mockResolvedValue([prepared]);
     client.confirmPaymentAction.mockResolvedValue(wireAction('processing'));
     renderModal();
-    await userEvent.click(await screen.findByRole('button', { name: 'Confirm quote' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Pay $27.50' }));
     expect(client.confirmPaymentAction).toHaveBeenCalledWith(
       {
         apiBaseUrl: 'https://api.tau.new',
@@ -440,7 +453,10 @@ describe('TopupModal', () => {
     renderModal();
     expect(await screen.findByRole('heading', { name: 'Credits added' })).toBeInTheDocument();
     expect(screen.getByText(/mastercard.*4{4}/i)).toBeInTheDocument();
-    expect(screen.getByText(/us\$27\.50 charged/i)).toBeInTheDocument();
+    expect(screen.getByText('Total paid')).toBeInTheDocument();
+    expect(screen.getByText('$27.50 USD')).toBeInTheDocument();
+    expect(screen.getByText('Paid with')).toBeInTheDocument();
+    expect(screen.queryByText('Total due')).toBeNull();
   });
 
   it.each([
@@ -452,22 +468,22 @@ describe('TopupModal', () => {
     await waitFor(() => {
       expect(client.getUnresolvedPaymentActions).toHaveBeenCalled();
     });
-    expect(screen.getByRole('button', { name: /review purchase with saved card/i })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /use another card in checkout/i })).toBeDisabled();
-    expect(screen.queryByText('Purchases are not available yet.') !== null).toBe(showsNote);
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Use a different card' })).toBeDisabled();
+    expect(screen.queryByText('You can’t buy credits yet. We’re still setting up payments.') !== null).toBe(showsNote);
   });
 
   it('reports a collection refusal without asking the customer to retry', async () => {
     const { toast } = await import('@taucad/ui/components/sonner');
     client.prepareTopup.mockRejectedValue(new CollectionUnavailable());
     renderModal();
-    const review = screen.getByRole('button', { name: /review purchase with saved card/i });
+    const review = screen.getByRole('button', { name: 'Continue' });
     await waitFor(() => {
       expect(review).toBeEnabled();
     });
     await userEvent.click(review);
     await waitFor(() => {
-      expect(toast.warning).toHaveBeenCalledWith('Purchases are not available yet.');
+      expect(toast.warning).toHaveBeenCalledWith('You can’t buy credits yet. We’re still setting up payments.');
     });
   });
 
@@ -476,14 +492,14 @@ describe('TopupModal', () => {
     const refusal = Object.assign(new PaymentConflict(undefined), { code: 'customer_tax_location_invalid' });
     client.prepareTopup.mockRejectedValue(refusal);
     renderModal();
-    const review = screen.getByRole('button', { name: /review purchase with saved card/i });
+    const review = screen.getByRole('button', { name: 'Continue' });
     await waitFor(() => {
       expect(review).toBeEnabled();
     });
     await userEvent.click(review);
     await waitFor(() => {
       expect(toast.warning).toHaveBeenCalledWith(
-        'No saved card with a billing address yet. Use another card in Checkout.',
+        'Your saved card needs a billing address. Choose "Use a different card" to add one.',
       );
     });
   });
@@ -492,9 +508,181 @@ describe('TopupModal', () => {
     client.getUnresolvedPaymentActions.mockResolvedValue([wireAction('prepared')]);
     client.confirmPaymentAction.mockResolvedValue(wireAction('fulfilled'));
     renderModal();
-    await userEvent.click(await screen.findByRole('button', { name: 'Confirm quote' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Pay $27.50' }));
     await waitFor(() => {
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['billing'] });
     });
+  });
+
+  it('describes the purchase in two plain sentences and links the refund policy from the footer', async () => {
+    renderModal();
+    const dialog = await screen.findByRole('dialog', { name: 'Add credits' });
+    expect(dialog).toHaveAccessibleDescription(
+      'Credits pay for AI and cloud kernel usage. They’re added right away and never expire.',
+    );
+    expect(dialog).not.toHaveTextContent(/refunded within 14 days|top up|US\$/iu);
+    const footer = dialog.querySelector('[data-slot=legal-line]');
+    expect(footer).toHaveTextContent('By continuing, you agree to Tau’s Terms and Refund policy.');
+    expect(screen.getByRole('link', { name: 'Terms' })).toHaveAttribute(
+      'href',
+      expect.stringMatching(/\/legal\/terms$/u),
+    );
+    expect(screen.getByRole('link', { name: 'Refund policy' })).toHaveAttribute(
+      'href',
+      expect.stringMatching(/\/legal\/terms#refunds$/u),
+    );
+  });
+
+  it('says how many credits the chosen amount adds and shows the saved card as a row', async () => {
+    renderModal();
+    expect(await screen.findByText('$25 adds 2,500 credits. Tax is added on the next step.')).toBeInTheDocument();
+    expect(screen.getByText('Visa •••• 4242')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '$100' }));
+    expect(screen.getByText('$100 adds 10,000 credits. Tax is added on the next step.')).toBeInTheDocument();
+  });
+
+  it('offers one button to the payment page when there is no saved card', async () => {
+    entitlements.current = { isResolved: true, paymentCollectionAvailable: true };
+    renderModal();
+    const proceed = await screen.findByRole('button', { name: 'Continue to payment' });
+    expect(
+      screen.getByText('$25 adds 2,500 credits. You’ll enter your card on Stripe’s payment page, where tax is added.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use a different card' })).toBeNull();
+    await waitFor(() => {
+      expect(proceed).toBeEnabled();
+    });
+    await userEvent.click(proceed);
+    expect(client.prepareTopup).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ amountMinor: '2500', method: 'checkout' }),
+    );
+  });
+
+  it('labels the custom amount, states the allowed range and explains an amount outside it', async () => {
+    renderModal();
+    await userEvent.click(await screen.findByRole('button', { name: 'Other' }));
+    const field = screen.getByRole('spinbutton', { name: 'Amount (USD)' });
+    expect(field).toHaveAccessibleDescription('Enter $5 to $5,000.');
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+
+    await userEvent.type(field, '2');
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter an amount from $5 to $5,000.');
+    expect(field).toBeInvalid();
+
+    await userEvent.clear(field);
+    await userEvent.type(field, '40');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(field).toHaveAccessibleDescription('$40 adds 4,000 credits. Enter $5 to $5,000.');
+  });
+
+  it('lets the dialog close while it checks for an unfinished payment', async () => {
+    client.getUnresolvedPaymentActions.mockReturnValue(neverSettles());
+    const onOpenChange = vi.fn();
+    render(
+      <MemoryRouter>
+        <TopupModal isOpen onOpenChange={onOpenChange} />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('button', { name: 'Continue' })).toHaveAttribute('aria-busy', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  const processingDescription =
+    'This usually takes a few seconds. You can close this window and your credits will still be added.';
+  it.each([
+    { state: 'processing', attention: null, title: 'Processing payment', description: processingDescription },
+    { state: 'creating', attention: null, title: 'Processing payment', description: processingDescription },
+    {
+      state: 'funds_received',
+      attention: null,
+      title: 'Payment received',
+      description: 'We’re adding 2,500 credits to your balance. This can take a moment.',
+    },
+    {
+      state: 'attention_required',
+      attention: { reason: 'operator_review', action: 'contact_support' },
+      title: 'We’re reviewing this payment',
+      description: 'You don’t need to do anything. If you have questions, email help@tau.new.',
+    },
+    {
+      state: 'attention_required',
+      attention: { reason: 'outcome_unknown', action: 'wait' },
+      title: 'Waiting to hear from your bank',
+      description:
+        'We don’t know yet whether this payment went through. Please don’t pay again. Check back in a few minutes.',
+    },
+  ])('gives the waiting state $state ($title) a plain description and a Close button', async (row) => {
+    const { state, attention, title, description } = row;
+    client.getUnresolvedPaymentActions.mockResolvedValue([{ ...wireAction(state), attention }]);
+    client.getPaymentAction.mockResolvedValue({ ...wireAction(state), attention });
+    const onOpenChange = vi.fn();
+    render(
+      <MemoryRouter>
+        <TopupModal isOpen onOpenChange={onOpenChange} />
+      </MemoryRouter>,
+    );
+    const dialog = await screen.findByRole('dialog', { name: title });
+    expect(dialog).toHaveAccessibleDescription(description);
+    expect(dialog).not.toHaveTextContent(/payment status:/iu);
+    // No payment is being asked for here, so the legal line is not shown.
+    expect(dialog.querySelector('[data-slot=legal-line]')).toBeNull();
+    const [, closeButton] = screen.getAllByRole('button', { name: 'Close' });
+    await userEvent.click(closeButton!);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('asks for the bank confirmation in the customer’s words and continues on the payment page', async () => {
+    const paused = {
+      ...wireAction('attention_required'),
+      attention: { reason: 'authentication_required', action: 'continue_hosted' },
+    };
+    client.getUnresolvedPaymentActions.mockResolvedValue([paused]);
+    client.recoverPaymentAction.mockResolvedValue(paused);
+    renderModal();
+    expect(await screen.findByRole('dialog', { name: 'Confirm with your bank' })).toHaveAccessibleDescription(
+      'Your bank wants you to confirm this payment. You can also pay with a different card. You’ll only be charged once.',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Continue to payment' }));
+    expect(client.recoverPaymentAction).toHaveBeenCalledWith(expect.anything(), 'topup_1');
+  });
+
+  it('reviews the purchase with a Pay button that states the charge and a Back that cancels it', async () => {
+    client.getUnresolvedPaymentActions.mockResolvedValue([wireAction('prepared')]);
+    client.cancelPaymentAction.mockResolvedValue(wireAction('canceled'));
+    renderModal();
+    const dialog = await screen.findByRole('dialog', { name: 'Review your purchase' });
+    expect(dialog).toHaveAccessibleDescription('You’re adding 2,500 credits to your balance.');
+    expect(screen.getByText('Total')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pay $27.50' })).toBeEnabled();
+    expect(dialog.querySelector('[data-slot=legal-line]')).not.toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+    expect(client.cancelPaymentAction).toHaveBeenCalledWith(expect.anything(), 'topup_1');
+    expect(await screen.findByRole('dialog', { name: 'Add credits' })).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      state: 'failed',
+      title: 'Payment failed',
+      description: 'Your card wasn’t charged. Try again, or use a different card.',
+      label: 'Try again',
+    },
+    { state: 'canceled', title: 'Purchase canceled', description: 'You weren’t charged.', label: 'Add credits' },
+  ])('ends a $state purchase with what happened and a button back to the amounts', async (row) => {
+    const { state, title, description, label } = row;
+    client.getUnresolvedPaymentActions.mockResolvedValue([wireAction(state)]);
+    renderModal();
+    expect(await screen.findByRole('dialog', { name: title })).toHaveAccessibleDescription(description);
+    await userEvent.click(screen.getByRole('button', { name: label }));
+    expect(await screen.findByRole('group', { name: 'Amount' })).toBeInTheDocument();
+  });
+
+  it('does not leave a completed action without a way out', async () => {
+    client.getUnresolvedPaymentActions.mockResolvedValue([wireAction('completed')]);
+    renderModal();
+    expect(await screen.findByRole('dialog', { name: 'Payment complete' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled();
   });
 });

@@ -4,7 +4,7 @@ import type { ConfigService } from '@nestjs/config';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep, mockReset } from 'vitest-mock-extended';
 import { admitEvidence } from '#evidence-admission.js';
 import { deliveryTiming, EvidenceDeliveryService } from '#evidence-delivery.service.js';
@@ -14,6 +14,7 @@ import { scoreAttempts } from '#langfuse-client.js';
 import { receiptSpanId } from '#langfuse-observation.js';
 import { evidenceFixture, outcomeFact, privateMarker, providerFact, toolFact } from '#testing/evidence.fixture.js';
 import { canonicalEvidence } from '@taucad/agent-observability/identity';
+import type { Evidence } from '@taucad/agent-observability/contract';
 import type { TelemetryPurposeService } from '#telemetry-purposes/telemetry-purpose.service.js';
 import type { TelemetryPurposeState } from '#telemetry-purposes/telemetry-purpose.schema.js';
 import type { TelemetryPurpose } from '@taucad/api-database/schema/telemetry-purpose.types';
@@ -59,6 +60,32 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     return { userId, projectId, email };
   };
 
+  /** Admit `evidence`, sealed as ingress seals it, and answer its receipt id. */
+  const admit = async (evidence: Evidence): Promise<string> => {
+    const { principal, project } = evidence.scope;
+    const bytes = new TextEncoder().encode(canonicalEvidence(evidence));
+    const outcome = await admitEvidence({
+      database,
+      evidence,
+      allowed: { replay: true, admit: true },
+      protection: 'free',
+      seal: (receipt) => ({
+        payload: sealEvidence(
+          Uint8Array.from(bytes),
+          { environment, principal, project, receipt, plane: evidence.payload.plane },
+          { version: 1, key },
+        ),
+        keyVersion: 1,
+      }),
+      budgets: { total: 1_000_000_000, principal: 1_000_000_000 },
+      now: new Date(),
+    });
+    if (outcome.kind !== 'receipt') {
+      throw new Error(outcome.kind);
+    }
+    return outcome.receipt.receipt;
+  };
+
   /**
    * One admitted receipt, sealed as ingress seals it: a tool fact by default, which maps to one Langfuse object; an
    * instruction (`summary`) maps to none.
@@ -87,27 +114,23 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
         ? { fact: providerFact(), semantic: 'call-1', ...(text === undefined ? {} : { text }) }
         : {}),
     });
-    const bytes = new TextEncoder().encode(canonicalEvidence(evidence));
-    const outcome = await admitEvidence({
-      database,
-      evidence,
-      allowed: { replay: true, admit: true },
-      protection: 'free',
-      seal: (receipt) => ({
-        payload: sealEvidence(
-          Uint8Array.from(bytes),
-          { environment, principal: userId, project: projectId, receipt, plane: evidence.payload.plane },
-          { version: 1, key },
-        ),
-        keyVersion: 1,
-      }),
-      budgets: { total: 1_000_000_000, principal: 1_000_000_000 },
-      now: new Date(),
+    return { userId, projectId, receiptId: await admit(evidence) };
+  };
+
+  /** One admitted summary receipt carrying `fact`, under `owner`. */
+  const admittedFact = async (
+    owner: Readonly<{ userId: string; projectId: string }>,
+    fact: Extract<Evidence['payload'], { plane: 'summary' }>['fact'],
+    semantic: string,
+  ) => {
+    const evidence = await evidenceFixture({
+      principal: owner.userId,
+      project: owner.projectId,
+      plane: 'summary',
+      fact,
+      semantic,
     });
-    if (outcome.kind !== 'receipt') {
-      throw new Error(outcome.kind);
-    }
-    return { userId, projectId, receiptId: outcome.receipt.receipt };
+    return admit(evidence);
   };
 
   const row = async (receiptId: string) => {
@@ -468,6 +491,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       'tau.agent_evidence.score_configured': 'true',
       outcome: 'accepted',
     });
+    expect(metrics.agentEvidenceLangfuseUnits.add.mock.calls).toEqual([[1, { kind: 'score' }]]);
   });
 
   it("should write an outcome's root once, then its run-termination and task-success scores on that root", async () => {
@@ -586,6 +610,114 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     await expect(settleDelivery(database, { receiptId, owner: 'worker-a' }, { kind: 'confirmed' })).resolves.toBe(
       false,
     );
+  });
+
+  /* Langfuse blueprint LW24: the units Tau writes, counted once per object when Langfuse is known to hold it. */
+  describe('Langfuse units', () => {
+    const outcomeFact: Extract<Evidence['payload'], { plane: 'summary' }>['fact'] = {
+      kind: 'outcome',
+      termination: 'completed',
+      success: 'unknown',
+      assessment: null,
+    };
+    const accepting = () =>
+      vendor((url) => {
+        if (url.pathname.endsWith('/otel/v1/traces')) {
+          return json(200, { name: 'otel-ingestion-job' });
+        }
+        return json(200, { data: [], meta: {} });
+      });
+    const units = () => metrics.agentEvidenceLangfuseUnits.add.mock.calls;
+    /* Earlier tests leave rows due again; each count here is of this test's receipts alone. */
+    beforeEach(async () => {
+      await database.delete(schema.agentEvidenceOutbox);
+    });
+
+    it('should count an accepted span as one observation, once, though it is confirmed later', async () => {
+      await admitted();
+      accepting();
+      const delivery = service();
+      const now = new Date();
+
+      await delivery.drain(now);
+      await delivery.drain(new Date(now.getTime() + deliveryTiming.recheckMilliseconds + 1));
+
+      expect(units()).toEqual([[1, { kind: 'observation' }]]);
+    });
+
+    it("should count a trace as well for a span with no parent, a run's root, and a score for each accepted score", async () => {
+      const owner = await account();
+      await admittedFact(owner, outcomeFact, 'outcome-1');
+      accepting();
+
+      await service().drain(new Date());
+
+      expect(units()).toEqual(
+        expect.arrayContaining([
+          [1, { kind: 'observation' }],
+          [1, { kind: 'trace' }],
+          [1, { kind: 'score' }],
+        ]),
+      );
+      expect(units()).toHaveLength(3);
+    });
+
+    it('should count nothing for a receipt that maps to no object or names one another receipt writes', async () => {
+      const owner = await account();
+      await admitted('summary', owner, { sequence: 5 });
+      await admitted('tool', owner, { sequence: 7 });
+      await admitted('tool', owner, { sequence: 9 });
+      accepting();
+
+      await service().drain(new Date());
+
+      expect(metrics.agentEvidenceSuperseded.add).toHaveBeenCalledWith(1, { reason: 'no_object' });
+      expect(metrics.agentEvidenceSuperseded.add).toHaveBeenCalledWith(1, { reason: 'object' });
+      expect(units()).toEqual([[1, { kind: 'observation' }]]);
+    });
+
+    it('should count nothing for a send Langfuse refused', async () => {
+      await admitted();
+      vendor((url) => (url.pathname.endsWith('/otel/v1/traces') ? json(400, {}) : json(200, { data: [] })));
+
+      await service().drain(new Date());
+
+      expect(metrics.agentEvidenceDeliveries.add).toHaveBeenCalledWith(1, { outcome: 'rejected' });
+      expect(units()).toEqual([]);
+    });
+
+    it('should count an uncertain send only when reconciliation finds it, and a gap never', async () => {
+      const found = await admitted();
+      const lost = await admitted();
+      const objects = new Map<string, string>();
+      let visible = false;
+      vendor(async (url, init) => {
+        if (url.pathname.endsWith('/otel/v1/traces')) {
+          const body = JSON.parse(typeof init?.body === 'string' ? init.body : '') as {
+            resourceSpans: Array<{ scopeSpans: Array<{ spans: Array<{ spanId: string; traceId: string }> }> }>;
+          };
+          const [span] = body.resourceSpans[0]!.scopeSpans[0]!.spans;
+          objects.set(span!.traceId, span!.spanId);
+          return json(503, {});
+        }
+        const traceId = url.searchParams.get('traceId')!;
+        const { traceId: foundTrace } = await row(found.receiptId);
+        const holds = visible && traceId === foundTrace;
+        return json(200, { data: holds ? [{ id: objects.get(traceId) }] : [], meta: {} });
+      });
+      const delivery = service();
+      const now = new Date();
+
+      await delivery.drain(now);
+      expect(units()).toEqual([]);
+
+      visible = true;
+      await delivery.drain(new Date(now.getTime() + deliveryTiming.gapAfterMilliseconds + 1));
+
+      expect(await row(found.receiptId)).toMatchObject({ state: 'confirmed' });
+      expect(await row(lost.receiptId)).toMatchObject({ state: 'expired', reason: 'gap' });
+      expect(units()).toEqual([[1, { kind: 'observation' }]]);
+    });
   });
 
   it('should purge every held row at its retention', async () => {

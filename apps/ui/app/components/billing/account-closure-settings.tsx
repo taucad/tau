@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { Info, TriangleAlert } from 'lucide-react';
 import type { WireAccountClosure, WirePaymentAction } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -24,40 +24,48 @@ import {
   prepareAccountClosure,
 } from '#lib/billing-lifecycle-client.js';
 import { useFinancialSession } from '#providers/financial-session-provider.js';
+import { IconLine, supportEmail } from '#components/billing/billing-primitives.js';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */
 
 /**
  * What the card says after a failure and the one step it offers: `support` where only support can clear it, `review`
- * where the owner can finish or end the payment in the Add credits dialog.
+ * where the owner can finish or cancel the purchase in the Add credits dialog.
  */
 type Notice = { readonly copy: string; readonly next?: 'support' | 'review' };
-const statusFailed: Notice = { copy: 'Could not check account closure status.' };
-const closureFailed: Notice = { copy: 'Could not continue account closure. Try again.' };
-const waitNotice: Notice = { copy: 'A payment is still being processed. Closing waits for it; try again in a minute.' };
+const statusFailed: Notice = { copy: 'Couldn’t check whether your account is closing. Reload the page to try again.' };
+const closureFailed: Notice = { copy: 'Couldn’t close your account. Try again.' };
+const waitNotice: Notice = { copy: 'A payment is still processing. Wait a minute, then try again.' };
 const reloadNotice: Notice = {
-  copy: 'An automatic reload is in progress. It finishes or clears on its own in a few minutes; try again then.',
+  copy: 'Auto-reload is buying credits right now. Try again in a few minutes.',
 };
-const checkoutNotice: Notice = { copy: 'Finish your pending payment in Checkout first.', next: 'review' };
-// The refusal raced a payment that settled or was cancelled meanwhile; the next attempt goes through.
-const settledNotice: Notice = { copy: 'That payment is no longer pending. Try again.' };
+const checkoutNotice: Notice = {
+  copy: 'You have a payment to finish first. Finish it, then close your account.',
+  next: 'review',
+};
+// The refusal raced a payment that settled or was canceled meanwhile; the next attempt goes through.
+const settledNotice: Notice = { copy: 'That payment is done. Try again.' };
 // Also a refusal that carried no action (an adapter without `describeAction`, or a projection that failed): the safe
 // reading of anything the owner cannot finish from here.
 const heldNotice: Notice = {
-  copy: 'A payment needs attention before this account can close. Contact support if you cannot finish it.',
+  copy: `A payment needs to be sorted out before you can close your account. Email ${supportEmail} for help.`,
   next: 'support',
+};
+const unfinishedPurchaseNotice: Notice = {
+  copy: 'You have a credit purchase you haven’t finished. Finish or cancel it, then close your account.',
+  next: 'review',
 };
 /** Copy per wire state of a pending manual payment; not exhaustive, so a miss falls to `heldNotice`. */
 const manualNotice = new Map<WirePaymentAction['state'], Notice>([
-  ['prepared', { copy: 'Discard or finish your pending top-up quote first.', next: 'review' }],
-  ['redirect_required', { copy: 'Finish or cancel your pending payment first.', next: 'review' }],
+  ['prepared', unfinishedPurchaseNotice],
+  ['redirect_required', unfinishedPurchaseNotice],
   ['creating', waitNotice],
   ['processing', waitNotice],
   // Captured cash awaiting its grant: the sweep normally lands it, and only support can when it does not.
   [
     'funds_received',
     {
-      copy: 'Your payment was received and its credits are still being added. Closing waits for them; contact support if they do not arrive.',
+      copy: `We’re still adding credits from your last payment. Try again in a few minutes, or email ${supportEmail} if this doesn’t clear.`,
       next: 'support',
     },
   ],
@@ -89,11 +97,46 @@ const refusalNotice = (action: WirePaymentAction | undefined): Notice => {
 
 function SupportLink(): React.JSX.Element {
   return (
-    <a className='underline' href='mailto:help@tau.new'>
-      Contact support
+    <a className='underline' href={`mailto:${supportEmail}`}>
+      Email {supportEmail}
     </a>
   );
 }
+
+/** The row's title and description for each closure state, in the customer's words and never the wire state. */
+const closureRowCopy = (
+  closure: WireAccountClosure | undefined,
+): { readonly title: string; readonly description: string | undefined } => {
+  switch (closure?.state) {
+    case undefined: {
+      return { title: 'Close account', description: 'Cancel your plan now and permanently delete your account.' };
+    }
+    case 'ready_for_auth_deletion': {
+      return { title: 'Your plan is canceled', description: 'One step left. Deleting your account is permanent.' };
+    }
+    case 'attention': {
+      return {
+        title: 'We couldn’t close your account',
+        description:
+          closure.attention?.action === 'wait'
+            ? 'We’re still working on it. Check again in a few minutes.'
+            : 'Something needs fixing on our side. Email us and we’ll finish it for you.',
+      };
+    }
+    case 'closed': {
+      return { title: 'Your account is closed', description: undefined };
+    }
+    default: {
+      return { title: 'Closing your account', description: 'We’re canceling your plan. This can take a minute.' };
+    }
+  }
+};
+
+/** What to do instead of closing, shown as separate lines so each is read on its own. */
+const closureAlternatives = [
+  'To keep your plan until the end of the billing period, cancel the plan in Billing instead.',
+  `If you bought credits in the last 14 days and want a refund, email ${supportEmail} before you close.`,
+] as const;
 
 /** Prepares the durable financial tombstone before invoking Better Auth deletion. */
 export function AccountClosureSettings({
@@ -101,7 +144,7 @@ export function AccountClosureSettings({
   onReviewPayment,
 }: {
   readonly binding: PaymentActionBinding | undefined;
-  /** Opens the Add credits dialog, where a pending quote or Checkout can be finished or ended. */
+  /** Opens the Add credits dialog, where an unfinished purchase can be finished or canceled. */
   readonly onReviewPayment: () => void;
 }): React.JSX.Element {
   const financial = useFinancialSession();
@@ -174,6 +217,7 @@ export function AccountClosureSettings({
       }
     });
 
+  const rowCopy = closureRowCopy(closure);
   const control = closure ? (
     closure.state === 'ready_for_auth_deletion' ? (
       <Button
@@ -193,7 +237,7 @@ export function AccountClosureSettings({
           })
         }
       >
-        Delete my account
+        Delete account
       </Button>
     ) : ['closing', 'cancellation_pending', 'attention'].includes(closure.state) ? (
       <Button
@@ -217,7 +261,7 @@ export function AccountClosureSettings({
           })
         }
       >
-        Refresh closure status
+        Check again
       </Button>
     ) : undefined
   ) : (
@@ -236,16 +280,7 @@ export function AccountClosureSettings({
 
   return (
     <>
-      <SettingsRow
-        settingId='close-account'
-        title='Close account'
-        description={
-          closure
-            ? `Closure status: ${closure.state.replaceAll('_', ' ')}`
-            : 'Cancels your plan right away and lets you delete your account'
-        }
-        control={control}
-      >
+      <SettingsRow settingId='close-account' title={rowCopy.title} description={rowCopy.description} control={control}>
         {closure?.attention?.action === 'contact_support' ? <SupportLink /> : undefined}
         {notice && !isConfirming ? (
           <ClosureNotice
@@ -262,22 +297,27 @@ export function AccountClosureSettings({
           <AlertDialogHeader>
             <AlertDialogTitle>Close your account?</AlertDialogTitle>
             <AlertDialogDescription>
-              Paid usage stops and your plan is cancelled right away. To keep your plan until the end of your billing
-              period, cancel it in Billing instead. Remaining credits are forfeited, so request any refund of a recent
-              top-up first.
+              Your plan ends now and you lose any credits you have left. This can’t be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <ul className='flex flex-col gap-2 text-sm text-muted-foreground'>
+            {closureAlternatives.map((alternative) => (
+              <li key={alternative}>
+                <IconLine icon={<Info aria-hidden='true' className='size-4' />}>{alternative}</IconLine>
+              </li>
+            ))}
+          </ul>
           <div className='flex items-start gap-2 text-sm'>
             <Checkbox
               id={confirmationId}
-              className='mt-0.5'
+              className='mt-[calc((1lh-1rem)/2)]'
               checked={confirmed}
               onCheckedChange={(checked) => {
                 setConfirmed(checked === true);
               }}
             />
             <Label htmlFor={confirmationId} className='leading-snug font-normal'>
-              I want to close my account.
+              I understand I’ll lose my remaining credits.
             </Label>
           </div>
           {notice ? (
@@ -313,14 +353,15 @@ function ClosureNotice({
   return (
     <div className='flex flex-col items-start gap-1 text-sm'>
       {/* The live region holds the sentence alone; colour marks only the glyph, and the step sits outside it. */}
-      <p role='alert' aria-label='Account closure notice' className='flex items-start gap-1.5'>
-        <AlertTriangle aria-hidden className='mt-0.5 size-4 shrink-0 text-warning' strokeWidth={1.5} />
-        <span>{notice.copy}</span>
+      <p role='alert' aria-label='Account closure notice'>
+        <IconLine icon={<TriangleAlert aria-hidden='true' className='size-4 text-warning' strokeWidth={1.5} />}>
+          {notice.copy}
+        </IconLine>
       </p>
       {notice.next === 'support' ? <SupportLink /> : undefined}
       {notice.next === 'review' ? (
         <Button variant='outline' size='sm' onClick={onReview}>
-          Open Add credits
+          Go to purchase
         </Button>
       ) : undefined}
     </div>

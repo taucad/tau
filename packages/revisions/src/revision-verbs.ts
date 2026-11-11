@@ -59,11 +59,10 @@ export type RevisionRow = Readonly<{
    *
    * History folds consecutive `idle`, `hidden` and `close` rows into one
    * *n autosaves* row (A20), and only the trigger can tell an autosave from a
-   * `save` the person asked for. Derived at read like `tags` (I3), and
-   * `undefined` for a revision written before the vocabulary existed — which is
-   * also why the field is optional: a fixture that predates it is still a row.
+   * `save` the person asked for. Read from the trailer's `capture` (B1), and
+   * `undefined` for a commit Tau did not record.
    */
-  trigger?: RevisionProvenance['trigger'];
+  trigger?: RevisionProvenance['capture'];
   /**
    * The revision a restore brought back (D1), by id.
    *
@@ -275,14 +274,15 @@ const rowOf = (
     revisionId: entry.id,
     changeId: entry.changeId,
     treeId: entry.treeId,
-    actor: entry.provenance.actorId,
+    /* B2 types this row's who; until then a commit Tau did not record reads as `unknown`, as before B1. */
+    actor: entry.provenance.actor?.id ?? 'unknown',
     source: entry.provenance.source,
     createdAt: entry.provenance.createdAt,
     summary: entry.summary.edited ?? entry.summary.generated,
     conflicted: entry.conflicted,
     turnId: entry.provenance.turnId,
     tags,
-    trigger: entry.provenance.trigger,
+    trigger: entry.provenance.capture,
     ...(entry.provenance.restoredFrom === undefined ? {} : { restoredFrom: entry.provenance.restoredFrom }),
     ...(entry.parents[0] === undefined ? {} : { parent: entry.parents[0] }),
     ...(entry.parents.length > 1 ? { otherParents: Object.freeze(entry.parents.slice(1)) } : {}),

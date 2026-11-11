@@ -13,10 +13,11 @@ import {
   generatedIgnorePath,
 } from '#workspace-config.js';
 import type { RevisionHttpClient, RevisionHttpRequest, RevisionHttpResponse } from '#http-client.js';
+import { recordedBy } from '#test/identity.js';
 
 const encoder = new TextEncoder();
 const author = { name: 'Tau', email: 'noreply@tau.new' };
-const provenance = { source: 'user', actorId: 'tag-lock-test', createdAt: 1_756_742_400_000 } as const;
+const provenance = { source: 'user', ...recordedBy('tag-lock-test'), createdAt: 1_756_742_400_000 } as const;
 const providers: MemoryProvider[] = [];
 
 afterEach(() => {

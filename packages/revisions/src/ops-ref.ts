@@ -24,7 +24,12 @@ import { randomUuid } from '@taucad/utils/id';
 
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { CheckoutCutTrigger } from '#checkout.machine.js';
-import type { RevisionActor, RevisionProvenance, RevisionUserActor } from '#revision-authority.js';
+import type {
+  RevisionActor,
+  RevisionCaptureIdentity,
+  RevisionProvenance,
+  RevisionUserActor,
+} from '#revision-authority.js';
 import { controlPlaneFiles, jsonRecord, readControlRecord, writeControlRecord } from '#control-plane-records.js';
 import type { RevisionFileSystem } from '#revision-effects.types.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -251,8 +256,8 @@ export const createOpsLog = (
     port: RevisionPort;
     recordsFileSystem: () => Promise<RevisionFileSystem>;
     now: () => number;
-    /** The id a revision with no resolved actor is committed under. */
-    actorId: string;
+    /** Who this host's captures are by (B1): an append whose form has no person is committed as this host's. */
+    identity: RevisionCaptureIdentity;
   }>,
 ): OpsLog => {
   const { port, recordsFileSystem, now } = dependencies;
@@ -404,10 +409,13 @@ export const createOpsLog = (
       bytes.set(added, before?.byteLength ?? 0);
       segments.set(index, bytes);
     }
+    /* A record commit, never history, but still attributed: to the form's person, else this host's (B1, I1). */
+    const host = dependencies.identity.resolve({ runId: undefined, trigger: 'save' });
     const provenance: RevisionProvenance = Object.freeze({
       source: 'user',
-      actorId: person?.id ?? dependencies.actorId,
-      ...(person === undefined ? {} : { actor: person }),
+      actor: person ?? (host.kind === 'agent' ? host.onBehalfOf : host),
+      capture: 'save',
+      via: dependencies.identity.via,
       createdAt: now(),
     });
     /* ponytail: the port takes whole trees, so each append reads and re-hashes

@@ -24,6 +24,7 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { RevisionPort } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
+import { recordedBy, testIdentity } from '#test/identity.js';
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
 
@@ -185,9 +186,16 @@ const fixture = async (
           },
         }
       : {};
-  const actors = createRevisionActors({ port, projectId: 'project-1', filesystem: async () => counted(), ...clock });
+  const actors = createRevisionActors({
+    identity: testIdentity,
+    port,
+    projectId: 'project-1',
+    filesystem: async () => counted(),
+    ...clock,
+  });
   /* The same files captured by walking, with no index to ask: what every incremental cut must hash to. */
   const walking = createRevisionActors({
+    identity: testIdentity,
     port,
     projectId: 'project-1',
     filesystem: async () => Object.assign(Object.create(rooted) as RevisionFileSystem, { changedSince: undefined }),
@@ -273,7 +281,7 @@ const moveHead = async (at: Fixture, entries: ReadonlyArray<readonly [string, st
   const receipt = await at.port.writeRevision({
     parents: head === undefined ? [] : [head],
     tree: new ImmutableRevisionTree(entries),
-    provenance: { source: 'user', actorId: 'actor-1', runId: 'run-1', createdAt: Date.UTC(2026, 10, 7) },
+    provenance: { source: 'user', ...recordedBy('actor-1'), runId: 'run-1', createdAt: Date.UTC(2026, 10, 7) },
     summary: { generated: 'Moved' },
   });
   await at.port.updateRef({ name: 'main', expectedHead: head, head: revisionId(receipt.commitId) });

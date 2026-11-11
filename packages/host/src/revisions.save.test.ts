@@ -74,7 +74,13 @@ const remoteWithOneRevision = async (
         `${JSON.stringify({ $schema: legacy ? 'https://tau.new/schemas/tau-schema-v1.json' : 'https://tau.new/schemas/tau-v1.json', ...(legacy ? { id: projectId } : {}), name: 'Save', description: '', tags: [], assets: { main: { entryPath: 'part.ts' } } })}\n`,
       ],
     ]),
-    provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 26) },
+    provenance: {
+      source: 'user',
+      actor: { kind: 'user', id: 'ada' },
+      capture: 'save',
+      via: 'desktop',
+      createdAt: Date.UTC(2026, 8, 26),
+    },
     summary: { generated: 'First device' },
   });
   await port.updateRef({ name: 'refs/heads/main', expectedHead: undefined, head: revisionId(receipt.commitId) });
@@ -91,7 +97,8 @@ const remoteWithOneRevision = async (
       deviceId: 'browser-fixture',
       chatId: 'chat-remote',
       syncChats: true,
-      actorId: 'ada',
+      actor: { kind: 'user', id: 'ada' },
+      via: 'desktop',
       now: Date.UTC(2026, 8, 26),
     });
     await port.push({ remote: 'tau', atomic: true, refs: [{ name: recorded.ref }] });

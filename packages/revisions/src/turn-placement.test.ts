@@ -26,6 +26,7 @@ import type { ProjectRevisions, RevisionFileSystem } from '#revision-effects.js'
 import { createTurnPlacementPort } from '#turn-placement.js';
 import type { TurnPlacementAdapter } from '#turn-placement.js';
 import type { TurnAttemptKey } from '#turn.types.js';
+import { recordedBy, testIdentity } from '#test/identity.js';
 
 const roots: string[] = [];
 const stops: Array<() => Promise<void>> = [];
@@ -108,6 +109,7 @@ const createProject = async (withAuthority = false): Promise<Project> => {
     open: (options: Readonly<{ deviceId?: () => string | undefined; revisionPort?: RevisionPort }> = {}) => {
       const { deviceId } = options;
       const revisions = createProjectRevisionsActor({
+        identity: testIdentity,
         port: options.revisionPort ?? port,
         projectId: 'project-1',
         ...(deviceId === undefined ? {} : { deviceId }),
@@ -219,7 +221,7 @@ const commitBranch = async (
       Object.entries(files).map(([path, text]) => [path, new TextEncoder().encode(text)]),
     ),
     parents: parent === undefined ? [] : [revisionId(parent)],
-    provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+    provenance: { source: 'user', ...recordedBy('person-1'), createdAt: 1 },
     summary: { generated: branch },
   });
   const head = await port.readRef(branch);
@@ -877,6 +879,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
     const opened: string[] = [];
     const revisions = createProjectRevisionsActor({
+      identity: testIdentity,
       port: project.port,
       projectId: 'project-1',
       filesystem: () => project.filesystem,
@@ -1283,6 +1286,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     const project = await createProject();
     await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
     const revisions = createProjectRevisionsActor({
+      identity: testIdentity,
       port: project.port,
       projectId: 'project-1',
       filesystem: () => project.filesystem,
@@ -1319,6 +1323,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
   it("should wait for the host's settle before it admits and before it cuts the completion", async () => {
     const project = await createProject();
     const revisions = createProjectRevisionsActor({
+      identity: testIdentity,
       port: project.port,
       projectId: 'project-1',
       filesystem: () => project.filesystem,
@@ -1385,6 +1390,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
       },
     });
     const revisions = createProjectRevisionsActor({
+      identity: testIdentity,
       port: project.port,
       projectId: 'project-1',
       filesystem: () => slow,
@@ -1453,6 +1459,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
       },
     });
     const revisions = createProjectRevisionsActor({
+      identity: testIdentity,
       port: project.port,
       projectId: 'project-1',
       filesystem: () => slow,
@@ -1501,6 +1508,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
         ]),
       ) as unknown as RevisionPort;
       const revisions = createProjectRevisionsActor({
+        identity: testIdentity,
         port: gated,
         projectId: 'project-1',
         filesystem: () => project.filesystem,

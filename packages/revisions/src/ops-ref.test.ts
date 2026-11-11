@@ -14,6 +14,7 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createOpsLog, opsRefName, opsRefPrefix, undoCandidates } from '#ops-ref.js';
 import type { OpsEntry } from '#ops-ref.js';
 import type { RevisionUserActor } from '#revision-authority.js';
+import { recordedBy, testIdentity } from '#test/identity.js';
 
 const roots: string[] = [];
 
@@ -77,7 +78,7 @@ describe('createOpsLog', () => {
     const port = createIsomorphicGitRevisionPort({ filesystem });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
     const open = () =>
-      createOpsLog({ port, recordsFileSystem: async () => filesystem, now: () => 2, actorId: 'tau-host' });
+      createOpsLog({ port, recordsFileSystem: async () => filesystem, now: () => 2, identity: testIdentity });
     return { port, open, filesystem };
   };
 
@@ -110,7 +111,7 @@ describe('createOpsLog', () => {
     const tree = await port.readTree(head!);
     expect(tree?.entries().map((file) => file.path)).toEqual([`events/${pseudonymDevice}.jsonl`]);
     const commit = await port.readRevision(head!);
-    expect(commit?.provenance.actorId).toBe(pseudonym.id);
+    expect(commit?.provenance.actor?.id).toBe(pseudonym.id);
   });
 
   it('reads the same record devices back in a new session', async () => {
@@ -165,7 +166,7 @@ describe('createOpsLog', () => {
       parents: [],
       tree: new ImmutableRevisionTree([[`events/${device}.jsonl`, sealed]]),
       largeObjects: false,
-      provenance: { source: 'user', actorId: account.id, createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy(account.id), createdAt: 1 },
       summary: { generated: 'Operation log' },
     });
     await port.updateRef({ name: opsRefName(device), expectedHead: undefined, head: revisionId(receipt.commitId) });

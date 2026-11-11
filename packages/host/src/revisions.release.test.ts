@@ -25,6 +25,7 @@ it('should refuse release when the pending queue cannot be written and keep the 
     await write(path, data);
   });
   const revisions = createProjectRevisions({
+    via: 'desktop',
     workspaceRoot,
     projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
     watchWorkspace: false,

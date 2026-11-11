@@ -23,6 +23,7 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { RevisionPort } from '#revision-port.js';
 import { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { recordedBy } from '#test/identity.js';
 
 /* Every commit object the browser leg reads goes through `readObject`. */
 const objectReads = vi.hoisted(() => ({ count: 0 }));
@@ -62,7 +63,7 @@ const record = async (
   const receipt = await port.writeRevision({
     parents: options.parents,
     tree: new ImmutableRevisionTree([['part.ts', options.content]]),
-    provenance: { source: 'user', actorId: options.actorId, createdAt },
+    provenance: { source: 'user', ...recordedBy(options.actorId), createdAt },
     summary: { generated: options.summary },
   });
   return revisionId(receipt.commitId);
@@ -98,14 +99,14 @@ describe('revision verbs', () => {
     const saved = await port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['part.ts', 'one']]),
-      provenance: { source: 'user', actorId: 'ada', trigger: 'save', createdAt },
+      provenance: { source: 'user', ...recordedBy('ada'), capture: 'save', createdAt },
       summary: { generated: 'Saved' },
     });
     const savedId = revisionId(saved.commitId);
     const idle = await port.writeRevision({
       parents: [savedId],
       tree: new ImmutableRevisionTree([['part.ts', 'two']]),
-      provenance: { source: 'user', actorId: 'ada', trigger: 'idle', createdAt },
+      provenance: { source: 'user', ...recordedBy('ada'), capture: 'idle', createdAt },
       summary: { generated: 'Autosaved' },
     });
     await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(idle.commitId) });
@@ -122,13 +123,13 @@ describe('revision verbs', () => {
     const before = await port.writeRevision({
       parents: [first],
       tree: new ImmutableRevisionTree([['part.ts', 'late']]),
-      provenance: { source: 'user', actorId: 'ada', trigger: 'restore', createdAt },
+      provenance: { source: 'user', ...recordedBy('ada'), capture: 'restore', createdAt },
       summary: { generated: 'Saved changes (restore)' },
     });
     const restored = await port.writeRevision({
       parents: [revisionId(before.commitId)],
       tree: new ImmutableRevisionTree([['part.ts', 'one']]),
-      provenance: { source: 'restore', actorId: 'ada', trigger: 'restore', restoredFrom: first, createdAt },
+      provenance: { source: 'restore', ...recordedBy('ada'), capture: 'restore', restoredFrom: first, createdAt },
       summary: { generated: 'Restored Rev 1' },
     });
     await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(restored.commitId) });
@@ -259,7 +260,7 @@ describe('revision verbs', () => {
       const receipt = await port.writeRevision({
         parents: head === undefined ? [] : [head],
         tree: new ImmutableRevisionTree([['part.ts', `export const part = ${String(index)};\n`]]),
-        provenance: { source: 'user', actorId, createdAt: createdAt + index * 1000 },
+        provenance: { source: 'user', ...recordedBy(actorId), createdAt: createdAt + index * 1000 },
         summary: { generated: `Rev ${String(index + 1)}` },
       });
       // oxlint-disable-next-line no-await-in-loop -- the ref follows each revision.
@@ -283,7 +284,7 @@ describe('revision verbs', () => {
     const receipt = await port.writeRevision({
       parents: [head],
       tree: new ImmutableRevisionTree([['part.ts', 'export const part = "minted";\n']]),
-      provenance: { source: 'user', actorId: 'e6-page', createdAt: createdAt + 200_000 },
+      provenance: { source: 'user', ...recordedBy('e6-page'), createdAt: createdAt + 200_000 },
       summary: { generated: 'Minted' },
     });
     await port.updateRef({ name: 'main', expectedHead: head, head: revisionId(receipt.commitId) });

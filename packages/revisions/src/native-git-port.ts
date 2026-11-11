@@ -23,7 +23,7 @@ import { ResourceQueue } from '@taucad/filesystem';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileMode } from '@taucad/filesystem';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
-import type { RevisionProvenance } from '#revision-authority.js';
+import type { RecordedProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
 import type { DecodedCommit } from '#git-objects.js';
 import { CommandAbortedError, runGitCommand } from '#git-command.js';
@@ -539,9 +539,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     const trailer = parseRevisionCommitMessage(commit.message);
     /* A project Tau did not write carries no trailer, and its date is still the
      * one git shows: the commit's own author time. */
-    const unattributed: RevisionProvenance = {
+    const unattributed: RecordedProvenance = {
       source: 'import',
-      actorId: 'unknown',
       createdAt: commit.author.seconds * 1000,
     };
     return Object.freeze({

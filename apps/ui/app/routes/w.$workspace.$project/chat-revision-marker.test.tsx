@@ -242,7 +242,12 @@ describe('ChatRevisionMarker', () => {
         checkouts: { projectId: 'project-1', root: () => filesystem },
       });
       await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
-      const revisions = createProjectRevisionsActor({ port, projectId: 'project-1', filesystem: () => filesystem });
+      const revisions = createProjectRevisionsActor({
+        port,
+        identity: { via: 'browser', resolve: () => ({ kind: 'user', id: 'usr_test' }) },
+        projectId: 'project-1',
+        filesystem: () => filesystem,
+      });
       revisions.actor.start();
       const toolsReady = Promise.withResolvers<RevisionFileSystem>();
       const running = Promise.withResolvers<void>();

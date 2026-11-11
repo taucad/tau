@@ -59,9 +59,9 @@ describe.runIf(gitToolchainOnPath)('attribution on a clone of a Tau project', ()
       tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
       provenance: {
         source: 'user',
-        actorId: 'user-lane',
         actor: { kind: 'user', id: 'user-lane', name: 'Lane Person', email: 'lane@example.com' },
-        trigger: 'save',
+        capture: 'save',
+        via: 'desktop',
         createdAt: Date.UTC(2026, 8, 8, 12, 0, 0),
       },
       summary: { generated: 'First revision' },
@@ -95,9 +95,9 @@ describe.runIf(gitToolchainOnPath)('attribution on a clone of a Tau project', ()
       tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
       provenance: {
         source: 'user',
-        actorId: 'anon:1a2b3c4d',
         actor: { kind: 'user', id: 'anon:1a2b3c4d', name: 'Anonymous', anonymous: true },
-        trigger: 'save',
+        capture: 'save',
+        via: 'desktop',
         createdAt: Date.UTC(2026, 8, 8, 12, 0, 0),
       },
       summary: { generated: 'First revision' },
@@ -153,7 +153,7 @@ describe.runIf(gitToolchainOnPath)('a Node host records the account it is handed
       filesystem: new NodeFsProvider(workspaceRoot),
       checkouts: { projectId, root: () => new NodeFsProvider(workspaceRoot) },
     });
-    const revisions = createProjectRevisions({ workspaceRoot, projectId, port });
+    const revisions = createProjectRevisions({ via: 'desktop', workspaceRoot, projectId, port });
     let liveCheckoutId: string | undefined;
     const { changed } = revisions;
     Object.assign(revisions, {
@@ -199,6 +199,7 @@ describe.runIf(gitToolchainOnPath)('a Node host records the account it is handed
     const workspaceRoot = await workspace();
     await configDirectory();
     const revisions = createProjectRevisions({
+      via: 'desktop',
       workspaceRoot,
       projectId: 'project-bad-actor',
       watchWorkspace: false,
@@ -286,10 +287,10 @@ describe.runIf(gitToolchainOnPath)('a cloud host records the owner it runs for',
       tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
       provenance: {
         source: 'agent',
-        actorId: turnActor?.id ?? '',
+        actor: turnActor,
+        capture: 'turn',
+        via: 'cloud',
         runId: 'run-1',
-        ...(turnActor === undefined ? {} : { actor: turnActor }),
-        trigger: 'turn',
         createdAt: Date.UTC(2026, 8, 27, 12, 0, 0),
       },
       summary: { generated: 'Agent turn' },
@@ -313,6 +314,7 @@ describe('the Node host observes its own workspace', () => {
     const workspaceRoot = await workspace();
     const raised: Array<readonly string[]> = [];
     const revisions = createProjectRevisions({
+      via: 'desktop',
       workspaceRoot,
       projectId: 'project-watch',
       port: createNativeGitRevisionPort({

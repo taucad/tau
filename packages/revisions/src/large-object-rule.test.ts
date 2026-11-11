@@ -29,9 +29,10 @@ import {
   generatedIgnoreContent,
   generatedIgnorePath,
 } from '#workspace-config.js';
+import { recordedBy } from '#test/identity.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
-const provenance = { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 10, 7) } as const;
+const provenance = { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 10, 7) } as const;
 const encoder = new TextEncoder();
 const part = encoder.encode('solid part\n'.repeat(256));
 const { bytes: pointerBytes } = lfsPointerFor(part);

@@ -34,7 +34,7 @@ import type { FileSystemProvider } from '@taucad/filesystem';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { equalBytes } from '#object-hash.js';
 
-import type { RevisionActor, RevisionProvenance } from '#revision-authority.js';
+import type { RevisionIdentity, RevisionProvenance, RevisionVia } from '#revision-authority.js';
 import { remoteTrackingRef } from '#remotes.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPort, RevisionPushRef } from '#revision-port.js';
@@ -202,9 +202,10 @@ export type WriteChatRefInput = ChatRefContext &
      * (W13); this is the guard that makes the narrowing unnecessary.
      */
     syncChats: boolean;
-    /** Who the commit is by (D18). */
-    actor?: RevisionActor;
-    actorId: string;
+    /** Who the commit is by (D18; B1: required, no fallback id). */
+    actor: RevisionIdentity;
+    /** Which Tau leg records it (B1). */
+    via: RevisionVia;
     /** Milliseconds since the Unix epoch. Defaults to the host clock. */
     now?: number;
     /**
@@ -745,8 +746,10 @@ const writeEntries = async (
 const chatProvenance = (input: WriteChatRefInput, now: number): RevisionProvenance =>
   Object.freeze({
     source: 'user',
-    actorId: input.actorId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
+    actor: input.actor,
+    /* A record commit: nothing asked for it but the save path that syncs chats. */
+    capture: 'save',
+    via: input.via,
     createdAt: now,
   });
 

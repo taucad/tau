@@ -124,7 +124,12 @@ export async function prepareLinkedGithubImport({
     );
   }
   const author = githubNoreplyAuthor(selection.connection.subject, selection.connection.login);
-  const actorId = getRevisionSessionUser()?.id ?? `github:${String(selection.connection.subject)}`;
+  /* B1, I1: the Tau person who linked it, and no stand-in. A GitHub connection
+   * belongs to a signed-in account, so there is always one to name. */
+  const person = getRevisionSessionUser();
+  if (person === undefined) {
+    throw new Error('Sign in to Tau to import a repository from GitHub.');
+  }
   const credential = await githubConnections.token(selection.connection.id, {
     repositoryId: selection.repository.id,
     operation: 'read',
@@ -168,9 +173,9 @@ export async function prepareLinkedGithubImport({
       provenance: {
         source: 'import',
         /* The Tau person who linked it, so History reads it as theirs (D33). */
-        actorId,
-        actor: { kind: 'user', id: actorId, ...author },
-        trigger: 'save',
+        actor: { kind: 'user', id: person.id, ...author },
+        capture: 'save',
+        via: 'browser',
         createdAt: Date.now(),
       },
       summary: { generated: 'Set up this repository as a Tau project' },

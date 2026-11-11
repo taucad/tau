@@ -38,6 +38,7 @@ import { startGitHttpBackend } from '#test/git-http-backend.js';
 import type { RevisionId } from '#algorithms/index.js';
 import type { RevisionPort } from '#revision-port.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { recordedBy } from '#test/identity.js';
 
 const decoder = new TextDecoder();
 const projectId = 'project-chat-refs';
@@ -179,7 +180,7 @@ describe.each([
       deviceId,
       chatId,
       syncChats,
-      actorId,
+      ...recordedBy(actorId),
       now,
     });
 
@@ -238,7 +239,7 @@ describe.each([
       deviceId: 'device-a',
       chatId: offChat,
       syncChats: false,
-      actorId,
+      ...recordedBy(actorId),
       now,
     });
     expect(refused.status).toBe('disabled');
@@ -255,7 +256,7 @@ describe.each([
       deviceId: 'device-a',
       chatId: emptyChat,
       syncChats: true,
-      actorId,
+      ...recordedBy(actorId),
       now,
     });
     expect(written).toMatchObject({ status: 'upToDate', head: undefined });
@@ -280,7 +281,7 @@ describe.each([
       deviceId: 'device-a',
       chatId: adoptedChat,
       syncChats: true,
-      actorId,
+      ...recordedBy(actorId),
       now,
     });
     const tree = await harness.port.readTree(orphan.head!);
@@ -290,7 +291,7 @@ describe.each([
       parents: [],
       tree: tree!,
       largeObjects: false,
-      provenance: { source: 'user', actorId, createdAt: now + 1 },
+      provenance: { source: 'user', ...recordedBy(actorId), createdAt: now + 1 },
       summary: { generated: `Chat ${adoptedChat}` },
     });
 
@@ -300,7 +301,7 @@ describe.each([
       deviceId: 'device-a',
       chatId: adoptedChat,
       syncChats: true,
-      actorId,
+      ...recordedBy(actorId),
       now,
       onto: revisionId(fetched.commitId),
     });
@@ -357,7 +358,7 @@ describe.each([
     const commit = await harness.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['events/device-a.jsonl', first]]),
-      provenance: { source: 'user', actorId, createdAt: now },
+      provenance: { source: 'user', ...recordedBy(actorId), createdAt: now },
       summary: { generated: 'Pulled' },
     });
     const references = [{ name: chatRefName(id), head: revisionId(commit.commitId) }];
@@ -393,7 +394,7 @@ describe.each([
     const grown = await harness.port.writeRevision({
       parents: [revisionId(commit.commitId)],
       tree: new ImmutableRevisionTree([['events/device-a.jsonl', second]]),
-      provenance: { source: 'user', actorId, createdAt: now + 1 },
+      provenance: { source: 'user', ...recordedBy(actorId), createdAt: now + 1 },
       summary: { generated: 'Grown' },
     });
     await pull(now + 3_610_000, [{ name: chatRefName(id), head: revisionId(grown.commitId) }]);
@@ -439,7 +440,7 @@ describe.each([
     const old = await harness.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n']]),
-      provenance: { source: 'user', actorId, createdAt: now },
+      provenance: { source: 'user', ...recordedBy(actorId), createdAt: now },
       summary: { generated: 'Old segment' },
     });
     const oldHead = revisionId(old.commitId);
@@ -448,7 +449,7 @@ describe.each([
       tree: new ImmutableRevisionTree([
         ['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n{"leaderEpoch":"a","sequence":1}\n'],
       ]),
-      provenance: { source: 'user', actorId, createdAt: now + 1 },
+      provenance: { source: 'user', ...recordedBy(actorId), createdAt: now + 1 },
       summary: { generated: 'Longer segment' },
     });
     const longerHead = revisionId(longer.commitId);
@@ -475,7 +476,7 @@ describe.each([
       tree: new ImmutableRevisionTree([
         ['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n{"different":true}\n'],
       ]),
-      provenance: { source: 'user', actorId, createdAt: now + 2 },
+      provenance: { source: 'user', ...recordedBy(actorId), createdAt: now + 2 },
       summary: { generated: 'Divergent segment' },
     });
     await expect(
@@ -496,14 +497,14 @@ describe.each([
     const first = await harness.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['chat.json', '{"name":"First"}']]),
-      provenance: { source: 'user', actorId, createdAt: now },
+      provenance: { source: 'user', ...recordedBy(actorId), createdAt: now },
       summary: { generated: 'First metadata' },
     });
     const firstHead = revisionId(first.commitId);
     const renamed = await harness.port.writeRevision({
       parents: [firstHead],
       tree: new ImmutableRevisionTree([['chat.json', '{"name":"Renamed remotely"}']]),
-      provenance: { source: 'user', actorId, createdAt: now + 1 },
+      provenance: { source: 'user', ...recordedBy(actorId), createdAt: now + 1 },
       summary: { generated: 'Renamed metadata' },
     });
     const target = await createMemoryProvider();
@@ -539,7 +540,7 @@ describe.each([
     const base = await harness.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['chat.json', JSON.stringify(records.base)]]),
-      provenance: { source: 'user', actorId, createdAt: now },
+      provenance: { source: 'user', ...recordedBy(actorId), createdAt: now },
       summary: { generated: 'Base record' },
     });
     const incoming = await harness.port.writeRevision({
@@ -548,7 +549,7 @@ describe.each([
         ['chat.json', JSON.stringify(records.incoming)],
         ['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n'],
       ]),
-      provenance: { source: 'user', actorId, createdAt: now + 1 },
+      provenance: { source: 'user', ...recordedBy(actorId), createdAt: now + 1 },
       summary: { generated: 'Incoming record' },
     });
     const target = await createMemoryProvider();
@@ -598,7 +599,7 @@ describe.each([
     const written = await harness.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['chat.json', JSON.stringify(record)], ...extra]),
-      provenance: { source: 'user', actorId, createdAt: now },
+      provenance: { source: 'user', ...recordedBy(actorId), createdAt: now },
       summary: { generated: 'Purge record' },
     });
     return revisionId(written.commitId);
@@ -755,7 +756,7 @@ describe.each([
       deviceId: 'device-b',
       chatId: id,
       syncChats: true,
-      actorId,
+      ...recordedBy(actorId),
       now,
       onto: base,
     });
@@ -799,7 +800,7 @@ describe.each([
       deviceId: 'device-b',
       chatId: id,
       syncChats: true,
-      actorId,
+      ...recordedBy(actorId),
       now,
       onto: base,
     });
@@ -880,7 +881,7 @@ describe.each([
       deviceId: 'device-a',
       chatId: id,
       syncChats: true,
-      actorId,
+      ...recordedBy(actorId),
       now,
     });
 
@@ -916,7 +917,14 @@ describe.each([
   it.runIf(enabled)('keeps the earlier form’s segment beside the new one after a sign-in', async () => {
     const id = `signin_${_engine}`;
     await writeChatFiles(harness.checkout, { 'chat.json': '{"name":"Chat"}', 'events.jsonl': 'A0\n' }, id);
-    const signedOut = { port: harness.port, filesystem: harness.checkout, chatId: id, syncChats: true, actorId, now };
+    const signedOut = {
+      port: harness.port,
+      filesystem: harness.checkout,
+      chatId: id,
+      syncChats: true,
+      ...recordedBy(actorId),
+      now,
+    };
     await writeChatRef({ ...signedOut, deviceId: 'form-pseudonym' });
     await writeChatFiles(harness.checkout, { 'events.jsonl': 'A0\nA1\n' }, id);
 
@@ -940,7 +948,7 @@ describe.each([
       deviceId: 'device-a',
       chatId: id,
       syncChats: true,
-      actorId,
+      ...recordedBy(actorId),
       now,
     });
     /* A first chat ref has no parent, so the incoming commit names no base of its own. */
@@ -1001,7 +1009,7 @@ describe.each([
         ['events.jsonl', 'remote live log\n'],
         ['events/device-a.jsonl', 'remote segment\n'],
       ]),
-      provenance: { source: 'user', actorId, createdAt: now },
+      provenance: { source: 'user', ...recordedBy(actorId), createdAt: now },
       summary: { generated: 'Malformed chat' },
     });
 
@@ -1031,7 +1039,7 @@ describe.each([
         [imagePath, imageBytes],
         [documentPath, documentBytes],
       ]),
-      provenance: { source: 'user', actorId, createdAt: now },
+      provenance: { source: 'user', ...recordedBy(actorId), createdAt: now },
       summary: { generated: 'Chat with attachments' },
     });
     const target = await createMemoryProvider();
@@ -1056,7 +1064,7 @@ describe.each([
           ['chat.json', '{"name":"remote"}'],
           [path, imageBytes],
         ]),
-        provenance: { source: 'user', actorId, createdAt: now },
+        provenance: { source: 'user', ...recordedBy(actorId), createdAt: now },
         summary: { generated: `Chat carrying ${path}` },
       });
       await expect(
@@ -1100,7 +1108,7 @@ describe.each([
           ['chat.json', '{"name":"old"}'],
           ['events/other.jsonl', 'old remote segment\n'],
         ]),
-        provenance: { source: 'user', actorId, createdAt: now },
+        provenance: { source: 'user', ...recordedBy(actorId), createdAt: now },
         summary: { generated: 'Old chat' },
       });
       const oldHead = revisionId(old.commitId);
@@ -1121,7 +1129,7 @@ describe.each([
         deviceId: 'mine',
         chatId: staleChat,
         syncChats: true,
-        actorId,
+        ...recordedBy(actorId),
         now,
       });
       expect(written.status).toBe('updated');
@@ -1170,7 +1178,7 @@ describe.each([
       deviceId: 'device-b',
       chatId,
       syncChats: true,
-      actorId,
+      ...recordedBy(actorId),
       now,
       onto: revisionId(remoteHead!),
     });
@@ -1219,7 +1227,7 @@ describe.each([
       deviceId: 'device-c',
       chatId,
       syncChats: true,
-      actorId,
+      ...recordedBy(actorId),
       now,
       onto: before,
     });
@@ -1270,7 +1278,7 @@ describe.runIf(gitToolchainOnPath)('two devices, two stores, one remote', () => 
       deviceId,
       chatId: sharedChatId,
       syncChats: true,
-      actorId,
+      ...recordedBy(actorId),
       now,
     });
 
@@ -1313,7 +1321,7 @@ describe.runIf(gitToolchainOnPath)('two devices, two stores, one remote', () => 
       deviceId: 'device-b',
       chatId: sharedChatId,
       syncChats: true,
-      actorId,
+      ...recordedBy(actorId),
       now,
       onto: remoteHead,
     });
@@ -1370,7 +1378,7 @@ describe.runIf(gitToolchainOnPath)('two devices, two stores, one remote', () => 
         deviceId,
         chatId: receivedId,
         syncChats: true,
-        actorId,
+        ...recordedBy(actorId),
         now,
         remote: 'origin',
       });
@@ -1445,7 +1453,7 @@ describe.runIf(gitToolchainOnPath)('two devices, two stores, one remote', () => 
       deviceId: 'device-a',
       chatId: sharedChatId,
       syncChats: true,
-      actorId,
+      ...recordedBy(actorId),
       now,
       onto: base,
     });
@@ -1478,7 +1486,7 @@ describe.runIf(gitToolchainOnPath)('two devices, two stores, one remote', () => 
       deviceId: 'device-a',
       chatId: sharedChatId,
       syncChats: true,
-      actorId,
+      ...recordedBy(actorId),
       now,
       onto: withAttachments.head,
     });
@@ -1518,7 +1526,7 @@ describe.runIf(gitToolchainOnPath)('two devices, two stores, one remote', () => 
         deviceId,
         chatId: purgedId,
         syncChats: true,
-        actorId,
+        ...recordedBy(actorId),
         now,
         remote: 'origin',
       });
@@ -1615,7 +1623,7 @@ describe.runIf(gitToolchainOnPath)('two devices, two stores, one remote', () => 
       deviceId: 'device-b',
       chatId: purgedId,
       syncChats: true,
-      actorId,
+      ...recordedBy(actorId),
       now,
       onto: remoteHead,
     });
@@ -1651,7 +1659,7 @@ describe('projectChats fan-out', () => {
         const receipt = await inner.writeRevision({
           parents: [],
           tree: new ImmutableRevisionTree([['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n']]),
-          provenance: { source: 'user', actorId, createdAt: now },
+          provenance: { source: 'user', ...recordedBy(actorId), createdAt: now },
           summary: { generated: `Chat ${id}` },
         });
         return { name: `refs/remotes/tau/tau/chats/${id}`, head: revisionId(receipt.commitId) };

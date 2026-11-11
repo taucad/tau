@@ -9,7 +9,14 @@
 
 import { z } from 'zod';
 import type { RevisionId } from '#algorithms/index.js';
-import type { RevisionActor, RevisionProvenance, RevisionSummary } from '#revision-authority.js';
+import { revisionProvenanceSchema } from '#algorithms/revision-metadata.js';
+import type {
+  RevisionActor,
+  RevisionIdentity,
+  RevisionProvenance,
+  RevisionSummary,
+  RevisionUserActor,
+} from '#revision-authority.js';
 import type { GitSignature } from '#git-objects.js';
 import { digest } from '#object-hash.js';
 import type { ObjectFormat } from '#object-hash.js';
@@ -53,22 +60,15 @@ const actorSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 
+/**
+ * The commit trailer's machine form, version 2 (blueprint B1): identity,
+ * capture and leg are required, and no other version parses (I7). A commit
+ * whose trailer is any other shape reads as one Tau did not record.
+ */
 const trailerSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(2),
   parents: z.array(z.string()),
-  provenance: z.object({
-    source: z.enum(['user', 'agent', 'merge', 'restore', 'import']),
-    actorId: z.string(),
-    runId: z.string().optional(),
-    attempt: z.number().optional(),
-    turnCut: z.enum(['base', 'result']).optional(),
-    heldRunIds: z.array(z.string()).optional(),
-    turnId: z.string().optional(),
-    actor: actorSchema.optional(),
-    trigger: z.enum(['turn', 'save', 'idle', 'hidden', 'close', 'merge', 'restore', 'switch']).optional(),
-    restoredFrom: z.string().optional(),
-    createdAt: z.number(),
-  }),
+  provenance: revisionProvenanceSchema,
   summary: z.object({
     generated: z.string(),
     edited: z.string().optional(),
@@ -82,21 +82,36 @@ export type RevisionTrailer = Readonly<{
   summary: RevisionSummary;
 }>;
 
+/* One key order for a person, whoever built the object, so two hosts derive
+ * the same trailer bytes for the same identity. */
+const canonicalPerson = (person: RevisionUserActor): RevisionUserActor => ({
+  kind: 'user',
+  id: person.id,
+  ...(person.name === undefined ? {} : { name: person.name }),
+  ...(person.email === undefined ? {} : { email: person.email }),
+  ...(person.anonymous === undefined ? {} : { anonymous: person.anonymous }),
+});
+
+const canonicalIdentity = (actor: RevisionIdentity): RevisionIdentity =>
+  actor.kind === 'agent'
+    ? { kind: 'agent', id: actor.id, runId: actor.runId, onBehalfOf: canonicalPerson(actor.onBehalfOf) }
+    : canonicalPerson(actor);
+
 const canonicalTrailer = (input: RevisionTrailer): string =>
   JSON.stringify({
-    version: 1,
+    version: 2,
     parents: [...input.parents],
     provenance: {
       source: input.provenance.source,
-      actorId: input.provenance.actorId,
+      actor: canonicalIdentity(input.provenance.actor),
+      capture: input.provenance.capture,
+      via: input.provenance.via,
       ...(input.provenance.runId === undefined ? {} : { runId: input.provenance.runId }),
-      /* RM-R9, in a fixed order; an older reader strips them (`z.object`). */
+      /* RM-R9, in a fixed order. */
       ...(input.provenance.attempt === undefined ? {} : { attempt: input.provenance.attempt }),
       ...(input.provenance.turnCut === undefined ? {} : { turnCut: input.provenance.turnCut }),
       ...(input.provenance.heldRunIds === undefined ? {} : { heldRunIds: [...input.provenance.heldRunIds] }),
       ...(input.provenance.turnId === undefined ? {} : { turnId: input.provenance.turnId }),
-      ...(input.provenance.actor === undefined ? {} : { actor: input.provenance.actor }),
-      ...(input.provenance.trigger === undefined ? {} : { trigger: input.provenance.trigger }),
       ...(input.provenance.restoredFrom === undefined ? {} : { restoredFrom: input.provenance.restoredFrom }),
       createdAt: input.provenance.createdAt,
     },
@@ -118,8 +133,8 @@ export const revisionCommitMessage = (input: RevisionTrailer): string => {
   /* Two readable trailers beside the machine one: `git log` on a clone with no
    * Tau shows who and why without anybody parsing JSON (S37, A26). */
   const readable = [
-    `${actorTrailerPrefix}${describeActor(input.provenance)}`,
-    ...(input.provenance.trigger === undefined ? [] : [`${triggerTrailerPrefix}${input.provenance.trigger}`]),
+    `${actorTrailerPrefix}${describeActor(input.provenance.actor)}`,
+    `${triggerTrailerPrefix}${input.provenance.capture}`,
   ];
   // `JSON.stringify` escapes every newline, so the trailer is always one line.
   return `${title === '' ? 'Tau revision' : title}\n\n${provenanceTrailerPrefix}${canonicalTrailer(input)}\n${readable.join('\n')}\n`;
@@ -128,18 +143,12 @@ export const revisionCommitMessage = (input: RevisionTrailer): string => {
 /**
  * The `Tau-Actor` trailer's one-line value.
  *
- * @param provenance - The revision's provenance.
- * @returns `agent <model> run <runId>`, `user <name>`, or the bare actor id.
+ * @param actor - Who the revision is by.
+ * @returns `agent <model> run <runId> for <person>`, or `user <name>`.
  */
-const describeActor = (provenance: RevisionProvenance): string => {
-  const { actor } = provenance;
-  if (actor === undefined) {
-    return `${provenance.source} ${provenance.actorId}`;
-  }
+const describeActor = (actor: RevisionIdentity): string => {
   if (actor.kind === 'agent') {
-    const run = actor.runId === undefined ? '' : ` run ${actor.runId}`;
-    const behalf = actor.onBehalfOf === undefined ? '' : ` for ${actor.onBehalfOf.name ?? actor.onBehalfOf.id}`;
-    return `agent ${actor.id}${run}${behalf}`;
+    return `agent ${actor.id} run ${actor.runId} for ${actor.onBehalfOf.name ?? actor.onBehalfOf.id}`;
   }
   return `user ${actor.name ?? actor.id}`;
 };
@@ -160,22 +169,11 @@ const describeActor = (provenance: RevisionProvenance): string => {
  * @public
  */
 export const revisionAuthorSignature = (provenance: RevisionProvenance): GitSignature => {
-  const seconds = Math.floor(provenance.createdAt / 1000);
-  const person = provenance.actor?.kind === 'agent' ? provenance.actor.onBehalfOf : provenance.actor;
-  if (person === undefined) {
-    /* No session to map: the id is still the truthful author, and the address
-     * says "this is not a mailbox" rather than inventing one. */
-    return {
-      name: provenance.actorId,
-      email: `${provenance.actorId}@${anonymousActorEmailDomain}`,
-      seconds,
-      offsetMinutes: 0,
-    };
-  }
+  const person = provenance.actor.kind === 'agent' ? provenance.actor.onBehalfOf : provenance.actor;
   return {
     name: person.name ?? person.id,
     email: person.email ?? `${person.id}@${anonymousActorEmailDomain}`,
-    seconds,
+    seconds: Math.floor(provenance.createdAt / 1000),
     offsetMinutes: 0,
   };
 };
@@ -198,11 +196,13 @@ export const revisionCommitterSignature = (provenance: RevisionProvenance): GitS
   offsetMinutes: 0,
 });
 
+const freezePerson = (person: RevisionUserActor): RevisionUserActor => Object.freeze(canonicalPerson(person));
+
 /**
  * Recover provenance from a commit message written by any adapter.
  *
  * @param message - Full commit message.
- * @returns The trailer, or `undefined` when the commit is not a Tau revision.
+ * @returns The trailer, or `undefined` when the commit carries no version 2 Tau trailer.
  * @public
  */
 export const parseRevisionCommitMessage = (message: string): RevisionTrailer | undefined => {
@@ -221,18 +221,27 @@ export const parseRevisionCommitMessage = (message: string): RevisionTrailer | u
     return undefined;
   }
   const { parents, provenance, summary } = result.data;
+  const { actor } = provenance;
   return Object.freeze({
     parents: Object.freeze([...parents]),
     provenance: Object.freeze({
       source: provenance.source,
-      actorId: provenance.actorId,
+      actor:
+        actor.kind === 'agent'
+          ? Object.freeze({
+              kind: 'agent',
+              id: actor.id,
+              runId: actor.runId,
+              onBehalfOf: freezePerson(actor.onBehalfOf),
+            })
+          : freezePerson(actor),
+      capture: provenance.capture,
+      via: provenance.via,
       ...(provenance.runId === undefined ? {} : { runId: provenance.runId }),
       ...(provenance.attempt === undefined ? {} : { attempt: provenance.attempt }),
       ...(provenance.turnCut === undefined ? {} : { turnCut: provenance.turnCut }),
       ...(provenance.heldRunIds === undefined ? {} : { heldRunIds: Object.freeze([...provenance.heldRunIds]) }),
       ...(provenance.turnId === undefined ? {} : { turnId: provenance.turnId }),
-      ...(provenance.actor === undefined ? {} : { actor: Object.freeze(provenance.actor) }),
-      ...(provenance.trigger === undefined ? {} : { trigger: provenance.trigger }),
       ...(provenance.restoredFrom === undefined ? {} : { restoredFrom: provenance.restoredFrom }),
       createdAt: provenance.createdAt,
     }),
@@ -334,7 +343,7 @@ export const parseRevisionTagMessage = (message: string | undefined): RevisionTa
  * Jujutsu mints a random change id and keeps it stable across rewrites. A store
  * with no rewrite operation has no such history to preserve, so the id is
  * derived from the revision **as recorded**: its tree, its parents and its whole
- * canonical trailer. The trailer is identity, not content — `actorId`, `runId`,
+ * canonical trailer. The trailer is identity, not content — `actor`, `runId`,
  * `createdAt` and (since W5) `turnId` are all in the preimage — so two hosts
  * derive the same change id only for the same *recording* of the same content,
  * never for two independent recordings of it. Identical edits on two hosts give

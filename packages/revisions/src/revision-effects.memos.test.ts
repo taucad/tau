@@ -15,6 +15,7 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { RevisionPort } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
+import { testIdentity } from '#test/identity.js';
 
 type Counted = Readonly<{
   filesystem: Awaited<ReturnType<typeof createMemoryProvider>>;
@@ -70,6 +71,7 @@ const fixture = async (
   };
   await port.init({ author });
   const actors = createRevisionActors({
+    identity: testIdentity,
     port,
     projectId: 'project-1',
     filesystem: async () => counted,

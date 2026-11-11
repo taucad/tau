@@ -104,7 +104,7 @@ describe.runIf(gitToolchainOnPath)('no machine identity enters a commit', () => 
     execFileSync('git', ['init', '--quiet', '--initial-branch=main', workspaceRoot]);
 
     /* The desktop: no session yet (pseudonym), then the renderer's `setActor`. */
-    const desktop = createProjectRevisions({ workspaceRoot, projectId });
+    const desktop = createProjectRevisions({ via: 'desktop', workspaceRoot, projectId });
     try {
       await saveOverChannel(desktop, workspaceRoot, 'export const size = 1;\n');
       await desktop.channel.request({
@@ -118,6 +118,7 @@ describe.runIf(gitToolchainOnPath)('no machine identity enters a commit', () => 
 
     /* `tau serve` with a token: wired with that token's account. */
     const served = createProjectRevisions({
+      via: 'desktop',
       workspaceRoot,
       projectId,
       actor: hostRevisionActor({ kind: 'user', id: 'usr_serve1' }),

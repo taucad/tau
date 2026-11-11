@@ -31,7 +31,9 @@
  *   quiet gate is graphics' (`sectionEdited` and `sectionSettled`). Edits are coalesced by `recordSync`'s debounce.
  * - Foreign field of view and up direction go through `adoptPersistedPose` with the pose, never through the camera's
  *   `setVerticalFieldOfView` or `setUpDirection`, whose person sources would be written back. Graphics' own up
- *   direction setting is adopted through `setUpDirection` on graphics.
+ *   direction setting is adopted through `setUpDirection` on graphics. Known gap, ruled by programme control
+ *   (2026-11-11): today's `up-direction-handler.tsx` answers that graphics change with a camera input pose, which this
+ *   binding would save; G4 replaces the handler so it does not, and G6b adds the row that proves it.
  *
  * The owners arrive in `input` as refs (MC-R3, MC-R13). The one effect, editing the record, is a custom action the
  * composition root (`view-record-binding.ts`) provides over `recordSync`'s command surface (MC-R8), so G1's answers hold: after a fault or a close
@@ -147,9 +149,12 @@ type BindingContext = Readonly<{
   revision: number;
   /** The newest camera revision written to the record. */
   lastWrittenRevision: number;
-  /** Camera adoptions waiting for the camera's answer, by request id. */
-  adoptions: readonly string[];
-  /** A foreign section waiting while the person edits cuts. */
+  /** Camera adoptions waiting for the camera's answer; `turns` when it carries a pose or orientation. */
+  adoptions: ReadonlyArray<Readonly<{ requestId: string; turns: boolean }>>;
+  /**
+   * A foreign section waiting while the person edits cuts. Set only in `section.editing`; a root key because the root
+   * `recordPublished` handler writes it from either section state (MC-R26 debt, accepted as for R5 and G1).
+   */
   sectionPending: PersistedSectionView | undefined;
   /** The publication the acknowledgement waits for. */
   applying: WorkbenchView | undefined;
@@ -167,10 +172,39 @@ const personSources: ReadonlySet<CameraSource> = new Set(['input', 'gizmo', 'fov
 /** Changes that keep the pose (CameraAuthority `Changed`): the camera's pose is still the one before them. */
 const poseKeepingSources: ReadonlySet<CameraSource> = new Set(['viewport', 'bounds']);
 
-/** Changes that show the entry is framed: the first frame, or a person's move once geometry is on screen. */
-const framingSources: ReadonlySet<CameraSource> = new Set(['framing', 'fit', 'input', 'gizmo', 'focus']);
+/**
+ * Changes that show the entry is framed: the first frame, or Fit view, which framing takes only once it has framed. A
+ * person's move before the first frame does not: framing still holds its pending pose until geometry arrives.
+ */
+const framingSources: ReadonlySet<CameraSource> = new Set(['framing', 'fit']);
 
 const same = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
+
+type Vector = readonly [number, number, number];
+const finiteVector = (vector: Vector): boolean => vector.every((axis) => Number.isFinite(axis));
+const length = (vector: Vector): number => Math.hypot(...vector);
+const crossLength = (left: Vector, right: Vector): number =>
+  Math.hypot(
+    left[1] * right[2] - left[2] * right[1],
+    left[2] * right[0] - left[0] * right[2],
+    left[0] * right[1] - left[1] * right[0],
+  );
+
+/* The checks the camera's guard refuses an adoption on (G3): no zero, non-finite or parallel direction and up. */
+const adoptable = (
+  camera: CameraOrientation & Partial<Pick<CameraPose, 'target' | 'verticalSpan' | 'perspectiveZoom'>>,
+): boolean => {
+  const { direction, up, target, verticalSpan, perspectiveZoom } = camera;
+  const positive = (value: number | undefined): boolean => value === undefined || (Number.isFinite(value) && value > 0);
+  return (
+    finiteVector(direction) &&
+    finiteVector(up) &&
+    (target === undefined || finiteVector(target)) &&
+    positive(verticalSpan) &&
+    positive(perspectiveZoom) &&
+    crossLength(direction, up) > 1e-9 * length(direction) * length(up)
+  );
+};
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -255,8 +289,9 @@ const observeRecord = (
 ): BindingContext => {
   const { record } = event;
   if (record === undefined) {
-    // The file is gone or refused: nothing to adopt, and no base to edit over until it is read again.
-    return { ...context, record: undefined, applying: undefined };
+    // The file is gone or refused: nothing to adopt. The last record stays the base, so a person's later edit recreates a
+    // file another window deleted (as the hook did), and the next record is compared with it, not adopted whole.
+    return { ...context, applying: undefined };
   }
   if (event.origin === 'own') {
     // I6: this view's own write is never adopted. A section it carried supersedes a foreign one still waiting.
@@ -265,7 +300,9 @@ const observeRecord = (
         ...context,
         record,
         applying: record,
-        sectionPending: event.patch?.section === undefined ? context.sectionPending : undefined,
+        ...(event.patch?.section === undefined
+          ? {}
+          : { sectionPending: undefined, owners: { ...context.owners, section: record.section } }),
       },
       enq,
     );
@@ -279,8 +316,10 @@ const observeRecord = (
   let { sectionPending } = context;
   if (changes.section !== undefined) {
     if (isEditingSection(value)) {
-      // The section quiet gate: the person is editing cuts, so the foreign section waits for `sectionSettled`.
+      // The section quiet gate: the person is editing cuts, so graphics adopts the foreign section on `sectionSettled`.
+      // The record already holds it, so an edit meanwhile carries it too and never writes the old section back.
       sectionPending = changes.section;
+      owners = { ...owners, section: changes.section };
     } else {
       enq.sendTo(context.graphics, { type: 'adoptSectionView', section: changes.section });
       owners = { ...owners, section: changes.section };
@@ -321,7 +360,11 @@ const requestCamera = (
   { context, camera, value }: Readonly<{ context: BindingContext; camera: ViewCameraAdoption; value: StateValue }>,
   enq: BindingEnqueue,
 ): BindingContext => {
-  const { pose, orientation, verticalFieldOfView, upDirection } = camera;
+  const { verticalFieldOfView, upDirection } = camera;
+  // A pose the camera would refuse gets no answer (G3), so it is not asked for: the acknowledgement would never come.
+  const pose = camera.pose !== undefined && adoptable(camera.pose) ? camera.pose : undefined;
+  const orientation =
+    camera.orientation !== undefined && adoptable(camera.orientation) ? camera.orientation : undefined;
   let { requests } = context;
   const nextRequest = (): string => {
     requests += 1;
@@ -332,11 +375,11 @@ const requestCamera = (
     ...(verticalFieldOfView === undefined ? {} : { verticalFieldOfView }),
     ...(upDirection === undefined ? {} : { upDirection }),
   };
-  const issued: string[] = [];
+  const issued: Array<{ requestId: string; turns: boolean }> = [];
   if (turns && !isFramed(value)) {
     // Framing holds the record's camera and applies it after the first frame; the other fields go to the camera now.
     const requestId = nextRequest();
-    issued.push(requestId);
+    issued.push({ requestId, turns: true });
     enq.sendTo(context.framing, {
       type: 'entryChanged',
       identity: context.entryPath,
@@ -344,12 +387,12 @@ const requestCamera = (
     });
     if (Object.keys(fields).length > 0) {
       const fieldsRequest = nextRequest();
-      issued.push(fieldsRequest);
+      issued.push({ requestId: fieldsRequest, turns: false });
       enq.sendTo(context.camera, { type: 'adoptPersistedPose', requestId: fieldsRequest, ...fields });
     }
-  } else {
+  } else if (turns || Object.keys(fields).length > 0) {
     const requestId = nextRequest();
-    issued.push(requestId);
+    issued.push({ requestId, turns });
     enq.sendTo(context.camera, {
       type: 'adoptPersistedPose',
       requestId,
@@ -361,8 +404,9 @@ const requestCamera = (
   return {
     ...context,
     requests,
-    // A newer adoption supersedes the earlier ones: their answers are stale (MC-R18).
-    adoptions: issued,
+    // A newer adoption supersedes the earlier ones it covers, whose answers are then stale (MC-R18): a pose or
+    // orientation supersedes every earlier request, a field-only request only earlier field-only ones.
+    adoptions: [...context.adoptions.filter((earlier) => !turns && earlier.turns), ...issued],
     // The record's camera now stands for what it changed; a drop writes the person's pose back.
     owners: {
       ...context.owners,
@@ -401,11 +445,14 @@ const answerAdoption = (
   { context, event, editRecord }: Handled<Answer>,
   enq: BindingEnqueue,
 ): BindingContext | undefined => {
-  if (!context.adoptions.includes(event.requestId)) {
+  if (!context.adoptions.some(({ requestId }) => requestId === event.requestId)) {
     // MC-R18: an answer to a superseded or foreign request.
     return undefined;
   }
-  const answered = { ...context, adoptions: context.adoptions.filter((id) => id !== event.requestId) };
+  const answered = {
+    ...context,
+    adoptions: context.adoptions.filter(({ requestId }) => requestId !== event.requestId),
+  };
   const { pose } = context;
   if (event.type === 'adoptionApplied' || pose === undefined || !personSources.has(pose.by)) {
     // Applied, or dropped over a machine-made pose, which is never saved (I7): the file keeps the foreign pose.

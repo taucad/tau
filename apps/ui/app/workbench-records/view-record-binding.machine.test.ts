@@ -145,10 +145,13 @@ function mount(options: Readonly<{ record?: WorkbenchView; framed?: boolean }> =
       verticalFieldOfView: requestedVerticalFieldOfView,
     });
   });
+  const answers: string[] = [];
   camera.on('adoptionApplied', (event) => {
+    answers.push(`applied:${event.requestId}`);
     binding.send(event);
   });
   camera.on('adoptionDropped', (event) => {
+    answers.push(`dropped:${event.requestId}`);
     binding.send(event);
   });
   const applied: WorkbenchView[] = [];
@@ -176,6 +179,7 @@ function mount(options: Readonly<{ record?: WorkbenchView; framed?: boolean }> =
     edits,
     poseEdits,
     applied,
+    answers,
     graphicsSent: () => sent('graphics') as ViewGraphicsAdoption[],
     framingSent: () => sent('framing') as ViewBindingFramingEvent[],
     publish,
@@ -296,8 +300,11 @@ describe('view record binding', () => {
       const harness = mount({ record: base });
       harness.press();
       harness.drag([1, 0, 0], 4);
-      harness.publish({ ...harness.edits.at(-1)!, grid: { unit: 'in' } });
+      const asked = harness.answers.length;
+      harness.publish({ ...base, grid: { unit: 'in' } });
       expect(harness.graphicsSent()).toContainEqual({ type: 'setGridUnit', payload: { unit: 'in' } });
+      // A grid-only record asks the camera for nothing.
+      expect(harness.answers).toHaveLength(asked);
       for (let elapsed = 0; elapsed < settle * 4; elapsed += 50) {
         harness.clock.advance(50);
         expect(harness.view()).toMatchObject({ direction: [1, 0, 0], verticalSpan: 4 });
@@ -385,6 +392,72 @@ describe('view record binding', () => {
       expect(harness.view()).toMatchObject({ direction: [0, 1, 0], verticalSpan: 9 });
       expect(harness.applied).toEqual([saved]);
       expect(harness.edits).toEqual([]);
+    });
+  });
+
+  describe('review round 1 rows', () => {
+    it('should carry a waiting foreign section in an edit made while cuts are edited', () => {
+      const harness = mount();
+      harness.binding.send({ type: 'sectionEdited' });
+      const section: PersistedSectionView = {
+        active: true,
+        cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: false }],
+      };
+      harness.publish(workbenchRecords.view.schema.parse({ ...initial(), section }));
+      harness.binding.send({ type: 'ownersChanged', owners: { gridUnit: 'in' } });
+      expect(harness.edits.at(-1)).toMatchObject({ section, grid: { unit: 'in' } });
+    });
+
+    it('should keep waiting for a pose framing holds when a later record changes only the field of view', () => {
+      const harness = mount({ framed: false, record: posed(initial(), pose([0, 1, 0], 9)) });
+      harness.clock.advance(settle * 4);
+      const later = workbenchRecords.view.schema.parse({ ...posed(initial(), pose([0, 1, 0], 9)), fieldOfView: 30 });
+      harness.publish(later);
+      expect(harness.applied).toEqual([]);
+      harness.send({ type: 'frameGeometry', bounds: box(2), margin: 0.1, source: 'framing' });
+      harness.send({ type: 'adoptPersistedPose', requestId: 'view-binding-1', pose: cameraPose([0, 1, 0], 9) });
+      expect(harness.applied).toEqual([later]);
+    });
+
+    it('should send a later record pose to framing while the first frame is still to come, even after a drag', () => {
+      const harness = mount({ framed: false, record: posed(initial(), pose([0, 1, 0], 9)) });
+      harness.drag([1, 0, 0], 4);
+      harness.clock.advance(settle * 4);
+      harness.publish(posed(initial(), pose([1, 1, 0], 6)));
+      expect(harness.binding.getSnapshot().value).toMatchObject({ camera: 'awaitingFrame' });
+      expect(harness.framingSent().at(-1)).toMatchObject({
+        type: 'entryChanged',
+        pendingPose: { pose: { direction: [1, 1, 0], verticalSpan: 6 } },
+      });
+    });
+
+    it('should keep the person settings and pose across a file that went missing and came back', () => {
+      const harness = mount();
+      harness.binding.send({ type: 'recordPublished', record: undefined, origin: 'foreign', patch: undefined });
+      harness.binding.send({ type: 'ownersChanged', owners: { gridUnit: 'in' } });
+      harness.drag([1, 0, 0], 4);
+      // The edits recreate the file over the last record.
+      expect(harness.edits.at(-1)).toMatchObject({ grid: { unit: 'in' }, camera: { direction: [1, 0, 0] } });
+      const sent = harness.graphicsSent().length;
+      harness.clock.advance(settle * 4);
+      harness.publish(harness.edits.at(-1)!, 'own', { grid: { unit: 'in' } });
+      expect(harness.graphicsSent()).toHaveLength(sent);
+      expect(harness.view().direction).toEqual([1, 0, 0]);
+    });
+
+    it('should not ask the camera to adopt a pose it would refuse, so acknowledgement is not stuck', () => {
+      const harness = mount();
+      harness.clock.advance(settle * 4);
+      harness.applied.length = 0;
+      const refused = workbenchRecords.view.schema.parse({
+        ...initial(),
+        camera: { ...pose([0, 0, 1], 9), up: [0, 0, 1] },
+      });
+      harness.publish(refused);
+      expect(harness.applied).toEqual([refused]);
+      const gridOnly = workbenchRecords.view.schema.parse({ ...refused, grid: { unit: 'in' } });
+      harness.publish(gridOnly);
+      expect(harness.applied).toEqual([refused, gridOnly]);
     });
   });
 

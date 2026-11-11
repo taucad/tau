@@ -22,6 +22,8 @@ import type { RevisionId } from '#algorithms/index.js';
 import { revisionId } from '#algorithms/index.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import type { RevisionDiffEntry, RevisionLogEntry, RevisionPort } from '#revision-port.js';
+import { startReadingOf } from '#start-version.js';
+import type { StartReading } from '#start-version.js';
 
 /** One revision as a person reads it. @public */
 export type RevisionRow = Readonly<{
@@ -92,6 +94,12 @@ export type RevisionRow = Readonly<{
    * sides appear further down the order.
    */
   otherParents?: readonly string[];
+  /**
+   * How this entry reads as the Start version, V1, when it is one (A6): the
+   * entry Tau minted when it created the store, or an older project's root
+   * entry. Derived at read like `tags` (I3), so no tag is needed.
+   */
+  start?: StartReading;
 }>;
 
 /** Where the reader is, and what else this project holds. @public */
@@ -295,7 +303,13 @@ const rowOf = (
     ...(entry.provenance.turnCut === undefined ? {} : { turnCut: entry.provenance.turnCut }),
     ...(entry.parents[0] === undefined ? {} : { parent: entry.parents[0] }),
     ...(entry.parents.length > 1 ? { otherParents: Object.freeze(entry.parents.slice(1)) } : {}),
+    ...startOf(entry),
   });
+
+const startOf = (entry: RevisionLogEntry): Readonly<{ start?: StartReading }> => {
+  const start = startReadingOf(entry);
+  return start === undefined ? {} : { start };
+};
 
 /**
  * Read one branch's history, newest first.

@@ -25,6 +25,11 @@
     "./mdx-parser": {
       "import": "./src/mdx-parser.js",
       "default": "./src/mdx-parser.js"
+    },
+    "./react-event-layer": {
+      "types": "./src/react-event-layer.ts",
+      "import": "./src/react-event-layer.ts",
+      "default": "./src/react-event-layer.ts"
     }
   }
 }

@@ -3,7 +3,7 @@ title: 'UI Policy'
 description: 'Design system entry point: principles, token architecture, typography, spacing, motion, and component composition for all Tau UI surfaces.'
 status: active
 created: '2026-03-14'
-updated: '2026-11-10'
+updated: '2026-11-11'
 related:
   - docs/policy/color-policy.md
   - docs/policy/diagram-policy.md
@@ -11,6 +11,7 @@ related:
   - docs/policy/rendering-pipeline-policy.md
   - docs/policy/rendering-policy.md
   - docs/policy/react-policy.md
+  - docs/research/billing-redesign-blueprint.md
 ---
 
 # UI Policy
@@ -149,6 +150,65 @@ All components follow the `cn()` + `cva` + `data-slot` pattern:
 - Keep `bg-*` and `scroll-shadows-*` on separate elements. The scroll mask fades the entire masked element, including its background; put the background on an unmasked parent and the mask on the scrolling content.
 - Use Tailwind opacity modifiers (`bg-neutral/30`, `border-border/50`) for transparent variants; allowed values follow [Color Policy](color-policy.md#opacity-modifiers).
 
+### One Component Per Repeated Piece
+
+A piece of UI that appears on more than one surface has one implementation, and every surface imports it. Before writing a badge, a notice, a summary row, a price, a payment method line or a plan card, look for the owner below; if the piece is new and will repeat, add it to the owner rather than to the screen.
+
+| Piece                                                                            | Owner                                                                   |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Dialog and sheet close control                                                   | `DialogContent`, `SheetContent` in `packages/ui`                        |
+| Loading placeholder                                                              | `Skeleton` in `packages/ui`                                             |
+| Plan cards, coming-soon icon and legend                                          | `@taucad/ui-kit/components/plan-cards` (app Billing and public pricing) |
+| Card brand and saved payment method                                              | `@taucad/ui-kit/components/payment-method`                              |
+| Plan catalogue (names, prices, features)                                         | `@taucad/billing/plan-catalog`                                          |
+| Money formatting                                                                 | `formatUsd*`, `formatMonthlyPrice` in `@taucad/billing`                 |
+| Billing badge, notice, inline error, summary rows, billing date, first-line icon | `apps/ui/app/components/billing/billing-primitives.tsx`                 |
+| Settings rows, groups and their loading placeholders                             | `apps/ui/app/components/settings/settings-item.tsx`                     |
+
+**Why**: the billing surfaces carried three card-brand formatters, four money formats and two plan grids that disagreed with the pricing page; one owner makes a wording or styling change a one-file change.
+
+### Close Controls
+
+A dialog or sheet closes from one control: a ghost icon button (`variant='ghost'`, `size='icon-sm'`) in the top inline-end corner, with the `X` glyph, `text-muted-foreground`, and the screen-reader name "Close". It is the same control, with the same hover and focus treatment, as "Close settings". `DialogContent` and `SheetContent` render it; never restyle it, reposition it or add a second bare `X`.
+
+**Why**: the old close mark was a bare, half-opaque glyph with no hover surface and a 16px target; it read as decoration and was hard to hit.
+
+### Icon Beside Text
+
+An icon that sits beside a line of text is centred on the first line of that text, whatever the text wraps to. Put the icon in a box one line tall (`flex h-lh shrink-0 items-center`) inside a `flex items-start` row. Use `FirstLineIcon` or `IconLine` from the billing primitives, or the same two classes; never `items-center` on a row whose text can wrap, and never a margin nudge (`mt-0.5`).
+
+CORRECT:
+
+```tsx
+<span className='flex items-start gap-2'>
+  <span className='flex h-lh shrink-0 items-center'>
+    <Info aria-hidden='true' className='size-4' />
+  </span>
+  <span>Canceling your plan keeps your account and your projects.</span>
+</span>
+```
+
+INCORRECT:
+
+```tsx
+<span className='flex items-center gap-2'>{/* icon floats to the middle of a wrapped paragraph */}</span>
+<Info className='mt-0.5 size-4' /> {/* breaks at any other font size or line height */}
+```
+
+**Why**: `1lh` follows the text's own line height, so the pair stays aligned at every size; a centred or nudged icon drifts as soon as the copy wraps.
+
+### Coming-Soon Features
+
+Mark a feature that is not available yet with the coming-soon icon (`ComingSoonIcon`, the lucide `Circle`: an empty, muted circle) in place of the tick, never with a tick, a greyed tick or a text suffix on each line. Any list that uses the icon shows `ComingSoonLegend` once beneath it, with the same icon and the words "Coming soon" only, and each such item carries the screen-reader prefix "Coming soon: ". A feature that exists on a plan is never marked coming soon.
+
+**Why**: a tick means "you get this"; a list that mixes shipped and unshipped features under one mark misleads a buyer, and an unexplained icon is a puzzle.
+
+### Loading Placeholders
+
+Content that is loading is drawn as its own shape: `Skeleton` bars where the text, controls and cards are about to appear, at their final size, so nothing moves when the data arrives. Do not show a centred spinner, a "Loading…" sentence or an empty card for content. One wrapper carries `role='status'`, `aria-busy='true'` and the words for screen readers; the bars are `aria-hidden`. A spinner remains correct inside a busy button and for work whose result has no shape yet (an upload, a running job).
+
+**Why**: a spinner tells the person nothing about what is coming and shifts the layout when it is replaced.
+
 ## 6. Motion
 
 Prefer CSS transitions. Honor `prefers-reduced-motion`. Animations are functional, not decorative.
@@ -162,7 +222,7 @@ Prefer CSS transitions. Honor `prefers-reduced-motion`. Animations are functiona
 
 Only animate `transform` and `opacity` — these are GPU-composited. Never animate `width`, `height`, `margin`, or position properties.
 
-Loading states: delay spinner appearance by 150-300ms. Once visible, keep for at least 300ms to avoid flicker.
+Loading states: delay spinner appearance by 150-300ms. Once visible, keep for at least 300ms to avoid flicker. Content loads as a layout-matching skeleton, not a spinner (§5 Loading Placeholders).
 
 ```css
 @media (prefers-reduced-motion: reduce) {
@@ -186,11 +246,16 @@ Use `0.01ms` rather than `0s` to preserve `transitionend` and `animationend` eve
 - Animation durations exceeding 500ms
 - Shadows for elevation in dark mode (use tonal elevation via surface token lightness)
 - `text-[11px]` or any arbitrary size below 12px without accessibility justification
+- A second implementation of a piece that has an owner in §5 (a local money formatter, card-brand label, plan grid or status badge)
+- A bare `X` glyph as a close control, or a restyled dialog close button
+- A spinner or "Loading…" text where the content's shape is known
+- A tick, or no explanation, on a feature that is not available yet
+- A tinted border to signal state on a badge; state is a glyph plus words on the standard badge variants
 - Size, weight, line-height or tracking utilities on a heading or title slot, or a heading level picked for its size (use `Heading` and its variants; see §3)
 
 ## References
 
-- [UX Policy](ux-policy.md) — Interaction design: inline editing, progressive disclosure, confirmation patterns
+- [UX Policy](ux-policy.md) — Interaction design: inline editing, progressive disclosure, confirmation patterns, user-side copy
 - [Color Policy](color-policy.md) — OKLCH system, chroma ranges, contrast requirements
 - [Diagram Policy](diagram-policy.md) — Mermaid diagram styling and authoring
 - [Accessibility Policy](accessibility-policy.md) — ARIA conventions, E2E selectors

@@ -683,7 +683,7 @@ describe('Tau Hosted Remote constants', () => {
     const { free } = storageLimitBytesByTier;
     expect(quotaRefusalSentence('owner', free)).toContain('your 1 GB storage plan');
     expect(quotaRefusalSentence('ownerAtTopTier', storageLimitBytesByTier.enterprise)).toMatch(
-      /your 100 GB storage plan.*Remove or stop tracking the largest files/u,
+      /your 1 TB storage plan.*Remove or stop tracking the largest files/u,
     );
     const collaborator = quotaRefusalSentence('collaborator', free);
     expect(collaborator).toContain('Ask the owner to make room.');

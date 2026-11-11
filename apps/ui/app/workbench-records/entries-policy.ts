@@ -124,6 +124,13 @@ const diffEntry = (base: Entry | undefined, next: Entry): EntryFields => {
   return fields;
 };
 
+/**
+ * The entry a person's change makes of `onto`: the fields of `next` that differ from `shown`, the entry they changed,
+ * over `onto`, so a field they left alone keeps what `onto` holds.
+ */
+export const changedEntry = (shown: Entry | undefined, next: Entry, onto: Entry | undefined): Entry =>
+  onto === undefined ? next : mergeEntry(onto, diffEntry(shown, next));
+
 const combineFields = (earlier: EntryFields | undefined, later: EntryFields): EntryFields => ({
   ...earlier,
   ...later,

@@ -9,7 +9,13 @@ import { workbenchPaths } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
-import { authoredFields, entriesPolicy, movePaths, withoutMoves } from '#workbench-records/entries-policy.js';
+import {
+  authoredFields,
+  changedEntry,
+  entriesPolicy,
+  movePaths,
+  withoutMoves,
+} from '#workbench-records/entries-policy.js';
 import type { EntriesPatch, EntryFields, EntryPathChange as PathChange } from '#workbench-records/entries-policy.js';
 import { isPotentiallyApplied } from '#workbench-records/record-health.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
@@ -165,7 +171,10 @@ export function createWorkbenchEntriesStore(
         return false;
       }
       const from = base();
-      return commands.edit({ ...from, entries: { ...from.entries, [entryPath]: next } });
+      // Only what the person changed on the entry they were shown: a field another party changed since the record
+      // this store asked for keeps the file's value.
+      const entry = changedEntry(context().published.record?.entries[entryPath], next, from.entries[entryPath]);
+      return commands.edit({ ...from, entries: { ...from.entries, [entryPath]: entry } });
     },
     changePaths: async (change) => {
       if (disposed) {

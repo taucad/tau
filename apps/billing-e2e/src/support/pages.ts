@@ -403,6 +403,7 @@ const cardTitles = [
   'You’re out of credits',
   'Tau paused this turn',
   'The model refused this request',
+  'Tau could not send this request',
   'This model is paused',
   'Tau could not start this turn',
   'Funded operation limit reached',

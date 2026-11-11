@@ -29,14 +29,24 @@ type Job = {
   readonly needs?: string | readonly string[];
   readonly outputs?: Record<string, string>;
   readonly steps?: readonly Step[];
+  readonly uses?: string;
+  readonly with?: Record<string, string>;
+  readonly env?: Record<string, string>;
 };
 type Workflow = {
-  readonly on?: { readonly pull_request?: { readonly types?: readonly string[] } };
+  readonly on?: {
+    readonly pull_request?: { readonly types?: readonly string[] };
+    readonly push?: { readonly paths?: readonly string[] };
+    readonly workflow_call?: { readonly inputs?: Record<string, { readonly type?: string }> };
+  };
+  readonly concurrency?: { readonly group?: string };
   readonly jobs: Record<string, Job>;
 };
 
 const ci = load(read('.github/workflows/ci.yml')) as Workflow;
 const staging = load(read('.github/workflows/staging.yml')) as Workflow;
+const nativeHosts = load(read('.github/workflows/native-hosts.yml')) as Workflow;
+const viewerParity = load(read('.github/workflows/viewer-parity.yml')) as Workflow;
 
 /** A GitHub Actions `${{ … }}` expression, built so the source holds no template-like string literal. */
 const expression = (body: string): string => ['$', '{{ ', body, ' }}'].join('');
@@ -122,6 +132,7 @@ describe('ci.yml affected-only lanes', () => {
     expect(laneSelectors).toEqual({
       apps: { type: 'app' },
       api: { tags: ['scope:api'] },
+      'api-image': { targets: ['docker:smoke'] },
       billing: { targets: ['test:billing-foundation'] },
       'cli-e2e': { targets: ['test:scenarios'] },
       size: { targets: ['size'] },
@@ -129,6 +140,9 @@ describe('ci.yml affected-only lanes', () => {
       'geospec-examples': { targets: ['test-geospec'] },
       browser: { tags: ['ci:browser'], targets: ['verify-browser'] },
       standalone: { tags: ['ci:standalone'] },
+      'native-hosts': { tags: ['ci:native-hosts'] },
+      'native-linux': { targets: ['test:native-linux'] },
+      'viewer-parity': { targets: ['test:viewer-parity'] },
     });
   });
 
@@ -174,7 +188,15 @@ describe('ci.yml affected-only lanes', () => {
     expect(action).toContain('event=merge_group&status=success');
     // The required gate still waits for the plan and every lane, and passes a skip only on the plan's verdict.
     const gate = ci.jobs['affected'];
-    expect(gate?.needs).toEqual(['plan', 'affected-lane', 'browser', 'geospec-examples', 'cli-e2e']);
+    expect(gate?.needs).toEqual([
+      'plan',
+      'affected-lane',
+      'browser',
+      'geospec-examples',
+      'cli-e2e',
+      'native-hosts',
+      'viewer-parity',
+    ]);
     const check = gate?.steps?.[0]?.run ?? '';
     expect(check).toContain('test "$PLAN_RESULT" = success');
     expect(check).toContain('test "$LANES_RESULT" = success');
@@ -194,12 +216,24 @@ describe('ci.yml affected-only lanes', () => {
     expect(check.indexOf('if [ "$DRAFT" = true ]; then')).toBeLessThan(check.indexOf('test "$PLAN_RESULT" = success'));
   });
 
-  it('should leave the service, formal, browser, GeoSpec, CLI end-to-end and standalone lanes to the merge queue on a pull request', () => {
+  it('should leave the service, formal, browser, GeoSpec, CLI end-to-end, native-host, viewer-parity and standalone lanes to the merge queue on a pull request', () => {
     const slim = planScript.slice(planScript.indexOf('if [ "$GITHUB_EVENT_NAME" = pull_request ]; then'));
-    for (const lane of ['run_api', 'run_billing', 'formal', 'browser', 'geospec_examples', 'cli_e2e', 'standalone']) {
+    expect(slim).toMatch(/^\s*native_linux=''$/mu);
+    for (const lane of [
+      'run_api',
+      'run_billing',
+      'formal',
+      'browser',
+      'geospec_examples',
+      'cli_e2e',
+      'native_hosts',
+      'viewer_parity',
+      'standalone',
+    ]) {
       expect(slim, lane).toMatch(new RegExp(`^\\s*${lane}=false$`, 'mu'));
     }
-    // The PR-only Docker smoke test keeps its own flag, the raw API selection.
+    // The PR-only Docker smoke test keeps its own flag: Nx's selection of the image's project.
+    expect(planScript).toContain('api_image=$(flag api-image)');
     expect(planScript).toContain('echo "api-image=$api_image"');
     expect(ci.jobs['api-docker-smoke']?.if).toBe(
       "github.event_name == 'pull_request' && needs.plan.outputs.api-image == 'true'",
@@ -263,6 +297,88 @@ describe('ci.yml affected-only lanes', () => {
     // A push that reuses the merge-queue verdict skips the lane, as it skips the shards.
     const planStep = ci.jobs['plan']?.steps?.find((step) => step.id === 'plan')?.run ?? '';
     expect(planStep).toMatch(/if \[ -n "\$REUSED" \]; then[^]*?cli_e2e=false[^]*?fi/u);
+  });
+});
+
+describe('ci.yml native-host and viewer-parity lanes', () => {
+  const gateStep = ci.jobs['affected']?.steps?.[0];
+
+  it.each([
+    ['native-hosts', './.github/workflows/native-hosts.yml'],
+    ['viewer-parity', './.github/workflows/viewer-parity.yml'],
+  ])('should call the %s workflow only when the plan selected its lane', (job, workflow) => {
+    const definition = ci.jobs[job];
+    expect(definition?.uses).toBe(workflow);
+    expect(definition?.needs).toEqual(['plan']);
+    expect(definition?.if).toBe(`needs.plan.outputs.${job} == 'true'`);
+    expect(affectedPlanOutputs()).toContain(job);
+  });
+
+  it('should pass the affected test:native-linux projects to the native host rows', () => {
+    expect(ci.jobs['native-hosts']?.with).toEqual({ 'native-linux': expression('needs.plan.outputs.native-linux') });
+    expect(ci.jobs['plan']?.outputs?.['native-linux']).toBe(expression('steps.plan.outputs.native-linux'));
+    expect(planScript).toContain(`native_linux=$(jq -r '."native-linux" | join(",")' <<< "$lanes")`);
+    // The Linux rows run when a native host project or a native-linux project is affected.
+    expect(planScript).toContain(
+      `native_hosts=$(jq -r 'if .["native-hosts"] == [] and .["native-linux"] == [] then "false" else "true" end' <<< "$lanes")`,
+    );
+    expect(planScript).toContain('echo "native-linux=$native_linux"');
+  });
+
+  it('should fail the required check when a selected native-host or viewer-parity lane did not pass', () => {
+    const check = gateStep?.run ?? '';
+    for (const [key, job] of [
+      ['NATIVE_HOSTS', 'native-hosts'],
+      ['VIEWER_PARITY', 'viewer-parity'],
+    ] as const) {
+      expect(gateStep?.env?.[`${key}_REQUIRED`]).toBe(expression(`needs.plan.outputs.${job}`));
+      expect(gateStep?.env?.[`${key}_RESULT`]).toBe(expression(`needs.${job}.result`));
+      expect(check).toContain(`if [ "$${key}_REQUIRED" = true ]; then test "$${key}_RESULT" = success; fi`);
+    }
+  });
+
+  it('should leave a push to the native-hosts workflow and skip viewer parity on a reused queue verdict', () => {
+    const reused = planScript.slice(planScript.indexOf('if [ -n "$REUSED" ]; then'));
+    expect(reused.slice(0, reused.indexOf('\nfi\n'))).toMatch(/^\s*viewer_parity=false$/mu);
+    const push = planScript.slice(planScript.indexOf('if [ "$GITHUB_EVENT_NAME" = push ]; then'));
+    expect(push.slice(0, push.indexOf('\nfi\n'))).toMatch(/^\s*native_hosts=false$/mu);
+    expect(nativeHosts.on?.push).toBeDefined();
+  });
+
+  it.each([
+    ['native-hosts', nativeHosts],
+    ['viewer-parity', viewerParity],
+  ])('should run %s from ci.yml and never on a pull request', (_name, workflow) => {
+    expect(workflow.on !== undefined && 'workflow_call' in workflow.on).toBe(true);
+    expect(workflow.on?.pull_request).toBeUndefined();
+    // A group equal to the caller's (`github.workflow` is `CI` in a called workflow) would cancel the call.
+    expect(workflow.concurrency?.group ?? '').not.toContain('github.workflow');
+  });
+
+  it('should select viewer parity through the graph, not hand-kept paths', () => {
+    expect(viewerParity.on?.push).toBeUndefined();
+    expect(read('.github/workflows/viewer-parity.yml')).not.toMatch(/^\s+paths:/mu);
+    const examples = JSON.parse(read('libs/tau-examples/project.json')) as {
+      readonly targets: Record<string, { readonly inputs?: readonly string[] }>;
+    };
+    expect(examples.targets['test:viewer-parity']?.inputs).toEqual([
+      'default',
+      '^default',
+      '{workspaceRoot}/.github/workflows/viewer-parity.yml',
+    ]);
+  });
+
+  it('should skip the native-hosts plan in the merge queue and take the rows from ci.yml', () => {
+    expect(nativeHosts.on?.workflow_call?.inputs?.['native-linux']?.type).toBe('string');
+    expect(nativeHosts.jobs['plan']?.if).toBe("github.event_name != 'merge_group'");
+    expect(nativeHosts.jobs['linux']?.if).toBe(
+      expression("!cancelled() && (github.event_name == 'merge_group' || needs.plan.outputs.linux == 'true')"),
+    );
+    expect(nativeHosts.jobs['linux']?.env?.['NATIVE_LINUX']).toBe(
+      expression('inputs.native-linux || needs.plan.outputs.native-linux'),
+    );
+    // The Intel row never runs in the queue: a skipped plan leaves its output empty.
+    expect(nativeHosts.jobs['intel']?.if).toBe("needs.plan.outputs.intel == 'true'");
   });
 });
 

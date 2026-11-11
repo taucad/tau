@@ -13,7 +13,7 @@ type TauCadTopologyRootState = {
 const encodedTopologyPayloads = new WeakMap<TauCadTopologyRoot, Uint8Array<ArrayBuffer>>();
 
 /**
- * Root-level Tau CAD topology payload.
+ * Root-level Tau topology payload.
  *
  * @public
  */

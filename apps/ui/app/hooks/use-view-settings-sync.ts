@@ -517,7 +517,14 @@ export function useViewSettingsSync({
         persistRef.current(includePose);
       }, poseSettle);
     };
-    const cameraSubscription = session?.rig.actorRef.subscribe(() => {
+    /* The camera actor also emits when its input state changes (dragging, settling, idle); only a new revision is
+     * a view change. */
+    let cameraRevision = session?.rig.actorRef.getSnapshot().context.revision;
+    const cameraSubscription = session?.rig.actorRef.subscribe(({ context }) => {
+      if (context.revision === cameraRevision) {
+        return;
+      }
+      cameraRevision = context.revision;
       lastCameraEmissionRef.current = Date.now();
       restartSettle(true);
     });

@@ -604,7 +604,7 @@ describe('TopupModal', () => {
       state: 'attention_required',
       attention: { reason: 'operator_review', action: 'contact_support' },
       title: 'We’re reviewing this payment',
-      description: 'You don’t need to do anything. If you have questions, email support@tau.new.',
+      description: 'You don’t need to do anything. If you have questions, email help@tau.new.',
     },
     {
       state: 'attention_required',

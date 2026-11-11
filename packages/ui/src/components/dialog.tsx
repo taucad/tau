@@ -4,6 +4,7 @@ import { Dialog as DialogPrimitive } from 'radix-ui';
 import { XIcon } from 'lucide-react';
 import { cn } from '#utils/cn.js';
 import { Button } from '#components/button.js';
+import { headingVariants } from '#components/heading.variants.js';
 import { useFullscreenElement } from '#hooks/use-fullscreen-element.js';
 
 /**
@@ -213,7 +214,7 @@ function DialogTitle({
   return (
     <DialogPrimitive.Title
       data-slot='dialog-title'
-      className={cn('text-lg leading-none font-semibold', className)}
+      className={cn(headingVariants({ variant: 'title' }), 'leading-none', className)}
       {...properties}
     />
   );

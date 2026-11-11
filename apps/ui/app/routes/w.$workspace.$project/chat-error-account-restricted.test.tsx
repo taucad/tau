@@ -32,7 +32,7 @@ describe('ChatErrorAccountRestricted', () => {
         'Tau has paused spending on this account while we look at a billing issue. Contact support to continue.',
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:support@tau.new');
+    expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:help@tau.new');
     expect(screen.queryAllByRole('button')).toEqual([]);
     expect(screen.queryByText(/restricted\./u)).not.toBeInTheDocument();
   });

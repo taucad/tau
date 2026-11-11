@@ -16,6 +16,7 @@ import { createOutputLimitRecoveryMessage } from '#harness/output-limit-recovery
 import {
   attachTurnContexts,
   carriedSkillsNote,
+  carriedStateNote,
   committedTurnContexts,
   createAgentSession,
   fundingPrincipal,
@@ -2566,6 +2567,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         (typeof options.clientContext === 'function' ? await options.clientContext() : options.clientContext);
       /* Journaled (RA-R3): a restart before the turn commits replays exactly this admission. */
       const rows = log.rows === undefined ? events : await log.rows();
+      const carried = attachTurnContexts(await log.messages(), committedTurnContexts(rows));
       const context = await createTurnContextSnapshot({
         chatId,
         systemPrompt: config.systemPrompt,
@@ -2578,7 +2580,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         clientContext,
         recentSkills: options.recentSkills,
         previousContext: lastCommittedTurnContext(rows),
-        carriedSkillsNote: carriedSkillsNote(attachTurnContexts(await log.messages(), committedTurnContexts(rows))),
+        carriedSkillsNote: carriedSkillsNote(carried),
+        carriedStateNote: carriedStateNote(carried),
       });
       /* The chat's last run ended on answers no attempt was told (a denial, a Stop): this run is told first. */
       const lastRunId = events.findLast(

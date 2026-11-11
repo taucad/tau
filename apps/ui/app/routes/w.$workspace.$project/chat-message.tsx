@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { ChatMessageSurface } from '@taucad/chat-ui/components/chat-message-surface';
 import {
   BookOpen,
@@ -143,7 +144,9 @@ function ChatMessageAcpPlan({
     plan.type === 'file' && ['http:', 'https:'].includes(URL.parse(plan.uri)?.protocol ?? '') ? plan.uri : undefined;
   return (
     <section aria-label='Agent plan' className='rounded-lg border bg-background p-3 text-sm'>
-      <h3 className='font-medium'>Plan</h3>
+      <Heading level={3} variant='label'>
+        Plan
+      </Heading>
       {plan.type === 'items' ? (
         <ul className='mt-2 flex flex-col gap-1.5'>
           {plan.entries.map((entry, index) => (

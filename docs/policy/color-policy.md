@@ -3,7 +3,7 @@ title: 'Color Policy'
 description: 'OKLCH color system rules: hue architecture, lightness levels, chroma ranges, semantic tokens, contrast requirements, colorblind safety, dark mode, and anti-patterns for all Tau UI surfaces.'
 status: active
 created: '2026-03-14'
-updated: '2026-11-09'
+updated: '2026-11-11'
 related:
   - docs/policy/ui-policy.md
   - docs/policy/diagram-policy.md
@@ -145,6 +145,8 @@ A badge that reports a state ("On", "Paused", "Canceled", "Payment failed") uses
 ### Opacity Modifiers
 
 Use Tailwind's opacity syntax for transparent variants: `bg-neutral/30`, `border-border/50`. Valid values: 5, 10, 20, 30, 40, 50, 60, 70, 80, 90.
+
+An opacity modifier on text makes a new colour pair: measure its contrast before using it. `text-muted-foreground` is the quietest text for 12–14px labels; `text-muted-foreground/70` measured 3.32:1 on the page background in light mode and 3.55:1 in dark mode, below the 4.5:1 that text needs.
 
 CORRECT:
 

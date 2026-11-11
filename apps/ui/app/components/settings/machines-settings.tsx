@@ -18,6 +18,7 @@
  * its Remove action beside it.
  */
 
+import { Heading } from '@taucad/ui/components/heading';
 import { memo, useCallback, useId, useMemo, useRef, useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import type { SubmitEvent } from 'react';
@@ -762,9 +763,9 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
         </p>
       )}
       <section aria-labelledby='machines-add-title' className='flex flex-col gap-2 border-t pt-4'>
-        <h3 id='machines-add-title' className='text-sm font-medium'>
+        <Heading level={3} variant='label' id='machines-add-title'>
           Add a machine
-        </h3>
+        </Heading>
         <UnavailableMachines providers={unavailable} />
         <div className='flex flex-wrap gap-2'>
           <Button
@@ -827,9 +828,9 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
           aria-labelledby='machines-bind-title'
           onSubmit={onBindSubmit}
         >
-          <h3 id='machines-bind-title' className='text-sm font-medium lg:col-span-2'>
+          <Heading level={3} variant='label' id='machines-bind-title' className='lg:col-span-2'>
             Connect a {selected.vendor} {selectedNoun}
-          </h3>
+          </Heading>
           <div className='grid gap-1.5 lg:col-span-2'>
             <Label htmlFor='machines-bind-model'>Model</Label>
             <select
@@ -937,12 +938,12 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
         return (
           <Collapsible key={simulator.id}>
             <section aria-labelledby={titleId} className='flex flex-col gap-2 border-t pt-4'>
-              <h3 id={titleId} className='text-sm font-medium'>
+              <Heading level={3} variant='label' id={titleId}>
                 <CollapsibleTrigger className='flex min-h-8 w-full items-center justify-between text-left'>
                   {name}
                   <ChevronDown aria-hidden className='size-4' />
                 </CollapsibleTrigger>
-              </h3>
+              </Heading>
               <CollapsibleContent className='flex flex-col gap-2'>
                 <p className='text-xs text-muted-foreground'>
                   A dry-run machine with no hardware, address or code. Its settings only change the simulation; they are

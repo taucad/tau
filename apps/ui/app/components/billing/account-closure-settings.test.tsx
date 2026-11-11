@@ -95,7 +95,7 @@ describe('AccountClosureSettings', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'You have a credit purchase you haven’t finished. Finish or cancel it, then close your account.',
     );
-    expect(screen.queryByRole('link', { name: 'Email support@tau.new' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Email help@tau.new' })).not.toBeInTheDocument();
     // The sentence names an action and the control reaches it; the notice has done its job once the dialog is open.
     await userEvent.click(screen.getByRole('button', { name: 'Go to purchase' }));
     expect(review).toHaveBeenCalledOnce();
@@ -120,7 +120,7 @@ describe('AccountClosureSettings', () => {
       'You have a payment to finish first. Finish it, then close your account.',
     );
     expect(screen.getByRole('button', { name: 'Go to purchase' })).toBeEnabled();
-    expect(screen.queryByRole('link', { name: 'Email support@tau.new' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Email help@tau.new' })).not.toBeInTheDocument();
   });
 
   it('should tell the owner to wait for an automatic reload and offer nothing to click', async () => {
@@ -131,7 +131,7 @@ describe('AccountClosureSettings', () => {
       'Auto-reload is buying credits right now. Try again in a few minutes.',
     );
     expect(screen.queryByRole('button', { name: 'Go to purchase' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Email support@tau.new' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Email help@tau.new' })).not.toBeInTheDocument();
   });
 
   it('should point a held payment at support instead of asking for an action the customer cannot take', async () => {
@@ -139,12 +139,9 @@ describe('AccountClosureSettings', () => {
     renderClosure();
     await prepareClosure();
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'A payment needs to be sorted out before you can close your account. Email support@tau.new for help.',
+      'A payment needs to be sorted out before you can close your account. Email help@tau.new for help.',
     );
-    expect(screen.getByRole('link', { name: 'Email support@tau.new' })).toHaveAttribute(
-      'href',
-      'mailto:support@tau.new',
-    );
+    expect(screen.getByRole('link', { name: 'Email help@tau.new' })).toHaveAttribute('href', 'mailto:help@tau.new');
     expect(screen.queryByRole('button', { name: 'Go to purchase' })).not.toBeInTheDocument();
   });
 
@@ -155,7 +152,7 @@ describe('AccountClosureSettings', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'A payment is still processing. Wait a minute, then try again.',
     );
-    expect(screen.queryByRole('link', { name: 'Email support@tau.new' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Email help@tau.new' })).not.toBeInTheDocument();
   });
 
   it('should hold closure for received funds whose credits have not landed and offer support', async () => {
@@ -163,9 +160,9 @@ describe('AccountClosureSettings', () => {
     renderClosure();
     await prepareClosure();
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'We’re still adding credits from your last payment. Try again in a few minutes, or email support@tau.new if this doesn’t clear.',
+      'We’re still adding credits from your last payment. Try again in a few minutes, or email help@tau.new if this doesn’t clear.',
     );
-    expect(screen.getByRole('link', { name: 'Email support@tau.new' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Email help@tau.new' })).toBeInTheDocument();
     // Nothing the customer can finish here, so no control that pretends otherwise.
     expect(screen.queryByRole('button', { name: 'Go to purchase' })).not.toBeInTheDocument();
   });
@@ -175,7 +172,7 @@ describe('AccountClosureSettings', () => {
     renderClosure();
     await prepareClosure();
     expect(await screen.findByRole('alert')).toHaveTextContent('That payment is done. Try again.');
-    expect(screen.queryByRole('link', { name: 'Email support@tau.new' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Email help@tau.new' })).not.toBeInTheDocument();
   });
 
   it('should say when the closure status could not be checked and still offer to prepare', async () => {
@@ -261,7 +258,7 @@ describe('AccountClosureSettings', () => {
     const alternatives = within(dialog).getAllByRole('listitem');
     expect(alternatives.map((item) => item.textContent)).toStrictEqual([
       'To keep your plan until the end of the billing period, cancel the plan in Billing instead.',
-      'If you bought credits in the last 14 days and want a refund, email support@tau.new before you close.',
+      'If you bought credits in the last 14 days and want a refund, email help@tau.new before you close.',
     ]);
     for (const item of alternatives) {
       // The icon box is one line tall and centres the icon, so it sits on the first line's centre whatever the text wraps to.

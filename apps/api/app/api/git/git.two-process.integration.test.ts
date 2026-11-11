@@ -161,7 +161,12 @@ const startWorker = async (
       where: () =>
         Object.assign(Promise.resolve([] as unknown[]), {
           limit: async () =>
-            table === projectDeletion ? [] : table === project ? [{ storageAccountId: null }] : rows(),
+            table === projectDeletion
+              ? []
+              : table === project
+                ? /* Stock git writes these commits, as on a project linked to GitHub (B4). */
+                  [{ storageAccountId: null, origin: 'github' }]
+                : rows(),
         }),
     }),
   });

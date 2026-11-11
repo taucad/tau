@@ -31,7 +31,7 @@ const subscriptionNotOpenMessage = (action: WirePaymentAction): string => {
       return 'We’re confirming your payment. Your plan will update in a moment.';
     }
     case 'attention_required': {
-      return 'We couldn’t start your subscription. Email support@tau.new and we’ll sort it out.';
+      return 'We couldn’t start your subscription. Email help@tau.new and we’ll sort it out.';
     }
     default: {
       return 'Couldn’t open the payment page. Try again in a minute.';

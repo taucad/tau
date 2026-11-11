@@ -556,7 +556,7 @@ export const registerTauMcpViewer = (
     resourceUri,
     {
       title: 'Tau viewer',
-      description: 'The Tau CAD viewer page.',
+      description: 'The Tau viewer page.',
       mimeType: tauViewerResourceMimeType,
       _meta: resourceMeta,
     },

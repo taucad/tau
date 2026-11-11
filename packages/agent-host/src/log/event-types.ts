@@ -214,6 +214,53 @@ export const isAbandonedTurn = (message: ProviderMessage): boolean =>
   (message.metadata?.tauInternal?.['kind'] === abandonedTurnKind ||
     message.metadata?.tauInternal?.['abandoned'] === true);
 
+/**
+ * The Tau-internal kind of the context message that states a chat's settings ({@link chatStateMessage}).
+ *
+ * @internal
+ */
+export const chatStateKind = 'chat-state';
+
+/**
+ * The context message that tells the model what a chat's settings are: its mode, its testing switch, its tool mask.
+ *
+ * A client renders the system prompt and declares the tools for the chat's defaults and never edits either for a
+ * setting, because both are part of the provider's cached prefix and of what replayed reasoning is bound to. It says
+ * the settings here instead, in `contextMessages`, on every turn. The host adds the message to a turn's context only
+ * when its text differs from the newest one the conversation carries, and leaves a note of the defaults out of a
+ * chat that carries none, so a setting is said once, where it changed.
+ *
+ * @param note - The settings as text, a whole statement that supersedes any earlier one, and whether they are the
+ * defaults.
+ * @returns The message for an admission's `contextMessages`.
+ * @public
+ *
+ * @example <caption>A chat switched to plan mode</caption>
+ * ```typescript
+ * import { chatStateMessage } from '@taucad/agent-host';
+ *
+ * const contextMessages = [
+ *   chatStateMessage({ text: '<system-reminder>Plan mode is on: write a plan, edit nothing.</system-reminder>', isDefault: false }),
+ * ];
+ * ```
+ */
+export const chatStateMessage = (note: Readonly<{ text: string; isDefault: boolean }>): UserProviderMessage => ({
+  id: 'tau:chat-state',
+  role: 'user',
+  content: note.text,
+  metadata: { tauInternal: { kind: chatStateKind, ...(note.isDefault ? { default: true } : {}) } },
+});
+
+/**
+ * Whether a message is a chat's state note ({@link chatStateMessage}).
+ *
+ * @param message - One message of a transcript or of an admission's context.
+ * @returns Whether it is marked {@link chatStateKind}.
+ * @internal
+ */
+export const isChatStateMessage = (message: ProviderMessage): boolean =>
+  message.role === 'user' && message.metadata?.tauInternal?.['kind'] === chatStateKind;
+
 /** Catalog provider identities accepted by the portable host. @public */
 export const modelProviderKinds = [
   'openai',

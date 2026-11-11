@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import type { LucideIcon } from 'lucide-react';
 import { Link } from 'react-router';
 import React, { useEffect, useRef } from 'react';
@@ -113,7 +114,9 @@ export function ResponsiveTabs({
       </TabsList>
 
       <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col gap-6 overflow-y-auto [&_*]:min-w-0', contentClassName)}>
-        <h2 className='hidden text-2xl font-bold md:block'>{activeTab}</h2>
+        <Heading level={2} variant='section' className='hidden md:block'>
+          {activeTab}
+        </Heading>
         <TabsContents className='w-full' enableAnimation={enableContentAnimation}>
           {children}
         </TabsContents>

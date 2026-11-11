@@ -1,7 +1,7 @@
 import type { KernelProvider } from '@taucad/runtime';
 import { kernelProviders } from '@taucad/types/constants';
 import { describe, expect, it } from 'vitest';
-import { getCadSystemPrompt } from '#prompts/cad-agent.prompt.js';
+import { getCadSystemPrompt, getChatStateNote } from '#prompts/cad-agent.prompt.js';
 import type { ResolvedSection } from '#prompts/prompt-section-registry.js';
 import { toolDescriptions } from '#constants/tool-description.constants.js';
 import { toolName } from '#constants/tool.constants.js';
@@ -210,5 +210,58 @@ describe('GeoSpec repair guidance', () => {
     expect(description).toContain('runStatus');
     expect(description).toContain('accounting');
     expect(description).toContain('fullResult');
+  });
+});
+
+describe('chat state note', () => {
+  it('should state the defaults as one sentence and mark them as the defaults', () => {
+    const note = getChatStateNote({ mode: 'agent', testingEnabled: true, toolChoice: 'auto' });
+    expect(note.isDefault).toBe(true);
+    expect(note.text).toContain('This chat is at its defaults');
+    expect(note.text).not.toContain('<plan_mode>');
+  });
+
+  it.each([
+    [
+      { mode: 'plan', testingEnabled: true, toolChoice: 'auto' },
+      ['plan mode, testing on, every tool available', '<plan_mode>'],
+      ['<testing_off>', '<tools_'],
+    ],
+    [
+      { mode: 'agent', testingEnabled: false, toolChoice: 'auto' },
+      ['agent mode, testing off', '<testing_off>', '`test_model`'],
+      ['<plan_mode>', '<tools_'],
+    ],
+    [
+      { mode: 'agent', testingEnabled: true, toolChoice: 'none' },
+      ['every tool off', '<tools_off>'],
+      ['<plan_mode>', '<testing_off>'],
+    ],
+    [
+      { mode: 'agent', testingEnabled: true, toolChoice: ['read_file', 'grep'] },
+      ['some tools off', 'Only these tools are turned on: `read_file`, `grep`.'],
+      ['<tools_off>'],
+    ],
+    [{ mode: 'plan', testingEnabled: false, toolChoice: 'none' }, ['<plan_mode>', '<testing_off>', '<tools_off>'], []],
+  ] as const)('should state %j whole, superseding any earlier note', (state, present, absent) => {
+    const note = getChatStateNote({
+      ...state,
+      toolChoice: typeof state.toolChoice === 'string' ? state.toolChoice : [...state.toolChoice],
+    });
+    expect(note.isDefault).toBe(false);
+    expect(note.text.startsWith('<system-reminder>')).toBe(true);
+    expect(note.text).toContain('any earlier note about the chat');
+    for (const part of present) {
+      expect(note.text).toContain(part);
+    }
+    for (const part of absent) {
+      expect(note.text).not.toContain(part);
+    }
+  });
+
+  it('should carry the plan-mode rules the system prompt states in plan mode, word for word', () => {
+    const inPrompt = /<plan_mode>[\s\S]*<\/plan_mode>/u.exec(getCadSystemPrompt('replicad', 'plan', true).static)?.[0];
+    expect(inPrompt).toBeDefined();
+    expect(getChatStateNote({ mode: 'plan', testingEnabled: true, toolChoice: 'auto' }).text).toContain(inPrompt);
   });
 });

@@ -68,6 +68,7 @@
     "@gltf-transform/core": "catalog:",
     "@taucad/esbuild": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "geospec-engine": "catalog:",
     "xstate": "catalog:",
     "zod": "catalog:"
   }

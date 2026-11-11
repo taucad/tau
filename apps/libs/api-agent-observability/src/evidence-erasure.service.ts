@@ -8,7 +8,12 @@ import type { Environment } from '@taucad/api-core';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import type { AgentEvidenceBacklogState, AgentEvidenceErasureOutcome } from '@taucad/api-observability/metrics';
-import { completeErasures, leaseErasureTraces, recheckErasureTrace, settleErasureTraces } from '#evidence-erasure.js';
+import {
+  completeErasures,
+  erasureDeleteAfterMilliseconds,
+  leaseErasureTraces,
+  settleErasureTraces,
+} from '#evidence-erasure.js';
 import type { LeasedErasureTrace } from '#evidence-erasure.js';
 import { backlogCounts, expireBacklog } from '#evidence-delivery.js';
 import { reapExpiredEvidence } from '#evidence-expiry.js';
@@ -18,40 +23,22 @@ import { LangfuseClient } from '#langfuse-client.js';
 export const erasureTiming = Object.freeze({
   intervalMilliseconds: 60_000,
   batch: 50,
-  concurrency: 4,
   requestTimeoutMilliseconds: 10_000,
   leaseMilliseconds: 120_000,
-  /**
-   * How long after a deletion request the trace is read back. At least the
-   * delivery gap window, so a span that was accepted before the fence but
-   * not yet ingested lands before the read and is deleted again.
-   */
-  recheckAfterMilliseconds: 15 * 60_000,
-  unavailableRecheckMilliseconds: 5 * 60_000,
+  /** How long after admission a named trace is first deleted; see {@link erasureDeleteAfterMilliseconds}. */
+  deleteAfterMilliseconds: erasureDeleteAfterMilliseconds,
   maxBackoffMilliseconds: 60 * 60_000,
   /** How long past its expiry a receipt is kept; longer than any clock skew ingress allows. */
   receiptGraceMilliseconds: 86_400_000,
   reapBatch: 1000,
 });
 
-/** Backoff for a deletion request that did not reach Langfuse, or a trace still present after one. */
+/** Backoff for a deletion request Langfuse did not accept, by the attempts made before it. */
 export const erasureRetryDelay = (attempts: number): number =>
   Math.min(erasureTiming.maxBackoffMilliseconds, 60_000 * 2 ** Math.max(0, attempts));
 
 const backlogStates: readonly AgentEvidenceBacklogState[] =
   TauMetrics.agentEvidenceBacklogRows.attributes.shape['tau.agent_evidence.state'].options;
-
-const runInPool = async <T>(items: readonly T[], width: number, task: (item: T) => Promise<void>): Promise<void> => {
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < items.length) {
-      const item = items[next++]!;
-      // oxlint-disable-next-line no-await-in-loop -- the pool bounds concurrency to `width`
-      await task(item);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(width, items.length) }, worker));
-};
 
 /**
  * Expires Tau's agent-evidence records and deletes erased subjects' traces
@@ -59,14 +46,16 @@ const runInPool = async <T>(items: readonly T[], width: number, task: (item: T) 
  *
  * Each pass first purges backlog payloads past their retention and deletes
  * receipts a day past it, with no vendor call, so it runs whether or not
- * delivery or Langfuse is configured. It then asks Langfuse to delete a batch of journal traces, then, once the
- * recheck window has passed, reads each one back from the v2 observations
- * list: only an empty page settles it. A trace still present is requested
- * again with backoff, and an unanswered read (a legacy-API 410, any other
- * non-ok answer, a transport failure) is retried without counting as
- * absence and counted as `recheck`, so a loop that never confirms alerts
- * (`agent-evidence-erasure-stuck`). That half runs whenever
- * Langfuse credentials are configured, whether or not delivery is enabled,
+ * delivery or Langfuse is configured. It then asks Langfuse to delete a
+ * batch of due journal traces. An accepted delete is the erasure (charter I6
+ * as amended by ruling 9): the trace settles `accepted` with no further
+ * request, and an erasure completes once every trace it named is accepted.
+ * Nothing is read back; a periodic drill proves that an accepted delete
+ * removes a trace and its scores. A refused delete (a 429, any other non-2xx,
+ * a timeout or an unreachable host) is retried with backoff and counted as
+ * `retry`, so deletes that are never accepted alert
+ * (`agent-evidence-erasure-stuck`). That half runs whenever Langfuse
+ * credentials are configured, whether or not delivery is enabled,
  * so pausing delivery never pauses erasure. Each pass also samples the
  * backlog for the health series (T14). Only counts and bounded codes are
  * logged or recorded.
@@ -136,14 +125,10 @@ export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
           limit: erasureTiming.batch,
           now,
         };
-        const pending = await leaseErasureTraces(database, { ...lease, state: 'pending' });
+        const pending = await leaseErasureTraces(database, lease);
         if (pending.length > 0) {
           add(...(await this.request(client, pending, now)));
         }
-        const requested = await leaseErasureTraces(database, { ...lease, state: 'requested' });
-        await runInPool(requested, erasureTiming.concurrency, async (trace) => {
-          add(await this.confirm(client, trace, now), 1);
-        });
         const completed = await completeErasures(database, now);
         add('completed', completed);
         retired.add(completed, { action: 'erased' });
@@ -200,42 +185,13 @@ export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
       owner: this.owner,
       now,
       settlement:
-        outcome.kind === 'requested'
-          ? { kind: 'requested', recheckAt: new Date(now.getTime() + erasureTiming.recheckAfterMilliseconds) }
+        outcome.kind === 'accepted'
+          ? { kind: 'accepted' }
           : { kind: 'retry', reason: outcome.reason, notBefore: new Date(now.getTime() + erasureRetryDelay(attempts)) },
     });
     this.countTraces(outcome.kind, held);
     this.countTraces('lease_lost', traces.length - held);
-    return [outcome.kind === 'requested' ? 'requested' : `retry:${outcome.reason}`, held];
-  }
-
-  private async confirm(client: LangfuseClient, trace: LeasedErasureTrace, now: Date): Promise<string> {
-    const found = await client.traceExists(trace.traceId, this.shutdown.signal);
-    const { database } = this.databaseService;
-    if (found === 'unavailable') {
-      const held = await recheckErasureTrace(database, {
-        trace,
-        owner: this.owner,
-        notBefore: new Date(now.getTime() + erasureTiming.unavailableRecheckMilliseconds),
-      });
-      this.countTraces(held ? 'recheck' : 'lease_lost', 1);
-      return held ? 'recheck' : 'lease-lost';
-    }
-    const held = await settleErasureTraces(database, {
-      traces: [trace],
-      owner: this.owner,
-      now,
-      settlement:
-        found === 'absent'
-          ? { kind: 'absent' }
-          : {
-              kind: 'retry',
-              reason: 'present',
-              notBefore: new Date(now.getTime() + erasureRetryDelay(trace.attempts)),
-            },
-    });
-    this.countTraces(held === 0 ? 'lease_lost' : found, 1);
-    return held === 0 ? 'lease-lost' : found;
+    return [outcome.kind === 'accepted' ? 'accepted' : `retry:${outcome.reason}`, held];
   }
 
   private countTraces(outcome: AgentEvidenceErasureOutcome, traces: number): void {

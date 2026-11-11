@@ -84,6 +84,11 @@ const scriptedClient = (): Readonly<{
   const client = mock<RevisionClient>();
   client.status.mockImplementation(() => projection);
   client.subscribe.mockImplementation((listener) => changed.subscribe(listener));
+  /* The identity commands are the real client's, over this scripted connection (audit R6). */
+  const identity = revisionClientTestApi.identity(projectId, client);
+  client.setUser.mockImplementation(identity.setUser);
+  client.setCredential.mockImplementation(identity.setCredential);
+  client.close.mockImplementation(identity.release);
   return {
     client,
     show: (remote, sync = {}) => {
@@ -449,6 +454,203 @@ describe('recovery from a refused GitHub credential (D2)', () => {
       });
     });
     expect(scripted.sent()).not.toContainEqual({ command: 'authorizeRemote' });
+  });
+});
+
+describe('an identity change on the open client (audit R6)', () => {
+  it('should keep the connection open when the person signs in, and mint on it', async () => {
+    setRevisionSessionUser(undefined);
+    githubToken.mockResolvedValue({ accessToken: 'fresh', expiresAt: expiringIn(eightHours), generation: 3 });
+    const scripted = mountBound();
+    await vi.waitFor(() => {
+      expect(scripted.client.open).toHaveBeenCalledOnce();
+    });
+    /* The open's first request met the signed-out frame. */
+    scripted.show({ ...githubRemote, phase: 'reconnectRequired' });
+    scripted.client.send.mockClear();
+    const taken = Promise.withResolvers<void>();
+    scripted.client.sessionChanged.mockReturnValueOnce(taken.promise);
+
+    setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
+
+    await vi.waitFor(() => {
+      expect(scripted.client.sessionChanged).toHaveBeenCalledOnce();
+    });
+    expect(scripted.sent()).toStrictEqual([{ command: 'authorizeRemote' }]);
+    expect(scripted.client.close).not.toHaveBeenCalled();
+    expect(scripted.client.open).toHaveBeenCalledOnce();
+    expect(githubToken).toHaveBeenCalledOnce();
+
+    /* A frame the root projected before it took the change is the last session's: the one retry is kept. */
+    scripted.show({ ...githubRemote, phase: 'reconnectRequired', error: 'Still signed out.' });
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, 20);
+    });
+    expect(githubToken).toHaveBeenCalledOnce();
+    /* The root takes the change; its refusal of the fresh credential, the first frame after, gets the one retry. */
+    taken.resolve();
+    await Promise.resolve();
+    scripted.show({ ...githubRemote, phase: 'reconnectRequired', error: 'Refused.' });
+    await vi.waitFor(() => {
+      expect(githubToken).toHaveBeenCalledTimes(2);
+    });
+    expect(scripted.frames().slice(0, 2)).toStrictEqual([
+      { apiBaseUrl, origin: 'https://github.com', repositoryUrl, unavailable: 'Sign in to Tau to sync with GitHub.' },
+      expect.objectContaining({ repositoryUrl, authorization: basic('fresh') }),
+    ]);
+  });
+
+  it('should withdraw the credential on the open connection when the person signs out', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    githubToken.mockResolvedValue({ accessToken: 'first', expiresAt: expiringIn(renewWindow + 50), generation: 3 });
+    const scripted = mountBound();
+    await elapse(0);
+    expect(scripted.client.open).toHaveBeenCalledOnce();
+
+    setRevisionSessionUser(undefined);
+    await elapse(0);
+
+    expect(scripted.client.close).not.toHaveBeenCalled();
+    expect(scripted.frames().at(-1)).toStrictEqual({
+      apiBaseUrl,
+      origin: 'https://github.com',
+      repositoryUrl,
+      unavailable: 'Sign in to Tau to sync with GitHub.',
+    });
+    /* The signed-out session's renewal never runs. */
+    await elapse(60_000);
+    expect(githubToken).toHaveBeenCalledOnce();
+  });
+
+  it('should keep the spent retry when the same person is said again', async () => {
+    githubToken.mockResolvedValue({ accessToken: 'fresh', expiresAt: expiringIn(eightHours), generation: 3 });
+    const scripted = mountBound();
+    await vi.waitFor(() => {
+      expect(scripted.client.open).toHaveBeenCalledOnce();
+    });
+    scripted.show({ ...githubRemote, phase: 'reconnectRequired' });
+    await vi.waitFor(() => {
+      expect(scripted.sent()).toContainEqual({ command: 'authorizeRemote' });
+    });
+    expect(githubToken).toHaveBeenCalledTimes(2);
+
+    /* A session refetch with a new display name is the same person. */
+    setRevisionSessionUser({ id: 'user-1', name: 'Ada Lovelace' });
+    scripted.show({ ...githubRemote, phase: 'reconnectRequired', error: 'Refused again.' });
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, 20);
+    });
+
+    expect(githubToken).toHaveBeenCalledTimes(2);
+    expect(scripted.client.close).not.toHaveBeenCalled();
+    expect(scripted.client.open).toHaveBeenCalledOnce();
+  });
+
+  it('should withdraw on the open connection for a project with no GitHub binding when the person signs out', async () => {
+    githubProjectBinding.remove(projectId);
+    const scripted = mountBound();
+    await vi.waitFor(() => {
+      expect(scripted.client.open).toHaveBeenCalledOnce();
+    });
+
+    setRevisionSessionUser(undefined);
+    await Promise.resolve();
+
+    expect(scripted.frames()).toStrictEqual([{ apiBaseUrl }, { apiBaseUrl }]);
+    expect(scripted.client.close).not.toHaveBeenCalled();
+  });
+
+  it('should have the root read a Tau Cloud remote afresh on sign-in', async () => {
+    githubProjectBinding.remove(projectId);
+    setRevisionSessionUser(undefined);
+    const scripted = mountBound();
+    await vi.waitFor(() => {
+      expect(scripted.client.open).toHaveBeenCalledOnce();
+    });
+    scripted.show({ kind: 'tau', phase: 'connected' }, { state: 'failed', reason: 'unauthorized' });
+    scripted.client.send.mockClear();
+
+    setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
+    await vi.waitFor(() => {
+      expect(scripted.client.sessionChanged).toHaveBeenCalledOnce();
+    });
+
+    expect(scripted.sent()).toStrictEqual([]);
+    expect(scripted.frames()).toStrictEqual([{ apiBaseUrl }]);
+    expect(scripted.client.close).not.toHaveBeenCalled();
+    expect(scripted.client.open).toHaveBeenCalledOnce();
+  });
+
+  it('should withdraw the last person credential before minting for the next one', async () => {
+    const second = Promise.withResolvers<Token>();
+    githubToken
+      .mockResolvedValueOnce({ accessToken: 'ada', expiresAt: expiringIn(eightHours), generation: 3 })
+      .mockReturnValueOnce(second.promise);
+    const scripted = mountBound();
+    await vi.waitFor(() => {
+      expect(scripted.client.open).toHaveBeenCalledOnce();
+    });
+
+    setRevisionSessionUser({ id: 'user-2', name: 'Grace' });
+    await Promise.resolve();
+
+    /* While the next person's mint is out, the root holds no credential of the last one's. */
+    expect(scripted.frames()).toStrictEqual([
+      expect.objectContaining({ authorization: basic('ada') }),
+      { apiBaseUrl, origin: 'https://github.com', repositoryUrl, unavailable: 'Sign in to Tau to sync with GitHub.' },
+    ]);
+    second.resolve({ accessToken: 'grace', expiresAt: expiringIn(eightHours), generation: 3 });
+    await vi.waitFor(() => {
+      expect(scripted.frames().at(-1)).toMatchObject({ authorization: basic('grace') });
+    });
+    expect(scripted.client.close).not.toHaveBeenCalled();
+  });
+
+  it('should have a remote refused just before the root took the change try the new credential', async () => {
+    githubToken.mockResolvedValue({ accessToken: 'fresh', expiresAt: expiringIn(eightHours), generation: 3 });
+    const scripted = mountBound();
+    await vi.waitFor(() => {
+      expect(scripted.client.open).toHaveBeenCalledOnce();
+    });
+    scripted.show({ ...githubRemote, phase: 'connecting' });
+    scripted.client.send.mockClear();
+    const taken = Promise.withResolvers<void>();
+    scripted.client.sessionChanged.mockReturnValueOnce(taken.promise);
+
+    setRevisionSessionUser({ id: 'user-2', name: 'Grace' });
+    await vi.waitFor(() => {
+      expect(scripted.client.sessionChanged).toHaveBeenCalledOnce();
+    });
+    expect(scripted.sent()).toStrictEqual([]);
+    /* The last credential's validation is refused after the change was sent, before the root took it. */
+    scripted.show({ ...githubRemote, phase: 'reconnectRequired' });
+    taken.resolve();
+
+    await vi.waitFor(() => {
+      expect(scripted.sent()).toStrictEqual([{ command: 'authorizeRemote' }]);
+    });
+  });
+
+  it('should open only once the newest identity has its frame (D36)', async () => {
+    const first = Promise.withResolvers<Token>();
+    githubToken.mockReturnValueOnce(first.promise);
+    const scripted = mountBound();
+    await Promise.resolve();
+
+    /* Signed out while the open's own mint is still out. */
+    setRevisionSessionUser(undefined);
+    await vi.waitFor(() => {
+      expect(scripted.client.open).toHaveBeenCalledOnce();
+    });
+    first.resolve({ accessToken: 'late', expiresAt: expiringIn(eightHours), generation: 3 });
+    await Promise.resolve();
+
+    expect(scripted.frames()).toStrictEqual([
+      { apiBaseUrl, origin: 'https://github.com', repositoryUrl, unavailable: 'Sign in to Tau to sync with GitHub.' },
+    ]);
+    expect(scripted.client.remoteCredential.mock.invocationCallOrder[0]).toBeLessThan(
+      scripted.client.open.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 });
 

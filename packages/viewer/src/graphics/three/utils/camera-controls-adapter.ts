@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { resolveCameraUp as resolveCameraUpVector } from '@taucad/camera';
+import type { CameraVector } from '@taucad/camera';
 
 /**
  * An event dispatched by a camera controls instance, identified only by its type.
@@ -95,11 +97,16 @@ export type ControlsListenerEventNames = {
   readonly end: string;
 };
 
-const cameraUpParallelEpsilon = 1e-8;
+const toCameraVector = (vector: THREE.Vector3): CameraVector => [vector.x, vector.y, vector.z];
 
 /**
  * Preserves the preferred up axis unless it is parallel to the view direction.
  *
+ * The rule is `resolveCameraUp` of `@taucad/camera`; this is its Three.js vector form, with the scene's default up
+ * (`THREE.Object3D.DEFAULT_UP`) as the second fallback.
+ *
+ * @param options - The view direction, the preferred up and an optional fallback up.
+ * @returns A new unit up vector that is not parallel to the direction.
  * @public
  */
 export const resolveCameraUp = ({
@@ -110,20 +117,15 @@ export const resolveCameraUp = ({
   readonly direction: THREE.Vector3;
   readonly preferredUp: THREE.Vector3;
   readonly fallbackUp?: THREE.Vector3;
-}): THREE.Vector3 => {
-  const normalizedDirection = direction.clone().normalize();
-  const candidates = [preferredUp, fallbackUp, THREE.Object3D.DEFAULT_UP, new THREE.Vector3(1, 0, 0)];
-  const resolved = candidates.find(
-    (candidate) =>
-      candidate !== undefined &&
-      candidate.lengthSq() > 0 &&
-      normalizedDirection.clone().cross(candidate).lengthSq() > cameraUpParallelEpsilon,
+}): THREE.Vector3 =>
+  new THREE.Vector3(
+    ...resolveCameraUpVector({
+      direction: toCameraVector(direction),
+      preferredUp: toCameraVector(preferredUp),
+      fallbackUp: fallbackUp === undefined ? undefined : toCameraVector(fallbackUp),
+      defaultUp: toCameraVector(THREE.Object3D.DEFAULT_UP),
+    }),
   );
-  if (!resolved) {
-    return new THREE.Vector3(0, 1, 0);
-  }
-  return resolved.clone().normalize();
-};
 
 /**
  * Checks whether a value is a controls instance with a `Vector3` target and an `update` method.

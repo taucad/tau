@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { PageHeader, PhoneTopBarContext } from '#components/layout/page-header.js';
+import { PageHeader, PhoneTopBarContext, SectionHeader } from '#components/layout/page-header.js';
 
 const titleInPhoneBar = { hasTitle: true, hasAction: false } as const;
 
@@ -24,18 +24,6 @@ describe('PageHeader', () => {
     expect(container.querySelector('.tabular-nums')).toBeNull();
   });
 
-  it('should render an embedded section without adding a second page heading', () => {
-    render(
-      <>
-        <h1>Home</h1>
-        <PageHeader headingLevel={2} title='Projects' />
-      </>,
-    );
-
-    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole('heading', { level: 2, name: 'Projects' })).toBeInTheDocument();
-  });
-
   it('should hide only the heading below md while the phone bar shows it, keeping the h1 and count', () => {
     render(
       <PhoneTopBarContext.Provider value={titleInPhoneBar}>
@@ -48,11 +36,35 @@ describe('PageHeader', () => {
     // The count stays on screen at every width (I1); only the repeated title hides.
     expect(screen.getByText('20').closest('[class*="sr-only"]')).toBeNull();
   });
+});
 
-  it('should keep an embedded section heading visible under the phone bar', () => {
+describe('SectionHeader', () => {
+  it('should render a section at its level without adding a second page heading', () => {
+    render(
+      <>
+        <h1>Home</h1>
+        <SectionHeader level={2} title='Projects' count={3} action={<a href='/projects'>View all</a>} />
+      </>,
+    );
+
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    const section = screen.getByRole('heading', { level: 2, name: 'Projects' });
+    expect(section).toHaveClass('text-2xl', 'font-semibold', 'tracking-tight');
+    expect(section).not.toHaveClass('text-4xl');
+    expect(screen.getByText('3')).toHaveClass('text-muted-foreground', 'tabular-nums');
+    expect(screen.getByRole('link', { name: 'View all' })).toBeInTheDocument();
+  });
+
+  it('should keep the section look one level down', () => {
+    render(<SectionHeader level={3} title='Examples' />);
+
+    expect(screen.getByRole('heading', { level: 3, name: 'Examples' })).toHaveClass('text-2xl', 'font-semibold');
+  });
+
+  it('should stay visible under the phone bar, which repeats only the page title', () => {
     render(
       <PhoneTopBarContext.Provider value={titleInPhoneBar}>
-        <PageHeader headingLevel={2} title='Projects' />
+        <SectionHeader level={2} title='Projects' />
       </PhoneTopBarContext.Provider>,
     );
 

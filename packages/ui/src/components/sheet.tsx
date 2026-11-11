@@ -3,6 +3,7 @@ import { Dialog as SheetPrimitive } from 'radix-ui';
 import { XIcon } from 'lucide-react';
 import { cn } from '#utils/cn.js';
 import { Button } from '#components/button.js';
+import { headingVariants } from '#components/heading.variants.js';
 
 /**
  * Owns the open state and focus lifecycle for a side sheet.
@@ -174,7 +175,7 @@ function SheetTitle({
   return (
     <SheetPrimitive.Title
       data-slot='sheet-title'
-      className={cn('font-semibold text-foreground', className)}
+      className={cn(headingVariants({ variant: 'item' }), 'text-foreground', className)}
       {...properties}
     />
   );

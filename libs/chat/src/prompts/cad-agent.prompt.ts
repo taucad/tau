@@ -55,9 +55,11 @@
 // EVAL(screenshot-workbench-view): pending benchmark-2026-10-21 — screenshot takes workbenchView, the id of a view arrange_workbench saved, and captures its file, kernel view, camera, field of view, plane cuts and display in one image, refusing view, instance, options, section and multi_angle beside it (LRP-8b). Validates the agent arranges a view once and screenshots it by id to check what the person sees, instead of rebuilding the camera and cut by hand.
 // EVAL(screenshot-pose): pending benchmark-2026-10-21 — screenshot takes pose { animation: { id, time } } | { coordinates } and its message lists every coordinate at that pose (LRP-7). Validates the agent captures a mechanism at two poses to show motion without a viewer page, and never edits geometry to move a part.
 // EVAL(test-model-responsive): pending benchmark-2026-10-23 — within one test_model run every load of the same model, format, parameters, mesh tolerance and region reuses one Runtime export while the files it read are unchanged (a failed export is never reused), and get_parameters answers from the resolved manifest without a runtime round-trip while every source it names keeps its digest (LRP-11). Validates GeoSpec runs that load main.ts many times finish sooner with the same rows, and that a parameter read right after an edit still reports the edited values.
+// EVAL(chat-state-note): measured 2026-11-10 (`chat-settings.live.test.ts`; passes of each row with the setting written into the system prompt and tool list, the composition before → with it said in the state note). Plan mode from the first turn, plan mode turned on mid-chat, testing off: 3/3 → 3/3 on anthropic-claude-fable-5.2, openai-gpt-6.1-terra, google-gemini-3.8-flash, together-kimi-k3.1-pro and xai-grok-4.7. Agent mode restored after a plan: 3/3 → 3/3 on Fable 5.2, Kimi K3.1 Pro and Grok 4.7; 1/3 → 3/3 on GPT 6.1 Terra; 9/9 → 8/9 on Gemini 3.8 Flash. Every tool off (note only; nothing to compare): 3/3 on all five. Moves plan mode, the testing switch and the tool mask out of the system prompt and the tool list into `getChatStateNote` (provider reasoning replay contract, WP6, rulings U10 and U16). Pending benchmark: every other catalog model, google-gemini-4-argon first (its stream stalled at the provider on most runs of both arms).
 
 import { toolName } from '#constants/index.js';
 import type { ChatMode } from '#constants/index.js';
+import type { ToolSelection } from '#types/tool.types.js';
 import { resolveKernel } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
 import { createSectionRegistry } from '#prompts/prompt-section-registry.js';
@@ -86,6 +88,83 @@ Create a \`.plan.md\` file outlining your approach:
 
 Stop after creating the plan. Do not begin implementation until the user approves.
 </plan_mode>`;
+}
+
+/**
+ * What a chat's settings say to the model when they differ from the defaults the system prompt describes.
+ *
+ * @public
+ */
+export type ChatStateNote = {
+  /** The note, a whole statement of the settings: it supersedes any earlier one. */
+  text: string;
+  /** Whether every setting is at its default, so a chat that never left them needs no note. */
+  isDefault: boolean;
+};
+
+/**
+ * State a chat's mode, testing switch and tool mask for the model, as a note in the conversation.
+ *
+ * The Tau host renders the system prompt for agent mode with testing on and declares every tool the model supports,
+ * whatever these settings are: a setting that edited the prompt or the tool list would cost the provider's prompt
+ * cache and withhold the reasoning bound to that prefix on every toggle. The host adds this note to a turn's context
+ * only when it differs from the last one the conversation carries.
+ *
+ * @param state - The chat's settings for the turn.
+ * @returns The note and whether it states the defaults.
+ * @public
+ *
+ * @example <caption>A chat switched to plan mode</caption>
+ * ```typescript
+ * import { getChatStateNote } from '@taucad/chat/prompts';
+ *
+ * const note = getChatStateNote({ mode: 'plan', testingEnabled: true, toolChoice: 'auto' });
+ * // note.isDefault === false; note.text holds the <plan_mode> rules
+ * ```
+ */
+export function getChatStateNote(state: {
+  mode: ChatMode;
+  testingEnabled: boolean;
+  toolChoice: ToolSelection;
+}): ChatStateNote {
+  const { mode, testingEnabled, toolChoice } = state;
+  const toolsOff = toolChoice === 'none';
+  const toolsNamed = Array.isArray(toolChoice) ? toolChoice : undefined;
+  const isDefault = mode === 'agent' && testingEnabled && !toolsOff && toolsNamed === undefined;
+  if (isDefault) {
+    return {
+      isDefault,
+      text: `<system-reminder>
+This chat is at its defaults, as the system prompt describes them: agent mode, testing on, every tool available. This supersedes any earlier note about the chat's settings.
+</system-reminder>`,
+    };
+  }
+  const sections = [
+    mode === 'plan' ? getPlanModeSection().trim() : '',
+    testingEnabled
+      ? ''
+      : `<testing_off>
+Testing is turned off. Leave out the workflow's Test Setup and Test steps and the TDD pattern: write no \`*.geospec.ts\` checks and do not call \`${toolName.testModel}\`, which is refused while testing is off. After \`${toolName.evaluateModel}\`, go straight to Inspect & iterate.
+</testing_off>`,
+    toolsOff
+      ? `<tools_off>
+Every tool is turned off: a tool call is refused. Answer from the conversation alone.
+</tools_off>`
+      : '',
+    toolsNamed === undefined
+      ? ''
+      : `<tools_limited>
+Only these tools are turned on: ${toolsNamed.map((name) => `\`${name}\``).join(', ') || 'none'}. A call to any other tool is refused.
+</tools_limited>`,
+  ].filter(Boolean);
+  return {
+    isDefault,
+    text: `<system-reminder>
+The person set this chat as follows: ${mode} mode, testing ${testingEnabled ? 'on' : 'off'}, ${toolsOff ? 'every tool off' : toolsNamed === undefined ? 'every tool available' : 'some tools off'}. This supersedes the system prompt where they differ, and any earlier note about the chat's settings.
+
+${sections.join('\n\n')}
+</system-reminder>`,
+  };
 }
 
 /**

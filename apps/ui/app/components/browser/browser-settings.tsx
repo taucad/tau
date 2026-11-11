@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useState } from 'react';
 import type { BrowserCommand, BrowserSettings } from '@taucad/types/browser';
 import { Button } from '@taucad/ui/components/button';
@@ -19,7 +20,9 @@ export function BrowserSettingsSurface({
   return (
     <div className='space-y-6 text-sm' data-review-id='browser-settings'>
       <section className='space-y-2' aria-label='Browsing preferences'>
-        <h3 className='font-medium'>Browsing</h3>
+        <Heading level={3} variant='label'>
+          Browsing
+        </Heading>
         <div className='divide-y rounded-lg border'>
           <div className='flex flex-wrap items-center justify-between gap-4 p-4'>
             <Label htmlFor='browser-search-engine'>Search engine</Label>
@@ -79,7 +82,9 @@ export function BrowserSettingsSurface({
         </div>
       </section>
       <section className='space-y-2' aria-label='Browser privacy'>
-        <h3 className='font-medium'>Privacy</h3>
+        <Heading level={3} variant='label'>
+          Privacy
+        </Heading>
         <div className='divide-y rounded-lg border'>
           <div className='p-4'>
             <p>Site permissions</p>

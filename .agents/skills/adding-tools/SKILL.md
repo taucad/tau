@@ -1,6 +1,6 @@
 ---
 name: adding-tools
-description: Add or change a Tau CAD chat tool across its shared schema, host registry, RPC, chat presentation, and optional MCP or skill surfaces. Use when implementing a new agent tool or changing its wire-visible contract.
+description: Add or change a Tau chat tool across its shared schema, host registry, RPC, chat presentation, and optional MCP or skill surfaces. Use when implementing a new agent tool or changing its wire-visible contract.
 ---
 
 # Adding Tau agent tools

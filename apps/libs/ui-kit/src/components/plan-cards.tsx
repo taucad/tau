@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Check, Circle } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
-import { Card, CardContent, CardHeader } from '@taucad/ui/components/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { cn } from '@taucad/ui/utils/cn';
 
 /** One line of a plan card; `isComingSoon` swaps the tick for the coming-soon icon. */
@@ -81,7 +81,9 @@ export function PlanCards<Entry extends PlanCardEntry>({
               <Badge className='absolute -top-2.5 left-1/2 -translate-x-1/2'>Most popular</Badge>
             ) : undefined}
             <CardHeader>
-              <h3 className='text-lg leading-none font-semibold'>{entry.name}</h3>
+              <CardTitle level={3} variant='title'>
+                {entry.name}
+              </CardTitle>
               <p className='text-sm text-muted-foreground'>{entry.tagline}</p>
               <p className='pt-2'>
                 <span className='text-3xl font-semibold'>{entry.priceLabel}</span>

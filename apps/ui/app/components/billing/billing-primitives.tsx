@@ -10,7 +10,7 @@ import { cn } from '@taucad/ui/utils/cn';
  */
 
 /** Tau's billing support mailbox, shown as text so it works without a desktop mail app. */
-export const supportEmail = 'support@tau.new';
+export const supportEmail = 'help@tau.new';
 
 /**
  * Puts an icon on the centre line of the first line of the text beside it,

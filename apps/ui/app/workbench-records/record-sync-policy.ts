@@ -42,7 +42,7 @@ export type RecordPolicy<T, P> = Readonly<{
    * machine applies it, through one helper (`baseOf`), wherever it sets that base from the record shown, and only
    * while that record is absent: a foreign read (`CompleteRead`), a saved edit cycle in `settle` (a write that changed
    * nothing, or an overlapped write whose refresh read found the file gone), a saved reset or restore in `settle`, and
-   * a restore that ended unsaved with its reply received. For a kind whose `merge` onto an absent file needs every
+   * every restore that ended unsaved. For a kind whose `merge` onto an absent file needs every
    * field, leave it unset.
    */
   keepsBaseOnAbsence?: true;

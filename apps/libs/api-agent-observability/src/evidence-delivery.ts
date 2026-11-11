@@ -9,7 +9,16 @@ import type { SourceProtection } from '#evidence-admission.js';
 export type LeasedDelivery = Readonly<
   Pick<
     typeof agentEvidenceOutbox.$inferSelect,
-    'receiptId' | 'payload' | 'attempts' | 'traceId' | 'objectId' | 'observedAt' | 'sentAt' | 'expiresAt' | 'createdAt'
+    | 'receiptId'
+    | 'payload'
+    | 'attempts'
+    | 'traceId'
+    | 'objectId'
+    | 'observedAt'
+    | 'sentAt'
+    | 'expiresAt'
+    | 'createdAt'
+    | 'reason'
   > &
     Pick<typeof agentEvidenceReceipt.$inferSelect, 'principalId' | 'projectId' | 'plane'> & {
       /** The strictest server-recorded protection across the receipt's lineage. */
@@ -69,6 +78,7 @@ const leasedOf = (
   sentAt: row.sentAt,
   expiresAt: row.expiresAt,
   createdAt: row.createdAt,
+  reason: row.reason,
 });
 
 const lease = async (

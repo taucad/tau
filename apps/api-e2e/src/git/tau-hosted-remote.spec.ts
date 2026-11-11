@@ -126,7 +126,7 @@ const spendStorage = async (projectId: string, bytes: number): Promise<void> => 
   );
 };
 
-const proLimitBytes = 10 * 1024 ** 3;
+const proLimitBytes = 100 * 1024 ** 3;
 
 let owner: TauCloudOwner;
 /* One shared second account. Better Auth allows three sign-ups per ten

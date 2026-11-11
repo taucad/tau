@@ -21,7 +21,7 @@ describe('useCommercialFeatures storage allowance', () => {
   });
 
   it('should offer no larger plan on Enterprise', () => {
-    expect(withPlan('enterprise')).toMatchObject({ storageLimitBytes: 100 * 1024 ** 3, canUpgradePlan: false });
+    expect(withPlan('enterprise')).toMatchObject({ storageLimitBytes: 1024 ** 4, canUpgradePlan: false });
   });
 
   it('should say nothing about storage or upgrades before the plan is known', () => {

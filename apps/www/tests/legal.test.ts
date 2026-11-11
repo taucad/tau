@@ -25,6 +25,12 @@ describe('legal documents', () => {
     expect(html).toContain('id="10-marketing"');
   });
 
+  test('should give the refund clause the stable anchor the Add credits dialog links to', () => {
+    const { html } = renderLegalDocument('terms');
+    expect(html).toContain('<p id="refunds"><strong>Refunds of top-ups.</strong>');
+    expect(html.match(/id="refunds"/gu)).toHaveLength(1);
+  });
+
   test('should let wide tables scroll inside a focusable region', () => {
     const { html } = renderLegalDocument('subprocessors');
     expect(html).toContain('<div class="table-scroll" tabindex="0"><table>');

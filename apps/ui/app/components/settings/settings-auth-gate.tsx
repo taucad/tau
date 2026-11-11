@@ -4,6 +4,7 @@ import { NavLink } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { Loader } from '@taucad/ui/components/loader';
+import { SettingsPageSkeleton } from '#components/settings/settings-item.js';
 import { authClient } from '#lib/auth-client.js';
 
 /**
@@ -16,11 +17,7 @@ export function SettingsAuthGate({ children }: { readonly children: React.ReactN
   const { signIn } = useAuthLinks();
 
   if (isPending) {
-    return (
-      <div className='flex items-center justify-center rounded-xl border bg-card py-16'>
-        <Loader className='size-6 text-muted-foreground' />
-      </div>
-    );
+    return <SettingsPageSkeleton label='Loading settings' />;
   }
 
   if (!session) {

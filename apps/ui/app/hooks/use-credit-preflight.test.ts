@@ -70,7 +70,7 @@ describe('useCreditPreflight', () => {
     expect(JSON.parse((thrown as Error).message)).toEqual({
       category: 'credits',
       title: 'Credit Limit Reached',
-      message: 'Add credits to start a turn on GPT-6 Astra.',
+      message: 'Add credits to use GPT-6 Astra.',
       code: 'INSUFFICIENT_CREDIT',
       httpStatus: 402,
       details: {

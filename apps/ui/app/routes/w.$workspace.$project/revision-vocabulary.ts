@@ -605,11 +605,18 @@ export const arrivedGlyph: LucideIcon = ArrowDownToLine;
 /**
  * What asked for a revision, in a person's words, for its Details.
  *
+ * A turn's base cut is recorded under the turn's trigger, but it holds the
+ * person's own edits, saved before the agent started (A5): it says so.
+ *
  * @param trigger - The recorded trigger, when the store recorded one.
+ * @param turnCut - Which of a turn's two entries it is, when a turn minted it.
  * @returns The label.
  * @public
  */
-export const revisionTriggerLabel = (trigger: string | undefined): string => {
+export const revisionTriggerLabel = (trigger: string | undefined, turnCut?: RevisionCard['turnCut']): string => {
+  if (turnCut === 'base') {
+    return 'Your edits, saved before the agent started';
+  }
   switch (trigger) {
     case 'turn': {
       return 'Agent turn';

@@ -1251,6 +1251,55 @@ describe('settling a turn', () => {
     });
   }, 30_000);
 
+  /* A5: a turn's base holds the person's own edits, so it is written as theirs, even beside another run's lease. */
+  it('writes a turn base cut as the person’s and its result as the run’s', async () => {
+    const person = { kind: 'user', id: 'user-ada', name: 'Ada' } as const;
+    const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, undefined, {
+      identity: {
+        via: 'browser',
+        resolve: ({ runId }) =>
+          runId === undefined ? person : { kind: 'agent', id: 'agent', runId, onBehalfOf: person },
+      },
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const key = { runId: 'run-2', turnId: 'turn-2', chatId: 'chat-2', attempt: 1 };
+    const mint = async (turnCut: 'base' | 'result', parents: readonly string[]): Promise<string> => {
+      const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+        checkoutId: 'live',
+        trigger: 'turn',
+      });
+      const written = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+        checkoutId: 'live',
+        cutId: cut.cutId,
+        treeId: cut.treeId,
+        parents,
+        trigger: 'turn',
+        turn: { key, turnCut },
+        leaseIds: ['run-2', 'run-1'],
+      });
+      return written.revisionId;
+    };
+    const base = await mint('base', []);
+    await filesystem.writeFile('main.ts', 'export const size = 2;\n');
+    const result = await mint('result', [base]);
+
+    const baseRecord = await port.readRevision(revisionId(base));
+    expect(baseRecord?.provenance).toMatchObject({
+      source: 'user',
+      actor: person,
+      turnCut: 'base',
+      turnId: 'turn-2',
+      capture: 'turn',
+    });
+    /* The result row is unchanged: the run's, for the person. */
+    const resultRecord = await port.readRevision(revisionId(result));
+    expect(resultRecord?.provenance).toMatchObject({
+      source: 'agent',
+      actor: { kind: 'agent', runId: 'run-2', onBehalfOf: person },
+      turnCut: 'result',
+    });
+  }, 30_000);
+
   it('should answer nothingToSave naming the lease when a save finds a lease another tab wrote', async () => {
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });

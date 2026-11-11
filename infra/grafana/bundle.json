@@ -4,7 +4,7 @@
     "dashboards/agent-latency.json": "73c8f54eefc5580c1b4c097847ff107ea6c890c425a8a1757c40a5c5485e69c2",
     "dashboards/agent-prompt-cache.json": "494a03d62e8dfb342d2efc0f10ab5ef54d868b6763f038ceb44a5eedf3994661",
     "dashboards/agents.json": "7bee464552ed3aa7d88cd2add736896deb6cc31a1f7c6c990c513059c63a6285",
-    "dashboards/ai-agent.json": "748ebd42e9192b1c22852191f8dee5a1e5646adf78f2ea44c31ca84ecc5770c8",
+    "dashboards/ai-agent.json": "1f9126c9dcd120005520b74cb2a48dde86016630c3d39a7f5a9542caef379f69",
     "dashboards/api-overview.json": "c7f62b6475ea6b93c26be58a8f3d337583222afda58f88fe8bb650c410c73a69",
     "dashboards/billing.json": "192f50af50d97a21c9aa32b2ecf328481f41311bf80e9ac343e948c6fb70bad5",
     "dashboards/cad-kernel.json": "30a705f5a17fcfb3b448759be880c28a16c2a1a2371f69f7598eb2192c5411a6",
@@ -26,6 +26,6 @@
     "alerts/tau-storage-integrity.json": "0403e3b7c31f265b5b7befc4713c4d3912d8c72edab67ee49e42bfc1e7aecb9d",
     "alerts/tau-storage-triggers.json": "38c6ab3d5e70bfc7bdcf6ac29f4154758534c4ce435f3f9b79914ae9fac8d485",
     "alerts/tau-storage-warning.json": "90dc3104e67cba5c3d1d30a588990ce51af5158cc3add5e518c61b25bc3f81d0",
-    "alerts/tau-warning.json": "efbd00a86a2e25edabc667b2aaa26a927656673f9cf8a4ecac31a4efb7087801"
+    "alerts/tau-warning.json": "b5127ae9697a4c6742c04193be06c837248bd440d75d6067ace597da8c1ab444"
   }
 }

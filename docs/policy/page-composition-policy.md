@@ -3,7 +3,7 @@ title: 'Page Composition Policy'
 description: 'Page frame, title row, view controls, collection grid and pagination, card anatomy and states, button roles, busy and collection states, copy, view URL state, keyboard order and first-viewport budget for Tau product pages.'
 status: active
 created: '2026-09-28'
-updated: '2026-11-10'
+updated: '2026-11-11'
 related:
   - docs/policy/design-policy.md
   - docs/policy/ui-policy.md
@@ -342,9 +342,13 @@ Loading is not empty, and no match is not empty. A collection embedded in anothe
 
 **Enforced by**: Accessibility Policy's ARIA table (review); role tests (`project-route-notices.test.tsx` pattern); the route sweep; retiring `CollectionEmptyState` by deletion. Spinner delay: UI Policy §6 — default, unenforced.
 
+A page that is not a card collection follows the same loading rule: skeletons in the final layout, per [UI Policy](ui-policy.md) §5 Loading Placeholders and, in Settings, [Settings Policy](settings-policy.md) Rule 12.
+
 ### 12. Write sentence-case, verb-first copy
 
 Write titles, buttons, menu items, values and placeholders in sentence case ("New project", "All kernels", "Clear filters"); proper nouns keep theirs (Tau, GitHub, OpenSCAD). Controls name their effect with a verb; menus name their values. Use "…" (U+2026) for truncation and progress, never "...". Take kernel, provider and format names from their catalogs. Do not write "Successfully" or apologise; a failure says what happened and what to do next (DESIGN Voice). Apply this to every page a change touches; remaining Title Case elsewhere is backlog, not precedent.
+
+What the words say (the user's side, buttons named after their action, "Couldn't … Try again.", one money format) is [UX Policy](ux-policy.md) Rules 9–12; this rule governs their form.
 
 **Why**: `/community` shipped "All Kernels", "New Project", "Load More Projects" and "Sort by: newest", and 42 copy sites used ASCII "..." including `SearchInput`'s default placeholder.
 

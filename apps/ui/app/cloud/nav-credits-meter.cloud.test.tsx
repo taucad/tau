@@ -127,7 +127,7 @@ describe('NavCreditsMeter', () => {
   it('should say the balance is unavailable for a paid account when the read failed', () => {
     useCredits.mockReturnValue(undefined);
     renderInMenu(<NavCreditsMeter />);
-    expect(screen.getByText('Unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Couldn’t load')).toBeInTheDocument();
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
   });
 
@@ -156,17 +156,17 @@ describe('NavCreditsMeter', () => {
     renderInMenu(<NavCreditsMeter />);
     expect(screen.getByText('Purchased credits')).toBeInTheDocument();
     expect(screen.getByText('0')).toBeInTheDocument();
-    expect(screen.getByText('20 credits reserved for active work')).toBeInTheDocument();
+    expect(screen.getByText('20 more on hold for work in progress')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('menuitem', { name: 'About monthly credits' }));
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('24 credits available this month');
-    expect(screen.getByRole('tooltip')).toHaveTextContent('2,000 credits per month');
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('24 credits left this month');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('2,000 credits a month');
   });
 
   it('should not invent a percentage for Enterprise', () => {
     useEntitlements.mockReturnValue({ tier: 'enterprise', isResolved: true });
     useCredits.mockReturnValue(balanceOf({ planGrantCreditAtoms: credits(6000) }));
     renderInMenu(<NavCreditsMeter />);
-    expect(screen.getByText('Custom allowance')).toBeInTheDocument();
+    expect(screen.getByText('Set by your contract')).toBeInTheDocument();
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
   });
 

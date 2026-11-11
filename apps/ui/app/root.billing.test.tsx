@@ -85,7 +85,7 @@ describe('billing payment return', () => {
     const options = warning.mock.calls[0]?.[1] as {
       action: { label: string; onClick: () => Promise<void> };
     };
-    expect(options.action.label).toBe('Continue in Checkout');
+    expect(options.action.label).toBe('Continue to payment');
     await userEvent.click(document.body);
     await options.action.onClick();
     expect(payment.recoverPaymentAction).toHaveBeenCalledOnce();
@@ -111,7 +111,7 @@ describe('billing payment return', () => {
     payment.recoverPaymentAction.mockResolvedValue(action);
     render(returnAt('?payment_action=topup_1'));
     await waitFor(() => {
-      expect(toast).toHaveBeenCalledWith('Checkout was not finished.', expect.anything());
+      expect(toast).toHaveBeenCalledWith('You didn’t finish paying. You haven’t been charged.', expect.anything());
     });
     expect(warning).not.toHaveBeenCalled();
     expect(payment.recoverPaymentAction).toHaveBeenCalledOnce();
@@ -123,12 +123,12 @@ describe('billing payment return', () => {
     const options = vi.mocked(toast).mock.lastCall?.[1] as unknown as {
       action: { label: string; onClick: () => void };
     };
-    expect(options.action.label).toBe('Resume Checkout');
+    expect(options.action.label).toBe('Continue to payment');
     options.action.onClick();
     expect(payment.followPaymentRedirect).toHaveBeenCalledWith(action);
   });
 
-  it('says billing was updated for a returned portal action, with no Checkout to resume and nothing to recover', async () => {
+  it('says the subscription was updated for a returned portal action, with no Checkout to resume and nothing to recover', async () => {
     const portal = {
       actionId: 'portal_1',
       ownerId: 'user-a',
@@ -141,7 +141,7 @@ describe('billing payment return', () => {
     payment.getPaymentAction.mockResolvedValue(portal);
     render(returnAt('?payment_action=portal_1'));
     await waitFor(() => {
-      expect(toast).toHaveBeenCalledWith('Billing updated.');
+      expect(toast).toHaveBeenCalledWith('Subscription updated.');
     });
     expect(warning).not.toHaveBeenCalled();
     expect(payment.recoverPaymentAction).not.toHaveBeenCalled();

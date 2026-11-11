@@ -72,6 +72,13 @@ export type RevisionRow = Readonly<{
    */
   restoredFrom?: string;
   /**
+   * Which of a turn's two entries this is (RM-R9): its `base`, the person's own
+   * edits saved before the agent started, or its `result`. Absent on an entry
+   * no turn minted. A base cut is the person's (A5), so its row reads
+   * `source: 'user'` whatever source an earlier build recorded for it.
+   */
+  turnCut?: RevisionProvenance['turnCut'];
+  /**
    * The revision this one follows: its first parent, by id, or `undefined` for
    * a branch's first revision. A merge's second parent is the side it brought
    * in, which History already lists without a number.
@@ -276,7 +283,8 @@ const rowOf = (
     treeId: entry.treeId,
     /* B2 types this row's who; until then a commit Tau did not record reads as `unknown`, as before B1. */
     actor: entry.provenance.actor?.id ?? 'unknown',
-    source: entry.provenance.source,
+    /* A5: a turn's base holds the person's bytes, never the agent's. */
+    source: entry.provenance.turnCut === 'base' ? 'user' : entry.provenance.source,
     createdAt: entry.provenance.createdAt,
     summary: entry.summary.edited ?? entry.summary.generated,
     conflicted: entry.conflicted,
@@ -284,6 +292,7 @@ const rowOf = (
     tags,
     trigger: entry.provenance.capture,
     ...(entry.provenance.restoredFrom === undefined ? {} : { restoredFrom: entry.provenance.restoredFrom }),
+    ...(entry.provenance.turnCut === undefined ? {} : { turnCut: entry.provenance.turnCut }),
     ...(entry.parents[0] === undefined ? {} : { parent: entry.parents[0] }),
     ...(entry.parents.length > 1 ? { otherParents: Object.freeze(entry.parents.slice(1)) } : {}),
   });

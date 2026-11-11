@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useState } from 'react';
 import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
@@ -415,7 +416,9 @@ export function AutoReloadSettings({
 
   return (
     <div>
-      <h2 className='mb-3 text-sm font-medium'>Auto-reload</h2>
+      <Heading level={2} variant='label' className='mb-3'>
+        Auto-reload
+      </Heading>
       <SettingsSectionCard>
         <CardContent className='flex flex-col gap-3 text-sm'>
           {body()}

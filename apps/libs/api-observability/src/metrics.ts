@@ -850,6 +850,11 @@ export class MetricsService {
     description: TauMetrics.agentEvidencePasses.description,
     unit: TauMetrics.agentEvidencePasses.unit,
   });
+
+  public readonly agentEvidenceLangfuseUnits = this.apiMeter.createCounter(TauMetrics.agentEvidenceLangfuseUnits.name, {
+    description: TauMetrics.agentEvidenceLangfuseUnits.description,
+    unit: TauMetrics.agentEvidenceLangfuseUnits.unit,
+  });
 }
 
 /** `ws.gateway` on the `ws.*` connection series: one value per upgrade route. */

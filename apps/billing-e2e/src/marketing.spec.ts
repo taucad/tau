@@ -43,14 +43,14 @@ const missing = (text: string, expected: readonly string[]): string[] =>
 
 describe('marketing funnel', () => {
   it(
-    'should send "Choose Pro in Tau" to Settings → Billing on this host [MK-01 P0]',
+    'should send "Upgrade to Pro" to Settings → Billing on this host [MK-01 P0]',
     matrixRow('MK-01', 'P0', async (evidence): Promise<Verdict> => {
       const pricing = await withBrowser(undefined, async ({ page }) =>
-        marketingLinks(page, '/pricing/', page.getByRole('link', { name: 'Choose Pro in Tau' })),
+        marketingLinks(page, '/pricing/', page.getByRole('link', { name: 'Upgrade to Pro' })),
       );
       const [href] = pricing.hrefs;
       evidence.push(
-        `/pricing/ ${pricing.status ?? 'no response'} in the browser: "Choose Pro in Tau" → ${href ?? 'no such link'}`,
+        `/pricing/ ${pricing.status ?? 'no response'} in the browser: "Upgrade to Pro" → ${href ?? 'no such link'}`,
       );
       if (href === undefined) {
         return { outcome: 'fail', defect: 'unclassified', evidence };
@@ -147,18 +147,18 @@ describe('marketing copy in the app', () => {
       const { page } = browsing;
       const creditsPerDollar = (commercial.topUp.creditAtomsPerPrincipalMinor * 100) / atomsPerCredit;
       const appExpected = [
-        `$${dollars(commercial.pro.principalMinor)}/month USD, plus applicable tax`,
+        `$${dollars(commercial.pro.principalMinor)}/month plus tax`,
         `${credits(commercial.pro.grantCreditAtoms)} credits every month`,
-        `Unused plan credits roll over, up to ${credits(commercial.pro.ceilingCreditAtoms)}`,
-        `Buy credits any time — ${creditsPerDollar} credits per US$1`,
+        `Unused monthly credits roll over, up to ${credits(commercial.pro.ceilingCreditAtoms)}`,
+        `Buy credits any time at ${creditsPerDollar} credits per $1`,
       ];
       const wwwExpected = [
-        `US$${dollars(commercial.pro.principalMinor)}`,
+        `$${dollars(commercial.pro.principalMinor)}`,
         `${credits(commercial.pro.grantCreditAtoms)} credits every month`,
-        `Unused plan credits roll over, up to ${credits(commercial.pro.ceilingCreditAtoms)}`,
-        `Credits cost US$1 per ${creditsPerDollar}, with top-ups from US$${dollars(
+        `Unused monthly credits roll over, up to ${credits(commercial.pro.ceilingCreditAtoms)}`,
+        `Credits cost $1 per ${creditsPerDollar}, and you can add from $${dollars(
           commercial.topUp.minimumPrincipalMinor,
-        )} to US$${dollars(commercial.topUp.maximumPrincipalMinor)}`,
+        )} to $${dollars(commercial.topUp.maximumPrincipalMinor)}`,
       ];
       const settings = billingSettings(page);
       await settings.open();
@@ -168,7 +168,7 @@ describe('marketing copy in the app', () => {
       await settings.addCredits();
       const modal = topupModal(page);
       await modal.chooseAmount(7);
-      const input = modal.dialog.getByLabel('Custom amount');
+      const input = modal.dialog.getByLabel('Amount (USD)');
       const bounds = [await input.getAttribute('min'), await input.getAttribute('max')];
       const www = await pageCopy('/pricing/');
       const appMissing = missing(appText, appExpected);

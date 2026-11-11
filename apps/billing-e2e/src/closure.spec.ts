@@ -64,7 +64,9 @@ describe('account closure', () => {
       expect(refused.status).toBe(409);
       expect(refusal.code).toBe('payment_action_pending');
       expect(refusal.action?.actionId).toBe(pending.actionId);
-      expect(shown[0]).toContain('Finish or cancel your pending payment first.');
+      expect(shown[0]).toContain(
+        'You have a credit purchase you haven’t finished. Finish or cancel it, then close your account.',
+      );
       return { outcome: 'pass', evidence };
     }),
   );

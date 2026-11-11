@@ -321,8 +321,10 @@ export type VersionNumberRefusal = keyof typeof versionNumberRefusals;
  * A Node program, for the reason the authorship check is one: the number is
  * JSON in the tag's `Tau-Tag` trailer, read here as the client reads it (the
  * last `Tau-Tag: ` line, through `JSON.parse`). `argv[1]` is the push's tag
- * updates as `<old> <new> <ref>` triples; it reads every tag the repository
- * holds and the pushed ones (the quarantine is visible to the hook's git).
+ * updates as `<old> <new> <ref>` triples, `argv[2]` the repository's tags as
+ * `<oid> <ref>` lines, and stdin `git cat-file --batch` over every object both
+ * name, which the hook's shell reads (the quarantine is visible to it) so the
+ * program spawns nothing; an object missing from stdin is a refusal.
  *
  * A pushed tag is refused when:
  *
@@ -339,7 +341,6 @@ export type VersionNumberRefusal = keyof typeof versionNumberRefusals;
  * embeds in the hook's quoted heredoc unchanged.
  */
 export const versionNumberCheckScript = String.raw`'use strict';
-const { execFileSync } = require('node:child_process');
 const refusals = ${JSON.stringify({ ...versionNumberRefusals, ...authorshipRefusals })};
 const marker = ${JSON.stringify(versionNumberTakenMarker)};
 const prefix = 'Tau-Tag: ';
@@ -358,8 +359,7 @@ try {
     pushed.push({ old: words[index], now: words[index + 1], ref: words[index + 2] });
   }
   const held = new Map();
-  const listed = execFileSync('git', ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/tags/'], { encoding: 'latin1' });
-  for (const line of listed.split('\n')) {
+  for (const line of (process.argv[2] || '').split('\n')) {
     const space = line.indexOf(' ');
     if (space > 0) {
       held.set(line.slice(space + 1), line.slice(0, space));
@@ -368,10 +368,9 @@ try {
   for (const update of pushed) {
     held.set(update.ref, update.now);
   }
-  const oids = [...new Set([...held.values(), ...pushed.filter((update) => !zero.test(update.old)).map((update) => update.old)])];
   const numbers = new Map();
-  if (oids.length > 0) {
-    const batch = execFileSync('git', ['cat-file', '--batch'], { input: oids.join('\n') + '\n', maxBuffer: 256 * 1024 * 1024 });
+  const batch = require('node:fs').readFileSync(0);
+  {
     let offset = 0;
     while (offset < batch.length) {
       const end = batch.indexOf(10, offset);
@@ -782,7 +781,19 @@ if [ -n "\${TAU_GIT_PUSHER:-}" ] && [ -n "$versions" ]; then
 ${versionNumberCheckScript}
 TAU_VERSION_CHECK
 )
-  if ! "$TAU_GIT_NODE" -e "$version_check" "$versions"; then
+  if ! held_tags=$(git for-each-ref --format='%(objectname) %(refname)' refs/tags/ 2>/dev/null); then
+    echo "Tau: refused the push — ${authorshipRefusals.GIT_PUSH_RECORD_UNREADABLE}" >&2
+    echo "Tau: nothing was written." >&2
+    exit 1
+  fi
+  version_objects=$(
+    { [ -z "$held_tags" ] || printf '%s\n' "$held_tags" | cut -d ' ' -f 1
+      for word in $versions; do
+        case "$word" in refs/*) ;; *[!0]*) printf '%s\n' "$word" ;; esac
+      done
+    } | sort -u
+  )
+  if ! printf '%s\n' "$version_objects" | git cat-file --batch 2>/dev/null | "$TAU_GIT_NODE" -e "$version_check" "$versions" "$held_tags"; then
     echo "Tau: nothing was written." >&2
     exit 1
   fi

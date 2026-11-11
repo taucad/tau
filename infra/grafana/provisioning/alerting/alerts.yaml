@@ -1361,6 +1361,31 @@ groups:
           severity: warning
           service: tau-api
           component: agent-observability
+      - uid: agent-evidence-langfuse-units
+        title: 'P1: Langfuse Units at 70% of Hobby Plan'
+        condition: langfuse_units
+        data:
+          - refId: langfuse_units
+            queryType: ''
+            relativeTimeRange:
+              from: 2678400
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: 'sum by (app) (increase(tau_agent_evidence_langfuse_units_total{app=~".*",service_name="tau-api"}[31d])) >= 35000'
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: langfuse_units
+        noDataState: OK
+        execErrState: OK
+        for: 15m
+        annotations:
+          runbook_url: docs/handbooks/cloud/system/services/agent-observability.md
+          summary: "Tau wrote 35,000 Langfuse units in the last 31 days, 70% of the Hobby plan's 50k a month (a unit is a trace, an observation or a score; ruling 13). Bound to this environment's API, as every hosted rule is, while staging and production share the organisation's 50k: add the other environment's figure from the Langfuse units panel. Respond in order: pause staging delivery (TAU_OBSERVABILITY_DELIVERY_ENABLED), build sampling (LW13), or reopen the plan. The counter misses units Langfuse features or other projects create, and increase() cannot see a new process's first sample."
+        labels:
+          severity: warning
+          service: tau-api
+          component: agent-observability
       - uid: api-llm-stream-severed
         title: 'P1: API Response Stream Severed (Fly PU05)'
         condition: stream_severed_threshold

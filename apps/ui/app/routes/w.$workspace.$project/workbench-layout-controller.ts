@@ -123,7 +123,6 @@ export function createWorkbenchLayoutStore(
    * and live owners keep their values.
    */
   let state: LayoutState = { layout: undefined, bytes: null, refusal: undefined, digest: 'missing' };
-  let published = 0;
   /** Whether the host has been shown a read of the file: the store is ready once it has. */
   let observed = false;
   let shown: Promise<void> = Promise.resolve();
@@ -156,15 +155,18 @@ export function createWorkbenchLayoutStore(
       },
     },
   });
-  /** Show the host one publication once its digest is known, unless a later one has superseded it. */
+  /**
+   * Show the host one publication once its digest is known. Publications are shown in order and none is skipped, so
+   * what the host was shown last is what the machine published last, and the diff base it reads back agrees with it.
+   */
   const show = async (
-    sequence: number,
+    digesting: Promise<LayoutState['digest']>,
     event: Extract<RecordSyncEmitted<WorkbenchLayout, WorkbenchLayoutPatch>, { type: 'published' }>,
   ): Promise<void> => {
     const { snapshot, origin, patch } = event;
     try {
-      const digest = snapshot.bytes === null ? 'missing' : await digestBytes(snapshot.bytes);
-      if (disposed || sequence !== published) {
+      const digest = await digesting;
+      if (disposed) {
         return;
       }
       state = { layout: snapshot.record ?? state.layout, bytes: snapshot.bytes, refusal: snapshot.refusal, digest };
@@ -177,7 +179,13 @@ export function createWorkbenchLayoutStore(
     }
   };
   on('published', (event) => {
-    shown = show(++published, event);
+    const { bytes } = event.snapshot;
+    const digesting: Promise<LayoutState['digest']> = bytes === null ? Promise.resolve('missing') : digestBytes(bytes);
+    const previous = shown;
+    shown = (async () => {
+      await previous;
+      await show(digesting, event);
+    })();
   });
   on('failed', ({ error }) => {
     if (!disposed) {
@@ -193,7 +201,7 @@ export function createWorkbenchLayoutStore(
   /** A command's answer, once the host has been shown what it published. */
   const answered = async (answer: Promise<boolean>): Promise<boolean> => {
     const ok = await answer;
-    // A publication that superseded the awaited one shows its own state; wait until the latest has been shown.
+    // A publication made while this one was being shown is shown after it; wait until the latest has been shown.
     let showing: Promise<void>;
     do {
       showing = shown;

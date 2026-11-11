@@ -1138,16 +1138,16 @@ describe('workbench layout store on recordSync (G2b)', () => {
       await vi.waitFor(() => {
         expect(digests).toBe(2);
       });
-      // The first read's publication is superseded; its answer waits for the second to be shown.
+      // Both publications are shown in order; the first read's answer waits for the second to be shown too.
       gates[0]?.resolve();
       await new Promise((resolve) => {
         setTimeout(resolve, 10);
       });
       expect(answered).toBe(false);
-      expect(store.ready()).toBe(false);
+      expect(shown).toBe(1);
       gates[1]?.resolve();
       expect(await first).toBe(true);
-      expect(shown).toBe(1);
+      expect(shown).toBe(2);
       expect(store.ready()).toBe(true);
       expect(store.snapshot().layout?.lanes.chat).toBe(false);
       expect(await second).toBe(true);
@@ -1155,6 +1155,45 @@ describe('workbench layout store on recordSync (G2b)', () => {
       for (const gate of gates) {
         gate.resolve();
       }
+      held.mockRestore();
+      store.dispose();
+    }
+  });
+
+  it('should show every publication in order, so the diff base after an absence is a layout the host was shown', async () => {
+    const empty: WorkbenchLayout = { ...layout(), workbench: { kind: 'group', tabs: [] } };
+    const memory = memoryFiles(empty);
+    const store = createWorkbenchLayoutStore({
+      root: '/root',
+      files: memory.files,
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    const { digest } = globalThis.crypto.subtle;
+    const gate = Promise.withResolvers<void>();
+    let digests = 0;
+    const held = vi.spyOn(globalThis.crypto.subtle, 'digest').mockImplementation(async (...args) => {
+      // The digest of the second publication (the foreign layout) is held until the file is gone.
+      if (++digests === 2) {
+        await gate.promise;
+      }
+      return digest.apply(globalThis.crypto.subtle, args);
+    });
+    try {
+      await store.read(true);
+      memory.set(layout());
+      const foreign = store.read();
+      await vi.waitFor(() => {
+        expect(digests).toBe(2);
+      });
+      memory.setBytes(null);
+      const absent = store.read();
+      gate.resolve();
+      await Promise.all([foreign, absent]);
+      expect(store.snapshot().layout).toEqual(layout());
+      expect(store.intendedLayout()).toEqual(store.snapshot().layout);
+    } finally {
+      gate.resolve();
       held.mockRestore();
       store.dispose();
     }

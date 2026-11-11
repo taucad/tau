@@ -16,7 +16,7 @@ describe('ZooUpgradeBanner', () => {
     render(<ZooUpgradeBanner message={zooCloseMessages.pro} onRetry={retry} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Upgrade to Pro' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
 
     expect(openSettingsDialog).toHaveBeenCalledWith('billing');
     expect(retry).toHaveBeenCalledOnce();
@@ -29,7 +29,7 @@ describe('ZooUpgradeBanner', () => {
     expect(screen.getByText(zooCloseMessages.unavailable)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Upgrade to Pro' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add credits' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(retry).toHaveBeenCalledOnce();
   });
 });

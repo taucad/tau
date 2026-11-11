@@ -325,6 +325,8 @@ Verify both desktop and browser behavior, not a screenshot from a stale build.
 - Pointer cursors are native hyperlink affordances by default. Actions use `--cursor-action` through the shared semantic selector or `cursor-action` utility, every action keeps visible hover and focus feedback, and specialized text/drag/resize/help/disabled cursors remain semantic. Sidebar navigation, including anchor-backed project/chat rows, follows the shared action-cursor preference; content hyperlinks retain native pointers. Enforced by `tau-lint/no-authored-pointer-cursor` and the computed-style sidebar regression.
 - Boolean props are named `is/has/should/enable/…` (lint-enforced); keyboard handling goes through the keyboard service (`event.key`, never `event.code`; the `mod` abstraction for Cmd/Ctrl).
 
+A repeated piece has one owner and every surface imports it; dialogs and sheets close from one ghost icon button; an icon beside text sits on the centre line of the text's first line; loading content is drawn as its own shape; and a feature that is not available yet carries the coming-soon icon with a legend. [UI Policy](ui-policy.md) §5 states each rule and names the owners.
+
 ## Surfaces
 
 ### apps/ui — the workspace
@@ -385,6 +387,8 @@ and a useful next action, never an overlapping decorative card.
 Call Tau-provided skills **system** skills, not “Built-in”. The file tree uses
 the lowercase trailing `system` badge without a redundant lock; read-only
 behavior still follows actual access metadata, never a path or label alone.
+
+Product copy is written from the person's side: it says what happened to them and what they can do, buttons are named after what they do, problems read "Couldn't … Try again.", and no state name or system term reaches the screen. [UX Policy](ux-policy.md) Rules 9–12 are the statute; `docs/research/billing-redesign-blueprint.md` holds the glossary they were drawn from.
 
 ## Governance
 

@@ -1,6 +1,6 @@
 ---
 title: 'UX Policy'
-description: 'Interaction design rules: inline editing, progressive disclosure, confirmation patterns, and keyboard conventions for all Tau UI surfaces.'
+description: 'Interaction design rules: inline editing, progressive disclosure, confirmation patterns, keyboard conventions and user-side copy for all Tau UI surfaces.'
 status: active
 created: '2026-04-08'
 updated: '2026-11-10'
@@ -9,6 +9,7 @@ related:
   - docs/policy/accessibility-policy.md
   - docs/policy/react-policy.md
   - docs/research/dialog-inline-editing-audit.md
+  - docs/research/billing-redesign-blueprint.md
 ---
 
 # UX Policy
@@ -169,6 +170,66 @@ The `InlineTextEditor` component (`#components/inline-text-editor.js`) is the ca
 
 Features: display/edit toggle, Enter/Escape/blur handling, auto-focus, auto-select, optional `renderDisplay`, `shouldSubmitOnBlur`, `variant`.
 
+### 9. Write Copy From the User's Side
+
+Say what happened to the person and what they can do next, in the plainest words that are true. Name things by what the person sees and does, never by how the system stores or moves them.
+
+| Do not write (system side)                         | Write (user side)                           |
+| -------------------------------------------------- | ------------------------------------------- |
+| "Payment status: processing"                       | "We're confirming your payment"             |
+| "Quote expired", "Refresh quote"                   | "This price is out of date", "Update price" |
+| "Checkout session", "payment intent", "binding"    | "payment page", "payment", nothing at all   |
+| "Issuance pending"                                 | "Adding 500 credits to your balance…"       |
+| "Top up", "top-up" in the app                      | "Add credits"                               |
+| "Entitlement", "tier", "ledger", "hold"            | "plan", "plan", "balance", "reserved"       |
+| A wire state printed as text (`closing`, `failed`) | A sentence written for that state           |
+
+Every state of a multi-step flow has its own title and one- or two-sentence description. Never print a state name, an identifier, an error code or a raw server message where a person reads it.
+
+**Why**: the billing review found about 200 strings written from the server's point of view; people could not tell whether they had been charged. See `docs/research/billing-redesign-blueprint.md`.
+
+**Enforced by**: `tau-lint/no-engineering-vocabulary-in-copy` for the vocabulary it lists; the rest is review.
+
+### 10. Name the Button After What It Does
+
+A button's label is the action and its object: "Pay $27.50", "Add credits", "Turn on auto-reload", "Continue to payment", "Delete account". The step back is "Back"; leaving without doing anything is "Cancel"; leaving a finished or waiting screen is "Close".
+
+| Situation                        | Label                             | Never                         |
+| -------------------------------- | --------------------------------- | ----------------------------- |
+| Commits money                    | "Pay $27.50" (the exact amount)   | "Confirm", "Submit", "OK"     |
+| Goes to another site to pay      | "Continue to payment"             | "Checkout", "Proceed"         |
+| Repeats a failed action          | "Try again"                       | "Retry", "Reload"             |
+| Returns to the previous step     | "Back"                            | "Cancel" (when nothing ends)  |
+| Abandons something in progress   | "Cancel purchase", "Cancel setup" | A bare "Cancel" that is vague |
+| Current choice in a set of plans | A label, "Your current plan"      | A disabled button             |
+
+**Why**: "Confirm" and "Cancel" on a payment screen do not say whether money moves; a label that names the outcome needs no surrounding explanation.
+
+### 11. Report a Problem as "Couldn't …" Then the Next Step
+
+Write an error as what did not happen, in the past tense with a contraction, then one thing to do: "Couldn't load your balance. Try again." State what is safe when money or data is involved ("Your card wasn't charged", "Your credits are safe") only when the system knows it to be true. Offer "Try again" as the button; give the support address when trying again cannot help.
+
+CORRECT:
+
+```tsx
+<BillingInlineError>Couldn’t open the payment page. Try again.</BillingInlineError>
+```
+
+INCORRECT:
+
+```tsx
+<p className='text-destructive'>Error: checkout session creation failed (409)</p>
+<p>Unable to process request. Please retry later.</p>
+```
+
+**Why**: an error is read at the worst moment; a fixed shape lets people find the next step without parsing the sentence.
+
+### 12. Print Money and Spelling One Way
+
+Print US dollars as `$10.00` for an amount that is or will be charged and `$20` for a list price or an amount choice. Name the currency once per screen, on the total (`$27.50 USD`) or in a field label ("Amount (USD)"); never as a `US$` prefix. Use the shared formatters in `@taucad/billing` (`formatUsdMinor`, `formatUsdTotalMinor`, `formatUsdWholeMinor`, `formatMonthlyPrice`); do not format money inline. Product copy uses US spelling ("authorize", "canceled", "center").
+
+**Why**: four formats (`US$10`, `$10.00 USD`, `10 USD`, `$10`) appeared on one screen, and two spellings of "cancelled" in one flow. Legal documents keep their own governed wording.
+
 ## Anti-Patterns
 
 - Opening a `Dialog` for a single-field rename or create
@@ -177,6 +238,10 @@ Features: display/edit toggle, Enter/Escape/blur handling, auto-focus, auto-sele
 - Using `setTimeout` to focus an input inside a Dialog (symptom of fighting the modal lifecycle)
 - Important actions discoverable only on hover, with no visible alternate route
 - Plain `<Select>` for unbounded or searchable lists
+- A state name, identifier or server message shown as copy ("Payment status: funds_received")
+- "Confirm", "Submit" or "OK" on a button that moves money or deletes something
+- "Failed to …", "Unable to …", "An error occurred" in place of "Couldn't … Try again."
+- `US$` prefixes, or a money amount formatted outside the shared formatters
 - A second popover, a menu-stacked drawer, or a hover flyout to nest a list (outside right-click menus)
 - A searchable listbox standing in for an action menu, or a menu standing in for a value picker
 
@@ -189,6 +254,10 @@ Features: display/edit toggle, Enter/Escape/blur handling, auto-focus, auto-sele
 - [ ] No nested Dialogs
 - [ ] Dense list actions follow DESIGN's visible-action and disclosure contracts
 - [ ] Searchable/dynamic lists use ComboBoxResponsive
+- [ ] Copy says what happened to the person and what to do next; no system vocabulary or state names
+- [ ] Each button names its action and object; money buttons carry the exact amount
+- [ ] Errors read "Couldn't … Try again." and claim safety only when it is known
+- [ ] Money goes through the shared formatters; the currency is named once per screen; US spelling
 - [ ] Choosing uses ComboBoxResponsive, acting uses DropdownMenu, and nesting in either uses the view-stack sub-view
 - [ ] New interaction patterns reviewed against this policy
 
@@ -198,3 +267,4 @@ Features: display/edit toggle, Enter/Escape/blur handling, auto-focus, auto-sele
 - [Accessibility Policy](accessibility-policy.md) — ARIA conventions, focus management
 - [React Policy](react-policy.md) — Component patterns, state management
 - Research: `docs/research/dialog-inline-editing-audit.md`
+- Research: `docs/research/billing-redesign-blueprint.md` — the copy glossary these rules come from

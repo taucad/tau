@@ -1,6 +1,18 @@
+/* eslint-disable @typescript-eslint/naming-convention -- provider request parameter names use snake_case. */
 import { describe, expect, it } from 'vitest';
-import { contractId } from '@taucad/agent-observability/identity';
-import { apiBuildRelease, executionOfAttempt, providerAttemptEvidence } from '#model-invocation-evidence.js';
+import { evidenceLimits, evidenceSchema } from '@taucad/agent-observability/contract';
+import {
+  canonicalEvidence,
+  contractId,
+  evidenceKeys,
+  verifyEvidenceDigest,
+} from '@taucad/agent-observability/identity';
+import {
+  apiBuildRelease,
+  executionOfAttempt,
+  providerAttemptEvidence,
+  providerContentEvidence,
+} from '#model-invocation-evidence.js';
 import type { ObservedAttempt } from '#model-invocation-evidence.js';
 
 describe('executionOfAttempt', () => {
@@ -94,5 +106,99 @@ describe('providerAttemptEvidence call kind, purpose and model', () => {
         ended: 'completed',
       }),
     ).toMatchObject({ resolvedModel: 'streamed-model' });
+  });
+});
+
+describe('providerContentEvidence', () => {
+  const stream = {
+    stop: 'stop',
+    usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: null, missing: 'none' },
+    resolvedModel: 'streamed-model',
+    response: undefined,
+    firstChunk: 1,
+    firstText: 2,
+  } as const;
+  const base: ObservedAttempt = {
+    principal: 'user-a',
+    project: 'project-a',
+    attemptKey: 'run-1:1:0',
+    chat: 'chat-1',
+    surface: 'gateway',
+    wire: 'anthropic',
+    activity: 'agent',
+    requestedModel: 'catalogue-model',
+    supplierModel: 'supplier-model',
+    provider: 'anthropic',
+    operation: undefined,
+    startedAt: 1_800_000_000_000,
+    duration: 10,
+    stream,
+    ended: 'completed',
+  };
+  const authority = { policyEpoch: 'epoch-a', protection: 'free' } as const;
+  const captured = (text: string): ObservedAttempt => ({
+    ...base,
+    content: {
+      input: {
+        messages: [{ role: 'user', parts: [{ kind: 'text', text }] }],
+        context: { historyMessages: 4, history: 'b'.repeat(64), system: 'c'.repeat(64), tools: null },
+        parameters: { max_tokens: 100 },
+      },
+      output: [{ role: 'assistant', parts: [{ kind: 'text', text: 'Done.' }] }],
+      truncated: false,
+    },
+  });
+
+  it('writes the same fact as the summary, with its input and output, under the content redactor', async () => {
+    const summary = await providerAttemptEvidence(captured('Make it taller'), authority);
+    const content = await providerContentEvidence(captured('Make it taller'), authority);
+
+    expect(content).toBeDefined();
+    expect(evidenceSchema.safeParse(content).success).toBe(true);
+    expect(await verifyEvidenceDigest(content!)).toBe(true);
+    expect(evidenceKeys(content!).source).toBe(evidenceKeys(summary).source);
+    expect(content!.source).toEqual(summary.source);
+    expect(content!.projection.redactor).toBe('content-v1');
+    expect(content!.coverage).toMatchObject({ input: 'complete', output: 'complete' });
+    expect(content!.payload).toMatchObject({
+      plane: 'content',
+      fact: summary.payload.plane === 'summary' ? summary.payload.fact : undefined,
+      input: { messages: [{ role: 'user', parts: [{ kind: 'text', text: 'Make it taller' }] }] },
+      output: { messages: [{ role: 'assistant', parts: [{ kind: 'text', text: 'Done.' }] }] },
+      context: { historyMessages: 4 },
+      parameters: { max_tokens: 100 },
+    });
+  });
+
+  it('keeps a large call inside one envelope, labelled truncated', async () => {
+    const content = await providerContentEvidence(captured('"quoted"\n'.repeat(60_000)), authority);
+
+    expect(new TextEncoder().encode(canonicalEvidence(content!)).byteLength).toBeLessThanOrEqual(evidenceLimits.bytes);
+    expect(evidenceSchema.safeParse(content).success).toBe(true);
+    expect(content!.coverage.input).toBe('truncated');
+  });
+
+  it('labels an unreadable request body unsupported and still records the output', async () => {
+    const attempt = captured('x');
+    const content = await providerContentEvidence(
+      { ...attempt, content: { ...attempt.content!, input: undefined } },
+      authority,
+    );
+
+    expect(content!.coverage).toMatchObject({ input: 'unsupported', output: 'complete' });
+    expect(content!.payload).toMatchObject({ input: null, context: null, parameters: {} });
+  });
+
+  it('writes no content for an attempt that captured none, and says why on its summary', async () => {
+    expect(await providerContentEvidence(base, authority)).toBeUndefined();
+    const omitted = await providerAttemptEvidence(base, authority);
+    const missing = await providerAttemptEvidence({ ...base, capture: 'missing' }, authority);
+
+    expect(omitted.coverage).toMatchObject({ input: 'omitted', output: 'omitted' });
+    expect(missing.coverage).toMatchObject({ input: 'missing', output: 'missing' });
+  });
+
+  it('writes no content for a compaction call, whose input and summary are old content', async () => {
+    expect(await providerContentEvidence({ ...captured('x'), activity: 'compaction' }, authority)).toBeUndefined();
   });
 });

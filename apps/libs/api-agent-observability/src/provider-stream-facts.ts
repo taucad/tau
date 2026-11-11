@@ -19,6 +19,9 @@ export type ProviderStreamSummary = Readonly<{
   firstText: number | undefined;
 }>;
 
+/** Where a content capture receives each parsed data frame. */
+export type FrameSink = Readonly<{ accept: (frame: unknown) => void }>;
+
 /** A frame larger than this is not parsed; its usage, if any, is reported as partial. */
 const maximumFrameCharacters = 1_048_576;
 /** Only frames that can carry a stop reason, usage or the first text are parsed at all. */
@@ -84,12 +87,23 @@ export class ProviderStreamFacts {
   private firstChunk: number | undefined;
   private firstText: number | undefined;
   private oversized = false;
+  private sink: FrameSink | undefined;
 
   public constructor(
     private readonly wire: ModelProviderWire,
     private readonly startedAt: number,
     private readonly clock: () => number = performance.now.bind(performance),
   ) {}
+
+  /**
+   * Hand every parsed data frame from here on to a content capture as well. Without one, only the frames that can
+   * carry facts are parsed; a capture that throws changes nothing this parser reads.
+   *
+   * @param sink - The capture.
+   */
+  public capture(sink: FrameSink): void {
+    this.sink = sink;
+  }
 
   /** @param chunk - Relayed bytes, already forwarded to the client. */
   public accept(chunk: Uint8Array<ArrayBuffer>): void {
@@ -148,7 +162,7 @@ export class ProviderStreamFacts {
       return;
     }
     const data = line.slice(5).trim();
-    if (data === '[DONE]' || !interesting.test(data)) {
+    if (data === '[DONE]' || (this.sink === undefined && !interesting.test(data))) {
       return;
     }
     let frame: unknown;
@@ -156,6 +170,11 @@ export class ProviderStreamFacts {
       frame = JSON.parse(data) as unknown;
     } catch {
       return;
+    }
+    try {
+      this.sink?.accept(frame);
+    } catch {
+      // A capture never affects the facts or the relay.
     }
     switch (this.wire) {
       case 'anthropic': {

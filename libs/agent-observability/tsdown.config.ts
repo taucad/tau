@@ -5,6 +5,7 @@ const baseConfig: UserConfig = {
   entry: [
     'src/index.ts',
     'src/contract.ts',
+    'src/content-redaction.ts',
     'src/delivery.ts',
     'src/authority.ts',
     'src/identity.ts',

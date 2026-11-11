@@ -364,4 +364,39 @@ describe('entriesPolicy path changes', () => {
       'c.ts': { renderTimeout: 1000 },
     });
   });
+
+  it.each([
+    ['a delete', { type: 'delete', path: 'a.ts' }],
+    ['a rename', { type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' }],
+  ] satisfies Array<[string, EntryPathChange]>)(
+    'should keep an edit carried with %s whose write did not land when another party removed the moved entry',
+    (_case, change) => {
+      const current: WorkbenchEntries = {
+        version: 1,
+        entries: { 'a.ts': { renderTimeout: 1000 }, 'c.ts': { renderTimeout: 2000 } },
+      };
+      const edited: EntriesRecord = { version: 1, entries: { ...current.entries, 'c.ts': { renderTimeout: 3000 } } };
+      const moved: EntriesRecord = { version: 1, entries: movePaths(edited.entries, [change]), moves: [change] };
+      const patch = combine(diff(current, edited), diff(edited, moved));
+      merge(current, moved, patch);
+      const removed: WorkbenchEntries = { version: 1, entries: { 'c.ts': { renderTimeout: 2000 } } };
+      expect(merge(removed, moved, patch).entries['c.ts']).toEqual({ renderTimeout: 3000 });
+    },
+  );
+
+  it('should not apply a delete found written again when another party later makes an entry at its path', () => {
+    const current: WorkbenchEntries = { version: 1, entries: { 'b.ts': { renderTimeout: 1000 } } };
+    const removal: EntryPathChange = { type: 'delete', path: 'b.ts' };
+    const deleted: EntriesRecord = { version: 1, entries: {}, moves: [removal] };
+    const patch = diff(current, deleted);
+    const written = merge(current, deleted, patch);
+    const edited: WorkbenchEntries = { version: 1, entries: { 'c.ts': { renderTimeout: 5000 } } };
+    const combined = combine(patch, diff(deleted, edited));
+    expect(merge(written, edited, combined).entries).toEqual({ 'c.ts': { renderTimeout: 5000 } });
+    const created: WorkbenchEntries = { version: 1, entries: { 'b.ts': { renderTimeout: 9000 } } };
+    expect(merge(created, edited, combined).entries).toEqual({
+      'b.ts': { renderTimeout: 9000 },
+      'c.ts': { renderTimeout: 5000 },
+    });
+  });
 });

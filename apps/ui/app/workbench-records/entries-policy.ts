@@ -174,9 +174,10 @@ type Mark = Readonly<{ upTo: number; writes: readonly Write[]; landed?: true }>;
  * What each patch wrote, by the prefix of its steps that made each write. Path changes are not idempotent (a delete
  * followed by a rename onto the deleted path removes the renamed entry when applied again; a swap applied again undoes
  * itself), yet the writer applies a patch again to the bytes it reads back after a lost reply, and a later combined
- * patch carries the same steps. A write has landed when, on the paths its path changes touch and where it changed the
- * entry, the file holds the entry it wrote somewhere and the entry it replaced nowhere: another party may have changed
- * any of those entries since, or any other entry. Only the steps after the landed prefix are applied. Keyed by the
+ * patch carries the same steps. A write has landed when, on the paths where it changed the entry, the file holds the
+ * entry it wrote somewhere and the entry it replaced nowhere: another party may have changed any of those entries
+ * since, or any other entry. A prefix found landed stays landed, since every later file comes after that write. Only
+ * the steps after the landed prefix are applied. Keyed by the
  * patch object, which the machine keeps from issue to retry; a combined patch inherits the marks of its earlier part,
  * whose steps it starts with.
  */
@@ -223,32 +224,17 @@ const combinePatches = (earlier: EntriesPatch, later: EntriesPatch): EntriesPatc
   return combined.steps;
 };
 
-/** Whether a path change of the steps reads or writes `path`: it is under a change's old or new path. */
-const moves = (steps: readonly EntriesStep[], path: string): boolean =>
-  steps.some((step) =>
-    step.moves.some((change) =>
-      change.type === 'delete'
-        ? matchesPath(path, change.path)
-        : matchesPath(path, change.oldPath) || matchesPath(path, change.newPath),
-    ),
-  );
-
 /**
- * Whether the file holds a write of `steps`: on the paths their path changes touch and the write changed, the file
- * holds the written entry on at least one and the replaced entry on none. A path another party changed since holds
- * neither, and says nothing.
+ * Whether the file holds a write: on the paths the write changed, the file holds the written entry on at least one and
+ * the replaced entry on none. A path another party changed since holds neither, and says nothing.
  */
-const holds = (current: WorkbenchEntries, write: Write, steps: readonly EntriesStep[]): boolean => {
-  const paths = new Set([
-    ...Object.keys(current.entries),
-    ...Object.keys(write.base.entries),
-    ...Object.keys(write.record.entries),
-  ]);
+const holds = (current: WorkbenchEntries, write: Write): boolean => {
+  const paths = new Set([...Object.keys(write.base.entries), ...Object.keys(write.record.entries)]);
   let written = false;
   for (const path of paths) {
     const before = JSON.stringify(write.base.entries[path]);
     const after = JSON.stringify(write.record.entries[path]);
-    if (before === after || !moves(steps, path)) {
+    if (before === after) {
       continue;
     }
     const now = JSON.stringify(current.entries[path]);
@@ -260,14 +246,17 @@ const holds = (current: WorkbenchEntries, write: Write, steps: readonly EntriesS
   return written;
 };
 
-/** The longest marked prefix of the patch the file already holds, if any. */
+/**
+ * The longest marked prefix of the patch on disk, if any: found landed before (every later file comes after that
+ * write), or held by the file now.
+ */
 const landedMark = (patch: EntriesPatch, current: WorkbenchEntries | undefined): Mark | undefined => {
   if (current === undefined) {
     return undefined;
   }
   return (marks.get(patch) ?? [])
     .toSorted((left, right) => right.upTo - left.upTo)
-    .find((mark) => mark.writes.some((write) => holds(current, write, patch.slice(0, mark.upTo))));
+    .find((mark) => mark.landed === true || mark.writes.some((write) => holds(current, write)));
 };
 
 /** Keep the marks of writes found landed first, then the latest others, each up to {@link maxMarks}. */
@@ -296,7 +285,10 @@ const mark = (patch: EntriesPatch, write: Write, found: Mark | undefined): void 
   const updated: Mark = {
     ...whole,
     upTo: patch.length,
-    writes: [...(whole?.writes ?? []), write].slice(-maxMarkWrites),
+    // The writer may merge the same cycle more than once; one write is kept once.
+    writes: [...(whole?.writes ?? []).filter((kept) => JSON.stringify(kept) !== JSON.stringify(write)), write].slice(
+      -maxMarkWrites,
+    ),
   };
   marks.set(patch, bounded([...kept.filter((existing) => existing !== whole), updated]));
 };

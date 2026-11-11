@@ -154,24 +154,42 @@ export function createWorkbenchEntriesStore(
       input.onError(error);
     }
   });
+  /** Changes refused because the file cannot take them, by entry path: owed to the person, never to the file. */
+  const refused = new Map<string, string>();
+  /** The machine's health, with a refused change counted as one the file does not hold. */
+  const healthOf = (health: RecordHealth): RecordHealth => {
+    const [first] = refused.values();
+    return first === undefined ? health : { ...health, unconfirmed: true, error: health.error ?? first };
+  };
   on('healthChanged', ({ health }) => {
     if (!disposed) {
-      input.onHealth?.(health);
+      input.onHealth?.(healthOf(health));
     }
   });
+  const refusalChanged = (): void => {
+    if (!disposed) {
+      input.onHealth?.(healthOf(context().health));
+    }
+  };
   actor.start();
   /**
-   * Whether the file can take a change: one it cannot is refused and reported here, rather than owed with every later
-   * change of every entry, which would then never be written.
+   * Whether the file can take a change to `path`: one it cannot is refused, reported and counted in health until a
+   * later change of that path is taken, rather than owed with every later change of every entry, which would then
+   * never be written.
    */
-  const writable = (record: EntriesRecord): boolean => {
+  const writable = (path: string, record: EntriesRecord): boolean => {
     try {
       entriesPolicy.serialize(record);
-      return true;
     } catch (error) {
+      refused.set(path, error instanceof Error ? error.message : String(error));
       input.onError(error);
+      refusalChanged();
       return false;
     }
+    if (refused.delete(path)) {
+      refusalChanged();
+    }
+    return true;
   };
   /** The record the person's next change starts from: what they last asked for, else what the file holds. */
   const base = (): WorkbenchEntries => {
@@ -200,7 +218,7 @@ export function createWorkbenchEntriesStore(
         owed: owed[entryPath],
       });
       const record = { ...from, entries: { ...from.entries, [entryPath]: entry }, set: { [entryPath]: fields } };
-      return writable(record) && commands.edit(record);
+      return writable(entryPath, record) && commands.edit(record);
     },
     changePaths: async (change) => {
       if (disposed) {
@@ -208,7 +226,7 @@ export function createWorkbenchEntriesStore(
       }
       const from = base();
       const record = { ...from, entries: movePaths(from.entries, [change]), moves: [change] };
-      if (!writable(record)) {
+      if (!writable(change.type === 'delete' ? change.path : change.oldPath, record)) {
         return false;
       }
       const saved = commands.edit(record);
@@ -223,13 +241,13 @@ export function createWorkbenchEntriesStore(
       }
       return commands.reset(next, reviewed === undefined ? shown.bytes : reviewed);
     },
-    flush: async () => commands.flush(),
+    flush: async () => (await commands.flush()) && refused.size === 0,
     dispose: () => {
       disposed = true;
       commands.close();
     },
     snapshot: () => context().published,
-    health: () => context().health,
+    health: () => healthOf(context().health),
     retryRead: async () => (disposed ? false : commands.retryRead()),
     ready: () => context().origin !== 'none',
   };

@@ -733,7 +733,7 @@ describe('workbench entries store over recordSync', () => {
     }
   });
 
-  it('refuses a change the record cannot take, and still writes the other entries', async () => {
+  it('refuses a change the record cannot take, reports it unsaved, and still writes the other entries', async () => {
     const m = memory();
     const onError = vi.fn();
     const entries = createWorkbenchEntriesStore({ root: '/root', files: m.files, onChange: () => undefined, onError });
@@ -742,11 +742,16 @@ describe('workbench entries store over recordSync', () => {
       const many = Array.from({ length: 1025 }, (_, index) => `c${index}`);
       expect(await entries.edit('a.ts', { components: { hidden: many, isolated: [], opacity: [] } })).toBe(false);
       expect(onError).toHaveBeenCalledOnce();
+      expect(entries.health().unconfirmed).toBe(true);
+      expect(entries.health().error).toContain('1024');
       expect(await entries.edit('b.ts', { renderTimeout: 15_000 })).toBe(true);
-      expect(await entries.flush()).toBe(true);
+      expect(await entries.flush()).toBe(false);
       expect(workbenchRecords.entries.read(m.get()!)).toMatchObject({
         record: { entries: { 'a.ts': { renderTimeout: 180_000 }, 'b.ts': { renderTimeout: 15_000 } } },
       });
+      expect(await entries.edit('a.ts', { components: { hidden: ['x'], isolated: [], opacity: [] } })).toBe(true);
+      expect(await entries.flush()).toBe(true);
+      expect(entries.health()).toMatchObject({ unconfirmed: false });
     } finally {
       entries.dispose();
     }

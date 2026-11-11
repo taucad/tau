@@ -15,9 +15,10 @@
  * - `transitionstart`, `wake`, `update`, `control`, `controlstart`: a render request.
  *
  * Camera to canvas, once per presented change: the controls, the retained consumers, the raycaster clipping and R3F's
- * camera. The controls are written only for a change the person did not make with them (`lastChange.source` is not
- * `input`), a new render frame, or a new native camera, and that write is stamped with the change's revision so the
- * `update` it causes is an echo the camera ignores.
+ * camera. The controls are written for every change except the one this adapter's own `update` reported (the person's
+ * gesture, which the controls already hold), unless that change also brought a new render frame or a new native camera.
+ * A pose another sender reports with the source `input` (a restored or adopted view) is written like any other. Each
+ * write is stamped with the change's revision so the `update` it causes is an echo the camera ignores.
  */
 import type { RootState } from '@react-three/fiber';
 import CameraControlsImpl from 'camera-controls';
@@ -91,8 +92,8 @@ const installCameraControls = (): void => {
     return;
   }
   installed = true;
+  /* eslint-disable @typescript-eslint/naming-convention -- `camera-controls` requires this exact install shape. */
   CameraControlsImpl.install({
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- `camera-controls` requires this exact install shape.
     THREE: {
       Box3,
       MathUtils: { clamp: MathUtils.clamp },
@@ -106,6 +107,7 @@ const installCameraControls = (): void => {
       Vector4,
     },
   });
+  /* eslint-enable @typescript-eslint/naming-convention -- The install shape ends here. */
 };
 
 /**
@@ -198,6 +200,8 @@ export const createControlsAdapter = ({
     const controls = new CameraControlsImpl(rig.activeCamera);
     // The revision whose presentation is writing the controls: the `update` that write causes is an echo (I3).
     let echoRevision: number | undefined;
+    // Set while this adapter reports a pose its controls made: the change it causes is already on the controls.
+    let observing = false;
     let held = false;
     let moved = false;
     let published:
@@ -220,9 +224,7 @@ export const createControlsAdapter = ({
     /* The driver: presents one camera change on this canvas. */
     const publish = (nativeCamera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
       const writeControls =
-        snapshot.lastChange.source !== 'input' ||
-        published?.camera !== nativeCamera ||
-        published.renderFrame !== snapshot.renderFrame;
+        !observing || published?.camera !== nativeCamera || published.renderFrame !== snapshot.renderFrame;
       if (writeControls) {
         echoRevision = snapshot.revision;
         try {
@@ -293,7 +295,12 @@ export const createControlsAdapter = ({
         return;
       }
       const nextFrame = resolvePoseRenderFrame({ renderFrame, target: pose.target, verticalSpan: pose.verticalSpan });
-      camera.send({ type: 'poseObserved', ...pose, source: 'input', ...(nextFrame && { renderFrame: nextFrame }) });
+      observing = true;
+      try {
+        camera.send({ type: 'poseObserved', ...pose, source: 'input', ...(nextFrame && { renderFrame: nextFrame }) });
+      } finally {
+        observing = false;
+      }
     };
     const listeners = [
       ['controlstart', onControlStart],

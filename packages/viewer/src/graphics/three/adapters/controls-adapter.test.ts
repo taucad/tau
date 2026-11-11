@@ -254,6 +254,24 @@ describe('controls adapter', () => {
     }
   });
 
+  /* A restored or adopted view arrives as `poseObserved` with the source `input` from a sender that is not the
+   * controls; camera-controls rewrites the native camera from its own state every frame, so it must take that pose. */
+  it('writes a pose another sender reports as input onto the controls, so the next frame keeps it', () => {
+    const harness = createHarness();
+    harness.attach();
+    const controls = harness.controls();
+
+    harness.camera.send({ type: 'poseObserved', source: 'input', ...cameraView, target: [5, 5, 5] });
+    controls.update(1 / 60);
+
+    expect(controls.getTarget(harness.rig.perspectiveCamera.position.clone()).toArray()).toEqual([5, 5, 5]);
+    const { target } = harness.camera.getSnapshot().context.view;
+    expect(target).toEqual([5, 5, 5]);
+    const position = harness.rig.perspectiveCamera.position.clone();
+    controls.update(1 / 60);
+    expect(harness.rig.perspectiveCamera.position.distanceTo(position)).toBeLessThan(1e-9);
+  });
+
   it('stamps the update its own controls write causes, so the camera ignores that echo (I3)', () => {
     const harness = createHarness();
     harness.attach();

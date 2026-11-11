@@ -89,6 +89,8 @@ export type OwnWrite<P> = Readonly<{
   /** The person's fields this write carried; `undefined` for a reset. */
   patch: P | undefined;
   state: 'inFlight' | 'acknowledged' | 'lost';
+  /** A restore wrote it: a read that finds it, once nothing is owed, settles the person's base on its record. */
+  restored?: true;
 }>;
 
 type Cycle<T, P> = Readonly<{
@@ -353,6 +355,9 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
   const baseOf = (record: T | undefined, context: Context): T | undefined =>
     record === undefined && policy.keepsBaseOnAbsence === true ? context.lastRecord : record;
 
+  /** A read settles the person's base on what it shows unless it is the store's own write, other than a restore's. */
+  const settlesBase = (own: OwnWrite<P> | undefined): boolean => own === undefined || own.restored === true;
+
   const answer = (enq: Emit, requestIds: readonly string[], ok: boolean): void => {
     if (requestIds.length > 0) {
       enq.emit({ type: 'answered', requestIds, ok });
@@ -482,9 +487,9 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
         deferred === undefined &&
         context.published.refusal === undefined
       ) {
-        /* An unsaved restore ends on the record its conflict read showed, which the read held while the cycle ran. */
-        /* A lost reply may have landed: like an edit, it holds what it wrote until the read-back shows otherwise. */
-        patch.intended = context.readBack === 'owed' ? cycle.next : baseOf(context.published.record, context);
+        /* An unsaved restore ends on the record shown: its conflict read's, or, after a lost reply, the one before it. */
+        /* A lost write that landed settles the base on its record when the read-back finds it (`CompleteRead`). */
+        patch.intended = baseOf(context.published.record, context);
       }
     }
     patch.deferred = deferred;
@@ -718,7 +723,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                         readFailures: 0,
                         readBack: context.readBack === 'reading' ? 'none' : context.readBack,
                         health: { ...context.health, read: 'ok' },
-                        ...(notify && !own && !published.refusal && settledIntent
+                        ...(notify && settlesBase(own) && !published.refusal && settledIntent
                           ? { intended: baseOf(published.record, context) }
                           : {}),
                       },
@@ -1021,7 +1026,9 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                     // Target rule 1: the entry exists from the moment the write is issued.
                     ownWrites: [
                       ...context.ownWrites,
-                      { writeId, bytes: new TextEncoder().encode(data), patch, state: 'inFlight' },
+                      cycle.kind === 'restore'
+                        ? { writeId, bytes: new TextEncoder().encode(data), patch, state: 'inFlight', restored: true }
+                        : { writeId, bytes: new TextEncoder().encode(data), patch, state: 'inFlight' },
                     ],
                     nextWriteId: writeId + 1,
                     overlap: false,

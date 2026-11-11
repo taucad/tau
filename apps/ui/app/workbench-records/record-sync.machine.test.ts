@@ -1059,6 +1059,22 @@ describe('recordSync', () => {
       expect(store.writes).toHaveLength(1);
     });
 
+    it('should keep the shown record as the base when a lost restore reads back refused bytes', async () => {
+      const store = harness({ file: 'name=seed' });
+      await store.observe();
+      const restored = store.commands.restore({ name: 'saved' }, bytesOf('name=seed'));
+      store.writes[0]?.settle(lostReply());
+      await flush();
+
+      expect(await restored).toBe(false);
+      store.foreign('!broken');
+      void store.commands.read(true);
+      await store.serve();
+
+      expect(store.context().published.refusal?.code).toBe('INVALID_RECORD');
+      expect(store.context().intended).toEqual({ name: 'seed' });
+    });
+
     it('should answer a restore whose owner no longer wants it with no', async () => {
       const store = harness({ file: 'name=seed' });
       await store.observe();

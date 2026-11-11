@@ -1104,97 +1104,43 @@ describe('workbench layout store on recordSync (G2b)', () => {
     }
   });
 
-  it('should answer a read only once the host has been shown the latest publication', async () => {
-    const memory = memoryFiles();
-    const { digest } = globalThis.crypto.subtle;
-    const gates = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
-    let digests = 0;
-    const held = vi.spyOn(globalThis.crypto.subtle, 'digest').mockImplementation(async (...args) => {
-      await gates[digests++]?.promise;
-      return digest.apply(globalThis.crypto.subtle, args);
-    });
-    let shown = 0;
+  it('should show each publication as the machine makes it, so the diff base never runs ahead of what is shown', async () => {
+    const memory = memoryFiles({ ...layout(), lanes: { chat: false, workbench: true } });
+    const seen: Array<{ digest: string; bytes: Uint8Array<ArrayBuffer> | null; agrees: boolean }> = [];
     const store = createWorkbenchLayoutStore({
       root: '/root',
       files: memory.files,
-      onChange: () => {
-        shown++;
+      onChange: (state) => {
+        seen.push({
+          digest: state.digest,
+          bytes: state.bytes,
+          agrees: JSON.stringify(store.intendedLayout()) === JSON.stringify(state.layout),
+        });
       },
       onError: () => undefined,
     });
     try {
-      let answered = false;
-      const first = (async () => {
-        const ok = await store.read(true);
-        answered = true;
-        return ok;
-      })();
+      const first = store.read(true);
+      // Shown in the step that published it: the host never sees a record older than the diff base.
       await vi.waitFor(() => {
-        expect(digests).toBe(1);
+        expect(seen).toHaveLength(1);
       });
-      // The file changes and a watch read publishes while the first read's digest is still being computed.
-      memory.set({ ...layout(), lanes: { chat: false, workbench: true } });
-      const second = store.read();
-      await vi.waitFor(() => {
-        expect(digests).toBe(2);
-      });
-      // Both publications are shown in order; the first read's answer waits for the second to be shown too.
-      gates[0]?.resolve();
-      await new Promise((resolve) => {
-        setTimeout(resolve, 10);
-      });
-      expect(answered).toBe(false);
-      expect(shown).toBe(1);
-      gates[1]?.resolve();
       expect(await first).toBe(true);
-      expect(shown).toBe(2);
-      expect(store.ready()).toBe(true);
-      expect(store.snapshot().layout?.lanes.chat).toBe(false);
-      expect(await second).toBe(true);
-    } finally {
-      for (const gate of gates) {
-        gate.resolve();
-      }
-      held.mockRestore();
-      store.dispose();
-    }
-  });
-
-  it('should show every publication in order, so the diff base after an absence is a layout the host was shown', async () => {
-    const empty: WorkbenchLayout = { ...layout(), workbench: { kind: 'group', tabs: [] } };
-    const memory = memoryFiles(empty);
-    const store = createWorkbenchLayoutStore({
-      root: '/root',
-      files: memory.files,
-      onChange: () => undefined,
-      onError: () => undefined,
-    });
-    const { digest } = globalThis.crypto.subtle;
-    const gate = Promise.withResolvers<void>();
-    let digests = 0;
-    const held = vi.spyOn(globalThis.crypto.subtle, 'digest').mockImplementation(async (...args) => {
-      // The digest of the second publication (the foreign layout) is held until the file is gone.
-      if (++digests === 2) {
-        await gate.promise;
-      }
-      return digest.apply(globalThis.crypto.subtle, args);
-    });
-    try {
-      await store.read(true);
-      memory.set(layout());
-      const foreign = store.read();
-      await vi.waitFor(() => {
-        expect(digests).toBe(2);
+      // Another window opens the chat lane; the person closes the workbench lane once the host shows it.
+      memory.set({ ...layout(), lanes: { chat: true, workbench: true } });
+      await store.read();
+      expect(store.snapshot().layout?.lanes).toEqual({ chat: true, workbench: true });
+      const current = store.intendedLayout()!;
+      expect(await store.edit({ ...current, lanes: { chat: current.lanes.chat, workbench: false } })).toBe(true);
+      expect(workbenchRecords.layout.read(memory.get()!)).toMatchObject({
+        status: 'current',
+        record: { lanes: { chat: true, workbench: false } },
       });
-      memory.setBytes(null);
-      const absent = store.read();
-      gate.resolve();
-      await Promise.all([foreign, absent]);
-      expect(store.snapshot().layout).toEqual(layout());
-      expect(store.intendedLayout()).toEqual(store.snapshot().layout);
+      expect(seen.every((entry) => entry.agrees)).toBe(true);
+      for (const entry of seen) {
+        expect(entry.digest).toBe(entry.bytes === null ? 'missing' : await digestBytes(entry.bytes));
+      }
     } finally {
-      gate.resolve();
-      held.mockRestore();
       store.dispose();
     }
   });

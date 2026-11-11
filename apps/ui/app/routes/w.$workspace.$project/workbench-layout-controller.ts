@@ -9,14 +9,13 @@ import type { ViewerNode, WorkbenchLaneNode, WorkbenchLayout, WorkbenchTab } fro
 import { workbenchPaths } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
-import { digestBytes } from '@taucad/ui-core/utils/crypto.utils';
+import { digestHex } from '@taucad/revisions';
 import { isPotentiallyApplied } from '#workbench-records/record-health.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
 import { layoutPolicy } from '#workbench-records/layout-policy.js';
 import type { WorkbenchLayoutPatch as PolicyPatch } from '#workbench-records/layout-policy.js';
 import { createRecordSync } from '#workbench-records/record-sync.js';
 import { createRecordSyncMachine } from '#workbench-records/record-sync.machine.js';
-import type { RecordSyncEmitted } from '#workbench-records/record-sync.machine.js';
 
 /** The focused page's applied portable arrangement and any tabs it cannot display. */
 export type WorkbenchLayoutSnapshot = Readonly<{
@@ -118,14 +117,12 @@ export function createWorkbenchLayoutStore(
   const path = `${input.root}/${workbenchPaths.layout}`;
   let disposed = false;
   /**
-   * What the host was last shown. The digest is computed after the machine publishes, so the state moves when it is
-   * known; every command waits for it before it answers. Absence keeps the last layout: it is not an adoption command,
-   * and live owners keep their values.
+   * What the host was last shown, with the digest of its bytes. Absence keeps the last layout: it is not an adoption
+   * command, and live owners keep their values.
    */
   let state: LayoutState = { layout: undefined, bytes: null, refusal: undefined, digest: 'missing' };
   /** Whether the host has been shown a read of the file: the store is ready once it has. */
   let observed = false;
-  let shown: Promise<void> = Promise.resolve();
   /** Whether a restore still wants its write, by the request id its write is asked with. */
   const eligibility = new Map<string, () => boolean>();
   const { actor, commands, context, on } = createRecordSync({
@@ -155,37 +152,16 @@ export function createWorkbenchLayoutStore(
       },
     },
   });
-  /**
-   * Show the host one publication once its digest is known. Publications are shown in order and none is skipped, so
-   * what the host was shown last is what the machine published last, and the diff base it reads back agrees with it.
-   */
-  const show = async (
-    digesting: Promise<LayoutState['digest']>,
-    event: Extract<RecordSyncEmitted<WorkbenchLayout, WorkbenchLayoutPatch>, { type: 'published' }>,
-  ): Promise<void> => {
-    const { snapshot, origin, patch } = event;
-    try {
-      const digest = await digesting;
-      if (disposed) {
-        return;
-      }
-      state = { layout: snapshot.record ?? state.layout, bytes: snapshot.bytes, refusal: snapshot.refusal, digest };
-      observed = true;
-      input.onChange(state, origin === 'own' ? 'write' : 'read', patch);
-    } catch (error) {
-      if (!disposed) {
-        input.onError(error);
-      }
+  // The machine sets the person's diff base in the step that publishes, so the host is shown the same step at once:
+  // what it shows and the base an edit is diffed against never part. The digest is synchronous for that reason.
+  on('published', ({ snapshot, origin, patch }) => {
+    if (disposed) {
+      return;
     }
-  };
-  on('published', (event) => {
-    const { bytes } = event.snapshot;
-    const digesting: Promise<LayoutState['digest']> = bytes === null ? Promise.resolve('missing') : digestBytes(bytes);
-    const previous = shown;
-    shown = (async () => {
-      await previous;
-      await show(digesting, event);
-    })();
+    const digest = snapshot.bytes === null ? 'missing' : (`sha256:${digestHex('sha256', snapshot.bytes)}` as const);
+    state = { layout: snapshot.record ?? state.layout, bytes: snapshot.bytes, refusal: snapshot.refusal, digest };
+    observed = true;
+    input.onChange(state, origin === 'own' ? 'write' : 'read', patch);
   });
   on('failed', ({ error }) => {
     if (!disposed) {
@@ -198,18 +174,6 @@ export function createWorkbenchLayoutStore(
     }
   });
   actor.start();
-  /** A command's answer, once the host has been shown what it published. */
-  const answered = async (answer: Promise<boolean>): Promise<boolean> => {
-    const ok = await answer;
-    // A publication made while this one was being shown is shown after it; wait until the latest has been shown.
-    let showing: Promise<void>;
-    do {
-      showing = shown;
-      // oxlint-disable-next-line no-await-in-loop -- each pass waits for the publication that is latest now.
-      await showing;
-    } while (showing !== shown);
-    return ok;
-  };
   const restorable = (expectedDigest: string, edits: number, eligible: () => boolean): boolean => {
     const current = context();
     return (
@@ -224,27 +188,27 @@ export function createWorkbenchLayoutStore(
     );
   };
   return {
-    read: async (notify = false) => (disposed ? false : answered(commands.read(notify))),
+    read: async (notify = false) => (disposed ? false : commands.read(notify)),
     invalidateRead: () => {
       if (!disposed) {
         commands.invalidate();
       }
     },
-    retryRead: async () => (disposed ? false : answered(commands.retryRead())),
-    edit: async (next) => (disposed ? false : answered(commands.edit(next))),
+    retryRead: async () => (disposed ? false : commands.retryRead()),
+    edit: async (next) => (disposed ? false : commands.edit(next)),
     restore: async (next, expectedDigest, eligible) => {
       const { edits } = context();
       if (!restorable(expectedDigest, edits, eligible)) {
         return false;
       }
       // Read first: the restore is written only over the bytes the file holds now.
-      if (!(await answered(commands.read())) || !restorable(expectedDigest, edits, eligible)) {
+      if (!(await commands.read()) || !restorable(expectedDigest, edits, eligible)) {
         return false;
       }
       const requestId = commands.nextRequestId();
       eligibility.set(requestId, () => restorable(expectedDigest, edits, eligible));
       try {
-        return await answered(commands.restore(next, state.bytes, requestId));
+        return await commands.restore(next, state.bytes, requestId);
       } finally {
         eligibility.delete(requestId);
       }
@@ -253,9 +217,9 @@ export function createWorkbenchLayoutStore(
       if (disposed || state.refusal?.code !== 'INVALID_RECORD') {
         return false;
       }
-      return answered(commands.reset(next, reviewed === undefined ? state.bytes : reviewed));
+      return commands.reset(next, reviewed === undefined ? state.bytes : reviewed);
     },
-    flush: async () => answered(commands.flush()),
+    flush: async () => commands.flush(),
     dispose: () => {
       if (disposed) {
         return;

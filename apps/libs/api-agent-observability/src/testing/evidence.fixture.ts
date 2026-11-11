@@ -22,11 +22,15 @@ type Overrides = Readonly<{
   lineageDigest?: string;
   now?: number;
   authority?: Evidence['authority'];
+  /** A summary fact in place of the default instruction, for a test that needs one that maps to a Langfuse object. */
+  fact?: Extract<Evidence['payload'], { plane: 'summary' }>['fact'];
+  /** The fact's semantic id; two sources that share it name one Langfuse object. */
+  semantic?: string;
 }>;
 
-const payloadOf = (plane: Evidence['payload']['plane'], text: string, source: string): Evidence['payload'] => {
+const payloadOf = (overrides: Overrides, plane: Evidence['payload']['plane'], text: string): Evidence['payload'] => {
   if (plane === 'summary') {
-    return { plane, fact: { kind: 'instruction', mode: 'initial', message: 'message-1' } };
+    return { plane, fact: overrides.fact ?? { kind: 'instruction', mode: 'initial', message: 'message-1' } };
   }
   if (plane === 'feedback') {
     return { plane, fact: { kind: 'rating', scale: 'thumbs.1', value: 'negative', evidence: 'presented-1' } };
@@ -34,22 +38,25 @@ const payloadOf = (plane: Evidence['payload']['plane'], text: string, source: st
   const bytes = new TextEncoder().encode(text).byteLength;
   return {
     plane,
-    family: 'instruction',
-    stage: 'admitted',
-    blocks: [
-      {
-        kind: 'text',
-        role: 'user',
-        format: 'text',
-        text,
-        source,
-        originalBytes: bytes,
-        retainedBytes: bytes,
-        redaction: 'none',
-      },
-    ],
+    fact: overrides.fact ?? { kind: 'instruction', mode: 'initial', message: 'message-1' },
+    input: {
+      messages: [
+        {
+          role: 'user',
+          parts: [{ kind: 'text', text, originalBytes: bytes, retainedBytes: bytes, redaction: 'none' }],
+        },
+      ],
+      omitted: 0,
+    },
+    output: null,
+    context: null,
+    parameters: {},
   };
 };
+
+/** The semantic kind a fixture's plane and fact name. */
+const semanticKind = (plane: Overrides['plane'], fact: Overrides['fact']): Evidence['semantic']['kind'] =>
+  plane === 'feedback' ? 'rating' : (fact?.kind ?? 'instruction');
 
 /**
  * A valid host-reported envelope whose projection digest is computed, so a
@@ -70,7 +77,10 @@ export const evidenceFixture = async (overrides: Overrides = {}): Promise<Eviden
       sequence: overrides.sequence ?? 7,
       digest: sourceDigest,
     },
-    semantic: { kind: plane === 'feedback' ? 'rating' : 'instruction', id: 'message-1' },
+    semantic: {
+      kind: semanticKind(plane, overrides.fact),
+      id: overrides.semantic ?? 'message-1',
+    },
     projection: { version: overrides.projectionVersion ?? 'v1', redactor: 'r1', digest: '0'.repeat(64) },
     delivery: {
       uploader: overrides.uploader ?? 'device-a',
@@ -119,10 +129,41 @@ export const evidenceFixture = async (overrides: Overrides = {}): Promise<Eviden
       artifacts: 'unsupported',
       permission: 'complete',
     },
-    payload: payloadOf(plane, text, lineageDigest),
+    payload: payloadOf(overrides, plane, text),
   };
   return { ...evidence, projection: { ...evidence.projection, digest: await evidenceDigest(evidence) } };
 };
+
+/** A settled tool call's summary fact: one that maps to a Langfuse object. */
+export const toolFact = (call = 'call-1'): Extract<Evidence['payload'], { plane: 'summary' }>['fact'] => ({
+  kind: 'tool',
+  call,
+  dispatch: 'dispatch-1',
+  toolClass: 'other',
+  toolVersion: null,
+  schemaVersion: null,
+  modelCall: null,
+  outcome: 'completed',
+  revisionBefore: null,
+  revisionAfter: null,
+});
+
+/** A completed model call's summary fact: a generation in Langfuse. */
+export const providerFact = (): Extract<Evidence['payload'], { plane: 'summary' }>['fact'] => ({
+  kind: 'provider',
+  logicalCall: 'call-1',
+  attempt: null,
+  billing: null,
+  requestedModel: null,
+  resolvedModel: 'model-1',
+  provider: null,
+  response: null,
+  firstOutput: null,
+  purpose: 'generation',
+  callKind: 'run',
+  stop: 'stop',
+  usage: { input: 1, output: 1, cacheRead: null, cacheWrite: null, reasoning: null, missing: 'none' },
+});
 
 /** The envelope as the host sends it. */
 export const encodeEvidence = (evidence: unknown): Uint8Array<ArrayBuffer> =>

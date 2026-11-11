@@ -64,6 +64,26 @@ export const environmentSchemaBase = z.object({
     'The approved agent-observability purpose notice in force. Unset keeps every new purpose unavailable.',
   ),
   /*
+   * Langfuse remediation LD15: whether model input and output may be recorded at all. `off`, the default, records
+   * content for no account, whatever its purposes say; `allowlist` records it only for the staff accounts in
+   * TAU_OBSERVABILITY_CONTENT_ACCOUNTS; `on` defers to each account's own `content` purpose. Not a secret.
+   */
+  TAU_OBSERVABILITY_CONTENT_CAPTURE: unsetWhenEmpty(z.enum(['off', 'allowlist', 'on']).default('off')).describe(
+    'Agent content capture for Langfuse: off (default), allowlist or on.',
+  ),
+  TAU_OBSERVABILITY_CONTENT_ACCOUNTS: unsetWhenEmpty(
+    z
+      .string()
+      .optional()
+      .transform((value) =>
+        (value ?? '')
+          .split(',')
+          .map((account) => account.trim())
+          .filter((account) => account.length > 0),
+      )
+      .pipe(z.array(z.string().regex(/^[\w-]{1,128}$/u, 'must be comma-separated account ids'))),
+  ).describe('Comma-separated staff account ids whose content is captured when the capture mode is allowlist.'),
+  /*
    * Blueprint T06: the key sealing accepted evidence in the delivery backlog.
    * Unset refuses new evidence admission; it never affects inference.
    */
@@ -207,7 +227,17 @@ export const environmentSchemaBase = z.object({
 
   // Email delivery
   RESEND_API_KEY: z.string().default(''),
+  // Account and security sender, and the fallback for the purpose-specific senders below.
   TAU_EMAIL_FROM: z.string().default('Tau <identity@taucad.dev>'),
+  // Purpose-specific senders (email readiness, Part C). Unset or empty sends from TAU_EMAIL_FROM, so a
+  // deploy without them sends exactly as before. EmailService applies the same fallback for callers that
+  // read raw process.env, such as the billing worker.
+  TAU_EMAIL_FROM_NOTIFICATIONS: unsetWhenEmpty(z.string().optional()).describe(
+    'Sender for sharing notifications such as publication invites; falls back to TAU_EMAIL_FROM',
+  ),
+  TAU_EMAIL_FROM_BILLING: unsetWhenEmpty(z.string().optional()).describe(
+    'Sender for billing notices; falls back to TAU_EMAIL_FROM',
+  ),
   // Operator ruling 2026-09-16 (OQ8): replies go to a staffed help mailbox, because the
   // payment-failed email invites one. fly.prod.toml overrides this with the tau.new address.
   TAU_EMAIL_REPLY_TO: z.email().default('help@taucad.dev'),
@@ -502,6 +532,13 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       code: 'custom',
       message: 'TAU_OBSERVABILITY_PAYLOAD_KEY is required when evidence delivery is enabled',
       path: ['TAU_OBSERVABILITY_PAYLOAD_KEY'],
+    });
+  }
+  if (data.TAU_OBSERVABILITY_CONTENT_CAPTURE === 'allowlist' && data.TAU_OBSERVABILITY_CONTENT_ACCOUNTS.length === 0) {
+    context.addIssue({
+      code: 'custom',
+      message: 'TAU_OBSERVABILITY_CONTENT_ACCOUNTS must name at least one account when content capture is allowlist',
+      path: ['TAU_OBSERVABILITY_CONTENT_ACCOUNTS'],
     });
   }
   if (

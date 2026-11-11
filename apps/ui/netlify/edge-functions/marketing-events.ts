@@ -156,6 +156,24 @@ export function resetCollectorState(): void {
   forwarded.clear();
 }
 
+/**
+ * The origin the visitor's browser addressed. On staging the router forwards each request to the
+ * `staging--<site>.netlify.app` alias and names the visitor's domain in `X-Tau-Public-Host`, so the alias
+ * hostname is not the page's origin there. The header is honoured only on a `netlify.app` hostname, as in
+ * `marketing.ts` (`publicRequestUrl`); a custom domain such as tau.new is always its own origin.
+ *
+ * @param request - The incoming request.
+ * @returns The public origin, such as `https://taucad.dev`.
+ */
+export function publicOrigin(request: Request): string {
+  const url = new URL(request.url);
+  const publicHost = request.headers.get('x-tau-public-host');
+  if (publicHost && url.hostname.endsWith('.netlify.app') && /^[a-z\d.-]+$/u.test(publicHost)) {
+    return `https://${publicHost}`;
+  }
+  return url.origin;
+}
+
 const answer = (status: number): Response => new Response(null, { status, headers: { 'cache-control': 'no-store' } });
 
 /**
@@ -172,7 +190,7 @@ function refusal(request: Request): number | undefined {
   if (request.headers.get('Sec-GPC') === '1' || request.headers.get('DNT') === '1') {
     return 204;
   }
-  if (request.headers.get('Origin') !== new URL(request.url).origin) {
+  if (request.headers.get('Origin') !== publicOrigin(request)) {
     return 403;
   }
   if (!(request.headers.get('content-type') ?? '').startsWith('application/json')) {

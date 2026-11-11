@@ -1,6 +1,6 @@
 import type { ObservationIdentity, OtlpSpan } from '#langfuse-observation.js';
 import type { LangfuseObservationRow } from '#langfuse-scorecard.js';
-import { otlpBody } from '#langfuse-observation.js';
+import { otlpBody, settlementObservationName } from '#langfuse-observation.js';
 
 /** Where and as whom the API writes to one Langfuse project. Server-side only. */
 export type LangfuseTarget = Readonly<{ baseUrl: string; publicKey: string; secretKey: string }>;
@@ -22,9 +22,10 @@ export type FindOutcome = 'present' | 'absent' | 'unavailable';
 
 /**
  * What one bulk trace deletion request established. Langfuse queues the
- * deletion, so `requested` is not removal: only a later read can say.
+ * deletion; an `accepted` delete is the erasure (charter I6 as amended by
+ * ruling 9), and nothing reads it back.
  */
-export type DeleteOutcome = Readonly<{ kind: 'requested' }> | Readonly<{ kind: 'retry'; reason: string }>;
+export type DeleteOutcome = Readonly<{ kind: 'accepted' }> | Readonly<{ kind: 'retry'; reason: string }>;
 
 /**
  * One environment's observations in a time window. `partial` is a read cut
@@ -121,15 +122,16 @@ const observationsUrl = (target: LangfuseTarget, query: Readonly<Record<string, 
  * Langfuse v4 ingestion and read-back for agent evidence. It never logs or
  * returns request or response bodies: the span carries customer content.
  */
-/* Only Tau's own observations, by the names the mapper gives them; anything else in the project is not read. */
+/*
+ * Only Tau's settlements, by the one name v4.3 and v5 share; every other observation is left unread, since the Langfuse
+ * dashboards score runs (LQ10) and no interval list is ever read back (LF-31).
+ */
 const observationRow = (item: unknown): LangfuseObservationRow[] => {
   const id = field(item, 'id');
-  const name = field(item, 'name');
   const startTime = field(item, 'startTime');
   const metadata = field(item, 'metadata');
   return typeof id === 'string' &&
-    typeof name === 'string' &&
-    name.startsWith('tau.') &&
+    field(item, 'name') === settlementObservationName &&
     typeof startTime === 'string' &&
     typeof metadata === 'object' &&
     metadata !== null
@@ -145,13 +147,13 @@ export class LangfuseClient {
   ) {}
 
   /**
-   * Send one complete observation.
+   * Send one receipt's complete observation, in one request.
    *
-   * @param span - The observation for one receipt.
+   * @param spans - The spans one receipt writes, its object first.
    * @param signal - Aborts the request on shutdown; an abort is uncertain.
    * @returns What the attempt established.
    */
-  public async send(span: OtlpSpan, signal?: AbortSignal): Promise<SendOutcome> {
+  public async send(spans: readonly OtlpSpan[], signal?: AbortSignal): Promise<SendOutcome> {
     const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
     try {
       const response = await this.fetcher(new URL('/api/public/otel/v1/traces', this.target.baseUrl), {
@@ -161,7 +163,7 @@ export class LangfuseClient {
           'content-type': 'application/json',
           'x-langfuse-ingestion-version': '4',
         },
-        body: otlpBody(span),
+        body: otlpBody(spans),
         signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
         redirect: 'error',
       });
@@ -286,7 +288,7 @@ export class LangfuseClient {
    *
    * @param traceIds - The traces to delete, at most a bounded batch.
    * @param signal - Aborts the request.
-   * @returns Requested, or retry with a bounded reason.
+   * @returns Accepted, or retry with a bounded reason.
    */
   public async deleteTraces(traceIds: readonly string[], signal?: AbortSignal): Promise<DeleteOutcome> {
     const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
@@ -298,43 +300,9 @@ export class LangfuseClient {
         signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
         redirect: 'error',
       });
-      return response.ok ? { kind: 'requested' } : { kind: 'retry', reason: `http-${response.status}` };
+      return response.ok ? { kind: 'accepted' } : { kind: 'retry', reason: `http-${response.status}` };
     } catch (error) {
       return { kind: 'retry', reason: classifySendError(error).kind === 'not-sent' ? 'unreachable' : 'transport' };
-    }
-  }
-
-  /**
-   * Whether a trace still has any observation, to confirm a requested deletion.
-   * It reads one row of the v2 observations list filtered by the trace (there is
-   * no v2 detail route), and only the `core` fields, so nothing is read back but
-   * ids. Only an ok answer whose `data` is an empty array is absence; a 410
-   * (`LEGACY_API_UNAVAILABLE_FOR_NEW_ORGANIZATION`), any other non-ok answer, an
-   * unreadable body and a transport failure are `unavailable`, never absence.
-   *
-   * @param traceId - The trace.
-   * @param signal - Aborts the read.
-   * @returns Present, absent (an empty page) or unavailable.
-   */
-  public async traceExists(traceId: string, signal?: AbortSignal): Promise<FindOutcome> {
-    const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
-    try {
-      const response = await this.fetcher(observationsUrl(this.target, { traceId, fields: 'core', limit: '1' }), {
-        headers: { authorization: authorization(this.target) },
-        signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
-        redirect: 'error',
-      });
-      if (!response.ok) {
-        await response.body?.cancel();
-        return 'unavailable';
-      }
-      const data = field(await readJson(response), 'data');
-      if (!Array.isArray(data)) {
-        return 'unavailable';
-      }
-      return data.length === 0 ? 'absent' : 'present';
-    } catch {
-      return 'unavailable';
     }
   }
 }

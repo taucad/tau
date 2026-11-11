@@ -25,7 +25,7 @@ vi.mock('@taucad/billing/hooks/use-entitlements', () => ({ useEntitlements: () =
 vi.mock('#lib/billing-payment-client.js', () => ({
   BillingPaymentConflict: PaymentConflict,
   BillingCollectionUnavailable: CollectionUnavailable,
-  purchasesUnavailableMessage: 'Purchases are not available yet.',
+  purchasesUnavailableMessage: 'You can’t buy credits yet. We’re still setting up payments.',
   createPaymentRequestId: () => 'request_1',
   createSubscriptionAction,
   followPaymentRedirect,
@@ -53,8 +53,8 @@ describe('PlanCards', () => {
         <PlanCards />
       </MemoryRouter>,
     );
-    expect(screen.getByRole('button', { name: 'Subscribe Now' })).toBeDisabled();
-    expect(screen.queryByText('Purchases are not available yet.') !== null).toBe(showsNote);
+    expect(screen.getByRole('button', { name: 'Upgrade to Pro' })).toBeDisabled();
+    expect(screen.queryByText('You can’t buy credits yet. We’re still setting up payments.') !== null).toBe(showsNote);
   });
   it('shows the availability copy instead of a retry when the API refuses collection', async () => {
     createSubscriptionAction.mockRejectedValue(new CollectionUnavailable());
@@ -63,8 +63,8 @@ describe('PlanCards', () => {
         <PlanCards />
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Subscribe Now' }));
-    expect(await screen.findByText('Purchases are not available yet.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Upgrade to Pro' }));
+    expect(await screen.findByText('You can’t buy credits yet. We’re still setting up payments.')).toBeInTheDocument();
     expect(screen.queryByText(/try again/i)).toBeNull();
   });
   it('starts the first-party Pro subscription action', async () => {
@@ -78,7 +78,7 @@ describe('PlanCards', () => {
         <PlanCards />
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Subscribe Now' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Upgrade to Pro' }));
     expect(createSubscriptionAction).toHaveBeenCalledWith(
       expect.objectContaining({
         environment: 'development',
@@ -95,7 +95,7 @@ describe('PlanCards', () => {
       </MemoryRouter>,
     );
     expect(screen.getByText('2,000 credits every month')).toBeInTheDocument();
-    expect(screen.getByText('Buy credits any time — 100 credits per US$1')).toBeInTheDocument();
+    expect(screen.getByText('Buy credits any time at 100 credits per $1')).toBeInTheDocument();
     expect(screen.queryByText(/of usage credits per month/)).not.toBeInTheDocument();
     expect(screen.queryByText(/free credits|welcome credits|refill/i)).not.toBeInTheDocument();
   });
@@ -105,7 +105,35 @@ describe('PlanCards', () => {
         <PlanCards currentTier='pro' />
       </MemoryRouter>,
     );
-    expect(screen.getByRole('button', { name: 'Current plan' })).toBeDisabled();
+    // A label, not a disabled button: a disabled button reads as broken.
+    expect(screen.getByText('Your current plan')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /current plan/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Upgrade to Pro' })).not.toBeInTheDocument();
+  });
+  it('lists cloud backup as included on every plan and team billing on Enterprise', () => {
+    render(
+      <MemoryRouter>
+        <PlanCards />
+      </MemoryRouter>,
+    );
+    for (const size of ['1 GB', '100 GB', 'Custom']) {
+      const item = screen.getByText(`${size} cloud backup and sync`).closest('li');
+      expect(item).not.toHaveAttribute('data-coming-soon');
+    }
+    expect(screen.getByRole('list', { name: 'Enterprise features' })).toHaveTextContent('Team billing');
+    expect(screen.queryByText(/\(coming soon\)/i)).not.toBeInTheDocument();
+  });
+  it('marks features in development with the coming-soon icon and explains it in one legend', () => {
+    render(
+      <MemoryRouter>
+        <PlanCards />
+      </MemoryRouter>,
+    );
+    const item = screen.getByText('Hosted design verification').closest('li');
+    expect(item).toHaveAttribute('data-coming-soon');
+    expect(item?.querySelector('[data-slot=coming-soon-icon]')).not.toBeNull();
+    expect(document.querySelectorAll('[data-slot=coming-soon-legend]')).toHaveLength(1);
+    expect(document.querySelector('[data-slot=coming-soon-legend]')).toHaveTextContent(/^Coming soon$/);
   });
   it('makes bounded feature lists keyboard-scrollable', () => {
     render(
@@ -113,7 +141,7 @@ describe('PlanCards', () => {
         <PlanCards isFeatureListScrollable />
       </MemoryRouter>,
     );
-    const featureList = screen.getByRole('list', { name: 'Pro Plan features' });
+    const featureList = screen.getByRole('list', { name: 'Pro features' });
 
     expect(featureList).toHaveAttribute('tabindex', '0');
     expect(featureList).toHaveClass('max-h-80', 'scroll-shadows-y');
@@ -132,11 +160,11 @@ describe('PlanCards', () => {
         <PlanCards />
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Subscribe Now' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Upgrade to Pro' }));
     expect(followPaymentRedirect).toHaveBeenCalledWith(action);
   });
 
-  it('should explain a pending subscription with no Checkout to open instead of sticking on Checkout pending', async () => {
+  it('should explain a pending subscription with no Checkout to open instead of sticking on Finish on the payment page', async () => {
     followPaymentRedirect.mockReturnValueOnce(false);
     createSubscriptionAction.mockRejectedValue(
       new PaymentConflict({
@@ -152,10 +180,10 @@ describe('PlanCards', () => {
         <PlanCards />
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Subscribe Now' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Upgrade to Pro' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Checkout is still being prepared. Try again in a minute.',
+      'Couldn’t open the payment page. Try again in a minute.',
     );
-    expect(screen.getByRole('button', { name: 'Subscribe Now' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Upgrade to Pro' })).toBeEnabled();
   });
 });

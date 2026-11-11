@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '@taucad/api-core';
+import type { EmailTemplate } from '#email.types.js';
 import { EmailService } from '#email.service.js';
 
 const sendMock = vi.fn();
@@ -18,8 +19,9 @@ vi.mock('resend', () => ({
   },
 }));
 
-const createService = (resendApiKey: string): EmailService => {
+const createService = (resendApiKey: string, senders: Record<string, string> = {}): EmailService => {
   const values: Record<string, string> = {
+    ...senders,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
     RESEND_API_KEY: resendApiKey,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
@@ -130,5 +132,156 @@ describe('EmailService delivery gate', () => {
     ).rejects.toThrow(/path/u);
 
     expect(sendMock).not.toHaveBeenCalled();
+  });
+});
+
+const identity = 'Tau <identity@tau.new>';
+const notifications = 'Tau <notifications@tau.new>';
+const billing = 'Tau Billing <billing@tau.new>';
+
+// One template per kind, with links the link guard accepts. The From each kind expects is the confirmed
+// sender table (email readiness, Part C); Reply-To is help@ for every class.
+const templatesByKind: ReadonlyArray<{ readonly template: EmailTemplate; readonly from: string }> = [
+  {
+    template: { kind: 'verify-email', email: 'user@example.com', url: 'https://tau.new/auth/verify-email?token=t' },
+    from: identity,
+  },
+  {
+    template: {
+      kind: 'account-exists',
+      email: 'user@example.com',
+      url: 'https://tau.new/auth/sign-in',
+      resetUrl: 'https://tau.new/auth/forgot-password',
+    },
+    from: identity,
+  },
+  {
+    template: { kind: 'magic-link', email: 'user@example.com', url: 'https://tau.new/auth/magic-link/verify?token=t' },
+    from: identity,
+  },
+  {
+    template: { kind: 'reset-password', email: 'user@example.com', url: 'https://tau.new/auth/reset-password?token=t' },
+    from: identity,
+  },
+  {
+    template: {
+      kind: 'password-changed',
+      email: 'user@example.com',
+      changedAt: '16 Sep 2026, 10:57 UTC',
+      url: 'https://tau.new/auth/forgot-password',
+    },
+    from: identity,
+  },
+  {
+    template: {
+      kind: 'publication-invite',
+      recipientEmail: 'user@example.com',
+      ownerName: 'Ada',
+      publicationTitle: 'Bracket',
+      url: 'https://tau.new/s/tau~pub_123',
+    },
+    from: notifications,
+  },
+  {
+    template: { kind: 'payment-failed', email: 'user@example.com', billingUrl: 'https://tau.new/?settings=billing' },
+    from: billing,
+  },
+  {
+    template: {
+      kind: 'auto-reload-disabled',
+      email: 'user@example.com',
+      billingUrl: 'https://tau.new/?settings=billing',
+    },
+    from: billing,
+  },
+  {
+    template: {
+      kind: 'auto-reload-action-required',
+      email: 'user@example.com',
+      billingUrl: 'https://tau.new/?settings=billing',
+    },
+    from: billing,
+  },
+];
+
+const sentEnvelope = (): { from: unknown; replyTo: unknown } => {
+  expect(sendMock).toHaveBeenCalledTimes(1);
+  const [payload] = sendMock.mock.lastCall as [{ from: unknown; replyTo: unknown }];
+  return { from: payload.from, replyTo: payload.replyTo };
+};
+
+describe('EmailService sender per template kind', () => {
+  beforeEach(() => {
+    sendMock.mockReset();
+    sendMock.mockResolvedValue({ data: { id: 'email_123' }, error: null });
+  });
+
+  it('covers every template kind', () => {
+    expect(new Set(templatesByKind.map(({ template }) => template.kind)).size).toBe(9);
+  });
+
+  it.each(templatesByKind)('sends $template.kind from its purpose sender', async ({ template, from }) => {
+    const service = createService('re_test_key', {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+      TAU_EMAIL_FROM_NOTIFICATIONS: notifications,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+      TAU_EMAIL_FROM_BILLING: billing,
+    });
+
+    await service.send({ to: 'user@example.com', template });
+
+    expect(sentEnvelope()).toEqual({ from, replyTo: 'help@tau.new' });
+  });
+
+  it.each(templatesByKind)(
+    'sends $template.kind from TAU_EMAIL_FROM when the purpose senders are unset',
+    async ({ template }) => {
+      // The mock's `get` returns '' for a missing key, as the billing worker's raw-environment config does.
+      const service = createService('re_test_key');
+
+      await service.send({ to: 'user@example.com', template });
+
+      expect(sentEnvelope()).toEqual({ from: identity, replyTo: 'help@tau.new' });
+    },
+  );
+
+  it.each(templatesByKind)(
+    'sends $template.kind from TAU_EMAIL_FROM when the purpose senders are empty',
+    async ({ template }) => {
+      const service = createService('re_test_key', {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+        TAU_EMAIL_FROM_NOTIFICATIONS: '  ',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+        TAU_EMAIL_FROM_BILLING: '',
+      });
+
+      await service.send({ to: 'user@example.com', template });
+
+      expect(sentEnvelope()).toEqual({ from: identity, replyTo: 'help@tau.new' });
+    },
+  );
+
+  it('falls back to TAU_EMAIL_FROM when the config returns undefined for an optional sender', async () => {
+    // A Nest ConfigService returns undefined for an optional key the schema left unset.
+    const values: Record<string, string | undefined> = {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+      RESEND_API_KEY: 're_test_key',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+      TAU_FRONTEND_URL: 'https://tau.new',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+      TAU_EMAIL_FROM: identity,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+      TAU_EMAIL_REPLY_TO: 'help@tau.new',
+    };
+    const service = new EmailService(
+      mock<ConfigService<Environment, true>>({ get: vi.fn((key: string) => values[key]) }),
+    );
+
+    await service.sendAutoReloadDisabled({
+      email: 'user@example.com',
+      billingUrl: 'https://tau.new/?settings=billing',
+    });
+
+    expect(sentEnvelope()).toEqual({ from: identity, replyTo: 'help@tau.new' });
   });
 });

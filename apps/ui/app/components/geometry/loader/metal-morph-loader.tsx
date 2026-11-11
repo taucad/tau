@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
 import { probeWebGpuSupport, resolveGraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-backend';
-import { readGraphicsBackendQueryOverride } from '#utils/graphics-backend-override.js';
+import { readGraphicsBackendQueryOverride } from '@taucad/ui-core/utils/graphics-backend-override';
 import { createMetalMorphLoader } from '#components/geometry/loader/metal-morph-controller.js';
 import type {
   MetalMorphLoaderController,

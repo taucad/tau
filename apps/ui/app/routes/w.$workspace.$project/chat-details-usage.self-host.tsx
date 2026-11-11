@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useProjectChatUsage } from '#hooks/use-chats.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useProject } from '#hooks/use-project.js';
-import { formatNumberAbbreviation } from '#utils/number.utils.js';
+import { formatNumberAbbreviation } from '@taucad/ui-core/utils/number.utils';
 
 export function ChatDetailsUsage({ enabled = true }: { readonly enabled?: boolean } = {}):
   | React.JSX.Element

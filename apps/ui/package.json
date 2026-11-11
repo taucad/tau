@@ -1,6 +1,6 @@
 {
   "name": "@taucad/app",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
@@ -92,6 +92,7 @@
     "@taucad/tscircuit": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/ui": "workspace:*",
+    "@taucad/ui-core": "workspace:*",
     "@taucad/ui-kit": "workspace:*",
     "@taucad/units": "workspace:*",
     "@taucad/utils": "workspace:*",

@@ -1,8 +1,8 @@
 import { assertEvent, setup, types } from 'xstate';
 import type { AnyActorRef, EnqueueObject } from 'xstate';
-import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
-import { listDataTransfer, listFileList } from '#utils/file-reader.utils.js';
-import type { ImportListing, ImportSourceDescriptor } from '#machines/import-staging.js';
+import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import { listDataTransfer, listFileList } from '@taucad/ui-core/utils/file-reader.utils';
+import type { ImportListing, ImportSourceDescriptor } from '@taucad/ui-core/machines/import-staging';
 import type { HostImportGrant } from '@taucad/filesystem/importer';
 import { findMainFile } from '#routes/import.$/import.utils.js';
 
@@ -33,7 +33,12 @@ export type ImportDiskContext = {
   error: Error | undefined;
   progress: { processed: number; total: number };
   projectId: string | undefined;
+  /** What the planned source was, for the project's Start version (A6): "imported from a zip" or "a folder". */
+  origin: ImportOrigin;
 };
+
+/** How a disk import reads on its Start version. @public */
+export type ImportOrigin = 'folder' | 'zip';
 
 /**
  * Import Disk Machine Input
@@ -69,7 +74,7 @@ type ImportDiskEmitted =
   | { type: 'error'; error: Error };
 
 // Actor output types
-type FilesReadResult = { type: 'filesRead'; listing: ImportListing; importName: string };
+type FilesReadResult = { type: 'filesRead'; listing: ImportListing; importName: string; origin: ImportOrigin };
 type ProjectCreatedResult = { type: 'projectCreated'; projectId: string };
 
 const planned = async (
@@ -78,7 +83,8 @@ const planned = async (
   signal: AbortSignal,
 ): Promise<FilesReadResult> => {
   const listing = await plan(source, signal);
-  return { type: 'filesRead', listing, importName: listing.name };
+  /* A zip is a zip however it arrived (picked or dropped); files, a folder and a host pick read as a folder. */
+  return { type: 'filesRead', listing, importName: listing.name, origin: source.kind === 'zip' ? 'zip' : 'folder' };
 };
 
 /** Picked files (or a folder pick): handed over by reference. */
@@ -118,6 +124,7 @@ const createProjectActor = fromSafeAsync<
     importName: string;
     mainFile: string;
     listing: ImportListing;
+    origin: ImportOrigin;
     onProgress: (processed: number, total: number) => void;
   }
 >(async () => {
@@ -144,6 +151,7 @@ const reset = {
   error: undefined,
   progress: { processed: 0, total: 0 },
   projectId: undefined,
+  origin: 'folder',
 } satisfies Partial<ImportDiskContext>;
 
 /* A failure is remembered and said once. */
@@ -165,6 +173,7 @@ const readingHandlers = {
       context: {
         listing,
         importName: event.importName,
+        origin: event.origin,
         selectedMainFile: findMainFile(listing.files.map(({ path }) => path)),
       },
     };
@@ -226,6 +235,7 @@ export const importDiskMachine = setup({
     error: undefined,
     progress: { processed: 0, total: 0 },
     projectId: undefined,
+    origin: 'folder',
   }),
   initial: 'idle',
   states: {
@@ -353,6 +363,7 @@ export const importDiskMachine = setup({
           importName: context.importName,
           mainFile: context.selectedMainFile!,
           listing: context.listing,
+          origin: context.origin,
           onProgress(processed: number, total: number) {
             self.send({ type: 'updateProgress', processed, total });
           },

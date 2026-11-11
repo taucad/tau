@@ -10,7 +10,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import type { RootState, ThreeEvent } from '@react-three/fiber';
 import type { GeometryComponentManifest } from '@taucad/types';
 import { useKinematicsPoseComposer } from '#graphics/three/react/kinematics-pose-composer.js';
-import { useKinematicsDragControls } from '#graphics/three/react/kinematics-drag-controls.js';
+import { useKinematicsDragControls } from '#graphics/three/react/kinematics-drag-controls-adapter.js';
 import { getModelComponentId } from '#graphics/three/utils/model-component-owner.js';
 import { useKinematicsRef } from '#hooks/use-graphics.jsx';
 import type { KinematicsRef } from '#machines/graphics.machine.js';

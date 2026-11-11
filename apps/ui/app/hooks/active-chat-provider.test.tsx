@@ -9,11 +9,11 @@ import type { ReactNode } from 'react';
 import type * as AiSdk from 'ai';
 import type { Chat, MyUIMessage } from '@taucad/chat';
 import { resolveKernel } from '@taucad/types/constants';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
 import { lifecycleRow, logRow, publishLogRows, runningRows } from '#machines/chat-projection.fixture.js';
 import { publishChatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js';
-import { resetAutoResumes } from '#utils/run-auto-resume.js';
+import { resetAutoResumes } from '@taucad/ui-core/utils/run-auto-resume';
 
 // ---------------------------------------------------------------------------
 // Hoisted harness — mocks the project-manager surface (chat row persistence),

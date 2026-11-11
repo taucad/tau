@@ -4,7 +4,7 @@ import { createAsyncLogic, setup, types } from 'xstate';
 import type { CadAgentExecution, Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
-import { eventSchemas } from '#lib/xstate.lib.js';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 
 /** @public */
 export type ChatPersistenceMachineInput = {

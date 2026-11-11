@@ -6,7 +6,7 @@ import { createNodeEventLog } from '@taucad/agent-host/node';
 import type { HostRunSnapshot, ToolRegistry } from '@taucad/agent-host';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
-import type { BindingKernelRow } from '#testing/live/kernel-routing.binding.js';
+import type { BindingKernelRow } from '@taucad/chat/prompts';
 import { kernelRoutingDevelopmentCases, kernelRoutingRoutingCases } from '#testing/live/kernel-routing.cases.js';
 import type { KernelRoutingCase } from '#testing/live/kernel-routing.cases.js';
 import { gradeKernelRoutingCase, stratumOf, summarizeKernelRoutingRun } from '#testing/live/kernel-routing.grader.js';

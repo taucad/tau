@@ -241,11 +241,11 @@ describe('BillableModelInvocationService', () => {
         ['google-gemini-3.8-flash', 'gemini-3.8-flash', 'openai-completions', 'max_completion_tokens'],
         ['google-gemini-3.5-flash-lite', 'gemini-3.5-flash-lite', 'openai-completions', 'max_completion_tokens'],
         ['google-gemini-3.5-flash', 'gemini-3.5-flash', 'openai-completions', 'max_completion_tokens'],
-        ['together-kimi-k3.1-pro', 'moonshotai/Kimi-K3.1-Pro', 'openai-completions', 'max_completion_tokens'],
-        ['together-glm-5.3', 'zai-org/GLM-5.3', 'openai-completions', 'max_completion_tokens'],
-        ['together-glm-5.3-flash', 'zai-org/GLM-5.3-Flash', 'openai-completions', 'max_completion_tokens'],
-        ['together-minimax-m3.1-flash', 'MiniMaxAI/MiniMax-M3.1-Flash', 'openai-completions', 'max_completion_tokens'],
-        ['together-deepseek-v4-pro', 'deepseek-ai/DeepSeek-V4-Pro-0813', 'openai-completions', 'max_completion_tokens'],
+        ['together-kimi-k3.1-pro', 'moonshotai/Kimi-K3.1-Pro', 'openai-completions', 'max_tokens'],
+        ['together-glm-5.3', 'zai-org/GLM-5.3', 'openai-completions', 'max_tokens'],
+        ['together-glm-5.3-flash', 'zai-org/GLM-5.3-Flash', 'openai-completions', 'max_tokens'],
+        ['together-minimax-m3.1-flash', 'MiniMaxAI/MiniMax-M3.1-Flash', 'openai-completions', 'max_tokens'],
+        ['together-deepseek-v4-pro', 'deepseek-ai/DeepSeek-V4-Pro-0813', 'openai-completions', 'max_tokens'],
         ['xai-grok-4.7', 'grok-4.7', 'openai-responses', 'max_output_tokens'],
         ['xai-grok-4.6', 'grok-4.6', 'openai-responses', 'max_output_tokens'],
       ] satisfies ReadonlyArray<
@@ -428,6 +428,49 @@ describe('BillableModelInvocationService', () => {
     await expect(service.invoke({ ...intent(), body: { model: 'changed' } })).rejects.toMatchObject({ status: 409 });
     expect(resolver.resolve).not.toHaveBeenCalled();
     expect(ledger.issueCurrentPromotion).not.toHaveBeenCalled();
+  });
+
+  /* A refusal before admission has no qualification, yet the Together output-field fault was one:
+   * it must still reach the admission and error-rate series, labelled only by funded routes. */
+  it.each([
+    {
+      model: 'google-gemini-3.5-flash',
+      labels: { 'gen_ai.provider.name': 'vertexai', 'gen_ai.request.model': 'gemini-3.5-flash' },
+      warned: true,
+    },
+    { model: 'not-a-funded-route', labels: { 'gen_ai.provider.name': 'other' }, warned: false },
+  ])('should record a refusal before admission of $model under bounded labels', async ({ model, labels, warned }) => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+      // Test-local logger sink.
+    });
+    const metrics = genAiMetrics();
+    const refusal = new LlmGatewayError(400, 'INVALID_REQUEST', 'Model request is outside the funded request contract');
+    const service = new BillableModelInvocationService(
+      { getOperationForAttempt: vi.fn(async () => undefined) } as unknown as CreditLedgerService,
+      {
+        resolve: () => {
+          throw refusal;
+        },
+      },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+      metrics as unknown as MetricsService,
+    );
+
+    await expect(service.invoke({ ...intent(), body: { model } })).rejects.toBe(refusal);
+
+    expect(metrics.llmGatewayAdmissionDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+      'gen_ai.provider.name': labels['gen_ai.provider.name'],
+      'tau.surface': 'gateway',
+      outcome: 'refused',
+    });
+    expect(metrics.genAiOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+      ...labels,
+      'tau.surface': 'gateway',
+      'error.type': 'refused',
+    });
+    expect(warn).toHaveBeenCalledTimes(warned ? 1 : 0);
+    warn.mockRestore();
   });
 
   describe('request bound', () => {

@@ -2,8 +2,8 @@ import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import type { LanguageSupport } from '@codemirror/language';
 import { highlightLines, loadLanguage, peekLanguage } from '@taucad/grammars';
 import type { HighlightSegment } from '@taucad/grammars';
-import type { CodeLanguage } from '#lib/code-language-resolution.js';
-import { plaintextHighlightLanguage } from '#lib/code-language-resolution.js';
+import type { CodeLanguage } from '@taucad/ui-core/lib/code-language-resolution';
+import { plaintextHighlightLanguage } from '@taucad/ui-core/lib/code-language-resolution';
 
 /**
  * Longest text, in UTF-16 code units, that static surfaces syntax highlight (D-UI-28).

@@ -14,7 +14,11 @@ import {
   eraseAccountEvidence,
   readEvidenceErasure,
 } from '@taucad/api-agent-observability/evidence-erasure';
-import { erasureTiming, EvidenceErasureService } from '@taucad/api-agent-observability/evidence-erasure.service';
+import {
+  erasureRetryDelay,
+  erasureTiming,
+  EvidenceErasureService,
+} from '@taucad/api-agent-observability/evidence-erasure.service';
 import { sealEvidence } from '@taucad/api-agent-observability/evidence-seal';
 import { evidenceFixture } from '@taucad/api-agent-observability/testing/evidence.fixture';
 import { requestProjectDeletion } from '@taucad/api-git-core/project-deletion';
@@ -182,8 +186,12 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     expect(await eraseProject(projectId)).toMatchObject({ fenced: 1, traces: 0 });
 
     await expect(
-      prepareSend(database, { receiptId, owner: 'worker-a' }, { traceId: 'b'.repeat(32), observedAt: new Date() }),
-    ).resolves.toBe(false);
+      prepareSend(
+        database,
+        { receiptId, owner: 'worker-a' },
+        { traceId: 'b'.repeat(32), objectId: 'b'.repeat(16), observedAt: new Date() },
+      ),
+    ).resolves.toBe('lost');
   });
 
   it('should keep an account erasure journal through the account cascade', async () => {
@@ -231,9 +239,6 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       vi.stubGlobal('fetch', fetcher);
       return fetcher;
     };
-    /** What every v3 read answers a new organisation; only the v2 observations list is a valid read. */
-    const legacy = () =>
-      Response.json({ error: 'LEGACY_API_UNAVAILABLE_FOR_NEW_ORGANIZATION', data: [] }, { status: 410 });
     const completedAt = async (erasureId: string) => {
       const [found] = await database
         .select({ completedAt: schema.agentEvidenceErasure.completedAt })
@@ -242,112 +247,78 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       return found!.completedAt;
     };
 
-    it('should delete, read back after the window, and complete only on absence', async () => {
+    it('should delete once after the ingestion window, settle on the accepted delete and never read Langfuse', async () => {
       const userId = await account();
       const projectId = await ownedProject(userId);
       const traceId = await delivered(await admitted(userId, projectId));
       const { erasureId } = await eraseProject(projectId);
       const deleted: unknown[] = [];
-      let present = true;
-      vendor((url, init) => {
-        if (init?.method === 'DELETE') {
-          deleted.push(JSON.parse(typeof init.body === 'string' ? init.body : ''));
-          return new Response('{}', { status: 200 });
-        }
-        if (url.pathname !== '/api/public/v2/observations' || url.searchParams.get('traceId') !== traceId) {
-          return legacy();
-        }
-        return Response.json({ data: present ? [{ id: 'o1' }] : [], meta: {} });
+      const fetcher = vendor((_url, init) => {
+        deleted.push(JSON.parse(typeof init?.body === 'string' ? init.body : ''));
+        return new Response('{}', { status: 200 });
       });
       const drainer = service();
       const now = Date.now();
 
+      /* A send accepted just before the fence may still be ingested; the one delete waits it out. */
       await drainer.drain(new Date(now));
+      expect(deleted).toEqual([]);
+      expect(await journal(erasureId)).toEqual([expect.objectContaining({ state: 'pending', attempts: 0 }) as unknown]);
+
+      const due = now + erasureTiming.deleteAfterMilliseconds + 1;
+      await drainer.drain(new Date(due));
       expect(deleted).toEqual([{ traceIds: expect.arrayContaining([traceId]) as unknown }]);
       expect(await journal(erasureId)).toEqual([
-        expect.objectContaining({ state: 'requested', attempts: 1 }) as unknown,
+        expect.objectContaining({ state: 'accepted', attempts: 1, reason: null }) as unknown,
       ]);
-
-      /* Still visible after the window: requested again, never counted as gone. */
-      await drainer.drain(new Date(now + erasureTiming.recheckAfterMilliseconds + 1));
-      expect(await journal(erasureId)).toEqual([
-        expect.objectContaining({ state: 'pending', reason: 'present' }) as unknown,
-      ]);
-      expect(await completedAt(erasureId)).toBeNull();
-
-      present = false;
-      const later = now + 2 * erasureTiming.maxBackoffMilliseconds;
-      await drainer.drain(new Date(later));
-      await drainer.drain(new Date(later + erasureTiming.recheckAfterMilliseconds + 1));
-      expect(await journal(erasureId)).toEqual([expect.objectContaining({ state: 'absent', attempts: 2 }) as unknown]);
       expect(await completedAt(erasureId)).not.toBeNull();
-      for (const outcome of ['requested', 'present', 'absent'] as const) {
-        expect(metrics.agentEvidenceErasureTraces.add).toHaveBeenCalledWith(expect.any(Number), { outcome });
-      }
+
+      /* Nothing is read back, and an accepted trace is never requested again. */
+      const calls = fetcher.mock.calls.length;
+      await drainer.drain(new Date(due + 10 * erasureTiming.maxBackoffMilliseconds));
+      expect(fetcher.mock.calls.slice(calls).filter(([, init]) => init?.method !== 'DELETE')).toEqual([]);
+      expect(fetcher.mock.calls.every(([, init]) => init?.method === 'DELETE')).toBe(true);
+      expect(deleted.filter((body) => JSON.stringify(body).includes(traceId))).toHaveLength(1);
+      expect(metrics.agentEvidenceErasureTraces.add).toHaveBeenCalledWith(expect.any(Number), { outcome: 'accepted' });
       expect(metrics.agentEvidenceLifecycleRecords.add).toHaveBeenCalledWith(expect.any(Number), {
         action: 'erased',
       });
     });
 
-    it('should retry a refused deletion and never read an outage as absence', async () => {
+    it('should retry a 429, a 5xx and a transport failure with backoff and never complete on one', async () => {
       const userId = await account();
       const projectId = await ownedProject(userId);
       await delivered(await admitted(userId, projectId));
       const { erasureId } = await eraseProject(projectId);
-      let status = 503;
-      vendor(() => new Response('{}', { status }));
+      const answers: Array<() => Response> = [
+        () => new Response('{}', { status: 429 }),
+        () => new Response('{}', { status: 503 }),
+        () => {
+          throw new TypeError('fetch failed', { cause: { code: 'ECONNRESET' } });
+        },
+      ];
+      let answer = 0;
+      const fetcher = vendor(() => answers[answer]!());
       const drainer = service();
-      const now = Date.now() + 10 * erasureTiming.maxBackoffMilliseconds;
+      let at = Date.now() + 30 * erasureTiming.maxBackoffMilliseconds;
 
-      await drainer.drain(new Date(now));
-      expect(await journal(erasureId)).toEqual([
-        expect.objectContaining({ state: 'pending', reason: 'http-503', attempts: 0 }) as unknown,
-      ]);
-
-      status = 200;
-      await drainer.drain(new Date(now + erasureTiming.maxBackoffMilliseconds));
-      status = 502;
-      await drainer.drain(
-        new Date(now + erasureTiming.maxBackoffMilliseconds + erasureTiming.recheckAfterMilliseconds + 1),
-      );
-      expect(await journal(erasureId)).toEqual([expect.objectContaining({ state: 'requested' }) as unknown]);
-      expect(await completedAt(erasureId)).toBeNull();
-      expect(metrics.agentEvidenceErasureTraces.add).toHaveBeenCalledWith(expect.any(Number), { outcome: 'retry' });
-      expect(metrics.agentEvidenceErasureTraces.add).toHaveBeenCalledWith(1, { outcome: 'recheck' });
-      expect(metrics.agentEvidenceErasureTraces.add).not.toHaveBeenCalledWith(expect.anything(), {
-        outcome: 'absent',
-      });
-    });
-
-    it('should count every unconfirmed read-back as a recheck and never settle on a legacy 410', async () => {
-      const userId = await account();
-      const projectId = await ownedProject(userId);
-      await delivered(await admitted(userId, projectId));
-      const { erasureId } = await eraseProject(projectId);
-      vendor((_url, init) => (init?.method === 'DELETE' ? Response.json({}, { status: 200 }) : legacy()));
-      const drainer = service();
-      const now = Date.now() + 20 * erasureTiming.maxBackoffMilliseconds;
-
-      await drainer.drain(new Date(now));
-      let at = now + erasureTiming.recheckAfterMilliseconds + 1;
-      for (let read = 0; read < 3; read++) {
-        // oxlint-disable-next-line no-await-in-loop -- each pass reads back after the previous one's recheck delay
+      for (const [index, reason] of ['http-429', 'http-503', 'transport'].entries()) {
+        answer = index;
+        // oxlint-disable-next-line no-await-in-loop -- each pass runs after the previous one's backoff
         await drainer.drain(new Date(at));
-        const notBefore = at + erasureTiming.unavailableRecheckMilliseconds;
         // oxlint-disable-next-line no-await-in-loop -- the journal row after this pass
-        expect(await journal(erasureId)).toEqual([
-          expect.objectContaining({ state: 'requested', leaseOwner: null, dueAt: new Date(notBefore) }) as unknown,
-        ]);
-        at = notBefore + 1;
+        const [row] = await journal(erasureId);
+        expect(row).toMatchObject({ state: 'pending', reason, attempts: index + 1, leaseOwner: null });
+        expect(row!.dueAt).toEqual(new Date(at + erasureRetryDelay(index)));
+        // oxlint-disable-next-line no-await-in-loop -- not complete after a failed delete
+        expect(await completedAt(erasureId)).toBeNull();
+        at = row!.dueAt.getTime() + 1;
       }
-      expect(await completedAt(erasureId)).toBeNull();
-      /* Earlier cases may leave their own traces due, so this pass counts at least this trace's three. */
-      const rechecks = metrics.agentEvidenceErasureTraces.add.mock.calls.filter(
-        ([, attributes]) => attributes?.['outcome'] === 'recheck',
-      );
-      expect(rechecks.length).toBeGreaterThanOrEqual(3);
+      expect(erasureRetryDelay(2)).toBeGreaterThan(erasureRetryDelay(0));
+      expect(fetcher.mock.calls.every(([, init]) => init?.method === 'DELETE')).toBe(true);
+      expect(metrics.agentEvidenceErasureTraces.add).toHaveBeenCalledWith(expect.any(Number), { outcome: 'retry' });
       expect(metrics.agentEvidenceErasureTraces.add).not.toHaveBeenCalledWith(expect.anything(), {
-        outcome: 'absent',
+        outcome: 'accepted',
       });
     });
 
@@ -385,7 +356,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       expect(metrics.agentEvidenceLifecycleRecords.add).toHaveBeenCalledWith(expect.any(Number), { action: 'purged' });
       expect(metrics.agentEvidenceLifecycleRecords.add).toHaveBeenCalledWith(expect.any(Number), { action: 'reaped' });
       /* Every state is sampled each pass, so a drained one reads zero rather than its last value. */
-      expect(metrics.agentEvidenceBacklogRows.record).toHaveBeenCalledTimes(2 * 6);
+      expect(metrics.agentEvidenceBacklogRows.record).toHaveBeenCalledTimes(2 * 7);
       expect(metrics.agentEvidenceBacklogHeldBytes.record).toHaveBeenCalledTimes(2);
       expect(metrics.agentEvidenceErasureTraces.add).not.toHaveBeenCalled();
       expect(metrics.agentEvidencePasses.add).toHaveBeenCalledWith(1, { 'tau.worker': 'lifecycle', outcome: 'ok' });

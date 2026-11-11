@@ -9,7 +9,7 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
-import { withAuthorityDigest } from '#lib/composed-view-client.fixture.js';
+import { withAuthorityDigest } from '@taucad/ui-core/lib/composed-view-client.fixture';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import type { ActorRefFrom } from 'xstate';
 import type { CapabilitiesManifest, ExportRoute, Rendering } from '@taucad/runtime';
@@ -22,7 +22,7 @@ import { imageEdgeSchemas } from '@taucad/image';
 import { toJSONSchema } from 'zod';
 import type * as RjsfCore from '@rjsf/core';
 import type { cadMachine } from '#machines/cad.machine.js';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import { toast } from '@taucad/ui/components/sonner';
 

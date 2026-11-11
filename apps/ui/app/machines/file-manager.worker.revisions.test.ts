@@ -557,6 +557,32 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect([...leases].sort()).toEqual(['run-1.json', 'run-2.json']);
   });
 
+  it('should answer a session change once the root has taken it, and pull the remote again (audit R6)', async () => {
+    const listRemoteReferences = vi.fn(async () => []);
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      listRemotes: async () => [{ name: 'tau', url: 'https://remote.test/project.git', kind: 'tau' }],
+      listRemoteRefs: listRemoteReferences,
+    }));
+    const alpha = await fixture.open('alpha');
+    await vi.waitFor(() => {
+      expect(listRemoteReferences).toHaveBeenCalled();
+    });
+    await vi.waitFor(() => {
+      expect(alpha.frames.findLast((frame) => frame.type === 'status')?.status.sync.state).not.toBe('opening');
+    });
+    const reads = listRemoteReferences.mock.calls.length;
+
+    alpha.send({ command: 'sessionChanged', id: 5 });
+
+    await vi.waitFor(() => {
+      expect(alpha.frames).toContainEqual({ type: 'result', id: 5, result: { kind: 'sessionChanged' } });
+    });
+    await vi.waitFor(() => {
+      expect(listRemoteReferences.mock.calls.length).toBeGreaterThan(reads);
+    });
+  });
+
   it('should give a branch its own checkout, route and files (AC22)', async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
@@ -834,112 +860,120 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
    * large-object placeholder (a reload mid-download) is picked up again, its
    * progress rides the projection, and the viewer's *Try again* reaches the fill.
    */
-  it('should publish a checkout’s large-object placeholders and retry their fill on the page’s word', async () => {
-    const fixture = harness(['alpha']);
-    const project = fixture.service.createRootedFileSystem('/projects/alpha');
-    const part = 'solid part\n';
-    await project.writeFile('main.scad', 'import("models/part.step");');
-    await project.writeFile('models/part.step', part);
-    const first = await fixture.open('alpha');
-    const root = await fixture.root('alpha');
-    const session = await root.placementSession();
-    await place(session, turnKey(1));
-    await project.writeFile('main.scad', 'import("models/part.step"); // v2');
-    await finish(session, turnKey(1));
-    await turnFinalized(first, 'turn-1');
-    first.send({ command: 'close' });
-    await vi.waitFor(
-      () => {
-        expect(fixture.registry.openProjectIds()).toEqual([]);
-      },
-      { timeout: 10_000 },
-    );
+  it.each([
+    { word: 'retryLargeObjects', id: undefined },
+    /* Audit R6: a session change retries a fill that failed under the last session. */
+    { word: 'sessionChanged', id: 74 },
+  ] as const)(
+    'should publish a checkout’s large-object placeholders and retry their fill on $word',
+    async ({ word, id }) => {
+      const fixture = harness(['alpha']);
+      const project = fixture.service.createRootedFileSystem('/projects/alpha');
+      const part = 'solid part\n';
+      await project.writeFile('main.scad', 'import("models/part.step");');
+      await project.writeFile('models/part.step', part);
+      const first = await fixture.open('alpha');
+      const root = await fixture.root('alpha');
+      const session = await root.placementSession();
+      await place(session, turnKey(1));
+      await project.writeFile('main.scad', 'import("models/part.step"); // v2');
+      await finish(session, turnKey(1));
+      await turnFinalized(first, 'turn-1');
+      first.send({ command: 'close' });
+      await vi.waitFor(
+        () => {
+          expect(fixture.registry.openProjectIds()).toEqual([]);
+        },
+        { timeout: 10_000 },
+      );
 
-    /* As a reload mid-download leaves it: the pointer on disk, the object not in the store. */
-    const { pointer, bytes } = lfsPointerFor(new TextEncoder().encode(part));
-    const objectFile = `.git/${lfsObjectPath(pointer.oid)}`;
-    await project.writeFile('models/part.step', bytes);
-    await project.unlink(objectFile);
+      /* As a reload mid-download leaves it: the pointer on disk, the object not in the store. */
+      const { pointer, bytes } = lfsPointerFor(new TextEncoder().encode(part));
+      const objectFile = `.git/${lfsObjectPath(pointer.oid)}`;
+      await project.writeFile('models/part.step', bytes);
+      await project.unlink(objectFile);
 
-    const second = await fixture.open('alpha');
-    /* Slice (a): the worker's own wiring, so the authority reads a pending entry through the revisions. */
-    fixture.service.setPendingObjectSource(createPendingObjectSource(fixture.registry.roots));
-    /* The first capture of the session picks the placeholder up; with no remote, the transfer fails. */
-    fixture.announce('alpha', ['main.scad']);
-    await vi.waitFor(
-      () => {
-        const status = second.frames.findLast((frame) => frame.type === 'status');
-        expect(status?.type === 'status' ? status.status.largeObjects : undefined).toMatchObject({
-          phase: 'failed',
-          paths: ['models/part.step'],
-          totalObjects: 1,
-          totalBytes: part.length,
-        });
-      },
-      { timeout: 10_000 },
-    );
-    /* D10: every authored file is here, the large object is not. */
-    expect(second.frames.findLast((frame) => frame.type === 'status')?.status.readiness).toBe('materialized');
-    /* D9: the page reads it as pending, never as its pointer, and a materialize that cannot fetch says so. */
-    second.send({ command: 'readContent', id: 71, path: 'models/part.step' });
-    second.send({ command: 'materialize', id: 72, paths: ['models/part.step'] });
-    await vi.waitFor(() => {
-      expect(second.frames.filter((frame) => 'id' in frame && (frame.id === 71 || frame.id === 72))).toHaveLength(2);
-    });
-    expect(second.frames.find((frame) => 'id' in frame && frame.id === 71)).toMatchObject({
-      type: 'result',
-      result: { kind: 'content', content: { outcome: 'pending', size: part.length, reason: 'not-fetched' } },
-    });
-    expect(second.frames.find((frame) => 'id' in frame && frame.id === 72)).toMatchObject({
-      type: 'error',
-      code: 'PENDING',
-    });
-    /* W4 review 7: a comparison against the checkout reads through a placeholder too, never its pointer text. */
-    const head = second.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
-    await project.writeFile('models/copy.step', bytes);
-    second.send({ command: 'compare', id: 73, revisionId: head!, path: 'models/copy.step', against: 'checkout' });
-    await vi.waitFor(() => {
-      expect(second.frames.find((frame) => 'id' in frame && frame.id === 73)).toMatchObject({
+      const second = await fixture.open('alpha');
+      /* Slice (a): the worker's own wiring, so the authority reads a pending entry through the revisions. */
+      fixture.service.setPendingObjectSource(createPendingObjectSource(fixture.registry.roots));
+      /* The first capture of the session picks the placeholder up; with no remote, the transfer fails. */
+      fixture.announce('alpha', ['main.scad']);
+      await vi.waitFor(
+        () => {
+          const status = second.frames.findLast((frame) => frame.type === 'status');
+          expect(status?.type === 'status' ? status.status.largeObjects : undefined).toMatchObject({
+            phase: 'failed',
+            paths: ['models/part.step'],
+            totalObjects: 1,
+            totalBytes: part.length,
+          });
+        },
+        { timeout: 10_000 },
+      );
+      /* D10: every authored file is here, the large object is not. */
+      expect(second.frames.findLast((frame) => frame.type === 'status')?.status.readiness).toBe('materialized');
+      /* D9: the page reads it as pending, never as its pointer, and a materialize that cannot fetch says so. */
+      second.send({ command: 'readContent', id: 71, path: 'models/part.step' });
+      second.send({ command: 'materialize', id: 72, paths: ['models/part.step'] });
+      await vi.waitFor(() => {
+        expect(second.frames.filter((frame) => 'id' in frame && (frame.id === 71 || frame.id === 72))).toHaveLength(2);
+      });
+      expect(second.frames.find((frame) => 'id' in frame && frame.id === 71)).toMatchObject({
+        type: 'result',
+        result: { kind: 'content', content: { outcome: 'pending', size: part.length, reason: 'not-fetched' } },
+      });
+      expect(second.frames.find((frame) => 'id' in frame && frame.id === 72)).toMatchObject({
         type: 'error',
         code: 'PENDING',
       });
-    });
-    /* Slice (a): the disk keeps the pointer, and the authority's read never answers it: with no way to fetch the object it refuses. */
-    const raw = fixture.service.createRootedFileSystem('/projects/alpha', undefined, { placeholders: 'raw' });
-    expect(await raw.readFile('models/part.step')).toStrictEqual(bytes);
-    await expect(project.readFile('models/part.step')).rejects.toMatchObject({ code: 'PENDING' });
-    await project.unlink('models/copy.step');
-    /* A placeholder is the object it stands for: a diff against the checkout neither fetches it nor lists it changed. */
-    const reopened = await fixture.root('alpha');
-    const pendingDiff = await reopened.diff(head!, undefined, { against: 'checkout' });
-    expect(pendingDiff.map(({ path }) => path)).not.toContain('models/part.step');
+      /* W4 review 7: a comparison against the checkout reads through a placeholder too, never its pointer text. */
+      const head = second.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+      await project.writeFile('models/copy.step', bytes);
+      second.send({ command: 'compare', id: 73, revisionId: head!, path: 'models/copy.step', against: 'checkout' });
+      await vi.waitFor(() => {
+        expect(second.frames.find((frame) => 'id' in frame && frame.id === 73)).toMatchObject({
+          type: 'error',
+          code: 'PENDING',
+        });
+      });
+      /* Slice (a): the disk keeps the pointer, and the authority's read never answers it: with no way to fetch the object it refuses. */
+      const raw = fixture.service.createRootedFileSystem('/projects/alpha', undefined, { placeholders: 'raw' });
+      expect(await raw.readFile('models/part.step')).toStrictEqual(bytes);
+      await expect(project.readFile('models/part.step')).rejects.toMatchObject({ code: 'PENDING' });
+      await project.unlink('models/copy.step');
+      /* A placeholder is the object it stands for: a diff against the checkout neither fetches it nor lists it changed. */
+      const reopened = await fixture.root('alpha');
+      const pendingDiff = await reopened.diff(head!, undefined, { against: 'checkout' });
+      expect(pendingDiff.map(({ path }) => path)).not.toContain('models/part.step');
 
-    await project.writeFile(objectFile, part);
-    /* Its object on the device and the pointer still on disk: the same file, still unchanged. */
-    const landedDiff = await reopened.diff(head!, undefined, { against: 'checkout' });
-    expect(landedDiff.map(({ path }) => path)).not.toContain('models/part.step');
-    /* Once the object is on the device the authority reads through to it, before any fill has written the file. */
-    expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
-    expect(await raw.readFile('models/part.step')).toStrictEqual(bytes);
-    const framesBeforeFill = second.frames.length;
-    second.send({ command: 'retryLargeObjects' });
-    await vi.waitFor(
-      () => {
-        const status = second.frames.findLast((frame) => frame.type === 'status');
-        expect(status?.type === 'status' && status.status.largeObjects === undefined).toBe(true);
-      },
-      { timeout: 10_000 },
-    );
-    expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
-    expect(second.frames.findLast((frame) => frame.type === 'status')?.status.readiness).toBe('filled');
-    /* The fill's flush wrote the file without holding the page's file tree. */
-    expect(
-      second.frames
-        .slice(framesBeforeFill)
-        .flatMap((frame) => (frame.type === 'status' ? [frame.status.applyingRoots] : []))
-        .filter((roots) => roots !== undefined),
-    ).toEqual([]);
-  }, 30_000);
+      await project.writeFile(objectFile, part);
+      /* Its object on the device and the pointer still on disk: the same file, still unchanged. */
+      const landedDiff = await reopened.diff(head!, undefined, { against: 'checkout' });
+      expect(landedDiff.map(({ path }) => path)).not.toContain('models/part.step');
+      /* Once the object is on the device the authority reads through to it, before any fill has written the file. */
+      expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
+      expect(await raw.readFile('models/part.step')).toStrictEqual(bytes);
+      const framesBeforeFill = second.frames.length;
+      second.send(id === undefined ? { command: word } : { command: word, id });
+      await vi.waitFor(
+        () => {
+          const status = second.frames.findLast((frame) => frame.type === 'status');
+          expect(status?.type === 'status' && status.status.largeObjects === undefined).toBe(true);
+        },
+        { timeout: 10_000 },
+      );
+      expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
+      expect(second.frames.findLast((frame) => frame.type === 'status')?.status.readiness).toBe('filled');
+      /* The fill's flush wrote the file without holding the page's file tree. */
+      expect(
+        second.frames
+          .slice(framesBeforeFill)
+          .flatMap((frame) => (frame.type === 'status' ? [frame.status.applyingRoots] : []))
+          .filter((roots) => roots !== undefined),
+      ).toEqual([]);
+    },
+    30_000,
+  );
 
   it('should restore a recorded revision through the port commands', async () => {
     const fixture = harness(['alpha']);
@@ -1569,9 +1603,13 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await finish(session, turnKey(1));
     await turnFinalized(alpha, 'turn-1');
 
+    /* The hidden save cut nothing: the log is the turn's result over its base cut, and the base cut is the
+     * person's (blueprint A5), so the agent's write is never read as theirs. */
     const rows = await root.log();
-    expect(rows.map((row) => row.source)).not.toContain('user');
-    expect(rows[0]?.turnId).toBe('turn-1');
+    expect(rows.map((row) => [row.source, row.trigger, row.turnId])).toEqual([
+      ['agent', 'turn', 'turn-1'],
+      ['user', 'turn', 'turn-1'],
+    ]);
   });
 
   /*

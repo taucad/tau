@@ -16,7 +16,7 @@ import { Page } from '#components/layout/page.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { ServerPreferencesProvider } from '#hooks/server-preferences.js';
 import type { ServerPreferences } from '#hooks/server-preferences.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { cn } from '@taucad/ui/utils/cn';
 import { Toaster } from '@taucad/ui/components/sonner';
 import { ColorProvider, useColor } from '#hooks/use-color.js';
@@ -37,7 +37,7 @@ import { GlobalChatFlushGuard } from '#components/global-chat-flush-guard.js';
 import { DocumentMemoryKillReporter } from '#components/memory-kill-reporter.js';
 import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
-import { authErrorMessage, betterFetchErrorBodyMessage } from '#utils/auth-error.utils.js';
+import { authErrorMessage, betterFetchErrorBodyMessage } from '@taucad/ui-core/utils/auth-error.utils';
 import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
 
 export type RootLoaderData = {

@@ -38,7 +38,7 @@ test('should retain the app home after a confirmed anonymous session', async () 
   });
   await target.navigate('/');
   await target.expectVisible(selectors.getByRole('heading', { name: 'What do you want to build?' }), 30_000);
-  await target.expectVisible(selectors.getByRole('heading', { name: 'Projects', level: 2 }));
+  await target.expectVisible(selectors.getByRole('heading', { name: 'Built with Tau', level: 2 }));
 });
 
 test('keeps a Home draft with an image and a PDF across a reload and hands both to the new project', async () => {

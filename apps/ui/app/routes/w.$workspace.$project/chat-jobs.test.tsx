@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { JobProjection, JobSnapshot } from '#lib/jobs-projection.js';
+import type { JobProjection, JobSnapshot } from '@taucad/ui-core/lib/jobs-projection';
 import type * as JobsHookModule from '#hooks/use-jobs.js';
 import { useJobs } from '#hooks/use-jobs.js';
 import { JobList, JobsPanelBody } from '#routes/w.$workspace.$project/chat-jobs.js';

@@ -125,7 +125,18 @@ describe('scorecard', () => {
   it('counts a run once across uploaders and replays, and never reads content', async () => {
     const first = await project(run({ presentedAt: at + 2000 }));
     const otherDevice = await project(run(), { uploader: 'device-b' });
-    const content = { ...first[0]!, payload: { plane: 'content', family: 'tool', stage: 'result', blocks: [] } };
+    const [fact] = first;
+    const content = {
+      ...fact!,
+      payload: {
+        plane: 'content',
+        fact: fact!.payload.fact,
+        input: null,
+        output: { messages: [], omitted: 0 },
+        context: null,
+        parameters: {},
+      },
+    };
 
     const card = scorecard([...first, ...otherDevice, ...first, content as Evidence]);
 

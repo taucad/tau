@@ -8,7 +8,7 @@ import type { EditorSymbolCrumb } from '#components/code/editor-language-feature
 import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
 import { loadEditorSyntax } from '#lib/editor-syntax.js';
 import { Button } from '@taucad/ui/components/button';
-import { pageProjectOpenPerformance } from '#lib/project-open-performance.js';
+import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
 
 /**
  * Longest wait for an idle period before requesting the editor runtime anyway. Milliseconds.

@@ -3,6 +3,7 @@ import { useState, useCallback, useMemo, useRef } from 'react';
 import { resolveKernel } from '@taucad/types/constants';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
+import { Heading } from '@taucad/ui/components/heading';
 import { cn } from '@taucad/ui/utils/cn';
 import { formatSharePath } from '@taucad/share/locator';
 import { Loader } from '@taucad/ui/components/loader';
@@ -21,12 +22,15 @@ export type CommunityProjectGridProperties = {
   readonly limit?: number;
   /** The example that spans two columns and rows, when it is in `projects`. */
   readonly featuredLocator?: string;
+  /** One level below the heading the host puts over the grid. */
+  readonly titleLevel?: 2 | 3;
 };
 
 export function CommunityProjectGrid({
   projects,
   limit,
   featuredLocator,
+  titleLevel = 2,
 }: CommunityProjectGridProperties): React.JSX.Element {
   const displayedProjects = limit ? projects.slice(0, limit) : projects;
   /* One live preview at a time: opening another card's preview releases this one. */
@@ -41,6 +45,7 @@ export function CommunityProjectGrid({
             <CommunityProjectCard
               project={project}
               isFeatured={isFeatured}
+              titleLevel={titleLevel}
               isPreviewVisible={previewLocator === project.locator}
               onPreviewLocatorChange={setPreviewLocator}
             />
@@ -54,6 +59,7 @@ export function CommunityProjectGrid({
 type CommunityProjectCardProperties = {
   readonly project: BuiltinProjectCardModel;
   readonly isFeatured: boolean;
+  readonly titleLevel: 2 | 3;
   readonly isPreviewVisible: boolean;
   readonly onPreviewLocatorChange: (locator: string | undefined) => void;
 };
@@ -61,6 +67,7 @@ type CommunityProjectCardProperties = {
 function CommunityProjectCard({
   project,
   isFeatured,
+  titleLevel,
   isPreviewVisible,
   onPreviewLocatorChange,
 }: CommunityProjectCardProperties): React.JSX.Element {
@@ -122,15 +129,15 @@ function CommunityProjectCard({
       {/* Below sm the action takes its own full-width row so the title keeps its width. */}
       <div
         className={cn(
-          'flex flex-col gap-2 p-3 sm:flex-row sm:items-end sm:justify-between sm:gap-3',
-          isFeatured && 'lg:p-4',
+          'flex flex-col justify-between gap-2 p-3 sm:flex-row sm:items-end sm:gap-3',
+          isFeatured ? 'lg:p-4' : 'flex-1',
         )}
       >
-        <div className='min-w-0'>
+        <div className='min-w-0 sm:self-start'>
           <div className='flex items-center gap-2'>
-            <h2 className={cn('line-clamp-1 font-semibold', isFeatured ? 'text-xl leading-7' : 'text-base leading-6')}>
+            <Heading level={titleLevel} variant={isFeatured ? 'title' : 'item'} className='line-clamp-2'>
               {name}
-            </h2>
+            </Heading>
             {isFeatured ? <Badge variant='secondary'>Featured</Badge> : null}
           </div>
           {isFeatured ? (

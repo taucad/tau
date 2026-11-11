@@ -14,11 +14,11 @@ import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
-import { getCaptchaComponentFromPlugins } from '#utils/auth-plugin.js';
+import { getCaptchaComponentFromPlugins } from '@taucad/ui-core/utils/auth-plugin';
 import { ProviderButtons } from '#components/auth/provider-buttons.js';
 import type { SocialLayout } from '#components/auth/provider-buttons.js';
 import { useAuthEmailDraft } from '#components/auth/auth-email-draft.js';
-import { authErrorMessage, betterFetchErrorBodyCode } from '#utils/auth-error.utils.js';
+import { authErrorMessage, betterFetchErrorBodyCode } from '@taucad/ui-core/utils/auth-error.utils';
 import { CheckEmail } from '#components/auth/check-email.js';
 
 /**
@@ -143,8 +143,8 @@ export function SignIn({ className, socialLayout, socialPosition = 'bottom' }: S
   return (
     <Card className={cn('w-full max-w-sm', className)}>
       <CardHeader>
-        <CardTitle className='text-xl font-semibold'>
-          <h1>{localization.auth.signIn}</h1>
+        <CardTitle level={1} variant='title'>
+          {localization.auth.signIn}
         </CardTitle>
       </CardHeader>
 

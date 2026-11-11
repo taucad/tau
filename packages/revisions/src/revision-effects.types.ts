@@ -251,7 +251,7 @@ export type RevisionActorsOptions = Readonly<{
    * It gates chat refs and never leaves the host: a segment, an ops ref and a
    * conflict line are named by a record device id per actor form
    * (`.git/ops-devices.json`, EQ10(a)), so no pushed name carries it. In the
-   * browser it is `apps/ui/app/lib/device-id.ts` and nothing else; on a disk
+   * browser it is `apps/libs/ui-core/src/lib/device-id.ts` and nothing else; on a disk
    * host the host's own machine identity. Without it this module writes **no**
    * chat refs at all.
    *

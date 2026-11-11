@@ -1,12 +1,21 @@
 import type { Evidence } from '@taucad/agent-observability/contract';
+import { evidenceLimits } from '@taucad/agent-observability/contract';
+import { contentRedactor } from '@taucad/agent-observability/content-redaction';
 import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '@taucad/agent-observability/identity';
 import type { SourceProtection } from '#evidence-admission.js';
 import { evidenceRetentionMilliseconds } from '#evidence-admission.js';
 import type { ProviderFact, ProviderStreamSummary } from '#provider-stream-facts.js';
-import type { ModelInvocationSurface, ModelProviderWire } from '@taucad/api-llm-gateway';
+import { contentSection, sectionTextBudget } from '#provider-content.js';
+import type { ContentMessage, ContentPayload, ContentSection, RequestContent } from '#provider-content.js';
+import type {
+  HostLabels,
+  ModelInvocationIntent,
+  ModelInvocationSurface,
+  ModelProviderWire,
+} from '@taucad/api-llm-gateway';
 
 /** Bumped whenever the facts written for the same attempt change. */
-export const apiProviderMapper = 'api-provider-v2';
+export const apiProviderMapper = 'api-provider-v3';
 
 /* An evidence id admits word characters, `:`, `.` and `-`; anything else in an image reference is replaced. */
 const releaseUnsafe = /[^\w:.-]/gu;
@@ -60,6 +69,9 @@ export const executionOfAttempt = async (attemptKey: string): Promise<string> =>
   return run === undefined ? contractId('inv', attemptKey) : contractId('run', run);
 };
 
+/* A model id the contract can carry as it is; any other is not a model name a reader could use. */
+const modelIdShape = /^[\w:.-]{1,128}$/u;
+
 /** One supplier attempt as the API saw it relay. */
 export type ObservedAttempt = Readonly<{
   principal: string;
@@ -70,7 +82,13 @@ export type ObservedAttempt = Readonly<{
   chat: string | undefined;
   surface: ModelInvocationSurface;
   wire: ModelProviderWire;
+  /** The activity the caller asserted (`compaction`) or the surface implies; absent from an older recorder. */
+  activity?: ModelInvocationIntent['activity'] | undefined;
   requestedModel: string | undefined;
+  /** The supplier's model id for the requested route, which names the model when the stream did not. */
+  supplierModel?: string | undefined;
+  /** The host labels the caller asserted (LW17), when it sent any. */
+  labels?: HostLabels | undefined;
   /** The supplier the route resolved to, when the API knows it. */
   provider: string | undefined;
   /** The funded operation, when Tau Cloud billed the attempt. */
@@ -81,6 +99,21 @@ export type ObservedAttempt = Readonly<{
   stream: ProviderStreamSummary | undefined;
   /** How the relay ended when the stream did not say. */
   ended: 'completed' | 'aborted' | 'failed';
+  /**
+   * Why no content was captured: `omitted` when the account or the mode did not permit it, `missing` when the purpose
+   * lookup had not answered by the first chunk. Absent is `omitted`.
+   */
+  capture?: 'omitted' | 'missing' | undefined;
+  /** What was captured, when the mode and the account's `content` purpose permitted it at the first chunk. */
+  content?:
+    | Readonly<{
+        /** The call's new messages, context and parameters; `undefined` when the body could not be read. */
+        input: RequestContent | undefined;
+        output: readonly ContentMessage[];
+        /** Whether the output capture stopped at its bound. */
+        truncated: boolean;
+      }>
+    | undefined;
 }>;
 
 /** What current authority stamps on the attempt. */
@@ -97,19 +130,45 @@ const stopOf = (attempt: ObservedAttempt): ProviderFact['stop'] => {
 };
 
 /**
- * The API-reported summary of one supplier attempt (blueprint T07). It holds
- * ids, timing, model, stop reason and token counts, never request or output
- * text, and its source is the attempt itself, so a replay of the same attempt
- * is the same fact.
- *
- * @param attempt - What the relay observed.
- * @param authority - The policy epoch and protection the attempt is admitted under.
- * @returns Evidence ready for admission.
+ * What kind of model call an attempt was (LF-13): a host run's call when its gateway attempt key names a run, a helper
+ * endpoint's call, or any other direct gateway call. A chat hint does not decide it, because a helper sends one too.
  */
-export const providerAttemptEvidence = async (
+const callKindOf = (attempt: ObservedAttempt): NonNullable<ProviderFact['callKind']> => {
+  if (attempt.surface !== 'gateway') {
+    return 'helper';
+  }
+  return hostAttemptKey.test(attempt.attemptKey) ? 'run' : 'direct';
+};
+
+const purposeOf = (attempt: ObservedAttempt): ProviderFact['purpose'] => {
+  if (attempt.surface !== 'gateway') {
+    return 'helper';
+  }
+  return attempt.activity === 'compaction' ? 'compaction' : 'generation';
+};
+
+/**
+ * The provider fact's host labels, each made a valid evidence id, as a member ready to spread into the fact; empty
+ * when the caller sent none, so a fact without labels is the fact written before LW17.
+ *
+ * @param labels - The labels the header boundary admitted.
+ * @returns The fact's `labels` member, or nothing.
+ */
+const labelsOf = async (
+  labels: HostLabels | undefined,
+): Promise<{ readonly labels?: NonNullable<ProviderFact['labels']> }> => {
+  const entries = await Promise.all(
+    Object.entries(labels ?? {}).map(async ([key, value]) => [key, await contractId('label', value)] as const),
+  );
+  return entries.length === 0 ? {} : { labels: Object.fromEntries(entries) };
+};
+
+/** The fact, source and identities one attempt's envelopes share, summary or content. */
+const attemptFact = async (
   attempt: ObservedAttempt,
-  authority: AttemptAuthority,
-): Promise<Evidence> => {
+): Promise<
+  Readonly<{ fact: ProviderFact; invocation: string; execution: string; run: string; sourceDigest: string }>
+> => {
   const optionalId = async (prefix: string, value: string | undefined): Promise<string | undefined> =>
     value === undefined ? undefined : contractId(prefix, value);
   const [invocation, execution, chat, operation, requestedModel, provider] = await Promise.all([
@@ -120,7 +179,7 @@ export const providerAttemptEvidence = async (
     optionalId('model', attempt.requestedModel),
     optionalId('provider', attempt.provider),
   ]);
-  const run = chat ?? invocation;
+  const labels = await labelsOf(attempt.labels);
   const { stream } = attempt;
   const usage: ProviderFact['usage'] = stream?.usage ?? {
     input: null,
@@ -136,27 +195,51 @@ export const providerAttemptEvidence = async (
     attempt: operation ?? null,
     billing: operation ?? null,
     requestedModel: requestedModel ?? null,
-    resolvedModel: stream?.resolvedModel ?? null,
+    resolvedModel:
+      stream?.resolvedModel ??
+      (attempt.supplierModel !== undefined && modelIdShape.test(attempt.supplierModel) ? attempt.supplierModel : null),
     provider: provider ?? null,
     response: stream?.response ?? null,
     firstOutput:
       stream?.firstChunk === undefined
         ? null
         : { domain: 'api-relay', chunk: stream.firstChunk, text: stream.firstText ?? null },
-    purpose: attempt.surface === 'gateway' ? 'generation' : 'helper',
+    purpose: purposeOf(attempt),
+    callKind: callKindOf(attempt),
     stop: stopOf(attempt),
     usage,
+    ...labels,
   };
+  /* The content envelope shares this source, so a call is one fact whichever plane carries it. */
   const sourceDigest = await sha256Hex(
     canonicalEvidence(['api-provider-attempt', attempt.principal, invocation, fact]),
   );
+  return { fact, invocation, execution, run: chat ?? invocation, sourceDigest };
+};
+
+type Coverage = Evidence['coverage']['input'];
+
+/** One attempt's envelope around a payload, with its projection digest computed. */
+const attemptEnvelope = async (
+  attempt: ObservedAttempt,
+  authority: AttemptAuthority,
+  content: Readonly<{
+    shared: Awaited<ReturnType<typeof attemptFact>>;
+    payload: Evidence['payload'];
+    redactor: string;
+    input: Coverage;
+    output: Coverage;
+  }>,
+): Promise<Evidence> => {
+  const { payload } = content;
+  const { fact, invocation, execution, run, sourceDigest } = content.shared;
   const expiresAt = attempt.startedAt + evidenceRetentionMilliseconds;
-  const firstChunk = stream?.firstChunk;
+  const firstChunk = attempt.stream?.firstChunk;
   const evidence: Evidence = {
     version: 1,
     source: { kind: 'invocation', invocation, digest: sourceDigest },
     semantic: { kind: 'provider', id: invocation },
-    projection: { version: apiProviderMapper, redactor: 'summary-only', digest: '0'.repeat(64) },
+    projection: { version: apiProviderMapper, redactor: content.redactor, digest: '0'.repeat(64) },
     delivery: { uploader: 'api', attempt: 'api-1', cursor: { view: 'own', origin: 'api', position: invocation } },
     scope: {
       principal: attempt.principal,
@@ -186,6 +269,7 @@ export const providerAttemptEvidence = async (
     },
     authority: 'api-reported',
     retention: { originalAt: attempt.startedAt, expiresAt, proof: 'api-retention-v1' },
+    /* Under LQ4(b) a generation records only what this call wrote, so the call itself is its one source (LF-37). */
     lineage: [
       {
         source: invocation,
@@ -198,13 +282,96 @@ export const providerAttemptEvidence = async (
     ],
     coverage: {
       events: 'complete',
-      input: 'omitted',
-      output: 'omitted',
-      usage: usage.missing === 'none' ? 'complete' : usage.missing === 'partial' ? 'truncated' : 'missing',
+      input: content.input,
+      output: content.output,
+      usage: fact.usage.missing === 'none' ? 'complete' : fact.usage.missing === 'partial' ? 'truncated' : 'missing',
       artifacts: 'unsupported',
       permission: 'complete',
     },
-    payload: { plane: 'summary', fact },
+    payload,
   };
   return { ...evidence, projection: { ...evidence.projection, digest: await evidenceDigest(evidence) } };
+};
+
+/**
+ * The API-reported summary of one supplier attempt (blueprint T07). It holds
+ * ids, timing, model, stop reason and token counts, never request or output
+ * text, and its source is the attempt itself, so a replay of the same attempt
+ * is the same fact.
+ *
+ * @param attempt - What the relay observed.
+ * @param authority - The policy epoch and protection the attempt is admitted under.
+ * @returns Evidence ready for admission.
+ */
+export const providerAttemptEvidence = async (
+  attempt: ObservedAttempt,
+  authority: AttemptAuthority,
+): Promise<Evidence> => {
+  const shared = await attemptFact(attempt);
+  const coverage = attempt.capture ?? 'omitted';
+  return attemptEnvelope(attempt, authority, {
+    shared,
+    payload: { plane: 'summary', fact: shared.fact },
+    redactor: 'summary-only',
+    input: coverage,
+    output: coverage,
+  });
+};
+
+/** A section's coverage: the strongest label any of its parts carries, `truncated` when the bounds dropped parts. */
+const sectionCoverage = (section: ContentSection, truncated: boolean): Coverage => {
+  const labels = new Set(
+    section.messages.flatMap((item) => item.parts.map((part) => ('redaction' in part ? part.redaction : 'none'))),
+  );
+  if (truncated || section.omitted > 0 || labels.has('truncated')) {
+    return 'truncated';
+  }
+  return labels.has('redacted') ? 'redacted' : 'complete';
+};
+
+/* Successive text budgets for one section, until the envelope fits the contract's 256 KiB. */
+const sectionBudgets = [sectionTextBudget, sectionTextBudget / 4, sectionTextBudget / 16] as const;
+
+/**
+ * The API-reported content of one supplier attempt (LW3): the same fact and source as its summary, with the messages
+ * new in this call as input and the assistant message it produced as output, source-redacted and capped so the whole
+ * envelope fits the contract. A compaction call records no content: its input and its summary are old content.
+ *
+ * @param attempt - What the relay observed, with what it captured.
+ * @param authority - The policy epoch and protection the attempt is admitted under.
+ * @returns Evidence ready for admission, or `undefined` when there is no content to record.
+ */
+export const providerContentEvidence = async (
+  attempt: ObservedAttempt,
+  authority: AttemptAuthority,
+): Promise<Evidence | undefined> => {
+  const { content } = attempt;
+  if (content === undefined || attempt.activity === 'compaction') {
+    return undefined;
+  }
+  const shared = await attemptFact(attempt);
+  for (const budget of sectionBudgets) {
+    const input = content.input === undefined ? null : contentSection(content.input.messages, budget);
+    const output = contentSection(content.output, budget);
+    const payload: ContentPayload = {
+      plane: 'content',
+      fact: shared.fact,
+      input,
+      output,
+      context: content.input?.context ?? null,
+      parameters: content.input?.parameters ?? {},
+    };
+    // oxlint-disable-next-line no-await-in-loop -- at most three sizes, each needed only when the last did not fit
+    const evidence = await attemptEnvelope(attempt, authority, {
+      shared,
+      payload,
+      redactor: contentRedactor,
+      input: input === null ? 'unsupported' : sectionCoverage(input, false),
+      output: sectionCoverage(output, content.truncated),
+    });
+    if (new TextEncoder().encode(canonicalEvidence(evidence)).byteLength <= evidenceLimits.bytes) {
+      return evidence;
+    }
+  }
+  return undefined;
 };

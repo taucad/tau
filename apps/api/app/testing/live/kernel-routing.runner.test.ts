@@ -3,7 +3,7 @@ import type { HostRunSnapshot, HostToolInvocation, JsonValue } from '@taucad/age
 import { toolName } from '@taucad/chat/constants';
 import { kernelChoiceCondition } from '@taucad/chat/prompts';
 import { resolveKernel } from '@taucad/types/constants';
-import type { BindingKernelRow } from '#testing/live/kernel-routing.binding.js';
+import type { BindingKernelRow } from '@taucad/chat/prompts';
 import { liveCadSystemPrompt } from '#testing/live/live-gateway.harness.js';
 import { kernelRoutingDevelopmentCases, kernelRoutingHosts } from '#testing/live/kernel-routing.cases.js';
 import type { KernelRoutingCase } from '#testing/live/kernel-routing.cases.js';

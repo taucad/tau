@@ -293,6 +293,57 @@
       "description": "purged payloads past retention, reaped receipts a day past it, erased subjects completed; and each worker's passes, the liveness signal."
     },
     {
+      "title": "Langfuse Units by Kind (31d)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 57
+      },
+      "targets": [
+        {
+          "expr": "sum by (kind) (increase(tau_agent_evidence_langfuse_units_total{app=~\"$app\",service_name=~\"$service\"}[31d]))",
+          "legendFormat": "{{kind}}"
+        },
+        {
+          "expr": "sum(increase(tau_agent_evidence_langfuse_units_total{app=~\"$app\",service_name=~\"$service\"}[31d]))",
+          "legendFormat": "total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "max": 50000,
+          "min": 0,
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 35000
+              },
+              {
+                "color": "red",
+                "value": 50000
+              }
+            ]
+          }
+        }
+      },
+      "id": 18,
+      "description": "Traces, observations and scores Tau wrote to Langfuse in the trailing 31 days, against Hobby's 50k units a month; agent-evidence-langfuse-units fires at 35,000 (70%). One environment per dashboard: staging and production share the organisation's 50k, so add the other environment's total. Check monthly against Langfuse's Usage Management counts (LW9)."
+    },
+    {
       "title": "Error Logs",
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 100 },

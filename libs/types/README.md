@@ -1,6 +1,6 @@
 # @taucad/types
 
-Shared TypeScript types for the Tau CAD platform (API, project, CAD, file, graphics).
+Shared TypeScript types for the Tau platform (API, project, CAD, file, graphics).
 
 ## Subpaths
 

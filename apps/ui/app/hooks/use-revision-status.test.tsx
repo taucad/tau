@@ -12,12 +12,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, waitFor } from '@testing-library/react';
 import { createActor, setup, types } from 'xstate';
-import { eventSchemas } from '#lib/xstate.lib.js';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { createIsomorphicGitRevisionPort, createRevisionHttpClient } from '@taucad/revisions';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { createCheckoutRoutes, createWorkerRevisionRegistry } from '#machines/file-manager.worker.revisions.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import type {
   RevisionToast,
   WorkerProjectRevisions,

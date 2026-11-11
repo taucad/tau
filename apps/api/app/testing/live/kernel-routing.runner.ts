@@ -4,12 +4,15 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HostRunSnapshot, HostToolInvocation, HostToolResult, JsonValue } from '@taucad/agent-host';
 import { toolName } from '@taucad/chat/constants';
-import { kernelChoiceCondition, renderKernelGuidance, renderKernelRoutingCard } from '@taucad/chat/prompts';
-import type { KernelRoutingProfile } from '@taucad/chat/prompts';
+import {
+  bindEntryFirstPass,
+  kernelChoiceCondition,
+  renderKernelGuidance,
+  renderKernelRoutingCard,
+} from '@taucad/chat/prompts';
+import type { BindingKernelRow, EntryBinding, KernelRoutingProfile } from '@taucad/chat/prompts';
 import { isKernelId, resolveKernel } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
-import { bindEntryFirstPass } from '#testing/live/kernel-routing.binding.js';
-import type { BindingKernelRow, EntryBinding } from '#testing/live/kernel-routing.binding.js';
 import { kernelRoutingHosts } from '#testing/live/kernel-routing.cases.js';
 import type { KernelRoutingCase } from '#testing/live/kernel-routing.cases.js';
 import type { KernelRoutingObservation } from '#testing/live/kernel-routing.grader.js';

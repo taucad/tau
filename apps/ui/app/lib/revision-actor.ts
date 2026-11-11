@@ -145,17 +145,25 @@ export const setRevisionSessionUser = (user: RevisionSessionUser | undefined): v
 export const getRevisionSessionUser = (): RevisionSessionUser | undefined => sessionUser;
 
 /**
+ * Hear every change of the published session user, outside React.
+ *
+ * What lets the revision client take a sign-in, a sign-out or an account
+ * switch as an event (audit R6) instead of a React effect re-running on it.
+ *
+ * @param listener - Called after each change; read {@link getRevisionSessionUser}.
+ * @returns The unsubscribe function.
+ * @public
+ */
+export const subscribeRevisionSessionUser = (listener: () => void): (() => void) => sessionTopic.subscribe(listener);
+
+/**
  * React binding for {@link getRevisionSessionUser}.
  *
  * @returns The signed-in person, or `undefined`.
  * @public
  */
 export const useRevisionSessionUser = (): RevisionSessionUser | undefined =>
-  useSyncExternalStore(
-    (listener) => sessionTopic.subscribe(listener),
-    getRevisionSessionUser,
-    () => undefined,
-  );
+  useSyncExternalStore(subscribeRevisionSessionUser, getRevisionSessionUser, () => undefined);
 
 /** Local-storage key prefix for the salts this host keeps; never written to the tree (EQ10). @public */
 export const revisionSaltStorageKeyPrefix = 'tau-revision-salt:';

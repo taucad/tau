@@ -5,7 +5,7 @@ import type { EditorDocument } from '#lib/editor-document.js';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import { applyEditorWorkspaceEdits } from '#lib/editor-workspace-edits.js';
 import type { EditorWorkspaceEdit } from '#lib/editor-workspace-edits.js';
-import { decodeTextFile } from '#utils/filesystem.utils.js';
+import { decodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 
 /** The request-time text and version of each source a language server edit may touch, keyed by file URI. */
 export type LspEditBasis = ReadonlyMap<string, Readonly<{ version: number; text: string }>>;

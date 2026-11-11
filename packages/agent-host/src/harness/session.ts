@@ -47,7 +47,7 @@ import type {
   TurnModelConfig,
   UserProviderMessage,
 } from '#log/event-types.js';
-import { isAbandonedTurn, isPersonsMessage } from '#log/event-types.js';
+import { isAbandonedTurn, isChatStateMessage, isPersonsMessage } from '#log/event-types.js';
 import {
   createTurnContextSnapshot,
   createToolResultTrimmerMiddleware,
@@ -304,6 +304,19 @@ export const lastCommittedTurnContext = (events: readonly AgentLogEvent[]): Turn
  */
 export const carriedSkillsNote = (messages: readonly ProviderMessage[]): string | undefined => {
   const note = messages.findLast((message) => message.id === skillsUpdateMessageId);
+  return typeof note?.content === 'string' ? note.content : undefined;
+};
+
+/**
+ * The newest state note the request history carries: what an earlier turn's context told the model about the chat's
+ * mode, testing and tool mask, which the next turn's note is compared against.
+ *
+ * @param messages - The request messages, with each committed turn's context attached.
+ * @returns The note's text, or `undefined` when the history tells the model nothing but the defaults.
+ * @internal
+ */
+export const carriedStateNote = (messages: readonly ProviderMessage[]): string | undefined => {
+  const note = messages.findLast((message) => isChatStateMessage(message));
   return typeof note?.content === 'string' ? note.content : undefined;
 };
 
@@ -1600,12 +1613,14 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   const skillsCarriage = async (): Promise<{
     readonly previousContext: TurnContextSnapshot | undefined;
     readonly carriedSkillsNote: string | undefined;
+    readonly carriedStateNote: string | undefined;
   }> => {
     const rows = await record.rows();
-    const history = await record.history();
+    const carried = attachTurnContexts(await record.history(), committedTurnContexts(rows));
     return {
       previousContext: lastCommittedTurnContext(rows),
-      carriedSkillsNote: carriedSkillsNote(attachTurnContexts(history, committedTurnContexts(rows))),
+      carriedSkillsNote: carriedSkillsNote(carried),
+      carriedStateNote: carriedStateNote(carried),
     };
   };
   const initialHistory = await record.history();
@@ -1698,18 +1713,25 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   const dedupedRegistry = withReadDedup(options.toolRegistry, async () => record.history());
   /* R4: one model response's calls share an aggregate result budget; each model request starts a fresh one. */
   const resultBatch = createToolResultBatchBudget();
+  /* The model is told every tool the turn was granted, whatever the tool choice masks: the declared list is part of
+   * the cached prefix and of what reasoning is bound to, so a mask that edited it would cost both on every toggle.
+   * The mask holds where a call is made. */
   const toolRegistry: ToolRegistry = {
-    list: () => options.toolRegistry.list().filter((tool) => selectedTools.has(tool.name)),
-    invoke: async (invocation) =>
-      selectedTools.has(invocation.toolName)
-        ? dedupedRegistry.invoke({ ...invocation, resultBudget: resultBatch.budget })
-        : {
-            content: {
-              errorCode: 'TOOL_NOT_FOUND',
-              message: `Unknown tool: ${invocation.toolName}`,
-            },
-            isError: true,
-          },
+    list: () => options.toolRegistry.list().filter((tool) => allowed.has(tool.name)),
+    invoke: async (invocation) => {
+      if (selectedTools.has(invocation.toolName)) {
+        return dedupedRegistry.invoke({ ...invocation, resultBudget: resultBatch.budget });
+      }
+      return {
+        content: allowed.has(invocation.toolName)
+          ? {
+              errorCode: 'TOOL_DISABLED',
+              message: `${invocation.toolName} is turned off for this chat. Do not call it again; continue without it, or tell the person what it would have done.`,
+            }
+          : { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
+        isError: true,
+      };
+    },
   };
   type PrestartedToolResult =
     | { readonly ok: true; readonly value: AgentToolResult<HostToolExecutionDetails> }

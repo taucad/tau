@@ -343,6 +343,13 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
     return { ...patch, health };
   };
 
+  /**
+   * The base of the person's next diff once the store has settled on `record`. An absent record is no base to adopt
+   * when the policy keeps its base on absence: then `kept`, the last record, stays the base.
+   */
+  const baseOf = (record: T | undefined, kept: T | undefined): T | undefined =>
+    record === undefined && policy.keepsBaseOnAbsence === true ? kept : record;
+
   const answer = (enq: Emit, requestIds: readonly string[], ok: boolean): void => {
     if (requestIds.length > 0) {
       enq.emit({ type: 'answered', requestIds, ok });
@@ -449,12 +456,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
         deferred = deferred === undefined ? cycle.patch : policy.combine(cycle.patch, deferred);
       }
       if (cycle.trigger === 'edit' && latest) {
-        /* A saved edit on an absent file keeps the last base when the policy says absence is not a record to adopt. */
-        patch.intended = saved
-          ? context.published.record === undefined && policy.keepsBaseOnAbsence === true
-            ? context.intended
-            : context.published.record
-          : cycle.next;
+        patch.intended = saved ? baseOf(context.published.record, context.intended) : cycle.next;
       }
       if (saved) {
         patch.retryDelay = firstRetryDelay;
@@ -466,7 +468,8 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
       /* A restore forms only when nothing is owed, so it has nothing to replace and, unsaved, owes nothing. */
       if (saved) {
         if (latest && deferred === undefined) {
-          patch.intended = context.published.record;
+          /* Absent once more after the write (its refresh read found the file gone): the record it wrote is the base. */
+          patch.intended = baseOf(context.published.record, cycle.next);
         }
       } else if (cycle.replaces !== undefined) {
         deferred = deferred === undefined ? cycle.replaces : policy.combine(cycle.replaces, deferred);
@@ -701,12 +704,8 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                         readFailures: 0,
                         readBack: context.readBack === 'reading' ? 'none' : context.readBack,
                         health: { ...context.health, read: 'ok' },
-                        ...(notify &&
-                        !own &&
-                        !published.refusal &&
-                        settledIntent &&
-                        (published.record !== undefined || policy.keepsBaseOnAbsence !== true)
-                          ? { intended: published.record }
+                        ...(notify && !own && !published.refusal && settledIntent
+                          ? { intended: baseOf(published.record, context.intended) }
                           : {}),
                       },
                       enq,

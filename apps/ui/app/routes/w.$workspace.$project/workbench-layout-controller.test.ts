@@ -1048,6 +1048,62 @@ describe('workbench layout store on recordSync (G2b)', () => {
     }
   });
 
+  it('should keep the restored layout as the base when the file is gone by the restore refresh read', async () => {
+    const memory = memoryFiles();
+    let readGate: PromiseWithResolvers<void> | undefined;
+    const store = createWorkbenchLayoutStore({
+      root: '/root',
+      files: {
+        ...memory.files,
+        exists: async () => {
+          const gate = readGate;
+          readGate = undefined;
+          await gate?.promise;
+          return memory.files.exists();
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await store.read(true);
+      const saved: WorkbenchLayout = {
+        ...layout(),
+        viewer: { kind: 'group', tabs: [{ kind: 'view', view: 'v-bbbb1111' }] },
+      };
+      const releaseWrite = memory.delayNextWrite();
+      const restored = store.restore(saved, store.snapshot().digest, () => true);
+      await vi.waitFor(() => {
+        expect(memory.writes).toHaveBeenCalledOnce();
+      });
+      // A watch read overlaps the restore's write, so its reply waits for a refresh read.
+      await store.read();
+      const refresh = Promise.withResolvers<void>();
+      readGate = refresh;
+      releaseWrite();
+      await vi.waitFor(() => {
+        expect(readGate).toBeUndefined();
+      });
+      // The file is deleted before the refresh read looks.
+      memory.setBytes(null);
+      refresh.resolve();
+      expect(await restored).toBe(true);
+      const theirs: WorkbenchLayout = {
+        ...layout(),
+        viewer: { kind: 'group', tabs: [{ kind: 'view', view: 'v-cccc2222' }] },
+      };
+      memory.set(theirs);
+      const current = store.intendedLayout()!;
+      expect(await store.edit({ ...current, lanes: { ...current.lanes, chat: false } })).toBe(true);
+      expect(workbenchRecords.layout.read(memory.get()!)).toEqual({
+        status: 'current',
+        record: { ...theirs, lanes: { chat: false, workbench: true } },
+      });
+    } finally {
+      store.dispose();
+    }
+  });
+
   it('should answer a read only once the host has been shown the latest publication', async () => {
     const memory = memoryFiles();
     const { digest } = globalThis.crypto.subtle;

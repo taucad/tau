@@ -426,6 +426,14 @@ it('should reject dishonest content lengths and duplicate lineage', () => {
   text.originalBytes = 2;
   text.retainedBytes = 2;
   expect(parse(evidence).ok).toBe(true);
+  /* The 64 KiB part cap is in UTF-8 bytes: a part within it in characters but over it in bytes is refused. */
+  text.text = 'é'.repeat(40_000);
+  text.originalBytes = 80_000;
+  text.retainedBytes = 80_000;
+  expect(parse(evidence).ok).toBe(false);
+  text.text = 'é';
+  text.originalBytes = 2;
+  text.retainedBytes = 2;
   evidence.lineage.push({ ...evidence.lineage[0]! });
   expect(parse(evidence).ok).toBe(false);
 });

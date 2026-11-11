@@ -216,7 +216,8 @@ export const contentLimits = Object.freeze({ messages: 32, parts: 32, parameters
 const retained = {
   text: z.string().max(evidenceLimits.text),
   originalBytes: count,
-  retainedBytes: count,
+  /* The part cap is in UTF-8 bytes; the byte-accounting refinement holds this to the text's encoded length. */
+  retainedBytes: count.max(evidenceLimits.text),
   redaction: z.enum(['none', 'redacted', 'truncated']),
 } as const;
 const toolName = z.string().regex(/^[\w.:-]{1,128}$/u);

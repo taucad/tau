@@ -5,7 +5,7 @@
  *
  * ```text
  * viewRecordBinding (parallel)
- * ├── camera   awaitingFrame ──cameraChanged{framing | fit | input | gizmo | focus}──▶ framed
+ * ├── camera   awaitingFrame ──cameraChanged{framing | fit}──▶ framed
  * │            awaitingFrame: a foreign pose goes to framing as its pending pose (G5)
  * │            framed:        a foreign pose goes to the camera as adoptPersistedPose
  * ├── section  settled ──sectionEdited──▶ editing ──sectionSettled──▶ settled
@@ -156,7 +156,7 @@ type BindingContext = Readonly<{
    * `recordPublished` handler writes it from either section state (MC-R26 debt, accepted as for R5 and G1).
    */
   sectionPending: PersistedSectionView | undefined;
-  /** A foreign record whose camera adoption the camera dropped: published again unchanged, it is still not shown. */
+  /** The record whose camera adoption the camera dropped; records after it that change no camera field are not shown either. */
   dropped: WorkbenchView | undefined;
   /** The publication the acknowledgement waits for. */
   applying: WorkbenchView | undefined;
@@ -279,9 +279,14 @@ const observeCamera = (
     return { framed, context: observed };
   }
   if (!wasFramed) {
-    // Before the entry's first frame nothing is written (as the hook did): framing still holds the record's pose and
-    // applies it after that frame, so a move of the empty canvas would put a pose on file the view then leaves.
-    return { framed, context: observed };
+    // Before the entry's first frame no pose is written (as the hook did): framing still holds the record's pose and
+    // applies it after that frame, so a move of the empty canvas would put a pose on file the view then leaves. A field
+    // of view is not part of that pose, so the person's is written now, as the hook wrote it on every persist.
+    if (source !== 'fov') {
+      return { framed, context: observed };
+    }
+    const fovOwners: ViewOwners = { ...context.owners, fieldOfView: event.verticalFieldOfView };
+    return { framed, context: edited({ context: observed, editRecord, owners: fovOwners, revision }, enq) };
   }
   const owners: ViewOwners = { ...context.owners, camera: event.pose, fieldOfView: event.verticalFieldOfView };
   return { framed, context: edited({ context: observed, editRecord, owners, revision }, enq) };
@@ -338,8 +343,9 @@ const observeRecord = (
       sectionPending = undefined;
     }
   }
-  // A record the camera dropped, published again unchanged (a forced read), asks nothing and is still not shown.
-  const stillDropped = context.dropped !== undefined && changes.camera === undefined && same(context.dropped, record);
+  // After a dropped adoption, a record that changes no camera field (a forced re-read, or an edit of other fields) still
+  // holds the camera the view does not show, so it is not acknowledged either.
+  const stillDropped = context.dropped !== undefined && changes.camera === undefined;
   const handled: BindingContext = {
     ...context,
     record,

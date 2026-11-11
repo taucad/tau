@@ -540,6 +540,32 @@ describe('view record binding', () => {
     });
   });
 
+  describe('review round 4 rows', () => {
+    it('should save a person field of view set before the first frame', () => {
+      const harness = mount({ framed: false });
+      harness.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 20 });
+      expect(harness.edits.at(-1)).toMatchObject({ fieldOfView: 20, camera: initial().camera });
+      harness.send({ type: 'frameGeometry', bounds: box(2), margin: 0.1, source: 'framing' });
+      harness.binding.send({ type: 'ownersChanged', owners: { gridUnit: 'in' } });
+      expect(harness.edits.at(-1)).toMatchObject({ fieldOfView: 20, grid: { unit: 'in' } });
+    });
+
+    it('should not acknowledge a later record that keeps a camera the view dropped', () => {
+      const harness = mount();
+      harness.press();
+      harness.drag([1, 0, 0], 4);
+      harness.release();
+      // An automatic refit: the camera's pose is machine-made, so the drop below re-saves nothing.
+      harness.send({ type: 'frameGeometry', bounds: box(8), margin: 0.1, source: 'framing' });
+      harness.applied.length = 0;
+      const dropped = posed(initial(), pose([0, 1, 0], 9));
+      harness.publish(dropped);
+      harness.publish(workbenchRecords.view.schema.parse({ ...dropped, grid: { unit: 'in' } }));
+      expect(harness.applied).toEqual([]);
+      expect(harness.graphicsSent().at(-1)).toEqual({ type: 'setGridUnit', payload: { unit: 'in' } });
+    });
+  });
+
   describe('camera rule', () => {
     it('should re-save on adoptionDropped only when a person made the pose', () => {
       const person = mount();

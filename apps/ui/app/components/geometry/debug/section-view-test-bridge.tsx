@@ -188,7 +188,7 @@ export type SectionViewTestCapCompleteness = Readonly<{
 
 export type SectionViewTestMeasureState = Readonly<{
   isMeasureActive: boolean;
-  /** True while camera controls own the pointer; a measure gesture started here is discarded. */
+  /** True while camera controls hold a gesture (`gesture.held`); a measure gesture started here is discarded. */
   cameraInteracting: boolean;
   /** Meshes the measure tool has drawn into the scene: snap indicators, lines and labels. */
   measurementUiMeshCount: number;
@@ -1040,7 +1040,8 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
               })
             : currentView.verticalSpan / (nextCamera.zoom ?? 1);
         cameraRig.actorRef.send({
-          type: 'setView',
+          type: 'poseObserved',
+          source: 'input',
           target: [target.x, target.y, target.z],
           direction: [direction.x, direction.y, direction.z],
           up: [up.x, up.y, up.z],
@@ -1149,7 +1150,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         const { context } = graphicsActor.getSnapshot();
         return {
           isMeasureActive: context.isMeasureActive,
-          cameraInteracting: context.cameraInteracting,
+          cameraInteracting: context.cameraRef.getSnapshot().matches({ gesture: 'held' }),
           measurementUiMeshCount: getSectionViewTestMeasurementUiMeshCount(scene),
           rendererGeometryCount: get().gl.info.memory.geometries,
           snapDistancePx: context.measureSnapDistance,

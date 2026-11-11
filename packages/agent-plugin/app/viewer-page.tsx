@@ -36,7 +36,6 @@ import { GraphicsProvider } from '@taucad/viewer/hooks/use-graphics';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { buildGeometryComponentReference } from '@taucad/viewer/graphics/metadata/geometry-component-reference';
 import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
-import { getViewCameraSession } from '@taucad/viewer/services/graphics-camera-registry';
 import { ModelViewer } from '@taucad/viewer/model-viewer';
 import { ToolCallError } from '#app/host-bridge.js';
 import type { ChatRoute, HostBridge, HostView } from '#app/host-bridge.js';
@@ -562,8 +561,8 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
         if (model === undefined || unit === undefined) {
           return undefined;
         }
-        const session = getViewCameraSession(graphicsRef);
-        const cameraView = session?.framing.initialized ? session.rig.actorRef.getSnapshot().context.view : undefined;
+        const { cameraRef, cameraFraming } = graphicsRef.getSnapshot().context;
+        const cameraView = cameraFraming.initialized ? cameraRef.getSnapshot().context.view : undefined;
         const camera: TauViewerCamera | undefined =
           cameraView === undefined
             ? undefined

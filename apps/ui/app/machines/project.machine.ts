@@ -344,6 +344,8 @@ const createViewGraphics = ({ context, event }: ProjectArgs<'createViewGraphics'
     id: `graphics-view-${context.projectId}-${event.viewId}`,
     input: {
       ...graphicsSeed,
+      // The view's camera is the graphics actor's child: it is seeded here, once, and lives as long as the view.
+      camera: { cameraFovAngle: settings.cameraFovAngle, cameraView: settings.cameraView },
       modelInteractionRef: context.modelInteractionRef,
     },
   });

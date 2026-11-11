@@ -13,7 +13,7 @@ import {
   createSourceModelInteractionUnitId,
   serializeModelComponentDisplayState,
 } from '@taucad/viewer/machines/model-interaction.machine';
-import { acquireViewCameraSession, getViewCameraSession } from '@taucad/viewer/services/graphics-camera-registry';
+import { latchViewCameraFraming } from '@taucad/viewer/services/graphics-camera-registry';
 import {
   graphicsSettingsForView,
   viewCameraOrientation,
@@ -64,17 +64,18 @@ export const seedViewer = (
   entryPath: string,
   saved: TauViewerWorkbenchState | undefined,
 ): void => {
-  if (getViewCameraSession(graphicsRef)?.framing.identity === entryPath) {
+  const { context } = graphicsRef.getSnapshot();
+  const framing = context.cameraFraming;
+  if (framing.identity === entryPath) {
     return;
   }
   const view = saved?.view;
   const record: WorkbenchView | undefined = view === undefined ? undefined : { ...view, version: 1, entryPath };
   /* A new identity re-arms the first-frame framing, with the saved pose to apply once the model is framed. */
-  const session = acquireViewCameraSession(graphicsRef, {
+  latchViewCameraFraming(framing, {
     identity: entryPath,
     camera: { cameraView: record?.camera.kind === 'pose' ? record.camera : undefined },
   });
-  const { context } = graphicsRef.getSnapshot();
   if (record === undefined) {
     /* Cuts and measurements belong to the geometry they were made on. */
     graphicsRef.send({ type: 'adoptSectionView', section: { active: false, cuts: [] } });
@@ -103,15 +104,21 @@ export const seedViewer = (
     }
     graphicsRef.send({ type: 'adoptSectionView', section: record.section });
     graphicsRef.send({ type: 'adoptPinnedMeasurements', measurements: settings.pinnedMeasurements ?? [] });
-    const rig = session.rig.actorRef;
+    const rig = context.cameraRef;
     rig.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: record.fieldOfView });
     const orientation = viewCameraOrientation(record);
     if (orientation !== undefined) {
       /* A preset or a look: face the model from that side, and let the first frame fit it without turning. */
       const current = rig.getSnapshot().context.view;
-      rig.send({ type: 'setView', target: current.target, ...orientation, verticalSpan: current.verticalSpan });
-      // oxlint-disable-next-line react/immutability -- The framing record is session state the first frame consumes.
-      session.framing.preserveOrientationOnFirstFrame = true;
+      rig.send({
+        type: 'poseObserved',
+        source: 'input',
+        target: current.target,
+        ...orientation,
+        verticalSpan: current.verticalSpan,
+      });
+      // oxlint-disable-next-line react/immutability -- The framing record is graphics state the first frame consumes.
+      framing.preserveOrientationOnFirstFrame = true;
     }
   }
   const components = saved?.components;
@@ -140,14 +147,11 @@ export const seedViewer = (
  * The live view's settings, as the page reports them for the server to keep.
  *
  * @param graphicsRef - The page's graphics actor.
- * @returns The settings, or `undefined` before the camera exists.
+ * @returns The settings, or `undefined` before a canvas presents the camera.
  */
 export const liveViewSettings = (graphicsRef: GraphicsActorRef): TauViewerViewSettings | undefined => {
-  const session = getViewCameraSession(graphicsRef);
-  return session === undefined
+  const { context } = graphicsRef.getSnapshot();
+  return context.controlsAdapter === undefined
     ? undefined
-    : viewSettingsOf(
-        graphicsRef.getSnapshot().context,
-        session.rig.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView,
-      );
+    : viewSettingsOf(context, context.cameraRef.getSnapshot().context.view.requestedVerticalFieldOfView);
 };

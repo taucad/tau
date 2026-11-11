@@ -17,7 +17,6 @@ type CadPreviewViewerProps = {
   readonly className?: string;
   readonly enablePan?: boolean;
   readonly enableZoom?: boolean;
-  readonly initialVerticalFieldOfView?: number;
   readonly stageOptions?: StageOptions;
   readonly graphicsOptions?: CadPreviewGraphicsOptions;
   /** A larger artifact is not handed to three.js; a notice asks to open the project instead. */
@@ -55,7 +54,6 @@ export const CadPreviewViewer = memo(function CadPreviewViewer({
   className,
   enablePan,
   enableZoom,
-  initialVerticalFieldOfView,
   stageOptions,
   graphicsOptions,
   maxArtifactBytes,
@@ -88,7 +86,6 @@ export const CadPreviewViewer = memo(function CadPreviewViewer({
       className={className}
       enablePan={enablePan}
       enableZoom={enableZoom}
-      initialVerticalFieldOfView={initialVerticalFieldOfView}
       stageOptions={stageOptions}
       graphicsOptions={{
         enableLines,

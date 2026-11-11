@@ -1048,7 +1048,7 @@ describe('workbench layout store on recordSync (G2b)', () => {
     }
   });
 
-  it('should keep the restored layout as the base when the file is gone by the restore refresh read', async () => {
+  it('should keep the shown layout as the base when the file is gone by the restore refresh read', async () => {
     const memory = memoryFiles();
     let readGate: PromiseWithResolvers<void> | undefined;
     const store = createWorkbenchLayoutStore({
@@ -1088,6 +1088,8 @@ describe('workbench layout store on recordSync (G2b)', () => {
       memory.setBytes(null);
       refresh.resolve();
       expect(await restored).toBe(true);
+      // The reply published nothing and the refresh found no file, so the host still shows the layout before it.
+      expect(store.intendedLayout()).toEqual(store.snapshot().layout);
       const theirs: WorkbenchLayout = {
         ...layout(),
         viewer: { kind: 'group', tabs: [{ kind: 'view', view: 'v-cccc2222' }] },
@@ -1143,6 +1145,48 @@ describe('workbench layout store on recordSync (G2b)', () => {
       expect(workbenchRecords.layout.read(memory.get()!)).toEqual({
         status: 'current',
         record: { ...theirs, lanes: { chat: false, workbench: true } },
+      });
+    } finally {
+      store.dispose();
+    }
+  });
+
+  it('should keep the shown layout as the base when a restore whose reply was lost reads back no file', async () => {
+    const memory = memoryFiles();
+    let lose = true;
+    const store = createWorkbenchLayoutStore({
+      root: '/root',
+      files: {
+        ...memory.files,
+        writeFileChecked: async (input) => {
+          const result = await memory.files.writeFileChecked(input);
+          if (!lose) {
+            return result;
+          }
+          lose = false;
+          memory.setBytes(null);
+          throw Object.assign(new Error('reply lost'), { applicationState: 'potentially-applied' });
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await store.read(true);
+      const saved: WorkbenchLayout = {
+        ...layout(),
+        viewer: { kind: 'group', tabs: [{ kind: 'view', view: 'v-bbbb1111' }] },
+      };
+      expect(await store.restore(saved, store.snapshot().digest, () => true)).toBe(false);
+      // The host reads the file again after a restore that did not save; it is gone.
+      expect(await store.read(true)).toBe(true);
+      expect(store.snapshot().digest).toBe('missing');
+      expect(store.intendedLayout()).toEqual(store.snapshot().layout);
+      const current = store.intendedLayout()!;
+      expect(await store.edit({ ...current, lanes: { ...current.lanes, chat: false } })).toBe(true);
+      expect(workbenchRecords.layout.read(memory.get()!)).toEqual({
+        status: 'current',
+        record: { ...layout(), lanes: { chat: false, workbench: true } },
       });
     } finally {
       store.dispose();

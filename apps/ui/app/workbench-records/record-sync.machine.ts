@@ -137,6 +137,8 @@ export type RecordSyncContext<T, P> = Readonly<{
   readBack: 'none' | 'owed' | 'reading';
   /** The record the person last asked for, or the last foreign record while nothing is owed: the base of a diff. */
   intended: T | undefined;
+  /** The last record a publication showed: what the host keeps showing while the file is absent. */
+  lastRecord: T | undefined;
   /** Edits no write has taken yet; `since` numbers the first of them. */
   pending: Readonly<{ next: T; patch: P; requests: readonly string[]; since: number }> | undefined;
   /** How many edits the store has taken. */
@@ -345,10 +347,11 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
 
   /**
    * The base of the person's next diff once the store has settled on `record`. An absent record is no base to adopt
-   * when the policy keeps its base on absence: then `kept`, the last record, stays the base.
+   * when the policy keeps its base on absence: then the last record a publication showed, which the host still shows,
+   * stays the base.
    */
-  const baseOf = (record: T | undefined, kept: T | undefined): T | undefined =>
-    record === undefined && policy.keepsBaseOnAbsence === true ? kept : record;
+  const baseOf = (record: T | undefined, context: Context): T | undefined =>
+    record === undefined && policy.keepsBaseOnAbsence === true ? context.lastRecord : record;
 
   const answer = (enq: Emit, requestIds: readonly string[], ok: boolean): void => {
     if (requestIds.length > 0) {
@@ -456,7 +459,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
         deferred = deferred === undefined ? cycle.patch : policy.combine(cycle.patch, deferred);
       }
       if (cycle.trigger === 'edit' && latest) {
-        patch.intended = saved ? baseOf(context.published.record, context.intended) : cycle.next;
+        patch.intended = saved ? baseOf(context.published.record, context) : cycle.next;
       }
       if (saved) {
         patch.retryDelay = firstRetryDelay;
@@ -468,8 +471,8 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
       /* A restore forms only when nothing is owed, so it has nothing to replace and, unsaved, owes nothing. */
       if (saved) {
         if (latest && deferred === undefined) {
-          /* Absent once more after the write (its refresh read found the file gone): the record it wrote is the base. */
-          patch.intended = baseOf(context.published.record, cycle.next);
+          /* Absent once more after the write (its refresh read found the file gone): the record last shown stays the base. */
+          patch.intended = baseOf(context.published.record, context);
         }
       } else if (cycle.replaces !== undefined) {
         deferred = deferred === undefined ? cycle.replaces : policy.combine(cycle.replaces, deferred);
@@ -481,7 +484,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
       ) {
         /* An unsaved restore ends on the record its conflict read showed, which the read held while the cycle ran. */
         /* A lost reply may have landed: like an edit, it holds what it wrote until the read-back shows otherwise. */
-        patch.intended = context.readBack === 'owed' ? cycle.next : baseOf(context.published.record, context.intended);
+        patch.intended = context.readBack === 'owed' ? cycle.next : baseOf(context.published.record, context);
       }
     }
     patch.deferred = deferred;
@@ -604,6 +607,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
       readFailures: 0,
       readBack: 'none',
       intended: undefined,
+      lastRecord: undefined,
       pending: undefined,
       edits: 0,
       flushedUpTo: 0,
@@ -700,6 +704,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                       context,
                       {
                         published,
+                        lastRecord: published.record ?? context.lastRecord,
                         origin,
                         patch: own?.patch,
                         // Target rule 3: only an acknowledged entry with other bytes goes.
@@ -714,7 +719,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                         readBack: context.readBack === 'reading' ? 'none' : context.readBack,
                         health: { ...context.health, read: 'ok' },
                         ...(notify && !own && !published.refusal && settledIntent
-                          ? { intended: baseOf(published.record, context.intended) }
+                          ? { intended: baseOf(published.record, context) }
                           : {}),
                       },
                       enq,
@@ -1122,7 +1127,14 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                     enq.emit({ type: 'published', snapshot: published, origin: 'own', patch: acknowledged?.patch });
                   }
                   enq.raise({ type: 'write.published' });
-                  const shown: Context = { ...landed, published, origin: 'own', patch: acknowledged?.patch };
+                  const lastRecord = published.record ?? context.lastRecord;
+                  const shown: Context = {
+                    ...landed,
+                    published,
+                    lastRecord,
+                    origin: 'own',
+                    patch: acknowledged?.patch,
+                  };
                   const settled = settle(shown, enq, { cycle, outcome: 'saved' });
                   return {
                     target: settled.target,
@@ -1130,6 +1142,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                       ...settled.context,
                       ownWrites,
                       published,
+                      lastRecord,
                       origin: 'own',
                       patch: acknowledged?.patch,
                       inFlight: undefined,

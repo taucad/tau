@@ -312,4 +312,56 @@ describe('entriesPolicy path changes', () => {
     const patch = combine(diff(current, edited), diff(edited, renamed));
     expect(merge(current, renamed, patch).entries).toEqual({ 'b.ts': { renderTimeout: 1 } });
   });
+
+  it.each([7, 8, 9, 12])(
+    'should still find a written delete and rename onto the deleted path after %i later merges that did not write',
+    (merges) => {
+      const current: WorkbenchEntries = {
+        version: 1,
+        entries: { 'a.ts': { renderTimeout: 1000 }, 'c.ts': { renderTimeout: 3000 } },
+      };
+      const removal: EntryPathChange = { type: 'delete', path: 'a.ts' };
+      const rename: EntryPathChange = { type: 'rename', oldPath: 'c.ts', newPath: 'a.ts' };
+      const deleted: EntriesRecord = { version: 1, entries: movePaths(current.entries, [removal]), moves: [removal] };
+      const renamed: EntriesRecord = { version: 1, entries: movePaths(deleted.entries, [rename]), moves: [rename] };
+      let patch = combine(diff(current, deleted), diff(deleted, renamed));
+      const written = merge(current, renamed, patch);
+      expect(written.entries).toEqual({ 'a.ts': { renderTimeout: 3000 } });
+      let intended: WorkbenchEntries = renamed;
+      for (let edit = 1; edit <= merges; edit++) {
+        const next: WorkbenchEntries = {
+          version: 1,
+          entries: { ...intended.entries, [`z${edit}.ts`]: { renderTimeout: edit } },
+        };
+        patch = combine(patch, diff(intended, next));
+        intended = next;
+        merge(written, intended, patch);
+      }
+      expect(merge(written, intended, patch).entries['a.ts']).toEqual({ renderTimeout: 3000 });
+    },
+  );
+
+  it('should apply a swap again to a file that still holds the entries it swapped', () => {
+    const current: WorkbenchEntries = {
+      version: 1,
+      entries: { 'a.ts': { renderTimeout: 1000 }, 'c.ts': { renderTimeout: 3000 } },
+    };
+    const changes: EntryPathChange[] = [
+      { type: 'rename', oldPath: 'a.ts', newPath: 't.ts' },
+      { type: 'rename', oldPath: 'c.ts', newPath: 'a.ts' },
+      { type: 'rename', oldPath: 't.ts', newPath: 'c.ts' },
+    ];
+    let intended: EntriesRecord = current;
+    let patch = diff(current, current);
+    for (const change of changes) {
+      const next: EntriesRecord = { version: 1, entries: movePaths(intended.entries, [change]), moves: [change] };
+      patch = combine(patch, diff(intended, next));
+      intended = next;
+      merge(current, intended, patch);
+    }
+    expect(merge(current, intended, patch).entries).toEqual({
+      'a.ts': { renderTimeout: 3000 },
+      'c.ts': { renderTimeout: 1000 },
+    });
+  });
 });

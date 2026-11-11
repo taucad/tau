@@ -1202,88 +1202,112 @@ describe('workbench entries store over recordSync', () => {
     }
   });
 
+  const deleteAndRenameOnto: EntryPathChange[] = [
+    { type: 'delete', path: 'a.ts' },
+    { type: 'rename', oldPath: 'c.ts', newPath: 'a.ts' },
+  ];
+  const swap: EntryPathChange[] = [
+    { type: 'rename', oldPath: 'a.ts', newPath: 't.ts' },
+    { type: 'rename', oldPath: 'c.ts', newPath: 'a.ts' },
+    { type: 'rename', oldPath: 't.ts', newPath: 'c.ts' },
+  ];
+  const elsewhere = { 'z.ts': { renderTimeout: 7000 } };
+  const onRenamed = { 'a.ts': { renderTimeout: 7000 } };
   it.each([
     [
-      'a delete and a rename onto the deleted path',
-      [
-        { type: 'delete', path: 'a.ts' },
-        { type: 'rename', oldPath: 'c.ts', newPath: 'a.ts' },
-      ],
-      { 'a.ts': { renderTimeout: 3000 } },
+      'a delete and a rename onto the deleted path when another party changes another entry',
+      { changes: deleteAndRenameOnto, foreign: elsewhere, expected: { 'a.ts': { renderTimeout: 3000 }, ...elsewhere } },
     ],
     [
-      'a swap through a third path',
-      [
-        { type: 'rename', oldPath: 'a.ts', newPath: 't.ts' },
-        { type: 'rename', oldPath: 'c.ts', newPath: 'a.ts' },
-        { type: 'rename', oldPath: 't.ts', newPath: 'c.ts' },
-      ],
-      { 'a.ts': { renderTimeout: 3000 }, 'c.ts': { renderTimeout: 1000 } },
+      'a swap through a third path when another party changes another entry',
+      {
+        changes: swap,
+        foreign: elsewhere,
+        expected: { 'a.ts': { renderTimeout: 3000 }, 'c.ts': { renderTimeout: 1000 }, ...elsewhere },
+      },
     ],
-  ] satisfies Array<[string, EntryPathChange[], WorkbenchEntries['entries']]>)(
-    'keeps %s through a lost reply when another party changes another entry before the read-back',
-    async (_case, changes, expected) => {
-      const m = memory();
-      m.setBytes(
-        encoder.encode(
-          workbenchRecords.entries.serialize({
-            version: 1,
-            entries: { 'a.ts': { renderTimeout: 1000 }, 'c.ts': { renderTimeout: 3000 } },
-          }),
-        ),
-      );
-      let offline = true;
-      let lost = false;
-      const entries = createWorkbenchEntriesStore({
-        root: '/root',
-        files: {
-          ...m.files,
-          writeFileChecked: async (input) => {
-            if (offline) {
-              throw new Error('offline');
+    [
+      'a delete and a rename onto the deleted path when another party changes the moved entry',
+      { changes: deleteAndRenameOnto, foreign: onRenamed, expected: onRenamed },
+    ],
+    [
+      'a swap through a third path when another party changes the moved entry',
+      { changes: swap, foreign: onRenamed, expected: { ...onRenamed, 'c.ts': { renderTimeout: 1000 } } },
+    ],
+    [
+      'a rename when another party makes a new entry at the old path',
+      {
+        changes: [{ type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' }],
+        foreign: onRenamed,
+        expected: { ...onRenamed, 'b.ts': { renderTimeout: 1000 }, 'c.ts': { renderTimeout: 3000 } },
+      },
+    ],
+  ] satisfies Array<
+    [
+      string,
+      { changes: EntryPathChange[]; foreign: WorkbenchEntries['entries']; expected: WorkbenchEntries['entries'] },
+    ]
+  >)('keeps %s before the read-back of a lost reply', async (_case, { changes, foreign, expected }) => {
+    const m = memory();
+    m.setBytes(
+      encoder.encode(
+        workbenchRecords.entries.serialize({
+          version: 1,
+          entries: { 'a.ts': { renderTimeout: 1000 }, 'c.ts': { renderTimeout: 3000 } },
+        }),
+      ),
+    );
+    let offline = true;
+    let lost = false;
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: {
+        ...m.files,
+        writeFileChecked: async (input) => {
+          if (offline) {
+            throw new Error('offline');
+          }
+          const result = await m.files.writeFileChecked(input);
+          if (!lost && result.status === 'applied') {
+            lost = true;
+            const landed = workbenchRecords.entries.read(m.get()!);
+            if (landed.status === 'current') {
+              m.setBytes(
+                encoder.encode(
+                  workbenchRecords.entries.serialize({
+                    ...landed.record,
+                    entries: { ...landed.record.entries, ...foreign },
+                  }),
+                ),
+              );
             }
-            const result = await m.files.writeFileChecked(input);
-            if (!lost && result.status === 'applied') {
-              lost = true;
-              const landed = workbenchRecords.entries.read(m.get()!);
-              if (landed.status === 'current') {
-                m.setBytes(
-                  encoder.encode(
-                    workbenchRecords.entries.serialize({
-                      ...landed.record,
-                      entries: { ...landed.record.entries, 'z.ts': { renderTimeout: 7000 } },
-                    }),
-                  ),
-                );
-              }
-              throw Object.assign(new Error('reply lost'), { applicationState: 'potentially-applied' });
-            }
-            return result;
-          },
+            throw Object.assign(new Error('reply lost'), { applicationState: 'potentially-applied' });
+          }
+          return result;
         },
-        onChange: () => undefined,
-        onError: () => undefined,
-      });
-      try {
-        await entries.read();
-        for (const change of changes) {
-          await entries.changePaths(change);
-        }
-        offline = false;
-        let flushed = false;
-        for (let attempt = 0; attempt < 6 && !flushed; attempt++) {
-          flushed = await entries.flush();
-        }
-        expect(flushed).toBe(true);
-        expect(workbenchRecords.entries.read(m.get()!)).toEqual({
-          status: 'current',
-          record: { version: 1, entries: { ...expected, 'z.ts': { renderTimeout: 7000 } } },
-        });
-      } finally {
-        entries.dispose();
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await entries.read();
+      for (const change of changes) {
+        await entries.changePaths(change);
       }
-    },
-  );
+      offline = false;
+      let flushed = false;
+      for (let attempt = 0; attempt < 6 && !flushed; attempt++) {
+        flushed = await entries.flush();
+      }
+      expect(flushed).toBe(true);
+      expect(workbenchRecords.entries.read(m.get()!)).toEqual({
+        status: 'current',
+        record: { version: 1, entries: expected },
+      });
+    } finally {
+      entries.dispose();
+    }
+  });
 
   it('keeps fields the person did not change through an edit and a rename lost in one write', async () => {
     vi.useFakeTimers();
@@ -1382,6 +1406,67 @@ describe('workbench entries store over recordSync', () => {
       vi.useRealTimers();
     }
   });
+
+  it.each([7, 8, 12])(
+    'keeps a landed delete and rename onto the deleted path through %i later edits that failed to write',
+    async (edits) => {
+      const m = memory();
+      m.setBytes(
+        encoder.encode(
+          workbenchRecords.entries.serialize({
+            version: 1,
+            entries: { 'a.ts': { renderTimeout: 1000 }, 'c.ts': { renderTimeout: 3000 } },
+          }),
+        ),
+      );
+      let phase: 'offline' | 'lose' | 'online' = 'offline';
+      const entries = createWorkbenchEntriesStore({
+        root: '/root',
+        files: {
+          ...m.files,
+          writeFileChecked: async (input) => {
+            if (phase === 'offline') {
+              throw new Error('offline');
+            }
+            const result = await m.files.writeFileChecked(input);
+            if (phase === 'lose' && result.status === 'applied') {
+              phase = 'offline';
+              throw Object.assign(new Error('reply lost'), { applicationState: 'potentially-applied' });
+            }
+            return result;
+          },
+        },
+        onChange: () => undefined,
+        onError: () => undefined,
+      });
+      try {
+        await entries.read();
+        for (const change of deleteAndRenameOnto) {
+          await entries.changePaths(change);
+        }
+        phase = 'lose';
+        await entries.flush();
+        expect(workbenchRecords.entries.read(m.get()!)).toMatchObject({
+          record: { entries: { 'a.ts': { renderTimeout: 3000 } } },
+        });
+        for (let edit = 1; edit <= edits; edit++) {
+          await entries.edit(`z${edit}.ts`, { renderTimeout: edit });
+        }
+        phase = 'online';
+        let flushed = false;
+        for (let attempt = 0; attempt < 6 && !flushed; attempt++) {
+          flushed = await entries.flush();
+        }
+        expect(flushed).toBe(true);
+        expect(workbenchRecords.entries.read(m.get()!)).toMatchObject({
+          status: 'current',
+          record: { entries: { 'a.ts': { renderTimeout: 3000 }, [`z${edits}.ts`]: { renderTimeout: edits } } },
+        });
+      } finally {
+        entries.dispose();
+      }
+    },
+  );
 
   it('saves every edit made while writes failed, however many', async () => {
     const m = memory();

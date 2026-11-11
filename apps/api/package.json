@@ -48,8 +48,6 @@
     "@taucad/agent-host": "workspace:*",
     "@taucad/agent-tools": "workspace:*",
     "@taucad/api-testing": "workspace:*",
-    "@taucad/runtime": "workspace:*",
-    "@taucad/tau-examples": "workspace:*",
     "@taucad/vite": "workspace:*"
   },
   "imports": {

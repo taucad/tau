@@ -1,4 +1,4 @@
-import { sourcePathMatchesExtensions } from '@taucad/runtime';
+import { sourcePathMatchesExtensions } from '@taucad/utils/file';
 import { isKernelId } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
 

@@ -1900,12 +1900,6 @@ importers:
       '@taucad/api-testing':
         specifier: workspace:*
         version: link:../libs/api-testing
-      '@taucad/runtime':
-        specifier: workspace:*
-        version: link:../../packages/runtime
-      '@taucad/tau-examples':
-        specifier: workspace:*
-        version: link:../../libs/tau-examples
       '@taucad/vite':
         specifier: workspace:*
         version: link:../../libs/vite
@@ -5052,6 +5046,9 @@ importers:
       '@taucad/agent-tools':
         specifier: workspace:*
         version: link:../agent-tools
+      '@taucad/chat':
+        specifier: workspace:*
+        version: link:../chat
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../packages/core/geometry

@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { loadAllFixtures } from '@taucad/tau-examples/fixtures';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
-import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import { kernelConfigurations } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
-import { bindEntryFirstPass, catalogKernelOf } from '#testing/live/kernel-routing.binding.js';
-import type { BindingKernelRow } from '#testing/live/kernel-routing.binding.js';
+import { bindEntryFirstPass, catalogKernelOf } from '@taucad/chat/prompts';
+import type { BindingKernelRow } from '@taucad/chat/prompts';
+import { loadAllFixtures } from '#fixture-loader.js';
+import { workspaceRuntime } from '#scripts/runtime.js';
 
 /*
- * Agreement with the runtime (AKS-3a). The rows are the workspace runtime's own (`@taucad/tau-examples/runtime`): the
+ * Agreement with the runtime (AKS-3a). The rows are the workspace runtime's own (`scripts/runtime.ts`): the
  * example runtime the example-health gate renders every example with, plus SMLibPy and Build123d. An example's kernel
  * directory is therefore a binding the runtime has already made. The helper must reproduce it for every example its first pass decides, and for every
  * catalog template (`emptyCode`), which is the file Tau writes when it creates a project today.
@@ -17,26 +17,8 @@ import type { BindingKernelRow } from '#testing/live/kernel-routing.binding.js';
 /** Example directories named for a runtime package rather than a catalog id; `occt` is native C++, not a kernel. */
 const exampleKernel: Readonly<Record<string, KernelId | undefined>> = { opencascade: 'opencascadejs', occt: undefined };
 
-/*
- * Loaded by a non-literal specifier so the compiler does not follow it: api's ambient `ProcessEnv`
- * (`apps/libs/api-core/src/types/environment.d.ts`) does not type-check the native-process sources that module imports.
- * Vitest loads it as usual.
- */
-const workspaceRuntimeModule = ['@taucad', 'tau-examples', 'runtime'].join('/');
-
-const hasWorkspaceRuntime = (value: unknown): value is { readonly workspaceRuntime: AnyRuntimeDefinition } =>
-  typeof value === 'object' &&
-  value !== null &&
-  'workspaceRuntime' in value &&
-  typeof value.workspaceRuntime === 'object' &&
-  value.workspaceRuntime !== null;
-
 const rows = async (): Promise<readonly BindingKernelRow[]> => {
-  const loaded: unknown = await import(workspaceRuntimeModule);
-  if (!hasWorkspaceRuntime(loaded)) {
-    throw new Error(`${workspaceRuntimeModule} exports no workspaceRuntime.`);
-  }
-  const resolved = await resolveRuntimeDefinition(loaded.workspaceRuntime, undefined);
+  const resolved = await resolveRuntimeDefinition(workspaceRuntime, undefined);
   return resolved.kernels;
 };
 

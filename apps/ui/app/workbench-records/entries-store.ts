@@ -11,6 +11,8 @@ import type { CheckedFileWriteResult } from '@taucad/types';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import {
   authoredFields,
+  createEntriesPolicy,
+  moveKeys,
   changedEntry,
   entriesPolicy,
   movePaths,
@@ -47,9 +49,6 @@ export type EntriesState = Readonly<{
   bytes: Uint8Array<ArrayBuffer> | null;
   refusal: { code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string } | undefined;
 }>;
-
-/** The entries record's `recordSync` machine; every entries store runs its own actor of it. */
-const entriesRecordSyncMachine = createRecordSyncMachine(entriesPolicy);
 
 const emptyRecord: WorkbenchEntries = { version: 1, entries: {} };
 
@@ -115,8 +114,23 @@ export function createWorkbenchEntriesStore(
 }> {
   const path = `${input.root}/${workbenchPaths.entries}`;
   let disposed = false;
+  /** Changes refused because the file cannot take them, by entry path: owed to the person, never to the file. */
+  const refused = new Map<string, string>();
+  /** The machine's health, with a refused change counted as one the file does not hold. */
+  const healthOf = (health: RecordHealth): RecordHealth => {
+    const [first] = refused.values();
+    return first === undefined ? health : { ...health, unconfirmed: true, error: health.error ?? first };
+  };
   const { actor, commands, context, on } = createRecordSync({
-    machine: entriesRecordSyncMachine,
+    // Each store's own policy, so a field its merge leaves out is counted as this store's refused change.
+    machine: createRecordSyncMachine(
+      createEntriesPolicy((paths, message) => {
+        for (const path of paths) {
+          refused.set(path, message);
+        }
+        queueMicrotask(refusalChanged);
+      }),
+    ),
     editDebounce: input.editDebounce,
     clock: input.clock,
     inspect: input.inspect,
@@ -139,6 +153,12 @@ export function createWorkbenchEntriesStore(
       },
     },
   });
+  function refusalChanged(): void {
+    if (!disposed) {
+      input.onHealth?.(healthOf(context().health));
+    }
+  }
+
   on('published', ({ snapshot, origin, patch }) => {
     if (!disposed) {
       // A published record is parsed from the file's bytes, so it never carries path changes.
@@ -154,34 +174,30 @@ export function createWorkbenchEntriesStore(
       input.onError(error);
     }
   });
-  /** Changes refused because the file cannot take them, by entry path: owed to the person, never to the file. */
-  const refused = new Map<string, string>();
-  /** The machine's health, with a refused change counted as one the file does not hold. */
-  const healthOf = (health: RecordHealth): RecordHealth => {
-    const [first] = refused.values();
-    return first === undefined ? health : { ...health, unconfirmed: true, error: health.error ?? first };
-  };
   on('healthChanged', ({ health }) => {
     if (!disposed) {
       input.onHealth?.(healthOf(health));
     }
   });
-  const refusalChanged = (): void => {
-    if (!disposed) {
-      input.onHealth?.(healthOf(context().health));
+  actor.start();
+  /** Why the file cannot take a record, if it cannot. */
+  const errorOf = (record: EntriesRecord): unknown => {
+    try {
+      entriesPolicy.serialize(record);
+      return undefined;
+    } catch (error) {
+      return error;
     }
   };
-  actor.start();
   /**
    * Whether the file can take a change to `path`: one it cannot is refused, reported and counted in health until a
    * later change of that path is taken, rather than owed with every later change of every entry, which would then
    * never be written.
    */
   const writable = (path: string, record: EntriesRecord): boolean => {
-    try {
-      entriesPolicy.serialize(record);
-    } catch (error) {
-      refused.set(path, error instanceof Error ? error.message : String(error));
+    const error = errorOf(record);
+    if (error !== undefined) {
+      refused.set(path, error instanceof Error ? error.message : 'The record cannot take this change.');
       input.onError(error);
       refusalChanged();
       return false;
@@ -225,9 +241,29 @@ export function createWorkbenchEntriesStore(
         return false;
       }
       const from = base();
-      const record = { ...from, entries: movePaths(from.entries, [change]), moves: [change] };
-      if (!writable(change.type === 'delete' ? change.path : change.oldPath, record)) {
+      const moved = (moves: EntryPathChange[]): EntriesRecord => ({
+        ...from,
+        entries: movePaths(from.entries, moves),
+        moves,
+      });
+      let record = moved([change]);
+      const unnamed = change.type === 'rename' ? errorOf(record) : undefined;
+      if (unnamed !== undefined && change.type === 'rename') {
+        // The record cannot name the new path: the settings cannot follow the file, so they go with its old path.
+        input.onError(unnamed);
+        record = moved([{ type: 'delete', path: change.oldPath }]);
+      }
+      if (!writable(change.type === 'rename' ? change.oldPath : change.path, record)) {
         return false;
+      }
+      // A refused change follows its entry, and goes when the entry is deleted.
+      const kept = moveKeys(Object.fromEntries(refused), record.moves ?? []);
+      if (JSON.stringify(kept) !== JSON.stringify(Object.fromEntries(refused))) {
+        refused.clear();
+        for (const [path, message] of Object.entries(kept)) {
+          refused.set(path, message);
+        }
+        refusalChanged();
       }
       const saved = commands.edit(record);
       // A path change is written at once, with the edits made before it.
@@ -239,9 +275,22 @@ export function createWorkbenchEntriesStore(
       if (disposed || shown.refusal?.code !== 'INVALID_RECORD') {
         return false;
       }
+      if (refused.size > 0) {
+        refused.clear();
+        refusalChanged();
+      }
       return commands.reset(next, reviewed === undefined ? shown.bytes : reviewed);
     },
-    flush: async () => (await commands.flush()) && refused.size === 0,
+    flush: async () => {
+      const saved = await commands.flush();
+      if (refused.size === 0) {
+        return saved;
+      }
+      // A refused change is never written: the flush that asks reports it unsaved, and then lets it go.
+      refused.clear();
+      refusalChanged();
+      return false;
+    },
     dispose: () => {
       disposed = true;
       commands.close();

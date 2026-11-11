@@ -756,4 +756,106 @@ describe('workbench entries store over recordSync', () => {
       entries.dispose();
     }
   });
+  it.each([
+    ['deleted', { type: 'delete', path: 'dir' }, {}],
+    [
+      'renamed and changed again',
+      { type: 'rename', oldPath: 'dir', newPath: 'dir2' },
+      { 'dir2/a.ts': { renderTimeout: 1000 } },
+    ],
+  ] satisfies Array<[string, EntryPathChange, WorkbenchEntries['entries']]>)(
+    'lets a refused change go once its directory is %s',
+    async (_case, change, expected) => {
+      const m = memory();
+      m.setBytes(
+        encoder.encode(
+          workbenchRecords.entries.serialize({ version: 1, entries: { 'dir/a.ts': { renderTimeout: 180_000 } } }),
+        ),
+      );
+      const entries = createWorkbenchEntriesStore({
+        root: '/root',
+        files: m.files,
+        onChange: () => undefined,
+        onError: () => undefined,
+      });
+      try {
+        await entries.read();
+        const many = Array.from({ length: 1025 }, (_, index) => `c${index}`);
+        expect(await entries.edit('dir/a.ts', { components: { hidden: many, isolated: [], opacity: [] } })).toBe(false);
+        expect(await entries.changePaths(change)).toBe(true);
+        if (change.type === 'rename') {
+          expect(await entries.edit('dir2/a.ts', { renderTimeout: 1000 })).toBe(true);
+        }
+        expect(await entries.flush()).toBe(true);
+        expect(entries.health().unconfirmed).toBe(false);
+        expect(workbenchRecords.entries.read(m.get()!)).toEqual({
+          status: 'current',
+          record: { version: 1, entries: expected },
+        });
+      } finally {
+        entries.dispose();
+      }
+    },
+  );
+
+  it('drops the settings of a file renamed to a path the record cannot name', async () => {
+    const m = memory();
+    const onError = vi.fn();
+    const entries = createWorkbenchEntriesStore({ root: '/root', files: m.files, onChange: () => undefined, onError });
+    try {
+      await entries.read();
+      expect(await entries.changePaths({ type: 'rename', oldPath: 'a.ts', newPath: 'notes:v2.ts' })).toBe(true);
+      expect(onError).toHaveBeenCalledOnce();
+      expect(await entries.flush()).toBe(true);
+      expect(workbenchRecords.entries.read(m.get()!)).toEqual({
+        status: 'current',
+        record: { version: 1, entries: {} },
+      });
+    } finally {
+      entries.dispose();
+    }
+  });
+
+  it('writes the other entries when another party’s change leaves no room for one entry’s change', async () => {
+    const m = memory();
+    const ids = (prefix: string, count: number) =>
+      Array.from({ length: count }, (_, index) => `${prefix}-${'x'.repeat(200)}-${index}`);
+    const hidden = (prefix: string, count: number) => ({
+      components: { hidden: ids(prefix, count), isolated: [], opacity: [] },
+    });
+    const before = { 'b.ts': hidden('b', 190) };
+    m.setBytes(encoder.encode(workbenchRecords.entries.serialize({ version: 1, entries: before })));
+    let foreign = true;
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: {
+        ...m.files,
+        writeFileChecked: async (input) => {
+          if (foreign) {
+            foreign = false;
+            m.setBytes(
+              encoder.encode(
+                workbenchRecords.entries.serialize({ version: 1, entries: { ...before, 'c.ts': hidden('c', 95) } }),
+              ),
+            );
+          }
+          return m.files.writeFileChecked(input);
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await entries.read();
+      void entries.edit('a.ts', hidden('a', 95));
+      expect(await entries.edit('d.ts', { renderTimeout: 15_000 })).toBe(true);
+      expect(await entries.flush()).toBe(false);
+      expect(workbenchRecords.entries.read(m.get()!)).toMatchObject({
+        record: { entries: { 'c.ts': hidden('c', 95), 'd.ts': { renderTimeout: 15_000 } } },
+      });
+      expect(await entries.flush()).toBe(true);
+    } finally {
+      entries.dispose();
+    }
+  });
 });

@@ -76,8 +76,11 @@ const moveKey = <V>(values: Readonly<Record<string, V>>, change: EntryPathChange
   return Object.fromEntries([...kept, ...moved]);
 };
 
-/** Keyed values with their keys moved by path changes, in order. */
-const moveKeys = <V>(values: Readonly<Record<string, V>>, moves: readonly EntryPathChange[]): Record<string, V> => {
+/** Keyed values with their keys moved by path changes, in order; a deleted key is dropped. */
+export const moveKeys = <V>(
+  values: Readonly<Record<string, V>>,
+  moves: readonly EntryPathChange[],
+): Record<string, V> => {
   let moved = { ...values };
   for (const change of moves) {
     moved = moveKey(moved, change);
@@ -387,8 +390,85 @@ const mark = (patch: EntriesPatch, write: Write, found: Mark | undefined): void 
   marks.set(patch, bounded([...kept.filter((existing) => existing !== whole), updated]));
 };
 
-/** The entries record's codec and patch algebra. */
-export const entriesPolicy: RecordPolicy<EntriesRecord, EntriesPatch> = {
+/**
+ * The entries a patch makes of `entries`: the path changes of its first `landed` steps are on disk already, so only
+ * their fields are applied again, at the paths they moved to; the steps after are applied whole. Without `fields`,
+ * only the path changes are applied.
+ */
+const applied = (
+  entries: Readonly<Record<string, Entry>>,
+  patch: EntriesPatch,
+  { landed, fields }: Readonly<{ landed: number; fields: boolean }>,
+): Record<string, Entry> => {
+  let result = { ...entries };
+  if (fields) {
+    for (const [path, set] of Object.entries(surelyAuthoredFields(patch.slice(0, landed)))) {
+      result[path] = mergeEntry(result[path], set);
+    }
+  }
+  for (const step of patch.slice(landed)) {
+    result = movePaths(result, step.moves);
+    if (fields) {
+      for (const [path, set] of Object.entries(step.fields)) {
+        result[path] = mergeEntry(result[path], set);
+      }
+    }
+  }
+  return result;
+};
+
+/** Why the record cannot be written, if it cannot. */
+const writeError = (record: WorkbenchEntries): string | undefined => {
+  try {
+    serializeEntries(record);
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+};
+
+/** Told the paths whose fields a merge left out because the file it met could not take them all, and why. */
+export type DroppedFields = (paths: readonly string[], message: string) => void;
+
+/**
+ * A merge that cannot be written, made writable by leaving out the person's fields path by path, latest first: the
+ * path changes and every other field are still written, rather than owing the whole patch with every later change.
+ */
+const fitted = ({
+  base,
+  patch,
+  landed,
+  merged,
+  message,
+  onDropped,
+}: Readonly<{
+  base: WorkbenchEntries;
+  patch: EntriesPatch;
+  landed: number;
+  merged: WorkbenchEntries;
+  message: string;
+  onDropped: DroppedFields | undefined;
+}>): WorkbenchEntries => {
+  const movedOnly = applied(base.entries, patch, { landed, fields: false });
+  const paths: string[] = [];
+  let entries = { ...merged.entries };
+  for (const path of Object.keys(surelyAuthoredFields(patch)).toReversed()) {
+    paths.push(path);
+    const { [path]: _left, ...rest } = entries;
+    entries = movedOnly[path] === undefined ? rest : { ...rest, [path]: movedOnly[path] };
+    if (writeError({ ...base, entries }) === undefined) {
+      onDropped?.(paths, message);
+      return { ...base, entries };
+    }
+  }
+  return merged;
+};
+
+/**
+ * The entries record's codec and patch algebra. `onDropped` hears of a person's fields a merge left out because another
+ * party's change left the record no room for them.
+ */
+export const createEntriesPolicy = (onDropped?: DroppedFields): RecordPolicy<EntriesRecord, EntriesPatch> => ({
   read(bytes) {
     const result = workbenchRecords.entries.read(bytes);
     return result.status === 'current'
@@ -419,18 +499,11 @@ export const entriesPolicy: RecordPolicy<EntriesRecord, EntriesPatch> = {
     const base: WorkbenchEntries = current === undefined ? { version: 1, entries: {} } : withoutMoves(current);
     const read = asRead(base);
     const found = landedMark(patch, current === undefined ? undefined : read);
-    let entries = { ...base.entries };
-    // The path changes of a prefix on disk are not applied again; its fields are, at the paths they moved to.
-    for (const [path, fields] of Object.entries(surelyAuthoredFields(patch.slice(0, found?.upTo ?? 0)))) {
-      entries[path] = mergeEntry(entries[path], fields);
+    let merged = { ...base, entries: applied(base.entries, patch, { landed: found?.upTo ?? 0, fields: true }) };
+    const unwritable = writeError(merged);
+    if (unwritable !== undefined) {
+      merged = fitted({ base, patch, landed: found?.upTo ?? 0, merged, message: unwritable, onDropped });
     }
-    for (const step of patch.slice(found?.upTo ?? 0)) {
-      entries = movePaths(entries, step.moves);
-      for (const [path, fields] of Object.entries(step.fields)) {
-        entries[path] = mergeEntry(entries[path], fields);
-      }
-    }
-    const merged = { ...base, entries };
     const record = asRead(merged);
     if (current === undefined) {
       // A file seen absent holds none of the patch's earlier writes, whatever was found before.
@@ -442,4 +515,7 @@ export const entriesPolicy: RecordPolicy<EntriesRecord, EntriesPatch> = {
     return merged;
   },
   isEmpty: (patch) => patch.every((step) => step.moves.length === 0 && Object.keys(step.fields).length === 0),
-};
+});
+
+/** The entries record's codec and patch algebra, for a store that need not hear of dropped fields. */
+export const entriesPolicy = createEntriesPolicy();

@@ -294,15 +294,18 @@ const observeRecord = (
     return { ...context, applying: undefined };
   }
   if (event.origin === 'own') {
-    // I6: this view's own write is never adopted. A section it carried supersedes a foreign one still waiting.
+    // I6: this view's own write is never adopted. A different section it carried supersedes a foreign one still
+    // waiting; one that carries the waiting section is an edit made while it waited, so graphics still adopts it.
+    const supersedes =
+      event.patch?.section !== undefined &&
+      context.sectionPending !== undefined &&
+      !same(record.section, context.sectionPending);
     return acknowledged(
       {
         ...context,
         record,
         applying: record,
-        ...(event.patch?.section === undefined
-          ? {}
-          : { sectionPending: undefined, owners: { ...context.owners, section: record.section } }),
+        ...(supersedes ? { sectionPending: undefined, owners: { ...context.owners, section: record.section } } : {}),
       },
       enq,
     );
@@ -449,17 +452,19 @@ const answerAdoption = (
     // MC-R18: an answer to a superseded or foreign request.
     return undefined;
   }
-  const answered = {
-    ...context,
-    adoptions: context.adoptions.filter(({ requestId }) => requestId !== event.requestId),
-  };
+  const adoptions = context.adoptions.filter(({ requestId }) => requestId !== event.requestId);
+  if (event.type === 'adoptionApplied') {
+    return acknowledged({ ...context, adoptions }, enq);
+  }
+  // A dropped adoption means the view never showed the record, so it is not acknowledged as applied.
+  const answered: BindingContext = { ...context, adoptions, applying: undefined };
   const { pose } = context;
-  if (event.type === 'adoptionApplied' || pose === undefined || !personSources.has(pose.by)) {
-    // Applied, or dropped over a machine-made pose, which is never saved (I7): the file keeps the foreign pose.
-    return acknowledged(answered, enq);
+  if (pose === undefined || !personSources.has(pose.by)) {
+    // Dropped over a machine-made pose, which is never saved (I7): the file keeps the foreign pose.
+    return answered;
   }
   const owners: ViewOwners = { ...context.owners, camera: pose.view, fieldOfView: context.fieldOfView };
-  return acknowledged(edited({ context: answered, editRecord, owners }, enq), enq);
+  return edited({ context: answered, editRecord, owners }, enq);
 };
 
 const viewRecordBindingDefinition = setup({

@@ -461,6 +461,40 @@ describe('view record binding', () => {
     });
   });
 
+  describe('review round 2 rows', () => {
+    it('should still adopt a waiting foreign section when an own write carries it', () => {
+      const harness = mount();
+      harness.binding.send({ type: 'sectionEdited' });
+      const section: PersistedSectionView = {
+        active: true,
+        cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: false }],
+      };
+      const foreign = workbenchRecords.view.schema.parse({ ...initial(), section });
+      harness.publish(foreign);
+      harness.binding.send({ type: 'ownersChanged', owners: { gridUnit: 'in' } });
+      // The edit made while the section waited lands as own, carrying the foreign section in its patch.
+      harness.publish(harness.edits.at(-1)!, 'own', { section, grid: { unit: 'in' } });
+      const sent = harness.graphicsSent().length;
+      const edits = harness.edits.length;
+      harness.binding.send({ type: 'sectionSettled', section: { active: false, cuts: [] } });
+      expect(harness.graphicsSent().slice(sent)).toEqual([{ type: 'adoptSectionView', section }]);
+      expect(harness.edits).toHaveLength(edits);
+    });
+
+    it('should not acknowledge a record whose pose the camera dropped', () => {
+      const harness = mount();
+      harness.applied.length = 0;
+      harness.press();
+      harness.drag([1, 0, 0], 4);
+      const foreign = posed(initial(), pose([0, 1, 0], 9));
+      harness.publish(foreign);
+      expect(harness.answers.at(-1)).toMatch(/^dropped:/u);
+      harness.release();
+      harness.clock.advance(settle * 4);
+      expect(harness.applied).toEqual([]);
+    });
+  });
+
   describe('camera rule', () => {
     it('should re-save on adoptionDropped only when a person made the pose', () => {
       const person = mount();

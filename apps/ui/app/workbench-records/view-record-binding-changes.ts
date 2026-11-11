@@ -114,15 +114,6 @@ const ownsCamera = (record: WorkbenchView, patch: ViewRecordPatch | undefined): 
   return change !== null && change !== undefined && Object.hasOwn(change, 'camera');
 };
 
-/**
- * What `next` asks the live owners to adopt (the per-field logic of `useViewSettingsSync`'s record effect).
- *
- * @param previous - The record this binding last handled, or `undefined` before the first: then every field adopts.
- * @param next - The record just published.
- * @param patch - The fields this view's own write carried into `next`; they are never adopted. A foreign publication
- *   carries none.
- * @returns The adoptions, per owner.
- */
 /* The graphics adoptions: display, grid unit, up direction and pinned measurements, each when it changed. */
 const graphicsChanges = (
   previous: WorkbenchView | undefined,

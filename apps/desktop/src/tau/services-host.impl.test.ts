@@ -64,6 +64,8 @@ const chatObservers = vi.hoisted(
 );
 
 vi.mock('#tau/services-host-evidence.js', () => ({
+  /* The build the release workflow stamps; this test bundle stamps none. */
+  desktopHostBuild: () => 'f61685bf3496',
   desktopChatObserver: (options: Readonly<{ projectId: string }>) => () => {
     const observer = {
       projectId: options.projectId,
@@ -1900,6 +1902,17 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     await expect(funding.principal()).resolves.toBe('user_1');
     host.handleMessage(frame({ type: 'authToken', token: undefined }));
     await expect(funding.principal()).resolves.toBeUndefined();
+  });
+
+  /* LW17: the API's provider fact names the same host and build the desktop's own evidence does. */
+  it('should label every gateway call as the desktop host with the build its evidence reports', async () => {
+    const { host, workspaceRoot } = await configuredHost();
+    connect(host, workspaceRoot);
+    await vi.waitFor(() => {
+      expect(transportCalls).not.toHaveLength(0);
+    });
+
+    expect(transportCalls.at(-1)!.hostLabels).toEqual({ kind: 'desktop', build: 'f61685bf3496' });
   });
 
   it('starts no external agents when main discovered none', async () => {

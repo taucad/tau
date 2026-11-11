@@ -23,6 +23,8 @@ import { revisionId } from '#algorithms/index.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import type { RevisionDiffEntry, RevisionLogEntry, RevisionPort } from '#revision-port.js';
 import { generatedSetupPaths } from '#workspace-config.js';
+import { startReadingOf } from '#start-version.js';
+import type { StartReading } from '#start-version.js';
 
 /** One revision as a person reads it. @public */
 export type RevisionRow = Readonly<{
@@ -100,6 +102,12 @@ export type RevisionRow = Readonly<{
    * fold a model edit out of sight under Tau's name. Absent on every other row.
    */
   isSetup?: true;
+  /**
+   * How this entry reads as the Start version, V1, when it is one (A6): the
+   * entry Tau minted when it created the store, or an older project's root
+   * entry. Derived at read like `tags` (I3), so no tag is needed.
+   */
+  start?: StartReading;
 }>;
 
 /** Where the reader is, and what else this project holds. @public */
@@ -303,6 +311,7 @@ const rowOf = (
     ...(entry.provenance.turnCut === undefined ? {} : { turnCut: entry.provenance.turnCut }),
     ...(entry.parents[0] === undefined ? {} : { parent: entry.parents[0] }),
     ...(entry.parents.length > 1 ? { otherParents: Object.freeze(entry.parents.slice(1)) } : {}),
+    ...startOf(entry),
   });
 
 /*
@@ -362,6 +371,11 @@ const setupEntriesOf = async (port: RevisionPort, page: readonly RevisionLogEntr
   return new Set(candidates.filter((entry) => verdicts.get(entry.id) === true).map((entry) => entry.id));
 };
 
+const startOf = (entry: RevisionLogEntry): Readonly<{ start?: StartReading }> => {
+  const start = startReadingOf(entry);
+  return start === undefined ? {} : { start };
+};
+
 /**
  * Read one branch's history, newest first.
  *
@@ -405,7 +419,8 @@ export const readRevisionLog = async (
   const setup = await setupEntriesOf(port, page);
   const rows = page.map((entry) => {
     const row = rowOf(entry, numbers.get(entry.id), Object.freeze((named.get(entry.id) ?? []).toSorted()));
-    return setup.has(entry.id) ? Object.freeze({ ...row, isSetup: true }) : row;
+    /* The Start entry is V1 and reads as itself, never folded into the setup line. */
+    return setup.has(entry.id) && row.start === undefined ? Object.freeze({ ...row, isSetup: true }) : row;
   });
   return Object.freeze(rows);
 };

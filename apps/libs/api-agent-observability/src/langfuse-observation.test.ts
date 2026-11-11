@@ -7,6 +7,7 @@ import type { ProjectedRun, ProjectionContext } from '@taucad/agent-observabilit
 import { projectRun } from '@taucad/agent-observability/projection';
 import { evidenceFixture, privateMarker } from '#testing/evidence.fixture.js';
 import {
+  exportableEvidence,
   langfuseObservation,
   observationGroup,
   observationMapperVersion,
@@ -17,7 +18,7 @@ import {
   runRootSpanId,
 } from '#langfuse-observation.js';
 import type { LangfuseObservation, OtlpSpan } from '#langfuse-observation.js';
-import { providerAttemptEvidence } from '#model-invocation-evidence.js';
+import { providerAttemptEvidence, providerContentEvidence } from '#model-invocation-evidence.js';
 import type { ObservedAttempt } from '#model-invocation-evidence.js';
 import { settlementEvidence } from '#settlement-evidence.js';
 
@@ -413,6 +414,161 @@ describe('langfuseObservation v5: one trace per run, one root, ids from the fact
 
   it('should keep content out of the body of a summary observation', async () => {
     expect(otlpBody(map(await generation()).spans)).not.toContain(privateMarker);
+  });
+});
+
+describe('langfuseObservation v5: generation content (LW3)', () => {
+  const identity = { email: 'Jane.Fontaine@Example.com', name: 'Jane Fontaine' } as const;
+  const withIdentity = { ...context, identity };
+  const content = async (): Promise<Evidence> => {
+    const evidence = await providerContentEvidence(
+      attempt({
+        content: {
+          input: {
+            messages: [
+              {
+                role: 'tool',
+                parts: [
+                  { kind: 'tool-result', call: 'toolu_1', error: false, text: 'const author = "Jane Fontaine";' },
+                  { kind: 'media', mime: 'image/png', bytes: 3000, digest: 'd'.repeat(64) },
+                ],
+              },
+              {
+                role: 'user',
+                parts: [{ kind: 'text', text: 'I am Jane Fontaine, mail jane.fontaine@example.com or bob@corp.io' }],
+              },
+            ],
+            context: { historyMessages: 6, history: 'b'.repeat(64), system: 'c'.repeat(64), tools: 'e'.repeat(64) },
+            parameters: { max_tokens: 8192, 'thinking.type': 'enabled' },
+          },
+          output: [
+            {
+              role: 'assistant',
+              parts: [
+                { kind: 'thinking', text: 'Fontaine wants it taller.' },
+                { kind: 'text', text: 'Raising it, Jane.' },
+                { kind: 'tool-call', call: 'toolu_2', name: 'edit_file', text: '{"author":"Jane Fontaine"}' },
+              ],
+            },
+          ],
+          truncated: false,
+        },
+      }),
+      authority,
+    );
+    return evidence!;
+  };
+  const json = (span: OtlpSpan, key: string): unknown => JSON.parse(String(attribute(span, key)));
+
+  it('should write the new messages as input and the assistant message as output, in the shapes Langfuse parses', async () => {
+    const [span] = langfuseObservation(await content(), withIdentity, pseudonym)!.spans;
+
+    expect(span!.name).toBe('call-model');
+    expect(json(span!, 'langfuse.observation.input')).toEqual({
+      messages: [
+        {
+          role: 'tool',
+          tool_call_id: 'toolu_1',
+          content: [
+            { type: 'text', text: 'const author = "Jane Fontaine";' },
+            { type: 'media', mime_type: 'image/png', bytes: 3000 },
+          ],
+        },
+        { role: 'user', content: 'I am [name], mail [email] or [email]' },
+      ],
+    });
+    expect(json(span!, 'langfuse.observation.output')).toEqual({
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: '[name] wants it taller.' },
+        { type: 'text', text: 'Raising it, Jane.' },
+      ],
+      tool_calls: [
+        { id: 'toolu_2', type: 'function', function: { name: 'edit_file', arguments: '{"author":"Jane Fontaine"}' } },
+      ],
+    });
+  });
+
+  it('should write the parameters and the digests and count of what the call was given', async () => {
+    const evidence = await content();
+    const span = only(evidence);
+
+    expect(json(span, 'langfuse.observation.model.parameters')).toEqual({
+      max_tokens: 8192,
+      'thinking.type': 'enabled',
+    });
+    expect(metadata(span, 'history_messages')).toBe('6');
+    for (const [key, value] of [
+      ['history_digest', 'b'],
+      ['system_digest', 'c'],
+      ['tools_digest', 'e'],
+    ] as const) {
+      expect(metadata(span, key)).toBe(observationGroup('staging', 'user-a', value.repeat(64)));
+    }
+    expect(metadata(span, 'coverage_input')).toBe('redacted');
+    expect(metadata(span, 'plane')).toBe('content');
+  });
+
+  it('should name the same object as the summary of the same call', async () => {
+    const summary = only(await generation());
+    const span = only(await content());
+
+    expect(span.spanId).toBe(summary.spanId);
+    expect(span.traceId).toBe(summary.traceId);
+  });
+
+  it('should export a content receipt without its sections when only the summary is effective', async () => {
+    const evidence = await content();
+    const summaryOnly = exportableEvidence(evidence, { summary: true, content: false });
+    const span = only(summaryOnly!);
+
+    expect(attribute(span, 'langfuse.observation.input')).toBeUndefined();
+    expect(attribute(span, 'langfuse.observation.output')).toBeUndefined();
+    expect(attribute(span, 'langfuse.observation.model.parameters')).toBeUndefined();
+    expect(metadata(span, 'coverage_input')).toBe('omitted');
+    expect(otlpBody([span])).not.toMatch(/Fontaine|taller/u);
+    expect(exportableEvidence(evidence, { summary: false, content: true })).toBeUndefined();
+    expect(exportableEvidence(evidence, { summary: true, content: true })).toBe(evidence);
+    const plain = await generation();
+    expect(exportableEvidence(plain, { summary: true, content: false })).toBe(plain);
+    expect(exportableEvidence(plain, { summary: false, content: true })).toBeUndefined();
+  });
+
+  it('should keep a truncated or digest-only part visible as such', async () => {
+    const evidence = await content();
+    if (evidence.payload.plane !== 'content') {
+      throw new Error('fixture');
+    }
+    const [result] = evidence.payload.input!.messages[0]!.parts;
+    const big: Evidence = {
+      ...evidence,
+      payload: {
+        ...evidence.payload,
+        input: {
+          messages: [
+            {
+              role: 'tool',
+              parts: [
+                {
+                  ...(result as Extract<typeof result, { kind: 'tool-result' }>),
+                  text: '',
+                  originalBytes: 90_000,
+                  retainedBytes: 0,
+                  redaction: 'truncated',
+                  digest: 'f'.repeat(64),
+                },
+              ],
+            },
+          ],
+          omitted: 2,
+        },
+      },
+    };
+
+    const input = json(langfuseObservation(big, withIdentity, pseudonym)!.spans[0]!, 'langfuse.observation.input');
+    expect(JSON.stringify(input)).toContain('not kept: 90000 bytes');
+    expect(JSON.stringify(input)).not.toContain('f'.repeat(64));
+    expect(metadata(langfuseObservation(big, withIdentity, pseudonym)!.spans[0]!, 'input_omitted_parts')).toBe('2');
   });
 });
 

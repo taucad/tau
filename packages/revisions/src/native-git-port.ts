@@ -1940,10 +1940,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * policy rules 5 and 13).
    *
    * Every session reaches the same answer for the same folder: before the
-   * store exists the answer is what `init` will leave behind (a folder whose
-   * own ignore and attributes files both exist, neither carrying Tau's block,
-   * stays the person's), and `init` forgets it once the store is made, so the
-   * next question reads the disk again.
+   * store exists the folder is Tau's, because Tau is about to create its store
+   * (A6), and `init` forgets the answer once the store is made, so the next
+   * question reads the disk again.
    */
   let opened: Promise<Readonly<{ owned: boolean; adopted: boolean }>> | undefined;
   const openState = async (): Promise<Readonly<{ owned: boolean; adopted: boolean }>> => {
@@ -1956,9 +1955,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           ),
         );
         const theirs = !hasGeneratedBlock(ignore) && !hasGeneratedBlock(attributes);
-        /* Before the store exists, a folder with an ignore file of its own stays
-         * the person's: `init` writes Tau's only where none exists (A4). */
-        return { owned, adopted: theirs && (owned || ignore !== undefined) };
+        /* Whether a store is Tau's is decided by Tau having created it (A6): a
+         * folder with no store yet is Tau's once `init` makes one, whatever its
+         * own ignore and attributes files say, and the Start mint merges both
+         * generated blocks into them, so the next session reads it as Tau's too. */
+        return { owned, adopted: owned && theirs };
       } catch (error) {
         /* A refusal is asked again, never remembered: the path may be mended. */
         opened = undefined;

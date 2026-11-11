@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { RevisionDiffEntry, RevisionLine, RevisionRow } from '@taucad/revisions';
+import type { RevisionDiffEntry, RevisionLine, RevisionRow, StartReading } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
 import type { RevisionWhoContext } from '#lib/revision-actor.js';
@@ -63,6 +63,8 @@ export type RevisionCard = {
   readonly parent?: string;
   /** An automatic entry that changed only Tau's own setup files (A4): one compact line in History. */
   readonly isSetup?: true;
+  /** How this entry reads as the Start version, V1, when it is one (A6). */
+  readonly start?: StartReading;
   /**
    * Paths the settling host attested, for a card whose revision is not in this
    * page's graph. Otherwise the diff is asked of the graph on demand.
@@ -192,6 +194,7 @@ const cardOf = (row: RevisionRow, who: RevisionWhoContext): RevisionCard => {
     ...(row.restoredFrom === undefined ? {} : { restoredFrom: row.restoredFrom }),
     ...(row.parent === undefined ? {} : { parent: row.parent }),
     ...(row.isSetup === true ? { isSetup: true } : {}),
+    ...(row.start === undefined ? {} : { start: row.start }),
   };
 };
 

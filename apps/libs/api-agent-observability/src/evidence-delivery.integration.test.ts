@@ -11,7 +11,7 @@ import { deliveryTiming, EvidenceDeliveryService } from '#evidence-delivery.serv
 import { leasePending, settleDelivery, sweepBacklog } from '#evidence-delivery.js';
 import { sealEvidence } from '#evidence-seal.js';
 import { receiptSpanId } from '#langfuse-observation.js';
-import { evidenceFixture, toolFact } from '#testing/evidence.fixture.js';
+import { evidenceFixture, privateMarker, providerFact, toolFact } from '#testing/evidence.fixture.js';
 import { canonicalEvidence } from '@taucad/agent-observability/identity';
 import type { Evidence } from '@taucad/agent-observability/contract';
 import type { TelemetryPurposeService } from '#telemetry-purposes/telemetry-purpose.service.js';
@@ -53,9 +53,10 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     const suffix = randomUUID();
     const userId = `user_${suffix}`;
     const projectId = `project_${suffix}`;
-    await database.insert(schema.user).values({ id: userId, name: 'Delivery', email: `${suffix}@test.invalid` });
+    const email = `${suffix}@test.invalid`;
+    await database.insert(schema.user).values({ id: userId, name: 'Delivery Fixture', email });
     await database.insert(schema.project).values({ id: projectId, ownerId: userId, name: 'Delivery fixture' });
-    return { userId, projectId };
+    return { userId, projectId, email };
   };
 
   /** Admit `evidence`, sealed as ingress seals it, and answer its receipt id. */
@@ -89,17 +90,20 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
    * instruction (`summary`) maps to none.
    */
   const admitted = async (
-    plane: 'tool' | 'summary' | 'content' = 'tool',
+    plane: 'tool' | 'summary' | 'content' | 'generation' = 'tool',
     owner?: Readonly<{ userId: string; projectId: string }>,
-    sequence = 7,
+    { sequence = 7, text }: Readonly<{ sequence?: number; text?: string }> = {},
   ) => {
     const { userId, projectId } = owner ?? (await account());
     const evidence = await evidenceFixture({
       principal: userId,
       project: projectId,
-      plane: plane === 'tool' ? 'summary' : plane,
+      plane: plane === 'tool' ? 'summary' : plane === 'generation' ? 'content' : plane,
       sequence,
       ...(plane === 'tool' ? { fact: toolFact(), semantic: 'call-1' } : {}),
+      ...(plane === 'generation'
+        ? { fact: providerFact(), semantic: 'call-1', ...(text === undefined ? {} : { text }) }
+        : {}),
     });
     return { userId, projectId, receiptId: await admit(evidence) };
   };
@@ -227,9 +231,9 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
 
   it('should send two receipts for one Langfuse object once and settle the second superseded', async () => {
     const owner = await account();
-    const first = await admitted('tool', owner, 7);
+    const first = await admitted('tool', owner, { sequence: 7 });
     /* Another source for the same tool call: the object its id derives from is the same. */
-    const second = await admitted('tool', owner, 9);
+    const second = await admitted('tool', owner, { sequence: 9 });
     let posts = 0;
     vendor((url) => {
       if (url.pathname.endsWith('/otel/v1/traces')) {
@@ -369,12 +373,66 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       .values({ projectId: deleted.projectId, ownerId: deleted.userId, requestedBy: deleted.userId });
     const fetcher = vendor(() => json(200, {}));
 
-    await service(['summary']).drain(new Date());
+    /* Neither content nor the summary its fact would fall back to is effective. */
+    await service(['feedback']).drain(new Date());
 
     expect(fetcher).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ method: 'POST' }));
     expect(await row(withdrawn.receiptId)).toMatchObject({ state: 'expired', payload: null, reason: 'revoked' });
     expect(await row(deleted.receiptId)).toMatchObject({ state: 'expired', payload: null, reason: 'deleted' });
     expect(metrics.agentEvidenceDeliveries.add).toHaveBeenCalledWith(1, { outcome: 'revoked' });
+  });
+
+  /** The attributes of the one span each OTLP post carried. */
+  const sentSpans = (bodies: readonly string[]) =>
+    bodies.map((body) => {
+      const parsed = JSON.parse(body) as {
+        resourceSpans: Array<{
+          scopeSpans: Array<{ spans: Array<{ attributes: Array<{ key: string; value: { stringValue?: string } }> }> }>;
+        }>;
+      };
+      const [span] = parsed.resourceSpans[0]!.scopeSpans[0]!.spans;
+      return new Map(span!.attributes.map((item) => [item.key, item.value.stringValue]));
+    });
+  const capturePosts = () => {
+    const sent: string[] = [];
+    vendor(async (url, init) => {
+      if (url.pathname.endsWith('/otel/v1/traces')) {
+        sent.push(typeof init?.body === 'string' ? init.body : '');
+      }
+      return json(200, { data: [], meta: {} });
+    });
+    return sent;
+  };
+
+  it("should send a generation's content with the account's email and name redacted", async () => {
+    const owner = await account();
+    await admitted('generation', owner, {
+      text: `I am Delivery Fixture, reach me at ${owner.email.toUpperCase()}`,
+    });
+    const sent = capturePosts();
+
+    await service(['summary', 'content']).drain(new Date());
+
+    const [attributes] = sentSpans(sent);
+    expect(JSON.parse(attributes!.get('langfuse.observation.input')!)).toEqual({
+      messages: [{ role: 'user', content: 'I am [name], reach me at [email]' }],
+    });
+    expect(sent[0]).not.toContain(owner.email);
+    expect(attributes!.get('langfuse.observation.metadata.plane')).toBe('content');
+  });
+
+  it('should send a content receipt as its summary when only the summary is effective at export', async () => {
+    const { receiptId } = await admitted('generation');
+    const sent = capturePosts();
+
+    await service(['summary']).drain(new Date());
+
+    const [attributes] = sentSpans(sent);
+    expect(sent).toHaveLength(1);
+    expect(attributes!.has('langfuse.observation.input')).toBe(false);
+    expect(attributes!.get('langfuse.observation.metadata.coverage_input')).toBe('omitted');
+    expect(sent[0]).not.toContain(privateMarker);
+    expect(await row(receiptId)).toMatchObject({ payload: null });
   });
 
   it('should fence a settlement to the lease holder and reconcile a send whose worker died', async () => {
@@ -445,9 +503,9 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
 
     it('should count nothing for a receipt that maps to no object or names one another receipt writes', async () => {
       const owner = await account();
-      await admitted('summary', owner, 5);
-      await admitted('tool', owner, 7);
-      await admitted('tool', owner, 9);
+      await admitted('summary', owner, { sequence: 5 });
+      await admitted('tool', owner, { sequence: 7 });
+      await admitted('tool', owner, { sequence: 9 });
       accepting();
 
       await service().drain(new Date());

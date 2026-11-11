@@ -64,6 +64,26 @@ export const environmentSchemaBase = z.object({
     'The approved agent-observability purpose notice in force. Unset keeps every new purpose unavailable.',
   ),
   /*
+   * Langfuse remediation LD15: whether model input and output may be recorded at all. `off`, the default, records
+   * content for no account, whatever its purposes say; `allowlist` records it only for the staff accounts in
+   * TAU_OBSERVABILITY_CONTENT_ACCOUNTS; `on` defers to each account's own `content` purpose. Not a secret.
+   */
+  TAU_OBSERVABILITY_CONTENT_CAPTURE: unsetWhenEmpty(z.enum(['off', 'allowlist', 'on']).default('off')).describe(
+    'Agent content capture for Langfuse: off (default), allowlist or on.',
+  ),
+  TAU_OBSERVABILITY_CONTENT_ACCOUNTS: unsetWhenEmpty(
+    z
+      .string()
+      .optional()
+      .transform((value) =>
+        (value ?? '')
+          .split(',')
+          .map((account) => account.trim())
+          .filter((account) => account.length > 0),
+      )
+      .pipe(z.array(z.string().regex(/^[\w-]{1,128}$/u, 'must be comma-separated account ids'))),
+  ).describe('Comma-separated staff account ids whose content is captured when the capture mode is allowlist.'),
+  /*
    * Blueprint T06: the key sealing accepted evidence in the delivery backlog.
    * Unset refuses new evidence admission; it never affects inference.
    */
@@ -512,6 +532,13 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       code: 'custom',
       message: 'TAU_OBSERVABILITY_PAYLOAD_KEY is required when evidence delivery is enabled',
       path: ['TAU_OBSERVABILITY_PAYLOAD_KEY'],
+    });
+  }
+  if (data.TAU_OBSERVABILITY_CONTENT_CAPTURE === 'allowlist' && data.TAU_OBSERVABILITY_CONTENT_ACCOUNTS.length === 0) {
+    context.addIssue({
+      code: 'custom',
+      message: 'TAU_OBSERVABILITY_CONTENT_ACCOUNTS must name at least one account when content capture is allowlist',
+      path: ['TAU_OBSERVABILITY_CONTENT_ACCOUNTS'],
     });
   }
   if (

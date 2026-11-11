@@ -40,7 +40,9 @@ import {
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
+  hasGeneratedBlock,
 } from '#workspace-config.js';
+import { serializeStartRecord, startRecordPath } from '#start-version.js';
 import { readRevisionLog } from '#revision-verbs.js';
 import { createOpsLog, opsRefName } from '#ops-ref.js';
 import { selectRevisionStatus } from '#project-revisions.machine.js';
@@ -2178,6 +2180,10 @@ describe('the checkout registry', () => {
     await vi.waitFor(() => {
       expect(events.toSorted()).toEqual(['close:linked', 'close:live', 'open:linked', 'open:live']);
     });
+    /* The host's first question opens the store, and a line with a head has any Start record dropped from the project directory. */
+    events.length = 0;
+    await run(actors.checkout.readHead, { checkoutId: 'live' });
+    expect(events).toEqual(['open:live', 'close:live']);
     events.length = 0;
 
     await run(actors.turn.prepare, {
@@ -6275,6 +6281,145 @@ for (const actorSet of actorSets) {
       expect(rows.get(model)).toBeUndefined();
       expect(rows.get(asked)).toBeUndefined();
       expect(rows.get(head)).toBeUndefined();
+    }, 30_000);
+  });
+}
+
+/*
+ * A6: every project starts with the Start version, V1. A creation flow leaves
+ * `.tau/start.json`; the first open, which creates the store, mints the entry
+ * with both of Tau's setup files and removes the record.
+ */
+for (const actorSet of actorSets) {
+  describe.runIf(actorSet.enabled)(`the Start version — ${actorSet.name}`, () => {
+    type Head = Readonly<{ revisionId: string | undefined; treeId: string | undefined }>;
+    const openHead = async (actors: RevisionActors): Promise<Head> =>
+      run<Head>(actors.checkout.readHead, { checkoutId: 'live' });
+    const record = (origin: Parameters<typeof serializeStartRecord>[0]): string =>
+      new TextDecoder().decode(serializeStartRecord(origin));
+
+    it('mints V1 · Start for a new project before any turn, and a clean first cut records nothing', async () => {
+      const { port, actors, filesystem } = await fixture(
+        { 'main.scad': 'cube(1);\n', [startRecordPath]: record('created') },
+        undefined,
+        { actorSet: actorSet.name },
+      );
+
+      const head = await openHead(actors);
+
+      expect(head.revisionId).toBeDefined();
+      const rows = await readRevisionLog(port, { branch: 'main' });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        start: 'created',
+        trigger: 'create',
+        source: 'user',
+        summary: 'Project created',
+      });
+      expect(rows[0]?.parent).toBeUndefined();
+      const tree = await port.readTree(revisionId(head.revisionId ?? ''));
+      expect(tree?.entries().map(({ path }) => path)).toStrictEqual(['.gitattributes', '.gitignore', 'main.scad']);
+      expect(await filesystem.exists(startRecordPath)).toBe(false);
+      expect(hasGeneratedBlock(await filesystem.readFile(generatedGitattributesPath, 'utf8'))).toBe(true);
+
+      /* The first turn's base cut: the person changed nothing, so the cut is the head's tree and nothing is minted. */
+      const cut = await run<{ treeId: string }>(actors.checkout.cut, { checkoutId: 'live', trigger: 'turn' });
+      expect(cut.treeId).toBe(head.treeId);
+    }, 30_000);
+
+    it('gives a folder whose own ignore file lacks Tau’s block both setup files, and stores its large file through LFS', async () => {
+      const step = 'ISO-10303-21;\n'.repeat(100);
+      const { port, actors, filesystem } = await fixture(
+        {
+          '.gitignore': '*.tmp\n',
+          'part.step': step,
+          'main.scad': 'import("part.step");\n',
+          [startRecordPath]: record('folder'),
+        },
+        undefined,
+        { actorSet: actorSet.name },
+      );
+
+      const head = await openHead(actors);
+
+      const [row] = await readRevisionLog(port, { branch: 'main' });
+      expect(row).toMatchObject({
+        start: 'folder',
+        trigger: 'import',
+        source: 'import',
+        summary: 'Imported from a folder',
+      });
+      const ignore = await filesystem.readFile(generatedIgnorePath, 'utf8');
+      expect(ignore.startsWith('*.tmp\n')).toBe(true);
+      expect(hasGeneratedBlock(ignore)).toBe(true);
+      expect(hasGeneratedBlock(await filesystem.readFile(generatedGitattributesPath, 'utf8'))).toBe(true);
+      const listing = new Map(
+        ((await port.listTree?.(revisionId(head.revisionId ?? ''))) ?? []).map((entry) => [entry.path, entry]),
+      );
+      expect(listing.get('part.step')?.oid).toBe(blobOid(lfsPointerFor(new TextEncoder().encode(step)).bytes, 'sha1'));
+      /* The live tree reads clean against the Start version. */
+      const cut = await run<{ treeId: string }>(actors.checkout.cut, { checkoutId: 'live', trigger: 'save' });
+      expect(cut.treeId).toBe(head.treeId);
+    }, 30_000);
+
+    it('keeps the record for the next open when the line gains a head before Start lands', async () => {
+      const { port, filesystem, actorFilesystem } = await fixture(
+        { 'main.scad': 'cube(1);\n', [startRecordPath]: record('created') },
+        undefined,
+        { actorSet: actorSet.name },
+      );
+      const racingPort: RevisionPort = {
+        ...port,
+        updateRef: async (input) => ({
+          status: 'conflicted',
+          name: input.name,
+          expectedHead: input.expectedHead,
+          actualHead: input.head,
+          proposedHead: input.head,
+        }),
+      };
+      const racing = createRevisionActors({ port: racingPort, projectId: 'project-1', filesystem: actorFilesystem });
+
+      /* The open warns and goes on; the record is what lets a later open mint V1 once the line is settled. */
+      await openHead(racing);
+      expect(await filesystem.exists(startRecordPath)).toBe(true);
+
+      /* The racer's head lands: the next open, with the real port, mints no second Start and drops the record. */
+      const racer = await port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([['main.scad', 'cube(2);\n']]),
+        provenance: { source: 'user', actorId: 'ada', createdAt: 1 },
+        summary: { generated: 'Racing work' },
+      });
+      await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(racer.commitId) });
+      const reopened = createRevisionActors({ port, projectId: 'project-1', filesystem: actorFilesystem });
+
+      const head = await openHead(reopened);
+      expect(head.revisionId).toBe(racer.commitId);
+      const rows = await readRevisionLog(port, { branch: 'main' });
+      expect(rows.map((row) => row.summary)).toStrictEqual(['Racing work']);
+      expect(await filesystem.exists(startRecordPath)).toBe(false);
+    }, 30_000);
+
+    it('mints nothing where no creation flow asked, as an older build’s project opens', async () => {
+      const { actors } = await fixture({ 'main.scad': 'cube(1);\n' }, undefined, { actorSet: actorSet.name });
+
+      const head = await openHead(actors);
+      expect(head.revisionId).toBeUndefined();
+    }, 30_000);
+
+    it('mints nothing on a project with a remote, whose history arrives with the pull, and drops the record', async () => {
+      const { port, actors, filesystem } = await fixture(
+        { 'main.scad': 'cube(1);\n', [startRecordPath]: record('created') },
+        undefined,
+        { actorSet: actorSet.name },
+      );
+      await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      await port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+
+      const head = await openHead(actors);
+      expect(head.revisionId).toBeUndefined();
+      expect(await filesystem.exists(startRecordPath)).toBe(false);
     }, 30_000);
   });
 }

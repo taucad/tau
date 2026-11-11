@@ -44,7 +44,7 @@ Use each term for exactly one concept and keep engineering terms out of product 
 | Checkout        | Addressable working copy of one branch; never a revision                                                                                                                            |
 | Live checkout   | The project directory, tracking `main` for a new project or the selected imported branch                                                                                            |
 | Linked checkout | Additional private working copy, one per branch                                                                                                                                     |
-| Turn            | One attempt of an agent run against one checkout. Its placement may first mint the dirty base it found, attributed to the attempt; its settlement mints at most one result revision |
+| Turn            | One attempt of an agent run against one checkout. Its placement may first mint the dirty base it found, kept as the person's edit; its settlement mints at most one result revision |
 | Lease           | Host record attaching a run to a checkout, stored under `.tau/runs/`                                                                                                                |
 | Backend         | Local revision engine behind `RevisionPort`                                                                                                                                         |
 | Remote          | Peer Git revision graph; refs and objects move, never working trees                                                                                                                 |

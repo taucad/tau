@@ -114,6 +114,42 @@ describe('revision verbs', () => {
     expect(rows.map((row) => row.trigger)).toStrictEqual(['idle', 'save']);
   });
 
+  /* A5, fixture B4: a turn's base cut is the person's, read from the trailer an earlier build wrote. */
+  it('reads a turn base cut as the person’s and leaves the result the agent’s', async () => {
+    const port = await openPort();
+    await port.setHead('main');
+    const turn = { runId: 'run-1', attempt: 1, turnId: 'u1', trigger: 'turn', createdAt } as const;
+    const base = await port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['part.ts', 'mine']]),
+      /* What a build before A5 recorded: source `agent`, the person as actor. */
+      provenance: { ...turn, source: 'agent', actorId: 'ada', turnCut: 'base' },
+      summary: { generated: 'Agent turn u1' },
+    });
+    const baseId = revisionId(base.commitId);
+    const result = await port.writeRevision({
+      parents: [baseId],
+      tree: new ImmutableRevisionTree([['part.ts', 'agent']]),
+      provenance: { ...turn, source: 'agent', actorId: 'agent', turnCut: 'result' },
+      summary: { generated: 'Agent turn u1' },
+    });
+    const saved = await port.writeRevision({
+      parents: [revisionId(result.commitId)],
+      tree: new ImmutableRevisionTree([['part.ts', 'later']]),
+      provenance: { source: 'user', actorId: 'ada', trigger: 'save', createdAt },
+      summary: { generated: 'Saved' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(saved.commitId) });
+
+    const rows = await readRevisionLog(port);
+    expect(rows.map((row) => [row.source, row.actor, row.turnCut, row.turnId])).toStrictEqual([
+      ['user', 'ada', undefined, undefined],
+      ['agent', 'agent', 'result', 'u1'],
+      ['user', 'ada', 'base', 'u1'],
+    ]);
+    expect(rows.map((row) => Object.hasOwn(row, 'turnCut'))).toStrictEqual([false, true, true]);
+  });
+
   /* A9: only the revision a restore minted names what it restored; the cut before it does not. */
   it('carries restoredFrom onto the row a restore minted and onto no other', async () => {
     const port = await openPort();

@@ -27,6 +27,15 @@ export type KernelBackend =
 export type KernelEcosystem = 'npm' | 'pypi' | 'nuget' | 'kcl' | 'none';
 
 /**
+ * The geometry family a kernel's models are made of; it names the kernel's group in the selector and in the routing
+ * rubric. `brep` is exact boundary representation, `mesh` constructive or mesh-first solids exported as triangles,
+ * `implicit` signed distance and other implicit fields, voxelised to evaluate, `electronics` circuit boards.
+ *
+ * @public
+ */
+export type KernelRepresentation = 'brep' | 'mesh' | 'implicit' | 'electronics';
+
+/**
  * Product catalog entry for a kernel offering, not an engine registry.
  *
  * `name`, `description`, `longDescription`, `recommended`, `tags`, and
@@ -59,6 +68,10 @@ export type KernelConfiguration = {
   features: string[];
   /** Runtime capability required before this offering may be selected. */
   requiresRuntimeKernelId?: string;
+  /** The geometry family of this kernel's models. */
+  representation: KernelRepresentation;
+  /** Whether its exports include analytic STEP, which standards-based or toleranced mating geometry needs. */
+  exactGeometry: boolean;
 };
 
 /** @public */
@@ -90,6 +103,8 @@ public static class Params
     tags: ['C#', 'PicoGK', 'OpenVDB', 'Voxels', 'Desktop'],
     features: ['CoreCLR JIT', 'Upstream PicoGK API', 'Interactive parameters', 'Topology-aware GLB'],
     requiresRuntimeKernelId: 'picogk',
+    representation: 'implicit',
+    exactGeometry: false,
   },
   {
     id: 'picovoxel',
@@ -122,6 +137,8 @@ export default function main(pico: Pico, params = defaultParams): Voxels[] {
       'Fast preview with exact export',
       'Interactive parameters',
     ],
+    representation: 'implicit',
+    exactGeometry: false,
   },
   {
     id: 'build123d',
@@ -148,6 +165,8 @@ def main(params: Params) -> Shape | None:
     tags: ['Python', 'OpenCascade', 'BRep', 'Desktop', 'Precision'],
     features: ['Native performance', 'Python CAD API', 'Topology-aware GLB', 'STEP export'],
     requiresRuntimeKernelId: 'build123d',
+    representation: 'brep',
+    exactGeometry: true,
   },
   {
     id: 'smlibpy',
@@ -174,6 +193,8 @@ def main(params: Params) -> smlibpy.Part | None:
     tags: ['Python', 'SMLib', 'NURBS', 'Boundary Representation', 'Desktop'],
     features: ['build123d-style API', 'Exact NURBS geometry', 'PBR materials', 'STEP export'],
     requiresRuntimeKernelId: 'smlibpy',
+    representation: 'brep',
+    exactGeometry: true,
   },
   {
     id: 'openscad',
@@ -181,15 +202,17 @@ def main(params: Params) -> smlibpy.Part | None:
     dimensions: [3],
     language: 'openscad',
     ecosystem: 'none',
-    description: 'Constructive Solid Geometry for 3D printing',
+    description: 'Simple prints and customisers',
     mainFile: 'main.scad',
     backendProvider: 'manifold',
     longDescription:
       'Constructive Solid Geometry (CSG) — build complex geometries by combining primitives with boolean operations. Supports customizer parameters, dependency resolution, and native GLB and 3MF output for 3D printing.',
     emptyCode: ``,
-    recommended: '3D Printing & Prototyping',
+    recommended: 'Simple Prints & Customisers',
     tags: ['Constructive Solid Geometry', 'Mesh Export', 'Scripting', '3D Printing'],
     features: ['Boolean operations', 'Parametric design', 'GLB export', '3MF export'],
+    representation: 'mesh',
+    exactGeometry: false,
   },
   {
     id: 'replicad',
@@ -211,6 +234,8 @@ export default function main(p = defaultParams) {}
     recommended: 'Engineering & Manufacturing',
     tags: ['Boundary Representation', 'OpenCascade', 'Exact Geometry', 'TypeScript', 'Precision'],
     features: ['Exact geometry', 'TypeScript API', 'CAD operations', 'STEP export'],
+    representation: 'brep',
+    exactGeometry: true,
   },
   {
     id: 'manifold',
@@ -232,6 +257,8 @@ export default function main(p = defaultParams) {}
     recommended: 'Procedural & Mesh-First CAD',
     tags: ['TypeScript', 'Robust Booleans', 'Mesh Kernel', 'WASM', 'Browser-Native'],
     features: ['Fast booleans', 'Robust topology', 'WASM runtime', 'GLTF-native scene output'],
+    representation: 'mesh',
+    exactGeometry: false,
   },
   {
     id: 'zoo',
@@ -255,6 +282,8 @@ export default function main(p = defaultParams) {}
       'Modern KCL syntax',
       'STL/STEP export',
     ],
+    representation: 'brep',
+    exactGeometry: true,
   },
   {
     id: 'jscad',
@@ -262,7 +291,7 @@ export default function main(p = defaultParams) {}
     dimensions: [2, 3],
     language: 'typescript',
     ecosystem: 'npm',
-    description: 'TypeScript CAD for Constructive Solid Geometry',
+    description: 'JavaScript CSG modelling',
     mainFile: 'main.ts',
     backendProvider: 'jscad',
     longDescription:
@@ -273,7 +302,7 @@ export const defaultParams = {};
 
 export default function main(p = defaultParams) {}
 `,
-    recommended: '3D Printing & Web-Based CAD',
+    recommended: 'JavaScript CSG Modelling',
     tags: ['TypeScript', 'CSG', 'Browser-Native', '3D Printing'],
     features: [
       'Constructive Solid Geometry (CSG)',
@@ -281,6 +310,8 @@ export default function main(p = defaultParams) {}
       'Browser & CLI support',
       'ES module architecture',
     ],
+    representation: 'mesh',
+    exactGeometry: false,
   },
   {
     id: 'opencascadejs',
@@ -308,6 +339,8 @@ export default function main(p = defaultParams) {}
       'Advanced boolean operations',
       'Precise tolerancing',
     ],
+    representation: 'brep',
+    exactGeometry: true,
   },
   {
     id: 'smlib',
@@ -329,6 +362,8 @@ export default function main(p = defaultParams) {}
     recommended: 'NURBS Modeling in TypeScript',
     tags: ['TypeScript', 'SMLib', 'NURBS', 'Boundary Representation', 'Exact Geometry'],
     features: ['build123d-style API', 'Exact NURBS geometry', 'STEP export', 'Interactive parameters'],
+    representation: 'brep',
+    exactGeometry: true,
   },
   {
     id: 'tscircuit',
@@ -352,11 +387,21 @@ export default function main(p = defaultParams) {}
     recommended: 'Electronics & PCB Design',
     tags: ['tscircuit', 'TSX', 'Electronics', 'PCB', 'Schematic'],
     features: ['3D board preview', 'Schematic and PCB SVG', 'Offline autorouting', 'BOM and netlist export'],
+    representation: 'electronics',
+    exactGeometry: false,
   },
 ] as const satisfies KernelConfiguration[];
 
 /** @public */
 export type KernelId = (typeof kernelConfigurations)[number]['id'];
+
+/**
+ * What a person or chat asks for: `auto`, which lets the working agent choose under the routing rubric, or one kernel.
+ * `auto` is never a {@link KernelId}: the runtime binds a concrete kernel from the entry file.
+ *
+ * @public
+ */
+export type KernelPreference = 'auto' | KernelId;
 
 /** @public */
 export type KernelBackendProvider = (typeof kernelConfigurations)[number]['backendProvider'];
@@ -408,6 +453,20 @@ export function resolveKernel(id: KernelId): KernelEntry {
  */
 export const isKernelId = (v: unknown): v is KernelId =>
   typeof v === 'string' && (kernelProviders as readonly string[]).includes(v);
+
+/**
+ * Every {@link KernelPreference}, `auto` first, for schema enums.
+ *
+ * @public
+ */
+export const kernelPreferences = ['auto', ...kernelProviders] as const satisfies readonly KernelPreference[];
+
+/**
+ * Type guard for {@link KernelPreference}, for the same external-data boundaries as {@link isKernelId}.
+ *
+ * @public
+ */
+export const isKernelPreference = (v: unknown): v is KernelPreference => v === 'auto' || isKernelId(v);
 
 /** @public */
 // oxlint-disable-next-line unicorn/no-array-reduce -- we know the keys are unique

@@ -5,7 +5,7 @@ import type { Evidence } from '@taucad/agent-observability/contract';
 import { evidenceSchema } from '@taucad/agent-observability/contract';
 import type { ProjectedRun, ProjectionContext } from '@taucad/agent-observability/projection';
 import { projectRun } from '@taucad/agent-observability/projection';
-import { evidenceFixture, privateMarker } from '#testing/evidence.fixture.js';
+import { evidenceFixture, privateMarker, toolFact } from '#testing/evidence.fixture.js';
 import {
   exportableEvidence,
   langfuseObservation,
@@ -319,7 +319,9 @@ describe('langfuseObservation v5: one trace per run, one root, ids from the fact
     const [failed] = await projected(hostRun({ tools: [tool('failed')], ending: undefined }));
     const span = only(completed!);
 
-    expect(span.name).toBe('call-tool');
+    /* A tool outside the first-party vocabulary is named only as external-tool (LQ5). */
+    expect(span.name).toBe('external-tool');
+    expect(JSON.stringify(completed)).not.toContain('SYNTHETIC_TOOL');
     expect(attribute(span, 'langfuse.observation.type')).toBe('tool');
     expect(span.parentSpanId).toBe(runRootSpanId('staging', 'user-a', 'run-1'));
     expect(milliseconds(span.endTimeUnixNano) - milliseconds(span.startTimeUnixNano)).toBe(2000);
@@ -329,6 +331,37 @@ describe('langfuseObservation v5: one trace per run, one root, ids from the fact
     expect(metadata(span, 'tool_call')).toMatch(/^[a-f\d]{32}$/u);
     expect(attribute(only(failed!), 'langfuse.observation.level')).toBe('ERROR');
     expect(only(failed!).spanId).toBe(span.spanId);
+  });
+
+  it('should name a first-party tool and its class, and any other name, or none, as external-tool (LW5)', async () => {
+    const [evidence] = await projected(
+      hostRun({
+        tools: [
+          {
+            call: 'call-1',
+            toolName: 'edit_file',
+            outcome: 'completed',
+            input: row(3),
+            output: row(4),
+            startedAt: at + 1000,
+            settledAt: at + 3000,
+          },
+        ],
+        ending: undefined,
+      }),
+    );
+    const span = only(evidence!);
+    expect(span.name).toBe('edit_file');
+    expect(metadata(span, 'tool_class')).toBe('write');
+
+    const renamed = async (name: string | undefined): Promise<string> => {
+      const fact = { ...toolFact(), ...(name === undefined ? {} : { name }) };
+      return only(await evidenceFixture({ semantic: 'call-1', fact })).name;
+    };
+    /* A host that sent a name outside the vocabulary, or an older host that sent none, still names no private tool. */
+    expect(await renamed('synthetic_private_tool')).toBe('external-tool');
+    expect(await renamed(undefined)).toBe('external-tool');
+    expect(await renamed('test_model')).toBe('test_model');
   });
 
   it('should map a check, a presentation and an instruction to no object', async () => {
@@ -582,5 +615,184 @@ describe('otlpBody', () => {
     expect(body.resourceSpans).toHaveLength(1);
     expect(body.resourceSpans[0]!.scopeSpans[0]!.spans).toEqual([span]);
     expect(body.resourceSpans[0]!.scopeSpans[0]!.scope.version).toBe('langfuse-v5');
+  });
+});
+
+describe('langfuseObservation v5: root and tool content from the host (LW6)', () => {
+  const identity = { email: 'Jane.Fontaine@Example.com', name: 'Jane Fontaine' } as const;
+  const withIdentity = { ...context, identity };
+  const contentContext: ProjectionContext = {
+    ...hostContext,
+    host: 'browser',
+    content: {
+      since: at - 60_000,
+      design: async () => [
+        { path: 'main.ts', text: '// by Jane Fontaine <jane.fontaine@example.com>\ncube(10)', bytes: 55 },
+      ],
+    },
+  };
+  const contentRun = (change: Partial<ProjectedRun> = {}): ProjectedRun =>
+    hostRun({
+      tools: [
+        {
+          call: 'call-1',
+          toolName: 'edit_file',
+          outcome: 'completed',
+          input: row(3),
+          output: row(4),
+          startedAt: at + 1000,
+          settledAt: at + 3000,
+          arguments: { targetFile: 'main.ts', author: 'Jane Fontaine', contact: 'jane.fontaine@example.com' },
+          result: 'Wrote main.ts for Jane Fontaine; told bob@corp.io',
+        },
+        {
+          call: 'call-2',
+          toolName: 'test_model',
+          outcome: 'completed',
+          input: row(5),
+          output: row(6),
+          startedAt: at + 4000,
+          settledAt: at + 5000,
+          arguments: { targetFile: 'main.ts' },
+          result: { tests: [] },
+          check: { result: 'failed', revision: ['main.ts\u0000main.ts=sha256:x'], requirements: ['spec.ts#1'] },
+        },
+      ],
+      finalRevision: 'rev-final',
+      filesChanged: 1,
+      priorTurns: 3,
+      invocations: [{ purpose: 'generation', modelId: 'model-1' }],
+      content: {
+        prompt: 'I am Jane Fontaine: make a cube, mail jane.fontaine@example.com',
+        reply: [{ type: 'text', text: 'Done, Jane Fontaine.' }],
+        changedPaths: ['main.ts'],
+      },
+      ...change,
+    });
+  const projectedContent = async (run: ProjectedRun = contentRun()): Promise<Evidence[]> => {
+    const { evidence } = await projectRun(run, contentContext);
+    return [...evidence];
+  };
+  const json = (span: OtlpSpan, key: string): unknown => JSON.parse(String(attribute(span, key)));
+  const mapped = (evidence: Evidence): OtlpSpan => {
+    const { spans } = langfuseObservation(evidence, withIdentity, pseudonym)!;
+    return spans[0]!;
+  };
+
+  it('should write a tool’s arguments in and result out, with emails but no name redacted', async () => {
+    const [tool] = await projectedContent();
+    const span = mapped(tool!);
+
+    expect(span.name).toBe('edit_file');
+    expect(json(span, 'langfuse.observation.input')).toEqual({
+      targetFile: 'main.ts',
+      author: 'Jane Fontaine',
+      contact: '[email]',
+    });
+    expect(attribute(span, 'langfuse.observation.output')).toBe('Wrote main.ts for Jane Fontaine; told [email]');
+    expect(metadata(span, 'plane')).toBe('content');
+    expect(metadata(span, 'coverage_input')).toBe('redacted');
+  });
+
+  it('should keep only the size and digest of a tool result over the cap', async () => {
+    const large = 'z'.repeat(70_000);
+    const [tool] = await projectedContent(contentRun({ tools: [{ ...contentRun().tools[0]!, result: large }] }));
+    const span = mapped(tool!);
+
+    expect(attribute(span, 'langfuse.observation.output')).toBe('[tool result not kept: 70000 bytes]');
+    expect(metadata(span, 'result_bytes')).toBe('70000');
+    expect(metadata(span, 'result_digest')).toMatch(/^[a-f\d]{32}$/u);
+    expect(otlpBody([span])).not.toContain(large);
+  });
+
+  it('should write the root’s message in, and its reply, design and checks out, redacting names only in prose', async () => {
+    const evidence = await projectedContent();
+    const outcome = evidence.find((item) => item.semantic.kind === 'outcome')!;
+    const { spans } = langfuseObservation(outcome, withIdentity, pseudonym)!;
+    const root = spans[0]!;
+
+    expect(root.name).toBe(runRootName);
+    expect(json(root, 'langfuse.observation.input')).toEqual({
+      messages: [{ role: 'user', content: 'I am [name]: make a cube, mail [email]' }],
+    });
+    expect(json(root, 'langfuse.observation.output')).toEqual({
+      role: 'assistant',
+      content: 'Done, [name].',
+      design: [{ path: 'main.ts', source: '// by Jane Fontaine <[email]>\ncube(10)' }],
+      checks: ['test_model failed: spec.ts#1'],
+    });
+  });
+
+  it('should write the root’s turn measures as metadata, with or without content', async () => {
+    const summary = await outcomeOf(contentRun());
+    const root = only(summary);
+
+    expect(attribute(root, 'langfuse.observation.input')).toBeUndefined();
+    expect(metadata(root, 'final_revision')).toMatch(/^[a-f\d]{32}$/u);
+    expect(metadata(root, 'start_revision')).toBeUndefined();
+    for (const [key, value] of [
+      ['files_changed', '1'],
+      ['checks_passed', '0'],
+      ['checks_failed', '1'],
+      ['prior_turns', '3'],
+      ['model_calls', '1'],
+      ['tool_calls', '2'],
+      ['model', 'model-1'],
+    ] as const) {
+      expect(metadata(root, key)).toBe(value);
+    }
+    expect(metadata(root, 'host')).toBeUndefined();
+    const evidence = await projectedContent();
+    const withHost = evidence.find((item) => item.semantic.kind === 'outcome')!;
+    expect(metadata(mapped(withHost), 'host')).toBe('browser');
+  });
+
+  it('should redact emails in a generation’s tool calls and results, never a name', async () => {
+    const evidence = await providerContentEvidence(
+      attempt({
+        content: {
+          input: {
+            messages: [
+              {
+                role: 'tool',
+                parts: [
+                  {
+                    kind: 'tool-result',
+                    call: 'toolu_1',
+                    error: false,
+                    text: 'Jane Fontaine <jane.fontaine@example.com>',
+                  },
+                ],
+              },
+            ],
+            context: { historyMessages: 0, history: null, system: null, tools: null },
+            parameters: {},
+          },
+          output: [
+            {
+              role: 'assistant',
+              parts: [
+                {
+                  kind: 'tool-call',
+                  call: 'toolu_2',
+                  name: 'edit_file',
+                  text: '{"to":"bob@corp.io","by":"Jane Fontaine"}',
+                },
+              ],
+            },
+          ],
+          truncated: false,
+        },
+      }),
+      authority,
+    );
+    const span = mapped(evidence!);
+
+    expect(json(span, 'langfuse.observation.input')).toMatchObject({
+      messages: [{ role: 'tool', content: 'Jane Fontaine <[email]>' }],
+    });
+    expect(json(span, 'langfuse.observation.output')).toMatchObject({
+      tool_calls: [{ function: { arguments: '{"to":"[email]","by":"Jane Fontaine"}' } }],
+    });
   });
 });

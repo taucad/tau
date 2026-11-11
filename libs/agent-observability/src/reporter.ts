@@ -1,6 +1,7 @@
 import type { DeliveryScope, DrainStop, EvidenceOutbox, OutboxCounts } from '#delivery.js';
 import type { ProjectedRun, ProjectionContext } from '#projection.js';
 import { projectRun } from '#projection.js';
+import type { DesignReader } from '#host-content.js';
 
 /*
  * Host evidence reporting (blueprint T10/T11).
@@ -19,6 +20,11 @@ export type ReportingGrant = DeliveryScope &
     protection: ProjectionContext['protection'];
     /** When the account's allowing decision was taken, as the server answers it; absent from an older server. */
     allowedSince?: number | undefined;
+    /**
+     * Present when the same answer allows `content` too (LW6, rule 5): the server answers it only where the capture
+     * mode permits the account. `allowedSince` is when content was allowed, on the host's clock.
+     */
+    content?: Readonly<{ allowedSince?: number }> | undefined;
   }>;
 
 /** The parts of the server's effective-purposes answer a host reads. @public */
@@ -72,6 +78,11 @@ export const purposeGrantOf = (
   if (answer.projectId !== subject.project || state?.allowed !== true || answer.epoch === '') {
     return undefined;
   }
+  /* Content rides on the summary grant: the same scope and epoch, and only what summaries already report gains it. */
+  const content =
+    purpose === 'summary'
+      ? answer.purposes.find((candidate) => candidate.purpose === 'content' && candidate.allowed)
+      : undefined;
   /* The answer does not say the account's protection; `unknown` is the strictest claim, and the API only tightens it. */
   return {
     principal: subject.principal,
@@ -79,6 +90,9 @@ export const purposeGrantOf = (
     policyEpoch: answer.epoch,
     protection: 'unknown',
     ...hostClockSince(state.allowedSince, answer.answeredAt, subject.receivedAt),
+    ...(content === undefined
+      ? {}
+      : { content: hostClockSince(content.allowedSince, answer.answeredAt, subject.receivedAt) }),
   };
 };
 
@@ -126,6 +140,10 @@ export type EvidenceReporterOptions = Readonly<{
   hostBuild: string | undefined;
   now: () => number;
   toolClass?: ProjectionContext['toolClass'];
+  /** Reads a run's changed model files at its final revision, for its root's content (LW6). */
+  design?: DesignReader | undefined;
+  /** What kind of host this is, written on each outcome. */
+  host?: ProjectionContext['host'];
   /** The purpose `grant` answers for, and so the plane projected; `summary` when absent. */
   purpose?: ReportingPurpose;
   /** Run `callback` after `milliseconds`; answers its cancel. `setTimeout` when absent. */
@@ -194,6 +212,8 @@ export const createEvidenceReporter = (options: EvidenceReporterOptions): Eviden
    * falls back to when this reporter first saw the grant. A time the server puts ahead of this clock is capped at now.
    */
   let bound: (ReportingGrant & Readonly<{ grantedAt: number }>) | undefined;
+  /* When this reporter's scope first had content allowed, on its clock; dropped the moment an answer withholds it. */
+  let contentSince: number | undefined;
   let stop: DrainStop | undefined;
   let cancelRetry: (() => void) | undefined;
   let closed = false;
@@ -216,9 +236,18 @@ export const createEvidenceReporter = (options: EvidenceReporterOptions): Eviden
     if (grant === undefined) {
       /* Also on a host's first answer: what an earlier session held under a grant now gone is purged. */
       bound = undefined;
+      contentSince = undefined;
       await outbox.bind(undefined);
       return undefined;
     }
+    if (!sameScope(bound, grant)) {
+      contentSince = undefined;
+    }
+    /* Like the summary grant, content counts from the account's decision, never later than now (LW6). */
+    contentSince =
+      grant.content === undefined
+        ? undefined
+        : Math.min(contentSince ?? Number.POSITIVE_INFINITY, grant.content.allowedSince ?? now(), now());
     if (!sameScope(bound, grant)) {
       bound = { ...grant, grantedAt: Math.min(grant.allowedSince ?? Number.POSITIVE_INFINITY, now()) };
       settled.clear();
@@ -311,6 +340,8 @@ export const createEvidenceReporter = (options: EvidenceReporterOptions): Eviden
       hostBuild: options.hostBuild,
       ...(options.toolClass === undefined ? {} : { toolClass: options.toolClass }),
       plane: options.purpose ?? 'summary',
+      ...(contentSince === undefined ? {} : { content: { since: contentSince, design: options.design } }),
+      ...(options.host === undefined ? {} : { host: options.host }),
     };
     const unsettled = runs.filter((run) => !settled.has(settledKey(run)));
     const projections = await Promise.all(unsettled.map(async (run) => projectRun(run, context)));

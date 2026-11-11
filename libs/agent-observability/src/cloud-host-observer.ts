@@ -59,7 +59,8 @@ export const cloudHostObserver =
   (
     environment: Environment,
     fetcher: typeof fetch = fetch,
-    observeTurns: (read: OwnRowsRead, chatId: string) => Promise<ObservedChat> = observeOwnTurns,
+    observeTurns: (read: OwnRowsRead, chatId: string) => Promise<ObservedChat> = async (read, chatId) =>
+      observeOwnTurns(read, chatId, { content: true }),
   ): ((projectId: string, read: OwnRowsRead) => CloudHostChatObserver) =>
   (projectId, read) => {
     const apiUrl = environment['TAU_API_URL'];
@@ -84,6 +85,7 @@ export const cloudHostObserver =
         /* The API admits a cloud host's evidence only under its own device id. */
         uploader: deviceId,
         hostBuild: undefined,
+        host: 'cloud',
         fetch: withCredential,
         store: filePendingStore(join(directory, `${encodeURIComponent(project)}.json`), ownerOnlyFiles),
         observe: async (chatId) => observeTurns(read, chatId),

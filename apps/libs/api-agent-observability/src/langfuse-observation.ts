@@ -2,6 +2,7 @@
 import { createHash, createHmac, hkdfSync } from 'node:crypto';
 import type { Evidence } from '@taucad/agent-observability/contract';
 import { evidenceKeys } from '@taucad/agent-observability/identity';
+import { reportedToolName } from '@taucad/agent-observability/projection';
 import { phaseDurations } from '@taucad/agent-observability/scorecard';
 import { redactPersonal } from '@taucad/agent-observability/content-redaction';
 import type { PersonalIdentity } from '@taucad/agent-observability/content-redaction';
@@ -516,10 +517,30 @@ const generationSpan = (mapping: Mapping, fact: ProviderFact, content?: ContentP
 
 type ToolFact = SummaryFact & { kind: 'tool' };
 
-/** LW5 names first-party tools; until then a tool is one operation name with its class as metadata. */
-const toolName = 'call-tool';
+/** A tool's arguments in and its result out (LW6): the call as the model made it, and the result as it came back. */
+const toolContentAttributes = (content: ContentPayload, group: (value: string) => string): OtlpAttribute[] => {
+  const call = content.input?.messages.flatMap((message) => message.parts).find((part) => part.kind === 'tool-call');
+  const resultParts = content.output?.messages.flatMap((message) => message.parts) ?? [];
+  const result = resultParts.find((part) => part.kind === 'tool-result');
+  const rendered = chatContent(resultParts);
+  return defined([
+    call === undefined ? undefined : stringAttribute('langfuse.observation.input', partText(call)),
+    rendered === undefined
+      ? undefined
+      : stringAttribute(
+          'langfuse.observation.output',
+          typeof rendered === 'string' ? rendered : JSON.stringify(rendered),
+        ),
+    result?.digest === null || result === undefined
+      ? undefined
+      : stringAttribute(metadataKey('result_digest'), group(result.digest)),
+    result?.digest === null || result === undefined
+      ? undefined
+      : intAttribute(metadataKey('result_bytes'), result.originalBytes),
+  ]);
+};
 
-const toolSpan = (mapping: Mapping, fact: ToolFact): OtlpSpan => {
+const toolSpan = (mapping: Mapping, fact: ToolFact, content?: ContentPayload): OtlpSpan => {
   const { evidence, group } = mapping;
   const start = startOf(evidence);
   const failed = fact.outcome === 'failed';
@@ -529,7 +550,8 @@ const toolSpan = (mapping: Mapping, fact: ToolFact): OtlpSpan => {
     traceId: mapping.traceId,
     spanId: objectId(mapping),
     parentSpanId: mapping.rootId,
-    name: toolName,
+    /* The host reports a first-party name or `external-tool`; a name outside the vocabulary is never sent (LQ5). */
+    name: reportedToolName(fact.name),
     kind: 1,
     startTimeUnixNano: nanoseconds(start),
     endTimeUnixNano: nanoseconds(start + spanMilliseconds(evidence)),
@@ -542,6 +564,7 @@ const toolSpan = (mapping: Mapping, fact: ToolFact): OtlpSpan => {
       stringAttribute(metadataKey('tool_call'), group(fact.call)),
       fact.revisionBefore === null ? undefined : stringAttribute(metadataKey('revision_before'), fact.revisionBefore),
       fact.revisionAfter === null ? undefined : stringAttribute(metadataKey('revision_after'), fact.revisionAfter),
+      ...(content === undefined ? [] : toolContentAttributes(content, group)),
       ...(failed ? level('ERROR', message) : warned ? level('WARNING', message) : []),
     ]),
     status: failed ? { code: 2, message } : { code: 1 },
@@ -563,7 +586,70 @@ const runFailure = (fact: OutcomeFact): string => {
  * from the earliest phase the outcome recorded to the run's end, and carries how the run ended; a later outcome of the
  * same run names the same root and is never sent.
  */
-const rootSpans = (mapping: Mapping, fact: OutcomeFact): OtlpSpan[] => {
+/**
+ * A run's root output (LW6): the reply as the assistant's content, then the design the run left, each file's source or,
+ * past the design cap, its size and digest, then one line per check.
+ */
+const rootOutput = (section: Section, group: (value: string) => string): Readonly<Record<string, unknown>> => {
+  const parts = section.messages.flatMap((message) => message.parts);
+  const prose = chatContent(parts.filter((part) => part.kind === 'text' || part.kind === 'media'));
+  const design = parts.flatMap((part): Array<Readonly<Record<string, string | number>>> => {
+    if (part.kind !== 'source') {
+      return [];
+    }
+    if (part.retainedBytes === 0 && part.originalBytes > 0) {
+      return [
+        {
+          path: part.path,
+          bytes: part.originalBytes,
+          ...(part.digest === null ? {} : { digest: group(part.digest) }),
+        },
+      ];
+    }
+    return [{ path: part.path, source: partText(part) }];
+  });
+  const checks = parts.flatMap((part) => (part.kind === 'check' ? [partText(part)] : []));
+  return {
+    role: 'assistant',
+    ...(prose === undefined ? {} : { content: prose }),
+    ...(design.length === 0 ? {} : { design }),
+    ...(checks.length === 0 ? {} : { checks }),
+  };
+};
+
+/** What the run did, so an evaluator of the root alone can judge it (LW6). */
+const turnAttributes = (turn: OutcomeFact['turn'], group: (value: string) => string): OtlpAttribute[] =>
+  turn === undefined
+    ? []
+    : defined([
+        turn.startRevision === null
+          ? undefined
+          : stringAttribute(metadataKey('start_revision'), group(turn.startRevision)),
+        turn.finalRevision === null
+          ? undefined
+          : stringAttribute(metadataKey('final_revision'), group(turn.finalRevision)),
+        intAttribute(metadataKey('files_changed'), turn.filesChanged),
+        intAttribute(metadataKey('checks_passed'), turn.checksPassed),
+        intAttribute(metadataKey('checks_failed'), turn.checksFailed),
+        intAttribute(metadataKey('prior_turns'), turn.priorTurns),
+        intAttribute(metadataKey('model_calls'), turn.modelCalls),
+        intAttribute(metadataKey('tool_calls'), turn.toolCalls),
+        turn.host === null ? undefined : stringAttribute(metadataKey('host'), turn.host),
+        turn.kernel === null ? undefined : stringAttribute(metadataKey('kernel'), turn.kernel),
+        turn.model === null ? undefined : stringAttribute(metadataKey('model'), turn.model),
+      ]);
+
+const rootContentAttributes = (content: ContentPayload, group: (value: string) => string): OtlpAttribute[] =>
+  defined([
+    content.input === null
+      ? undefined
+      : stringAttribute('langfuse.observation.input', JSON.stringify({ messages: chatMessages(content.input) })),
+    content.output === null
+      ? undefined
+      : stringAttribute('langfuse.observation.output', JSON.stringify(rootOutput(content.output, group))),
+  ]);
+
+const rootSpans = (mapping: Mapping, fact: OutcomeFact, content?: ContentPayload): OtlpSpan[] => {
   const { evidence } = mapping;
   const end = startOf(evidence);
   const start = Math.min(end, ...evidence.clocks.intervals.map((item) => item.start));
@@ -592,6 +678,8 @@ const rootSpans = (mapping: Mapping, fact: OutcomeFact): OtlpSpan[] => {
       phases.has('admission') ? intAttribute(metadataKey('admission_ms'), phases.get('admission')!) : undefined,
       phases.has('approval') ? intAttribute(metadataKey('approval_ms'), phases.get('approval')!) : undefined,
       mapping.chat === undefined ? undefined : stringAttribute(metadataKey('chat'), mapping.chat),
+      ...turnAttributes(fact.turn, mapping.group),
+      ...(content === undefined ? [] : rootContentAttributes(content, mapping.group)),
       ...(failed === undefined ? [] : level('ERROR', failed)),
       ...(abandoned === undefined ? [] : level('WARNING', abandoned)),
     ]),
@@ -641,7 +729,11 @@ const transitionalSpan = (mapping: Mapping, name: string, fact: Readonly<Record<
   };
 };
 
-/** Run the export pass over one section: text and readable thinking only, never tool arguments or results (LQ13). */
+/**
+ * Run the export pass over one section (LQ13): emails everywhere text is kept, and the account's name only in prose
+ * (text, readable thinking and check lines), never in a tool's arguments or result or in design source, where a name
+ * match would corrupt code.
+ */
 const redactSection = (section: MaybeSection, identity: PersonalIdentity): MaybeSection =>
   section === null
     ? null
@@ -650,10 +742,11 @@ const redactSection = (section: MaybeSection, identity: PersonalIdentity): Maybe
         messages: section.messages.map((message) => ({
           ...message,
           parts: message.parts.map((part): Part => {
-            if (part.kind !== 'text' && part.kind !== 'thinking') {
+            if (part.kind === 'media') {
               return part;
             }
-            const { text, redacted } = redactPersonal(part.text, identity);
+            const prose = part.kind === 'text' || part.kind === 'thinking' || part.kind === 'check';
+            const { text, redacted } = redactPersonal(part.text, prose ? identity : { email: identity.email });
             return redacted
               ? {
                   ...part,
@@ -729,7 +822,8 @@ export const exportableEvidence = (
  *
  * A fact that is not an operation (a check, a presentation, an instruction) maps to no object: the caller settles such
  * a receipt `superseded` and sends nothing. A content receipt maps as its fact does; a generation's also carries its
- * input, output, parameters and context digests, after the export redaction pass (LW3).
+ * input, output, parameters and context digests (LW3), a tool's its arguments and result, and a root's this turn's
+ * message, reply, design and checks (LW6), each after the export redaction pass.
  *
  * @param evidence - The opened, previously validated evidence.
  * @param context - Server facts about the receipt.
@@ -753,10 +847,10 @@ export const langfuseObservation = (
         return [generationSpan(mapping, fact, payload.plane === 'content' ? payload : undefined)];
       }
       case 'tool': {
-        return [toolSpan(mapping, fact)];
+        return [toolSpan(mapping, fact, payload.plane === 'content' ? payload : undefined)];
       }
       case 'outcome': {
-        return rootSpans(mapping, fact);
+        return rootSpans(mapping, fact, payload.plane === 'content' ? payload : undefined);
       }
       case 'financial': {
         return [transitionalSpan(mapping, settlementObservationName, fact)];

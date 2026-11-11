@@ -610,3 +610,113 @@ it("should parse a provider fact's declared call kind, absent from an older API,
   }
   expect(parse(provider('chat')).ok).toBe(false);
 });
+
+it("should parse a tool fact's name, absent from an older host, and refuse a name of any other shape", () => {
+  /* Untyped, so a name of the wrong shape reaches the parser as a JavaScript caller would send it. */
+  const tool = (extra: Readonly<Record<string, unknown>> = {}): Readonly<Record<string, unknown>> => ({
+    ...fixture(),
+    source: { kind: 'row', chat: 'chat-1', leaderEpoch: 'device-a', sequence: 7, digest },
+    semantic: { kind: 'tool', id: 'call-1' },
+    payload: {
+      plane: 'summary',
+      fact: {
+        kind: 'tool',
+        call: 'call-1',
+        dispatch: 'dispatch-1',
+        toolClass: 'write',
+        toolVersion: null,
+        schemaVersion: null,
+        modelCall: null,
+        outcome: 'completed',
+        revisionBefore: null,
+        revisionAfter: null,
+        ...extra,
+      },
+    },
+  });
+  expect(parse(tool()).ok).toBe(true);
+  expect(parse(tool({ name: 'edit_file' })).ok).toBe(true);
+  expect(parse(tool({ name: 'external-tool' })).ok).toBe(true);
+  for (const name of ['', 'mcp server/tool', 'a'.repeat(65), 'Edit File']) {
+    expect(parse(tool({ name }))).toEqual({ ok: false, code: 'EVIDENCE_INVALID' });
+  }
+  /* A field this contract does not know is refused whole, with the fixed code: how an older API answers a newer host. */
+  expect(parse(tool({ toolName: 'edit_file' }))).toEqual({ ok: false, code: 'EVIDENCE_INVALID' });
+});
+
+/** A run's root content: the user's message in; the reply, the changed design source and a check line out (LW6). */
+const rootContent = (extra: Readonly<Record<string, unknown>> = {}): Readonly<Record<string, unknown>> => ({
+  ...fixture(),
+  semantic: { kind: 'outcome', id: 'run-1' },
+  payload: {
+    plane: 'content',
+    fact: {
+      kind: 'outcome',
+      termination: 'completed',
+      success: 'unknown',
+      assessment: null,
+      turn: {
+        startRevision: null,
+        finalRevision: digest,
+        filesChanged: 1,
+        checksPassed: 1,
+        checksFailed: 0,
+        priorTurns: 2,
+        modelCalls: 3,
+        toolCalls: 4,
+        host: 'browser',
+        kernel: null,
+        model: 'model-1',
+      },
+    },
+    input: { messages: [{ role: 'user', parts: [{ kind: 'text', ...textPart('Make it taller') }] }], omitted: 0 },
+    output: {
+      messages: [
+        {
+          role: 'assistant',
+          parts: [
+            { kind: 'text', ...textPart('Raised it.') },
+            { kind: 'source', path: 'main.ts', digest: null, ...textPart('export default 1;') },
+            {
+              kind: 'source',
+              path: 'big.ts',
+              digest,
+              text: '',
+              originalBytes: 200_000,
+              retainedBytes: 0,
+              redaction: 'truncated',
+            },
+            { kind: 'check', result: 'passed', ...textPart('test_model passed: spec#1') },
+          ],
+        },
+      ],
+      omitted: 0,
+    },
+    context: null,
+    parameters: {},
+    ...extra,
+  },
+});
+
+it("should parse a run's root content with its design source and check lines, and its turn measures", () => {
+  expect(parse(rootContent()).ok).toBe(true);
+  const summary = rootContent() as { payload: { fact: unknown } };
+  expect(parse({ ...rootContent(), payload: { plane: 'summary', fact: summary.payload.fact } }).ok).toBe(true);
+  /* The measures are optional, so an older host's outcome still parses. */
+  const { turn: _turn, ...older } = summary.payload.fact as Readonly<Record<string, unknown>>;
+  expect(parse({ ...rootContent(), payload: { plane: 'summary', fact: older } }).ok).toBe(true);
+  const badCheck = rootContent({
+    output: {
+      messages: [{ role: 'assistant', parts: [{ kind: 'check', result: 'great', ...textPart('x') }] }],
+      omitted: 0,
+    },
+  });
+  expect(parse(badCheck).ok).toBe(false);
+  const badPath = rootContent({
+    output: {
+      messages: [{ role: 'assistant', parts: [{ kind: 'source', path: '', digest: null, ...textPart('x') }] }],
+      omitted: 0,
+    },
+  });
+  expect(parse(badPath).ok).toBe(false);
+});

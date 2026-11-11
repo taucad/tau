@@ -495,6 +495,51 @@ describe('view record binding', () => {
     });
   });
 
+  describe('review round 3 rows', () => {
+    it('should write no pose before the first frame, so the record pose framing holds is the one on file', () => {
+      const saved = posed(initial(), pose([0, 1, 0], 9));
+      const harness = mount({ framed: false, record: saved });
+      harness.drag([1, 0, 0], 4);
+      harness.clock.advance(settle * 4);
+      expect(harness.poseEdits()).toEqual([]);
+      harness.send({ type: 'frameGeometry', bounds: box(2), margin: 0.1, source: 'framing' });
+      harness.send({ type: 'adoptPersistedPose', requestId: 'view-binding-1', pose: cameraPose([0, 1, 0], 9) });
+      expect(harness.view()).toMatchObject({ direction: [0, 1, 0], verticalSpan: 9 });
+      expect(harness.poseEdits()).toEqual([]);
+      expect(harness.applied).toEqual([saved]);
+    });
+
+    it('should not acknowledge a dropped record when it is published again unchanged', () => {
+      const harness = mount();
+      harness.applied.length = 0;
+      harness.press();
+      harness.drag([1, 0, 0], 4);
+      const foreign = posed(initial(), pose([0, 1, 0], 9));
+      harness.publish(foreign);
+      harness.publish(structuredClone(foreign));
+      expect(harness.applied).toEqual([]);
+    });
+
+    it('should drop a waiting foreign section when its record goes missing', () => {
+      const harness = mount();
+      harness.binding.send({ type: 'sectionEdited' });
+      const section: PersistedSectionView = {
+        active: true,
+        cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: false }],
+      };
+      harness.publish(workbenchRecords.view.schema.parse({ ...initial(), section }));
+      harness.binding.send({ type: 'recordPublished', record: undefined, origin: 'foreign', patch: undefined });
+      const sent = harness.graphicsSent().length;
+      const mine: PersistedSectionView = {
+        active: true,
+        cuts: [{ kind: 'plane', plane: 'xy', offset: 1, isFlipped: false }],
+      };
+      harness.binding.send({ type: 'sectionSettled', section: mine });
+      expect(harness.graphicsSent()).toHaveLength(sent);
+      expect(harness.edits.at(-1)?.section).toEqual(mine);
+    });
+  });
+
   describe('camera rule', () => {
     it('should re-save on adoptionDropped only when a person made the pose', () => {
       const person = mount();

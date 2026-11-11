@@ -156,6 +156,8 @@ type BindingContext = Readonly<{
    * `recordPublished` handler writes it from either section state (MC-R26 debt, accepted as for R5 and G1).
    */
   sectionPending: PersistedSectionView | undefined;
+  /** A foreign record whose camera adoption the camera dropped: published again unchanged, it is still not shown. */
+  dropped: WorkbenchView | undefined;
   /** The publication the acknowledgement waits for. */
   applying: WorkbenchView | undefined;
   /** Request ids issued, for the next one. */
@@ -259,7 +261,7 @@ type CameraChanged = Extract<ViewRecordBindingEvent, { type: 'cameraChanged' }>;
 
 /* The camera rule (D20, I7), with the pose captured with the change that produced it. */
 const observeCamera = (
-  { context, event, editRecord }: Handled<CameraChanged>,
+  { context, event, editRecord, framed: wasFramed }: Handled<CameraChanged> & Readonly<{ framed: boolean }>,
   enq: BindingEnqueue,
 ): Readonly<{ framed: boolean; context: BindingContext }> | undefined => {
   const { source, revision } = event.change;
@@ -274,6 +276,11 @@ const observeCamera = (
   const framed = framingSources.has(source);
   if (!personSources.has(source) || revision <= context.lastWrittenRevision) {
     // Automatic framing, `persisted`, `viewport` and `bounds` are never written (D20, I7).
+    return { framed, context: observed };
+  }
+  if (!wasFramed) {
+    // Before the entry's first frame nothing is written (as the hook did): framing still holds the record's pose and
+    // applies it after that frame, so a move of the empty canvas would put a pose on file the view then leaves.
     return { framed, context: observed };
   }
   const owners: ViewOwners = { ...context.owners, camera: event.pose, fieldOfView: event.verticalFieldOfView };
@@ -291,7 +298,8 @@ const observeRecord = (
   if (record === undefined) {
     // The file is gone or refused: nothing to adopt. The last record stays the base, so a person's later edit recreates a
     // file another window deleted (as the hook did), and the next record is compared with it, not adopted whole.
-    return { ...context, applying: undefined };
+    // A section still waiting belonged to that record, so the person's settled cuts are written again instead.
+    return { ...context, applying: undefined, sectionPending: undefined };
   }
   if (event.origin === 'own') {
     // I6: this view's own write is never adopted. A different section it carried supersedes a foreign one still
@@ -305,6 +313,7 @@ const observeRecord = (
         ...context,
         record,
         applying: record,
+        dropped: undefined,
         ...(supersedes ? { sectionPending: undefined, owners: { ...context.owners, section: record.section } } : {}),
       },
       enq,
@@ -329,7 +338,16 @@ const observeRecord = (
       sectionPending = undefined;
     }
   }
-  const handled: BindingContext = { ...context, record, owners, sectionPending, applying: record };
+  // A record the camera dropped, published again unchanged (a forced read), asks nothing and is still not shown.
+  const stillDropped = context.dropped !== undefined && changes.camera === undefined && same(context.dropped, record);
+  const handled: BindingContext = {
+    ...context,
+    record,
+    owners,
+    sectionPending,
+    applying: stillDropped ? undefined : record,
+    dropped: stillDropped ? context.dropped : undefined,
+  };
   return acknowledged(
     changes.camera === undefined ? handled : requestCamera({ context: handled, camera: changes.camera, value }, enq),
     enq,
@@ -445,7 +463,7 @@ type Answer = Extract<ViewRecordBindingEvent, { type: 'adoptionApplied' | 'adopt
 
 /* The camera's answer to an adoption; a drop re-saves the person's pose (D15, `AdoptDropped:resaved`). */
 const answerAdoption = (
-  { context, event, editRecord }: Handled<Answer>,
+  { context, event, editRecord, framed }: Handled<Answer> & Readonly<{ framed: boolean }>,
   enq: BindingEnqueue,
 ): BindingContext | undefined => {
   if (!context.adoptions.some(({ requestId }) => requestId === event.requestId)) {
@@ -457,9 +475,10 @@ const answerAdoption = (
     return acknowledged({ ...context, adoptions }, enq);
   }
   // A dropped adoption means the view never showed the record, so it is not acknowledged as applied.
-  const answered: BindingContext = { ...context, adoptions, applying: undefined };
+  const answered: BindingContext = { ...context, adoptions, applying: undefined, dropped: context.record };
   const { pose } = context;
-  if (pose === undefined || !personSources.has(pose.by)) {
+  if (!framed || pose === undefined || !personSources.has(pose.by)) {
+    // Before the first frame nothing is written; framing still applies the record's pose after that frame.
     // Dropped over a machine-made pose, which is never saved (I7): the file keeps the foreign pose.
     return answered;
   }
@@ -496,6 +515,7 @@ const viewRecordBindingDefinition = setup({
     lastWrittenRevision: 0,
     adoptions: [],
     sectionPending: undefined,
+    dropped: undefined,
     applying: undefined,
     requests: 0,
     fault: undefined,
@@ -513,12 +533,12 @@ const viewRecordBindingDefinition = setup({
       }
       return { context: edited({ context, editRecord: actions.editRecord, owners }, enq) };
     }),
-    adoptionApplied: refines('Observe', ({ context, event, actions }, enq) => {
-      const next = answerAdoption({ context, event, editRecord: actions.editRecord }, enq);
+    adoptionApplied: refines('Observe', ({ context, event, actions, value }, enq) => {
+      const next = answerAdoption({ context, event, editRecord: actions.editRecord, framed: isFramed(value) }, enq);
       return next === undefined ? {} : { context: next };
     }),
-    adoptionDropped: refines('Observe', ({ context, event, actions }, enq) => {
-      const next = answerAdoption({ context, event, editRecord: actions.editRecord }, enq);
+    adoptionDropped: refines('Observe', ({ context, event, actions, value }, enq) => {
+      const next = answerAdoption({ context, event, editRecord: actions.editRecord, framed: isFramed(value) }, enq);
       return next === undefined ? {} : { context: next };
     }),
   },
@@ -529,7 +549,7 @@ const viewRecordBindingDefinition = setup({
         awaitingFrame: {
           on: {
             cameraChanged: refines('Changed', ({ context, event, actions }, enq) => {
-              const observed = observeCamera({ context, event, editRecord: actions.editRecord }, enq);
+              const observed = observeCamera({ context, event, editRecord: actions.editRecord, framed: false }, enq);
               if (observed === undefined) {
                 return {};
               }
@@ -540,7 +560,7 @@ const viewRecordBindingDefinition = setup({
         framed: {
           on: {
             cameraChanged: refines('Changed', ({ context, event, actions }, enq) => {
-              const observed = observeCamera({ context, event, editRecord: actions.editRecord }, enq);
+              const observed = observeCamera({ context, event, editRecord: actions.editRecord, framed: true }, enq);
               return observed === undefined ? {} : { context: observed.context };
             }),
           },

@@ -53,6 +53,7 @@ import { createMachineToolRegistry, isMachineToolName } from '#registry/machine-
 import { createRuntimeWorkbenchClient } from '#registry/workbench-client.js';
 import { createShellSource, invokeShell } from '#registry/shell-tool.js';
 import type { ShellSource } from '#registry/shell-tool.js';
+import { withToolResultOffload } from '#registry/tool-result-offload.js';
 import { invokeWebTool, webToolDefinitions, webToolNames } from '#registry/web-tools.js';
 import type { WebResearchClient } from '#registry/web-tools.js';
 
@@ -687,6 +688,36 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
   }
   const shellOf = createShellSource(options.shell);
 
+  const dispatch = async (invocation: HostToolInvocation): Promise<HostToolResult> => {
+    assertNotAborted(invocation.signal);
+    if (invocation.toolName === toolName.shell) {
+      const shell = shellOf();
+      return shell === undefined
+        ? {
+            content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
+            isError: true,
+          }
+        : invokeShell(shell.client, invocation);
+    }
+    if (webToolNames.has(invocation.toolName)) {
+      return web === undefined
+        ? {
+            content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
+            isError: true,
+          }
+        : invokeWebTool(web, invocation);
+    }
+    if (isMachineToolName(invocation.toolName)) {
+      return (
+        machineRegistry?.invoke(invocation) ?? {
+          content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
+          isError: true,
+        }
+      );
+    }
+    return invokeRpcTool(invocation);
+  };
+
   return {
     list: () => {
       const shell = shellOf();
@@ -694,34 +725,8 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
     },
     /* Only the machine tools ask for approvals (D5). */
     answerApproval: async (answer) => machineRegistry?.answerApproval?.(answer),
-    async invoke(invocation) {
-      assertNotAborted(invocation.signal);
-      if (invocation.toolName === toolName.shell) {
-        const shell = shellOf();
-        return shell === undefined
-          ? {
-              content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
-              isError: true,
-            }
-          : invokeShell(shell.client, invocation);
-      }
-      if (webToolNames.has(invocation.toolName)) {
-        return web === undefined
-          ? {
-              content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
-              isError: true,
-            }
-          : invokeWebTool(web, invocation);
-      }
-      if (isMachineToolName(invocation.toolName)) {
-        return (
-          machineRegistry?.invoke(invocation) ?? {
-            content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
-            isError: true,
-          }
-        );
-      }
-      return invokeRpcTool(invocation);
-    },
+    invoke: withToolResultOffload(dispatch, {
+      fileSystemFor: (signal) => (options.recordFileSystemFor ?? options.fileSystemFor)(signal),
+    }),
   };
 };

@@ -12,7 +12,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
 import { linuxInstallation } from '#shared/linux-installation.js';
 import { promisify } from 'node:util';
-import { defaultPayloadStore } from '@taucad/host';
+import { defaultDependencyStore } from '@taucad/host';
 import { assertQualificationConsumerScope, fetchQualificationCandidates } from './qualification-candidates.mjs';
 import { qualificationArtifactObjects, qualificationFeed } from './qualification-feeds.mjs';
 import { startQualificationMirrorProcess } from './qualification-mirror-process.mjs';
@@ -355,10 +355,10 @@ const main = async (): Promise<void> => {
   if (linuxConsumer && channel !== 'staging') {
     throw new Error('Linux clean-host acceptance is staging only');
   }
-  const store = channel === 'staging' ? join(profile, 'config/payloads') : defaultPayloadStore();
+  const store = channel === 'staging' ? join(profile, 'config/dependencies') : defaultDependencyStore();
   const coldEntries = await files.readdir(join(store, 'closures/sha256'));
   if (coldEntries.length > 0) {
-    throw new Error('First-use qualification requires an initially cold payload store');
+    throw new Error('First-use qualification requires an initially cold dependency store');
   }
   const readJson = async (path: string): Promise<unknown> => {
     const bytes = await files.read(path);
@@ -600,6 +600,8 @@ const main = async (): Promise<void> => {
                   TAU_QUALIFICATION_REPORT_GL_RENDERER: '1',
                 },
                 killAfter: 1_200_000,
+                // `--import @oxc-node/core/register` resolves from the working directory: run in this checkout.
+                cwd: process.cwd(),
               });
               for (const suffix of ['', '.png', '.failure.json', '.failure.png']) {
                 const bytes = await linuxConsumer.readFile(join(consumerRenderer, `${fileName}${suffix}`));
@@ -612,7 +614,14 @@ const main = async (): Promise<void> => {
               }
             })()
           : execFileAsync(process.execPath, rendererArguments, {
-              env: { ...process.env, ...rendererEnv },
+              env: {
+                ...process.env,
+                ...rendererEnv,
+                /* The reinstalled app's attach stalls after `<ws connected>` with every target still answering (run
+                 * 42563760774 macos-zip-arm64): Playwright's own CDP traffic for this step names the command that
+                 * never got its answer. Diagnostics only; the step's behaviour and limits are unchanged. */
+                ...(action === 'reinstall-ui' ? { DEBUG: 'pw:protocol', DEBUG_FILE: `${output}.protocol.txt` } : {}),
+              },
               maxBuffer: 8 * 1024 * 1024,
               timeout: 1_200_000,
             })

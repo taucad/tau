@@ -6,9 +6,9 @@ import type { RevisionRow } from '@taucad/revisions';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExportFile } from '@taucad/types';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
-import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
+import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 
 let registeredItems: CommandPaletteItem[] = [];
 let isTauDebugEnabled = false;
@@ -101,7 +101,7 @@ vi.mock('@taucad/viewer/services/graphics-camera-registry', () => ({
 
 vi.mock('@taucad/utils/file', () => ({ downloadBlob }));
 
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: {
     promise: vi.fn(
       async (

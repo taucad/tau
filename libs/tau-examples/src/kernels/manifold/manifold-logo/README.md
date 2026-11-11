@@ -86,10 +86,10 @@ pnpm exec tsx libs/tau-examples/src/kernels/manifold/manifold-logo/generate-logo
 pnpm nx check-thumbnails tau-examples
 ```
 
-The renderer writes two identical copies: the canonical `manifold.svg` here, and `apps/ui/app/components/icons/raw/manifold.svg`, so the UI's kernel icon cannot drift from the part it is a render of. After regenerating, rebuild the sprite:
+The renderer writes two identical copies: the canonical `manifold.svg` here, and `apps/libs/ui-kit/src/icons/raw/manifold.svg`, so the UI's kernel icon cannot drift from the part it is a render of. After regenerating, rebuild the sprite:
 
 ```bash
-pnpm nx run ui:generate-svg-sprite
+pnpm nx run ui-kit:generate-svg-sprite
 ```
 
 ## Benchmark Prompt

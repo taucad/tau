@@ -19,7 +19,7 @@ import type * as useSettingsDialogModule from '#hooks/use-settings-dialog.js';
 import type * as shareProvidersModule from '#lib/share-providers.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { store as preferenceStore } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { metaConfig } from '#constants/meta.constants.js';
 
 const portableProviderPublish = vi.hoisted(() => vi.fn());
@@ -121,7 +121,7 @@ const publishFacet = (facet: Partial<(typeof revisionStatusHarness)['status']['p
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: {
     success: (...args: unknown[]) => {
       toastSuccessMock(...args);

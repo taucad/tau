@@ -9,16 +9,17 @@
 import type { DevicePreference, ReportingConsent, ViewerEventInput } from '@taucad/telemetry/client';
 import { onViewerEvent } from '@taucad/viewer/lib/renderer-telemetry';
 import { tauTelemetryHostCloud } from '#cloud/telemetry-host.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { metaConfig } from '#constants/meta.constants.js';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { store } from '#hooks/use-cookie.js';
 import { readBuildRelease } from '#lib/build-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
+import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import { reportRuntimeFailures } from '#lib/runtime-failure-reporting.js';
-import { isGlobalPrivacyControlEnabled } from '#lib/global-privacy-control.lib.js';
+import { recordViewerWork } from '#lib/kill-work-context.js';
+import { isGlobalPrivacyControlEnabled } from '@taucad/ui-core/lib/global-privacy-control.lib';
 import { createPageTelemetry } from '#telemetry/page-telemetry.js';
 import type { ObservedRuntimeClient, PageCaller, PageTelemetry } from '#telemetry/page-telemetry.js';
 import { osClass, platformClass } from '#telemetry/platform-class.js';
@@ -103,7 +104,12 @@ export const pageTelemetry = (): PageTelemetry | undefined => {
   /* FR-17: the viewer emits closed events and never reports; the page decides. */
   const viewerPage = page;
   onViewerEvent((event) => {
-    viewerPage.recordViewerEvent(event);
+    /* Crash capture: every viewer step reaches the local tab-kill marker; `upload-start` is a phase marker only. */
+    recordViewerWork(event);
+    const { event: name, ...rest } = event;
+    if (name !== 'upload-start') {
+      viewerPage.recordViewerEvent({ ...rest, event: name });
+    }
   });
   return page;
 };

@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { Activity, Check, ChevronDown } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelector } from '@xstate/react';
@@ -16,8 +17,8 @@ import type {
   SpanNode,
   TelemetryTrace,
   ViewMode,
-} from '#routes/w.$workspace.$project/chat-kernel-types.js';
-import { defaultDisplaySettings } from '#routes/w.$workspace.$project/chat-kernel-types.js';
+} from '@taucad/project-workspace/utils/chat-kernel-types';
+import { defaultDisplaySettings } from '@taucad/project-workspace/utils/chat-kernel-types';
 import {
   applyVisibility,
   buildPipelineLanes,
@@ -147,7 +148,9 @@ function PipelineLanes({
   return (
     <section aria-label='Render pipeline' className='shrink-0 rounded-lg border border-border bg-muted/15 p-2'>
       <div className='mb-1 flex items-center justify-between text-xs'>
-        <h3 className='font-medium text-foreground'>Render pipeline</h3>
+        <Heading level={3} variant='overline' className='text-foreground'>
+          Render pipeline
+        </Heading>
         <span className='font-mono text-muted-foreground'>0 → {formatDuration(duration)}</span>
       </div>
       <div className='flex flex-col gap-1.5'>

@@ -9,6 +9,7 @@ Use Node built-ins or already-declared dependencies, explicit input validation a
 - `pnpm docs:validate` runs `scripts:validate-frontmatter` for policy, research, handbook and incident documents.
 - `pnpm nx run scripts:validate-agent-config` checks authored boundaries, budgets, skill routing, retired producers and plugin catalog placement without model calls.
 - `pnpm nx run scripts:validate-agent-lanes` checks live-job refusal and byte attribution in the optional lane helper.
+- `pnpm nx run scripts:validate-nx-guard` runs the CI Nx guard and its remote cache relay (`.github/actions/setup-nx/nx-guard.ts`) against a fake cache Worker.
 - `pnpm nx run scripts:validate-tsgo-runtime-references` checks the runtime TypeScript project boundary.
 - `pnpm nx test scripts --watch=false` and the scripts lint/typecheck targets verify this project. Scoped lint file paths are relative to `scripts/`.
 

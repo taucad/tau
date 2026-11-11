@@ -4,12 +4,18 @@
 #
 # Callers download the `picogk-browser-host` artifact and point `PICOGK_BROWSER_ASSETS_ROOT` at it:
 #   - `picogk-browser-archive.yml` proves it with `ui-e2e:test:e2e:picogk` on every archive run.
-#   - `deploy-ui.yml` builds staging and production with it.
+# `deploy-ui.yml` no longer embeds it: staging and production load the pinned bundle by digest from
+# their dependency mirror (`PICOGK_BROWSER_MIRROR_BASE`).
 #
 # The bundle depends only on the PicoVoxel builder and the inputs the key hashes, so a prepared bundle
 # is cached under that key and a deploy that changed none of them reuses it without rebuilding the
 # archives. A rebuild from the same inputs is byte-identical (`prepare-browser-host.mts` publishes
 # without source control metadata), so even a cache miss keeps the bundle's content address.
+#
+# `picogk-browser-host-publish.yml` is the producer (charter picogk-interim-digest-consumer, W2): it
+# asks for the key alone (`key-only`) to compare it with `packages/plugins/picogk/browser-host.pin.json`,
+# and on a change asks for a `reproduce` build, which prepares the host twice from the same archives
+# without the cache and refuses unless every output file is byte-identical (I4).
 name: PicoGK browser host
 on:
   workflow_call:
@@ -18,10 +24,21 @@ on:
         description: The caller already built `picogk-browser-package` in this run, so use it rather than building the archives again (their artifact names would collide).
         type: boolean
         default: false
+      key-only:
+        description: Compute the inputs key and stop, building and downloading nothing.
+        type: boolean
+        default: false
+      reproduce:
+        description: Ignore the cache and prepare the host twice from the same archives on separate runners, failing unless both bundles are byte-identical. The first is uploaded as `artifact` and saved to the cache.
+        type: boolean
+        default: false
     outputs:
       artifact:
         description: The artifact holding the prepared bundle (the directory to name in PICOGK_BROWSER_ASSETS_ROOT).
         value: ${{ jobs.key.outputs.artifact }}
+      key:
+        description: The bundle's inputs key, the `inputsKey` that browser-host.pin.json records.
+        value: ${{ jobs.key.outputs.key }}
 permissions:
   contents: read
 env:
@@ -66,7 +83,7 @@ jobs:
 
   archive:
     needs: key
-    if: needs.key.outputs.hit != 'true' && !inputs.package-from-run
+    if: ${{ !inputs.key-only && (needs.key.outputs.hit != 'true' || inputs.reproduce) && !inputs.package-from-run }}
     uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@9440db9a52109efbc5a4481cb25022328d9eaf31
     with:
       picovoxel-ref: 9440db9a52109efbc5a4481cb25022328d9eaf31
@@ -74,15 +91,20 @@ jobs:
 
   host:
     needs: [key, archive]
-    if: ${{ !cancelled() && needs.key.result == 'success' && (needs.key.outputs.hit == 'true' || inputs.package-from-run || needs.archive.result == 'success') }}
+    if: ${{ !cancelled() && !inputs.key-only && needs.key.result == 'success' && ((needs.key.outputs.hit == 'true' && !inputs.reproduce) || inputs.package-from-run || needs.archive.result == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    strategy:
+      matrix:
+        # A `reproduce` run prepares a second, independent bundle from the same archives to compare.
+        build: ${{ fromJSON(inputs.reproduce && '["first","second"]' || '["first"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Restore the prepared bundle
         id: cache
+        if: ${{ !inputs.reproduce }}
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: out/picogk-browser-host/bundle
@@ -182,13 +204,38 @@ jobs:
           pnpm nx run picogk:prepare-browser-host out/host-config.json
           test -f out/picogk-browser-host/bundle/assets-manifest.json
       - name: Keep the bundle for the next run with the same inputs
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.cache.outputs.cache-hit != 'true' && matrix.build == 'first'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: out/picogk-browser-host/bundle
           key: ${{ needs.key.outputs.key }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: picogk-browser-host
+          name: ${{ matrix.build == 'first' && 'picogk-browser-host' || 'picogk-browser-host-second' }}
           path: out/picogk-browser-host/bundle/
           if-no-files-found: error
+
+  # Charter I4: a host is pinned only when two preparations agree on every output file, the
+  # manifest and its receipt included.
+  reproduce:
+    needs: host
+    if: inputs.reproduce
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: picogk-browser-host
+          path: out/first
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: picogk-browser-host-second
+          path: out/second
+      - name: Refuse unless both builds are byte-identical
+        run: node scripts/src/picogk-browser-host-pin.ts compare out/first out/second

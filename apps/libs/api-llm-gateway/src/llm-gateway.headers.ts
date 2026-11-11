@@ -3,15 +3,23 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ZodType } from 'zod';
 import { financialIdentitySchema } from '@taucad/billing';
-import { turnGaps, turnSteps } from '@taucad/telemetry';
+import { agentPlacements, kernelIds, turnGaps, turnSteps } from '@taucad/telemetry';
 import type { FinancialActivityKind } from '@taucad/billing';
 import { LlmGatewayError } from '#llm-gateway.error.js';
 import type { LlmGatewayErrorType } from '#llm-gateway.error.js';
 import { httpHeader } from '@taucad/api-core/constants/http-header';
-import type { TurnTelemetry } from '#model-invocation.types.js';
+import type { HostLabels, TurnTelemetry } from '#model-invocation.types.js';
+import { gatewayModelRoutes } from '#providers/provider-gateway.js';
 
 const allowedAnthropicVersions = new Set(['2023-06-01']);
-const allowedAnthropicBetas = new Set(['fine-grained-tool-streaming-2025-05-14', 'interleaved-thinking-2025-05-14']);
+const allowedAnthropicBetas = new Set([
+  'fine-grained-tool-streaming-2025-05-14',
+  'interleaved-thinking-2025-05-14',
+  // Admits an effort level carried as an empty `system`-role message in the transcript.
+  'mid-conversation-output-config-2026-07-01',
+  // Admits `thinking.block_binding` and the provider's report of the blocks it left out.
+  'thinking-binding-controls-2026-08-01',
+]);
 
 /** Rejects query inputs that are absent from the funded request identity. */
 export const assertNoQuery = (request: FastifyRequest): void => {
@@ -169,6 +177,48 @@ export const readTurnTelemetry = (request: FastifyRequest): { readonly turn?: Tu
     turn: {
       step: readOptionalHeader(stepHeader, assertableTurnStep) ?? 'unknown',
       gap: readOptionalHeader(gapHeader, assertableTurnGap) ?? 'unknown',
+    },
+  };
+};
+
+const assertableHostKind = z.enum(agentPlacements);
+const assertableKernel = z.enum(kernelIds);
+/* A release label as the hosts report one: a short or full commit, or the desktop app's semver. */
+const assertableBuild = z.string().regex(/^(?:[\da-f]{7,40}|\d{1,6}\.\d{1,6}\.\d{1,6})$/u);
+let catalogRouteIds: ReadonlySet<string> | undefined;
+const assertableModel = z.string().refine((value) => {
+  catalogRouteIds ??= new Set(gatewayModelRoutes().map((route) => route.routeId));
+  return catalogRouteIds.has(value);
+});
+
+/**
+ * The host labels the agent host asserts on a gateway step (LW17): host kind, host build, kernel and requested model.
+ * Like the turn labels these never refuse: each is checked against a closed vocabulary (the agent placements, a
+ * release label, the product kernel ids, this catalog's route ids) and becomes `unknown` outside it, and a header that
+ * was not sent leaves its label unset, so a helper or direct call carries none. They are client-asserted (LR13) and
+ * feed the provider fact only, never admission, price, routing or the request digest.
+ *
+ * @param request - The incoming gateway request.
+ * @returns The asserted labels as a member ready to spread into a relay input.
+ */
+export const readHostLabels = (request: FastifyRequest): { readonly hostLabels?: HostLabels } => {
+  const read = <T>(name: string, contract: ZodType<T>): { readonly value: T | 'unknown' } | undefined => {
+    const value = readSingleHeader(request, name);
+    return value === undefined ? undefined : { value: readOptionalHeader(value, contract) ?? 'unknown' };
+  };
+  const host = read(httpHeader.xTauHostKind, assertableHostKind);
+  const build = read(httpHeader.xTauHostBuild, assertableBuild);
+  const kernel = read(httpHeader.xTauKernel, assertableKernel);
+  const model = read(httpHeader.xTauModel, assertableModel);
+  if (host === undefined && build === undefined && kernel === undefined && model === undefined) {
+    return {};
+  }
+  return {
+    hostLabels: {
+      ...(host === undefined ? {} : { host: host.value }),
+      ...(build === undefined ? {} : { build: build.value }),
+      ...(kernel === undefined ? {} : { kernel: kernel.value }),
+      ...(model === undefined ? {} : { model: model.value }),
     },
   };
 };

@@ -1,10 +1,33 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'node:crypto';
 import { Resend } from 'resend';
 import type { Environment } from '@taucad/api-core';
-import type { EmailMessage } from '#email.types.js';
+import type { EmailMessage, EmailTemplateKind } from '#email.types.js';
 import { renderEmailTemplate, subjectForEmailTemplate } from '#email-templates.js';
 import { assertEmailTemplateUrlAllowed } from '#email-link-builder.js';
+
+/** Why an email is sent, which decides the address it comes from (email readiness, Part C). */
+type SenderClass = 'identity' | 'notifications' | 'billing';
+
+/** Exhaustive, so a new template kind cannot ship without choosing its sender. */
+const senderClassByKind: Record<EmailTemplateKind, SenderClass> = {
+  'verify-email': 'identity',
+  'account-exists': 'identity',
+  'magic-link': 'identity',
+  'reset-password': 'identity',
+  'password-changed': 'identity',
+  'publication-invite': 'notifications',
+  'payment-failed': 'billing',
+  'auto-reload-disabled': 'billing',
+  'auto-reload-action-required': 'billing',
+};
+
+const senderVariableByClass = {
+  identity: 'TAU_EMAIL_FROM',
+  notifications: 'TAU_EMAIL_FROM_NOTIFICATIONS',
+  billing: 'TAU_EMAIL_FROM_BILLING',
+} as const satisfies Record<SenderClass, keyof Environment>;
 
 @Injectable()
 export class EmailService {
@@ -33,12 +56,15 @@ export class EmailService {
     }
 
     const response = await this.resend.emails.send({
-      from: this.configService.get('TAU_EMAIL_FROM', { infer: true }),
+      from: this.senderFor(templateKind),
       to: message.to,
       replyTo: this.configService.get('TAU_EMAIL_REPLY_TO', { infer: true }),
       subject,
       html: rendered.html,
       text: rendered.text,
+      // A unique reference per send stops Gmail threading same-subject transactional emails into one conversation,
+      // where it trims repeated content and buries the newest link (email readiness R8).
+      headers: { 'X-Entity-Ref-ID': randomUUID() },
     });
 
     if (response.error) {
@@ -79,7 +105,23 @@ export class EmailService {
   }
 
   public async sendVerification(args: { readonly email: string; readonly url: string }): Promise<void> {
-    await this.send({ to: args.email, template: { kind: 'verify-email', ...args } });
+    await this.send({
+      to: args.email,
+      template: { kind: 'verify-email', ...args },
+    });
+  }
+
+  /** Answers a sign-up for an address that already has a verified account, instead of silence. */
+  public async sendAccountExists(args: {
+    readonly email: string;
+    readonly url: string;
+    readonly resetUrl: string;
+    readonly device?: string;
+  }): Promise<void> {
+    await this.send({
+      to: args.email,
+      template: { kind: 'account-exists', ...args },
+    });
   }
 
   public async sendPaymentFailed(args: {
@@ -111,6 +153,17 @@ export class EmailService {
     readonly url: string;
   }): Promise<void> {
     await this.send({ to: args.recipientEmail, template: { kind: 'publication-invite', ...args } });
+  }
+
+  /**
+   * The From address for a template kind. An unset or empty purpose sender falls back to `TAU_EMAIL_FROM`
+   * here rather than only in the Nest schema, because the billing worker builds this service from raw
+   * `process.env`, where a missing key reads as `''`.
+   */
+  private senderFor(kind: EmailTemplateKind): string {
+    const fallback = this.configService.get('TAU_EMAIL_FROM', { infer: true });
+    const sender = this.configService.get(senderVariableByClass[senderClassByKind[kind]], { infer: true });
+    return sender === undefined || sender.trim() === '' ? fallback : sender;
   }
 
   private describeRecipient(email: string): string {

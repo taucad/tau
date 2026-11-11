@@ -10,7 +10,7 @@
  */
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
-import { findLogLeaks } from '#api/git/worker/log-leaks.js';
+import { findLogLeaks } from '@taucad/api-git-core/worker/log-leaks';
 
 const [path] = process.argv.slice(2);
 let sample: string;

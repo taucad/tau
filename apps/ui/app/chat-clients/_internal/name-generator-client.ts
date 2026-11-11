@@ -4,7 +4,7 @@ import { idPrefix } from '@taucad/types/constants';
 import type { MyUIMessage } from '@taucad/chat';
 import { messageRole } from '@taucad/chat/constants';
 import { ENV } from '#environment.config.js';
-import { parseErrorForPersistence } from '#utils/error.utils.js';
+import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
 import { recordApiRequestId } from '#lib/api-request-id.js';
 
 /**

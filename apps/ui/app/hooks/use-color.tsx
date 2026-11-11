@@ -10,8 +10,8 @@ import {
   convertRgbToHsl,
 } from 'culori/fn';
 import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
-import { hueCssVariable, defaultHue, defaultLightness, defaultChroma } from '#constants/color.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
+import { hueCssVariable, defaultHue, defaultLightness, defaultChroma } from '@taucad/ui-core/constants/color.constants';
 
 const getRootColorStyle = (hue: number) => {
   return { [hueCssVariable]: `${hue}deg` };

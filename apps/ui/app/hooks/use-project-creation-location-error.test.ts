@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
+import { WorkspaceDirectoryRequiredError } from '@taucad/ui-core/filesystem/workspace-errors';
 
 type TestHandle = { readonly name: string };
 type ToastAction = { readonly label: string; readonly onClick: () => void | Promise<void> };
@@ -32,7 +32,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 vi.mock('#utils/workspace-telemetry.utils.js', () => ({
   useWorkspaceTelemetry: () => ({ projectCreateWebaccessBlocked: mockBlocked }),
 }));
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { error: mockToastError, success: mockToastSuccess },
 }));
 

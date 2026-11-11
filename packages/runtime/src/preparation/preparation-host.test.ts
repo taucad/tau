@@ -22,7 +22,7 @@ import type {
   PrepareOutcome,
   SealClosureRefusal,
 } from '#preparation/preparation-host.types.js';
-import type { DependencyPayload, DependencyVariant, HostIndicators } from '#preparation/preparation.types.js';
+import type { DependencyFile, DependencyVariant, HostIndicators } from '#preparation/preparation.types.js';
 
 import {
   createFakeRegistry,
@@ -30,11 +30,11 @@ import {
   linuxHost,
   linuxTarget,
   originOf,
-  payloadOf,
+  dependencyFileOf,
   pluginOf,
-  pythonPayloadBytes,
-  pythonPayloads,
-  servePayloads,
+  pythonFileBytes,
+  pythonFiles,
+  serveDependencyFiles,
   sha256Hex,
   tarGz,
   temporaryDirectory,
@@ -54,8 +54,8 @@ type Scenario = {
   readonly store: string;
   readonly hostPath: string;
   readonly registry: FakeRegistry;
-  readonly bytes: ReturnType<typeof pythonPayloadBytes>;
-  readonly payloads: readonly [DependencyPayload, ...DependencyPayload[]];
+  readonly bytes: ReturnType<typeof pythonFileBytes>;
+  readonly dependencyFiles: readonly [DependencyFile, ...DependencyFile[]];
   readonly host: PreparationHost;
   readonly events: PluginPreparation[];
   /** Another host over the same store, as a second process or a restarted one sees it. */
@@ -80,7 +80,7 @@ afterEach(async () => {
 const scenario = async (
   options: {
     readonly variants?: (
-      payloads: readonly [DependencyPayload, ...DependencyPayload[]],
+      dependencyFiles: readonly [DependencyFile, ...DependencyFile[]],
     ) => readonly DependencyVariant[];
     readonly serve?: boolean;
     readonly host?: Partial<CreatePreparationHostOptions>;
@@ -93,18 +93,22 @@ const scenario = async (
   const store = join(directory.path, 'store');
   const hostPath = join(directory.path, 'tau-host.mjs');
   await writeFile(hostPath, '// host installation\n');
-  const bytes = pythonPayloadBytes();
-  const payloads = pythonPayloads(bytes);
+  const bytes = pythonFileBytes();
+  const dependencyFiles = pythonFiles(bytes);
   const plugin = {
-    ...pluginOf(packageName, { engine: options.variants?.(payloads) ?? [{ target: linuxTarget, payloads }] }),
+    ...pluginOf(packageName, {
+      engine: options.variants?.(dependencyFiles) ?? [{ target: linuxTarget, files: dependencyFiles }],
+    }),
     ...(options.seal === undefined ? {} : { seal: options.seal }),
     ...(options.launchSet === undefined ? {} : { launchSet: options.launchSet }),
   };
   const registry = createFakeRegistry();
   if (options.serve !== false) {
-    servePayloads(
+    serveDependencyFiles(
       registry,
-      payloads.map((payload) => [payload, bytes[payload.name as keyof typeof bytes]] as const),
+      dependencyFiles.map(
+        (dependencyFile) => [dependencyFile, bytes[dependencyFile.name as keyof typeof bytes]] as const,
+      ),
     );
   }
   const reopen = (overrides: Partial<CreatePreparationHostOptions> = {}): PreparationHost => {
@@ -128,7 +132,7 @@ const scenario = async (
   host.on('preparation', (event) => {
     events.push(event);
   });
-  return { store, hostPath, registry, bytes, payloads, host, events, reopen };
+  return { store, hostPath, registry, bytes, dependencyFiles, host, events, reopen };
 };
 
 const prepare = async (
@@ -202,7 +206,7 @@ const expectPreparationError = async (
 describe('createPreparationHost', () => {
   describe('happy path', () => {
     it('should seal a receipt that lists every file and prepare again with zero fetch calls', async () => {
-      const { store, registry, payloads, host, events, reopen } = await scenario();
+      const { store, registry, dependencyFiles, host, events, reopen } = await scenario();
 
       const receipt = readyReceipt(await prepare(host));
 
@@ -220,13 +224,18 @@ describe('createPreparationHost', () => {
         ]),
       );
       expect(receipt.files.find((row) => row.path === 'python/bin/python3')?.symlinkTarget).toBe('python3.13');
-      expect(receipt.closureIntegrity).toBe(await computeClosureIntegrity(payloads));
+      expect(receipt.closureIntegrity).toBe(await computeClosureIntegrity(dependencyFiles));
       expect(receipt.treeIntegrity).toBe(await computeTreeIntegrity(receipt.files));
       expect(receipt.root).toBe(join(store, 'closures', 'sha256', sha256Key(receipt.closureIntegrity)));
-      expect(receipt.payloads.map(({ name, acquiredFrom }) => [name, acquiredFrom])).toEqual(
-        payloads.map((payload) => [payload.name, { kind: 'origin', location: originOf(payload.name) }]),
+      expect(receipt.dependencyFiles.map(({ name, acquiredFrom }) => [name, acquiredFrom])).toEqual(
+        dependencyFiles.map((dependencyFile) => [
+          dependencyFile.name,
+          { kind: 'origin', location: originOf(dependencyFile.name) },
+        ]),
       );
-      expect(registry.calls.toSorted()).toEqual(payloads.map((payload) => originOf(payload.name)).toSorted());
+      expect(registry.calls.toSorted()).toEqual(
+        dependencyFiles.map((dependencyFile) => originOf(dependencyFile.name)).toSorted(),
+      );
       expect(await entriesOf(join(store, 'tmp'))).toEqual([]);
       expect(events.at(-1)?.state.status).toBe('ready');
       expect(await readStoreGeneration(store)).not.toBe('0');
@@ -234,11 +243,11 @@ describe('createPreparationHost', () => {
       const again = reopen();
       await expect(again.inspect({ package: packageName })).resolves.toMatchObject({ state: { status: 'ready' } });
       expect(readyReceipt(await prepare(again)).treeIntegrity).toBe(receipt.treeIntegrity);
-      expect(registry.calls).toHaveLength(payloads.length);
+      expect(registry.calls).toHaveLength(dependencyFiles.length);
     });
 
     it('should report progress through downloading, verifying and extracting with bounded byte counts', async () => {
-      const { host, events, payloads } = await scenario();
+      const { host, events, dependencyFiles } = await scenario();
 
       await prepare(host);
 
@@ -246,9 +255,9 @@ describe('createPreparationHost', () => {
       expect(new Set(preparing.map((state) => state.phase))).toEqual(
         new Set(['downloading', 'verifying', 'extracting']),
       );
-      const totalBytes = payloads.reduce((sum, payload) => sum + payload.byteLength, 0);
+      const totalBytes = dependencyFiles.reduce((sum, dependencyFile) => sum + dependencyFile.byteLength, 0);
       for (const state of preparing) {
-        expect(state.totalPayloads).toBe(payloads.length);
+        expect(state.totalDependencyFiles).toBe(dependencyFiles.length);
         expect(state.totalBytes).toBe(totalBytes);
         expect(state.completedBytes).toBeLessThanOrEqual(totalBytes);
       }
@@ -330,8 +339,8 @@ describe('createPreparationHost', () => {
       });
       const [intact] = await host.verify({ package: packageName, signal: AbortSignal.timeout(prepareTimeout) });
 
-      expect(stale).toMatchObject({ status: 'stale', payloads: [], files: [bytecode] });
-      expect(repaired).toMatchObject({ status: 'repaired', payloads: [] });
+      expect(stale).toMatchObject({ status: 'stale', dependencyFiles: [], files: [bytecode] });
+      expect(repaired).toMatchObject({ status: 'repaired', dependencyFiles: [] });
       expect(intact).toMatchObject({ status: 'intact' });
       expect(runs).toBe(2);
     });
@@ -378,7 +387,7 @@ describe('createPreparationHost', () => {
     it('should repair through a seal step that refuses any file it did not expect, as Build123d does (S4)', async () => {
       const roots: string[][] = [];
       const { store, bytes, host } = await scenario({
-        // Like Build123d's compileall check: only the payloads' files and bytecode may be under the root.
+        // Like Build123d's compileall check: only the dependency files' files and bytecode may be under the root.
         seal: async ({ root, files }) => {
           const present = await listFiles(root);
           roots.push(present);
@@ -408,7 +417,7 @@ describe('createPreparationHost', () => {
       });
       const [intact] = await host.verify({ package: packageName, signal: AbortSignal.timeout(prepareTimeout) });
 
-      expect(repaired).toMatchObject({ status: 'repaired', payloads: [], files: [bytecode] });
+      expect(repaired).toMatchObject({ status: 'repaired', dependencyFiles: [], files: [bytecode] });
       expect(intact).toMatchObject({ status: 'intact' });
       expect(roots).toHaveLength(2);
       expect(roots.flat().filter((path) => path === 'receipt.json' || path === 'launch.json')).toEqual([]);
@@ -469,7 +478,7 @@ describe('createPreparationHost', () => {
       const row = receipt.files.find(({ path }) => path === 'launch.json');
       const indexBytes = new Uint8Array(await readFile(join(receipt.root, 'launch.json')));
       expect(row).toMatchObject({ mode: 0o644, sha256: sha256Hex(indexBytes) });
-      expect(row?.payload).toBeUndefined();
+      expect(row?.dependencyFile).toBeUndefined();
       expect(receipt.treeIntegrity).toBe(await computeTreeIntegrity(receipt.files));
       // The version stamp leads the receipt, so a launch reads it from the head.
       const written = await readFile(join(receipt.root, 'receipt.json'), 'utf8');
@@ -543,8 +552,8 @@ describe('createPreparationHost', () => {
         signal: AbortSignal.timeout(prepareTimeout),
       });
 
-      expect(stale).toMatchObject({ status: 'stale', payloads: [], files: ['launch.json'] });
-      expect(repaired).toMatchObject({ status: 'repaired', payloads: [] });
+      expect(stale).toMatchObject({ status: 'stale', dependencyFiles: [], files: ['launch.json'] });
+      expect(repaired).toMatchObject({ status: 'repaired', dependencyFiles: [] });
       expect(await readFile(path, 'utf8')).toBe(original);
       expect(runs).toBe(1);
     });
@@ -574,7 +583,7 @@ describe('createPreparationHost', () => {
       expect(await entriesOf(join(store, 'closures', 'sha256'))).toEqual([]);
     });
 
-    it('should name the URL and size on DOWNLOAD_FAILED, keep verified blobs and fetch only the missing payload on retry', async () => {
+    it('should name the URL and size on DOWNLOAD_FAILED, keep verified blobs and fetch only the missing dependency file on retry', async () => {
       const { store, registry, bytes, host, events } = await scenario();
       let release = (): void => undefined;
       registry.route(originOf('demo'), {
@@ -629,18 +638,18 @@ describe('createPreparationHost', () => {
         { name: '../../escape.sh', data: 'echo pwned' },
       );
       const { store, registry, host, events } = await scenario({
-        variants: (payloads) => [
+        variants: (dependencyFiles) => [
           {
             target: linuxTarget,
-            payloads: [
-              payloadOf({
+            files: [
+              dependencyFileOf({
                 name: 'python',
                 bytes: hostile,
                 format: 'tar.gz',
                 destination: 'python',
                 stripComponents: 1,
               }),
-              ...payloads.slice(1),
+              ...dependencyFiles.slice(1),
             ],
           },
         ],
@@ -649,7 +658,7 @@ describe('createPreparationHost', () => {
 
       const error = await expectPreparationError(prepare(host), 'EXTRACTION_REFUSED');
 
-      expect(error.message).toContain('Payload python (tar.gz) was refused while unpacking');
+      expect(error.message).toContain('Dependency file python (tar.gz) was refused while unpacking');
       expect(events.at(-1)?.state).toMatchObject({ status: 'failed', code: 'EXTRACTION_REFUSED' });
       expect(await entriesOf(join(store, 'closures', 'sha256'))).toEqual([]);
       expect(await entriesOf(join(store, 'tmp'))).toEqual([]);
@@ -680,7 +689,7 @@ describe('createPreparationHost', () => {
         let cancelledAt: string | undefined;
         host.on('preparation', ({ state }) => {
           if (state.status === 'preparing' && state.phase === phase && !controller.signal.aborted) {
-            cancelledAt = state.payload;
+            cancelledAt = state.dependencyFile;
             controller.abort(new Error('cancelled by the test'));
           }
         });
@@ -705,8 +714,8 @@ describe('createPreparationHost', () => {
   });
 
   describe('joining', () => {
-    it('should join one attempt per selection with one fetch per payload and strictly increasing revisions', async () => {
-      const { registry, payloads, host, events } = await scenario();
+    it('should join one attempt per selection with one fetch per dependency file and strictly increasing revisions', async () => {
+      const { registry, dependencyFiles, host, events } = await scenario();
 
       const [first, second] = await Promise.all([
         prepare(host),
@@ -716,8 +725,8 @@ describe('createPreparationHost', () => {
       expect(first.status).toBe('ready');
       expect(second.status).toBe('ready');
       expect(first.status === 'ready' && second.status === 'ready' && first.attemptId === second.attemptId).toBe(true);
-      for (const payload of payloads) {
-        expect(registry.count(originOf(payload.name))).toBe(1);
+      for (const dependencyFile of dependencyFiles) {
+        expect(registry.count(originOf(dependencyFile.name))).toBe(1);
       }
       const revisions = events.map(({ revision }) => revision);
       expect(revisions).toEqual(revisions.toSorted((left, right) => left - right));
@@ -728,7 +737,7 @@ describe('createPreparationHost', () => {
       const { registry, host } = await scenario();
       let release = (): void => undefined;
       registry.route(originOf('demo'), {
-        bytes: pythonPayloadBytes().demo,
+        bytes: pythonFileBytes().demo,
         holdBody: new Promise((resolve) => {
           release = resolve;
         }),
@@ -818,15 +827,15 @@ describe('createPreparationHost', () => {
       cleanups.push(seed.remove);
       const { registry, bytes, host } = await scenario({ host: { seed: seed.path } });
       await mkdir(join(seed.path, 'blobs', 'sha256'), { recursive: true });
-      for (const payloadBytes of Object.values(bytes)) {
+      for (const fileBytes of Object.values(bytes)) {
         // oxlint-disable-next-line no-await-in-loop -- three seed files
-        await writeFile(join(seed.path, 'blobs', 'sha256', sha256Hex(payloadBytes)), payloadBytes);
+        await writeFile(join(seed.path, 'blobs', 'sha256', sha256Hex(fileBytes)), fileBytes);
       }
 
       const receipt = readyReceipt(await prepare(host, { offline: true }));
 
       expect(registry.calls).toEqual([]);
-      expect(receipt.payloads.every(({ acquiredFrom }) => acquiredFrom.kind === 'seed')).toBe(true);
+      expect(receipt.dependencyFiles.every(({ acquiredFrom }) => acquiredFrom.kind === 'seed')).toBe(true);
     });
 
     it('should skip a seed file whose bytes do not hash to its name', async () => {
@@ -839,7 +848,7 @@ describe('createPreparationHost', () => {
 
       const receipt = readyReceipt(await prepare(host));
 
-      expect(receipt.payloads.map(({ name, acquiredFrom }) => [name, acquiredFrom.kind])).toEqual([
+      expect(receipt.dependencyFiles.map(({ name, acquiredFrom }) => [name, acquiredFrom.kind])).toEqual([
         ['python', 'seed'],
         ['demo', 'origin'],
         ['worker.py', 'origin'],
@@ -853,14 +862,14 @@ describe('createPreparationHost', () => {
 
     it('should try the mirror before every manifest URL', async () => {
       const { registry, bytes, host } = await scenario({ serve: false, host: { mirror: { baseUrl: mirror } } });
-      for (const payloadBytes of Object.values(bytes)) {
-        registry.route(`${mirror}blobs/sha256/${sha256Hex(payloadBytes)}`, { bytes: payloadBytes });
+      for (const fileBytes of Object.values(bytes)) {
+        registry.route(`${mirror}blobs/sha256/${sha256Hex(fileBytes)}`, { bytes: fileBytes });
       }
 
       const receipt = readyReceipt(await prepare(host));
 
       expect(registry.calls.every((url) => url.startsWith(mirror))).toBe(true);
-      expect(receipt.payloads.every(({ acquiredFrom }) => acquiredFrom.kind === 'mirror')).toBe(true);
+      expect(receipt.dependencyFiles.every(({ acquiredFrom }) => acquiredFrom.kind === 'mirror')).toBe(true);
     });
 
     it('should fall back to the manifest URL after a mirror miss unless no-fallback is set', async () => {
@@ -881,20 +890,20 @@ describe('createPreparationHost', () => {
     });
 
     it(
-      'should never ask a no-fallback mirror for a payload its package ships (X51, I10)',
+      'should never ask a no-fallback mirror for a dependency file its package ships (X51, I10)',
       { timeout: prepareTimeout },
       async () => {
         const directory = await temporaryDirectory('tau-preparation-in-package-');
         cleanups.push(directory.remove);
         const packageRoot = join(directory.path, 'package');
         await mkdir(join(packageRoot, 'python'), { recursive: true });
-        const bytes = pythonPayloadBytes();
+        const bytes = pythonFileBytes();
         await writeFile(join(packageRoot, 'python', 'worker.py'), bytes['worker.py']);
-        const [python, demo, worker] = pythonPayloads(bytes);
-        const inPackage: DependencyPayload = { ...worker!, origin: { kind: 'packagePath', path: 'python/worker.py' } };
+        const [python, demo, worker] = pythonFiles(bytes);
+        const inPackage: DependencyFile = { ...worker!, origin: { kind: 'packagePath', path: 'python/worker.py' } };
         const external = { [sha256Hex(bytes.python)]: bytes.python, [sha256Hex(bytes.demo)]: bytes.demo };
 
-        // A recording mirror over node:http: every request is logged; it holds only the external payloads.
+        // A recording mirror over node:http: every request is logged; it holds only the external dependency files.
         const requests: string[] = [];
         const server = createServer((request, response) => {
           requests.push(`${request.method ?? ''} ${request.url ?? ''}`);
@@ -939,7 +948,7 @@ describe('createPreparationHost', () => {
         const host = createPreparationHost({
           plugins: [
             {
-              ...pluginOf(packageName, { engine: [{ target: linuxTarget, payloads: [python, demo!, inPackage] }] }),
+              ...pluginOf(packageName, { engine: [{ target: linuxTarget, files: [python, demo!, inPackage] }] }),
               directory: packageRoot,
             },
           ],
@@ -962,7 +971,7 @@ describe('createPreparationHost', () => {
             `GET /tau/blobs/sha256/${sha256Hex(bytes.demo)}`,
           ].toSorted(),
         );
-        expect(receipt.payloads.map(({ name, acquiredFrom }) => [name, acquiredFrom.kind])).toEqual([
+        expect(receipt.dependencyFiles.map(({ name, acquiredFrom }) => [name, acquiredFrom.kind])).toEqual([
           ['python', 'mirror'],
           ['demo', 'mirror'],
           ['worker.py', 'origin'],
@@ -977,7 +986,7 @@ describe('createPreparationHost', () => {
   });
 
   describe('verify and repair', () => {
-    it('should report stale files and repair only the payload that wrote them, from the store', async () => {
+    it('should report stale files and repair only the dependency file that wrote them, from the store', async () => {
       const { store, registry, bytes, host } = await scenario();
       const receipt = readyReceipt(await prepare(host));
       await writeFile(join(receipt.root, 'worker', 'worker.py'), 'print("tampered")\n');
@@ -998,16 +1007,16 @@ describe('createPreparationHost', () => {
 
       expect(stale).toMatchObject({
         status: 'stale',
-        payloads: ['worker.py'],
+        dependencyFiles: ['worker.py'],
         files: ['stray.txt', 'worker/worker.py'],
       });
-      expect(repaired).toMatchObject({ status: 'repaired', payloads: ['worker.py'] });
-      expect(intact).toMatchObject({ status: 'intact', payloads: [], files: [] });
+      expect(repaired).toMatchObject({ status: 'repaired', dependencyFiles: ['worker.py'] });
+      expect(intact).toMatchObject({ status: 'intact', dependencyFiles: [], files: [] });
       expect(await readFile(join(receipt.root, 'worker', 'worker.py'), 'utf8')).toBe('print("ready")\n');
       expect(registry.calls).toHaveLength(calls);
     });
 
-    it('should record a payload the store already held as acquired from the store, offline or not', async () => {
+    it('should record a dependency file the store already held as acquired from the store, offline or not', async () => {
       const { store, registry, host } = await scenario();
       const first = readyReceipt(await prepare(host));
       await rm(join(store, 'closures'), { recursive: true });
@@ -1016,8 +1025,8 @@ describe('createPreparationHost', () => {
       const again = readyReceipt(await prepare(host, { offline: true }));
 
       expect(registry.calls).toHaveLength(calls);
-      expect(again.payloads.map(({ name, acquiredFrom }) => [name, acquiredFrom])).toEqual(
-        first.payloads.map(({ name, sha256 }) => [name, { kind: 'store', location: `blobs/sha256/${sha256}` }]),
+      expect(again.dependencyFiles.map(({ name, acquiredFrom }) => [name, acquiredFrom])).toEqual(
+        first.dependencyFiles.map(({ name, sha256 }) => [name, { kind: 'store', location: `blobs/sha256/${sha256}` }]),
       );
     });
 
@@ -1045,7 +1054,7 @@ describe('createPreparationHost', () => {
     });
 
     it('should treat a receipt from another Tau version as idle, then re-verify it locally on prepare', async () => {
-      const { registry, payloads, host, reopen } = await scenario();
+      const { registry, dependencyFiles, host, reopen } = await scenario();
       readyReceipt(await prepare(host));
       const upgraded = reopen({ tauVersion: '2.0.0' });
 
@@ -1054,7 +1063,7 @@ describe('createPreparationHost', () => {
       const receipt = readyReceipt(await prepare(upgraded));
 
       expect(receipt.tauVersion).toBe('2.0.0');
-      expect(registry.calls).toHaveLength(payloads.length);
+      expect(registry.calls).toHaveLength(dependencyFiles.length);
       await expect(upgraded.inspect({ package: packageName })).resolves.toMatchObject({ state: { status: 'ready' } });
     });
   });
@@ -1064,9 +1073,9 @@ describe('createPreparationHost', () => {
 
     it('should launch the recorded closure and report a better variant after the floor is crossed', async () => {
       const { host, reopen } = await scenario({
-        variants: (payloads) => [
-          { target: { ...linuxTarget, minimumLibcVersion: '2.17' }, payloads },
-          { target: { ...linuxTarget, minimumLibcVersion: '2.31' }, payloads: [payloads[0], payloads[2]!] },
+        variants: (dependencyFiles) => [
+          { target: { ...linuxTarget, minimumLibcVersion: '2.17' }, files: dependencyFiles },
+          { target: { ...linuxTarget, minimumLibcVersion: '2.31' }, files: [dependencyFiles[0], dependencyFiles[2]!] },
         ],
         host: { indicators: glibcHost('2.28') },
       });
@@ -1118,7 +1127,9 @@ describe('createPreparationHost', () => {
 
     it('should record the host snapshot, the candidates and the emulation flag in every receipt', async () => {
       const { host } = await scenario({
-        variants: (payloads) => [{ target: { ...linuxTarget, minimumLibcVersion: '2.31' }, payloads }],
+        variants: (dependencyFiles) => [
+          { target: { ...linuxTarget, minimumLibcVersion: '2.31' }, files: dependencyFiles },
+        ],
       });
 
       const receipt = readyReceipt(await prepare(host));
@@ -1142,7 +1153,9 @@ describe('createPreparationHost', () => {
       ],
     ])('should refuse a %s host on its axis before any request', async (_name, indicators, detail) => {
       const { host, registry } = await scenario({
-        variants: (payloads) => [{ target: { ...linuxTarget, minimumLibcVersion: '2.31' }, payloads }],
+        variants: (dependencyFiles) => [
+          { target: { ...linuxTarget, minimumLibcVersion: '2.31' }, files: dependencyFiles },
+        ],
         host: { indicators },
       });
 

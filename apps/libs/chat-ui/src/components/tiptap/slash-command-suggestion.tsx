@@ -1,0 +1,377 @@
+import { Heading } from '@taucad/ui/components/heading';
+import { useState, useEffect, useCallback, useRef, memo } from 'react';
+import { createPortal } from 'react-dom';
+import { Extension, InputRule } from '@tiptap/core';
+import { Suggestion } from '@tiptap/suggestion';
+import { PluginKey } from '@tiptap/pm/state';
+import type { EditorState } from '@tiptap/pm/state';
+import { Blocks, Zap } from 'lucide-react';
+import { cn } from '@taucad/ui/utils/cn';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
+import { menuContentVariants, menuGroupHeadingClass, menuItemVariants } from '@taucad/ui/components/menu.variants';
+import type {
+  SlashCommandItem,
+  SuggestionPopupState,
+  SuggestionRenderCallbacks,
+} from '#components/tiptap/suggestion-types.js';
+
+const slashCommandPluginKey = new PluginKey('slashCommand');
+const dollarCommandPluginKey = new PluginKey('dollarCommand');
+
+export const defaultCommands: SlashCommandItem[] = [
+  {
+    id: 'compress',
+    label: '/compress',
+    description: 'Compress conversation context',
+    group: 'Commands',
+    enabled: false,
+  },
+];
+
+export const isEnabledSlashCommandItem = (item: SlashCommandItem): boolean => item.enabled !== false;
+
+export const getEnabledSlashCommandItems = (items: readonly SlashCommandItem[]): SlashCommandItem[] =>
+  items.filter((item) => isEnabledSlashCommandItem(item));
+
+/** Chip node for one invocation token; its text (the label) is exactly what the agent receives. */
+const invocationChip = (item: Pick<SlashCommandItem, 'label'>) =>
+  ({ type: 'contextChip', attrs: { id: item.label, label: item.label, chipType: 'skill' } }) as const;
+
+export type SlashCommandOptions = {
+  getItems?: (query: string) => SlashCommandItem[];
+  /** Enabled items by exact invocation token, for typed-token conversion and the `$` trigger. */
+  getKnownItems?: () => ReadonlyMap<string, SlashCommandItem>;
+  renderCallbacks: SuggestionRenderCallbacks<SlashCommandItem>;
+  onCommand?: (item: SlashCommandItem) => void;
+};
+
+export function shouldAllowSlashCommandTrigger({
+  state,
+  range,
+}: {
+  readonly state: EditorState;
+  readonly range: { readonly from: number };
+}): boolean {
+  const $from = state.doc.resolve(range.from);
+  if ($from.parentOffset === 0) {
+    return true;
+  }
+
+  const previousCharacter = state.doc.textBetween(range.from - 1, range.from, '\n', '\0');
+  return /\s/.test(previousCharacter);
+}
+
+export const SlashCommand = Extension.create<SlashCommandOptions>({
+  name: 'slashCommand',
+
+  addOptions() {
+    return {
+      getItems: undefined,
+      getKnownItems: undefined,
+      renderCallbacks: {
+        onStateChange: () => undefined,
+        keydownHandlerRef: { current: undefined },
+      },
+      onCommand: undefined,
+    };
+  },
+
+  addInputRules() {
+    const { getKnownItems } = this.options;
+    return [
+      /* Typing a known token then a space turns it into its chip, as picking it from the menu would. */
+      new InputRule({
+        find: /(?:^|\s)([$/][\w-]+(?::[\w-]+)*)\s$/,
+        handler: ({ range, match, chain }) => {
+          const token = match[1] ?? '';
+          const item = getKnownItems?.().get(token);
+          if (!item) {
+            return null;
+          }
+          /* Input rules include the typed space; preserve any leading whitespace before the token. */
+          const from = range.from + match[0].indexOf(token);
+          chain()
+            .deleteRange({ from, to: range.to })
+            .insertContentAt(from, [invocationChip(item), { type: 'text', text: ' ' }])
+            .run();
+          return undefined;
+        },
+      }),
+    ];
+  },
+
+  addProseMirrorPlugins() {
+    const { getItems, getKnownItems, renderCallbacks, onCommand } = this.options;
+
+    const defaultGetItems = (query: string): SlashCommandItem[] => {
+      const all = getEnabledSlashCommandItems(defaultCommands);
+      if (!query) {
+        return all;
+      }
+      const q = query.toLowerCase();
+      return all.filter((item) => item.label.toLowerCase().includes(q) || item.description.toLowerCase().includes(q));
+    };
+
+    const itemsFunction = getItems ?? defaultGetItems;
+    const hasDollarItems = (): boolean => [...(getKnownItems?.().keys() ?? [])].some((token) => token.startsWith('$'));
+
+    const suggestionFor = (char: '/' | '$', pluginKey: PluginKey) =>
+      // oxlint-disable-next-line new-cap -- Tiptap's Suggestion factory is PascalCase
+      Suggestion<SlashCommandItem>({
+        pluginKey,
+        editor: this.editor,
+        char,
+        /* `/` lists every command (Codex parity); `$` lists only the agent's `$` skills. */
+        items: ({ query }) =>
+          char === '/' ? itemsFunction(query) : itemsFunction(query).filter((item) => item.label.startsWith('$')),
+        allowedPrefixes: null,
+        allow: ({ state, range }) =>
+          shouldAllowSlashCommandTrigger({ state, range }) && (char === '/' || hasDollarItems()),
+        command: ({ editor, range, props }) => {
+          const selected = props as SlashCommandItem;
+          const item = itemsFunction('').find(
+            (candidate) => candidate.id === selected.id && candidate.label === selected.label,
+          );
+          if (item === undefined || !isEnabledSlashCommandItem(item)) {
+            return;
+          }
+
+          editor.chain().focus().deleteRange(range).insertContent(invocationChip(item)).insertContent(' ').run();
+          onCommand?.(item);
+        },
+        render: () => ({
+          onStart(properties) {
+            renderCallbacks.onStateChange({
+              query: properties.query,
+              items: properties.items,
+              command: properties.command as (item: SlashCommandItem) => void,
+              clientRect: properties.clientRect ?? undefined,
+            } as SuggestionPopupState<SlashCommandItem>);
+          },
+          onUpdate(properties) {
+            renderCallbacks.onStateChange({
+              query: properties.query,
+              items: properties.items,
+              command: properties.command as (item: SlashCommandItem) => void,
+              clientRect: properties.clientRect ?? undefined,
+            } as SuggestionPopupState<SlashCommandItem>);
+          },
+          onExit() {
+            renderCallbacks.onStateChange(undefined);
+          },
+          onKeyDown({ event }) {
+            return renderCallbacks.keydownHandlerRef.current?.(event) ?? false;
+          },
+        }),
+      });
+
+    return [suggestionFor('/', slashCommandPluginKey), suggestionFor('$', dollarCommandPluginKey)];
+  },
+});
+
+// --- Dropdown UI Component ---
+
+const groupIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+  Skills: Blocks,
+  Commands: Zap,
+};
+
+function titleFromCommandId(commandId: string): string {
+  return commandId
+    .split('-')
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function SkillItemButton({
+  item,
+  globalIndex,
+  isSelected,
+  onSelect,
+  onHover,
+  buttonRef,
+}: {
+  readonly item: SlashCommandItem;
+  readonly globalIndex: number;
+  readonly isSelected: boolean;
+  readonly onSelect: (index: number) => void;
+  readonly onHover: (index: number) => void;
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref callback signature requires null
+  readonly buttonRef: (element: HTMLButtonElement | null) => void;
+}): React.JSX.Element {
+  const button = (
+    <button
+      ref={buttonRef}
+      type='button'
+      data-selected={isSelected}
+      className={cn(menuItemVariants({ highlight: 'selected' }), 'h-7 w-full gap-2 px-2.25 text-left font-normal')}
+      /* F2: a click must not move focus out of the editor — that would end an edit. */
+      onMouseDown={(event) => {
+        event.preventDefault();
+      }}
+      onClick={() => {
+        onSelect(globalIndex);
+      }}
+      onMouseEnter={() => {
+        onHover(globalIndex);
+      }}
+    >
+      <Blocks className='size-3.5 shrink-0' />
+      <span className='shrink-0 text-foreground'>{item.title ?? titleFromCommandId(item.id)}</span>
+      <span className='min-w-0 flex-1 truncate text-muted-foreground'>{item.description}</span>
+      <span className='ml-2 shrink-0 text-muted-foreground'>{item.source ?? item.group}</span>
+    </button>
+  );
+
+  if (!item.fullDescription) {
+    return button;
+  }
+
+  return (
+    <HoverCard>
+      <HoverCardTrigger asChild>{button}</HoverCardTrigger>
+      <HoverCardContent side='right' align='start' sideOffset={12} alignOffset={-4} className='w-72'>
+        <div className='space-y-2'>
+          <div className='flex items-center gap-2'>
+            <Blocks className='size-4 shrink-0 text-muted-foreground' />
+            <Heading level={4} variant='label'>
+              {item.title ?? titleFromCommandId(item.id)}
+            </Heading>
+          </div>
+          <p className='text-sm text-muted-foreground'>{item.fullDescription}</p>
+        </div>
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+export const SlashCommandDropdown = memo(function SlashCommandDropdown({
+  state,
+  keydownHandlerRef,
+}: {
+  readonly state: SuggestionPopupState<SlashCommandItem>;
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
+  readonly keydownHandlerRef: React.RefObject<((event: KeyboardEvent) => boolean) | undefined>;
+}): React.JSX.Element | undefined {
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [previousItems, setPreviousItems] = useState(state.items);
+  const itemReferences = useRef<Map<number, HTMLButtonElement>>(new Map());
+
+  const { items, command, clientRect } = state;
+
+  if (previousItems !== items) {
+    setPreviousItems(items);
+    setSelectedIndex(0);
+  }
+
+  useEffect(() => {
+    const element = itemReferences.current.get(selectedIndex);
+    element?.scrollIntoView({ block: 'nearest' });
+  }, [selectedIndex]);
+
+  const selectItem = useCallback(
+    (index: number) => {
+      const item = items[index];
+      if (item && isEnabledSlashCommandItem(item)) {
+        command(item);
+      }
+    },
+    [items, command],
+  );
+
+  useEffect(() => {
+    keydownHandlerRef.current = (event: KeyboardEvent): boolean => {
+      if (event.key === 'ArrowUp') {
+        setSelectedIndex((previous) => (previous <= 0 ? items.length - 1 : previous - 1));
+        return true;
+      }
+      if (event.key === 'ArrowDown') {
+        setSelectedIndex((previous) => (previous >= items.length - 1 ? 0 : previous + 1));
+        return true;
+      }
+      if (event.key === 'Enter') {
+        selectItem(selectedIndex);
+        return true;
+      }
+      if (event.key === 'Escape') {
+        return true;
+      }
+      return false;
+    };
+
+    return () => {
+      keydownHandlerRef.current = undefined;
+    };
+  }, [items, selectedIndex, selectItem, keydownHandlerRef]);
+
+  const rect = clientRect?.();
+  if (!rect) {
+    return undefined;
+  }
+
+  const groups = new Map<string, { items: SlashCommandItem[]; startIndex: number }>();
+  let currentIndex = 0;
+  for (const item of items) {
+    const existing = groups.get(item.group);
+    if (existing) {
+      existing.items.push(item);
+    } else {
+      groups.set(item.group, { items: [item], startIndex: currentIndex });
+    }
+    currentIndex++;
+  }
+
+  return createPortal(
+    <div
+      className={cn(menuContentVariants(), 'fixed max-h-64 w-[min(44rem,calc(100vw-2rem))]')}
+      style={{
+        left: rect.left,
+        top: rect.top - 8,
+        transform: 'translateY(-100%)',
+      }}
+      data-testid='slash-command-dropdown'
+    >
+      <div
+        className='flex min-h-0 scroll-shadows-y flex-col gap-0.5 overflow-x-hidden overflow-y-auto'
+        data-testid='slash-command-scroll-area'
+      >
+        {items.length === 0 ? (
+          <div className='px-2 py-1.5 text-xs text-muted-foreground'>No commands found</div>
+        ) : (
+          [...groups.entries()].map(([groupName, group]) => {
+            const GroupIcon = groupIcons[groupName] ?? Zap;
+            return (
+              <div key={groupName} className='flex flex-col gap-0.5'>
+                <div className={cn(menuGroupHeadingClass, 'flex items-center gap-1.5 px-2.25')}>
+                  <GroupIcon className='size-3 shrink-0' />
+                  {groupName}
+                </div>
+                {group.items.map((item, itemIndex) => {
+                  const globalIndex = group.startIndex + itemIndex;
+                  return (
+                    <SkillItemButton
+                      key={item.id}
+                      item={item}
+                      globalIndex={globalIndex}
+                      isSelected={globalIndex === selectedIndex}
+                      onSelect={selectItem}
+                      onHover={setSelectedIndex}
+                      buttonRef={(element) => {
+                        if (element) {
+                          itemReferences.current.set(globalIndex, element);
+                        } else {
+                          itemReferences.current.delete(globalIndex);
+                        }
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+});

@@ -14,6 +14,7 @@ import type {
   BillableProviderWire,
   QualifiedBillableInvocation,
 } from '#billable-model-invocation.types.js';
+import { createGatewayModelTransport } from '@taucad/agent-host';
 import { isModelListEntryEnabled, LlmGatewayError, modelList } from '@taucad/api-llm-gateway';
 
 const adapter = mock<BillableModelProviderAdapter>();
@@ -23,8 +24,8 @@ const resolver = new CodeOwnedBillableModelQualificationResolver({
     ['openai-gpt-5.6-sol', adapter],
     ['openai-gpt-5.5', adapter],
     ['anthropic-claude-opus-5', adapter],
-    ['together-glm-5.2', adapter],
-    ['morph-kimi-k3.1-pro', adapter],
+    ['together-glm-5.3', adapter],
+    ['morph-deepseek-v4.1-flash', adapter],
     ['google-gemini-3.5-flash', adapter],
     ['xai-grok-4.6', adapter],
   ]),
@@ -43,11 +44,12 @@ const intent = (body: unknown): Omit<BillableInvocationIntent, 'authUserId' | 's
 
 describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should preserve every intended static funded route identity', () => {
-    expect(billableModelRouteIds).toHaveLength(29);
-    expect(new Set(billableModelRouteIds).size).toBe(29);
+    expect(billableModelRouteIds).toHaveLength(31);
+    expect(new Set(billableModelRouteIds).size).toBe(31);
+    expect(billableModelRouteIds).toContain('anthropic-claude-fable-5.2');
     expect(billableModelRouteIds).toContain('anthropic-claude-sonnet-5.5');
     expect(billableModelRouteIds).toContain('google-gemini-3.1-pro');
-    expect(billableModelRouteIds).toContain('morph-kimi-k3.1-pro');
+    expect(billableModelRouteIds).toContain('morph-deepseek-v4.1-flash');
   });
 
   it('should qualify a configured provider without a manual account map', () => {
@@ -99,6 +101,46 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
       max_completion_tokens: 16,
     });
     expect(result.invocation.jointInputMaximum).toBeUndefined();
+  });
+
+  /* A host and a route that disagree on the output field read as Tau's own fault only if the
+   * refusal names the route and the field it expects. */
+  it.each([
+    {
+      failure: 'no output maximum',
+      limits: {},
+      message:
+        'Model request must carry exactly one output-token maximum; route google-gemini-3.5-flash expects max_completion_tokens',
+    },
+    {
+      failure: 'two output maxima',
+      limits: { max_tokens: 16, max_completion_tokens: 16 },
+      message:
+        'Model request must carry exactly one output-token maximum; route google-gemini-3.5-flash expects max_completion_tokens',
+    },
+    {
+      failure: 'the field the route does not accept',
+      limits: { max_tokens: 16 },
+      message:
+        'Model request bounds output with a field route google-gemini-3.5-flash does not accept; it expects max_completion_tokens',
+    },
+    {
+      failure: 'a maximum past the route ceiling',
+      limits: { max_completion_tokens: 65_537 },
+      message: "Model request max_completion_tokens of 65537 exceeds route google-gemini-3.5-flash's maximum of 65536",
+    },
+  ])('should refuse $failure naming the route and its output field', ({ limits, message }) => {
+    expect(() =>
+      resolver.resolve({
+        ...intent({
+          model: 'google-gemini-3.5-flash',
+          messages: [{ role: 'user', content: 'hello' }],
+          stream: true,
+          ...limits,
+        }),
+        providerWire: 'openai-completions',
+      }),
+    ).toThrow(message);
   });
 
   it('should bound the input by the request itself', () => {
@@ -252,10 +294,87 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     ).toThrow('Provider header is outside the funded request contract');
   });
 
+  it('should admit the thinking binding controls at the price of the same request without them', () => {
+    const body = {
+      model: 'anthropic-claude-opus-5',
+      messages: [{ role: 'user', content: 'hello' }],
+      max_tokens: 16,
+      stream: true,
+      thinking: { type: 'adaptive' },
+    };
+    const headers = { 'anthropic-version': '2023-06-01' };
+    const plain = resolver.resolve({ ...intent(body), providerWire: 'anthropic', priceHeaders: headers });
+    const bound = resolver.resolve({
+      ...intent({
+        ...body,
+        thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } },
+      }),
+      providerWire: 'anthropic',
+      priceHeaders: { ...headers, 'anthropic-beta': 'thinking-binding-controls-2026-08-01' },
+    });
+
+    expect(bound.normalizedRequest).toMatchObject({
+      headers: { 'anthropic-beta': 'thinking-binding-controls-2026-08-01' },
+      body: { thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } } },
+    });
+    /* The control changes which replayed blocks the provider reads, never what a token costs. */
+    expect(bound.sku).toBe(plain.sku);
+    expect(bound.invocation.supplierRates).toStrictEqual(plain.invocation.supplierRates);
+  });
+
+  it('should price an effort level carried in the transcript as the same request with a top-level effort', () => {
+    const anthropic = {
+      model: 'anthropic-claude-opus-5',
+      messages: [{ role: 'user', content: 'hello' }],
+      max_tokens: 16,
+      stream: true,
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'high' },
+    };
+    const responses = {
+      model: 'openai-gpt-5.6-sol',
+      input: [{ role: 'user', content: 'hello' }],
+      max_output_tokens: 16,
+      stream: true,
+      reasoning: { effort: 'medium' },
+    };
+    const headers = { 'anthropic-version': '2023-06-01' };
+    const resolve = (providerWire: 'anthropic' | 'openai-responses', body: unknown, beta?: string) =>
+      resolver.resolve({
+        ...intent(body),
+        providerWire,
+        ...(providerWire === 'anthropic'
+          ? { priceHeaders: beta === undefined ? headers : { ...headers, 'anthropic-beta': beta } }
+          : {}),
+      });
+    const marker = { role: 'system', content: [], output_config: { effort: 'low' } };
+    const update = { type: 'configuration_update', reasoning: { effort: 'high' } };
+
+    const anthropicPlain = resolve('anthropic', anthropic);
+    const anthropicMarked = resolve(
+      'anthropic',
+      { ...anthropic, messages: [...anthropic.messages, marker] },
+      'mid-conversation-output-config-2026-07-01',
+    );
+    const responsesPlain = resolve('openai-responses', responses);
+    const responsesMarked = resolve('openai-responses', { ...responses, input: [...responses.input, update] });
+
+    expect(anthropicMarked.normalizedRequest).toMatchObject({
+      headers: { 'anthropic-beta': 'mid-conversation-output-config-2026-07-01' },
+      body: { messages: [anthropic.messages[0], marker] },
+    });
+    expect(responsesMarked.normalizedRequest).toMatchObject({ body: { input: [responses.input[0], update] } });
+    /* The marker selects how hard the model thinks, as the top-level field does; tokens cost what they cost. */
+    expect(anthropicMarked.sku).toBe(anthropicPlain.sku);
+    expect(anthropicMarked.invocation.supplierRates).toStrictEqual(anthropicPlain.invocation.supplierRates);
+    expect(responsesMarked.sku).toBe(responsesPlain.sku);
+    expect(responsesMarked.invocation.supplierRates).toStrictEqual(responsesPlain.invocation.supplierRates);
+  });
+
   it('should accept the authoritative OpenAI-compatible host stream options and strict function shape', () => {
     const result = resolver.resolve({
       ...intent({
-        model: 'together-glm-5.2',
+        model: 'together-glm-5.3',
         messages: [
           { role: 'developer', content: 'static\n\nworkspace\n\ndynamic' },
           { role: 'user', content: 'hello' },
@@ -263,7 +382,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
         stream: true,
         stream_options: { include_usage: true },
         store: false,
-        max_completion_tokens: 8192,
+        max_tokens: 8192,
         tools: [
           {
             type: 'function',
@@ -279,7 +398,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
       providerWire: 'openai-completions',
     });
 
-    expect(result.routeId).toBe('together-glm-5.2');
+    expect(result.routeId).toBe('together-glm-5.3');
     expect(result.invocation.jointInputMaximum).toBeUndefined();
   });
 
@@ -393,17 +512,17 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should qualify Morph as uncached input, cache read and output within its combined context', () => {
     const result = resolver.resolve({
       ...intent({
-        model: 'morph-kimi-k3.1-pro',
+        model: 'morph-deepseek-v4.1-flash',
         messages: [{ role: 'user', content: 'hello' }],
         stream: true,
-        max_tokens: 512,
+        max_completion_tokens: 512,
       }),
       providerWire: 'openai-completions',
     });
 
     expect(result.maximumQuantities).toEqual([
-      { dimension: 'uncached_input', tier: null, quantity: 4269n },
-      { dimension: 'cache_read', tier: null, quantity: 4269n },
+      { dimension: 'uncached_input', tier: null, quantity: 4286n },
+      { dimension: 'cache_read', tier: null, quantity: 4286n },
       { dimension: 'output', tier: null, quantity: 512n },
     ]);
   });
@@ -411,9 +530,9 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should carry a supplier valuation for Together routes so their usage is metered', () => {
     const result = resolver.resolve({
       ...intent({
-        model: 'together-glm-5.2',
+        model: 'together-glm-5.3',
         messages: [{ role: 'user', content: 'hello' }],
-        max_completion_tokens: 16,
+        max_tokens: 16,
         stream: true,
       }),
       providerWire: 'openai-completions',
@@ -422,7 +541,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     expect(result.providerId).toBe('together');
     expect(result.invocation.supplierValuation).toEqual({
       version: 'supplier-valuation-v1',
-      sourceRevision: 'official-pricing:2026-09-06:together-glm-5.2',
+      sourceRevision: 'official-pricing:2026-11-09:together-glm-5.3',
       longContextMinimumInputTokens: null,
       longContextRates: null,
       baseRates: result.invocation.supplierRates,
@@ -525,6 +644,36 @@ describe('catalog route vocabulary', () => {
     ]);
   });
 
+  /* The transport may mark any Anthropic breakpoint with a one-hour lifetime, which
+   * Anthropic bills at 2× base input against 1.25× for five minutes. Every Anthropic
+   * contract prices both tiers so a split usage report always settles. */
+  it('should price both cache-write lifetimes on every Anthropic meter contract', () => {
+    const anthropicMeters = billableModelRouteMeters.filter((meter) => meter.routeId.startsWith('anthropic-'));
+    expect(anthropicMeters.length).toBeGreaterThan(0);
+    for (const meter of anthropicMeters) {
+      const rate = (key: string): bigint | undefined =>
+        meter.rates.find((entry) => `${entry.dimension}:${entry.tier ?? ''}` === key)?.numeratorPicoUsd;
+      const input = rate('uncached_input:');
+      expect(input, meter.routeId).toBeDefined();
+      expect(rate('cache_write:5m'), meter.routeId).toBe(((input ?? 0n) * 5n) / 4n);
+      expect(rate('cache_write:1h'), meter.routeId).toBe((input ?? 0n) * 2n);
+    }
+  });
+
+  it('should stamp the one-hour tariff reading on the Anthropic valuation', () => {
+    const result = qualifyRoute('anthropic-claude-opus-5.5');
+
+    expect(result.invocation.supplierValuation?.sourceRevision).toBe(
+      'official-pricing:2026-11-08:anthropic-claude-opus-5.5',
+    );
+    expect(result.invocation.supplierRates).toContainEqual({
+      dimension: 'cache_write',
+      tier: '1h',
+      numeratorPicoUsd: '8000000000000',
+      denominatorUnits: '1000000',
+    });
+  });
+
   it('should resolve every funded route id and forward the supplier model id', () => {
     for (const routeId of billableModelRouteIds) {
       const resolved = qualifyRoute(routeId);
@@ -607,4 +756,71 @@ describe('catalog route vocabulary', () => {
       catalogResolver.resolve(intent({ model: 'gpt-5.6-luna', input: 'hello', max_output_tokens: 1, stream: true })),
     ).toThrow('Model route is not qualified');
   });
+});
+
+/* The host and the route table name the output-limit field independently, and the live matrix runs with
+ * Tau Cloud off, so only this join sees a route and its codec disagreeing. */
+describe('funded route admission of the request the host sends', () => {
+  const catalogRows = new Map(
+    Object.values(modelList)
+      .flatMap((provider) => Object.values(provider))
+      .map((row) => [row.id, row] as const),
+  );
+  const fundedResolver = new CodeOwnedBillableModelQualificationResolver({
+    adapters: new Map(billableModelRouteIds.map((routeId) => [routeId, adapter])),
+    executionTimeout: 30_000,
+  });
+  const drain = async (events: AsyncIterable<unknown>): Promise<readonly unknown[]> => {
+    const seen: unknown[] = [];
+    for await (const event of events) {
+      seen.push(event);
+    }
+    return seen;
+  };
+  const wireForUrl = (url: string): BillableProviderWire => {
+    if (url.endsWith('/responses')) {
+      return 'openai-responses';
+    }
+    return url.endsWith('/messages') ? 'anthropic' : 'openai-completions';
+  };
+
+  it.each(billableModelRouteIds)(
+    'should admit the host request for %s at its catalog output ceiling',
+    async (routeId) => {
+      const row = catalogRows.get(routeId)!;
+      let sent: { body: unknown; wire: BillableProviderWire } | undefined;
+      const transport = createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        async fetch(input, init) {
+          sent = {
+            body: JSON.parse(init?.body as string) as unknown,
+            wire: wireForUrl(input instanceof Request ? input.url : String(input)),
+          };
+          throw new Error('The request has been captured');
+        },
+      });
+
+      await drain(
+        transport.stream({
+          attemptId: `attempt-${routeId}`,
+          invocationPurpose: 'generation',
+          modelId: routeId,
+          providerKind: row.provider.id,
+          maxTokens: row.details.maxTokens,
+          contextWindow: row.details.contextWindow,
+          systemPrompt: 'static',
+          messages: [{ id: 'user-1', role: 'user', content: 'hello' }],
+          tools: [],
+          signal: new AbortController().signal,
+        }),
+      ).catch(() => undefined);
+
+      const qualified = fundedResolver.resolve({
+        ...intent(sent!.body),
+        providerWire: sent!.wire,
+        priceHeaders: sent!.wire === 'anthropic' ? { 'anthropic-version': '2023-06-01' } : {},
+      });
+      expect(qualified.routeId).toBe(routeId);
+    },
+  );
 });

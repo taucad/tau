@@ -1,10 +1,11 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { MetaFunction } from 'react-router';
 import type { Handle } from '#types/matches.types.js';
 import { formatConfigurations } from '@taucad/types/constants';
 import { asKnownArtifact } from '@taucad/runtime';
 import { Cpu, Download, Upload, RotateCcw } from 'lucide-react';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { projectToManifest } from '@taucad/types';
 import type { ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import { Button } from '@taucad/ui/components/button';
@@ -16,7 +17,7 @@ import {
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
 } from '#components/ui/floating-panel.js';
-import { Dropzone, DropzoneEmptyState } from '#components/ui/dropzone.js';
+import { Dropzone, DropzoneEmptyState } from '@taucad/ui-kit/components/dropzone';
 import { FormatsList } from '#routes/convert/formats-list.js';
 import { InfoTooltip } from '@taucad/ui/components/info-tooltip';
 import {
@@ -28,7 +29,7 @@ import {
 import { Converter } from '#components/geometry/converter/converter.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { cn } from '@taucad/ui/utils/cn';
 import { Loader } from '@taucad/ui/components/loader';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
@@ -538,7 +539,9 @@ function ConverterContentInner(): React.JSX.Element {
           ) : (
             <div className='grid items-start gap-8 border-t pt-6 lg:grid-cols-[minmax(0,1fr)_20rem]'>
               <div className='min-w-0 space-y-4'>
-                <h2 className='text-sm font-medium'>Source model</h2>
+                <Heading level={2} variant='label'>
+                  Source model
+                </Heading>
                 <Dropzone
                   className='min-h-72 rounded-lg border-dashed p-6 text-wrap'
                   maxFiles={100}

@@ -70,7 +70,7 @@ const subCommands: Record<string, CommandDef> = {
     const { installCommand } = await import('./commands/install.js');
     return installCommand as CommandDef;
   }),
-  prepare: lazyCommand('prepare', 'Prepare a native kernel’s runtime in the shared payload store', async () => {
+  prepare: lazyCommand('prepare', 'Prepare a native kernel’s runtime in the shared dependency store', async () => {
     const { prepareCommand } = await import('./commands/prepare.js');
     return prepareCommand as CommandDef;
   }),
@@ -102,7 +102,7 @@ const subCommands: Record<string, CommandDef> = {
     const { publishCommand } = await import('./commands/publish.js');
     return publishCommand as CommandDef;
   }),
-  mcp: lazyCommand('mcp', 'Serve Tau CAD tools to a local agent over stdio (MCP)', async () => {
+  mcp: lazyCommand('mcp', 'Serve Tau tools to a local agent over stdio (MCP)', async () => {
     const { mcpCommand } = await import('./commands/mcp.js');
     return mcpCommand as CommandDef;
   }),

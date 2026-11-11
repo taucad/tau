@@ -32,13 +32,13 @@
 
 import { assertEvent, createAsyncLogic, setup, types } from 'xstate';
 import type { EnqueueObject, SystemRegistry } from 'xstate';
-import { eventSchemas } from '#lib/xstate.lib.js';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import type { MyUIMessage, ModelInputModality, ModelSupport } from '@taucad/chat';
 import { modelSupportsInput } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
 import { base64ToUint8Array } from 'uint8array-extras';
-import { attachmentKind, attachmentReferenceOf, attachmentUrl } from '#utils/attachment.utils.js';
-import type { AttachmentKind, StoredAttachment, StoredAttachmentRef } from '#utils/attachment.utils.js';
+import { attachmentKind, attachmentReferenceOf, attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
+import type { AttachmentKind, StoredAttachment, StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 
 /**
  * An attachment held by a draft: a reference, whose `byteLength` is known only
@@ -373,7 +373,7 @@ const clearMessageEditActor = createAsyncLogic<void, { messageId: string }>({
 
 /**
  * Placeholder resize actor. The real implementation lives in
- * `apps/ui/app/hooks/resize-image.actor.ts` and is provided via
+ * `apps/libs/chat-ui/src/hooks/resize-image.actor.ts` and is provided via
  * `.provide({ actors: { resizeImageActor } })` by every ownership site.
  * Tests override with a deterministic fake.
  */

@@ -7,7 +7,7 @@ import { Button } from '@taucad/ui/components/button';
 import { FieldError } from '@taucad/ui/components/field';
 import { Input } from '@taucad/ui/components/input';
 import { Skeleton } from '@taucad/ui/components/skeleton';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { ChangeAvatar } from '#components/auth/settings/account/change-avatar.js';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 

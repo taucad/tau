@@ -73,7 +73,7 @@
     "validate-prose": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "./node_modules/.bin/vale --config apps/docs/.vale.ini apps/docs/content",
+        "command": "node scripts/src/ensure-vale.ts && node_modules/@vvago/vale/bin/vale --config apps/docs/.vale.ini apps/docs/content",
         "cwd": "."
       }
     },
@@ -332,9 +332,26 @@
     },
     "validate-agent-lanes": {
       "executor": "nx:run-commands",
-      "cache": false,
+      "cache": true,
+      "inputs": [
+        "{workspaceRoot}/.agents/skills/codex-lanes/scripts/**/*",
+        { "env": "CODEX_LANES_SECTION" },
+        { "runtime": "node --version" },
+        { "runtime": "git --version" }
+      ],
+      "outputs": [],
       "options": {
         "command": "node --test .agents/skills/codex-lanes/scripts/lanes.test.mjs"
+      }
+    },
+    "validate-nx-guard": {
+      "executor": "nx:run-commands",
+      "inputs": [
+        "{workspaceRoot}/.github/actions/setup-nx/nx-guard.ts",
+        "{workspaceRoot}/.github/actions/setup-nx/nx-guard.test.ts"
+      ],
+      "options": {
+        "command": "node --disable-warning=ExperimentalWarning --test .github/actions/setup-nx/nx-guard.test.ts"
       }
     }
   }

@@ -2,10 +2,12 @@ import { Link } from 'react-router';
 import type { PublishedArticle } from '#www/editorial.js';
 import { Button } from '@taucad/ui/components/button';
 import { SiteLink } from '#www/site-link.js';
-import { Badge } from '@taucad/ui/components/badge';
+import { PlanCards } from '@taucad/ui-kit/components/plan-cards';
+import type { PlanCatalogEntry } from '@taucad/billing/plan-catalog';
+import { tauPlanCatalog } from '@taucad/billing/plan-catalog';
 import type { ReactNode } from 'react';
 import { appHref, docsOrigin } from '#www/environment.js';
-import { ecosystem, exampleUrl, plans, principles, sourceUrl, storyChapters, useCases } from '#www/content.js';
+import { ecosystem, exampleUrl, principles, salesEmail, sourceUrl, storyChapters, useCases } from '#www/content.js';
 import { heroDrafting } from '#www/hero-view.js';
 import { diagrams } from '#www/principle-diagrams.js';
 import { geospecRun as evidence } from '@taucad/planetary-gearbox';
@@ -316,7 +318,7 @@ export const storyMarkup = (): React.JSX.Element => (
   </section>
 );
 export const principleStrip = (): React.JSX.Element => (
-  <section className='band principles' aria-label='Design, verify, make'>
+  <section className='band principles' aria-label='Design, verify, build'>
     {principles.map((item, index) => (
       <article key={item.id} className='cell principle'>
         <p className='kicker'>
@@ -421,67 +423,60 @@ export const caseCards = (): React.JSX.Element => (
     ))}
   </div>
 );
+/** Where each plan's action goes from the public site. The catalogue names the action; the site owns the link. */
+const planCta = (entry: PlanCatalogEntry): React.JSX.Element => {
+  switch (entry.cta.kind) {
+    case 'contact-sales': {
+      return (
+        <SiteLink className='button' href={`mailto:${salesEmail}`}>
+          {entry.cta.label} {out}
+        </SiteLink>
+      );
+    }
+    case 'subscribe': {
+      return (
+        <SiteLink
+          className='button primary'
+          href={appHref('/?settings=billing')}
+          isAppLink
+          data-event='cta'
+          data-placement={`pricing-${entry.id}`}
+        >
+          {entry.cta.label} {out}
+        </SiteLink>
+      );
+    }
+    case 'signup': {
+      return (
+        <SiteLink
+          className='button'
+          href={appHref('/')}
+          isAppLink
+          data-open-app=''
+          data-event='cta'
+          data-placement={`pricing-${entry.id}`}
+        >
+          {entry.cta.label} {out}
+        </SiteLink>
+      );
+    }
+  }
+};
+
+/**
+ * The plan grid: the same `PlanCards` component and `tauPlanCatalog` the app's
+ * Billing settings render, so the two can never disagree. `compact` is the
+ * home page teaser: name, price and action only.
+ */
 export const planCards = (compact = false): React.JSX.Element => (
-  <div className='plans'>
-    {plans.map((plan) => (
-      <article key={plan.id} className={`cell plan${plan.id === 'pro' ? ' featured' : ''}`}>
-        <div className='plan-head'>
-          <h3>{plan.name}</h3>
-          {plan.id === 'pro' ? <Badge variant='secondary'>Most popular</Badge> : ''}
-        </div>
-        <p>{plan.tagline}</p>
-        <p className='price'>
-          {plan.price}
-          <span>{plan.billingPeriod}</span>
-        </p>
-        {compact ? (
-          ''
-        ) : (
-          <ul>
-            {plan.features.map(([label, flag]) => (
-              <li key={label} className={flag ? 'soon' : ''}>
-                <span className='mark' aria-hidden='true'>
-                  {flag ? '○' : '✓'}
-                </span>
-                <span>
-                  {label}
-                  {flag ? (
-                    <>
-                      {' '}
-                      <span className='soon-label'>· Coming soon</span>
-                    </>
-                  ) : (
-                    ''
-                  )}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {plan.cta[1].startsWith('mailto:') ? (
-          <SiteLink className='button' href={plan.cta[1]}>
-            {plan.cta[0]} {out}
-          </SiteLink>
-        ) : (
-          <SiteLink
-            className={`button${plan.id === 'pro' ? ' primary' : ''}`}
-            href={appHref(plan.cta[1] as `/${string}`)}
-            isAppLink
-            data-open-app={plan.cta[1] === '/' ? '' : undefined}
-            data-event='cta'
-            data-placement={`pricing-${plan.id}`}
-          >
-            {plan.cta[0]} {out}
-          </SiteLink>
-        )}
-      </article>
-    ))}
+  <div className='cell plans'>
+    <PlanCards entries={tauPlanCatalog} isCompact={compact} renderCta={planCta} />
   </div>
 );
 export const closing = (): React.JSX.Element => (
   <section className='band closing' aria-labelledby='closing-title'>
     <div className='cell closing-copy'>
-      {kicker('Design. Verify. Make.')}
+      {kicker('Design. Verify. Build.')}
       <h2 id='closing-title'>
         Get started
         <br />

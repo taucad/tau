@@ -72,9 +72,8 @@ DATABASE_STATEMENT_TIMEOUT_MS = '15000'
 DATABASE_LOCK_TIMEOUT_MS = '5000'
 DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS = '15000'
 DATABASE_RUNTIME_ROLE = 'tau_api_runtime'
-# Deploy-cut charter D15: a funded model step may run up to 600 s on staging so
-# high-effort reasoning is measured, not cut. Production keeps the schema default
-# (300 s). kill_timeout stays 120 s and shutdownPhases and recoveryGraceMinutes are
+# Deploy-cut charter D15: a funded model step may run up to 600 s, as in production
+# (operator ruling 2026-11-10). kill_timeout stays 120 s and shutdownPhases and recoveryGraceMinutes are
 # unchanged: a step cut by a deploy still settles at zero with service_restart.
 BILLING_INVOCATION_DEADLINE = '600000'
 # Additional CORS origins for the Netlify-hosted UI:
@@ -171,9 +170,8 @@ processes = ['app']
 # schema, Stripe, react-email through EmailService, OTel auto-instrumentations) and
 # measured ~213 MiB peak RSS locally; staging OOM-killed it twice at 256 MB, once with
 # a one-shot `billing-command.js` run inside it and once on a failing pass alone. One-shot
-# `billing-command.js` runs (`recover-payments`, `lifecycle`, `pause-route`, `resume-route`,
-# `export-supplier-legacy` and the like) belong on an `app` Machine (`fly ssh console -g app`),
-# never inside this worker.
+# `billing-command.js` runs (`recover-payments`, `lifecycle`, `pause-route`, `resume-route`
+# and the like) belong on an `app` Machine (`fly ssh console -g app`), never inside this worker.
 [[vm]]
 memory = '512mb'
 cpu_kind = 'shared'

@@ -1,4 +1,4 @@
-// Integration fixture: prepares this host's Build123d closure from the payload seed the `seed` target fills, through
+// Integration fixture: prepares this host's Build123d closure from the dependency seed the `seed` target fills, through
 // the same preparation host, sandboxed seal and receipt `tau prepare build123d` uses, so every native test runs the
 // shipped closure rather than a separately built tree.
 import { existsSync, readFileSync } from 'node:fs';
@@ -18,7 +18,7 @@ import { build123dLaunchSet, sealBuild123dClosure } from '#build123d-closure.js'
 const packageName = '@taucad/build123d';
 export const packageRoot = resolve(import.meta.dirname, '..');
 const workspaceRoot = resolve(packageRoot, '../../..');
-/** The digest-addressed payload seed `pnpm nx run build123d:seed` fills (`blobs/sha256/<hex>`). */
+/** The digest-addressed dependency seed `pnpm nx run build123d:seed` fills (`blobs/sha256/<hex>`). */
 export const seedDirectory = resolve(workspaceRoot, 'out/cache/build123d-seed');
 /** The native test store; an isolated store can avoid unrelated filesystem metadata writers. */
 export const storeDirectory = process.env['TAU_BUILD123D_TEST_STORE']
@@ -42,12 +42,12 @@ const selectHostVariant = (): DependencyVariant | undefined => {
 /** This host's `engine` variant, or `undefined` on a host the package declares none for. */
 export const hostVariant: DependencyVariant | undefined = selectHostVariant();
 
-/** Whether the seed holds every third-party payload of this host's variant, so a prepare needs no network. */
+/** Whether the seed holds every third-party dependency file of this host's variant, so a prepare needs no network. */
 export const seedPresent: boolean =
-  hostVariant?.payloads.every(
-    (payload) =>
-      payload.origin.kind !== 'url' ||
-      existsSync(join(seedDirectory, 'blobs', 'sha256', integrityToHex(payload.integrity).hex)),
+  hostVariant?.files.every(
+    (dependencyFile) =>
+      dependencyFile.origin.kind !== 'url' ||
+      existsSync(join(seedDirectory, 'blobs', 'sha256', integrityToHex(dependencyFile.integrity).hex)),
   ) === true;
 
 /**

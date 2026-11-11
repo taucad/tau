@@ -11,12 +11,12 @@ import { useEffect } from 'react';
 import { useSession } from '@better-auth-ui/react';
 import { resolveTelemetryConsent } from '@taucad/telemetry/client';
 import type { DevicePreference, ReportingConsent } from '@taucad/telemetry/client';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useCookieConsent } from '#hooks/use-cookie-consent.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
 import { authClient } from '#lib/auth-client.js';
-import { isGlobalPrivacyControlEnabled } from '#lib/global-privacy-control.lib.js';
+import { isGlobalPrivacyControlEnabled } from '@taucad/ui-core/lib/global-privacy-control.lib';
 import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
 
 /**
@@ -32,7 +32,8 @@ export const telemetryCopy = {
     'Never includes prompts, code, parameter values, file names or geometry.',
     'Signed in, data is rate-limited per account but not stored against it. Signed out, nothing identifies you.',
     'Applies to this browser and the Tau desktop app. The Tau command line, MCP server and self-hosted server use "tau telemetry off".',
-    'Error reports and product analytics are separate. Analytics follows your cookie preferences.',
+    'Includes a short diagnostic report when the browser stops a page, such as which kernel was running and how much memory it used.',
+    'Other error reports and product analytics are separate. On the web, analytics follow your cookie preferences; in the desktop app, the Analytics switch in Data controls.',
   ],
   untilActivation: {
     /** True to the switch's current reach: three legacy producers still ignore it. */

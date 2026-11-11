@@ -1,7 +1,7 @@
 import { KeyRound } from 'lucide-react';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { CopyButton } from '@taucad/ui/components/copy-button';
-import type { AgentHostLogin } from '#services/agent-host-event-projection.js';
+import type { AgentHostLogin } from '@taucad/chat-ui/services/agent-host-event-projection';
 
 /**
  * What the *user* has to do to sign an external agent in (V11).

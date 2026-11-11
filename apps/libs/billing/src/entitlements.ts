@@ -57,8 +57,9 @@ export type Entitlements = {
  */
 export const storageLimitBytesByTier: Readonly<Record<BillingTier, number>> = {
   free: 1024 ** 3,
-  pro: 10 * 1024 ** 3,
-  enterprise: 100 * 1024 ** 3,
+  pro: 100 * 1024 ** 3,
+  /* Enterprise is sold as custom storage; this is the default allowance until a contract sets another. */
+  enterprise: 1024 ** 4,
 };
 
 /**
@@ -78,9 +79,8 @@ export const formatStorageLimit = (bytes: number): string => {
 };
 
 /**
- * What the free tier is entitled to once free sync is open (D16, EQ2): backup
- * to Tau Cloud within its allowance and publishing (which shares
- * `canSyncFiles`). A GitHub connection needs no entitlement: every plan has it.
+ * What the free tier is entitled to (D16, EQ2): backup to Tau Cloud within its
+ * allowance and publishing (which shares `canSyncFiles`). A GitHub connection needs no entitlement: every plan has it.
  */
 const freeEntitlements = {
   canUseProKernels: false,
@@ -122,14 +122,11 @@ const proEntitlements = {
  * Synthesises an {@link Entitlements} projection from a billing tier.
  * Used as the MVP fallback before `GET /v1/billing/entitlements` ships.
  *
- * Free sync is a launch gate (charter D23): until a deployment opens it, the
- * free tier projects `canSyncFiles` as `false`, so the default is the closed
- * answer everywhere this is called without the flag — including a browser's
- * fallback before the server has answered. The gate covers Tau's storage only:
- * a GitHub connection uses the user's own storage, so every tier has it (EQ2).
+ * Every tier syncs to Tau Cloud within its account allowance
+ * ({@link storageLimitBytesByTier}): 1 GB on Free. A GitHub connection uses the
+ * user's own storage, so every tier has it too (EQ2).
  *
  * @param tier - The subscriber's billing tier
- * @param options - Deployment gates; `freeTierSync` opens the free tier's sync.
  * @returns A fully-populated entitlements object
  * @public
  * @example <caption>Project entitlements for a Pro subscriber</caption>
@@ -140,17 +137,13 @@ const proEntitlements = {
  * entitlements.canUseProKernels; // true
  * ```
  */
-export const entitlementsFromTier = (
-  tier: BillingTier,
-  options: Readonly<{ freeTierSync?: boolean }> = {},
-): Entitlements => {
+export const entitlementsFromTier = (tier: BillingTier): Entitlements => {
   switch (tier) {
     case 'free': {
       return {
         tier,
         status: 'none',
         ...freeEntitlements,
-        ...(options.freeTierSync === true ? {} : { canSyncFiles: false }),
         paidThrough: undefined,
         graceEndsAt: undefined,
         cancelAtPeriodEnd: false,

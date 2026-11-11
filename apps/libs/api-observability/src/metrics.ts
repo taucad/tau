@@ -394,6 +394,19 @@ export class MetricsService {
     unit: TauMetrics.agentCompactions.unit,
   });
 
+  public readonly agentPrefixBreaks = this.clientMeter.createCounter(TauMetrics.agentPrefixBreaks.name, {
+    description: TauMetrics.agentPrefixBreaks.description,
+    unit: TauMetrics.agentPrefixBreaks.unit,
+  });
+
+  public readonly agentReasoningOmittedBlocks = this.clientMeter.createCounter(
+    TauMetrics.agentReasoningOmittedBlocks.name,
+    {
+      description: TauMetrics.agentReasoningOmittedBlocks.description,
+      unit: TauMetrics.agentReasoningOmittedBlocks.unit,
+    },
+  );
+
   // --- Client-reported: agent context ---
 
   public readonly agentCallsBeforeFirstWrite = this.clientMeter.createHistogram(
@@ -802,6 +815,11 @@ export class MetricsService {
     unit: TauMetrics.agentEvidenceDeliveries.unit,
   });
 
+  public readonly agentEvidenceSuperseded = this.apiMeter.createCounter(TauMetrics.agentEvidenceSuperseded.name, {
+    description: TauMetrics.agentEvidenceSuperseded.description,
+    unit: TauMetrics.agentEvidenceSuperseded.unit,
+  });
+
   public readonly agentEvidenceBacklogRows = this.apiMeter.createGauge(TauMetrics.agentEvidenceBacklogRows.name, {
     description: TauMetrics.agentEvidenceBacklogRows.description,
     unit: TauMetrics.agentEvidenceBacklogRows.unit,
@@ -832,6 +850,11 @@ export class MetricsService {
     description: TauMetrics.agentEvidencePasses.description,
     unit: TauMetrics.agentEvidencePasses.unit,
   });
+
+  public readonly agentEvidenceLangfuseUnits = this.apiMeter.createCounter(TauMetrics.agentEvidenceLangfuseUnits.name, {
+    description: TauMetrics.agentEvidenceLangfuseUnits.description,
+    unit: TauMetrics.agentEvidenceLangfuseUnits.unit,
+  });
 }
 
 /** `ws.gateway` on the `ws.*` connection series: one value per upgrade route. */
@@ -848,6 +871,9 @@ export type AgentEvidenceAdmissionAttributes = z.infer<typeof TauMetrics.agentEv
 
 /** `outcome` of one `tau.agent_evidence.deliveries` increment. */
 export type AgentEvidenceDeliveryOutcome = z.infer<typeof TauMetrics.agentEvidenceDeliveries.attributes>['outcome'];
+
+/** `reason` of one `tau.agent_evidence.superseded_receipts` increment. */
+export type AgentEvidenceSupersededReason = z.infer<typeof TauMetrics.agentEvidenceSuperseded.attributes>['reason'];
 
 /** `outcome` of one `tau.agent_evidence.erasure_traces` increment. */
 export type AgentEvidenceErasureOutcome = z.infer<typeof TauMetrics.agentEvidenceErasureTraces.attributes>['outcome'];

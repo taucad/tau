@@ -1,12 +1,12 @@
 // @vitest-environment node
 import { installNativeClosureResolver } from '@taucad/native-process-core/store';
-import type { ClosureLaunch, ReceiptFile } from '@taucad/runtime/preparation/node';
+import type { ClosureLaunch, InstalledFile } from '@taucad/runtime/preparation/node';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { defineDotnetKernelAdopter } from '#dotnet-kernel-adopter.js';
 import { bindDotnetKernel } from '#dotnet-kernel-binding.js';
 
-const row = (path: string, digit: string): ReceiptFile => ({
+const row = (path: string, digit: string): InstalledFile => ({
   path,
   byteLength: 1,
   sha256: digit.repeat(64),
@@ -26,7 +26,7 @@ const sample = defineDotnetKernelAdopter({
       runtime: [
         {
           target: { runtime: 'native', os: 'linux', arch: 'x64', libc: 'glibc' },
-          payloads: [
+          files: [
             {
               name: 'runtime',
               integrity: `sha256-${'A'.repeat(43)}=`,

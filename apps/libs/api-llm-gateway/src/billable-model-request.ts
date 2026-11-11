@@ -15,7 +15,11 @@ const maximumDepth = 64;
 /* Text, signatures and identifiers stay bounded per string; attachment bytes carry their own bounds. */
 const maximumStringLength = 4_000_000;
 const boundedString = z.string().max(maximumStringLength);
-const cacheControlSchema = z.object({ type: z.literal('ephemeral'), ttl: z.literal('5m').optional() }).strict();
+/* `1h` is priced as its own `cache_write` tier; both lifetimes are Anthropic's documented values. */
+const cacheControlSchema = z.object({ type: z.literal('ephemeral'), ttl: z.enum(['5m', '1h']).optional() }).strict();
+/* Routes a conversation to one supplier server so its prefix cache is found again. The caller
+ * sends a hash, never a Tau identifier (I4). OpenAI documents at most 64 characters. */
+const promptCacheKeySchema = z.string().min(1).max(64);
 /* Linear on purpose: a backtracking group per quadruple overflows V8's regexp stack
  * on a multi-megabyte attachment. Length and padding position are checked apart. */
 const isBase64 = (value: string): boolean => value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/u.test(value);
@@ -140,17 +144,51 @@ const toolResultSchema = z
 const googleToolCallExtraContentSchema = z
   .object({ google: z.object({ thought_signature: boundedString }).strict() })
   .strict();
+/**
+ * How Anthropic treats a replayed thinking block whose prefix changed since it was minted: refuse the request, or
+ * leave the block out and report it. Either value turns the check on whatever the account's age; it changes which
+ * blocks the model reads, not what a token costs. It needs the `thinking-binding-controls-2026-08-01` beta.
+ */
+const anthropicBlockBindingSchema = z
+  .object({ prefix_mismatch_behavior: z.enum(['error', 'drop_block']) })
+  .strict()
+  .optional();
 const anthropicThinkingConfigSchema = z.union([
-  z.object({ type: z.literal('adaptive'), display: z.enum(['summarized', 'omitted']).optional() }).strict(),
+  z
+    .object({
+      type: z.literal('adaptive'),
+      display: z.enum(['summarized', 'omitted']).optional(),
+      block_binding: anthropicBlockBindingSchema,
+    })
+    .strict(),
   z
     .object({
       type: z.literal('enabled'),
       budget_tokens: z.number().int().positive(),
       display: z.enum(['summarized', 'omitted']).optional(),
+      block_binding: anthropicBlockBindingSchema,
     })
     .strict(),
 ]);
 const anthropicOutputConfigSchema = z.object({ effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']) }).strict();
+/**
+ * An effort level carried in the transcript instead of in a top-level field. A top-level change
+ * rewrites the provider's cached messages; an appended marker is one more turn and the cache holds.
+ * Anthropic reads an empty `system`-role message with `output_config` under the
+ * `mid-conversation-output-config-2026-07-01` beta, OpenAI a `configuration_update` item. Each
+ * carries the effort and nothing else, so neither can smuggle instructions past the system prompt.
+ * Support is per model: the provider itself refuses the form on a model that does not read it.
+ */
+const anthropicEffortMessageSchema = z
+  .object({ role: z.literal('system'), content: z.array(z.never()).max(0), output_config: anthropicOutputConfigSchema })
+  .strict();
+const responseReasoningEffortSchema = z.enum(['none', 'low', 'medium', 'high', 'xhigh']);
+const responseConfigurationUpdateSchema = z
+  .object({
+    type: z.literal('configuration_update'),
+    reasoning: z.object({ effort: responseReasoningEffortSchema }).strict(),
+  })
+  .strict();
 const googleReasoningConfigSchema = z
   .object({
     google: z
@@ -199,6 +237,7 @@ const messageSchema = z
   .object({
     role: z.enum(['system', 'developer', 'user', 'assistant', 'tool']),
     content: contentSchema.nullable(),
+    output_config: anthropicOutputConfigSchema.optional(),
     name: z.string().min(1).max(128).optional(),
     tool_call_id: z.string().min(1).max(256).optional(),
     tool_calls: z
@@ -283,6 +322,7 @@ const responseInputSchema = z
       responseFunctionCallSchema,
       responseFunctionOutputSchema,
       responseMessageSchema,
+      responseConfigurationUpdateSchema,
     ]),
   )
   .max(512);
@@ -299,6 +339,7 @@ export const billableModelRequestSchema = z
       .strict()
       .optional(),
     store: z.literal(false).optional(),
+    prompt_cache_key: promptCacheKeySchema.optional(),
     input: z.union([contentSchema, responseInputSchema]).optional(),
     messages: z.array(messageSchema).max(512).optional(),
     system: contentSchema.optional(),
@@ -306,7 +347,7 @@ export const billableModelRequestSchema = z
     include: z.array(z.literal('reasoning.encrypted_content')).max(1).optional(),
     reasoning: z
       .object({
-        effort: z.enum(['none', 'low', 'medium', 'high', 'xhigh']),
+        effort: responseReasoningEffortSchema,
         summary: z.enum(['auto', 'concise', 'detailed']).optional(),
       })
       .strict()
@@ -417,16 +458,18 @@ const responsesWireSchema = z
             responseFunctionCallSchema,
             responseFunctionOutputSchema,
             responseMessageSchema,
+            responseConfigurationUpdateSchema,
           ]),
         )
         .max(512),
     ]),
     stream: z.literal(true),
     store: z.literal(false).optional(),
+    prompt_cache_key: promptCacheKeySchema.optional(),
     max_output_tokens: z.number(),
     reasoning: z
       .object({
-        effort: z.enum(['none', 'low', 'medium', 'high', 'xhigh']),
+        effort: responseReasoningEffortSchema,
         summary: z.enum(['auto', 'concise', 'detailed']).optional(),
       })
       .strict()
@@ -474,6 +517,7 @@ const anthropicMessageSchema = z.union([
       content: anthropicAssistantContentSchema,
     })
     .strict(),
+  anthropicEffortMessageSchema,
 ]);
 const anthropicWireSchema = z
   .object({
@@ -627,6 +671,7 @@ const boundedElementTypes = new Set([
   'adaptive',
   'any',
   'auto',
+  'configuration_update',
   'ephemeral',
   'enabled',
   'function',

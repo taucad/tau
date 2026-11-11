@@ -20,10 +20,10 @@ import type {
   ComposerRecordPatch,
   ComposerRecordReadResult,
   ComposerRecordStore,
-} from '#db/composer-record-store.js';
-import { isComposerRecordInputError } from '#db/composer-record-store.js';
-import { eventSchemas } from '#lib/xstate.lib.js';
-import { getRetryDelay } from '#utils/backoff.utils.js';
+} from '@taucad/chat-ui/db/composer-record-store';
+import { isComposerRecordInputError } from '@taucad/chat-ui/db/composer-record-store';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
+import { getRetryDelay } from '@taucad/ui-core/utils/backoff.utils';
 
 /** How many times a retryable write failure is retried before the patch is declared stalled. */
 const defaultRetryMaxAttempts = 5;

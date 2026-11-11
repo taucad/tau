@@ -1,10 +1,10 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Topic } from '@taucad/events';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
 
 /**

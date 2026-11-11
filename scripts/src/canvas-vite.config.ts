@@ -217,6 +217,11 @@ export const createCanvasConfig = (
     // arbitrary variants live in `dockview.tsx`, so an unscanned app root renders
     // the real Dockview markup with none of the theme that gives it its geometry.
     appRoot,
+    // App code cut into `@taucad/ui-kit` and `@taucad/project-workspace` carries class strings the same way.
+    resolve(repoRoot, 'apps/libs/ui-kit/src'),
+    resolve(repoRoot, 'apps/libs/chat-ui/src'),
+    resolve(repoRoot, 'apps/libs/project-workspace/src'),
+    resolve(repoRoot, 'apps/libs/ui-core/src'),
     ...Array.from(aliases.values(), dirname),
   ]);
   return defineConfig({

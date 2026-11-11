@@ -64,16 +64,23 @@ describe('apiLibraryAppEdges()', () => {
     );
 
     expect(apiLibraries.toSorted()).toEqual([
+      'api-agent-observability',
       'api-auth',
       'api-billing',
+      'api-chat',
       'api-core',
       'api-database',
       'api-email',
+      'api-git-core',
+      'api-git-mirror',
       'api-hosts',
       'api-lifecycle',
       'api-llm-gateway',
+      'api-object-storage',
       'api-observability',
+      'api-projects',
       'api-redis',
+      'api-testing',
     ]);
     expect(apiLibraryAppEdges(graph)).toEqual([]);
     for (const library of apiLibraries) {

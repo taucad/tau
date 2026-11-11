@@ -19,27 +19,28 @@ import {
 import type { CadReference } from '@taucad/chat/references';
 import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
-import type { ChipType } from '#components/chat/context-chip.js';
-import { buildPastedContent, invocationTokenRegex } from '#utils/at-reference.utils.js';
-import type { PastedContentSegment } from '#utils/at-reference.utils.js';
+import type { ChipType } from '@taucad/chat-ui/components/context-chip';
+import { buildPastedContent, invocationTokenRegex } from '@taucad/chat-ui/utils/at-reference.utils';
+import type { PastedContentSegment } from '@taucad/chat-ui/utils/at-reference.utils';
 import { ContextChipNode } from '#components/chat/tiptap/context-chip-node.js';
-import { SubmitOnEnter } from '#components/chat/tiptap/submit-on-enter.js';
-import { ChatInputDropHandler } from '#components/chat/tiptap/chat-input-drop-handler.js';
-import { ContextMention } from '#components/chat/tiptap/context-suggestion.js';
+import { SubmitOnEnter } from '@taucad/chat-ui/components/tiptap/submit-on-enter';
+import { ChatInputDropHandler } from '@taucad/chat-ui/components/tiptap/chat-input-drop-handler';
+import { ContextMention } from '@taucad/chat-ui/components/tiptap/context-suggestion';
 import {
   SlashCommand,
   defaultCommands,
   getEnabledSlashCommandItems,
-} from '#components/chat/tiptap/slash-command-suggestion.js';
-import { buildContextItemsFromSearch } from '#components/chat/tiptap/context-suggestion.utils.js';
-import { chatComposerPlaceholder } from '#components/chat/chat-input-styles.js';
-import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
+} from '@taucad/chat-ui/components/tiptap/slash-command-suggestion';
+import { buildContextItemsFromSearch } from '@taucad/chat-ui/components/tiptap/context-suggestion.utils';
+import { chatComposerPlaceholder } from '@taucad/chat-ui/components/chat-input-styles';
+import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
+import type { ClipboardPasteEvent } from '@taucad/chat-ui/components/chat-paste-handler';
 import type {
   ContextSuggestionItem,
   SlashCommandItem,
   SuggestionPopupState,
   SuggestionRenderCallbacks,
-} from '#components/chat/tiptap/suggestion-types.js';
+} from '@taucad/chat-ui/components/tiptap/suggestion-types';
 
 export type ContextChip = {
   id: string;
@@ -323,6 +324,8 @@ export function useChatEditor({
   const handleImagePasteRef = useRef(handleImagePaste);
   handleImagePasteRef.current = handleImagePaste;
 
+  // Local measurement only: from this composer's first render to its editor's creation, once per composer instance.
+  const [composerMountSpan] = useState(() => pageProjectOpenPerformance().begin('composer.mount'));
   const editor = useEditor({
     content: initialText === undefined ? undefined : buildEditorContentJson([{ type: 'text', value: initialText }]),
     extensions: [
@@ -413,6 +416,9 @@ export function useChatEditor({
         }
         return false;
       },
+    },
+    onCreate: () => {
+      composerMountSpan.finish('ok');
     },
     onUpdate: ({ editor: updatedEditor }) => {
       onUpdateRef.current?.(extractContent(updatedEditor));

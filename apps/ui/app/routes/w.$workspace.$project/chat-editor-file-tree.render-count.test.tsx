@@ -16,7 +16,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry } from '@taucad/types';
 import type * as HighlightTextModule from '@taucad/ui/components/highlight-text';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
-import { rowWindowThreshold } from '#routes/w.$workspace.$project/use-row-window.js';
+import { rowWindowThreshold } from '@taucad/project-workspace/hooks/use-row-window';
 
 /** Row renders, counted where each file or folder row draws its name. */
 const renders = vi.hoisted(() => ({ row: 0 }));
@@ -49,6 +49,11 @@ const actorStub = vi.hoisted(() => {
     on: () => ({ unsubscribe: () => undefined }),
   };
 });
+
+// These fixtures describe an already loaded tree; root readiness has its own cases.
+vi.mock('@taucad/fs-client/react/use-directory-listing', () => ({
+  useDirectoryListing: () => ({ kind: 'ready', path: '', entries: [] }),
+}));
 
 vi.mock('@taucad/ui/components/highlight-text', async (importOriginal) => {
   const actual = await importOriginal<typeof HighlightTextModule>();

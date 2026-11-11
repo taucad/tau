@@ -3,9 +3,9 @@ import { cadReferenceToken } from '@taucad/chat/references';
 import type { CadReference } from '@taucad/chat/references';
 import { describe, expect, it } from 'vitest';
 import type { ResolvedModel } from '#hooks/use-models.js';
-import { buildBrowserAgentHostSnapshotContext } from '#chat-clients/_internal/browser-agent-host-snapshot-context.js';
+import { buildBrowserAgentHostSnapshotContext } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-snapshot-context';
 import { agentHostConfig } from '#chat-clients/_internal/turn-body.js';
-import { turnReferencesOf } from '#chat-clients/turn-intent.js';
+import { turnReferencesOf } from '@taucad/chat-ui/chat-clients/turn-intent';
 import { buildUserMessage } from '#utils/chat.utils.js';
 
 const workbench = {
@@ -154,6 +154,11 @@ describe('browser agent host snapshot context', () => {
     const withoutChip = contextOf(turnReferencesOf([buildUserMessage({ text })]));
     expect(withoutChip).not.toContain('Sun gear');
     expect(withoutChip).not.toContain('"componentKind":"part"');
-    expect(agentHostConfig({ agent, chatId: 'chat-1', runId: 'run-1', resolvedModel }).contextMessages).toBeUndefined();
+    /* With nothing to say about the workspace, the turn carries its state note alone. */
+    expect(
+      agentHostConfig({ agent, chatId: 'chat-1', runId: 'run-1', resolvedModel }).contextMessages?.map(
+        (message) => message.metadata?.tauInternal?.['kind'],
+      ),
+    ).toEqual(['chat-state']);
   });
 });

@@ -7,7 +7,8 @@ import { inspectServerHtml, installHomeLoadRecorder, readHomeLoad } from '#suppo
 
 /**
  * R9 (home page loading audit): a load of Home is steady from its first frame. The target frame sequence's
- * acceptance, held at 1x and 4x CPU for a fresh visitor and for a returning one with projects and a stored model:
+ * acceptance, held at 1x and 4x CPU on a wide and a phone viewport, for a fresh visitor and for a returning one with
+ * projects and a stored model:
  *
  * - no `layout-shift` entry from navigation start, other than one an input caused (CLS 0, not "good");
  * - no frame with the skills notice or its retry control, since nothing failed;
@@ -34,6 +35,13 @@ const settleWindow = 2000;
 const catalogLatency = 1000;
 
 type Profile = 'fresh' | 'returning';
+
+/** Wide is the audit's desktop; phone is where a layout decided after hydration (`isMobile`) used to move the page. */
+const viewports = {
+  wide: { width: 1440, height: 900 },
+  phone: { width: 390, height: 844 },
+} as const;
+type ViewportName = keyof typeof viewports;
 
 /** The server's HTML for Home shows the final composer: a named or placeholder model, no notice, no spinner. */
 const expectSteadyServerHtml = (label: string, inspection: HomeInspection): void => {
@@ -107,24 +115,25 @@ const seedReturningVisitor = async (): Promise<void> => {
   }, storedModel);
 };
 
-test.each([
-  { profile: 'fresh', rate: 1 },
-  { profile: 'fresh', rate: 4 },
-  { profile: 'returning', rate: 1 },
-  { profile: 'returning', rate: 4 },
-] satisfies ReadonlyArray<{ readonly profile: Profile; readonly rate: number }>)(
-  'should load Home in its final shape for a $profile visitor at $rate x CPU',
-  async ({ profile, rate }) => {
-    await target.setViewport({ width: 1440, height: 900 });
+test.each(
+  (['wide', 'phone'] as const).flatMap((viewport) =>
+    (['fresh', 'returning'] as const).flatMap((profile) => [1, 4].map((rate) => ({ viewport, profile, rate }))),
+  ) satisfies ReadonlyArray<{ readonly viewport: ViewportName; readonly profile: Profile; readonly rate: number }>,
+)(
+  'should load Home in its final shape on a $viewport viewport for a $profile visitor at $rate x CPU',
+  async ({ viewport, profile, rate }) => {
+    /* Projects are seeded through the wide workbench; the measured loads use the row's own viewport. */
+    await target.setViewport(viewports.wide);
     await target.installModelCatalogFixture(catalogLatency);
     const { serverHasCatalog } = await target.startModelCatalogApi();
     expect.soft(serverHasCatalog, 'the UI server never rendered Home with the model catalog').toBe(true);
     await installHomeLoadRecorder();
     const projects = profile === 'returning' ? seededProjects : [];
-    const label = `${profile}-cpu${rate}x`;
+    const label = viewport === 'wide' ? `${profile}-cpu${rate}x` : `${viewport}-${profile}-cpu${rate}x`;
 
     if (profile === 'fresh') {
       /* The first visit itself: no cookies, no storage, nothing remembered. */
+      await target.setViewport(viewports[viewport]);
       await target.emulateCpuThrottling(rate);
       expectSteadyLoad(
         `${label} first visit`,
@@ -132,6 +141,7 @@ test.each([
       );
     } else {
       await seedReturningVisitor();
+      await target.setViewport(viewports[viewport]);
       /* A warm visit lets the page remember what it will be asked to render next time. */
       await target.navigate('/');
       await waitForSettledHome(projects, 1);

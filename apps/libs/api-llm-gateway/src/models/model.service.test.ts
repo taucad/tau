@@ -11,6 +11,7 @@ import type { Environment } from '@taucad/api-core';
 const maxEffectiveContextWindow = 200_000;
 
 const cappedModelIds = [
+  'anthropic-claude-fable-5.2',
   'anthropic-claude-fable-5.1',
   'anthropic-claude-fable-5',
   'anthropic-claude-opus-5.5',
@@ -31,14 +32,11 @@ const cappedModelIds = [
   'google-gemini-3.8-flash',
   'google-gemini-3.5-flash-lite',
   'google-gemini-3.5-flash',
-  'together-glm-5.1',
-  'together-glm-5.2',
-  'together-kimi-k3',
-  'together-qwen-3.5-397b',
-  'together-llama-4-maverick',
-  'morph-kimi-k3.1-pro',
-  'morph-glm-5.3',
-  'morph-glm-5.3-flash',
+  'together-kimi-k3.1-pro',
+  'together-glm-5.3',
+  'together-glm-5.3-flash',
+  'together-minimax-m3.1-flash',
+  'together-deepseek-v4-pro',
   'morph-deepseek-v4.1-flash',
   'xai-grok-4.7',
   'xai-grok-4.6',
@@ -47,6 +45,7 @@ const cappedModelIds = [
 
 /** Every model Tau sends a PDF to. Vertex rows are included because the gateway rewrites their completions file part into an image_url PDF data URI. */
 const pdfInputModelIds = [
+  'anthropic-claude-fable-5.2',
   'anthropic-claude-fable-5.1',
   'anthropic-claude-fable-5',
   'anthropic-claude-opus-5.5',
@@ -163,6 +162,7 @@ describe('modelList', () => {
         .filter((model) => model.support?.reasoning?.levels.includes('xhigh'))
         .map((model) => model.id);
       expect(extraHigh).toEqual([
+        'anthropic-claude-fable-5.2',
         'anthropic-claude-fable-5.1',
         'anthropic-claude-fable-5',
         'anthropic-claude-opus-5.5',
@@ -307,14 +307,14 @@ describe('ModelService', () => {
     expect(modelList.anthropic['claude-opus-5']?.recommended).toBe(false);
   });
 
-  it('recommends Fable 5.1 while retaining Fable 5', async () => {
+  it('recommends Fable 5.2 while retaining Fable 5.1 and Fable 5', async () => {
     const service = createModelService();
     const listedModels = await service.getModels();
-    const fable51 = listedModels.find((model) => model.id === 'anthropic-claude-fable-5.1');
+    const fable52 = listedModels.find((model) => model.id === 'anthropic-claude-fable-5.2');
 
-    expect(fable51).toMatchObject({
+    expect(fable52).toMatchObject({
       recommended: true,
-      model: 'claude-fable-5-1',
+      model: 'claude-fable-5-2',
       provider: { id: 'anthropic', name: 'Anthropic' },
       support: {
         toolChoice: false,
@@ -325,7 +325,7 @@ describe('ModelService', () => {
         contextWindow: maxEffectiveContextWindow,
         maxTokens: 128_000,
         knowledgeCutoff: '2026-06',
-        cost: { inputTokens: 10, outputTokens: 50, cacheReadTokens: 0.25, cacheWriteTokens: 12.5 },
+        cost: { inputTokens: 8, outputTokens: 40, cacheReadTokens: 0.2, cacheWriteTokens: 10 },
       },
       configuration: {
         streaming: true,
@@ -334,7 +334,8 @@ describe('ModelService', () => {
         outputConfig: { effort: 'high' },
       },
     });
-    expect(fable51?.configuration).toHaveProperty('max_tokens', 120_000);
+    expect(fable52?.configuration).toHaveProperty('max_tokens', 120_000);
+    expect(modelList.anthropic['claude-fable-5.1']?.recommended).toBe(false);
     expect(modelList.anthropic['claude-fable-5']?.recommended).toBe(false);
   });
 
@@ -414,10 +415,10 @@ describe('ModelService', () => {
     expect(modelList.vertexai['gemini-3.5-flash']?.recommended).toBe(false);
   });
 
-  it('lists GLM-5.2 as an enabled text-only tool-capable model', async () => {
+  it('lists GLM 5.3 as an enabled text-only tool-capable model', async () => {
     const service = createModelService();
     const models = await service.getModels();
-    const glm = models.find((model) => model.id === 'together-glm-5.2');
+    const glm = models.find((model) => model.id === 'together-glm-5.3');
 
     expect(glm).toBeDefined();
     expect(glm?.support?.tools).toBe(true);
@@ -455,16 +456,16 @@ describe('ModelService', () => {
     expect(modelList.xai['grok-4.6']?.recommended).toBe(false);
   });
 
-  it('lists Together Kimi K3 while retaining Moonshot as a hidden fallback', async () => {
+  it('lists Together Kimi K3.1 Pro while retaining Moonshot as a hidden fallback', async () => {
     const service = createModelService();
     const listedModels = await service.getModels();
-    const kimi = service.models.find((model) => model.id === 'together-kimi-k3');
+    const kimi = service.models.find((model) => model.id === 'together-kimi-k3.1-pro');
     const moonshotKimi = service.models.find((model) => model.id === 'moonshot-kimi-k3');
     const listedModelIds = listedModels.map((model) => model.id);
 
     expect(kimi).toMatchObject({
       recommended: true,
-      model: 'moonshotai/Kimi-K3',
+      model: 'moonshotai/Kimi-K3.1-Pro',
       provider: { id: 'together', name: 'Together AI' },
       support: {
         tools: true,
@@ -475,14 +476,14 @@ describe('ModelService', () => {
         family: 'kimi',
         contextWindow: maxEffectiveContextWindow,
         maxTokens: 200_000,
-        cost: { inputTokens: 3, outputTokens: 15, cacheReadTokens: 0.3, cacheWriteTokens: 0 },
+        cost: { inputTokens: 2, outputTokens: 10, cacheReadTokens: 0.2, cacheWriteTokens: 0 },
       },
       configuration: { streaming: true },
     });
     expect(kimi?.configuration).not.toHaveProperty('maxTokens');
     expect(kimi?.configuration).not.toHaveProperty('maxOutputTokens');
     expect(kimi?.configuration).not.toHaveProperty('reasoning');
-    expect(listedModelIds).toContain('together-kimi-k3');
+    expect(listedModelIds).toContain('together-kimi-k3.1-pro');
     expect(moonshotKimi).toMatchObject({
       recommended: false,
       model: 'kimi-k3',
@@ -490,7 +491,7 @@ describe('ModelService', () => {
       details: { contextWindow: maxEffectiveContextWindow },
     });
     expect(listedModelIds).not.toContain('moonshot-kimi-k3');
-    expect(service.getContextWindow('together-kimi-k3')).toBe(maxEffectiveContextWindow);
+    expect(service.getContextWindow('together-kimi-k3.1-pro')).toBe(maxEffectiveContextWindow);
     expect(service.getContextWindow('moonshot-kimi-k3')).toBe(maxEffectiveContextWindow);
   });
 
@@ -498,14 +499,11 @@ describe('ModelService', () => {
     const configService = {
       get: vi.fn((key: string) => (key === 'TOGETHER_API_KEY' ? 'sk-test-together' : false)),
     } satisfies Pick<ConfigService<Environment>, 'get'>;
-    const service = new ModelService(
-      new ProviderService(configService as unknown as ConfigService<Environment, true>),
-      configService as unknown as ConfigService<Environment>,
-    );
+    const service = new ModelService(new ProviderService(), configService as unknown as ConfigService<Environment>);
     await service.getModels();
 
     expect(
-      service.normalizeUsageTokens('together-kimi-k3', {
+      service.normalizeUsageTokens('together-kimi-k3.1-pro', {
         inputTokens: 100,
         outputTokens: 20,
         reasoningTokens: 10,
@@ -521,13 +519,13 @@ describe('ModelService', () => {
     });
   });
 
-  it('filters screenshot from GLM-5.2 while preserving text-only spatial tools', async () => {
+  it('filters screenshot from GLM 5.3 while preserving text-only spatial tools', async () => {
     const service = createModelService();
     await service.getModels();
 
     expect(
       service.filterProviderToolNamesForModel({
-        modelId: 'together-glm-5.2',
+        modelId: 'together-glm-5.3',
         toolNames: [toolName.screenshot, toolName.testModel, toolName.evaluateModel, toolName.exportModel],
       }),
     ).toEqual([toolName.testModel, toolName.evaluateModel, toolName.exportModel]);

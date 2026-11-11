@@ -1,5 +1,86 @@
 # Changelog
 
+## 0.8.0 (2026-11-10)
+
+### Features
+
+- feat(api-llm-gateway): Admit an effort level carried in the transcript (#1747) (550a6fa80)
+- feat(telemetry): Count each prompt-prefix break with what it cost in cache (#1741) (4ad7fd01e)
+- feat(api): Turn on Free-tier cloud sync and remove its flag (#1744) (182df355d)
+- feat(api): Allow funded model steps 10 minutes in production (#1740) (10bcfb96c)
+- feat(agent-host): Replay native reasoning only under the prefix that minted it (#1737) (51d463248)
+- feat(camera): Add the CameraAuthority TLA+ spec and its formal target (#1709) (57c5e68ca)
+- feat(api-llm-gateway): Admit Anthropic's thinking binding controls (#1735) (68df918fa)
+- feat(api-llm-gateway): Refuse a rejected reasoning replay with its own code (#1721) (ae04dcbb0)
+- feat(agent-host): Stamp each reply with its request prefix and count typed breaks (#1716) (85bad0f83)
+- feat(ui): Load PicoGK by digest from each environment's dependency mirror (#1676) (8f31a0772)
+- feat(api): Report R2 usage per bucket role and add the R2 buckets dashboard (#1689) (1f0ce143a)
+
+### Fixes
+
+- fix(revisions): stop a model download ending in "Couldn't download model files" (#1724) (a41bcb503)
+- fix(agent-host): Store the reply as the provider wrote it and normalize math at render (#1736) (4b53bf3f3)
+- fix(api): cut and settle at once when Fly repeats the stop signal (#1734) (984772f97)
+- fix(tscircuit): Give the 3D board a matte solder mask (#1712) (dc97df044)
+- fix(api-email): Fix email rendering across clients and the sign-up verification flow (#1701) (8f9053c81)
+- fix(api): Accept Cloudflare's null GraphQL errors in the R2 analytics pass (#1700) (a2045069e)
+
+### Other changes
+
+- test(native-process-core): Qualify the macOS Terminal own-pty rule in shell conformance (#1690) (645be1a1e)
+- ci(nx): Take the workflow files out of sharedGlobals and hash the environment tests read (#1715) (7e04defbb)
+- ci(desktop): Cut a staging candidate when desktop or its renderer is affected (#1671) (3d776f30f)
+- test(camera): Add the camera machine totality baseline (#1705) (4060083f6)
+- refactor(api-llm-gateway): Run self-host helpers on the provider wires and remove LangChain (#1606) (6259bfe1a)
+- chore(picogk): Pin the PicoGK browser host to manifest 313d375b1617 (#1698) (9c56d753e)
+- refactor(api): Extract api-projects, api-agent-observability and api-chat, and run the API lane on affected projects (#1685) (564371eb3)
+
+## 0.7.0 (2026-11-09)
+
+### Features
+
+- feat(agent-host): Send each model step's turn step and gap as gateway headers (#1675) (cd28b4d93)
+
+### Fixes
+
+- fix(api-llm-gateway): Disable the Morph DeepSeek V4.1 Flash model for now (#1687) (6d7bd925b)
+
+### Other changes
+
+- refactor(ui): Cut the chat-ui app library from the chat domain (UI wave B) (#1678) (9ff51774b)
+- refactor(api): Extract api-git-core and api-git-mirror libraries (#1682) (9c9f1c241)
+- refactor(runtime): Rename runtime payloads to dependency files (#1673) (007c14ee7)
+
+## 0.6.0 (2026-11-09)
+
+### Features
+
+- feat(agent-host): Ask Anthropic for a one-hour prompt cache and key OpenAI and xAI caches by chat (#1643) (bbcde6478)
+- feat(nx): Add the shell tag, pin the shell import surface, and adopt the package rule (#1644) (a973dfa77)
+- feat(api): Drop the retired supplier budget holds and cost evidence (0067) (#1621) (15d30731a)
+- feat(billing): price Anthropic one-hour cache writes and admit prompt cache keys (#1597) (5213a7c2d)
+- feat(telemetry): Report agent-loop safeguards and compactions from the Pi host (R9) (#1623) (1ab6c548e)
+- feat(agent-tools): Restore web search and web browsing on the Pi agent host (#1605) (79bbd572f)
+- feat(api): refresh Morph catalog to the models Morph serves today (#1631) (9fa28f697)
+
+### Fixes
+
+- fix(agent-host, ui): Restore the LangChain plane's interrupt reminder, recent skills, read dedup, result offloading and outage resume (R2–R6) (#1634) (723bf4c3f)
+- fix(agent-host): unblock Together turns; refresh Together catalog to the cheapest provider per model (#1640) (d143e0d21)
+- fix(agent-host): Keep the prompt prefix identical across turns and steps (#1629) (5fbe770fb)
+
+### Performance
+
+- perf(ui): Verify an installed project route without catalog discovery (#1625) (cea01b6f4)
+
+### Other changes
+
+- ci(cli-e2e): Run the CLI end-to-end suites in their own gated lane (#1670) (1f8e6d7e2)
+- test(telemetry): Stop Grafana and OTel bootstrap edits from selecting telemetry and the native rows (#1662) (569643b0a)
+- refactor(host): Move the X1C qualifier from bambu to host:qualify-x1c (#1651) (8d6c13f46)
+- ci(nx): Harden the remote cache relay, write from main and the merge queue, upload behind Nx (#1645) (302ddc9ff)
+- test(telemetry): Stop kernel-plugin changes from selecting telemetry, host and agent-tools (#1639) (6c5f87c2e)
+
 ## 0.5.0 (2026-11-09)
 
 ### Features

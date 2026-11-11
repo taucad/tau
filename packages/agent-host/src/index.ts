@@ -63,6 +63,7 @@ export type {
   LedgerAnomaly,
   LedgerCompaction,
   LedgerPosition,
+  LedgerPrefixBreak,
   LedgerSafeguard,
   ReadFold,
   ReplayedStartOutcome,
@@ -88,6 +89,8 @@ export {
   isOpenAiGatewayProviderKind,
 } from '#transport/gateway-model-transport.js';
 export { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
+export { prefixBreakCauses } from '#log/prefix-stamp.js';
+export type { PrefixBreakCause, PrefixStamp } from '#log/prefix-stamp.js';
 export { composeModelCallMiddleware } from '#harness/model-call-middleware.js';
 export { normalizeLatexDelimiters, trimToolResultContext } from '#harness/cad-middleware.js';
 export { HostCompactionError } from '#harness/compaction.js';
@@ -139,7 +142,7 @@ export type {
   TurnPlacement,
   UserProviderMessage,
 } from '#log/event-types.js';
-export { isPersonsMessage, modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
+export { chatStateMessage, isPersonsMessage, modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
 export type { PromptCacheControl } from '#log/event-types.js';
 export type {
   DurableEventLog,
@@ -153,6 +156,7 @@ export type {
   HostToolApprovalRecord,
   HostToolDefinition,
   HostToolInvocation,
+  HostToolResultBudget,
   HostToolResult,
   InterruptRequest,
   InterruptResolution,

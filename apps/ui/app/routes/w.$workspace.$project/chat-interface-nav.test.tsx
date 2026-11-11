@@ -6,7 +6,7 @@ import type { DockviewApi, DockviewPanelApi, IDockviewPanel } from 'dockview-rea
 import { mock } from 'vitest-mock-extended';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ChatInterfaceNav, chatTabs } from '#routes/w.$workspace.$project/chat-interface-nav.js';
-import type { MobilePanelId } from '#constants/editor.constants.js';
+import type { MobilePanelId } from '@taucad/ui-core/constants/editor.constants';
 
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => true }));
 

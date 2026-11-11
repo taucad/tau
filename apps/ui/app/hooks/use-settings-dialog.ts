@@ -3,8 +3,8 @@ import { useSearchParams } from 'react-router';
 import { z } from 'zod';
 import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
 import type { SettingId } from '#components/settings/settings-registry.js';
-import { searchParameterName } from '#constants/search-parameter.constants.js';
-import { enumParameter, stringParameter } from '#utils/search-parameter.codecs.js';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
+import { enumParameter, stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 
 /** Sections the dialog can show, and the single source of truth for `?settings=`. */
 export const settingsSectionSchema = z.enum([

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { mirrorEnvironmentSchema } from '#api/git/mirror/config.js';
+import { mirrorEnvironmentSchema } from '@taucad/api-git-mirror/mirror/config';
 
 /**
  * Holds `tau-mirror`'s deploy unit to its shape (W13 DM1): private (no service,

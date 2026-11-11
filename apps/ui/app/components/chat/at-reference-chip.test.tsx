@@ -4,7 +4,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry } from '@taucad/types';
 import type { Chat } from '@taucad/chat';
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
-import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
+import { AtReferenceProvider } from '@taucad/chat-ui/components/at-reference-context';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 
 /** The app mounts one TooltipProvider at its root; file chips carry a path tooltip. */

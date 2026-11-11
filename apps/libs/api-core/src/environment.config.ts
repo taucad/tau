@@ -55,16 +55,6 @@ export const environmentSchemaBase = z.object({
       ),
   ).describe('Desktop, CLI and daemon releases admitted as runtime telemetry labels, newest first.'),
   /*
-   * Charter D23: sync opens to the free tier only after the deployment gate
-   * (DG1–DG4) closes. Off, a free account projects `canSyncFiles: false`
-   * whatever the code's free tier says. `BillingService` ignores it under
-   * `NODE_ENV=production` until the go-live commit deletes that clause; the
-   * value then arrives through the Terraform secrets map, never a `fly.*.toml`.
-   */
-  TAU_FREE_TIER_SYNC_ENABLED: strictEnvironmentBoolean(false).describe(
-    'Open Tau Cloud backup and publishing to the free tier (charter D23). Ignored under NODE_ENV=production until the go-live checklist opens it.',
-  ),
-  /*
    * Blueprint T01/T04: the agent-observability purpose notice the account is
    * shown and decides against. Unset — the default everywhere until the
    * production notice is approved — keeps every new purpose unavailable, so no
@@ -217,7 +207,17 @@ export const environmentSchemaBase = z.object({
 
   // Email delivery
   RESEND_API_KEY: z.string().default(''),
+  // Account and security sender, and the fallback for the purpose-specific senders below.
   TAU_EMAIL_FROM: z.string().default('Tau <identity@taucad.dev>'),
+  // Purpose-specific senders (email readiness, Part C). Unset or empty sends from TAU_EMAIL_FROM, so a
+  // deploy without them sends exactly as before. EmailService applies the same fallback for callers that
+  // read raw process.env, such as the billing worker.
+  TAU_EMAIL_FROM_NOTIFICATIONS: unsetWhenEmpty(z.string().optional()).describe(
+    'Sender for sharing notifications such as publication invites; falls back to TAU_EMAIL_FROM',
+  ),
+  TAU_EMAIL_FROM_BILLING: unsetWhenEmpty(z.string().optional()).describe(
+    'Sender for billing notices; falls back to TAU_EMAIL_FROM',
+  ),
   // Operator ruling 2026-09-16 (OQ8): replies go to a staffed help mailbox, because the
   // payment-failed email invites one. fly.prod.toml overrides this with the tau.new address.
   TAU_EMAIL_REPLY_TO: z.email().default('help@taucad.dev'),
@@ -254,7 +254,7 @@ export const environmentSchemaBase = z.object({
     .max(600_000)
     .default(300_000)
     .describe(
-      'Maximum funded provider execution time in milliseconds, including admission. Production keeps the default; staging sets 600000 (deploy-cut charter D15).',
+      'Maximum funded provider execution time in milliseconds, including admission. Staging and production set 600000 (deploy-cut charter D15, operator ruling 2026-11-10); self-hosted deployments keep the default.',
     ),
   BILLING_RECOVERY_INTERVAL_MS: z.coerce
     .number()
@@ -336,6 +336,17 @@ export const environmentSchemaBase = z.object({
   ),
   TAU_CLOUDFLARE_ANALYTICS_TOKEN: unsetWhenEmpty(z.string().optional()).describe(
     'Cloudflare API token with Account Analytics read, for R2 usage in Grafana (W14 OB3); unset leaves the R2 task off',
+  ),
+  /*
+   * Analytics only: the API holds no credential to either bucket. They name the `downloads` and
+   * `dependencies` roles of `tau.r2.bucket` (R2 storage blast-radius blueprint, phase 8); unset, that
+   * bucket counts as `other`.
+   */
+  TAU_CLOUDFLARE_DOWNLOADS_BUCKET: unsetWhenEmpty(z.string().optional()).describe(
+    "The environment's desktop downloads bucket, reported as the `downloads` role in R2 usage (analytics only)",
+  ),
+  TAU_CLOUDFLARE_DEPENDENCIES_BUCKET: unsetWhenEmpty(z.string().optional()).describe(
+    "The environment's locked dependency bucket, reported as the `dependencies` role in R2 usage (analytics only)",
   ),
 
   /*

@@ -19,6 +19,7 @@ Bambu Lab Developer LAN machine plugin
 - `src/bambu.session.ts`: the one session both the LAN provider and the simulator run; admission at send, reports, confirmation
 - `src/bambu.simulator.ts` (`bambuSimulatorMachine`, `bambuA1MiniSimulatorMachine`): the real session over an in-memory printer
 - `src/bambu.commands.ts`: every request payload; `bambuExternalSpoolFields` is the one external-spool table
+- `src/bambu.lan.ts` (`./lan`): LAN endpoint helpers for a host that drives a printer outside the machine runtime (the supervised X1C qualification)
 - `src/bambu.settings.ts` (`./settings`): project preferences and the slot encoding (`bambuSlotOf`, `bambuAddressOf`)
 - `src/bambu.plate.ts` (`./plate`: pre-rendered X1C and A1 mini plate/hotend GLBs in `src/assets`, from `models/{x1c,a1-mini}`)
 - `package.json`
@@ -36,7 +37,6 @@ pnpm nx build bambu
 pnpm nx pkgcheck bambu
 pnpm nx size bambu
 pnpm nx run bambu:render-plates   # after editing either model family; the unit tests fail until re-rendered
-pnpm nx run bambu:qualify-x1c -- --stage=self-check   # hardware stages need the operator's consent; see README
 ```
 
 ## Local maintenance

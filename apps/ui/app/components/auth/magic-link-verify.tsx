@@ -5,7 +5,7 @@ import { useLocation } from 'react-router';
 
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { sanitizeVerifyEmailRedirectTo } from '#components/auth/verify-email.js';
 import { cn } from '@taucad/ui/utils/cn';
 
@@ -98,16 +98,14 @@ export function MagicLinkVerify({ className }: MagicLinkVerifyProps): React.JSX.
           )}
         </div>
 
-        <CardTitle className='text-xl font-semibold'>
-          <h1>
-            {status === 'verified'
-              ? 'Magic link verified'
-              : status === 'verifying'
-                ? 'Verifying your magic link'
-                : status === 'missing-token'
-                  ? 'Magic link is missing'
-                  : "We couldn't verify your magic link"}
-          </h1>
+        <CardTitle level={1} variant='title'>
+          {status === 'verified'
+            ? 'Magic link verified'
+            : status === 'verifying'
+              ? 'Verifying your magic link'
+              : status === 'missing-token'
+                ? 'Magic link is missing'
+                : "We couldn't verify your magic link"}
         </CardTitle>
 
         <CardDescription>

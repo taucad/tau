@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent } from '@taucad/ui/components/card';
-import { apiKeyPlugin } from '#utils/api-key-plugin.js';
+import { apiKeyPlugin } from '@taucad/ui-core/utils/api-key-plugin';
 import { DeleteApiKeyDialog } from '#components/auth/api-key/delete-api-key-dialog.js';
 
 export type ApiKeyProps = {

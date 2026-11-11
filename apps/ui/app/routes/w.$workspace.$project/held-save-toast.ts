@@ -6,7 +6,7 @@
 import { useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import type { TurnAttemptKey } from '@taucad/revisions';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';

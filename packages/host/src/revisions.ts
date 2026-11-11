@@ -90,6 +90,7 @@ import type {
   RevisionRow,
   RevisionStatusProjection,
   RevisionTag,
+  RevisionUserActor,
   SyncPushOutcome,
 } from '@taucad/revisions';
 import { GitToolchainError, createNativeGitRevisionPort, resolveGitToolchain } from '@taucad/revisions/node';
@@ -104,7 +105,7 @@ import type { TurnPlacementAdapter, TurnPlacementPortOptions } from '@taucad/rev
 import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
 import { defaultConfigDirectory } from '#credential-store.js';
-import { hostRevisionActor } from '#revision-actor.js';
+import { actorFor, hostRevisionActor, revisionUserActorSchema } from '#revision-actor.js';
 
 /**
  * How this host reads and writes `.tau/parameters/**` for the per-key merge (D12).
@@ -254,12 +255,11 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
    */
   readonly actorId?: string | undefined;
   /**
-   * The actor recorded on every revision this host mints (S37, A26).
+   * The actor recorded on every revision this host mints until a `setActor` request names the session (S37, A26, A1).
    *
-   * The host owns the mapping because only the host knows who it is running
-   * for: a daemon serving one machine answers with that machine's user, and a
-   * Tau Cloud host answers from the session. Anonymity is applied here, before
-   * the write, so switching it later rewrites nothing.
+   * Defaults to {@link hostRevisionActor}: the cloud host's owner, else this device's pseudonym. A host that holds a
+   * Tau account passes `hostRevisionActor(account)`. Once a renderer sends `setActor`, its session wins: it is the
+   * person signed in on this device, anonymity already applied, so switching it later rewrites nothing.
    */
   readonly actor?:
     | ((input: { readonly runId: string | undefined; readonly trigger: string }) => RevisionActor | undefined)
@@ -435,7 +435,7 @@ const revisionJson = (value: unknown): JsonValue =>
  * The machine plus the account, which is what "this device" means on disk: two
  * users on one machine hold two checkouts and write two chat segments. Stable
  * across restarts, needs no record of its own, and is never a credential — the
- * browser's equivalent is `apps/ui/app/lib/device-id.ts` and neither mints the
+ * browser's equivalent is `apps/libs/ui-core/src/lib/device-id.ts` and neither mints the
  * other's.
  */
 export const hostDeviceId = `${hostname()}:${userInfo().username}`;
@@ -540,6 +540,9 @@ const registryAnswered = async (actor: ProjectRevisionsActor): Promise<void> => 
 export const createProjectRevisions = (options: ProjectRevisionsOptions): ProjectRevisions => {
   const { projectId } = options;
   const { apiBaseUrl } = options;
+  const fallbackActor = options.actor ?? hostRevisionActor();
+  /* The person the page signed in on this device last named (`setActor`), for every mint after it. */
+  let session: RevisionUserActor | undefined;
   let channelRemoteCredential: NativeGitRemoteCredential | undefined;
   let channelWriteCredential: NativeGitRemoteCredential | undefined;
   const toolchain = options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable };
@@ -603,7 +606,9 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
     ...(options.actorId === undefined ? {} : { actorId: options.actorId }),
-    ...(options.actor === undefined ? {} : { actor: options.actor }),
+    /* A1: the session the renderer last sent, else the account or pseudonym this host was wired with; never the OS
+     * login name or an environment email, and never the opaque fallback id (I1). */
+    actor: (input) => (session === undefined ? fallbackActor(input) : actorFor(session, input.runId)),
     /*
      * Which device this host is (W13, W17).
      *
@@ -1343,8 +1348,10 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
      * braces and destructuring here add ceremony without narrowing the wire. */
     /* oxlint-disable unicorn/switch-case-braces, prefer-destructuring -- Mirrors the established worker command switch without per-case ceremony. */
     switch (request.command) {
-      case 'status':
       case 'setActor':
+        session = revisionUserActorSchema.parse(request['actor']);
+        return null;
+      case 'status':
       case 'setDeviceId':
       case 'flushKeepalive':
         return null;
@@ -1603,6 +1610,11 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         break;
       case 'syncNow':
         actor.send({ type: 'syncNow' });
+        break;
+      /* Audit R6: the page's signed-in person changed; the remote is read afresh under the new session. */
+      case 'sessionChanged':
+        actor.send({ type: 'remote', event: { type: 'sessionChanged' } });
+        actor.send({ type: 'sync', event: { type: 'sessionChanged' } });
         break;
       /* XD3, rounds 18 and 19: another device's run has been quiet here a while; pulls show whether it stayed quiet.
        * Round 27: through the placement's pull, so the page hears where this device cannot pull the chat at all. */
@@ -1989,6 +2001,8 @@ export const openProjectRevisions = async (
     apiBaseUrl?: string | undefined;
     /** Bearer session token for the publication row. Never persisted here. */
     apiToken?: string | undefined;
+    /** The Tau account `apiToken` belongs to; absent, the host records this device's pseudonym (A1). */
+    actor?: RevisionUserActor | undefined;
     /** In-memory credential for one exact third-party Git repository. */
     remoteCredential?: (() => NativeGitRemoteCredential | undefined) | undefined;
     /** The Tau Hosted Remote this project pushes a publication to (A40). */
@@ -2085,9 +2099,8 @@ export const openProjectRevisions = async (
         ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
         ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
         parameters: parameterCodec,
-        /* The person this process runs for, as both other Node hosts record
-         * (AC15): without it a terminal's save is authored by `tau-host`. */
-        actor: hostRevisionActor(),
+        /* The account the terminal's token belongs to, else this device's pseudonym (A1, AC15). */
+        actor: hostRevisionActor(options.actor),
         ...(remoteUrl === undefined ? {} : { remoteUrl }),
         ...(publishPublication === undefined ? {} : { publishPublication }),
         ...(registerRemoteProject === undefined ? {} : { registerRemoteProject }),

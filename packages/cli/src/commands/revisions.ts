@@ -13,12 +13,15 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { authApiOrigin, resolveAuthToken } from '#auth.js';
+import { authApiOrigin, inspectSession, resolveAuthToken } from '#auth.js';
 import { openProjectRevisions, requireRevisionToolchain } from '@taucad/host';
 import type { ProjectRevisionVerbs } from '@taucad/host';
 import { defineCommand } from 'citty';
 
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
+
+/** The Tau account a revision records, in the host's own shape. */
+type RevisionUserActor = NonNullable<Parameters<typeof openProjectRevisions>[0]['actor']>;
 
 /** Arguments every verb takes. */
 const projectArguments = {
@@ -67,7 +70,7 @@ export const requireGitToolchain = async (): Promise<void> => {
  */
 const open = async (
   project: string | undefined,
-  session: Readonly<{ apiBaseUrl?: string; apiToken?: string }> = {},
+  session: Readonly<{ apiBaseUrl?: string; apiToken?: string; actor?: RevisionUserActor }> = {},
 ): Promise<Readonly<{ revisions: ProjectRevisionVerbs; workspaceRoot: string }>> => {
   const workspaceRoot = resolve(project ?? process.cwd());
   /* The binaries first, so "git-lfs is not installed" never reaches a person as
@@ -315,18 +318,48 @@ const discardCommand = defineCommand({
 });
 
 /**
- * The session a save backs up to Tau Cloud with, when this terminal was given one.
+ * The Tau account a session token belongs to, as a revision records it (A1).
+ *
+ * The account id only: never the account's email, the OS login name or an
+ * environment address. A token the API does not accept, or an API that cannot
+ * be reached, names no account, and the host then records this device's
+ * pseudonym rather than guessing.
+ *
+ * @param apiBaseUrl - The API origin the token belongs to.
+ * @param apiToken - The session token.
+ * @returns The account, or `undefined` when the API does not confirm one.
+ */
+export const tokenRevisionActor = async (
+  apiBaseUrl: string,
+  apiToken: string,
+): Promise<RevisionUserActor | undefined> => {
+  try {
+    const session = await inspectSession(apiBaseUrl, apiToken);
+    return session === undefined ? undefined : { kind: 'user', id: session.user.id };
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The session a save backs up to Tau Cloud with, and records its author as, when this terminal was given one.
  *
  * The same two values `tau publish` and `tau clone` are told (P40), but optional:
  * a save is recorded either way, and without them only a Git remote, or none,
- * is backed up to.
+ * is backed up to, under this device's pseudonym (A1).
  *
- * @returns The API origin and token, or nothing when either is unset.
+ * @returns The API origin, token and its account, or nothing when no token is set.
  */
-const optionalSession = async (): Promise<Readonly<{ apiBaseUrl?: string; apiToken?: string }>> => {
+const optionalSession = async (): Promise<
+  Readonly<{ apiBaseUrl?: string; apiToken?: string; actor?: RevisionUserActor }>
+> => {
   const apiBaseUrl = authApiOrigin();
   const apiToken = await resolveAuthToken(apiBaseUrl);
-  return apiToken ? { apiBaseUrl, apiToken } : {};
+  if (!apiToken) {
+    return {};
+  }
+  const actor = await tokenRevisionActor(apiBaseUrl, apiToken);
+  return { apiBaseUrl, apiToken, ...(actor === undefined ? {} : { actor }) };
 };
 
 /** How a save's backup reads, after `Saved main · Rev 3.` */

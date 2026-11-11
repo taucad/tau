@@ -50,7 +50,7 @@ vi.mock('#hooks/use-chat-snapshot.js', () => ({
   },
 }));
 
-vi.mock('#constants/chat-prompt-examples.js', () => ({
+vi.mock('@taucad/ui-core/constants/chat-prompt-examples', () => ({
   getRandomExamples: () => [
     { title: 'Cube', prompt: 'Make a cube' },
     { title: 'Sphere', prompt: 'Make a sphere' },
@@ -65,7 +65,7 @@ vi.mock('@taucad/ui/components/button', () => ({
   ),
 }));
 
-vi.mock('#components/ui/collection-empty-state.js', () => ({
+vi.mock('@taucad/ui-kit/components/collection-empty-state', () => ({
   CollectionEmptyState: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
 

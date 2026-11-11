@@ -18,6 +18,7 @@ import { desktopAgentSystemPrompt } from '#main/environment.js';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  agentHostRatingChannel,
   agentHostSessionChannels,
   computeControlChannels,
   directoryGrantChannels,
@@ -91,6 +92,7 @@ const state = vi.hoisted(() => ({
         readonly sample: (utility: { pid: number | undefined }) => number | undefined;
       },
   servicesRetainAgentHost: vi.fn(),
+  servicesSend: vi.fn(),
   servicesReleaseAgentHost: vi.fn(async () => undefined),
   servicesQuiesce: vi.fn(
     async (
@@ -338,7 +340,7 @@ vi.mock('@taucad/host', async (importOriginal) => {
     await importOriginal<typeof Host>();
   return {
     defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
-    defaultPayloadStore: vi.fn(() => join(state.userData, 'store')),
+    defaultDependencyStore: vi.fn(() => join(state.userData, 'store')),
     discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
     externalAgentDescriptors: vi.fn(() => []),
     keepAwakeWhileStreaming,
@@ -416,6 +418,7 @@ vi.mock('#main/services-broker.js', () => ({
       hasActiveDirectory: state.servicesHasActiveDirectory,
       retainAgentHost: state.servicesRetainAgentHost,
       releaseAgentHost: state.servicesReleaseAgentHost,
+      send: state.servicesSend,
       computeProjectRoot: (root: string) =>
         root.includes('/.tau/checkouts/') ? root.slice(0, root.indexOf('/.tau/checkouts/')) : undefined,
     };
@@ -500,6 +503,7 @@ afterEach(async () => {
   state.geometrySampleResidentBytes = undefined;
   state.runtimeResidentLimit = undefined;
   state.servicesRetainAgentHost.mockClear();
+  state.servicesSend.mockReset();
   state.servicesReleaseAgentHost.mockClear();
   app.getAppMetrics.mockReset();
   app.getAppMetrics.mockReturnValue([]);
@@ -962,6 +966,34 @@ describe('desktop main compute owner', () => {
       expect(state.servicesReleaseAgentHost).toHaveBeenCalledTimes(2);
       expect(sender.listenerCount('destroyed')).toBe(0);
       expect(sender.listenerCount('did-navigate')).toBe(0);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should relay a trusted rating of a run to the services utility, and refuse anything else',
+    async () => {
+      await bootstrap();
+      const rated = state.handlers.get(agentHostRatingChannel)!;
+      const trusted = { sender: { id: 7 }, senderFrame: { url: 'app://tau/' } };
+      const rating = { projectId: 'proj_a', chatId: 'chat-1', runId: 'run-1', value: 'positive', at: 1 };
+
+      await rated(trusted, rating);
+      expect(state.servicesSend).toHaveBeenCalledExactlyOnceWith({ type: 'agent-host-rated', ...rating });
+
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+      await expect(rated(trusted, rating)).rejects.toThrow();
+      await expect(rated(trusted, { ...rating, value: 'great' })).rejects.toThrow();
+      await expect(rated(trusted, { ...rating, at: Number.NaN })).rejects.toThrow();
+      await expect(rated(trusted, { ...rating, projectId: '' })).rejects.toThrow();
+      expect(state.servicesSend).toHaveBeenCalledOnce();
+
+      /* A quiescing utility takes no request: the rating is only a missing feedback fact, never a renderer error. */
+      state.servicesSend.mockImplementationOnce(() => {
+        throw new Error('The services broker is quiescing and sends no requests.');
+      });
+      await expect(rated(trusted, rating)).resolves.toBeUndefined();
     },
     bootMilliseconds,
   );
@@ -2074,7 +2106,7 @@ describe('desktop main machine store', () => {
   );
 
   it(
-    'reads the shared payload store and posts its native composition to the kernel utilities, with no resource roots',
+    'reads the shared dependency store and posts its native composition to the kernel utilities, with no resource roots',
     async () => {
       await boot();
       await vi.waitFor(() => {

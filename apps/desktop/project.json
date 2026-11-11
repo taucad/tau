@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/desktop/src",
   "projectType": "application",
-  "tags": ["scope:ui", "type:app", "release:app"],
+  "tags": ["scope:ui", "type:app", "release:app", "ci:desktop"],
   "implicitDependencies": ["desktop-quick-look"],
   "targets": {
     "prepare-build123d-python": {
@@ -75,6 +75,9 @@
         },
         {
           "env": "SENTRY_RELEASE"
+        },
+        {
+          "runtime": "git rev-parse HEAD"
         }
       ],
       "dependsOn": [
@@ -183,7 +186,10 @@
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
-        "check-renderer-payload",
+        {
+          "projects": ["ui"],
+          "target": "check-desktop-payload"
+        },
         {
           "projects": ["desktop-quick-look"],
           "target": "build-extensions"
@@ -210,7 +216,10 @@
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
-        "check-renderer-payload",
+        {
+          "projects": ["ui"],
+          "target": "check-desktop-payload"
+        },
         {
           "projects": ["desktop-quick-look"],
           "target": "build-extensions"
@@ -237,7 +246,10 @@
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
-        "check-renderer-payload",
+        {
+          "projects": ["ui"],
+          "target": "check-desktop-payload"
+        },
         {
           "projects": ["desktop-quick-look"],
           "target": "build-extensions"
@@ -254,7 +266,15 @@
     },
     "package-linux": {
       "executor": "nx:run-commands",
-      "dependsOn": ["build", "check-renderer-payload", "prepare-build123d-python-linux", "prepare-git-linux"],
+      "dependsOn": [
+        "build",
+        {
+          "projects": ["ui"],
+          "target": "check-desktop-payload"
+        },
+        "prepare-build123d-python-linux",
+        "prepare-git-linux"
+      ],
       "outputs": ["{projectRoot}/package-out"],
       "options": {
         "cwd": ".",
@@ -263,7 +283,14 @@
     },
     "package-windows": {
       "executor": "nx:run-commands",
-      "dependsOn": ["build", "check-renderer-payload", "prepare-build123d-python-windows"],
+      "dependsOn": [
+        "build",
+        {
+          "projects": ["ui"],
+          "target": "check-desktop-payload"
+        },
+        "prepare-build123d-python-windows"
+      ],
       "outputs": ["{projectRoot}/package-out"],
       "options": {
         "cwd": ".",
@@ -320,26 +347,6 @@
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/verify-macos-package.mts --unsigned"
       }
     },
-    "check-renderer-payload": {
-      "executor": "nx:run-commands",
-      "cache": true,
-      "metadata": {
-        "description": "Renderer ownership gate: fails when the renderer bundle carries kernel, converter or host payloads (only the KCL editor, Clipper section-cap and Terminal ghostty-vt WASM are allowed, one copy each, with producer provenance, plus the C# and OpenSCAD editor language servers byte-matched to their prepared stage manifests). Every package target depends on it. Cached on the bytes it checks, the renderer build and the main and preload bundles; `dist/dev-electron`, the branded Electron that `dev` and `serve` create, is left out of the key."
-      },
-      "dependsOn": ["build"],
-      "inputs": [
-        "{projectRoot}/scripts/check-renderer-payload.mts",
-        {
-          "dependentTasksOutputFiles": "{apps/ui/desktop/build,apps/desktop/dist/main,apps/desktop/dist/preload,out/csharp-language/stage,out/openscad-language/stage}/**",
-          "transitive": true
-        }
-      ],
-      "outputs": [],
-      "options": {
-        "cwd": ".",
-        "command": "node --import @oxc-node/core/register apps/desktop/scripts/check-renderer-payload.mts"
-      }
-    },
     "publish": {
       "executor": "nx:run-commands",
       "options": {
@@ -372,7 +379,10 @@
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
-        "check-renderer-payload",
+        {
+          "projects": ["ui"],
+          "target": "check-desktop-payload"
+        },
         "prepare-build123d-python-macos-intel",
         "prepare-git-macos-intel"
       ],
@@ -394,7 +404,10 @@
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
-        "check-renderer-payload",
+        {
+          "projects": ["ui"],
+          "target": "check-desktop-payload"
+        },
         "prepare-build123d-python-macos-intel",
         "prepare-git-macos-intel"
       ],
@@ -416,7 +429,10 @@
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
-        "check-renderer-payload",
+        {
+          "projects": ["ui"],
+          "target": "check-desktop-payload"
+        },
         "prepare-build123d-python-macos-intel",
         "prepare-git-macos-intel"
       ],

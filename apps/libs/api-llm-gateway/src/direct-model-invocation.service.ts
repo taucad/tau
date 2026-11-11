@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- OpenAI Responses wire fields use snake_case. */
 import { randomUUID } from 'node:crypto';
-import { convertModelMessages } from '@ai-sdk/langchain';
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { safeParseBillableModelRequest } from '#billable-model-request.js';
@@ -24,30 +23,41 @@ import { errorDiagnostic, providerDiagnostic, textMarker } from '#provider-diagn
 import type { ModelInvocationIntent, ModelInvocationResult, ModelInvocationService } from '#model-invocation.types.js';
 import {
   executeGatewayProviderRequest,
+  helperModelRoute,
   isGatewayProviderId,
   resolveGatewayModelRoute,
+  upstreamModelId,
 } from '#providers/provider-gateway.js';
-import type { GatewayProviderId } from '#providers/provider-gateway.js';
+import type { GatewayProviderId, HelperModelRoute } from '#providers/provider-gateway.js';
+import { HelperStreamFailure, helperRequestBody, readHelperStream } from '#providers/helper-wire.js';
+import type { HelperStreamEvent, HelperUsage } from '#providers/helper-wire.js';
 import { ModelService } from '#models/model.service.js';
 import type { Environment } from '@taucad/api-core';
+import { startGenAiChatSpan } from '@taucad/api-observability';
+import type { GenAiChatSpan } from '@taucad/api-observability';
 
 const encoder = new TextEncoder();
 
 const sse = (event: unknown): Uint8Array<ArrayBuffer> =>
   encoder.encode(`data: ${typeof event === 'string' ? event : JSON.stringify(event)}\n\n`);
 
-/** The provider body carried by a thrown SDK error, in the shape recognition reads. */
-const thrownProviderBody = (error: unknown): unknown => {
-  if (error === null || typeof error !== 'object') {
-    return undefined;
-  }
-  const record = error as Record<string, unknown>;
-  const nested = record['error'];
-  if (nested !== null && typeof nested === 'object') {
-    return 'error' in nested ? nested : { error: nested };
-  }
-  return typeof record['message'] === 'string' ? { error: { message: record['message'] } } : undefined;
+/** One helper call: the invocation, the route it took and its `gen_ai` span. */
+type HelperCall = {
+  readonly intent: ModelInvocationIntent;
+  readonly route: HelperModelRoute;
+  readonly span: GenAiChatSpan;
 };
+
+/** A helper's provider failure that is not a recognised account refusal. */
+const helperUnavailable = (): LlmGatewayError =>
+  new LlmGatewayError(
+    HttpStatus.SERVICE_UNAVAILABLE,
+    'PROVIDER_UNAVAILABLE',
+    'The configured model provider is unavailable.',
+  );
+
+/** Anthropic's Messages API version; the helper names it as the provider's SDK does. */
+const anthropicVersion = '2023-06-01';
 
 /** Self-host provider execution with request validation and no financial side effects. */
 @Injectable()
@@ -83,7 +93,7 @@ export class DirectModelInvocationService implements ModelInvocationService {
       providerId: route.providerId,
       body: {
         ...parsed.data,
-        model: route.providerId === 'vertexai' ? `google/${route.modelId}` : route.modelId,
+        model: upstreamModelId(route),
       },
       headers: {
         ...(anthropicHeaders ? { 'anthropic-version': anthropicHeaders.version } : {}),
@@ -118,6 +128,7 @@ export class DirectModelInvocationService implements ModelInvocationService {
       const classification = classifyUpstreamRefusal({
         status: response.status,
         accountOwner: 'operator',
+        body,
         ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
       });
       // The operator owns this key, so the provider's own reason stays in the message.
@@ -201,34 +212,6 @@ export class DirectModelInvocationService implements ModelInvocationService {
     );
   }
 
-  /**
-   * Classifies a helper's first-chunk failure: a recognised provider-account
-   * refusal answers the typed 503, anything else stays an unknown outage.
-   *
-   * @param providerId - Provider of the selected helper model, when it has one.
-   * @param error - What the provider stream threw.
-   * @returns The gateway error to throw before the response is committed.
-   */
-  private helperProviderFailure(providerId: string | undefined, error: unknown): LlmGatewayError {
-    if (providerId !== undefined && isGatewayProviderId(providerId)) {
-      const refusal = recognizeProviderAccountRefusal({ providerId, body: thrownProviderBody(error) });
-      if (refusal) {
-        return this.providerAccountExhausted(providerId, refusal);
-      }
-    }
-    // A LangChain error's message and stack embed the provider's body, which can quote the request.
-    const body = thrownProviderBody(error);
-    this.logger.error(
-      `The configured model provider failed before the first helper chunk (${errorDiagnostic(error)}): ` +
-        `${body === undefined ? 'no provider body' : providerDiagnostic(body)}`,
-    );
-    return new LlmGatewayError(
-      HttpStatus.SERVICE_UNAVAILABLE,
-      'PROVIDER_UNAVAILABLE',
-      'The configured model provider is unavailable.',
-    );
-  }
-
   private providerAccountExhausted(providerId: GatewayProviderId, refusal: ProviderAccountRefusal): LlmGatewayError {
     this.warnProviderAccount(providerId, refusal);
     return new LlmGatewayError(HttpStatus.SERVICE_UNAVAILABLE, 'PROVIDER_ACCOUNT_EXHAUSTED', refusal.message, {
@@ -238,6 +221,36 @@ export class DirectModelInvocationService implements ModelInvocationService {
     });
   }
 
+  /**
+   * The typed 503 for a recognised provider-account refusal on a helper route.
+   *
+   * @param route - The helper's route.
+   * @param refusal - The provider's status, when it answered one, and error body.
+   * @returns The `PROVIDER_ACCOUNT_EXHAUSTED` error, or `undefined` when the body is not one.
+   */
+  private helperAccountRefusal(
+    route: HelperModelRoute,
+    refusal: { readonly status?: number; readonly body: unknown },
+  ): LlmGatewayError | undefined {
+    if (!isGatewayProviderId(route.providerId)) {
+      return undefined;
+    }
+    const recognized = recognizeProviderAccountRefusal({
+      providerId: route.providerId,
+      ...(refusal.status === undefined ? {} : { status: refusal.status }),
+      body: refusal.body,
+    });
+    return recognized ? this.providerAccountExhausted(route.providerId, recognized) : undefined;
+  }
+
+  /**
+   * Runs a self-host helper prompt (`project_name`, `commit_name`) on the first
+   * listed model through the shared provider transport, and answers it as an
+   * OpenAI Responses stream.
+   *
+   * @param intent - The helper invocation; its `directPrompt` is the request.
+   * @returns The Responses stream, committed only after the provider's first event.
+   */
   private async invokeHelper(intent: ModelInvocationIntent): Promise<ModelInvocationResult> {
     const prompt = intent.directPrompt;
     if (!prompt) {
@@ -248,38 +261,34 @@ export class DirectModelInvocationService implements ModelInvocationService {
       available.find((model) => model.id === 'openai-gpt-5.6-luna') ??
       available.find((model) => model.recommended) ??
       available[0];
-    if (!selected) {
+    const route = selected === undefined ? undefined : helperModelRoute(selected);
+    if (!selected || !route) {
       throw new LlmGatewayError(
         HttpStatus.SERVICE_UNAVAILABLE,
         'PROVIDER_UNAVAILABLE',
         'No configured model provider is available.',
       );
     }
-    const { model } = this.models.buildModel(selected.id, { maximumOutputTokens: prompt.maximumOutputTokens });
-    const providerStream = await model.stream(
-      convertModelMessages([{ role: 'system', content: prompt.system }, ...prompt.messages]),
-      { signal: intent.signal },
-    );
-    /* The provider only refuses once the stream is pulled. Pull its first chunk here, before
-     * the caller gets `streaming` and the controller sends 200, so a refusal is still a typed
-     * JSON status rather than a destroyed socket. */
-    const iterator = providerStream[Symbol.asyncIterator]();
-    let first;
+    const span = startGenAiChatSpan({
+      providerName: this.models.getOtelProviderName(selected.id) ?? route.providerId,
+      requestModel: route.modelId,
+      maxTokens: prompt.maximumOutputTokens,
+    });
+    const call: HelperCall = { intent, route, span };
+    const events = await this.openHelperStream(call, helperRequestBody(route, selected, prompt));
+    /* Pull the first event before the caller gets `streaming` and the controller sends 200: a
+     * provider that refuses inside its stream is then still a typed JSON status rather than a
+     * destroyed socket. */
+    let first: IteratorResult<HelperStreamEvent>;
     try {
-      first = await iterator.next();
+      first = await events.next();
     } catch (error) {
-      if (intent.signal.aborted) {
-        // The caller left; that is not a provider outage.
-        throw error;
-      }
-      throw this.helperProviderFailure(selected.provider.id, error);
+      throw this.helperStreamFailure(call, error);
     }
     const completion = Promise.withResolvers<void>();
     const responseId = `resp_${randomUUID()}`;
     const messageId = `msg_${randomUUID()}`;
-    let output = '';
-    let inputTokens = 0;
-    let outputTokens = 0;
+    const { logger } = this;
     const body = new ReadableStream<Uint8Array<ArrayBuffer>>({
       async start(controller) {
         controller.enqueue(
@@ -292,23 +301,24 @@ export class DirectModelInvocationService implements ModelInvocationService {
             item: { type: 'message', id: messageId, role: 'assistant', content: [], status: 'in_progress' },
           }),
         );
+        let output = '';
+        let usage: HelperUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
         try {
           // oxlint-disable-next-line no-await-in-loop -- the provider stream is consumed serially.
-          for (let part = first; part.done !== true; part = await iterator.next()) {
-            const chunk = part.value;
-            inputTokens = chunk.usage_metadata?.input_tokens ?? inputTokens;
-            outputTokens = chunk.usage_metadata?.output_tokens ?? outputTokens;
-            if (!chunk.text) {
+          for (let part = first; part.done !== true; part = await events.next()) {
+            const event = part.value;
+            if (event.type === 'usage') {
+              ({ usage } = event);
               continue;
             }
-            output += chunk.text;
+            output += event.text;
             controller.enqueue(
               sse({
                 type: 'response.output_text.delta',
                 item_id: messageId,
                 output_index: 0,
                 content_index: 0,
-                delta: chunk.text,
+                delta: event.text,
               }),
             );
           }
@@ -330,19 +340,32 @@ export class DirectModelInvocationService implements ModelInvocationService {
                 status: 'completed',
                 output: [item],
                 usage: {
-                  input_tokens: inputTokens,
-                  output_tokens: outputTokens,
-                  input_tokens_details: { cached_tokens: 0 },
-                  output_tokens_details: { reasoning_tokens: 0 },
-                  total_tokens: inputTokens + outputTokens,
+                  input_tokens: usage.input,
+                  output_tokens: usage.output,
+                  input_tokens_details: { cached_tokens: usage.cacheRead },
+                  output_tokens_details: { reasoning_tokens: usage.reasoning },
+                  total_tokens: usage.input + usage.output,
                 },
               },
             }),
           );
           controller.enqueue(sse('[DONE]'));
           controller.close();
+          span.succeed({
+            inputTokens: usage.input,
+            outputTokens: usage.output,
+            cacheReadTokens: usage.cacheRead,
+            cacheWriteTokens: usage.cacheWrite,
+            reasoningTokens: usage.reasoning,
+          });
           completion.resolve();
         } catch (error) {
+          span.fail(
+            intent.signal.aborted ? 'aborted' : error instanceof HelperStreamFailure ? 'provider_stream' : 'stream',
+          );
+          if (error instanceof HelperStreamFailure) {
+            logger.error(`Helper provider stream failed for ${route.providerId} ${route.modelId}: ${error.message}`);
+          }
           controller.error(error);
           completion.reject(error);
         }
@@ -353,5 +376,86 @@ export class DirectModelInvocationService implements ModelInvocationService {
       response: new Response(body, { headers: { 'content-type': 'text/event-stream' } }),
       completion: completion.promise,
     };
+  }
+
+  /**
+   * Sends the helper request and answers the provider's refusal before any stream exists.
+   *
+   * @param call - The helper invocation, its route and its `gen_ai` span, failed here when the call never streams.
+   * @param body - The native request body.
+   * @returns The provider's text and usage events.
+   */
+  private async openHelperStream(call: HelperCall, body: unknown): Promise<AsyncGenerator<HelperStreamEvent>> {
+    const { intent, route, span } = call;
+    let response: Response;
+    try {
+      response = await executeGatewayProviderRequest({
+        config: this.config,
+        providerId: route.providerId,
+        body,
+        headers: route.wire === 'anthropic' ? { 'anthropic-version': anthropicVersion } : {},
+        signal: intent.signal,
+      });
+    } catch (error) {
+      if (intent.signal.aborted) {
+        span.fail('aborted');
+        // The caller left; that is not a provider outage.
+        throw error;
+      }
+      span.fail('unavailable');
+      this.logger.error(
+        `The configured model provider failed before the helper stream (${route.providerId}, ${errorDiagnostic(error)})`,
+      );
+      throw helperUnavailable();
+    }
+    if (!response.ok) {
+      const { body: refusal, loggedBody } = await readUpstreamRefusal(response);
+      // Content-free projection only: the provider's body can name the account behind the key.
+      this.logger.warn(
+        {
+          providerId: route.providerId,
+          modelId: route.modelId,
+          upstreamStatus: response.status,
+          upstreamBody: loggedBody,
+        },
+        'Upstream model provider refused the helper request',
+      );
+      span.fail(String(response.status));
+      throw this.helperAccountRefusal(route, { status: response.status, body: refusal }) ?? helperUnavailable();
+    }
+    if (!response.body) {
+      span.fail('no_body');
+      throw helperUnavailable();
+    }
+    return readHelperStream(route.wire, response.body);
+  }
+
+  /**
+   * Classifies a failure on the helper stream's first event.
+   *
+   * @param call - The helper invocation, its route and its `gen_ai` span.
+   * @param error - What the first read threw.
+   * @returns The error to throw: the caller's own abort untouched, otherwise a typed 503.
+   */
+  private helperStreamFailure(call: HelperCall, error: unknown): unknown {
+    const { intent, route, span } = call;
+    if (intent.signal.aborted) {
+      span.fail('aborted');
+      return error;
+    }
+    span.fail(error instanceof HelperStreamFailure ? 'provider_stream' : 'stream');
+    const accountRefusal =
+      error instanceof HelperStreamFailure ? this.helperAccountRefusal(route, { body: error.body }) : undefined;
+    if (accountRefusal) {
+      return accountRefusal;
+    }
+    this.logger.error(
+      `The configured model provider failed before the first helper chunk (${route.providerId}, ${
+        error instanceof HelperStreamFailure
+          ? `${error.message}: ${redactCredentials(providerDiagnostic(error.body))}`
+          : errorDiagnostic(error)
+      })`,
+    );
+    return helperUnavailable();
   }
 }

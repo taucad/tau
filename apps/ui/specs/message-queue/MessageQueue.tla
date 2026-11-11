@@ -76,6 +76,18 @@
 \* waits for the host probe, before it composes the turn's context (prompt-prefix identity I1);
 \* the wait sits inside Prepare, and submit, persistence, delivery, cancellation and the queue
 \* keep their paths and guards; queue paths unchanged.
+\* The composer now takes its toast from the shared UI package instead of the app's own sonner
+\* wrapper (ui-kit extraction); only an import moved, and queue paths unchanged.
+\* The queue store and the queue view moved into the chat-ui library (UI wave B) with no change
+\* to their code beyond import specifiers; queue paths unchanged.
+\* The session machine now holds the chat's automatic-resume wait and the run-elsewhere pull
+\* heartbeat as `after` delays the store drives (audit R5). A wait that ends sends a `continue`
+\* gesture, which never enters the queue; a gesture ends the wait. Submit, Prepare and delivery unchanged.
+\* Only a viewed chat with a published admission waits; the resumed plan stays in hand until its
+\* failure leaves, or the run returns to failed under it; neither touches the queue.
+\* The machines, the session store and the turn host take their xstate, privacy and observation
+\* helpers from the ui-core library (UI wave E) instead of the app's lib; only imports moved,
+\* and queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

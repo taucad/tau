@@ -78,7 +78,7 @@ import type { UiServer } from '#support/two-client/ui-server.js';
  * directions with file, revision and chat identity.
  */
 
-const proLimitBytes = 10 * 1024 ** 3;
+const proLimitBytes = 100 * 1024 ** 3;
 const fiveMiB = 5 * 1024 ** 2;
 const fiftyMiB = 50 * 1024 ** 2;
 const continuationOwner = 'W13/V18 · S48(15)';
@@ -2794,9 +2794,8 @@ describe('a terminal as the third client', () => {
 /*
  * Backup by default and one library (charter D19, D20; W11's desktop rows).
  *
- * The suite's account is Pro, so its plan admits the default connection without
- * D23's gate; the gate-closed Free row is `sync-refusals.spec.ts`'s. Nothing
- * here clicks *Connect*: the subject is that nobody has to.
+ * The suite's account is Pro; the Free row is `sync-refusals.spec.ts`'s.
+ * Nothing here clicks *Connect*: the subject is that nobody has to.
  */
 describe('backup by default and one library', () => {
   const name = 'W11 Default Backup';

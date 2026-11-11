@@ -5,10 +5,7 @@
     "target": "ESNext",
     "outDir": "./out-tsc/spec",
     "erasableSyntaxOnly": false, // Incompatible with NestJS dependency injection.
-    "types": ["node", "vitest/importMeta", "vite-plugin-node", "vitest"],
-    "paths": {
-      "libcascade": ["../libs/api-extractor/src/generated/opencascade/modules/libcascade/index.d.ts"]
-    }
+    "types": ["node", "vitest/importMeta", "vite-plugin-node", "vitest"]
   },
   "include": [
     "vite.config.ts",
@@ -40,7 +37,14 @@
     "../libs/api-auth/src/**/*.ts",
     "../libs/api-hosts/src/**/*.ts",
     "../libs/api-llm-gateway/src/**/*.ts",
-    "../libs/api-billing/src/**/*.ts"
+    "../libs/api-billing/src/**/*.ts",
+    "../libs/api-object-storage/src/**/*.ts",
+    "../libs/api-git-core/src/**/*.ts",
+    "../libs/api-git-mirror/src/**/*.ts",
+    "../libs/api-agent-observability/src/**/*.ts",
+    "../libs/api-chat/src/**/*.ts",
+    "../libs/api-projects/src/**/*.ts",
+    "../libs/api-testing/src/**/*.ts"
   ],
   "exclude": ["../libs/*/src/**/*.test.ts", "../libs/*/src/**/*.spec.ts", "../libs/*/src/**/*.test-d.ts"]
 }

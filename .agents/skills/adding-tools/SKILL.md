@@ -1,6 +1,6 @@
 ---
 name: adding-tools
-description: Add or change a Tau CAD chat tool across its shared schema, host registry, RPC, chat presentation, and optional MCP or skill surfaces. Use when implementing a new agent tool or changing its wire-visible contract.
+description: Add or change a Tau chat tool across its shared schema, host registry, RPC, chat presentation, and optional MCP or skill surfaces. Use when implementing a new agent tool or changing its wire-visible contract.
 ---
 
 # Adding Tau agent tools
@@ -30,10 +30,10 @@ For a tool that exposes CAD computation, use domain-neutral evaluation vocabular
 15. Add the kind to [`tauToolKinds`](../../../packages/agent-host/src/harness/tools.ts) so the durable top-level `call` fact classifies the tool. Add path normalization only for actual path fields.
 16. Build an observable card in [chat route components](../../../apps/ui/app/routes/w.$workspace.$project/) and select it in [`chat-message.tsx`](../../../apps/ui/app/routes/w.$workspace.$project/chat-message.tsx). Reuse the current card primitives and owning page/controller state.
 17. Add the exhaustive copy/compaction serializer in [`toolSerializers`](../../../apps/ui/app/utils/chat.utils.ts).
-18. Classify both static and qualified external names in [assistant activity](../../../apps/ui/app/utils/assistant-message-activity.ts); test the visible family.
+18. Classify both static and qualified external names in [assistant activity](../../../apps/libs/chat-ui/src/utils/assistant-message-activity.ts); test the visible family.
 19. When a tool writes a person-visible record, connect the owning UI reader and live adoption surface. For workbench records see [workbench record host](../../../apps/ui/app/routes/w.$workspace.$project/workbench-record-host.tsx); do not add a second store.
 20. Teach the workflow briefly in [the CAD prompt](../../../libs/chat/src/prompts/cad-agent.prompt.ts) when model choice depends on it. Keep the full schema and description at their owners.
-21. Test the provider schema and grant, registry invocation, RPC outcome, durable call facts, card, and one real host path. [Provider compatibility tests](../../../libs/chat/src/schemas/provider-tool-schema-compat.test.ts) cover provider-safe JSON Schema. Update the deliberate `toolChoice` snapshot in [the API schema test](../../../apps/api/app/api/chat/chat.controller.json-schema.test.ts), check the [CAD prompt budget test](../../../libs/chat/src/prompts/cad-agent.prompt.test.ts), and use [the scripted chat gateway precedent](../../../apps/ui-e2e/src/chat-todo-list.spec.ts) for a visible end-to-end turn.
+21. Test the provider schema and grant, registry invocation, RPC outcome, durable call facts, card, and one real host path. [Provider compatibility tests](../../../libs/chat/src/schemas/provider-tool-schema-compat.test.ts) cover provider-safe JSON Schema. Update the deliberate `toolChoice` snapshot in [the API schema test](../../../apps/libs/api-chat/src/chat.controller.json-schema.test.ts), check the [CAD prompt budget test](../../../libs/chat/src/prompts/cad-agent.prompt.test.ts), and use [the scripted chat gateway precedent](../../../apps/ui-e2e/src/chat-todo-list.spec.ts) for a visible end-to-end turn.
 22. If approved for external agents, add the exact name to [`hostMcpAllowedTools` and `hostMcpRegistryTools`](../../../packages/host/src/mcp-server.ts). The signed claim, registry listing and `invokeAllowed` dispatch must agree; no whole-registry exposure.
 23. Add canonical input/output normalization in [`tauMcpSchemas`](../../../packages/host/src/acp/session.ts). Qualified ACP calls then retain external attribution while using the native family; add the [`tau-mcp` card switch](../../../apps/ui/app/routes/w.$workspace.$project/chat-message.tsx) and test real result envelopes.
 24. Review [agent-host compaction](../../../packages/agent-host/src/harness/compaction.ts) and [safeguards](../../../packages/agent-host/src/harness/safeguards.ts) only if this tool's actual behavior requires them.

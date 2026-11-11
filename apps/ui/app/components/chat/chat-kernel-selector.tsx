@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { memo, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { Check } from 'lucide-react';
@@ -5,7 +6,7 @@ import type { KernelProvider } from '@taucad/runtime';
 import type { KernelConfiguration, kernelConfigurations } from '@taucad/types/constants';
 import { availableKernelConfigurations } from '#constants/available-kernel-configurations.js';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { KernelCommercialBadge } from '#cloud/kernel-commerce.js';
@@ -106,10 +107,10 @@ export const ChatKernelSelector = memo(function ({
             <div className='space-y-2'>
               <div className='flex items-center gap-2'>
                 <SvgIcon id={item.id} className='size-5 shrink-0' />
-                <h4 className='flex items-center gap-1.5 text-sm font-semibold'>
+                <Heading level={4} variant='label' className='flex items-center gap-1.5'>
                   {item.name}
                   <KernelCommercialBadge kernelId={item.id} />
-                </h4>
+                </Heading>
               </div>
               <p className='text-sm text-muted-foreground'>{item.longDescription}</p>
               <p className='text-xs text-muted-foreground'>Best for: {item.recommended}</p>

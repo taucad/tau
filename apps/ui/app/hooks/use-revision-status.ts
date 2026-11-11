@@ -1,4 +1,4 @@
-import type { RevisionClient } from '#types/revision-client.types.js';
+import type { RevisionClient, RevisionCredentialSource } from '#types/revision-client.types.js';
 import { revisionClients } from '#services/revision-client-registry.js';
 /**
  * The page's client of the worker revision root (architecture A38).
@@ -39,27 +39,38 @@ import { isGithubRemoteUrl, tauRemoteUrl } from '@taucad/revisions';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
 import { useParams } from 'react-router';
 import {
+  getRevisionSessionUser,
   revisionUserActor,
+  subscribeRevisionSessionUser,
   useAnonymousRevisions,
   useRevisionSalt,
   useRevisionSessionUser,
 } from '#lib/revision-actor.js';
-import { deviceId } from '#lib/device-id.js';
+import type { RevisionSessionUser } from '#lib/revision-actor.js';
+import { deviceId } from '@taucad/ui-core/lib/device-id';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import { GithubRequestError, githubConnections, githubErrorMessage } from '#lib/github-connections.js';
-import { githubNoreplyAuthor, githubProjectBinding } from '#lib/github-project-binding.js';
-import type { GithubProjectBinding } from '#lib/github-project-binding.js';
+import { githubNoreplyAuthor, githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
+import type { GithubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { reportRevisionToast } from '#lib/revision-failure-reporting.js';
-import { holdTreeRefreshesWhileApplying } from '#lib/tree-refresh-hold.js';
+import { holdTreeRefreshesWhileApplying } from '@taucad/ui-core/lib/tree-refresh-hold';
 
 type ConnectionOperation = 'connect' | 'status' | 'open' | 'subscribe' | 'stream';
+
+/**
+ * A client's connection half: everything but the identity commands, which
+ * {@link withRevisionIdentity} adds the same way to every host's connection.
+ *
+ * @public
+ */
+export type RevisionClientConnection = Omit<RevisionClient, 'setUser' | 'setCredential'>;
 
 /** One failed attachment shared by every caller waiting for its initialization. */
 class RevisionConnectionError extends Error {
@@ -102,7 +113,7 @@ const branchCreatedOf = (answer: unknown, name: string): BranchCreated => {
 export const createHostRevisionClient = (input: {
   readonly projectId: string;
   readonly connect?: () => Promise<AgentChannelClient>;
-}): RevisionClient => {
+}): RevisionClientConnection => {
   const listeners = new Topic<void>({ name: 'HostRevisionClient' });
   const events = new Topic<WorkerRevisionEvent>({
     name: 'HostRevisionClientEvents',
@@ -406,6 +417,9 @@ export const createHostRevisionClient = (input: {
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
     },
+    sessionChanged: async () => {
+      await ask({ command: 'sessionChanged' });
+    },
     recordEditorConflict: async (conflict) =>
       (await ask({ command: 'recordEditorConflict', ...conflict })) as unknown as EditorConflictOutcome,
     /* The host answers the verb with the checkout the registry made, or its refusal (B7: an answer, never a bound). */
@@ -570,7 +584,7 @@ const isTransientGithubFailure = (error: unknown): boolean =>
  *
  * @param client - The project's revision client.
  */
-const resumeGithubRemote = (client: RevisionClient): void => {
+const resumeRefusedRemote = (client: RevisionClient): void => {
   const status = client.status();
   if (status?.remote.phase === 'reconnectRequired') {
     client.send({ command: 'authorizeRemote' });
@@ -660,7 +674,7 @@ function scheduleGithubCredential(client: RevisionClient, projectId: string, ren
     // async-iife: bootstrap -- a renewal reports through the frame it sends, or retries.
     void (async (): Promise<void> => {
       if ((await mintGithubCredential(client, projectId, 'retry')) && withdrawn) {
-        resumeGithubRemote(client);
+        resumeRefusedRemote(client);
       }
     })();
   }, renewDelay);
@@ -844,6 +858,236 @@ const awaitReplacementAnswer = (
   settle();
 };
 
+/** The sentence a GitHub-bound project's Sync region shows while nobody is signed in to Tau. */
+const signedOutGithubReason = 'Sign in to Tau to sync with GitHub.';
+
+/**
+ * The identity half of one revision client (audit R6).
+ *
+ * Who is signed in and where the GitHub credential comes from are facts the
+ * open client is told, not reasons to reopen it: a sign-in, a sign-out or an
+ * account switch mints or withdraws the credential on the connection that is
+ * already up, and the root, its tree and its port stay as they are. The one
+ * automatic re-mint a refused credential gets (D2) lives here too, so only a
+ * real identity change re-arms it.
+ *
+ * @param projectId - The project the client serves.
+ * @param client - The client these commands belong to.
+ * @returns The two commands, and the release its `close` calls.
+ */
+const revisionIdentityCommands = (
+  projectId: string,
+  client: () => RevisionClient,
+): Readonly<{
+  setUser: RevisionClient['setUser'];
+  setCredential: RevisionClient['setCredential'];
+  release: () => void;
+}> => {
+  /* Whether this connection has been told who is signed in since it opened. */
+  let told = false;
+  let user: RevisionSessionUser | undefined;
+  /* Retires an answer that arrives after the identity it was for has changed or closed. */
+  let generation = 0;
+  /*
+   * One automatic re-mint per refusal (D2): a GitHub remote the provider
+   * answered 401 for re-mints, re-sends its frame and retries exactly once.
+   * The latch opens again only once the project is backed up, so a revoked
+   * grant still settles in *Reconnect GitHub* instead of looping. Closed
+   * until an identity's own mint has answered: that mint is the first attempt.
+   */
+  let recovered = true;
+  /*
+   * Set when a session change is announced: until the root answers it, the
+   * projection still shows the last session's refusal, which is no refusal of
+   * the credential just sent and must not spend the one retry.
+   */
+  let awaitingAnswer = false;
+  let unsubscribe: (() => void) | undefined;
+
+  const setCredential = async (source: RevisionCredentialSource): Promise<boolean> => {
+    if (source.kind === 'github') {
+      return mintGithubCredential(client(), projectId, 'unavailable');
+    }
+    stopGithubCredential(projectId);
+    client().remoteCredential(withdrawnGithubCredential(projectId, source.reason));
+    return false;
+  };
+
+  const recover = (): void => {
+    const status = client().status();
+    if (status === undefined) {
+      return;
+    }
+    const refused =
+      status.remote.kind === 'git' &&
+      (status.remote.phase === 'reconnectRequired' ||
+        (status.sync.state === 'failed' && status.sync.reason === 'unauthorized'));
+    if (awaitingAnswer) {
+      return;
+    }
+    if (status.sync.state === 'backedUp') {
+      recovered = false;
+      return;
+    }
+    if (
+      !refused ||
+      recovered ||
+      user === undefined ||
+      githubProjectBinding.get(projectId)?.repositoryUrl !== status.remote.url
+    ) {
+      return;
+    }
+    recovered = true;
+    const retry = status.remote.phase === 'reconnectRequired' ? 'authorizeRemote' : 'syncNow';
+    const asked = generation;
+    // async-iife: bootstrap -- the retry settles on the projection this listener reads.
+    void (async (): Promise<void> => {
+      if ((await setCredential({ kind: 'github' })) && asked === generation) {
+        client().send({ command: retry });
+      }
+    })();
+  };
+
+  /*
+   * What a fresh root did implicitly when an identity change reopened it: the
+   * remote is read afresh under the new session (a Tau Cloud remote and its
+   * move stream are reached with the session cookie, not a frame), and a
+   * remote waiting on a credential takes the one just sent.
+   */
+  const announceSession = (): void => {
+    /* Taken by the root before the change, so its answer follows it too. */
+    const reauthorized = client().status()?.remote.phase === 'reconnectRequired';
+    if (reauthorized) {
+      client().send({ command: 'authorizeRemote' });
+    }
+    awaitingAnswer = true;
+    const asked = generation;
+    // async-iife: bootstrap -- the root's answer arrives on the projection; this only ends the wait for it.
+    void (async (): Promise<void> => {
+      try {
+        await client().sessionChanged();
+      } catch {
+        /* The connection closed: `release` has already ended the wait. */
+      }
+      if (asked !== generation) {
+        return;
+      }
+      awaitingAnswer = false;
+      /* A refusal that reached `reconnectRequired` after the change was sent,
+       * but before the root took it, was the last credential's: try the new one. */
+      if (!reauthorized && client().status()?.remote.phase === 'reconnectRequired') {
+        client().send({ command: 'authorizeRemote' });
+      }
+    })();
+  };
+
+  const say = async (next: RevisionSessionUser | undefined): Promise<void> => {
+    const opening = !told;
+    const previous = user;
+    told = true;
+    user = next;
+    generation += 1;
+    const asked = generation;
+    recovered = true;
+    unsubscribe ??= client().subscribe(recover);
+    const bound = githubProjectBinding.get(projectId) !== undefined;
+    if (next === undefined || !bound) {
+      /* A bound project's credential depends on who is signed in. An unbound
+       * one is withdrawn too when a person leaves, since a *Connect* still
+       * waiting to bind may have handed the root that person's credential. */
+      if (opening || bound || previous !== undefined) {
+        await setCredential({ kind: 'withdrawn', reason: signedOutGithubReason });
+      }
+      if (!opening && asked === generation) {
+        announceSession();
+      }
+      return;
+    }
+    if (!opening) {
+      if (previous === undefined) {
+        /* Retire any renewal and any mint still in flight for the signed-out session. */
+        stopGithubCredential(projectId);
+      } else {
+        /* An account switch: the last person's credential is withdrawn before the next one's is minted. */
+        await setCredential({ kind: 'withdrawn', reason: signedOutGithubReason });
+        if (asked !== generation) {
+          /* Superseded during the withdrawal: the newer identity mints its own. */
+          return;
+        }
+      }
+    }
+    const minted = await setCredential({ kind: 'github' });
+    if (asked !== generation) {
+      return;
+    }
+    recovered = !minted;
+    if (!opening) {
+      announceSession();
+    }
+  };
+
+  /*
+   * The newest identity's credential work. An open waits for that one, not
+   * its own (D36): a mint superseded while it is out stops being waited for
+   * the moment it is superseded, and its late answer is retired by the lease.
+   */
+  let latest: Promise<void> = Promise.resolve();
+  let superseded = Promise.withResolvers<void>();
+  const settle = async (): Promise<void> => {
+    let awaited: Promise<void>;
+    do {
+      awaited = latest;
+      // oxlint-disable-next-line no-await-in-loop -- each newer identity supersedes the one awaited.
+      await Promise.race([awaited, superseded.promise]);
+    } while (awaited !== latest);
+  };
+
+  const setUser = async (next: RevisionSessionUser | undefined): Promise<void> => {
+    if (told && next?.id === user?.id) {
+      /* The person already held: a refetch or a new display name. Nothing to mint, and the latch stays. */
+      user = next;
+      return settle();
+    }
+    latest = say(next);
+    superseded.resolve();
+    superseded = Promise.withResolvers<void>();
+    return settle();
+  };
+
+  const release = (): void => {
+    unsubscribe?.();
+    unsubscribe = undefined;
+    told = false;
+    user = undefined;
+    generation += 1;
+    recovered = true;
+    awaitingAnswer = false;
+  };
+
+  return { setUser, setCredential, release };
+};
+
+/**
+ * Give a client connection the identity commands (audit R6).
+ *
+ * @param projectId - The project the connection serves.
+ * @param connection - The worker or host connection.
+ * @returns The client; its `close` also forgets who it was told is signed in.
+ */
+const withRevisionIdentity = (projectId: string, connection: RevisionClientConnection): RevisionClient => {
+  const identity = revisionIdentityCommands(projectId, () => client);
+  const client: RevisionClient = {
+    ...connection,
+    setUser: identity.setUser,
+    setCredential: identity.setCredential,
+    close: () => {
+      identity.release();
+      connection.close();
+    },
+  };
+  return client;
+};
+
 /**
  * Open (or reuse) this project's connection to the worker revision root.
  *
@@ -863,7 +1107,7 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     existing.client.close();
   }
   if (isDesktopTarget) {
-    const client = createHostRevisionClient({ projectId: input.projectId });
+    const client = withRevisionIdentity(input.projectId, createHostRevisionClient({ projectId: input.projectId }));
     revisionClients.set(input.projectId, { client, worker: input.worker });
     return client;
   }
@@ -977,7 +1221,7 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     }
     pending.clear();
   };
-  const client: RevisionClient = {
+  const connection: RevisionClientConnection = {
     status: () => status,
     pushGithub: async (credential) => {
       await ask({ command: 'pushGithub', ...credential });
@@ -1067,6 +1311,9 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     },
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+    },
+    sessionChanged: async () => {
+      await ask({ command: 'sessionChanged' });
     },
     /* On the selected checkout, which is the one the page's files are rooted at. */
     materialize: async (paths) => {
@@ -1158,6 +1405,7 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       }
     },
   };
+  const client = withRevisionIdentity(input.projectId, connection);
   revisionClients.set(input.projectId, { client, worker: input.worker });
   return client;
 };
@@ -1168,6 +1416,9 @@ export const revisionClientTestApi = {
   adopt: (projectId: string, worker: Worker, client: RevisionClient): void => {
     revisionClients.set(projectId, { client, worker });
   },
+  /** The identity commands a real client carries, over `client`'s own connection (audit R6). */
+  identity: (projectId: string, client: RevisionClient): ReturnType<typeof revisionIdentityCommands> =>
+    revisionIdentityCommands(projectId, () => client),
   reset: (): void => {
     revisionClients.clear();
     for (const projectId of githubCredentialLeases.keys()) {
@@ -1303,71 +1554,41 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
     }
     client.send({ command: 'setDeviceId', deviceId: deviceId() });
   }, [client]);
+  /*
+   * Open and close follow the project's client alone (audit R6).
+   *
+   * Who is signed in reaches the open client as an event: the session store's
+   * changes are relayed to `setUser`, which mints or withdraws the GitHub
+   * credential on the connection that is already up. A sign-in, a sign-out or
+   * a session refetch never closes the port or stops the root. A refetch or a
+   * new display name leaves D2's one-retry latch as it was; a real sign-in
+   * arms it once its own mint has answered. The open's own `setUser` runs first, so the credential
+   * frame is queued before the connection that starts the root (D36).
+   */
   useEffect(() => {
     if (client === undefined) {
       return;
     }
-    const credentialAbort = new AbortController();
-    /*
-     * One automatic re-mint per refusal (D2): a GitHub remote the provider
-     * answered 401 for re-mints, re-sends its frame and retries exactly once.
-     * The latch opens again only once the project is backed up, so a revoked
-     * grant still settles in *Reconnect GitHub* instead of looping. Closed
-     * until the open's own mint has answered: that mint is the first attempt.
-     */
-    let recovered = true;
-    const recover = (): void => {
-      const status = client.status();
-      if (status === undefined) {
-        return;
-      }
-      if (status.sync.state === 'backedUp') {
-        recovered = false;
-        return;
-      }
-      const refused =
-        status.remote.kind === 'git' &&
-        (status.remote.phase === 'reconnectRequired' ||
-          (status.sync.state === 'failed' && status.sync.reason === 'unauthorized'));
-      if (
-        !refused ||
-        recovered ||
-        sessionUser === undefined ||
-        githubProjectBinding.get(projectId)?.repositoryUrl !== status.remote.url
-      ) {
-        return;
-      }
-      recovered = true;
-      const retry = status.remote.phase === 'reconnectRequired' ? 'authorizeRemote' : 'syncNow';
-      // async-iife: bootstrap -- the retry settles on the projection this listener reads.
-      void (async (): Promise<void> => {
-        if ((await mintGithubCredential(client, projectId, 'unavailable')) && !credentialAbort.signal.aborted) {
-          client.send({ command: retry });
-        }
-      })();
-    };
-    const unsubscribe = client.subscribe(recover);
+    const closed = new AbortController();
+    const unsubscribeUser = subscribeRevisionSessionUser(() => {
+      // async-iife: bootstrap -- the credential reports through the frame it sends.
+      void client.setUser(getRevisionSessionUser());
+    });
     // async-iife: bootstrap -- project cleanup retires the session-scoped credential request.
     void (async (): Promise<void> => {
-      const bound = sessionUser !== undefined && githubProjectBinding.get(projectId) !== undefined;
-      const minted = bound && (await mintGithubCredential(client, projectId, 'unavailable'));
-      if (credentialAbort.signal.aborted) {
-        return;
+      await client.setUser(getRevisionSessionUser());
+      if (!closed.signal.aborted) {
+        client.open();
       }
-      if (!bound) {
-        client.remoteCredential(withdrawnGithubCredential(projectId, 'Sign in to Tau to sync with GitHub.'));
-      }
-      recovered = !minted;
-      client.open();
     })();
     return () => {
-      credentialAbort.abort();
-      unsubscribe();
-      stopGithubCredential(projectId);
-      client.remoteCredential(withdrawnGithubCredential(projectId, 'Open this project in Tau to sync with GitHub.'));
+      closed.abort();
+      unsubscribeUser();
+      // async-iife: bootstrap -- a withdrawal sends its frame before it returns.
+      void client.setCredential({ kind: 'withdrawn', reason: 'Open this project in Tau to sync with GitHub.' });
       client.close();
     };
-  }, [client, projectId, sessionUser]);
+  }, [client]);
   useEffect(() => {
     if (client === undefined) {
       return;

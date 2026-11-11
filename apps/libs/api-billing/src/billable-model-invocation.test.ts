@@ -5,7 +5,7 @@ import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
 import { BillableModelInvocationService } from '#billable-model-invocation.service.js';
-import { LlmGatewayError, providerDiagnostic, textMarker } from '@taucad/api-llm-gateway';
+import { gatewayModelRoutes, LlmGatewayError, providerDiagnostic, textMarker } from '@taucad/api-llm-gateway';
 import { billableModelRouteIds, CodeOwnedBillableModelQualificationResolver } from '#billable-model-qualification.js';
 import { createBillableModelProviderAdapters } from '#billable-model-provider.js';
 import { createBillableModelEvidenceCollector } from '#billable-model-evidence.js';
@@ -218,6 +218,7 @@ describe('BillableModelInvocationService', () => {
   it('maps every catalog route through the production adapter factory and actual resolver', () => {
     const routeCases = (
       [
+        ['anthropic-claude-fable-5.2', 'claude-fable-5-2', 'anthropic', 'max_tokens'],
         ['anthropic-claude-fable-5.1', 'claude-fable-5-1', 'anthropic', 'max_tokens'],
         ['anthropic-claude-fable-5', 'claude-fable-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-opus-5.5', 'claude-opus-5-5', 'anthropic', 'max_tokens'],
@@ -240,11 +241,11 @@ describe('BillableModelInvocationService', () => {
         ['google-gemini-3.8-flash', 'gemini-3.8-flash', 'openai-completions', 'max_completion_tokens'],
         ['google-gemini-3.5-flash-lite', 'gemini-3.5-flash-lite', 'openai-completions', 'max_completion_tokens'],
         ['google-gemini-3.5-flash', 'gemini-3.5-flash', 'openai-completions', 'max_completion_tokens'],
-        ['together-kimi-k3', 'moonshotai/Kimi-K3', 'openai-completions', 'max_completion_tokens'],
-        ['together-glm-5.2', 'zai-org/GLM-5.2', 'openai-completions', 'max_completion_tokens'],
-        ['morph-kimi-k3.1-pro', 'morph-kimik31', 'openai-completions', 'max_tokens'],
-        ['morph-glm-5.3-flash', 'morph-glm53flash', 'openai-completions', 'max_tokens'],
-        ['morph-deepseek-v4.1-flash', 'morph-dsv41flash', 'openai-completions', 'max_tokens'],
+        ['together-kimi-k3.1-pro', 'moonshotai/Kimi-K3.1-Pro', 'openai-completions', 'max_tokens'],
+        ['together-glm-5.3', 'zai-org/GLM-5.3', 'openai-completions', 'max_tokens'],
+        ['together-glm-5.3-flash', 'zai-org/GLM-5.3-Flash', 'openai-completions', 'max_tokens'],
+        ['together-minimax-m3.1-flash', 'MiniMaxAI/MiniMax-M3.1-Flash', 'openai-completions', 'max_tokens'],
+        ['together-deepseek-v4-pro', 'deepseek-ai/DeepSeek-V4-Pro-0813', 'openai-completions', 'max_tokens'],
         ['xai-grok-4.7', 'grok-4.7', 'openai-responses', 'max_output_tokens'],
         ['xai-grok-4.6', 'grok-4.6', 'openai-responses', 'max_output_tokens'],
       ] satisfies ReadonlyArray<
@@ -272,7 +273,9 @@ describe('BillableModelInvocationService', () => {
       ],
     ]);
     const adapters = createBillableModelProviderAdapters({ get: (key) => configured.get(key) });
-    expect([...adapters.keys()].sort()).toEqual([...billableModelRouteIds].sort());
+    // A funded route whose catalog row is disabled has no gateway route, so it gets no adapter.
+    const dispatchable = new Set(gatewayModelRoutes().map((route) => route.routeId));
+    expect([...adapters.keys()].sort()).toEqual(billableModelRouteIds.filter((id) => dispatchable.has(id)).sort());
     const resolver = new CodeOwnedBillableModelQualificationResolver({
       adapters,
       executionTimeout: 30_000,
@@ -425,6 +428,49 @@ describe('BillableModelInvocationService', () => {
     await expect(service.invoke({ ...intent(), body: { model: 'changed' } })).rejects.toMatchObject({ status: 409 });
     expect(resolver.resolve).not.toHaveBeenCalled();
     expect(ledger.issueCurrentPromotion).not.toHaveBeenCalled();
+  });
+
+  /* A refusal before admission has no qualification, yet the Together output-field fault was one:
+   * it must still reach the admission and error-rate series, labelled only by funded routes. */
+  it.each([
+    {
+      model: 'google-gemini-3.5-flash',
+      labels: { 'gen_ai.provider.name': 'vertexai', 'gen_ai.request.model': 'gemini-3.5-flash' },
+      warned: true,
+    },
+    { model: 'not-a-funded-route', labels: { 'gen_ai.provider.name': 'other' }, warned: false },
+  ])('should record a refusal before admission of $model under bounded labels', async ({ model, labels, warned }) => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+      // Test-local logger sink.
+    });
+    const metrics = genAiMetrics();
+    const refusal = new LlmGatewayError(400, 'INVALID_REQUEST', 'Model request is outside the funded request contract');
+    const service = new BillableModelInvocationService(
+      { getOperationForAttempt: vi.fn(async () => undefined) } as unknown as CreditLedgerService,
+      {
+        resolve: () => {
+          throw refusal;
+        },
+      },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+      metrics as unknown as MetricsService,
+    );
+
+    await expect(service.invoke({ ...intent(), body: { model } })).rejects.toBe(refusal);
+
+    expect(metrics.llmGatewayAdmissionDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+      'gen_ai.provider.name': labels['gen_ai.provider.name'],
+      'tau.surface': 'gateway',
+      outcome: 'refused',
+    });
+    expect(metrics.genAiOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+      ...labels,
+      'tau.surface': 'gateway',
+      'error.type': 'refused',
+    });
+    expect(warn).toHaveBeenCalledTimes(warned ? 1 : 0);
+    warn.mockRestore();
   });
 
   describe('request bound', () => {
@@ -1629,6 +1675,30 @@ describe('BillableModelInvocationService', () => {
         gatewayErrorType(error) === 'UPSTREAM_REJECTED' &&
         error.message === 'The request exceeds the context window of the selected model.' &&
         !error.message.includes(supplierSentence),
+    );
+  });
+
+  /* Anthropic binds a thinking signature to everything sent before it. Resuming re-sends the same history, so the
+   * funded path answers with a code no client resumes, in Tau's own sentence. */
+  it('should code a refused reasoning replay as its own refusal without quoting the supplier on the funded path', async () => {
+    const supplierSentence =
+      'messages.1.content.4: Invalid `signature` in `thinking` block. The block is bound to a different conversation.';
+    const qualified = qualification();
+    qualified.adapter.executeOnce = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: supplierSentence } }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    const { service } = exhaustionHarness(qualified);
+
+    await expect(service.invoke(intent())).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof LlmGatewayError &&
+        error.getStatus() === 502 &&
+        gatewayErrorType(error) === 'REASONING_REPLAY_REJECTED' &&
+        error.message === 'The model provider rejected reasoning replayed from earlier in this chat.',
     );
   });
 

@@ -3,14 +3,14 @@ import { Link, useNavigate } from 'react-router';
 import { QueryClientContext } from '@tanstack/react-query';
 import type { AuthProviderProps } from '@better-auth-ui/react';
 // oxlint-disable-next-line import/no-unassigned-import -- side-effect loads `AuthPluginRegister` module augmentation before `<AuthProvider>`
-import '#utils/auth-plugin.js';
+import '@taucad/ui-core/utils/auth-plugin';
 import { AuthProvider } from '#components/auth/auth-provider.js';
 import { authClient } from '#lib/auth-client.js';
-import { apiKeyPlugin } from '#utils/api-key-plugin.js';
+import { apiKeyPlugin } from '@taucad/ui-core/utils/api-key-plugin';
 import { magicLinkPlugin } from '#utils/magic-link-plugin.js';
 import { useCloudFinancialPurge } from '#cloud/financial-purge.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
-import { hasWebsitePreference, setEntryPreference } from '#lib/entry-preference.js';
+import { hasWebsitePreference, setEntryPreference } from '@taucad/ui-core/lib/entry-preference';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { authReturnOrigin } from '#lib/share-origin.js';
 
@@ -165,7 +165,10 @@ export function AuthConfigLink({
   onClick,
   children,
   ...rest
-}: React.ComponentProps<'a'> & { readonly href: string; readonly to?: string }): React.JSX.Element {
+}: React.ComponentProps<'a'> & {
+  readonly href: string;
+  readonly to?: string;
+}): React.JSX.Element {
   if (desktopAuthAction(href) === undefined) {
     return (
       <Link {...rest} to={href}>
@@ -294,6 +297,9 @@ export function AuthConfigProvider({ children }: { readonly children: React.Reac
       localization={authLocalization}
       plugins={[magicLinkPlugin(), apiKeyPlugin()]}
       socialProviders={['github', 'google']}
+      // Mirrors the API's `requireEmailVerification`: a sign-up answers with no session, so the form shows
+      // "Check your email" instead of navigating home signed out.
+      emailAndPassword={{ requireEmailVerification: true }}
       redirectTo='/'
       baseURL={authReturnOrigin()}
     >

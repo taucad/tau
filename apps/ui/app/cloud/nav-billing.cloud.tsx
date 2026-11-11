@@ -8,7 +8,6 @@ import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { MonthlyCreditsMeter } from '#components/billing/monthly-credits-meter.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
-import { formatCredits } from '#utils/credits.utils.js';
 import { ProBadge } from '#components/tier-badge.js';
 import type { NavRoute } from '#constants/route.constants.js';
 
@@ -95,7 +94,8 @@ export function NavCreditsMeter(): React.JSX.Element | undefined {
         </div>
         {BigInt(credits.balance.purchasedHeldCreditAtoms) > 0n ? (
           <p className='text-muted-foreground'>
-            {formatCredits(BigInt(credits.balance.purchasedHeldCreditAtoms))} reserved for active work
+            {formatCreditAtomsDisplay(BigInt(credits.balance.purchasedHeldCreditAtoms))} more on hold for work in
+            progress
           </p>
         ) : undefined}
       </div>

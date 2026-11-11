@@ -13,7 +13,7 @@ import {
   unplaceableExecutionReason,
 } from '#lib/agent-host-placement.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
-import { withoutHostId } from '#utils/chat-execution.js';
+import { withoutHostId } from '@taucad/chat-ui/utils/chat-execution';
 
 /**
  * Why this device cannot place one execution, kept current: a loopback daemon

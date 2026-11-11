@@ -303,7 +303,13 @@ export type LinuxCleanHostConsumer = LinuxProcessAccess & {
   exec(
     file: string,
     args: readonly string[],
-    options?: { env?: Record<string, string>; /** Milliseconds; three minutes when absent. */ killAfter?: number },
+    options?: {
+      env?: Record<string, string>;
+      /** Milliseconds; three minutes when absent. */
+      killAfter?: number;
+      /** Working directory; the consumer's home when absent. */
+      cwd?: string;
+    },
   ): Promise<{ status: number; stdout: string; stderr: string }>;
   spawn(file: string, args: readonly string[], env: Record<string, string>): Promise<number>;
   /** The consumer's own main (non `--type=`) processes whose executable matches `pattern`. */
@@ -616,7 +622,7 @@ export const createLinuxAptQualificationDriver = (
       if (kind === 'linux-appimage') {
         // What the consumer does with a downloaded AppImage: `chmod +x`, then run it.
         // oxlint-disable-next-line no-await-in-loop, no-bitwise -- Ordered consumer steps on POSIX mode bits.
-        const mode = await consumer.chmod(downloaded.path, downloaded.mode | 0o111);
+        const mode = await consumer.chmod(downloaded.path, (downloaded.mode & 0o777) | 0o111);
         // oxlint-disable-next-line no-await-in-loop -- The runtime must execute for the consumer after chmod.
         const probe = await consumer.exec(downloaded.path, ['--appimage-offset'], { killAfter: 60_000 });
         if (probe.status !== 0 || !/^[1-9]\d*$/u.test(probe.stdout.trim())) {
@@ -853,7 +859,17 @@ export const createLinuxAptQualificationDriver = (
     const commandLine = stage === 'initial' ? ['gio', 'launch', desktopEntry] : [launcher, ...args];
     let spawned: number | undefined;
     if (stage === 'initial') {
-      const result = await consumer.exec('gio', ['launch', desktopEntry], { env, killAfter: 60_000 });
+      // The gio launch command hands its stdio to the launched app: detach it so the call returns and the app keeps no pipe.
+      const result = await consumer.exec(
+        '/bin/sh',
+        [
+          '-c',
+          'e=$(mktemp) || exit 1; gio launch "$1" </dev/null >/dev/null 2>"$e"; s=$?; cat "$e" >&2; rm -f "$e"; exit $s',
+          'sh',
+          desktopEntry,
+        ],
+        { env, killAfter: 60_000 },
+      );
       if (result.status !== 0) {
         throw new QualificationUnavailable(`Desktop entry launch failed: ${result.stderr}`);
       }
@@ -874,7 +890,21 @@ export const createLinuxAptQualificationDriver = (
     }
     const [main] = started;
     if (started.length !== 1 || !main || (spawned !== undefined && main.pid !== spawned)) {
-      throw new QualificationUnavailable('Consumer launch did not start exactly one installed main process');
+      // Name what was seen, from root's own /proc view: the parent and argument vector of every new main process.
+      const seen = await Promise.all(
+        started.map(async ({ pid, executable }) => {
+          const [status, rawCommandLine] = await Promise.all([
+            readFile(`/proc/${pid}/status`, 'utf8').catch(() => ''),
+            readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => ''),
+          ]);
+          const parent = /^PPid:\s+(\d+)/mu.exec(status)?.[1] ?? 'exited';
+          return `${pid} (parent ${parent}) ${executable} ${JSON.stringify(rawCommandLine.replaceAll('\0', ' ').trim())}`;
+        }),
+      );
+      throw new QualificationUnavailable(
+        `Consumer ${stage} launch did not start exactly one installed main process` +
+          `${spawned === undefined ? '' : ` (spawned ${spawned})`}: ${seen.length === 0 ? 'none within 120 s' : seen.join('; ')}`,
+      );
     }
     // Independent of the consumer agent's reply: the kernel's owner of the process and root's view of its executable.
     const status = await readFile(`/proc/${main.pid}/status`, 'utf8');

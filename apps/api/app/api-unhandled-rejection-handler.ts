@@ -1,6 +1,6 @@
 import process from 'node:process';
 import { Logger } from '@nestjs/common';
-import { isExpectedChatCancellationRejection } from '#api/chat/utils/chat-abort.js';
+import { isExpectedChatCancellationRejection } from '@taucad/api-chat/utils/chat-abort';
 
 const handleApiUnhandledRejection = (reason: unknown): void => {
   if (isExpectedChatCancellationRejection(reason)) {

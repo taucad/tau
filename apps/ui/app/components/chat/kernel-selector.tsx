@@ -1,9 +1,10 @@
+import { Heading } from '@taucad/ui/components/heading';
 import type { KernelProvider } from '@taucad/runtime';
 import { availableKernelConfigurations } from '#constants/available-kernel-configurations.js';
 import { Button } from '@taucad/ui/components/button';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { Badge } from '@taucad/ui/components/badge';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { cn } from '@taucad/ui/utils/cn';
 import { KernelCommercialBadge } from '#cloud/kernel-commerce.js';
 
@@ -51,10 +52,10 @@ export function KernelSelector({
               <div className='flex items-start gap-4'>
                 <SvgIcon id={option.id} className='size-12 min-w-12 rounded-lg bg-muted p-2' />
                 <div>
-                  <h3 className='flex items-center gap-1.5 text-lg font-semibold'>
+                  <Heading level={3} variant='title' className='flex items-center gap-1.5'>
                     {option.name}
                     <KernelCommercialBadge kernelId={option.id} />
-                  </h3>
+                  </Heading>
                   <p className='text-sm text-wrap text-muted-foreground italic'>{option.description}</p>
                 </div>
               </div>

@@ -1,5 +1,6 @@
 'use client';
 
+import { Heading } from '@taucad/ui/components/heading';
 import { useAuth, useChangeEmail, useSession } from '@better-auth-ui/react';
 import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
@@ -11,7 +12,7 @@ import { Field, FieldError } from '@taucad/ui/components/field';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { Skeleton } from '@taucad/ui/components/skeleton';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
 
 export type ChangeEmailProps = {
@@ -51,7 +52,9 @@ export function ChangeEmail({ className }: ChangeEmailProps): React.JSX.Element 
 
   return (
     <div>
-      <h2 className='mb-3 text-sm font-semibold'>{localization.settings.changeEmail}</h2>
+      <Heading level={2} variant='label' className='mb-3'>
+        {localization.settings.changeEmail}
+      </Heading>
 
       <form onSubmit={handleSubmit}>
         <Card className={cn(className)}>

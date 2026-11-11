@@ -10,7 +10,7 @@ import { SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem } from '#componen
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-navigation.utils.js';
 import { projectChatIdFromSearch, projectChatUrl, projectUrl } from '#utils/project-url.utils.js';
-import { compareChatsByRecency, getChatRecencyAt } from '#utils/chat-recency.utils.js';
+import { compareChatsByRecency, getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { StatusMark } from '#components/nav/status-mark.js';
 import { sidebarDisclosureButtonClass } from '#components/nav/sidebar-disclosure.styles.js';
 import {
@@ -32,8 +32,8 @@ import {
 } from '#hooks/use-sidebar-status.js';
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { isUnownedChatObservation } from '#lib/chat-observation-guard.js';
-import { toast } from '#components/ui/sonner.js';
+import { isUnownedChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
+import { toast } from '@taucad/ui/components/sonner';
 
 const chatsPerPage = 5;
 /** Joins chat ids into one effect key; ids never contain it. */

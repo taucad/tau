@@ -7,7 +7,7 @@ import type { NativeSandboxCommand, NativeSandboxCommandResult } from '@taucad/n
 import { PreparationError, systemLibraryRefusal } from '@taucad/runtime/preparation/node';
 import type {
   ClosureLaunch,
-  ReceiptFile,
+  InstalledFile,
   SealClosureInput,
   SealClosureRefusal,
 } from '@taucad/runtime/preparation/node';
@@ -63,7 +63,7 @@ export const pythonOptionsFromClosure = (
   worker: PythonKernelWorker,
 ): ((closure: ClosureLaunch) => PythonClosureOptions) => {
   const { entry, support } = workerPaths(worker);
-  const rowOf = (closure: ClosureLaunch, path: string): ReceiptFile => {
+  const rowOf = (closure: ClosureLaunch, path: string): InstalledFile => {
     const row = closure.files.find((file) => file.path === path);
     if (row === undefined) {
       throw new Error(
@@ -97,8 +97,8 @@ export type PythonSandboxRunner = (command: NativeSandboxCommand) => Promise<Nat
 const escapeRegExp = (text: string): string => text.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
 
 /**
- * The `.py` sources whose bytecode a payload already ships, as closure-relative POSIX paths.
- * @param files - The payload rows.
+ * The `.py` sources whose bytecode a dependency file already ships, as closure-relative POSIX paths.
+ * @param files - The dependency file rows.
  * @returns The sources compileall must skip.
  */
 const shippedBytecodeSources = (files: SealClosureInput['files']): string[] =>
@@ -157,7 +157,7 @@ export const createPythonSeal =
       // D22: compile once at seal, with source hashes the interpreter never re-checks, so the worker's `-B` launch
       // imports bytecode instead of compiling thousands of modules. For S26's byte-determinism: `-B` keeps the
       // compiling interpreter from writing timestamped bytecode for the modules it imports itself, `-s` strips the
-      // staging root from the recorded file names, and `-x` leaves alone the sources whose bytecode a payload ships
+      // staging root from the recorded file names, and `-x` leaves alone the sources whose bytecode a dependency file ships
       // (python-build-standalone's three `encodings` files), which a seal step may not rewrite.
       const shipped = shippedBytecodeSources(input.files);
       const compiled = await run({

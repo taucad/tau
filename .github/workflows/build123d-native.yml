@@ -2,9 +2,12 @@ name: Build123d native qualification
 
 on:
   pull_request:
+    # `ready_for_review` so a draft, which requests no macOS runner, gets its rows once it is ready.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - '.github/workflows/build123d-native.yml'
-      - '.github/actions/setup-nx/**'
+      # Not `.github/actions/setup-nx/**`: a change to the shared setup action alone requests no macOS
+      # runner here; dispatch this workflow on the branch to qualify one on macOS.
       - 'packages/plugins/build123d/**'
       - 'libs/tau-examples/src/kernels/build123d/planetary-gear-system/**'
       - 'packages/core/geometry/**'
@@ -20,9 +23,10 @@ permissions:
   actions: read
   contents: read
 
+# A newer push to a pull request's head branch cancels its outdated run; a dispatch is never cancelled.
 concurrency:
-  group: build123d-native-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: build123d-native-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -35,18 +39,13 @@ jobs:
     timeout-minutes: 45
     strategy:
       fail-fast: false
+      # A draft pull request runs the Linux and Windows legs only and requests no macOS runner;
+      # marking it ready for review runs all five.
       matrix:
-        include:
-          - os: macos-15
-            target: darwin-arm64
-          - os: macos-15-intel
-            target: darwin-x64
-          - os: ubuntu-24.04
-            target: linux-x64
-          - os: ubuntu-24.04-arm
-            target: linux-arm64
-          - os: windows-latest
-            target: win32-x64
+        include: >-
+          ${{ fromJSON(github.event.pull_request.draft
+          && '[{"os":"ubuntu-24.04","target":"linux-x64"},{"os":"ubuntu-24.04-arm","target":"linux-arm64"},{"os":"windows-latest","target":"win32-x64"}]'
+          || '[{"os":"macos-15","target":"darwin-arm64"},{"os":"macos-15-intel","target":"darwin-x64"},{"os":"ubuntu-24.04","target":"linux-x64"},{"os":"ubuntu-24.04-arm","target":"linux-arm64"},{"os":"windows-latest","target":"win32-x64"}]') }}
     env:
       NX_DAEMON: 'false'
       NX_NO_CLOUD: 'true'

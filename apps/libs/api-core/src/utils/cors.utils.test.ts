@@ -64,6 +64,35 @@ it('should allow the gateway attribution headers a browser host sends', () => {
 });
 
 /**
+ * R1. The agent host labels every gateway step with its turn step and gap. The server reads them
+ * (`readTurnTelemetry`) and must admit them at the preflight before any browser sends them (I6).
+ */
+it('should allow the turn-step telemetry headers a browser host sends', () => {
+  expect(corsBaseConfiguration.allowedHeaders).toEqual(
+    expect.arrayContaining([httpHeader.xTauTurnStep, httpHeader.xTauTurnGap, 'x-tau-turn-step', 'x-tau-turn-gap']),
+  );
+});
+
+/**
+ * LW17. The agent host labels every gateway step with its host kind, build, kernel and model. The server reads them
+ * (`readHostLabels`) and must admit them at the preflight before any browser sends them (I6).
+ */
+it('should allow the host-label headers a browser host sends', () => {
+  expect(corsBaseConfiguration.allowedHeaders).toEqual(
+    expect.arrayContaining([
+      httpHeader.xTauHostKind,
+      httpHeader.xTauHostBuild,
+      httpHeader.xTauKernel,
+      httpHeader.xTauModel,
+      'x-tau-host-kind',
+      'x-tau-host-build',
+      'x-tau-kernel',
+      'x-tau-model',
+    ]),
+  );
+});
+
+/**
  * W18 DEF-5. `isomorphic-git` asks for protocol v2 with a `git-protocol` header
  * on every smart-HTTP request, and posts its packs as `application/x-git-*`,
  * which is not one of CORS's three safelisted `content-type` values. A missing

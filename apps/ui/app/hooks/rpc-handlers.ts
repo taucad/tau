@@ -22,7 +22,7 @@ import type {
 import { rpcClientErrorCode, rpcClientErrorCodeSchema } from '@taucad/chat';
 import { mutatingRpcNames } from '@taucad/chat/constants';
 import type { LargeObjectsFacet } from '@taucad/revisions';
-import { guardLargeObjectFiles, guardLargeObjectKernel } from '#lib/large-object-guard.js';
+import { guardLargeObjectFiles, guardLargeObjectKernel } from '@taucad/ui-core/lib/large-object-guard';
 import { applyClientTextMutation, createExactReplacementPlan, createRpcDispatcher } from '@taucad/chat/rpc';
 import type {
   RpcDependencies,
@@ -52,13 +52,13 @@ import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { getErrno } from '@taucad/utils/error';
 import { randomUuid } from '@taucad/utils/id';
-import { recordRpcOutcome } from '#services/rpc-ledger.js';
+import { recordRpcOutcome } from '@taucad/chat-ui/services/rpc-ledger';
 import type { projectMachine } from '#machines/project.machine.js';
 import { selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { createSourceModelInteractionUnitId } from '@taucad/viewer/machines/model-interaction.machine';
-import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
+import { decodeTextFile, encodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 import { createSkillResolver } from '#lib/skill-resolver.js';
 import type { HeadlessImageService } from '#services/headless-image.service.js';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';

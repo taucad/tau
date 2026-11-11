@@ -14,17 +14,28 @@ import type {
   OpenAIResponsesOptions,
 } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
+import { isClearedToolResult, isCompactionSummaryRow } from '#harness/compaction.js';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
 import { fitAttachmentBudget, rewriteDocuments } from '#transport/document-payload.js';
+import { readPrefixStamp } from '#log/prefix-stamp.js';
+import type { PrefixStamp } from '#log/prefix-stamp.js';
+import { prefixCodecEpoch, stampPrefix, withoutNativeReasoning } from '#transport/prefix-stamp.js';
+import type { StampedPrefix } from '#transport/prefix-stamp.js';
 import { createVertexResponseShim, echoThoughtSignatures } from '#transport/vertex-completions-shim.js';
 import { modelTelemetryParent, modelTelemetrySubject } from '#transport/model-telemetry.js';
 import { modelRequestObserver, observeModelStream } from '#transport/model-observation.js';
 import type { ModelTelemetrySeam } from '#transport/model-telemetry.js';
-import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock, ProviderMessage } from '#log/event-types.js';
+import type {
+  JsonObject,
+  ModelProviderKind,
+  ModelReasoningConfig,
+  ModelSystemPromptBlock,
+  ProviderMessage,
+} from '#log/event-types.js';
 import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 import { gatewayProviderKinds } from '#wire/admission.schema.js';
 import { gatewayErrorCodes } from '#wire/gateway.js';
-import type { GatewayErrorCode } from '#wire/gateway.js';
+import type { GatewayErrorCode, GatewayHostLabels, GatewayTurnLabels } from '#wire/gateway.js';
 import type { RefusalCode } from '#wire/refusals.js';
 
 const openAiGatewayPath = 'v1/llm/openai/v1';
@@ -184,8 +195,18 @@ export type GatewayModelTransportOptions = {
       }
     | undefined;
   readonly fetch?: typeof globalThis.fetch | undefined;
+  /**
+   * The composing build's release label. A prefix break under another release is one of `definitions`: the prompt or
+   * tool text a release changed. A composition that names none reports such a break as `instructions` or `tools`.
+   */
+  readonly release?: string | undefined;
   /** Optional funded-operation protocol supplied only by a managed Cloud composition. */
   readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
+  /**
+   * The host, build and kernel labels every call from this composition carries, with each request's model (LW17).
+   * Omitted, the call sends none of the four, so a composition opts in only once the gateway admits them (I6).
+   */
+  readonly hostLabels?: GatewayHostLabels | undefined;
   /**
    * Host composition's native-telemetry seam. Supplied only by a composition
    * that has an enabled, permitted adapter; absent in every other build, which
@@ -571,6 +592,67 @@ const guardedResponse = (options: {
   });
 };
 
+/** The prompt-cache lifetime pi-ai's codecs take: `short` is each provider's default. */
+type GatewayCacheRetention = 'short' | 'long';
+
+/** The Anthropic `cache_control.ttl` pi-ai writes for `long` retention. */
+const anthropicLongCacheTtl = '1h';
+
+/**
+ * The one owner of a request's prompt-cache lifetime.
+ *
+ * Anthropic is the only wire where Tau chooses the lifetime, and a turn there
+ * asks for one hour: the gaps it rescues are the person's think time between
+ * turns, which outlast five minutes. A compaction stays at five minutes, since
+ * the tail it writes is replaced by its summary and never read again. Every
+ * other provider keeps its own default: OpenAI's longer retention fields are
+ * refused or deprecated, and the Completions wire would put
+ * `prompt_cache_retention` and `prompt_cache_key` on a body the gateway refuses.
+ *
+ * @param request - The invocation being sent.
+ * @returns The retention every cache breakpoint of the request carries.
+ */
+const cacheRetentionFor = (request: ModelStreamRequest): GatewayCacheRetention =>
+  request.providerKind === 'anthropic' && request.invocationPurpose !== 'compaction' ? 'long' : 'short';
+
+/**
+ * The Responses `prompt_cache_key` for a chat: SHA-256 of its id, as 32 hex
+ * characters. It routes a conversation's steps to one supplier server so its
+ * prefix cache is found again, without handing a Tau identifier to the
+ * supplier (I4).
+ *
+ * @param chatId - The chat the invocation belongs to.
+ * @returns The hashed routing key.
+ */
+const promptCacheKeyFor = async (chatId: string): Promise<string> => {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(chatId));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 32);
+};
+
+/** Anthropic refuses a request with more `cache_control` breakpoints than this. */
+const anthropicMaxCacheBreakpoints = 4;
+
+/**
+ * Count the `cache_control` breakpoints in part of a request body.
+ *
+ * @param value - Any JSON value from the body.
+ * @returns How many objects within it carry `cache_control`.
+ */
+const cacheBreakpointCount = (value: unknown): number => {
+  if (Array.isArray(value)) {
+    return value.reduce<number>((total, item) => total + cacheBreakpointCount(item), 0);
+  }
+  if (!zodUtility.isObject(value)) {
+    return 0;
+  }
+  return Object.entries(value).reduce(
+    (total, [key, item]) => total + (key === 'cache_control' ? 1 : cacheBreakpointCount(item)),
+    0,
+  );
+};
+
 /**
  * Project provider-neutral prompt blocks onto Anthropic's `system` array.
  *
@@ -585,26 +667,53 @@ const guardedResponse = (options: {
  *   prompt;
  * - `cache_control.scope` (`Extra inputs are not permitted`) — Tau's neutral
  *   `PromptCacheControl` carries a scope that no Anthropic beta accepts.
+ *
+ * Every breakpoint carries the request's one lifetime, the same one pi-ai puts
+ * on the tool and history breakpoints: Anthropic refuses a one-hour breakpoint
+ * after a five-minute one, so a request is all one hour or all five minutes.
+ * Anthropic also refuses more than four breakpoints, so the system blocks take
+ * only those pi-ai's tool and history breakpoints leave, earliest first: the
+ * static prompt's is the one every chat shares.
+ *
+ * @param options - The neutral blocks, the request's retention and the breakpoints left for them.
+ * @returns The Anthropic `system` array.
  */
-const anthropicSystemBlocks = (blocks: readonly ModelSystemPromptBlock[]): readonly JsonObject[] =>
-  blocks.flatMap((block) => {
+const anthropicSystemBlocks = (options: {
+  readonly blocks: readonly ModelSystemPromptBlock[];
+  readonly cacheRetention: GatewayCacheRetention;
+  /** Breakpoints left once pi-ai's own tool and history breakpoints are counted. */
+  readonly breakpointBudget: number;
+}): readonly JsonObject[] => {
+  let budget = options.breakpointBudget;
+  return options.blocks.flatMap((block) => {
     const text = block.text.toWellFormed();
     if (text === '') {
       return [];
+    }
+    const cacheControl = budget > 0 ? block.cacheControl : undefined;
+    if (cacheControl) {
+      budget -= 1;
     }
     return [
       {
         type: 'text',
         text,
-        ...(block.cacheControl
+        ...(cacheControl
           ? {
               // eslint-disable-next-line @typescript-eslint/naming-convention -- Anthropic's wire uses snake_case.
-              cache_control: { type: block.cacheControl.type },
+              cache_control: {
+                type: cacheControl.type,
+                ...(options.cacheRetention === 'long' ? { ttl: anthropicLongCacheTtl } : {}),
+              },
             }
           : {}),
       },
     ];
   });
+};
+
+/* A label is sent only as printable ASCII within the gateway's bound; anything else would throw in `Headers#set`. */
+const headerLabel = /^[!-~]{1,128}$/u;
 
 const authenticatedFetch =
   (options: {
@@ -623,9 +732,15 @@ const authenticatedFetch =
      * billing wire does not define cannot be put on it.
      */
     readonly activity?: 'compaction' | undefined;
+    /** The step's turn labels, sent as headers only: never in the body, so the digest and prompt bytes ignore them. */
+    readonly turn?: GatewayTurnLabels | undefined;
+    /** The composition's host labels and the request's model, sent as headers only, like {@link turn}. */
+    readonly host?: (GatewayHostLabels & { readonly model: string }) | undefined;
     readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
     readonly onInvocationBound?: ModelStreamRequest['onInvocationBound'];
     readonly systemPromptBlocks?: readonly ModelSystemPromptBlock[] | undefined;
+    /** The request's one cache lifetime, from {@link cacheRetentionFor}. */
+    readonly cacheRetention: GatewayCacheRetention;
   }): typeof globalThis.fetch =>
   async (input, init) => {
     try {
@@ -657,6 +772,28 @@ const authenticatedFetch =
       if (options.activity !== undefined) {
         headers.set('x-tau-activity', options.activity);
       }
+      // Telemetry labels for the gateway's turn-step series: enumerated values only (I4), read by
+      // `readTurnTelemetry` in apps/api and listed in its CORS allow-list (`httpHeader.xTauTurnStep`).
+      if (options.turn !== undefined) {
+        headers.set('x-tau-turn-step', options.turn.step);
+        if (options.turn.gap !== undefined) {
+          headers.set('x-tau-turn-gap', options.turn.gap);
+        }
+      }
+      // Observability labels for the API's provider fact (LW17), read by `readHostLabels` in apps/api against closed
+      // vocabularies and listed in its CORS allow-list (`httpHeader.xTauHostKind` and the three beside it).
+      if (options.host !== undefined) {
+        for (const [name, value] of [
+          ['x-tau-host-kind', options.host.kind],
+          ['x-tau-host-build', options.host.build],
+          ['x-tau-kernel', options.host.kernel],
+          ['x-tau-model', options.host.model],
+        ] as const) {
+          if (value !== undefined && headerLabel.test(value)) {
+            headers.set(name, value);
+          }
+        }
+      }
       let body = init?.body;
       // Anthropic can preserve SP-8's three cache breakpoints. OpenAI has no
       // per-system-block cache-control wire shape and uses pi's blanket retention.
@@ -665,7 +802,12 @@ const authenticatedFetch =
         if (!zodUtility.isObject(payload)) {
           throw new TypeError('pi-ai produced a non-object Anthropic request body.');
         }
-        const system = anthropicSystemBlocks(options.systemPromptBlocks);
+        const system = anthropicSystemBlocks({
+          blocks: options.systemPromptBlocks,
+          cacheRetention: options.cacheRetention,
+          breakpointBudget:
+            anthropicMaxCacheBreakpoints - cacheBreakpointCount([payload['tools'], payload['messages']]),
+        });
         // An all-empty block set leaves pi's own string prompt in place rather
         // than posting `system: []`.
         if (system.length > 0) {
@@ -754,14 +896,25 @@ const piModelFor = (options: {
           ? { compat: { forceAdaptiveThinking: true } }
           : {}),
       }
-    : {
-        ...common,
-        // Both OpenAI codecs share this base: the bundled SDK appends
-        // `/chat/completions` or `/responses` to it.
-        api: isOpenAiResponsesProviderKind(options.request.providerKind) ? 'openai-responses' : 'openai-completions',
-        baseUrl: baseUrlFor(options.transport.baseUrl, openAiGatewayPath),
-        ...(options.request.providerKind === 'vertexai' ? { compat: { supportsDeveloperRole: false } } : {}),
-      };
+    : isOpenAiResponsesProviderKind(options.request.providerKind)
+      ? {
+          ...common,
+          // Both OpenAI codecs share this base: the bundled SDK appends
+          // `/chat/completions` or `/responses` to it.
+          api: 'openai-responses',
+          baseUrl: baseUrlFor(options.transport.baseUrl, openAiGatewayPath),
+        }
+      : {
+          ...common,
+          api: 'openai-completions',
+          baseUrl: baseUrlFor(options.transport.baseUrl, openAiGatewayPath),
+          ...(options.request.providerKind === 'vertexai' ? { compat: { supportsDeveloperRole: false } } : {}),
+          // Pi detects `provider: 'together'` and switches to its Together thinking
+          // format, which always adds `reasoning: { enabled }`. Tau never forwards a
+          // reasoning effort on this wire, and the gateway's strict completions
+          // boundary refuses that key, so every Together turn was a 400.
+          ...(options.request.providerKind === 'together' ? { compat: { thinkingFormat: 'openai' } } : {}),
+        };
 };
 
 /**
@@ -811,10 +964,17 @@ const replayInterruptedCalls = (messages: readonly ProviderMessage[]): readonly 
     };
   });
 
-const piContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Context => {
+/** A request's pi context, and the prefix stamp each of its messages' durable rows carries, by message index. */
+type StampedContext = { readonly context: Context; readonly stamps: ReadonlyArray<PrefixStamp | undefined> };
+
+const piContextFor = (request: ModelStreamRequest, model: PiGatewayModel): StampedContext => {
   const identities = new MessageIdentities(() => 'transport-message');
+  const stamps: Array<PrefixStamp | undefined> = [];
   const messages = replayInterruptedCalls(request.messages).flatMap((message): Context['messages'] => {
     const hydrated = providerMessageToPi(message, model as Model<Api>, identities);
+    if (hydrated) {
+      stamps.push(message.role === 'assistant' ? readPrefixStamp(message.metadata?.['prefix']) : undefined);
+    }
     if (
       hydrated?.role === 'assistant' &&
       (hydrated.provider !== model.provider || hydrated.api !== model.api || hydrated.model !== model.id)
@@ -840,7 +1000,7 @@ const piContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Conte
     description: tool.description,
     parameters: tool.inputSchema as PiTool['parameters'],
   }));
-  return { systemPrompt: request.systemPrompt, messages, tools };
+  return { context: { systemPrompt: request.systemPrompt, messages, tools }, stamps };
 };
 
 /**
@@ -848,17 +1008,60 @@ const piContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Conte
  *
  * @param request - The model stream request.
  * @param model - The pi model the context is built for.
- * @returns The fitted context.
+ * @returns The fitted context, its rows' stamps and how many attachments the budget omitted.
  */
-const budgetedContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Context => {
-  const fitted = fitAttachmentBudget(piContextFor(request, model), request.documents);
+const budgetedContextFor = (
+  request: ModelStreamRequest,
+  model: PiGatewayModel,
+): StampedContext & { readonly evicted: number } => {
+  const { context, stamps } = piContextFor(request, model);
+  const fitted = fitAttachmentBudget(context, request.documents);
   if (fitted.omitted > 0) {
     // Ponytail: warned per request, since the transport keeps no session state.
     console.warn(
       `Tau model gateway: ${fitted.omitted} older attachment(s) exceed this request's budget and were omitted.`,
     );
   }
-  return fitted.context;
+  return { context: fitted.context, stamps, evicted: fitted.omitted };
+};
+
+/**
+ * The reasoning level a request runs at, as the prefix stamp records it: the level is part of the prompt-cache key on
+ * every wire but Anthropic's system and tools tiers.
+ *
+ * @param reasoning - The request's reasoning configuration.
+ * @returns The effort, the thinking budget, or `none`.
+ */
+const reasoningSetting = (reasoning: ModelReasoningConfig | undefined): string =>
+  reasoning?.effort ?? (reasoning?.budgetTokens === undefined ? 'none' : `budget:${String(reasoning.budgetTokens)}`);
+
+/**
+ * Stamp a request's prefix: which rows may replay native reasoning (P2), and the break it suffered (P1).
+ *
+ * @param input - The request, the pi model and context it is sent as, and the composing build's release label.
+ * @returns The stamp and the stale rows.
+ */
+const prefixStampFor = (input: {
+  readonly request: ModelStreamRequest;
+  readonly model: PiGatewayModel;
+  readonly fitted: ReturnType<typeof budgetedContextFor>;
+  readonly release: string | undefined;
+}): StampedPrefix => {
+  const { request, model, fitted } = input;
+  return stampPrefix({
+    epoch: prefixCodecEpoch,
+    model: { api: model.api, provider: model.provider, id: model.id },
+    system: [request.systemPrompt, ...(request.systemPromptBlocks ?? []).map((block) => block.text)],
+    tools: fitted.context.tools ?? [],
+    messages: fitted.context.messages,
+    stamps: fitted.stamps,
+    settings: reasoningSetting(request.reasoning),
+    release: input.release,
+    summary: request.messages.findLast((message) => isCompactionSummaryRow(message))?.id,
+    cleared: fitted.context.messages.filter((message) => message.role === 'toolResult' && isClearedToolResult(message))
+      .length,
+    evicted: fitted.evicted,
+  });
 };
 
 const metadataFor = (message: AssistantMessage): JsonObject | undefined => {
@@ -943,10 +1146,19 @@ const streamPiEvents = async function* (options: {
   readonly signal: AbortSignal;
   /** Gemini thought signatures captured off the wire by the Vertex shim. */
   readonly thoughtSignatures: ReadonlyMap<string, string>;
+  /** The request's prefix stamp, for the reply's durable row. */
+  readonly prefix: PrefixStamp | undefined;
 }): AsyncGenerator<ModelStreamEvent> {
   const emittedSignatures = new Map<number, string>();
   let terminal = false;
+  let unsentStamp = options.prefix;
   for await (const event of options.events) {
+    /* With the codec's first event, whatever it is: the reply's row records the request's prefix even when the
+     * stream then fails, and a caller that stops reading here still closes the codec stream. */
+    if (unsentStamp !== undefined) {
+      yield { type: 'message-metadata', metadata: { prefix: unsentStamp } };
+      unsentStamp = undefined;
+    }
     if (event.type === 'text_start') {
       yield { type: 'text-start', contentIndex: event.contentIndex };
       continue;
@@ -1074,17 +1286,51 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
     }
     const model = piModelFor({ request, transport: options });
     const state: GatewayFetchState = {};
-    const context = budgetedContextFor(request, model);
+    const fitted = budgetedContextFor(request, model);
+    const { stamp, stale } = prefixStampFor({ request, model, fitted, release: options.release });
+    /* P2: a row whose prefix changed since it was minted replays no native reasoning. Every request obeys it; the
+     * durable row is untouched. A Gemini call of the current turn left without its signature gets the validator
+     * placeholder from `echoThoughtSignatures`, which reads this context. */
+    const context: Context =
+      stale.size === 0
+        ? fitted.context
+        : {
+            ...fitted.context,
+            messages: fitted.context.messages.map((message, index) =>
+              stale.has(index) ? withoutNativeReasoning(message) : message,
+            ),
+          };
+    /* P1: only a generation is a step of the chat's prefix. A compaction call is not stamped. */
+    const prefix = request.invocationPurpose === 'generation' ? stamp : undefined;
     const thoughtSignatures = new Map<string, string>();
     const rewrite = rewriteDocuments(request.documents, model.api);
     const echo = request.providerKind === 'vertexai' ? echoThoughtSignatures(context) : undefined;
+    const cacheRetention = cacheRetentionFor(request);
+    // Set on the body rather than through pi's `sessionId`: pi would also stamp
+    // `session_id` and `x-client-request-id` headers, which the gateway's CORS
+    // allow-list refuses. Only the Responses wire admits the key, and a request
+    // with no chat has nothing to route by.
+    const promptCacheKey =
+      isOpenAiResponsesProviderKind(request.providerKind) && request.chatId !== undefined
+        ? await promptCacheKeyFor(request.chatId)
+        : undefined;
     // Every adapter shares one request-construction step: Vertex signature echo,
-    // then the document rewrite (D21, D25). A refusal here is the caller's
-    // request, so it surfaces as INVALID_REQUEST and nothing is fetched.
+    // then the document rewrite (D21, D25), then the Responses routing key. A
+    // refusal here is the caller's request, so it surfaces as INVALID_REQUEST
+    // and nothing is fetched.
     const onPayload = (payload: unknown): unknown => {
       try {
         const echoed = echo?.(payload);
-        return rewrite(echoed ?? payload) ?? echoed;
+        const rewritten = rewrite(echoed ?? payload) ?? echoed;
+        if (promptCacheKey === undefined) {
+          return rewritten;
+        }
+        const body = rewritten ?? payload;
+        if (!zodUtility.isObject(body)) {
+          throw new TypeError('pi-ai produced a non-object Responses request body.');
+        }
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI's wire uses snake_case.
+        return { ...body, prompt_cache_key: promptCacheKey };
       } catch (error) {
         state.failure = new GatewayModelTransportError({
           code: 'INVALID_REQUEST',
@@ -1110,18 +1356,21 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
       // A generation is the gateway's default activity and says nothing; a
       // compaction is a kind of its own and says so.
       ...(request.invocationPurpose === 'compaction' ? { activity: 'compaction' } : {}),
+      ...(request.turn === undefined ? {} : { turn: request.turn }),
+      ...(options.hostLabels === undefined ? {} : { host: { ...options.hostLabels, model: request.modelId } }),
       fundedOperations: options.fundedOperations,
       ...(options.fundedOperations && request.onInvocationBound
         ? { onInvocationBound: request.onInvocationBound }
         : {}),
       systemPromptBlocks: request.systemPromptBlocks,
+      cacheRetention,
     });
     // Asked once per invocation, before anything is built or fetched. A seam
     // that fails answers nothing and the request proceeds untelemetered.
     const telemetryParent = modelTelemetryParent(options.telemetry, modelTelemetrySubject(request));
     const commonOptions = {
       headers: piCookieAuthValidationHeaders,
-      cacheRetention: 'short',
+      cacheRetention,
       // Gemini's thought markers and tool-call thought signatures are rewritten
       // into the OpenAI-compatible shape before pi's codec reads a byte. Every
       // other provider keeps the gateway response untouched.
@@ -1211,6 +1460,7 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
     });
     yield* streamPiEvents({
       events: observer === undefined ? events : observeModelStream(events, observer),
+      prefix,
       state,
       signal: request.signal,
       thoughtSignatures,

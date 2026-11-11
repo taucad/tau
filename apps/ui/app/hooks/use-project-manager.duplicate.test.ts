@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Test fixtures use React component names and literal workspace file paths. */
-import { createProjectFixture } from '#lib/project.fixture.js';
+import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -59,6 +59,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
       rmdir: vi.fn(async () => undefined),
     },
     client: {
+      verifyProjectRoute: vi.fn(async () => ({ status: 'discovery-required' })),
       listProjectManifests: vi.fn(async () => ({ roots: [], entries: [] })),
       commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
     },

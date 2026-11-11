@@ -644,6 +644,8 @@ const remoteMachineDefinition = setup({
         connect: ({ context, event }) => replaceOrReconnect(context, event, 'connected'),
         /* F9: a push changed what is stored; read it again, dropping any read in flight. */
         pushed: { target: '.reading', reenter: true },
+        /* Audit R6: the figure was read under the last session; read it under this one, as a fresh root would. */
+        sessionChanged: { target: '.reading', reenter: true, context: { storage: undefined } },
         /* F9: a refusal's own figures are newer than a read still in flight, so
            leaving `reading` stops that read before its answer can overwrite them. */
         quotaRefused: ({ context, event }) =>
@@ -720,6 +722,25 @@ const remoteMachineDefinition = setup({
 export const remoteIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
   ['probing', 'authorized'],
   ['probing', 'validated'],
+  /* Audit R6: a session change matters only to `connected`'s stored-size
+   * figure. Elsewhere the sequence in flight, or the credential frame the page
+   * sent with the change, decides what this session reads; a refused connect
+   * in `failed` is the person's to retry with the same *Connect*. */
+  ...(
+    [
+      'reading',
+      'none',
+      'choosing',
+      'probing',
+      'authorizing',
+      'validating',
+      'initialSync',
+      'abandoning',
+      'disconnecting',
+      'reconnectRequired',
+      'failed',
+    ] as const
+  ).map((state) => [state, 'sessionChanged'] as const),
 ];
 
 type RemoteMachineDefinition = typeof remoteMachineDefinition;

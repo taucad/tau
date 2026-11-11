@@ -25,7 +25,7 @@ We have zero tolerance for child sexual abuse material or any content that sexua
 
 ## Reporting and enforcement
 
-Report a violation to support@tau.new with a link and what is wrong. Depending on what we find, we may warn you, remove or restrict content, suspend or close the account, or report the matter to law enforcement. We are not obliged to monitor Tau, but we may. If you think we acted in error, reply to the notice or write to support@tau.new with your reasons and we will look again.
+Report a violation to help@tau.new with a link and what is wrong. Depending on what we find, we may warn you, remove or restrict content, suspend or close the account, or report the matter to law enforcement. We are not obliged to monitor Tau, but we may. If you think we acted in error, reply to the notice or write to help@tau.new with your reasons and we will look again.
 
 ## Contact
 

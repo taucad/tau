@@ -1,7 +1,7 @@
 [
   {
-    "name": "@taucad/camera runtime",
+    "name": "@taucad/camera runtime — measured 5.50 kB brotli on 2026-11-10 (3.51 kB before the input states, provenance, atomic framing, adoption, payload refusal and `createCameraActor`, G3)",
     "path": "dist/**/*.mjs",
-    "limit": "3.5 kB"
+    "limit": "5.5 kB"
   }
 ]

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { describe, expect, it, vi } from 'vitest';
@@ -14,6 +15,7 @@ import {
 import type { GatewayModelTransportOptions } from '#transport/gateway-model-transport.js';
 import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
+import { stampedHistory } from '#transport/prefix-stamp.fixture.js';
 
 const request = (overrides: Partial<ModelStreamRequest> = {}): ModelStreamRequest => ({
   attemptId: 'attempt-fixture-1',
@@ -47,12 +49,34 @@ const request = (overrides: Partial<ModelStreamRequest> = {}): ModelStreamReques
   ...overrides,
 });
 
+const isPrefixStamp = (event: ModelStreamEvent): boolean =>
+  event.type === 'message-metadata' && event.metadata['prefix'] !== undefined;
+
+/** The reply's events. The request's prefix stamp leads them and has its own cases, so it is left out here. */
+/**
+ * A request that continues a chat on the same model: its assistant rows carry the stamps their own requests left, so
+ * their native reasoning is replayed (P2).
+ *
+ * @param overrides - What the request changes about the fixture request.
+ * @returns The request, its history stamped.
+ */
+const continuing = async (overrides: Partial<ModelStreamRequest>): Promise<ModelStreamRequest> => {
+  const next = request(overrides);
+  return { ...next, messages: await stampedHistory(next) };
+};
+
 const collect = async (stream: AsyncIterable<ModelStreamEvent>): Promise<ModelStreamEvent[]> => {
   const events: ModelStreamEvent[] = [];
   for await (const event of stream) {
     events.push(event);
   }
-  return events;
+  return events.filter((event) => !isPrefixStamp(event));
+};
+
+/** Read past the request's prefix stamp, which leads every generation stream. */
+const skipPrefixStamp = async (iterator: AsyncIterator<ModelStreamEvent>): Promise<void> => {
+  const first = await iterator.next();
+  expect(first.done === true ? undefined : isPrefixStamp(first.value)).toBe(true);
 };
 
 const usage = (
@@ -153,7 +177,7 @@ const responseFromChunks = (chunks: readonly string[], contentType = 'text/event
  * @returns The headers the gateway was called with.
  */
 const headersFor = async (
-  options: { readonly projectId?: string } = {},
+  options: Pick<GatewayModelTransportOptions, 'projectId' | 'hostLabels'> = {},
   overrides: Partial<ModelStreamRequest> = {},
 ): Promise<Headers> => {
   let headers: Headers | undefined;
@@ -331,7 +355,11 @@ describe('createGatewayModelTransport', () => {
       fetch: vi.fn(async () => held.response),
     });
     const iterator = transport.stream(request({ providerKind: 'anthropic' }))[Symbol.asyncIterator]();
-    const first = iterator.next();
+    // async-iife: bootstrap -- the read is left pending on purpose, so the test can race it against a timer.
+    const first = (async () => {
+      await skipPrefixStamp(iterator);
+      return iterator.next();
+    })();
 
     try {
       await held.waiting.promise;
@@ -362,6 +390,21 @@ describe('createGatewayModelTransport', () => {
       held.release.resolve();
       await iterator.return?.();
     }
+  });
+
+  it('sends no Together reasoning object the gateway completions boundary would refuse', async () => {
+    let body: unknown;
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async (_input, init) => {
+        body = JSON.parse(String(init?.body));
+        return fixtureResponse();
+      }),
+    });
+
+    await collect(transport.stream(request({ providerKind: 'together' })));
+
+    expect(body).not.toHaveProperty('reasoning');
   });
 
   it('posts pi-ai OpenAI Chat Completions bytes and maps a fragmented gateway SSE stream', async () => {
@@ -616,7 +659,7 @@ describe('createGatewayModelTransport', () => {
 
     await collect(
       transport.stream(
-        request({
+        await continuing({
           messages: [
             { id: 'user-1', role: 'user', content: 'read both files' },
             {
@@ -1183,6 +1226,113 @@ describe('createGatewayModelTransport', () => {
     expect(generation.has('x-tau-activity')).toBe(false);
   });
 
+  it('sends the turn labels as headers, the gap only when known, and nothing when the request has none', async () => {
+    /* The gateway's turn-step series (`readTurnTelemetry` in apps/api) reads exactly these names and values. */
+    const labelled = await headersFor({}, { turn: { step: 'first', gap: '5m_60m' } });
+    expect(labelled.get('x-tau-turn-step')).toBe('first');
+    expect(labelled.get('x-tau-turn-gap')).toBe('5m_60m');
+
+    const continuation = await headersFor({}, { turn: { step: 'continuation', gap: 'first_turn' } });
+    expect(continuation.get('x-tau-turn-step')).toBe('continuation');
+    expect(continuation.get('x-tau-turn-gap')).toBe('first_turn');
+
+    /* A gap the host could not read is left to the gateway, which records it as `unknown`. */
+    const stepOnly = await headersFor({}, { turn: { step: 'continuation' } });
+    expect(stepOnly.get('x-tau-turn-step')).toBe('continuation');
+    expect(stepOnly.has('x-tau-turn-gap')).toBe(false);
+
+    const none = await headersFor({});
+    expect(none.has('x-tau-turn-step')).toBe(false);
+    expect(none.has('x-tau-turn-gap')).toBe(false);
+  });
+
+  it('sends the host, build, kernel and model labels on every call once the composition names its host', async () => {
+    /* LW17: the gateway reads exactly these names (`readHostLabels` in apps/api) and tags the API's provider fact with
+     * them. The model label is the request's own route id, so a compaction call is labelled as well. */
+    const labelled = await headersFor(
+      { hostLabels: { kind: 'browser', build: '0123456789ab', kernel: 'replicad' } },
+      { modelId: 'fixture-model' },
+    );
+    expect(labelled.get('x-tau-host-kind')).toBe('browser');
+    expect(labelled.get('x-tau-host-build')).toBe('0123456789ab');
+    expect(labelled.get('x-tau-kernel')).toBe('replicad');
+    expect(labelled.get('x-tau-model')).toBe('fixture-model');
+
+    const compaction = await headersFor({ hostLabels: { kind: 'desktop' } }, { invocationPurpose: 'compaction' });
+    expect(compaction.get('x-tau-host-kind')).toBe('desktop');
+    expect(compaction.get('x-tau-model')).toBe('fixture-model');
+    /* A build or kernel the composition cannot name is left to the gateway, which then records no such label. */
+    expect(compaction.has('x-tau-host-build')).toBe(false);
+    expect(compaction.has('x-tau-kernel')).toBe(false);
+
+    /* Server before client (I6): a composition that names no host sends none of the four, so a browser build never
+     * reaches a gateway whose CORS allow-list predates them. */
+    const unnamed = await headersFor({});
+    for (const name of ['x-tau-host-kind', 'x-tau-host-build', 'x-tau-kernel', 'x-tau-model']) {
+      expect(unnamed.has(name)).toBe(false);
+    }
+  });
+
+  it('drops a host label a header cannot carry rather than failing the call', async () => {
+    /* `Headers#set` throws on a control or non-Latin-1 character; a label is never worth a turn. */
+    const headers = await headersFor({
+      hostLabels: { kind: 'daemon', build: 'build\nwith-newline', kernel: 'k'.repeat(129) },
+    });
+    expect(headers.get('x-tau-host-kind')).toBe('daemon');
+    expect(headers.has('x-tau-host-build')).toBe(false);
+    expect(headers.has('x-tau-kernel')).toBe(false);
+  });
+
+  it('keeps the request body byte-identical with and without host labels', async () => {
+    const bodies: string[] = [];
+    const transportFor = (hostLabels?: GatewayModelTransportOptions['hostLabels']) =>
+      createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        ...(hostLabels === undefined ? {} : { hostLabels }),
+        fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+          bodies.push(init?.body as string);
+          return byteSplitResponse(authoritativeGatewayWireFixtures.anthropicToolTurn);
+        }),
+      });
+    await collect(transportFor().stream(request({ providerKind: 'anthropic', chatId: 'chat_fixture' })));
+    await collect(
+      transportFor({ kind: 'cloud', build: 'fedcba987654', kernel: 'openscad' }).stream(
+        request({ providerKind: 'anthropic', chatId: 'chat_fixture' }),
+      ),
+    );
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toBe(bodies[0]);
+    expect(bodies[0]).not.toMatch(/fedcba987654|openscad|x-tau-host/u);
+  });
+
+  it.each(['anthropic', 'openai', 'vertexai'] as const)(
+    'keeps the %s request body byte-identical with and without turn labels',
+    async (providerKind) => {
+      /* The labels ride in headers only: the prompt bytes, the prompt-cache key and the billing request digest
+       * (computed over the body) are what they would be without them (I4). */
+      const responses = {
+        anthropic: () => byteSplitResponse(authoritativeGatewayWireFixtures.anthropicToolTurn),
+        openai: () => byteSplitResponse(authoritativeGatewayWireFixtures.openAiResponsesToolTurn),
+        vertexai: fixtureResponse,
+      };
+      const bodies: string[] = [];
+      const transport = createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+          bodies.push(init?.body as string);
+          return responses[providerKind]();
+        }),
+      });
+      await collect(transport.stream(request({ providerKind, chatId: 'chat_fixture' })));
+      await collect(
+        transport.stream(request({ providerKind, chatId: 'chat_fixture', turn: { step: 'first', gap: 'gt_60m' } })),
+      );
+      expect(bodies).toHaveLength(2);
+      expect(bodies[1]).toBe(bodies[0]);
+      expect(bodies[0]).not.toMatch(/first|gt_60m|x-tau-turn/u);
+    },
+  );
+
   it('strips the bundled SDK telemetry headers the gateway CORS allow-list rejects', async () => {
     const seen: Array<readonly string[]> = [];
     const transportFor = (response: () => Response) =>
@@ -1208,6 +1358,27 @@ describe('createGatewayModelTransport', () => {
     expect(seen).toEqual([
       ['accept', 'content-type', 'user-agent', 'x-tau-attempt-id'],
       ['accept', 'anthropic-version', 'content-type', 'user-agent', 'x-tau-attempt-id'],
+    ]);
+
+    /* A browser turn's full set: the chat hint and both turn labels join it, each in the CORS allow-list
+     * (`httpHeader.xTauChatId`, `xTauTurnStep`, `xTauTurnGap`). */
+    seen.length = 0;
+    await collect(
+      transportFor(() => byteSplitResponse(authoritativeGatewayWireFixtures.anthropicToolTurn)).stream(
+        request({ providerKind: 'anthropic', chatId: 'chat_fixture', turn: { step: 'continuation', gap: 'lt_5m' } }),
+      ),
+    );
+    expect(seen).toEqual([
+      [
+        'accept',
+        'anthropic-version',
+        'content-type',
+        'user-agent',
+        'x-tau-attempt-id',
+        'x-tau-chat-id',
+        'x-tau-turn-gap',
+        'x-tau-turn-step',
+      ],
     ]);
   });
 
@@ -1254,7 +1425,7 @@ describe('createGatewayModelTransport', () => {
     // This binds SP-8's static/workspace/dynamic ordering to pi-ai's native
     // system/history/tool cache breakpoints without duplicating its codec.
     expect(body).toBe(
-      String.raw`{"model":"fixture-model","messages":[{"role":"user","content":[{"type":"text","text":"hello","cache_control":{"type":"ephemeral"}}]}],"max_tokens":8192,"stream":true,"system":[{"type":"text","text":"static","cache_control":{"type":"ephemeral"}},{"type":"text","text":"workspace","cache_control":{"type":"ephemeral"}},{"type":"text","text":"dynamic"}],"tools":[{"name":"read_file","description":"Read a file.","eager_input_streaming":true,"input_schema":{"type":"object","properties":{"targetFile":{"type":"string"}},"required":["targetFile"]},"cache_control":{"type":"ephemeral"}}]}`,
+      String.raw`{"model":"fixture-model","messages":[{"role":"user","content":[{"type":"text","text":"hello","cache_control":{"type":"ephemeral","ttl":"1h"}}]}],"max_tokens":8192,"stream":true,"system":[{"type":"text","text":"static","cache_control":{"type":"ephemeral","ttl":"1h"}},{"type":"text","text":"workspace","cache_control":{"type":"ephemeral","ttl":"1h"}},{"type":"text","text":"dynamic"}],"tools":[{"name":"read_file","description":"Read a file.","eager_input_streaming":true,"input_schema":{"type":"object","properties":{"targetFile":{"type":"string"}},"required":["targetFile"]},"cache_control":{"type":"ephemeral","ttl":"1h"}}]}`,
     );
     expect(events).toEqual([
       { type: 'thinking-start', contentIndex: 0 },
@@ -1331,7 +1502,7 @@ describe('createGatewayModelTransport', () => {
 
     expect(body?.system).toEqual([
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Anthropic's wire uses snake_case.
-      { type: 'text', text: 'static', cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: 'static', cache_control: { type: 'ephemeral', ttl: '1h' } },
       { type: 'text', text: 'dynamic' },
     ]);
   });
@@ -1363,6 +1534,187 @@ describe('createGatewayModelTransport', () => {
     );
 
     expect(body).not.toContain('scope');
+  });
+
+  describe('prompt-cache lifetime and routing', () => {
+    type CacheControl = Readonly<Record<string, unknown>>;
+
+    /** Every `cache_control` of an Anthropic body in the order Anthropic reads its prefix: tools, system, messages. */
+    const anthropicBreakpoints = (body: Record<string, unknown>): readonly CacheControl[] => {
+      const found: CacheControl[] = [];
+      const visit = (value: unknown): void => {
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            visit(item);
+          }
+          return;
+        }
+        if (typeof value !== 'object' || value === null) {
+          return;
+        }
+        for (const [key, item] of Object.entries(value)) {
+          if (key === 'cache_control') {
+            found.push(item as CacheControl);
+          } else {
+            visit(item);
+          }
+        }
+      };
+      visit(body['tools']);
+      visit(body['system']);
+      visit(body['messages']);
+      return found;
+    };
+
+    const bodyFor = async (overrides: Partial<ModelStreamRequest>): Promise<Record<string, unknown>> => {
+      let body: Record<string, unknown> | undefined;
+      const anthropic = overrides.providerKind === 'anthropic';
+      const responses = overrides.providerKind === 'openai' || overrides.providerKind === 'xai';
+      await collect(
+        createGatewayModelTransport({
+          baseUrl: 'https://gateway.example',
+          fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            body = JSON.parse(init?.body as string) as Record<string, unknown>;
+            return anthropic
+              ? byteSplitResponse(authoritativeGatewayWireFixtures.anthropicToolTurn)
+              : responses
+                ? byteSplitResponse(authoritativeGatewayWireFixtures.openAiResponsesToolTurn)
+                : fixtureResponse();
+          }),
+        }).stream(request(overrides)),
+      );
+      return body!;
+    };
+
+    /* Anthropic refuses a one-hour breakpoint after a five-minute one, and more than four of them. */
+    const expectAdmissibleBreakpoints = (breakpoints: readonly CacheControl[]): void => {
+      expect(breakpoints.length).toBeGreaterThan(0);
+      expect(breakpoints.length).toBeLessThanOrEqual(4);
+      const firstShort = breakpoints.findIndex((control) => control['ttl'] !== '1h');
+      if (firstShort !== -1) {
+        expect(breakpoints.slice(firstShort).every((control) => control['ttl'] !== '1h')).toBe(true);
+      }
+    };
+
+    const generationShapes = [
+      { name: 'one turn', overrides: {} },
+      {
+        name: 'a follow-up step with a tool result',
+        overrides: {
+          messages: [
+            { id: 'user-1', role: 'user', content: 'hello' },
+            {
+              id: 'assistant-1',
+              role: 'assistant',
+              content: [{ type: 'toolCall', id: 'call-1', name: 'read_file', arguments: { targetFile: 'main.ts' } }],
+              metadata: { api: 'anthropic-messages', provider: 'anthropic', model: 'fixture-model' },
+            },
+            {
+              id: 'tool-1',
+              role: 'tool-output',
+              toolCallId: 'call-1',
+              toolName: 'read_file',
+              content: { text: 'export const main = 1;' },
+              isError: false,
+            },
+          ],
+        },
+      },
+      {
+        name: 'more system breakpoints than Anthropic admits',
+        overrides: {
+          systemPromptBlocks: [
+            { type: 'text', text: 'static', cacheControl: { type: 'ephemeral' } },
+            { type: 'text', text: 'workspace', cacheControl: { type: 'ephemeral' } },
+            { type: 'text', text: 'skills', cacheControl: { type: 'ephemeral' } },
+            { type: 'text', text: 'dynamic' },
+          ],
+        },
+      },
+    ] as const satisfies ReadonlyArray<{ name: string; overrides: Partial<ModelStreamRequest> }>;
+
+    it.each(generationShapes)('puts the one-hour lifetime on every Anthropic breakpoint of $name', async (shape) => {
+      const body = await bodyFor({ providerKind: 'anthropic', chatId: 'chat_fixture', ...shape.overrides });
+
+      const breakpoints = anthropicBreakpoints(body);
+      expectAdmissibleBreakpoints(breakpoints);
+      expect(breakpoints).toEqual(breakpoints.map(() => ({ type: 'ephemeral', ttl: '1h' })));
+      // A hashed key is for the Responses wire only; Anthropic routes no conversation by it.
+      expect(body).not.toHaveProperty('prompt_cache_key');
+    });
+
+    it('keeps the earliest system breakpoints when pi-ai has spent the rest', async () => {
+      const body = await bodyFor({ providerKind: 'anthropic', ...generationShapes[2].overrides });
+
+      // Tool and history take two of the four; the static prompt, which every chat shares, keeps its own.
+      /* eslint-disable @typescript-eslint/naming-convention -- Anthropic's wire uses snake_case. */
+      expect(body['system']).toEqual([
+        { type: 'text', text: 'static', cache_control: { type: 'ephemeral', ttl: '1h' } },
+        { type: 'text', text: 'workspace', cache_control: { type: 'ephemeral', ttl: '1h' } },
+        { type: 'text', text: 'skills' },
+        { type: 'text', text: 'dynamic' },
+      ]);
+      /* eslint-enable @typescript-eslint/naming-convention -- End Anthropic wire fixture. */
+    });
+
+    it('keeps a compaction on the five-minute default for every Anthropic breakpoint', async () => {
+      /* The tail a compaction writes is replaced by its summary and never read
+       * again within the hour, so it is not worth the one-hour write price. */
+      const body = await bodyFor({ providerKind: 'anthropic', invocationPurpose: 'compaction' });
+
+      const breakpoints = anthropicBreakpoints(body);
+      expectAdmissibleBreakpoints(breakpoints);
+      expect(breakpoints).toEqual(breakpoints.map(() => ({ type: 'ephemeral' })));
+    });
+
+    it.each(['openai', 'xai'] as const)(
+      'routes a %s chat by its hashed id and hands the supplier no Tau id',
+      async (providerKind) => {
+        let headerNames: string[] | undefined;
+        let body: Record<string, unknown> | undefined;
+        const fetchFor = (): typeof globalThis.fetch =>
+          vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            headerNames = [...new Headers(init?.headers).keys()];
+            body = JSON.parse(init?.body as string) as Record<string, unknown>;
+            return byteSplitResponse(authoritativeGatewayWireFixtures.openAiResponsesToolTurn);
+          });
+
+        await collect(
+          createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchFor() }).stream(
+            request({ providerKind, chatId: 'chat_fixture' }),
+          ),
+        );
+
+        const key = createHash('sha256').update('chat_fixture').digest('hex').slice(0, 32);
+        expect(body?.['prompt_cache_key']).toBe(key);
+        expect(JSON.stringify(body)).not.toContain('chat_fixture');
+        // Retention stays the provider's own: the longer controls are refused or deprecated.
+        expect(body).not.toHaveProperty('prompt_cache_retention');
+        expect(body).not.toHaveProperty('prompt_cache_options');
+        // The key rides the body only. pi-ai's `sessionId` would also stamp
+        // `session_id` and `x-client-request-id`, which the CORS allow-list refuses.
+        expect(headerNames).toEqual(['accept', 'content-type', 'user-agent', 'x-tau-attempt-id', 'x-tau-chat-id']);
+
+        await collect(
+          createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchFor() }).stream(
+            request({ providerKind }),
+          ),
+        );
+        // A request with no chat has nothing to route by.
+        expect(body).not.toHaveProperty('prompt_cache_key');
+      },
+    );
+
+    it.each(['vertexai', 'cerebras', 'together', 'morph', 'moonshot'] as const)(
+      'never puts a cache key or retention on a %s Completions body, which the gateway refuses',
+      async (providerKind) => {
+        const body = await bodyFor({ providerKind, chatId: 'chat_fixture' });
+
+        expect(body).not.toHaveProperty('prompt_cache_key');
+        expect(body).not.toHaveProperty('prompt_cache_retention');
+        expect(JSON.stringify(body)).not.toContain('cache_control');
+      },
+    );
   });
 
   it('reads a typed gateway code out of the flattened API error envelope', async () => {
@@ -1652,7 +2004,7 @@ describe('createGatewayModelTransport', () => {
 
     const events = await collect(
       transport.stream(
-        request({
+        await continuing({
           messages: [
             {
               id: 'assistant-1',
@@ -1704,7 +2056,7 @@ describe('createGatewayModelTransport', () => {
 
     await collect(
       transport.stream(
-        request({
+        await continuing({
           providerKind: 'anthropic',
           messages: [
             {
@@ -1982,6 +2334,7 @@ describe('createGatewayModelTransport', () => {
     const iterator = transport
       .stream(request({ providerKind: 'anthropic', signal: operation.signal }))
       [Symbol.asyncIterator]();
+    await skipPrefixStamp(iterator);
     await expect(iterator.next()).resolves.toEqual({
       done: false,
       value: { type: 'text-start', contentIndex: 0 },

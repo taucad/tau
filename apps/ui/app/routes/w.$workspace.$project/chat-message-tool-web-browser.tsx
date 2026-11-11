@@ -1,16 +1,16 @@
 import { Globe } from 'lucide-react';
 import type { ToolInvocation } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
-import { extractDomainFromUrl, safeExtractDomainFromUrl } from '#utils/url.utils.js';
+import { extractDomainFromUrl, safeExtractDomainFromUrl } from '@taucad/ui-core/utils/url.utils';
 import {
   ChatToolCard,
   ChatToolCardHeader,
   ChatToolCardIcon,
   ChatToolCardTitle,
   ChatToolCardContent,
-} from '#components/chat/chat-tool-card.js';
-import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
-import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
+} from '@taucad/chat-ui/components/chat-tool-card';
+import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
+import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { WebFavicon } from '#routes/w.$workspace.$project/web-favicon.js';
 import { WebSourceLink } from '#routes/w.$workspace.$project/web-source-link.js';

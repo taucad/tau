@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { memo, useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Check, Plus } from 'lucide-react';
@@ -6,9 +7,9 @@ import { useModels, type Model, type ResolvedModel } from '#hooks/use-models.js'
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { Badge } from '@taucad/ui/components/badge';
 import { menuItemVariants } from '@taucad/ui/components/menu.variants';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
-import { groupModels } from '#utils/model-groups.js';
+import { groupModels } from '@taucad/chat-ui/utils/model-groups';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -116,9 +117,9 @@ export const ChatModelSelector = memo(function ({
               <div className='space-y-2'>
                 <div className='flex items-center gap-2'>
                   <SvgIcon id={item.details.family} className='size-5 shrink-0' />
-                  <h4 className='text-sm font-semibold'>
+                  <Heading level={4} variant='label'>
                     {item.provider.name} {item.name}
-                  </h4>
+                  </Heading>
                 </div>
                 {item.description ? <p className='text-sm text-muted-foreground'>{item.description}</p> : null}
                 {item.details.contextWindow ? (

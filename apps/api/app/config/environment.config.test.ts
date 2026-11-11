@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
 import { describe, it, expect } from 'vitest';
 import { fileLinkVectors } from '@taucad/file-links/vectors';
@@ -34,32 +34,6 @@ describe('environmentSchema', () => {
   it('should reject ambiguous cloud deletion admission flags', () => {
     const result = environmentSchema.safeParse({ ...baseEnvironment(), TAU_PROJECT_DELETION_ENABLED: '1' });
     expect(result.success).toBe(false);
-  });
-
-  /*
-   * Charter D23: free-tier sync is landed code behind a launch gate. The flag
-   * defaults off, and no committed deploy config turns it on: the go-live
-   * checklist opens it by setting it in `fly.*.toml` and deleting the second
-   * row here in the same commit, so the opening is a reviewed change.
-   */
-  it('should keep free-tier sync closed when TAU_FREE_TIER_SYNC_ENABLED is unset', () => {
-    const environment = Object.fromEntries(
-      Object.entries(baseEnvironment()).filter(([key]) => key !== 'TAU_FREE_TIER_SYNC_ENABLED'),
-    );
-    const result = environmentSchema.safeParse(environment);
-
-    expect(result.success, JSON.stringify(result.success ? {} : result.error.issues)).toBe(true);
-    expect(result.success && result.data.TAU_FREE_TIER_SYNC_ENABLED).toBe(false);
-  });
-
-  it('should keep free-tier sync closed in every committed deploy config while D23 is open', () => {
-    const apiRoot = new URL('../../', import.meta.url);
-    const deployConfigs = readdirSync(apiRoot).filter((name) => /^fly\..*toml$/u.test(name));
-
-    expect(deployConfigs.length).toBeGreaterThan(0);
-    for (const name of deployConfigs) {
-      expect(readFileSync(new URL(name, apiRoot), 'utf8'), name).not.toContain('TAU_FREE_TIER_SYNC_ENABLED');
-    }
   });
 
   it.each([
@@ -423,13 +397,10 @@ describe('environmentSchema', () => {
       expect(parseDeadline(value).success).toBe(false);
     });
 
-    it('should leave production on the default while staging sets the maximum', () => {
+    it.each(['fly.prod.toml', 'fly.staging.toml'])('should set the maximum in %s', (file) => {
       const apiRoot = new URL('../../', import.meta.url);
 
-      expect(readFileSync(new URL('fly.prod.toml', apiRoot), 'utf8')).not.toContain('BILLING_INVOCATION_DEADLINE');
-      expect(readFileSync(new URL('fly.staging.toml', apiRoot), 'utf8')).toMatch(
-        /^BILLING_INVOCATION_DEADLINE = '600000'$/mu,
-      );
+      expect(readFileSync(new URL(file, apiRoot), 'utf8')).toMatch(/^BILLING_INVOCATION_DEADLINE = '600000'$/mu);
     });
   });
 
@@ -502,6 +473,39 @@ describe('environmentSchema', () => {
       expect(result.data.TAU_EMAIL_FROM).toBe('Tau <identity@taucad.dev>');
       // Replies go to the staffed help mailbox (OQ8); fly.prod.toml overrides it with the tau.new address.
       expect(result.data.TAU_EMAIL_REPLY_TO).toBe('help@taucad.dev');
+    }
+  });
+
+  it('should leave the purpose-specific senders unset when omitted or empty', () => {
+    const omitted = Object.fromEntries(
+      Object.entries(baseEnvironment()).filter(
+        ([key]) => key !== 'TAU_EMAIL_FROM_NOTIFICATIONS' && key !== 'TAU_EMAIL_FROM_BILLING',
+      ),
+    );
+    const empty = { ...baseEnvironment(), TAU_EMAIL_FROM_NOTIFICATIONS: '', TAU_EMAIL_FROM_BILLING: '' };
+
+    for (const environment of [omitted, empty]) {
+      const result = environmentSchema.safeParse(environment);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        // No default address in code: EmailService falls back to TAU_EMAIL_FROM.
+        expect(result.data.TAU_EMAIL_FROM_NOTIFICATIONS).toBeUndefined();
+        expect(result.data.TAU_EMAIL_FROM_BILLING).toBeUndefined();
+      }
+    }
+  });
+
+  it('should accept the purpose-specific senders when set', () => {
+    const result = environmentSchema.safeParse({
+      ...baseEnvironment(),
+      TAU_EMAIL_FROM_NOTIFICATIONS: 'Tau <notifications@taucad.dev>',
+      TAU_EMAIL_FROM_BILLING: 'Tau Billing <billing@taucad.dev>',
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.TAU_EMAIL_FROM_NOTIFICATIONS).toBe('Tau <notifications@taucad.dev>');
+      expect(result.data.TAU_EMAIL_FROM_BILLING).toBe('Tau Billing <billing@taucad.dev>');
     }
   });
 

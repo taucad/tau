@@ -66,7 +66,7 @@
     },
     "test": {
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production"]
+      "inputs": ["default", "^production", "serviceEnvironment"]
     },
     "build": {
       "inputs": ["production", "^production"]
@@ -78,7 +78,7 @@
       },
       "inputs": [
         "default",
-        "^default",
+        "^production",
         "{workspaceRoot}/eslint.config.mjs",
         "{workspaceRoot}/.oxlintrc.json",
         "{workspaceRoot}/libs/oxlint/src/**/*",
@@ -166,10 +166,16 @@
     "enabled": false
   },
   "namedInputs": {
-    "sharedGlobals": [
-      "{workspaceRoot}/.github/workflows/ci.yml",
-      "{workspaceRoot}/.github/workflows/publish.yml",
-      "{workspaceRoot}/tools/typescript/base.json"
+    "sharedGlobals": ["{workspaceRoot}/tools/typescript/base.json", { "runtime": "node --version" }],
+    "serviceEnvironment": [
+      { "env": "TAU_API_URL" },
+      { "env": "TAU_WEBSOCKET_URL" },
+      { "env": "TAU_FRONTEND_URL" },
+      { "env": "DATABASE_URL" },
+      { "env": "BILLING_TEST_DATABASE_URL" },
+      { "env": "REDIS_URL" },
+      { "env": "TAU_S3_CONFORMANCE_ENDPOINT" },
+      { "env": "TAU_S3_CONFORMANCE_BUCKET" }
     ],
     "default": ["{projectRoot}/**/*", "sharedGlobals"],
     "production": [
@@ -186,7 +192,12 @@
     "projects": ["tag:type:package"],
     "projectsRelationship": "fixed",
     "versionPlans": {
-      "ignorePatternsForPlanCheck": ["**/*.spec.ts", "**/*.test.ts", "**/*.md"]
+      "ignorePatternsForPlanCheck": [
+        "**/*.spec.ts",
+        "**/*.test.ts",
+        "**/*.md",
+        "packages/plugins/picogk/browser-host.pin.json"
+      ]
     },
     "version": {
       "preVersionCommand": "pnpm nx run-many -t build --projects=tag:type:package",

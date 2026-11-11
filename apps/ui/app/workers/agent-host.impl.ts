@@ -51,18 +51,22 @@ import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { agentHostWorkerBuild } from '#workers/agent-host.contract.js';
 import type { AgentHostProjectProvide, AgentHostProjectRebridge } from '#workers/agent-host.contract.js';
 import { closeProvidedPorts, createDisposers } from '#workers/agent-host-projects.js';
-import { createResidentPlacement } from '#workers/agent-host-placement.js';
+import { createResidentPlacement } from '@taucad/ui-core/workers/agent-host-placement';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
-import { guardLargeObjectFiles, guardLargeObjectKernel, pendingPathsUnsupportedCode } from '#lib/large-object-guard.js';
+import {
+  guardLargeObjectFiles,
+  guardLargeObjectKernel,
+  pendingPathsUnsupportedCode,
+} from '@taucad/ui-core/lib/large-object-guard';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
-import { createWorkerEvidence } from '#workers/agent-host-evidence.js';
+import { createWorkerEvidence } from '@taucad/ui-core/workers/agent-host-evidence';
 import type { HostEvidence, RunRating } from '@taucad/agent-observability/host-evidence';
 import { readBuildRelease, unknownBuildRelease } from '#lib/build-identity.js';
 import { forwardOperations } from '#telemetry/worker-forwarding.js';
 import type { ForwardEntry, WorkerTelemetry } from '#telemetry/worker-forwarding.js';
 import type { IdleRuntimeClient } from '#workers/idle-runtime-client.js';
-import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
+import { systemSkillsOverlay } from '@taucad/ui-core/workers/system-skills-overlay';
 
 type ProjectFileSystemBridge = Pick<
   FileSystemBridgeProxy,
@@ -798,7 +802,10 @@ const composeProjectHost = async (
         },
       },
       revisions,
-      testingEnabled: provide.testingEnabled ?? false,
+      /* The registry lists `test_model` whatever the chat's testing switch says. The declared tool list is part of
+       * the cached prefix, so the switch masks the call (the admission's tool choice) and never the listing.
+       * ponytail: `provide.testingEnabled` is now unread; drop it from the worker contract when that next changes. */
+      testingEnabled: true,
       // X43: under the locked profile the page's own install_packages makes no registry request.
       acquisition: runtimeConfig.acquisition,
       /* R1: web research runs on Tau's API under the page's session cookie, so the search key never reaches the tab. */
@@ -879,6 +886,8 @@ const composeProjectHost = async (
     model: provide.model,
     /* The funded (cloud) build checks an attempt's account against it (W11 GI-Q6); self-host ignores it. */
     principal: () => provide.principal,
+    /* A prompt or tool text change under another release is a `definitions` prefix break, not a mode change. */
+    release: hostBuildOf(provide.release),
   };
   /* T3: set as a release drains. A new start is refused HOST_CLOSED; another tab that forwarded it keeps it for this
    * host's release or a successor (M2, C11). */

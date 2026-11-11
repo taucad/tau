@@ -1,5 +1,5 @@
-import type { QueueLock } from '#db/chat-message-queue-store.js';
-import { chatMessageQueuePath, createChatMessageQueueStore } from '#db/chat-message-queue-store.js';
+import type { QueueLock } from '@taucad/chat-ui/db/chat-message-queue-store';
+import { chatMessageQueuePath, createChatMessageQueueStore } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
 import { safeValidateUiMessages } from '@taucad/chat';
@@ -10,13 +10,13 @@ import { chatLogFileName, chatRecordFileName, chatRecordsPath } from '@taucad/re
 import { errorCategory, idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { isRecord } from '@taucad/utils/schema';
-import { isNotFound } from '#db/attachment-store.js';
-import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
-import { KeyedMutex } from '#db/keyed-mutex.js';
-import { registrationProbeChatId } from '#lib/chat-observation-guard.js';
+import { isNotFound } from '@taucad/chat-ui/db/attachment-store';
+import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
+import { KeyedMutex } from '@taucad/utils/keyed-mutex';
+import { registrationProbeChatId } from '@taucad/ui-core/lib/chat-observation-guard';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
-import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
-import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '#utils/chat-execution.js';
+import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
+import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '@taucad/chat-ui/utils/chat-execution';
 
 /**
  * The chat store, on the filesystem.

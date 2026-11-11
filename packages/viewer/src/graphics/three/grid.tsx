@@ -3,14 +3,7 @@ import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { InfiniteGrid } from '#graphics/three/react/infinite-grid.jsx';
 import { resolveInfiniteGridFrame } from '#graphics/three/utils/infinite-grid-frame.js';
-import {
-  infiniteGridColorDarkMode,
-  infiniteGridColorHighContrastDarkMode,
-  infiniteGridColorHighContrastLightMode,
-  infiniteGridColorLightMode,
-  infiniteGridOpacity,
-  infiniteGridOpacityHighContrast,
-} from '#graphics/three/overlay-colors.constants.js';
+import { resolveInfiniteGridTint } from '#graphics/three/overlay-colors.constants.js';
 import { useGraphicsSelector, useRenderFrame } from '#hooks/use-graphics.jsx';
 import { useViewerEnvironment } from '#environment/viewer-environment.jsx';
 
@@ -31,19 +24,11 @@ export const Grid = React.memo(() => {
     invalidate();
   }, [invalidate]);
 
-  const gridColor = React.useMemo(
-    () =>
-      new THREE.Color(
-        isHighContrast
-          ? colorScheme === 'light'
-            ? infiniteGridColorHighContrastLightMode
-            : infiniteGridColorHighContrastDarkMode
-          : colorScheme === 'light'
-            ? infiniteGridColorLightMode
-            : infiniteGridColorDarkMode,
-      ),
+  const tint = React.useMemo(
+    () => resolveInfiniteGridTint({ colorScheme, isHighContrast }),
     [colorScheme, isHighContrast],
   );
+  const gridColor = React.useMemo(() => new THREE.Color(tint.color), [tint]);
 
   // Calculate grid axes based on the up direction
   // x: X-up (1,0,0) -> grid on YZ plane -> 'zyx'
@@ -65,9 +50,9 @@ export const Grid = React.memo(() => {
     return {
       ...gridFrame,
       color: gridColor,
-      lineOpacity: isHighContrast ? infiniteGridOpacityHighContrast : infiniteGridOpacity,
+      lineOpacity: tint.opacity,
     };
-  }, [axes, cameraVisibleSpan, gridSizes, gridColor, isHighContrast, renderFrame]);
+  }, [axes, cameraVisibleSpan, gridSizes, gridColor, tint, renderFrame]);
 
   return <InfiniteGrid axes={axes} materialProperties={materialProperties} />;
 });

@@ -74,8 +74,8 @@ import { withTabContextMenu } from '#components/panes/with-tab-context-menu.js';
 import { DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
 import { useIsTopRightGroup } from '#components/panes/use-is-top-right-group.js';
 import { getEditorLanguage } from '#lib/editor-languages.js';
-import { ChatEditorTooLargeWarning } from '#routes/w.$workspace.$project/chat-editor-too-large-warning.js';
-import { ChatEditorErrorPlaceholder } from '#routes/w.$workspace.$project/chat-editor-error-placeholder.js';
+import { ChatEditorTooLargeWarning } from '@taucad/project-workspace/components/chat-editor-too-large-warning';
+import { ChatEditorErrorPlaceholder } from '@taucad/project-workspace/components/chat-editor-error-placeholder';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileContent } from '#hooks/use-file-content.js';
 import type { FileContentSelection } from '#hooks/use-file-content.js';
@@ -92,7 +92,7 @@ import { CodeEditor } from '#components/code/code-editor.client.js';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
 import { useFeature } from '#flags/use-feature.js';
 import { fileViewerRouter } from '#routes/w.$workspace.$project/file-viewers/built-in-viewers.js';
-import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '#filesystem/workspace-errors.js';
+import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '@taucad/ui-core/filesystem/workspace-errors';
 import { ParametersPanelBody } from '#routes/w.$workspace.$project/chat-parameters.js';
 import { KinematicsPanelBody } from '#routes/w.$workspace.$project/chat-kinematics.js';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
@@ -124,7 +124,7 @@ import type {
 } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { Button } from '@taucad/ui/components/button';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
-import type { OpenFile } from '#types/editor.types.js';
+import type { OpenFile } from '@taucad/ui-core/types/editor.types';
 import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import {

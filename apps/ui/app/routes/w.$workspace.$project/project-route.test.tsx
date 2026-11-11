@@ -1,4 +1,4 @@
-import { createProjectFixture } from '#lib/project.fixture.js';
+import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { useEffect } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,8 +8,8 @@ import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { createSessionsActor } from '#services/sessions-store.js';
-import { createParameterSetService } from '#services/parameter-set-service.js';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
+import { createParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import type { ActorRefFrom } from 'xstate';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
@@ -18,6 +18,7 @@ import { EditorSaveConflictError } from '@taucad/fs-client/file-content-service'
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import type * as HandleStoreModule from '#filesystem/handle-store.js';
+import type * as DesktopBridgeModule from '#filesystem/desktop-bridge.js';
 
 /** The registry these rows share, composed as the app's root composes its own (MC-R4). */
 const sessionsActor = createSessionsActor().start();
@@ -91,8 +92,16 @@ const chatSessionStore = {
   getChatHostSettings: async (chatId: string) => storedHostSettings.get(chatId),
   cancelProjectedRun,
 };
+const noteBrowserRunRated = vi.fn(async (_rating: unknown) => undefined);
+/** The desktop shell's bridge, when a row stands in for the desktop app; otherwise the web build's none. */
+let desktopShellBridge: unknown;
+vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof DesktopBridgeModule>();
+  return { ...actual, desktopBridge: () => desktopShellBridge ?? actual.desktopBridge() };
+});
 vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof AgentHostClientModule>()),
+  noteBrowserRunRated,
   createBrowserAgentHostClient: (options: unknown) => {
     browserClientOptions.push(options);
     return { close: async () => undefined };
@@ -104,7 +113,7 @@ vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
   },
   readBrowserRunStoppability: async () => 'stoppable',
 }));
-vi.mock('#services/daemon-agent-host-client.js', () => ({
+vi.mock('@taucad/chat-ui/services/daemon-agent-host-client', () => ({
   createDaemonAgentHostTransport: (dial: unknown) => ({ dial }),
 }));
 vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
@@ -446,6 +455,8 @@ beforeEach(() => {
   connectRemote.mockClear();
   revisionStatus.mockReset();
   publishProjectHostConnector.mockClear();
+  noteBrowserRunRated.mockReset();
+  desktopShellBridge = undefined;
   connectorReleases.length = 0;
   browserClientOptions.length = 0;
   retainBrowserAgentHostProject.mockClear();
@@ -594,6 +605,26 @@ describe('project route session identity', () => {
     });
     expect(sessionsActor.getSnapshot().context.refs[projectA]).toBe(session);
   });
+  /* LW8: in the desktop app a rating also reaches the desktop host, whichever host ran the run; each reports its own. */
+  it('sends a rating to the browser host and the desktop host, and loses neither to the other’s failure', async () => {
+    fileManagerReady = true;
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const desktopRated = vi.fn(async (_rating: unknown) => undefined);
+    desktopShellBridge = { agentHost: { rated: desktopRated } };
+    renderRouteProvider();
+    await screen.findAllByTestId('project-session');
+    const extras = publishProjectHostConnector.mock.calls[0]?.[2] as unknown as {
+      rated: (rating: Readonly<Record<string, unknown>>) => Promise<void>;
+    };
+    const rating = { chatId: 'chat-1', runId: 'run-1', value: 'positive', at: 1 } as const;
+    noteBrowserRunRated.mockRejectedValueOnce(new Error('no browser host'));
+
+    await extras.rated(rating);
+
+    expect(noteBrowserRunRated).toHaveBeenCalledExactlyOnceWith({ projectId: projectA, ...rating });
+    expect(desktopRated).toHaveBeenCalledExactlyOnceWith({ projectId: projectA, ...rating });
+  });
+
   it('retains one project connector when focus moves to another live project', async () => {
     fileManagerReady = true;
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
@@ -925,6 +956,34 @@ describe('project route session identity', () => {
     });
     await screen.findAllByTestId('project-session');
     expect(focusedSessionId()).toBe(projectA);
+  });
+
+  it('should never leave the closed notice on screen between tasks while a ready project opens', async () => {
+    const pendingA = deferred<ProjectRouteAccess>();
+    getProjectRouteAccess.mockReturnValue(pendingA.promise);
+    renderRouteProvider();
+    expect(screen.getByText('Notice: resolving')).toBeInTheDocument();
+
+    /* Outside `act`, React renders on its own schedule, so the DOM between tasks is what a browser
+     * could paint. Opening the session in a passive effect left `closed` committed for a task. */
+    const previous = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+    const seen: string[] = [];
+    try {
+      pendingA.resolve(ready(projectA));
+      for (let task = 0; task < 50 && screen.queryAllByTestId('project-session').length === 0; task++) {
+        // oxlint-disable-next-line no-await-in-loop -- one sample per task, in order, is the point
+        await new Promise<void>((resolve) => {
+          globalThis.setTimeout(resolve, 0);
+        });
+        seen.push(document.body.textContent);
+      }
+    } finally {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = previous;
+    }
+
+    await screen.findAllByTestId('project-session');
+    expect(seen.some((text) => text.includes('Notice: closed'))).toBe(false);
   });
 
   it('should leave the initial loader for a retryable access error', async () => {

@@ -23,7 +23,7 @@ import type { SealedReceipt } from './store-spike.mts';
 /* oxlint-enable no-restricted-imports */
 
 // Receipt fields that are documented as not part of any identity: where the closure lives, when it was sealed, which
-// source served each payload and the host snapshot the variant was selected on.
+// source served each dependency file and the host snapshot the variant was selected on.
 const identity = (receipt: SealedReceipt): Record<string, unknown> => ({
   package: receipt.package,
   dependency: receipt.dependency,
@@ -31,8 +31,8 @@ const identity = (receipt: SealedReceipt): Record<string, unknown> => ({
   closureIntegrity: receipt.closureIntegrity,
   treeIntegrity: receipt.treeIntegrity,
   tauVersion: receipt['tauVersion'],
-  files: receipt.files.map(({ payload: _payload, ...row }) => row),
-  payloads: receipt.payloads.map(({ name, integrity, sha256 }) => ({ name, integrity, sha256 })),
+  files: receipt.files.map(({ dependencyFile: _dependencyFile, ...row }) => row),
+  dependencyFiles: receipt.dependencyFiles.map(({ name, integrity, sha256 }) => ({ name, integrity, sha256 })),
 });
 
 const main = async (): Promise<void> => {
@@ -80,7 +80,7 @@ const main = async (): Promise<void> => {
   const comparisons: Array<Record<string, unknown>> = [];
   for (const { kernel, package: packageName, dependency } of kernels) {
     const [a, b] = stores.map((store) =>
-      receiptOf(join(store.configDirectory, 'payloads'), packageName, dependency),
+      receiptOf(join(store.configDirectory, 'dependencies'), packageName, dependency),
     ) as [SealedReceipt, SealedReceipt];
     // Byte comparison of the two trees; the receipts are compared by identity fields below.
     const diff = spawnSync('diff', ['-r', '-x', 'receipt.json', a.root, b.root], {
@@ -113,7 +113,7 @@ const main = async (): Promise<void> => {
         goldenEntry === undefined
           ? undefined
           : goldenEntry.treeIntegrity === a.treeIntegrity && goldenEntry.closureIntegrity === a.closureIntegrity,
-      acquiredFrom: [a.payloads[0]?.acquiredFrom, b.payloads[0]?.acquiredFrom],
+      acquiredFrom: [a.dependencyFiles[0]?.acquiredFrom, b.dependencyFiles[0]?.acquiredFrom],
     };
     comparisons.push(record);
     summary.line(

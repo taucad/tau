@@ -52,6 +52,7 @@ import {
 } from '@taucad/ui/components/context-menu';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { markCodeEditorMilestone } from '#components/code/code-editor.client.js';
+import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
 import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.js';
 import type { CodeEditorProps } from '#components/code/code-editor.client.js';
 import type { DocumentChange, EditorDocument, TextChange } from '#lib/editor-document.js';
@@ -219,6 +220,8 @@ export function CodeEditorView({
     if (!host) {
       return;
     }
+    // One span per constructed view: the open's `.cm-editor` connections count this overlay and the view's own root.
+    const mountSpan = pageProjectOpenPerformance().begin('editor.mount');
     const overlay = globalThis.document.createElement('div');
     overlay.className = 'cm-editor ph-no-capture';
     overlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:50';
@@ -344,6 +347,7 @@ export function CodeEditorView({
     view.dom.dataset['viewId'] = viewId;
     restoreViewPosition(document, viewId, view);
     markCodeEditorMilestone('editor-mounted', viewId);
+    mountSpan.finish('ok');
     overlay.className = `${view.dom.className} cm-overlays ph-no-capture`;
     const unsubscribe = document.subscribe((event: DocumentChange) => {
       if (event.origin === 'view' && event.viewId === viewId) {

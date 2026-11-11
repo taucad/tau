@@ -46,9 +46,9 @@ export const pages: Array<{ path: string; title: string; description: string; er
   },
   {
     path: '/pricing/',
-    title: 'Pricing — Free, Pro US$20 and Enterprise · Tau',
+    title: 'Pricing — Free, Pro $20 and Enterprise · Tau',
     description:
-      'Start free in your browser. Pro is US$20 per month plus applicable tax, with 2,000 monthly credits and 10 GB of Tau Cloud backup and sync.',
+      'Start free in your browser. Pro is $20 per month plus tax, with 2,000 monthly credits and 100 GB of Tau Cloud backup and sync.',
   },
   {
     path: '/contact/',

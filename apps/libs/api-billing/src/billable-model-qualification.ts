@@ -70,6 +70,15 @@ const rates = (
       ]),
   { dimension: 'output', tier: null, numeratorPicoUsd: picoUsd(output) },
 ];
+/* Anthropic bills a one-hour cache write at 2× base input and a five-minute write at 1.25×
+ * (published pricing, read 2026-11-08). The transport marks a breakpoint with either lifetime,
+ * so every Anthropic route prices both tiers and settles the split the supplier reports. */
+const anthropicOneHourRevision = '2026-11-08';
+// oxlint-disable-next-line max-params -- mirrors the supplier tariff dimensions in the static table.
+const anthropicRates = (input: string, read: string, write: string, output: string): readonly Rate[] => [
+  ...rates(input, read, write, output, '5m'),
+  { dimension: 'cache_write', tier: '1h', numeratorPicoUsd: picoUsd(input) * 2n },
+];
 const catalogRowsById = new Map(
   Object.values(modelList)
     .flatMap((provider) => Object.values(provider))
@@ -129,35 +138,84 @@ const route = (
   ...extra,
 });
 
+/* Together's chat route is driven through pi-ai's `max_tokens` codec, the field every Together model has passed live on. */
+const togetherOutputParameter = 'max_tokens';
+
 const routes = [
+  route(
+    'anthropic-claude-fable-5.2',
+    'Fable 5.2',
+    'anthropic',
+    1_000_000,
+    128_000,
+    anthropicRates('8', '.2', '10', '40'),
+    { pricingRevision: '2026-11-10' },
+  ),
   route(
     'anthropic-claude-fable-5.1',
     'Fable 5.1',
     'anthropic',
     1_000_000,
     128_000,
-    rates('10', '.25', '12.5', '50', '5m'),
+    anthropicRates('10', '.25', '12.5', '50'),
+    { pricingRevision: anthropicOneHourRevision },
   ),
-  route('anthropic-claude-fable-5', 'Fable 5', 'anthropic', 1_000_000, 128_000, rates('10', '1', '12.5', '50', '5m')),
-  route('anthropic-claude-opus-5.5', 'Opus 5.5', 'anthropic', 1_000_000, 128_000, rates('4', '.2', '5', '20', '5m')),
-  route('anthropic-claude-opus-5', 'Opus 5', 'anthropic', 1_000_000, 128_000, rates('5', '.5', '6.25', '25', '5m')),
-  route('anthropic-claude-opus-4.8', 'Opus 4.8', 'anthropic', 1_000_000, 128_000, rates('5', '.5', '6.25', '25', '5m')),
+  route(
+    'anthropic-claude-fable-5',
+    'Fable 5',
+    'anthropic',
+    1_000_000,
+    128_000,
+    anthropicRates('10', '1', '12.5', '50'),
+    { pricingRevision: anthropicOneHourRevision },
+  ),
+  route(
+    'anthropic-claude-opus-5.5',
+    'Opus 5.5',
+    'anthropic',
+    1_000_000,
+    128_000,
+    anthropicRates('4', '.2', '5', '20'),
+    { pricingRevision: anthropicOneHourRevision },
+  ),
+  route('anthropic-claude-opus-5', 'Opus 5', 'anthropic', 1_000_000, 128_000, anthropicRates('5', '.5', '6.25', '25'), {
+    pricingRevision: anthropicOneHourRevision,
+  }),
+  route(
+    'anthropic-claude-opus-4.8',
+    'Opus 4.8',
+    'anthropic',
+    1_000_000,
+    128_000,
+    anthropicRates('5', '.5', '6.25', '25'),
+    { pricingRevision: anthropicOneHourRevision },
+  ),
   route(
     'anthropic-claude-sonnet-5.5',
     'Sonnet 5.5',
     'anthropic',
     1_000_000,
     128_000,
-    rates('2', '.2', '2.5', '10', '5m'),
+    anthropicRates('2', '.2', '2.5', '10'),
+    { pricingRevision: anthropicOneHourRevision },
   ),
-  route('anthropic-claude-sonnet-5', 'Sonnet 5', 'anthropic', 1_000_000, 128_000, rates('2', '.2', '2.5', '10', '5m')),
+  route(
+    'anthropic-claude-sonnet-5',
+    'Sonnet 5',
+    'anthropic',
+    1_000_000,
+    128_000,
+    anthropicRates('2', '.2', '2.5', '10'),
+    { pricingRevision: anthropicOneHourRevision },
+  ),
   route(
     'anthropic-claude-sonnet-4.6',
     'Sonnet 4.6',
     'anthropic',
     1_000_000,
     64_000,
-    rates('3', '.3', '3.75', '15', '5m'),
+    anthropicRates('3', '.3', '3.75', '15'),
+    { pricingRevision: anthropicOneHourRevision },
   ),
   route(
     'anthropic-claude-haiku-5.5',
@@ -165,10 +223,8 @@ const routes = [
     'anthropic',
     1_000_000,
     128_000,
-    rates('.5', '.05', '.625', '2.5', '5m'),
-    {
-      pricingRevision: '2026-10-10',
-    },
+    anthropicRates('.5', '.05', '.625', '2.5'),
+    { pricingRevision: anthropicOneHourRevision },
   ),
   route(
     'openai-gpt-6.1-terra',
@@ -265,40 +321,66 @@ const routes = [
     65_536,
     rates('1.5', '.15', undefined, '9'),
   ),
-  route('together-kimi-k3', 'Kimi K3', 'openai-completions', 1_000_000, 200_000, rates('3', '.3', undefined, '15')),
   route(
-    'together-glm-5.2',
-    'GLM 5.2',
-    'openai-completions',
-    1_000_000,
-    131_072,
-    rates('1.4', '.26', undefined, '4.4'),
-    { allowsImage: false },
-  ),
-  route(
-    'morph-kimi-k3.1-pro',
+    'together-kimi-k3.1-pro',
     'Kimi K3.1 Pro',
     'openai-completions',
     1_048_576,
-    1_048_576,
-    rates('2.5', '.29', undefined, '14'),
+    200_000,
+    rates('2', '.2', undefined, '10'),
     {
-      combinedMaximum: 1_048_576n,
-      outputParameter: 'max_tokens',
+      outputParameter: togetherOutputParameter,
       pricingRevision: '2026-11-09',
     },
   ),
   route(
-    'morph-glm-5.3-flash',
+    'together-glm-5.3',
+    'GLM 5.3',
+    'openai-completions',
+    1_048_575,
+    131_072,
+    rates('1.4', '.26', undefined, '4.4'),
+    {
+      outputParameter: togetherOutputParameter,
+      pricingRevision: '2026-11-09',
+      allowsImage: false,
+    },
+  ),
+  route(
+    'together-glm-5.3-flash',
     'GLM 5.3 Flash',
     'openai-completions',
-    1_048_576,
-    1_048_576,
-    rates('.2', '.04', undefined, '.7'),
+    1_048_575,
+    131_072,
+    rates('.15', '.03', undefined, '.5'),
     {
-      combinedMaximum: 1_048_576n,
-      outputParameter: 'max_tokens',
+      outputParameter: togetherOutputParameter,
       pricingRevision: '2026-11-09',
+    },
+  ),
+  route(
+    'together-minimax-m3.1-flash',
+    'MiniMax M3.1 Flash',
+    'openai-completions',
+    1_048_576,
+    131_072,
+    rates('.15', '.015', undefined, '.6'),
+    {
+      outputParameter: togetherOutputParameter,
+      pricingRevision: '2026-11-09',
+    },
+  ),
+  route(
+    'together-deepseek-v4-pro',
+    'DeepSeek V4 Pro',
+    'openai-completions',
+    1_048_576,
+    131_072,
+    rates('1.32', '.13', undefined, '3.96'),
+    {
+      outputParameter: togetherOutputParameter,
+      pricingRevision: '2026-11-09',
+      allowsImage: false,
     },
   ),
   route(
@@ -310,7 +392,6 @@ const routes = [
     rates('.12', '.008', undefined, '.8'),
     {
       combinedMaximum: 1_048_576n,
-      outputParameter: 'max_tokens',
       pricingRevision: '2026-11-09',
     },
   ),
@@ -327,7 +408,7 @@ const tieredValuations = new Map<string, { minimum: bigint; baseRates: readonly 
   ['openai-gpt-5.6-terra', { minimum: 272_001n, baseRates: rates('2', '.2', '2.5', '12', '30m') }],
   ['openai-gpt-5.6-luna', { minimum: 272_001n, baseRates: rates('.2', '.02', '.25', '1.2', '30m') }],
   ['openai-gpt-5.5', { minimum: 272_001n, baseRates: rates('5', '.5', undefined, '30') }],
-  ['anthropic-claude-haiku-5.5', { minimum: 100_001n, baseRates: rates('.1', '.01', '.125', '.5', '5m') }],
+  ['anthropic-claude-haiku-5.5', { minimum: 100_001n, baseRates: anthropicRates('.1', '.01', '.125', '.5') }],
   ['google-gemini-3.1-pro', { minimum: 200_001n, baseRates: rates('2', '.2', undefined, '12') }],
   ['xai-grok-4.7', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],
   ['xai-grok-4.6', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],
@@ -540,12 +621,22 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
       throw invalidRequest('Images are not qualified for this model route');
     }
     const maximumOutput = billableModelOutputMaximum(parsed.data);
-    if (
-      maximumOutput === undefined ||
-      parsed.data[selected.outputParameter] === undefined ||
-      maximumOutput > selected.outputMaximum
-    ) {
-      throw invalidRequest('Exactly one bounded output-token maximum is required');
+    /* Each message names the field the route expects, so a host and route that disagree on it
+     * read as a Tau contract fault, not as a refusal of the person's request. */
+    if (maximumOutput === undefined) {
+      throw invalidRequest(
+        `Model request must carry exactly one output-token maximum; route ${selected.routeId} expects ${selected.outputParameter}`,
+      );
+    }
+    if (parsed.data[selected.outputParameter] === undefined) {
+      throw invalidRequest(
+        `Model request bounds output with a field route ${selected.routeId} does not accept; it expects ${selected.outputParameter}`,
+      );
+    }
+    if (maximumOutput > selected.outputMaximum) {
+      throw invalidRequest(
+        `Model request ${selected.outputParameter} of ${maximumOutput} exceeds route ${selected.routeId}'s maximum of ${selected.outputMaximum}`,
+      );
     }
     const contextBound = (selected.combinedMaximum ?? selected.contextMaximum) - maximumOutput;
     if (contextBound < 0n) {

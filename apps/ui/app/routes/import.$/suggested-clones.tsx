@@ -1,8 +1,9 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { ArrowRight } from 'lucide-react';
 import { kernelConfigurations } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
-import { SvgIcon } from '#components/icons/svg-icon.js';
-import type { SvgIcons } from '#components/icons/generated/svg-icons.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
+import type { SvgIcons } from '@taucad/ui-kit/icons/generated/svg-icons';
 import { cn } from '@taucad/ui/utils/cn';
 
 type SuggestedRepository = {
@@ -72,7 +73,9 @@ type SuggestedClonesProperties = {
 export function SuggestedClones({ onSelect, className }: SuggestedClonesProperties): React.JSX.Element {
   return (
     <section className={cn('grid gap-4 md:grid-cols-[12rem_minmax(0,1fr)]', className)}>
-      <h2 className='pt-3 text-sm font-medium'>Public examples</h2>
+      <Heading level={2} variant='label' className='pt-3'>
+        Public examples
+      </Heading>
       <ul className='min-w-0 divide-y'>
         {suggestedRepositories.map((repository) => (
           <li key={`${repository.owner}/${repository.repo}`}>

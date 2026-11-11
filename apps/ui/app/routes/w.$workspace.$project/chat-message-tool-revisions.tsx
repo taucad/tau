@@ -10,22 +10,31 @@ import {
   ChatToolCardContent,
   ChatToolCardList,
   ChatToolCardListItem,
-} from '#components/chat/chat-tool-card.js';
-import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
-import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
+} from '@taucad/chat-ui/components/chat-tool-card';
+import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
+import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
-import { actorOf } from '#hooks/use-revisions.js';
-import { useRevisionSessionUser } from '#lib/revision-actor.js';
+import { useProject } from '#hooks/use-project.js';
+import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
 
 /**
- * Who made a revision, as History names them: never a model id or an account id (HQ4).
+ * Who made a revision, from the same resolver History reads: never a model id or an account id (HQ4).
  *
- * @param props - The row's recorded actor and source.
- * @returns The name.
+ * @param props - The row's id, recorded actor and source.
+ * @returns The who line, or nothing when the row shows none (Q2).
  */
-function ActorName({ actor, source }: { readonly actor: string; readonly source: string }): React.JSX.Element {
-  const session = useRevisionSessionUser();
-  return <span className='shrink-0 text-xs text-muted-foreground/70'>{actorOf({ actor, source }, session)}</span>;
+function ActorName({
+  revisionId,
+  actor,
+  source,
+}: {
+  readonly revisionId: string;
+  readonly actor: string;
+  readonly source: string;
+}): React.JSX.Element | undefined {
+  const who = useRevisionWhoContext(useProject({ enableNoContext: true })?.projectId);
+  const { line } = revisionWho({ revisionId, actor, source }, who);
+  return line === '' ? undefined : <span className='shrink-0 text-xs text-muted-foreground/70'>{line}</span>;
 }
 
 type RevisionsInvocation = ToolInvocation<typeof toolName.revisions>;
@@ -95,7 +104,7 @@ const revisionRows = (output: RevisionsOutput): ReactNode => {
                   {revision.summary}
                   {revision.conflicted ? ' · Needs your decision' : ''}
                 </span>
-                <ActorName actor={revision.actor} source={revision.source} />
+                <ActorName revisionId={revision.revisionId} actor={revision.actor} source={revision.source} />
               </span>
             </ChatToolCardListItem>
           ))

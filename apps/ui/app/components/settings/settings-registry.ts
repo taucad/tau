@@ -136,25 +136,26 @@ const settingsCatalog = [
       {
         id: 'plan',
         label: 'Plan',
-        description: 'Manage your subscription and usage limits',
+        description: 'See your plan and manage your subscription',
         keywords: ['upgrade', 'cancel', 'payment'],
       },
       {
         id: 'plan-limits',
-        label: 'Plan limits',
-        description: 'View your monthly credits and remaining percentage',
+        label: 'Monthly credits',
+        description: 'See how many monthly credits you have left',
+        keywords: ['plan limits', 'usage', 'allowance'],
       },
       {
         id: 'credit-balance',
         label: 'Purchased credits',
-        description: 'View your purchased credit balance and add more',
-        keywords: ['top up', 'purchase'],
+        description: 'See your balance and add credits',
+        keywords: ['top up', 'purchase', 'add credits'],
       },
       {
         id: 'automatic-reload',
-        label: 'Automatic reload',
-        description: 'Automatically buy credits when your balance is low',
-        keywords: ['threshold', 'payment', 'budget'],
+        label: 'Auto-reload',
+        description: 'Buy credits automatically when your balance runs low',
+        keywords: ['automatic reload', 'threshold', 'payment', 'budget'],
       },
       {
         id: 'cancel-plan',
@@ -181,6 +182,12 @@ const settingsCatalog = [
         label: 'Improve Tau for everyone',
         description: 'Control whether your chats are used for improving the service',
         keywords: ['training', 'sharing', 'no train', 'ai', 'privacy', 'agent', 'recording', 'summaries', 'evaluation'],
+      },
+      {
+        id: 'desktop-analytics',
+        label: 'Analytics',
+        description: 'Send usage analytics to help improve Tau',
+        keywords: ['analytics', 'usage', 'events', 'tracking', 'opt out', 'privacy'],
       },
       {
         id: 'cookie-preferences',
@@ -397,17 +404,20 @@ const platformSections: readonly SettingsSectionDefinition[] = isDesktopTarget()
   ? cloudSections.map((section) =>
       section.id === 'filesystem'
         ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'browser-storage') }
-        : /* The desktop shell has no optional analytics cookies to choose. */
+        : /* The desktop shell has no optional analytics cookies to choose; its analytics switch stands in. */
           section.id === 'data-controls'
           ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'cookie-preferences') }
           : section,
     )
   : cloudSections
       .filter((section) => section.id !== 'machines' && section.id !== 'browser')
-      /* The permission selector governs the desktop shell, which the web build has none of (D1). */
+      /* The permission selector governs the desktop shell, which the web build has none of (D1). The web asks for
+       * analytics consent through cookie preferences, so the desktop analytics switch is not offered there. */
       .map((section) => ({
         ...section,
-        entries: section.entries.filter((entry) => entry.id !== 'default-permissions'),
+        entries: section.entries.filter(
+          (entry) => entry.id !== 'default-permissions' && entry.id !== 'desktop-analytics',
+        ),
       }));
 
 export const settingsSections: readonly SettingsSectionDefinition[] = platformSections

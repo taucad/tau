@@ -13,20 +13,20 @@ import { Button } from '@taucad/ui/components/button';
 import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import { SearchInput } from '@taucad/ui/components/search-input';
 import { PageHeader } from '#components/layout/page-header.js';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { Loader } from '@taucad/ui/components/loader';
-import { DataTablePagination } from '#components/ui/data-table.js';
+import { DataTablePagination } from '@taucad/ui-kit/components/data-table';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { CommunityProjectGrid } from '#components/project-grid.js';
 import { featuredCommunityLocator, galleryProjects } from '#constants/project-examples.js';
 import type { BuiltinProjectCardModel } from '#constants/project-examples.js';
-import { searchParameterName } from '#constants/search-parameter.constants.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { useImmediateSearchParameter } from '#hooks/use-immediate-search-parameter.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
-import { enumParameter, stringParameter } from '#utils/search-parameter.codecs.js';
-import { isFunction } from '#utils/function.utils.js';
+import { enumParameter, stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
+import { isFunction } from '@taucad/ui-core/utils/function.utils';
 import type { Handle } from '#types/matches.types.js';
 
 export const handle: Handle = {

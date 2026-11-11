@@ -10,6 +10,11 @@
 import * as Sentry from '@sentry/electron/main';
 import type { ErrorEvent } from '@sentry/electron/main';
 import type { DesktopSignal } from '#main/desktop-signals.js';
+import { applyRendererGoneSnapshot, snapshotRendererGone } from '#main/renderer-crash-context.js';
+import type { RendererGoneSnapshot } from '#main/renderer-crash-context.js';
+
+/** Main's view of the renderer when it last went, until its minidump is sent (D13). */
+let rendererGone: RendererGoneSnapshot | undefined;
 
 /**
  * Drop the user and request an event could carry.
@@ -46,7 +51,26 @@ export const initializeDesktopErrorReporting = (channel: 'staging' | 'production
       ipcMode: Sentry.IPCMode.Classic,
       integrations: (defaults) => defaults.filter((integration) => integration.name !== 'PreloadInjection'),
     });
+    // A renderer's minidump keeps the dead page's route, activity and counts, not the reloaded page's (D13).
+    Sentry.addEventProcessor((event) => {
+      const applied = applyRendererGoneSnapshot(event, rendererGone, Date.now());
+      if (applied.spent) {
+        rendererGone = undefined;
+      }
+      return applied.event;
+    });
   }
+};
+
+/**
+ * Record what the renderer last synced to main's scope, the moment it went and before the window reloads, so its
+ * minidump carries the dead page's context (D13). A no-op while Sentry is not initialized.
+ */
+export const noteRendererGone = (): void => {
+  if (!Sentry.isInitialized()) {
+    return;
+  }
+  rendererGone = snapshotRendererGone(Sentry.getCurrentScope().getScopeData().tags, Date.now());
 };
 
 /**

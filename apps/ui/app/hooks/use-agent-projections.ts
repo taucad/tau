@@ -10,9 +10,9 @@ import type { ResolvedModel } from '#hooks/use-models.js';
 import { useProject } from '#hooks/use-project.js';
 import { chatStatusLabel, selectChatStatus } from '#hooks/use-sidebar-status.js';
 import type { ChatSidebarStatus } from '#hooks/use-sidebar-status.js';
-import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
+import type { ChatSidebarState } from '@taucad/chat-ui/types/chat-sidebar.types';
 import type { ChatHistoricalUsage, ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
-import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
+import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 
 export type AgentProjectionState = 'waiting' | 'running' | 'error' | 'idle';
 

@@ -112,7 +112,7 @@ export type TerminalTextRendering = Readonly<{
  *   2.0 at 2x in the installed app), more than any coverage exponent removes. The face drops to 300, which takes
  *   about 0.5 px off a Geist Mono stroke, and the exponent covers the rest.
  *
- * @param theme - The resolved theme the Terminal opens with.
+ * @param theme - The resolved theme.
  * @param apple - Whether the renderer runs on macOS (or iOS), whose glyph rasterizer draws heavier.
  * @returns The blending and weight options for the renderer.
  */

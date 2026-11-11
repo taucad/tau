@@ -14,7 +14,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
 
 export type ChangeAvatarProps = {

@@ -6,7 +6,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatPermissionRequest } from '#components/chat/chat-permission-request.js';
 import { QuestionCard } from '#components/chat/question-card.js';
 import type { Ask } from '@taucad/chat';
-import type { AgentHostApproval } from '#services/agent-host-event-projection.js';
+import type { AgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
 
 vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
 const microphone = vi.hoisted(() => ({

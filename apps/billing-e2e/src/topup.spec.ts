@@ -188,7 +188,7 @@ describe('top-up in the browser', () => {
       await settings.addCredits();
       const { action, requestId } = await modal.reviewInCheckout();
       quoted = action;
-      await modal.dialog.getByText('Calculated in secure Checkout before payment').waitFor();
+      await modal.dialog.getByText('Calculated on the payment page').waitFor();
       const credits = await modal.quotedCredits();
       expect(action.state).toBe('prepared');
       expect(action.frozen).toMatchObject({ principalMinor: '2500', creditAtoms: '25000000', taxMinor: null });
@@ -220,19 +220,19 @@ describe('top-up in the browser', () => {
       // Stripe's Back link is the session's cancel_url, which carries payment_action.
       await page.locator('a[href*="payment_action="]').first().click();
       await page.waitForURL((url) => url.origin === baseUrl);
-      const toast = await waitForToast(page, /Checkout was not finished/u);
+      const toast = await waitForToast(page, /You didn’t finish paying/u);
       evidence.push(`toast "${toast}"`, await screenshot(page, 'tu-07-return'));
       const returned = await readAction(account, quote.actionId);
       // The dialog reopens on the pending action: "Resume Checkout" or "Cancel payment" (main's label for this state).
       await billingSettings(page).addCredits();
-      await modal.status('Waiting for Checkout').waitFor();
+      await modal.status('Finish your payment').waitFor();
       evidence.push(`dialog "${await modal.text()}"`);
       const { action: canceled, requestId } = await modal.cancelPayment();
       const after = await readAction(account, quote.actionId);
       evidence.push(
-        `action ${quote.actionId} ${returned.state} after Back; Cancel payment → ${canceled.state} (${requestId}); read back ${after.state}`,
+        `action ${quote.actionId} ${returned.state} after Back; Cancel purchase → ${canceled.state} (${requestId}); read back ${after.state}`,
       );
-      expect(toast).toContain('Resume Checkout');
+      expect(toast).toContain('Continue to payment');
       expect(returned.state).toBe('redirect_required');
       expect(canceled.state).toBe('canceled');
       expect(after.state).toBe('canceled');
@@ -297,11 +297,11 @@ describe('funded journey', () => {
         `open holds ${holds.holds.length}`,
         await screenshot(page, 'fd-01-credits-card'),
       );
-      expect(title).toBe('Credit limit reached');
-      // Main's preflight card has no run behind it: it says "Add credits, then send your message." and offers no
-      // Resume; a gateway 402 instead prefixes "Tau paused this turn:" and offers Resume.
-      expect(text).toMatch(/\b\d+ more credits? needed for Haiku 5\.5\./u);
-      expect(buttons).toEqual(expect.arrayContaining(['Billing', 'Switch model']));
+      expect(title).toBe('You’re out of credits');
+      // The preflight card has no run behind it: it offers Add credits and Switch model and no Resume, and says
+      // "Add credits, then send your message again."; a resumable gateway 402 offers Resume instead.
+      expect(text).toMatch(/This turn needs \d+ more credits? on Haiku 5\.5\./u);
+      expect(buttons).toEqual(expect.arrayContaining(['Add credits', 'Switch model']));
       expect(holds.holds).toHaveLength(0);
       return { outcome: 'pass', evidence };
     }),
@@ -602,6 +602,56 @@ describe('funded journey', () => {
   );
 
   it(
+    'should settle a funded Kimi K3.1 Pro turn that calls a tool [FD-13 P0]',
+    matrixRow('FD-13', 'P0', async (evidence): Promise<Verdict> => {
+      if (paid?.action.state !== 'fulfilled') {
+        return { outcome: 'blocked', defect: 'H-03', evidence: ['TU-01 left no funded account'] };
+      }
+      /* The first funded exercise of Together's tariff, settlement and supplier path: every Together route was
+       * refused before admission while its route named another output field than the host sends (taucad/tau#1763). */
+      const call = await callGateway(account.api, 'kimi', {
+        prompt: 'Read the file main.scad with the read_file tool. Call the tool; do not answer in text.',
+        maximumTokens: 4096,
+      });
+      const streamFile = `${evidenceStamp()}-fd-13-kimi-stream.txt`;
+      await writeFile(join(runDirectory, streamFile), call.stream ?? '');
+      evidence.push(
+        `Kimi K3.1 Pro: ${describeCall(call)}`,
+        `final usage event: ${finalUsage(call.stream) ?? 'none in the stream'}`,
+        streamFile,
+      );
+      if (call.status !== 200 || call.operationId === undefined) {
+        return { outcome: 'fail', defect: 'unclassified', evidence };
+      }
+      const refusal = streamRefusal(call.stream);
+      if (refusal !== undefined) {
+        evidence.push(
+          `the gateway ended the stream with ${refusal.code}${refusal.providerCode === undefined ? '' : ` (${refusal.providerCode})`}`,
+        );
+        return { outcome: 'fail', defect: 'unclassified', evidence };
+      }
+      const calledTool = /"tool_calls"\s*:\s*\[\s*\{[^\]]*"read_file"/u.test(call.stream ?? '');
+      evidence.push(calledTool ? 'the stream calls read_file' : 'the stream carries no read_file call');
+      const operation = await waitForTerminal(account.api, call.operationId, 330_000);
+      const operationFile = `${evidenceStamp()}-fd-13-kimi-operation.json`;
+      await writeFile(join(runDirectory, operationFile), JSON.stringify(operation, null, 2));
+      evidence.push(describeOperation(operation), operationFile);
+      if (operation.state !== 'terminal') {
+        evidence.push('still pending 330 s after the stream ended');
+        return { outcome: 'fail', defect: 'unclassified', evidence };
+      }
+      const charged = BigInt(operation.receipt.chargedCreditAtoms);
+      if (operation.receipt.customerState !== 'settled' || charged <= 0n) {
+        evidence.push(`billing never priced the turn: ${operation.receipt.customerState} at ${charged} atoms`);
+        return { outcome: 'fail', defect: 'unclassified', evidence };
+      }
+      expect(calledTool).toBe(true);
+      return { outcome: 'pass', evidence };
+    }),
+    400_000,
+  );
+
+  it(
     'should explain a settled model call by its operation receipt [US-03 P1]',
     matrixRow('US-03', 'P1', async (evidence) => {
       if (settled === undefined) {
@@ -748,7 +798,7 @@ describe('funded journey', () => {
       const after = BigInt(availableAtoms(await readCredits(account)));
       savedCardReceipt = { action: topup, text };
       evidence.push(
-        `${describeAction(topup)}, receipt shown ${seconds.toFixed(1)} s after Confirm quote, still on ${new URL(page.url()).origin}`,
+        `${describeAction(topup)}, receipt shown ${seconds.toFixed(1)} s after Pay, still on ${new URL(page.url()).origin}`,
         `available ${before} → ${after} atoms`,
         await screenshot(page, 'tu-03-saved-card'),
       );
@@ -799,7 +849,7 @@ describe('funded journey', () => {
       );
       await settings.closure.prepare().click();
       const prepared = await preparing;
-      await page.getByText('Closure status: ready for auth deletion').waitFor();
+      await page.getByText('Your plan is canceled', { exact: true }).waitFor();
       evidence.push(
         `available ${availableAtoms(credits)} atoms at closure`,
         `closure prepare ${prepared.status()} (${prepared.headers()['request-id'] ?? 'no request id'})`,
@@ -883,7 +933,7 @@ describe('3D Secure', () => {
       await modal.chooseAmount(5);
       const { action: quote } = await modal.reviewWithSavedCard();
       await modal.confirm();
-      await modal.dialog.getByRole('button', { name: 'Continue in Checkout' }).waitFor({ timeout: 90_000 });
+      await modal.dialog.getByRole('button', { name: 'Continue to payment' }).waitFor({ timeout: 90_000 });
       const paused = await readAction(account, quote.actionId);
       evidence.push(
         `saved-card quote ${describeAction(quote)}`,

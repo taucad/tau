@@ -46,6 +46,7 @@ import { ClientOperationObserver, entryFormatOf, runtimeTransportOf } from '#cli
 import type { ObservedAttempt, SettleReason } from '#client/runtime-operation-observer.js';
 import type {
   RuntimeLateTerminal,
+  RuntimeOperationBegin,
   RuntimeObservationMode,
   RuntimeOperationObservation,
 } from '#types/runtime-observation.types.js';
@@ -119,6 +120,8 @@ type ClientEventHandlers<
   operation: (observation: RuntimeOperationObservation) => void;
   /** A worker reply that arrived after its attempt had already settled as timed out, cancelled or abandoned. */
   'operation-late': (late: RuntimeLateTerminal) => void;
+  /** An attempt began, before any work; carries the operation name and attempt id only. */
+  'operation-begin': (begin: RuntimeOperationBegin) => void;
 };
 
 /** Options for one document client. @public */
@@ -792,6 +795,12 @@ export function createRuntimeClient(options: {
         case 'operation-late': {
           return observer.onLate(
             handler as ClientEventHandlers<KernelPlugin[], MiddlewarePlugin[], TranscoderPlugin[]>['operation-late'],
+            settings,
+          );
+        }
+        case 'operation-begin': {
+          return observer.onBegin(
+            handler as ClientEventHandlers<KernelPlugin[], MiddlewarePlugin[], TranscoderPlugin[]>['operation-begin'],
             settings,
           );
         }

@@ -13,15 +13,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { computeClosureIntegrity, computeTreeIntegrity, receiptRow } from '#preparation/closure-receipt.js';
 import { parsePluginDeployment, wheelDataDestination } from '#preparation/plugin-deployment.js';
-import type { DependencyPayload, DependencyVariant, ReceiptFile } from '#preparation/preparation.types.js';
+import type { DependencyFile, DependencyVariant, InstalledFile } from '#preparation/preparation.types.js';
 
 // ============================================================================
-// In-test payloads: a python-build-standalone-shaped archive, a wheel with a `data` scheme and a raw worker file.
+// In-test dependency files: a python-build-standalone-shaped archive, a wheel with a `data` scheme and a raw worker file.
 // ============================================================================
 
 const encoder = new TextEncoder();
 const limits = { maximumUnpackedBytes: 16 * 1024 * 1024, maximumEntries: 10_000 };
-const sri = (bytes: Uint8Array<ArrayBuffer>): DependencyPayload['integrity'] =>
+const sri = (bytes: Uint8Array<ArrayBuffer>): DependencyFile['integrity'] =>
   `sha256-${createHash('sha256').update(bytes).digest('base64')}`;
 
 type TarMember = { readonly name: string; readonly data?: string; readonly mode?: number; readonly linkname?: string };
@@ -104,7 +104,7 @@ const demoWheel = (): Uint8Array<ArrayBuffer> => {
 };
 
 const sitePackages = 'python/lib/python3.13/site-packages';
-const payloadBytes: Readonly<Record<string, Uint8Array<ArrayBuffer>>> = {
+const fileBytes: Readonly<Record<string, Uint8Array<ArrayBuffer>>> = {
   python: tarGz(
     { name: 'python/bin/python3.13', data: 'interpreter', mode: 0o755 },
     { name: 'python/bin/python3', linkname: 'python3.13', mode: 0o777 },
@@ -123,15 +123,15 @@ const manifest = {
     engine: [
       {
         target: { runtime: 'native', os: 'darwin', arch: 'arm64', minimumOsVersion: '12.0' },
-        payloads: [
+        files: [
           { name: 'python', format: 'tar.gz', destination: 'python', stripComponents: 1 },
           { name: 'demo', format: 'wheel', destination: sitePackages },
           { name: 'worker.py', format: 'raw', destination: 'tau-worker' },
-        ].map((payload) => ({
-          ...payload,
-          integrity: sri(payloadBytes[payload.name]!),
-          byteLength: payloadBytes[payload.name]!.byteLength,
-          origin: { kind: 'url', urls: [`https://payloads.example.test/${payload.name}`] },
+        ].map((dependencyFile) => ({
+          ...dependencyFile,
+          integrity: sri(fileBytes[dependencyFile.name]!),
+          byteLength: fileBytes[dependencyFile.name]!.byteLength,
+          origin: { kind: 'url', urls: [`https://files.example.test/${dependencyFile.name}`] },
         })),
       },
     ],
@@ -146,27 +146,27 @@ const unpackVariant = async (
 ): Promise<WrittenFile[]> => {
   const write = async (destination: string, entries: readonly ArchiveEntry[]): Promise<WrittenFile[]> =>
     writeArchiveEntries({ root, destination, entries, links });
-  const unpack = async (payload: DependencyPayload): Promise<WrittenFile[]> => {
-    const bytes = payloadBytes[payload.name]!;
-    expect(await integrityMatches(bytes, payload.integrity)).toBe(true);
-    if (payload.format === 'tar.gz') {
+  const unpack = async (dependencyFile: DependencyFile): Promise<WrittenFile[]> => {
+    const bytes = fileBytes[dependencyFile.name]!;
+    expect(await integrityMatches(bytes, dependencyFile.integrity)).toBe(true);
+    if (dependencyFile.format === 'tar.gz') {
       const { entries } = readTarEntries(await gunzip(bytes, limits), {
         ...limits,
-        stripComponents: payload.stripComponents ?? 0,
+        stripComponents: dependencyFile.stripComponents ?? 0,
       });
-      return write(payload.destination, entries);
+      return write(dependencyFile.destination, entries);
     }
-    if (payload.format === 'wheel') {
+    if (dependencyFile.format === 'wheel') {
       const contents = await readWheel(bytes, limits);
       const [installed, data] = await Promise.all([
-        write(payload.destination, contents.entries),
-        write(wheelDataDestination(payload.destination), contents.data),
+        write(dependencyFile.destination, contents.entries),
+        write(wheelDataDestination(dependencyFile.destination), contents.data),
       ]);
       return [...installed, ...data];
     }
-    return write(payload.destination, [{ path: payload.name, bytes, mode: 0o644 }]);
+    return write(dependencyFile.destination, [{ path: dependencyFile.name, bytes, mode: 0o644 }]);
   };
-  const rows = await Promise.all(variant.payloads.map(async (payload) => unpack(payload)));
+  const rows = await Promise.all(variant.files.map(async (dependencyFile) => unpack(dependencyFile)));
   return rows.flat();
 };
 
@@ -218,7 +218,7 @@ describe('closure receipt', () => {
   });
 
   it('should change treeIntegrity when one file changes and not when the rows are reordered', async () => {
-    const files: ReceiptFile[] = [
+    const files: InstalledFile[] = [
       { path: 'python/bin/python3.13', byteLength: 11, sha256: 'a'.repeat(64), mode: 0o755 },
       { path: 'python/bin/python3', byteLength: 11, sha256: 'a'.repeat(64), mode: 0o755, symlinkTarget: 'python3.13' },
     ];
@@ -239,10 +239,10 @@ describe('closure receipt', () => {
   it('should derive closureIntegrity from the pins in manifest order', async () => {
     const variant = parsePluginDeployment(manifest).dependencies['engine']![0];
     const expected = `sha256-${createHash('sha256')
-      .update(variant.payloads.map(({ name, integrity }) => `${name}\t${integrity}`).join('\n'))
+      .update(variant.files.map(({ name, integrity }) => `${name}\t${integrity}`).join('\n'))
       .digest('base64')}`;
 
-    expect(await computeClosureIntegrity(variant.payloads)).toBe(expected);
-    expect(await computeClosureIntegrity(variant.payloads.toReversed())).not.toBe(expected);
+    expect(await computeClosureIntegrity(variant.files)).toBe(expected);
+    expect(await computeClosureIntegrity(variant.files.toReversed())).not.toBe(expected);
   });
 });

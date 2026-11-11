@@ -42,11 +42,14 @@
  */
 
 import { Topic } from '@taucad/events';
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { RevisionUserActor } from '@taucad/revisions';
 import { randomUuid } from '@taucad/utils/id';
 import { ENV } from '#environment.config.js';
+import { useFeature } from '#flags/use-feature.js';
 import { recordApiRequestId } from '#lib/api-request-id.js';
+import { getPushRecords, subscribePushRecords } from '#lib/revision-pushes.js';
+import type { PushRecordSnapshot } from '#lib/revision-pushes.js';
 
 /** Local-storage key prefix; one entry per workspace (EQ8). @public */
 export const anonymousRevisionsStorageKeyPrefix = 'tau-anonymous-revisions:';
@@ -142,17 +145,25 @@ export const setRevisionSessionUser = (user: RevisionSessionUser | undefined): v
 export const getRevisionSessionUser = (): RevisionSessionUser | undefined => sessionUser;
 
 /**
+ * Hear every change of the published session user, outside React.
+ *
+ * What lets the revision client take a sign-in, a sign-out or an account
+ * switch as an event (audit R6) instead of a React effect re-running on it.
+ *
+ * @param listener - Called after each change; read {@link getRevisionSessionUser}.
+ * @returns The unsubscribe function.
+ * @public
+ */
+export const subscribeRevisionSessionUser = (listener: () => void): (() => void) => sessionTopic.subscribe(listener);
+
+/**
  * React binding for {@link getRevisionSessionUser}.
  *
  * @returns The signed-in person, or `undefined`.
  * @public
  */
 export const useRevisionSessionUser = (): RevisionSessionUser | undefined =>
-  useSyncExternalStore(
-    (listener) => sessionTopic.subscribe(listener),
-    getRevisionSessionUser,
-    () => undefined,
-  );
+  useSyncExternalStore(subscribeRevisionSessionUser, getRevisionSessionUser, () => undefined);
 
 /** Local-storage key prefix for the salts this host keeps; never written to the tree (EQ10). @public */
 export const revisionSaltStorageKeyPrefix = 'tau-revision-salt:';
@@ -321,3 +332,239 @@ export const revisionUserActor = (
   }
   return { kind: 'user', id: input.user.id, ...(input.user.name === undefined ? {} : { name: input.user.name }) };
 };
+
+/**
+ * Who pushed one entry to Tau Cloud, as the server's push record names them (A3).
+ *
+ * @public
+ */
+export type RevisionPusher = Readonly<
+  | {
+      kind: 'account';
+      accountId: string;
+      /** The directory's name for the account; empty when it has none to show. */
+      name: string;
+      /** The owner's read of a push that brought an anonymously recorded entry (Q3). */
+      recordedAnonymous?: true;
+      /** A host device pushed it on the account's behalf. */
+      viaDevice?: true;
+    }
+  /** A member's read of a push that brought an anonymously recorded entry: the server withholds the account (Q3). */
+  | { kind: 'anonymous'; viaDevice?: true }
+>;
+
+/**
+ * Tau Cloud's push record for one project, once the page has read it (A3).
+ *
+ * @public
+ */
+export type RevisionPushRecord = Readonly<{
+  /** The push that first reached the entry, or `undefined` for one not backed up. */
+  pushedBy: (revisionId: string) => RevisionPusher | undefined;
+  /** The member directory's name for an account; `undefined` for an account it does not name. */
+  memberName: (accountId: string) => string | undefined;
+  /** How many accounts are members of the project: more than one is a shared project (Q2). */
+  memberCount: number;
+}>;
+
+/**
+ * What the who-resolver reads besides the entry itself.
+ *
+ * @public
+ */
+export type RevisionWhoContext = Readonly<{
+  /** The account signed in on this device, or `undefined` signed out. */
+  session: RevisionSessionUser | undefined;
+  /** This project's id: what the browser leg records an entry as when it has no session. */
+  projectId: string | undefined;
+  /**
+   * Tau Cloud's push record (A3). `undefined` until that package reads it:
+   * every entry then falls to "made on this device", its git author, or no name.
+   */
+  pushRecord: RevisionPushRecord | undefined;
+  /** The debug setting: an anonymous entry also shows its pseudonym's hash (Q3). */
+  showAnonymousId: boolean;
+}>;
+
+/**
+ * Who made an entry, as every surface shows it.
+ *
+ * @public
+ */
+export type RevisionWho = Readonly<{
+  /** The who line; empty when the row shows none. */
+  line: string;
+  /** The entry is the signed-in account's own. */
+  isYou: boolean;
+  /** The entry is an agent's result. */
+  isAgent: boolean;
+}>;
+
+/**
+ * The entry a who is asked of: its id, the recorded actor and source, and for a
+ * commit Tau did not write the commit's own author name.
+ *
+ * @public
+ */
+export type RevisionWhoEntry = Readonly<{ revisionId: string; actor: string; source: string; authorName?: string }>;
+
+/** What a disk host records when it has no account to record (`packages/host`). */
+const hostFallbackId = 'tau-host';
+
+const nobody: RevisionWho = { line: '', isYou: false, isAgent: false };
+
+/**
+ * Who a pushed entry reads as: the account the server authenticated, with
+ * `recorded as` beside it when the entry names another account in the
+ * directory, and `by a cloud agent host` when a host device pushed it.
+ *
+ * @param input - The entry, the resolver's context, the push that reached it,
+ *   the entry's anonymous line and whether the project is shared.
+ * @returns The who line and what it stands for.
+ */
+const pushedWho = (
+  input: Readonly<{
+    entry: RevisionWhoEntry;
+    context: RevisionWhoContext;
+    pusher: RevisionPusher;
+    anonymous: string;
+    isShared: boolean;
+  }>,
+): RevisionWho => {
+  const { entry, context, pusher } = input;
+  const joined = (parts: readonly string[]): string => {
+    const named = parts.filter((part) => part !== '');
+    return named.length === 0
+      ? ''
+      : [...named, ...(pusher.viaDevice === true ? ['by a cloud agent host'] : [])].join(' · ');
+  };
+  /* A client never shows what it was not given, and never unmasks a pseudonym the record did not mark for the owner. */
+  if (pusher.kind === 'anonymous' || (entry.actor.startsWith('anon:') && pusher.recordedAnonymous !== true)) {
+    return { line: joined([input.anonymous]), isYou: false, isAgent: false };
+  }
+  const nameOf = (accountId: string, name: string): string => (context.session?.id === accountId ? 'You' : name);
+  const isYou = context.session?.id === pusher.accountId;
+  const recorded =
+    pusher.recordedAnonymous === true
+      ? 'Anonymous'
+      : entry.actor === pusher.accountId
+        ? undefined
+        : context.pushRecord?.memberName(entry.actor);
+  if (recorded === undefined) {
+    return { line: joined([input.isShared ? nameOf(pusher.accountId, pusher.name) : '']), isYou, isAgent: false };
+  }
+  const recordedAs = pusher.recordedAnonymous === true ? recorded : nameOf(entry.actor, recorded);
+  return { line: joined([nameOf(pusher.accountId, pusher.name), `recorded as ${recordedAs}`]), isYou, isAgent: false };
+};
+
+/**
+ * Who made an entry: the one answer History, the chat marker, the agent's tool
+ * card and the arrival sentence show (blueprint "Who made it comes from what
+ * the server authenticated", I2).
+ *
+ * In order: an agent's result reads `Agent`; an entry on Tau Cloud is the
+ * account that pushed it; an entry made on this device is whoever is signed in
+ * here, and nobody signed out; a commit Tau did not write is its git author;
+ * anything else shows no name. The recorded actor is never printed and never
+ * trusted for a name, so an OS login name or an environment address an older
+ * host recorded shows no name rather than a guess. A single-person project
+ * shows no who line on its person's entries; a shared one names every entry,
+ * yours as `You` (Q2). An anonymous entry reads `Anonymous`, its hash only
+ * behind the debug setting (Q3).
+ *
+ * A pushed entry whose recorded actor is another account in the project's
+ * directory reads as the pusher with `recorded as` that account beside it,
+ * never folded into either; so does the owner's read of an anonymously
+ * recorded entry (`recorded as Anonymous`). A push a host device made on the
+ * account's behalf adds `by a cloud agent host` to a line that names someone.
+ *
+ * @param entry - The entry's id, recorded actor and source.
+ * @param context - The session, project, push record and debug setting.
+ * @returns The who line and what it stands for.
+ * @public
+ */
+export const revisionWho = (entry: RevisionWhoEntry, context: RevisionWhoContext): RevisionWho => {
+  const isShared = (context.pushRecord?.memberCount ?? 1) > 1;
+  const account = (accountId: string, name: string): RevisionWho => {
+    const isYou = context.session?.id === accountId;
+    return { line: isShared ? (isYou ? 'You' : name) : '', isYou, isAgent: false };
+  };
+  if (entry.source === 'agent') {
+    return { line: 'Agent', isYou: false, isAgent: true };
+  }
+  const isAnonymous = entry.actor.startsWith('anon:');
+  const anonymous =
+    context.showAnonymousId && isAnonymous ? `Anonymous · ${entry.actor.slice('anon:'.length)}` : 'Anonymous';
+  const pusher = context.pushRecord?.pushedBy(entry.revisionId);
+  if (pusher !== undefined) {
+    return pushedWho({ entry, context, pusher, anonymous, isShared });
+  }
+  if (isAnonymous) {
+    return { line: anonymous, isYou: false, isAgent: false };
+  }
+  const { session } = context;
+  if (entry.actor === hostFallbackId || entry.actor === context.projectId || entry.actor === session?.id) {
+    return session === undefined ? nobody : account(session.id, session.name ?? '');
+  }
+  if (entry.source === 'import' && entry.authorName !== undefined && entry.authorName !== '') {
+    return { line: entry.authorName, isYou: false, isAgent: false };
+  }
+  return nobody;
+};
+
+/**
+ * React binding for one project's {@link RevisionWhoContext}.
+ *
+ * The push record is whatever `refreshPushRecords` has read for this
+ * account and project, joined to the rows the page holds; the History hook
+ * drives those reads, so every reader here sees the same answer.
+ *
+ * @param projectId - The open project's id, when there is one.
+ * @returns The context, re-rendering on sign-in, sign-out, the debug setting, and each push or row that arrives.
+ * @public
+ */
+export const useRevisionWhoContext = (projectId: string | undefined): RevisionWhoContext => {
+  const session = useRevisionSessionUser();
+  const showAnonymousId = useFeature('tauDebug');
+  const accountId = session?.id;
+  const pushes = useSyncExternalStore(
+    subscribePushRecords,
+    () => getPushRecords(projectId, accountId),
+    () => undefined,
+  );
+  const pushRecord = useMemo(() => (pushes === undefined ? undefined : revisionPushRecordOf(pushes)), [pushes]);
+  return useMemo(
+    () => ({ session, projectId, pushRecord, showAnonymousId }),
+    [projectId, pushRecord, session, showAnonymousId],
+  );
+};
+
+/**
+ * The resolver's view of a joined push store.
+ *
+ * @param pushes - One account's push records for one project, joined to the held rows.
+ * @returns The push record {@link revisionWho} reads.
+ * @public
+ */
+export const revisionPushRecordOf = (pushes: PushRecordSnapshot): RevisionPushRecord => ({
+  pushedBy: (revisionId) => {
+    const push = pushes.pushOf(revisionId);
+    if (push === undefined) {
+      return undefined;
+    }
+    const viaDevice: { viaDevice?: true } = push.viaDevice ? { viaDevice: true } : {};
+    if (push.pusher.kind === 'anonymous') {
+      return { kind: 'anonymous', ...viaDevice };
+    }
+    const { accountId } = push.pusher;
+    return {
+      kind: 'account',
+      accountId,
+      name: push.pusher.name ?? pushes.nameOf(accountId) ?? '',
+      ...(push.anonymous === true ? { recordedAnonymous: push.anonymous } : {}),
+      ...viaDevice,
+    };
+  },
+  memberName: (accountId) => pushes.nameOf(accountId),
+  memberCount: pushes.memberCount,
+});

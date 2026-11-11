@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- circuit JSON field names are snake_case. */
 import { Document } from '@gltf-transform/core';
+import type { ExtensionProperty } from '@gltf-transform/core';
 import { describe, expect, it } from 'vitest';
 
 import { buildPresentationBoard } from '#board-geometry.js';
@@ -133,6 +134,26 @@ describe('buildPresentationBoard', () => {
     const finish = factor(blue, 'pcb-finish')!;
     // HASL is tin: a neutral grey, not ENIG gold.
     expect(Math.abs(finish[0] - finish[2])).toBeLessThan(0.1);
+  });
+
+  it('should author every solder mask as a matte base under a soft lacquer coat', async () => {
+    const document = new Document();
+    await buildPresentationBoard(document, circuitJson);
+    const materials = document.getRoot().listMaterials();
+
+    for (const name of ['pcb-mask-top', 'pcb-mask-bottom', 'pcb-mask-copper-top', 'pcb-mask-copper-bottom']) {
+      const material = materials.find((candidate) => candidate.getName() === name)!;
+      expect(material.getRoughnessFactor(), name).toBe(0.6);
+      const clearcoat = material.getExtension<
+        ExtensionProperty & { getClearcoatFactor: () => number; getClearcoatRoughnessFactor: () => number }
+      >('KHR_materials_clearcoat');
+      expect(clearcoat?.getClearcoatFactor(), name).toBe(0.15);
+      expect(clearcoat?.getClearcoatRoughnessFactor(), name).toBe(0.25);
+      const specular = material.getExtension<ExtensionProperty & { getSpecularFactor: () => number }>(
+        'KHR_materials_specular',
+      );
+      expect(specular?.getSpecularFactor(), name).toBe(0.5);
+    }
   });
 
   it('drills the board through: the mounting hole removes core area', async () => {

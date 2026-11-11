@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 import type { Chat } from '@taucad/chat';
 import type { RevisionStatusProjection } from '@taucad/revisions';
-import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
-import * as questionTool from '#utils/question-tool.js';
+import type { ChatSidebarState } from '@taucad/chat-ui/types/chat-sidebar.types';
+import * as questionTool from '@taucad/chat-ui/utils/question-tool';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/chat-session.machine.js';
@@ -33,8 +33,8 @@ import {
 } from '#hooks/use-sidebar-status.js';
 import type { ProjectSidebarRow, useLiveNow } from '#hooks/use-sidebar-status.js';
 import { publishRecordIssue } from '#workbench-records/record-issues.js';
-import { toSnapshotCallback } from '#lib/xstate-test.utils.js';
-import type { SnapshotListener } from '#lib/xstate-test.utils.js';
+import { toSnapshotCallback } from '@taucad/ui-core/lib/xstate-test.utils';
+import type { SnapshotListener } from '@taucad/ui-core/lib/xstate-test.utils';
 
 /* The registry and the revision clients are the hooks' two inputs; the chat
  * machines below are real, because the pins are about what they say. */
@@ -1249,13 +1249,13 @@ const compiledHooks = await (async () => {
   const modules: Record<string, unknown> = {
     react: await import('react'),
     'react/compiler-runtime': await import('react/compiler-runtime'),
-    '#utils/question-tool.js': questionTool,
+    '@taucad/chat-ui/utils/question-tool': questionTool,
     '#machines/sessions.machine.js': await import('#machines/sessions.machine.js'),
     '#services/sessions-store.js': await import('#services/sessions-store.js'),
     '#services/revision-client-registry.js': await import('#services/revision-client-registry.js'),
     '#hooks/use-sessions.js': await import('#hooks/use-sessions.js'),
     '#hooks/chat-session-store-provider.js': await import('#hooks/chat-session-store-provider.js'),
-    '#lib/xstate.lib.js': await import('#lib/xstate.lib.js'),
+    '@taucad/ui-core/lib/xstate.lib': await import('@taucad/ui-core/lib/xstate.lib'),
     '#machines/chat-projection.logic.js': await import('#machines/chat-projection.logic.js'),
     '#workbench-records/record-issues.js': await import('#workbench-records/record-issues.js'),
   };

@@ -9,9 +9,11 @@ import type { ReactNode } from 'react';
 import type * as AiSdk from 'ai';
 import type { Chat, MyUIMessage } from '@taucad/chat';
 import { resolveKernel } from '@taucad/types/constants';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
 import { lifecycleRow, logRow, publishLogRows, runningRows } from '#machines/chat-projection.fixture.js';
+import { publishChatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js';
+import { resetAutoResumes } from '@taucad/ui-core/utils/run-auto-resume';
 
 // ---------------------------------------------------------------------------
 // Hoisted harness — mocks the project-manager surface (chat row persistence),
@@ -139,7 +141,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   }),
 }));
 
-vi.mock('#components/ui/sonner.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({
   toast: {
     error: harness.toastError,
     success: vi.fn(),
@@ -148,7 +150,7 @@ vi.mock('#components/ui/sonner.js', () => ({
   },
 }));
 
-vi.mock('#hooks/resize-image.actor.js', () => ({
+vi.mock('@taucad/chat-ui/hooks/resize-image.actor', () => ({
   resizeImageActor: fromSafeAsync<
     { type: 'imageResized'; resized: string },
     { image: string; preserveOriginal: boolean }
@@ -259,6 +261,7 @@ const {
   ChatComposerProvider,
   HomeNewProjectComposerProvider,
   useActiveChatSession,
+  useChatAutoResume,
   useChatComposer,
 } = await import('#hooks/active-chat-provider.js');
 const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
@@ -991,6 +994,37 @@ describe('ActiveChatProvider', () => {
     });
     expect(result.current.composer.agentActivity).toBe('ready');
     expect(result.current.composer.status).toBe('ready');
+  });
+
+  it('reads the chat’s automatic-resume wait from its session machine, and drops it once the run moves on (audit R5)', () => {
+    resetAutoResumes();
+    const unpublish = publishChatTurnAdmission('chat_auto_resume', async () => {
+      throw new Error('Refused by the row.');
+    });
+    const { result } = renderHook(() => ({ waiting: useChatAutoResume(), store: useChatSessionStore() }), {
+      wrapper: createSessionWrapper('chat_auto_resume'),
+    });
+    expect(result.current.waiting).toBeUndefined();
+
+    act(() => {
+      publishLogRows(result.current.store, 'chat_auto_resume', [
+        lifecycleRow(0, 'admitted'),
+        lifecycleRow(1, 'running'),
+        logRow(2, {
+          type: 'run.lifecycle',
+          state: 'failed',
+          attempt: 1,
+          detail: { code: 'RATE_LIMITED', message: 'Wait.', status: 429, details: { retryAfterSeconds: 30 } },
+        }),
+      ]);
+    });
+    expect(result.current.waiting).toMatchObject({ kind: 'rateLimit', attempt: 1, delayMilliseconds: 30_000 });
+
+    act(() => {
+      publishLogRows(result.current.store, 'chat_auto_resume', [lifecycleRow(3, 'running')], 3);
+    });
+    expect(result.current.waiting).toBeUndefined();
+    unpublish();
   });
 
   it('should surface approval and cancellation activity independently from the execution provider', () => {

@@ -34,7 +34,7 @@ import {
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { ActionButton, DetailsToggle, disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
 import { RevisionRegion } from '#components/revisions/revision-region.js';
@@ -48,7 +48,7 @@ import {
   timelineRowHover,
   timelineMarker,
 } from '#components/revisions/revision-timeline.js';
-import { RevisionRow } from '#routes/w.$workspace.$project/revision-marker.js';
+import { RevisionRow, isAutosave } from '#routes/w.$workspace.$project/revision-marker.js';
 import { ConflictDecision, RevisionBranches } from '#routes/w.$workspace.$project/revision-branches.js';
 import type { ConflictMaterialization } from '#routes/w.$workspace.$project/revision-branches.js';
 import { RevisionSyncRegion } from '#routes/w.$workspace.$project/revision-sync-region.js';
@@ -69,10 +69,10 @@ import {
   useRevisionCommands,
   useRevisionStatus,
 } from '#hooks/use-revision-status.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { setAnonymousRevisions, useAnonymousRevisions, useRevisionSessionUser } from '#lib/revision-actor.js';
 import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
-import { useRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
+import { useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
 import { projectChatIdFromSearch } from '#utils/project-url.utils.js';
@@ -82,7 +82,7 @@ import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 /** Sync settings live in tau.json, which Tau refuses to write while it needs repair (R4). */
 const reportSyncSettingError = (error: unknown): void => {
@@ -369,9 +369,8 @@ export const groupRevisionHistory = (
     const foldable =
       revision.revisionId !== headRevisionId &&
       (revision.tags?.length ?? 0) === 0 &&
-      revision.turnId === undefined &&
       !revision.conflicted &&
-      (revision.trigger === 'idle' || revision.trigger === 'hidden' || revision.trigger === 'close');
+      isAutosave(revision);
     const previous = groups.at(-1);
     if (foldable && previous?.kind === 'autosaves') {
       groups[groups.length - 1] = { kind: 'autosaves', revisions: [...previous.revisions, revision] };

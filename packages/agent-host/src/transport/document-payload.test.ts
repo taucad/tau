@@ -19,6 +19,7 @@ import {
 import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
 import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
+import { stampedHistory } from '#transport/prefix-stamp.fixture.js';
 
 /*
  * W11c's admission schemas (apps/libs/api-llm-gateway/src/billable-model-request.ts),
@@ -41,7 +42,7 @@ const gatewayDocumentSchemas = {
         })
         .strict(),
       cache_control: z
-        .object({ type: z.literal('ephemeral'), ttl: z.literal('5m').optional() })
+        .object({ type: z.literal('ephemeral'), ttl: z.enum(['5m', '1h']).optional() })
         .strict()
         .optional(),
     })
@@ -554,7 +555,7 @@ describe('gateway transport document rewrite (D21, D22)', () => {
       type: 'document',
       title: 'bracket-spec.pdf',
       source: { type: 'base64', media_type: 'application/pdf', data: pdfData },
-      cache_control: { type: 'ephemeral' },
+      cache_control: { type: 'ephemeral', ttl: '1h' },
     });
     expect(gatewayDocumentSchemas['anthropic-messages'].safeParse(content.at(-1)).success).toBe(true);
     expect(content[0]).not.toHaveProperty('cache_control');
@@ -606,45 +607,43 @@ describe('gateway transport document rewrite (D21, D22)', () => {
   it('composes with the Vertex thought-signature echo: one request carries both', async () => {
     const { transport, bodies } = capturingTransport('openai-completions');
     const signature = 'opaque-Gemini+/=signature';
-
-    await drain(
-      transport.stream(
-        request({
-          providerKind: 'vertexai',
-          messages: [
-            {
-              id: 'user-1',
-              role: 'user',
-              content: [
-                { type: 'text', text: 'Read this.' },
-                { type: 'text', text: sentinel },
-              ],
-            },
-            {
-              id: 'assistant-1',
-              role: 'assistant',
-              content: [
-                { type: 'toolCall', id: 'call-signed', name: 'read_file', arguments: {}, thoughtSignature: signature },
-              ],
-              metadata: {
-                api: 'openai-completions',
-                provider: 'vertexai',
-                model: 'fixture-model',
-                stopReason: 'toolUse',
-              },
-            },
-            {
-              id: 'tool-1',
-              role: 'tool-output',
-              toolCallId: 'call-signed',
-              toolName: 'read_file',
-              content: 'x',
-              isError: false,
-            },
+    const continuing = request({
+      providerKind: 'vertexai',
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Read this.' },
+            { type: 'text', text: sentinel },
           ],
-        }),
-      ),
-    );
+        },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: [
+            { type: 'toolCall', id: 'call-signed', name: 'read_file', arguments: {}, thoughtSignature: signature },
+          ],
+          metadata: {
+            api: 'openai-completions',
+            provider: 'vertexai',
+            model: 'fixture-model',
+            stopReason: 'toolUse',
+          },
+        },
+        {
+          id: 'tool-1',
+          role: 'tool-output',
+          toolCallId: 'call-signed',
+          toolName: 'read_file',
+          content: 'x',
+          isError: false,
+        },
+      ],
+    });
+
+    /* The signed call replays under the stamp its own request left (P2). */
+    await drain(transport.stream({ ...continuing, messages: await stampedHistory(continuing) }));
 
     const messages = bodies[0]!['messages'] as Array<Record<string, unknown>>;
     const user = messages.find((message) => message['role'] === 'user');

@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import type { ActorRefFrom } from 'xstate';
 import { Badge } from '@taucad/ui/components/badge';
 import { Separator } from '@taucad/ui/components/separator';
@@ -20,7 +21,9 @@ export function PreviewDetails({ project, hasGeometry, cadRef }: PreviewDetailsP
     <div className='space-y-6 p-6'>
       {/* About */}
       <div>
-        <h3 className='mb-3 text-sm font-semibold'>About</h3>
+        <Heading level={3} variant='label' className='mb-3'>
+          About
+        </Heading>
         <p className='text-sm text-muted-foreground'>{project.description || 'No description provided'}</p>
       </div>
 
@@ -30,7 +33,9 @@ export function PreviewDetails({ project, hasGeometry, cadRef }: PreviewDetailsP
       {project.tags.length > 0 ? (
         <>
           <div>
-            <h3 className='mb-3 text-sm font-semibold'>Tags</h3>
+            <Heading level={3} variant='label' className='mb-3'>
+              Tags
+            </Heading>
             <div className='flex flex-wrap gap-2'>
               {project.tags.map((tag) => (
                 <Badge key={tag} variant='secondary'>
@@ -45,7 +50,9 @@ export function PreviewDetails({ project, hasGeometry, cadRef }: PreviewDetailsP
 
       {/* License */}
       <div>
-        <h3 className='mb-3 text-sm font-semibold'>License</h3>
+        <Heading level={3} variant='label' className='mb-3'>
+          License
+        </Heading>
         <p className='text-sm text-muted-foreground'>MIT</p>
       </div>
 
@@ -53,7 +60,9 @@ export function PreviewDetails({ project, hasGeometry, cadRef }: PreviewDetailsP
 
       {/* Downloads */}
       <div>
-        <h3 className='mb-3 text-sm font-semibold'>Downloads</h3>
+        <Heading level={3} variant='label' className='mb-3'>
+          Downloads
+        </Heading>
         {hasGeometry ? (
           <ExportSelector cadActor={cadRef} filenameBase={project.name} variant='inline' />
         ) : (

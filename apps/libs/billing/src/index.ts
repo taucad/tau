@@ -76,8 +76,9 @@ export {
 } from '#financial-wire.js';
 export type { WireEntitlements } from '#entitlements-wire.js';
 export { parseEntitlements, serializeEntitlements, wireEntitlementsSchema } from '#entitlements-wire.js';
-export type { PlanCatalogCtaKind, PlanCatalogEntry } from '#tau-plan-catalog.js';
-export { tauPlanCatalog } from '#tau-plan-catalog.js';
+export type { PlanCatalogCtaKind, PlanCatalogEntry, PlanCatalogFeature } from '#tau-plan-catalog.js';
+export { purchasedCreditsPerUsd, tauPlanCatalog } from '#tau-plan-catalog.js';
+export { formatMonthlyPrice, formatUsdMinor, formatUsdTotalMinor, formatUsdWholeMinor } from '#money.js';
 export type { MonthlyCredits } from '#monthly-credits.js';
 export { monthlyCreditsFromBalance, monthlyPlanCreditAtomsByTier } from '#monthly-credits.js';
 export type { WirePaymentAction } from '#payment-action-wire.js';

@@ -1,4 +1,4 @@
-// The `tau-plugin.json` schema v1 contract for native runtime payloads, the closure receipt and the host
+// The `tau-plugin.json` schema v1 contract for native runtime dependency files, the closure receipt and the host
 // indicators a variant is selected on. Types only; `plugin-deployment.ts` validates manifests against them.
 
 /**
@@ -10,7 +10,7 @@ export type Integrity = `${'sha256' | 'sha384' | 'sha512'}-${string}`;
 
 /**
  * Where a closure runs. A native target is `(os, arch)` on macOS and Windows and `(os, arch, libc)` on Linux, with
- * optional floors the generator computes as the maximum of its payloads' floors. A browser target varies only on
+ * optional floors the generator computes as the maximum of its files' floors. A browser target varies only on
  * pthreads behind cross-origin isolation. No CPU-feature, microarchitecture or SIMD axis exists: every ecosystem
  * resolves CPU features inside its binaries.
  * @public
@@ -21,7 +21,7 @@ export type DependencyTarget =
       readonly runtime: 'native';
       readonly os: 'darwin' | 'win32';
       readonly arch: 'arm64' | 'x64';
-      /** Lowest OS version every payload supports, such as macOS `12.0`. */
+      /** Lowest OS version every dependency file supports, such as macOS `12.0`. */
       readonly minimumOsVersion?: string;
     }
   | {
@@ -30,7 +30,7 @@ export type DependencyTarget =
       readonly arch: 'arm64' | 'x64';
       /** Required: a glibc closure never serves a musl host and vice versa. */
       readonly libc: 'glibc' | 'musl';
-      /** Lowest libc version every payload supports, such as `2.31` from a `manylinux_2_31` wheel. */
+      /** Lowest libc version every dependency file supports, such as `2.31` from a `manylinux_2_31` wheel. */
       readonly minimumLibcVersion?: string;
     };
 
@@ -56,11 +56,11 @@ export type HostIndicators = {
 };
 
 /**
- * Where a payload's bytes come from. The digest is the identity; URLs are tried in order, the canonical registry URL
+ * Where a dependency file's bytes come from. The digest is the identity; URLs are tried in order, the canonical registry URL
  * first.
  * @public
  */
-export type PayloadOrigin =
+export type DependencyFileOrigin =
   | { readonly kind: 'url'; readonly urls: readonly [string, ...string[]] }
   /** A file inside the declaring npm package. */
   | { readonly kind: 'packagePath'; readonly path: string }
@@ -68,25 +68,25 @@ export type PayloadOrigin =
   | { readonly kind: 'packageAsset'; readonly specifier: string };
 
 /**
- * How a payload unpacks. `raw` is one file written as `<destination>/<name>`; `wheel` is a zip whose `RECORD` lists
+ * How a dependency file unpacks. `raw` is one file written as `<destination>/<name>`; `wheel` is a zip whose `RECORD` lists
  * every file's digest.
  * @public
  */
-export type PayloadFormat = 'raw' | 'tar.gz' | 'zip' | 'wheel';
+export type DependencyFileFormat = 'raw' | 'tar.gz' | 'zip' | 'wheel';
 
 /**
  * One pinned object of a closure.
  * @public
  */
-export type DependencyPayload = {
+export type DependencyFile = {
   /** Closure-local name used by receipts and progress, such as `python`, `numpy` or `dotnet`. */
   readonly name: string;
   readonly integrity: Integrity;
   readonly byteLength: number;
-  readonly format: PayloadFormat;
-  readonly origin: PayloadOrigin;
+  readonly format: DependencyFileFormat;
+  readonly origin: DependencyFileOrigin;
   /**
-   * Closure-relative POSIX directory the payload unpacks into. `.` (the closure root) is allowed only for `raw`. A
+   * Closure-relative POSIX directory the dependency file unpacks into. `.` (the closure root) is allowed only for `raw`. A
    * wheel's destination is its interpreter's `site-packages` (`<prefix>/lib/pythonX.Y/site-packages` or
    * `<prefix>/Lib/site-packages`), and its `.data/data/` files install under `<prefix>`.
    */
@@ -98,12 +98,12 @@ export type DependencyPayload = {
 };
 
 /**
- * Every payload one target needs: a closure of several payloads with distinct origins and formats.
+ * Every dependency file one target needs: a closure of several files with distinct origins and formats.
  * @public
  */
 export type DependencyVariant = {
   readonly target: DependencyTarget;
-  readonly payloads: readonly [DependencyPayload, ...DependencyPayload[]];
+  readonly files: readonly [DependencyFile, ...DependencyFile[]];
 };
 
 /**
@@ -131,7 +131,7 @@ export type PluginDeployment = {
  * One file of a sealed closure, as written.
  * @public
  */
-export type ReceiptFile = {
+export type InstalledFile = {
   /** POSIX path relative to the closure root. */
   readonly path: string;
   readonly byteLength: number;
@@ -140,16 +140,16 @@ export type ReceiptFile = {
   /** Permission bits, `0o777` at most. */
   readonly mode: number;
   readonly symlinkTarget?: string;
-  /** Name of the payload that wrote the file, so a repair re-unpacks only that payload; not part of any identity. */
-  readonly payload?: string;
+  /** Name of the dependency file this file came from, so a repair re-unpacks only that one; not part of any identity. */
+  readonly dependencyFile?: string;
 };
 
 /**
- * Which source served a payload's bytes; not part of any identity. `store` is a blob the store already held, so
+ * Which source served a dependency file's bytes; not part of any identity. `store` is a blob the store already held, so
  * nothing was read from any other source; its location is the blob's store-relative path.
  * @public
  */
-export type PayloadAcquisition = {
+export type DependencyFileAcquisition = {
   readonly kind: 'store' | 'origin' | 'mirror' | 'seed';
   readonly location: string;
 };
@@ -175,13 +175,13 @@ export type ClosureReceipt = {
   readonly closureIntegrity: Integrity;
   /** What the installer produced: sha256 over the canonical file rows sorted by path. */
   readonly treeIntegrity: Integrity;
-  readonly files: readonly ReceiptFile[];
-  /** Per payload: the pin, its sha256 store key (lowercase hex) and which source served it. */
-  readonly payloads: ReadonlyArray<{
+  readonly files: readonly InstalledFile[];
+  /** Per dependency file: the pin, its sha256 store key (lowercase hex) and which source served it. */
+  readonly dependencyFiles: ReadonlyArray<{
     readonly name: string;
     readonly integrity: Integrity;
     readonly sha256: string;
-    readonly acquiredFrom: PayloadAcquisition;
+    readonly acquiredFrom: DependencyFileAcquisition;
   }>;
   /** ISO 8601 time the closure was sealed. */
   readonly preparedAt: string;

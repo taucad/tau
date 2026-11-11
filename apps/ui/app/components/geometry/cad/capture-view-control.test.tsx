@@ -4,7 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { CadAgentExecution } from '@taucad/chat';
 import type { captureCadImages as captureCadImagesType } from '#services/headless-capture.js';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 
 const mockAddDraftAttachment = vi.fn();
 const selectedModel = {
@@ -46,7 +46,7 @@ vi.mock('@taucad/ui/hooks/use-tick-animation', () => ({
 vi.mock('#providers/headless-image-provider.js', () => ({
   useHeadlessImageService: () => mockImageService,
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
 vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   TooltipTrigger: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,

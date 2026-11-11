@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createProjectFixture } from '#lib/project.fixture.js';
+import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MemoryRouter, useLocation } from 'react-router';
@@ -53,7 +53,7 @@ vi.mock('#hooks/use-projects.js', () => ({
     return { projects: [held, trashed] };
   },
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { info: mockToastInfo } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { info: mockToastInfo } }));
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({ createProject: mockCreateProject, getProjects: async () => [] }),
 }));

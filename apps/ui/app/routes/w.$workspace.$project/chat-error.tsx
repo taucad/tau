@@ -1,4 +1,4 @@
-import { memo, useEffect, useEffectEvent, useState } from 'react';
+import { memo } from 'react';
 import type React from 'react';
 import { Bot, CircleAlert, MonitorSmartphone, RefreshCcw, WifiOff } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
@@ -8,17 +8,15 @@ import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { chatHistoryTidyFailureMessage, parseErrorForPersistence } from '#utils/error.utils.js';
-import { ENV } from '#environment.config.js';
-import { cardOf } from '#utils/chat-error-card.js';
+import { chatHistoryTidyFailureMessage } from '@taucad/chat-ui/utils/error.utils';
+import { cardOf } from '@taucad/chat-ui/utils/chat-error-card';
 import {
-  autoResumableRateLimitCode,
-  canAutoResumeModelPending,
-  lookUpModelAttempt,
-  modelPendingPollMilliseconds,
-  modelPendingResumeBy,
-  recordModelPendingAutoResume,
-} from '#utils/run-auto-resume.js';
+  autoResumableProviderUnavailableCode,
+  nextProviderUnavailableRetry,
+} from '@taucad/ui-core/utils/run-auto-resume';
+import { selectVisibleChatErrorEntry } from '#utils/run-auto-resume-plan.js';
+import type { AutoResumePlan, AutoResumeTarget } from '#utils/run-auto-resume-plan.js';
+import { useChatAutoResume } from '#hooks/active-chat-provider.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 import { ChatErrorDetails } from '#routes/w.$workspace.$project/chat-error-details.js';
 import { ChatErrorPausedTurn } from '#routes/w.$workspace.$project/chat-error-paused-turn.js';
@@ -34,89 +32,7 @@ import { ChatErrorAccountRestricted } from '#routes/w.$workspace.$project/chat-e
 import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.js';
 import { isResumableRun } from '@taucad/agent-host';
 import { externalAgentStopCodes, externalAgentStopSchema } from '@taucad/agent-host/wire';
-import { selectCaughtUp, selectCurrentRun, selectRunFailure } from '#machines/chat-projection.logic.js';
-
-const projectedFailureErrors = new WeakMap<Readonly<{ runId: string; text: string }>, NormalizedChatError>();
-
-type VisibleChatError = Readonly<{
-  error: NormalizedChatError;
-  /**
-   * The failure's identity from durable data, the same across a rerender, a remount and a projection rebuild: the
-   * failed run's attempt, or the refused command's request. Only a live error with neither falls back to the error
-   * object's own identity.
-   */
-  id: string;
-}>;
-
-const liveErrorIds = new WeakMap<Error | NormalizedChatError, string>();
-let lastLiveErrorId = 0;
-
-/** A live error's identity for as long as the chat holds that error object. */
-function liveErrorId(error: Error | NormalizedChatError): string {
-  let id = liveErrorIds.get(error);
-  if (id === undefined) {
-    lastLiveErrorId += 1;
-    id = `live:${String(lastLiveErrorId)}`;
-    liveErrorIds.set(error, id);
-  }
-  return id;
-}
-
-const refusalId = (refusal: NormalizedChatError): string | undefined =>
-  refusal.requestId === undefined ? undefined : `refusal:${refusal.requestId}`;
-
-/** Only the caught-up host log can retire a legacy chat-wide error. */
-function selectVisibleChatErrorEntry(
-  state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'error' | 'persistedError'>,
-): VisibleChatError | undefined {
-  const { projection } = state;
-  const caughtUp = projection !== undefined && selectCaughtUp(projection);
-  const run = projection === undefined || !caughtUp ? undefined : selectCurrentRun(projection);
-  if (
-    projection !== undefined &&
-    (run?.lifecycle === 'failed' || (run?.lifecycle === 'cancelled' && run.failure?.code === 'USER_STOPPED'))
-  ) {
-    const failure = selectRunFailure(projection, run.runId);
-    if (failure !== undefined) {
-      const key = projection.failure;
-      if (key !== undefined) {
-        let parsed = projectedFailureErrors.get(key);
-        if (parsed === undefined) {
-          parsed = parseErrorForPersistence(new Error(failure));
-          projectedFailureErrors.set(key, parsed);
-        }
-        // A resumed run that fails again is a new failure: its attempt is part of the identity.
-        return { error: parsed, id: `run:${key.runId}:${String(run.attempt)}` };
-      }
-    }
-  }
-  if (caughtUp && state.attachmentStatus === 'attached') {
-    // A command refusal carries its command identity. A chat-wide legacy error
-    // does not. A later healthy run also retires a prior refused Start, even
-    // when a different page admitted that run and this page never cleared the
-    // old chat record. A refused Resume still belongs to the same paused run;
-    // the persisted command records that run identity, not just its command ID.
-    const refusal = state.persistedError;
-    if (refusal?.requestId === undefined) {
-      return undefined;
-    }
-    const refusedRunId = refusal.details?.['runId'];
-    const refusedCommandType = refusal.details?.['commandType'];
-    if (
-      run !== undefined &&
-      (run.lifecycle !== 'paused' || refusedRunId !== run.runId || refusedCommandType !== 'resume')
-    ) {
-      return undefined;
-    }
-    return { error: refusal, id: `refusal:${refusal.requestId}` };
-  }
-  if (state.error) {
-    const error = parseErrorForPersistence(state.error);
-    return { error, id: refusalId(error) ?? liveErrorId(state.error) };
-  }
-  const persisted = state.persistedError;
-  return persisted === undefined ? undefined : { error: persisted, id: refusalId(persisted) ?? liveErrorId(persisted) };
-}
+import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';
 
 /** The chat's visible failure, if any. */
 export function selectVisibleChatError(
@@ -169,9 +85,6 @@ function codedRefusalRaw(error: NormalizedChatError, rawDetail: string | undefin
   );
 }
 
-/** The failed run attempt a card may resume on its own. */
-type AutoResumeTarget = Readonly<{ runId: string; attempt: number }>;
-
 /**
  * The approved pending-attempt card (D4): named busy status, never an alert. Tau Debug keeps what the host said.
  *
@@ -199,97 +112,6 @@ function modelPendingCard({ className, raw }: { readonly className: string; read
 }
 
 /**
- * A run abandoned while the gateway still owned its last model attempt (RA-R1 around `MODEL_ATTEMPT_PENDING`).
- *
- * The page asks the attempt route until the gateway settles that attempt, then resumes the run once without a click.
- * Past the run's bound (`modelPendingResumeBy`), or when the attempt settled but this attempt was already resumed, it
- * shows the resumable pause card instead and waits for the person.
- *
- * @param properties - The card class, the failed attempt, the gateway attempt key, Tau Debug's raw text and the
- * pause card to fall back to.
- * @returns The pending card, or the pause card.
- */
-function ChatErrorModelPending({
-  className,
-  target,
-  attemptId,
-  raw,
-  paused,
-}: {
-  readonly className: string;
-  readonly target: AutoResumeTarget;
-  readonly attemptId: string;
-  readonly raw: string | undefined;
-  readonly paused: React.ReactNode;
-}): React.ReactNode {
-  const { runId, attempt } = target;
-  const { continueChat } = useChatActions();
-  const [waiting, setWaiting] = useState(() => canAutoResumeModelPending(runId, attempt, Date.now()));
-  // Read at the moment the attempt settles, so a new `continueChat` neither restarts the polling nor resumes twice.
-  const resumeOnce = useEffectEvent(() => {
-    if (!canAutoResumeModelPending(runId, attempt, Date.now())) {
-      setWaiting(false);
-      return;
-    }
-    recordModelPendingAutoResume(runId, attempt);
-    continueChat();
-  });
-
-  useEffect(() => {
-    if (!waiting) {
-      return;
-    }
-    const controller = new AbortController();
-    let nextLookup: ReturnType<typeof globalThis.setTimeout> | undefined;
-    const boundTimer = globalThis.setTimeout(
-      () => {
-        controller.abort();
-        setWaiting(false);
-      },
-      Math.max(modelPendingResumeBy(runId, Date.now()) - Date.now(), 0),
-    );
-    const poll = async (): Promise<void> => {
-      const answer = await lookUpModelAttempt({ apiBaseUrl: ENV.TAU_API_URL, attemptId, signal: controller.signal });
-      if (controller.signal.aborted) {
-        return;
-      }
-      if (answer === 'settled') {
-        globalThis.clearTimeout(boundTimer);
-        resumeOnce();
-        return;
-      }
-      nextLookup = globalThis.setTimeout(() => {
-        void poll();
-      }, modelPendingPollMilliseconds);
-    };
-    void poll();
-    return () => {
-      controller.abort();
-      globalThis.clearTimeout(boundTimer);
-      globalThis.clearTimeout(nextLookup);
-    };
-  }, [waiting, runId, attemptId]);
-
-  return waiting ? modelPendingCard({ className, ...(raw === undefined ? {} : { raw }) }) : paused;
-}
-
-/**
- * The gateway attempt key a run abandoned around `MODEL_ATTEMPT_PENDING` waits on, read through the one card map.
- *
- * @param error - The parsed failure.
- * @returns The attempt key, or `undefined` for any other failure.
- */
-function pendingAttemptOf(error: NormalizedChatError): string | undefined {
-  const abandonedCode = error.code === 'RUN_ABANDONED' ? error.details?.['code'] : undefined;
-  const attemptId = error.details?.['attemptId'];
-  return typeof abandonedCode === 'string' &&
-    cardOf(abandonedCode, error.category).category === 'modelPending' &&
-    typeof attemptId === 'string'
-    ? attemptId
-    : undefined;
-}
-
-/**
  * The card a coded failure names for itself, or `undefined` when its category
  * decides instead.
  *
@@ -309,11 +131,14 @@ function codedErrorCard({
   onNewChat,
   canOpenNewChat,
   autoResume,
+  waiting,
 }: {
   readonly error: NormalizedChatError;
   readonly resumable: boolean;
-  /** The current run's failed attempt, which a card that resumes on its own resumes. */
+  /** The current run's failed attempt. */
   readonly autoResume: AutoResumeTarget | undefined;
+  /** The automatic resume the chat's machine is waiting out for that attempt (audit R5). */
+  readonly waiting: AutoResumePlan | undefined;
   readonly className: string;
   readonly onTryAgain: () => void;
   readonly onRegenerate: () => void;
@@ -418,18 +243,29 @@ function codedErrorCard({
         raw={pausedRaw}
       />
     );
-    /* An abandoned run whose model attempt the gateway still owned shows the pending card and resumes once that
-     * attempt settles (D4); a run the host will not resume, or one without its attempt key, keeps the pause card. */
-    const pendingAttemptId = pendingAttemptOf(error);
-    if (pendingAttemptId !== undefined && retry === 'resume' && resumable && autoResume !== undefined) {
+    /* An abandoned run whose model attempt the gateway still owned shows the pending card while the chat's machine
+     * asks the attempt route, and resumes once that attempt settles (D4, `#utils/run-auto-resume-plan`). Past the
+     * run's bound, or for a run the host will not resume, it keeps the pause card. */
+    if (waiting?.kind === 'modelPending') {
+      return modelPendingCard({ className, ...(pausedRaw === undefined ? {} : { raw: pausedRaw }) });
+    }
+    /* A provider outage reads `pausedTurn` in the card map, so the category switch below never sees it: the resumable
+     * one gets its auto-resume card here while its one automatic resume is unspent, then the paused card with its Tau
+     * Debug details (regression review R6). */
+    if (
+      code === autoResumableProviderUnavailableCode &&
+      retry === 'resume' &&
+      resumable &&
+      autoResume !== undefined &&
+      nextProviderUnavailableRetry(autoResume.runId, autoResume.attempt) !== undefined
+    ) {
       return (
-        <ChatErrorModelPending
-          key={`${autoResume.runId}:${String(autoResume.attempt)}`}
+        <ChatErrorServiceUnavailable
           className={className}
-          target={autoResume}
-          attemptId={pendingAttemptId}
-          raw={pausedRaw}
-          paused={paused}
+          resumable
+          title='Service Temporarily Unavailable'
+          description={error.message}
+          {...(waiting?.kind === 'providerUnavailable' ? { countdown: waiting } : {})}
         />
       );
     }
@@ -452,6 +288,21 @@ function codedErrorCard({
     );
   }
 
+  /* The provider refused reasoning replayed from earlier in the chat. The same history meets the same refusal on this
+   * model, so the card offers the switch, as for a paused route; the provider's sentence stays in Tau Debug. */
+  if (code === 'REASONING_REPLAY_REJECTED') {
+    return (
+      <ChatErrorPausedTurn
+        className={className}
+        title='This model cannot continue this chat'
+        reason='The model provider refused reasoning from earlier in this chat. Switch to another model to continue.'
+        resumable={false}
+        canSwitchModel
+        raw={codedRefusalRaw(error, rawDetail)}
+      />
+    );
+  }
+
   // Spending on the account is held (W11a): the account's, not the route's, so neither Resume nor another model helps.
   if (category === 'accountRestricted') {
     return <ChatErrorAccountRestricted className={className} raw={codedRefusalRaw(error, rawDetail)} />;
@@ -459,12 +310,13 @@ function codedErrorCard({
 
   // A refusal of the request itself resumes once the model or its settings
   // change; re-issuing it unchanged meets the same refusal, which is honest and
-  // costs nothing.
+  // costs nothing. INVALID_REQUEST is Tau's own host or gateway contract refusing
+  // the request before any model saw it, so the card does not blame the model.
   if (category === 'switchModel') {
     return (
       <ChatErrorPausedTurn
         className={className}
-        title='The model refused this request'
+        title={code === 'INVALID_REQUEST' ? 'Tau could not send this request' : 'The model refused this request'}
         reason={error.message}
         resumable={retry === 'resume' && resumable}
         guidance='Change the model or its settings, then resume.'
@@ -640,12 +492,19 @@ function codedErrorCard({
 const autoResumeTarget = (runId: string | undefined, attempt: number | undefined): AutoResumeTarget | undefined =>
   runId !== undefined && attempt !== undefined ? { runId, attempt } : undefined;
 
-/** Only the provider's transient `RATE_LIMITED` resumes on its own; the card still asks `resumable`. */
-const rateLimitAutoResume = (
-  code: string | undefined,
+/** The machine waits out the visible failure's own resume; a wait for another attempt is not this card's. */
+const waitingFor = (
+  offered: AutoResumePlan | undefined,
   runId: string | undefined,
   attempt: number | undefined,
-): AutoResumeTarget | undefined => (code === autoResumableRateLimitCode ? autoResumeTarget(runId, attempt) : undefined);
+): AutoResumePlan | undefined =>
+  offered !== undefined && offered.runId === runId && offered.attempt === attempt ? offered : undefined;
+
+/** The countdown a card shows beside Resume: only the chat's own wait of that kind, for the current attempt. */
+const countdownOf = (
+  waiting: AutoResumePlan | undefined,
+  kind: 'rateLimit' | 'providerUnavailable',
+): { countdown?: Readonly<{ resumeAt: number }> } => (waiting?.kind === kind ? { countdown: waiting } : {});
 
 /**
  * The run's failure, a decision the phone sheet never folds away (I5, `chat-interface-mobile.tsx`): the marker renders
@@ -689,6 +548,7 @@ function ChatErrorBody({
   );
   const { regenerate } = useChatActions();
   const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
+  const waiting = waitingFor(useChatAutoResume(), currentRunId, currentAttempt);
 
   // Try again is an explicit replay. Specialized components own auth,
   // credits, rate-limit, and tool-error actions. Credits remain the
@@ -746,6 +606,7 @@ function ChatErrorBody({
     },
     canOpenNewChat,
     autoResume: autoResumeTarget(currentRunId, currentAttempt),
+    waiting,
   });
   if (codedCard !== undefined) {
     return codedCard;
@@ -787,7 +648,7 @@ function ChatErrorBody({
               ? parsedError.details['retryAfterSeconds']
               : undefined
           }
-          autoResume={rateLimitAutoResume(parsedError.code, currentRunId, currentAttempt)}
+          {...countdownOf(waiting, 'rateLimit')}
         />
       );
     }
@@ -800,6 +661,7 @@ function ChatErrorBody({
           resumable={resumable}
           title={category === 'billingRecovery' ? 'Finalizing earlier work' : undefined}
           description={parsedError.message}
+          {...countdownOf(waiting, 'providerUnavailable')}
         />
       );
     }

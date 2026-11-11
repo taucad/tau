@@ -6,7 +6,7 @@ import {
   ChatInterfaceSessionGate,
   FocusedChatErrorPanel,
 } from '#routes/w.$workspace.$project/focused-chat-gate.js';
-import { ChatPaneSkeleton } from '#routes/w.$workspace.$project/chat-pane-skeleton.js';
+import { ChatPaneSkeleton } from '@taucad/project-workspace/components/chat-pane-skeleton';
 
 type StateValue = string | { [key: string]: StateValue };
 
@@ -111,6 +111,15 @@ describe('ChatPaneSkeleton', () => {
 
     const placeholder = screen.getByTestId('chat-pane-skeleton-loading');
     expect(placeholder.dataset['slot']).toBe('floating-panel');
+  });
+
+  it('draws the composer as the live empty composer frame rather than a pulsing block', () => {
+    render(<ChatPaneSkeleton variant='loading' />);
+
+    const composer = screen.getByTestId('chat-pane-skeleton-composer');
+    expect(composer.className).toContain('rounded-2xl');
+    expect(composer.className).toContain('min-h-20.5');
+    expect(composer.className).not.toContain('animate-pulse');
   });
 });
 

@@ -33,7 +33,7 @@ const { mockToast } = vi.hoisted(() => ({
     ) => void
   >(),
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: mockToast }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: mockToast }));
 
 const storageValues = new Map<string, string>();
 vi.stubGlobal(
@@ -104,8 +104,8 @@ const status = (
 };
 
 const entitled: Eligibility = { auth: 'authed', isResolved: true, canSyncFiles: true };
-/* W8/D23: a Free account while the free-tier gate is closed. */
-const gateClosedFree: Eligibility = { auth: 'authed', isResolved: true, canSyncFiles: false };
+/* W8: an account whose plan cannot sync (an Enterprise override). */
+const notEntitled: Eligibility = { auth: 'authed', isResolved: true, canSyncFiles: false };
 
 describe('nextTauCloudStep', () => {
   // ── D19: backup by default, announced before commitment ──────────────────
@@ -122,9 +122,9 @@ describe('nextTauCloudStep', () => {
     expect(nextTauCloudStep('noticed', entitled, status(undefined))).toBe('wait');
   });
 
-  it('should forget the intent for a Free account while the free-tier gate is closed', () => {
-    expect(nextTauCloudStep('default', gateClosedFree, status('rev-1'))).toBe('forget');
-    expect(nextTauCloudStep('noticed', gateClosedFree, status('rev-1'))).toBe('forget');
+  it('should forget the intent for an account whose plan cannot sync', () => {
+    expect(nextTauCloudStep('default', notEntitled, status('rev-1'))).toBe('forget');
+    expect(nextTauCloudStep('noticed', notEntitled, status('rev-1'))).toBe('forget');
   });
 
   it('should wait for a signed-out account, so the project backs up once its person signs in', () => {
@@ -152,7 +152,7 @@ describe('nextTauCloudStep', () => {
 
   // ── D20: materialized projects ───────────────────────────────────────────
   it('should connect a materialized project on its first open, before any revision', () => {
-    expect(nextTauCloudStep('open', gateClosedFree, status(undefined))).toBe('connect');
+    expect(nextTauCloudStep('open', notEntitled, status(undefined))).toBe('connect');
   });
 
   it('should keep a materialized project owed until a person is signed in', () => {
@@ -178,7 +178,7 @@ describe('backupByDefaultNotice', () => {
   });
 
   it('should say nothing to an account that is not entitled', () => {
-    expect(backupByDefaultNotice('default', gateClosedFree, remote('none'))).toBeUndefined();
+    expect(backupByDefaultNotice('default', notEntitled, remote('none'))).toBeUndefined();
   });
 
   it('should say the project is backed up once the default connection landed', () => {
@@ -420,8 +420,8 @@ describe('useTauCloudIntentConnection', () => {
     expect(tauCloudIntent.get(projectId)).toBe('connected');
   });
 
-  // ── Acceptance 1: gate closed ────────────────────────────────────────────
-  it('should create nothing for a Free account while the D23 gate is closed', () => {
+  // ── Acceptance 1: not entitled ───────────────────────────────────────────
+  it('should create nothing for an account whose plan cannot sync', () => {
     account.canSyncFiles = false;
     tauCloudIntent.set(projectId, 'noticed');
 

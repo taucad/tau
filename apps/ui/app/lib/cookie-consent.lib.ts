@@ -1,6 +1,6 @@
 import { readConsentCookie } from '@taucad/consent';
 import type { ConsentStatus } from '@taucad/consent';
-import { isGlobalPrivacyControlEnabled } from '#lib/global-privacy-control.lib.js';
+import { isGlobalPrivacyControlEnabled } from '@taucad/ui-core/lib/global-privacy-control.lib';
 
 /**
  * The decision a document request carried, for the server render.

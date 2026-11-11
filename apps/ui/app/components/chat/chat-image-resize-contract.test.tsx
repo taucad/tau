@@ -25,9 +25,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createAsyncLogic, waitFor as xstateWaitFor } from 'xstate';
 import { draftMachine } from '#hooks/draft.machine.js';
-import { resizeImageActor } from '#hooks/resize-image.actor.js';
-import { MAX_DATA_URL_LENGTH } from '#utils/resize-image.js';
-import type { StoredAttachment } from '#utils/attachment.utils.js';
+import { resizeImageActor } from '@taucad/chat-ui/hooks/resize-image.actor';
+import { MAX_DATA_URL_LENGTH } from '@taucad/chat-ui/utils/resize-image';
+import type { StoredAttachment } from '@taucad/chat-ui/utils/attachment.utils';
 import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
 
 const SMALL_JPEG_DATA_URL = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';

@@ -17,6 +17,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import type { ViewportGizmo } from 'three-viewport-gizmo';
 import type { ViewportGizmoStyle } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
 import { viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
+import { timeViewerCanvas2d } from '#lib/viewer-load-timing.js';
 
 const regionKey = (normal: Vector3): string =>
   ['x', 'y', 'z']
@@ -74,7 +75,7 @@ export const createViewportGizmoSurfaceGeometry = (): Map<string, BufferGeometry
   );
 };
 
-const createFaceTexture = ({
+const drawFaceTexture = ({
   label,
   color,
   labelColor,
@@ -105,6 +106,10 @@ const createFaceTexture = ({
   texture.anisotropy = 4;
   return texture;
 };
+
+/** One face texture, timed as a viewer 2D context. */
+const createFaceTexture = (face: Parameters<typeof drawFaceTexture>[0]): CanvasTexture =>
+  timeViewerCanvas2d('gizmo.face', () => drawFaceTexture(face));
 
 /**
  * Apply Tau's opaque, continuous surface without replacing the gizmo's picking or controls.

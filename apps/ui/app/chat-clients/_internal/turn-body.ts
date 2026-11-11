@@ -1,12 +1,12 @@
 import type { CadAgentConfigInput, CadAgentExecution, TauAgentHostId } from '@taucad/chat';
 import type { CadReference } from '@taucad/chat/references';
-import { getCadSystemPrompt } from '@taucad/chat/prompts';
-import { getProviderFacingToolInputSchemas } from '@taucad/chat/schemas';
+import { getCadSystemPrompt, getChatStateNote } from '@taucad/chat/prompts';
+import { getProviderFacingToolGrant } from '@taucad/chat/schemas';
 import type { ChatExecutionTarget } from '@taucad/chat/schemas';
 import { modelSupportsInput } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
-import { createCachedSystemPromptBlocks } from '@taucad/agent-host';
+import { chatStateMessage, createCachedSystemPromptBlocks } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host';
 import type { AgentHostClientOptions } from '#services/agent-host-client.js';
 import {
@@ -25,8 +25,8 @@ import type {
   AgentHostExternalAgent,
   AgentHostExternalContext,
 } from '#workers/agent-host.contract.js';
-import { buildBrowserAgentHostSnapshotContext } from '#chat-clients/_internal/browser-agent-host-snapshot-context.js';
-import type { TurnTrigger } from '#chat-clients/turn-intent.js';
+import { buildBrowserAgentHostSnapshotContext } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-snapshot-context';
+import type { TurnTrigger } from '@taucad/chat-ui/chat-clients/turn-intent';
 
 /**
  * How one turn's wire body and host admission are composed.
@@ -101,13 +101,18 @@ const requireTauExecution: (agent: CadAgentConfigInput) => asserts agent is TauA
   }
 };
 
-/** The CAD system prompt and its cache blocks for one chat on one model row. */
+/**
+ * The CAD system prompt and its cache blocks for one chat on one model row.
+ *
+ * Always the prompt of agent mode with testing on. The chat's mode and testing switch ride in the turn's state note
+ * (`getChatStateNote`), so changing either leaves the cached prefix, and the reasoning bound to it, as they were.
+ */
 const hostPrompt = (
   agent: TauAgentConfigInput,
   chatId: string,
   model: ResolvedModel['model'],
 ): Pick<BrowserHostAdmissionConfig, 'systemPrompt' | 'systemPromptBlocks'> => {
-  const prompt = getCadSystemPrompt(agent.kernel, agent.mode, agent.testingEnabled, {
+  const prompt = getCadSystemPrompt(agent.kernel, 'agent', true, {
     chatId,
     modelId: agent.execution.model,
     contextWindow: model?.details.contextWindow,
@@ -201,34 +206,36 @@ export const agentHostConfig = (input: {
     throw new Error('The Tau agent host requires resolved model provider metadata.');
   }
   const snapshotContext = buildBrowserAgentHostSnapshotContext(agent.snapshot, input.references);
-  return {
-    ...hostPrompt(agent, input.chatId, model),
-    model: hostedModel,
-    toolChoice: agent.toolChoice,
-    allowedTools: getProviderFacingToolInputSchemas({
-      toolChoice: agent.toolChoice,
-      testingEnabled: agent.testingEnabled,
-      modelSupport: model?.support,
-    }).map(({ toolName }) => toolName),
-    testingEnabled: agent.testingEnabled,
-    snapshot: agent.snapshot === undefined ? undefined : toStrictJson(agent.snapshot),
-    contextPayload: agent.contextPayload === undefined ? undefined : toStrictJson(agent.contextPayload),
-    contextMessages: snapshotContext
-      ? [
+  const snapshotMessages: NonNullable<BrowserHostAdmissionConfig['contextMessages']> =
+    snapshotContext === undefined
+      ? []
+      : [
           {
             id: `tau:snapshot-context:${input.runId}`,
             role: 'user',
             content: snapshotContext,
-            metadata: {
-              tauInternal: {
-                kind: 'snapshot-context',
-                anchorId: input.chatId,
-                pruning: 'replace-by-id',
-              },
-            },
+            metadata: { tauInternal: { kind: 'snapshot-context', anchorId: input.chatId, pruning: 'replace-by-id' } },
           },
-        ]
-      : undefined,
+        ];
+  /* Every tool this model can be given is declared on every turn; what the chat's settings turn off is masked where
+   * a call is made, so the tool list is the same bytes whatever the settings are. */
+  const grant = getProviderFacingToolGrant({
+    toolChoice: agent.toolChoice,
+    testingEnabled: agent.testingEnabled,
+    modelSupport: model?.support,
+  });
+  return {
+    ...hostPrompt(agent, input.chatId, model),
+    model: hostedModel,
+    ...grant,
+    snapshot: agent.snapshot === undefined ? undefined : toStrictJson(agent.snapshot),
+    contextPayload: agent.contextPayload === undefined ? undefined : toStrictJson(agent.contextPayload),
+    contextMessages: [
+      ...snapshotMessages,
+      /* The host says this once per change: it joins a turn's context only when the conversation's newest state
+       * note says something else, and a chat that never left its defaults never carries one. */
+      chatStateMessage(getChatStateNote(agent)),
+    ],
   };
 };
 

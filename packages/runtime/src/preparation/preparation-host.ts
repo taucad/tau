@@ -14,9 +14,9 @@ import {
 import { runSealStep, SealRefused } from '#preparation/closure-seal.js';
 import { verifyClosureTree } from '#preparation/closure-verify.js';
 import { detectHostIndicators } from '#preparation/host-indicators.js';
-import { acquirePayload, locallyAvailable, OfflineMiss } from '#preparation/payload-source.js';
-import type { AcquiredPayload, AcquisitionContext } from '#preparation/payload-source.js';
-import { unpackedBytesOf, unpackPayload } from '#preparation/payload-install.js';
+import { acquireDependencyFile, locallyAvailable, OfflineMiss } from '#preparation/dependency-source.js';
+import type { AcquiredDependencyFile, AcquisitionContext } from '#preparation/dependency-source.js';
+import { unpackedBytesOf, unpackDependencyFile } from '#preparation/dependency-install.js';
 import { PreparationError } from '#preparation/preparation-error.js';
 import {
   advanceGeneration,
@@ -56,12 +56,12 @@ import type {
 } from '#preparation/preparation-host.types.js';
 import type {
   ClosureReceipt,
-  DependencyPayload,
+  DependencyFile,
   DependencyTarget,
   DependencyVariant,
   HostIndicators,
   Integrity,
-  ReceiptFile,
+  InstalledFile,
 } from '#preparation/preparation.types.js';
 import { packageVersion } from '#utils/package-info.js';
 
@@ -120,7 +120,7 @@ const hostKeyOf = (indicators: HostIndicators): string =>
 
 const megabytes = (byteLength: number): string => `${(byteLength / 1e6).toFixed(1)} MB`;
 
-const byPath = (left: ReceiptFile, right: ReceiptFile): number =>
+const byPath = (left: InstalledFile, right: InstalledFile): number =>
   left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
 
 /**
@@ -133,7 +133,7 @@ const byPath = (left: ReceiptFile, right: ReceiptFile): number =>
 const writeLaunchIndex = async (
   plugin: PreparationPlugin,
   closure: Pick<ClosureReceipt, 'root' | 'dependency' | 'closureIntegrity' | 'files'>,
-): Promise<ReceiptFile | undefined> => {
+): Promise<InstalledFile | undefined> => {
   if (plugin.launchSet === undefined) {
     return undefined;
   }
@@ -222,7 +222,7 @@ const runAll = async <T>(
  * Create the preparation host (API 4) for a Node host: `tau mcp`, `tau export`, `tau prepare`, the daemon parent
  * and the desktop main process compose one each, over one shared store.
  *
- * `prepare` selects each dependency's variant from the host's indicators, takes every payload from the store, the
+ * `prepare` selects each dependency's variant from the host's indicators, takes every dependency file from the store, the
  * seed, the mirror or its pinned origins (in that order, four downloads at a time), verifies the bytes before
  * writing them, unpacks them into staging while hashing each file, writes the receipt last and publishes the closure
  * with one `rename`. Verified blobs are kept, so a failed or cancelled attempt resumes with what is missing. Two
@@ -238,7 +238,7 @@ const runAll = async <T>(
  * declare const manifest: unknown;
  *
  * const host = createPreparationHost({
- *   store: '/var/lib/tau/payloads',
+ *   store: '/var/lib/tau/dependencies',
  *   plugins: [{ package: '@taucad/build123d', deployment: parsePluginDeployment(manifest) }],
  * });
  * const outcome = await host.prepare({ package: '@taucad/build123d', signal: AbortSignal.timeout(900_000) });
@@ -308,7 +308,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       const keyed = async (): Promise<ReadonlyMap<string, DependencyVariant>> => {
         const entries = await Promise.all(
           (plugin.deployment.dependencies[dependency] ?? []).map(
-            async (variant) => [sha256Key(await computeClosureIntegrity(variant.payloads)), variant] as const,
+            async (variant) => [sha256Key(await computeClosureIntegrity(variant.files)), variant] as const,
           ),
         );
         return new Map(entries);
@@ -347,11 +347,11 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
         message:
           forced === undefined
             ? `${plugin.package} declares no ${dependency} variant for this host (${hostKeyOf(indicators)}; failing axis: ${selection.axis}; nearest declared: ${nearest}).`
-            : `TAU_PAYLOAD_TARGET=${forced} names no ${dependency} variant that ${plugin.package} declares for this host (failing axis: ${selection.axis}; nearest declared: ${nearest}).`,
+            : `TAU_DEPENDENCY_TARGET=${forced} names no ${dependency} variant that ${plugin.package} declares for this host (failing axis: ${selection.axis}; nearest declared: ${nearest}).`,
         detail: { axis: selection.axis, ...(selection.nearest === undefined ? {} : { nearest: selection.nearest }) },
       };
     }
-    const closureIntegrity = await computeClosureIntegrity(selection.variant.payloads);
+    const closureIntegrity = await computeClosureIntegrity(selection.variant.files);
     return {
       kind: 'selected',
       dependency,
@@ -510,10 +510,10 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
   });
 
   /*
-   * Re-unpack, from verified blobs, only the payloads whose files differ, remove files the receipt does not list, run
+   * Re-unpack, from verified blobs, only the dependency files whose unpacked files differ, remove files the receipt does not list, run
    * the seal step again when it must, rewrite the launch index, and check the result against the receipt.
    *
-   * Every payload is restored into staging before the closure is touched, so a payload no source holds (offline)
+   * Every dependency file is restored into staging before the closure is touched, so a dependency file no source holds (offline)
    * leaves it sealed and unchanged. Then the receipt moves aside: while its files change the closure is unsealed, so
    * nothing launches it, verifies it intact or hands it to a seal step, which sees the root as the first seal did. The
    * receipt goes back last, once every row matches; a repair that fails or stops before then leaves the closure
@@ -523,9 +523,9 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     readonly plugin: PreparationPlugin;
     readonly receipt: ClosureReceipt;
     readonly variant: DependencyVariant;
-    readonly payloads: readonly string[];
+    readonly dependencyFiles: readonly string[];
     readonly extra: readonly string[];
-    /** Run the plugin's seal step again once the payloads are restored. */
+    /** Run the plugin's seal step again once the dependency files are restored. */
     readonly reseal: boolean;
     /** Rewrite the launch index, which derives from the receipt's rows. */
     readonly reindex: boolean;
@@ -536,14 +536,14 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     const staging = await createStaging(layout, `repair-${randomUUID()}`);
     try {
       const indexes: AcquisitionContext['indexes'] = new Map();
-      const restored: Array<{ readonly directory: string; readonly rows: readonly ReceiptFile[] }> = [];
-      for (const payload of input.variant.payloads.filter(({ name }) => input.payloads.includes(name))) {
+      const restored: Array<{ readonly directory: string; readonly rows: readonly InstalledFile[] }> = [];
+      for (const dependencyFile of input.variant.files.filter(({ name }) => input.dependencyFiles.includes(name))) {
         const context = acquisitionContext(plugin, { staging, offline: input.offline, signal, indexes });
-        // oxlint-disable-next-line no-await-in-loop -- payloads are repaired one at a time
-        const acquired = await acquirePayload(payload, context);
-        const directory = join(staging, `unpack-${payload.name}`);
+        // oxlint-disable-next-line no-await-in-loop -- dependency files are repaired one at a time
+        const acquired = await acquireDependencyFile(dependencyFile, context);
+        const directory = join(staging, `unpack-${dependencyFile.name}`);
         // oxlint-disable-next-line no-await-in-loop -- ditto
-        const rows = await unpackPayload({ payload, bytes: acquired.bytes, root: directory, signal });
+        const rows = await unpackDependencyFile({ dependencyFile, bytes: acquired.bytes, root: directory, signal });
         restored.push({ directory, rows });
       }
 
@@ -565,11 +565,11 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
         input.extra.map(async (path) => rm(join(receipt.root, ...path.split('/')), { recursive: true, force: true })),
       );
       if (input.reseal) {
-        // The seal step's files derive from the payloads' files, so every one is removed and the step runs again over
+        // The seal step's files derive from the dependency files' contents, so every one is removed and the step runs again over
         // the repaired closure; a step that skips files it finds present then never keeps a stale one.
         await Promise.all(
           receipt.files
-            .filter((row) => row.payload === undefined)
+            .filter((row) => row.dependencyFile === undefined)
             .map(async (row) => rm(join(receipt.root, ...row.path.split('/')), { force: true })),
         );
         const resealed = await runSealStep({
@@ -577,7 +577,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           dependency: receipt.dependency,
           target: receipt.target,
           root: receipt.root,
-          files: receipt.files.filter((row) => row.payload !== undefined),
+          files: receipt.files.filter((row) => row.dependencyFile !== undefined),
           signal,
         });
         if ('refusal' in resealed) {
@@ -620,40 +620,41 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     };
     const found = await verifyClosureTree(receipt, signal);
     if (found.changed.length === 0 && found.extra.length === 0) {
-      return { ...base, status: 'intact', payloads: [], files: [] };
+      return { ...base, status: 'intact', dependencyFiles: [], files: [] };
     }
     const declared = await declaredVariants(plugin, receipt.dependency);
     const variant = declared.get(input.key);
     // The launch index derives from the receipt, so a changed index is rewritten rather than recompiled.
     const reindex = found.changed.some((row) => row.path === launchIndexPath);
-    const named = new Set(found.changed.filter((row) => row.path !== launchIndexPath).map((row) => row.payload));
-    const order = (variant?.payloads ?? []).map(({ name }) => name);
-    // A row with no payload was written by the seal step: rerunning it restores the row, unless the plugin has none.
+    const named = new Set(found.changed.filter((row) => row.path !== launchIndexPath).map((row) => row.dependencyFile));
+    const order = (variant?.files ?? []).map(({ name }) => name);
+    // A row with no dependency file was written by the seal step: rerunning it restores the row, unless the plugin has none.
     const sealedRowChanged = named.has(undefined);
-    const payloads = sealedRowChanged && plugin.seal === undefined ? order : order.filter((name) => named.has(name));
+    const dependencyFiles =
+      sealedRowChanged && plugin.seal === undefined ? order : order.filter((name) => named.has(name));
     const files = [...found.changed.map((row) => row.path), ...found.extra].toSorted().slice(0, reportedFileLimit);
     if (!input.repair || variant === undefined) {
-      return { ...base, status: 'stale', payloads, files };
+      return { ...base, status: 'stale', dependencyFiles, files };
     }
     try {
       await repairClosure({
         plugin,
         receipt,
         variant,
-        payloads,
+        dependencyFiles,
         extra: found.extra,
-        reseal: plugin.seal !== undefined && (sealedRowChanged || payloads.length > 0),
+        reseal: plugin.seal !== undefined && (sealedRowChanged || dependencyFiles.length > 0),
         reindex,
         offline: input.offline,
         signal,
       });
     } catch (error) {
       if (error instanceof OfflineMiss) {
-        return { ...base, status: 'stale', payloads, files };
+        return { ...base, status: 'stale', dependencyFiles, files };
       }
       throw error;
     }
-    return { ...base, status: 'repaired', payloads, files };
+    return { ...base, status: 'repaired', dependencyFiles, files };
   };
 
   // Split the selected closures into those already sealed and those to build. A closure sealed by another Tau
@@ -706,19 +707,19 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
     return { receipts, work };
   };
 
-  // Payload names no local source holds: existence checks only, never a request.
+  // Dependency file names no local source holds: existence checks only, never a request.
   const missingLocally = async (
     plugin: PreparationPlugin,
-    payloads: ReadonlyArray<{ readonly payload: DependencyPayload }>,
+    dependencyFiles: ReadonlyArray<{ readonly dependencyFile: DependencyFile }>,
     attempt: Pick<AcquisitionContext, 'signal' | 'indexes'>,
   ): Promise<string[]> => {
     const missing: string[] = [];
     const context = acquisitionContext(plugin, { staging: layout.staging, offline: true, ...attempt });
-    for (const { payload } of payloads) {
-      // oxlint-disable-next-line no-await-in-loop -- the first local hit answers each payload
-      const available = await locallyAvailable(payload, context);
+    for (const { dependencyFile } of dependencyFiles) {
+      // oxlint-disable-next-line no-await-in-loop -- the first local hit answers each dependency file
+      const available = await locallyAvailable(dependencyFile, context);
       if (!available) {
-        missing.push(payload.name);
+        missing.push(dependencyFile.name);
       }
     }
     return missing;
@@ -728,18 +729,20 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
   const admit = async (
     plugin: PreparationPlugin,
     input: {
-      readonly payloads: ReadonlyArray<{ readonly payload: DependencyPayload }>;
+      readonly dependencyFiles: ReadonlyArray<{ readonly dependencyFile: DependencyFile }>;
       readonly work: readonly WorkItem[];
     },
   ): Promise<void> => {
-    const stored = await Promise.all(input.payloads.map(async ({ payload }) => blobKey(layout, payload.integrity)));
-    const downloadBytes = input.payloads.reduce(
-      (sum, { payload }, index) => sum + (stored[index] === undefined ? payload.byteLength : 0),
+    const stored = await Promise.all(
+      input.dependencyFiles.map(async ({ dependencyFile }) => blobKey(layout, dependencyFile.integrity)),
+    );
+    const downloadBytes = input.dependencyFiles.reduce(
+      (sum, { dependencyFile }, index) => sum + (stored[index] === undefined ? dependencyFile.byteLength : 0),
       0,
     );
     const unpackBytes = input.work
-      .flatMap((item) => item.variant.payloads)
-      .reduce((sum, payload) => sum + unpackedBytesOf(payload), 0);
+      .flatMap((item) => item.variant.files)
+      .reduce((sum, dependencyFile) => sum + unpackedBytesOf(dependencyFile), 0);
     await mkdir(layout.root, { recursive: true });
     const decision = admitCapacityWrite({
       measurement: await measureCapacityDomain({ kind: 'volume', path: layout.root }),
@@ -790,7 +793,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           status: 'blocked',
           attemptId,
           reason: 'offline-miss',
-          message: `${plugin.package} ${reused.unrepairable} needs repair from payloads that are not in the store, and this host may not download.`,
+          message: `${plugin.package} ${reused.unrepairable} needs repair from dependency files that are not in the store, and this host may not download.`,
         });
       }
       const { receipts, work } = reused;
@@ -802,45 +805,45 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       const unique = new Map<
         Integrity,
         {
-          readonly payload: DependencyPayload;
-          readonly uses: Array<{ readonly item: WorkItem; readonly payload: DependencyPayload }>;
+          readonly dependencyFile: DependencyFile;
+          readonly uses: Array<{ readonly item: WorkItem; readonly dependencyFile: DependencyFile }>;
         }
       >();
       for (const item of work) {
-        for (const payload of item.variant.payloads) {
-          const entry = unique.get(payload.integrity) ?? { payload, uses: [] };
-          entry.uses.push({ item, payload });
-          unique.set(payload.integrity, entry);
+        for (const dependencyFile of item.variant.files) {
+          const entry = unique.get(dependencyFile.integrity) ?? { dependencyFile, uses: [] };
+          entry.uses.push({ item, dependencyFile });
+          unique.set(dependencyFile.integrity, entry);
         }
       }
-      const payloads = [...unique.values()];
+      const dependencyFiles = [...unique.values()];
       const indexes: AcquisitionContext['indexes'] = new Map();
 
       if (input.offline) {
-        const missing = await missingLocally(plugin, payloads, { signal, indexes });
+        const missing = await missingLocally(plugin, dependencyFiles, { signal, indexes });
         if (missing.length > 0) {
           return finish({
             status: 'blocked',
             attemptId,
             reason: 'offline-miss',
-            message: `${plugin.package} is not prepared and ${missing.length} of its payloads (${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}) are in neither the store nor the seed; this host may not download. Prepare it online or seed the store.`,
+            message: `${plugin.package} is not prepared and ${missing.length} of its dependency files (${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}) are in neither the store nor the seed; this host may not download. Prepare it online or seed the store.`,
           });
         }
       }
-      await admit(plugin, { payloads, work });
+      await admit(plugin, { dependencyFiles, work });
 
       await sweepStaging(layout, Date.now());
       const attemptStaging = await createStaging(layout, attemptId);
       staging = attemptStaging;
       await Promise.all(work.map(async (item) => mkdir(join(attemptStaging, item.key), { recursive: true })));
 
-      const totalBytes = payloads.reduce((sum, { payload }) => sum + payload.byteLength, 0);
+      const totalBytes = dependencyFiles.reduce((sum, { dependencyFile }) => sum + dependencyFile.byteLength, 0);
       const received = new Map<Integrity, number>();
-      let completedPayloads = 0;
+      let completedDependencyFiles = 0;
       let lastProgress = 0;
       const progress = (
         phase: 'downloading' | 'verifying' | 'extracting' | 'sealing',
-        payload: string,
+        dependencyFile: string,
         force: boolean,
       ): void => {
         const now = Date.now();
@@ -848,64 +851,69 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           return;
         }
         lastProgress = now;
-        const completedBytes = payloads.reduce(
-          (sum, entry) => sum + Math.min(received.get(entry.payload.integrity) ?? 0, entry.payload.byteLength),
+        const completedBytes = dependencyFiles.reduce(
+          (sum, entry) =>
+            sum + Math.min(received.get(entry.dependencyFile.integrity) ?? 0, entry.dependencyFile.byteLength),
           0,
         );
         emit(selection, key, {
           status: 'preparing',
           attemptId,
           phase,
-          payload,
-          completedPayloads,
-          totalPayloads: payloads.length,
+          dependencyFile,
+          completedDependencyFiles,
+          totalDependencyFiles: dependencyFiles.length,
           completedBytes,
           totalBytes,
         });
       };
 
-      const rows = new Map<string, Map<string, readonly ReceiptFile[]>>(work.map((item) => [item.key, new Map()]));
-      const sources = new Map<Integrity, AcquiredPayload['acquiredFrom']>();
+      const rows = new Map<string, Map<string, readonly InstalledFile[]>>(work.map((item) => [item.key, new Map()]));
+      const sources = new Map<Integrity, AcquiredDependencyFile['acquiredFrom']>();
       const keys = new Map<Integrity, string>();
       const extract = limiter(extractionConcurrency);
-      await runAll(payloads, { limit: downloadConcurrency, signal }, async ({ payload, uses }, laneSignal) => {
-        const acquired = await acquirePayload(
-          payload,
-          acquisitionContext(plugin, {
-            staging: attemptStaging,
-            offline: input.offline,
-            signal: laneSignal,
-            indexes,
-            onPhase: (phase) => {
-              progress(phase, payload.name, true);
-            },
-            onBytes: (bytes) => {
-              received.set(payload.integrity, bytes);
-              progress('downloading', payload.name, false);
-            },
-          }),
-        );
-        received.set(payload.integrity, payload.byteLength);
-        sources.set(payload.integrity, acquired.acquiredFrom);
-        keys.set(payload.integrity, acquired.key);
-        await extract(async () => {
-          for (const use of uses) {
-            progress('extracting', use.payload.name, true);
-            // oxlint-disable-next-line no-await-in-loop -- one closure at a time per payload
-            const written = await unpackPayload({
-              payload: use.payload,
-              bytes: acquired.bytes,
-              root: join(attemptStaging, use.item.key),
+      await runAll(
+        dependencyFiles,
+        { limit: downloadConcurrency, signal },
+        async ({ dependencyFile, uses }, laneSignal) => {
+          const acquired = await acquireDependencyFile(
+            dependencyFile,
+            acquisitionContext(plugin, {
+              staging: attemptStaging,
+              offline: input.offline,
               signal: laneSignal,
-            });
-            rows.get(use.item.key)?.set(use.payload.name, written);
-          }
-        });
-        completedPayloads += 1;
-      });
+              indexes,
+              onPhase: (phase) => {
+                progress(phase, dependencyFile.name, true);
+              },
+              onBytes: (bytes) => {
+                received.set(dependencyFile.integrity, bytes);
+                progress('downloading', dependencyFile.name, false);
+              },
+            }),
+          );
+          received.set(dependencyFile.integrity, dependencyFile.byteLength);
+          sources.set(dependencyFile.integrity, acquired.acquiredFrom);
+          keys.set(dependencyFile.integrity, acquired.key);
+          await extract(async () => {
+            for (const use of uses) {
+              progress('extracting', use.dependencyFile.name, true);
+              // oxlint-disable-next-line no-await-in-loop -- one closure at a time per dependency file
+              const written = await unpackDependencyFile({
+                dependencyFile: use.dependencyFile,
+                bytes: acquired.bytes,
+                root: join(attemptStaging, use.item.key),
+                signal: laneSignal,
+              });
+              rows.get(use.item.key)?.set(use.dependencyFile.name, written);
+            }
+          });
+          completedDependencyFiles += 1;
+        },
+      );
 
       for (const item of work) {
-        const unpacked = item.variant.payloads
+        const unpacked = item.variant.files
           .flatMap(({ name }) => rows.get(item.key)?.get(name) ?? [])
           .toSorted((left, right) => (left.path < right.path ? -1 : 1));
         if (plugin.seal !== undefined) {
@@ -949,11 +957,11 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           closureIntegrity: item.closureIntegrity,
           treeIntegrity,
           files,
-          payloads: item.variant.payloads.map((payload) => ({
-            name: payload.name,
-            integrity: payload.integrity,
-            sha256: keys.get(payload.integrity) ?? '',
-            acquiredFrom: sources.get(payload.integrity)!,
+          dependencyFiles: item.variant.files.map((dependencyFile) => ({
+            name: dependencyFile.name,
+            integrity: dependencyFile.integrity,
+            sha256: keys.get(dependencyFile.integrity) ?? '',
+            acquiredFrom: sources.get(dependencyFile.integrity)!,
           })),
           preparedAt: new Date().toISOString(),
         };
@@ -1080,7 +1088,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
             dependency,
             ...(state.resolved.kind === 'selected' ? { closureIntegrity: state.resolved.closureIntegrity } : {}),
             status: 'absent',
-            payloads: [],
+            dependencyFiles: [],
             files: [],
           });
           continue;
@@ -1113,7 +1121,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
               return { ...base, state: 'unsupported' };
             }
             const variant = state.resolved.kind === 'selected' ? state.resolved.variant : undefined;
-            const byteLength = variant?.payloads.reduce((sum, payload) => sum + payload.byteLength, 0);
+            const byteLength = variant?.files.reduce((sum, dependencyFile) => sum + dependencyFile.byteLength, 0);
             if (state.state === 'absent') {
               return {
                 ...base,

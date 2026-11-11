@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useEffect, useReducer } from 'react';
@@ -7,7 +8,7 @@ import { Bot, Circle, CircleAlert, Clock3, FolderGit2, GitBranch, Radio, ShieldA
 import type { ProjectSlugs } from '#utils/project-url.utils.js';
 import { projectChatUrl } from '#utils/project-url.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { formatRelativeTime } from '#utils/date.utils.js';
+import { formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { useAgentProjections } from '#hooks/use-agent-projections.js';
@@ -17,7 +18,7 @@ import {
   useReceiptCredits,
 } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 import type { AgentProjection, AgentProjectionMetadata, AgentProjectionState } from '#hooks/use-agent-projections.js';
-import { SvgIcon } from '#components/icons/svg-icon.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
@@ -280,7 +281,9 @@ const AgentRowContent = ({ agent }: { readonly agent: AgentProjection }): React.
         </div>
         <div className='min-w-0 flex-1'>
           <div className='flex min-w-0 items-center gap-1.5'>
-            <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>{agent.name}</h3>
+            <Heading level={3} variant='label' className='min-w-0 flex-1 truncate text-foreground'>
+              {agent.name}
+            </Heading>
             {agent.focused ? (
               <Badge
                 variant='outline'

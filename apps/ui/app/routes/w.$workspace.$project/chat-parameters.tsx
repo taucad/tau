@@ -5,7 +5,7 @@ import { useCallback, memo, useState, useMemo, useRef, useEffect } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { ExportSelector } from '#components/files/export-selector.js';
 import {
   FloatingPanel,
@@ -28,8 +28,8 @@ import type { ParameterCommit } from '@taucad/viewer/parameters/rjsf-context';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { ParameterManifest } from '@taucad/parameters';
 import type { FileParameterEntry, JSONValue } from '@taucad/types';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
-import { withPointerValue } from '#services/parameter-set-service.js';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
+import { withPointerValue } from '@taucad/ui-core/services/parameter-set-service';
 import { usePaneviewPersistence } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ProjectWorkbenchPanesHost } from '#routes/w.$workspace.$project/workbench-panes-host.js';

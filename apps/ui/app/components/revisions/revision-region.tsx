@@ -2,6 +2,7 @@
  * A Revisions pane region: the card and bordered heading row the Details,
  * Export and Console panes share (L3-F17), on the 14 px heading step.
  */
+import { Heading } from '@taucad/ui/components/heading';
 import type { ReactNode } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
 
@@ -30,9 +31,9 @@ export function RevisionRegion({
   return (
     <section aria-labelledby={id} className={cn('rounded-xl border border-border bg-card', className)}>
       <div className='flex min-h-8 items-center justify-between gap-2 border-b px-3 py-1'>
-        <h3 id={id} className='min-w-0 truncate text-sm font-medium text-foreground'>
+        <Heading level={3} variant='label' id={id} className='min-w-0 truncate text-foreground'>
           {title}
-        </h3>
+        </Heading>
         {action}
       </div>
       <div className={bodyClassName ?? 'p-1.5'}>{children}</div>

@@ -63,5 +63,5 @@ const app = await NestFactory.create<NestFastifyApplication>(
   { logger: shutdownLogger },
 );
 await app.listen(0, '127.0.0.1');
-closeGracefullyOnSignal(app, { cut: 5000, abandon: 6000 });
+closeGracefullyOnSignal(app, { cut: 5000, abandon: 6000, lastCall: 1000 });
 record(`listening ${await app.getUrl()}`);

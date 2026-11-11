@@ -15,6 +15,7 @@ import {
   builtInSkillSlugs,
   geospecRunStatuses,
   kernelIds,
+  llmGatewayProviders,
   tauToolNames,
 } from '@taucad/telemetry';
 import type {
@@ -32,7 +33,7 @@ import { chunksSince } from '#machines/chat-projection.logic.js';
 import { agentPlacementOf } from '#lib/agent-host-placement.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
-import { parseErrorForPersistence } from '#utils/error.utils.js';
+import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
 
 type AgentTurnDetail = Extract<ClientMetricEntry, { name: 'agent.turn' }>['detail'];
 type AgentSessionDetail = Extract<ClientMetricEntry, { name: 'agent.session' }>['detail'];
@@ -613,10 +614,34 @@ const countedSince = <Entry, Labels extends Readonly<Record<string, string>>>(
   return [...counts.values()];
 };
 
+/**
+ * The prefix breaks this turn's replies recorded, by cause, provider and what each cost in prompt cache, with the
+ * reasoning blocks they left out.
+ *
+ * @param run - The run's ledger entry.
+ * @param initialRun - The entry as it stood when this turn was admitted: a resumed run's earlier attempts.
+ * @returns One counted row per cause, provider and cache outcome; empty when every request reproduced its prefix.
+ */
+const prefixBreaksOf = (
+  run: RunEntry | undefined,
+  initialRun: RunEntry | undefined,
+): NonNullable<AgentTurnDetail['prefixBreaks']> => {
+  const rows = new Map<string, NonNullable<AgentTurnDetail['prefixBreaks']>[number]>();
+  for (const entry of (run?.prefixBreaks ?? []).slice(initialRun?.prefixBreaks?.length ?? 0)) {
+    /* The host's cause union is the ingest vocabulary; a provider the gateway vocabulary does not name is `other`. */
+    const provider = llmGatewayProviders.find((candidate) => candidate === entry.provider) ?? 'other';
+    const outcome = entry.cache ?? 'unreported';
+    const key = `${entry.cause}:${provider}:${outcome}`;
+    const row = rows.get(key) ?? { cause: entry.cause, provider, outcome, count: 0, reasoningOmitted: 0 };
+    rows.set(key, { ...row, count: row.count + 1, reasoningOmitted: row.reasoningOmitted + entry.dropped });
+  }
+  return [...rows.values()];
+};
+
 const loopOf = (
   run: RunEntry | undefined,
   initialRun: RunEntry | undefined,
-): Pick<AgentTurnDetail, 'safeguards' | 'compactions'> => {
+): Pick<AgentTurnDetail, 'safeguards' | 'compactions' | 'prefixBreaks'> => {
   /* The host's pattern union is the ingest vocabulary: a pattern it adds fails this assignment until telemetry knows it. */
   const safeguards = countedSince(
     run?.safeguards,
@@ -632,9 +657,11 @@ const loopOf = (
       outcome,
     }),
   );
+  const prefixBreaks = prefixBreaksOf(run, initialRun);
   return {
     ...(safeguards.length === 0 ? {} : { safeguards }),
     ...(compactions.length === 0 ? {} : { compactions }),
+    ...(prefixBreaks.length === 0 ? {} : { prefixBreaks }),
   };
 };
 

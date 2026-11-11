@@ -40,14 +40,14 @@ import { useTree, AssistiveTreeDescription } from '@headless-tree/react';
 import { tauFileDragMime } from '@taucad/types/constants';
 import { availableKernelConfigurations } from '#constants/available-kernel-configurations.js';
 import type { KernelConfiguration } from '@taucad/types/constants';
-import type { FileItem } from '#types/editor.types.js';
+import type { FileItem } from '@taucad/ui-core/types/editor.types';
 import type { FileEntry, FileProvenance } from '@taucad/types';
 import { cn } from '@taucad/ui/utils/cn';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Badge } from '@taucad/ui/components/badge';
 import { SearchInput } from '@taucad/ui/components/search-input';
 import { PaneSearchRegion } from '@taucad/ui/components/pane-search';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import {
   FloatingPanelContent,
   FloatingPanelContentBody,
@@ -89,17 +89,18 @@ import {
   sidebarRowClass,
 } from '#components/nav/sidebar-row.js';
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
-import { FileExtensionIcon, getIconIdForFilename } from '#components/icons/file-extension-icon.js';
-import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
+import { FileExtensionIcon, getIconIdForFilename } from '@taucad/ui-kit/icons/file-extension-icon';
+import { getFileExtension, encodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
-import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
+import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
+import { useDirectoryListing } from '@taucad/fs-client/react/use-directory-listing';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { parentDirectory } from '@taucad/utils/path';
-import { useRowWindow } from '#routes/w.$workspace.$project/use-row-window.js';
+import { useRowWindow } from '@taucad/project-workspace/hooks/use-row-window';
 
 import type { TreeItemData } from '#routes/w.$workspace.$project/chat-editor-file-tree.utils.js';
 import {
@@ -107,10 +108,10 @@ import {
   indexedItemData,
   isEditorSystemArtifactPath,
 } from '#routes/w.$workspace.$project/chat-editor-file-tree.utils.js';
-import { fileProvenanceLabel } from '#lib/file-provenance-labels.js';
-import type { FileProvenanceLabel } from '#lib/file-provenance-labels.js';
-import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '#filesystem/workspace-errors.js';
-import type { WorkspaceMutationErrorLike } from '#filesystem/workspace-errors.js';
+import { fileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
+import type { FileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
+import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '@taucad/ui-core/filesystem/workspace-errors';
+import type { WorkspaceMutationErrorLike } from '@taucad/ui-core/filesystem/workspace-errors';
 import { OverwriteConfirmDialog } from '#components/filesystem/overwrite-confirm-dialog.js';
 import type { OverwriteConfirmResult } from '#components/filesystem/overwrite-confirm-dialog.js';
 import {
@@ -118,21 +119,21 @@ import {
   fileTreeRootId,
   joinFileTreePath,
   resolveFileTreeTargetDirectory,
-} from '#routes/w.$workspace.$project/file-tree-targets.js';
+} from '@taucad/project-workspace/utils/file-tree-targets';
 import {
   canReadForeignFileTreeDrop,
   collectDropDirectoryPaths,
   ingestFileTreeDataTransfer,
-} from '#routes/w.$workspace.$project/file-tree-drop-ingestion.js';
+} from '@taucad/project-workspace/utils/file-tree-drop-ingestion';
 import type {
   DroppedDirectory,
   DroppedFile,
   DropIngestionResult,
-} from '#routes/w.$workspace.$project/file-tree-drop-ingestion.js';
+} from '@taucad/project-workspace/utils/file-tree-drop-ingestion';
 import {
   copyTextToClipboard,
   summarizeFileTreeImport,
-} from '#routes/w.$workspace.$project/file-tree-operation-results.js';
+} from '@taucad/project-workspace/utils/file-tree-operation-results';
 import {
   createFileTreeDownloadError,
   getFileTreeDownloadErrorMessage,
@@ -528,6 +529,8 @@ export const ChatEditorFileTree = memo(function ({
   );
 
   const { treeService } = fileManager;
+  const [rootListingRetry, setRootListingRetry] = useState(0);
+  const rootListing = useDirectoryListing(treeService, '', { reloadToken: rootListingRetry });
 
   /* Every row re-renders with this component, so it holds the snapshot it last drew until a row
    * would change: sizes and mtimes in it may be stale, and nothing below reads them. */
@@ -1785,7 +1788,7 @@ export const ChatEditorFileTree = memo(function ({
 
   const fileActions = (
     <FloatingPanelButtonGroup className='shrink-0'>
-      {readOnly ? null : (
+      {readOnly || rootListing.kind !== 'ready' ? null : (
         <DropdownMenu modal={false}>
           <FloatingPanelMenuButton asChild tooltip='Create new file' aria-label='Create new file'>
             <DropdownMenuTrigger>
@@ -1830,7 +1833,7 @@ export const ChatEditorFileTree = memo(function ({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
-      {readOnly ? null : (
+      {readOnly || rootListing.kind !== 'ready' ? null : (
         <FloatingPanelMenuButton
           aria-label='Create new folder'
           tooltip='Create new folder'
@@ -1936,7 +1939,29 @@ export const ChatEditorFileTree = memo(function ({
           </PaneSearchRegion>
 
           <AssistiveTreeDescription tree={tree} getLabel={getFileTreeAssistiveDndLabel} />
-          {tree.getItems().length > 0 || pendingFolder !== undefined || pendingFile !== undefined ? (
+          {rootListing.kind === 'error' ? (
+            <div role='alert' aria-label='Files unavailable' className='p-3 text-sm'>
+              <p>{rootListing.cause.message}</p>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => {
+                  setRootListingRetry((value) => value + 1);
+                }}
+              >
+                Try again
+              </Button>
+            </div>
+          ) : rootListing.kind === 'loading' || rootListing.kind === 'unready' ? (
+            <div
+              role='status'
+              aria-label='Loading files'
+              aria-busy='true'
+              className='p-3 text-sm text-muted-foreground'
+            >
+              Loading files…
+            </div>
+          ) : tree.getItems().length > 0 || pendingFolder !== undefined || pendingFile !== undefined ? (
             <div
               data-tree-container
               {...tree.getContainerProps()}

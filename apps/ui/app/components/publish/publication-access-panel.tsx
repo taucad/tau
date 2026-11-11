@@ -1,9 +1,10 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import { Trash2 } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { CopyButton } from '@taucad/ui/components/copy-button';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { PublicationEmailTagsField, getPublicationEmailTagsError } from '#components/publish/publication-email-tags.js';
@@ -167,7 +168,9 @@ export function PublicationAccessPanel({
 
       <div className='flex flex-col gap-2'>
         <div className='flex items-center justify-between'>
-          <h3 className='text-sm font-medium'>People with access</h3>
+          <Heading level={3} variant='label'>
+            People with access
+          </Heading>
           {loading ? <Loader className='size-4 text-muted-foreground' /> : null}
         </div>
         {grants.length === 0 && !loading ? (

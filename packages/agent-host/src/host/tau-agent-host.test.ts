@@ -225,7 +225,7 @@ describe('createTauAgentHost', () => {
     await host.close();
   });
 
-  it('applies the complete admission config and enforces tool selection in the host', async () => {
+  it('applies the complete admission config and declares only the granted tools', async () => {
     const file = createMemoryLogFile();
     const requests: ModelStreamRequest[] = [];
     const invoke = vi.fn(async () => ({ content: null, isError: false }));
@@ -270,7 +270,8 @@ describe('createTauAgentHost', () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ modelId: 'retry-model', systemPrompt: 'static\n\nworkspace\n\ndynamic' });
-    expect(requests[0]?.tools).toEqual([]);
+    /* The grant narrows what is declared; the tool choice masks calls and leaves the declared list alone (U10). */
+    expect(requests[0]?.tools.map((tool) => tool.name)).toEqual(['read_file']);
     expect(requests[0]?.messages).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'tau:client-memory' }),
@@ -300,6 +301,7 @@ describe('createTauAgentHost', () => {
     ['BILLING_RECOVERY_UNAVAILABLE', 503],
     ['MODEL_ROUTE_PAUSED', 503],
     ['BILLING_ACCOUNT_RESTRICTED', 403],
+    ['REASONING_REPLAY_REJECTED', 502],
   ] as const)('retains %s as a typed failed-run snapshot', async (code, status) => {
     const file = createMemoryLogFile();
     const host = createTauAgentHost(
@@ -811,6 +813,8 @@ describe('createTauAgentHost', () => {
       MODEL_ROUTE_PAUSED: false,
       // Spending on the account is held; neither a resume nor another model changes it (W11a).
       BILLING_ACCOUNT_RESTRICTED: false,
+      // The resumed run replays the same reasoning, which meets the same refusal; another model reads it as text.
+      REASONING_REPLAY_REJECTED: false,
       // Compaction failures resume through start-of-turn reprojection and the degradation ladder.
       SUMMARY_REQUIRED: true,
       NO_EVICTABLE_HISTORY: true,

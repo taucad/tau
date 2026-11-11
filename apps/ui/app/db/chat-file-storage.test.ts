@@ -1,4 +1,4 @@
-import { KeyedMutex } from '#db/keyed-mutex.js';
+import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 // oxlint-disable-next-line import/no-unassigned-import -- side-effect import polyfills IndexedDB for the library-row tests
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
@@ -17,7 +17,7 @@ import type { ChatStoreClient } from '#db/chat-file-storage.js';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import type { ChatStorage } from '#types/storage.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
-import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
+import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 
 /**
  * The chat store's behaviour, re-pointed from `indexeddb-storage.test.ts`.

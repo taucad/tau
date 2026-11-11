@@ -6,6 +6,7 @@ import {
   agentCompactionLanes,
   agentCompactionOutcomes,
   agentCompactionTiers,
+  agentPrefixBreakCauses,
   agentSafeguardPatterns,
   agentToolKinds,
   builtInSkillSlugs,
@@ -129,11 +130,13 @@ const ceilingThresholds = ['0.5', '0.8', '0.95', '1.0'] as const;
 const repositorySizeBounds = [...Array.from({ length: 15 }, (_, step) => String(65_536 * 2 ** step)), '+Inf'] as const;
 
 /**
- * `tau.r2.bucket`: which of Tau's buckets a figure is for, by role. The environment's two configured
- * buckets are `public` (`TAU_S3_BUCKET`) and `private` (`TAU_S3_PRIVATE_BUCKET`); every other bucket in
- * the account, another environment's included, is `other`.
+ * `tau.r2.bucket`: which of Tau's buckets a figure is for, by role. The environment's buckets are `public`
+ * (`TAU_S3_BUCKET`), `private` (`TAU_S3_PRIVATE_BUCKET`), `downloads` (`TAU_CLOUDFLARE_DOWNLOADS_BUCKET`,
+ * the desktop installers and update feeds) and `dependencies` (`TAU_CLOUDFLARE_DEPENDENCIES_BUCKET`, the
+ * locked release dependency bucket); every other bucket in the account, another environment's included, is
+ * `other`. A bucket name never becomes a label value.
  */
-const r2Buckets = ['public', 'private', 'other'] as const;
+const r2Buckets = ['public', 'private', 'downloads', 'dependencies', 'other'] as const;
 
 /** `tau.r2.action`: R2's billed `actionType` values (R2 pricing); any other is `other`. */
 const r2Actions = [
@@ -179,13 +182,15 @@ const accountingTasks = ['usage', 'r2_analytics', 'db', 'hot_projects', 'route']
 const agentEvidencePlanes = ['summary', 'feedback', 'content'] as const;
 
 /**
- * `outcome` of one agent-evidence admission. `duplicate` answered a held receipt, `revoked` and
+ * `outcome` of one agent-evidence admission. `duplicate` answered a held receipt, `superseded` a new
+ * projection of a source whose earlier projection is delivered or on its way, `revoked` and
  * `expired` a replay current policy or retention no longer delivers; `policy_stale` a submission
  * under a superseded policy epoch, `refused` one whose purpose is not granted.
  */
 const agentEvidenceAdmissionOutcomes = [
   'accepted',
   'duplicate',
+  'superseded',
   'revoked',
   'expired',
   'refused',
@@ -200,7 +205,8 @@ const agentEvidenceAdmissionOutcomes = [
  * `outcome` of one agent-evidence delivery step. `acknowledged` and `uncertain` are sends whose
  * visibility is not yet proven; `confirmed` was read back; `gap` was never visible and is not resent;
  * `key_unavailable` is held for a payload key this deployment no longer has; `abandoned` is a lease a
- * stopped worker left, returned for another pass.
+ * stopped worker left, returned for another pass; `superseded` names a Langfuse object another receipt
+ * already writes, or none.
  */
 const agentEvidenceDeliveryOutcomes = [
   'acknowledged',
@@ -214,14 +220,36 @@ const agentEvidenceDeliveryOutcomes = [
   'gap',
   'expired',
   'abandoned',
+  'superseded',
   'lease_lost',
 ] as const;
 
 /** `tau.agent_evidence.state`: an agent-evidence backlog row's delivery state. */
-const agentEvidenceBacklogStates = ['pending', 'sending', 'confirmed', 'uncertain', 'rejected', 'expired'] as const;
+const agentEvidenceBacklogStates = [
+  'pending',
+  'sending',
+  'confirmed',
+  'uncertain',
+  'rejected',
+  'expired',
+  'superseded',
+] as const;
 
-/** `outcome` of one Langfuse trace erasure step; only `absent` settles a trace. */
-const agentEvidenceErasureOutcomes = ['requested', 'retry', 'absent', 'present', 'recheck', 'lease_lost'] as const;
+/**
+ * `reason` a receipt was settled without writing to Langfuse (LD12): `reprojected` at admission, a new
+ * projection of a source already delivered or on its way; `object`, a second receipt for a Langfuse
+ * object another receipt writes; `no_object`, a fact that maps to no Langfuse object.
+ */
+const agentEvidenceSupersededReasons = ['reprojected', 'object', 'no_object'] as const;
+
+/**
+ * `kind` of one Langfuse billable unit (Langfuse blueprint LW24, ruling 13): Langfuse counts traces, observations and
+ * scores against the plan's monthly units.
+ */
+const agentEvidenceLangfuseUnitKinds = ['trace', 'observation', 'score'] as const;
+
+/** `outcome` of one Langfuse trace deletion request; an `accepted` delete settles the trace (nothing is read back). */
+const agentEvidenceErasureOutcomes = ['accepted', 'retry', 'lease_lost'] as const;
 
 /**
  * Canonical metric registry for Tau.
@@ -968,6 +996,37 @@ export const TauMetrics = {
       'compaction.lane': z.enum(agentCompactionLanes),
       'compaction.tier': z.enum(agentCompactionTiers),
       'compaction.outcome': z.enum(agentCompactionOutcomes),
+    }),
+  }),
+
+  /**
+   * Requests that did not reproduce the previous request's prompt prefix (provider reasoning replay contract, P1),
+   * folded from the break each reply's row records. Read it against `tau.agent.turns`: a counter has no series until
+   * it first fires, so a missing series is not a zero. `tau.prompt_cache.outcome` is what the break cost: the cache
+   * share of the breaking request, by the gateway's rule, from the usage its reply reported to the client;
+   * `unreported` when the client sent none.
+   */
+  agentPrefixBreaks: defineCounter({
+    name: 'tau.agent.prefix_breaks',
+    unit: '{break}',
+    description:
+      'Requests that did not reproduce the previous request prefix, by cause, provider and prompt-cache outcome (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'prefix_break.cause': z.enum(agentPrefixBreakCauses),
+      'gen_ai.provider.name': z.enum(llmGatewayProviders),
+      'tau.prompt_cache.outcome': z.enum(promptCacheOutcomes),
+    }),
+  }),
+
+  /** Native reasoning a prefix break made unreplayable (P2): left out of the request, never erased from the log. */
+  agentReasoningOmittedBlocks: defineCounter({
+    name: 'tau.agent.reasoning_omitted_blocks',
+    unit: '{block}',
+    description: 'Native reasoning blocks left out of a request after a prefix break, by cause (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'prefix_break.cause': z.enum(agentPrefixBreakCauses),
     }),
   }),
 
@@ -1930,6 +1989,15 @@ export const TauMetrics = {
     }),
   }),
 
+  agentEvidenceSuperseded: defineCounter({
+    name: 'tau.agent_evidence.superseded_receipts',
+    unit: '{receipt}',
+    description: 'Agent-evidence receipts settled without a Langfuse write, by reason',
+    attributes: z.object({
+      reason: z.enum(agentEvidenceSupersededReasons),
+    }),
+  }),
+
   agentEvidenceBacklogRows: defineGauge({
     name: 'tau.agent_evidence.backlog_rows',
     unit: '{row}',
@@ -1949,7 +2017,7 @@ export const TauMetrics = {
   agentEvidenceErasureTraces: defineCounter({
     name: 'tau.agent_evidence.erasure_traces',
     unit: '{trace}',
-    description: 'Langfuse traces moved through an erasure step, by outcome',
+    description: 'Langfuse trace deletion requests made for an erasure, by outcome',
     attributes: z.object({
       outcome: z.enum(agentEvidenceErasureOutcomes),
     }),
@@ -1972,6 +2040,16 @@ export const TauMetrics = {
     attributes: z.object({
       'tau.worker': z.enum(['delivery', 'lifecycle']),
       outcome: z.enum(['ok', 'error']),
+    }),
+  }),
+
+  agentEvidenceLangfuseUnits: defineCounter({
+    name: 'tau.agent_evidence.langfuse_units',
+    unit: '{unit}',
+    description:
+      'Langfuse billable units Tau wrote, by kind: an observation per span and a score per score Langfuse holds, and a trace per span with no parent, each counted once',
+    attributes: z.object({
+      kind: z.enum(agentEvidenceLangfuseUnitKinds),
     }),
   }),
 

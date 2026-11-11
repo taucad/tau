@@ -464,7 +464,7 @@ export const stageRuntimePackages = async (
 };
 
 /** The preparation target key (`<os>-<arch>[-<libc>]`) each packaged target's native closures are sealed for. */
-const nativePayloadTargets: Readonly<Record<RuntimeTarget, string | undefined>> = {
+const nativeClosureTargets: Readonly<Record<RuntimeTarget, string | undefined>> = {
   'darwin-arm64': 'darwin-arm64',
   'darwin-x64': 'darwin-x64',
   'linux-x64': 'linux-x64-glibc',
@@ -486,7 +486,7 @@ export type PreparedNativeClosure = Readonly<{
  * Prepare the desktop's native kernel closures for one target into a scratch store, exactly as the app prepares them
  * on first use (desktop first-use download blueprint, DS-1) and `tau prepare` does: from each package's
  * `tau-plugin.json` pins, through the same verify-before-write path and seal steps (build123d's bytecode), honouring
- * the managed profile (`TAU_PAYLOAD_DIR`, `TAU_PAYLOAD_MIRROR`) for where the bytes come from. The app ships none of
+ * the managed profile (`TAU_DEPENDENCY_DIR`, `TAU_DEPENDENCY_MIRROR`) for where the bytes come from. The app ships none of
  * them; the package's verification launches what a person would download.
  * @param options - The packaged target and a scratch directory the caller removes.
  * @returns The prepared closures; none for a target that runs no native kernel.
@@ -500,14 +500,14 @@ export const prepareNativeClosures = async (
     deployments?: readonly NativeKernelDeployment[];
   }>,
 ): Promise<readonly PreparedNativeClosure[]> => {
-  const target = nativePayloadTargets[options.target];
+  const target = nativeClosureTargets[options.target];
   if (target === undefined) {
     return [];
   }
-  /* Each bundled package with its seal step, launch set and directory, which payloads shipped inside it resolve from. */
+  /* Each bundled package with its seal step, launch set and directory, which dependency files shipped inside it resolve from. */
   const plugins = preparationPluginsOf(options.deployments ?? desktopNativeDeployments);
   const managed = readManagedPreparation(process.env);
-  const store = join(options.workRoot, 'payload-store');
+  const store = join(options.workRoot, 'dependency-store');
   await rm(options.workRoot, { recursive: true, force: true });
   await mkdir(store, { recursive: true });
   const host = createPreparationHost({
@@ -559,18 +559,18 @@ const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null;
 
 /**
- * The paths of the payloads a `tau-plugin.json` ships inside its package (`packagePath` origins), for every target.
+ * The paths of the dependency files a `tau-plugin.json` ships inside its package (`packagePath` origins), for every target.
  * @param manifest - The package's unparsed `tau-plugin.json`.
  * @returns The package-relative paths, each once.
  */
-export const packagePathPayloads = (manifest: unknown): readonly string[] => {
+export const packagePathDependencyFiles = (manifest: unknown): readonly string[] => {
   const paths = new Set<string>();
   const dependencies = isRecord(manifest) ? manifest['dependencies'] : undefined;
   for (const variants of isRecord(dependencies) ? Object.values(dependencies) : []) {
     for (const variant of Array.isArray(variants) ? variants : []) {
-      const payloads: unknown = isRecord(variant) ? variant['payloads'] : undefined;
-      for (const payload of Array.isArray(payloads) ? payloads : []) {
-        const origin: unknown = isRecord(payload) ? payload['origin'] : undefined;
+      const files: unknown = isRecord(variant) ? variant['files'] : undefined;
+      for (const file of Array.isArray(files) ? files : []) {
+        const origin: unknown = isRecord(file) ? file['origin'] : undefined;
         if (isRecord(origin) && origin['kind'] === 'packagePath' && typeof origin['path'] === 'string') {
           paths.add(origin['path']);
         }
@@ -581,7 +581,7 @@ export const packagePathPayloads = (manifest: unknown): readonly string[] => {
 };
 
 /**
- * Copy each native package's own payload files (its worker and support modules) into the app's resources, where main
+ * Copy each native package's own dependency files (its worker and support modules) into the app's resources, where main
  * prepares a kernel from on first use (`preparableNativeDeployments`). They are source files, not executables, so the
  * app signs and notarizes without them changing.
  * @param resources - The packaged app's resources directory.
@@ -589,7 +589,7 @@ export const packagePathPayloads = (manifest: unknown): readonly string[] => {
 export const stageNativePackageFiles = async (resources: string): Promise<void> => {
   await Promise.all(
     desktopNativeDeployments.flatMap((deployment) =>
-      packagePathPayloads(deployment.manifest).map(async (path) =>
+      packagePathDependencyFiles(deployment.manifest).map(async (path) =>
         cp(
           join(fileURLToPath(deployment.packageRoot), path),
           join(resources, nativePackageResources, deployment.package, path),

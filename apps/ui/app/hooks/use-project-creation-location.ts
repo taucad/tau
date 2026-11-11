@@ -12,16 +12,19 @@ import {
 } from '#filesystem/handle-store.js';
 import type { Workspace } from '#filesystem/handle-store.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
+import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import type {
   HomeProjectCreationLocation,
   ProjectCreationLocation,
   WorkspaceProjectCreationLocation,
-} from '#types/project-creation-location.types.js';
+} from '@taucad/ui-core/types/project-creation-location.types';
 import { projectCreationLocationsEqual, projectLocationDescriptor } from '#utils/project-creation-location.utils.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
-import { toast } from '#components/ui/sonner.js';
-import { isWorkspaceIdentityConflictError, workspaceIdentityConflictCopy } from '#filesystem/workspace-errors.js';
+import { toast } from '@taucad/ui/components/sonner';
+import {
+  isWorkspaceIdentityConflictError,
+  workspaceIdentityConflictCopy,
+} from '@taucad/ui-core/filesystem/workspace-errors';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 
 export type HomeLocationOption = {

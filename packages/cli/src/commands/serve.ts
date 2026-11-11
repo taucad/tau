@@ -9,7 +9,7 @@ import { dirname, join, resolve } from 'node:path';
 import {
   defaultConfigDirectory,
   defaultMachineProviders,
-  defaultPayloadStore,
+  defaultDependencyStore,
   handOffMintPath,
   startHostDaemon,
 } from '@taucad/host';
@@ -37,7 +37,7 @@ import { prepareServeUi } from '#serve-ui.js';
 import type { ServeUi } from '#serve-ui.js';
 import { stageUiEnvironment } from '#ui-environment.js';
 import { resolveZooAuthToken, cliZooProxyUrl } from '#zoo-proxy.js';
-import { requireGitToolchain } from '#commands/revisions.js';
+import { requireGitToolchain, tokenRevisionActor } from '#commands/revisions.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 import { cliRuntimeTelemetry } from '#runtime-telemetry.js';
 import { loadCloudHostObserver } from '#cloud-host-observer.js';
@@ -335,10 +335,17 @@ const agentOptions = async (
    * reason: a terminal has no cookie jar, and the device credential this daemon
    * paired with authenticates the relay only (C67). */
   const tauApiToken = await resolveAuthToken(args.gateway ?? args.apiUrl);
+  /* A1: the account that token belongs to is who every served project records as, until a renderer names its own
+   * session; without one, this device's pseudonym. Never the OS login name or an environment email. */
+  const revisionActor =
+    tauApiToken === undefined || tauApiToken === ''
+      ? undefined
+      : await tokenRevisionActor(args.gateway ?? args.apiUrl, tauApiToken);
   return {
     workspaceRoot: agentWorkspaceRoot(args.workspace, process.cwd()),
     tauCloudEnabled: tauCloudEnabled(),
     ...(tauApiToken === undefined || tauApiToken === '' ? {} : { tauApiToken }),
+    ...(revisionActor === undefined ? {} : { revisionActor }),
     /* The gateway lives on the Tau API, which is also the relay origin unless
      * the operator points somewhere else (a stub, or a self-hosted API). */
     gatewayBaseUrl: args.gateway ?? args.apiUrl,
@@ -398,7 +405,7 @@ export const acpAdapterResolveFrom = (from: string = import.meta.url): string =>
 /**
  * The native kernels this daemon serves (D37): each one its runtime children's definitions list.
  *
- * A runtime child reports the native deployments its runtime lists and, since it cannot read the payload store, asks
+ * A runtime child reports the native deployments its runtime lists and, since it cannot read the dependency store, asks
  * this process for each kernel's sealed closure when the kernel binds; this process answers from the store's launch
  * index, from the child's data alone, and a kernel that is not prepared answers `KERNEL_NOT_PREPARED`. `prepare_kernel`
  * prepares in this process, with its unrestricted network (D4), the kernels this CLI ships: a child runs project code,
@@ -449,9 +456,9 @@ export const serveNativeKernels = (
   };
   return {
     native: {
-      /* Beside the payload store and outside TMPDIR, which each runtime child may write. */
-      directory: join(dirname(defaultPayloadStore()), 'runtime-children'),
-      store: defaultPayloadStore(),
+      /* Beside the dependency store and outside TMPDIR, which each runtime child may write. */
+      directory: join(dirname(defaultDependencyStore()), 'runtime-children'),
+      store: defaultDependencyStore(),
       inspect: async (request) => {
         const { inspectReportedClosure } = await nativeKernels();
         return inspectReportedClosure(request);
@@ -685,7 +692,7 @@ const announceServed = async (served: {
 
 /**
  * Which UI `tau serve` serves: none (`--no-ui`), a directory (`--ui <dir>`, for development), or by default the
- * digest-pinned Tau UI layer from the payload store (charter W18).
+ * digest-pinned Tau UI layer from the dependency store (charter W18).
  *
  * @internal
  * @param value - The `--ui` value: a directory, `false` under `--no-ui`, or absent.
@@ -709,7 +716,7 @@ export const serveUiChoice = (
 const megabytes = (bytes: number): string => `${(bytes / 1_000_000).toFixed(1)} MB`;
 
 /**
- * Prepare the pinned Tau UI layer into the payload store, saying what it downloads (I5: automatic, with visible
+ * Prepare the pinned Tau UI layer into the dependency store, saying what it downloads (I5: automatic, with visible
  * progress). A sealed layer answers at once and says nothing; a download reports every tenth of its bytes on stderr.
  *
  * @param options - Cancellation, where the settled preparation is reported (runtime telemetry, T19), and the preparation
@@ -741,7 +748,7 @@ export const prepareStoreUi = async (
     },
   });
   if (ui.status === 'ready' && progress.announced) {
-    consola.success('The Tau UI is verified and sealed in the payload store.');
+    consola.success('The Tau UI is verified and sealed in the dependency store.');
   }
   return ui;
 };
@@ -904,7 +911,7 @@ export const serveCommand = defineCommand({
     ui: {
       type: 'string',
       description:
-        'Directory of a prebuilt Tau UI to serve instead of the digest-pinned one from the payload store (development); --no-ui serves agents only (TAU_HOST_UI_DIR)',
+        'Directory of a prebuilt Tau UI to serve instead of the digest-pinned one from the dependency store (development); --no-ui serves agents only (TAU_HOST_UI_DIR)',
       required: false,
       default: process.env['TAU_HOST_UI_DIR'],
     },

@@ -30,30 +30,32 @@ import { DatabaseService } from '@taucad/api-database';
 import { project, projectDeletion } from '@taucad/api-database/schema';
 import { PublicationRateLimiterService, RedisService } from '@taucad/api-redis';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
-import { StorageModule } from '#storage/storage.module.js';
-import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
-import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
+import { StorageModule } from '@taucad/api-object-storage/module';
+import { assertDestructiveTestBucketAllowed } from '@taucad/api-object-storage/testing/destructive-test-bucket-guard';
+import { ProjectAccessService } from '@taucad/api-projects/collaboration/project-access.service';
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
-import type { ProjectRole } from '#api/collaboration/project-access.service.js';
-import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
-import { pktLine, repositoryStoreKey } from '#api/git/git.constants.js';
+import type { ProjectRole } from '@taucad/api-projects/collaboration/project-access.service';
+import { commercialEntitlementsKey } from '@taucad/api-projects/entitlements/commercial-entitlements';
+import { authorshipRefusals, pktLine, repositoryStoreKey } from '@taucad/api-git-core/git.constants';
 import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
-import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
+import { tenantLfsObjectKey } from '@taucad/api-git-core/lfs-keys';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
+import { GitPushesController } from '#api/git/pushes.controller.js';
+import type { PushPage } from '#api/git/pushes.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
-import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
-import type { StorageGitService } from '#api/git/worker/storage-git.service.js';
-import { startStorageHop } from '#testing/storage-hop.js';
-import type { StorageHop } from '#testing/storage-hop.js';
-import { RepositoryStoreError } from '#api/git/store/errors.js';
-import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
-import { livePackBound } from '#api/git/store/limits.js';
-import { hydrateLease } from '#api/git/store/lease.js';
-import { repositoryLocator } from '#api/git/store/locator.js';
-import type { RepositoryStore, StoredObject } from '#api/git/store/port.js';
+import { gitExecutorKey } from '@taucad/api-git-core/forwarding/git-executor';
+import type { StorageGitService } from '@taucad/api-git-core/worker/storage-git.service';
+import { startStorageHop } from '@taucad/api-git-core/testing/storage-hop';
+import type { StorageHop } from '@taucad/api-git-core/testing/storage-hop';
+import { RepositoryStoreError } from '@taucad/api-git-core/store/errors';
+import { S3RepositoryStore } from '@taucad/api-git-core/store/s3-repository-store';
+import { livePackBound } from '@taucad/api-git-core/store/limits';
+import { hydrateLease } from '@taucad/api-git-core/store/lease';
+import { repositoryLocator } from '@taucad/api-git-core/store/locator';
+import type { RepositoryStore, StoredObject } from '@taucad/api-git-core/store/port';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { createGitTestListener } from '#api/git/git-test-listener.js';
 
@@ -89,6 +91,12 @@ const state = {
   lfsBytes: 0,
   generation: 0,
   derivedGeneration: 0,
+  /**
+   * `project.origin` (B4). Stock git writes this suite's commits, as on a
+   * project linked to GitHub; the authorship rows set `local-mirror`, the
+   * origin every project Tau registers carries.
+   */
+  origin: 'github' as 'github' | 'local-mirror',
 };
 
 /** What one request cost the plan lookups, so the read path's cost is a fact. */
@@ -243,7 +251,11 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
         where: () =>
           Object.assign(Promise.resolve([] as unknown[]), {
             limit: async () =>
-              table === projectDeletion ? [] : table === project ? [{ storageAccountId: null }] : rows(),
+              table === projectDeletion
+                ? []
+                : table === project
+                  ? [{ storageAccountId: null, origin: state.origin }]
+                  : rows(),
           }),
       }),
     });
@@ -305,11 +317,23 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
         return { projectId: project, ownerId, role: caller.role };
       },
       invalidate: () => undefined,
+      /* Q2: ids, names and roles only. The guard's users carry an address; the directory never does. */
+      directory: async (_project: string, alsoNamed: readonly string[] = []) => {
+        const members = Object.entries(callers).flatMap(([label, caller]) =>
+          caller.role === undefined ? [] : [{ accountId: caller.id, name: `Member ${label}`, role: caller.role }],
+        );
+        return [
+          ...members,
+          ...alsoNamed
+            .filter((accountId) => !members.some((member) => member.accountId === accountId))
+            .map((accountId) => ({ accountId })),
+        ];
+      },
     };
 
     @Module({
       imports: [ConfigModule.forRoot({ validate: getEnvironment, isGlobal: true }), StorageModule],
-      controllers: [GitController, GitProxyController],
+      controllers: [GitController, GitProxyController, GitPushesController],
       providers: [
         GitRepositoryService,
         GitLfsService,
@@ -797,6 +821,219 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(await refused.text()).toContain('write access');
   }, 120_000);
 
+  /**
+   * A3, Q1–Q3: who pushed what, from the server's own record. Chats are left
+   * out, no email is ever in the body, and the account behind a push that
+   * brought an anonymous commit reaches the owner only.
+   */
+  it('reads the push records to members, hiding an anonymous pusher from all but the owner', async () => {
+    const clone = path.join(workspace, 'push-records');
+    await gitOk(['clone', remoteFor(callers.writer.token), clone], workspace);
+    await writeFile(path.join(clone, 'attributed.ts'), 'export const attributed = 1;\n', 'utf8');
+    await gitOk(['add', '.'], clone);
+    await gitOk(['commit', '-m', 'attributed save'], clone);
+    const attributed = await runGit(
+      ['push', 'origin', 'HEAD:refs/heads/push-attributed', 'HEAD:refs/tau/chats/chat_push_records'],
+      clone,
+    );
+    expect(attributed.code, attributed.stderr).toBe(0);
+    const attributedHead = await gitOk(['rev-parse', 'HEAD'], clone);
+    const attributedTip = attributedHead.stdout.trim();
+
+    await writeFile(path.join(clone, 'anonymous.ts'), 'export const anonymous = 1;\n', 'utf8');
+    await gitOk(['add', '.'], clone);
+    const committed = await runGit(['commit', '-m', 'anonymous save'], clone, {
+      GIT_AUTHOR_NAME: 'Anonymous',
+      GIT_AUTHOR_EMAIL: 'anon:3fa9c1d2@users.noreply.tau.new',
+    });
+    expect(committed.code, committed.stderr).toBe(0);
+    const anonymous = await runGit(['push', 'origin', 'HEAD:refs/heads/push-anonymous'], clone);
+    expect(anonymous.code, anonymous.stderr).toBe(0);
+    const anonymousHead = await gitOk(['rev-parse', 'HEAD'], clone);
+    const anonymousTip = anonymousHead.stdout.trim();
+
+    const read = async (token: string, query = ''): Promise<{ status: number; body: string }> => {
+      const response = await fetch(`${baseUrl}/v1/projects/${projectId}/git/pushes${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return { status: response.status, body: await response.text() };
+    };
+    const entryFor = (page: PushPage, ref: string): PushPage['pushes'][number] | undefined =>
+      page.pushes.find((entry) => entry.tips.some((tip) => tip.ref === ref));
+
+    const owner = await read(callers.owner.token);
+    expect(owner.status).toBe(200);
+    expect(owner.body).not.toContain('@');
+    const ownerPage = JSON.parse(owner.body) as PushPage;
+    const generations = ownerPage.pushes.map((entry) => entry.generation);
+    expect(generations).toStrictEqual(generations.toSorted((left, right) => left - right));
+    expect(ownerPage.pushes.flatMap((entry) => entry.tips).every((tip) => tip.ref.startsWith('refs/heads/'))).toBe(
+      true,
+    );
+    expect(entryFor(ownerPage, 'refs/heads/push-attributed')).toMatchObject({
+      pusher: { kind: 'account', accountId: callers.writer.id, name: 'Member writer' },
+      viaDevice: false,
+      tips: [{ ref: 'refs/heads/push-attributed', tip: attributedTip }],
+    });
+    expect(entryFor(ownerPage, 'refs/heads/push-attributed')).not.toHaveProperty('anonymous');
+    expect(entryFor(ownerPage, 'refs/heads/push-anonymous')).toMatchObject({
+      pusher: { kind: 'account', accountId: callers.writer.id },
+      anonymous: true,
+      tips: [{ ref: 'refs/heads/push-anonymous', tip: anonymousTip }],
+    });
+    expect(ownerPage.members.map((member) => member.accountId)).toContain(callers.writer.id);
+
+    for (const member of [callers.reader, callers.writer]) {
+      // oxlint-disable-next-line no-await-in-loop -- two members, read one after the other
+      const answer = await read(member.token);
+      expect(answer.status).toBe(200);
+      expect(answer.body).not.toContain('@');
+      const page = JSON.parse(answer.body) as PushPage;
+      const hidden = entryFor(page, 'refs/heads/push-anonymous');
+      expect(hidden).toStrictEqual({
+        generation: entryFor(ownerPage, 'refs/heads/push-anonymous')?.generation,
+        pushedAt: entryFor(ownerPage, 'refs/heads/push-anonymous')?.pushedAt,
+        pusher: { kind: 'anonymous' },
+        viaDevice: false,
+        tips: [{ ref: 'refs/heads/push-anonymous', tip: anonymousTip }],
+      });
+      expect(entryFor(page, 'refs/heads/push-attributed')?.pusher).toMatchObject({ accountId: callers.writer.id });
+    }
+
+    /* Paging by generation: after the attributed push, only what followed it. */
+    const attributedGeneration = entryFor(ownerPage, 'refs/heads/push-attributed')?.generation ?? 0;
+    const laterAnswer = await read(callers.owner.token, `?after=${String(attributedGeneration)}`);
+    const later = JSON.parse(laterAnswer.body) as PushPage;
+    expect(later.pushes.every((entry) => entry.generation > attributedGeneration)).toBe(true);
+    expect(entryFor(later, 'refs/heads/push-anonymous')).toBeDefined();
+    expect(entryFor(later, 'refs/heads/push-attributed')).toBeUndefined();
+    expect(later.next).toBeUndefined();
+    const invalid = await read(callers.owner.token, '?after=-1');
+    expect(invalid.status).toBe(400);
+
+    /* A caller with no relation is told the project does not exist (D27), and learns nothing else. */
+    const stranger = await read(callers.stranger.token);
+    expect(stranger.status).toBe(404);
+    expect(stranger.body).not.toContain(callers.writer.id);
+    expect(stranger.body).not.toContain('refs/heads');
+  }, 120_000);
+
+  /**
+   * B4 (A3, Q11; Revisions Policy rule 19): every commit new to the project's
+   * history names the pushing account, whatever its Tau record's version, on a
+   * project Tau registered. The records are the shape the client writes today.
+   * No refusal repeats an id, a name or an address the commit recorded.
+   */
+  it('refuses a revision that does not name its pusher, and one that carries an email, each with its own reason', async () => {
+    state.origin = 'local-mirror';
+    try {
+      const clone = path.join(workspace, 'authorship');
+      await gitOk(['clone', remoteFor(callers.writer.token), clone], workspace);
+      const cloned = await gitOk(['rev-parse', 'HEAD'], clone);
+      const base = cloned.stdout.trim();
+      let file = 0;
+      /** One revision on the base, recorded as `actor` and authored at `email`. */
+      const revise = async (email: string, record?: Readonly<Record<string, unknown>>): Promise<void> => {
+        await gitOk(['reset', '--quiet', '--hard', base], clone);
+        file += 1;
+        await writeFile(
+          path.join(clone, `authorship-${String(file)}.ts`),
+          `export const n = ${String(file)};\n`,
+          'utf8',
+        );
+        await gitOk(['add', '.'], clone);
+        const message =
+          record === undefined
+            ? ['-m', 'Edited outside Tau']
+            : [
+                '-m',
+                'Saved',
+                '-m',
+                `Tau-Metadata: ${JSON.stringify({
+                  version: 1,
+                  parents: [base],
+                  provenance: { source: 'user', createdAt: Date.now(), ...record },
+                  summary: { generated: 'Saved' },
+                })}`,
+              ];
+        const committed = await runGit(['commit', ...message], clone, {
+          GIT_AUTHOR_NAME: 'Someone',
+          GIT_AUTHOR_EMAIL: email,
+          GIT_COMMITTER_NAME: 'Tau',
+          GIT_COMMITTER_EMAIL: 'noreply@tau.new',
+        });
+        expect(committed.code, committed.stderr).toBe(0);
+      };
+      const push = async (branch: string) => runGit(['push', 'origin', `HEAD:refs/heads/${branch}`], clone);
+      const noreply = (id: string): string => `${id}@users.noreply.tau.new`;
+
+      /* B pushing a revision signed as A. */
+      await revise(noreply(callers.owner.id), {
+        actorId: callers.owner.id,
+        actor: { kind: 'user', id: callers.owner.id, name: 'Member owner', email: `${callers.owner.id}@test.com` },
+      });
+      const forged = await push('authorship-forged');
+      expect(forged.code).not.toBe(0);
+      expect(forged.stderr).toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
+      expect(forged.stderr).not.toContain(callers.owner.id);
+      expect(forged.stderr).not.toContain('Member owner');
+      expect(await advertised()).not.toContain('authorship-forged');
+
+      /* An agent working for A, pushed by B. */
+      await revise(noreply(callers.owner.id), {
+        source: 'agent',
+        actorId: 'agent',
+        actor: { kind: 'agent', id: 'agent', runId: 'run_b4', onBehalfOf: { kind: 'user', id: callers.owner.id } },
+      });
+      const forgedAgent = await push('authorship-forged-agent');
+      expect(forgedAgent.code).not.toBe(0);
+      expect(forgedAgent.stderr).toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
+
+      /* A Tau-written revision carrying an environment email (Q11). */
+      await revise('writer@example.com', {
+        actorId: callers.writer.id,
+        actor: { kind: 'user', id: callers.writer.id, email: 'writer@example.com' },
+      });
+      const leaked = await push('authorship-email');
+      expect(leaked.code).not.toBe(0);
+      expect(leaked.stderr).toContain(authorshipRefusals.GIT_PUSH_AUTHOR_ADDRESS);
+      expect(leaked.stderr).not.toContain('writer@example.com');
+
+      /* A commit Tau did not record, on a project not linked to GitHub. */
+      await revise('someone@example.com');
+      const outside = await push('authorship-outside');
+      expect(outside.code).not.toBe(0);
+      expect(outside.stderr).toContain(authorshipRefusals.GIT_PUSH_NOT_RECORDED_BY_TAU);
+      expect(await advertised()).not.toMatch(/authorship-(?:forged|email|outside)/u);
+
+      /* …and the same commit on a project linked to GitHub. */
+      state.origin = 'github';
+      const linked = await push('authorship-outside');
+      expect(linked.code, linked.stderr).toBe(0);
+      state.origin = 'local-mirror';
+
+      /* The pusher's own revision, and an agent's on the pusher's behalf. */
+      await revise(noreply(callers.writer.id), {
+        actorId: callers.writer.id,
+        actor: { kind: 'user', id: callers.writer.id, name: 'Member writer' },
+      });
+      const own = await push('authorship-own');
+      expect(own.code, own.stderr).toBe(0);
+      await revise(noreply(callers.writer.id), {
+        source: 'agent',
+        actorId: 'agent',
+        actor: { kind: 'agent', id: 'agent', runId: 'run_b4', onBehalfOf: { kind: 'user', id: callers.writer.id } },
+      });
+      const onBehalf = await push('authorship-agent');
+      expect(onBehalf.code, onBehalf.stderr).toBe(0);
+      const advertisement = await advertised();
+      expect(advertisement).toContain('refs/heads/authorship-own');
+      expect(advertisement).toContain('refs/heads/authorship-agent');
+    } finally {
+      state.origin = 'github';
+    }
+  }, 120_000);
+
   /** Ruling P55: an account with no relation to the project is told it does not exist. */
   it('answers a stranger with 404 rather than 403', async () => {
     const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
@@ -1040,7 +1277,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
   }, 120_000);
 
   it('refuses an over-quota LFS batch with 413 and the file list', async () => {
-    state.storageBytes = 10 * 1024 ** 3 - 1024;
+    state.storageBytes = 100 * 1024 ** 3 - 1024;
     const objects = [
       { oid: 'b'.repeat(64), size: 4096 },
       { oid: 'c'.repeat(64), size: 8192 },
@@ -1060,7 +1297,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     /* D17: largest first, in the sentence addressed to the owner of a Pro plan. */
     expect(body.files?.map((file) => file.oid)).toEqual(objects.toReversed().map((object) => object.oid));
     expect(body.message).toBe(
-      'This push needs more room than your 10 GB storage plan has left, so it was not backed up.',
+      'This push needs more room than your 100 GB storage plan has left, so it was not backed up.',
     );
   });
 

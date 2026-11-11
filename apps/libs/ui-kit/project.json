@@ -1,0 +1,17 @@
+{
+  "name": "ui-kit",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/ui-kit",
+  "projectType": "library",
+  "tags": ["scope:ui", "type:app-lib", "layer:ui"],
+  "targets": {
+    "generate-svg-sprite": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "node --import @oxc-node/core/register scripts/generate-svg-sprite.mts"
+      }
+    }
+  }
+}

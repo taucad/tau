@@ -27,6 +27,7 @@ import type { CreateNodeMachineHostInput } from '@taucad/runtime/host/node';
 import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import { nodeGrepMatcherWorker } from '@taucad/runtime/filesystem/node';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
+import type { RevisionUserActor } from '@taucad/revisions';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types';
 
@@ -191,6 +192,12 @@ export type HostDaemonAgentOptions = {
    * here and never written under a project.
    */
   readonly tauApiToken?: string | undefined;
+  /**
+   * The Tau account `tauApiToken` belongs to, which every project this daemon serves records as (A1).
+   *
+   * Absent, a served project records this device's pseudonym until a renderer names its session with `setActor`.
+   */
+  readonly revisionActor?: RevisionUserActor | undefined;
   /** Default model row; one admission may override it. */
   readonly model: AgentSessionModel;
   /** Default system prompt; one admission may override it. */
@@ -262,7 +269,7 @@ export type HostDaemonOptions = {
     readonly args?: readonly string[];
     /**
      * The native kernels the runtime children's definitions list (D37): each child reports its deployments and asks
-     * this daemon for each kernel's sealed closure, since it cannot read the payload store. The child may not spawn,
+     * this daemon for each kernel's sealed closure, since it cannot read the dependency store. The child may not spawn,
      * so this daemon starts each native worker on its behalf, only from a closure it answered and only through the OS
      * sandbox. Absent, every native kernel in a child refuses as not prepared.
      */
@@ -1002,6 +1009,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
        */
       apiBaseUrl: options.relayUrl.origin,
       syncTelemetryPlacement: 'daemon',
+      ...(agent.revisionActor === undefined ? {} : { revisionActor: agent.revisionActor }),
       ...(observeChats === undefined ? {} : { observeChats: (read) => observeChats(projectId, read) }),
       /* The session, not this daemon's device credential: the Git endpoints and
        * `PUT /v1/projects/<id>` authenticate an account, and a paired device

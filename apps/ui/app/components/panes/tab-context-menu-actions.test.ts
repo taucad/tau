@@ -10,7 +10,7 @@ import {
 
 const mocks = vi.hoisted(() => ({ error: vi.fn() }));
 
-vi.mock('#components/ui/sonner.js', () => ({ toast: { error: mocks.error } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: mocks.error } }));
 
 const clipboardDescriptor = Object.getOwnPropertyDescriptor(globalThis.navigator, 'clipboard');
 

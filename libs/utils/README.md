@@ -1,6 +1,6 @@
 # @taucad/utils
 
-Shared utilities for the Tau CAD platform. Exposed as granular subpaths so consumers only pull in what they use.
+Shared utilities for the Tau platform. Exposed as granular subpaths so consumers only pull in what they use.
 
 ## Subpaths
 
@@ -13,5 +13,6 @@ Shared utilities for the Tau CAD platform. Exposed as granular subpaths so consu
 - `@taucad/utils/error` — error helpers
 - `@taucad/utils/cache` — cache helpers
 - `@taucad/utils/worktree-database` — per-worktree local Postgres forks (node only)
+- `@taucad/utils/keyed-mutex` — per-key serialiser for asynchronous tasks
 
 Part of the [Tau](https://github.com/taucad/tau) monorepo.

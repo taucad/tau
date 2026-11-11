@@ -15,9 +15,9 @@ import {
   ChatToolCardHeader,
   ChatToolCardIcon,
   ChatToolCardTitle,
-} from '#components/chat/chat-tool-card.js';
-import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
-import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
+} from '@taucad/chat-ui/components/chat-tool-card';
+import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
+import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { useExportToDisk } from '#components/files/use-export-to-disk.js';
 import { ViewerLink } from '#components/files/viewer-link.js';
@@ -31,7 +31,7 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
+import { downloadExportArtifactSet } from '@taucad/ui-core/utils/export-artifact-set.utils';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 /** Matches {@link chat-tool-file-operation.tsx} action buttons — label hidden until `@xs/code`. */

@@ -26,7 +26,7 @@ describe('assertKernelRosterCoverage', () => {
         catalog,
         omitted: {
           zoo: 'credentialed: the fixture has no proxy token',
-          build123d: 'native: composed from the payload store',
+          build123d: 'native: composed from the dependency store',
         },
       });
     }).not.toThrow();

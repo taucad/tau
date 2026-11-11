@@ -12,8 +12,7 @@ import {
   planCards,
   closing,
 } from '#www/page-components.js';
-import { Button } from '@taucad/ui/components/button';
-import { appOrigin } from '#www/environment.js';
+import { AgentPrompt } from '#www/agent-prompt.js';
 import { MarketingPage } from '#app/marketing-page.js';
 import { loader as loadMarketingPage } from '#app/route-loader.server.js';
 export const loader: typeof loadMarketingPage = loadMarketingPage;
@@ -24,7 +23,8 @@ export const content = (): React.JSX.Element => (
       <div className='cell hero-copy'>
         {kicker('AI-native CAD')}
         <h1 id='hero-title'>
-          <span className='w w1'>Design</span> <span className='w w2'>Verify</span> <span className='w w3'>Make.</span>
+          <span className='w w1'>Design.</span> <span className='w w2'>Verify.</span>{' '}
+          <span className='w w3'>Build.</span>
         </h1>
         <p className='lead'>
           Describe the part you need. Tau builds it as editable parametric CAD, checks the geometry against your
@@ -38,23 +38,7 @@ export const content = (): React.JSX.Element => (
         </div>
         <div className='agent-prompt'>
           <p className='fine'>Using Claude Code or Codex? Paste this into your agent:</p>
-          {/* One text node, so the UI edge function can name staging's own agent page before React hydrates it. */}
-          <code id='agent-prompt-text' suppressHydrationWarning>
-            {`Install the Tau plugin from ${appOrigin}/llms.txt`}
-          </code>
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            data-copy='agent-prompt-text'
-            data-event='cta'
-            data-placement='hero-agent'
-            aria-label='Copy the agent prompt'
-            hidden
-          >
-            Copy
-          </Button>
-          <span role='status' className='sr-only' />
+          <AgentPrompt />
         </div>
       </div>
       {heroStage()}
@@ -96,8 +80,8 @@ export const content = (): React.JSX.Element => (
         {kicker('Pricing')}
         <h2 id='pricing-title'>Free to start.</h2>
         <p>
-          Use Tau for free and pay for hosted AI with credits. Pro is US$20 a month and adds 2,000 credits and Tau Cloud
-          backup and sync.{' '}
+          Use Tau for free and pay for hosted AI with credits. Pro is $20 a month and adds 2,000 credits a month and 100
+          GB of cloud backup.{' '}
           <SiteLink className='text-link' href='/pricing/'>
             Compare plans →
           </SiteLink>

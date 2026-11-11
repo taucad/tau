@@ -15,7 +15,7 @@ import type { RevisionCard, RevisionsView } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import type { ChatSidebarStatus } from '#hooks/use-sidebar-status.js';
-import { requestRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
+import { requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { initialChatProjection, reduceChatProjection } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 
@@ -48,7 +48,6 @@ vi.mock('#hooks/use-revisions.js', () => ({
   useRevisionsOnLine: vi.fn(),
   useWithRestoreTargets: vi.fn(),
   revisionPageSize: 50,
-  actorOf: vi.fn(),
   useRevisions: vi.fn(),
   useRevisionCards: vi.fn(),
   useTurnRevision: vi.fn(),
@@ -91,7 +90,7 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
     },
   }),
 }));
-vi.mock('#routes/w.$workspace.$project/revision-reveal.js', () => ({
+vi.mock('@taucad/project-workspace/utils/revision-reveal', () => ({
   requestRevisionReveal: vi.fn(),
   consumeRevisionReveal: vi.fn(),
   useRevisionReveal: vi.fn(),

@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(196);
+    expect(metrics).toHaveLength(201);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -87,7 +87,7 @@ describe('TauMetrics', () => {
 
   it('should bound the R2 bucket label to roles, so a bucket name never becomes a label value', () => {
     const bucket = TauMetrics.r2StoredBytes.attributes.shape['tau.r2.bucket'];
-    expect(bucket.options).toEqual(['public', 'private', 'other']);
+    expect(bucket.options).toEqual(['public', 'private', 'downloads', 'dependencies', 'other']);
     expect(bucket.safeParse('tau-content-staging').success).toBe(false);
   });
 
@@ -594,7 +594,7 @@ describe('TauMetrics', () => {
     expect(TauMetrics.chatToolResultMediaPreserved.unit).toBe('{preservation}');
   });
 
-  /* R9: the LangChain plane's agent-loop metrics have no emitter on the Pi host. Safeguards and compactions moved to
+  /* R9: the former server-side agent loop's metrics have no emitter on the Pi host. Safeguards and compactions moved to
    * client-reported `tau.agent.*` successors; tool calls are `tau.agent.tool_calls`; the rest had no consumer. */
   it.each([
     'genAiToolInvocations',
@@ -626,6 +626,31 @@ describe('TauMetrics', () => {
         'compaction.outcome': 'generated',
       }).success,
     ).toBe(false);
+  });
+
+  it('should declare the client-reported prefix-break counters with bounded labels', () => {
+    expect(TauMetrics.agentPrefixBreaks.name).toBe('tau.agent.prefix_breaks');
+    expect(TauMetrics.agentReasoningOmittedBlocks.name).toBe('tau.agent.reasoning_omitted_blocks');
+    const labels = {
+      'agent.id': 'tau',
+      'prefix_break.cause': 'unsanctioned',
+      'gen_ai.provider.name': 'anthropic',
+      'tau.prompt_cache.outcome': 'miss',
+    };
+    expect(TauMetrics.agentPrefixBreaks.attributes.safeParse(labels).success).toBe(true);
+    expect(
+      TauMetrics.agentPrefixBreaks.attributes.safeParse({ ...labels, 'prefix_break.cause': 'cosmic-ray' }).success,
+    ).toBe(false);
+    expect(
+      TauMetrics.agentPrefixBreaks.attributes.safeParse({ ...labels, 'gen_ai.provider.name': 'acme' }).success,
+    ).toBe(false);
+    expect(
+      TauMetrics.agentPrefixBreaks.attributes.safeParse({ ...labels, 'tau.prompt_cache.outcome': 'warm' }).success,
+    ).toBe(false);
+    expect(
+      TauMetrics.agentReasoningOmittedBlocks.attributes.safeParse({ 'agent.id': 'tau', 'prefix_break.cause': 'tools' })
+        .success,
+    ).toBe(true);
   });
 
   it('should expose the prompt-section-size histogram with the canonical OTEL name', () => {
@@ -672,22 +697,26 @@ describe('TauMetrics', () => {
     const series = [
       TauMetrics.agentEvidenceAdmissions,
       TauMetrics.agentEvidenceDeliveries,
+      TauMetrics.agentEvidenceSuperseded,
       TauMetrics.agentEvidenceBacklogRows,
       TauMetrics.agentEvidenceBacklogHeldBytes,
       TauMetrics.agentEvidenceErasureTraces,
       TauMetrics.agentEvidenceLifecycleRecords,
       TauMetrics.agentEvidencePasses,
+      TauMetrics.agentEvidenceLangfuseUnits,
     ];
     expect(
       Object.fromEntries(series.map((metric) => [toPrometheusName(metric.name, metric.type), metric.type])),
     ).toEqual({
       tau_agent_evidence_admissions_total: 'counter',
       tau_agent_evidence_deliveries_total: 'counter',
+      tau_agent_evidence_superseded_receipts_total: 'counter',
       tau_agent_evidence_backlog_rows: 'gauge',
       tau_agent_evidence_backlog_held_bytes: 'gauge',
       tau_agent_evidence_erasure_traces_total: 'counter',
       tau_agent_evidence_lifecycle_records_total: 'counter',
       tau_agent_evidence_passes_total: 'counter',
+      tau_agent_evidence_langfuse_units_total: 'counter',
     });
     for (const metric of series) {
       for (const label of Object.values(metric.attributes.shape)) {
@@ -702,6 +731,15 @@ describe('TauMetrics', () => {
       }).success,
     ).toBe(true);
     expect(TauMetrics.agentEvidenceDeliveries.attributes.safeParse({ outcome: 'http-503' }).success).toBe(false);
+  });
+
+  /* Langfuse blueprint LW24 (ruling 13): Hobby's 50k units are traces, observations and scores, counted by kind only. */
+  it('should count the Langfuse units Tau writes by kind alone', () => {
+    const units = TauMetrics.agentEvidenceLangfuseUnits;
+
+    expect(units.attributes.shape.kind.options).toEqual(['trace', 'observation', 'score']);
+    expect(Object.keys(units.attributes.shape)).toEqual(['kind']);
+    expect(units.unit).toBe('{unit}');
   });
 
   it('should use lowercase dot-delimited names for all metrics', () => {

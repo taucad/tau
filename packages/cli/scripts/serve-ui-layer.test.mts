@@ -128,7 +128,7 @@ describe('pinLayer', () => {
     const pin = JSON.parse(await readFile(pinPath, 'utf8')) as Record<string, unknown>;
     expect(pin).toEqual(composePin(record));
     expect(pin['urls']).toEqual([
-      `https://cdn.tau.new/blobs/sha256/${record.sha256}`,
+      `https://dependencies.tau.new/blobs/sha256/${record.sha256}`,
       `https://github.com/taucad/tau/releases/download/${record.tag}/${layerAsset}`,
     ]);
     /* The comment is oxfmt's and the operator's; only the pin itself is compared. */

@@ -2,14 +2,14 @@ import { useEffect, useMemo, useReducer } from 'react';
 import { useSelector } from '@xstate/react';
 import { DropdownMenuLabel, DropdownMenuSeparator } from '@taucad/ui/components/dropdown-menu';
 import { useChatSelector } from '#hooks/use-chat.js';
-import { formatRelativeTime } from '#utils/date.utils.js';
+import { formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
 import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { useModels } from '#hooks/use-models.js';
 import { useProject } from '#hooks/use-project.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
-import { SvgIcon } from '#components/icons/svg-icon.js';
-import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
+import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
+import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 import {
   formatReceiptTotal,
   sumReceiptCredits,

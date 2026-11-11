@@ -11,8 +11,8 @@ import { gltfEdgeDetection } from '@taucad/middleware';
 import { writeGlb } from '@taucad/geometry-core';
 import { z } from 'zod';
 import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
-import { defaultOperationTimeout } from '#constants/editor.constants.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { defaultOperationTimeout } from '@taucad/ui-core/constants/editor.constants';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import {
   cadMachine,
   disposeCadRuntime,

@@ -76,7 +76,7 @@ vi.mock('@taucad/ui/components/combobox-responsive', () => ({
   },
 }));
 
-vi.mock('#components/icons/svg-icon.js', () => ({
+vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({
   SvgIcon: ({ id }: { readonly id?: string }) => <span data-testid='svg-icon'>{id}</span>,
 }));
 

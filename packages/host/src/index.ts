@@ -30,7 +30,7 @@ export type {
   HostJobRunnerRegistration,
 } from '#job-attempt-host.js';
 export type { HostCredential } from '#credential-store.js';
-export { defaultConfigDirectory, defaultPayloadStore } from '#credential-store.js';
+export { defaultConfigDirectory, defaultDependencyStore } from '#credential-store.js';
 export {
   handOffMintPath,
   handOffSessionPath,
@@ -43,6 +43,7 @@ export { startRunReporter } from '#run-reporter.js';
 export type { RunReporter, RunReporterOptions } from '#run-reporter.js';
 export type { HostRunState } from '#host.schemas.js';
 export { hostRevisionActor } from '#revision-actor.js';
+export type { HostRevisionActorInput, HostRevisionActorResolver } from '#revision-actor.js';
 export {
   createProjectRevisionPort,
   createProjectRevisions,

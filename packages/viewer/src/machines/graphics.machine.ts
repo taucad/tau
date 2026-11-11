@@ -41,6 +41,9 @@ import { viewerFirstFrame } from '#lib/viewer-events.js';
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
+import { canvasMachine } from '#machines/canvas.machine.js';
+import type { CanvasRef, CanvasSurfaceKind } from '#machines/canvas.machine.js';
+import type { webglContextMachine } from '#machines/webgl-context.machine.js';
 import type { MeasurementAnchor, MeasurementRecord, MeasurementOperation } from '#constants/measurement.types.js';
 
 /**
@@ -177,7 +180,7 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
  *   `currentMeasurementStart`, `modelInteractionUnitId` and `selectedSectionCutId`.
  * - **ephemeral** -- derived from geometry, the canvas or a pointer on every mount, never seeded:
  *   `gridSizes`, `gridSizesComputed`, `cadUnits`, `cameraVisibleSpan`, `geometryRadius`,
- *   `geometryCenter`, `resolvedGraphicsBackend`, `activeRenderer`, `webGpuAvailable`, `webGpuProbeSettled`, `hoveredSectionCutId`,
+ *   `geometryCenter`, `resolvedGraphicsBackend`, `canvas`, `webGpuAvailable`, `hoveredSectionCutId`,
  *   `committedSectionCuts` (what the caps last committed),
  *   `hoveredMeasurementId`, `measureSnapDistance`, every
  *   suppression and interaction flag, `pickableMeshesVersion`, `geometry`, `geometryKey` and
@@ -232,27 +235,22 @@ export interface GraphicsContext {
   upDirection: 'x' | 'y' | 'z';
   /** User preference (`auto` uses runtime GPU probe). */
   graphicsBackendPreference: GraphicsBackendPreference;
-  /** Probe result cached after startup (invoked probe). */
-  webGpuAvailable: boolean;
   /**
-   * Whether the capability probe has answered (or failed, or run out of time). Until then a WebGPU-preferring viewer
-   * mounts no canvas: a canvas mounted on WebGL meanwhile would be thrown away for a WebGPU one, and on a software
-   * adapter its work also delays the adapter answer.
+   * Probe result cached after startup (the `backend` region's invoked probe). Until the probe answers, the `backend`
+   * region is `probing` and a WebGPU-preferring viewer mounts no canvas: a canvas mounted on WebGL meanwhile would be
+   * thrown away for a WebGPU one, and on a software adapter its work also delays the adapter answer.
    */
-  webGpuProbeSettled: boolean;
+  webGpuAvailable: boolean;
   /** Capability-derived candidate; initialization can still fall back to WebGL. */
   resolvedGraphicsBackend: ResolvedGraphicsBackend;
-  /** Successfully initialized canvas; cleared on matching loss or teardown, never persisted. */
-  activeRenderer: Readonly<{ canvasId: string; backend: ResolvedGraphicsBackend }> | undefined;
   /**
-   * The mounted canvas that draws frames, and whether its first frame is on screen. Only a Three canvas sets it, or the
-   * placeholder that holds its place while the WebGPU probe runs, so a stage showing other content (an SVG) is never
-   * waiting. The stage is busy while `presented` is false.
+   * The mounted surface's canvas actor, which owns the renderer lifecycle (`creating → ready → presented ; lost ;
+   * failed`). Only a Three canvas attaches one, or the placeholder that holds its place while the WebGPU probe runs, so
+   * a stage showing other content (an SVG) is never waiting.
    *
-   * Assumes one canvas per graphics actor: a second canvas mounted on the same actor replaces the first one's entry, and
-   * the stage would then wait only on whichever mounted last.
+   * One canvas per graphics actor: a second surface attaching replaces the first one's actor.
    */
-  canvasPresentation: Readonly<{ canvasId: string; presented: boolean }> | undefined;
+  canvas: Readonly<{ canvasId: string; ref: CanvasRef }> | undefined;
 
   // Section view state
   isSectionViewActive: boolean;
@@ -343,14 +341,23 @@ export type GraphicsEvent =
   | { type: 'setGraphicsBackendPreference'; payload: GraphicsBackendPreference }
   /** A WebGPU canvas on this page could not present, or lost its device to the browser: WebGPU is off for the page. */
   | { type: 'webGpuCanvasLost' }
-  | { type: 'rendererInitialized'; payload: NonNullable<GraphicsContext['activeRenderer']> }
-  | { type: 'rendererRemoved'; canvasId: string }
-  /** A canvas that draws frames has mounted; the stage waits for its first frame. */
-  | { type: 'canvasMounted'; canvasId: string }
-  /** The canvas's first frame is on screen. */
-  | { type: 'rendererPresented'; canvasId: string }
-  /** The canvas no longer draws frames (unmounted, or replaced by its context-lost fallback). */
-  | { type: 'canvasUnmounted'; canvasId: string }
+  /**
+   * A viewer surface entered the document: graphics starts its canvas actor, which the surface's R3F root then hosts.
+   * Sent once per surface from its element's ref, so a StrictMode replay detaches and attaches again.
+   */
+  | {
+      type: 'canvasAttached';
+      canvasId: string;
+      kind: CanvasSurfaceKind;
+      /** The viewer's WebGL context budget, when the embedder tracks one. */
+      webglContext?: ActorRefFrom<typeof webglContextMachine>;
+      /** The surface estimate the viewer was admitted with. */
+      admittedBytes?: number;
+      /** The surface re-attached to a renderer that already exists, so its canvas actor times no load spans. */
+      reattached?: boolean;
+    }
+  /** The surface left the document: its canvas actor stops and returns its budget. */
+  | { type: 'canvasDetached'; canvasId: string }
   // Section view events
   /** Turning the section on with no cuts adds the default plane, removing the side `viewDirection` faces. */
   | { type: 'setSectionViewActive'; payload: boolean; viewDirection?: SectionVector }
@@ -546,6 +553,104 @@ export type GraphicsEvent =
     };
 
 /**
+ * The graphics machine's public alphabet: every {@link GraphicsEvent} type, in the union's order. The totality test
+ * samples each one and fails when this list and the union differ.
+ *
+ * @public
+ */
+export const graphicsEventTypes = [
+  'updateGridSize',
+  'setGridSizeLocked',
+  'setGridUnit',
+  'fitView',
+  'cameraViewChanged',
+  'setSurfaceVisibility',
+  'setLinesVisibility',
+  'setGizmoVisibility',
+  'setGridVisibility',
+  'setAxesVisibility',
+  'setMatcapVisibility',
+  'setPostProcessingVisibility',
+  'setUpDirection',
+  'setGraphicsBackendPreference',
+  'webGpuCanvasLost',
+  'canvasAttached',
+  'canvasDetached',
+  'setSectionViewActive',
+  'adoptSectionView',
+  'addSectionCut',
+  'updateSectionCut',
+  'removeSectionCut',
+  'selectSectionCut',
+  'hoverSectionCut',
+  'commitSectionCuts',
+  'setMeasureActive',
+  'setMeasureInputReady',
+  'adoptPinnedMeasurements',
+  'startMeasurement',
+  'completeMeasurement',
+  'startFeatureMeasurement',
+  'completeFeatureMeasurement',
+  'setMeasureMode',
+  'setMeasureFrame',
+  'setMeasureSnapEnabled',
+  'setMeasureOperation',
+  'setMeasureFilter',
+  'setMeasureCandidates',
+  'chooseMeasureCandidate',
+  'clearMeasureChosenCandidate',
+  'requestMeasureCandidateCommit',
+  'requestMeasureCatalog',
+  'setMeasureMessage',
+  'setMeasurePreviewDistance',
+  'setMeasureLockedTarget',
+  'measurementSourceChanged',
+  'measurementPoseChanged',
+  'measurementCutChanged',
+  'addMeasurementRecord',
+  'resolveMeasurementRecord',
+  'cancelPendingMeasurements',
+  'cancelCurrentMeasurement',
+  'clearMeasurement',
+  'clearAllMeasurements',
+  'clearUnpinnedMeasurements',
+  'setHoveredMeasurement',
+  'setMeasurementName',
+  'toggleMeasurementPinned',
+  'controlsInteractionStart',
+  'controlsInteractionMoved',
+  'controlsInteractionEnd',
+  'beginViewerModelHoverSuppression',
+  'endViewerModelHoverSuppression',
+  'markModelPointerGestureMoved',
+  'clearModelPointerClickGuard',
+  'updateArtifact',
+  'clearArtifact',
+  'gltfPreparationStarted',
+  'gltfDisplayReady',
+  'gltfAnalysisReady',
+  'gltfPresentationCommitted',
+  'gltfPresentationFailed',
+  'gltfPresentationMeasured',
+  'loadModelComponentManifest',
+  'clearModelComponentManifest',
+  'setHoveredModelComponent',
+  'toggleModelComponentSelection',
+  'selectModelComponent',
+  'clearModelComponentSelection',
+  'hideModelComponent',
+  'showModelComponent',
+  'showHiddenModelComponents',
+  'isolateModelComponent',
+  'clearModelComponentIsolation',
+  'setModelComponentOpacity',
+  'resetModelComponentOpacities',
+  'focusModelComponent',
+  'clearModelComponentFocus',
+  'sceneRadiusUpdated',
+] as const satisfies ReadonlyArray<GraphicsEvent['type']>;
+
+/**
  * The cut to add. A plane defaults to the first of XZ, YZ and XY the list lacks, and a cutaway to the up axis;
  * both pass through the geometry centre. `viewDirection` points from the view's target toward the camera (the camera
  * view's `direction`): a plane then removes the side facing the camera and a cutaway opens toward it.
@@ -682,6 +787,7 @@ const graphicsActors = {
   ),
   modelInteraction: modelInteractionMachine,
   kinematics: kinematicsMachine,
+  canvas: canvasMachine,
 };
 
 type GraphicsEnqueue = EnqueueObject<GraphicsEvent, GraphicsEmitted, SystemRegistry, typeof graphicsActors>;
@@ -787,6 +893,12 @@ const sectionOffContext: Pick<GraphicsContext, 'isSectionViewActive' | 'committe
 const isSectionCutReference = (context: GraphicsContext, current: string | undefined, next: string | undefined) =>
   next !== current && (next === undefined || context.sectionCuts.some((cut) => cut.id === next));
 
+/** WebGPU is off for the page: the preference resolves without it. */
+const webGpuOffContext = ({ context }: { context: GraphicsContext }): GraphicsPatch => ({
+  webGpuAvailable: false,
+  resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
+});
+
 const graphicsMachineDefinition = setup({
   actors: graphicsActors,
   schemas: {
@@ -794,35 +906,12 @@ const graphicsMachineDefinition = setup({
     events: eventSchemas<GraphicsEvent>(),
     input: types<GraphicsInput>(),
     emitted: eventSchemas<GraphicsEmitted>(),
+    tags: types<GraphicsTag>(),
   },
 }).createMachine({
   id: 'graphics',
 
-  invoke: [
-    {
-      src: 'probeWebGpu',
-      id: 'probeWebGpuInvocation',
-      onDone: ({ context, event }) => {
-        const output = typeof event.output === 'boolean' ? event.output : false;
-        return {
-          context: {
-            webGpuAvailable: output,
-            webGpuProbeSettled: true,
-            resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, output),
-          },
-        };
-      },
-      /** Probe actor rejected / threw — pessimistic fallback. */
-      onError: ({ context }) => ({
-        context: {
-          webGpuAvailable: false,
-          webGpuProbeSettled: true,
-          resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
-        },
-      }),
-    },
-    { src: 'watchWebGpuCanvasLoss', id: 'watchWebGpuCanvasLossInvocation' },
-  ],
+  invoke: [{ src: 'watchWebGpuCanvasLoss', id: 'watchWebGpuCanvasLossInvocation' }],
 
   context: ({ input, spawn, actors }) => {
     const preference = input.graphicsBackend ?? 'webgpu';
@@ -868,10 +957,8 @@ const graphicsMachineDefinition = setup({
       upDirection: input.upDirection ?? 'z',
       graphicsBackendPreference: preference,
       webGpuAvailable: false,
-      webGpuProbeSettled: false,
       resolvedGraphicsBackend: resolveGraphicsBackendPreference(preference, false),
-      activeRenderer: undefined,
-      canvasPresentation: undefined,
+      canvas: undefined,
 
       // Section view state (the cuts are durable and entry-scoped)
       ...createSectionViewSeed(input.sectionView),
@@ -933,6 +1020,9 @@ const graphicsMachineDefinition = setup({
       enq.stop(context.modelInteractionRef);
     }
     enq.stop(context.kinematicsRef);
+    if (context.canvas) {
+      enq.stop(context.canvas.ref);
+    }
   },
   initial: 'operational',
   states: {
@@ -1034,35 +1124,33 @@ const graphicsMachineDefinition = setup({
           }),
         },
 
-        // A Retry or remount then starts on WebGL instead of repeating the WebGPU start the browser cannot present.
-        webGpuCanvasLost: {
-          context: ({ context }) => ({
-            webGpuAvailable: false,
-            resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
-          }),
+        canvasAttached: ({ context, event, actors }, enq) => {
+          if (context.canvas?.canvasId === event.canvasId) {
+            // Idempotent re-delivery: this surface's actor is already running.
+            return {};
+          }
+          if (context.canvas) {
+            enq.stop(context.canvas.ref);
+          }
+          const ref = enq.spawn(actors.canvas, {
+            id: `canvas:${event.canvasId}`,
+            input: {
+              canvasId: event.canvasId,
+              kind: event.kind,
+              webglContext: event.webglContext,
+              admittedBytes: event.admittedBytes,
+              reattached: event.reattached,
+            },
+          });
+          return { context: { canvas: { canvasId: event.canvasId, ref } } };
         },
-        rendererInitialized: { context: ({ event }) => ({ activeRenderer: event.payload }) },
-        canvasMounted: {
-          context: ({ event }) => ({ canvasPresentation: { canvasId: event.canvasId, presented: false } }),
-        },
-        rendererPresented: {
-          context: ({ context, event }) => ({
-            canvasPresentation:
-              context.canvasPresentation?.canvasId === event.canvasId
-                ? { canvasId: event.canvasId, presented: true }
-                : context.canvasPresentation,
-          }),
-        },
-        canvasUnmounted: {
-          context: ({ context, event }) => ({
-            canvasPresentation:
-              context.canvasPresentation?.canvasId === event.canvasId ? undefined : context.canvasPresentation,
-          }),
-        },
-        rendererRemoved: {
-          context: ({ context, event }) => ({
-            activeRenderer: context.activeRenderer?.canvasId === event.canvasId ? undefined : context.activeRenderer,
-          }),
+        canvasDetached: ({ context, event }, enq) => {
+          if (context.canvas?.canvasId !== event.canvasId) {
+            // Stale: a replacement surface already took the slot.
+            return {};
+          }
+          enq.stop(context.canvas.ref);
+          return { context: { canvas: undefined } };
         },
 
         // Controls events
@@ -1607,6 +1695,58 @@ const graphicsMachineDefinition = setup({
         },
       },
       states: {
+        /*
+         * The rendering backend: `probing` while the WebGPU capability probe runs, `resolved` once it answered (or failed
+         * or ran out of time), and `lost` once a WebGPU canvas on this page could not present. A canvas loss reported
+         * while probing turns WebGPU off but, as before, the probe's own answer then decides.
+         */
+        backend: {
+          initial: 'probing',
+          states: {
+            probing: {
+              tags: ['backend-probing'],
+              invoke: {
+                src: 'probeWebGpu',
+                id: 'probeWebGpuInvocation',
+                onDone: ({ context, event }) => {
+                  const output = typeof event.output === 'boolean' ? event.output : false;
+                  return {
+                    target: 'resolved',
+                    context: {
+                      webGpuAvailable: output,
+                      resolvedGraphicsBackend: resolveGraphicsBackendPreference(
+                        context.graphicsBackendPreference,
+                        output,
+                      ),
+                    },
+                  };
+                },
+                /** Probe actor rejected / threw — pessimistic fallback. */
+                onError: ({ context }) => ({
+                  target: 'resolved',
+                  context: {
+                    webGpuAvailable: false,
+                    resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
+                  },
+                }),
+              },
+              on: {
+                webGpuCanvasLost: { context: webGpuOffContext },
+              },
+            },
+            resolved: {
+              on: {
+                // A Retry or remount then starts on WebGL instead of repeating the WebGPU start the browser cannot present.
+                webGpuCanvasLost: { target: 'lost', context: webGpuOffContext },
+              },
+            },
+            lost: {
+              on: {
+                webGpuCanvasLost: { context: webGpuOffContext },
+              },
+            },
+          },
+        },
         section: {
           initial: 'off',
           states: {
@@ -1805,10 +1945,50 @@ const graphicsMachineDefinition = setup({
   },
 });
 
-/** The graphics machine's state value: the operational section and measure regions. @public */
+/**
+ * The (state, event) pairs the graphics machine leaves unanswered today (MC-R17): its totality baseline. Each
+ * state is a dotted path or `'*'`. The list records the gaps without changing them; a later change that answers one of
+ * these events removes its pair here, and the totality test fails on a stale pair or an unlisted gap.
+ *
+ * @public
+ */
+export const graphicsIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  // Declared in the alphabet but handled in no state.
+  ['*', 'startFeatureMeasurement'],
+  // Turning the section on while on, or off while off, returns `undefined`.
+  ['operational.section.off', 'setSectionViewActive'],
+  ['operational.section.on', 'setSectionViewActive'],
+  // Turning the measuring tool on while on, or off while off, returns `undefined`.
+  ['operational.measure.off', 'setMeasureActive'],
+  ['operational.measure.on', 'setMeasureActive'],
+  // The measuring tool's own events, handled only inside `measure.on`.
+  ['operational.measure.off', 'setMeasureInputReady'],
+  ['operational.measure.off', 'clearAllMeasurements'],
+  ['operational.measure.off', 'startMeasurement'],
+  ['operational.measure.off', 'completeMeasurement'],
+  ['operational.measure.off', 'completeFeatureMeasurement'],
+  ['operational.measure.off', 'cancelCurrentMeasurement'],
+  // A point is placed only while selecting, and completed or cancelled only once placed.
+  ['operational.measure.on.selected', 'startMeasurement'],
+  ['operational.measure.on.selecting', 'completeMeasurement'],
+  ['operational.measure.on.selecting', 'cancelCurrentMeasurement'],
+];
+
+/** The graphics machine's state value: the operational backend, section and measure regions. @public */
 export type GraphicsStateValue = {
-  operational: { measure: 'off' | { on: 'selected' | 'selecting' }; section: 'off' | 'on' };
+  operational: {
+    backend: 'probing' | 'resolved' | 'lost';
+    measure: 'off' | { on: 'selected' | 'selecting' };
+    section: 'off' | 'on';
+  };
 };
+
+/**
+ * The graphics machine's tags. `backend-probing`: the WebGPU capability probe has not answered yet.
+ *
+ * @public
+ */
+export type GraphicsTag = 'backend-probing';
 
 /**
  * The graphics machine's type, written out rather than inferred. The inferred type carries every inline
@@ -1822,7 +2002,7 @@ export type GraphicsMachine = StateMachine<
   GraphicsEvent,
   Record<string, AnyActor>,
   GraphicsStateValue,
-  string,
+  GraphicsTag,
   GraphicsInput,
   Record<never, never>,
   GraphicsEmitted,
@@ -1902,6 +2082,10 @@ const checkedGraphicsMachineDefinition: MatchingDefinition<typeof graphicsMachin
  * State Architecture:
  *
  * operational (parallel: the tools run together)
+ *   ├── backend
+ *   │   ├── probing (default; the WebGPU capability probe runs)
+ *   │   ├── resolved
+ *   │   └── lost (a WebGPU canvas on the page could not present)
  *   ├── section
  *   │   ├── off (default; the cuts are kept)
  *   │   └── on (at least one cut)

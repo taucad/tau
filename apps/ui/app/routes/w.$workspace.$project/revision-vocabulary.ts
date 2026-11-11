@@ -382,12 +382,11 @@ const restingFacts = (status: RevisionStatusProjection, where: RevisionWhere): R
  * The canvas's arrival line (RS28, RS29): `Rev N arrived from <who>`. It shows
  * while a turn holds the files, because a checkout a turn holds is never
  * re-based (rule 9); the revision applies when the turn settles. Who is
- * History's attribution (HQ4) on its remote (`Tau agent on Tau Cloud`), except
- * for the viewer's own work, which is said as `another session`: attribution
- * here is the revision's own provenance, which its author asserts, and this
- * client can read neither the server's per-push attribution (EQ11's
- * `committedBy`/`viaDevice`) nor a device id on the revision — so it claims no
- * other *device* it cannot prove (RV-W5b F11). A second tab is a session too.
+ * History's who line on its remote (`Agent on Tau Cloud`), except for the
+ * viewer's own work, which is said as `another session`: until this client
+ * reads the server's per-push attribution (A3) it has no device id to prove
+ * another *device* by (RV-W5b F11). A second tab is a session too. A row with
+ * no who line names nobody.
  *
  * @param card - The arrived revision's card, once History has read it.
  * @param remote - The remote it arrived from.
@@ -399,8 +398,11 @@ export const arrivedSentence = (card: RevisionCard | undefined, remote?: RemoteF
   if (card === undefined) {
     return `${name} arrived`;
   }
-  if (card.actor === 'You') {
+  if (card.isYours === true) {
     return `${name} arrived from another session`;
+  }
+  if (card.actor === '') {
+    return remote?.kind === 'tau' ? `${name} arrived from Tau Cloud` : `${name} arrived`;
   }
   return remote?.kind === 'tau'
     ? `${name} arrived from ${card.actor} on Tau Cloud`
@@ -603,11 +605,18 @@ export const arrivedGlyph: LucideIcon = ArrowDownToLine;
 /**
  * What asked for a revision, in a person's words, for its Details.
  *
+ * A turn's base cut is recorded under the turn's trigger, but it holds the
+ * person's own edits, saved before the agent started (A5): it says so.
+ *
  * @param trigger - The recorded trigger, when the store recorded one.
+ * @param turnCut - Which of a turn's two entries it is, when a turn minted it.
  * @returns The label.
  * @public
  */
-export const revisionTriggerLabel = (trigger: string | undefined): string => {
+export const revisionTriggerLabel = (trigger: string | undefined, turnCut?: RevisionCard['turnCut']): string => {
+  if (turnCut === 'base') {
+    return 'Your edits, saved before the agent started';
+  }
   switch (trigger) {
     case 'turn': {
       return 'Agent turn';

@@ -1,12 +1,12 @@
 import { createContext, useContext, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import { chatAttachmentsPath } from '#db/attachment-store.js';
-import { composerRecordPaths, recordAttachmentsPath } from '#db/composer-record-store.js';
+import { chatAttachmentsPath } from '@taucad/chat-ui/db/attachment-store';
+import { composerRecordPaths, recordAttachmentsPath } from '@taucad/chat-ui/db/composer-record-store';
 import { File, FileText, ImageOff } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
 import { attachmentAbsentLabel, attachmentDownloadName, useAttachmentSource } from '#hooks/use-attachment-source.js';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
-import { formatBytes } from '#lib/format-bytes.js';
+import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 
 /** The directories one project chat's attachment references resolve against. */
 export type ChatAttachmentDirectories = {

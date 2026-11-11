@@ -7,9 +7,13 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Environment } from '@taucad/api-core';
 import type { RedisService } from '@taucad/api-redis';
 import { attachHostDevice } from '@taucad/api-auth';
-import { gitRequestsPerUserPerWindow, gitRequestsPerWindow, quotaRefusalMarker } from '#api/git/git.constants.js';
+import {
+  gitRequestsPerUserPerWindow,
+  gitRequestsPerWindow,
+  quotaRefusalMarker,
+} from '@taucad/api-git-core/git.constants';
 import { GitController, receivePackOutcome, syncOutcomeOf } from '#api/git/git.controller.js';
-import type { GitExecution } from '#api/git/forwarding/git-execution.js';
+import type { GitExecution } from '@taucad/api-git-core/forwarding/git-execution';
 import type { GitLfsService } from '#api/git/git-lfs.service.js';
 import type { GitAccess, GitRepositoryService } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '@taucad/api-redis';

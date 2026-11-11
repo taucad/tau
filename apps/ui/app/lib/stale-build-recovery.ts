@@ -9,8 +9,9 @@
  * "Failed to fetch dynamically imported module", Firefox "error loading
  * dynamically imported module", Vite's preloader "Unable to preload CSS".
  *
- * React Router already reloads on a failed route-module import and on a
- * `/__manifest` version mismatch; this covers every other lazy import. On such
+ * React Router already reloads on a failed route-module import (its `/__manifest`
+ * version check never runs, because route discovery is eager); this covers every
+ * other lazy import. On such
  * a failure the page asks the server which build it runs (`/health/build`):
  *
  * - The same build, or no answer: the failure is genuine (`current`) and is reported.
@@ -23,8 +24,8 @@
  *   runs the target build, so a deploy that cannot serve its own chunks never loops; and
  *   a tab makes at most `autoReloadBudget` automatic reloads per `autoReloadBudgetWindow`,
  *   never cleared on arrival, so a rolling deploy whose edges disagree cannot either.
- * - A different build otherwise: the sidebar update control (`BrowserUpdate`) or banner
- *   offers the reload (`superseded`). Writes go on: in a lone tab no other bundle shares
+ * - A different build otherwise: the sidebar update control (`BrowserUpdate`) offers the
+ *   reload (`superseded`). Writes go on: in a lone tab no other bundle shares
  *   storage, and another tab's bundle stops them through `build-skew`'s channel.
  *
  * The recovery asks no server itself: `build-skew` owns every `/health/build` answer and the
@@ -58,9 +59,9 @@ import {
   sendWaitingErrors,
   setErrorDescriber,
 } from '#lib/error-reporting.js';
-import { isPageHidden, notePageHide, notePageShow } from '#lib/page-visibility.js';
-import { readSessionStorage } from '#lib/session-storage.js';
-import { isWeakKey } from '#lib/weak-key.js';
+import { isPageHidden, notePageHide, notePageShow } from '@taucad/ui-core/lib/page-visibility';
+import { readSessionStorage } from '@taucad/ui-core/lib/session-storage';
+import { isWeakKey } from '@taucad/ui-core/lib/weak-key';
 
 /**
  * What a module load failure turned out to be.
@@ -992,7 +993,7 @@ export const installStaleBuildRecovery = (): (() => void) => {
 };
 
 /**
- * Whether a reload prompt (the banner, the sidebar update control) shows: while the reload is
+ * Whether the reload prompt (the sidebar update control) shows: while the reload is
  * offered, and never while the page's own automatic reload is pending (a second reload would race
  * it); it shows again once that reload stalls.
  *

@@ -28,6 +28,20 @@ export type AccountDeletionHook = {
   readonly run: (input: { readonly userId: string }) => Promise<void>;
 };
 
+/**
+ * Shared counter for Better Auth's rate limits, so every API Machine counts the same requests. Bound to Redis in
+ * the app; unbound (tests, a single local process) Better Auth keeps its in-memory counter.
+ */
+export const authRateLimitStoreToken = Symbol('AUTH_RATE_LIMIT_STORE');
+
+/** @see authRateLimitStoreToken */
+export type AuthRateLimitStore = {
+  consume(input: { readonly key: string; readonly limit: number; readonly windowSeconds: number }): Promise<{
+    readonly allowed: boolean;
+    readonly retryAfterSeconds: number;
+  }>;
+};
+
 /** Raw routes registered under the auth base path, ahead of the Better Auth wildcard. */
 export const authRouteExtensionsToken = Symbol('AUTH_ROUTE_EXTENSIONS');
 

@@ -463,6 +463,27 @@
       "when": 1794112808571,
       "tag": "0066_drop_refund_intent",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1794189301116,
+      "tag": "0067_supplier_contract",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794312915029,
+      "tag": "0068_agent_evidence_erasure_accepted",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1794314005846,
+      "tag": "0069_agent_evidence_outbox_object",
+      "breakpoints": true
     }
   ]
 }

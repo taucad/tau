@@ -31,7 +31,7 @@ export default defineConfig({
   cacheDir: '../../node_modules/.vite/apps/api-live',
   test: {
     environment: 'node',
-    include: ['app/testing/live/**/*.live.test.ts'],
+    include: ['app/testing/live/**/*.live.test.ts', 'app/api/llm/helper-path.live.test.ts'],
     setupFiles: ['./vitest.setup.ts'],
     // Live provider quota is shared and Vertex rate-limited a 16-call burst:
     // one file at a time, one test at a time, no retries hiding a real refusal.

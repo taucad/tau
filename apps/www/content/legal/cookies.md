@@ -1,6 +1,6 @@
 # Storage and Cookie Policy
 
-*Effective date: November 8, 2026*
+*Effective date: November 9, 2026*
 
 This page explains what TAUCAD LIMITED ("Tau", "we") stores in your browser and on your device, and how to change your analytics choice. Read it with our [Privacy Policy](/legal/privacy).
 
@@ -19,13 +19,13 @@ If the consent cookie is missing, expired or from an older version of this polic
 
 ## Local storage for your preferences and projects
 
-Interface choices (sidebar state, kernel, model, editor and display preferences) are kept in `localStorage`. Your local projects and files are kept in IndexedDB or the Origin Private File System in the web app, and on disk in the desktop app. None of this is analytics. It stays until you delete it, clear the site or app data, or uninstall the app.
+Interface choices (sidebar state, kernel, model, editor and display preferences) are kept in `localStorage`. If a shared model stops the page while it is opening, `tau:kill-memory` remembers it for up to 7 days (an opaque model key, a count, a time and the app version, at most 10 models) so Tau shows "We paused this model" instead of running it again; it is never sent. Your local projects and files are kept in IndexedDB or the Origin Private File System in the web app, and on disk in the desktop app. None of this is analytics. It stays until you delete it, clear the site or app data, or uninstall the app.
 
 ## Optional analytics
 
 On the web, Tau asks on your first visit whether to allow analytics. If you accept, PostHog Cloud records page views, browser and device information, feature use, your account identity when you are signed in, error events and session replays, and stores its own first-party cookies and local storage. Replays mask all text and inputs. If your choice is unknown, declined or withdrawn, PostHog is not started and nothing is sent.
 
-The desktop app sends the same analytics, without session replay, unless you turn it off; it tells you this when you first open it, and keeps its analytics identity in the app's local storage rather than in a cookie.
+The desktop app sends the same analytics, without session replay, unless you turn it off in **Settings → Data controls**, and keeps its analytics identity in the app's local storage rather than in a cookie.
 
 PostHog receives this data; see the [PostHog privacy policy](https://posthog.com/privacy).
 

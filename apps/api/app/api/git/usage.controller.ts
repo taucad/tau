@@ -2,7 +2,7 @@
 import { Controller, Get, HttpException, HttpStatus, Param, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { UseAuth, User } from '@taucad/api-auth';
-import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import { ProjectAccessService } from '@taucad/api-projects/collaboration/project-access.service';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
 

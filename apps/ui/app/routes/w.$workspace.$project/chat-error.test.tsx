@@ -9,21 +9,21 @@ import type { ChatError as ChatErrorPayload } from '@taucad/types';
 import type * as AgentHostModule from '@taucad/agent-host';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { useChatSelector } from '#hooks/use-chat.js';
-import { chatTurnNotStartedCode } from '#utils/error.utils.js';
+import { chatTurnNotStartedCode } from '@taucad/chat-ui/utils/error.utils';
 import { ChatError as ChatErrorBanner } from '#routes/w.$workspace.$project/chat-error.js';
 import { chatProjectionLogic, selectCurrentRun, selectRunFailure } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { createActor } from 'xstate';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
-import {
-  modelPendingAutoResumeBoundMilliseconds,
-  modelPendingPollMilliseconds,
-  resetAutoResumes,
-} from '#utils/run-auto-resume.js';
+import { recordProviderUnavailableAutoResume, resetAutoResumes } from '@taucad/ui-core/utils/run-auto-resume';
+import { autoResumePlanOf } from '#utils/run-auto-resume-plan.js';
+import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
 
 const continueChat = vi.fn();
 const regenerate = vi.fn();
 const resumableFailureOverrides = vi.hoisted(() => new Set<string>());
+/* What the chat's session machine is waiting out, as the store offers it (audit R5): the card only presents it. */
+const machine = vi.hoisted(() => ({ waiting: undefined as AutoResumePlan | undefined }));
 const debug = vi.hoisted(() => ({ enabled: false }));
 vi.mock('#flags/use-feature.js', () => ({ useFeature: () => debug.enabled }));
 
@@ -84,12 +84,14 @@ vi.mock('#components/code/code-viewer.js', () => ({
 const openNewChat = vi.fn(async () => undefined);
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({ execution: { execution: { kind: 'tau', model: 'openai-gpt-6-astra' } } }),
+  useChatAutoResume: () => machine.waiting,
 }));
 vi.mock('#routes/w.$workspace.$project/use-open-new-chat.js', () => ({
   useOpenNewChat: () => ({ openNewChat, isReady: true }),
 }));
 
 const persisted = (error: ChatErrorPayload): void => {
+  machine.waiting = undefined;
   vi.mocked(useChatSelector).mockImplementation((selector) =>
     selector({ error: undefined, persistedError: error } as unknown as CombinedChatState),
   );
@@ -134,6 +136,8 @@ const projectedFailure = (error: ChatErrorPayload): CombinedChatState => {
 /* A card promises Resume only for the caught-up log's current run, as the turn host admits it. */
 const projected = (error: ChatErrorPayload): void => {
   const state = projectedFailure(error);
+  /* The store offers the machine the wait the same facts allow. */
+  machine.waiting = autoResumePlanOf(state, Date.now(), () => 0.5);
   vi.mocked(useChatSelector).mockImplementation((selector) => selector(state));
 };
 
@@ -428,6 +432,43 @@ describe('ChatError', () => {
     expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
   });
 
+  it('should resume a provider outage pause on its own, counting down beside Resume', () => {
+    projected({
+      category: errorCategory.overloaded,
+      title: 'Service Temporarily Unavailable',
+      message: 'The model provider is temporarily unavailable.',
+      code: 'PROVIDER_UNAVAILABLE',
+      httpStatus: 503,
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('timer')).toHaveTextContent('Resuming in 2 seconds');
+    expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+  });
+
+  it('should return a provider outage to the paused card once its automatic resume is spent', () => {
+    resetAutoResumes();
+    recordProviderUnavailableAutoResume('run_1', 1);
+    projected({
+      category: errorCategory.overloaded,
+      title: 'Service Temporarily Unavailable',
+      message: 'The model provider is temporarily unavailable.',
+      code: 'PROVIDER_UNAVAILABLE',
+      httpStatus: 503,
+    });
+
+    render(<ChatErrorBanner />);
+
+    // The paused card, which carries the Tau Debug details, rather than the countdown card.
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.queryByText('Service Temporarily Unavailable')).not.toBeInTheDocument();
+    expect(screen.getByText('The model provider is temporarily unavailable.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+    resetAutoResumes();
+  });
+
   it('should keep Try again for a service refusal the host rules unrecoverable', () => {
     persisted({
       category: errorCategory.overloaded,
@@ -476,7 +517,7 @@ describe('ChatError', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
-  it('should name a refused request and offer a model switch ahead of Resume', () => {
+  it('should name a request Tau could not send and offer a model switch ahead of Resume', () => {
     projected({
       category: errorCategory.toolError,
       title: 'Processing Error',
@@ -487,7 +528,8 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('The model refused this request')).toBeInTheDocument();
+    expect(screen.getByText('Tau could not send this request')).toBeInTheDocument();
+    expect(screen.queryByText('The model refused this request')).not.toBeInTheDocument();
     expect(screen.queryByText('Processing error')).not.toBeInTheDocument();
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Switch model', 'Resume']);
   });
@@ -536,6 +578,37 @@ describe('ChatError', () => {
     expect(continueChat).not.toHaveBeenCalled();
   });
 
+  /* A refused reasoning replay is worded by the page: resuming re-sends the same history to the same refusal, so the
+   * card offers another model and the provider's sentence reaches Tau Debug only. */
+  it('should word a refused reasoning replay itself and offer a model switch without Resume', () => {
+    debug.enabled = true;
+    const providerSentence =
+      'Configured provider returned HTTP 400. messages.1.content.4: Invalid `signature` in `thinking` block.';
+    projected({
+      category: errorCategory.server,
+      title: 'Server Error',
+      message: providerSentence,
+      code: 'REASONING_REPLAY_REJECTED',
+      httpStatus: 502,
+    });
+
+    render(<ChatErrorBanner />);
+
+    const card = screen.getByRole('alert');
+    expect(card).toHaveTextContent('This model cannot continue this chat');
+    expect(
+      screen.getByText(
+        'The model provider refused reasoning from earlier in this chat. Switch to another model to continue.',
+      ),
+    ).toBeInTheDocument();
+    expect(card).not.toHaveTextContent(providerSentence);
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'Switch model',
+      'Try again',
+      'Debug details',
+    ]);
+  });
+
   /* W11a, IC5, OQ15: a restricted account is the account's, not the route's: support is the one recovery, the copy names
    * no case kind, and the gateway's sentence reaches Tau Debug only. */
   it('should point a restricted account to support without Resume or a model switch', async () => {
@@ -561,7 +634,7 @@ describe('ChatError', () => {
     ).toBeInTheDocument();
     expect(card).not.toHaveTextContent(gatewaySentence);
     expect(card).not.toHaveTextContent('Everything up to here is saved.');
-    expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:support@tau.new');
+    expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:help@tau.new');
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Debug details']);
 
     await user.click(screen.getByRole('button', { name: 'Debug details' }));
@@ -1148,7 +1221,9 @@ describe('ChatError', () => {
     });
 
     expect(
-      screen.getByText('Tau paused this turn: 13 more credits needed for openai-gpt-6-astra.'),
+      screen.getByText(
+        'This turn needs 13 more credits on openai-gpt-6-astra. Add credits or switch to a cheaper model, then resume.',
+      ),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
   });
@@ -1176,7 +1251,7 @@ describe('ChatError', () => {
       ),
     });
 
-    expect(screen.getByText('13 more credits needed for openai-gpt-6-astra.')).toBeInTheDocument();
+    expect(screen.getByText('This turn needs 13 more credits on openai-gpt-6-astra.')).toBeInTheDocument();
     expect(screen.queryByText(/Tau paused this turn/iu)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
   });
@@ -1216,7 +1291,7 @@ describe('ChatError', () => {
     for (const [first, second] of snapshots) {
       expect(Object.is(first, second)).toBe(true);
     }
-    expect(screen.getByText('Credit limit reached')).toBeInTheDocument();
+    expect(screen.getByText('You’re out of credits')).toBeInTheDocument();
   });
 
   /* The funded boundary's own 402 copy is credit-denominated and reaches the
@@ -1240,7 +1315,7 @@ describe('ChatError', () => {
       ),
     });
 
-    expect(screen.getByText('Credit limit reached')).toBeInTheDocument();
+    expect(screen.getByText('You’re out of credits')).toBeInTheDocument();
     expect(screen.getByText(creditMessage)).toBeInTheDocument();
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
     expect(screen.queryByText('Processing error')).not.toBeInTheDocument();
@@ -1282,14 +1357,6 @@ describe('ChatError for a run abandoned on a pending model attempt', () => {
     details: { attemptId: incidentAttemptId, code: 'MODEL_ATTEMPT_PENDING' },
   };
   const pendingTitle = 'Checking whether the last model call finished';
-  const attemptRoute = `http://localhost:4000/v1/billing/attempts/gateway/${encodeURIComponent(incidentAttemptId)}`;
-  const answer = (body: unknown): Response => Response.json(body);
-  const pending = { state: 'pending', operationId: 'op_1' };
-  const terminal = {
-    state: 'terminal',
-    operationId: 'op_1',
-    receipt: { customerState: 'released', chargedCreditAtoms: '0' },
-  };
   const fetchAttempt = vi.fn<typeof globalThis.fetch>();
   const advance = async (milliseconds: number): Promise<void> => {
     await act(async () => {
@@ -1313,7 +1380,6 @@ describe('ChatError for a run abandoned on a pending model attempt', () => {
 
   it('should announce the approved pending card as busy status, not "Chat paused", and keep the raw failure in Tau Debug', async () => {
     debug.enabled = true;
-    fetchAttempt.mockResolvedValue(answer(pending));
     const user = userEvent.setup();
     projected(incidentEndingRow);
 
@@ -1328,7 +1394,7 @@ describe('ChatError for a run abandoned on a pending model attempt', () => {
     expect(screen.queryByText(incidentMessage)).not.toBeInTheDocument();
 
     // Keyboard only: the one control is Tau Debug's disclosure, and it opens on Enter. Testing Library's async wrapper
-    // waits on a real macrotask, so the clock is real for the keystrokes; the next lookup stays on the fake one.
+    // waits on a real macrotask, so the clock is real for the keystrokes.
     vi.useRealTimers();
     await user.tab();
     const details = screen.getByRole('button', { name: 'Debug details' });
@@ -1337,71 +1403,39 @@ describe('ChatError for a run abandoned on a pending model attempt', () => {
     expect(screen.getByTestId('code-viewer')).toHaveTextContent(incidentMessage);
   });
 
-  it('should resume once without a click when the attempt route answers terminal', async () => {
-    fetchAttempt.mockResolvedValueOnce(answer(pending)).mockResolvedValue(answer(terminal));
-    projected(incidentEndingRow);
-
-    render(<ChatErrorBanner />);
-    await advance(0);
-
-    expect(fetchAttempt).toHaveBeenCalledTimes(1);
-    expect(fetchAttempt).toHaveBeenCalledWith(attemptRoute, expect.objectContaining({ credentials: 'include' }));
-    expect(continueChat).not.toHaveBeenCalled();
-
-    await advance(modelPendingPollMilliseconds);
-
-    expect(fetchAttempt).toHaveBeenCalledTimes(2);
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(regenerate).not.toHaveBeenCalled();
-    expect(screen.getByRole('status', { name: pendingTitle })).toBeInTheDocument();
-
-    await advance(modelPendingAutoResumeBoundMilliseconds);
-
-    expect(fetchAttempt).toHaveBeenCalledTimes(2);
-    expect(continueChat).toHaveBeenCalledTimes(1);
-  });
-
-  it('should never resume the same failed attempt twice when its card mounts again', async () => {
-    fetchAttempt.mockResolvedValue(answer(terminal));
-    projected(incidentEndingRow);
-
-    const first = render(<ChatErrorBanner />);
-    await advance(0);
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    first.unmount();
-
-    render(<ChatErrorBanner />);
-    await advance(modelPendingPollMilliseconds);
-
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('alert')).toHaveTextContent('Chat paused');
-  });
-
-  it('should show the resumable pause card past the bound and stop asking the route', async () => {
-    fetchAttempt.mockResolvedValue(answer(pending));
+  it('should show the resumable pause card once the chat no longer waits on the attempt', async () => {
     const user = userEvent.setup();
     projected(incidentEndingRow);
+    // Past the run's bound, or once the wait resumed the run, the machine waits on nothing.
+    machine.waiting = undefined;
 
     render(<ChatErrorBanner />);
-    await advance(modelPendingAutoResumeBoundMilliseconds - 1);
-    expect(screen.getByRole('status', { name: pendingTitle })).toBeInTheDocument();
-
-    await advance(1);
 
     expect(screen.queryByRole('status', { name: pendingTitle })).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Chat paused');
     expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
     expect(continueChat).not.toHaveBeenCalled();
-    const lookups = fetchAttempt.mock.calls.length;
-    await advance(modelPendingPollMilliseconds * 3);
-    expect(fetchAttempt).toHaveBeenCalledTimes(lookups);
 
-    // Keyboard only: Resume is reachable by Tab and continues the turn on Enter (real clock, as above).
+    // Keyboard only: Resume is reachable by Tab and continues the turn on Enter.
     vi.useRealTimers();
     await user.tab();
     expect(screen.getByRole('button', { name: 'Resume' })).toHaveFocus();
     await user.keyboard('{Enter}');
     expect(continueChat).toHaveBeenCalledTimes(1);
     expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  it('should never ask the attempt route or resume from the card itself', async () => {
+    projected(incidentEndingRow);
+
+    const first = render(<ChatErrorBanner />);
+    await advance(10 * 60 * 1000);
+    first.unmount();
+    render(<ChatErrorBanner />);
+    await advance(10 * 60 * 1000);
+
+    expect(fetchAttempt).not.toHaveBeenCalled();
+    expect(continueChat).not.toHaveBeenCalled();
+    expect(screen.getByRole('status', { name: pendingTitle })).toBeInTheDocument();
   });
 });

@@ -3,9 +3,10 @@ import { Loader } from '@taucad/ui/components/loader';
 import { useMemo, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { getReasoningEndedAtMs, getReasoningStartedAtMs } from '@taucad/chat';
+import { normalizeLatexDelimiters } from '@taucad/agent-host';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Button } from '@taucad/ui/components/button';
-import { ThoughtBubble } from '#components/icons/thought-bubble.js';
+import { ThoughtBubble } from '@taucad/ui-kit/icons/thought-bubble';
 import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js';
 
 type ChatMessageReasoningProperties = {
@@ -105,7 +106,7 @@ export function ChatMessageReasoning({
               isStreaming={isMessageActive && index === visibleParts.length - 1}
               isStreamingFade={isMessageActive && index === visibleParts.length - 1}
             >
-              {part.text.trim()}
+              {normalizeLatexDelimiters(part.text.trim())}
             </MarkdownViewerChat>
           ))}
         </div>

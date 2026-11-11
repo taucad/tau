@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useEffect, useRef, useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import { ArrowDownToLine, ArrowUpFromLine, ChevronLeft, ChevronRight, Layers } from 'lucide-react';
@@ -555,7 +556,9 @@ export function MaterialSlots({
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <div className='flex min-w-0 items-center gap-2'>
-        <h3 className='min-w-0 flex-1 truncate text-xs font-medium'>{system.label}</h3>
+        <Heading level={3} variant='overline' className='min-w-0 flex-1 truncate'>
+          {system.label}
+        </Heading>
         {isStale ? <StaleBadge /> : null}
       </div>
       {slot ? (

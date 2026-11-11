@@ -6,7 +6,7 @@ import { useChatSelector } from '#hooks/use-chat.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useChatSnapshot } from '#hooks/use-chat-snapshot.js';
 import { useContextPayload } from '#hooks/use-context-payload.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { isBrowserAgentHostProviderKind, probeBrowserAgentHostCapability } from '#services/agent-host-client.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
@@ -22,9 +22,9 @@ import {
   listAgentHostPlacements,
   onLoopbackAgentHostsChanged,
 } from '#lib/agent-host-placement.js';
-import { loopbackHostIdPrefix } from '#utils/chat-execution.js';
+import { loopbackHostIdPrefix } from '@taucad/chat-ui/utils/chat-execution';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
-import { unknownIconId } from '#components/icons/svg-icon.js';
+import { unknownIconId } from '@taucad/ui-kit/icons/svg-icon';
 
 /**
  * Whether this project can host the agent log, as three distinct states.

@@ -165,7 +165,7 @@
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/system/services/llm-suppliers.md",
         "summary": "Prompt cache hit rate <40% sustained for 30m on a model with non-trivial volume.",
-        "description": "Provider-side prompt caches (Gemini implicit, Anthropic incremental, OpenAI prompt) are not hitting on {{ $labels.gen_ai_provider_name }}/{{ $labels.gen_ai_request_model }} despite >=200K input tokens billed in the last 30m. This is a cost-bleed signal, not a user-facing failure. Common causes: per-turn-mutating prefix bytes (token-usage reminders, dynamic system-prompt fields), tool-list churn, or LangChain integration regressions. See docs/research/gemini-prompt-cache-busting.md for the diagnosis playbook."
+        "description": "Provider-side prompt caches (Gemini implicit, Anthropic incremental, OpenAI prompt) are not hitting on {{ $labels.gen_ai_provider_name }}/{{ $labels.gen_ai_request_model }} despite >=200K input tokens billed in the last 30m. This is a cost-bleed signal, not a user-facing failure. Common causes: per-turn-mutating prefix bytes (token-usage reminders, dynamic system-prompt fields), tool-list churn, or provider request-shape regressions. See docs/research/gemini-prompt-cache-busting.md for the diagnosis playbook."
       },
       "labels": {
         "severity": "warning",
@@ -1154,21 +1154,63 @@
     {
       "uid": "alerting-rule-health",
       "title": "TauAlertingRuleHealth",
-      "condition": "rule_health",
+      "condition": "rule_health_threshold",
       "data": [
         {
-          "refId": "rule_health",
-          "queryType": "",
+          "refId": "rule_health_logs",
+          "queryType": "range",
           "relativeTimeRange": {
-            "from": 900,
+            "from": 1800,
             "to": 0
           },
-          "datasourceUid": "prometheus",
+          "datasourceUid": "alert-state-history",
           "model": {
-            "expr": "sum(increase(grafana_alerting_rule_evaluation_failures_total{app=~\".*\"}[15m])) > 0",
+            "expr": "sum(count_over_time({from=\"state-history\", folderUID=\"tau-local\"} | json | current=~\"Error.*\" | ruleTitle!=\"TauAlertingRuleHealth\" [30m]))",
             "intervalMs": 15000,
-            "maxDataPoints": 20,
-            "refId": "rule_health"
+            "maxDataPoints": 43200,
+            "queryType": "range",
+            "refId": "rule_health_logs"
+          }
+        },
+        {
+          "refId": "rule_health_reduce",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "reduce",
+            "reducer": "last",
+            "expression": "rule_health_logs",
+            "refId": "rule_health_reduce"
+          }
+        },
+        {
+          "refId": "rule_health_threshold",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "threshold",
+            "expression": "rule_health_reduce",
+            "conditions": [
+              {
+                "type": "query",
+                "evaluator": {
+                  "type": "gt",
+                  "params": [0]
+                },
+                "operator": {
+                  "type": "and"
+                }
+              }
+            ],
+            "refId": "rule_health_threshold"
           }
         }
       ],
@@ -1177,7 +1219,7 @@
       "for": "15m",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/operate/runtime-observability-bootstrap.md",
-        "summary": "Grafana failed to evaluate an alert rule in the last 15 min. The series name is Grafana's own and is unverified on the hosted Prometheus datasource (package.md §12.2); added paused until W4 confirms it or replaces it with an operator check of rule state. Rules that fail to evaluate also report through their execution-error state."
+        "summary": "Some rule in this environment's folder entered an Error state in the last 30 min, by Grafana's own alert state history (Loki, logical datasource alert-state-history; folderUID=\"tau-local\" binds to tau-<environment>). Lines carry ruleTitle, ruleUID and error: query {from=\"state-history\", folderUID=\"tau-<environment>\"} | json | current=~\"Error.*\" to see which rule failed and why. Excludes its own title so its own evaluation error cannot keep it firing. Locally the datasource maps to the local Loki, which has no state-history streams; the local copy stays paused."
       },
       "labels": {
         "severity": "warning",
@@ -1336,7 +1378,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "(sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=~\"retry|present\"}[1h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"absent\"}[1h])) > 0) or (sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"recheck\"}[2h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"absent\"}[2h])) > 0)",
+            "expr": "sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"retry\"}[2h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"accepted\"}[2h])) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "erasure_stuck"
@@ -1348,7 +1390,7 @@
       "for": "2h",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
-        "summary": "For 2 h Langfuse trace deletions have been retried, read back as still present, or read back with no answer (recheck: a 410 legacy-API refusal, another non-ok answer or a timeout), with none confirmed absent. Erasure of a deleted account or project is owed within a day; check Langfuse availability, the v2 observations read and the deletion API's answer codes in the lifecycle log."
+        "summary": "For 2 h Langfuse trace deletions have been retried (a 429, a 5xx, a timeout or an unreachable host) with none accepted. An accepted delete is the erasure and Tau does not read it back; erasure of a deleted account is owed within a day, so check Langfuse availability and the deletion API's answer codes in the lifecycle log."
       },
       "labels": {
         "severity": "warning",
@@ -1383,6 +1425,40 @@
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
         "summary": "Langfuse rejected a send, or a backlog payload could not be opened or parsed. The evidence is dropped, never retried; the row's bounded reason says which."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "agent-observability"
+      }
+    },
+    {
+      "uid": "agent-evidence-langfuse-units",
+      "title": "P1: Langfuse Units at 70% of Hobby Plan",
+      "condition": "langfuse_units",
+      "data": [
+        {
+          "refId": "langfuse_units",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 2678400,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app) (increase(tau_agent_evidence_langfuse_units_total{app=~\".*\",service_name=\"tau-api\"}[31d])) >= 35000",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "langfuse_units"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "15m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
+        "summary": "Tau wrote 35,000 Langfuse units in the last 31 days, 70% of the Hobby plan's 50k a month (a unit is a trace, an observation or a score; ruling 13). Bound to this environment's API, as every hosted rule is, while staging and production share the organisation's 50k: add the other environment's figure from the Langfuse units panel. Respond in order: pause staging delivery (TAU_OBSERVABILITY_DELIVERY_ENABLED), build sampling (LW13), or reopen the plan. The counter misses units Langfuse features or other projects create, and increase() cannot see a new process's first sample."
       },
       "labels": {
         "severity": "warning",

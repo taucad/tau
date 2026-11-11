@@ -2,7 +2,7 @@
  * Netlify skew protection for production documents (TAU-UI-S).
  *
  * Netlify keeps each deploy servable and, for requests that carry a deploy's token, answers
- * from that deploy: a tab keeps loading the chunks, `.data` and `/__manifest` of the build it
+ * from that deploy: a tab keeps loading the chunks and `.data` of the build it
  * started on. The paths and the token's source are declared at build time
  * (`scripts/write-skew-protection-config.mts`, `.netlify/v1/skew-protection.json`); this sets
  * the token as a cookie on every document, so each later request from that page carries it.

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
 import { mock } from 'vitest-mock-extended';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import type { ReactNode } from 'react';
 import type { SyncFacet } from '@taucad/revisions';
 import type { useProjects } from '#hooks/use-projects.js';
@@ -138,7 +138,7 @@ vi.mock('#components/inline-text-editor.js', () => ({
     </div>
   ),
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('@taucad/ui/components/alert-dialog', () => ({
   AlertDialog: ({ children, ...properties }: { readonly children: ReactNode } & Record<string, unknown>) =>
     properties['open'] === false ? null : <div role='dialog'>{children}</div>,

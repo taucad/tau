@@ -24,7 +24,7 @@ import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-sta
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';
-import { consumeRevisionReveal, requestRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
+import { consumeRevisionReveal, requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import type { EditorDocument } from '#lib/editor-document.js';
 
@@ -977,6 +977,33 @@ describe('Revisions pane closeout', () => {
     );
     expect(unnamed.map((node) => node.textContent)).toEqual([]);
   });
+
+  /* A5, fixture B4: a turn's base cut is the person's autosave; the agent's result beside it is unchanged. */
+  it('reads a turn base cut as an autosave that folds with autosaves, under the agent’s result', async () => {
+    const user = userEvent.setup();
+    const turn = { trigger: 'turn', turnId: 'u1', summary: 'Agent turn u1' } as const;
+    revisionStatusHarness.rows = [
+      row({ ...turn, revisionId: 'rev-4', revisionNumber: 4, source: 'agent', actor: 'agent', turnCut: 'result' }),
+      row({ ...turn, revisionId: 'rev-3', revisionNumber: 3, turnCut: 'base' }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, trigger: 'idle' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, trigger: 'save' }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
+
+    renderPane();
+
+    expect(await screen.findByRole('button', { name: 'Rev 4 · Agent change' })).toBeInTheDocument();
+    const fold = screen.getByRole('button', { name: /^2 autosaves/u });
+    expect(screen.queryByRole('button', { name: 'Rev 3 · Autosave' })).not.toBeInTheDocument();
+    await user.click(fold);
+    const base = screen.getByRole('button', { name: 'Rev 3 · Autosave' });
+    await user.click(base);
+    await user.click(await within(base.closest('li')!).findByRole('button', { name: 'Details' }));
+    expect(document.querySelector('dl[aria-label="Details for Rev 3"]')).toHaveTextContent(
+      'Your edits, saved before the agent started',
+    );
+    expect(screen.queryByText(/Agent turn/u)).not.toBeInTheDocument();
+  });
 });
 
 /** RA11, M2, HQ3, HQ7 and the round 4–20 History geometry, on the shipped pane. */
@@ -1302,7 +1329,7 @@ describe('Revisions pane vocabulary and History', () => {
 
     const { container } = render(<RevisionsPanelBody />, { wrapper });
 
-    expect(await screen.findByText('Tau agent')).toBeInTheDocument();
+    expect(await screen.findByText('Agent')).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/claude-opus-4|user_2abc|anon:/u);
   });
 });

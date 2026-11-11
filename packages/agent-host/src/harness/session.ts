@@ -47,11 +47,10 @@ import type {
   TurnModelConfig,
   UserProviderMessage,
 } from '#log/event-types.js';
-import { isAbandonedTurn, isPersonsMessage } from '#log/event-types.js';
+import { isAbandonedTurn, isChatStateMessage, isPersonsMessage } from '#log/event-types.js';
 import {
   createTurnContextSnapshot,
   createToolResultTrimmerMiddleware,
-  latexDelimiterMiddleware,
   skillsUpdateMessageId,
 } from '#harness/cad-middleware.js';
 import { omitAttachments, planAttachmentOmissions } from '#transport/document-payload.js';
@@ -81,10 +80,14 @@ import type { AttachmentReader, MessageIdentities, SessionLogEvent, SessionRecor
 import { applyHostToolResult, createAgentTools, normalizeToolInput } from '#harness/tools.js';
 import type { HostToolExecutionDetails, ToolResultSubstituter } from '#harness/tools.js';
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
+import { createEventLogRecentSkills } from '#harness/recent-skills.js';
+import { withReadDedup } from '#harness/read-dedup.js';
+import { createToolResultBatchBudget } from '#harness/tool-result-budget.js';
 import { createOutputLimitRecoveryMessage } from '#harness/output-limit-recovery.js';
 import { codedFailureDetail as codedFailure } from '#harness/coded-failure.js';
 import { emptyChatLedger, foldChatLedger, isForeignInvocation, unresolvedInvocations } from '#log/chat-ledger.js';
-import type { InvocationResolution } from '#wire/gateway.js';
+import { turnLabelsOf } from '#harness/turn-labels.js';
+import type { GatewayTurnLabels, InvocationResolution } from '#wire/gateway.js';
 import type { RefusalCode } from '#wire/refusals.js';
 
 const zeroUsage: Usage = {
@@ -304,6 +307,19 @@ export const carriedSkillsNote = (messages: readonly ProviderMessage[]): string 
   return typeof note?.content === 'string' ? note.content : undefined;
 };
 
+/**
+ * The newest state note the request history carries: what an earlier turn's context told the model about the chat's
+ * mode, testing and tool mask, which the next turn's note is compared against.
+ *
+ * @param messages - The request messages, with each committed turn's context attached.
+ * @returns The note's text, or `undefined` when the history tells the model nothing but the defaults.
+ * @internal
+ */
+export const carriedStateNote = (messages: readonly ProviderMessage[]): string | undefined => {
+  const note = messages.findLast((message) => isChatStateMessage(message));
+  return typeof note?.content === 'string' ? note.content : undefined;
+};
+
 /** The bytes of a context that reach a provider: role and content, never ids or metadata. */
 const contextKey = (messages: readonly UserProviderMessage[]): string =>
   JSON.stringify(messages.map(({ role, content }) => ({ role, content })));
@@ -438,6 +454,8 @@ type CreateTransportStreamOptions = {
     | undefined;
   readonly bindInvocation?: ((attemptId: string, metadata: ProviderMessageMetadata) => Promise<void>) | undefined;
   readonly invocationPurpose?: 'generation' | 'compaction' | undefined;
+  /** The next generation step's turn labels (`x-tau-turn-step`, `x-tau-turn-gap`); asked once per generation call. */
+  readonly turnLabels?: (() => Promise<GatewayTurnLabels>) | undefined;
   /** E9: the longest silence between transport events before the call fails `MODEL_STREAM_STALLED`. */
   readonly stallBound?: StreamStallBound | undefined;
 };
@@ -792,6 +810,7 @@ export const createTransportStreamFunction =
         signal.throwIfAborted();
         const committedContext = options.committedContext?.();
         const committedTurns = (await options.committedTurns?.()) ?? [];
+        const turn = invocationPurpose === 'generation' ? await options.turnLabels?.() : undefined;
         signal.throwIfAborted();
         const documents = options.documents?.();
         /* The transport's own signal: pi's abort reaches it, and so does the stall bound's. */
@@ -804,6 +823,7 @@ export const createTransportStreamFunction =
           attemptId,
           ...(options.chatId === undefined ? {} : { chatId: options.chatId }),
           invocationPurpose,
+          ...(turn === undefined ? {} : { turn }),
           ...(funded
             ? {
                 onInvocationBound: async (binding: ModelInvocationBinding) => {
@@ -1593,12 +1613,14 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   const skillsCarriage = async (): Promise<{
     readonly previousContext: TurnContextSnapshot | undefined;
     readonly carriedSkillsNote: string | undefined;
+    readonly carriedStateNote: string | undefined;
   }> => {
     const rows = await record.rows();
-    const history = await record.history();
+    const carried = attachTurnContexts(await record.history(), committedTurnContexts(rows));
     return {
       previousContext: lastCommittedTurnContext(rows),
-      carriedSkillsNote: carriedSkillsNote(attachTurnContexts(history, committedTurnContexts(rows))),
+      carriedSkillsNote: carriedSkillsNote(carried),
+      carriedStateNote: carriedStateNote(carried),
     };
   };
   const initialHistory = await record.history();
@@ -1687,18 +1709,29 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         ? (toolChoice as readonly string[]).filter((name) => allowed.has(name))
         : allowed,
   );
+  /* R5: a re-read whose text an earlier visible read returned answers with a pointer to it. */
+  const dedupedRegistry = withReadDedup(options.toolRegistry, async () => record.history());
+  /* R4: one model response's calls share an aggregate result budget; each model request starts a fresh one. */
+  const resultBatch = createToolResultBatchBudget();
+  /* The model is told every tool the turn was granted, whatever the tool choice masks: the declared list is part of
+   * the cached prefix and of what reasoning is bound to, so a mask that edited it would cost both on every toggle.
+   * The mask holds where a call is made. */
   const toolRegistry: ToolRegistry = {
-    list: () => options.toolRegistry.list().filter((tool) => selectedTools.has(tool.name)),
-    invoke: async (invocation) =>
-      selectedTools.has(invocation.toolName)
-        ? options.toolRegistry.invoke(invocation)
-        : {
-            content: {
-              errorCode: 'TOOL_NOT_FOUND',
-              message: `Unknown tool: ${invocation.toolName}`,
-            },
-            isError: true,
-          },
+    list: () => options.toolRegistry.list().filter((tool) => allowed.has(tool.name)),
+    invoke: async (invocation) => {
+      if (selectedTools.has(invocation.toolName)) {
+        return dedupedRegistry.invoke({ ...invocation, resultBudget: resultBatch.budget });
+      }
+      return {
+        content: allowed.has(invocation.toolName)
+          ? {
+              errorCode: 'TOOL_DISABLED',
+              message: `${invocation.toolName} is turned off for this chat. Do not call it again; continue without it, or tell the person what it would have done.`,
+            }
+          : { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
+        isError: true,
+      };
+    },
   };
   type PrestartedToolResult =
     | { readonly ok: true; readonly value: AgentToolResult<HostToolExecutionDetails> }
@@ -1865,6 +1898,19 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     });
     return attemptId;
   };
+  /*
+   * R1: the run's labels are read from the log once, at this session's first generation step, so a resumed run (on
+   * this device or another) labels its steps the way the run that started them would have. Every later step of the
+   * session is a continuation carrying the same turn gap, so one run's steps never straddle a bucket edge.
+   */
+  let runTurnLabels: GatewayTurnLabels | undefined;
+  const turnLabels = async (): Promise<GatewayTurnLabels> => {
+    if (runTurnLabels !== undefined) {
+      return { ...runTurnLabels, step: 'continuation' };
+    }
+    runTurnLabels = turnLabelsOf({ rows: await record.rows(), runId: options.runId, now: now().getTime() });
+    return runTurnLabels;
+  };
   const base = createTransportStreamFunction({
     transport: options.modelTransport,
     stallBound: {
@@ -1881,6 +1927,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
     committedContext: () => committedContext,
     committedTurns: async () => committedTurnContexts(await record.rows()),
+    turnLabels,
     systemPromptBlocks: () => options.systemPromptBlocks,
     // eslint-disable-next-line max-params -- The hook mirrors Pi's streamed tool-call lifecycle.
     prestartTool: async (toolCall, contentIndex, messageId, partial, signal) => {
@@ -2045,12 +2092,18 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     return { context: { ...context, messages } };
   };
   agent.streamFunction = composeModelCallMiddleware(base, [
+    asMiddleware(
+      (next): StreamFn =>
+        async (...request) => {
+          resultBatch.reset();
+          return next(...request);
+        },
+    ),
     asMiddleware(compaction.wrapStreamFn),
     createToolResultTrimmerMiddleware({
       allowImageBlocks: options.allowImageBlocks,
     }),
     asMiddleware(safeguards.wrapStreamFn),
-    latexDelimiterMiddleware,
   ]);
 
   let state: RunLifecycleState = 'admitted';
@@ -2217,11 +2270,22 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
               snapshot: options.snapshot,
               contextMessages: options.contextMessages,
               clientContext: options.clientContext,
-              recentSkills: options.recentSkills,
+              /* R2: with no host store, the chat's own event log is the record of its `use_skill` activations. */
+              recentSkills: options.recentSkills ?? createEventLogRecentSkills(async () => record.events()),
               ...(await skillsCarriage()),
             }));
           if (!(await prepareStartOfTurn())) {
             return false;
+          }
+          /* R3: pi runs `prepareNextTurn` only after a completed turn, never before a run's first call, so a new
+           * prompt after Stop would reach the model with interrupted tool results and no instruction to re-verify.
+           * The reminder follows the stopped history and precedes the new prompt, as the resume path places it. */
+          const reminder = await createInterruptRecoveryMessage({
+            messages: await record.history(),
+            timestamp: now().getTime(),
+          });
+          if (reminder) {
+            await record.append({ type: 'message.appended', message: reminder });
           }
           const retainedHistory = await record.history();
           await record.append({

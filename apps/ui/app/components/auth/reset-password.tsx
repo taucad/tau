@@ -10,7 +10,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Field, FieldDescription, FieldError, FieldGroup } from '@taucad/ui/components/field';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@taucad/ui/components/input-group';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
 import { Label } from '@taucad/ui/components/label';
 
@@ -80,8 +80,8 @@ export function ResetPassword({ className }: ResetPasswordProps): React.JSX.Elem
   return (
     <Card className={cn('w-full max-w-sm', className)}>
       <CardHeader>
-        <CardTitle className='text-xl font-semibold'>
-          <h1>{localization.auth.resetPassword}</h1>
+        <CardTitle level={1} variant='title'>
+          {localization.auth.resetPassword}
         </CardTitle>
       </CardHeader>
 

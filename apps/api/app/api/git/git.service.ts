@@ -24,49 +24,54 @@ import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import type { GitOperation, GitReceiptOutcome } from '@taucad/api-observability/metrics';
 import { project, projectDeletion, projectGit, projectGitLfsObject, publication } from '@taucad/api-database/schema';
-import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
-import type { ProjectRole } from '#api/collaboration/project-access.service.js';
+import { ProjectAccessService } from '@taucad/api-projects/collaboration/project-access.service';
+import type { ProjectRole } from '@taucad/api-projects/collaboration/project-access.service';
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type {
   CommercialEntitlements,
   CommercialEntitlementsService,
-} from '#api/entitlements/commercial-entitlements.js';
-import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
+} from '@taucad/api-projects/entitlements/commercial-entitlements';
+import { commercialEntitlementsKey } from '@taucad/api-projects/entitlements/commercial-entitlements';
 import {
   hydratesFromOthersPerOwnerPerDay,
   hydratesPerCallerPerDay,
   isRemovableRef,
+  linkedForges,
   quotaRefusalSentence,
   repositoryStoreKey,
-} from '#api/git/git.constants.js';
-import type { GitService as GitSmartService, QuotaAudience } from '#api/git/git.constants.js';
-import { OwnerInFlightGate } from '#api/git/admission/owner-in-flight.js';
-import { advertiseReferences } from '#api/git/advertisement.js';
-import type { AdvertisementDialect } from '#api/git/advertisement.js';
-import { developmentPublicKeysJson } from '#api/git/forwarding/contract/development-keys.js';
-import { parsePublicKeys } from '#api/git/forwarding/contract/keys.js';
-import type { VerificationKeys } from '#api/git/forwarding/contract/keys.js';
-import { verifyReceipt } from '#api/git/forwarding/contract/receipt.js';
-import type { StorageReceipt } from '#api/git/forwarding/contract/receipt.js';
-import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
-import type { GitExecutor, GrantFacts } from '#api/git/forwarding/git-executor.js';
-import { memoryReceiptLedger } from '#api/git/forwarding/receipt-ledger.js';
-import type { ReceiptLedger } from '#api/git/forwarding/receipt-ledger.js';
-import { unconfiguredExecutor } from '#api/git/forwarding/unconfigured-executor.js';
-import { refusalCode, refusalFor } from '#api/git/git-refusals.js';
-import { resolveLfsObjectLocation } from '#api/git/lfs-keys.js';
-import { copyPendingOnAdvance } from '#api/git/mirror/watermark.js';
+} from '@taucad/api-git-core/git.constants';
+import type { GitService as GitSmartService, LinkedForge, QuotaAudience } from '@taucad/api-git-core/git.constants';
+import { OwnerInFlightGate } from '@taucad/api-git-core/admission/owner-in-flight';
+import { advertiseReferences } from '@taucad/api-git-core/advertisement';
+import type { AdvertisementDialect } from '@taucad/api-git-core/advertisement';
+import { developmentPublicKeysJson } from '@taucad/api-git-core/forwarding/contract/development-keys';
+import { parsePublicKeys } from '@taucad/api-git-core/forwarding/contract/keys';
+import type { VerificationKeys } from '@taucad/api-git-core/forwarding/contract/keys';
+import { verifyReceipt } from '@taucad/api-git-core/forwarding/contract/receipt';
+import type { StorageReceipt } from '@taucad/api-git-core/forwarding/contract/receipt';
+import { gitExecutorKey } from '@taucad/api-git-core/forwarding/git-executor';
+import type { GitExecutor, GrantFacts } from '@taucad/api-git-core/forwarding/git-executor';
+import { memoryReceiptLedger } from '@taucad/api-git-core/forwarding/receipt-ledger';
+import type { ReceiptLedger } from '@taucad/api-git-core/forwarding/receipt-ledger';
+import { unconfiguredExecutor } from '@taucad/api-git-core/forwarding/unconfigured-executor';
+import { refusalCode, refusalFor } from '@taucad/api-git-core/git-refusals';
+import { resolveLfsObjectLocation } from '@taucad/api-git-core/lfs-keys';
+import { copyPendingOnAdvance } from '@taucad/api-git-mirror/mirror/watermark';
 import { writeLfsReachability } from '#api/git/lfs-reachability-marks.js';
-import { RepositoryRouteGuard } from '#api/git/routing/route-guard.js';
-import { RepositoryStoreError } from '#api/git/store/errors.js';
-import { repositoryLocator } from '#api/git/store/locator.js';
-import { decodeManifest, isTombstoned, onlyCompactedSince } from '#api/git/store/manifest.js';
-import type { Manifest } from '#api/git/store/manifest.js';
-import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
-import { materializePublishedTags } from '#api/publications/publication-materializer.js';
-import type { GitChildRunner, MaterializerDependencies } from '#api/publications/publication-materializer.js';
+import { RepositoryRouteGuard } from '@taucad/api-git-core/routing/route-guard';
+import { RepositoryStoreError } from '@taucad/api-git-core/store/errors';
+import { repositoryLocator } from '@taucad/api-git-core/store/locator';
+import { decodeManifest, isTombstoned, onlyCompactedSince } from '@taucad/api-git-core/store/manifest';
+import type { Manifest } from '@taucad/api-git-core/store/manifest';
+import type { RepositoryLocator, RepositoryStore } from '@taucad/api-git-core/store/port';
+import { materializePublishedTags } from '@taucad/api-projects/publications/publication-materializer';
+import type {
+  GitChildRunner,
+  MaterializerDependencies,
+} from '@taucad/api-projects/publications/publication-materializer';
+import type { PublicationRepositoryLeases, ReadLease } from '@taucad/api-projects/publications/repository-leases';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
+import { ObjectStorageService } from '@taucad/api-object-storage';
 
 /**
  * The Tau Hosted Remote's request path in tau-api (charter D1, D3, D4; north
@@ -86,15 +91,6 @@ const flushPacketBytes = 4;
 
 /** The caller a derived-state repair is made as: nobody's account, and nobody's hydrate budget. */
 const derivedStateCaller = 'system:derived-state';
-
-/** A read lease the publication materializer holds through tau-storage (until DC3). */
-export type ReadLease = {
-  /** An opaque handle the materializer's git runner ({@link GitRepositoryService.leaseGit}) resolves. */
-  readonly directory: string;
-  readonly locator: RepositoryLocator;
-  /** The manifest the reads are pinned to. `undefined` is generation 0. */
-  readonly manifest: Manifest | undefined;
-};
 
 /** How the API checks receipts: tau-storage's verification keys and the applied-receipt ledger. */
 export type ReceiptVerification = {
@@ -227,7 +223,7 @@ export type GitLfsReservation =
     };
 
 @Injectable()
-export class GitRepositoryService {
+export class GitRepositoryService implements PublicationRepositoryLeases {
   readonly #logger = new Logger(GitRepositoryService.name);
 
   /**
@@ -767,10 +763,13 @@ export class GitRepositoryService {
     const { access } = args;
     const release = await this.admitRpc(access, 'receive_pack');
     try {
-      const facts = await this.grantFacts(access, { committedBy: args.committedBy, authoritative: true });
+      const [facts, forge] = await Promise.all([
+        this.grantFacts(access, { committedBy: args.committedBy, authoritative: true }),
+        this.linkedForge(access.projectId),
+      ]);
       await this.spendHydrate(access, 'receive_pack');
       const result = await this.forwardWrite(access, async () =>
-        this.executor.receivePack(facts, {
+        this.executor.receivePack(forge === undefined ? facts : { ...facts, forge }, {
           body: args.body,
           gzipped: args.gzipped,
           ...(args.abort === undefined ? {} : { abort: args.abort }),
@@ -1198,6 +1197,20 @@ export class GitRepositoryService {
       recordedGeneration: row?.derivedGeneration ?? 0,
       route,
     };
+  }
+
+  /**
+   * The forge a project is linked to (B4), from `project.origin`: a push's
+   * authorship check passes commits Tau did not record only on such a
+   * project. Read with the push, never from the request.
+   */
+  private async linkedForge(projectId: string): Promise<LinkedForge | undefined> {
+    const [row] = await this.databaseService.database
+      .select({ origin: project.origin })
+      .from(project)
+      .where(eq(project.id, projectId))
+      .limit(1);
+    return linkedForges.find((forge) => forge === row?.origin);
   }
 
   /**

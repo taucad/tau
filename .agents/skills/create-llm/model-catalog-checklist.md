@@ -11,15 +11,19 @@ Use this checklist after loading `SKILL.md` for model/provider work.
 | Catalog cap/shape tests            | `apps/libs/api-llm-gateway/src/models/model.service.test.ts`       |
 | Gateway routes, wires, credentials | `apps/libs/api-llm-gateway/src/providers/provider-gateway.ts`      |
 | Strict gateway request boundary    | `apps/libs/api-llm-gateway/src/billable-model-request.ts`          |
+| Funded routes: rates, ceilings     | `apps/libs/api-billing/src/billable-model-qualification.ts`        |
+| Funded route contract test         | `apps/libs/api-billing/src/billable-model-qualification.test.ts`   |
 | Provider/family enums (chat wire)  | `libs/chat/src/schemas/provider.schema.ts`                         |
 | Tool-schema contract test          | `libs/chat/src/schemas/provider-tool-schema-compat.test.ts`        |
 | Host transport: wire + reasoning   | `packages/agent-host/src/transport/gateway-model-transport.ts`     |
 | Vertex response/request shim       | `packages/agent-host/src/transport/vertex-completions-shim.ts`     |
 | UI reasoning derivation            | `apps/ui/app/chat-clients/_internal/turn-body.ts`                  |
-| Self-host helper path (LangChain)  | `apps/libs/api-llm-gateway/src/providers/provider.service.ts`      |
+| Self-host helper codec             | `apps/libs/api-llm-gateway/src/providers/helper-wire.ts`           |
+| Provider metadata (OTel, cache)    | `apps/libs/api-llm-gateway/src/providers/provider.service.ts`      |
 | Helper invocation                  | `apps/libs/api-llm-gateway/src/direct-model-invocation.service.ts` |
 | Environment config                 | `apps/api/app/config/environment.config.ts`                        |
 | Live gateway suite (gateway URL)   | `packages/agent-host/tests/live/provider-streaming.live.test.ts`   |
+| Live helper path (self-host)       | `apps/api/app/api/llm/helper-path.live.test.ts`                    |
 
 ## Research Checklist
 
@@ -80,6 +84,18 @@ When a new provider is actually needed, update all relevant surfaces:
 - Extend the request boundary in `billable-model-request.ts` if the wire carries block shapes it does not yet accept.
 - Add reasoning derivation in `turn-body.ts` if the provider names its reasoning control differently.
 - Add at least one catalog row and a live matrix row.
+- If Tau Cloud funds it, add funded routes for its rows (next section).
+
+## Funded Route Checklist
+
+A provider in `fundedGatewayProviderIds` reaches its supplier on Tau Cloud only through a route in `billable-model-qualification.ts`. `CodeOwnedBillableModelQualificationResolver.resolve` refuses any request whose route, wire, output field or output bound does not match, before anything is charged or sent. For every funded row:
+
+- Add a `route(...)` with the catalog route id, display name and wire.
+- Set `contextMaximum` and `outputMaximum` to the supplier's limits on that surface. `outputMaximum` must be at least the row's `details.maxTokens`, or every turn at the catalog ceiling is refused.
+- Set `rates(input, cacheRead, cacheWrite, output)` in USD per million tokens from the supplier's published pricing, and `pricingRevision` to the date you read it. A route without rates is refused as temporarily unavailable.
+- Set `outputParameter` to the field the host transport actually sends. The default is `max_tokens` for `anthropic`, `max_output_tokens` for `openai-responses`, and `max_completion_tokens` for `openai-completions`. On `openai-completions`, pi-ai picks the field in `detectCompat` (`dist/api/openai-completions.js` in `@earendil-works/pi-ai`): it sends `max_tokens` for Together, DeepSeek, Moonshot and some other providers and base URLs, and `max_completion_tokens` otherwise, unless `piModelFor` sets `compat.maxTokensField`. Read `detectCompat` for the pinned pi-ai version; do not infer the field from the provider's docs. A mismatch refuses every turn with `Exactly one bounded output-token maximum is required`.
+- Set `allowsImage: false` for text-only models and `combinedMaximum` where the supplier bounds input plus output together.
+- Run the funded route contract test. It sends each funded row's real host request through the real resolver at the row's catalog output ceiling, so it catches a wrong field or a low ceiling. Re-check `outputParameter` for every funded route when pi-ai is upgraded.
 
 ## Catalog Row Checklist
 
@@ -125,12 +141,14 @@ Avoid:
 
 `gateway-model-transport.ts` then applies it: Anthropic gets `thinkingEnabled` plus budget/display/effort, the Responses providers get `reasoningEffort`/`reasoningSummary`, and Vertex gets `samplingParams.extra_body.google`.
 
+The self-host helper (`project_name`, `commit_name` with Tau Cloud off) maps the row's `configuration` in `helper-wire.ts`, but asks for the least reasoning each wire accepts, so a short name fits its 64-token ceiling: OpenAI gets `reasoning.effort: 'none'`; xAI and Moonshot get the row's lowest level; Vertex gets the row's lowest level as `extra_body.google.thinking_config.thinking_level`; Together Kimi and GLM get `reasoning.enabled: false`; Anthropic gets no `thinking` and no `output_config`. The row's `temperature` is forwarded where set, except on Moonshot Kimi, which fixes its own. A new reasoning control a helper must forward is a codec change there, with a `helper-wire.test.ts` case.
+
 ## Vertex Wire Facts
 
 A Vertex row goes through Tau's OpenAI-compatible route, not Gemini's native `generateContent`. Facts a model author must know:
 
 - Thinking levels are per model. Gemini 3.5 Flash and 3.5 Flash-Lite accept `MINIMAL` upstream; Gemini 3.8 Flash and 3.1 Pro accept `LOW`, `MEDIUM`, `HIGH` only. Tau cannot declare `MINIMAL`: the `thinkingLevel` enum in `model.schema.ts` and the gateway transport admit only `LOW`, `MEDIUM`, `HIGH`. Setting a level the model rejects is a request-time refusal, not a downgrade.
-- Streamed tool-call arguments are never requested, on either Vertex wire: `extra_body.google.stream_function_call_arguments` on the OpenAI-compatible route (`billable-model-request.ts` refuses it) and the `streamFunctionCallArguments` client option in `provider.service.ts`, which the Google client turns into `toolConfig.functionCallingConfig.streamFunctionCallArguments` on native `generateContent` — emitted even for a tool-free turn. Vertex sheds requests carrying it with a pre-stream 499 CANCELLED while its shared-quota pool is stressed (near-deterministic inside such a window, 0/120 outside one), and its streamed-arguments serializer also cancels a turn mid-stream — HTTP 200, real deltas, then a bare `[{"error":{"code":499,…"CANCELLED"}}]` tail no pre-stream retry can see — whenever a tool call closes a nested object on a string value. That value shape is why no schema contract test can guarantee it away: `apply_parameter_operation` is 0/9 live with the flag and 9/9 without it across Gemini 3.7 Flash, 3.8 Flash and 3.1 Pro, so the live matrix's `apply_parameter_operation` row is the standing guard for anyone re-enabling the flag once Google fixes the serializer.
+- Streamed tool-call arguments are never requested: `extra_body.google.stream_function_call_arguments` on the OpenAI-compatible route is refused by `billable-model-request.ts` and never sent by the helper codec. Every Vertex call, the self-host helper included, uses that route; none uses native `generateContent`. Vertex sheds requests carrying it with a pre-stream 499 CANCELLED while its shared-quota pool is stressed (near-deterministic inside such a window, 0/120 outside one), and its streamed-arguments serializer also cancels a turn mid-stream — HTTP 200, real deltas, then a bare `[{"error":{"code":499,…"CANCELLED"}}]` tail no pre-stream retry can see — whenever a tool call closes a nested object on a string value. That value shape is why no schema contract test can guarantee it away: `apply_parameter_operation` is 0/9 live with the flag and 9/9 without it across Gemini 3.7 Flash, 3.8 Flash and 3.1 Pro, so the live matrix's `apply_parameter_operation` row is the standing guard for anyone re-enabling the flag once Google fixes the serializer.
 - Thought-signature echo is handled by `vertex-completions-shim.ts`: it captures `extra_content.google.thought_signature` off the response stream and replays it onto outbound tool calls. Do not add a second signature path in a catalog change.
 - Tool schemas must satisfy the contract test. Vertex rejects `$ref`/`definitions` loops and a non-object top-level schema outright.
 - The gateway exchanges the service-account JSON in `GOOGLE_VERTEX_AI_CREDENTIALS` for an OAuth token and prefixes the model id with `google/`; the catalog row carries the bare provider model id.
@@ -145,6 +163,7 @@ Before public enablement, verify:
 - Streaming works through the configured wire.
 - Provider-specific reasoning or JSON controls are actually wired, not merely present in the row.
 - The live matrix row for the model's provider passed with this model id.
+- For a funded model: the funded route contract test passes, and after deploy one funded turn with tools succeeded on staging (taucad.dev) before the row is public on production (tau.new). The live matrix cannot stand in for this: it runs with Tau Cloud off.
 
 Hidden rows are still useful for staging, but `enabled: false` also removes the gateway route, so a hidden row cannot be smoke-tested through the gateway.
 
@@ -166,10 +185,22 @@ pnpm nx test agent-host --watch=false
 pnpm nx typecheck agent-host
 ```
 
-Then the live ladder. `api:test:live` runs an in-process live gateway harness (suites under `apps/api/app/testing/live/`: a provider matrix suite and a provider-switch suite) against real keys from `apps/api/.env`, with no running API required:
+When a funded route, a funded row's output ceiling or the pi-ai version changed:
+
+```bash
+pnpm nx test api-billing --watch=false src/billable-model-qualification.test.ts
+```
+
+Then the live ladder. `api:test:live` runs an in-process live gateway harness (suites under `apps/api/app/testing/live/`: a provider matrix suite and a provider-switch suite) against real keys from `apps/api/.env`, with no running API required. The harness boots the gateway with `ModelInvocationModule.forRoot({ tauCloudEnabled: false })` in `live-gateway.harness.ts`, so it skips route qualification, metering and settlement entirely. A green live matrix says nothing about whether Tau Cloud admits the model:
 
 ```bash
 pnpm nx run api:test:live
+```
+
+The self-host helper path has its own live harness, skipped unless `TAU_LIVE_PROVIDERS=1`: for each configured provider it streams a helper request, an image helper request, and a tool call through the direct `gateway` surface, printing provider, model id, status, latency and token counts only:
+
+```bash
+TAU_LIVE_PROVIDERS=1 pnpm nx run api:test:live -- app/api/llm/helper-path.live.test.ts
 ```
 
 The gateway-URL variant drives a running gateway from the agent host instead:

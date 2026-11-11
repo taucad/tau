@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { toast } from '#components/ui/sonner.js';
+import { toast } from '@taucad/ui/components/sonner';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { useChats } from '#hooks/use-chats.js';
@@ -63,7 +63,7 @@ export function RevisionConflictChat(): undefined {
       request: Readonly<{ revisionId: string; checkoutId: string | undefined; paths: readonly string[] }>,
     ): Promise<void> => {
       const message = buildUserMessage({ text: resolutionPrompt(request.revisionId, request.paths) });
-      /* The same one-shot startup request *Fix with AI* uses, so the seeded
+      /* The same one-shot startup request *Fix in chat* uses, so the seeded
        * turn fires once on hydration and a plain pending tail is still only
        * display state (apps/ui/AGENTS.md). */
       const chat = await createChat({

@@ -7,11 +7,11 @@ import {
   ChatToolCardHeader,
   ChatToolCardIcon,
   ChatToolCardTitle,
-} from '#components/chat/chat-tool-card.js';
-import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
-import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
+} from '@taucad/chat-ui/components/chat-tool-card';
+import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
+import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
-import { formatNumberAbbreviation } from '#utils/number.utils.js';
+import { formatNumberAbbreviation } from '@taucad/ui-core/utils/number.utils';
 
 type CompactionView = {
   icon: LucideIcon;

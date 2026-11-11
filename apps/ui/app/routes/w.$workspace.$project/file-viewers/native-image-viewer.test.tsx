@@ -6,13 +6,13 @@ import { mock } from 'vitest-mock-extended';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
-import { withAuthorityDigest } from '#lib/composed-view-client.fixture.js';
+import { withAuthorityDigest } from '@taucad/ui-core/lib/composed-view-client.fixture';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { useFileContent } from '#hooks/use-file-content.js';
 import { NativeImageViewer } from '#routes/w.$workspace.$project/file-viewers/native-image-viewer.js';
-import { nativeImageFormats } from '#routes/w.$workspace.$project/file-viewers/native-image-format.js';
+import { nativeImageFormats } from '@taucad/project-workspace/utils/native-image-format';
 import type { FileViewerPaneContent } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);

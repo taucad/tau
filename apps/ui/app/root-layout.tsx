@@ -16,9 +16,9 @@ import { Page } from '#components/layout/page.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { ServerPreferencesProvider } from '#hooks/server-preferences.js';
 import type { ServerPreferences } from '#hooks/server-preferences.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { cn } from '@taucad/ui/utils/cn';
-import { Toaster } from '#components/ui/sonner.js';
+import { Toaster } from '@taucad/ui/components/sonner';
 import { ColorProvider, useColor } from '#hooks/use-color.js';
 import { AppViewerEnvironment } from '#components/geometry/app-viewer-environment.js';
 import { useFavicon } from '#hooks/use-favicon.js';
@@ -37,7 +37,7 @@ import { GlobalChatFlushGuard } from '#components/global-chat-flush-guard.js';
 import { DocumentMemoryKillReporter } from '#components/memory-kill-reporter.js';
 import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
-import { authErrorMessage, betterFetchErrorBodyMessage } from '#utils/auth-error.utils.js';
+import { authErrorMessage, betterFetchErrorBodyMessage } from '@taucad/ui-core/utils/auth-error.utils';
 import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
 
 export type RootLoaderData = {
@@ -201,7 +201,7 @@ function LayoutDocument({
   // which allows PreventFlashOnWrongTheme's script to correctly detect and apply the
   // system preference before the page renders (prevents light mode flash on dark systems).
   const location = useLocation();
-  const { ssrTheme: resolvedTheme } = useTheme();
+  const { theme, ssrTheme: resolvedTheme } = useTheme();
   const color = useColor();
   const { setFaviconColor } = useFavicon();
   const [usePointerCursors] = useCookie(cookieName.pointerCursors, false);
@@ -245,7 +245,7 @@ function LayoutDocument({
         {children}
         <ScrollRestoration />
         <Scripts />
-        <Toaster />
+        <Toaster theme={theme} />
       </body>
     </html>
   );

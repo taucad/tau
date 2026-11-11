@@ -2,8 +2,8 @@
 import { act, render, screen, within } from '@testing-library/react';
 import { createActor } from 'xstate';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { KeyedMutex } from '#db/keyed-mutex.js';
-import type * as ChatMessageQueueModule from '#db/chat-message-queue-store.js';
+import { KeyedMutex } from '@taucad/utils/keyed-mutex';
+import type * as ChatMessageQueueModule from '@taucad/chat-ui/db/chat-message-queue-store';
 import type * as ThemeModule from '#hooks/use-theme.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
@@ -13,7 +13,7 @@ import { publishChatTurnAdmission } from '#chat-clients/_internal/chat-host-bind
 import { lifecycleRow, logRow, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
 
 const queueMutex = new KeyedMutex<string>();
-vi.mock('#db/chat-message-queue-store.js', async (importOriginal) => {
+vi.mock('@taucad/chat-ui/db/chat-message-queue-store', async (importOriginal) => {
   const original = await importOriginal<typeof ChatMessageQueueModule>();
   return {
     ...original,

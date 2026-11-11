@@ -11,7 +11,8 @@ import { appendCell, policyEvidence, summarize } from './first-use-evidence.mjs'
 
 const scratch = () => mkdtempSync(join(tmpdir(), 'tau-first-use-test-'));
 const sample = '10:00:00 pid 42 parent 41 (/test/Tau.app/Contents/MacOS/Tau): python3';
-const policy = (log: string) => policyEvidence({ log, samples: sample, app: '/test/Tau.app', store: '/test/payloads' });
+const policy = (log: string) =>
+  policyEvidence({ log, samples: sample, app: '/test/Tau.app', store: '/test/dependencies' });
 
 await test('should preserve multiline and tabbed failures as one JSON cell and one Markdown row', () => {
   const directory = scratch();
@@ -77,10 +78,10 @@ await test('should detect attributed refusal without matching a PID prefix or la
 
 await test('should retain both attributed alerts and unattributed UI alerts for fail-closed assessment', () => {
   const evidence = policy(
-    'CoreServicesUIAgent[7:abc] Window <_NSAlertPanel: 0x1> ordered front\nsyspolicyd[8:abc] /test/payloads/python rejected',
+    'CoreServicesUIAgent[7:abc] Window <_NSAlertPanel: 0x1> ordered front\nsyspolicyd[8:abc] /test/dependencies/python rejected',
   );
   assert.equal(evidence.uiAlerts.length, 1);
-  assert.deepEqual(evidence.failures, ['syspolicyd[8:abc] /test/payloads/python rejected']);
+  assert.deepEqual(evidence.failures, ['syspolicyd[8:abc] /test/dependencies/python rejected']);
 });
 
 await test('should not accept a policy log command failure as an empty successful window', () => {
@@ -96,7 +97,7 @@ await test('should not accept a policy log command failure as an empty successfu
       'policy',
       directory,
       '/test/Tau.app',
-      '/test/payloads',
+      '/test/dependencies',
       '1',
     ]);
     const cell = JSON.parse(readFileSync(join(directory, 'cells.jsonl'), 'utf8')) as {

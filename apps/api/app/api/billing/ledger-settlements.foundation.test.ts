@@ -14,12 +14,12 @@ import {
 import type { QualifiedAdmissionInput } from '@taucad/api-billing';
 import { seedBillingFixturePolicy } from '@taucad/api-billing/testing/billing-policy.fixture';
 import { fulfillPaidFixture, seedPaidPurchase } from '@taucad/api-billing/testing/billing-payment.fixture';
-import type { OtlpSpan } from '#api/agent-observability/langfuse-observation.js';
-import { langfuseObservation, pseudonymKey } from '#api/agent-observability/langfuse-observation.js';
-import type { LangfuseObservationRow } from '#api/agent-observability/langfuse-scorecard.js';
-import { reconcileLedger } from '#api/agent-observability/ledger-reconciliation.js';
-import { ledgerSettlements } from '#api/agent-observability/ledger-settlements.js';
-import { settlementEvidence } from '#api/agent-observability/settlement-evidence.js';
+import type { OtlpSpan } from '@taucad/api-agent-observability/langfuse-observation';
+import { langfuseObservation, pseudonymKey } from '@taucad/api-agent-observability/langfuse-observation';
+import type { LangfuseObservationRow } from '@taucad/api-agent-observability/langfuse-scorecard';
+import { reconcileLedger } from '@taucad/api-agent-observability/ledger-reconciliation';
+import { ledgerSettlements } from '@taucad/api-agent-observability/ledger-settlements';
+import { settlementEvidence } from '@taucad/api-agent-observability/settlement-evidence';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 if (!databaseUrl) {
@@ -183,18 +183,14 @@ describe('ledgerSettlements PostgreSQL foundation', () => {
     const pseudonym = pseudonymKey(Uint8Array.from(randomBytes(32)));
     const authority = { policyEpoch: 'epoch-1', protection: 'free', project: 'project-a' } as const;
     const rows = await Promise.all(
-      charged.map(async ({ operation, receipt }, index) => {
+      charged.map(async ({ operation, receipt }) => {
         const evidence = await settlementEvidence(
           { operation, receipt, normalization: 'test-v1' },
           fixture.userId,
           authority,
         );
-        const { span } = langfuseObservation(
-          evidence,
-          { environment: 'synthetic', receipt: `evr_${index}`, protection: 'free' },
-          pseudonym,
-        );
-        return rowOf(span);
+        const observation = langfuseObservation(evidence, { environment: 'synthetic', protection: 'free' }, pseudonym);
+        return rowOf(observation!.spans[0]!);
       }),
     );
     expect(await reconcileLedger(settlements, rows, 'synthetic')).toEqual({

@@ -3,7 +3,7 @@ title: 'Page Composition Policy'
 description: 'Page frame, title row, view controls, collection grid and pagination, card anatomy and states, button roles, busy and collection states, copy, view URL state, keyboard order and first-viewport budget for Tau product pages.'
 status: active
 created: '2026-09-28'
-updated: '2026-09-28'
+updated: '2026-11-11'
 related:
   - docs/policy/design-policy.md
   - docs/policy/ui-policy.md
@@ -68,7 +68,7 @@ INCORRECT (`routes/plugins/route.tsx`):
 
 ### 2. Lead with one title row
 
-Start the page with `PageHeader` (`components/layout/page-header.tsx`): title, optional count and at most one primary action at the inline end, in `flex flex-wrap items-center justify-between gap-4`. `PageHeader` renders UI Policy §3's H1 step (36 px, weight 500, line height 1.1, `text-4xl font-medium tracking-tight`); do not hand-write heading utilities. The count is the collection's total as muted `tabular-nums` text without parentheses; the filtered count belongs to the results status (Rule 11). The page's primary action lives in this row, not in the shell header's `Handle.actions` slot, which holds route-scoped tools. Collection pages may place their named search in the same row, before the action (Rule 3). Product pages carry no kicker and no hero copy; add one sentence of description only when the title cannot say what the page is for (`/usage`). Marketing and docs sections keep their display scale and DESIGN's Geist Mono kicker.
+Start the page with `PageHeader` (`components/layout/page-header.tsx`): title, optional count and at most one primary action at the inline end, in `flex flex-wrap items-center justify-between gap-4`. `PageHeader` renders the page's one `h1` in UI Policy §3's `page` role; a section inside a page leads with `SectionHeader` (same file, §3's `section` role), which takes its `level` from the host and the same count and action slots. Do not hand-write heading utilities. The count is the collection's total as muted `tabular-nums` text without parentheses; the filtered count belongs to the results status (Rule 11). The page's primary action lives in this row, not in the shell header's `Handle.actions` slot, which holds route-scoped tools. Collection pages may place their named search in the same row, before the action (Rule 3). Product pages carry no kicker and no hero copy; add one sentence of description only when the title cannot say what the page is for (`/usage`). Marketing and docs sections keep their display scale and DESIGN's Geist Mono kicker.
 
 **Why**: page titles were `text-3xl font-bold` (Projects, Community, Usage), `text-3xl font-medium tracking-tight` (Files), `text-2xl font-medium` (Plugins) and `text-6xl font-medium` (Workflows); none rendered the policy step.
 
@@ -85,7 +85,7 @@ INCORRECT (the pre-refresh community route):
 <span className='text-muted-foreground'>({sortedProjects.length})</span>
 ```
 
-**Enforced by**: `PageHeader` as the owner; `tau-lint/no-raw-page-heading` (an `<h1>` carrying a `text-*` size utility outside `PageHeader` and a display-hero allowlist). One primary action per view: default, unenforced; reviewer surface: rendered review.
+**Enforced by**: `PageHeader` and `SectionHeader` as the owners; `tau-lint/no-raw-heading-type` (type utilities on any heading or title slot, and the `page` variant outside `PageHeader`; UI Policy §3). One primary action per view: default, unenforced; reviewer surface: rendered review.
 
 ### 3. Put view controls in one row
 
@@ -177,7 +177,7 @@ const [selectedKernel, setSelectedKernel] = useState<KernelProvider | 'all'>('al
 
 ### 6. Render collections through one grid owner and paginate with the shared owner
 
-Render card collections through `projectGridClassName` (`components/project-grid.tsx`): `grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5`, adding `grid-flow-dense` when a featured card spans cells. Skeletons use the same owner. Mark the grid as a list: `<ul role='list'>` with one `<li>` per card. Page every collection with the app's standard: TanStack `useReactTable` with `getPaginationRowModel` and controlled `pagination` state, rendered by the shared `DataTablePagination` (`components/ui/data-table.tsx`) below the grid, page size remembered per device through `useCookie` (default 20; options 20, 50, 100), `withSelectedCount={false}` with an `itemName` so the row shows the visible range ("21–31 of 31 examples"). Never show "Load more", infinite scroll or a show-all switch.
+Render card collections through `projectGridClassName` (`components/project-grid.tsx`): `grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5`, adding `grid-flow-dense` when a featured card spans cells. Skeletons use the same owner. Mark the grid as a list: `<ul role='list'>` with one `<li>` per card. Page every collection with the app's standard: TanStack `useReactTable` with `getPaginationRowModel` and controlled `pagination` state, rendered by the shared `DataTablePagination` (`@taucad/ui-kit/components/data-table`) below the grid, page size remembered per device through `useCookie` (default 20; options 20, 50, 100), `withSelectedCount={false}` with an `itemName` so the row shows the visible range ("21–31 of 31 examples"). Never show "Load more", infinite scroll or a show-all switch.
 
 **Why**: the chain was written three times and the library skeleton had already lost `2xl:grid-cols-5`; `/community`'s "Load More Projects" never sliced the grid, and `/projects` already paginates through `DataTablePagination`, so one standard serves both.
 
@@ -207,7 +207,7 @@ INCORRECT (the pre-refresh library skeleton):
 
 ### 7. Build cards from the ProjectCard anatomy
 
-A clickable project card is `ProjectCard` (`components/project-card.tsx`): an isolated shell with one full-inset sibling `Link` (`z-10`) whose sr-only label is a verb plus the name that says where it goes ("Open Bracket"); reserve "Preview" for the in-card live preview toggle. Add `ProjectCardMedia`: the media wrapper owns the 4:3 geometry and its children fill it, so content never sizes a grid row; a thumbnail is decorative (`alt=''`) beside the heading; the overlay `Preview model` toggle carries `aria-pressed`. The body holds a title as a heading one level below the page's (`h2` on index pages), clamped to one line; at most one muted metadata line; and a footer action island (`relative z-20`) with at most one visible action plus a named overflow (`Actions for <name>`). Never nest interactive elements in the link or put `onClick` on the card. Show authentic metadata only: on example cards the metadata line is the kernel's `SvgIcon` mark and catalog name, with no author, avatar or badge adornments.
+A clickable project card is `ProjectCard` (`components/project-card.tsx`): an isolated shell with one full-inset sibling `Link` (`z-10`) whose sr-only label is a verb plus the name that says where it goes ("Open Bracket"); reserve "Preview" for the in-card live preview toggle. Add `ProjectCardMedia`: the media wrapper owns the 4:3 geometry and its children fill it, so content never sizes a grid row; a thumbnail is decorative (`alt=''`) beside the heading; the overlay `Preview model` toggle carries `aria-pressed`. The body holds a title as a heading one level below the heading over the grid (`h2` on index pages), clamped to two lines; at most one muted metadata line; and a footer action island (`relative z-20`) with at most one visible action plus a named overflow (`Actions for <name>`). Never nest interactive elements in the link or put `onClick` on the card. Show authentic metadata only: on example cards the metadata line is the kernel's `SvgIcon` mark and catalog name, with no author, avatar or badge adornments.
 
 A gallery may lead its unfiltered first page with one featured card chosen by a curated locator constant (never rotated or random): same anatomy, spanning `col-span-2 lg:row-span-2` with size containment, a larger media area, a two-line description and a "Featured" badge beside its heading. It disappears as soon as a query or filter is active or the visitor leaves the first page.
 
@@ -219,7 +219,9 @@ CORRECT:
 <ProjectCard to={examplePath} linkLabel={`Open ${name}`}>
   <ProjectCardMedia name={name} …>{preview}</ProjectCardMedia>
   <CardHeader>
-    <h2 className='line-clamp-1 text-base font-semibold'>{name}</h2>
+    <Heading level={2} variant='item' className='line-clamp-2'>
+      {name}
+    </Heading>
     <p className='flex items-center gap-1.5 text-sm text-muted-foreground'>
       <SvgIcon id={kernel} className='size-4' />
       {kernelConfiguration.name}
@@ -296,7 +298,7 @@ INCORRECT (the pre-refresh community grid):
 
 ### 10. Keep a busy action's name
 
-While an action runs, keep its label (a progressive verb with "…" is allowed), set `aria-busy`, and ignore repeat activation. The glyph may stay or give way to `Loader` (`components/ui/loader.tsx`, `aria-hidden`); never swap the label itself for `Loader`, which leaves the control nameless and collapses its width. Use `Spinner` (`components/ui/spinner.tsx`, `role='status' aria-label='Loading'`) for standalone progress, never inside a named control, where its label joins the control's name. `Loader` and `Spinner` stay two owners. A pending `NavLink` follows the same rule.
+While an action runs, keep its label (a progressive verb with "…" is allowed), set `aria-busy`, and ignore repeat activation. The glyph may stay or give way to `Loader` (`components/ui/loader.tsx`, `aria-hidden`); never swap the label itself for `Loader`, which leaves the control nameless and collapses its width. Use `Spinner` (`@taucad/ui-kit/components/spinner`, `role='status' aria-label='Loading'`) for standalone progress, never inside a named control, where its label joins the control's name. `Loader` and `Spinner` stay two owners. A pending `NavLink` follows the same rule.
 
 **Why**: six controls, including every "New Project" link, rendered an unnamed spinner while pending; `components/billing/plan-cards.tsx` is the pattern to copy.
 
@@ -334,15 +336,19 @@ INCORRECT (the pre-refresh community route):
 | No match | Items exist; the query or filters exclude all | `PanelEmptyState` "No examples match “gear”" with `Clear filters`; keep the view controls                                 | The results status carries "0 of M"                                     |
 | Error    | The load failed                               | Inline consequence and `Retry`; keep the last good data; recoverable failures use neutral surfaces, not destructive red   | `role='alert'`                                                          |
 
-Loading is not empty, and no match is not empty. Do not frame a collection in the dashed `CollectionEmptyState`; keep dashed boundaries for real drop zones (DESIGN Surfaces › apps/ui).
+Loading is not empty, and no match is not empty. A collection embedded in another page (the library on Home) renders nothing while it is known to be empty, and its host supplies the replacement; the collection's own page keeps its title row and controls. Do not frame a collection in the dashed `CollectionEmptyState`; keep dashed boundaries for real drop zones (DESIGN Surfaces › apps/ui).
 
 **Why**: both project grids rendered nothing when a search matched nothing, the library's load failure had no `role='alert'`, and its refresh failure used `border-destructive/40` for a recoverable error.
 
 **Enforced by**: Accessibility Policy's ARIA table (review); role tests (`project-route-notices.test.tsx` pattern); the route sweep; retiring `CollectionEmptyState` by deletion. Spinner delay: UI Policy §6 — default, unenforced.
 
+A page that is not a card collection follows the same loading rule: skeletons in the final layout, per [UI Policy](ui-policy.md) §5 Loading Placeholders and, in Settings, [Settings Policy](settings-policy.md) Rule 12.
+
 ### 12. Write sentence-case, verb-first copy
 
 Write titles, buttons, menu items, values and placeholders in sentence case ("New project", "All kernels", "Clear filters"); proper nouns keep theirs (Tau, GitHub, OpenSCAD). Controls name their effect with a verb; menus name their values. Use "…" (U+2026) for truncation and progress, never "...". Take kernel, provider and format names from their catalogs. Do not write "Successfully" or apologise; a failure says what happened and what to do next (DESIGN Voice). Apply this to every page a change touches; remaining Title Case elsewhere is backlog, not precedent.
+
+What the words say (the user's side, buttons named after their action, "Couldn't … Try again.", one money format) is [UX Policy](ux-policy.md) Rules 9–12; this rule governs their form.
 
 **Why**: `/community` shipped "All Kernels", "New Project", "Load More Projects" and "Sort by: newest", and 42 copy sites used ASCII "..." including `SearchInput`'s default placeholder.
 
@@ -372,7 +378,7 @@ Serve web and desktop from the same route module unless `apps/ui/desktop/app/rou
 
 ### 16. Use lucide glyphs for actions and sprite marks for identities
 
-Use `lucide-react` icons for interface glyphs; they take the token stylesheet's 1.5 stroke and are `aria-hidden` by default. Use `SvgIcon` (`components/icons/svg-icon.tsx`) for kernel, provider, format and brand identities, always beside the catalog name. Size icons through their owning component.
+Use `lucide-react` icons for interface glyphs; they take the token stylesheet's 1.5 stroke and are `aria-hidden` by default. Use `SvgIcon` (`@taucad/ui-kit/icons/svg-icon`) for kernel, provider, format and brand identities, always beside the catalog name. Size icons through their owning component.
 
 **Enforced by**: `svg-icon.tsx` fails typecheck when a kernel or model family has no mark; otherwise default.
 
@@ -386,12 +392,12 @@ Use `lucide-react` icons for interface glyphs; they take the token stylesheet's 
 | `tau-lint/no-label-replacing-loader`                                                                                                                                                                                                                                                                                      | warn for one release, then error   | 10                 |
 | `tau-lint/no-accent-hover`                                                                                                                                                                                                                                                                                                | warn for one release, then error   | 8                  |
 | `tau-lint/no-button-size-override`                                                                                                                                                                                                                                                                                        | warn (suggestion)                  | 9                  |
-| `tau-lint/no-raw-page-heading`                                                                                                                                                                                                                                                                                            | warn for one release, then error   | 2                  |
+| `tau-lint/no-raw-heading-type`                                                                                                                                                                                                                                                                                            | error (suggestion)                 | 2, 7               |
 | Nine-site `jsx-a11y` subset (`tabindex-no-positive`, `no-noninteractive-tabindex`, `aria-*`, `role-*-aria-props`, `alt-text`, `heading-has-content`, `anchor-has-content`)                                                                                                                                                | error                              | 7, 13              |
 | `focus-outline.test.ts` regex over `apps/ui/app`                                                                                                                                                                                                                                                                          | unit                               | 8                  |
 | `apps/ui-e2e/src/route-accessibility.spec.ts`: axe over `/community`, `/projects`, `/files`, `/plugins`, `/usage` at 1280×720 and 390×844, plus one `h1`, non-default title, first-`listitem` budget, filled-button ring ≥ 3:1, hover text ≥ 4.5:1, targets ≥ 24 px, no horizontal overflow at 320 px and 200 % text zoom | e2e                                | 1, 4, 7, 9, 13, 14 |
 
-Lint rules scope to `apps/ui/app/**/*.tsx` and `packages/ui/src/**/*.tsx`, excluding tests and `[__e2e]` routes, and register per `create-lint-rule`. These gates land with the [community page refresh blueprint](../research/community-page-refresh-blueprint.md) (W3.2–W3.5); until the route accessibility sweep (W3.5) lands, rendered and code review enforce its rules.
+Lint rules scope to `apps/ui/app/**/*.tsx` and `packages/ui/src/**/*.tsx`, excluding tests and `[__e2e]` routes, and register per `create-lint-rule`; `no-raw-heading-type` also covers `apps/libs/*/src/**/*.tsx`. These gates land with the [community page refresh blueprint](../research/community-page-refresh-blueprint.md) (W3.2–W3.5); until the route accessibility sweep (W3.5) lands, rendered and code review enforce its rules.
 
 ## Anti-Patterns
 

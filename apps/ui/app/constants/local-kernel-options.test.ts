@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import type { ComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import type { ComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 
 const mocks = vi.hoisted(() => ({
   defaultBuild: vi.fn((_dependencies: unknown) => ({ preset: 'default' })),

@@ -1,7 +1,7 @@
 import * as Cookies from 'es-cookie';
 import type { PostHogConfig } from 'posthog-js';
 import { ENV } from '#environment.config.js';
-import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
+import { redactInvitationTokens } from '@taucad/ui-core/lib/invitation-token.lib';
 
 /** One captured event, as much of it as this redaction reads. */
 type AnalyticsEvent = Readonly<{ properties?: Record<string, unknown> }>;
@@ -112,9 +112,9 @@ export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } 
 };
 
 /**
- * PostHog options for the desktop renderer, where analytics always run. Built on the web options with the
- * differences an `app://` document needs: events post straight to the PostHog host (the renderer has no
- * `/api/ph` route) and persist in local storage, no consent gate applies, and the SDK loads no remote
+ * PostHog options for the desktop renderer, where analytics run unless turned off in Data controls. Built on the web
+ * options with the differences an `app://` document needs: events post straight to the PostHog host (the renderer has
+ * no `/api/ph` route) and persist in local storage, no cookie consent applies, and the SDK loads no remote
  * extension scripts, which the desktop Content-Security-Policy refuses — so dead-click capture is off and
  * session replay never starts. Invitation tokens are redacted as on the web.
  *

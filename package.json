@@ -1,6 +1,6 @@
 {
   "name": "@taucad/tau-source",
-  "description": "The AI-Native CAD Platform",
+  "description": "Open-source, AI-native CAD",
   "homepage": "https://github.com/taucad/tau",
   "license": "Apache-2.0",
   "private": true,
@@ -58,7 +58,6 @@
     "prepare": "husky tools/git-hooks"
   },
   "dependencies": {
-    "@ai-sdk/langchain": "2.0.181",
     "@ai-sdk/provider-utils": "catalog:",
     "@ai-sdk/react": "^3.0.210",
     "@better-auth/api-key": "catalog:",
@@ -73,14 +72,6 @@
     "@headless-tree/core": "^1.7.0",
     "@headless-tree/react": "^1.7.0",
     "@jscad/modeling": "catalog:",
-    "@langchain/anthropic": "catalog:",
-    "@langchain/cerebras": "catalog:",
-    "@langchain/core": "catalog:",
-    "@langchain/google-vertexai": "catalog:",
-    "@langchain/langgraph": "catalog:",
-    "@langchain/ollama": "catalog:",
-    "@langchain/openai": "catalog:",
-    "@langchain/xai": "catalog:",
     "@nestjs/common": "catalog:",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "catalog:",
@@ -121,7 +112,6 @@
     "@tiptap/pm": "catalog:",
     "@tiptap/react": "catalog:",
     "@tiptap/suggestion": "catalog:",
-    "@traceloop/instrumentation-langchain": "catalog:",
     "@types/express": "^5.0.6",
     "@types/madge": "catalog:",
     "@types/pg": "^8.20.0",

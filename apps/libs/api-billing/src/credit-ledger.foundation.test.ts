@@ -10,7 +10,6 @@ import * as schema from '@taucad/api-database/schema';
 import {
   billingBudget,
   billingBudgetFunding,
-  billingBudgetHold,
   billingInvocationEvidence,
   billingOperationException,
   billingPurchase,
@@ -20,7 +19,6 @@ import {
   billingReversalCase,
   creditAccount,
   creditOperation,
-  supplierCostEvidence,
   user,
 } from '@taucad/api-database/schema';
 import { allocateSources, creditDebtFirst, CreditLedgerService } from '#credit-ledger.service.js';
@@ -122,7 +120,10 @@ const createFixture = async (
     markupBps: 0,
     fleet: { minimumSchemaVersion: 1, meterContractIds: [meterContractId] },
     rates: partitionRates.map((partition) => ({
-      rateId: partitionRates.length === 1 ? `rate-${suffix}` : `rate-${partition.dimension}-${suffix}`,
+      rateId:
+        partitionRates.length === 1
+          ? `rate-${suffix}`
+          : `rate-${partition.dimension}${partition.tier === null ? '' : `-${partition.tier}`}-${suffix}`,
       meterContractId,
       dimension: partition.dimension,
       tier: partition.tier,
@@ -137,7 +138,9 @@ const createFixture = async (
         sku,
         meterContractId,
         rateIds: partitionRates.map((partition) =>
-          partitionRates.length === 1 ? `rate-${suffix}` : `rate-${partition.dimension}-${suffix}`,
+          partitionRates.length === 1
+            ? `rate-${suffix}`
+            : `rate-${partition.dimension}${partition.tier === null ? '' : `-${partition.tier}`}-${suffix}`,
         ),
         enabled: true,
       },
@@ -778,24 +781,9 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
       .from(creditOperation)
       .where(eq(creditOperation.id, admitted.operationId));
     expect(operation).toMatchObject({
-      supplierState: null,
-      spendBudgetHoldId: null,
-      riskBudgetHoldId: null,
       supplierCostPicoUsd: null,
       supplierCostUnpricedReason: 'absorbed',
     });
-    expect(
-      await firstDatabase
-        .select()
-        .from(billingBudgetHold)
-        .where(eq(billingBudgetHold.operationId, admitted.operationId)),
-    ).toEqual([]);
-    expect(
-      await firstDatabase
-        .select()
-        .from(supplierCostEvidence)
-        .where(eq(supplierCostEvidence.operationId, admitted.operationId)),
-    ).toEqual([]);
     const lateReplay = await firstLedger.terminalizeOperation({
       operationId: admitted.operationId,
       accountId: fixture.accountId,
@@ -1088,7 +1076,6 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     expect(operation).toMatchObject({
       actualRetailAtoms: 150n,
       chargedAtoms: 100n,
-      supplierState: null,
     });
     const pauses = await firstDatabase
       .select()
@@ -1203,7 +1190,6 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     expect(operation).toMatchObject({
       actualRetailAtoms: actual,
       inputTokens: null,
-      supplierState: null,
       // This operation pinned no supplier valuation, so its usage stays unpriced rather than guessed.
       supplierCostPicoUsd: null,
       supplierCostUnpricedReason: 'missing_rate',
@@ -1648,7 +1634,6 @@ describe('LLM durable evidence and fenced recovery', () => {
         // One pico-USD per token at the pinned valuation, whatever the customer was capped at.
         supplierCostPicoUsd: quantity,
         supplierCostUnpricedReason: null,
-        supplierState: null,
         generation: 2n,
       });
       await expect(
@@ -1662,12 +1647,6 @@ describe('LLM durable evidence and fenced recovery', () => {
       expect(
         await firstDatabase
           .select()
-          .from(supplierCostEvidence)
-          .where(eq(supplierCostEvidence.operationId, admitted.operationId)),
-      ).toEqual([]);
-      expect(
-        await firstDatabase
-          .select()
           .from(billingRoutePause)
           .where(eq(billingRoutePause.operationId, admitted.operationId)),
       ).toEqual([]);
@@ -1676,12 +1655,6 @@ describe('LLM durable evidence and fenced recovery', () => {
         .from(billingOperationException)
         .where(eq(billingOperationException.operationId, admitted.operationId));
       expect(exceptions.map(({ kind }) => kind)).toEqual(quantity > 10n ? ['customer_bound'] : []);
-      expect(
-        await firstDatabase
-          .select()
-          .from(billingBudgetHold)
-          .where(eq(billingBudgetHold.operationId, admitted.operationId)),
-      ).toEqual([]);
     },
   );
 
@@ -1733,17 +1706,10 @@ describe('LLM durable evidence and fenced recovery', () => {
       expect(row).toMatchObject({
         customerState: dispatched ? 'absorbed' : 'released',
         chargedAtoms: 0n,
-        supplierState: null,
         // An undispatched call cost the supplier nothing; a cut stream reported nothing to price.
         supplierCostPicoUsd: dispatched ? null : 0n,
         supplierCostUnpricedReason: dispatched ? 'absorbed' : null,
       });
-      expect(
-        await firstDatabase
-          .select()
-          .from(billingBudgetHold)
-          .where(eq(billingBudgetHold.operationId, admitted.operationId)),
-      ).toEqual([]);
       if (dispatched) {
         expect(row.normalizationEvidence).toEqual({
           version: 'partial-v1',
@@ -1993,7 +1959,6 @@ it('should execute a bounded recovery batch through the built DB-only runtime-ro
   expect(operation).toMatchObject({
     customerState: 'released',
     chargedAtoms: 0n,
-    supplierState: null,
     supplierCostPicoUsd: 0n,
     supplierCostUnpricedReason: null,
   });
@@ -2156,7 +2121,6 @@ it.each([
     expect(operation).toMatchObject({
       chargedAtoms: 2n * partitionQuantity + 1n,
       authorizedAtoms: 101n,
-      supplierState: null,
       // Every reported partition is priced at its own rate: q + 0 + 20q + 1.
       supplierCostPicoUsd: 21n * partitionQuantity + 1n,
     });
@@ -2754,14 +2718,14 @@ describe('credit operation model (GI-S2, GI-A4)', () => {
 });
 
 describe('admission without supplier state', () => {
-  it('should admit as the runtime role with no read access to supplier budgets, holds or evidence', async () => {
+  it('should admit as the runtime role with no read access to budgets', async () => {
     const fixture = await createFixture();
     const rolledBack = new Error('roll back the revoked grants');
     await expect(
       firstDatabase.transaction(async (transaction) => {
         // Revoked by the owner login that granted them, so the revocation binds the runtime role.
-        await transaction.execute(sql`REVOKE SELECT ON billing.billing_budget, billing.billing_budget_funding,
-          billing.billing_budget_hold, billing.supplier_cost_evidence FROM tau_billing_runtime`);
+        await transaction.execute(sql`REVOKE SELECT ON billing.billing_budget, billing.billing_budget_funding
+          FROM tau_billing_runtime`);
         await transaction.execute(sql`SET LOCAL ROLE tau_billing_runtime`);
         const transactionDatabase = Object.assign(transaction, { $client: firstDatabase.$client });
         const transactionLedger = new CreditLedgerService(
@@ -2775,9 +2739,7 @@ describe('admission without supplier state', () => {
         await expect(transaction.execute(sql`select count(*) from billing.credit_attempt_void`)).resolves.toBeDefined();
         // A savepoint keeps the refused read from aborting the admission that follows.
         await expect(
-          transaction.transaction(async (inner) =>
-            inner.execute(sql`select count(*) from billing.billing_budget_hold`),
-          ),
+          transaction.transaction(async (inner) => inner.execute(sql`select count(*) from billing.billing_budget`)),
         ).rejects.toSatisfy((error: unknown) => databaseCode(error) === '42501');
         expect(await transactionLedger.admitOperation(fundedInvocation(fixture, 'runtime-no-budgets'))).toMatchObject({
           status: 'admitted',
@@ -2807,7 +2769,7 @@ describe('admission without supplier state', () => {
     expect(await readInvocationAccount(fixture.accountId)).toEqual(before);
   });
 
-  it('should never write the retired supplier state through admission, settlement or recovery', async () => {
+  it('should admit, settle and recover with the retired supplier columns and tables dropped', async () => {
     const fixture = await createFixture();
     const settledRequest = fundedInvocation(fixture, randomUUID());
     const settled = await firstLedger.admitOperation(settledRequest);
@@ -2815,8 +2777,6 @@ describe('admission without supplier state', () => {
     if (settled.status !== 'admitted' || recovered.status !== 'admitted') {
       throw new Error('operations were not admitted');
     }
-    const admittedRow = await readInvocationOperation(settled.operationId);
-    expect(admittedRow.supplierState).toBeNull();
     await firstLedger.markDispatchIntent(settled.operationId, settled.generation);
     const evidence: TerminalEvidence = {
       kind: 'final_usage',
@@ -2844,17 +2804,24 @@ describe('admission without supplier state', () => {
       // oxlint-disable-next-line eslint/no-await-in-loop -- two reads
       const row = await readInvocationOperation(operationId);
       expect(row.customerState).not.toBe('pending');
-      expect(row.supplierState).toBeNull();
     }
-    /* The runtime role keeps its supplier_state grant until the 0050 contract step, so old-image Machines can
-     * settle during the expand step's rolling deploy (billing-foundation.test.ts, the 0048 upgrade suite). */
+    // Migration 0067 dropped the supplier finality state, the two hold ids and both supplier tables.
+    expect(
+      await firstDatabase.execute(sql`select column_name from information_schema.columns
+        where table_schema = 'billing' and table_name = 'credit_operation'
+          and column_name in ('supplier_state', 'spend_budget_hold_id', 'risk_budget_hold_id')`),
+    ).toHaveLength(0);
+    expect(
+      await firstDatabase.execute(sql`select to_regclass('billing.billing_budget_hold')::text as holds,
+        to_regclass('billing.supplier_cost_evidence')::text as evidence`),
+    ).toEqual([{ holds: null, evidence: null }]);
   });
 });
 
 describe('post-hoc supplier metering', () => {
   const resolver = new CodeOwnedBillableModelQualificationResolver({
     adapters: new Map(
-      ['anthropic-claude-haiku-5.5', 'openai-gpt-5.6-luna', 'google-gemini-3.5-flash', 'together-glm-5.2'].map(
+      ['anthropic-claude-haiku-5.5', 'openai-gpt-5.6-luna', 'google-gemini-3.5-flash', 'together-glm-5.3'].map(
         (routeId) => [
           routeId,
           {
@@ -2875,6 +2842,8 @@ describe('post-hoc supplier metering', () => {
       { dimension: 'uncached_input', tier: null, quantity: 1000n },
       { dimension: 'cache_read', tier: null, quantity: 2000n },
       { dimension: 'cache_write', tier: cacheWriteTier, quantity: 300n },
+      // Anthropic settles both write lifetimes; the evidence collector reports a zero 1h tier when none was written.
+      ...(cacheWriteTier === '1h' ? [] : [{ dimension: 'cache_write', tier: '1h', quantity: 0n }]),
       { dimension: 'output', tier: null, quantity: 400n },
     ].filter(({ dimension, tier }) => dimensions.has(`${dimension}:${tier ?? ''}`));
 
@@ -2962,9 +2931,9 @@ describe('post-hoc supplier metering', () => {
     },
     {
       // $1.40, $0.26 and $4.40 per million: a route that carried no valuation before.
-      routeId: 'together-glm-5.2',
+      routeId: 'together-glm-5.3',
       providerWire: 'openai-completions',
-      body: { messages: [{ role: 'user', content: 'hello' }], max_completion_tokens: 500 },
+      body: { messages: [{ role: 'user', content: 'hello' }], max_tokens: 500 },
       cacheWriteTier: 'none',
       supplierCostPicoUsd: 3_680_000_000n,
     },

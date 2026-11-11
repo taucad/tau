@@ -34,14 +34,14 @@ import type { HomeStorageBackend, Workspace } from '#filesystem/handle-store.js'
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { useProjectUrl } from '#hooks/use-project-slug-route.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import type { WorkspaceDirectoryStatus } from '#constants/workspace-directory-copy.constants.js';
-import { toast } from '#components/ui/sonner.js';
+import type { WorkspaceDirectoryStatus } from '@taucad/ui-core/constants/workspace-directory-copy.constants';
+import { toast } from '@taucad/ui/components/sonner';
 import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
+import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 
 export const meta: MetaFunction = () => [{ title: 'Files · Tau' }];
 

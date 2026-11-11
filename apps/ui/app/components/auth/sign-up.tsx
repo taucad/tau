@@ -12,15 +12,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/
 import { Field, FieldDescription, FieldError, FieldGroup, FieldSeparator } from '@taucad/ui/components/field';
 import { Input } from '@taucad/ui/components/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@taucad/ui/components/input-group';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
-import { getCaptchaComponentFromPlugins } from '#utils/auth-plugin.js';
+import { getCaptchaComponentFromPlugins } from '@taucad/ui-core/utils/auth-plugin';
 import { Label } from '@taucad/ui/components/label';
 import { AdditionalField } from '#components/auth/additional-field.js';
 import { ProviderButtons } from '#components/auth/provider-buttons.js';
 import type { SocialLayout } from '#components/auth/provider-buttons.js';
 import { useAuthEmailDraft } from '#components/auth/auth-email-draft.js';
-import { authErrorMessage } from '#utils/auth-error.utils.js';
+import { authErrorMessage } from '@taucad/ui-core/utils/auth-error.utils';
+import { CheckEmail } from '#components/auth/check-email.js';
 
 export type SignUpProps = {
   className?: string;
@@ -32,7 +33,7 @@ export type SignUpProps = {
  * Renders a sign-up form with name, email, and password fields, optional social provider buttons, and submission handling.
  *
  * Submits credentials to the configured auth client and handles the response:
- * - If email verification is required, shows a notification and navigates to sign-in
+ * - If email verification is required, shows the "Check your email" view naming the address
  * - On success, refreshes the session and navigates to the configured redirect path
  * - On failure, displays error toasts
  * - Manages a pending state while the request is in-flight
@@ -61,6 +62,8 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
   const [email, setEmail] = useState(emailDraft);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  // The address a verification link went to; set, the form gives way to the "Check your email" view.
+  const [sentTo, setSentTo] = useState<string | undefined>(undefined);
 
   const { mutate: signUpEmail, isPending: signUpEmailPending } = useSignUpEmail(authClient, {
     onError: (error) => {
@@ -69,10 +72,11 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
       toast.error(authErrorMessage(error));
       resetFetchOptions();
     },
-    onSuccess: () => {
+    onSuccess: (_data, { email: submitted }) => {
       if (emailAndPassword.requireEmailVerification) {
-        toast.success(localization.auth.checkYourEmail);
-        navigate({ to: `${basePaths.auth}/${viewPaths.auth.signIn}` });
+        setPassword('');
+        setConfirmPassword('');
+        setSentTo(submitted);
       } else {
         navigate({ to: redirectTo });
       }
@@ -154,11 +158,24 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
 
   const showSeparator = emailAndPassword.enabled && socialProviders && socialProviders.length > 0;
 
+  if (sentTo !== undefined) {
+    return (
+      <CheckEmail
+        className={className}
+        email={sentTo}
+        reason='sign-up'
+        onUseDifferentEmail={() => {
+          setSentTo(undefined);
+        }}
+      />
+    );
+  }
+
   return (
     <Card className={cn('w-full max-w-sm', className)}>
       <CardHeader>
-        <CardTitle className='text-xl font-semibold'>
-          <h1>{localization.auth.signUp}</h1>
+        <CardTitle level={1} variant='title'>
+          {localization.auth.signUp}
         </CardTitle>
       </CardHeader>
 

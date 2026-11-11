@@ -21,7 +21,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { prepareFromSeed, seedPresent } from '#build123d-closure.fixture.js';
 import { build123d, build123dOptionsFromClosure } from '#index.js';
 
-// The closure `tau prepare build123d` installs, prepared from the payload seed (`pnpm nx run build123d:seed`).
+// The closure `tau prepare build123d` installs, prepared from the dependency seed (`pnpm nx run build123d:seed`).
 const receipt = seedPresent ? await prepareFromSeed() : undefined;
 
 const runtime = defineRuntime({

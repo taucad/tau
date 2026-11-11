@@ -1,6 +1,6 @@
 // SB5: first, so its listeners catch what any module below throws before the SDK's handlers are in.
 // oxlint-disable-next-line import/no-unassigned-import -- evaluated for its listeners, before every other module.
-import '#lib/early-error-buffer.js';
+import '@taucad/ui-core/lib/early-error-buffer';
 import { HydratedRouter } from 'react-router/dom';
 import { startTransition, StrictMode } from 'react';
 import { hydrateRoot } from 'react-dom/client';
@@ -9,10 +9,14 @@ import { startErrorReporting } from '#lib/error-reporting.js';
 import { reactRootErrorHooks } from '#lib/react-root-errors.js';
 import { installStaleBuildNavigation } from '#lib/stale-build-navigation.js';
 import { installStaleBuildRecovery, recoverFromSdkLoadFailure } from '#lib/stale-build-recovery.js';
+import { installProjectOpenLoadTiming } from '@taucad/ui-core/lib/project-open-load-timing';
 
 /* D21: started before hydration and never stopped, so the frames that block the first paint are
  * recorded too (the observer is buffered, and the platform only reports frames over 50 ms). */
 observeLongAnimationFrames();
+
+// Local measurement only: inert unless a loopback harness injected its configuration before this ran.
+installProjectOpenLoadTiming();
 
 // A failed SDK load may be a chunk a deploy stopped serving: the recovery may reload into the live build.
 void startErrorReporting(recoverFromSdkLoadFailure);

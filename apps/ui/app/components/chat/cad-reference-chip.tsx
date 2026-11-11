@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { useSelector } from '@xstate/react';
 import { cadReferenceTokenLabel } from '@taucad/chat/references';
 import type { CadReferenceTokenTarget } from '@taucad/chat/references';
-import { ContextChip } from '#components/chat/context-chip.js';
+import { ContextChip } from '@taucad/chat-ui/components/context-chip';
 import { useProject } from '#hooks/use-project.js';
 
 /** Model-interaction units of a source file are keyed `file:<entryPath>` (`model-interaction.machine.ts`). */

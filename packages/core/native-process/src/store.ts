@@ -1,5 +1,5 @@
 /**
- * The payload-store side of native kernels, for Node hosts: discovering the native deployments a resolved runtime
+ * The dependency file-store side of native kernels, for Node hosts: discovering the native deployments a resolved runtime
  * lists, the preparation plugins they give, reading the store's launch indexes for a kernel's sealed closure, the
  * closure resolver a kernel binds through in `initialize`, the closure re-verifier, the preparation host a long-lived
  * process prepares through, and the package-neutral report a runtime thread or child sends its parent.
@@ -41,37 +41,37 @@ import { installNativeRuntimeVerifier } from '#native-process-session.js';
 import type { NativeRuntimeVerifier } from '#native-process-session.js';
 
 /**
- * The digest-keyed payload store every Tau host on this computer shares: the per-OS data root (Application Support
- * on macOS, `$XDG_DATA_HOME/tau` on Linux, `%LOCALAPPDATA%\tau` on Windows), or `<TAU_CONFIG_DIR>/payloads` when the
+ * The digest-keyed dependency store every Tau host on this computer shares: the per-OS data root (Application Support
+ * on macOS, `$XDG_DATA_HOME/tau` on Linux, `%LOCALAPPDATA%\tau` on Windows), or `<TAU_CONFIG_DIR>/dependency files` when the
  * one override is set.
  * @returns Absolute store root.
  * @public
  */
-export const defaultPayloadStore = (): string => {
+export const defaultDependencyStore = (): string => {
   if (process.env['TAU_CONFIG_DIR']) {
-    return join(process.env['TAU_CONFIG_DIR'], 'payloads');
+    return join(process.env['TAU_CONFIG_DIR'], 'dependencies');
   }
   if (platform() === 'win32') {
-    return join(process.env['LOCALAPPDATA'] ?? join(homedir(), 'AppData', 'Local'), 'tau', 'payloads');
+    return join(process.env['LOCALAPPDATA'] ?? join(homedir(), 'AppData', 'Local'), 'tau', 'dependencies');
   }
   if (platform() === 'darwin') {
-    return join(homedir(), 'Library', 'Application Support', 'tau', 'payloads');
+    return join(homedir(), 'Library', 'Application Support', 'tau', 'dependencies');
   }
   // An empty XDG_DATA_HOME means the default, as the XDG Base Directory specification says.
   const dataHome = process.env['XDG_DATA_HOME'];
   return join(
     dataHome === undefined || dataHome === '' ? join(homedir(), '.local', 'share') : dataHome,
     'tau',
-    'payloads',
+    'dependencies',
   );
 };
 
 /**
- * Where a host's payload store is and which managed profile applies to it.
+ * Where a host's dependency store is and which managed profile applies to it.
  * @public
  */
 export type NativeStoreInput = {
-  /** Absolute payload store root. */
+  /** Absolute dependency store root. */
   readonly store: string;
   /** The managed acquisition profile, from `readManagedPreparation`. */
   readonly managed: ManagedPreparation;
@@ -161,7 +161,7 @@ export const nativeDeploymentsOf = (runtime: ResolvedRuntimeKernels): readonly N
 const directoryOf = (packageRoot: string): string => fileURLToPath(packageRoot).replace(/[/\\]$/u, '');
 
 /**
- * The preparation plugins of native deployments: each package's parsed `tau-plugin.json`, its root (which payloads
+ * The preparation plugins of native deployments: each package's parsed `tau-plugin.json`, its root (which dependency files
  * shipped inside the package resolve against), its seal step and its launch set. No kernel code runs.
  * @param deployments - The deployments, in order.
  * @returns One preparation plugin per deployment.
@@ -213,7 +213,7 @@ export const nativeKernelIdsSupportedOn = (
   });
 
 /**
- * A closure re-verifier for native workers launched from the payload store: a worker that exits before its handshake
+ * A closure re-verifier for native workers launched from the dependency store: a worker that exits before its handshake
  * re-verifies its closure against the receipt beside it, so the refusal names the damaged file. A root without a
  * receipt was a sealed closure when it was bound, so a repair that stopped half way is named as `receipt.json`.
  * @param remedy - The host's repair instruction: `files` is `undefined` when the receipt itself is missing.
@@ -256,7 +256,7 @@ export type NativeClosureRefusal = {
   readonly status: 'unavailable';
   /** `not-prepared`: preparing fixes it. `unsupported-target`: the package declares no runtime for this host. */
   readonly reason: 'not-prepared' | 'unsupported-target';
-  /** Bytes preparing downloads on this host: the selected variants' payloads. Zero when unsupported. */
+  /** Bytes preparing downloads on this host: the selected variants' dependency files. Zero when unsupported. */
   readonly byteLength: number;
   /** For `unsupported-target`, the preparation host's own explanation. */
   readonly detail?: string;
@@ -273,7 +273,7 @@ export type NativeClosureAnswer =
   | NativeClosureRefusal;
 
 /**
- * Finds a kernel's sealed closure. A host whose runtime cannot read the payload store installs one that asks a
+ * Finds a kernel's sealed closure. A host whose runtime cannot read the dependency store installs one that asks a
  * process that can.
  * @public
  */
@@ -287,7 +287,7 @@ const resolverSlot = Symbol.for('@taucad/native-process-core/closure-resolver');
 
 /**
  * Install the closure resolver every native kernel in this realm binds through, or remove it with `undefined`.
- * Without one, a kernel reads the default payload store itself ({@link storeClosureResolver}).
+ * Without one, a kernel reads the default dependency store itself ({@link storeClosureResolver}).
  * @param resolver - The resolver.
  * @public
  */
@@ -313,7 +313,7 @@ const realStore = async (store: string): Promise<string> => {
   }
 };
 
-// The bytes preparing a kernel downloads on this host: the payloads of the variant each required dependency selects.
+// The bytes preparing a kernel downloads on this host: the dependency files of the variant each required dependency selects.
 const preparationBytes = (
   manifest: PluginDeployment,
   requires: readonly string[],
@@ -326,8 +326,8 @@ const preparationBytes = (
   let byteLength = 0;
   for (const dependency of requires) {
     const selection = selectVariant(manifest.dependencies[dependency] ?? [], indicators, managed.selection);
-    for (const payload of selection.status === 'selected' ? selection.variant.payloads : []) {
-      byteLength += payload.byteLength;
+    for (const dependencyFile of selection.status === 'selected' ? selection.variant.files : []) {
+      byteLength += dependencyFile.byteLength;
     }
   }
   return byteLength;
@@ -364,9 +364,9 @@ const inspectStore = async (
 };
 
 /**
- * The default closure resolver: read the payload store's launch index in this process. When a closure is ready, the
+ * The default closure resolver: read the dependency store's launch index in this process. When a closure is ready, the
  * store's closure re-verifier is installed, so a worker that exits before its handshake names what differs.
- * @param input - The payload store (default: {@link defaultPayloadStore}) and the managed profile (default:
+ * @param input - The dependency store (default: {@link defaultDependencyStore}) and the managed profile (default:
  *   `readManagedPreparation(process.env)`).
  * @returns The resolver.
  * @public
@@ -376,7 +376,7 @@ export const storeClosureResolver = (
 ): NativeClosureResolver => {
   let store: Promise<string> | undefined;
   return async ({ deployment, dependencies }) => {
-    store ??= realStore(input.store ?? defaultPayloadStore());
+    store ??= realStore(input.store ?? defaultDependencyStore());
     const answer = await inspectStore({
       store: await store,
       managed: input.managed ?? readManagedPreparation(process.env),
@@ -452,9 +452,9 @@ export const nativeInspectionSchema: z.ZodType<NativeKernelInspection> = z.array
 );
 
 /**
- * Read every kernel the deployments declare from the payload store's launch indexes, for a process whose runtime
+ * Read every kernel the deployments declare from the dependency store's launch indexes, for a process whose runtime
  * cannot read the store. Nothing is downloaded.
- * @param input - The deployments, the payload store and the managed profile.
+ * @param input - The deployments, the dependency store and the managed profile.
  * @returns One row per declared kernel, in deployment then manifest order.
  * @public
  */
@@ -561,7 +561,7 @@ export type BoundNativeKernel<Options, Bounds> = {
 
 /**
  * Bind a native kernel to its closure, in `initialize`: an explicit `options.closure` wins; otherwise the installed
- * closure resolver (or, without one, the default payload store) finds the sealed closure and the deployment maps it
+ * closure resolver (or, without one, the default dependency store) finds the sealed closure and the deployment maps it
  * to options. The host's bounds are kept either way.
  * @param input - The package's deployment, the kernel id and the kernel's parsed options.
  * @returns The bound options.
@@ -671,9 +671,9 @@ export class UnknownNativeKernelError extends Error {
 
 /**
  * Open the preparation host a long-lived process prepares native kernels through: the deployments with their seal
- * steps, the payload store and the managed profile, with the process's unrestricted `fetch` unless one is given.
- * Verified payloads persist, so a cancelled or failed call leaves the next one only the remainder to download.
- * @param input - The deployments, the payload store, the managed profile, the installation whose link records what it
+ * steps, the dependency store and the managed profile, with the process's unrestricted `fetch` unless one is given.
+ * Verified dependency files persist, so a cancelled or failed call leaves the next one only the remainder to download.
+ * @param input - The deployments, the dependency store, the managed profile, the installation whose link records what it
  *   prepares (the running script by default; a packaged app names its executable, since its `argv[1]` is no path) and,
  *   for tests, the transport.
  * @returns The preparation and its disposal.
@@ -723,7 +723,7 @@ export const openNativePreparation = (
           onProgress?.({
             progress: state.completedBytes,
             total: state.totalBytes,
-            message: `${state.phase} ${state.payload} (${String(state.completedPayloads)}/${String(state.totalPayloads)})`,
+            message: `${state.phase} ${state.dependencyFile} (${String(state.completedDependencyFiles)}/${String(state.totalDependencyFiles)})`,
           });
         }
       });
@@ -738,7 +738,7 @@ export const openNativePreparation = (
           return {
             status: 'cancelled',
             kernel,
-            message: `Preparing ${kernel} was cancelled; verified payloads are kept, so the next call downloads only the rest.`,
+            message: `Preparing ${kernel} was cancelled; verified dependency files are kept, so the next call downloads only the rest.`,
           };
         }
         if (outcome.status === 'blocked') {

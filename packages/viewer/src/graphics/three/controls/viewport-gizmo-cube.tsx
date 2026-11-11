@@ -22,6 +22,7 @@ import { resolveGizmoContainer, syncGizmoFov, useGizmoResizeSync } from '#graphi
 import { useViewerEnvironment } from '#environment/viewer-environment.jsx';
 import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
 import { applyViewportGizmoSurface } from '#graphics/three/controls/viewport-gizmo-cube-surface.js';
+import { beginViewerLoadSpan } from '#lib/viewer-load-timing.js';
 
 type ViewportGizmoCubeProps = {
   readonly size?: number;
@@ -83,6 +84,8 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
       return;
     }
 
+    // A rebuild (theme, accent, size, the web font arriving) is a second span, which is what a load profile counts.
+    const finishGizmoSpan = beginViewerLoadSpan('gizmo.create');
     const style = readViewportGizmoStyle({ container: containerToUse, colorScheme, isHighContrast, accentColor });
     const faceConfig = {
       color: style.face,
@@ -173,6 +176,7 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
       gizmoRef.current = undefined;
       removeInvalidationListeners();
       gizmo.dispose();
+      finishGizmoSpan('cancelled');
       return;
     }
     controlsBindingRef.current = controlsBinding;
@@ -225,6 +229,7 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
     }
 
     invalidate();
+    finishGizmoSpan();
 
     return () => {
       warmupCancellation.cancelled = true;

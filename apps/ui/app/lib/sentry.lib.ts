@@ -3,10 +3,12 @@ import * as Sentry from '@sentry/react';
 import type { Breadcrumb, ErrorEvent, EventHint } from '@sentry/react';
 import { isAbortError } from '@taucad/utils/error';
 import { ENV } from '#environment.config.js';
-import { setActivityBreadcrumbSink } from '#lib/activity-breadcrumbs.js';
+import { setActivityBreadcrumbSink } from '@taucad/ui-core/lib/activity-breadcrumbs';
+import { applyAnalyticsLink } from '#lib/analytics-link.lib.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { applyErrorDetails } from '#lib/error-details.js';
-import { decorateForNetworkFailure } from '#lib/network-failure.js';
+import { decorateForNetworkFailure } from '@taucad/ui-core/lib/network-failure';
+import { setKillContextSink } from '#lib/memory-kill-signal.js';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import {
   decorateForStaleBuild,
@@ -237,12 +239,19 @@ export const initSentry = (): void => {
     Sentry.init(options);
   } else {
     initElectronRenderer(options, Sentry.init);
+    // Scope tags sync to main, which keeps them on this renderer's minidump if it dies (D13).
+    setKillContextSink((tags) => {
+      Sentry.setTags(tags);
+    });
   }
   if (sampleRate !== undefined) {
     nameSpansByRoute();
   }
-  // Error events only: the processor never touches a transaction or feedback.
-  Sentry.addEventProcessor((event) => (event.type === undefined ? applyTauEventContext(event) : event));
+  // Error events only: the processor never touches a transaction or feedback. While PostHog is capturing
+  // (consented on the web), the event also links to the PostHog person and replay (SB7, A8).
+  Sentry.addEventProcessor((event) =>
+    event.type === undefined ? applyAnalyticsLink(applyTauEventContext(event)) : event,
+  );
   setActivityBreadcrumbSink((message) => {
     Sentry.addBreadcrumb({ category: 'tau.activity', message, level: 'info' });
   });
@@ -252,8 +261,7 @@ export const initSentry = (): void => {
  * Report an error a boundary caught. A no-op before `initSentry` ran or without a DSN.
  *
  * @param error - The caught value.
- * @returns The event's id, which the crash prompt attaches its feedback to (SB12), or `undefined`
- * when there was no SDK to capture it.
+ * @returns The event's id, or `undefined` when there was no SDK to capture it.
  * @public
  */
 export const captureUiError = (error: unknown): string | undefined => {
@@ -261,31 +269,6 @@ export const captureUiError = (error: unknown): string | undefined => {
     return Sentry.captureException(error);
   }
   return undefined;
-};
-
-/**
- * Send what someone wrote about a crash they saw, as Sentry user feedback on that crash's event
- * (SB12, D9). Nothing is collected automatically: the message is typed, the email is optional and
- * empty by default, and no screenshot is taken (the screen after a reload shows nothing useful and
- * could carry private model or file content).
- *
- * @param feedback - The message, the optional email, and the event the feedback belongs to.
- * @returns Whether the SDK took it.
- * @public
- */
-export const captureUserFeedback = (
-  feedback: Readonly<{ message: string; email?: string; associatedEventId?: string }>,
-): boolean => {
-  if (!Sentry.isInitialized()) {
-    return false;
-  }
-  Sentry.captureFeedback({
-    message: feedback.message,
-    source: 'tau.crash-prompt',
-    ...(feedback.email === undefined || feedback.email === '' ? {} : { email: feedback.email }),
-    ...(feedback.associatedEventId === undefined ? {} : { associatedEventId: feedback.associatedEventId }),
-  });
-  return true;
 };
 
 /**

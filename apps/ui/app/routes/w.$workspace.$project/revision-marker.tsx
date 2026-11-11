@@ -56,10 +56,10 @@ import {
 import { cn } from '@taucad/ui/utils/cn';
 import type { RevisionDiffEntry } from '@taucad/revisions';
 import type { RevisionComparisonNotice } from '@taucad/revisions/algorithms';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { DiffViewer } from '#components/code/diff-viewer.js';
-import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
+import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { ActionButton, ActionsRow, disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
 import {
@@ -71,21 +71,23 @@ import {
   timelineRowHover,
 } from '#components/revisions/revision-timeline.js';
 import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
-import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-language-resolution';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionChanges, useRevisionChangesSince, useRevisionFileComparison } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { consumeRevisionReveal, useRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
+import { consumeRevisionReveal, useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import type { AffectedPublication } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import { revisionName, revisionTriggerLabel } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 
-/** Whether a revision is one of the autosaves History folds. */
+/** Whether a revision is one of the autosaves History folds: a turn's base cut is one too (A5). */
 export const isAutosave = (revision: RevisionCard): boolean =>
-  revision.trigger === 'idle' || revision.trigger === 'hidden' || revision.trigger === 'close';
+  revision.turnCut === 'base' ||
+  (revision.turnId === undefined &&
+    (revision.trigger === 'idle' || revision.trigger === 'hidden' || revision.trigger === 'close'));
 
 /* The file's state is muted at 90%, the lightest step that keeps 4.5:1 on the
    file list in every theme; a hovered row returns it to the full muted colour. */
@@ -412,7 +414,7 @@ export function RevisionDetails({
         ] as const)),
     ...(parent === undefined ? [] : ([['Parent', parent]] as const)),
     ...(branch === undefined ? [] : ([['Branch', branch]] as const)),
-    ['Trigger', revisionTriggerLabel(revision.trigger)],
+    ['Trigger', revisionTriggerLabel(revision.trigger, revision.turnCut)],
     ...(revision.createdAt > 0
       ? ([
           [
@@ -1046,8 +1048,8 @@ export function RevisionRow({
     revision.createdAt > 0
       ? new Date(revision.createdAt).toLocaleTimeString(undefined, { timeStyle: 'short' })
       : undefined;
-  /* Your own revisions need no attribution; everyone else's say who (HQ4). */
-  const actor = revision.actor === 'You' || revision.actor === '' ? undefined : revision.actor;
+  /* The who-resolver decides whether a row has a who line (Q2): none on a single-person project. */
+  const actor = revision.actor === '' ? undefined : revision.actor;
   const canRestore = role !== 'revoked';
   /* D2, M1: Undo restore lives on the restore row while nothing has landed after it, and only where this
      device's restore machine holds its undo target — never after a reload or another device's restore. */
@@ -1092,7 +1094,7 @@ export function RevisionRow({
                     {isCurrent ? <span className='text-foreground'>Current</span> : null}
                     {actor === undefined ? null : (
                       <span className='flex min-w-0 items-center gap-1'>
-                        {actor === 'Tau agent' ? <Bot aria-hidden className='size-3 shrink-0' /> : null}
+                        {actor === 'Agent' ? <Bot aria-hidden className='size-3 shrink-0' /> : null}
                         <span className='min-w-0'>{actor}</span>
                       </span>
                     )}

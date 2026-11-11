@@ -1,5 +1,7 @@
 import { interactiveViewContent } from '#lib/interactive-view-content.js';
 import { markGeometryReceipt } from '@taucad/viewer/lib/renderer-telemetry';
+import { observeKillWork, recordGeometryReceived } from '#lib/kill-work-context.js';
+import { recordKillWork } from '#lib/memory-kill-signal.js';
 import { createAsyncLogic, setup, types, waitFor } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import type { CodeIssue, LogLevel, LogOrigin } from '@taucad/types';
@@ -17,9 +19,9 @@ import type { ParameterManifest } from '@taucad/parameters';
 import { asKnownArtifact, isKernelIssueCode } from '@taucad/runtime/types';
 import { safeDispose } from '@taucad/utils/dispose';
 import type { LengthSymbol } from '@taucad/viewer/constants/length-units';
-import { defaultOperationTimeout } from '#constants/editor.constants.js';
-import { actorIdOf, eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
-import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import { defaultOperationTimeout } from '@taucad/ui-core/constants/editor.constants';
+import { actorIdOf, eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import { getComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 import type { logMachine } from '#machines/logs.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -386,6 +388,8 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   cleanups.push(
     /* Runtime observability (FR-14): attached before `connect()` so `initialize` is observed. */
     observeRuntimeClient(client, 'editor'),
+    /* Crash capture: the step in flight is written to the tab-kill marker as it begins. */
+    observeKillWork(client),
     client.on('state', (state) => {
       machineRef.send({ type: 'stateChanged', state });
     }),
@@ -482,6 +486,7 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
         view.on('rendered', (rendering) => {
           const artifact = rendering.success ? asKnownArtifact(rendering.artifact) : undefined;
           if (artifact?.mimeType === 'model/gltf-binary') {
+            recordGeometryReceived(artifact.content.byteLength);
             markGeometryReceipt(artifact.content);
           }
           input.machineRef.send({ type: 'defaultRendered', rendering });
@@ -526,6 +531,7 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
     const cleanups = [
       document.on('described', (description) => {
         kernelId = description.kernelId;
+        recordKillWork({ kernel: description.kernelId });
         input.machineRef.send({ type: 'documentDescribed', description });
       }),
       document.on('evaluated', (evaluation) => {

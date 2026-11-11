@@ -4,8 +4,11 @@ on:
   push:
     branches: [main] # Only run on pushes to main branch
   pull_request:
-    # PRs vs `main`: full CI. PRs targeting `production` only (trail PR): skip
+    # PRs vs `main`: the fast lanes (plan, workspace, the seven affected lanes and the
+    # PR-only reports); the merge queue runs everything. A draft runs nothing until it is
+    # marked ready (`ready_for_review`). PRs targeting `production` only (trail PR): skip
     # checks — release gate is staging smoke + human merge.
+    types: [opened, synchronize, reopened, ready_for_review]
     branches-ignore:
       - production
   # The merge queue runs the required checks on the exact commit that will land:
@@ -19,6 +22,8 @@ env:
   pnpm_config_verify_deps_before_run: warn
   # Nx remote cache, provisioned by tau-cloud `tau-ci-cache`. The server is set only when a
   # token is present (fork and Dependabot runs get none, and Nx fails on a tokenless 403).
+  # Same-repository pull request jobs granted `id-token: write` swap the read token for a session that
+  # writes only their own pull request's entries (tau-cloud CP-5b; setup-nx `nx-guard.ts`, item 5).
   NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
   NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
   TAU_API_URL: http://localhost:4000
@@ -44,10 +49,18 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # One affected computation for every downstream lane. Every selector here is a
-  # tag or a target name — no job in this workflow may name a project.
+  # One affected computation for the lanes that need a project list or a flag: the
+  # service, browser, formal, GeoSpec, native-host, viewer-parity and standalone lanes,
+  # the PR-only reports, and
+  # `staging.yml` (the `ci-plan` artifact). The seven `affected-lane` jobs do not wait
+  # for it: they run their own `nx affected` and read the queue verdict themselves.
+  # Every selector here is a tag, a target name or a project type — no job in this
+  # workflow may name a project.
   plan:
     name: Plan affected lanes
+    # A draft pull request runs no CI (the runner pool is the queue's bottleneck,
+    # 2026-11-10); marking it ready runs this workflow.
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
       contents: 'read'
@@ -56,22 +69,37 @@ jobs:
     outputs:
       apps: ${{ steps.plan.outputs.apps }}
       api: ${{ steps.plan.outputs.api }}
+      api-image: ${{ steps.plan.outputs.api-image }}
       billing: ${{ steps.plan.outputs.billing }}
+      cli-e2e: ${{ steps.plan.outputs.cli-e2e }}
       size: ${{ steps.plan.outputs.size }}
       formal: ${{ steps.plan.outputs.formal }}
       geospec-examples: ${{ steps.plan.outputs.geospec-examples }}
       browser: ${{ steps.plan.outputs.browser }}
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
       standalone: ${{ steps.plan.outputs.standalone }}
+      native-hosts: ${{ steps.plan.outputs.native-hosts }}
+      native-linux: ${{ steps.plan.outputs.native-linux }}
+      viewer-parity: ${{ steps.plan.outputs.viewer-parity }}
       reused: ${{ steps.queue.outputs.run-id }}
     steps:
+      # A queue run diffs against its first parent (`nx-set-shas` sets NX_BASE to `HEAD^1`
+      # on `merge_group`), so two commits are enough; pushes and pull requests keep full
+      # history, which `nx-set-shas` walks to find their base.
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0
+          fetch-depth: ${{ github.event_name == 'merge_group' && 2 || 0 }}
 
+      # Only `workspace` saves a missed pnpm store in pull requests and the queue (a save
+      # is a 12–15 s post step on the job's end, X10). On a push the plan saves too: it is
+      # the one job that sets up Nx on every push, and a push that reuses the queue verdict
+      # skips `workspace`'s setup, while a store saved in the queue is scoped to the queue's
+      # ref and never reaches `main` or the pull requests that read it.
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: ${{ github.event_name == 'push' && 'true' || 'false' }}
 
       # A push to `main` whose identical commit passed the merge queue reuses that
       # verdict: the lanes below report the queue's result instead of running again.
@@ -81,60 +109,143 @@ jobs:
         with:
           github-token: ${{ github.token }}
 
+      # One `nx show projects --affected` and one graph, and each lane's projects selected
+      # from them by the tags, targets and project type in LANE_SELECTORS (seven separate
+      # `nx show projects --affected` calls took 31–50 s). A selector naming a tag or a
+      # target that no project has fails the step, rather than leaving its lane off.
       - name: Compute affected lanes
         id: plan
         env:
           REUSED: ${{ steps.queue.outputs.run-id }}
-        run: |
-          # `pipefail` so a failing `nx show projects` fails the step instead of
-          # leaving an empty output behind `tail`. `tail -1` keeps the JSON array
-          # and drops Nx's log lines.
-          set -o pipefail
-          apps=$(pnpm nx show projects --affected --type=app --json | tail -1)
-          api=$(pnpm nx show projects --affected --projects tag:scope:api --json | tail -1)
-          # Billing contracts: the project that owns them (`api-billing`) or one it depends on changed.
-          billing=$(pnpm nx show projects --affected --with-target test:billing-foundation --json | tail -1)
-          size=$(pnpm nx show projects --affected --with-target size --json | tail -1)
-          formal=$(pnpm nx show projects --affected --with-target formal --json | tail -1)
-          geospec_examples=$(pnpm nx show projects --affected --with-target test-geospec --json | tail -1)
-          browser=$(pnpm nx show projects --affected --projects tag:ci:browser --with-target verify-browser --json | tail -1)
+          QUEUE_LANES: ${{ steps.queue.outputs.lanes || '{}' }}
           # `tag:ci:standalone` marks the projects whose source the standalone oracles execute
           # (`check-standalone-project.ts` runs the CLI from source and imports the UI's project
-          # factory); Nx marks each affected when any dependency of it changes.
-          standalone=$(pnpm nx show projects --affected --projects tag:ci:standalone --json | tail -1)
-          echo "Affected apps: $apps"
-          echo "Affected tag:scope:api: $api"
-          echo "Affected with a test:billing-foundation target: $billing"
-          echo "Affected with a size target: $size"
-          echo "Affected with a formal target: $formal"
-          echo "Affected with a test-geospec target: $geospec_examples"
-          echo "Affected standalone-oracle projects: $standalone"
-          # The queue run already ran the formal, browser and GeoSpec lanes on this tree.
+          # factory); Nx marks each affected when any dependency of it changes. Billing
+          # contracts: the project that owns them (`api-billing`) or one it depends on changed.
+          # CLI end-to-end suites: the project that owns them or one it depends on (the CLI) changed.
+          # API image: the project with the `docker:smoke` target (`api`) or one it depends on
+          # changed, so a change to another `scope:api` project (an end-to-end suite, `files`)
+          # does not rebuild the production image.
+          # Native host rows (`native-hosts.yml`): a `tag:ci:native-hosts` project (Build123d, PicoGK,
+          # the CLI) or a `test:native-linux` project is affected; the latter are also the linux-x64
+          # native rows it runs. Viewer parity (`viewer-parity.yml`): the project that owns the gate
+          # (`test:viewer-parity`), or one it depends on, or the workflow its target lists, changed.
+          LANE_SELECTORS: >-
+            {"apps": {"type": "app"},
+             "api": {"tags": ["scope:api"]},
+             "api-image": {"targets": ["docker:smoke"]},
+             "billing": {"targets": ["test:billing-foundation"]},
+             "cli-e2e": {"targets": ["test:scenarios"]},
+             "size": {"targets": ["size"]},
+             "formal": {"targets": ["formal"]},
+             "geospec-examples": {"targets": ["test-geospec"]},
+             "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"]},
+             "standalone": {"tags": ["ci:standalone"]},
+             "native-hosts": {"tags": ["ci:native-hosts"]},
+             "native-linux": {"targets": ["test:native-linux"]},
+             "viewer-parity": {"targets": ["test:viewer-parity"]}}
+        run: |
+          # `pipefail` so a failing `nx` call fails the step instead of leaving an empty
+          # output behind `tail`. `tail -1` keeps the JSON array and drops Nx's log lines.
+          set -o pipefail
+          affected=$(pnpm nx show projects --affected --json | tail -1)
+          pnpm nx graph --file="$RUNNER_TEMP/graph.json" > /dev/null
+          lanes=$(jq -c --argjson affected "$affected" --argjson selectors "$LANE_SELECTORS" '
+            .graph.nodes as $nodes
+            | ([$selectors[] | .tags[]?] - [$nodes[] | .data.tags[]?]) as $unknown_tags
+            | ([$selectors[] | .targets[]?] - [$nodes[] | .data.targets // {} | keys[]]) as $unknown_targets
+            | if ($unknown_tags + $unknown_targets) != [] then
+                error("lane selectors name a tag or target no project has: \($unknown_tags + $unknown_targets | join(", "))")
+              else . end
+            | $selectors | map_values(. as $selector
+              | [$affected[] | . as $name | $nodes[$name] | select(. != null)
+                  | select($selector.type == null or .type == $selector.type)
+                  | select(all($selector.tags[]?; . as $tag | $nodes[$name].data.tags // [] | index([$tag]) != null))
+                  | select(all($selector.targets[]?; . as $target | $nodes[$name].data.targets // {} | has($target)))
+                  | $name] | sort)' "$RUNNER_TEMP/graph.json")
+          jq -r 'to_entries[] | "Affected \(.key): \(.value | tojson)"' <<< "$lanes"
+          flag() { jq -r --arg lane "$1" 'if .[$lane] == [] then "false" else "true" end' <<< "$lanes"; }
+          api=$(flag api)
+          billing=$(flag billing)
+          formal=$(flag formal)
+          browser=$(flag browser)
+          geospec_examples=$(flag geospec-examples)
+          cli_e2e=$(flag cli-e2e)
+          browser_projects=$(jq -c '.browser' <<< "$lanes")
+          native_linux=$(jq -r '."native-linux" | join(",")' <<< "$lanes")
+          native_hosts=$(jq -r 'if .["native-hosts"] == [] and .["native-linux"] == [] then "false" else "true" end' <<< "$lanes")
+          viewer_parity=$(flag viewer-parity)
+          run_api=$api
+          run_billing=$billing
+          # The queue run already ran the formal, browser, GeoSpec, CLI end-to-end, native-host and
+          # viewer-parity lanes on this tree, and the API tests and billing contracts where it concluded them
+          # `success`. The API lane's suites are the affected `tag:scope:api` projects of that
+          # queue run, which is the verdict the affected lanes reuse too: every earlier commit
+          # carries its own. A service lane the queue run skipped or failed runs here when this
+          # plan selects it.
           if [ -n "$REUSED" ]; then
-            formal='[]'
-            browser='[]'
-            geospec_examples='[]'
-            echo "Reusing merge-queue run $REUSED: formal, browser and GeoSpec lanes skip."
+            formal=false
+            browser=false
+            geospec_examples=false
+            cli_e2e=false
+            viewer_parity=false
+            browser_projects='[]'
+            if [ "$(jq -r '.api // ""' <<< "$QUEUE_LANES")" = success ]; then run_api=false; fi
+            if [ "$(jq -r '."billing-e2e" // ""' <<< "$QUEUE_LANES")" = success ]; then run_billing=false; fi
+            echo "Reusing merge-queue run $REUSED: formal, browser, GeoSpec, CLI end-to-end and viewer-parity lanes skip; queue service lanes: $QUEUE_LANES."
+          fi
+          # A push to `main` runs the native host rows from `native-hosts.yml`'s own push trigger:
+          # every Linux row, and the Intel row when affected since its last successful push run.
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            native_hosts=false
+            native_linux=''
+          fi
+          # A pull request runs the fast lanes only. The service, formal, browser, GeoSpec,
+          # CLI end-to-end, native-host, viewer-parity and standalone lanes run in the merge queue, on the exact commit
+          # that lands: a PR run of them proved nothing the queue does not prove again, and
+          # PR runs held about six times the queue's runner minutes when the 60-job pool was
+          # the queue's bottleneck (2026-11-10). `api-image` keeps the PR-only Docker smoke
+          # test on the PRs that affect the API image.
+          api_image=$(flag api-image)
+          standalone=$(flag standalone)
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            run_api=false
+            run_billing=false
+            formal=false
+            browser=false
+            geospec_examples=false
+            cli_e2e=false
+            native_hosts=false
+            native_linux=''
+            viewer_parity=false
+            browser_projects='[]'
+            standalone=false
+            echo "Pull request: service, formal, browser, GeoSpec, CLI end-to-end, native-host, viewer-parity and standalone lanes run in the merge queue."
           fi
           {
-            echo "browser-projects=$browser"
-            echo "apps<<EOF"
-            echo "$apps"
-            echo "EOF"
+            echo "apps=$(jq -c '.apps' <<< "$lanes")"
+            echo "browser-projects=$browser_projects"
+            echo "api=$run_api"
+            echo "api-image=$api_image"
+            echo "billing=$run_billing"
+            echo "cli-e2e=$cli_e2e"
+            echo "size=$(flag size)"
+            echo "formal=$formal"
+            echo "browser=$browser"
+            echo "geospec-examples=$geospec_examples"
+            echo "standalone=$standalone"
+            echo "native-hosts=$native_hosts"
+            echo "native-linux=$native_linux"
+            echo "viewer-parity=$viewer_parity"
           } >> "$GITHUB_OUTPUT"
-          for lane in "api=$api" "billing=$billing" "size=$size" "formal=$formal" "browser=$browser" "geospec-examples=$geospec_examples" "standalone=$standalone"; do
-            if [ "${lane#*=}" = '[]' ]; then
-              echo "${lane%%=*}=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "${lane%%=*}=true" >> "$GITHUB_OUTPUT"
-            fi
-          done
-          # `staging.yml` reads which service lanes this run selected: a lane it skipped is
-          # acceptable to a deploy only when this plan found nothing of it affected.
+          # `staging.yml` reads which service lanes this plan found affected (`api`,
+          # `billing-e2e`), and the merge-queue run this push reused with that run's
+          # conclusion of each (`reused-run`, `queue`): a lane skipped here is acceptable to
+          # a deploy only when it was not affected, or when the reused queue run passed it.
           mkdir -p out/ci-plan
-          jq -n --arg api "$([ "$api" = '[]' ] && echo false || echo true)" \
-            --arg billing "$([ "$billing" = '[]' ] && echo false || echo true)" \
-            '{api: $api, "billing-e2e": $billing}' > out/ci-plan/lanes.json
+          jq -n --arg api "$api" --arg billing "$billing" --arg reused "$REUSED" --argjson queue "$QUEUE_LANES" \
+            '{api: $api, "billing-e2e": $billing, "reused-run": $reused, queue: (if $reused == "" then {} else $queue end)}' \
+            > out/ci-plan/lanes.json
           cat out/ci-plan/lanes.json
 
       - name: Upload the lane plan
@@ -154,8 +265,12 @@ jobs:
   # verdict (`queue-verdict`); it still reports, so `staging.yml` reads it.
   workspace:
     name: Validate workspace
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
+    # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
+    environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     permissions:
+      id-token: write # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: read
       actions: read
     steps:
@@ -176,21 +291,44 @@ jobs:
         if: steps.queue.outputs.run-id == ''
         run: pnpm nx run scripts:validate
 
+      # A change to the PicoGK browser host pin merges only once both dependency hosts, production
+      # dependencies.tau.new and staging dependencies.taucad.dev, serve every blob it names with its
+      # pinned digest, so `main` never names a digest either environment does not serve (charter
+      # picogk-interim-digest-consumer, D9 and I2). It runs in this required check, on the pull
+      # request and in the merge queue, only when the pin differs from the base.
+      - name: Prove a changed PicoGK browser host pin is served on both hosts
+        if: steps.queue.outputs.run-id == '' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          PIN: packages/plugins/picogk/browser-host.pin.json
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          if git diff --quiet "$BASE_SHA" HEAD -- "$PIN"; then
+            echo "$PIN is unchanged from the base; no blob to prove."
+          else
+            node scripts/src/picogk-browser-host-pin.ts check --pin "$PIN"
+          fi
+
   # The affected tasks run as parallel lanes on separate standard runners: lint,
   # typecheck, build and its checks, and three test shards. One runner running every
   # task in turn took 1 h 40 min on a full graph (run 37221169741, 2026-10-04); the
   # lanes bring that down to the longest lane. Each lane keeps `--parallel=1`, which
   # its own 16 GB runner still needs (see `Run the lane's tasks`).
+  #
+  # No `needs: plan`: every lane selects its own projects with `nx affected`, and the only
+  # thing it read from the plan was the queue verdict, which it now finds itself, as
+  # `workspace` does. Waiting for the plan put 2.1–3.9 min on every queue run's critical
+  # path (Brain research/ci-decomposition-blueprint.md, X1). A push to `main` whose commit
+  # passed the merge queue reuses that run's lanes: every step after the verdict skips, and
+  # the required `affected` gate passes on the plan's own verdict.
   affected-lane:
     name: Affected (${{ matrix.lane }})
-    needs: [plan]
-    # Not `always()`: that also ignores a cancel, so a superseded run kept this job
-    # going for its full length and held the next run in the concurrency queue.
-    # A push whose commit passed the merge queue reuses that run's lanes (`plan.outputs.reused`).
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.reused == '' }}
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
-    environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cache-write' || null }}
+    environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: 'read'
       actions: 'read'
       pull-requests: 'read'
@@ -199,16 +337,28 @@ jobs:
       matrix:
         lane: [lint, typecheck, build, pkgcheck, test-1, test-2, test-3]
     steps:
+      # Two commits in a queue run, full history otherwise (see `plan`).
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0
+          fetch-depth: ${{ github.event_name == 'merge_group' && 2 || 0 }}
+
+      # A no-op unless this is a push to `main`; on pull requests and in the merge queue
+      # `run-id` is always empty, so every step below runs.
+      - name: Find the merge-queue verdict for this commit
+        id: queue
+        uses: ./.github/actions/queue-verdict
+        with:
+          github-token: ${{ github.token }}
 
       - name: Setup Nx Environment
+        if: steps.queue.outputs.run-id == ''
         uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
 
       - name: Setup Linux sandbox prerequisites
-        if: startsWith(matrix.lane, 'test-')
+        if: startsWith(matrix.lane, 'test-') && steps.queue.outputs.run-id == ''
         uses: ./.github/actions/setup-linux-sandbox
 
       # The PR gate documented in docs/policy/release-policy.md: under version plans,
@@ -219,6 +369,47 @@ jobs:
       - name: Check version plans
         if: matrix.lane == 'build' && github.event_name == 'pull_request'
         run: pnpm nx release plan:check
+
+      # Pinned third-party downloads come from the Actions cache, so only a pin change asks their
+      # origin (Brain research/ci-flake-classes.md class 1, R3: during a GitHub Releases outage the
+      # wasi-sdk of `prepare` and the CPython of `seed` failed 34 lane jobs in two days). The lane's
+      # task graph, for the same targets as the step below, decides which entries it needs, so a
+      # lane that runs neither task restores nothing (the kernel seeds are about 350 MB, the
+      # wasi-sdk archive 125 MB); the test shards read the whole affected `test` graph, as the
+      # deal happens in the step below. Keys digest the pins themselves
+      # (scripts/src/ci-pinned-downloads.ts). The consumers re-verify every byte against its pin,
+      # and on a miss they download as before; `ci-pinned-downloads.yml` saves the entries from
+      # `main`, whose cache scope pull requests and the merge queue restore from.
+      - name: Find the lane's pinned downloads
+        id: pins
+        if: steps.queue.outputs.run-id == ''
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          graph="$RUNNER_TEMP/lane-graph.json"
+          case "$LANE" in
+            lint) pnpm nx affected -t lint --graph="$graph" > /dev/null ;;
+            typecheck) pnpm nx affected -t typecheck --graph="$graph" > /dev/null ;;
+            build) pnpm nx affected -t build size check-desktop-payload --graph="$graph" > /dev/null ;;
+            pkgcheck) pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --graph="$graph" > /dev/null ;;
+            test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
+            *) echo "Unknown lane $LANE" >&2; exit 1 ;;
+          esac
+          node scripts/src/ci-pinned-downloads.ts --graph "$graph" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Python kernel seeds
+        if: steps.queue.outputs.run-id == '' && steps.pins.outputs.kernel-seeds-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.kernel-seeds-path }}
+          key: ${{ steps.pins.outputs.kernel-seeds-key }}
+
+      - name: Restore the wasi-sdk archive
+        if: steps.queue.outputs.run-id == '' && steps.pins.outputs.wasi-sdk-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.wasi-sdk-path }}
+          key: ${{ steps.pins.outputs.wasi-sdk-key }}
 
       # Nx Affected runs only tasks affected by the changes in this PR/commit.
       # Browser-backed targets are not in this list — they run nightly in
@@ -232,8 +423,11 @@ jobs:
       # runs in the `api` lane below, which has both; these lanes stay hermetic.
       #
       # The three test shards split the affected projects with a `test` target by
-      # their test-file counts. The project list comes from the graph at run time,
-      # never from this file.
+      # measured uncached test seconds (scripts/src/test-shard-dealer.ts and its
+      # duration snapshot). The project list comes from the graph at run time,
+      # never from this file: one `nx affected -t test --graph=<file>` writes the affected
+      # `test` tasks and the project graph (each project's tags) without running
+      # anything, in place of an `nx show projects --affected` and an `nx graph` (X8).
       #
       # `--parallel=1`: ui:lint and ui:typecheck each peak near 9.5 GB, so any two of
       # them (or ui:build) together exhaust the 16 GB hosted runner, which then loses
@@ -241,7 +435,14 @@ jobs:
       # this happened a few minutes in; at two it still happened once both overlapped.
       # `test` needs the same cap: overlapping WASM suites lost the VM the same way
       # a few minutes into `test` (tau#306 and tau#299, 2026-10-04).
+      #
+      # The build lane also runs `ui:check-desktop-payload`, the desktop renderer ownership
+      # gate, whenever `ui` is affected: a renderer-only change no longer selects `desktop`,
+      # so the desktop `package-*` targets that also depend on it never run for it (Brain
+      # research/desktop-split-blueprint.md, D-DS2). Its `ui:build:desktop` and
+      # `desktop:build` dependencies stay serial here under the same `--parallel=1`.
       - name: Run the lane's tasks
+        if: steps.queue.outputs.run-id == ''
         env:
           LANE: ${{ matrix.lane }}
         run: |
@@ -249,7 +450,7 @@ jobs:
           case "$LANE" in
             lint) pnpm nx affected -t lint --parallel=1 ;;
             typecheck) pnpm nx affected -t typecheck --parallel=1 ;;
-            build) pnpm nx affected -t build size --parallel=1 ;;
+            build) pnpm nx affected -t build size check-desktop-payload --parallel=1 ;;
             pkgcheck)
               # publint, attw, madge and the surface checks are light, so they run three at
               # a time once their builds exist. The builds stay serial and land in the local
@@ -264,21 +465,17 @@ jobs:
               # GeoSpec suites run here against the published `geospec-engine` prebuild for
               # this runner. `ci:quarantined` projects (runtime-e2e) run only in the nightly
               # workflow until their failing tests pass there: https://github.com/taucad/tau/issues/342
-              projects=$(pnpm nx show projects --affected --with-target test --exclude tag:scope:api,tag:ci:quarantined --json | tail -1)
-              pnpm nx graph --file="$RUNNER_TEMP/graph.json" > /dev/null
-              # Weigh each project by its test files, then deal the heaviest first to the
-              # lightest shard, so the slowest suites land in different shards.
-              shard=$(echo "$projects" | jq -r '.[]' | while read -r project; do
-                root=$(jq -r --arg project "$project" '.graph.nodes[$project].data.root' "$RUNNER_TEMP/graph.json")
-                weight=1
-                if [ "$root" != . ]; then
-                  weight=$(( $(git ls-files -- "$root" | grep -cE '(\.(test|spec)\.[cm]?[jt]sx?|Tests?\.cs)$') + 1 ))
-                fi
-                echo "$weight $project"
-              done | sort -k1,1nr -k2,2 | awk -v shard="$(( ${LANE#test-} - 1 ))" '
-                { best = 0; for (s = 1; s < 3; s++) if (load[s] < load[best]) best = s
-                  load[best] += $1
-                  if (best == shard) { printf "%s%s", sep, $2; sep = "," } }')
+              pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$RUNNER_TEMP/test-graph.json" > /dev/null
+              # The task graph also holds the tasks `test` depends on (builds and the like),
+              # so keep the `test` tasks, and drop an excluded tag again in case another
+              # project's `test` ever depends on one of theirs.
+              projects=$(jq -c '
+                .graph.nodes as $nodes
+                | [.tasks.tasks[] | select(.target.target == "test") | .target.project] | unique
+                | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:quarantined") | not))' "$RUNNER_TEMP/test-graph.json")
+              # Every lane deals the same list heaviest first to the lightest shard by
+              # duration, so the shards partition it and the slowest suites land apart.
+              shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 3)
               if [ -z "$shard" ]; then
                 echo "No affected test projects in this shard."
                 exit 0
@@ -313,11 +510,11 @@ jobs:
 
       # The M3 verdict helpers left with `geospec` for taucad/geospec, which runs them in its own CI.
       - name: Check the affected GeoSpec consumer
-        if: matrix.lane == 'build'
+        if: matrix.lane == 'build' && steps.queue.outputs.run-id == ''
         run: pnpm nx affected -t check-geospec-test-consumer
 
       - name: Check workspace root hygiene
-        if: always()
+        if: always() && steps.queue.outputs.run-id == ''
         run: pnpm nx run scripts:validate-workspace-root
 
   browser:
@@ -325,6 +522,8 @@ jobs:
     needs: plan
     if: needs.plan.outputs.browser == 'true'
     runs-on: ubuntu-24.04
+    # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
+    environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     timeout-minutes: 20
     env:
       WWW_LAUNCH: 'true'
@@ -333,9 +532,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0
+          fetch-depth: ${{ github.event_name == 'merge_group' && 2 || 0 }}
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
       - name: Use the pinned browser for Lighthouse
@@ -363,21 +564,51 @@ jobs:
           retention-days: 14
 
   # Standalone-project oracles, in `standalone-projects.yml` (also nightly). Only when the plan
-  # finds a project they execute affected, and on every push to `main`.
+  # finds a project they execute affected, and on every push to `main`. Not required checks, so
+  # they wait for the required gate rather than take three runners while the required lanes
+  # still queue for one (X3); `!cancelled()` keeps them running when a lane failed.
   standalone:
     name: Standalone projects
-    needs: [plan]
+    needs: [plan, affected]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.standalone == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push'))
     uses: ./.github/workflows/standalone-projects.yml
     secrets: inherit
 
+  # The Linux native host rows (`native-hosts.yml`), in the merge queue when the plan finds a
+  # `tag:ci:native-hosts` or `test:native-linux` project affected, with the affected
+  # `test:native-linux` projects. Its plan job is skipped when called; a push to `main`, the
+  # nightly and a dispatch run that workflow on their own. The required check waits for it.
+  native-hosts:
+    name: Native hosts
+    needs: [plan]
+    if: needs.plan.outputs.native-hosts == 'true'
+    permissions: # The called workflow's plan job declares these, though it is skipped here
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
+    uses: ./.github/workflows/native-hosts.yml
+    with:
+      native-linux: ${{ needs.plan.outputs.native-linux }}
+
+  # The viewer parity gate (`viewer-parity.yml`), in the merge queue and on a push the queue did
+  # not prove, when the plan finds a `test:viewer-parity` project affected. The required check
+  # waits for it.
+  viewer-parity:
+    name: Viewer parity
+    needs: [plan]
+    if: needs.plan.outputs.viewer-parity == 'true'
+    permissions:
+      contents: 'read'
+    uses: ./.github/workflows/viewer-parity.yml
+
   # The required check. It passes only when the plan and every affected lane passed, and the
-  # browser and GeoSpec example-contract lanes too when this run needed them.
+  # browser, GeoSpec example-contract, CLI end-to-end, native-host and viewer-parity lanes too
+  # when this run needed them: a skip of a lane the plan selected fails it.
   affected:
     name: Run affected tasks
-    needs: [plan, affected-lane, browser, geospec-examples]
+    needs: [plan, affected-lane, browser, geospec-examples, cli-e2e, native-hosts, viewer-parity]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -389,8 +620,19 @@ jobs:
           BROWSER_RESULT: ${{ needs.browser.result }}
           GEOSPEC_EXAMPLES_REQUIRED: ${{ needs.plan.outputs.geospec-examples }}
           GEOSPEC_EXAMPLES_RESULT: ${{ needs.geospec-examples.result }}
+          CLI_E2E_REQUIRED: ${{ needs.plan.outputs.cli-e2e }}
+          CLI_E2E_RESULT: ${{ needs.cli-e2e.result }}
+          NATIVE_HOSTS_REQUIRED: ${{ needs.plan.outputs.native-hosts }}
+          NATIVE_HOSTS_RESULT: ${{ needs.native-hosts.result }}
+          VIEWER_PARITY_REQUIRED: ${{ needs.plan.outputs.viewer-parity }}
+          VIEWER_PARITY_RESULT: ${{ needs.viewer-parity.result }}
           REUSED: ${{ needs.plan.outputs.reused }}
+          DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
         run: |
+          if [ "$DRAFT" = true ]; then
+            echo "Draft pull request: no CI runs until it is marked ready for review."
+            exit 0
+          fi
           test "$PLAN_RESULT" = success
           if [ -n "$REUSED" ]; then
             echo "Merge-queue run $REUSED passed every affected lane on this commit."
@@ -399,6 +641,9 @@ jobs:
           test "$LANES_RESULT" = success
           if [ "$BROWSER_REQUIRED" = true ]; then test "$BROWSER_RESULT" = success; fi
           if [ "$GEOSPEC_EXAMPLES_REQUIRED" = true ]; then test "$GEOSPEC_EXAMPLES_RESULT" = success; fi
+          if [ "$CLI_E2E_REQUIRED" = true ]; then test "$CLI_E2E_RESULT" = success; fi
+          if [ "$NATIVE_HOSTS_REQUIRED" = true ]; then test "$NATIVE_HOSTS_RESULT" = success; fi
+          if [ "$VIEWER_PARITY_REQUIRED" = true ]; then test "$VIEWER_PARITY_RESULT" = success; fi
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
   # of every affected project with a `formal` target. A known counterexample is an
@@ -408,10 +653,13 @@ jobs:
   formal:
     name: Formal models
     runs-on: ubuntu-latest
+    # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
+    environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     needs: [plan]
     if: needs.plan.outputs.formal == 'true'
     timeout-minutes: 15
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: 'read'
       actions: 'read'
       pull-requests: 'read'
@@ -419,10 +667,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0
+          fetch-depth: ${{ github.event_name == 'merge_group' && 2 || 0 }}
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
 
       - name: Setup formal toolchains
         uses: ./.github/actions/setup-formal
@@ -452,10 +702,13 @@ jobs:
   geospec-examples:
     name: GeoSpec example contracts
     runs-on: ubuntu-latest
+    # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
+    environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     needs: [plan]
     if: needs.plan.outputs.geospec-examples == 'true'
     timeout-minutes: 30
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: 'read'
       actions: 'read'
       pull-requests: 'read'
@@ -463,10 +716,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0
+          fetch-depth: ${{ github.event_name == 'merge_group' && 2 || 0 }}
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
 
       - name: Run affected example contracts
         run: pnpm nx affected -t test-geospec --parallel=1
@@ -490,6 +745,8 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
 
       # The budgets gate on this checkout alone. The action below also rebuilds the base branch
       # for its comparison comment, so the comparison only reports.
@@ -575,6 +832,8 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
 
       - name: Run invariant and microbenchmark gates
         env:
@@ -619,6 +878,8 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
 
       - name: Enforce the span-path and operation-facts gates
         env:
@@ -648,7 +909,7 @@ jobs:
     name: API Docker smoke test
     runs-on: ubuntu-latest
     needs: [plan]
-    if: github.event_name == 'pull_request' && needs.plan.outputs.api == 'true'
+    if: github.event_name == 'pull_request' && needs.plan.outputs.api-image == 'true'
     # A production API refuses to boot without Redis, a reachable database and a schema at
     # this build's migration head, so the smoke test brings both up and runs the image's
     # own release command before starting it.
@@ -760,21 +1021,25 @@ jobs:
         run: docker rm -f tau-api-smoke || true
 
   # Service lane: the suites that need Postgres + Redis + MinIO. Since the git
-  # storage substrate landed, that is the whole of `test` for `tag:scope:api` —
+  # storage substrate landed, that is `test` for the affected `tag:scope:api` projects —
   # the `affected` lane above excludes the tag rather than trying to guess which
   # files reach a service — plus the service-backed targets (`test:models`,
   # `test:server-modes`, `test:git`) and the API's billing composition suites. Billing contracts
   # have their own job. Like every lane here it runs only when the plan finds it affected, on
-  # `main` pushes too; `staging.yml` accepts a skipped lane only when this run's plan says so.
+  # `main` pushes too, and a push skips it when the merge-queue run it reuses passed it;
+  # `staging.yml` accepts a skipped lane only when this run's plan says it was not affected or
+  # names that reused run (`lanes.json`).
   # Writes the dependency layers the PR-only `api-docker-smoke` job reads: the GHA cache
   # a branch writes is readable by pull requests into it, so one `main` writer replaces a
   # cold cache and a 4-minute export on every PR run. It rebuilds only when an input of
   # the `deps` stages, or this workflow, changed since the previous `main` commit, so most
   # pushes skip it.
+  # After the required gate, so a rebuild never takes a runner the gating lanes wait for (X11).
   api-docker-cache:
     name: API Docker dependency cache
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [affected]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -825,14 +1090,27 @@ jobs:
   api:
     name: API tests (Postgres + MinIO)
     runs-on: ubuntu-latest
+    # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
+    environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
     needs: [plan]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.api == 'true' }}
     steps:
+      # Two commits in a queue run, full history otherwise (see `plan`): the suites step
+      # selects its projects with `nx affected`.
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: ${{ github.event_name == 'merge_group' && 2 || 0 }}
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
 
       - name: Prepare API env file
         run: cp apps/api/.env.example apps/api/.env
@@ -849,29 +1127,29 @@ jobs:
       - name: Apply the protected migration job
         run: BILLING_DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm nx run-many -t db-migrate --projects tag:scope:api
 
-      # The default suite, moved here whole from the `affected` lane. `DATABASE_URL`
+      # The default suite of every affected `tag:scope:api` project (the `affected` lane
+      # excludes the tag). `nx affected` diffs against the same NX_BASE/NX_HEAD as the
+      # affected lanes, so a change to one API library runs that library's suites and its
+      # dependents' (`api` and `api-e2e` depend on every one), not every API suite.
+      # `nx affected` ignores `--projects`, so the tag is selected by excluding every
+      # project but it: `--exclude '*,!tag:scope:api'`.
+      # `--parallel=1`: the suites share this lane's one PostgreSQL, and concurrent suites
+      # contend on it (DC-2 measured a 70,000-row purge suite going from 60 s to 120 s
+      # beside two others); one at a time keeps each suite's timing its own. `DATABASE_URL`
       # is named here rather than left to `apps/api/.env` — which the step above
       # copies from `.env.example` and which carries the same URL — so the database
       # these suites talk to is stated at the place they run, not inherited from a
       # file three steps away. An inherited value wins over anything a Vitest config
       # loads, which is what makes naming it work at all.
       #
-      # The `TAU_S3_CONFORMANCE_*` family is the env gate on the R2 half of the
-      # repository-store conformance suite (charter D32). These secrets deliberately
-      # do not exist in this repository: the scratch-bucket credentials are read from
-      # Terraform outputs at run time and are never placed in CI. Absent, they expand
-      # to empty strings, `conformanceAccountFromEnvironment` answers `undefined` and
-      # that half skips; the MinIO half above it still runs on every push. The suite
-      # itself refuses any bucket outside the scratch allowlist before a credential is
-      # used, so this can never be pointed at a staging content bucket.
+      # The R2 half of the repository-store conformance suite (charter D32) is an
+      # operator run: its `TAU_S3_CONFORMANCE_*` scratch-bucket credentials are read
+      # from Terraform outputs at run time and never reach CI, so no step here names
+      # them and that half skips; the MinIO half runs on every push.
       - name: Run API suites (real PostgreSQL + MinIO)
         env:
           DATABASE_URL: postgresql://dev_user:dev_password@localhost:5432/tau_dev
-          TAU_S3_CONFORMANCE_ENDPOINT: ${{ secrets.TAU_S3_CONFORMANCE_ENDPOINT }}
-          TAU_S3_CONFORMANCE_BUCKET: ${{ secrets.TAU_S3_CONFORMANCE_BUCKET }}
-          TAU_S3_CONFORMANCE_ACCESS_KEY_ID: ${{ secrets.TAU_S3_CONFORMANCE_ACCESS_KEY_ID }}
-          TAU_S3_CONFORMANCE_SECRET_ACCESS_KEY: ${{ secrets.TAU_S3_CONFORMANCE_SECRET_ACCESS_KEY }}
-        run: pnpm nx run-many -t test --projects tag:scope:api
+        run: pnpm nx affected -t test --exclude '*,!tag:scope:api' --parallel=1
 
       - name: Qualify API development and production servers
         run: pnpm nx run-many -t test:server-modes
@@ -880,8 +1158,11 @@ jobs:
       # deterministic edit qualification is the Tier-D edit bench.
       # The two billing foundation suites that compose billing with the app's chat and
       # agent-observability code, on the launcher's own disposable PostgreSQL 17.
+      # postgres:17-alpine pinned by digest; the billing-e2e job's step says how to refresh it.
       - name: Pull the billing foundation PostgreSQL image
-        run: docker pull postgres:17-alpine
+        run: |
+          docker pull postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+          docker tag postgres@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac postgres:17-alpine
 
       - name: Run the API's billing composition contracts
         run: pnpm nx run-many -t test:billing-composition
@@ -920,11 +1201,15 @@ jobs:
 
   # Credential-free database and Stripe adapter contracts, including fork PRs. Runs when
   # `api-billing` or a project it depends on is affected, on pull requests, in the merge
-  # queue and on `main` pushes alike; a change under `apps/api/app/**` alone skips it.
-  # Keep the job name stable: `staging.yml` gates the API deploy on its result.
+  # queue and on `main` pushes alike; a change under `apps/api/app/**` alone skips it. A push
+  # that reuses a merge-queue run which passed it skips it, like the API lane.
+  # Keep the job name stable: `staging.yml` gates the API deploy on its result, and
+  # `queue-verdict` reads it from the reused run.
   billing-e2e:
     name: Billing contracts (no Stripe credentials)
     runs-on: ubuntu-latest
+    # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
+    environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     timeout-minutes: 30
     needs: [plan]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.billing == 'true' }}
@@ -934,9 +1219,45 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
 
+      # postgres:17-alpine pinned to the tag's OCI index digest, resolved 2026-11-09 from
+      # registry-1.docker.io (`HEAD /v2/library/postgres/manifests/17-alpine`, Docker-Content-Digest).
+      # The launcher (apps/libs/api-billing/scripts/test-billing-foundation.mts) runs `postgres:17-alpine`
+      # with `pull_policy: never`, so the pinned image is tagged locally under that name. Refresh: resolve
+      # the tag's current digest the same way and replace it in every pull step of ci.yml and
+      # billing-nightly.yml (scripts/src/billing-stripe-lanes.test.ts requires one digest everywhere).
       - name: Pull the billing foundation PostgreSQL image
-        run: docker pull postgres:17-alpine
+        run: |
+          docker pull postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+          docker tag postgres@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac postgres:17-alpine
 
       - name: Run billing database and Stripe adapter contracts
         run: pnpm nx run-many -t test:billing-foundation
+
+  # The CLI's end-to-end suites (`apps/cli-e2e`): the built binary, `tau serve`, `tau mcp` and
+  # `tau agent` as real child processes against real kernels, 10 to 14 minutes. Their own lane,
+  # out of the test shards, where they were the floor of one shard: it runs when the plan finds
+  # a project with a `test:scenarios` target affected, and `Run affected tasks` requires it then.
+  cli-e2e:
+    name: CLI end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [plan]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.cli-e2e == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # The suites spawn sandboxed kernel workers, as the shards' native suites do.
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
+
+      - name: Run the CLI end-to-end suites
+        run: pnpm nx run-many -t test:scenarios --parallel=1 --outputStyle=static

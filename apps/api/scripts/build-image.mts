@@ -2,8 +2,8 @@
 /**
  * Build the API and its command bundles inside the Linux deploy image.
  * This builds every `^build` dependency of `api:build` through Nx, then the API targets without task
- * dependencies. The runtime image never loads the GeoSpec engine (`geospec-engine`, a test-harness
- * devDependency installed from npm), so the script refuses to run if it becomes an API runtime dependency.
+ * dependencies. The runtime image never loads the GeoSpec engine (`geospec-engine`, a native add-on
+ * installed from npm), so the script refuses to run if it becomes an API runtime dependency.
  * Required env: none.
  * Usage: node apps/api/scripts/build-image.mts (from the Dockerfile build stage)
  * Exit codes: 0 built, 1 graph precondition or build failure.
@@ -19,30 +19,18 @@ const repoRoot = resolve(import.meta.dirname, '../../..');
 type TaskGraph = { tasks: { tasks: Record<string, unknown>; dependencies: Record<string, string[]> } };
 
 const nxBin = join(repoRoot, 'node_modules/.bin/nx');
+const nxGuard = join(repoRoot, '.github/actions/setup-nx/nx-guard.ts');
 
-/* Nx 22.7.1 intermittently segfaults before it runs anything, as the CI setup
- * (`.github/actions/setup-nx`) records; the Dockerfile also turns off its native PTY
- * runner. Call the bin directly, so the signal reaches this process instead of pnpm's
- * exit 1, then rerun once on SIGSEGV.
- * Nx's self-hosted remote cache client also fails a whole command when the cache is
- * unreachable or refuses an entry, and a cache fault must not fail a build (tau-cloud
- * `tau-ci-cache`). So a failure with the remote cache on is rerun once with it off;
- * tasks that already succeeded replay from the local cache. */
+/* Every Nx call goes through CI's guard (`.github/actions/setup-nx/nx-guard.ts`, kept in the build context by
+ * `apps/api/Dockerfile.dockerignore`). It reruns once when Nx segfaults before it runs anything, and points Nx at a
+ * local relay to the remote cache, so an unreachable cache or a refused entry costs a miss, not a failed command. It
+ * reruns with the remote cache off only when Nx fails on one of its own remote cache errors; any other failure, such
+ * as a compile error, fails the build the first time. Without a remote cache the guard runs Nx unchanged. */
 const nx = (...args: string[]): void => {
-  const run = () => {
-    let outcome = spawnSync(nxBin, args, { cwd: repoRoot, stdio: 'inherit' });
-    if (outcome.signal === 'SIGSEGV') {
-      console.warn(`Nx was killed by SIGSEGV; rerunning: nx ${args.join(' ')}`);
-      outcome = spawnSync(nxBin, args, { cwd: repoRoot, stdio: 'inherit' });
-    }
-    return outcome;
-  };
-  let result = run();
-  if (result.status !== 0 && process.env['NX_SELF_HOSTED_REMOTE_CACHE_SERVER']) {
-    console.warn(`nx ${args.join(' ')} failed with the remote cache on; rerunning with it off from here on`);
-    process.env['NX_SELF_HOSTED_REMOTE_CACHE_SERVER'] = '';
-    result = run();
-  }
+  const result = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', nxGuard, nxBin, ...args], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+  });
   if (result.status !== 0) {
     throw new Error(`nx ${args.join(' ')} exited with ${result.status ?? result.signal}`);
   }

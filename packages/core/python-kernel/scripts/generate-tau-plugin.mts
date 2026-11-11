@@ -1,7 +1,7 @@
 /**
  * Purpose: Generate a Python kernel package's `tau-plugin.json`, its per-target `pylock.<target>.toml` files, its
  * CycloneDX SBOM and its pinned copy of the core's `tau_kernel` modules from `python/requirements.lock` and
- * `python/interpreter.json`; fill a payload seed; record a golden receipt.
+ * `python/interpreter.json`; fill a dependency file seed; record a golden receipt.
  * Why: Every byte a native Python kernel runs is pinned by digest in a file Tau ships (I1). The pins are transcoded to
  * SRI only from bytes this script downloaded and verified against the publisher's own digest (D2, R1), so nothing is
  * re-hashed or hand-copied, and `--check` catches any drift, `tau_kernel` included, as a reviewed diff (I13).
@@ -11,7 +11,7 @@
  *   tau-python-kernel seed --package <dir> [--target <key>]
  *   tau-python-kernel golden --package <dir>
  *   Options: --seed <dir> (default out/cache/<kernel id>-seed under the working directory; the download cache and the
- *   payload seed are one digest-addressed directory, `blobs/sha256/<hex>`), --store <dir> (golden only).
+ *   dependency file seed are one digest-addressed directory, `blobs/sha256/<hex>`), --store <dir> (golden only).
  *   The kernel's own `python/interpreter.json` overrides the core's, which every Python kernel shares by default (D3).
  * Exit codes: 0 on success or when `--check` finds the committed files current; 1 when `--check` finds a difference
  * or any download, digest or lock check fails.
@@ -40,7 +40,7 @@ import {
   selectVariant,
   targetKey,
 } from '@taucad/runtime/preparation/node';
-import type { DependencyPayload, DependencyVariant, PluginDeployment } from '@taucad/runtime/preparation/node';
+import type { DependencyFile, DependencyVariant, PluginDeployment } from '@taucad/runtime/preparation/node';
 
 import { compactLock, normalizeName, parseRequirementsLock, renderPylock, variantFloor } from '#generator.js';
 import type { IndexFile, LockPin, SelectedWheel, TargetConfig } from '#generator.js';
@@ -281,7 +281,7 @@ const readInterpreterSums = async (release: string): Promise<Map<string, string>
 const interpreterUrl = (release: string, asset: string): string =>
   `https://github.com/astral-sh/python-build-standalone/releases/download/${release}/${encodeURIComponent(asset)}`;
 
-/** Bytes a payload unpacks to, read with the same readers the installer uses, so admission matches the install. */
+/** Bytes a dependency file unpacks to, read with the same readers the installer uses, so admission matches the install. */
 const unpackedBytes = async (format: 'tar.gz' | 'wheel', bytes: Uint8Array<ArrayBuffer>): Promise<number> => {
   if (format === 'wheel') {
     const wheel = await readWheel(bytes, unboundedLimits);
@@ -306,8 +306,8 @@ const readInterpreter = async (paths: Paths): Promise<InterpreterFile> => {
   return JSON.parse(await readFile(path, 'utf8')) as InterpreterFile;
 };
 
-/** A raw worker payload of `bytes`, unpacked to `<destination>/<name>` from the package file at `origin`. */
-const rawPayload = ({
+/** A raw worker dependency file of `bytes`, unpacked to `<destination>/<name>` from the package file at `origin`. */
+const rawDependencyFile = ({
   name,
   bytes,
   origin,
@@ -317,9 +317,9 @@ const rawPayload = ({
   readonly bytes: Uint8Array<ArrayBuffer>;
   readonly origin: string;
   readonly destination: string;
-}): DependencyPayload => ({
+}): DependencyFile => ({
   name,
-  integrity: integrityFromHex('sha256', sha256Hex(bytes)) as DependencyPayload['integrity'],
+  integrity: integrityFromHex('sha256', sha256Hex(bytes)) as DependencyFile['integrity'],
   byteLength: bytes.byteLength,
   format: 'raw',
   origin: { kind: 'packagePath', path: origin },
@@ -327,18 +327,18 @@ const rawPayload = ({
 });
 
 /**
- * The worker payloads: the kernel's own worker modules from its `python/` directory, then the core's `tau_kernel`
+ * The worker dependency files: the kernel's own worker modules from its `python/` directory, then the core's `tau_kernel`
  * modules, pinned from the core's bytes, which the generator copies to `python/tau_kernel/` of the package.
  */
-const workerPayloads = async (
+const workerFiles = async (
   kernel: PythonKernelPackage,
   paths: Paths,
-): Promise<{ readonly payloads: DependencyPayload[]; readonly tauKernel: Map<string, string> }> => {
+): Promise<{ readonly dependencyFiles: DependencyFile[]; readonly tauKernel: Map<string, string> }> => {
   const own = await Promise.all(
     kernel.adopter.worker.workerModules.map(async (module) => {
       const bytes = new Uint8Array(await readFile(resolve(paths.python, ...module.split('/'))));
       const slash = module.lastIndexOf('/');
-      return rawPayload({
+      return rawDependencyFile({
         name: module.slice(slash + 1),
         bytes,
         origin: `python/${module}`,
@@ -352,7 +352,7 @@ const workerPayloads = async (
       const text = await readFile(resolve(coreRoot, 'python', ...module.split('/')), 'utf8');
       tauKernel.set(resolve(paths.python, ...module.split('/')), text);
       const name = module.slice(module.lastIndexOf('/') + 1);
-      return rawPayload({
+      return rawDependencyFile({
         name,
         bytes: new TextEncoder().encode(text),
         origin: `python/${module}`,
@@ -360,7 +360,7 @@ const workerPayloads = async (
       });
     }),
   );
-  return { payloads: [...own, ...shared], tauKernel };
+  return { dependencyFiles: [...own, ...shared], tauKernel };
 };
 
 type Generated = {
@@ -412,11 +412,11 @@ const generate = async (kernel: PythonKernelPackage, paths: Paths, seed: string)
   );
   const unpackedOf = (sha256: string): number => unpacked.get(sha256)!;
 
-  const { payloads: workers, tauKernel } = await workerPayloads(kernel, paths);
+  const { dependencyFiles: workers, tauKernel } = await workerFiles(kernel, paths);
   const variants = selections.map(({ target, wheels }): DependencyVariant => {
-    const python: DependencyPayload = {
+    const python: DependencyFile = {
       name: 'python',
-      integrity: integrityFromHex('sha256', target.interpreter.sha256) as DependencyPayload['integrity'],
+      integrity: integrityFromHex('sha256', target.interpreter.sha256) as DependencyFile['integrity'],
       byteLength: target.interpreter.byteLength,
       format: 'tar.gz',
       origin: { kind: 'url', urls: [interpreterUrl(interpreter.release, target.interpreter.asset)] },
@@ -424,10 +424,10 @@ const generate = async (kernel: PythonKernelPackage, paths: Paths, seed: string)
       stripComponents: 1,
       unpackedByteLength: unpackedOf(target.interpreter.sha256),
     };
-    const wheelPayloads = wheels.map(
-      ({ pin, file }): DependencyPayload => ({
+    const wheelFiles = wheels.map(
+      ({ pin, file }): DependencyFile => ({
         name: pin.name,
-        integrity: integrityFromHex('sha256', file.sha256) as DependencyPayload['integrity'],
+        integrity: integrityFromHex('sha256', file.sha256) as DependencyFile['integrity'],
         byteLength: file.size,
         format: 'wheel',
         origin: { kind: 'url', urls: [file.url] },
@@ -437,7 +437,7 @@ const generate = async (kernel: PythonKernelPackage, paths: Paths, seed: string)
     );
     return {
       target: nativeTarget(target, variantFloor(target, wheels)),
-      payloads: [python, ...wheelPayloads, ...workers],
+      files: [python, ...wheelFiles, ...workers],
     };
   });
 
@@ -469,7 +469,7 @@ const renderSbom = (input: {
   readonly kernel: PythonKernelPackage;
   readonly interpreter: InterpreterFile;
   readonly selections: ReadonlyArray<{ readonly target: TargetConfig; readonly wheels: readonly SelectedWheel[] }>;
-  readonly workers: readonly DependencyPayload[];
+  readonly workers: readonly DependencyFile[];
   readonly licenses: ReadonlyMap<string, string | undefined>;
 }): string => {
   type Component = {
@@ -574,7 +574,7 @@ const currentGolden = async (
 ): Promise<{ kept: Golden; stale: string[] }> => {
   const declared = new Map<string, string>();
   for (const variant of deployment.dependencies[dependencyName] ?? []) {
-    declared.set(targetKey(variant.target), await computeClosureIntegrity(variant.payloads));
+    declared.set(targetKey(variant.target), await computeClosureIntegrity(variant.files));
   }
   const kept: Record<string, Golden[string]> = {};
   const stale: string[] = [];
@@ -590,7 +590,7 @@ const currentGolden = async (
 
 const display = (path: string): string => relative(process.cwd(), path);
 
-/** The kernel package a run is for, where its generated files live, and the payload seed. */
+/** The kernel package a run is for, where its generated files live, and the dependency file seed. */
 type Context = { readonly kernel: PythonKernelPackage; readonly paths: Paths; readonly seed: string };
 
 const runGenerate = async ({ kernel, paths, seed }: Context, check: boolean): Promise<void> => {
@@ -665,23 +665,25 @@ const hostVariant = (kernel: PythonKernelPackage, deployment: PluginDeployment, 
   return selection.variant;
 };
 
-/** Fill the seed with one variant's third-party payloads; the worker scripts come from the package itself. */
+/** Fill the seed with one variant's third-party dependency files; the worker scripts come from the package itself. */
 const runSeed = async ({ kernel, paths, seed }: Context, key?: string): Promise<void> => {
   const variant = hostVariant(kernel, await readManifest(kernel, paths), key);
-  const remote = variant.payloads.filter((payload) => payload.origin.kind === 'url');
-  await mapConcurrent(remote, downloadConcurrency, async (payload) => {
-    const { hex } = integrityToHex(payload.integrity);
-    if (payload.origin.kind !== 'url') {
+  const remote = variant.files.filter((dependencyFile) => dependencyFile.origin.kind === 'url');
+  await mapConcurrent(remote, downloadConcurrency, async (dependencyFile) => {
+    const { hex } = integrityToHex(dependencyFile.integrity);
+    if (dependencyFile.origin.kind !== 'url') {
       return;
     }
     await verifiedBlob(seed, {
-      url: payload.origin.urls[0],
+      url: dependencyFile.origin.urls[0],
       sha256: hex,
-      byteLength: payload.byteLength,
-      label: payload.name,
+      byteLength: dependencyFile.byteLength,
+      label: dependencyFile.name,
     });
   });
-  console.log(`seed ${seed} holds every ${targetKey(variant.target)} payload (${String(remote.length)} blobs).`);
+  console.log(
+    `seed ${seed} holds every ${targetKey(variant.target)} dependency file (${String(remote.length)} blobs).`,
+  );
 };
 
 /** Prepare this host's variant from the seed, sandbox and seal included, and record its golden receipt. */

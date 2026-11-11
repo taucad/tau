@@ -4,7 +4,10 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectCreationLocationRead, Workspace, WorkspaceConnection } from '#filesystem/handle-store.js';
 import type { ProjectCreationLocationState } from '#hooks/use-project-creation-location.js';
-import { WorkspaceIdentityConflictError, workspaceIdentityConflictCopy } from '#filesystem/workspace-errors.js';
+import {
+  WorkspaceIdentityConflictError,
+  workspaceIdentityConflictCopy,
+} from '@taucad/ui-core/filesystem/workspace-errors';
 
 type TestHandle = { readonly name: string };
 type TestWorkspaceEntry = { readonly workspace: Workspace; readonly handle: TestHandle };
@@ -107,7 +110,7 @@ vi.mock('#utils/workspace-telemetry.utils.js', () => {
   return { useWorkspaceTelemetry: () => telemetry };
 });
 
-vi.mock('#components/ui/sonner.js', () => ({ toast: { error: mockToastError } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: mockToastError } }));
 
 const { useProjectCreationLocation } = await import('#hooks/use-project-creation-location.js');
 

@@ -113,7 +113,7 @@ const seconds = (name: string, value: string | undefined, fallback: number): num
  * printers until the agent closes, and a server whose one folder holds no `tau.json` does not take it.
  *
  * Native kernels (each one the runtime definition lists: built-ins, `--plugin` and `--config`) run from closures in
- * the payload store that `tau prepare` and the `prepare_kernel` tool fill (D7). The CAD tools never download: a file
+ * the dependency store that `tau prepare` and the `prepare_kernel` tool fill (D7). The CAD tools never download: a file
  * whose kernel is not prepared answers `KERNEL_NOT_PREPARED`, naming `prepare_kernel` and its input. The kernel reads
  * the store again on every operation until it binds, so a closure another process prepared is used at once, with no
  * runtime replaced. `prepare_kernel` learns which kernels the runtime lists from a thread that builds it, so no kernel
@@ -150,7 +150,7 @@ const readViewerPage = async (path: string | undefined): Promise<{ html: string;
 export const mcpCommand = defineCommand({
   meta: {
     name: 'mcp',
-    description: 'Serve Tau CAD tools to a local agent over stdio (MCP)',
+    description: 'Serve Tau tools to a local agent over stdio (MCP)',
   },
   args: {
     project: {
@@ -238,7 +238,7 @@ export const mcpCommand = defineCommand({
       process.stderr.write(
         `tau mcp: project root ${workspaceRoot} (${started.source})${pinned ? '' : '; a call that names its own folder works there'}\n`,
       );
-      /* Loaded on first use: preparation reads the payload store, which `initialize` must not wait for. */
+      /* Loaded on first use: preparation reads the dependency store, which `initialize` must not wait for. */
       let nativeModule: Promise<typeof NativeKernels> | undefined;
       const native = async (): Promise<typeof NativeKernels> => {
         nativeModule ??= import('#native-kernels.js');

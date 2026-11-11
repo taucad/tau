@@ -7,7 +7,7 @@ import {
   cdnVaryQueryResponseHeader,
   edgeDurableSsrRouteCacheControl,
   edgeShortLivedSsrRouteCacheControl,
-} from '#constants/cache.constants.js';
+} from '@taucad/ui-core/constants/cache.constants';
 
 /**
  * Application-defined cache tags identifying SSR route classes for

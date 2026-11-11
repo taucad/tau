@@ -42,7 +42,7 @@ import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
-import { FileManagerNotReadyError } from '#filesystem/workspace-errors.js';
+import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-errors';
 import { reprovideAgentHostProjects } from '#services/agent-host-client.js';
 import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
@@ -240,6 +240,7 @@ export type PreviewFilesClient = Pick<RootedContentClient, 'writeFiles'>;
 export type FileSystemClientFacade = Pick<
   FileSystemClient,
   | 'listProjectManifests'
+  | 'verifyProjectRoute'
   | 'commitPendingProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
   | 'adoptProjectDirectory'
@@ -1361,6 +1362,7 @@ function FileManagerProviderCore({
 
     return {
       listProjectManifests: gated('listProjectManifests'),
+      verifyProjectRoute: gated('verifyProjectRoute'),
       commitPendingProjectDirectory: gated('commitPendingProjectDirectory'),
       permanentlyDeleteProjectDirectory: gated('permanentlyDeleteProjectDirectory'),
       adoptProjectDirectory: gated('adoptProjectDirectory'),

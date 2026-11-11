@@ -14,7 +14,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldSeparator } from '@taucad/ui/components/field';
 import { Input } from '@taucad/ui/components/input';
-import { Spinner } from '#components/ui/spinner.js';
+import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { magicLinkPlugin } from '#utils/magic-link-plugin.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { Label } from '@taucad/ui/components/label';
@@ -93,8 +93,8 @@ export function MagicLink({ className, socialLayout, socialPosition = 'bottom' }
   return (
     <Card className={cn('w-full max-w-sm', className)}>
       <CardHeader>
-        <CardTitle className='text-xl'>
-          <h1>{localization.auth.signIn}</h1>
+        <CardTitle level={1} variant='title'>
+          {localization.auth.signIn}
         </CardTitle>
       </CardHeader>
 

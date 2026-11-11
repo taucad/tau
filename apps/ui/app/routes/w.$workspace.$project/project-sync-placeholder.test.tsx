@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { LargeObjectsFacet } from '@taucad/revisions';
 import {
@@ -53,5 +53,27 @@ describe('model files placeholder', () => {
     expect(screen.getByRole('region', { name: 'Couldn’t download model files' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(mocks.send).toHaveBeenCalledWith({ command: 'retryLargeObjects' });
+  });
+
+  /* T5: no download runs, so it never says one does; a wait that outlasts its bound offers a way out. */
+  it('says it is preparing the model, not downloading, while no download runs, and offers a retry once it waits too long', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.facet = undefined;
+      mocks.send.mockClear();
+      render(<ProjectSyncPlaceholder state='filesChecking' />);
+      expect(screen.getByRole('region', { name: 'Preparing model' })).toHaveAttribute('aria-busy', 'true');
+      expect(screen.queryByText('Downloading model files')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(10_000);
+      });
+      act(() => {
+        screen.getByRole('button', { name: 'Try again' }).click();
+      });
+      expect(mocks.send).toHaveBeenCalledWith({ command: 'retryLargeObjects' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

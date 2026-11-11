@@ -1,9 +1,9 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { FileLinksService } from '#storage/file-links.service.js';
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
-import { TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
+import type { FileLinksService } from '@taucad/api-object-storage/file-links';
+import type { ObjectStorageService } from '@taucad/api-object-storage';
+import { TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '@taucad/api-object-storage';
 import {
   buildCatalogue,
   catalogueSizes,
@@ -12,12 +12,12 @@ import {
 } from '#api/git/catalogue.js';
 import { GitCatalogueController } from '#api/git/catalogue.controller.js';
 import type { GitAccess, GitRepositoryService } from '#api/git/git.service.js';
-import { listingKeyFor } from '#api/git/store/listing-key.js';
-import { encodeManifest, indexKeyFor, succeedManifest } from '#api/git/store/manifest.js';
-import type { Manifest } from '#api/git/store/manifest.js';
-import { repositoryLocator } from '#api/git/store/locator.js';
+import { listingKeyFor } from '@taucad/api-git-core/store/listing-key';
+import { encodeManifest, indexKeyFor, succeedManifest } from '@taucad/api-git-core/store/manifest';
+import type { Manifest } from '@taucad/api-git-core/store/manifest';
+import { repositoryLocator } from '@taucad/api-git-core/store/locator';
 import type { PublicationRateLimiterService } from '@taucad/api-redis';
-import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
+import { createMemoryRepositoryStore } from '@taucad/api-git-core/testing/publication-lease.fixture';
 
 /*
  * The catalogue (D8): sync-policy-filtered refs, a listing link per branch tip,

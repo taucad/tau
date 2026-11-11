@@ -1,0 +1,28 @@
+import type { CallHandler, ExecutionContext, NestInterceptor } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
+// oxlint-disable-next-line eslint-plugin-import/no-unassigned-import -- Side-effect import to register Fastify type augmentation
+import '#publications/viewer-identity.fastify-augmentation.js';
+import { ViewerIdentityService } from '#publications/viewer-identity.service.js';
+
+function readSessionUserId(request: FastifyRequest): string | undefined {
+  const userUnknown = (request as FastifyRequest & { user?: { id?: unknown } }).user;
+  const id = userUnknown?.id;
+  return typeof id === 'string' && id !== '' ? id : undefined;
+}
+
+@Injectable()
+export class ViewerIdentityInterceptor implements NestInterceptor {
+  public constructor(private readonly viewerIdentityService: ViewerIdentityService) {}
+
+  public intercept(context: ExecutionContext, next: CallHandler): ReturnType<CallHandler['handle']> {
+    const http = context.switchToHttp();
+    const request = http.getRequest<FastifyRequest>();
+    request.viewerIdentity = this.viewerIdentityService.resolveForRequest({
+      request,
+      sessionUserId: readSessionUserId(request),
+    });
+
+    return next.handle();
+  }
+}

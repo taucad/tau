@@ -26,7 +26,7 @@ import type { ComponentType } from 'react';
 import { z } from 'zod';
 
 import type { BoardPresentationOptions } from '#board-geometry.js';
-import { pcbPaletteOptions, schematicThemeOptions } from '#svg-themes.js';
+import { pcbPaletteOptions, schematicThemeOptions, withPcbScale } from '#svg-themes.js';
 import {
   kicadFootprintCacheUrl,
   kicadNameOfModelUrl,
@@ -832,7 +832,7 @@ export const tscircuitKernel = defineKernel({
     flatbush: { name: 'flatbush', version: '4.6.2' },
   },
   name: 'TscircuitKernel',
-  version: `1.3.0+kicad.${kicadPackVersion}`,
+  version: `1.3.3+kicad.${kicadPackVersion}`,
   optionsSchema: tscircuitOptionsSchema,
   views: {
     board: {
@@ -1049,13 +1049,16 @@ export const tscircuitKernel = defineKernel({
       case 'pcb': {
         const { convertCircuitJsonToPcbSvg } = await import('#engine/svg.js');
         return {
-          content: withViewBox(
-            convertCircuitJsonToPcbSvg(asCircuitJson(circuitJson), {
-              showPinNumbers: request.options.pinNumbers,
-              ...pcbPaletteOptions(request.options.palette, circuitJson),
-              matchBoardAspectRatio: true,
-              drawPaddingOutsideBoard: false,
-            }),
+          content: withPcbScale(
+            withViewBox(
+              convertCircuitJsonToPcbSvg(asCircuitJson(circuitJson), {
+                showPinNumbers: request.options.pinNumbers,
+                ...pcbPaletteOptions(request.options.palette, circuitJson),
+                matchBoardAspectRatio: true,
+                drawPaddingOutsideBoard: false,
+              }),
+            ),
+            circuitJson,
           ),
         };
       }

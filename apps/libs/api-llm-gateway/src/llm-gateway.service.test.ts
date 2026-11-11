@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { FastifyReply } from 'fastify';
 import { LlmGatewayService } from '#llm-gateway.service.js';
+import type { LlmGatewayRelayInput } from '#llm-gateway.service.js';
 import type { ModelInvocationService } from '#model-invocation.types.js';
 
 afterEach(() => vi.restoreAllMocks());
@@ -28,6 +29,31 @@ describe('LlmGatewayService', () => {
       signal: new AbortController().signal,
     });
     expect(invocations.invoke).toHaveBeenCalledOnce();
+  });
+
+  it('passes the host labels to the invocation owner only when the caller sent some', async () => {
+    const invocations = mock<ModelInvocationService>();
+    invocations.invoke.mockResolvedValue({ state: 'pending', operationId: 'operation' });
+    const service = new LlmGatewayService(invocations);
+    const reply = { header: vi.fn(), status: vi.fn(), send: vi.fn() };
+    reply.header.mockReturnValue(reply);
+    reply.status.mockReturnValue(reply);
+    const relay = async (extra: Pick<LlmGatewayRelayInput, 'hostLabels'>) =>
+      service.relay({
+        provider: 'anthropic',
+        body: {},
+        principalId: 'user',
+        attemptId: 'attempt',
+        reply: reply as unknown as FastifyReply,
+        signal: new AbortController().signal,
+        ...extra,
+      });
+
+    await relay({ hostLabels: { host: 'browser', kernel: 'unknown' } });
+    await relay({});
+
+    expect(invocations.invoke.mock.calls[0]![0].hostLabels).toEqual({ host: 'browser', kernel: 'unknown' });
+    expect(invocations.invoke.mock.calls[1]![0]).not.toHaveProperty('hostLabels');
   });
 
   it('installs the operation header when admission commits even if provider execution rejects', async () => {

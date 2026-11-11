@@ -8,7 +8,7 @@ import type { WebSocket } from 'ws';
 import { KernelsGateway } from '#api/kernels/kernels.gateway.js';
 import type { KernelsService } from '#api/kernels/kernels.service.js';
 import type { DevWebSocketService } from '@taucad/api-lifecycle';
-import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
+import type { CommercialEntitlementsService } from '@taucad/api-projects/entitlements/commercial-entitlements';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { ZooTokenService } from '#api/kernels/zoo-token.service.js';
 import type { ConfigService } from '@nestjs/config';

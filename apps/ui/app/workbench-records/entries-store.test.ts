@@ -6,6 +6,7 @@ import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import { createWorkbenchEntriesStore } from '#workbench-records/entries-store.js';
+import type { EntryPathChange } from '#workbench-records/entries-store.js';
 
 const encoder = new TextEncoder();
 const seed = (): WorkbenchEntries => ({ version: 1, entries: { 'a.ts': { renderTimeout: 180_000 } } });
@@ -1200,4 +1201,218 @@ describe('workbench entries store over recordSync', () => {
       vi.useRealTimers();
     }
   });
+
+  it.each([
+    [
+      'a delete and a rename onto the deleted path',
+      [
+        { type: 'delete', path: 'a.ts' },
+        { type: 'rename', oldPath: 'c.ts', newPath: 'a.ts' },
+      ],
+      { 'a.ts': { renderTimeout: 3000 } },
+    ],
+    [
+      'a swap through a third path',
+      [
+        { type: 'rename', oldPath: 'a.ts', newPath: 't.ts' },
+        { type: 'rename', oldPath: 'c.ts', newPath: 'a.ts' },
+        { type: 'rename', oldPath: 't.ts', newPath: 'c.ts' },
+      ],
+      { 'a.ts': { renderTimeout: 3000 }, 'c.ts': { renderTimeout: 1000 } },
+    ],
+  ] satisfies Array<[string, EntryPathChange[], WorkbenchEntries['entries']]>)(
+    'keeps %s through a lost reply when another party changes another entry before the read-back',
+    async (_case, changes, expected) => {
+      const m = memory();
+      m.setBytes(
+        encoder.encode(
+          workbenchRecords.entries.serialize({
+            version: 1,
+            entries: { 'a.ts': { renderTimeout: 1000 }, 'c.ts': { renderTimeout: 3000 } },
+          }),
+        ),
+      );
+      let offline = true;
+      let lost = false;
+      const entries = createWorkbenchEntriesStore({
+        root: '/root',
+        files: {
+          ...m.files,
+          writeFileChecked: async (input) => {
+            if (offline) {
+              throw new Error('offline');
+            }
+            const result = await m.files.writeFileChecked(input);
+            if (!lost && result.status === 'applied') {
+              lost = true;
+              const landed = workbenchRecords.entries.read(m.get()!);
+              if (landed.status === 'current') {
+                m.setBytes(
+                  encoder.encode(
+                    workbenchRecords.entries.serialize({
+                      ...landed.record,
+                      entries: { ...landed.record.entries, 'z.ts': { renderTimeout: 7000 } },
+                    }),
+                  ),
+                );
+              }
+              throw Object.assign(new Error('reply lost'), { applicationState: 'potentially-applied' });
+            }
+            return result;
+          },
+        },
+        onChange: () => undefined,
+        onError: () => undefined,
+      });
+      try {
+        await entries.read();
+        for (const change of changes) {
+          await entries.changePaths(change);
+        }
+        offline = false;
+        let flushed = false;
+        for (let attempt = 0; attempt < 6 && !flushed; attempt++) {
+          flushed = await entries.flush();
+        }
+        expect(flushed).toBe(true);
+        expect(workbenchRecords.entries.read(m.get()!)).toEqual({
+          status: 'current',
+          record: { version: 1, entries: { ...expected, 'z.ts': { renderTimeout: 7000 } } },
+        });
+      } finally {
+        entries.dispose();
+      }
+    },
+  );
+
+  it('keeps fields the person did not change through an edit and a rename lost in one write', async () => {
+    vi.useFakeTimers();
+    const m = memory();
+    const components = { hidden: ['x'], isolated: [], opacity: [] };
+    m.setBytes(
+      encoder.encode(
+        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { renderTimeout: 1000, components } } }),
+      ),
+    );
+    let lost = false;
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      editDebounce: 500,
+      files: {
+        ...m.files,
+        writeFileChecked: async (input) => {
+          const result = await m.files.writeFileChecked(input);
+          if (!lost && result.status === 'applied') {
+            lost = true;
+            const landed = workbenchRecords.entries.read(m.get()!);
+            if (landed.status === 'current') {
+              m.setBytes(
+                encoder.encode(
+                  workbenchRecords.entries.serialize({
+                    ...landed.record,
+                    entries: { ...landed.record.entries, 'z.ts': { renderTimeout: 7000 } },
+                  }),
+                ),
+              );
+            }
+            throw Object.assign(new Error('reply lost'), { applicationState: 'potentially-applied' });
+          }
+          return result;
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await entries.read();
+      void entries.edit('a.ts', { renderTimeout: 5000, components });
+      void entries.changePaths({ type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' });
+      await vi.runAllTimersAsync();
+      let flushed = false;
+      for (let attempt = 0; attempt < 5 && !flushed; attempt++) {
+        const flushing = entries.flush();
+        await vi.runAllTimersAsync();
+        flushed = await flushing;
+      }
+      expect(flushed).toBe(true);
+      expect(workbenchRecords.entries.read(m.get()!)).toEqual({
+        status: 'current',
+        record: {
+          version: 1,
+          entries: { 'b.ts': { renderTimeout: 5000, components }, 'z.ts': { renderTimeout: 7000 } },
+        },
+      });
+    } finally {
+      entries.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('names only the fields the written record holds when a rename replaced an edited entry', async () => {
+    vi.useFakeTimers();
+    const m = memory();
+    m.setBytes(
+      encoder.encode(
+        workbenchRecords.entries.serialize({
+          version: 1,
+          entries: { 'a.ts': { renderTimeout: 1000 }, 'b.ts': { renderTimeout: 2000 } },
+        }),
+      ),
+    );
+    const onChange = vi.fn<(state: { record?: WorkbenchEntries }, source: 'read' | 'write', patch?: unknown) => void>();
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: m.files,
+      editDebounce: 500,
+      onChange,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    try {
+      await entries.read();
+      void entries.edit('b.ts', { renderTimeout: 9000 });
+      void entries.changePaths({ type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' });
+      await vi.runAllTimersAsync();
+      expect(onChange.mock.lastCall?.[0].record?.entries).toEqual({ 'b.ts': { renderTimeout: 1000 } });
+      expect(onChange.mock.lastCall?.[1]).toBe('write');
+      expect(onChange.mock.lastCall?.[2]).toBeUndefined();
+    } finally {
+      entries.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('saves every edit made while writes failed, however many', async () => {
+    const m = memory();
+    let offline = true;
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: {
+        ...m.files,
+        writeFileChecked: async (input) => {
+          if (offline) {
+            throw new Error('offline');
+          }
+          return m.files.writeFileChecked(input);
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await entries.read();
+      for (let edit = 0; edit < 3000; edit++) {
+        await entries.edit(edit % 2 === 0 ? 'a.ts' : 'b.ts', { renderTimeout: edit });
+      }
+      offline = false;
+      expect(await entries.flush()).toBe(true);
+      expect(workbenchRecords.entries.read(m.get()!)).toMatchObject({
+        status: 'current',
+        record: { entries: { 'a.ts': { renderTimeout: 2998 }, 'b.ts': { renderTimeout: 2999 } } },
+      });
+    } finally {
+      entries.dispose();
+    }
+  }, 60_000);
 });

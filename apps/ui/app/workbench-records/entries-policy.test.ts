@@ -196,6 +196,40 @@ describe('entriesPolicy patch algebra', () => {
     );
   });
 
+  it('should change nothing when a patch is applied to its own result after another party changed another entry', () => {
+    assert(
+      property(
+        optional(entriesArbitrary),
+        historyArbitrary,
+        entryArbitrary,
+        (current, { base, first, second }, foreign) => {
+          const patch = combine(diff(base, first), diff(first, second));
+          const once = merge(current, second, patch);
+          // `z.ts` is a path no history touches.
+          const changed = { ...once, entries: { ...once.entries, 'z.ts': foreign } };
+          expect(entriesValue(merge(changed, second, patch))).toBe(entriesValue(changed));
+        },
+      ),
+    );
+  });
+
+  it('should keep a patch small however many times it is written and combined with a later edit', () => {
+    let patch = diff(undefined, { version: 1, entries: { 'a.ts': { renderTimeout: 0 } } });
+    let record: WorkbenchEntries | undefined;
+    for (let edit = 1; edit <= 20_000; edit++) {
+      record = merge(undefined, { version: 1, entries: {} }, patch);
+      patch = combine(patch, [
+        {
+          moves: edit % 1000 === 0 ? [{ type: 'delete', path: 'b.ts' }] : [],
+          fields: { 'a.ts': { renderTimeout: edit % 600_000 } },
+        },
+      ]);
+    }
+    expect(record).toBeDefined();
+    expect(patch.length).toBeLessThanOrEqual(30);
+    expect(merge(undefined, { version: 1, entries: {} }, patch).entries['a.ts']).toEqual({ renderTimeout: 20_000 });
+  });
+
   it("should carry a person's changes onto a record another party changed", () => {
     assert(
       property(historyArbitrary, entriesArbitrary, ({ base, first }, foreign) => {

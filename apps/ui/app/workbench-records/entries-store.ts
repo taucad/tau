@@ -42,10 +42,36 @@ const entriesRecordSyncMachine = createRecordSyncMachine(entriesPolicy);
 
 const emptyRecord: WorkbenchEntries = { version: 1, entries: {} };
 
-/** The person's fields an own write carried, by the entry path they are on in the written record. */
-const entryPatchOf = (patch: EntriesPatch | undefined): EntryRecordPatch | undefined => {
-  const fields = patch === undefined ? {} : authoredFields(patch);
-  return Object.keys(fields).length > 0 ? { fields } : undefined;
+/**
+ * The person's fields an own write carried, by the entry path they are on in the written record, and only where the
+ * written record holds them: a rename onto a path replaces what the person set there before.
+ */
+const entryPatchOf = (
+  patch: EntriesPatch | undefined,
+  record: WorkbenchEntries | undefined,
+): EntryRecordPatch | undefined => {
+  const held = new Map<string, EntryFields>();
+  for (const [path, fields] of Object.entries(patch === undefined ? {} : authoredFields(patch))) {
+    const entry = record?.entries[path];
+    const kept: EntryFields = {};
+    if (Object.hasOwn(fields, 'renderTimeout') && entry?.renderTimeout === fields.renderTimeout) {
+      kept.renderTimeout = fields.renderTimeout;
+    }
+    const components = Object.fromEntries(
+      Object.entries(fields.components ?? {}).filter(
+        ([field, value]) =>
+          JSON.stringify(entry?.components?.[field as keyof NonNullable<Entry['components']>] ?? []) ===
+          JSON.stringify(value),
+      ),
+    );
+    if (Object.keys(components).length > 0) {
+      kept.components = components;
+    }
+    if (Object.keys(kept).length > 0) {
+      held.set(path, kept);
+    }
+  }
+  return held.size > 0 ? { fields: Object.fromEntries(held) } : undefined;
 };
 
 /** Checked per-entry settings; a person's timeout and component changes merge independently. */
@@ -105,7 +131,11 @@ export function createWorkbenchEntriesStore(
   on('published', ({ snapshot, origin, patch }) => {
     if (!disposed) {
       // A published record is parsed from the file's bytes, so it never carries path changes.
-      input.onChange(snapshot, origin === 'own' ? 'write' : 'read', origin === 'own' ? entryPatchOf(patch) : undefined);
+      input.onChange(
+        snapshot,
+        origin === 'own' ? 'write' : 'read',
+        origin === 'own' ? entryPatchOf(patch, snapshot.record) : undefined,
+      );
     }
   });
   on('failed', ({ error }) => {

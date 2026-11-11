@@ -147,44 +147,107 @@ export const withoutMoves = (record: EntriesRecord): WorkbenchEntries => {
   return written;
 };
 
+/** The most marks a patch keeps: one per write of it that may have landed, as many as the writer keeps lost writes. */
+const maxMarks = 8;
+/** The most records a mark keeps: one per checked write of the same steps (a conflict re-merges them). */
+const maxMarkRecords = 4;
+
+/** The record a patch's first `upTo` steps produced when it was merged, which a later file may already hold. */
+type Mark = Readonly<{ upTo: number; records: readonly WorkbenchEntries[] }>;
+
 /**
- * What each patch wrote, by the text it produced, and the two patches a combined patch is made of. A path change is
- * not idempotent (a delete followed by a rename onto the deleted path removes the renamed entry when applied again),
- * yet the writer applies a patch again to the bytes it read back after a lost reply. A patch merged onto the very
- * text it produced, or a combined patch whose earlier part produced the text, applies only what is left. Both maps
- * are keyed by the patch object, which the machine keeps from issue to retry.
+ * What each patch wrote, by the prefix of its steps that produced each record. Path changes are not idempotent (a
+ * delete followed by a rename onto the deleted path removes the renamed entry when applied again), yet the writer
+ * applies a patch again to the bytes it reads back after a lost reply, and a later combined patch carries the same
+ * steps. When the file holds what a prefix produced on every path those steps touch, whatever another party did to
+ * other paths, the prefix has landed and only the steps after it are applied. Keyed by the patch object, which the
+ * machine keeps from issue to retry; a combined patch inherits the marks of its earlier part, whose steps it starts
+ * with.
  */
-const produced = new WeakMap<EntriesPatch, Set<string>>();
-const parts = new WeakMap<EntriesPatch, Readonly<{ earlier: EntriesPatch; later: EntriesPatch }>>();
+const marks = new WeakMap<EntriesPatch, readonly Mark[]>();
 
 const serializeEntries = (record: WorkbenchEntries): string => workbenchRecords.entries.serialize(record);
 
-const combinePatches = (earlier: EntriesPatch, later: EntriesPatch): EntriesPatch => {
-  const last = earlier.at(-1);
-  const [first, ...rest] = later;
-  // A step with no path change folds into the step before it: fields over fields combine exactly.
-  const combined =
-    last && first?.moves.length === 0
-      ? [...earlier.slice(0, -1), { moves: last.moves, fields: combineFieldMaps(last.fields, first.fields) }, ...rest]
-      : [...earlier, ...later];
-  parts.set(combined, { earlier, later });
-  return combined;
+/**
+ * Steps with every step that has no path change folded into the one before it (fields over fields combine exactly),
+ * except across a marked prefix's end, which must stay a step boundary.
+ */
+const compact = (steps: EntriesPatch, kept: readonly Mark[]): { steps: EntriesStep[]; marks: Mark[] } => {
+  const boundaries = new Set(kept.map((mark) => mark.upTo));
+  const folded: EntriesStep[] = [];
+  const position = new Map<number, number>([[0, 0]]);
+  for (const [index, step] of steps.entries()) {
+    const last = folded.at(-1);
+    if (last && step.moves.length === 0 && !boundaries.has(index)) {
+      folded[folded.length - 1] = { moves: last.moves, fields: combineFieldMaps(last.fields, step.fields) };
+    } else {
+      folded.push(step);
+    }
+    position.set(index + 1, folded.length);
+  }
+  return { steps: folded, marks: kept.map((mark) => ({ ...mark, upTo: position.get(mark.upTo) ?? folded.length })) };
 };
 
-/** The part of `patch` still to apply to a file that holds `text`. */
-const remaining = (patch: EntriesPatch, text: string | undefined): EntriesPatch => {
-  if (text !== undefined && produced.get(patch)?.has(text)) {
-    return [];
+const combinePatches = (earlier: EntriesPatch, later: EntriesPatch): EntriesPatch => {
+  const combined = compact([...earlier, ...later], marks.get(earlier) ?? []);
+  if (combined.marks.length > 0) {
+    marks.set(combined.steps, combined.marks);
   }
-  const made = parts.get(patch);
-  if (!made) {
-    return patch;
+  return combined.steps;
+};
+
+/** Whether `path` is one the steps read or write: a field they set, or a path under a change's old or new path. */
+const touches = (steps: readonly EntriesStep[], path: string): boolean =>
+  steps.some(
+    (step) =>
+      Object.hasOwn(step.fields, path) ||
+      step.moves.some((change) =>
+        change.type === 'delete'
+          ? matchesPath(path, change.path)
+          : matchesPath(path, change.oldPath) || matchesPath(path, change.newPath),
+      ),
+  );
+
+/** An entry as text with its keys sorted and its absent fields left out, so equal entries compare equal. */
+const canonical = (entry: Entry | undefined): string =>
+  entry === undefined
+    ? 'none'
+    : JSON.stringify(entry, (_key, value: unknown) =>
+        value !== null && typeof value === 'object' && !Array.isArray(value)
+          ? Object.fromEntries(Object.entries(value).toSorted(([left], [right]) => left.localeCompare(right)))
+          : value,
+      );
+
+/** Whether the file already holds what `steps` produced as `record`, on every path they touch. */
+const holds = (current: WorkbenchEntries, record: WorkbenchEntries, steps: readonly EntriesStep[]): boolean =>
+  [...new Set([...Object.keys(current.entries), ...Object.keys(record.entries)])].every(
+    (path) => !touches(steps, path) || canonical(current.entries[path]) === canonical(record.entries[path]),
+  );
+
+/** How many of the patch's steps the file already holds: the longest marked prefix it holds, else none. */
+const landed = (patch: EntriesPatch, current: WorkbenchEntries | undefined): number => {
+  if (current === undefined) {
+    return 0;
   }
-  const left = remaining(made.earlier, text);
-  if (left === made.earlier) {
-    return patch;
+  const kept = (marks.get(patch) ?? []).toSorted((left, right) => right.upTo - left.upTo);
+  const found = kept.find((mark) => mark.records.some((record) => holds(current, record, patch.slice(0, mark.upTo))));
+  return found?.upTo ?? 0;
+};
+
+/** Remember that the patch's steps produced `record`, keeping the latest marks only. */
+const mark = (patch: EntriesPatch, record: WorkbenchEntries): void => {
+  if (patch.length === 0) {
+    return;
   }
-  return left.length === 0 ? made.later : combinePatches(left, made.later);
+  const kept = marks.get(patch) ?? [];
+  const whole = kept.find((existing) => existing.upTo === patch.length);
+  const updated = { upTo: patch.length, records: [...(whole?.records ?? []), record].slice(-maxMarkRecords) };
+  marks.set(
+    patch,
+    [...kept.filter((existing) => existing !== whole), updated]
+      .toSorted((left, right) => left.upTo - right.upTo)
+      .slice(-maxMarks),
+  );
 };
 
 /** The fields a patch leaves on each path of the record it is merged onto: the person's own fields there. */
@@ -225,7 +288,7 @@ export const entriesPolicy: RecordPolicy<EntriesRecord, EntriesPatch> = {
   merge(current, _next, patch) {
     const base: WorkbenchEntries = current === undefined ? { version: 1, entries: {} } : withoutMoves(current);
     let { entries } = base;
-    for (const step of remaining(patch, current === undefined ? undefined : serializeEntries(base))) {
+    for (const step of patch.slice(landed(patch, current === undefined ? undefined : base))) {
       entries = movePaths(entries, step.moves);
       for (const [path, fields] of Object.entries(step.fields)) {
         entries[path] = mergeEntry(entries[path], fields);
@@ -233,11 +296,13 @@ export const entriesPolicy: RecordPolicy<EntriesRecord, EntriesPatch> = {
     }
     const merged = { ...base, entries };
     try {
-      const texts = produced.get(patch) ?? new Set<string>();
-      texts.add(serializeEntries(merged));
-      produced.set(patch, texts);
+      // Kept as the file will read it back, so it compares with a later read field for field.
+      const written = workbenchRecords.entries.read(new TextEncoder().encode(serializeEntries(merged)));
+      if (written.status === 'current') {
+        mark(patch, written.record);
+      }
     } catch {
-      // A record that cannot be written produces no text; the writer reports the same error when it serializes.
+      // A record that cannot be written is never on disk; the writer reports the same error when it serializes.
     }
     return merged;
   },

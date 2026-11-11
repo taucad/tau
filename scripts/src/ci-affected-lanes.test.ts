@@ -143,6 +143,7 @@ describe('ci.yml affected-only lanes', () => {
       'native-hosts': { tags: ['ci:native-hosts'] },
       'native-linux': { targets: ['test:native-linux'] },
       'viewer-parity': { targets: ['test:viewer-parity'] },
+      desktop: { tags: ['ci:desktop'] },
     });
   });
 
@@ -382,6 +383,36 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
   });
 });
 
+describe('ci.yml desktop lane', () => {
+  it('should plan the desktop lane from tag:ci:desktop alone', () => {
+    expect(laneSelectors['desktop']).toEqual({ tags: ['ci:desktop'] });
+    expect(affectedPlanOutputs()).toContain('desktop');
+    expect(planScript).toContain('desktop=$(flag desktop)');
+    expect(planScript).toContain(`desktop_projects=$(jq -c '.desktop' <<< "$lanes")`);
+    expect(planScript).toContain('echo "desktop-projects=$desktop_projects"');
+    expect(ci.jobs['plan']?.outputs?.['desktop-projects']).toBe(expression('steps.plan.outputs.desktop-projects'));
+  });
+
+  it('should record the desktop lane in lanes.json without making it a planned staging lane', () => {
+    expect(planScript).toContain('--arg desktop "$desktop" --argjson desktop_projects "$desktop_projects"');
+    expect(planScript).toContain('desktop: $desktop, "desktop-projects": $desktop_projects}');
+    const check = staging.jobs['ci']?.steps?.find((step) => step.id === 'check');
+    expect(JSON.parse(check?.env?.['PLANNED_LANES'] ?? '[]')).not.toContain('desktop');
+  });
+
+  it('should run the packaged desktop suite on the candidate gate, not in the merge queue (D-DS1 b)', () => {
+    for (const [name, definition] of Object.entries(ci.jobs)) {
+      expect(definition.if ?? '', name).not.toContain('needs.plan.outputs.desktop');
+      for (const step of definition.steps ?? []) {
+        expect(step.run ?? '', name).not.toMatch(/test:e2e:(?:packaged|desktop:completed-artifact)\b/u);
+      }
+    }
+    expect(read('.github/workflows/release-desktop-staging.yml')).toContain(
+      'uses: ./.github/workflows/desktop-packaged.yml',
+    );
+  });
+});
+
 describe('staging.yml skipped-lane rule', () => {
   const check = staging.jobs['ci']?.steps?.find((step) => step.id === 'check');
   const script = check?.run ?? '';
@@ -389,7 +420,7 @@ describe('staging.yml skipped-lane rule', () => {
 
   it('should read the lane plan that the same CI run uploaded', () => {
     expect(planScript).toContain(
-      `'{api: $api, "billing-e2e": $billing, "reused-run": $reused, queue: (if $reused == "" then {} else $queue end)}'`,
+      `'{api: $api, "billing-e2e": $billing, "reused-run": $reused, queue: (if $reused == "" then {} else $queue end), desktop: $desktop, "desktop-projects": $desktop_projects}'`,
     );
     expect(planScript).toContain('> out/ci-plan/lanes.json');
     const upload = ci.jobs['plan']?.steps?.find((step) => step.with?.['name'] === 'ci-plan');

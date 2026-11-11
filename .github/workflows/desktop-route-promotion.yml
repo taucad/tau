@@ -39,7 +39,48 @@ permissions:
   actions: read
 
 jobs:
+  # Operator decision D-DS3 (desktop split blueprint DS-3): Intel is packaged where it ships, not on a
+  # schedule. Automatic staging candidates are Apple silicon only, so promoting all routes of one asks
+  # `release-desktop-staging.yml` for a full candidate (`intel`) of the same commit and stops: the
+  # operator promotes that tag once its installer candidate and qualification runs are green. A
+  # production tag (`desktop@*`) always packages both, and the Apple silicon-only scope needs no Intel.
+  candidate:
+    name: Require a full candidate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Request a full candidate for an Apple silicon-only one
+        if: github.event_name == 'workflow_dispatch' && inputs.operation == 'promote-routes' && inputs.scope != 'macos'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            desktop-staging@*) ;;
+            *) echo "$TAG is not a staging candidate; nothing to request."; exit 0 ;;
+          esac
+          object=$(gh api "repos/${GH_REPO}/git/ref/tags/${TAG}" --jq '.object | "\(.type) \(.sha)"')
+          sha=${object#* }
+          if [ "${object%% *}" = tag ]; then
+            message=$(gh api "repos/${GH_REPO}/git/tags/${sha}" --jq .message)
+            if grep -qx 'Mac architectures: arm64 x64' <<< "$message"; then
+              echo "$TAG is a full candidate (Apple silicon and Intel)."
+              exit 0
+            fi
+            sha=$(gh api "repos/${GH_REPO}/git/tags/${sha}" --jq .object.sha)
+          fi
+          gh workflow run release-desktop-staging.yml --repo "$GH_REPO" --ref main -f intel=true -f sha="$sha"
+          echo "::error::$TAG is Apple silicon only. Requested a full candidate of $sha (release-desktop-staging.yml, intel); promote that tag once its installer candidate and qualification runs are green."
+          exit 1
+
   publication:
+    needs: [candidate]
     # Each channel has its own repository gate, read before any environment is selected:
     # a dispatch runs only for an enabled channel, and the nightly schedule renews only enabled channels.
     if: >-

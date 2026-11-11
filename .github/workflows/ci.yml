@@ -81,6 +81,8 @@ jobs:
       native-hosts: ${{ steps.plan.outputs.native-hosts }}
       native-linux: ${{ steps.plan.outputs.native-linux }}
       viewer-parity: ${{ steps.plan.outputs.viewer-parity }}
+      desktop: ${{ steps.plan.outputs.desktop }}
+      desktop-projects: ${{ steps.plan.outputs.desktop-projects }}
       reused: ${{ steps.queue.outputs.run-id }}
     steps:
       # A queue run diffs against its first parent (`nx-set-shas` sets NX_BASE to `HEAD^1`
@@ -130,6 +132,10 @@ jobs:
           # the CLI) or a `test:native-linux` project is affected; the latter are also the linux-x64
           # native rows it runs. Viewer parity (`viewer-parity.yml`): the project that owns the gate
           # (`test:viewer-parity`), or one it depends on, or the workflow its target lists, changed.
+          # Desktop lane: a `tag:ci:desktop` project (the Electron app and, after the split, its services
+          # host). No job here runs it: the packaged suite runs on every staging candidate instead
+          # (operator decision D-DS1 (b), `desktop-packaged.yml`), so the lane is informational and
+          # `lanes.json` records it for the observed desktop lane rate.
           LANE_SELECTORS: >-
             {"apps": {"type": "app"},
              "api": {"tags": ["scope:api"]},
@@ -143,7 +149,8 @@ jobs:
              "standalone": {"tags": ["ci:standalone"]},
              "native-hosts": {"tags": ["ci:native-hosts"]},
              "native-linux": {"targets": ["test:native-linux"]},
-             "viewer-parity": {"targets": ["test:viewer-parity"]}}
+             "viewer-parity": {"targets": ["test:viewer-parity"]},
+             "desktop": {"tags": ["ci:desktop"]}}
         run: |
           # `pipefail` so a failing `nx` call fails the step instead of leaving an empty
           # output behind `tail`. `tail -1` keeps the JSON array and drops Nx's log lines.
@@ -175,6 +182,8 @@ jobs:
           native_linux=$(jq -r '."native-linux" | join(",")' <<< "$lanes")
           native_hosts=$(jq -r 'if .["native-hosts"] == [] and .["native-linux"] == [] then "false" else "true" end' <<< "$lanes")
           viewer_parity=$(flag viewer-parity)
+          desktop=$(flag desktop)
+          desktop_projects=$(jq -c '.desktop' <<< "$lanes")
           run_api=$api
           run_billing=$billing
           # The queue run already ran the formal, browser, GeoSpec, CLI end-to-end, native-host and
@@ -237,14 +246,18 @@ jobs:
             echo "native-hosts=$native_hosts"
             echo "native-linux=$native_linux"
             echo "viewer-parity=$viewer_parity"
+            echo "desktop=$desktop"
+            echo "desktop-projects=$desktop_projects"
           } >> "$GITHUB_OUTPUT"
           # `staging.yml` reads which service lanes this plan found affected (`api`,
           # `billing-e2e`), and the merge-queue run this push reused with that run's
           # conclusion of each (`reused-run`, `queue`): a lane skipped here is acceptable to
           # a deploy only when it was not affected, or when the reused queue run passed it.
+          # `desktop` and `desktop-projects` record the desktop lane, which no job runs (see above).
           mkdir -p out/ci-plan
           jq -n --arg api "$api" --arg billing "$billing" --arg reused "$REUSED" --argjson queue "$QUEUE_LANES" \
-            '{api: $api, "billing-e2e": $billing, "reused-run": $reused, queue: (if $reused == "" then {} else $queue end)}' \
+            --arg desktop "$desktop" --argjson desktop_projects "$desktop_projects" \
+            '{api: $api, "billing-e2e": $billing, "reused-run": $reused, queue: (if $reused == "" then {} else $queue end), desktop: $desktop, "desktop-projects": $desktop_projects}' \
             > out/ci-plan/lanes.json
           cat out/ci-plan/lanes.json
 

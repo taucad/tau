@@ -14,7 +14,7 @@ import type { PrinterSceneProps } from '#components/printer/printer-scene.js';
 import type { PrinterLiveState } from '#components/printer/use-printer-live.js';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 import { getViewerTabIcon } from '#components/panes/viewer-tab-context-menu.js';
-import { digestBytes } from '#utils/crypto.utils.js';
+import { digestBytes } from '@taucad/ui-core/utils/crypto.utils';
 import type { FileViewerPaneContent } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 
 const mocks = vi.hoisted(() => ({

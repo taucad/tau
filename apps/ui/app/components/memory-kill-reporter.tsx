@@ -15,9 +15,9 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useLiveProjectIds } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
+import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import { busyKillPhases, getDocumentMemoryKillSignal, killBusyHeartbeatMilliseconds } from '#lib/memory-kill-signal.js';
-import { setLiveCountsReader } from '#lib/memory-sampler.js';
+import { setLiveCountsReader } from '@taucad/ui-core/lib/memory-sampler';
 import { installKillWorkReaders } from '#lib/kill-work-context.js';
 import { killMemory } from '#lib/kill-memory.js';
 import type { KillMemory } from '#lib/kill-memory.js';

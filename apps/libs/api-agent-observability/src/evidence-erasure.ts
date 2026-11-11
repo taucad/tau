@@ -20,7 +20,9 @@ import {
  * transaction it records the subject, stops every send that has not reached
  * the vendor, and copies every trace id a send may have written. The journal
  * has no foreign key to the subject, so the cascade that follows cannot take
- * it, and a drainer deletes and then reads back each trace.
+ * it, and a drainer asks Langfuse to delete each trace. An accepted delete is
+ * the erasure (charter I6 as amended by ruling 9): nothing reads it back, and
+ * a periodic drill proves that an accepted delete removes a trace and its scores.
  *
  * Admission and erasure serialize on one lock per subject: the project
  * lifecycle lock evidence admission already takes, and a per-account lock it
@@ -36,6 +38,14 @@ import {
 
 /** Whose evidence an erasure covers. */
 export type ErasureSubject = Readonly<{ scope: 'account' | 'project'; subjectId: string }>;
+
+/**
+ * How long after admission a named trace is first deleted: at least
+ * delivery's visibility window (`deliveryTiming.gapAfterMilliseconds`), so a
+ * span Langfuse accepted just before the fence has been ingested by the time
+ * its trace is deleted, and the one accepted delete removes it too.
+ */
+export const erasureDeleteAfterMilliseconds = 15 * 60_000;
 
 /** What admitting an erasure did. */
 export type ErasureAdmission = Readonly<{ erasureId: string; fenced: number; traces: number }>;
@@ -107,7 +117,7 @@ export const admitEvidenceErasure = async (
           state: sql<'pending'>`'pending'`.as('state'),
           attempts: sql<number>`0`.as('attempts'),
           leaseOwner: sql`null`.as('lease_owner'),
-          dueAt: sql<Date>`now()`.as('due_at'),
+          dueAt: sql<Date>`now() + make_interval(secs => ${erasureDeleteAfterMilliseconds / 1000})`.as('due_at'),
           requestedAt: sql`null::timestamptz`.as('requested_at'),
           reason: sql`null`.as('reason'),
         })
@@ -190,23 +200,21 @@ export type LeasedErasureTrace = Readonly<
   Pick<typeof agentEvidenceErasureTrace.$inferSelect, 'erasureId' | 'traceId' | 'state' | 'attempts' | 'requestedAt'>
 >;
 
-/** How a leased trace settles. */
+/** How a leased trace settles: its delete was accepted, or it is retried later. */
 export type ErasureSettlement =
-  | Readonly<{ kind: 'requested'; recheckAt: Date }>
-  | Readonly<{ kind: 'absent' }>
+  | Readonly<{ kind: 'accepted' }>
   | Readonly<{ kind: 'retry'; reason: string; notBefore: Date }>;
 
 /**
- * Lease due traces: `pending` ones to delete, or `requested` ones to read back.
+ * Lease due `pending` traces to delete.
  *
  * @param database - The API database.
- * @param input - The state, lease owner, duration, batch size and clock.
+ * @param input - The lease owner, duration, batch size and clock.
  * @returns The leased traces, oldest due first.
  */
 export const leaseErasureTraces = async (
   database: Database,
   input: Readonly<{
-    state: 'pending' | 'requested';
     owner: string;
     leaseMilliseconds: number;
     limit: number;
@@ -217,7 +225,7 @@ export const leaseErasureTraces = async (
     const due = await transaction
       .select({ erasureId: agentEvidenceErasureTrace.erasureId, traceId: agentEvidenceErasureTrace.traceId })
       .from(agentEvidenceErasureTrace)
-      .where(and(eq(agentEvidenceErasureTrace.state, input.state), lte(agentEvidenceErasureTrace.dueAt, input.now)))
+      .where(and(eq(agentEvidenceErasureTrace.state, 'pending'), lte(agentEvidenceErasureTrace.dueAt, input.now)))
       .orderBy(asc(agentEvidenceErasureTrace.dueAt))
       .limit(input.limit)
       .for('update', { skipLocked: true });
@@ -247,8 +255,9 @@ export const leaseErasureTraces = async (
   });
 
 /**
- * Settle leased traces. Fenced on the lease owner, so a worker whose lease
- * lapsed cannot overwrite a newer outcome.
+ * Settle leased traces after one deletion request. Each request counts as an
+ * attempt, so retries back off. Fenced on the lease owner, so a worker whose
+ * lease lapsed cannot overwrite a newer outcome.
  *
  * @param database - The API database.
  * @param input - The traces, their owner and the settlement.
@@ -269,17 +278,8 @@ export const settleErasureTraces = async (
   const { settlement } = input;
   const values = ((): PgUpdateSetSource<typeof agentEvidenceErasureTrace> => {
     switch (settlement.kind) {
-      case 'requested': {
-        return {
-          state: 'requested',
-          attempts: sql`${agentEvidenceErasureTrace.attempts} + 1`,
-          requestedAt: input.now,
-          dueAt: settlement.recheckAt,
-          reason: null,
-        };
-      }
-      case 'absent': {
-        return { state: 'absent', reason: null };
+      case 'accepted': {
+        return { state: 'accepted', requestedAt: input.now, reason: null };
       }
       case 'retry': {
         return { state: 'pending', dueAt: settlement.notBefore, reason: settlement.reason };
@@ -288,7 +288,7 @@ export const settleErasureTraces = async (
   })();
   const rows = await database
     .update(agentEvidenceErasureTrace)
-    .set({ ...values, leaseOwner: null })
+    .set({ ...values, attempts: sql`${agentEvidenceErasureTrace.attempts} + 1`, leaseOwner: null })
     .where(
       and(
         eq(agentEvidenceErasureTrace.leaseOwner, input.owner),
@@ -307,32 +307,9 @@ export const settleErasureTraces = async (
 };
 
 /**
- * Release a read-back that could not answer, keeping the trace `requested`.
- *
- * @param database - The API database.
- * @param input - The trace, its owner and when to read again.
- * @returns Whether this worker still held it.
- */
-export const recheckErasureTrace = async (
-  database: Database,
-  input: Readonly<{ trace: Pick<LeasedErasureTrace, 'erasureId' | 'traceId'>; owner: string; notBefore: Date }>,
-): Promise<boolean> => {
-  const rows = await database
-    .update(agentEvidenceErasureTrace)
-    .set({ leaseOwner: null, dueAt: input.notBefore })
-    .where(
-      and(
-        eq(agentEvidenceErasureTrace.leaseOwner, input.owner),
-        eq(agentEvidenceErasureTrace.erasureId, input.trace.erasureId),
-        eq(agentEvidenceErasureTrace.traceId, input.trace.traceId),
-      ),
-    )
-    .returning({ traceId: agentEvidenceErasureTrace.traceId });
-  return rows.length > 0;
-};
-
-/**
- * Mark erasures complete once every trace they named was read back absent.
+ * Mark erasures complete once Langfuse accepted the delete of every trace
+ * they named. A trace settled `absent` before ruling 9 was read back and
+ * counts as done too.
  *
  * @param database - The API database.
  * @param now - The clock.
@@ -352,7 +329,7 @@ export const completeErasures = async (database: Database, now: Date): Promise<n
             .where(
               and(
                 eq(agentEvidenceErasureTrace.erasureId, agentEvidenceErasure.id),
-                inArray(agentEvidenceErasureTrace.state, ['pending', 'requested']),
+                eq(agentEvidenceErasureTrace.state, 'pending'),
               ),
             ),
         ),

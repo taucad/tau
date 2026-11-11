@@ -9,7 +9,7 @@ import type {
   ProjectCreationLocationOption,
   ProjectCreationLocationState,
 } from '#hooks/use-project-creation-location.js';
-import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
+import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import {
   projectCreationLocationAccessibleName,
   projectCreationLocationsEqual,
@@ -17,7 +17,7 @@ import {
 import { cn } from '@taucad/ui/utils/cn';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 
 type WorkspaceSelectorProperties = Omit<React.HTMLAttributes<HTMLDivElement>, 'onSelect'> & {
   readonly state: ProjectCreationLocationState;

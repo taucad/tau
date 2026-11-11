@@ -9,6 +9,8 @@ import handleRequest, { handleError } from '#entry.server.js';
 import { claimSsrErrors, queueSsrError, reportSsrError } from '#lib/sentry.server.js';
 import type * as SentryServer from '#lib/sentry.server.js';
 import { canonicalProductionUrl } from '#lib/canonical-url.js';
+import { resolveContentSecurityPolicyEnvironment } from '#lib/content-security-policy.server.js';
+import { contentSecurityPolicyHeaders } from '#scripts/write-content-security-policy-headers.mts';
 
 vi.mock('#lib/sentry.server.js', async (importOriginal) => {
   const original = await importOriginal<typeof SentryServer>();
@@ -69,17 +71,16 @@ describe('entry.server handleRequest', () => {
       // Drain the real React stream before assertions, including on a failing regression.
       const body = await response.text();
       const netlifyConfig = readFileSync(resolve(import.meta.dirname, '../netlify.toml'), 'utf8');
-      const staticPolicy = /^Content-Security-Policy-Report-Only = "(.+)"$/mu.exec(netlifyConfig)?.[1];
+      // The build writes the same policy for static files (`_headers`); the shared netlify.toml names none.
+      const staticPolicy = /^ {2}Content-Security-Policy-Report-Only: (.+)$/mu.exec(
+        contentSecurityPolicyHeaders(resolveContentSecurityPolicyEnvironment(process.env['TAU_FRONTEND_URL'])),
+      )?.[1];
       expect(staticPolicy).toContain("default-src 'self';");
       expect(response.headers.get('Content-Security-Policy-Report-Only')).toBe(staticPolicy);
       expect(response.headers.has('Content-Security-Policy')).toBe(false);
+      expect(netlifyConfig).not.toMatch(/^Content-Security-Policy/mu);
       // SB6: violations and crash reports go to the same-origin receiver, on documents and static files alike.
       expect(staticPolicy).toMatch(/ report-to default;$/u);
-      // Each site fetches the PicoGK browser host by digest from its own dependency mirror
-      // (picogk-interim-digest-consumer W3); the shared policy admits both.
-      expect(/ connect-src ([^;]+);/u.exec(staticPolicy!)?.[1]?.split(' ')).toEqual(
-        expect.arrayContaining(['https://dependencies.tau.new', 'https://dependencies.taucad.dev']),
-      );
       expect(response.headers.get('Reporting-Endpoints')).toBe('default="/api/reports"');
       expect(/^Reporting-Endpoints = '(.+)'$/mu.exec(netlifyConfig)?.[1]).toBe('default="/api/reports"');
       expect(response.headers.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');

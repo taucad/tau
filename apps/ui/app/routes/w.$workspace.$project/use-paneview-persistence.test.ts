@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import type { PaneviewApi, IPaneviewPanel } from 'dockview-react';
-import type { PaneviewPanelState } from '#types/editor.types.js';
+import type { PaneviewPanelState } from '@taucad/ui-core/types/editor.types';
 import {
   getInitialPanelOptions,
   usePaneviewPersistence,

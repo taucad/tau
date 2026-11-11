@@ -15,7 +15,7 @@ const state = vi.hoisted(() => ({
     .mockResolvedValueOnce({ status: 'incomplete', reclaimed: 7, cursor: 'next' })
     .mockResolvedValueOnce({ status: 'complete', reclaimed: 3 }),
 }));
-vi.mock('#lib/compute-reuse-preference.js', () => ({
+vi.mock('@taucad/ui-core/lib/compute-reuse-preference', () => ({
   useComputeReuseMode: () => state.mode,
   setComputeReuseMode: state.set,
 }));

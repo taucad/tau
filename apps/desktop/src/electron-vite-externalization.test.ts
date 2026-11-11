@@ -102,6 +102,8 @@ type ProcessExternals = {
   readonly isExternal: (id: string) => Promise<boolean>;
   /** `externalizeDeps.include` as the config declares it. */
   readonly include: readonly string[];
+  /** The process's compile-time defines. */
+  readonly define: Readonly<Record<string, unknown>>;
 };
 
 const resolveProcessExternals = async (processType: 'main' | 'preload' = 'main'): Promise<ProcessExternals> => {
@@ -134,7 +136,11 @@ const resolveProcessExternals = async (processType: 'main' | 'preload' = 'main')
     if (!declared && processType === 'main') {
       throw new TypeError('electron-vite main config declares no externalizeDeps.include');
     }
-    return { isExternal: async (id: string) => matchesExternal(external, id), include: declared ?? [] };
+    return {
+      isExternal: async (id: string) => matchesExternal(external, id),
+      include: declared ?? [],
+      define: (processConfig['define'] as Record<string, unknown> | undefined) ?? {},
+    };
   } finally {
     process.chdir(previousDirectory);
     if (previousNodeEnvironment === undefined) {
@@ -144,6 +150,20 @@ const resolveProcessExternals = async (processType: 'main' | 'preload' = 'main')
     }
   }
 };
+
+describe('electron-vite build stamp', () => {
+  /* LW8: the services utility reports the commit it was built from as its build, on every observability fact. */
+  it('stamps main and preload with the checked-out commit as the desktop host build', async () => {
+    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: appRoot, encoding: 'utf8' }).stdout.trim();
+
+    /* One at a time: each resolution changes the working directory while it runs. */
+    const main = await resolveProcessExternals('main');
+    const preload = await resolveProcessExternals('preload');
+
+    expect(main.define['tauDesktopHostBuild']).toBe(JSON.stringify(head.slice(0, 12)));
+    expect(preload.define['tauDesktopHostBuild']).toBe(JSON.stringify(head.slice(0, 12)));
+  });
+});
 
 describe('electron-vite main externalization', () => {
   it('bundles workspace sources and keeps host/runtime imports external', async () => {

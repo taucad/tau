@@ -3,7 +3,7 @@ import type { ChatEditorViewerProps } from '#routes/w.$workspace.$project/chat-e
 import { ChatEditorCodeViewer } from '#routes/w.$workspace.$project/chat-editor-code-viewer.js';
 import { ChatEditorMarkdownViewer } from '#routes/w.$workspace.$project/chat-editor-markdown-viewer.js';
 import { ChatEditorBinaryWarning } from '@taucad/project-workspace/components/chat-editor-binary-warning';
-import { decodeTextFile } from '#utils/filesystem.utils.js';
+import { decodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 import { createViewer } from '#routes/w.$workspace.$project/file-viewers/create-viewer.js';
 import { createViewerRouter } from '#routes/w.$workspace.$project/file-viewers/create-viewer-router.js';
 import type { FileViewerRenderRequest } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';

@@ -14,7 +14,7 @@ import {
   nextRateLimitRetry,
   providerUnavailableRetryDelayMilliseconds,
   rateLimitRetryDelayMilliseconds,
-} from '#utils/run-auto-resume.js';
+} from '@taucad/ui-core/utils/run-auto-resume';
 
 /**
  * Which failure the chat shows, and whether it resumes on its own (audit R5).

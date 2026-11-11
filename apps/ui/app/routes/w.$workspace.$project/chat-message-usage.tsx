@@ -5,7 +5,7 @@ import { SvgIcon, unknownIconId } from '@taucad/ui-kit/icons/svg-icon';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { Button } from '@taucad/ui/components/button';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
-import { formatNumberAbbreviation } from '#utils/number.utils.js';
+import { formatNumberAbbreviation } from '@taucad/ui-core/utils/number.utils';
 
 /** Provider token counts summed over a message's usage parts. @public */
 export type UsageTotals = {

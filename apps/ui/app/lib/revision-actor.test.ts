@@ -13,8 +13,8 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { deviceId } from '#lib/device-id.js';
-import { githubNoreplyAuthor } from '#lib/github-project-binding.js';
+import { deviceId } from '@taucad/ui-core/lib/device-id';
+import { githubNoreplyAuthor } from '@taucad/ui-core/lib/github-project-binding';
 import { revisionUserActor, revisionWho, useRevisionSalt } from '#lib/revision-actor.js';
 import type { RevisionPushRecord, RevisionWhoContext } from '#lib/revision-actor.js';
 

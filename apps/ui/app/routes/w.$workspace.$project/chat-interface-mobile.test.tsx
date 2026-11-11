@@ -4,7 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatInterfaceMobile } from '#routes/w.$workspace.$project/chat-interface-mobile.js';
-import { mobileDrawerOpenSnapPoint } from '#constants/editor.constants.js';
+import { mobileDrawerOpenSnapPoint } from '@taucad/ui-core/constants/editor.constants';
 import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { mobilePanelByWorkbenchPanel } from '#routes/w.$workspace.$project/project-workspace-context.js';
 

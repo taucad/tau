@@ -83,7 +83,7 @@ describe('ProviderStreamFacts', () => {
 
     expect(read('openai-responses', completed('response.completed', {}))).toMatchObject({
       stop: 'stop',
-      usage: { input: 20, output: 8, cacheRead: 4, reasoning: 2, missing: 'none' },
+      usage: { input: 16, output: 8, cacheRead: 4, reasoning: 2, missing: 'none' },
     });
     expect(
       read(
@@ -112,5 +112,56 @@ describe('ProviderStreamFacts', () => {
 
     expect(summary.stop).toBeUndefined();
     expect(summary.usage.missing).toBe('unreported');
+  });
+
+  /* 10,000 prompt tokens of which 8,000 were cached: `usage.input` is the uncached 2,000 on every wire (LI4, LF-33). */
+  it.each([
+    [
+      'anthropic',
+      [
+        {
+          type: 'message_start',
+          message: {
+            id: 'msg_1',
+            model: 'claude-test',
+            usage: { input_tokens: 2000, cache_read_input_tokens: 8000, cache_creation_input_tokens: 0 },
+          },
+        },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 500 } },
+      ],
+    ],
+    [
+      'openai-responses',
+      [
+        {
+          type: 'response.completed',
+          response: {
+            id: 'resp_1',
+            model: 'gpt-test',
+            output: [],
+            usage: { input_tokens: 10_000, output_tokens: 500, input_tokens_details: { cached_tokens: 8000 } },
+          },
+        },
+      ],
+    ],
+    [
+      'openai-completions',
+      [
+        { id: 'cmpl_1', model: 'gpt-test', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+        {
+          id: 'cmpl_1',
+          model: 'gpt-test',
+          choices: [],
+          usage: { prompt_tokens: 10_000, completion_tokens: 500, prompt_tokens_details: { cached_tokens: 8000 } },
+        },
+      ],
+    ],
+  ] as const)('should report uncached input on the %s wire', (wire, events) => {
+    expect(read(wire, frames(events)).usage).toMatchObject({
+      input: 2000,
+      cacheRead: 8000,
+      output: 500,
+      missing: 'none',
+    });
   });
 });

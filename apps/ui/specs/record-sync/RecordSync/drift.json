@@ -1,0 +1,56 @@
+{
+  "actions": {
+    "record-sync.intent.close": "CloseFence",
+    "record-sync.intent.debouncing.edit": "Edit",
+    "record-sync.intent.quiet.edit": "Edit",
+    "record-sync.source.backoff.xstate.after": "WatchRead",
+    "record-sync.source.close": "CloseFence",
+    "record-sync.source.read": "WatchRead",
+    "record-sync.source.reading.invalidate": "Unmodelled",
+    "record-sync.source.reading.write.published": "ReplyApplied",
+    "record-sync.source.reading.xstate.done.actor": "CompleteRead",
+    "record-sync.source.reading.xstate.error.actor": "Unmodelled",
+    "record-sync.source.retryRead": "ForcedRead",
+    "record-sync.source.write.published": "Unmodelled",
+    "record-sync.source.write.readRequested": "WatchRead",
+    "record-sync.write.awaitingBase.source.abandoned": "Unmodelled",
+    "record-sync.write.awaitingBase.source.failed": "Unmodelled",
+    "record-sync.write.awaitingRefresh.source.abandoned": "Unmodelled",
+    "record-sync.write.awaitingRefresh.source.completed": "CompleteRead",
+    "record-sync.write.awaitingRefresh.source.failed": "Unmodelled",
+    "record-sync.write.close": "CloseFence",
+    "record-sync.write.ensure": "Unmodelled",
+    "record-sync.write.flush": "Unmodelled",
+    "record-sync.write.reset": "Unmodelled",
+    "record-sync.write.retrying.xstate.after": "IssueWrite",
+    "record-sync.write.source.abandoned": "Unmodelled",
+    "record-sync.write.source.completed": "Unmodelled",
+    "record-sync.write.source.failed": "Unmodelled",
+    "record-sync.write.writing.xstate.after": "Unmodelled",
+    "record-sync.write.writing.xstate.done.actor": "ReplyApplied",
+    "record-sync.write.writing.xstate.error.actor": "Unmodelled",
+    "record-sync.xstate.error.*": "Unmodelled"
+  },
+  "alphabet": [
+    "close",
+    "edit",
+    "ensure",
+    "flush",
+    "invalidate",
+    "read",
+    "reset",
+    "retryRead",
+    "source.abandoned",
+    "source.completed",
+    "source.failed",
+    "write.published",
+    "write.readRequested"
+  ],
+  "specs": {
+    "RecordSync.tla": "b59afef10df7f23db157ee5e2757fa64a4159240878b23285eeaa92f7fc79166"
+  },
+  "tables": {},
+  "versions": {
+    "record-sync": "1"
+  }
+}

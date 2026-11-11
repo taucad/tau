@@ -221,6 +221,7 @@ export const createCanvasConfig = (
     resolve(repoRoot, 'apps/libs/ui-kit/src'),
     resolve(repoRoot, 'apps/libs/chat-ui/src'),
     resolve(repoRoot, 'apps/libs/project-workspace/src'),
+    resolve(repoRoot, 'apps/libs/ui-core/src'),
     ...Array.from(aliases.values(), dirname),
   ]);
   return defineConfig({

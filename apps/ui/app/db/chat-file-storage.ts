@@ -13,7 +13,7 @@ import { isRecord } from '@taucad/utils/schema';
 import { isNotFound } from '@taucad/chat-ui/db/attachment-store';
 import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
-import { registrationProbeChatId } from '#lib/chat-observation-guard.js';
+import { registrationProbeChatId } from '@taucad/ui-core/lib/chat-observation-guard';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '@taucad/chat-ui/utils/chat-execution';

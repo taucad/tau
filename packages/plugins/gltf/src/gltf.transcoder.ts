@@ -129,7 +129,7 @@ export const gltfTranscoder = defineTranscoder({
             success: false,
             issues: [
               {
-                message: 'Draco compression cannot preserve Tau CAD topology metadata. Export without topology.',
+                message: 'Draco compression cannot preserve Tau topology metadata. Export without topology.',
                 code: 'RUNTIME_CONTENT_UNSUPPORTED',
                 type: 'runtime',
                 severity: 'error',

@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
 import { useId, useMemo } from 'react';
@@ -67,7 +68,9 @@ export function ImportMainFileView({
       <div className='space-y-4 border-t pt-6'>
         <div className='flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1'>
           <div className='space-y-1'>
-            <h2 className='text-base font-medium'>{title}</h2>
+            <Heading level={2} variant='item'>
+              {title}
+            </Heading>
             <p className='font-mono text-sm break-all text-muted-foreground'>{subtitle}</p>
           </div>
           <p className='text-xs text-muted-foreground tabular-nums'>

@@ -6,6 +6,9 @@
  */
 import { posix, win32 } from 'node:path';
 
+import { shellGitEnvironment } from '#shell/shell-git-view.js';
+import type { ShellGitView } from '#shell/shell-git-view.js';
+
 /** A locale or login value safe to pass on: no separators, quotes or control characters. */
 const plainValue = /^[A-Za-z0-9_.@-]{1,64}$/u;
 
@@ -23,6 +26,8 @@ export type ShellEnvironmentOptions = Readonly<{
   host: Readonly<Record<string, string | undefined>>;
   /** A pipe launch runs under `TERM=dumb`; a Terminal under a colour terminal. */
   terminal: boolean;
+  /** The launch's read-only git view (blueprint E1), which git in the shell then reads instead of finding none. */
+  git?: ShellGitView | undefined;
 }>;
 
 const posixSystemBins = ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
@@ -72,5 +77,6 @@ export const shellEnvironment = (options: ShellEnvironmentOptions): Readonly<Rec
     ...(options.terminal ? { COLORTERM: 'truecolor', CLICOLOR: '1' } : {}),
     ...plain('USER'),
     ...plain('LOGNAME'),
+    ...(options.git === undefined ? {} : shellGitEnvironment(options.git)),
   };
 };

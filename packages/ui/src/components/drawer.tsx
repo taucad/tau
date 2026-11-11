@@ -2,6 +2,7 @@ import { useResponsiveSurfaceContainer } from '#hooks/responsive-surface.js';
 import * as React from 'react';
 import { Drawer as DrawerPrimitive } from 'vaul';
 import { Button } from '#components/button.js';
+import { headingVariants } from '#components/heading.variants.js';
 import { cn } from '#utils/cn.js';
 
 const DrawerContext = React.createContext(false);
@@ -629,7 +630,7 @@ function DrawerTitle({
   return (
     <DrawerPrimitive.Title
       data-slot='drawer-title'
-      className={cn('font-semibold text-foreground', className)}
+      className={cn(headingVariants({ variant: 'item' }), 'text-foreground', className)}
       {...properties}
     />
   );

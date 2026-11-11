@@ -6,7 +6,7 @@ const state = vi.hoisted(() => ({ constrained: false, replay: [] as boolean[] })
 
 vi.mock('#hooks/use-cookie-consent.js', () => ({ useCookieConsent: () => 'accepted' }));
 vi.mock('#lib/web-posthog.lib.js', () => ({ webPosthogOptions: () => ({}) }));
-vi.mock('#lib/device-memory-class.js', () => ({ isMemoryConstrainedDevice: () => state.constrained }));
+vi.mock('@taucad/ui-core/lib/device-memory-class', () => ({ isMemoryConstrainedDevice: () => state.constrained }));
 vi.mock('#providers/posthog-analytics-provider.js', () => ({
   // eslint-disable-next-line @typescript-eslint/naming-convention -- mocks the component's exported name.
   PostHogAnalyticsProvider: ({

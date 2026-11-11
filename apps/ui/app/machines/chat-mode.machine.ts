@@ -2,7 +2,7 @@
 import { setup, types } from 'xstate';
 import type { ChatMode } from '@taucad/chat/constants';
 import { chatMode } from '@taucad/chat/constants';
-import { eventSchemas } from '#lib/xstate.lib.js';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 
 type ChatModeContext = {
   mode: ChatMode;

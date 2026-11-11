@@ -3,11 +3,11 @@ import * as Sentry from '@sentry/react';
 import type { Breadcrumb, ErrorEvent, EventHint } from '@sentry/react';
 import { isAbortError } from '@taucad/utils/error';
 import { ENV } from '#environment.config.js';
-import { setActivityBreadcrumbSink } from '#lib/activity-breadcrumbs.js';
+import { setActivityBreadcrumbSink } from '@taucad/ui-core/lib/activity-breadcrumbs';
 import { applyAnalyticsLink } from '#lib/analytics-link.lib.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { applyErrorDetails } from '#lib/error-details.js';
-import { decorateForNetworkFailure } from '#lib/network-failure.js';
+import { decorateForNetworkFailure } from '@taucad/ui-core/lib/network-failure';
 import { setKillContextSink } from '#lib/memory-kill-signal.js';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import {

@@ -1322,7 +1322,7 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: '(sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome=~"retry|present"}[1h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome="absent"}[1h])) > 0) or (sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome="recheck"}[2h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome="absent"}[2h])) > 0)'
+              expr: 'sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome="retry"}[2h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~".*",service_name="tau-api",outcome="accepted"}[2h])) > 0'
               intervalMs: 15000
               maxDataPoints: 20
               refId: erasure_stuck
@@ -1331,7 +1331,7 @@ groups:
         for: 2h
         annotations:
           runbook_url: docs/handbooks/cloud/system/services/agent-observability.md
-          summary: "For 2 h Langfuse trace deletions have been retried, read back as still present, or read back with no answer (recheck: a 410 legacy-API refusal, another non-ok answer or a timeout), with none confirmed absent. Erasure of a deleted account or project is owed within a day; check Langfuse availability, the v2 observations read and the deletion API's answer codes in the lifecycle log."
+          summary: "For 2 h Langfuse trace deletions have been retried (a 429, a 5xx, a timeout or an unreachable host) with none accepted. An accepted delete is the erasure and Tau does not read it back; erasure of a deleted account is owed within a day, so check Langfuse availability and the deletion API's answer codes in the lifecycle log."
         labels:
           severity: warning
           service: tau-api
@@ -3127,7 +3127,7 @@ groups:
         execErrState: Error
         for: 0s
         annotations:
-          runbook_url: docs/handbooks/cloud/system/services/object-storage.md
+          runbook_url: docs/handbooks/cloud/playbooks/object-integrity.md
           summary: An R2 event notification reported an object-delete (DeleteObject or LifecycleDeletion) on the locked dependency bucket in the last 10 minutes, so the bucket lock failed or was removed. The line names the bucket, key and eTag; notifications carry no actor, so read the Data Access Logs (r2 dataset) for who.
         labels:
           severity: critical
@@ -3182,7 +3182,7 @@ groups:
         execErrState: Error
         for: 0s
         annotations:
-          runbook_url: docs/handbooks/cloud/system/services/object-storage.md
+          runbook_url: docs/handbooks/cloud/playbooks/object-integrity.md
           summary: An R2 event notification reported an object-create on the dependency bucket for a key the audit Worker had already recorded (an overwrite the lock should refuse; previousEtag is the first eTag), or for a key outside blobs/sha256/<64 hex> (a layout breach), in the last 10 minutes.
         labels:
           severity: critical
@@ -3237,7 +3237,7 @@ groups:
         execErrState: Error
         for: 0s
         annotations:
-          runbook_url: docs/handbooks/cloud/system/services/object-storage.md
+          runbook_url: docs/handbooks/cloud/playbooks/object-integrity.md
           summary: R2 Data Access Logs show DeleteObjects or DeleteObjectsByPrefix on the dependency bucket. The lock refuses each key inside a 200 response, so the attempt is logged where a refused single delete (409) is not; the line names the actor's accessKeyId, interface and scriptName.
         labels:
           severity: critical
@@ -3292,7 +3292,7 @@ groups:
         execErrState: Error
         for: 0s
         annotations:
-          runbook_url: docs/handbooks/cloud/system/services/object-storage.md
+          runbook_url: docs/handbooks/cloud/playbooks/object-integrity.md
           summary: R2 Data Access Logs show a write or delete (PutObject, CopyObject, CompleteMultipartUpload, DeleteObject, DeleteObjects, DeleteObjectsByPrefix) whose accessKeyId, interface or scriptName is not in the bucket's expected writers (AUDIT_EXPECTED_WRITERS), or any interface = API write. reason is api-interface, unknown-bucket or unknown-actor.
         labels:
           severity: critical
@@ -3347,7 +3347,7 @@ groups:
         execErrState: Error
         for: 0s
         annotations:
-          runbook_url: docs/handbooks/cloud/system/services/object-storage.md
+          runbook_url: docs/handbooks/cloud/playbooks/object-integrity.md
           summary: "No scheduled heartbeat from the tau-r2-audit Worker for 15 minutes (it writes one every 5). The write alarms are blind: check the Worker, its cron trigger and the Workers Observability OTLP logs destination. A heartbeat with poll=skipped means the Data Access Log poll has no query token; poll=failed carries pollDetail. Paused in local Grafana, which has no audit Worker; Tau Cloud's rule policy sets the hosted pause state."
         labels:
           severity: warning

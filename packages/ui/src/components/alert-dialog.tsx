@@ -2,6 +2,7 @@ import * as React from 'react';
 import { AlertDialog as AlertDialogPrimitive } from 'radix-ui';
 import { cn } from '#utils/cn.js';
 import { buttonVariants } from '#components/button.js';
+import { headingVariants } from '#components/heading.variants.js';
 
 /**
  * Owns state and focus for a modal confirmation dialog.
@@ -179,7 +180,7 @@ function AlertDialogTitle({
   return (
     <AlertDialogPrimitive.Title
       data-slot='alert-dialog-title'
-      className={cn('text-lg font-semibold', className)}
+      className={cn(headingVariants({ variant: 'title' }), className)}
       {...props}
     />
   );

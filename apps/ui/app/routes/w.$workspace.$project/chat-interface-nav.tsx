@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import {
   Activity,
   Bot,
@@ -42,7 +43,7 @@ import { ViewerTabContextMenu } from '#components/panes/viewer-tab-context-menu.
 import type { ViewerFileActions } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { MobileWorkbenchNavigation } from '#components/mobile-workbench-navigation.js';
 import type { MobileWorkbenchDestinationCue } from '#components/mobile-workbench-navigation.js';
-import type { MobilePanelId } from '#constants/editor.constants.js';
+import type { MobilePanelId } from '@taucad/ui-core/constants/editor.constants';
 import { useFeature } from '#flags/use-feature.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
 import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
@@ -215,9 +216,14 @@ export function ChatInterfaceNav({
           >
             {viewerApi ? (
               <section aria-labelledby='all-views-title'>
-                <h3 id='all-views-title' className='px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground'>
+                <Heading
+                  level={3}
+                  variant='overline'
+                  id='all-views-title'
+                  className='px-4 pt-3 pb-1 text-muted-foreground'
+                >
                   Views
-                </h3>
+                </Heading>
                 <div className='grid grid-cols-1 gap-2 px-4'>
                   <FileSelector
                     dataSource={fileActions?.dataSource}
@@ -301,12 +307,14 @@ export function ChatInterfaceNav({
             ) : null}
             {groups.map((group) => (
               <section key={group.label} aria-labelledby={`all-surfaces-${group.label}`}>
-                <h3
+                <Heading
+                  level={3}
+                  variant='overline'
                   id={`all-surfaces-${group.label}`}
-                  className='px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground'
+                  className='px-4 pt-3 pb-1 text-muted-foreground'
                 >
                   {group.label}
-                </h3>
+                </Heading>
                 {/* Two columns at 320px, so the longest title keeps its whole word beside its icon. */}
                 <div className='grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-2 px-4'>
                   {group.surfaces.map((id) => {

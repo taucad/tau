@@ -1,7 +1,8 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AgentLogEvent, OwnRowsRead } from '@taucad/agent-host';
 import { desktopChatObserver } from '#tau/services-host-evidence.js';
 
 let directory: string;
@@ -11,6 +12,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   // The observer can still be writing evidence as the test ends: retry the teardown rather than fail on ENOTEMPTY.
   await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
 });
@@ -34,16 +36,18 @@ describe('desktopChatObserver', () => {
       fetch: fetchMock,
     })(noRows);
 
+    /* One read for the summaries' grant and one for the ratings'. */
     await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
-    /* A refused grant purges the queue file; settle that write before the directory is removed. */
-    await observer.reporter.refresh();
+    /* A refused grant purges the queue files; settle those writes before the directory is removed. */
+    await Promise.all([observer.reporter.refresh(), observer.feedback?.refresh()]);
     observer.close();
 
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe('https://api.test/v1/telemetry-purposes?projectId=project-1');
-    expect(new Headers(init?.headers).get('authorization')).toBe('Bearer session-token');
+    for (const [url, init] of fetchMock.mock.calls.slice(0, 2)) {
+      expect(url).toBe('https://api.test/v1/telemetry-purposes?projectId=project-1');
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer session-token');
+    }
   });
 
   it('should send nothing while signed out', async () => {
@@ -65,5 +69,153 @@ describe('desktopChatObserver', () => {
     observer.close();
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+/** The build id the release workflow's checkout stamps into this bundle (`tauDesktopHostBuild`). */
+const desktopBuild = '0123456789ab';
+
+/** One ended run of `chat-1` in this host's own rows, recorded after the grant is read. */
+const endedRun = (recordedAt: number): AgentLogEvent[] =>
+  (
+    [
+      { type: 'run.lifecycle', state: 'admitted' },
+      {
+        type: 'turn.history-projection-committed',
+        retainedMessageIds: [],
+        message: { id: 'turn-1', role: 'user', content: 'SYNTHETIC_PERSON_TEXT' },
+        context: { version: 1, systemPrompt: 'SYNTHETIC_SYSTEM', initialMessages: [], postCompactionMessages: [] },
+      },
+      { type: 'run.lifecycle', state: 'running', attempt: 1 },
+      { type: 'run.lifecycle', state: 'completed', attempt: 1 },
+    ] as const
+  ).map(
+    (body, sequence) =>
+      ({
+        version: 1,
+        leaderEpoch: 'term-1',
+        sequence,
+        recordedAt: new Date(recordedAt + sequence).toISOString(),
+        runId: 'run-1',
+        ...body,
+      }) as unknown as AgentLogEvent,
+  );
+
+const rowsOf =
+  (events: readonly AgentLogEvent[]): OwnRowsRead =>
+  async ({ cursor }) => ({ cursor, nextCursor: events.length, endCursor: events.length, events: [...events] });
+
+type Sent = Readonly<{ plane: string; kind: string | undefined; hostBuild: unknown }>;
+
+/** The API: both purposes allowed; every envelope is recorded, and accepted only once the API is `up`. */
+const api = (up: boolean) => {
+  const sent: Sent[] = [];
+  const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (url.includes('/v1/telemetry-purposes')) {
+      return Response.json({
+        epoch: 'policy-1',
+        projectId: 'project-1',
+        purposes: [
+          { purpose: 'summary', allowed: true },
+          { purpose: 'feedback', allowed: true },
+        ],
+      });
+    }
+    const envelope = JSON.parse(await new Response(init?.body).text()) as {
+      payload: { plane: string; fact?: { kind: string } };
+      hostBuild?: unknown;
+      versions?: { hostBuild?: unknown };
+    };
+    sent.push({
+      plane: envelope.payload.plane,
+      kind: envelope.payload.fact?.kind,
+      hostBuild: envelope.versions?.hostBuild ?? envelope.hostBuild,
+    });
+    return up
+      ? Response.json({ receipt: `r-${sent.length}`, disposition: 'accepted', duplicate: false })
+      : new Response('{}', { status: 503 });
+  });
+  return { fetchMock, sent };
+};
+
+describe('desktopChatObserver — desktop parity (LW8)', () => {
+  it('should report as the desktop build, with a rating plane beside the summaries', async () => {
+    vi.stubGlobal('tauDesktopHostBuild', desktopBuild);
+    const { fetchMock, sent } = api(true);
+    const observer = desktopChatObserver({
+      directory,
+      apiBaseUrl: 'https://api.test',
+      projectId: 'project-1',
+      principal: () => 'user-1',
+      token: () => 'session-token',
+      fetch: fetchMock,
+    })(rowsOf(endedRun(Date.now() + 1000)));
+
+    expect(observer.feedback).toBeDefined();
+    await Promise.all([observer.reporter.refresh(), observer.feedback!.refresh()]);
+    observer.onChatQuiescent('chat-1', true);
+    await vi.waitFor(() => {
+      expect(sent.some(({ plane }) => plane === 'summary')).toBe(true);
+    });
+    observer.close();
+
+    expect(sent.map(({ hostBuild }) => hostBuild)).toEqual(sent.map(() => desktopBuild));
+  });
+
+  it('should report no build for a bundle stamped with none', async () => {
+    vi.stubGlobal('tauDesktopHostBuild', '');
+    const { fetchMock, sent } = api(true);
+    const observer = desktopChatObserver({
+      directory,
+      apiBaseUrl: 'https://api.test',
+      projectId: 'project-1',
+      principal: () => 'user-1',
+      token: () => 'session-token',
+      fetch: fetchMock,
+    })(rowsOf(endedRun(Date.now() + 1000)));
+
+    await observer.reporter.refresh();
+    observer.onChatQuiescent('chat-1', true);
+    await vi.waitFor(() => {
+      expect(sent.length).toBeGreaterThan(0);
+    });
+    observer.close();
+
+    expect(sent.every(({ hostBuild }) => hostBuild === undefined || hostBuild === null)).toBe(true);
+  });
+
+  it('should queue a rating made in the desktop app in its own file, and send it after a restart', async () => {
+    vi.stubGlobal('tauDesktopHostBuild', desktopBuild);
+    const rows = rowsOf(endedRun(Date.now() + 1000));
+    const options = {
+      directory,
+      apiBaseUrl: 'https://api.test',
+      projectId: 'project-1',
+      principal: () => 'user-1',
+      token: () => 'session-token',
+    } as const;
+    const down = api(false);
+    const before = desktopChatObserver({ ...options, fetch: down.fetchMock })(rows);
+    await Promise.all([before.reporter.refresh(), before.feedback!.refresh()]);
+
+    before.onRated({ chatId: 'chat-1', runId: 'run-1', value: 'positive', at: Date.now() });
+    const feedbackFile = join(directory, 'feedback', 'project-1.json');
+    await vi.waitFor(async () => {
+      expect(down.sent.some(({ plane }) => plane === 'feedback')).toBe(true);
+      expect(await readFile(feedbackFile, 'utf8')).toContain('"rating"');
+    });
+    await before.feedback!.refresh();
+    before.close();
+
+    /* The app restarts: a fresh observer over the same directory, and the API answers again. */
+    const up = api(true);
+    const after = desktopChatObserver({ ...options, fetch: up.fetchMock })(rows);
+    await after.feedback!.refresh();
+    await vi.waitFor(() => {
+      expect(up.sent).toContainEqual({ plane: 'feedback', kind: 'rating', hostBuild: desktopBuild });
+    });
+    await after.reporter.refresh();
+    after.close();
   });
 });

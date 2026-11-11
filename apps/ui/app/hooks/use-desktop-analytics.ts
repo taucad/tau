@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useSyncExternalStore } from 'react';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { metaConfig } from '#constants/meta.constants.js';
 import { store } from '#hooks/use-cookie.js';
 

@@ -5,9 +5,9 @@ import { toast } from 'sonner';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
 import { useCloudFinancialPurge } from '#cloud/financial-purge.js';
-import { setEntryPreference } from '#lib/entry-preference.js';
+import { setEntryPreference } from '@taucad/ui-core/lib/entry-preference';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { authErrorMessage } from '#utils/auth-error.utils.js';
+import { authErrorMessage } from '@taucad/ui-core/utils/auth-error.utils';
 
 export type SignOutProps = {
   className?: string;

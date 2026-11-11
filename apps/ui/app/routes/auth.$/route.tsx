@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { MetaFunction } from 'react-router';
@@ -10,7 +11,7 @@ import { sanitizeVerifyEmailRedirectTo, VerifyEmail } from '#components/auth/ver
 import { TauWordmark } from '@taucad/ui-kit/icons/tau-wordmark';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import type { Handle } from '#types/matches.types.js';
-import { setEntryPreference } from '#lib/entry-preference.js';
+import { setEntryPreference } from '@taucad/ui-core/lib/entry-preference';
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import type { ShellAuthHandoff } from '#providers/auth-provider.js';
@@ -52,7 +53,9 @@ function ShellHandoff({ handoff }: { readonly handoff: ShellAuthHandoff }): Reac
   if (!handoff.isBridgeAvailable) {
     return (
       <div className='w-full max-w-md text-center'>
-        <h1 className='text-lg font-medium'>Sign-in is unavailable</h1>
+        <Heading level={1} variant='title'>
+          Sign-in is unavailable
+        </Heading>
         <p className='mt-2 text-sm text-muted-foreground'>
           Tau could not reach the desktop app&apos;s sign-in service. Restart Tau and try again.
         </p>
@@ -66,7 +69,9 @@ function ShellHandoff({ handoff }: { readonly handoff: ShellAuthHandoff }): Reac
 
   return (
     <div className='w-full max-w-md text-center'>
-      <h1 className='text-lg font-medium'>Continue in your browser</h1>
+      <Heading level={1} variant='title'>
+        Continue in your browser
+      </Heading>
       <p className='mt-2 text-sm text-muted-foreground'>
         Tau signs you in through your browser, then hands the session back to this window.
       </p>

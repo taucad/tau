@@ -7,12 +7,12 @@ import { renderToPipeableStream } from 'react-dom/server';
 import type { RenderToPipeableStreamOptions } from 'react-dom/server';
 import { ServerRouter } from 'react-router';
 import type { AppLoadContext, EntryContext, HandleErrorFunction } from 'react-router';
-import { cdnCacheControlResponseHeader } from '#constants/cache.constants.js';
+import { cdnCacheControlResponseHeader } from '@taucad/ui-core/constants/cache.constants';
 import { reportOnlyContentSecurityPolicy } from '#lib/content-security-policy.server.js';
 import { reportingEndpoints } from '#lib/browser-reports.server.js';
 import { isCanonicalProductionUrl } from '#lib/canonical-url.js';
 import { skewProtectionCookie, skewProtectionToken } from '#lib/skew-protection.server.js';
-import { createModulePreloadCap, criticalModuleHrefs, isNotFoundRender } from '#lib/module-preload-cap.js';
+import { createModulePreloadCap, criticalModuleHrefs, isNotFoundRender } from '@taucad/ui-core/lib/module-preload-cap';
 import { claimSsrErrors, leafRouteId, queueSsrError, reportSsrError } from '#lib/sentry.server.js';
 
 export const streamTimeout = 5000;

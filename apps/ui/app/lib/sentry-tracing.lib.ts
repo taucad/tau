@@ -1,7 +1,7 @@
 import * as Sentry from '@sentry/react';
 import type { Event } from '@sentry/react';
 import { readRouteId } from '#lib/sentry-context.lib.js';
-import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
+import { redactInvitationTokens } from '@taucad/ui-core/lib/invitation-token.lib';
 import { scrubUrl } from '#lib/sentry-event.lib.js';
 
 /**

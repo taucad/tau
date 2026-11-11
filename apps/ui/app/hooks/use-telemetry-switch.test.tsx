@@ -31,7 +31,7 @@ vi.mock('#hooks/use-privacy-preferences.js', () => ({
     isUpdating: state.updating,
   }),
 }));
-vi.mock('#lib/global-privacy-control.lib.js', () => ({ isGlobalPrivacyControlEnabled: () => state.gpc }));
+vi.mock('@taucad/ui-core/lib/global-privacy-control.lib', () => ({ isGlobalPrivacyControlEnabled: () => state.gpc }));
 vi.mock('#telemetry/runtime-telemetry.js', () => ({ pageTelemetry: () => ({ onConsentInputsChanged }) }));
 
 const { useTelemetrySwitch } = await import('#hooks/use-telemetry-switch.js');

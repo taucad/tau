@@ -6,7 +6,7 @@ import { useSelector } from '@xstate/react';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
 import type { ActorRefFrom } from 'xstate';
-import { defaultOperationTimeout } from '#constants/editor.constants.js';
+import { defaultOperationTimeout } from '@taucad/ui-core/constants/editor.constants';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { useProject } from '#hooks/use-project.js';
@@ -22,7 +22,7 @@ import { confirmFlush } from '#workbench-records/record-health.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
 import { recordIssueState, usePublishRecordIssue } from '#workbench-records/record-issues.js';
 import type { RecordIssue } from '#workbench-records/record-issues.js';
-import { digestBytes } from '#utils/crypto.utils.js';
+import { digestBytes } from '@taucad/ui-core/utils/crypto.utils';
 
 type Entry = WorkbenchEntries['entries'][string];
 const storeMounts = new WeakMap<ReturnType<typeof createWorkbenchEntriesStore>, number>();

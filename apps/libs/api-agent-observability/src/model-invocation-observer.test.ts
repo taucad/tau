@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { evidenceSchema } from '@taucad/agent-observability/contract';
 import { contractId, verifyEvidenceDigest } from '@taucad/agent-observability/identity';
-import { LlmGatewayError } from '@taucad/api-llm-gateway';
+import { LlmGatewayError, resolveGatewayModelRoute } from '@taucad/api-llm-gateway';
 import type { ModelInvocationIntent, ModelInvocationResult, ModelInvocationService } from '@taucad/api-llm-gateway';
 import { providerAttemptEvidence } from '#model-invocation-evidence.js';
 import type { ObservedAttempt } from '#model-invocation-evidence.js';
@@ -81,6 +81,22 @@ describe('ObservedModelInvocationService', () => {
       stream: { stop: 'stop', usage: { input: 4, output: 2 } },
     });
     expect(JSON.stringify(recorded)).not.toContain(secret);
+  });
+
+  it("should record the caller's activity and the supplier's model id for the route", async () => {
+    const route = 'anthropic-claude-opus-5.5';
+    const { observed, recorded } = setup(async () => streaming());
+
+    const result = await observed.invoke(
+      intent({ activity: 'compaction', body: { model: route, messages: [{ role: 'user', content: secret }] } }),
+    );
+    if (result.state === 'streaming') {
+      await result.response.arrayBuffer();
+    }
+
+    expect(recorded).toMatchObject([
+      { activity: 'compaction', supplierModel: resolveGatewayModelRoute(route, 'anthropic').modelId },
+    ]);
   });
 
   it('should pass a cancel through to the provider stream and record the attempt as aborted', async () => {

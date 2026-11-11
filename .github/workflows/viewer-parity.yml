@@ -23,43 +23,20 @@ name: Viewer parity
 #    Both builds are the nanoraster package the lockfile installs, its Node and its universal entry; the gate refuses
 #    one older than 0.9.0, the release that accepts the viewer-parity options.
 
+# Selection (2026-11-10): `ci.yml` calls this workflow (`workflow_call`) when its plan finds a project with a
+# `test:viewer-parity` target affected (`tau-examples`, whose graph holds the viewer, the image plugin, the render
+# profile, the capture options and the renderer output it compares, and whose target lists this workflow among its
+# inputs), in the merge queue and on a push to `main` the queue did not already prove; never on a pull request. Its
+# required check fails when a job here does. A dispatch runs it directly.
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/viewer-parity.yml'
-      - '.github/actions/setup-nx/**'
-      - 'pnpm-workspace.yaml'
-      - 'packages/viewer/src/**'
-      - 'packages/runtime-testing/src/browser/three-renderer-output*'
-      - 'packages/plugins/image/src/**'
-      - 'libs/types/src/constants/viewer-render-profile*'
-      - 'libs/agent-tools/src/capture/viewer-capture-options*'
-      - 'libs/tau-examples/fixtures/viewer-parity/**'
-      - 'libs/tau-examples/scripts/viewer-parity*'
-      - 'libs/tau-examples/scripts/export-parity-fixtures.mts'
-      - 'libs/tau-examples/vitest.viewer-parity.config.ts'
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/viewer-parity.yml'
-      - 'pnpm-workspace.yaml'
-      - 'packages/viewer/src/**'
-      - 'packages/runtime-testing/src/browser/three-renderer-output*'
-      - 'packages/plugins/image/src/**'
-      - 'libs/types/src/constants/viewer-render-profile*'
-      - 'libs/agent-tools/src/capture/viewer-capture-options*'
-      - 'libs/tau-examples/fixtures/viewer-parity/**'
-      - 'libs/tau-examples/scripts/viewer-parity*'
-      - 'libs/tau-examples/scripts/export-parity-fixtures.mts'
-      - 'libs/tau-examples/vitest.viewer-parity.config.ts'
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: viewer-parity-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+# No concurrency group: called from `ci.yml`, whose own group already holds the run, a group here would let a newer
+# push cancel a `main` run's parity jobs, which `ci.yml` never cancels.
 
 defaults:
   run:

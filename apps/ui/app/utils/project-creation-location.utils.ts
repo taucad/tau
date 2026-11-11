@@ -1,6 +1,6 @@
 import { idPrefix } from '@taucad/types/constants';
-import type { WorkspaceDirectoryRequiredCode } from '#filesystem/workspace-errors.js';
-import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
+import type { WorkspaceDirectoryRequiredCode } from '@taucad/ui-core/filesystem/workspace-errors';
+import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { isDesktopTarget } from '#lib/build-target.js';
 
 export type ProjectLocationDisplay =

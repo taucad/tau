@@ -228,9 +228,14 @@ const deniedVariants = (paths: readonly string[]): string[] => {
  *
  * @param writable - The launch's writable roots.
  * @param protectedPaths - Its read-only and denied paths.
+ * @param denied - Its denied paths, every spelling: no ancestor inside one is bound.
  * @returns The ancestors to bind, outermost first.
  */
-const pinnedAncestors = (writable: readonly string[], protectedPaths: readonly string[]): string[] => {
+const pinnedAncestors = (
+  writable: readonly string[],
+  protectedPaths: readonly string[],
+  denied: readonly string[],
+): string[] => {
   if (process.platform !== 'linux') {
     return [];
   }
@@ -244,12 +249,48 @@ const pinnedAncestors = (writable: readonly string[], protectedPaths: readonly s
     for (let ancestor = dirname(path); ancestor !== root && inside(ancestor, root); ancestor = dirname(ancestor)) {
       chain.unshift(ancestor);
     }
-    for (const ancestor of chain) {
+    /*
+     * A denied directory is never bound writable onto itself, even when a read-only path lies inside it: the runtime
+     * restores a write bind its read-deny tmpfs wiped, which would open the whole denied directory (`.git` around a
+     * read-only `.git/objects`). Its tmpfs already keeps the inner path from moving.
+     */
+    for (const ancestor of chain.filter((step) => !denied.some((deny) => inside(step, deny)))) {
       pinned.add(ancestor);
     }
   }
   return [...pinned].toSorted((left, right) => left.length - right.length);
 };
+
+/** Characters the sandbox runtime reads as a glob, which a carved spelling cannot escape. */
+const globCharacters = /[*?[\]]/u;
+
+/**
+ * Seatbelt read denies for one launch, with each denied directory that holds a path the launch may read spelled so the
+ * runtime carves that path out (blueprint E1).
+ *
+ * Seatbelt is last-match-wins, and the runtime re-emits a literal deny nested inside an allowed root after every
+ * allow, so a read allow for `<checkout>/.git/objects` under the `<checkout>/.git` deny is overridden. The runtime
+ * re-emits a glob deny instead minus every allow its pattern covers. A denied directory that holds an allowed path is
+ * therefore handed over as the one-segment glob that matches exactly its own name (`.gi[t]` for `.git`), which denies
+ * the same subtree and leaves the allowed paths inside it readable. Everything else in it stays denied, names created
+ * later included. A path the runtime would already read as a glob, or whose last character cannot sit in a bracket,
+ * keeps its literal spelling: the inner path then stays denied, which fails closed.
+ *
+ * Only reads change: writes keep the literal deny, so the carved path stays unwritable.
+ *
+ * @internal
+ * @param denied - The launch's denied paths, every spelling.
+ * @param allowed - The paths the launch may read, every spelling.
+ * @returns The denied paths, spelled for Seatbelt's read rules.
+ */
+export const seatbeltReadDenies = (denied: readonly string[], allowed: readonly string[]): string[] =>
+  denied.map((path) => {
+    if (!allowed.some((candidate) => candidate !== path && inside(candidate, path))) {
+      return path;
+    }
+    const last = path.at(-1) ?? '';
+    return globCharacters.test(path) || !/^[\w.]$/u.test(last) ? path : `${path.slice(0, -1)}[${last}]`;
+  });
 
 export const shellSandboxProfile = (
   launch: Pick<ShellLaunch, 'filesystem' | 'network' | 'startupFiles'>,
@@ -266,14 +307,22 @@ export const shellSandboxProfile = (
     ),
   ]);
   const readOnly = [...(launch.filesystem.readOnly ?? []), ...startupFiles];
-  const pinned = pinnedAncestors(launch.filesystem.writable, [...readOnly, ...launch.filesystem.denied]);
+  const pinned = pinnedAncestors(
+    launch.filesystem.writable,
+    [...readOnly, ...launch.filesystem.denied],
+    physicalVariants(launch.filesystem.denied),
+  );
   const { domains } = launch.network;
+  const readDenied =
+    process.platform === 'darwin'
+      ? seatbeltReadDenies(denied, physicalVariants([...launch.filesystem.readable, ...readOnly]))
+      : denied;
   return {
     seccomp: sandboxRuntimeSeccomp(),
     javaAgentJarPath: sandboxRuntimeJavaAgent(),
     network: { allowedDomains: [...domains], deniedDomains: domains.length > 0 ? [] : ['*'], strictAllowlist: true },
     filesystem: {
-      denyRead: [...new Set([...deniedReadRoots(), ...denied])],
+      denyRead: [...new Set([...deniedReadRoots(), ...readDenied])],
       allowRead: physicalVariants([
         ...launch.filesystem.readable,
         ...launch.filesystem.writable,

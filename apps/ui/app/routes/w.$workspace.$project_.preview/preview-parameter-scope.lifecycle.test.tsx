@@ -3,7 +3,7 @@ import { StrictMode } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import type { useFileManager } from '#hooks/use-file-manager.js';
 import { PreviewParameterScope } from '#routes/w.$workspace.$project_.preview/preview-parameter-scope.js';
 
@@ -15,7 +15,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => fixture.manager,
   FileManagerProvider: ({ children }: { children: React.ReactNode }): React.JSX.Element => <div>{children}</div>,
 }));
-vi.mock('#services/parameter-set-service.js', () => ({ createParameterSetService: fixture.create }));
+vi.mock('@taucad/ui-core/services/parameter-set-service', () => ({ createParameterSetService: fixture.create }));
 
 it('should drain the parameter service before unmounting its temporary filesystem', async () => {
   const closed = Promise.withResolvers<void>();

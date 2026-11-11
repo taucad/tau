@@ -17,7 +17,7 @@ import type { ActorRefFrom, AnyActorRef, SnapshotFrom } from 'xstate';
 import type { DockviewPanelApi } from 'dockview-react';
 import type { Geometry } from '@taucad/types';
 import type { Artifact, Rendering } from '@taucad/runtime';
-import { eventSchemas } from '#lib/xstate.lib.js';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import type { cadMachine } from '#machines/cad.machine.js';
 
 const entryPath = 'main.scad';

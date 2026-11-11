@@ -2,8 +2,8 @@
 /**
  * Build the API and its command bundles inside the Linux deploy image.
  * This builds every `^build` dependency of `api:build` through Nx, then the API targets without task
- * dependencies. The runtime image never loads the GeoSpec engine (`geospec-engine`, a test-harness
- * devDependency installed from npm), so the script refuses to run if it becomes an API runtime dependency.
+ * dependencies. The runtime image never loads the GeoSpec engine (`geospec-engine`, a native add-on
+ * installed from npm), so the script refuses to run if it becomes an API runtime dependency.
  * Required env: none.
  * Usage: node apps/api/scripts/build-image.mts (from the Dockerfile build stage)
  * Exit codes: 0 built, 1 graph precondition or build failure.

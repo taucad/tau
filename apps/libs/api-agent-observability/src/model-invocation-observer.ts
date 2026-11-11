@@ -29,14 +29,19 @@ const requestedModel = (body: unknown): string | undefined => {
   return typeof model === 'string' ? model : undefined;
 };
 
-const supplierOf = (intent: ModelInvocationIntent, model: string | undefined): string | undefined => {
+/** The supplier and its model id for the requested route, when the gateway can resolve it. */
+const routeOf = (
+  intent: ModelInvocationIntent,
+  model: string | undefined,
+): Readonly<{ provider?: string; modelId?: string }> => {
   if (intent.surface !== 'gateway' || model === undefined) {
-    return undefined;
+    return {};
   }
   try {
-    return resolveGatewayModelRoute(model, intent.providerWire).providerId;
+    const route = resolveGatewayModelRoute(model, intent.providerWire);
+    return { provider: route.providerId, modelId: route.modelId };
   } catch {
-    return undefined;
+    return {};
   }
 };
 
@@ -77,6 +82,7 @@ export class ObservedModelInvocationService implements ModelInvocationService {
     const startedAt = Date.now();
     const started = this.clock();
     const model = requestedModel(intent.body);
+    const route = routeOf(intent, model);
     let operation: string | undefined;
     const { onAdmitted } = intent;
     const attempt = (ended: ObservedAttempt['ended'], stream: ObservedAttempt['stream']): ObservedAttempt => ({
@@ -86,8 +92,10 @@ export class ObservedModelInvocationService implements ModelInvocationService {
       chat: intent.chatHint,
       surface: intent.surface,
       wire: intent.providerWire,
+      activity: intent.activity,
       requestedModel: model,
-      provider: supplierOf(intent, model),
+      supplierModel: route.modelId,
+      provider: route.provider,
       operation,
       startedAt,
       duration: this.clock() - started,

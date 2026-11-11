@@ -1,5 +1,5 @@
 import { archiveTooLargeCode } from '@taucad/filesystem/content-ops';
-import { formatBytes } from '#lib/format-bytes.js';
+import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 import type { FileProvenance, FileProvenanceSource } from '@taucad/types';
 
 export type FileTreeDownloadPolicy =

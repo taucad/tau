@@ -18,7 +18,7 @@
 
 import { systemSkillBundles } from '@taucad/skills/resources';
 
-import { createModelSkillMarkdown } from '#lib/create-model-skill.js';
+import { createModelSkillMarkdown } from '@taucad/ui-core/lib/create-model-skill';
 
 export type SystemSkill = {
   readonly slug: string;
@@ -194,7 +194,7 @@ If updating an existing artifact, inspect the current file first and preserve us
     slug: 'create-model',
     name: 'Create Model',
     description:
-      'Selects a Tau CAD kernel and activates its authoring skill. Use when creating a model without a pinned kernel.',
+      'Selects a Tau kernel and activates its authoring skill. Use when creating a model without a pinned kernel.',
     version: '1.0.0',
     source: 'system',
     priority: 60,

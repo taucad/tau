@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import { toast } from '@taucad/ui/components/sonner';
 
 /** Preview routes have no editor live-session owner to drain and release parameter clients. */

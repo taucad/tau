@@ -198,6 +198,21 @@ describe('EvidenceIngressService', () => {
     });
   });
 
+  it('answers a superseded re-projection as a replay of the earlier receipt and counts it superseded', async () => {
+    admitted.mockResolvedValue({ kind: 'receipt', receipt: { ...receipt, duplicate: true }, superseded: true });
+    const { service, metrics } = createService();
+
+    await expect(service.admit('user-a', encodeEvidence(await evidenceFixture()))).resolves.toEqual({
+      ...receipt,
+      duplicate: true,
+    });
+    expect(metrics.agentEvidenceAdmissions.add).toHaveBeenCalledExactlyOnceWith(
+      1,
+      expect.objectContaining({ outcome: 'superseded' }),
+    );
+    expect(metrics.agentEvidenceSuperseded.add).toHaveBeenCalledExactlyOnceWith(1, { reason: 'reprojected' });
+  });
+
   it('tells a withdrawn purpose from a stale epoch, and answers replay with the purpose alone', async () => {
     admitted.mockResolvedValue({ kind: 'refused' });
     const withdrawn = createService({ allowed: ['content'] });

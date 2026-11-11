@@ -17,7 +17,7 @@ import { metaConfig } from '#constants/meta.constants.js';
 import { legalUrl } from '#lib/legal-url.js';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { setEntryPreference } from '#lib/entry-preference.js';
+import { setEntryPreference } from '@taucad/ui-core/lib/entry-preference';
 import { pageOrigin, websiteOrigin } from '#lib/website-origin.js';
 import { CookiePreferencesDialog, CookiePreferencesMenuItem } from '#components/cookie-preferences.js';
 import { NavBillingItem, NavCreditsMeter } from '#cloud/nav-billing.js';

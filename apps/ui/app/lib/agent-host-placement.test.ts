@@ -20,7 +20,7 @@ import {
   shouldAutoOfferCloudPlacement,
 } from '#lib/agent-host-placement.js';
 import { RemoteHostApiError } from '#lib/remote-host-client.js';
-import { getComputeReuseMode, setComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import { getComputeReuseMode, setComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 

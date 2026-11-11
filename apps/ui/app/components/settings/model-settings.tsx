@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useMemo, useState } from 'react';
 import { Bot, SearchX } from 'lucide-react';
 import type { Model } from '#hooks/use-models.js';
@@ -56,7 +57,9 @@ export function ModelSettings(): React.JSX.Element {
 
       <div className='flex flex-col gap-3'>
         <div className='flex min-h-8 items-center justify-between gap-4'>
-          <h2 className='text-sm font-medium'>Available models</h2>
+          <Heading level={2} variant='label'>
+            Available models
+          </Heading>
           {hasOverrides ? (
             <Button variant='link' size='sm' className='h-auto px-0' onClick={resetAvailability}>
               Reset to recommended

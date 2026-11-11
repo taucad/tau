@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createProjectFixture } from '#lib/project.fixture.js';
+import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';

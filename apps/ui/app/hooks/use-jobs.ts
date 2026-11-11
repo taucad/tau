@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ENV } from '#environment.config.js';
 import { useProject } from '#hooks/use-project.js';
-import { digestBytes } from '#utils/crypto.utils.js';
+import { digestBytes } from '@taucad/ui-core/utils/crypto.utils';
 import {
   JobProjectionProtocolError,
   applyDurableJobRead,
@@ -11,8 +11,8 @@ import {
   markJobProjectionSync,
   parseJobList,
   parseJobSnapshot,
-} from '#lib/jobs-projection.js';
-import type { JobArtifact, JobProjection, JobSnapshot } from '#lib/jobs-projection.js';
+} from '@taucad/ui-core/lib/jobs-projection';
+import type { JobArtifact, JobProjection, JobSnapshot } from '@taucad/ui-core/lib/jobs-projection';
 
 const durableLongPollDuration = 25_000;
 const listRefreshDuration = 10_000;

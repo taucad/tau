@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { MarkdownCode } from '#components/markdown/markdown-code.js';
-import { extractLanguageFromClassName } from '#lib/code-language-resolution.js';
+import { extractLanguageFromClassName } from '@taucad/ui-core/lib/code-language-resolution';
 
 // Mock the CollapsibleCodeBlock component
 vi.mock('#components/ui/collapsible-code-block.js', () => ({

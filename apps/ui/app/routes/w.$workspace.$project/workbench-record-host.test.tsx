@@ -6,7 +6,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { workbenchRecords, workbenchPaths } from '@taucad/workbench';
 import type { WorkbenchLaneNode, WorkbenchLayout, WorkbenchView } from '@taucad/workbench';
-import type { PreviousWorkbenchLayout } from '#types/editor.types.js';
+import type { PreviousWorkbenchLayout } from '@taucad/ui-core/types/editor.types';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import { WorkbenchRecordHost } from '#routes/w.$workspace.$project/workbench-record-host.js';
 import { readRecordIssues } from '#workbench-records/record-issues.js';

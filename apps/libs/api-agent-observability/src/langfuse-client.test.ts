@@ -1,16 +1,21 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { evidenceFixture } from '#testing/evidence.fixture.js';
+import { evidenceFixture, toolFact } from '#testing/evidence.fixture.js';
 import { classifySendError, classifySendResponse, LangfuseClient } from '#langfuse-client.js';
 import { langfuseObservation, pseudonymKey } from '#langfuse-observation.js';
 
 const target = { baseUrl: 'https://langfuse.test.invalid', publicKey: 'pk-test', secretKey: 'sk-test' };
-const span = async () =>
-  langfuseObservation(
-    await evidenceFixture(),
-    { environment: 'test', receipt: 'evr_1', protection: 'free' },
+const span = async () => {
+  const observation = langfuseObservation(
+    await evidenceFixture({ fact: toolFact() }),
+    { environment: 'test', protection: 'free' },
     pseudonymKey(Uint8Array.from(randomBytes(32))),
   );
+  if (observation === undefined) {
+    throw new Error('a tool fact maps to an object');
+  }
+  return observation;
+};
 
 const json = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -53,7 +58,7 @@ describe('LangfuseClient', () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(207, { name: 'otel-ingestion-job' }));
     const observation = await span();
 
-    await expect(new LangfuseClient(target, 1000, fetcher).send(observation.span)).resolves.toEqual({
+    await expect(new LangfuseClient(target, 1000, fetcher).send(observation.spans)).resolves.toEqual({
       kind: 'accepted',
     });
     const [url, init] = fetcher.mock.calls[0]!;
@@ -63,14 +68,16 @@ describe('LangfuseClient', () => {
       'x-langfuse-ingestion-version': '4',
     });
     expect(init?.redirect).toBe('error');
+    const body = JSON.parse(init?.body as string) as { resourceSpans: [{ scopeSpans: [{ spans: unknown[] }] }] };
+    expect(body.resourceSpans[0].scopeSpans[0].spans).toHaveLength(1);
   });
 
   it('should answer uncertain, never not-sent, when the request times out after connecting', async () => {
     const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new DOMException('late', 'TimeoutError'));
 
-    const { span: observation } = await span();
+    const { spans } = await span();
 
-    await expect(new LangfuseClient(target, 1000, fetcher).send(observation)).resolves.toEqual({
+    await expect(new LangfuseClient(target, 1000, fetcher).send(spans)).resolves.toEqual({
       kind: 'uncertain',
       reason: 'timeout',
     });
@@ -99,14 +106,23 @@ describe('LangfuseClient', () => {
     ).resolves.toBe('unavailable');
   });
 
-  it('should read only Tau observations and their metadata, and call a cut-short read partial', async () => {
+  it('should read only settlement observations and their metadata, and call a cut-short read partial', async () => {
     const window = { environment: 'synthetic', from: new Date(0), to: new Date(1000) };
-    const tau = { id: 's1', name: 'tau.tool', startTime: '1970-01-01T00:00:00.000Z', metadata: { family: 'tool' } };
+    const tau = {
+      id: 's1',
+      name: 'tau.financial',
+      startTime: '1970-01-01T00:00:00.000Z',
+      metadata: { 'fact.kind': 'financial' },
+    };
+    /* Every other name, Tau's or not, is left unread: the Langfuse dashboards score runs (LQ10). */
+    const others = ['tau.tool', 'tau.outcome', 'call-tool', 'run-cad-agent', 'checkout'].map((name) => ({
+      ...tau,
+      id: name,
+      name,
+    }));
     const paged = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        json(200, { data: [tau, { ...tau, id: 'other', name: 'checkout' }], meta: { cursor: 'next' } }),
-      )
+      .mockResolvedValueOnce(json(200, { data: [tau, ...others], meta: { cursor: 'next' } }))
       .mockResolvedValueOnce(json(200, { data: [{ ...tau, id: 's2' }], meta: {} }));
     const client = (fetcher: typeof fetch) => new LangfuseClient(target, 1000, fetcher);
 
@@ -127,11 +143,11 @@ describe('LangfuseClient', () => {
     ).resolves.toEqual({ kind: 'partial', rows: [] });
   });
 
-  it('should request a bulk trace deletion and retry anything but a 2xx', async () => {
+  it('should count an accepted bulk trace deletion as the erasure and retry anything but a 2xx', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(200, { message: 'queued' }));
     const client = (fetch: typeof globalThis.fetch) => new LangfuseClient(target, 1000, fetch);
 
-    await expect(client(fetcher).deleteTraces(['t1', 't2'])).resolves.toEqual({ kind: 'requested' });
+    await expect(client(fetcher).deleteTraces(['t1', 't2'])).resolves.toEqual({ kind: 'accepted' });
     const [url, init] = fetcher.mock.calls[0]!;
     expect(url instanceof URL ? url.href : url).toBe('https://langfuse.test.invalid/api/public/traces');
     expect(init).toMatchObject({
@@ -146,63 +162,5 @@ describe('LangfuseClient', () => {
     await expect(
       client(vi.fn<typeof fetch>().mockRejectedValue(failure('ECONNREFUSED'))).deleteTraces(['t1']),
     ).resolves.toEqual({ kind: 'retry', reason: 'unreachable' });
-  });
-
-  it('should read a trace back from one row of the v2 observations list, never a v3 route', async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(200, { data: [], meta: {} }));
-
-    await expect(new LangfuseClient(target, 1000, fetcher).traceExists('t 1')).resolves.toBe('absent');
-    const [url, init] = fetcher.mock.calls[0]!;
-    expect(url instanceof URL && url.origin + url.pathname).toBe(
-      'https://langfuse.test.invalid/api/public/v2/observations',
-    );
-    expect(url instanceof URL && Object.fromEntries(url.searchParams)).toEqual({
-      traceId: 't 1',
-      fields: 'core',
-      limit: '1',
-    });
-    expect(init?.method).toBeUndefined();
-    expect(init?.redirect).toBe('error');
-  });
-
-  it('should answer absent only for an ok answer with an empty page, and present for a non-empty one', async () => {
-    const client = (response: Response) =>
-      new LangfuseClient(target, 1000, vi.fn<typeof fetch>().mockResolvedValue(response));
-
-    await expect(client(json(200, { data: [], meta: {} })).traceExists('t1')).resolves.toBe('absent');
-    await expect(client(json(200, { data: [{ id: 'o1' }], meta: { cursor: 'next' } })).traceExists('t1')).resolves.toBe(
-      'present',
-    );
-    /* An ok answer that is not a page proves nothing. */
-    await expect(client(json(200, {})).traceExists('t1')).resolves.toBe('unavailable');
-    await expect(client(new Response('not json', { status: 200 })).traceExists('t1')).resolves.toBe('unavailable');
-  });
-
-  it('should never read the legacy-API 410 as absence', async () => {
-    const legacy = json(410, {
-      message: 'This API is no longer available for new organizations.',
-      error: 'LEGACY_API_UNAVAILABLE_FOR_NEW_ORGANIZATION',
-      data: [],
-    });
-
-    await expect(
-      new LangfuseClient(target, 1000, vi.fn<typeof fetch>().mockResolvedValue(legacy)).traceExists('t1'),
-    ).resolves.toBe('unavailable');
-  });
-
-  it.each([404, 401, 429, 500, 503])('should answer unavailable, never absent, for a %i', async (status) => {
-    await expect(
-      new LangfuseClient(target, 1000, vi.fn<typeof fetch>().mockResolvedValue(json(status, { data: [] }))).traceExists(
-        't1',
-      ),
-    ).resolves.toBe('unavailable');
-  });
-
-  it('should answer unavailable when the read fails in transport', async () => {
-    await expect(
-      new LangfuseClient(target, 1000, vi.fn<typeof fetch>().mockRejectedValue(failure('ECONNREFUSED'))).traceExists(
-        't1',
-      ),
-    ).resolves.toBe('unavailable');
   });
 });

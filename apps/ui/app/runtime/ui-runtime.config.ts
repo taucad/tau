@@ -1,6 +1,6 @@
 import type { RuntimeConfigInput } from '@taucad/runtime/worker';
 import type { Environment } from '#environment.config.js';
-import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
+import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 

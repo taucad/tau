@@ -3,14 +3,14 @@ import { Cpu, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
-import { stringParameter } from '#utils/search-parameter.codecs.js';
+import { stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import { approveRemoteHostPairing, listRemoteHosts, revokeRemoteHost } from '#lib/remote-host-client.js';
 import type { RemoteHostDevice } from '#lib/remote-host-client.js';
 import {
   selectLocalCompute,
   selectRemoteComputeDevice,
   useRemoteComputePlacement,
-} from '#lib/remote-compute-placement.js';
+} from '@taucad/ui-core/lib/remote-compute-placement';
 import { isDesktopTarget } from '#lib/build-target.js';
 
 const placementCopy = {

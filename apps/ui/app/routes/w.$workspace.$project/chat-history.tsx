@@ -43,8 +43,8 @@ import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useProject } from '#hooks/use-project.js';
 import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
-import { searchParameterName } from '#constants/search-parameter.constants.js';
-import { flagParameter } from '#utils/search-parameter.codecs.js';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
+import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import { ArchivedChats } from '#routes/w.$workspace.$project/archived-chats.js';
 
 // One conversational turn per virtual row, sized only by its content.

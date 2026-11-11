@@ -14,13 +14,13 @@ import { Input } from '@taucad/ui/components/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@taucad/ui/components/input-group';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
-import { getCaptchaComponentFromPlugins } from '#utils/auth-plugin.js';
+import { getCaptchaComponentFromPlugins } from '@taucad/ui-core/utils/auth-plugin';
 import { Label } from '@taucad/ui/components/label';
 import { AdditionalField } from '#components/auth/additional-field.js';
 import { ProviderButtons } from '#components/auth/provider-buttons.js';
 import type { SocialLayout } from '#components/auth/provider-buttons.js';
 import { useAuthEmailDraft } from '#components/auth/auth-email-draft.js';
-import { authErrorMessage } from '#utils/auth-error.utils.js';
+import { authErrorMessage } from '@taucad/ui-core/utils/auth-error.utils';
 import { CheckEmail } from '#components/auth/check-email.js';
 
 export type SignUpProps = {
@@ -174,8 +174,8 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
   return (
     <Card className={cn('w-full max-w-sm', className)}>
       <CardHeader>
-        <CardTitle className='text-xl font-semibold'>
-          <h1>{localization.auth.signUp}</h1>
+        <CardTitle level={1} variant='title'>
+          {localization.auth.signUp}
         </CardTitle>
       </CardHeader>
 

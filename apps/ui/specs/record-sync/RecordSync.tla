@@ -84,8 +84,21 @@
 (*   MaxForced     how many forced reads the person may start. As built,   *)
 (*                 a forced read publishes even when its bytes are the     *)
 (*                 ones already shown.                                     *)
+(*   EagerWriter   FALSE: the writer issues its next write at any step.    *)
+(*                 TRUE: the writer as `recordSync` schedules it           *)
+(*                   ("digest" only). It issues its next write in the same *)
+(*                   task as the conflict read or read-back it waited for, *)
+(*                   or finds nothing left to write (`Forget`); and after  *)
+(*                   a lost reply it writes again only once a read that    *)
+(*                   started after the loss has completed, which it starts *)
+(*                   itself if no other party does (`Resolve`).            *)
+(*   Labelled      TRUE: `act` names each step, for the graph export and   *)
+(*                 the covering suite. FALSE: `act` is constant, so the    *)
+(*                 checked configurations pay nothing for it.              *)
 (*                                                                         *)
-(* Correspondence, as built (`view-store.ts`; README.md has the table):    *)
+(* Correspondence, as built (`view-store.ts` before `recordSync`, and the  *)
+(* entries and layout stores; README.md has that table and the table for   *)
+(* `record-sync.machine.ts`, whose transitions name these actions):        *)
 (*   IssueWrite     `write` -> `writeFileChecked` with `expected`          *)
 (*   FsDecide       the authority's checked precondition                   *)
 (*   ReplyApplied   `result.status !== 'conflict'`: publish, or refresh    *)
@@ -111,7 +124,7 @@ CONSTANTS Bytes,         \* the contents the file can hold
           MaxLost,       \* write replies that may be lost
           MaxForced,     \* forced reads the person may start
           Attribution, DropOnRead, DropOnAck, ReplyPublish, Refresh, Fence, EntryKey, OverlapOnComplete,
-          WaitLatestRead
+          WaitLatestRead, EagerWriter, Labelled
 
 ASSUME /\ InitialBytes \in Bytes
        /\ MaxWrites \in Nat /\ MaxEdits \in Nat /\ MaxForeign \in Nat
@@ -125,6 +138,9 @@ ASSUME /\ InitialBytes \in Bytes
        /\ EntryKey \in {"write", "digest"}
        /\ OverlapOnComplete \in BOOLEAN
        /\ WaitLatestRead \in BOOLEAN
+       /\ EagerWriter \in BOOLEAN
+       /\ EagerWriter => Attribution = "digest"
+       /\ Labelled \in BOOLEAN
 
 VARIABLES
   file,        \* the record file: its bytes; ghost: its version and who wrote that version
@@ -138,13 +154,21 @@ VARIABLES
   kept,        \* the own writes the store still holds for attribution
   overlap,     \* a read overlapped the write in flight
   dirty,       \* an edit waits to be written (the deferred patch)
-  readBack,    \* as built: the read-back of an unresolved write returned and the writer continues
+  readBack,    \* the read the writer waited for returned and the writer continues in the same task:
+               \* as built, the read-back of an unresolved write; with EagerWriter, a conflict read too
+  owed,        \* EagerWriter: a reply was lost and no read that started after the loss has completed
   phase,       \* "open" or "fenced"
   edits, foreign, lost, forced,  \* bounds
-  superseded   \* ghost: acknowledged writes the store has seen replaced
+  superseded,  \* ghost: acknowledged writes the store has seen replaced
+  act          \* the step's label, for the graph export; constant unless Labelled
 
-vars == <<file, wr, nextId, watch, echoes, rd, st, kept, overlap, dirty, readBack, phase, edits, foreign, lost, forced,
-          superseded>>
+vars == <<file, wr, nextId, watch, echoes, rd, st, kept, overlap, dirty, readBack, owed, phase, edits, foreign, lost,
+          forced, superseded, act>>
+
+Labels == {"Init", "Edit", "IssueWrite", "Resolve", "Forget", "FsDecide", "ReplyApplied", "ReplyConflict",
+           "LoseReply", "ForeignWrite", "WatchRead", "ForcedRead", "ServeLater", "CompleteRead", "CloseFence"}
+
+Label(l) == IF Labelled THEN l ELSE "-"
 
 Writes == 1..MaxWrites
 MaxVersion == MaxWrites + MaxForeign
@@ -152,7 +176,7 @@ Slots == Attribution \in {"slots2", "slots3"}
 
 NoWrite == [status |-> "unused", bytes |-> InitialBytes, expected |-> InitialBytes, fs |-> "pending", ver |-> 0]
 NoRead == [active |-> FALSE, purpose |-> "none", w |-> 0, bytes |-> InitialBytes, ver |-> 0,
-           author |-> "init", after |-> {}, mark |-> 1, forced |-> FALSE]
+           author |-> "init", after |-> {}, mark |-> 1, forced |-> FALSE, back |-> FALSE]
 
 WithStatus(s) == {w \in Writes : wr[w].status = s}
 InFlight == WithStatus("inFlight")
@@ -169,10 +193,11 @@ WriterBusy == InFlight # {} \/ (rd.active /\ rd.purpose \in {"refresh", "conflic
 Outstanding == InFlight \cup Lost \cup (Acked \ superseded)
 
 \* A read captures the file when the authority serves it: at its start here, or later in `ServeLater`.
-\* `after`, `mark` and `forced` stay as they were when the store started the read.
+\* `after`, `mark`, `forced` and `back` stay as they were when the store started the read. `back`: the
+\* read started while a read-back was owed, so its completion is that read-back.
 Capture(purpose, w) ==
   [active |-> TRUE, purpose |-> purpose, w |-> w, bytes |-> file.bytes, ver |-> file.ver,
-   author |-> file.author, after |-> Acked, mark |-> nextId, forced |-> FALSE]
+   author |-> file.author, after |-> Acked, mark |-> nextId, forced |-> FALSE, back |-> owed]
 
 Snapshot(origin, bytes, ver, author, excused) ==
   [origin |-> origin, bytes |-> bytes, ver |-> ver, author |-> author, excused |-> excused]
@@ -192,13 +217,15 @@ TypeOK ==
   /\ rd \in [active : BOOLEAN, purpose : {"none", "watch", "refresh", "conflict", "resolve"},
              w : 0..MaxWrites, bytes : Bytes, ver : 0..MaxVersion,
              author : {"init", "own", "foreign"}, after : SUBSET Writes, mark : 1..(MaxWrites + 1),
-             forced : BOOLEAN]
+             forced : BOOLEAN, back : BOOLEAN]
   /\ st \in [origin : {"none", "own", "foreign"}, bytes : Bytes, ver : 0..MaxVersion,
              author : {"init", "own", "foreign"}, excused : BOOLEAN]
   /\ kept \subseteq Writes
   /\ overlap \in BOOLEAN
   /\ dirty \in BOOLEAN
   /\ readBack \in BOOLEAN
+  /\ owed \in BOOLEAN
+  /\ act \in Labels \cup {"-"}
   /\ phase \in {"open", "fenced"}
   /\ edits \in 0..MaxEdits
   /\ foreign \in 0..MaxForeign
@@ -218,6 +245,8 @@ Init ==
   /\ overlap = FALSE
   /\ dirty = FALSE
   /\ readBack = FALSE
+  /\ owed = FALSE
+  /\ act = Label("Init")
   /\ phase = "open"
   /\ edits = 0
   /\ foreign = 0
@@ -233,7 +262,8 @@ Edit ==
   /\ edits < MaxEdits
   /\ dirty' = TRUE
   /\ edits' = edits + 1
-  /\ UNCHANGED <<file, wr, nextId, watch, echoes, rd, st, kept, overlap, readBack, phase, foreign, lost, forced, superseded>>
+  /\ UNCHANGED <<owed, file, wr, nextId, watch, echoes, rd, st, kept, overlap, readBack, phase, foreign, lost, forced, superseded>>
+  /\ act' = Label("Edit")
 
 \* The writer sends a checked write of new bytes, expecting the bytes it last published.
 IssueWrite(b) ==
@@ -244,6 +274,7 @@ IssueWrite(b) ==
   /\ nextId <= MaxWrites
   /\ b # st.bytes
   /\ kept \cap Lost # {} => (~Slots \/ readBack)  \* as built, an unresolved write is read back first
+  /\ ~owed                                        \* EagerWriter: and so it is in `recordSync`
   /\ wr' = [wr EXCEPT ![nextId] = [status |-> "inFlight", bytes |-> b, expected |-> st.bytes,
                                    fs |-> "pending", ver |-> 0]]
   /\ nextId' = nextId + 1
@@ -253,31 +284,37 @@ IssueWrite(b) ==
   /\ overlap' = FALSE
   /\ dirty' = FALSE
   /\ readBack' = FALSE
-  /\ UNCHANGED <<file, watch, echoes, rd, st, phase, edits, foreign, lost, forced, superseded>>
+  /\ UNCHANGED <<owed, file, watch, echoes, rd, st, phase, edits, foreign, lost, forced, superseded>>
+  /\ act' = Label("IssueWrite")
 
-\* As built, a write whose reply was lost is read back before the next write.
+\* A write whose reply was lost is read back before the next write: as built, and with EagerWriter.
+\* With EagerWriter a read that started after the loss is that read-back, and the writer waits for it.
 Resolve ==
-  /\ Slots
+  /\ Slots \/ EagerWriter
   /\ dirty
   /\ Observed
   /\ ~WriterBusy
   /\ ~readBack
   /\ phase = "open"
-  /\ kept \cap Lost # {}
-  /\ rd' = Capture("resolve", 0)
-  /\ UNCHANGED <<file, wr, nextId, watch, echoes, st, kept, overlap, dirty, readBack, phase,
+  /\ IF Slots THEN kept \cap Lost # {} ELSE owed
+  /\ rd' = IF EagerWriter /\ rd.active /\ rd.back THEN [rd EXCEPT !.purpose = "resolve"] ELSE Capture("resolve", 0)
+  /\ UNCHANGED <<owed, file, wr, nextId, watch, echoes, st, kept, overlap, dirty, readBack, phase,
                  edits, foreign, lost, forced, superseded>>
+  /\ act' = Label("Resolve")
 
 \* As built, the read-back returned and the writer forgets the unresolved write in the same task. It
 \* then issues the next write (`IssueWrite`) or finds nothing left to write, which is this step.
+\* With EagerWriter the entry of the lost write stays (target rule 3), and the step also follows a
+\* conflict read: the bytes it read already hold the person's change.
 Forget ==
   /\ readBack
   /\ ~WriterBusy
   /\ phase = "open"
-  /\ kept' = kept \ Lost
+  /\ kept' = IF Slots THEN kept \ Lost ELSE kept
   /\ readBack' = FALSE
   /\ dirty' = FALSE
-  /\ UNCHANGED <<file, wr, nextId, watch, echoes, rd, st, overlap, phase, edits, foreign, lost, forced, superseded>>
+  /\ UNCHANGED <<owed, file, wr, nextId, watch, echoes, rd, st, overlap, phase, edits, foreign, lost, forced, superseded>>
+  /\ act' = Label("Forget")
 
 \* The authority decides a checked write: applied when the file still holds the expected bytes.
 \* A write whose reply was lost can be decided at any later step, or never.
@@ -290,7 +327,8 @@ FsDecide(w) ==
             /\ watch' = TRUE
        ELSE /\ wr' = [wr EXCEPT ![w].fs = "refused"]
             /\ UNCHANGED <<file, watch>>
-  /\ UNCHANGED <<nextId, echoes, rd, st, kept, overlap, dirty, readBack, phase, edits, foreign, lost, forced, superseded>>
+  /\ UNCHANGED <<owed, nextId, echoes, rd, st, kept, overlap, dirty, readBack, phase, edits, foreign, lost, forced, superseded>>
+  /\ act' = Label("FsDecide")
 
 \* The applied reply arrives. Any read still in flight is superseded. When no read overlapped the
 \* write, the reply publishes the write as the store's own; otherwise a refresh read starts.
@@ -309,7 +347,8 @@ ReplyApplied(w) ==
              ELSE Snapshot("own", wr[w].bytes, wr[w].ver, "own", FALSE)
   \* The refresh read starts after this acknowledgement: other bytes in it supersede `w` too.
   /\ rd' = IF overlap /\ (Slots \/ Refresh) THEN [Capture("refresh", w) EXCEPT !.after = @ \cup {w}] ELSE NoRead
-  /\ UNCHANGED <<file, nextId, watch, echoes, overlap, dirty, readBack, phase, edits, foreign, lost, forced>>
+  /\ UNCHANGED <<owed, file, nextId, watch, echoes, overlap, dirty, readBack, phase, edits, foreign, lost, forced>>
+  /\ act' = Label("ReplyApplied")
 
 \* The conflict reply arrives: nothing was written, so the entry goes and the store reads again.
 \* Keyed by digest, the entries of other writes of the same bytes go with it.
@@ -323,7 +362,8 @@ ReplyConflict(w) ==
                ELSE kept \ {w}
   /\ dirty' = TRUE
   /\ rd' = Capture("conflict", w)
-  /\ UNCHANGED <<file, nextId, watch, echoes, st, overlap, readBack, phase, edits, foreign, lost, forced, superseded>>
+  /\ UNCHANGED <<owed, file, nextId, watch, echoes, st, overlap, readBack, phase, edits, foreign, lost, forced, superseded>>
+  /\ act' = Label("ReplyConflict")
 
 \* The reply is lost (a dropped connection, an abort after sending): the write may or may not land.
 LoseReply(w) ==
@@ -333,7 +373,9 @@ LoseReply(w) ==
   /\ wr' = [wr EXCEPT ![w].status = "lost"]
   /\ lost' = lost + 1
   /\ dirty' = TRUE
+  /\ owed' = EagerWriter
   /\ UNCHANGED <<file, nextId, watch, echoes, rd, st, kept, overlap, readBack, phase, edits, foreign, forced, superseded>>
+  /\ act' = Label("LoseReply")
 
 \* Another party writes the file. Its bytes may equal bytes this store wrote.
 ForeignWrite(b) ==
@@ -342,7 +384,8 @@ ForeignWrite(b) ==
   /\ file' = [bytes |-> b, ver |-> file.ver + 1, author |-> "foreign"]
   /\ watch' = TRUE
   /\ foreign' = foreign + 1
-  /\ UNCHANGED <<wr, nextId, echoes, rd, st, kept, overlap, dirty, readBack, phase, edits, lost, forced, superseded>>
+  /\ UNCHANGED <<owed, wr, nextId, echoes, rd, st, kept, overlap, dirty, readBack, phase, edits, lost, forced, superseded>>
+  /\ act' = Label("ForeignWrite")
 
 \* A read starts and supersedes the read in flight. A forced read differs only when it completes.
 StartRead(isForced) ==
@@ -351,12 +394,13 @@ StartRead(isForced) ==
   \* As built, a superseded `read()` still returns to the write that awaited it.
   /\ readBack' = (Slots /\ rd.active /\ rd.purpose = "resolve")
   \* Target rule 6: the writer waits for the latest read, not only for the read its reply started.
-  /\ LET next == IF WaitLatestRead /\ ~Slots /\ rd.active /\ rd.purpose \in {"refresh", "conflict"}
+  /\ LET waited == {"refresh", "conflict"} \cup (IF EagerWriter THEN {"resolve"} ELSE {})
+         next == IF WaitLatestRead /\ ~Slots /\ rd.active /\ rd.purpose \in waited
                     THEN Capture(rd.purpose, rd.w)
                     ELSE Capture("watch", 0)
      IN rd' = [next EXCEPT !.forced = isForced]
   /\ overlap' = (overlap \/ InFlight # {})
-  /\ UNCHANGED <<file, wr, nextId, st, kept, dirty, phase, edits, foreign, lost, superseded>>
+  /\ UNCHANGED <<owed, file, wr, nextId, st, kept, dirty, phase, edits, foreign, lost, superseded>>
 
 \* A change event is delivered, once or again, and starts a read.
 WatchRead ==
@@ -364,6 +408,7 @@ WatchRead ==
      \/ echoes < MaxEcho /\ echoes' = echoes + 1 /\ UNCHANGED watch
   /\ StartRead(FALSE)
   /\ UNCHANGED forced
+  /\ act' = Label("WatchRead")
 
 \* The person retries the read (`retryRead`). As built, its completion publishes even when the
 \* bytes are the ones already shown.
@@ -372,14 +417,16 @@ ForcedRead ==
   /\ forced' = forced + 1
   /\ StartRead(TRUE)
   /\ UNCHANGED <<watch, echoes>>
+  /\ act' = Label("ForcedRead")
 
 \* The authority serves a read at any point between its start and its completion.
 ServeLater ==
   /\ rd.active
   /\ <<rd.bytes, rd.ver>> # <<file.bytes, file.ver>>
   /\ rd' = [rd EXCEPT !.bytes = file.bytes, !.ver = file.ver, !.author = file.author]
-  /\ UNCHANGED <<file, wr, nextId, watch, echoes, st, kept, overlap, dirty, readBack, phase,
+  /\ UNCHANGED <<owed, file, wr, nextId, watch, echoes, st, kept, overlap, dirty, readBack, phase,
                  edits, foreign, lost, forced, superseded>>
+  /\ act' = Label("ServeLater")
 
 \* The latest read completes: the store attributes its bytes and publishes them.
 CompleteRead ==
@@ -410,11 +457,14 @@ CompleteRead ==
                 THEN st
                 ELSE Snapshot(IF own THEN "own" ELSE "foreign", b, rd.ver, rd.author, own /\ excused)
      /\ superseded' = superseded \cup {w \in rd.after : wr[w].bytes # b}
-  /\ readBack' = (Slots /\ rd.purpose = "resolve")
+  /\ readBack' = \/ (Slots /\ rd.purpose = "resolve")
+                 \/ (EagerWriter /\ rd.purpose \in {"conflict", "resolve"})
+  /\ owed' = (owed /\ ~rd.back)
   /\ rd' = NoRead
   \* Target: a read that completes while a write is in flight overlaps it too. As built, only a read's start does.
   /\ overlap' = (overlap \/ (~Slots /\ OverlapOnComplete /\ InFlight # {}))
   /\ UNCHANGED <<file, wr, nextId, watch, echoes, dirty, phase, edits, foreign, lost, forced>>
+  /\ act' = Label("CompleteRead")
 
 \* The view closes: in the target the store publishes nothing more and, with the fence, writes nothing
 \* more. As built, a write reply that arrives after the close still publishes, which the model does not follow.
@@ -423,8 +473,9 @@ CloseFence ==
   /\ ~readBack
   /\ phase' = "fenced"
   /\ rd' = NoRead
-  /\ UNCHANGED <<file, wr, nextId, watch, echoes, st, kept, overlap, dirty, readBack,
+  /\ UNCHANGED <<owed, file, wr, nextId, watch, echoes, st, kept, overlap, dirty, readBack,
                  edits, foreign, lost, forced, superseded>>
+  /\ act' = Label("CloseFence")
 
 Next ==
   \/ Edit
@@ -448,6 +499,7 @@ Spec == Init /\ [][Next]_vars
 \* delivery of a pending change event, not a repeated or late delivery.
 Fairness ==
   /\ WF_vars(\E b \in Bytes : IssueWrite(b))
+  /\ WF_vars(Resolve)
   /\ WF_vars(watch /\ WatchRead /\ ~watch')
   /\ WF_vars(CompleteRead)
   /\ \A w \in Writes :

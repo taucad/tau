@@ -251,7 +251,7 @@ describe('validateTags()', () => {
         ],
       }),
     ).toEqual([
-      'fixture/unknown-lane: unknown tag "ci:packaged" (ci: must be one of browser, standalone, quarantined, shell, desktop)',
+      'fixture/unknown-lane: unknown tag "ci:packaged" (ci: must be one of browser, standalone, quarantined, shell, desktop, native-hosts)',
       'fixture/repeated-lane: duplicate tag "ci:desktop"',
     ]);
   });

@@ -19,7 +19,9 @@ export type ShellNetwork = Readonly<{ domains: readonly string[] }>;
  * The filesystem one launch may touch, as absolute native paths the host has already resolved.
  *
  * `writable` includes the private HOME and temporary roots. `readOnly` names paths inside a readable or writable root
- * that the launch may read but never write or replace, such as a checkout's records. `denied` wins over all three. The
+ * that the launch may read but never write or replace, such as a checkout's records. `denied` wins over all three,
+ * except that a readable or read-only path strictly inside a denied directory stays readable on both platforms, the
+ * rest of that directory still denied and the path itself still unwritable (the git view's `.git/objects`). The
  * provider always adds the baseline read-deny set ({@link shellBaselineDenied}) to it, so a host that forgets an entry
  * cannot open it. `directories` names the protected paths that are directories when present (the path registry's
  * directory rows), so a Linux launch stands in for an absent one with an empty directory rather than a file.

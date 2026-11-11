@@ -448,3 +448,35 @@ it('should reject inherited purpose names at the runtime boundary', () => {
     code: 'PURPOSE',
   });
 });
+
+it("should parse a provider fact's declared call kind, absent from an older API, and refuse any other", () => {
+  /* Untyped, so a call kind outside the vocabulary reaches the parser as a JavaScript caller would send it. */
+  const provider = (callKind?: string): Readonly<Record<string, unknown>> => ({
+    ...fixture(),
+    source: { kind: 'invocation', invocation: 'call-1', digest },
+    semantic: { kind: 'provider', id: 'call-1' },
+    payload: {
+      plane: 'summary',
+      fact: {
+        kind: 'provider',
+        logicalCall: 'logical-1',
+        attempt: null,
+        billing: null,
+        purpose: 'helper',
+        ...(callKind === undefined ? {} : { callKind }),
+        requestedModel: null,
+        resolvedModel: null,
+        provider: null,
+        response: null,
+        firstOutput: null,
+        stop: 'stop',
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: null, missing: 'none' },
+      },
+    },
+  });
+
+  for (const callKind of ['run', 'helper', 'direct', undefined]) {
+    expect(parse(provider(callKind)).ok).toBe(true);
+  }
+  expect(parse(provider('chat')).ok).toBe(false);
+});

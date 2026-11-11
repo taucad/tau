@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { memo, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { Check } from 'lucide-react';
@@ -106,10 +107,10 @@ export const ChatKernelSelector = memo(function ({
             <div className='space-y-2'>
               <div className='flex items-center gap-2'>
                 <SvgIcon id={item.id} className='size-5 shrink-0' />
-                <h4 className='flex items-center gap-1.5 text-sm font-semibold'>
+                <Heading level={4} variant='label' className='flex items-center gap-1.5'>
                   {item.name}
                   <KernelCommercialBadge kernelId={item.id} />
-                </h4>
+                </Heading>
               </div>
               <p className='text-sm text-muted-foreground'>{item.longDescription}</p>
               <p className='text-xs text-muted-foreground'>Best for: {item.recommended}</p>

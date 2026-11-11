@@ -76,6 +76,8 @@ describe('monthlyCreditsFromBalance', () => {
   it('should agree with the advertised Pro grant', () => {
     const pro = tauPlanCatalog.find((entry) => entry.id === 'pro');
     const allotment = (monthlyPlanCreditAtomsByTier.pro ?? 0n) / creditAtomsPerCredit;
-    expect(pro?.features).toContain(`${allotment.toLocaleString('en-US')} credits every month`);
+    expect(pro?.features.map((feature) => feature.label)).toContain(
+      `${allotment.toLocaleString('en-US')} credits every month`,
+    );
   });
 });

@@ -29,7 +29,7 @@ describe('package exports', () => {
       './icons/generated/payment-sprite.svg': './src/icons/generated/payment-sprite.svg',
       './package.json': './package.json',
     });
-    expect(Object.keys(moduleExports)).toHaveLength(28);
+    expect(Object.keys(moduleExports)).toHaveLength(30);
   });
 
   it('points every export at a file that exists', () => {

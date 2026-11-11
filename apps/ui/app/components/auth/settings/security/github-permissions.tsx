@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Switch } from '@taucad/ui/components/switch';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import { SettingsRow } from '#components/settings/settings-item.js';
 import { LinkedAccount } from '#components/auth/settings/security/linked-account.js';
 import { getGithubGistCapability, setGithubGistEnabled } from '#lib/share-providers.js';
@@ -39,8 +40,9 @@ export function GithubPermissions(): React.JSX.Element {
         title='Gist sharing'
         description={
           capability.isPending ? (
-            <span role='status' aria-busy='true'>
-              Checking GitHub…
+            <span role='status' aria-busy='true' className='block py-0.5'>
+              <span className='sr-only'>Checking GitHub…</span>
+              <Skeleton aria-hidden='true' className='h-3 w-48' />
             </span>
           ) : capability.error ? (
             <span role='alert'>GitHub access could not be checked.</span>

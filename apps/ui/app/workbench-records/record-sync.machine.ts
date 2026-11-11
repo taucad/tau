@@ -480,7 +480,8 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
         context.published.refusal === undefined
       ) {
         /* An unsaved restore ends on the record its conflict read showed, which the read held while the cycle ran. */
-        patch.intended = baseOf(context.published.record, context.intended);
+        /* A lost reply may have landed: like an edit, it holds what it wrote until the read-back shows otherwise. */
+        patch.intended = context.readBack === 'owed' ? cycle.next : baseOf(context.published.record, context.intended);
       }
     }
     patch.deferred = deferred;

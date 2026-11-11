@@ -1037,6 +1037,25 @@ describe('recordSync', () => {
       await flush();
 
       expect(store.context().origin).toBe('own');
+      // The read-back shows what the restore wrote, and the next edit diffs from it.
+      expect(store.context().intended).toEqual(store.context().published.record);
+      expect(store.writes).toHaveLength(1);
+    });
+
+    it('should end on the file as read back when a restore whose reply was lost never landed', async () => {
+      const store = harness({ file: 'name=seed' });
+      await store.observe();
+      const restored = store.commands.restore({ name: 'saved' }, bytesOf('name=seed'));
+      store.writes[0]?.settle(lostReply());
+      await flush();
+
+      expect(await restored).toBe(false);
+      // The host reads the file again after a restore that did not save.
+      void store.commands.read(true);
+      await store.serve();
+
+      expect(store.published().at(-1)).toEqual(['foreign', 'name=seed']);
+      expect(store.context().intended).toEqual(store.context().published.record);
       expect(store.writes).toHaveLength(1);
     });
 

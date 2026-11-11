@@ -41,8 +41,9 @@ export type RecordPolicy<T, P> = Readonly<{
    * diff, so a later edit carries only the fields it changes. The machine applies it, through one helper (`baseOf`),
    * wherever it sets that base from the record shown, and only while that record is absent: a foreign read
    * (`CompleteRead`), a saved edit cycle in `settle` (a write that changed nothing, or an overlapped write whose
-   * refresh read found the file gone), and a saved reset or restore in `settle` (whose base is then the record it
-   * wrote). For a kind whose `merge` onto an absent file needs every field, leave it unset.
+   * refresh read found the file gone), a saved reset or restore in `settle` (whose base is then the record it
+   * wrote), and a restore that ended unsaved with its reply received (whose base is then the record its conflict read
+   * showed). For a kind whose `merge` onto an absent file needs every field, leave it unset.
    */
   keepsBaseOnAbsence?: true;
 }>;

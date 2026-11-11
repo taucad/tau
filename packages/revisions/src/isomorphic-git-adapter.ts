@@ -55,6 +55,7 @@ import {
 } from '#revision-headers.js';
 import type { RevisionTrailer } from '#revision-headers.js';
 import { walkRevisionLog } from '#revision-log-order.js';
+import { numberVersions, versionNumberFor } from '#version-numbers.js';
 import {
   pktEncoder,
   pktLine,
@@ -1389,7 +1390,15 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       note: trailer.note,
       actor: trailer.actor,
       createdAt: decoded.tagger.seconds * 1000,
+      ...(trailer.number === undefined ? {} : { number: trailer.number }),
     });
+  };
+
+  /* Every named version, by name, each with the number it reads as (B6). */
+  const listTags = async (): Promise<readonly RevisionTag[]> => {
+    const names = await listRefs({ fs, gitdir, filepath: tagRefPrefix });
+    const tags = await Promise.all(names.toSorted().map(async (name) => readTagRef(name)));
+    return numberVersions(tags.filter((entry) => entry !== undefined));
   };
 
   const tryResolve = async (ref: string): Promise<string | undefined> => {
@@ -2145,6 +2154,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         throw new RevisionPortError('UNKNOWN_REVISION', 'The revision this name would point at is not in the store.');
       }
       const createdAt = input.createdAt ?? Date.now();
+      const number = input.number ?? versionNumberFor(await listTags(), input.name);
       const object = encodeTag({
         objectFormat,
         object: input.revisionId,
@@ -2154,6 +2164,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           name: input.name,
           note: input.note,
           actor: input.actor,
+          number,
         }),
       });
       /* The bytes `encodeTag` hashed, stored as they are: one encoder for both legs. */
@@ -2167,14 +2178,11 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         note: input.note,
         actor: input.actor,
         createdAt,
+        number,
       });
     },
 
-    listTags: async (): Promise<readonly RevisionTag[]> => {
-      const names = await listRefs({ fs, gitdir, filepath: tagRefPrefix });
-      const tags = await Promise.all(names.toSorted().map(async (name) => readTagRef(name)));
-      return Object.freeze(tags.filter((entry) => entry !== undefined));
-    },
+    listTags,
 
     deleteTag: async (name: string): Promise<void> => {
       await withRefLock(`${filesystem.id}:${gitdir}:${tagRefPrefix}/${name}`, async () => {

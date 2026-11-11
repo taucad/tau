@@ -37,7 +37,13 @@ import { ProjectAccessService } from '@taucad/api-projects/collaboration/project
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { ProjectRole } from '@taucad/api-projects/collaboration/project-access.service';
 import { commercialEntitlementsKey } from '@taucad/api-projects/entitlements/commercial-entitlements';
-import { authorshipRefusals, pktLine, repositoryStoreKey } from '@taucad/api-git-core/git.constants';
+import {
+  authorshipRefusals,
+  pktLine,
+  repositoryStoreKey,
+  versionNumberRefusals,
+  versionNumberTakenMarker,
+} from '@taucad/api-git-core/git.constants';
 import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
@@ -1032,6 +1038,59 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     } finally {
       state.origin = 'github';
     }
+  }, 120_000);
+
+  /**
+   * B6 (Q6, I6; Revisions Policy rule 19): a version's number, in its tag's
+   * `Tau-Tag` trailer, is held by one version on Tau Cloud. A second version
+   * with that number is refused behind the marker the client renumbers on, and
+   * a backed-up version's number never changes.
+   */
+  it('refuses a version whose number another version holds, and a change to a backed-up number', async () => {
+    const clone = path.join(workspace, 'version-numbers');
+    await gitOk(['clone', remoteFor(callers.writer.token), clone], workspace);
+    /** One annotated version tag on the clone's head, recording `number`. */
+    const version = async (name: string, number: number): Promise<void> => {
+      await gitOk(
+        [
+          'tag',
+          '--force',
+          '-a',
+          name,
+          '-m',
+          name,
+          '-m',
+          `Tau-Tag: ${JSON.stringify({ version: 1, note: name, number })}`,
+        ],
+        clone,
+      );
+    };
+    const push = async (name: string) => runGit(['push', '--force', 'origin', `refs/tags/${name}`], clone);
+
+    await version('b6-hinge', 4);
+    const first = await push('b6-hinge');
+    expect(first.code, first.stderr).toBe(0);
+
+    await version('b6-lid', 4);
+    const taken = await push('b6-lid');
+    expect(taken.code).not.toBe(0);
+    expect(taken.stderr).toContain(`${versionNumberTakenMarker} — refs/tags/b6-lid names V4`);
+    expect(taken.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
+    expect(await advertised()).not.toContain('refs/tags/b6-lid');
+
+    /* The device's renumbered version: the next free number is backed up. */
+    await version('b6-lid', 5);
+    const renumbered = await push('b6-lid');
+    expect(renumbered.code, renumbered.stderr).toBe(0);
+
+    /* A backed-up number never changes. */
+    await version('b6-hinge', 6);
+    const changed = await push('b6-hinge');
+    expect(changed.code).not.toBe(0);
+    expect(changed.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_CHANGED);
+    const advertisement = await advertised();
+    expect(advertisement).toContain('refs/tags/b6-hinge');
+    expect(advertisement).toContain('refs/tags/b6-lid');
   }, 120_000);
 
   /** Ruling P55: an account with no relation to the project is told it does not exist. */

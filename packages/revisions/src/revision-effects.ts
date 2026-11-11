@@ -144,6 +144,8 @@ import { createSyncQueue } from '#sync-queue.js';
 import { createOpsLog, opsRefName, opsRefPrefix, undoCandidates } from '#ops-ref.js';
 import { restoreMachine } from '#restore.machine.js';
 import { readRevisionLog } from '#revision-verbs.js';
+import { isVersionNumberRefusal } from '#refusal-markers.js';
+import { renumberUnpushedVersions } from '#version-numbers.js';
 import { syncMachine } from '#sync.machine.js';
 import {
   generatedGitattributesContent,
@@ -170,7 +172,7 @@ import type {
   SyncRemoteMovesActorInput,
   SyncWritePendingActorInput,
 } from '#sync.machine.js';
-import type { SyncFacet, SyncQueueEntry, SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
+import type { SyncFacet, SyncQueueEntry, SyncQueueRecord, SyncRefOutcome, VersionRenumbering } from '#sync.types.js';
 import type {
   RestoreActors,
   RestoreApplyPlanActorOutput,
@@ -5487,24 +5489,54 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
         }
         const offeredHistory = history.filter((name) => !unintegrated.has(name));
+        let renumbered: readonly VersionRenumbering[] = [];
 
         if (offeredHistory.length > 0) {
           signal.throwIfAborted();
           try {
             /* The one push a `pagehide` re-send may carry (D28, S41, review 2
              * R3): the host's recorder is armed for exactly this call. */
-            const offerHistory = async (): Promise<RevisionPushResult> =>
+            const offerHistory = async (pushSession: RevisionPushSession): Promise<RevisionPushResult> =>
               port.push({
                 remote: input.remote,
                 repositoryUrl: input.repositoryUrl,
                 signal,
                 atomic: true,
                 refs: offeredHistory.map((name) => offerOf(name, input.leases)),
-                session,
+                session: pushSession,
               });
             // An explicit GitHub gesture must never arm a pagehide resend.
-            const pushed = await (input.explicit === true ? offerHistory() : recordHistoryPush(offerHistory));
-            results.push(...pushed.refs.map((entry) => outcomeOf(entry, localHeads)));
+            const first =
+              input.explicit === true ? offerHistory(session) : recordHistoryPush(async () => offerHistory(session));
+            /* B6: Tau Cloud refused a version whose number another version
+             * holds — per ref on the browser leg, thrown on the native one.
+             * Only this device has seen its provisional number, so its own
+             * versions that are not backed up take the next free numbers and
+             * the history set is offered once more, on a fresh advertisement
+             * because the remote moved. */
+            let taken: unknown;
+            let pushed = await first.catch((error: unknown) => {
+              if (!(error instanceof RevisionPortError && isVersionNumberRefusal(error.message))) {
+                throw error;
+              }
+              taken = error;
+              return undefined;
+            });
+            if (
+              taken !== undefined ||
+              pushed?.refs.some((entry) => entry.status === 'rejected' && isVersionNumberRefusal(entry.reason)) === true
+            ) {
+              renumbered = await renumberUnpushedVersions(port, { remote: input.remote, signal });
+              if (renumbered.length > 0) {
+                for (const tag of await port.listRefs('refs/tags')) {
+                  localHeads.set(tag.name, String(tag.head));
+                }
+                pushed = await offerHistory({});
+              } else if (pushed === undefined) {
+                throw taken;
+              }
+            }
+            results.push(...(pushed?.refs ?? []).map((entry) => outcomeOf(entry, localHeads)));
           } catch (error) {
             /* A refusal of the whole push — a credential, a plan, a missing
              * repository, the network — is the scheduler's to classify (its R5
@@ -5616,6 +5648,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           ...(overQuota === undefined ? {} : { overQuota }),
           ...(quotaMessage === undefined ? {} : { quotaMessage }),
           ...(quotaStorage === undefined ? {} : { quotaStorage }),
+          ...(renumbered.length === 0 ? {} : { renumbered }),
         };
       }),
 

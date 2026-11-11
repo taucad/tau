@@ -473,6 +473,14 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
         }
       } else if (cycle.replaces !== undefined) {
         deferred = deferred === undefined ? cycle.replaces : policy.combine(cycle.replaces, deferred);
+      } else if (
+        cycle.kind === 'restore' &&
+        latest &&
+        deferred === undefined &&
+        context.published.refusal === undefined
+      ) {
+        /* An unsaved restore ends on the record its conflict read showed, which the read held while the cycle ran. */
+        patch.intended = baseOf(context.published.record, context.intended);
       }
     }
     patch.deferred = deferred;

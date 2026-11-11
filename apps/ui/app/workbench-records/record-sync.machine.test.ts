@@ -994,6 +994,8 @@ describe('recordSync', () => {
       expect(await restored).toBe(false);
       expect(store.writes).toHaveLength(1);
       expect(store.published().at(-1)).toEqual(['foreign', 'name=theirs']);
+      // The record it ends on is the foreign one: the next edit diffs from what the conflict read showed.
+      expect(store.context().intended).toEqual(store.context().published.record);
       expect(store.context().deferred).toBeUndefined();
       expect(await store.commands.flush()).toBe(true);
       expect(store.writes).toHaveLength(1);

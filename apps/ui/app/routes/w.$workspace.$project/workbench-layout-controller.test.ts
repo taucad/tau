@@ -1104,6 +1104,51 @@ describe('workbench layout store on recordSync (G2b)', () => {
     }
   });
 
+  it("should end a restore that conflicts on the other window's layout, so the next edit keeps that window's change", async () => {
+    const memory = memoryFiles();
+    const store = createWorkbenchLayoutStore({
+      root: '/root',
+      files: memory.files,
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await store.read(true);
+      const saved: WorkbenchLayout = {
+        ...layout(),
+        viewer: { kind: 'group', tabs: [{ kind: 'view', view: 'v-bbbb1111' }] },
+      };
+      const theirs: WorkbenchLayout = {
+        ...layout(),
+        workbench: {
+          kind: 'group',
+          tabs: [
+            { kind: 'pane', pane: 'parameters' },
+            { kind: 'file', path: 'main.ts' },
+          ],
+        },
+      };
+      const releaseWrite = memory.delayNextWrite();
+      const restored = store.restore(saved, store.snapshot().digest, () => true);
+      await vi.waitFor(() => {
+        expect(memory.writes).toHaveBeenCalledOnce();
+      });
+      // Another window writes while the restore's checked write is on the wire.
+      memory.set(theirs);
+      releaseWrite();
+      expect(await restored).toBe(false);
+      expect(store.intendedLayout()).toEqual(store.snapshot().layout);
+      const current = store.intendedLayout()!;
+      expect(await store.edit({ ...current, lanes: { ...current.lanes, chat: false } })).toBe(true);
+      expect(workbenchRecords.layout.read(memory.get()!)).toEqual({
+        status: 'current',
+        record: { ...theirs, lanes: { chat: false, workbench: true } },
+      });
+    } finally {
+      store.dispose();
+    }
+  });
+
   it('should show each publication as the machine makes it, so the diff base never runs ahead of what is shown', async () => {
     const memory = memoryFiles({ ...layout(), lanes: { chat: false, workbench: true } });
     const seen: Array<{ digest: string; bytes: Uint8Array<ArrayBuffer> | null; agrees: boolean }> = [];

@@ -491,6 +491,37 @@ describe('useRevisions', () => {
     expect(result.current.line).toEqual({ kind: 'unborn', name: 'main' });
     expect(result.current.isDirty).toBe(true);
   });
+
+  /* A5, fixture B4: a turn's base cut reads as the person's autosave, old trailer and new; the result is unchanged. */
+  it('titles a turn base cut Autosave, by the person, and carries turnCut to its card', async () => {
+    setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
+    const turn = { turnId: 'u1', trigger: 'turn', summary: 'Agent turn u1' } as const;
+    revisionStatusHarness.rows = [
+      row({ ...turn, revisionId: 'rev-2', revisionNumber: 2, source: 'agent', actor: 'agent', turnCut: 'result' }),
+      /* `readRevisionLog` reads every base cut as `source: 'user'`, whatever an earlier build recorded. */
+      row({ ...turn, revisionId: 'rev-1', revisionNumber: 1, source: 'user', actor: 'user-1', turnCut: 'base' }),
+    ];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-2',
+    };
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(2);
+    });
+
+    /* A2: a single-person project shows no who line; the base cut is still the person's own. */
+    expect(
+      result.current.revisions.map(({ summary, actor, isYours, turnCut }) => ({ summary, actor, isYours, turnCut })),
+    ).toStrictEqual([
+      { summary: 'Agent change', actor: 'Agent', isYours: undefined, turnCut: 'result' },
+      { summary: 'Autosave', actor: '', isYours: true, turnCut: 'base' },
+    ]);
+    /* The turn's own save is its result, never the person's base. */
+    expect(result.current.byTurnId.get('u1')?.revisionId).toBe('rev-2');
+  });
 });
 
 describe('useRevisions after a mint (E6)', () => {

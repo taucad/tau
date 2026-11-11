@@ -129,8 +129,9 @@ describe('the commit trailer, version 2 (B1)', () => {
 
     it.each(['actor', 'capture', 'via'])('reads a record with no %s as a commit Tau did not record', (field) => {
       const record = written();
-      const provenance = { ...(record['provenance'] as Record<string, unknown>) };
-      delete provenance[field];
+      const provenance = Object.fromEntries(
+        Object.entries(record['provenance'] as Record<string, unknown>).filter(([key]) => key !== field),
+      );
 
       expect(parseRevisionCommitMessage(messageWith({ ...record, provenance }))).toBeUndefined();
     });

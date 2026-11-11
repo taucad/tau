@@ -170,7 +170,7 @@ describe.runIf(gitToolchainOnPath)('no machine identity enters a commit', () => 
       encoding: 'utf8',
     });
     const pseudonym = hostRevisionActor()({ runId: undefined, trigger: 'save' });
-    const anonymousId = pseudonym?.kind === 'user' ? pseudonym.id : '';
+    const anonymousId = pseudonym.kind === 'user' ? pseudonym.id : '';
     expect(anonymousId).toMatch(/^anon:/u);
     expect(authors).toContain(`Anonymous|${anonymousId}@users.noreply.tau.new`);
     expect(authors).toContain('Desk Person|usr_desktop1@users.noreply.tau.new');

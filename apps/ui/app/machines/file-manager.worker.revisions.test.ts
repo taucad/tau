@@ -190,6 +190,8 @@ const harness = (
         frames.push(data);
       });
       channel.port2.start();
+      /* The page names who its revisions are by before anything else (B1): a capture with no person is refused. */
+      channel.port2.postMessage({ command: 'setActor', actor: { kind: 'user', id: 'usr_page', name: 'Page Person' } });
       const client: Client = {
         port: channel.port2,
         frames,

@@ -223,7 +223,7 @@ describe.runIf(gitToolchainOnPath)('a Node host records the account it is handed
     const line = await closeCut(workspaceRoot, 'project-pseudonym');
     const person = hostRevisionActor()({ runId: undefined, trigger: 'close' });
     expect(person).toMatchObject({ kind: 'user', name: 'Anonymous', anonymous: true });
-    const id = person?.kind === 'user' ? person.id : '';
+    const id = person.kind === 'user' ? person.id : '';
     expect(id).toMatch(/^anon:[\da-f]{8}$/u);
     /* One device, one pseudonym: a second host on it records the same one. */
     expect(hostRevisionActor()({ runId: undefined, trigger: 'save' })).toStrictEqual(person);

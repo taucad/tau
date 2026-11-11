@@ -201,7 +201,7 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
     const person = hostRevisionActor()({ runId: undefined, trigger: 'save' });
     expect(person).toMatchObject({ kind: 'user', name: 'Anonymous', anonymous: true });
     expect(git(bare, ['log', '-1', '--format=%an|%ae', saved])).toBe(
-      person?.kind === 'user' ? `Anonymous|${person.id}@users.noreply.tau.new` : '',
+      person.kind === 'user' ? `Anonymous|${person.id}@users.noreply.tau.new` : '',
     );
   }, 120_000);
 

@@ -63,6 +63,7 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
         await tree.settled();
         tree = createProjectRevisionsActor({
           port: revisions,
+          identity: { via: 'browser', resolve: () => ({ kind: 'user', id: 'usr_test' }) },
           projectId: options.authority.projectId,
           filesystem: () => root,
         });

@@ -60,9 +60,9 @@ expectTypeOf(recorded).toExtend<WriteRevisionInput['provenance']>();
 
 // @ts-expect-error -- no actor.
 const unattributed: RevisionProvenance = { source: 'user', capture: 'save', via: 'browser', createdAt: 0 };
-// @ts-expect-error -- an undefined actor.
 const undefinedActor: RevisionProvenance = {
   source: 'user',
+  // @ts-expect-error -- an undefined actor.
   actor: undefined,
   capture: 'save',
   via: 'browser',
@@ -72,9 +72,9 @@ const undefinedActor: RevisionProvenance = {
 const uncaptured: RevisionProvenance = { source: 'user', actor: person, via: 'browser', createdAt: 0 };
 // @ts-expect-error -- no leg.
 const noLeg: RevisionProvenance = { source: 'user', actor: person, capture: 'save', createdAt: 0 };
-// @ts-expect-error -- the bare id of version 1 is gone.
 const legacy: RevisionProvenance = {
   source: 'user',
+  // @ts-expect-error -- the bare id of version 1 is gone.
   actorId: 'tau-host',
   capture: 'save',
   via: 'browser',

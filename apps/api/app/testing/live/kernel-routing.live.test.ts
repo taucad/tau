@@ -58,12 +58,24 @@ const models = (process.env['TAU_KR_MODELS'] ?? `${gateModel},anthropic-claude-o
   .split(',')
   .map((id) => id.trim())
   .filter(Boolean);
-const arms = (process.env['TAU_KR_ARMS'] ?? 'in-turn,pointer,template,prompt-only')
+const supportedArms: readonly KernelRoutingArm[] = ['in-turn', 'pointer', 'template', 'prompt-only'];
+const isArm = (arm: string): arm is KernelRoutingArm => (supportedArms as readonly string[]).includes(arm);
+const requestedArms = (process.env['TAU_KR_ARMS'] ?? supportedArms.join(','))
   .split(',')
   .map((arm) => arm.trim())
-  .filter(Boolean) as KernelRoutingArm[];
+  .filter(Boolean);
+const unknownArms = requestedArms.filter((arm) => !isArm(arm));
+if (unknownArms.length > 0) {
+  throw new Error(`TAU_KR_ARMS names unknown arms ${unknownArms.join(', ')}; use ${supportedArms.join(', ')}.`);
+}
+const arms = requestedArms.filter((arm) => isArm(arm));
 const limit = Number(process.env['TAU_KR_LIMIT'] ?? '0');
-const onlyCases = new Set((process.env['TAU_KR_CASES'] ?? '').split(',').filter(Boolean));
+const onlyCases = new Set(
+  (process.env['TAU_KR_CASES'] ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean),
+);
 const concurrency = Math.max(1, Number(process.env['TAU_KR_CONCURRENCY'] ?? '4'));
 const maxUsd = Number(process.env['TAU_KR_MAX_USD'] ?? 'Infinity');
 /** Milliseconds. */
@@ -81,15 +93,23 @@ const promptOnlyCases = kernelRoutingDevelopmentCases.filter(
   (testCase) => testCase.fixture.kind === 'entry-less' && testCase.preference === 'auto',
 );
 
+const baseCasesFor = (arm: KernelRoutingArm): readonly KernelRoutingCase[] =>
+  arm === 'pointer'
+    ? pointerCases
+    : arm === 'template'
+      ? templateCases
+      : arm === 'prompt-only'
+        ? promptOnlyCases
+        : kernelRoutingDevelopmentCases;
+
+/** An explicit `TAU_KR_CASES` id that no selected arm runs is a typo, not an empty run. */
+const unmatchedCases = [...onlyCases].filter((id) => !arms.some((arm) => baseCasesFor(arm).some((c) => c.id === id)));
+if (unmatchedCases.length > 0) {
+  throw new Error(`TAU_KR_CASES names ${unmatchedCases.join(', ')}, which no selected arm runs.`);
+}
+
 const casesFor = (arm: KernelRoutingArm): readonly KernelRoutingCase[] => {
-  const base =
-    arm === 'pointer'
-      ? pointerCases
-      : arm === 'template'
-        ? templateCases
-        : arm === 'prompt-only'
-          ? promptOnlyCases
-          : kernelRoutingDevelopmentCases;
+  const base = baseCasesFor(arm);
   const selected = onlyCases.size > 0 ? base.filter(({ id }) => onlyCases.has(id)) : base;
   return limit > 0 ? selected.slice(0, limit) : selected;
 };
@@ -128,7 +148,12 @@ const pool = async <T>(items: readonly T[], width: number, work: (item: T) => Pr
       await work(item);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(width, items.length) }, async () => lane()));
+  // Let every lane settle before reporting, so one failed case cannot leave other lanes writing after the test ends.
+  const settled = await Promise.allSettled(Array.from({ length: Math.min(width, items.length) }, async () => lane()));
+  const rejected = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (rejected) {
+    throw rejected.reason instanceof Error ? rejected.reason : new Error(String(rejected.reason));
+  }
 };
 
 const emptyRegistry: ToolRegistry = {

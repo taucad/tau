@@ -198,6 +198,8 @@ export type RunRecord = {
   }>;
   /** Model-file writes the binding left undecided, waiting for `evaluate_model`. */
   readonly pendingWrites: string[];
+  /** The tool call id of the first model-file write, so the announcement is read only from text before it. */
+  firstWriteCallId?: string;
   toolCount: number;
   stopped: boolean;
 };
@@ -266,11 +268,12 @@ export const createRoutingToolHandler = (input: {
     return stopHere;
   };
 
-  const written = (path: string, content: string): HostToolResult => {
+  const written = (path: string, content: string, callId: string): HostToolResult => {
     project.files.set(path, content);
     if (record.binding !== undefined || isNonModelPath(path)) {
       return ok({ message: `Wrote ${path}.` });
     }
+    record.firstWriteCallId ??= callId;
     const result = bindEntryFirstPass({
       entryPath: path,
       source: content,
@@ -282,6 +285,9 @@ export const createRoutingToolHandler = (input: {
     }
     if (result.kind === 'undecided') {
       record.pendingWrites.push(path);
+    } else {
+      // An unbound write is still the first model write: it sticks, and the run counts as having written.
+      record.binding = { path, result, at: 'write' };
     }
     return ok({ message: `Wrote ${path}.` });
   };
@@ -309,7 +315,11 @@ export const createRoutingToolHandler = (input: {
           return ok({ name, content: renderKernelRoutingCard(input.profile) });
         }
         const kernel = name.replace(/^cad-/u, '');
-        if (isKernelId(kernel) && input.profile.available.includes(kernel)) {
+        if (
+          isKernelId(kernel) &&
+          input.profile.available.includes(kernel) &&
+          !(input.profile.withoutSkill ?? []).includes(kernel)
+        ) {
           return ok({ name, content: await skillText(kernel) });
         }
         return {
@@ -355,7 +365,9 @@ export const createRoutingToolHandler = (input: {
         });
       }
       case toolName.createFile: {
-        return path === undefined ? finish() : written(path, stringField(invocation.input, 'content') ?? '');
+        return path === undefined
+          ? finish()
+          : written(path, stringField(invocation.input, 'content') ?? '', invocation.toolCallId);
       }
       case toolName.editFile: {
         const current = path === undefined ? undefined : project.files.get(path);
@@ -372,7 +384,7 @@ export const createRoutingToolHandler = (input: {
         const replaceAll = asObject(invocation.input)['replaceAll'] === true;
         const newString = stringField(invocation.input, 'newString') ?? '';
         const next = replaceAll ? current.replaceAll(oldString, newString) : current.replace(oldString, newString);
-        return written(path, next);
+        return written(path, next, invocation.toolCallId);
       }
       case toolName.evaluateModel: {
         const pending = path ?? record.pendingWrites.at(0);
@@ -396,7 +408,7 @@ export const createRoutingToolHandler = (input: {
 };
 
 /** Words that make a final reply a question or an out-of-scope statement rather than a silent stop. */
-const questionPattern = /\?\s*$|\?\s*\n|\bwhich (?:would|do) you\b|\bwould you (?:like|prefer)\b/iu;
+const questionPattern = /\?|\bwhich (?:would|do) you\b|\bwould you (?:like|prefer)\b/iu;
 
 /** One case's observation plus what the report and an auditor need. */
 export type RoutingRunResult = {
@@ -431,7 +443,13 @@ export const observeRun = (input: {
   const wrote = record.binding !== undefined || record.pendingWrites.length > 0;
   const askedInText = !wrote && !record.askedWithTool && questionPattern.test(finalText);
   const asked = record.askedWithTool || askedInText;
-  const textBeforeWrite = assistantTexts.join('\n');
+  const writeIndex = snapshot.messages.findIndex(
+    (message) => message.role === 'tool-input' && message.toolCallId === record.firstWriteCallId,
+  );
+  const textBeforeWrite = (writeIndex === -1 ? snapshot.messages : snapshot.messages.slice(0, writeIndex))
+    .filter((message) => message.role === 'assistant')
+    .map((message) => textOf(message))
+    .join('\n');
   const announced = boundKernel === undefined ? undefined : textBeforeWrite.includes(resolveKernel(boundKernel).name);
   const skillBeforeWrite =
     boundKernel === undefined
@@ -485,9 +503,12 @@ export const promptOnlySystemPrompt = (testCase: KernelRoutingCase): string => {
  * @returns The observation.
  */
 export const observePromptOnly = (caseId: string, text: string): KernelRoutingObservation => {
-  const kernel = /KERNEL:\s*`?([a-z0-9]+)`?/iu.exec(text)?.[1]?.toLowerCase();
-  const asked = /\bASK:/u.test(text);
-  const declined = /\bNONE:/u.test(text);
+  // Only the first decision line counts, so a reason that mentions another label cannot add a second decision.
+  const decision = /^\s*`?(KERNEL|ASK|NONE):\s*(.*)$/mu.exec(text);
+  const label = decision?.[1];
+  const kernel = label === 'KERNEL' ? /^`?([a-z0-9]+)`?/iu.exec(decision?.[2] ?? '')?.[1]?.toLowerCase() : undefined;
+  const asked = label === 'ASK';
+  const declined = label === 'NONE';
   return {
     caseId,
     ...(kernel !== undefined && isKernelId(kernel) ? { boundKernel: kernel } : {}),

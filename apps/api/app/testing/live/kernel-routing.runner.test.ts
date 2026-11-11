@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { HostRunSnapshot, HostToolInvocation, JsonValue } from '@taucad/agent-host';
+import type { HostRunSnapshot, HostToolInvocation, JsonValue, ProviderMessage } from '@taucad/agent-host';
 import { toolName } from '@taucad/chat/constants';
 import { kernelChoiceCondition } from '@taucad/chat/prompts';
 import { resolveKernel } from '@taucad/types/constants';
@@ -53,15 +53,22 @@ const call = (name: string, input: Record<string, JsonValue>): HostToolInvocatio
   return invocation;
 };
 
+const assistant = (text: string, index: number): ProviderMessage => ({
+  id: `a${index}`,
+  role: 'assistant',
+  content: text,
+});
+
+const snapshotOf = (messages: readonly ProviderMessage[]): HostRunSnapshot => ({
+  chatId: 'c',
+  runId: 'run',
+  turnId: 't',
+  state: 'completed',
+  messages,
+});
+
 const snapshotWith = (texts: readonly string[]): HostRunSnapshot =>
-  ({
-    state: 'completed',
-    messages: texts.map((text, index) => ({
-      id: `a${index}`,
-      role: 'assistant',
-      content: text,
-    })),
-  }) as unknown as HostRunSnapshot;
+  snapshotOf(texts.map((text, index) => assistant(text, index)));
 
 const handlerFor = (testCase: KernelRoutingCase, arm: 'in-turn' | 'template' = 'in-turn') => {
   let stops = 0;
@@ -178,6 +185,73 @@ describe('kernel routing runner', () => {
     });
   });
 
+  it('should read the announcement only from text before the first model write', async () => {
+    const { record, handle } = handlerFor(byId('u1-wall-hook'));
+    await handle(
+      call(toolName.createFile, {
+        targetFile: 'main.scad',
+        content: 'cube(1);',
+      }),
+    );
+    const run = observeRun({
+      caseId: 'u1-wall-hook',
+      record,
+      snapshot: snapshotOf([
+        assistant('Here is a wall hook.', 0),
+        {
+          id: 'w',
+          role: 'tool-input',
+          toolCallId: `${toolName.createFile}-1`,
+          toolName: toolName.createFile,
+          content: {},
+        },
+        assistant('Done in OpenSCAD.', 1),
+      ]),
+    });
+    expect(run.observation.announced).toBe(false);
+  });
+
+  it('should keep an unbound first write as the write and not rebind a later one', async () => {
+    const { record, handle } = handlerFor(byId('u1-wall-hook'));
+    await handle(call(toolName.createFile, { targetFile: 'main.py', content: 'print(1)' }));
+    expect(record.binding?.result.kind).toBe('unbound');
+    await handle(
+      call(toolName.createFile, {
+        targetFile: 'main.scad',
+        content: 'cube(1);',
+      }),
+    );
+    expect(record.binding?.path).toBe('main.py');
+    expect(
+      observeRun({
+        caseId: 'u1-wall-hook',
+        record,
+        snapshot: snapshotWith(['Which would you like?']),
+      }).observation,
+    ).toMatchObject({ asked: false, declinedOutOfScope: false });
+  });
+
+  it('should refuse a skill the host profile lists without one', async () => {
+    let stops = 0;
+    const { handle } = createRoutingToolHandler({
+      project: buildFixture(byId('u1-wall-hook'), 'in-turn'),
+      kernels,
+      profile: {
+        available: ['openscad', 'opencascadejs'],
+        withoutSkill: ['opencascadejs'],
+      },
+      stop: () => {
+        stops += 1;
+      },
+      skillText: async (kernel) => `# cad-${kernel}`,
+    });
+    const withoutSkill = await handle(call(toolName.useSkill, { skillName: 'cad-opencascadejs' }));
+    const withSkill = await handle(call(toolName.useSkill, { skillName: 'cad-openscad' }));
+    expect(withoutSkill.isError).toBe(true);
+    expect(withSkill.isError).toBe(false);
+    expect(stops).toBe(0);
+  });
+
   it('should leave an undecided write for evaluate_model and record it there', async () => {
     const { record, handle } = handlerFor(byId('u1-wall-hook'));
     await handle(
@@ -210,7 +284,7 @@ describe('kernel routing runner', () => {
     const asked = observeRun({
       caseId: 'ask-lattice-step',
       record: text.record,
-      snapshot: snapshotWith(['A lattice and STEP conflict. Which would you prefer?']),
+      snapshot: snapshotWith(['A lattice and STEP conflict? Tell me which matters more.']),
     });
     expect(asked.observation).toMatchObject({
       asked: true,
@@ -247,6 +321,11 @@ describe('kernel routing runner', () => {
     });
     expect(observePromptOnly('x', 'NONE: out of scope')).toMatchObject({
       declinedOutOfScope: true,
+    });
+    expect(observePromptOnly('x', 'ASK: lattice or STEP?\nKERNEL: `picovoxel` if lattice.')).toEqual({
+      caseId: 'x',
+      asked: true,
+      declinedOutOfScope: false,
     });
   });
 });

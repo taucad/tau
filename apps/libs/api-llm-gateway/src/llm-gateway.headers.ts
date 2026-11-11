@@ -183,8 +183,10 @@ export const readTurnTelemetry = (request: FastifyRequest): { readonly turn?: Tu
 
 const assertableHostKind = z.enum(agentPlacements);
 const assertableKernel = z.enum(kernelIds);
-/* A release label as the hosts report one: a short or full commit, or the desktop app's semver. */
-const assertableBuild = z.string().regex(/^(?:[\da-f]{7,40}|\d{1,6}\.\d{1,6}\.\d{1,6})$/u);
+/* A release label as the hosts report one: a short or full commit, or a semver such as the CLI's `0.1.0-beta.9`. */
+const assertableBuild = z
+  .string()
+  .regex(/^(?:[\da-f]{7,40}|\d{1,6}\.\d{1,6}\.\d{1,6}(?:-(?=[\da-z.]{1,32}$)[\da-z]+(?:\.[\da-z]+)*)?)$/u);
 let catalogRouteIds: ReadonlySet<string> | undefined;
 const assertableModel = z.string().refine((value) => {
   catalogRouteIds ??= new Set(gatewayModelRoutes().map((route) => route.routeId));

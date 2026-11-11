@@ -137,7 +137,7 @@ describe('readHostLabels', () => {
     expect(readHostLabels(requestWith({ 'x-tau-kernel': kernel }))).toEqual({ hostLabels: { kernel } });
   });
 
-  it.each(['abcdef1', 'abcdef012345', '0123456789abcdef0123456789abcdef01234567', '1.24.0'])(
+  it.each(['abcdef1', 'abcdef012345', '0123456789abcdef0123456789abcdef01234567', '1.24.0', '0.1.0-beta.9'])(
     'should keep the release label %s',
     (build) => {
       expect(readHostLabels(requestWith({ 'x-tau-host-build': build }))).toEqual({ hostLabels: { build } });
@@ -149,6 +149,8 @@ describe('readHostLabels', () => {
     [{ 'x-tau-host-build': 'not-a-build' }, { build: 'unknown' }],
     [{ 'x-tau-host-build': 'ABCDEF012345' }, { build: 'unknown' }],
     [{ 'x-tau-host-build': 'a'.repeat(41) }, { build: 'unknown' }],
+    [{ 'x-tau-host-build': '1.2.3-' }, { build: 'unknown' }],
+    [{ 'x-tau-host-build': `1.2.3-${'a'.repeat(33)}` }, { build: 'unknown' }],
     [{ 'x-tau-kernel': 'cadquery' }, { kernel: 'unknown' }],
     [{ 'x-tau-model': 'a-model-the-catalog-does-not-route' }, { model: 'unknown' }],
     [

@@ -37,9 +37,11 @@ export type RecordPolicy<T, P> = Readonly<{
   /** A patch that changes nothing, so no write is owed for it. */
   isEmpty: (patch: P) => boolean;
   /**
-   * `true` when the file's absence is not a record to adopt: after a foreign read of absence the last record stays
-   * the base of the person's next diff, so a later edit carries only the fields it changes. For a kind whose `merge`
-   * onto an absent file needs every field, leave it unset.
+   * `true` when the file's absence is not a record to adopt: the last record stays the base of the person's next
+   * diff, so a later edit carries only the fields it changes. The machine reads it in two places, both only while the
+   * shown record is absent: a foreign read's update of `intended` (`CompleteRead`), and a saved edit cycle's update
+   * of `intended` in `settle` (a write that changed nothing, or an overlapped write whose refresh read found the file
+   * gone). For a kind whose `merge` onto an absent file needs every field, leave it unset.
    */
   keepsBaseOnAbsence?: true;
 }>;

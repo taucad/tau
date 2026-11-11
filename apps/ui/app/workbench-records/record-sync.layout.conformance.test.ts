@@ -8,7 +8,8 @@
  * a write's content (`merge`) and its rule that every edit owes a write (`isEmpty`) stand in for the model. The
  * harness steps are the ones the generic replay documents.
  *
- * `layoutPolicy.keepsBaseOnAbsence` changes only the diff base (`intended`) after a read of an absent file. The model's
+ * `layoutPolicy.keepsBaseOnAbsence` changes only the diff base (`intended`) while the shown record is absent, in
+ * `CompleteRead` and in `settle`. The model's
  * file is never absent and the model has no diff base, so the refinement mapping does not compare `intended`; that
  * part of `CompleteRead` is outside the spec (README, Not modelled), and the store rows cover it.
  */

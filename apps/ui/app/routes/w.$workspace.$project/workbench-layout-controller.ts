@@ -193,7 +193,13 @@ export function createWorkbenchLayoutStore(
   /** A command's answer, once the host has been shown what it published. */
   const answered = async (answer: Promise<boolean>): Promise<boolean> => {
     const ok = await answer;
-    await shown;
+    // A publication that superseded the awaited one shows its own state; wait until the latest has been shown.
+    let showing: Promise<void>;
+    do {
+      showing = shown;
+      // oxlint-disable-next-line no-await-in-loop -- each pass waits for the publication that is latest now.
+      await showing;
+    } while (showing !== shown);
     return ok;
   };
   const restorable = (expectedDigest: string, edits: number, eligible: () => boolean): boolean => {

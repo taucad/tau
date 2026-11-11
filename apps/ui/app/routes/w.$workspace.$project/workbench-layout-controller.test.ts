@@ -1018,6 +1018,92 @@ describe('workbench layout store on recordSync (G2b)', () => {
     }
   });
 
+  it('should keep the last layout as the base after an edit that saved nothing while the file was absent', async () => {
+    const memory = memoryFiles();
+    const store = createWorkbenchLayoutStore({
+      root: '/root',
+      files: memory.files,
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await store.read();
+      memory.setBytes(null);
+      await store.read();
+      // A Dockview echo of the same portable tree changes nothing.
+      expect(await store.edit(store.intendedLayout()!)).toBe(true);
+      const theirs: WorkbenchLayout = {
+        ...layout(),
+        viewer: { kind: 'group', tabs: [{ kind: 'view', view: 'v-1234abcd' }] },
+      };
+      memory.set(theirs);
+      const current = store.intendedLayout()!;
+      expect(await store.edit({ ...current, lanes: { ...current.lanes, chat: false } })).toBe(true);
+      expect(workbenchRecords.layout.read(memory.get()!)).toEqual({
+        status: 'current',
+        record: { ...theirs, lanes: { chat: false, workbench: true } },
+      });
+    } finally {
+      store.dispose();
+    }
+  });
+
+  it('should answer a read only once the host has been shown the latest publication', async () => {
+    const memory = memoryFiles();
+    const { digest } = globalThis.crypto.subtle;
+    const gates = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+    let digests = 0;
+    const held = vi.spyOn(globalThis.crypto.subtle, 'digest').mockImplementation(async (...args) => {
+      await gates[digests++]?.promise;
+      return digest.apply(globalThis.crypto.subtle, args);
+    });
+    let shown = 0;
+    const store = createWorkbenchLayoutStore({
+      root: '/root',
+      files: memory.files,
+      onChange: () => {
+        shown++;
+      },
+      onError: () => undefined,
+    });
+    try {
+      let answered = false;
+      const first = (async () => {
+        const ok = await store.read(true);
+        answered = true;
+        return ok;
+      })();
+      await vi.waitFor(() => {
+        expect(digests).toBe(1);
+      });
+      // The file changes and a watch read publishes while the first read's digest is still being computed.
+      memory.set({ ...layout(), lanes: { chat: false, workbench: true } });
+      const second = store.read();
+      await vi.waitFor(() => {
+        expect(digests).toBe(2);
+      });
+      // The first read's publication is superseded; its answer waits for the second to be shown.
+      gates[0]?.resolve();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+      expect(answered).toBe(false);
+      expect(store.ready()).toBe(false);
+      gates[1]?.resolve();
+      expect(await first).toBe(true);
+      expect(shown).toBe(1);
+      expect(store.ready()).toBe(true);
+      expect(store.snapshot().layout?.lanes.chat).toBe(false);
+      expect(await second).toBe(true);
+    } finally {
+      for (const gate of gates) {
+        gate.resolve();
+      }
+      held.mockRestore();
+      store.dispose();
+    }
+  });
+
   it('should become ready only once the host has been shown the first read', async () => {
     const memory = memoryFiles();
     memory.setBytes(encoder.encode('{broken'));

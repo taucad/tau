@@ -449,7 +449,12 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
         deferred = deferred === undefined ? cycle.patch : policy.combine(cycle.patch, deferred);
       }
       if (cycle.trigger === 'edit' && latest) {
-        patch.intended = saved ? context.published.record : cycle.next;
+        /* A saved edit on an absent file keeps the last base when the policy says absence is not a record to adopt. */
+        patch.intended = saved
+          ? context.published.record === undefined && policy.keepsBaseOnAbsence === true
+            ? context.intended
+            : context.published.record
+          : cycle.next;
       }
       if (saved) {
         patch.retryDelay = firstRetryDelay;

@@ -445,4 +445,35 @@ describe('entriesPolicy path changes', () => {
     const remade: WorkbenchEntries = { version: 1, entries: { 'a.ts': { renderTimeout: 9000 } } };
     expect(merge(remade, deleted, patch).entries).toEqual({});
   });
+
+  it('should not apply a written rename chain again when another party changed back a field the same write set', () => {
+    const current: WorkbenchEntries = {
+      version: 1,
+      entries: { 'a.ts': { renderTimeout: 1000 }, 'c.ts': { renderTimeout: 3000 }, 'z.ts': { renderTimeout: 5000 } },
+    };
+    const hidden = { hidden: ['h'], isolated: [], opacity: [] };
+    const edited: EntriesRecord = {
+      version: 1,
+      entries: { ...current.entries, 'z.ts': { renderTimeout: 5000, components: hidden } },
+    };
+    const first: EntryPathChange = { type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' };
+    const second: EntryPathChange = { type: 'rename', oldPath: 'c.ts', newPath: 'a.ts' };
+    const once: EntriesRecord = { version: 1, entries: movePaths(edited.entries, [first]), moves: [first] };
+    const twice: EntriesRecord = { version: 1, entries: movePaths(once.entries, [second]), moves: [second] };
+    const patch = combine(combine(diff(current, edited), diff(edited, once)), diff(once, twice));
+    const written = merge(current, twice, patch);
+    const shown: WorkbenchEntries = { ...written, entries: { ...written.entries, 'z.ts': { renderTimeout: 5000 } } };
+    expect(merge(shown, twice, patch).entries).toEqual({
+      'a.ts': { renderTimeout: 3000 },
+      'b.ts': { renderTimeout: 1000 },
+      'z.ts': { renderTimeout: 5000, components: hidden },
+    });
+  });
+
+  it('should carry a field the person set even where the record it was edited from holds it', () => {
+    const current: WorkbenchEntries = { version: 1, entries: { 'a.ts': { renderTimeout: 1000 } } };
+    const next: EntriesRecord = { ...current, set: { 'a.ts': { renderTimeout: 1000 } } };
+    expect(diff(current, next)).toEqual([{ moves: [], fields: { 'a.ts': { renderTimeout: 1000 } } }]);
+    expect(serialize(next)).toBe(serialize(current));
+  });
 });

@@ -16,7 +16,12 @@ import {
   movePaths,
   withoutMoves,
 } from '#workbench-records/entries-policy.js';
-import type { EntriesPatch, EntryFields, EntryPathChange as PathChange } from '#workbench-records/entries-policy.js';
+import type {
+  EntriesPatch,
+  EntriesRecord,
+  EntryFields,
+  EntryPathChange as PathChange,
+} from '#workbench-records/entries-policy.js';
 import { isPotentiallyApplied } from '#workbench-records/record-health.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
 import { createRecordSync } from '#workbench-records/record-sync.js';
@@ -155,6 +160,19 @@ export function createWorkbenchEntriesStore(
     }
   });
   actor.start();
+  /**
+   * Whether the file can take a change: one it cannot is refused and reported here, rather than owed with every later
+   * change of every entry, which would then never be written.
+   */
+  const writable = (record: EntriesRecord): boolean => {
+    try {
+      entriesPolicy.serialize(record);
+      return true;
+    } catch (error) {
+      input.onError(error);
+      return false;
+    }
+  };
   /** The record the person's next change starts from: what they last asked for, else what the file holds. */
   const base = (): WorkbenchEntries => {
     const { origin, intended, published } = context();
@@ -175,20 +193,25 @@ export function createWorkbenchEntriesStore(
       // another party changed since keeps the file's value. A cycle took what was deferred when it formed.
       const { published, deferred, cycle, pending } = context();
       const owed = authoredFields([...(cycle?.patch ?? []), ...(deferred ?? []), ...(pending?.patch ?? [])]);
-      const entry = changedEntry({
+      const { entry, fields } = changedEntry({
         shown: published.record?.entries[entryPath],
         next,
         onto: from.entries[entryPath],
         owed: owed[entryPath],
       });
-      return commands.edit({ ...from, entries: { ...from.entries, [entryPath]: entry } });
+      const record = { ...from, entries: { ...from.entries, [entryPath]: entry }, set: { [entryPath]: fields } };
+      return writable(record) && commands.edit(record);
     },
     changePaths: async (change) => {
       if (disposed) {
         return false;
       }
       const from = base();
-      const saved = commands.edit({ ...from, entries: movePaths(from.entries, [change]), moves: [change] });
+      const record = { ...from, entries: movePaths(from.entries, [change]), moves: [change] };
+      if (!writable(record)) {
+        return false;
+      }
+      const saved = commands.edit(record);
       // A path change is written at once, with the edits made before it.
       void commands.flush();
       return saved;

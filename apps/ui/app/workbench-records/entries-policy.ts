@@ -6,7 +6,8 @@
  * A patch is the person's changes in the order they were made: path changes, and the fields changed on each path. A path
  * change cannot be seen in two records (a renamed entry looks like one removed and one added, and would lose what
  * another party changed on it), so the record a person asks for carries the changes that made it from its base in
- * `moves`. `moves` is never written: `serialize` drops it and `read` never returns it.
+ * `moves`, and the fields the person set in `set`. Neither is written: `serialize` drops them and `read` never returns
+ * them.
  */
 import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
@@ -36,8 +37,14 @@ export type EntriesStep = Readonly<{
  */
 export type EntriesPatch = readonly EntriesStep[];
 
-/** An entries record, and the path changes that made it from the record it was edited from. */
-export type EntriesRecord = WorkbenchEntries & { readonly moves?: readonly EntryPathChange[] };
+/**
+ * An entries record, the path changes that made it from the record it was edited from, and the fields the person set
+ * (`set`), which are carried even where the record it was edited from already held them.
+ */
+export type EntriesRecord = WorkbenchEntries & {
+  readonly moves?: readonly EntryPathChange[];
+  readonly set?: Readonly<Record<string, EntryFields>>;
+};
 
 const componentFields = ['hidden', 'isolated', 'opacity'] as const;
 const noComponents: Components = { hidden: [], isolated: [], opacity: [] };
@@ -127,7 +134,8 @@ const diffEntry = (base: Entry | undefined, next: Entry): EntryFields => {
 /**
  * The entry a person's change makes of `onto`, the entry the store last asked for. A field the person set in a change
  * the file does not hold yet (`owed`) is compared with `onto`; any other with `shown`, the entry the file showed them,
- * so a field another party changed since keeps the file's value. Only the changed fields go over `onto`.
+ * so a field another party changed since keeps the file's value. Only the changed fields go over `onto`, and they are
+ * returned to be carried as set even where `onto` already holds them.
  */
 export const changedEntry = ({
   shown,
@@ -139,7 +147,7 @@ export const changedEntry = ({
   next: Entry;
   onto: Entry | undefined;
   owed: EntryFields | undefined;
-}>): Entry => {
+}>): Readonly<{ entry: Entry; fields: EntryFields }> => {
   const fromShown = diffEntry(shown, next);
   const fromOnto = diffEntry(onto, next);
   const fields: EntryFields = {};
@@ -157,7 +165,7 @@ export const changedEntry = ({
   if (Object.keys(components).length > 0) {
     fields.components = components;
   }
-  return mergeEntry(onto, fields);
+  return { entry: mergeEntry(onto, fields), fields };
 };
 
 const combineFields = (earlier: EntryFields | undefined, later: EntryFields): EntryFields => ({
@@ -177,9 +185,9 @@ const combineFieldMaps = (
   return combined;
 };
 
-/** The record as it is written: without the path changes that made it. */
+/** The record as it is written: without the path changes and the person's fields that made it. */
 export const withoutMoves = (record: EntriesRecord): WorkbenchEntries => {
-  const { moves: _moves, ...written } = record;
+  const { moves: _moves, set: _set, ...written } = record;
   return written;
 };
 
@@ -188,6 +196,25 @@ export const authoredFields = (patch: EntriesPatch): Record<string, EntryFields>
   let fields: Record<string, EntryFields> = {};
   for (const step of patch) {
     fields = combineFieldMaps(moveKeys(fields, step.moves), step.fields);
+  }
+  return fields;
+};
+
+/**
+ * The fields a patch surely leaves on each path: as {@link authoredFields}, except that a rename drops what the person
+ * set under its new path, since the entry there is replaced by the one it moves.
+ */
+const surelyAuthoredFields = (patch: EntriesPatch): Record<string, EntryFields> => {
+  let fields: Record<string, EntryFields> = {};
+  for (const step of patch) {
+    for (const change of step.moves) {
+      if (change.type === 'rename') {
+        const { newPath } = change;
+        fields = Object.fromEntries(Object.entries(fields).filter(([path]) => !matchesPath(path, newPath)));
+      }
+      fields = moveKey(fields, change);
+    }
+    fields = combineFieldMaps(fields, step.fields);
   }
   return fields;
 };
@@ -289,9 +316,9 @@ const replacedHeld = (before: Entry | undefined, after: Entry | undefined, now: 
 };
 
 /**
- * Whether the file holds a write of `steps`: nothing the write replaced is still there (an entry it made or removed,
- * or a field it changed), and an entry its path changes moved is there as written. A field change alone is never
- * evidence, since applying it again changes nothing; what another party changed since holds neither, and says nothing.
+ * Whether the file holds the path changes of a write of `steps`: on the paths they touch, nothing the write replaced is
+ * still there (an entry it made or removed, or a field it changed) and an entry is there as written. Fields elsewhere
+ * say nothing: they are applied again whatever the file holds. What another party changed since holds neither.
  */
 const holds = (current: WorkbenchEntries, write: Write, steps: readonly EntriesStep[]): boolean => {
   const paths = new Set([...Object.keys(write.base.entries), ...Object.keys(write.record.entries)]);
@@ -300,13 +327,13 @@ const holds = (current: WorkbenchEntries, write: Write, steps: readonly EntriesS
     const before = write.base.entries[path];
     const after = write.record.entries[path];
     const now = current.entries[path];
-    if (JSON.stringify(before) === JSON.stringify(after)) {
+    if (!moves(steps, path) || JSON.stringify(before) === JSON.stringify(after)) {
       continue;
     }
     if (replacedHeld(before, after, now)) {
       return false;
     }
-    written ||= moves(steps, path) && JSON.stringify(now) === JSON.stringify(after);
+    written ||= JSON.stringify(now) === JSON.stringify(after);
   }
   return written;
 };
@@ -378,7 +405,9 @@ export const entriesPolicy: RecordPolicy<EntriesRecord, EntriesPatch> = {
     const moved = movePaths(base?.entries ?? {}, moves);
     const fields = new Map<string, EntryFields>();
     for (const [path, entry] of Object.entries(next.entries)) {
-      const changed = diffEntry(moved[path], entry);
+      const set = next.set?.[path];
+      const changed =
+        set === undefined ? diffEntry(moved[path], entry) : combineFields(diffEntry(moved[path], entry), set);
       if (Object.keys(changed).length > 0) {
         fields.set(path, changed);
       }
@@ -390,7 +419,11 @@ export const entriesPolicy: RecordPolicy<EntriesRecord, EntriesPatch> = {
     const base: WorkbenchEntries = current === undefined ? { version: 1, entries: {} } : withoutMoves(current);
     const read = asRead(base);
     const found = landedMark(patch, current === undefined ? undefined : read);
-    let { entries } = base;
+    let entries = { ...base.entries };
+    // The path changes of a prefix on disk are not applied again; its fields are, at the paths they moved to.
+    for (const [path, fields] of Object.entries(surelyAuthoredFields(patch.slice(0, found?.upTo ?? 0)))) {
+      entries[path] = mergeEntry(entries[path], fields);
+    }
     for (const step of patch.slice(found?.upTo ?? 0)) {
       entries = movePaths(entries, step.moves);
       for (const [path, fields] of Object.entries(step.fields)) {

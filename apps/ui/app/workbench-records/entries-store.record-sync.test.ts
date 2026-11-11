@@ -687,4 +687,68 @@ describe('workbench entries store over recordSync', () => {
       }
     },
   );
+  it('writes a field the person set again after another party changed it, while their earlier write is on the wire', async () => {
+    const m = memory();
+    const components = (hidden: string[]) => ({ hidden, isolated: [], opacity: [{ id: 'o', opacity: 0.5 }] });
+    m.setBytes(
+      encoder.encode(
+        workbenchRecords.entries.serialize({
+          version: 1,
+          entries: { 'a.ts': { renderTimeout: 1000, components: { hidden: ['x'], isolated: [], opacity: [] } } },
+        }),
+      ),
+    );
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: m.files,
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await entries.read();
+      const shown = () => entries.snapshot().record?.entries['a.ts'];
+      const release = m.delay();
+      const first = entries.edit('a.ts', { ...shown(), components: components(['x']) });
+      await vi.waitFor(() => {
+        expect(m.writes).toHaveBeenCalledOnce();
+      });
+      m.setBytes(
+        encoder.encode(
+          workbenchRecords.entries.serialize({
+            version: 1,
+            entries: { 'a.ts': { renderTimeout: 1000, components: { hidden: ['y'], isolated: [], opacity: [] } } },
+          }),
+        ),
+      );
+      await entries.read();
+      const second = entries.edit('a.ts', { ...shown(), components: components(['x']) });
+      release();
+      await Promise.all([first, second]);
+      expect(await entries.flush()).toBe(true);
+      expect(workbenchRecords.entries.read(m.get()!)).toMatchObject({
+        record: { entries: { 'a.ts': { renderTimeout: 1000, components: components(['x']) } } },
+      });
+    } finally {
+      entries.dispose();
+    }
+  });
+
+  it('refuses a change the record cannot take, and still writes the other entries', async () => {
+    const m = memory();
+    const onError = vi.fn();
+    const entries = createWorkbenchEntriesStore({ root: '/root', files: m.files, onChange: () => undefined, onError });
+    try {
+      await entries.read();
+      const many = Array.from({ length: 1025 }, (_, index) => `c${index}`);
+      expect(await entries.edit('a.ts', { components: { hidden: many, isolated: [], opacity: [] } })).toBe(false);
+      expect(onError).toHaveBeenCalledOnce();
+      expect(await entries.edit('b.ts', { renderTimeout: 15_000 })).toBe(true);
+      expect(await entries.flush()).toBe(true);
+      expect(workbenchRecords.entries.read(m.get()!)).toMatchObject({
+        record: { entries: { 'a.ts': { renderTimeout: 180_000 }, 'b.ts': { renderTimeout: 15_000 } } },
+      });
+    } finally {
+      entries.dispose();
+    }
+  });
 });

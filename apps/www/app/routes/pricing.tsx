@@ -10,13 +10,10 @@ export const content = (): React.JSX.Element => (
       {intro({
         eyebrow: 'Pricing · USD',
         title: 'Plans and pricing',
-        body: 'Every plan includes design, local geometry checks and export. On Free, you pay for hosted AI with credits. Pro adds 2,000 credits a month and Tau Cloud backup and sync.',
+        body: 'Every plan includes design, local geometry checks, export and cloud backup. On Free, you pay for hosted AI with credits. Pro adds 2,000 credits a month and 100 GB of backup.',
       })}
       {planCards()}
-      <p className='cell fine'>
-        Prices exclude applicable tax. Plans and limits match the Tau app. Features marked ○ are in development and not
-        yet included in any plan.
-      </p>
+      <p className='cell fine'>Prices are in US dollars and exclude tax. Plans and limits match the Tau app.</p>
     </section>
     <section className='band faq' aria-labelledby='faq-title'>
       <div className='cell'>

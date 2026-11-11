@@ -188,7 +188,7 @@ describe('top-up in the browser', () => {
       await settings.addCredits();
       const { action, requestId } = await modal.reviewInCheckout();
       quoted = action;
-      await modal.dialog.getByText('Calculated in secure Checkout before payment').waitFor();
+      await modal.dialog.getByText('Calculated on the payment page').waitFor();
       const credits = await modal.quotedCredits();
       expect(action.state).toBe('prepared');
       expect(action.frozen).toMatchObject({ principalMinor: '2500', creditAtoms: '25000000', taxMinor: null });
@@ -220,19 +220,19 @@ describe('top-up in the browser', () => {
       // Stripe's Back link is the session's cancel_url, which carries payment_action.
       await page.locator('a[href*="payment_action="]').first().click();
       await page.waitForURL((url) => url.origin === baseUrl);
-      const toast = await waitForToast(page, /Checkout was not finished/u);
+      const toast = await waitForToast(page, /You didn’t finish paying/u);
       evidence.push(`toast "${toast}"`, await screenshot(page, 'tu-07-return'));
       const returned = await readAction(account, quote.actionId);
       // The dialog reopens on the pending action: "Resume Checkout" or "Cancel payment" (main's label for this state).
       await billingSettings(page).addCredits();
-      await modal.status('Waiting for Checkout').waitFor();
+      await modal.status('Finish your payment').waitFor();
       evidence.push(`dialog "${await modal.text()}"`);
       const { action: canceled, requestId } = await modal.cancelPayment();
       const after = await readAction(account, quote.actionId);
       evidence.push(
-        `action ${quote.actionId} ${returned.state} after Back; Cancel payment → ${canceled.state} (${requestId}); read back ${after.state}`,
+        `action ${quote.actionId} ${returned.state} after Back; Cancel purchase → ${canceled.state} (${requestId}); read back ${after.state}`,
       );
-      expect(toast).toContain('Resume Checkout');
+      expect(toast).toContain('Continue to payment');
       expect(returned.state).toBe('redirect_required');
       expect(canceled.state).toBe('canceled');
       expect(after.state).toBe('canceled');
@@ -297,11 +297,11 @@ describe('funded journey', () => {
         `open holds ${holds.holds.length}`,
         await screenshot(page, 'fd-01-credits-card'),
       );
-      expect(title).toBe('Credit limit reached');
-      // Main's preflight card has no run behind it: it says "Add credits, then send your message." and offers no
-      // Resume; a gateway 402 instead prefixes "Tau paused this turn:" and offers Resume.
-      expect(text).toMatch(/\b\d+ more credits? needed for Haiku 5\.5\./u);
-      expect(buttons).toEqual(expect.arrayContaining(['Billing', 'Switch model']));
+      expect(title).toBe('You’re out of credits');
+      // The preflight card has no run behind it: it offers Add credits and Switch model and no Resume, and says
+      // "Add credits, then send your message again."; a resumable gateway 402 offers Resume instead.
+      expect(text).toMatch(/This turn needs \d+ more credits? on Haiku 5\.5\./u);
+      expect(buttons).toEqual(expect.arrayContaining(['Add credits', 'Switch model']));
       expect(holds.holds).toHaveLength(0);
       return { outcome: 'pass', evidence };
     }),
@@ -798,7 +798,7 @@ describe('funded journey', () => {
       const after = BigInt(availableAtoms(await readCredits(account)));
       savedCardReceipt = { action: topup, text };
       evidence.push(
-        `${describeAction(topup)}, receipt shown ${seconds.toFixed(1)} s after Confirm quote, still on ${new URL(page.url()).origin}`,
+        `${describeAction(topup)}, receipt shown ${seconds.toFixed(1)} s after Pay, still on ${new URL(page.url()).origin}`,
         `available ${before} → ${after} atoms`,
         await screenshot(page, 'tu-03-saved-card'),
       );
@@ -849,7 +849,7 @@ describe('funded journey', () => {
       );
       await settings.closure.prepare().click();
       const prepared = await preparing;
-      await page.getByText('Closure status: ready for auth deletion').waitFor();
+      await page.getByText('Your plan is canceled', { exact: true }).waitFor();
       evidence.push(
         `available ${availableAtoms(credits)} atoms at closure`,
         `closure prepare ${prepared.status()} (${prepared.headers()['request-id'] ?? 'no request id'})`,
@@ -933,7 +933,7 @@ describe('3D Secure', () => {
       await modal.chooseAmount(5);
       const { action: quote } = await modal.reviewWithSavedCard();
       await modal.confirm();
-      await modal.dialog.getByRole('button', { name: 'Continue in Checkout' }).waitFor({ timeout: 90_000 });
+      await modal.dialog.getByRole('button', { name: 'Continue to payment' }).waitFor({ timeout: 90_000 });
       const paused = await readAction(account, quote.actionId);
       evidence.push(
         `saved-card quote ${describeAction(quote)}`,

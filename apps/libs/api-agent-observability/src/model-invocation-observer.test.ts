@@ -99,6 +99,21 @@ describe('ObservedModelInvocationService', () => {
     ]);
   });
 
+  it('should record the host labels the caller asserted, and none for a call that sent none', async () => {
+    const { observed, recorded } = setup(async () => streaming());
+    const hostLabels = { host: 'browser', build: '0123456789ab', kernel: 'replicad', model: 'unknown' } as const;
+
+    const drain = async (result: ModelInvocationResult): Promise<void> => {
+      if (result.state === 'streaming') {
+        await result.response.arrayBuffer();
+      }
+    };
+    await drain(await observed.invoke(intent({ hostLabels })));
+    await drain(await observed.invoke(intent()));
+
+    expect(recorded.map((attempt) => attempt.labels)).toEqual([hostLabels, undefined]);
+  });
+
   it('should pass a cancel through to the provider stream and record the attempt as aborted', async () => {
     const cancelled = vi.fn();
     const source = new ReadableStream<Uint8Array<ArrayBuffer>>({
@@ -195,6 +210,44 @@ describe('ObservedModelInvocationService', () => {
 });
 
 describe('providerAttemptEvidence', () => {
+  const observedAttempt = (change: Partial<ObservedAttempt> = {}): ObservedAttempt => ({
+    principal: 'user-a',
+    project: 'project-a',
+    attemptKey: 'run-1:1:0',
+    chat: 'chat-a',
+    surface: 'gateway',
+    wire: 'anthropic',
+    requestedModel: 'anthropic-claude-test',
+    provider: 'anthropic',
+    operation: 'op-1',
+    startedAt: 1_800_000_000_000,
+    duration: 50,
+    stream: undefined,
+    ended: 'completed',
+    ...change,
+  });
+  const authority = { policyEpoch: 'epoch-a', protection: 'pro' } as const;
+
+  it('should carry the host labels on the provider fact, so a later mapper can tag the generation', async () => {
+    const labels = { host: 'desktop', build: '1.24.0', kernel: 'openscad', model: 'anthropic-claude-test' } as const;
+    const evidence = await providerAttemptEvidence(observedAttempt({ labels }), authority);
+
+    expect(evidenceSchema.safeParse(evidence).success).toBe(true);
+    await expect(verifyEvidenceDigest(evidence)).resolves.toBe(true);
+    expect(evidence.payload).toMatchObject({ plane: 'summary', fact: { kind: 'provider', labels } });
+    /* The labels ride on the fact, not the envelope: the API's own build stays the envelope's, as before LW17. */
+    expect(evidence.versions.hostBuild).toBeNull();
+  });
+
+  it('should write the same fact as before LW17 for a call that sent no host labels', async () => {
+    const unlabelled = await providerAttemptEvidence(observedAttempt(), authority);
+    const empty = await providerAttemptEvidence(observedAttempt({ labels: {} }), authority);
+
+    expect(unlabelled.payload.plane === 'summary' ? unlabelled.payload.fact : undefined).not.toHaveProperty('labels');
+    /* An empty label set is no label set: same source, same digest. */
+    expect(empty).toEqual(unlabelled);
+  });
+
   it('should build valid API-reported summary evidence with a verified digest', async () => {
     const evidence = await providerAttemptEvidence(
       {

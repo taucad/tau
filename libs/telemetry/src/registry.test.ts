@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(200);
+    expect(metrics).toHaveLength(201);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -703,6 +703,7 @@ describe('TauMetrics', () => {
       TauMetrics.agentEvidenceErasureTraces,
       TauMetrics.agentEvidenceLifecycleRecords,
       TauMetrics.agentEvidencePasses,
+      TauMetrics.agentEvidenceLangfuseUnits,
     ];
     expect(
       Object.fromEntries(series.map((metric) => [toPrometheusName(metric.name, metric.type), metric.type])),
@@ -715,6 +716,7 @@ describe('TauMetrics', () => {
       tau_agent_evidence_erasure_traces_total: 'counter',
       tau_agent_evidence_lifecycle_records_total: 'counter',
       tau_agent_evidence_passes_total: 'counter',
+      tau_agent_evidence_langfuse_units_total: 'counter',
     });
     for (const metric of series) {
       for (const label of Object.values(metric.attributes.shape)) {
@@ -729,6 +731,15 @@ describe('TauMetrics', () => {
       }).success,
     ).toBe(true);
     expect(TauMetrics.agentEvidenceDeliveries.attributes.safeParse({ outcome: 'http-503' }).success).toBe(false);
+  });
+
+  /* Langfuse blueprint LW24 (ruling 13): Hobby's 50k units are traces, observations and scores, counted by kind only. */
+  it('should count the Langfuse units Tau writes by kind alone', () => {
+    const units = TauMetrics.agentEvidenceLangfuseUnits;
+
+    expect(units.attributes.shape.kind.options).toEqual(['trace', 'observation', 'score']);
+    expect(Object.keys(units.attributes.shape)).toEqual(['kind']);
+    expect(units.unit).toBe('{unit}');
   });
 
   it('should use lowercase dot-delimited names for all metrics', () => {

@@ -48,7 +48,7 @@ import {
   timelineRowHover,
   timelineMarker,
 } from '#components/revisions/revision-timeline.js';
-import { RevisionRow } from '#routes/w.$workspace.$project/revision-marker.js';
+import { RevisionRow, isAutosave } from '#routes/w.$workspace.$project/revision-marker.js';
 import { ConflictDecision, RevisionBranches } from '#routes/w.$workspace.$project/revision-branches.js';
 import type { ConflictMaterialization } from '#routes/w.$workspace.$project/revision-branches.js';
 import { RevisionSyncRegion } from '#routes/w.$workspace.$project/revision-sync-region.js';
@@ -385,9 +385,8 @@ export const groupRevisionHistory = (
     const foldable =
       revision.revisionId !== headRevisionId &&
       (revision.tags?.length ?? 0) === 0 &&
-      revision.turnId === undefined &&
       !revision.conflicted &&
-      (revision.trigger === 'idle' || revision.trigger === 'hidden' || revision.trigger === 'close');
+      isAutosave(revision);
     const previous = groups.at(-1);
     if (foldable && previous?.kind === 'autosaves') {
       groups[groups.length - 1] = { kind: 'autosaves', revisions: [...previous.revisions, revision] };

@@ -39,7 +39,7 @@ const waitForPortalReturnToasts = async (page: Browsing['page']): Promise<string
   for (let attempt = 0; attempt < 20; attempt++) {
     // oxlint-disable-next-line no-await-in-loop -- sequential bounded polling of one page
     const shown = await toasts(page);
-    if (shown.some((text) => text.includes('Billing updated.'))) {
+    if (shown.some((text) => text.includes('Subscription updated.'))) {
       return shown;
     }
     // oxlint-disable-next-line no-await-in-loop -- sequential bounded polling of one page
@@ -246,8 +246,8 @@ describe('Pro subscription', () => {
       expect(entitlements.tier).toBe('pro');
       expect(new URL(returnUrl).searchParams.get('billing_return')).toBe('portal');
       expect(new URL(returnUrl).searchParams.has('payment_action')).toBe(false);
-      expect(shown.some((text) => text.includes('Billing updated.'))).toBe(true);
-      expect(shown.some((text) => text.includes('Resume Checkout'))).toBe(false);
+      expect(shown.some((text) => text.includes('Subscription updated.'))).toBe(true);
+      expect(shown.some((text) => text.includes('Continue to payment'))).toBe(false);
       expect(bannerText).toMatch(/^Pro until .+ reactivate any time from Manage subscription\.$/u);
       return { outcome: 'pass', evidence };
     }),
@@ -289,8 +289,8 @@ describe('Pro subscription', () => {
       expect(entitlements.tier).toBe('pro');
       expect(isBannerShown).toBe(false);
       expect(new URL(returnUrl).searchParams.get('billing_return')).toBe('portal');
-      expect(shown.some((text) => text.includes('Billing updated.'))).toBe(true);
-      expect(shown.some((text) => text.includes('Resume Checkout'))).toBe(false);
+      expect(shown.some((text) => text.includes('Subscription updated.'))).toBe(true);
+      expect(shown.some((text) => text.includes('Continue to payment'))).toBe(false);
       return { outcome: 'pass', evidence };
     }),
     rowTimeout,
@@ -312,7 +312,7 @@ describe('Pro subscription', () => {
       await settings.closure.prepare().click();
       const prepared = await preparing;
       const closure = wireAccountClosureSchema.parse(await prepared.json());
-      await page.getByText('Closure status: ready for auth deletion').waitFor({ timeout: 60_000 });
+      await page.getByText('Your plan is canceled', { exact: true }).waitFor({ timeout: 60_000 });
       const deleting = page.waitForResponse((response) => response.url().endsWith('/v1/auth/delete-user'));
       await settings.closure.deleteAccount().click();
       const deletion = await deleting;

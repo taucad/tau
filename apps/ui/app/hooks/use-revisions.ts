@@ -61,6 +61,8 @@ export type RevisionCard = {
   readonly turnCut?: RevisionRow['turnCut'];
   /** The revision this one follows, its first parent by id; absent on a branch's first revision. */
   readonly parent?: string;
+  /** An automatic entry that changed only Tau's own setup files (A4): one compact line in History. */
+  readonly isSetup?: true;
   /** How this entry reads as the Start version, V1, when it is one (A6). */
   readonly start?: StartReading;
   /**
@@ -191,6 +193,7 @@ const cardOf = (row: RevisionRow, who: RevisionWhoContext): RevisionCard => {
     ...(row.turnCut === undefined ? {} : { turnCut: row.turnCut }),
     ...(row.restoredFrom === undefined ? {} : { restoredFrom: row.restoredFrom }),
     ...(row.parent === undefined ? {} : { parent: row.parent }),
+    ...(row.isSetup === true ? { isSetup: true } : {}),
     ...(row.start === undefined ? {} : { start: row.start }),
   };
 };

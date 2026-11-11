@@ -628,6 +628,44 @@ describe('view record binding', () => {
     });
   });
 
+  describe('review round 7 rows', () => {
+    const heldPose = () => {
+      const harness = mount();
+      harness.press();
+      harness.drag([1, 0, 0], 4);
+      const posedEdit = harness.edits.at(-1)!;
+      harness.publish(posedEdit, 'own', { camera: posedEdit.camera });
+      harness.applied.length = 0;
+      return { harness, posedEdit };
+    };
+
+    it('should not acknowledge a field-only drop re-published before its re-save lands', () => {
+      const { harness, posedEdit } = heldPose();
+      const foreign = workbenchRecords.view.schema.parse({ ...posedEdit, fieldOfView: 30 });
+      harness.publish(foreign);
+      harness.publish(structuredClone(foreign));
+      expect(harness.applied).toEqual([]);
+      harness.release();
+    });
+
+    it('should keep an earlier pose drop unresolved through a later field-only drop', () => {
+      const { harness, posedEdit } = heldPose();
+      const turned = posed(posedEdit, pose([0, 1, 0], 9));
+      harness.publish(turned);
+      const fieldOnly = workbenchRecords.view.schema.parse({ ...turned, fieldOfView: 30 });
+      harness.publish(fieldOnly);
+      harness.publish(workbenchRecords.view.schema.parse({ ...fieldOnly, grid: { unit: 'in' } }));
+      expect(harness.applied).toEqual([]);
+      // Only the re-save's camera resolves the pose drop; its field of view alone does not.
+      const resave = harness.edits.at(-1)!;
+      harness.publish(resave, 'own', { fieldOfView: resave.fieldOfView });
+      expect(harness.applied).toEqual([]);
+      harness.publish(resave, 'own', { camera: resave.camera });
+      expect(harness.applied).toEqual([resave]);
+      harness.release();
+    });
+  });
+
   describe('camera rule', () => {
     it('should re-save on adoptionDropped only when a person made the pose', () => {
       const person = mount();

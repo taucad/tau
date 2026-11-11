@@ -161,8 +161,12 @@ type BindingContext = Readonly<{
    * `recordPublished` handler writes it from either section state (MC-R26 debt, accepted as for R5 and G1).
    */
   sectionPending: PersistedSectionView | undefined;
-  /** The record whose camera adoption the camera dropped; later records that ask for no new pose, and own writes without the camera, are not acknowledged. */
-  dropped: WorkbenchView | undefined;
+  /**
+   * The record whose camera adoption the camera dropped, and whether any unresolved drop carried a pose (`turns`). Until
+   * this view's write of what was dropped is published (the camera, or for a field-only drop its field of view), or a
+   * foreign record asks for a new pose, no record is acknowledged.
+   */
+  dropped: Readonly<{ record: WorkbenchView; turns: boolean }> | undefined;
   /** The publication the acknowledgement waits for. */
   applying: WorkbenchView | undefined;
   /** Request ids issued, for the next one. */
@@ -301,6 +305,38 @@ const observeCamera = (
 
 type Published = Extract<ViewRecordBindingEvent, { type: 'recordPublished' }>;
 
+/* I6: this view's own write is never adopted; it becomes the base of the next edit. */
+const observeOwn = (
+  {
+    context,
+    record,
+    patch,
+  }: Readonly<{ context: BindingContext; record: WorkbenchView; patch: ViewRecordPatch | undefined }>,
+  enq: BindingEnqueue,
+): BindingContext => {
+  // I6: this view's own write is never adopted. A different section it carried supersedes a foreign one still
+  // waiting; one that carries the waiting section is an edit made while it waited, so graphics still adopts it.
+  const supersedes =
+    patch?.section !== undefined &&
+    context.sectionPending !== undefined &&
+    !same(record.section, context.sectionPending);
+  // After a drop, only a write that carries the camera (or, after field-only drops, the field of view) puts the view's
+  // camera back on file (CameraAuthority README: the file keeps the foreign pose until this view's next write of it),
+  // so any other own write is not acknowledged.
+  const resolved = ownsCamera(record, patch) || (context.dropped?.turns === false && patch?.fieldOfView !== undefined);
+  const stillDropped = context.dropped !== undefined && !resolved;
+  return acknowledged(
+    {
+      ...context,
+      record,
+      applying: stillDropped ? undefined : record,
+      dropped: stillDropped ? context.dropped : undefined,
+      ...(supersedes ? { sectionPending: undefined, owners: { ...context.owners, section: record.section } } : {}),
+    },
+    enq,
+  );
+};
+
 /* A publication handled once (CameraAuthority `Observe`): own is never adopted (I6), foreign goes to the owners. */
 const observeRecord = (
   { context, event, value }: Readonly<{ context: BindingContext; event: Published; value: StateValue }>,
@@ -314,25 +350,7 @@ const observeRecord = (
     return { ...context, applying: undefined, sectionPending: undefined };
   }
   if (event.origin === 'own') {
-    // I6: this view's own write is never adopted. A different section it carried supersedes a foreign one still
-    // waiting; one that carries the waiting section is an edit made while it waited, so graphics still adopts it.
-    const supersedes =
-      event.patch?.section !== undefined &&
-      context.sectionPending !== undefined &&
-      !same(record.section, context.sectionPending);
-    // After a drop, only a write that carries the camera puts the view's camera back on file (CameraAuthority README:
-    // the file keeps the foreign pose until this view's next write of it), so any other own write is not acknowledged.
-    const stillDropped = context.dropped !== undefined && !ownsCamera(record, event.patch);
-    return acknowledged(
-      {
-        ...context,
-        record,
-        applying: stillDropped ? undefined : record,
-        dropped: stillDropped ? context.dropped : undefined,
-        ...(supersedes ? { sectionPending: undefined, owners: { ...context.owners, section: record.section } } : {}),
-      },
-      enq,
-    );
+    return observeOwn({ context, record, patch: event.patch }, enq);
   }
   const changes = foreignChanges(context.record, record, undefined);
   let { owners } = context;
@@ -494,7 +512,9 @@ const answerAdoption = (
     return acknowledged({ ...context, adoptions }, enq);
   }
   // A dropped adoption means the view never showed the record, so it is not acknowledged as applied.
-  const answered: BindingContext = { ...context, adoptions, applying: undefined, dropped: context.record };
+  // An earlier drop still unresolved keeps its pose: a field-only drop after it never lowers what must be written back.
+  const dropped = { record: context.record!, turns: turns || context.dropped?.turns === true };
+  const answered: BindingContext = { ...context, adoptions, applying: undefined, dropped };
   const { pose } = context;
   if (!framed || pose === undefined || !personSources.has(pose.by)) {
     // Before the first frame nothing is written; framing still applies the record's pose after that frame.
@@ -502,9 +522,10 @@ const answerAdoption = (
     return answered;
   }
   const owners: ViewOwners = { ...context.owners, camera: pose.view, fieldOfView: context.fieldOfView };
-  // A field-only drop leaves the person's pose on file, so the re-save (whose patch holds no camera, or nothing at all)
-  // puts the view back on file by itself: the binding does not wait for a camera write to acknowledge again.
-  return edited({ context: turns ? answered : { ...answered, dropped: undefined }, editRecord, owners }, enq);
+  // After a field-only drop the person's pose is already on file, so the re-save's field of view resolves it once it is
+  // published. A re-save equal to the file (an up direction the owners already hold) publishes nothing: nothing differs.
+  const unchanged = !dropped.turns && same(nextRecord(owners, context.record!), context.record);
+  return edited({ context: unchanged ? { ...answered, dropped: undefined } : answered, editRecord, owners }, enq);
 };
 
 const viewRecordBindingDefinition = setup({

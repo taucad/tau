@@ -171,9 +171,16 @@ export function createWorkbenchEntriesStore(
         return false;
       }
       const from = base();
-      // Only what the person changed on the entry they were shown: a field another party changed since the record
-      // this store asked for keeps the file's value.
-      const entry = changedEntry(context().published.record?.entries[entryPath], next, from.entries[entryPath]);
+      // Only what the person changed: on the entry they were shown, or over their own change the file lacks. A field
+      // another party changed since keeps the file's value. A cycle took what was deferred when it formed.
+      const { published, deferred, cycle, pending } = context();
+      const owed = authoredFields([...(cycle?.patch ?? []), ...(deferred ?? []), ...(pending?.patch ?? [])]);
+      const entry = changedEntry({
+        shown: published.record?.entries[entryPath],
+        next,
+        onto: from.entries[entryPath],
+        owed: owed[entryPath],
+      });
       return commands.edit({ ...from, entries: { ...from.entries, [entryPath]: entry } });
     },
     changePaths: async (change) => {

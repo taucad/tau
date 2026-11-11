@@ -596,4 +596,95 @@ describe('workbench entries store over recordSync', () => {
       entries.dispose();
     }
   }, 60_000);
+  /** A store over `entries` whose first edit waits: on a write that fails, or within the debounce. */
+  const owing = (mode: 'fails' | 'debounces', entries: WorkbenchEntries['entries']) => {
+    const m = memory();
+    const write = (next: WorkbenchEntries['entries']) => {
+      m.setBytes(encoder.encode(workbenchRecords.entries.serialize({ version: 1, entries: next })));
+    };
+    write(entries);
+    let offline = false;
+    if (mode === 'debounces') {
+      vi.useFakeTimers();
+    }
+    const store = createWorkbenchEntriesStore({
+      root: '/root',
+      editDebounce: mode === 'debounces' ? 500 : 0,
+      files: {
+        ...m.files,
+        writeFileChecked: async (input) => {
+          if (offline) {
+            throw new Error('offline');
+          }
+          return m.files.writeFileChecked(input);
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    return {
+      store,
+      write,
+      start: async () => {
+        await store.read();
+        offline = mode === 'fails';
+      },
+      settle: async () => {
+        offline = false;
+        if (mode === 'debounces') {
+          await vi.advanceTimersByTimeAsync(600);
+        }
+        expect(await store.flush()).toBe(true);
+        const read = workbenchRecords.entries.read(m.get()!);
+        return read.status === 'current' ? read.record.entries : undefined;
+      },
+      dispose: () => {
+        store.dispose();
+        vi.useRealTimers();
+      },
+    };
+  };
+
+  it.each(['fails', 'debounces'] as const)(
+    'writes a field the person set back to the file’s value after their own change, when its write %s',
+    async (mode) => {
+      const owed = owing(mode, { 'a.ts': { renderTimeout: 180_000 } });
+      const hidden = { hidden: ['x'], isolated: [], opacity: [] };
+      try {
+        await owed.start();
+        void owed.store.edit('a.ts', { renderTimeout: 1000 });
+        void owed.store.edit('a.ts', { renderTimeout: 180_000, components: hidden });
+        expect(await owed.settle()).toEqual({ 'a.ts': { renderTimeout: 180_000, components: hidden } });
+      } finally {
+        owed.dispose();
+      }
+    },
+  );
+
+  it.each(['fails', 'debounces'] as const)(
+    'keeps a later foreign field on an entry the person’s own change lacks, when its write %s',
+    async (mode) => {
+      const owed = owing(mode, { 'a.ts': { renderTimeout: 180_000 } });
+      const components = (hidden: string[]) => ({ hidden, isolated: [], opacity: [] });
+      try {
+        await owed.start();
+        void owed.store.edit('a.ts', { renderTimeout: 1000 });
+        owed.write({
+          'a.ts': { renderTimeout: 180_000 },
+          'b.ts': { renderTimeout: 5000, components: components(['y']) },
+        });
+        await owed.store.read();
+        void owed.store.edit('b.ts', { ...owed.store.snapshot().record?.entries['b.ts'], renderTimeout: 7000 });
+        owed.write({
+          'a.ts': { renderTimeout: 180_000 },
+          'b.ts': { renderTimeout: 5000, components: components(['z']) },
+        });
+        await owed.store.read();
+        const settled = await owed.settle();
+        expect(settled?.['b.ts']).toEqual({ renderTimeout: 7000, components: components(['z']) });
+      } finally {
+        owed.dispose();
+      }
+    },
+  );
 });

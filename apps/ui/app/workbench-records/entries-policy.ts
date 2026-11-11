@@ -125,11 +125,40 @@ const diffEntry = (base: Entry | undefined, next: Entry): EntryFields => {
 };
 
 /**
- * The entry a person's change makes of `onto`: the fields of `next` that differ from `shown`, the entry they changed,
- * over `onto`, so a field they left alone keeps what `onto` holds.
+ * The entry a person's change makes of `onto`, the entry the store last asked for. A field the person set in a change
+ * the file does not hold yet (`owed`) is compared with `onto`; any other with `shown`, the entry the file showed them,
+ * so a field another party changed since keeps the file's value. Only the changed fields go over `onto`.
  */
-export const changedEntry = (shown: Entry | undefined, next: Entry, onto: Entry | undefined): Entry =>
-  onto === undefined ? next : mergeEntry(onto, diffEntry(shown, next));
+export const changedEntry = ({
+  shown,
+  next,
+  onto,
+  owed,
+}: Readonly<{
+  shown: Entry | undefined;
+  next: Entry;
+  onto: Entry | undefined;
+  owed: EntryFields | undefined;
+}>): Entry => {
+  const fromShown = diffEntry(shown, next);
+  const fromOnto = diffEntry(onto, next);
+  const fields: EntryFields = {};
+  const timeoutChange = owed !== undefined && Object.hasOwn(owed, 'renderTimeout') ? fromOnto : fromShown;
+  if (Object.hasOwn(timeoutChange, 'renderTimeout')) {
+    fields.renderTimeout = timeoutChange.renderTimeout;
+  }
+  const components: Partial<Components> = {};
+  for (const field of componentFields) {
+    const changed = (owed?.components?.[field] === undefined ? fromShown : fromOnto).components?.[field];
+    if (changed !== undefined) {
+      Object.assign(components, { [field]: changed });
+    }
+  }
+  if (Object.keys(components).length > 0) {
+    fields.components = components;
+  }
+  return mergeEntry(onto, fields);
+};
 
 const combineFields = (earlier: EntryFields | undefined, later: EntryFields): EntryFields => ({
   ...earlier,

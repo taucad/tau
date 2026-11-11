@@ -24,7 +24,7 @@ import { HomeFileManagerProvider, useFileManager } from '#hooks/use-file-manager
 import { useModels } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
 import { isKernelId } from '@taucad/types/constants';
 import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
@@ -46,9 +46,10 @@ import {
 } from '#services/agent-host-client.js';
 import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-agent-host-client';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
+import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { dialExecutionHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
-import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import { useComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 import { ENV } from '#environment.config.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
@@ -80,7 +81,7 @@ import {
 } from '#hooks/use-revision-status.js';
 import type { RevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import { closeProjectRuntime, selectProjectKernelRefusal } from '#machines/project.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
@@ -337,15 +338,22 @@ function ProjectSessionBinding({
         }
       },
       /*
-       * Every rating goes to the browser host, which reports one only for a run it observed in its own rows: the
-       * chat's current execution may have changed since the rated run ended, and a daemon's run is never reported.
+       * Every rating goes to the browser host and, in the desktop app, to the desktop host (LW8). Each reports one
+       * only for a run it observed in its own rows: the chat's current execution may have changed since the rated run
+       * ended, and a paired daemon's run is never reported.
        */
       rated: async (rating) => {
-        try {
-          await noteBrowserRunRated({ projectId, ...rating });
-        } catch {
-          /* A lost rating is only a missing feedback fact. */
-        }
+        const note = async (deliver: () => Promise<void> | undefined): Promise<void> => {
+          try {
+            await deliver();
+          } catch {
+            /* A lost rating is only a missing feedback fact. */
+          }
+        };
+        await Promise.all([
+          note(async () => noteBrowserRunRated({ projectId, ...rating })),
+          note(async () => desktopBridge()?.agentHost.rated({ projectId, ...rating })),
+        ]);
       },
     });
     return () => {

@@ -8,15 +8,15 @@
  * cannot import UI source (ruling D3), so the copy is repeated here; `tauCloudBuildEnabled`
  * keeps billing copy out of a self-host build exactly as the UI's cloud boundary does.
  */
-const unavailable = 'Zoo execution is temporarily unavailable. Your project is safe; try again later.';
+const unavailable = 'Zoo is temporarily unavailable. Your project is safe. Try again later.';
 const signIn = 'Sign in to Tau to use the Zoo kernel.';
 
 export const desktopZooCloseErrors: Readonly<Record<string, string>> = tauCloudBuildEnabled
   ? {
       1013: unavailable,
       4401: signIn,
-      4402: 'This Zoo run needs more credits. Add credits, then retry.',
-      4403: 'Zoo execution requires Pro. Upgrade to Pro, then retry.',
+      4402: 'You need more credits to run Zoo. Add credits, then try again.',
+      4403: 'Zoo needs a Pro plan. Upgrade to Pro, then try again.',
     }
   : { 1013: unavailable, 4401: signIn };
 /* eslint-enable @typescript-eslint/naming-convention -- End numeric WebSocket close-code keys. */

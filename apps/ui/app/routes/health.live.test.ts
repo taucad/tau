@@ -2,7 +2,7 @@
 import process from 'node:process';
 import { describe, expect, it, vi } from 'vitest';
 import { loader } from '#routes/health.live.js';
-import { heapThresholdBytes } from '#constants/health.constants.js';
+import { heapThresholdBytes } from '@taucad/ui-core/constants/health.constants';
 
 const callLoader = async () => {
   // The liveness loader doesn't read request/params/context — pass a stub.

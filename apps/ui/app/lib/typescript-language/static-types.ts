@@ -1,5 +1,5 @@
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
-import { bundledTypesWorkspaceRootSegment } from '#lib/bundled-types-tree.constants.js';
+import { bundledTypesWorkspaceRootSegment } from '@taucad/ui-core/lib/bundled-types-tree.constants';
 
 export type StaticTypeDefinition = Readonly<{
   packageName: string;

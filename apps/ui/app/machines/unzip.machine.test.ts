@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor } from 'xstate';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { unzipMachine } from '#machines/unzip.machine.js';
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createProjectFixture } from '#lib/project.fixture.js';
+import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { createContext, useContext, useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { projectToManifest, projectManifestSchemaUrl } from '@taucad/types';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
@@ -823,6 +823,52 @@ describe('ProjectLibrary', () => {
     expect(within(controls).getByRole('button', { name: 'View mode' })).toBeInTheDocument();
     expect(screen.queryByTestId('new-project-chat-composer')).not.toBeInTheDocument();
     expect(screen.queryByText('Build from code')).not.toBeInTheDocument();
+  });
+
+  describe('host empty content', () => {
+    const renderLibrary = (): ReturnType<typeof render> =>
+      render(
+        <TestRouter>
+          <TooltipProvider>
+            <ProjectLibrary headingLevel={2} emptyContent={<div>community builds</div>} />
+          </TooltipProvider>
+        </TestRouter>,
+      );
+
+    it('replaces the whole section when the library is empty', () => {
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [] };
+      renderLibrary();
+
+      expect(screen.getByText('community builds')).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Projects' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Project controls' })).not.toBeInTheDocument();
+      expect(screen.queryByText('No projects yet. Your first project appears here.')).not.toBeInTheDocument();
+    });
+
+    it('stands in for the skeleton while the count is unknown, not while projects are remembered', () => {
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+      const unknown = renderLibrary();
+      expect(screen.getByText('community builds')).toBeInTheDocument();
+      unknown.unmount();
+
+      mockRememberedShape = { count: 3 };
+      renderLibrary();
+      expect(screen.queryByText('community builds')).not.toBeInTheDocument();
+      expect(screen.getByRole('status', { name: 'Loading projects' })).toBeInTheDocument();
+    });
+
+    it('keeps the section once a project exists or a listing failure needs a retry', () => {
+      mockUseProjectsResult = createUseProjectsResult();
+      const listed = renderLibrary();
+      expect(screen.queryByText('community builds')).not.toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
+      listed.unmount();
+
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], error: new Error('listing failed') };
+      renderLibrary();
+      expect(screen.queryByText('community builds')).not.toBeInTheDocument();
+      expect(screen.getByText('Projects could not be loaded')).toBeInTheDocument();
+    });
   });
 
   /* R5: a remembered empty list is known before the worker lists, so no skeleton stands in for it. */

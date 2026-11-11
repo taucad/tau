@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchLayout } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
-import { digestBytes } from '#utils/crypto.utils.js';
+import { digestBytes } from '@taucad/ui-core/utils/crypto.utils';
 import { createWorkbenchLayoutStore } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import { fromDockview, toDockview } from '#workbench-records/converters.js';
 

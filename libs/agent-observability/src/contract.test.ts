@@ -428,6 +428,40 @@ it('should represent direct, funded and compaction calls without inventing a bil
   }
 });
 
+it('should carry the optional host labels on a provider fact, bounded like every id', () => {
+  const providerEvidence = (labels?: Record<string, unknown>): unknown => ({
+    ...fixture(),
+    source: { kind: 'invocation', invocation: 'call-1', digest },
+    semantic: { kind: 'provider', id: 'call-1' },
+    payload: {
+      plane: 'summary',
+      fact: {
+        kind: 'provider',
+        logicalCall: 'logical-1',
+        attempt: null,
+        billing: null,
+        purpose: 'generation',
+        requestedModel: null,
+        resolvedModel: null,
+        provider: null,
+        response: null,
+        firstOutput: null,
+        stop: 'stop',
+        usage: { input: 1, output: 1, cacheRead: null, cacheWrite: null, reasoning: null, missing: 'none' },
+        ...(labels === undefined ? {} : { labels }),
+      },
+    },
+  });
+  /* A fact written before LW17 has no labels and still parses. */
+  expect(parse(providerEvidence()).ok).toBe(true);
+  expect(
+    parse(providerEvidence({ host: 'browser', build: '0123456789ab', kernel: 'replicad', model: 'route-1' })).ok,
+  ).toBe(true);
+  expect(parse(providerEvidence({ host: 'unknown' })).ok).toBe(true);
+  expect(parse(providerEvidence({ host: 'x'.repeat(129) })).ok).toBe(false);
+  expect(parse(providerEvidence({ host: 'browser', plan: 'pro' })).ok).toBe(false);
+});
+
 it('should refuse a valid retention proof borrowed from a different source fact', () => {
   const evidence = fixture();
   const current = authority(evidence);
@@ -447,4 +481,36 @@ it('should reject inherited purpose names at the runtime boundary', () => {
     allowed: false,
     code: 'PURPOSE',
   });
+});
+
+it("should parse a provider fact's declared call kind, absent from an older API, and refuse any other", () => {
+  /* Untyped, so a call kind outside the vocabulary reaches the parser as a JavaScript caller would send it. */
+  const provider = (callKind?: string): Readonly<Record<string, unknown>> => ({
+    ...fixture(),
+    source: { kind: 'invocation', invocation: 'call-1', digest },
+    semantic: { kind: 'provider', id: 'call-1' },
+    payload: {
+      plane: 'summary',
+      fact: {
+        kind: 'provider',
+        logicalCall: 'logical-1',
+        attempt: null,
+        billing: null,
+        purpose: 'helper',
+        ...(callKind === undefined ? {} : { callKind }),
+        requestedModel: null,
+        resolvedModel: null,
+        provider: null,
+        response: null,
+        firstOutput: null,
+        stop: 'stop',
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: null, missing: 'none' },
+      },
+    },
+  });
+
+  for (const callKind of ['run', 'helper', 'direct', undefined]) {
+    expect(parse(provider(callKind)).ok).toBe(true);
+  }
+  expect(parse(provider('chat')).ok).toBe(false);
 });

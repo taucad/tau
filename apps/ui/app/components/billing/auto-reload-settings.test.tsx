@@ -20,7 +20,7 @@ const entitlements = vi.hoisted(() => ({ current: { isResolved: true, paymentCol
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({ useEntitlements: () => entitlements.current }));
 vi.mock('#lib/billing-payment-client.js', () => ({
   BillingCollectionUnavailable: CollectionUnavailable,
-  purchasesUnavailableMessage: 'Purchases are not available yet.',
+  purchasesUnavailableMessage: 'You can’t buy credits yet. We’re still setting up payments.',
   createPaymentRequestId: () => 'request-a',
   confirmPaymentAction: vi.fn(),
   followPaymentRedirect: vi.fn(),
@@ -74,64 +74,127 @@ describe('AutoReloadSettings', () => {
   it('shows one load failure with a working retry and no contradictory off state', async () => {
     getReloadConsent.mockRejectedValueOnce(new Error('offline'));
     renderSettings();
-    expect(await screen.findByRole('alert')).toHaveTextContent('could not be loaded');
-    expect(screen.queryByText('Automatic reload is off.')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Review automatic reload' })).toBeNull();
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByText('Automatic reload is off.')).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t load auto-reloadYour setting hasn’t changed.');
+    expect(screen.queryByText('Auto-reload is off')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Set up' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('Auto-reload is off')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).toBeNull();
   });
   it('keeps Review disabled with the availability copy when collection is unavailable', async () => {
     entitlements.current = { isResolved: true, paymentCollectionAvailable: false };
     renderSettings();
-    expect(await screen.findByRole('button', { name: 'Review automatic reload' })).toBeDisabled();
-    expect(screen.getByText('Purchases are not available yet.')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Set up' })).toBeDisabled();
+    expect(screen.getByText('You can’t buy credits yet. We’re still setting up payments.')).toBeInTheDocument();
   });
   it('maps a collection refusal to the availability copy', async () => {
     prepareReloadConsent.mockRejectedValue(new CollectionUnavailable());
     renderSettings();
-    await userEvent.click(await screen.findByRole('button', { name: 'Review automatic reload' }));
-    expect(await screen.findByText('Purchases are not available yet.')).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'Set up' }));
+    expect(await screen.findByText('You can’t buy credits yet. We’re still setting up payments.')).toBeInTheDocument();
     expect(screen.queryByText(/try again/i)).toBeNull();
   });
   it('names the reload cadence in singular or plural hours', async () => {
     getReloadConsent.mockResolvedValue(consentIn('enabled', 3600));
     const { unmount } = renderSettings();
-    expect(await screen.findByText('1 hour')).toBeInTheDocument();
+    expect(await screen.findByText(/and one reload per hour\.$/u)).toBeInTheDocument();
     unmount();
     getReloadConsent.mockResolvedValue(consentIn('enabled', 7200));
     renderSettings();
-    expect(await screen.findByText('2 hours')).toBeInTheDocument();
+    expect(await screen.findByText(/and one reload every 2 hours\.$/u)).toBeInTheDocument();
   });
 
   it.each([
-    ['disabled_failures', 'Off after failed payments'],
-    ['paused_terms', 'Paused because the terms changed. Review the new terms to continue.'],
-  ])('should offer a review of new terms directly when the consent is %s', async (state, status) => {
+    {
+      state: 'disabled_failures',
+      status: 'We turned auto-reload off after 2 failed payments. Check your card, then turn it back on.',
+      badge: 'Off',
+      review: 'Turn on',
+    },
+    {
+      state: 'paused_terms',
+      status: 'We’ve updated the auto-reload terms. Review and accept them to turn auto-reload back on.',
+      badge: 'Paused',
+      review: 'Review new terms',
+    },
+  ])('should offer a review of new terms directly when the consent is $state', async (row) => {
+    const { state, status, badge, review } = row;
     getReloadConsent.mockResolvedValue(consentIn(state));
     prepareReloadConsent.mockResolvedValue({ state: 'prepared' });
     renderSettings();
     expect(await screen.findByText(status)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Turn off automatic reload' })).toBeEnabled();
-    await userEvent.click(screen.getByRole('button', { name: 'Review automatic reload' }));
+    expect(screen.getByText(badge)).toHaveAttribute('data-tone', 'warning');
+    // Auto-reload that failed payments already turned off has nothing left to turn off.
+    expect(screen.queryByRole('button', { name: 'Turn off' }) !== null).toBe(state === 'paused_terms');
+    await userEvent.click(screen.getByRole('button', { name: review }));
     expect(prepareReloadConsent).toHaveBeenCalledWith(
       expect.objectContaining({ ownerId: 'user-a' }),
       expect.objectContaining({ requestId: 'request-a' }),
     );
   });
 
-  it.each(['pending_setup', 'enabled'])('should not offer a review while the consent is %s', async (state) => {
+  it.each([
+    ['pending_setup', 'Cancel setup'],
+    ['enabled', 'Turn off'],
+  ])('should not offer a review while the consent is %s', async (state, off) => {
     getReloadConsent.mockResolvedValue(consentIn(state));
     renderSettings();
-    expect(await screen.findByRole('button', { name: 'Turn off automatic reload' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Review automatic reload' })).toBeNull();
+    expect(await screen.findByRole('button', { name: off })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^(Set up|Turn on|Review new terms)$/u })).toBeNull();
+  });
+
+  it('should say what auto-reload does in one sentence with the card named properly and the limits on one line', async () => {
+    getReloadConsent.mockResolvedValue({ ...consentIn('enabled'), paymentMethod: { brand: 'visa', last4: '8252' } });
+    renderSettings();
+    expect(
+      await screen.findByText('When your balance drops below 100 credits, we charge Visa •••• 8252 $25.00 plus tax.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Limits: up to $25.00 per charge including tax, $100.00 per month, and one reload per hour.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('On')).toHaveAttribute('data-tone', 'positive');
+    expect(screen.queryByText(/visa •••• 8252|US\$|Quoted tax|Failure limit/u)).toBeNull();
+  });
+
+  it('should show a layout-matching skeleton while the consent loads', () => {
+    getReloadConsent.mockReturnValue(
+      new Promise<never>(() => {
+        // Left pending on purpose.
+      }),
+    );
+    renderSettings();
+    const loading = screen.getByRole('status');
+    expect(loading).toHaveTextContent('Loading auto-reload…');
+    expect(loading.querySelectorAll('[data-slot=skeleton]')).toHaveLength(2);
+  });
+
+  it('should state the terms in the customer’s words before turning on, and cancel instead of turning off', async () => {
+    const limits = { ...setupInCheckout, state: 'prepared', redirectUrl: null };
+    getReloadConsent.mockResolvedValue({ ...consentIn('pending_setup'), setupAction: limits });
+    revokeReloadConsent.mockResolvedValue(consentIn('revoked'));
+    renderSettings();
+    expect(await screen.findByText('Turn on auto-reload?')).toBeInTheDocument();
+    const list = screen.getByLabelText('Auto-reload limits');
+    expect(list).toHaveTextContent('Each reload$25.00 plus tax');
+    expect(list).toHaveTextContent('Most we charge at once$25.00');
+    expect(list).toHaveTextContent('Most we charge per month$100.00');
+    expect(list).toHaveTextContent('Time between reloadsAt least 1 hour');
+    expect(list).toHaveTextContent('Turns off after2 failed payments');
+    expect(
+      screen.getByText(
+        'By turning this on, you authorize Tau to charge your saved card $25.00 plus tax each time your balance drops below 100 credits, within these limits, until you turn auto-reload off.',
+      ),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(revokeReloadConsent).toHaveBeenCalledOnce();
+    expect(await screen.findByRole('button', { name: 'Turn on' })).toBeInTheDocument();
   });
 
   it.each([
-    ['paused_terms', 'redirect_required', 'Continue setup'],
-    ['paused_terms', 'prepared', 'Accept these limits'],
-    ['disabled_failures', 'redirect_required', 'Continue setup'],
-    ['disabled_failures', 'prepared', 'Accept these limits'],
+    ['paused_terms', 'redirect_required', 'Continue to payment'],
+    ['paused_terms', 'prepared', 'Agree and turn on'],
+    ['disabled_failures', 'redirect_required', 'Continue to payment'],
+    ['disabled_failures', 'prepared', 'Agree and turn on'],
   ])(
     'should not offer the old card setup of a %s consent that still reads %s beside its review',
     async (state, setupState, control) => {
@@ -140,7 +203,9 @@ describe('AutoReloadSettings', () => {
         setupAction: { ...setupInCheckout, state: setupState },
       });
       renderSettings();
-      expect(await screen.findByRole('button', { name: 'Review automatic reload' })).toBeEnabled();
+      expect(
+        await screen.findByRole('button', { name: state === 'paused_terms' ? 'Review new terms' : 'Turn on' }),
+      ).toBeEnabled();
       expect(screen.queryByRole('button', { name: control })).toBeNull();
     },
   );
@@ -153,18 +218,18 @@ describe('AutoReloadSettings', () => {
     prepareReloadConsent.mockResolvedValue(newLimits);
     renderSettings();
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Review automatic reload' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Review new terms' }));
 
-    expect(await screen.findByRole('button', { name: 'Accept these limits' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Continue setup' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Review automatic reload' })).toBeNull();
+    expect(await screen.findByRole('button', { name: 'Agree and turn on' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Continue to payment' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Review new terms' })).toBeNull();
   });
 
   it('should share the consent with useAutoReloadEnabled and refresh when billing is invalidated', async () => {
     const queryClient = new QueryClient();
     getReloadConsent.mockResolvedValue({ ...consentIn('pending_setup'), setupAction: setupInCheckout });
     renderSettings(queryClient, { ...binding, subjectId: 'account-a' });
-    expect(await screen.findByText('Waiting for card setup')).toBeInTheDocument();
+    expect(await screen.findByText('Finish setting up auto-reload')).toBeInTheDocument();
     expect(queryClient.getQueryData(sharedConsentKey)).toMatchObject({ state: 'pending_setup' });
 
     getReloadConsent.mockResolvedValue(consentIn('enabled'));
@@ -174,7 +239,7 @@ describe('AutoReloadSettings', () => {
     });
 
     expect(await screen.findByText('On')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Continue setup' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Continue to payment' })).toBeNull();
   });
 
   it('should turn on in place once billing confirms a card setup it was waiting for', async () => {
@@ -184,13 +249,13 @@ describe('AutoReloadSettings', () => {
         .mockResolvedValueOnce({ ...consentIn('pending_setup'), setupAction: setupInCheckout })
         .mockResolvedValue(consentIn('enabled'));
       renderSettings();
-      expect(await screen.findByText('Waiting for card setup')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Continue setup' })).toBeInTheDocument();
+      expect(await screen.findByText('Finish setting up auto-reload')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Continue to payment' })).toBeInTheDocument();
 
       await vi.advanceTimersByTimeAsync(2000);
 
       expect(await screen.findByText('On')).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Continue setup' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Continue to payment' })).toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -201,7 +266,7 @@ describe('AutoReloadSettings', () => {
     try {
       getReloadConsent.mockResolvedValue({ ...consentIn('pending_setup'), setupAction: setupInCheckout });
       renderSettings();
-      expect(await screen.findByText('Waiting for card setup')).toBeInTheDocument();
+      expect(await screen.findByText('Finish setting up auto-reload')).toBeInTheDocument();
       expect(getReloadConsent).toHaveBeenCalledOnce();
       await vi.advanceTimersByTimeAsync(2000);
       expect(getReloadConsent).toHaveBeenCalledTimes(2);
@@ -213,7 +278,7 @@ describe('AutoReloadSettings', () => {
       await vi.advanceTimersByTimeAsync(20_000);
 
       expect(getReloadConsent).toHaveBeenCalledTimes(reads);
-      expect(screen.getByRole('button', { name: 'Continue setup' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Continue to payment' })).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -240,21 +305,22 @@ describe('AutoReloadSettings', () => {
     revokeReloadConsent.mockResolvedValue(consentIn('revoked'));
     renderSettings(queryClient, { ...binding, subjectId: 'account-a' });
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Turn off automatic reload' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Turn off' }));
 
-    expect(await screen.findByText('Off')).toBeInTheDocument();
+    expect(await screen.findByText('Auto-reload is off')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Turn on' })).toBeEnabled();
     expect(revokeReloadConsent).toHaveBeenCalledWith(expect.objectContaining({ subjectId: 'account-a' }), 'consent-a');
-    expect(screen.queryByRole('button', { name: 'Turn off automatic reload' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Turn off' })).toBeNull();
     expect(queryClient.getQueryData(sharedConsentKey)).toMatchObject({ state: 'revoked' });
   });
 
   it('points a customer without a saved billing address to a Checkout purchase first', async () => {
     prepareReloadConsent.mockRejectedValue(new AddressRequired());
     renderSettings();
-    await userEvent.click(await screen.findByRole('button', { name: 'Review automatic reload' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Set up' }));
     expect(
       await screen.findByText(
-        'Add credits once through Checkout to save a card and billing address, then set up automatic reload.',
+        'Auto-reload needs a saved card. Add credits once to save your card, then come back here.',
       ),
     ).toBeInTheDocument();
   });
@@ -263,7 +329,7 @@ describe('AutoReloadSettings', () => {
     prepareReloadConsent.mockResolvedValue({ state: 'prepared' });
     renderSettings();
     expect(prepareReloadConsent).not.toHaveBeenCalled();
-    await userEvent.click(await screen.findByRole('button', { name: 'Review automatic reload' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Set up' }));
     expect(prepareReloadConsent).toHaveBeenCalledWith(
       expect.objectContaining({ ownerId: 'user-a' }),
       expect.objectContaining({ requestId: 'request-a' }),

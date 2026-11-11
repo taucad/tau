@@ -150,7 +150,7 @@ const readViewerPage = async (path: string | undefined): Promise<{ html: string;
 export const mcpCommand = defineCommand({
   meta: {
     name: 'mcp',
-    description: 'Serve Tau CAD tools to a local agent over stdio (MCP)',
+    description: 'Serve Tau tools to a local agent over stdio (MCP)',
   },
   args: {
     project: {

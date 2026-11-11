@@ -97,12 +97,7 @@ function CommandDialog({
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
-      <DialogContent
-        className={cn(
-          'overflow-hidden p-0 *:data-[slot=dialog-close]:top-2.5 *:data-[slot=dialog-close]:right-2.5',
-          contentClassName,
-        )}
-      >
+      <DialogContent className={cn('overflow-hidden p-0', contentClassName)}>
         <Command
           shouldFilter={shouldFilter}
           className='[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4'

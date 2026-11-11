@@ -7,7 +7,7 @@ import {
   getRemoteComputePlacement,
   selectRemoteComputeDevice,
   setRemoteComputePlacement,
-} from '#lib/remote-compute-placement.js';
+} from '@taucad/ui-core/lib/remote-compute-placement';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
 const failureState = (error: unknown): 'device-offline' | 'busy' | 'version-mismatch' | 'disconnected' => {

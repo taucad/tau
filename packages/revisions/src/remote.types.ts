@@ -155,4 +155,6 @@ export type RemoteMachineEvent =
    * A push put bytes on the remote (RV-W8 F9): the stored figure is stale, so
    * a connected remote reads it again. Forwarded by `sync.machine`.
    */
-  | Readonly<{ type: 'pushed' }>;
+  | Readonly<{ type: 'pushed' }>
+  /** The page's signed-in person changed (audit R6): what the last session read is read again. */
+  | Readonly<{ type: 'sessionChanged' }>;

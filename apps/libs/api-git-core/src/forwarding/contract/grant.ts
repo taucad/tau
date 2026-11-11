@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
+import { linkedForges } from '#git.constants.js';
 import type { SigningKey, VerificationKeys } from '#forwarding/contract/keys.js';
 import type { ReplayGuard } from '#forwarding/contract/replay-guard.js';
 import { acceptedVersions, openToken, signToken } from '#forwarding/contract/signed-token.js';
@@ -84,6 +85,12 @@ const factsSchema = z.object({
   committedBy: identifier,
   /** The cloud host the request came through (D21), recorded on the push (EQ11). */
   viaDevice: identifier.optional(),
+  /**
+   * `git-receive-pack` only: the forge the project is linked to (B4). Commits
+   * Tau did not record pass the push's authorship check only then, and the
+   * forge's no-reply address is an author Tau may write.
+   */
+  forge: z.enum(linkedForges).optional(),
   /** Bytes the owner's plan still allows (D16); 0 on a read. */
   remainingBytes: bytes,
   storageLimitBytes: bytes,

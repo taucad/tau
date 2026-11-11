@@ -16,7 +16,7 @@ import { createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type { MockRuntimeDocumentFixture } from '@taucad/runtime-testing';
 import { workbenchRecords } from '@taucad/workbench';
 import { createEmptyGlb } from '@taucad/geometry-core';
-import { defaultOperationTimeout } from '#constants/editor.constants.js';
+import { defaultOperationTimeout } from '@taucad/ui-core/constants/editor.constants';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
 import type { GraphicsViewSettings, PinnedMeasurement } from '@taucad/viewer/graphics/graphics-settings';
 import type { cadMachine } from '#machines/cad.machine.js';

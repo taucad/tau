@@ -48,7 +48,7 @@ import {
   timelineRowHover,
   timelineMarker,
 } from '#components/revisions/revision-timeline.js';
-import { RevisionRow } from '#routes/w.$workspace.$project/revision-marker.js';
+import { RevisionRow, isAutosave } from '#routes/w.$workspace.$project/revision-marker.js';
 import { ConflictDecision, RevisionBranches } from '#routes/w.$workspace.$project/revision-branches.js';
 import type { ConflictMaterialization } from '#routes/w.$workspace.$project/revision-branches.js';
 import { RevisionSyncRegion } from '#routes/w.$workspace.$project/revision-sync-region.js';
@@ -69,7 +69,7 @@ import {
   useRevisionCommands,
   useRevisionStatus,
 } from '#hooks/use-revision-status.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { setAnonymousRevisions, useAnonymousRevisions, useRevisionSessionUser } from '#lib/revision-actor.js';
 import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
@@ -369,9 +369,8 @@ export const groupRevisionHistory = (
     const foldable =
       revision.revisionId !== headRevisionId &&
       (revision.tags?.length ?? 0) === 0 &&
-      revision.turnId === undefined &&
       !revision.conflicted &&
-      (revision.trigger === 'idle' || revision.trigger === 'hidden' || revision.trigger === 'close');
+      isAutosave(revision);
     const previous = groups.at(-1);
     if (foldable && previous?.kind === 'autosaves') {
       groups[groups.length - 1] = { kind: 'autosaves', revisions: [...previous.revisions, revision] };

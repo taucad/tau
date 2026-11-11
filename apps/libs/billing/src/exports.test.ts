@@ -17,6 +17,7 @@ describe('package exports', () => {
       './hooks/use-open-holds': './src/hooks/use-open-holds.ts',
       './hooks/use-usage-snapshot': './src/hooks/use-usage-snapshot.ts',
       './training-consent': './src/training-consent.ts',
+      './plan-catalog': './src/tau-plan-catalog.ts',
     });
   });
 });

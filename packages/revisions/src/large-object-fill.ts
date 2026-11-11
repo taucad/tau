@@ -166,7 +166,11 @@ export const createLargeObjectFill = (
     retryMilliseconds?: readonly number[];
   }>,
 ): Readonly<{
-  fill: (place: Checkout, head: RevisionId, placeholders?: ReadonlyMap<string, Placeholder>) => Promise<void>;
+  fill: (
+    place: Checkout,
+    head: RevisionId | undefined,
+    placeholders?: ReadonlyMap<string, Placeholder>,
+  ) => Promise<void>;
   resume: (place: Checkout, head: RevisionId, replace?: boolean) => Promise<void>;
   forget: (checkoutId: string) => void;
   stop: () => Promise<void>;
@@ -721,12 +725,13 @@ export const createLargeObjectFill = (
    * waits for this word on the new tree (D10).
    *
    * @param place - The checkout.
-   * @param head - The revision whose tree names the objects.
+   * @param head - The revision whose tree names the objects; none before a
+   *   checkout's first revision, when there is nothing it can owe.
    * @param placeholders - What the caller just wrote; captured from the checkout when absent.
    */
   const fill = async (
     place: Checkout,
-    head: RevisionId,
+    head: RevisionId | undefined,
     placeholders?: ReadonlyMap<string, Placeholder>,
   ): Promise<void> => {
     const pending = new Map(placeholders ?? largeObjectPlaceholders(await capture(place)));
@@ -741,6 +746,13 @@ export const createLargeObjectFill = (
         report?.({ checkoutId: place.id, facet: undefined, retry: () => undefined, prioritize: () => undefined });
       }
       return;
+    }
+    if (head === undefined) {
+      /* A placeholder only a revision's tree can explain: with none, the check fails and is asked again. */
+      throw new RevisionPortError(
+        'MISSING_LARGE_OBJECT',
+        'This checkout holds a large-object placeholder but has no revision to fetch it from.',
+      );
     }
     const wanted = new Map([...pending.values()].map(({ oid, size }) => [oid, size]));
     const next: Fill = {

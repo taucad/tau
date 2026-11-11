@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { PreviewWorkbenchLayout } from '#components/share/preview-workbench-layout.js';
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
@@ -128,10 +129,9 @@ const SharedRunConsent = ({
       <div className='mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-muted/50 dark:bg-muted/30'>
         <Code className='size-6 text-muted-foreground' aria-hidden />
       </div>
-      {/* oxlint-disable-next-line tau-lint/no-raw-page-heading -- Full-screen gate, laid out like PublicationLockScreen rather than a product page. */}
-      <h1 id='shared-run-title' className='text-xl font-semibold tracking-tight'>
+      <Heading level={1} variant='title' id='shared-run-title'>
         {title}
-      </h1>
+      </Heading>
       <p className='mt-2 text-sm text-muted-foreground'>
         {isDesktopTarget()
           ? 'This model is code written by its author. Running it executes that code in Tau on your computer, with access to your signed-in session. Run it only if you trust where it came from.'

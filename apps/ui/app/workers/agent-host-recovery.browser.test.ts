@@ -13,7 +13,7 @@ import { openBrowserProjectHost } from '#workers/agent-host.impl.js';
 import type { WorkerRevisionRequest, WorkerRevisionResponse } from '#machines/file-manager.worker.revisions.js';
 import type { BrowserProjectHost } from '#workers/agent-host.impl.js';
 import { disposeOpfsProject, opfsProject, opfsProvider } from '#workers/test/agent-host-resident.fixture.js';
-import { rootedProvider } from '#workers/test/rooted-provider.fixture.js';
+import { rootedProvider } from '@taucad/ui-core/workers/test/rooted-provider.fixture';
 
 afterEach(disposeOpfsProject);
 

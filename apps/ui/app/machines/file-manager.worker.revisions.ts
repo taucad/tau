@@ -91,8 +91,8 @@ import type {
 import { workerTimings } from '@taucad/filesystem';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import type { ChangeEvent } from '@taucad/types';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
-import { logWorkerTimings } from '#lib/worker-timing-report.js';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
+import { logWorkerTimings } from '@taucad/ui-core/lib/worker-timing-report';
 import { randomUuid } from '@taucad/utils/id';
 import { createFileSystemBridgePort } from '@taucad/fs-bridge';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
@@ -101,7 +101,7 @@ import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
-import { fetchGeoSpecCandidates, publishGeoSpecCandidate } from '#lib/geospec-candidate-git.js';
+import { fetchGeoSpecCandidates, publishGeoSpecCandidate } from '@taucad/ui-core/lib/geospec-candidate-git';
 
 /**
  * The versioned paths one content-change event touches inside this project.
@@ -180,6 +180,8 @@ export type WorkerRevisionCommand =
      with and sent its frame first; `remote.machine` re-validates (D3). */
   | Readonly<{ command: 'authorizeRemote' }>
   | Readonly<{ command: 'syncNow' }>
+  /** The page's signed-in person changed (audit R6): read the remote afresh under the new session. */
+  | Readonly<{ command: 'sessionChanged' }>
   /* The viewer's *Try again* after a large-object transfer failed; the files are already open. */
   | Readonly<{ command: 'retryLargeObjects' }>
   /* An opened file still holding its pointer: its object jumps the fill queue (D10). */
@@ -269,7 +271,7 @@ export type WorkerRevisionCommand =
    * segments name a random record device per actor form (`.git/ops-devices.json`)
    * — but a worker that has not been told writes no chat refs at all, and the id
    * counts as this host's own for a segment written before record devices
-   * existed (`apps/ui/app/lib/device-id.ts` is the one source).
+   * existed (`apps/libs/ui-core/src/lib/device-id.ts` is the one source).
    */
   | Readonly<{ command: 'setDeviceId'; deviceId: string }>
   /*
@@ -874,6 +876,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     readContent,
     materialize,
     resolvePlaceholder,
+    checkLargeObjects,
     pullsChats,
   } = createProjectRevisionsActor({
     port: options.port,
@@ -1641,8 +1644,29 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           actor.send({ type: 'syncNow' });
           return;
         }
-        case 'retryLargeObjects': {
+        case 'sessionChanged': {
+          actor.send({ type: 'remote', event: { type: 'sessionChanged' } });
+          actor.send({ type: 'sync', event: { type: 'sessionChanged' } });
+          /* A large-object fill refused under the last session tries again under this one; a healthy fill ignores it. */
           largeObjects.get(selectRevisionStatus(actor.getSnapshot()).checkoutId ?? '')?.retry();
+          return;
+        }
+        case 'retryLargeObjects': {
+          const { checkoutId } = selectRevisionStatus(actor.getSnapshot());
+          const running = largeObjects.get(checkoutId ?? '');
+          if (running === undefined) {
+            /* No fill to retry: the wait is for the fill's word, so the checkout is checked again. */
+            // async-iife: bootstrap -- a command answers nothing; a failed check is logged and the next capture checks again.
+            void (async (): Promise<void> => {
+              try {
+                await checkLargeObjects(checkoutId);
+              } catch (error) {
+                console.warn('[revisions] large objects could not be checked again', error);
+              }
+            })();
+          } else {
+            running.retry();
+          }
           return;
         }
         case 'prioritizeLargeObjects': {
@@ -2059,6 +2083,12 @@ export type WorkerRevisionResult =
    * permission for `pagehide` to run.
    */
   | Readonly<{ kind: 'saved' }>
+  /**
+   * The root has taken a `sessionChanged` (audit R6). Every frame posted after
+   * this one was projected after the change; frames before it may be from
+   * either side, so the page reads only a refusal after it as the new session's.
+   */
+  | Readonly<{ kind: 'sessionChanged' }>
   /** What recording an editor's overlapping edit did (D14). */
   | Readonly<{ kind: 'editorConflict'; outcome: EditorConflictOutcome }>
   /**
@@ -2225,6 +2255,10 @@ const answerOf = (
   request: WorkerRevisionRequest,
 ): Promise<WorkerRevisionResult> | undefined => {
   switch (request.command) {
+    case 'sessionChanged': {
+      tree.send(request);
+      return Promise.resolve({ kind: 'sessionChanged' } as const);
+    }
     case 'log': {
       const { branch, limit, from } = request;
       return tree

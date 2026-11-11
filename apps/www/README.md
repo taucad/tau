@@ -113,7 +113,7 @@ Start `node apps/www/scripts/serve.ts`, then run `node apps/www/scripts/browser-
 
 ## Claims
 
-Tau Cloud backup and sync are presented as available on Pro (10 GB) and Enterprise (100 GB) from `apps/libs/billing`; Free shows GitHub backup only, because free-tier sync is held off in production. Hosted verification and Enterprise signed evidence/CI keep their “Coming soon” labels. Tau Desktop is “in development” with no download link, because no installer is published. The blog stays empty until a human writes and reviews an article.
+Tau Cloud backup and sync come from `apps/libs/billing`: 1 GB on Free, 100 GB on Pro, custom on Enterprise. Free sync stays closed in production until the D23 gate opens (go-live checklist STO-14). Hosted verification and Enterprise signed evidence/CI keep their “Coming soon” labels. Tau Desktop is “in development” with no download link, because no installer is published. The blog stays empty until a human writes and reviews an article.
 
 ## Lint
 

@@ -98,10 +98,10 @@ const warningButton = (): ToastButton => {
 const expectResumeOffer = async (): Promise<void> => {
   await waitFor(() => {
     expect(toast).toHaveBeenCalledWith(
-      'Checkout was not finished.',
+      'You didn’t finish paying. You haven’t been charged.',
       expect.objectContaining({
-        action: expect.objectContaining({ label: 'Resume Checkout' }) as unknown,
-        cancel: expect.objectContaining({ label: 'Cancel payment' }) as unknown,
+        action: expect.objectContaining({ label: 'Continue to payment' }) as unknown,
+        cancel: expect.objectContaining({ label: 'Cancel purchase' }) as unknown,
       }),
     );
   });
@@ -145,7 +145,7 @@ describe('useCloudPaymentActionReturn', () => {
         </QueryClientProvider>,
       );
       await waitFor(() => {
-        expect(toast).toHaveBeenCalledWith('Billing updated.');
+        expect(toast).toHaveBeenCalledWith('Subscription updated.');
       });
       expect(search).toBe('?settings=billing');
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['billing'] });
@@ -168,7 +168,7 @@ describe('useCloudPaymentActionReturn', () => {
       });
       returnFromCheckout();
       await waitFor(() => {
-        expect(toast).toHaveBeenCalledWith('Billing updated.');
+        expect(toast).toHaveBeenCalledWith('Subscription updated.');
       });
       await vi.advanceTimersByTimeAsync(20_000);
       expect(getPaymentAction).toHaveBeenCalledOnce();
@@ -184,7 +184,7 @@ describe('useCloudPaymentActionReturn', () => {
     returnFromCheckout();
     await waitFor(() => {
       expect(toast.warning).toHaveBeenCalledWith(
-        'This payment belongs to a different account. Sign in to that account to see it.',
+        'This payment was made from a different account. Sign in to that account to see it.',
       );
     });
   });
@@ -197,7 +197,7 @@ describe('useCloudPaymentActionReturn', () => {
     await expectResumeOffer();
     await toastButton('cancel').onClick();
     expect(cancelPaymentAction).toHaveBeenCalledWith(expect.objectContaining({ subjectId: 'account-a' }), 'action_1');
-    expect(toast).toHaveBeenCalledWith('Payment canceled.');
+    expect(toast).toHaveBeenCalledWith('Purchase canceled.');
   });
 
   it('should refresh billing on any returned action, even one still open', async () => {
@@ -214,9 +214,9 @@ describe('useCloudPaymentActionReturn', () => {
     getPaymentAction.mockResolvedValue({ ...checkoutAction('processing'), purpose: 'subscription_checkout' });
     returnFromCheckout();
     await waitFor(() => {
-      expect(toast).toHaveBeenCalledWith('Payment is still processing.');
+      expect(toast).toHaveBeenCalledWith('Processing your payment…');
     });
-    expect(toast).not.toHaveBeenCalledWith('Checkout was not finished.', expect.anything());
+    expect(toast).not.toHaveBeenCalledWith('You didn’t finish paying. You haven’t been charged.', expect.anything());
   });
 
   it.each(['completed', 'fulfilled'])('refreshes billing data when the returned action is %s', async (state) => {
@@ -266,7 +266,7 @@ describe('useCloudPaymentActionReturn', () => {
     recoverPaymentAction.mockResolvedValue(checkoutAction('fulfilled', { grantedCreditAtoms: '5370000' }));
     returnFromCheckout();
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith('537 credits added to your purchased credits.');
+      expect(toast.success).toHaveBeenCalledWith('537 credits added to your balance.');
     });
     expect(recoverPaymentAction).toHaveBeenCalledOnce();
     expect(recoverPaymentAction).toHaveBeenCalledWith(expect.objectContaining({ subjectId: 'account-a' }), 'action_1');
@@ -294,13 +294,13 @@ describe('useCloudPaymentActionReturn', () => {
     returnFromCheckout();
     await waitFor(() => {
       expect(toast.warning).toHaveBeenCalledWith(
-        'Card setup for automatic reload was not finished.',
-        expect.objectContaining({ action: expect.objectContaining({ label: 'Continue setup' }) as unknown }),
+        'You didn’t finish setting up auto-reload.',
+        expect.objectContaining({ action: expect.objectContaining({ label: 'Continue to payment' }) as unknown }),
       );
     });
     // Recovery read the Session as open: only the customer can finish it, so it is not re-read.
     expect(recoverPaymentAction).toHaveBeenCalledOnce();
-    expect(toast).not.toHaveBeenCalledWith('Confirming your card for automatic reload.');
+    expect(toast).not.toHaveBeenCalledWith('Confirming your card for auto-reload…');
     warningButton().onClick();
     expect(followPaymentRedirect).toHaveBeenCalledWith(setup);
   });
@@ -315,13 +315,13 @@ describe('useCloudPaymentActionReturn', () => {
       const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
       returnFromCheckout(queryClient);
       await waitFor(() => {
-        expect(toast).toHaveBeenCalledWith('Confirming your card for automatic reload.');
+        expect(toast).toHaveBeenCalledWith('Confirming your card for auto-reload…');
       });
 
       await vi.advanceTimersByTimeAsync(2000);
 
       await waitFor(() => {
-        expect(toast.success).toHaveBeenCalledWith('Automatic reload is on.');
+        expect(toast.success).toHaveBeenCalledWith('Auto-reload is on.');
       });
       expect(toast.dismiss).toHaveBeenCalledWith('confirming');
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['billing'] });
@@ -339,7 +339,7 @@ describe('useCloudPaymentActionReturn', () => {
       vi.mocked(toast).mockReturnValueOnce('confirming');
       returnFromCheckout();
       await waitFor(() => {
-        expect(toast).toHaveBeenCalledWith('Confirming your card for automatic reload.');
+        expect(toast).toHaveBeenCalledWith('Confirming your card for auto-reload…');
       });
 
       await vi.advanceTimersByTimeAsync(18_000);
@@ -348,7 +348,7 @@ describe('useCloudPaymentActionReturn', () => {
 
       await waitFor(() => {
         expect(toast.warning).toHaveBeenCalledWith(
-          'Automatic reload is still confirming your card. Check back in a few minutes.',
+          'We’re still confirming your card for auto-reload. Check back in a few minutes.',
         );
       });
       expect(recoverPaymentAction).toHaveBeenCalledTimes(11);
@@ -369,13 +369,13 @@ describe('useCloudPaymentActionReturn', () => {
       vi.mocked(toast).mockReturnValueOnce('processing');
       returnFromCheckout();
       await waitFor(() => {
-        expect(toast).toHaveBeenCalledWith('Payment is still processing.');
+        expect(toast).toHaveBeenCalledWith('Processing your payment…');
       });
 
       await vi.advanceTimersByTimeAsync(2000);
 
       await waitFor(() => {
-        expect(toast.success).toHaveBeenCalledWith('537 credits added to your purchased credits.');
+        expect(toast.success).toHaveBeenCalledWith('537 credits added to your balance.');
       });
       expect(toast.dismiss).toHaveBeenCalledWith('processing');
       expect(toast.warning).not.toHaveBeenCalled();
@@ -392,7 +392,7 @@ describe('useCloudPaymentActionReturn', () => {
       vi.mocked(toast).mockReturnValueOnce('processing');
       returnFromCheckout();
       await waitFor(() => {
-        expect(toast).toHaveBeenCalledWith('Payment is still processing.');
+        expect(toast).toHaveBeenCalledWith('Processing your payment…');
       });
 
       await vi.advanceTimersByTimeAsync(18_000);
@@ -401,7 +401,7 @@ describe('useCloudPaymentActionReturn', () => {
 
       await waitFor(() => {
         expect(toast.warning).toHaveBeenCalledWith(
-          'Billing has not confirmed your payment yet. Check back in a few minutes.',
+          'Your payment is taking longer than usual. Check back in a few minutes.',
         );
       });
       expect(getPaymentAction).toHaveBeenCalledTimes(11);
@@ -420,15 +420,15 @@ describe('useCloudPaymentActionReturn', () => {
       });
       returnFromCheckout();
       await waitFor(() => {
-        expect(toast).toHaveBeenCalledWith('Payment is still processing.');
+        expect(toast).toHaveBeenCalledWith('Processing your payment…');
       });
 
       await vi.advanceTimersByTimeAsync(2000);
 
       await waitFor(() => {
         expect(toast.warning).toHaveBeenCalledWith(
-          'Your payment needs attention.',
-          expect.objectContaining({ action: expect.objectContaining({ label: 'Continue in Checkout' }) as unknown }),
+          'Your bank needs you to confirm this payment.',
+          expect.objectContaining({ action: expect.objectContaining({ label: 'Continue to payment' }) as unknown }),
         );
       });
       await vi.advanceTimersByTimeAsync(4000);
@@ -446,14 +446,14 @@ describe('useCloudPaymentActionReturn', () => {
     });
     returnFromCheckout();
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith('Tau Pro is active. 2,000 credits added to your monthly credits.');
+      expect(toast.success).toHaveBeenCalledWith('You’re on Tau Pro. 2,000 monthly credits added.');
     });
     expect(toast.success).toHaveBeenCalledOnce();
   });
 
   it.each([
-    ['a card setup', 'reload_setup', 'Card setup for automatic reload was not completed.'],
-    ['a purchase', 'manual_topup', 'Payment was not completed.'],
+    ['a card setup', 'reload_setup', 'Auto-reload wasn’t turned on.'],
+    ['a purchase', 'manual_topup', 'Payment failed. You weren’t charged.'],
   ])('should say %s was not completed when the customer left its Checkout', async (_, purpose, copy) => {
     getPaymentAction.mockResolvedValue({ ...checkoutAction('canceled'), purpose });
     returnFromCheckout();
@@ -468,7 +468,7 @@ describe('useCloudPaymentActionReturn', () => {
     getPaymentAction.mockResolvedValue(checkoutAction('fulfilled', { grantedCreditAtoms: '5370000' }));
     returnFromCheckout();
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith('537 credits added to your purchased credits.');
+      expect(toast.success).toHaveBeenCalledWith('537 credits added to your balance.');
     });
     expect(recoverPaymentAction).not.toHaveBeenCalled();
   });

@@ -11,6 +11,7 @@
  * deliberately presentational.
  */
 
+import { Heading } from '@taucad/ui/components/heading';
 import { useEffect, useRef, useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -237,13 +238,15 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
 
   return (
     <div className='flex flex-col gap-3 rounded-md border bg-card p-3'>
-      <h4
+      <Heading
+        level={4}
+        variant='overline'
         ref={headingRef}
         tabIndex={-1}
-        className='text-xs font-medium text-muted-foreground focus-visible:focus-outline'
+        className='text-muted-foreground focus-visible:focus-outline'
       >
         People with access
-      </h4>
+      </Heading>
 
       <div className='flex flex-col gap-2'>
         <Label htmlFor='collaborator-email' className='text-sm font-normal'>

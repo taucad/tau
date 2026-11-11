@@ -1,0 +1,104 @@
+# Fills and saves, from `main`, the Actions cache entries the affected lanes of `ci.yml` restore their
+# pinned third-party downloads from (Brain research/ci-flake-classes.md class 1, R3): every Python
+# kernel's dependency seed (CPython and wheels) and the wasi-sdk archive `openscad-language:prepare`
+# compiles the OpenSCAD parser with. `scripts/src/ci-pinned-downloads.ts` names the entries and keys
+# each by the pins themselves, the same way for the lanes and here.
+#
+# The lanes cannot save the entries themselves: a pull request's or a merge-queue group's cache scope
+# is its own ref, which no other run restores from, and on a push to `main` the lanes reuse the merge
+# queue's verdict and run nothing. So this workflow runs on a push to `main` that changes a pin source,
+# and nightly to refill an entry the cache evicted. On a hit it stops at the lookup; on a miss it
+# downloads from the origins, every byte checked against its pin before it is written, and saves.
+#
+# Not a required check. A red nightly (an origin outage on a miss) reaches the operator through the
+# nightly watchdog; the lanes meanwhile download as they did before.
+name: CI pinned downloads
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/plugins/*/tau-plugin.json'
+      - 'packages/plugins/*/project.json'
+      - 'apps/libs/openscad-language/project.json'
+      - 'apps/libs/openscad-language/scripts/wasi-sdk.json'
+      - 'apps/libs/openscad-language/scripts/wasi-sdk.mts'
+      - 'scripts/src/ci-pinned-downloads.ts'
+      - '.github/workflows/ci-pinned-downloads.yml'
+  schedule:
+    - cron: '41 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    name: Seed the affected lanes' pinned downloads
+    # Only `main`'s cache scope reaches pull requests and the merge queue.
+    if: github.ref == 'refs/heads/main'
+    # The lanes' runner, so the entries are for the host that restores them.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # A project graph has no task data, so every entry is named.
+      - name: Name the pinned downloads
+        id: pins
+        run: |
+          pnpm nx graph --file="$RUNNER_TEMP/graph.json" > /dev/null
+          node scripts/src/ci-pinned-downloads.ts --graph "$RUNNER_TEMP/graph.json" >> "$GITHUB_OUTPUT"
+
+      - name: Look up the Python kernel seeds
+        id: kernel-seeds
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.kernel-seeds-path }}
+          key: ${{ steps.pins.outputs.kernel-seeds-key }}
+          lookup-only: true
+
+      # Every `seed` target downloads its kernel's pinned closure for this host, each blob checked
+      # against its pin before it is written.
+      - name: Fill the Python kernel seeds from the pinned origins
+        if: steps.kernel-seeds.outputs.cache-hit != 'true'
+        run: pnpm nx run-many -t seed --outputStyle=static
+
+      - name: Save the Python kernel seeds
+        if: steps.kernel-seeds.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ steps.pins.outputs.kernel-seeds-path }}
+          key: ${{ steps.pins.outputs.kernel-seeds-key }}
+
+      - name: Look up the wasi-sdk archive
+        id: wasi-sdk
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.wasi-sdk-path }}
+          key: ${{ steps.pins.outputs.wasi-sdk-key }}
+          lookup-only: true
+
+      # Downloads the archive and keeps it only when it hashes to its pin in wasi-sdk.json.
+      - name: Fill the wasi-sdk archive from its release
+        if: steps.wasi-sdk.outputs.cache-hit != 'true'
+        run: node --import @oxc-node/core/register apps/libs/openscad-language/scripts/prepare-openscad-language-server.mts --wasi-sdk-archive
+
+      - name: Save the wasi-sdk archive
+        if: steps.wasi-sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ steps.pins.outputs.wasi-sdk-path }}
+          key: ${{ steps.pins.outputs.wasi-sdk-key }}

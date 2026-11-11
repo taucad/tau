@@ -1,8 +1,11 @@
 import { useMemo } from 'react';
 import { localKernelOptions } from '#constants/local-kernel-options.js';
 import { remoteKernelOptions } from '#constants/remote-kernel-options.js';
-import { useRemoteComputePlacement, useRemoteComputeSelectionRevision } from '#lib/remote-compute-placement.js';
-import { useComputeReuseMode, useComputeReuseRevision } from '#lib/compute-reuse-preference.js';
+import {
+  useRemoteComputePlacement,
+  useRemoteComputeSelectionRevision,
+} from '@taucad/ui-core/lib/remote-compute-placement';
+import { useComputeReuseMode, useComputeReuseRevision } from '@taucad/ui-core/lib/compute-reuse-preference';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
 export type ProjectKernelSelection = {

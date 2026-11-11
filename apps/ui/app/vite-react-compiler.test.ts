@@ -88,7 +88,7 @@ describe('production React compiler', () => {
           state: { status: 'ready', monthly: { availableCreditAtoms: 1n, scaleCreditAtoms: 0n, fraction: 0 } },
         }),
       ),
-    ).toContain('Custom allowance');
+    ).toContain('Set by your contract');
   });
 
   it.each(['100n', '1_00n', '0x64n', '0X64n', '0o144n', '0O144n', '0b1100100n', '0B1100100n'])(

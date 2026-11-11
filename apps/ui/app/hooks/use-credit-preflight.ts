@@ -58,7 +58,7 @@ export const useCreditPreflight = (): CreditPreflight => {
           // The exact shortfall rides on `details`, which the credits card
           // renders; `@taucad/billing`'s formatter is lazy-loaded in this app
           // and may not be imported statically here.
-          message: `Add credits to start a turn on ${modelName}.`,
+          message: `Add credits to use ${modelName}.`,
           code: 'INSUFFICIENT_CREDIT',
           httpStatus: 402,
           details: {

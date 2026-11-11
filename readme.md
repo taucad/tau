@@ -4,7 +4,7 @@
 
 # Tau
 
-The AI-native CAD platform — open-source, browser-based, and kernel-agnostic. Design anything from 3D prints, game assets, and more.
+Open-source, AI-native CAD: browser-based and kernel-agnostic. Design anything from 3D prints, game assets, and more.
 
 **[Try it now at tau.new](https://tau.new)**
 

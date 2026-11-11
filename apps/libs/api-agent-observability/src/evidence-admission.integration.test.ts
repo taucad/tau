@@ -164,16 +164,81 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     expect(held.sources.map((row) => row.sourceId)).toEqual(['row-7']);
   });
 
-  it('keeps a distinct projection of one source as its own receipt', async () => {
-    const { userId, projectId } = await seed();
-    await admit(await evidenceFixture({ principal: userId, project: projectId }));
+  const settleOutbox = async (receipt: string, change: Partial<typeof schema.agentEvidenceOutbox.$inferInsert>) =>
+    database.update(schema.agentEvidenceOutbox).set(change).where(eq(schema.agentEvidenceOutbox.receiptId, receipt));
 
-    const upgraded = await admit(
+  it('settles a re-projection superseded while the earlier projection is on its way or delivered, enqueueing nothing', async () => {
+    const { userId, projectId } = await seed();
+    const first = await admit(await evidenceFixture({ principal: userId, project: projectId }));
+    const receipt = first.kind === 'receipt' ? first.receipt.receipt : '';
+
+    const pending = await admit(
       await evidenceFixture({ principal: userId, project: projectId, projectionVersion: 'v2' }),
     );
+    /* A fact first delivered under the v4.3 mapper keeps its receipt: a later projection is never exported again. */
+    await settleOutbox(receipt, { state: 'confirmed', payload: null, traceId: 'a'.repeat(32) });
+    const delivered = await admit(
+      await evidenceFixture({ principal: userId, project: projectId, projectionVersion: 'v3' }),
+    );
+    const withdrawn = await admit(
+      await evidenceFixture({ principal: userId, project: projectId, projectionVersion: 'v4' }),
+      { allowed: { replay: false, admit: false } },
+    );
 
-    expect(upgraded).toMatchObject({ kind: 'receipt', receipt: { duplicate: false } });
-    expect(await count(projectId, 'receipts')).toBe(2);
+    for (const outcome of [pending, delivered]) {
+      expect(outcome).toMatchObject({
+        kind: 'receipt',
+        superseded: true,
+        receipt: { receipt, disposition: 'accepted', duplicate: true },
+      });
+    }
+    expect(withdrawn).toMatchObject({
+      kind: 'receipt',
+      superseded: true,
+      receipt: { receipt, disposition: 'revoked' },
+    });
+    expect(await count(projectId, 'receipts')).toBe(1);
+    expect(await count(projectId, 'outbox')).toBe(1);
+  });
+
+  it('admits a re-projection whose earlier projection was rejected or expired unsent', async () => {
+    const { userId, projectId } = await seed();
+    const first = await admit(await evidenceFixture({ principal: userId, project: projectId }));
+    await settleOutbox(first.kind === 'receipt' ? first.receipt.receipt : '', { state: 'rejected', payload: null });
+
+    const second = await admit(
+      await evidenceFixture({ principal: userId, project: projectId, projectionVersion: 'v2' }),
+    );
+    await settleOutbox(second.kind === 'receipt' ? second.receipt.receipt : '', {
+      state: 'expired',
+      payload: null,
+      reason: 'revoked',
+    });
+    const third = await admit(
+      await evidenceFixture({ principal: userId, project: projectId, projectionVersion: 'v3' }),
+    );
+
+    expect(second).toMatchObject({ kind: 'receipt', receipt: { duplicate: false } });
+    expect(second).not.toHaveProperty('superseded');
+    expect(third).toMatchObject({ kind: 'receipt', receipt: { duplicate: false } });
+    expect(await count(projectId, 'receipts')).toBe(3);
+    expect(await count(projectId, 'outbox')).toBe(3);
+  });
+
+  it('admits again after a send that reached ingestion only when it was rejected, never after a gap', async () => {
+    const { userId, projectId } = await seed();
+    const first = await admit(await evidenceFixture({ principal: userId, project: projectId }));
+    await settleOutbox(first.kind === 'receipt' ? first.receipt.receipt : '', {
+      state: 'expired',
+      payload: null,
+      reason: 'gap',
+      traceId: 'b'.repeat(32),
+    });
+
+    expect(
+      await admit(await evidenceFixture({ principal: userId, project: projectId, projectionVersion: 'v2' })),
+    ).toMatchObject({ kind: 'receipt', superseded: true });
+    expect(await count(projectId, 'outbox')).toBe(1);
   });
 
   it('refuses without authority, in a deletion-fenced project and beyond the backlog budget, writing nothing', async () => {
@@ -194,17 +259,16 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     const { userId, projectId } = await seed();
     await admit(await evidenceFixture({ principal: userId, project: projectId }), { protection: 'pro' });
 
-    /* The same source uploaded after a downgrade: still Pro. */
+    /* Another fact citing the same source, uploaded after a downgrade: the source is still Pro. */
+    const citing = await evidenceFixture({ principal: userId, project: projectId, sequence: 8 });
     const later = await admit(
-      await evidenceFixture({ principal: userId, project: projectId, projectionVersion: 'v2' }),
-      {
-        protection: 'free',
-      },
+      { ...citing, lineage: [{ ...citing.lineage[0]!, source: 'row-7' }] },
+      { protection: 'free' },
     );
     /* A new source the client marks unknown while the account is Free: unknown. */
     await admit(await evidenceFixture({ principal: userId, project: projectId, sequence: 9, protection: 'unknown' }));
 
-    expect(later).toMatchObject({ kind: 'receipt' });
+    expect(later).toMatchObject({ kind: 'receipt', receipt: { duplicate: false } });
     const held = await rows(projectId);
     expect(Object.fromEntries(held.sources.map((row) => [row.sourceId, row.protection]))).toEqual({
       'row-7': 'pro',

@@ -4,7 +4,7 @@ import { reachesReadiness } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { canOpenCloudProject, useTauCloudIntent } from '#hooks/use-cloud-projects.js';
-import { followCloudOpen } from '#lib/cloud-open-lock.js';
+import { followCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
 
 /** First-open readiness comes from the durable gesture and the worker's acknowledged checkout. */
 export type ProjectAvailability =
@@ -67,7 +67,7 @@ export function useProjectAvailability(): ProjectAvailability {
  * still holds its pointer. A render over a pointer would be partial geometry,
  * so the viewer, and everything else that runs the kernel, waits for them all.
  */
-export type ModelAvailability = ProjectAvailability | 'files' | 'filesFailed';
+export type ModelAvailability = ProjectAvailability | 'files' | 'filesFailed' | 'filesChecking';
 
 /**
  * {@link ModelAvailability} from the project's availability, its large-object
@@ -91,7 +91,8 @@ export function modelAvailability(
     return project;
   }
   if (largeObjects === undefined) {
-    return readiness === undefined || readyFor('model', readiness) ? 'ready' : 'files';
+    /* No download runs: the wait is for the fill's word on this tree, a check, never shown as a download (T5). */
+    return readiness === undefined || readyFor('model', readiness) ? 'ready' : 'filesChecking';
   }
   return largeObjects.phase === 'failed' ? 'filesFailed' : 'files';
 }

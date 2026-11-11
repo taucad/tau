@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import type { LucideIcon } from 'lucide-react';
 import { Archive, CloudOff, FileWarning, Lock, MapPin, TimerReset } from 'lucide-react';
 import { Link } from 'react-router';
@@ -176,7 +177,9 @@ export function PublicationLockScreen({
           <div className='mb-4 flex size-12 items-center justify-center rounded-full bg-muted/50 dark:bg-muted/30'>
             <Icon className='size-6 text-muted-foreground' aria-hidden />
           </div>
-          <h1 className='text-xl font-semibold tracking-tight'>{config.headline}</h1>
+          <Heading level={1} variant='title'>
+            {config.headline}
+          </Heading>
           <p className='mt-2 text-sm text-muted-foreground'>{config.body}</p>
         </div>
 

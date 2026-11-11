@@ -6,9 +6,9 @@ import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { applyErrorDetails, withoutUserWhenAnonymous } from '#lib/error-details.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { decorateForNetworkFailure } from '#lib/network-failure.js';
+import { decorateForNetworkFailure } from '@taucad/ui-core/lib/network-failure';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
-import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
+import { redactInvitationTokens } from '@taucad/ui-core/lib/invitation-token.lib';
 import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
 
 /*

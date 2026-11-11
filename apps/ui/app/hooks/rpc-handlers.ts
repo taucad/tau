@@ -22,7 +22,7 @@ import type {
 import { rpcClientErrorCode, rpcClientErrorCodeSchema } from '@taucad/chat';
 import { mutatingRpcNames } from '@taucad/chat/constants';
 import type { LargeObjectsFacet } from '@taucad/revisions';
-import { guardLargeObjectFiles, guardLargeObjectKernel } from '#lib/large-object-guard.js';
+import { guardLargeObjectFiles, guardLargeObjectKernel } from '@taucad/ui-core/lib/large-object-guard';
 import { applyClientTextMutation, createExactReplacementPlan, createRpcDispatcher } from '@taucad/chat/rpc';
 import type {
   RpcDependencies,
@@ -58,7 +58,7 @@ import { selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { createSourceModelInteractionUnitId } from '@taucad/viewer/machines/model-interaction.machine';
-import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
+import { decodeTextFile, encodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 import { createSkillResolver } from '#lib/skill-resolver.js';
 import type { HeadlessImageService } from '#services/headless-image.service.js';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';

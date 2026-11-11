@@ -3,8 +3,9 @@ title: 'Accessibility Policy'
 description: 'Guidelines for accessible UI and ARIA-driven E2E testing across the Tau codebase. Covers semantic HTML, ARIA conventions, Vitest Browser selectors, and screenshot tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-08-21'
-related: []
+updated: '2026-11-11'
+related:
+  - docs/research/billing-redesign-blueprint.md
 ---
 
 # Accessibility Policy
@@ -31,6 +32,19 @@ Accessible UI ensures all users, including those using assistive technology, can
 | Error                        | `role="alert"` `aria-label="<description>"`                     | `<div role="alert" aria-label="Preview error">`                     |
 | Informational image / canvas | `role="img"` `aria-label="<description>"`                       | `<div role="img" aria-label="3D model preview">`                    |
 
+A skeleton placeholder is one status region: the wrapper carries `role="status"`, `aria-busy="true"` and the name of the wait (an `aria-label`, or a visually hidden sentence referenced by `aria-labelledby` when the region has other content), and every `Skeleton` bar inside it is `aria-hidden="true"`. Announce the wait once per region, not once per bar.
+
+```tsx
+<div role='status' aria-busy='true' aria-labelledby='repositories-loading'>
+  <span id='repositories-loading' className='sr-only'>
+    Loading repositories…
+  </span>
+  <Skeleton aria-hidden='true' className='h-3.5 w-32' />
+</div>
+```
+
+An icon that carries meaning beside text (the coming-soon icon in a feature list) is `aria-hidden`, and the meaning is given in words: a visually hidden prefix on the item ("Coming soon: ") and a visible legend.
+
 ### Interactive controls
 
 - Buttons must have an accessible name via visible text content or `aria-label`.
@@ -41,6 +55,7 @@ Accessible UI ensures all users, including those using assistive technology, can
 
 - Use native landmark elements (`<nav>`, `<main>`, `<aside>`) instead of generic `<div>` with `role`.
 - Dialog-like surfaces (drawers, modals) must have `aria-labelledby` pointing to their title element.
+- Heading levels follow the document outline, never the look: one `h1` per route, and each nested heading one level below the heading that owns its region. The look comes from the `Heading` variant ([UI Policy](ui-policy.md) §3).
 
 ## E2E Test Selector Strategy
 

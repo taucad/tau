@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { contractId } from '@taucad/agent-observability/identity';
-import { apiBuildRelease, executionOfAttempt } from '#model-invocation-evidence.js';
+import { apiBuildRelease, executionOfAttempt, providerAttemptEvidence } from '#model-invocation-evidence.js';
+import type { ObservedAttempt } from '#model-invocation-evidence.js';
 
 describe('executionOfAttempt', () => {
   it('names the host run a host attempt key carries, under the id the host gives that run', async () => {
@@ -34,5 +35,64 @@ describe('apiBuildRelease', () => {
   it('reports no build outside Fly', () => {
     expect(apiBuildRelease(undefined)).toBeUndefined();
     expect(apiBuildRelease('')).toBeUndefined();
+  });
+});
+
+describe('providerAttemptEvidence call kind, purpose and model', () => {
+  const attempt = (change: Partial<ObservedAttempt> = {}): ObservedAttempt => ({
+    principal: 'user-a',
+    project: 'project-a',
+    attemptKey: 'run-1:1:0',
+    chat: 'chat-1',
+    surface: 'gateway',
+    wire: 'openai-responses',
+    activity: 'agent',
+    requestedModel: 'catalogue-model',
+    supplierModel: 'supplier-model',
+    provider: 'openai',
+    operation: undefined,
+    startedAt: 1_800_000_000_000,
+    duration: 10,
+    stream: undefined,
+    ended: 'failed',
+    ...change,
+  });
+  const factOf = async (change: Partial<ObservedAttempt> = {}) => {
+    const { payload } = await providerAttemptEvidence(attempt(change), { policyEpoch: 'epoch-a', protection: 'free' });
+    if (payload.plane !== 'summary' || payload.fact.kind !== 'provider') {
+      throw new Error('not a provider fact');
+    }
+    return payload.fact;
+  };
+
+  it('declares a host run, a helper endpoint and any other gateway call by kind', async () => {
+    expect(await factOf()).toMatchObject({ callKind: 'run', purpose: 'generation' });
+    expect(await factOf({ surface: 'project_name', attemptKey: 'name-1', activity: 'title' })).toMatchObject({
+      callKind: 'helper',
+      purpose: 'helper',
+    });
+    expect(await factOf({ attemptKey: 'attempt-1' })).toMatchObject({ callKind: 'direct', purpose: 'generation' });
+  });
+
+  it('takes the compaction purpose from the activity the host asserted', async () => {
+    expect(await factOf({ activity: 'compaction' })).toMatchObject({ callKind: 'run', purpose: 'compaction' });
+  });
+
+  it("falls back to the supplier's model id for the route when the stream named none", async () => {
+    expect(await factOf()).toMatchObject({ resolvedModel: 'supplier-model' });
+    expect(await factOf({ supplierModel: 'model@2026-01-01' })).toMatchObject({ resolvedModel: null });
+    expect(
+      await factOf({
+        stream: {
+          stop: 'stop',
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: null, missing: 'none' },
+          resolvedModel: 'streamed-model',
+          response: undefined,
+          firstChunk: 1,
+          firstText: undefined,
+        },
+        ended: 'completed',
+      }),
+    ).toMatchObject({ resolvedModel: 'streamed-model' });
   });
 });

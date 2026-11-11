@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
-import { flagParameter, stringParameter } from '#utils/search-parameter.codecs.js';
+import { flagParameter, stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 
 const chatParameter = stringParameter();
 

@@ -63,6 +63,8 @@
     "./components/drawer": "./src/components/drawer.tsx",
     "./components/dropdown-menu": "./src/components/dropdown-menu.tsx",
     "./components/field": "./src/components/field.tsx",
+    "./components/heading": "./src/components/heading.tsx",
+    "./components/heading.variants": "./src/components/heading.variants.ts",
     "./components/highlight-text": "./src/components/highlight-text.tsx",
     "./components/hover-card": "./src/components/hover-card.tsx",
     "./components/info-tooltip": "./src/components/info-tooltip.tsx",
@@ -248,6 +250,16 @@
         "types": "./dist/components/field.d.mts",
         "import": "./dist/components/field.mjs",
         "default": "./dist/components/field.mjs"
+      },
+      "./components/heading": {
+        "types": "./dist/components/heading.d.mts",
+        "import": "./dist/components/heading.mjs",
+        "default": "./dist/components/heading.mjs"
+      },
+      "./components/heading.variants": {
+        "types": "./dist/components/heading.variants.d.mts",
+        "import": "./dist/components/heading.variants.mjs",
+        "default": "./dist/components/heading.variants.mjs"
       },
       "./components/highlight-text": {
         "types": "./dist/components/highlight-text.d.mts",

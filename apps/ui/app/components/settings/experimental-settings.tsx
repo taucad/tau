@@ -2,6 +2,7 @@ import { useId } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import { selectCanvasBackend } from '@taucad/viewer/machines/canvas.machine';
 import { findEntryGraphics } from '@taucad/workbench-panes/units/geometry-units';
 import { useProject } from '#hooks/use-project.js';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
@@ -17,7 +18,8 @@ function ActiveRendererStatus({
   readonly graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   readonly shouldPreferWebGpu: boolean;
 }): React.JSX.Element {
-  const backend = useSelector(graphicsRef, (snapshot) => snapshot.context.activeRenderer?.backend);
+  const canvasRef = useSelector(graphicsRef, (snapshot) => snapshot.context.canvas?.ref);
+  const backend = useSelector(canvasRef, selectCanvasBackend);
   const label =
     backend === 'webgpu'
       ? 'Using WebGPU.'

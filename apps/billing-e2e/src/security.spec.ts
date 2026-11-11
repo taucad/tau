@@ -102,7 +102,7 @@ describe('security', () => {
       }
       const evidence = await withBrowser(intruder, async ({ page }) => {
         await page.goto(`${baseUrl}/?settings=billing&payment_action=${target.actionId}`);
-        const toast = await waitForToast(page, /Could not check the returned payment/u);
+        const toast = await waitForToast(page, /Couldn’t check your payment/u);
         const shown = await toasts(page);
         expect(
           shown.some((text) => /Checkout is ready|credits added|Payment received|still processing/u.test(text)),

@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@react-three/fiber', () => ({
   // The canvas's controls adapter has not attached yet: the root holds no controls.
-  useThree: (selector: (state: { controls: null }) => unknown) => selector({ controls: null }),
+  useThree: (selector: (state: { controls: undefined }) => unknown) => selector({ controls: undefined }),
   useFrame: (callback: (state: unknown, delta: number) => void, priority?: number) => {
     mocks.frames.push({ callback, priority });
   },

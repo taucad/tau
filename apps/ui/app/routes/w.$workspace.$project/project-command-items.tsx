@@ -68,7 +68,8 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
     state?.context.rendering?.success ? state.context.rendering.artifact.mimeType : undefined,
   );
   /* The camera is presented once a canvas has attached its controls; before that its pose is the unframed seed. */
-  const cameraReady = useSelector(mainGraphicsRef, (state) => state?.context.controlsAdapter !== undefined) ?? false;
+  const controlsAdapter = useSelector(mainGraphicsRef, (state) => state?.context.controlsAdapter);
+  const cameraReady = controlsAdapter !== undefined;
   const canCapturePng = Boolean(
     artifactMimeType === 'image/svg+xml' || (artifactMimeType === 'model/gltf-binary' && cameraReady),
   );

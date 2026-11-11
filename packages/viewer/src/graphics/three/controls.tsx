@@ -31,7 +31,7 @@ type CameraControlsFeel = ReturnType<typeof resolveCameraControlProps>;
  * controls each frame. The controls adapter owns the instance, its DOM connection and its only listener (charter I9),
  * and installs it as R3F's `controls`; this renders nothing until it does.
  */
-function ViewerCameraControls({ feel }: { readonly feel: CameraControlsFeel }): React.JSX.Element | null {
+function ViewerCameraControls({ feel }: { readonly feel: CameraControlsFeel }): React.JSX.Element | undefined {
   const controls = useThree((state) => state.controls);
   const interactionLock = useViewportGizmoInteractionLock();
   useFrame((_state, delta) => {
@@ -39,7 +39,7 @@ function ViewerCameraControls({ feel }: { readonly feel: CameraControlsFeel }): 
       controls.update(delta);
     }
   }, -1);
-  return controls instanceof CameraControlsImpl ? <primitive object={controls} {...feel} /> : null;
+  return controls instanceof CameraControlsImpl ? <primitive object={controls} {...feel} /> : undefined;
 }
 
 type ControlsProperties = {

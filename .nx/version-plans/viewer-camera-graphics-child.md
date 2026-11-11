@@ -1,0 +1,5 @@
+---
+viewer: minor
+---
+
+Make the view's camera a child of the graphics actor and present it on each canvas through one controls adapter, the only `camera-controls` listener. Seed the camera from the graphics input `camera` (`cameraFovAngle`, `cameraView`); `GraphicsProvider` no longer takes `initialVerticalFieldOfView`. Replace the `controlsInteraction*` events with `interactionStarted`, `interactionMoved` and `interactionEnded`, and remove `cameraInteracting` and `cameraInteractionHadMovement`: read the camera's `gesture.held` and `input.dragging` instead. Remove `ActorBridge`, `ControlsListenerBridge`, `UpDirectionHandler`, `useViewCameraSession`, `useGraphicsCameraRigQuery` and the camera-session registry functions; use `useGraphicsCamera`, `selectGraphicsCamera`, `selectGraphicsCameraFraming` and `latchViewCameraFraming`, and import `ViewCameraFraming` from the graphics machine.

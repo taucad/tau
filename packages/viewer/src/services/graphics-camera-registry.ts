@@ -14,8 +14,6 @@ import type { GraphicsCameraRef, graphicsMachine, ViewCameraFraming } from '#mac
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 
-export type { ViewCameraFraming } from '#machines/graphics.machine.js';
-
 /**
  * Receives the camera and driver snapshot each time a view's camera rig updates.
  *

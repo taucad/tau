@@ -19,11 +19,10 @@ import type { MeasurementFeatureWorkerClient } from '#graphics/three/utils/measu
 
 /** Reports a pose the person made with the controls, as the controls adapter does on `update`. */
 const observeInputPose = (cameraRef: GraphicsCameraRef): void => {
-  const { frameId, target, direction, up, verticalSpan } = cameraRef.getSnapshot().context.view;
+  const { target, direction, up, verticalSpan } = cameraRef.getSnapshot().context.view;
   cameraRef.send({
     type: 'poseObserved',
     source: 'input',
-    frameId,
     target,
     direction,
     up,

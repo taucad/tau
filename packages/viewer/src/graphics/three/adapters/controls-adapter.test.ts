@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CameraControlsImpl from 'camera-controls';
-import { OrthographicCamera, PerspectiveCamera, Raycaster, Scene } from 'three';
-import type { Camera } from 'three';
+import { OrthographicCamera, Raycaster, Scene } from 'three';
+import type { Camera, PerspectiveCamera } from 'three';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor, InspectionEvent } from 'xstate';
 import type { RootState } from '@react-three/fiber';
@@ -43,7 +43,8 @@ type Harness = {
 
 const harnesses: Harness[] = [];
 
-const createHarness = (camera: Partial<CameraOwnedSettings> = { cameraView }): Harness => {
+const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
+  const camera = seed ?? { cameraView };
   const graphicsEvents: string[] = [];
   const cameraEvents: Array<Readonly<{ type: string; echoRevision?: number }>> = [];
   const graphics = createActor(
@@ -57,14 +58,14 @@ const createHarness = (camera: Partial<CameraOwnedSettings> = { cameraView }): H
         const { type } = event.event as { type: string };
         if (event.actorRef === graphics) {
           graphicsEvents.push(type);
-        } else if (event.actorRef === graphics.getSnapshot().context.cameraRef) {
+        } else if ((event.actorRef as unknown) === graphics.getSnapshot().context.cameraRef) {
           cameraEvents.push(event.event as { type: string; echoRevision?: number });
         }
       },
     },
   );
   graphics.start();
-  const cameraRef = graphics.getSnapshot().context.cameraRef;
+  const { cameraRef } = graphics.getSnapshot().context;
   const connectorRef: { current: CameraUpdateHandler | undefined } = { current: undefined };
   const consumers = new Set<CameraUpdateHandler>();
   // The provider's presentation: the rig publishes each change through the connector the adapter fills.
@@ -182,7 +183,7 @@ describe('controls adapter', () => {
 
   it('is the one listener of each camera-controls event, and reports one move per gesture', () => {
     const added: string[] = [];
-    const addEventListener = CameraControlsImpl.prototype.addEventListener;
+    const { addEventListener } = CameraControlsImpl.prototype;
     vi.spyOn(CameraControlsImpl.prototype, 'addEventListener').mockImplementation(
       function (this: CameraControlsImpl, type, listener) {
         added.push(type);
@@ -211,7 +212,7 @@ describe('controls adapter', () => {
   it('republishes raycaster clipping when the clip planes change without a pose change', () => {
     const harness = createHarness();
     harness.attach();
-    harness.state.invalidate.mockClear();
+    vi.mocked(harness.state.invalidate).mockClear();
 
     harness.rig.setClipPlanes({ farPaddingVerticalSpans: 1000 });
 
@@ -248,9 +249,9 @@ describe('controls adapter', () => {
     const { view, lastChange } = harness.camera.getSnapshot().context;
     expect(lastChange.source).toBe('input');
     expect(view.perspectiveZoom).toBe(1.75);
-    view.target.forEach((value, index) => {
+    for (const [index, value] of view.target.entries()) {
       expect(value).toBeCloseTo([1, 2, 3][index]!, 9);
-    });
+    }
   });
 
   it('stamps the update its own controls write causes, so the camera ignores that echo (I3)', () => {
@@ -266,6 +267,26 @@ describe('controls adapter', () => {
     expect(poses.slice(1).every((event) => Number.isInteger(event.echoRevision))).toBe(true);
     expect(harness.camera.getSnapshot().context.revision).toBe(revision + 1);
     expect(harness.camera.getSnapshot().context.lastChange.source).toBe('gizmo');
+  });
+
+  /* The removed up-direction handler answered every graphics up change with an input pose, which was saved and held the
+   * camera settling for the settle window. Graphics' up now reaches the camera as `setUpDirection` (source `up`), and
+   * the controls write it causes is an echo. */
+  it('makes no input-sourced camera change when graphics adopts a new up direction', () => {
+    const harness = createHarness();
+    harness.attach();
+    harness.cameraEvents.length = 0;
+
+    harness.graphics.send({ type: 'setUpDirection', payload: 'y' });
+
+    const { lastChange, view } = harness.camera.getSnapshot().context;
+    expect(lastChange.source).toBe('up');
+    expect(view.up).toEqual([0, 1, 0]);
+    expect(harness.camera.getSnapshot().matches({ input: 'idle' })).toBe(true);
+    const inputPoses = harness.cameraEvents.filter(
+      (event) => event.type === 'poseObserved' && !Number.isInteger(event.echoRevision),
+    );
+    expect(inputPoses).toEqual([]);
   });
 
   it('ends a held gesture when its canvas leaves mid-drag, so the camera is not stuck dragging', () => {

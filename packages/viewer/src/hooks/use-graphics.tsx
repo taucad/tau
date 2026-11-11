@@ -7,14 +7,13 @@ import type { CameraMachineSnapshot } from '@taucad/camera/machine';
 import type { RenderFrame } from '@taucad/spatial';
 import { createThreeCameraRig } from '@taucad/three/camera';
 import type { ThreeCameraRig } from '@taucad/three/camera';
-import type { GraphicsCameraRef, graphicsMachine } from '#machines/graphics.machine.js';
+import type { GraphicsCameraRef, graphicsMachine, ViewCameraFraming } from '#machines/graphics.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { kinematicsMachine } from '#machines/kinematics.machine.js';
 import { asCameraActor, latchViewCameraFraming } from '#services/graphics-camera-registry.js';
 import type {
   CameraUpdateHandler,
   RenderFrameUpdateHandler,
-  ViewCameraFraming,
   ViewCameraSeed,
 } from '#services/graphics-camera-registry.js';
 

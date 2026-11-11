@@ -227,7 +227,7 @@ export const createControlsAdapter = ({
         echoRevision = snapshot.revision;
         try {
           retargetCameraControls({ controls, camera: nativeCamera });
-          if (published && published.up.some((value, index) => value !== snapshot.view.up[index])) {
+          if (published?.up.some((value, index) => value !== snapshot.view.up[index])) {
             controls.updateCameraUp();
           }
           syncControlsLookAt({

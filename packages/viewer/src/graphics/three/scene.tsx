@@ -29,19 +29,17 @@ export function Scene({
   gizmoContainer,
 }: SceneProperties): React.JSX.Element {
   return (
-    <>
-      <ViewportGizmoInteractionLockProvider>
-        <Controls
-          enableGizmo={enableGizmo}
-          enableDamping={enableDamping}
-          enableZoom={enableZoom}
-          enablePan={enablePan}
-          secondaryMouseButtonMode={secondaryMouseButtonMode}
-          zoomSpeed={zoomSpeed}
-          gizmoContainer={gizmoContainer}
-        />
-        <Stage stageOptions={stageOptions}>{children}</Stage>
-      </ViewportGizmoInteractionLockProvider>
-    </>
+    <ViewportGizmoInteractionLockProvider>
+      <Controls
+        enableGizmo={enableGizmo}
+        enableDamping={enableDamping}
+        enableZoom={enableZoom}
+        enablePan={enablePan}
+        secondaryMouseButtonMode={secondaryMouseButtonMode}
+        zoomSpeed={zoomSpeed}
+        gizmoContainer={gizmoContainer}
+      />
+      <Stage stageOptions={stageOptions}>{children}</Stage>
+    </ViewportGizmoInteractionLockProvider>
   );
 }

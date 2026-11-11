@@ -16,7 +16,7 @@ import {
 } from '#hooks/use-graphics.jsx';
 import type { CameraOwnedSettings } from '#graphics/graphics-settings.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
-import type { ViewCameraFraming } from '#services/graphics-camera-registry.js';
+import type { ViewCameraFraming } from '#machines/graphics.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
 const actors: Array<Actor<typeof graphicsMachine>> = [];

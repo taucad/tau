@@ -21,8 +21,8 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { createCameraView } from '@taucad/camera';
 import { cameraMachine } from '@taucad/camera/machine';
 import type { CameraMachineEmitted } from '@taucad/camera/machine';
-import type { CameraOwnedSettings } from '#graphics/graphics-settings.js';
 import type {
+  CameraOwnedSettings,
   GraphicsBackendPreference,
   GraphicsOwnedSettings,
   PersistedCameraView,
@@ -1154,10 +1154,14 @@ const graphicsMachineDefinition = setup({
     operational: {
       /* Seeded cuts set context directly; this raise only enters the section region's `on` state. */
       entry: ({ context }, enq) => {
-        enq.listen(context.cameraRef, 'viewChanged', (event) => ({
-          type: 'cameraViewChanged' as const,
-          verticalSpan: (event as CameraMachineEmitted & { type: 'viewChanged' }).verticalSpan,
-        }));
+        enq.listen(
+          context.cameraRef,
+          'viewChanged',
+          (event): GraphicsEvent => ({
+            type: 'cameraViewChanged',
+            verticalSpan: (event as CameraMachineEmitted & { type: 'viewChanged' }).verticalSpan,
+          }),
+        );
         if (context.isSectionViewActive) {
           enq.raise({ type: 'setSectionViewActive', payload: true });
         }

@@ -399,4 +399,50 @@ describe('entriesPolicy path changes', () => {
       'c.ts': { renderTimeout: 5000 },
     });
   });
+
+  it.each([
+    ['with a delete', [{ type: 'delete', path: 'a.ts' }]],
+    ['alone', []],
+  ] satisfies Array<[string, EntryPathChange[]]>)(
+    'should keep an edit made %s when a conflicting write matches part of it and changes another field',
+    (_case, changes) => {
+      const current: WorkbenchEntries = {
+        version: 1,
+        entries: { 'a.ts': { renderTimeout: 1000 }, 'b.ts': { renderTimeout: 2000 }, 'c.ts': { renderTimeout: 1000 } },
+      };
+      const hidden = { hidden: ['x'], isolated: [], opacity: [] };
+      const edited: EntriesRecord = {
+        version: 1,
+        entries: {
+          ...current.entries,
+          'b.ts': { renderTimeout: 2000, components: hidden },
+          'c.ts': { renderTimeout: 5000 },
+        },
+      };
+      const moved: EntriesRecord = { version: 1, entries: movePaths(edited.entries, changes), moves: changes };
+      const patch = combine(diff(current, edited), diff(edited, moved));
+      merge(current, moved, patch);
+      const foreign: WorkbenchEntries = {
+        version: 1,
+        entries: {
+          ...movePaths(current.entries, changes),
+          'b.ts': { renderTimeout: 3000 },
+          'c.ts': { renderTimeout: 5000 },
+        },
+      };
+      expect(merge(foreign, moved, patch).entries['b.ts']).toEqual({ renderTimeout: 3000, components: hidden });
+    },
+  );
+
+  it('should apply a written path change again to a file made again after it was seen absent', () => {
+    const current: WorkbenchEntries = { version: 1, entries: { 'a.ts': { renderTimeout: 1000 } } };
+    const removal: EntryPathChange = { type: 'delete', path: 'a.ts' };
+    const deleted: EntriesRecord = { version: 1, entries: {}, moves: [removal] };
+    const patch = diff(current, deleted);
+    const written = merge(current, deleted, patch);
+    merge(written, deleted, patch);
+    merge(undefined, deleted, patch);
+    const remade: WorkbenchEntries = { version: 1, entries: { 'a.ts': { renderTimeout: 9000 } } };
+    expect(merge(remade, deleted, patch).entries).toEqual({});
+  });
 });

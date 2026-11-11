@@ -224,24 +224,53 @@ const combinePatches = (earlier: EntriesPatch, later: EntriesPatch): EntriesPatc
   return combined.steps;
 };
 
+/** Whether a path change of the steps reads or writes `path`: it is under a change's old or new path. */
+const moves = (steps: readonly EntriesStep[], path: string): boolean =>
+  steps.some((step) =>
+    step.moves.some((change) =>
+      change.type === 'delete'
+        ? matchesPath(path, change.path)
+        : matchesPath(path, change.oldPath) || matchesPath(path, change.newPath),
+    ),
+  );
+
+/** An entry's fields, each as text, so two entries compare field by field; missing components are the empty lists. */
+const fieldsOf = (entry: Entry | undefined): string[] =>
+  entry === undefined
+    ? []
+    : [
+        JSON.stringify(entry.renderTimeout),
+        ...componentFields.map((field) => JSON.stringify(entry.components?.[field] ?? [])),
+      ];
+
+/** Whether the file still holds something the write replaced: an entry it made or removed, or a field it changed. */
+const replacedHeld = (before: Entry | undefined, after: Entry | undefined, now: Entry | undefined): boolean => {
+  if (before === undefined || after === undefined) {
+    return JSON.stringify(now) === JSON.stringify(before);
+  }
+  const [replaced, wrote, held] = [fieldsOf(before), fieldsOf(after), fieldsOf(now)];
+  return replaced.some((field, index) => field !== wrote[index] && held[index] === field);
+};
+
 /**
- * Whether the file holds a write: on the paths the write changed, the file holds the written entry on at least one and
- * the replaced entry on none. A path another party changed since holds neither, and says nothing.
+ * Whether the file holds a write of `steps`: nothing the write replaced is still there (an entry it made or removed,
+ * or a field it changed), and an entry its path changes moved is there as written. A field change alone is never
+ * evidence, since applying it again changes nothing; what another party changed since holds neither, and says nothing.
  */
-const holds = (current: WorkbenchEntries, write: Write): boolean => {
+const holds = (current: WorkbenchEntries, write: Write, steps: readonly EntriesStep[]): boolean => {
   const paths = new Set([...Object.keys(write.base.entries), ...Object.keys(write.record.entries)]);
   let written = false;
   for (const path of paths) {
-    const before = JSON.stringify(write.base.entries[path]);
-    const after = JSON.stringify(write.record.entries[path]);
-    if (before === after) {
+    const before = write.base.entries[path];
+    const after = write.record.entries[path];
+    const now = current.entries[path];
+    if (JSON.stringify(before) === JSON.stringify(after)) {
       continue;
     }
-    const now = JSON.stringify(current.entries[path]);
-    if (now === before) {
+    if (replacedHeld(before, after, now)) {
       return false;
     }
-    written ||= now === after;
+    written ||= moves(steps, path) && JSON.stringify(now) === JSON.stringify(after);
   }
   return written;
 };
@@ -256,7 +285,9 @@ const landedMark = (patch: EntriesPatch, current: WorkbenchEntries | undefined):
   }
   return (marks.get(patch) ?? [])
     .toSorted((left, right) => right.upTo - left.upTo)
-    .find((mark) => mark.landed === true || mark.writes.some((write) => holds(current, write)));
+    .find(
+      (mark) => mark.landed === true || mark.writes.some((write) => holds(current, write, patch.slice(0, mark.upTo))),
+    );
 };
 
 /** Keep the marks of writes found landed first, then the latest others, each up to {@link maxMarks}. */
@@ -332,6 +363,10 @@ export const entriesPolicy: RecordPolicy<EntriesRecord, EntriesPatch> = {
     }
     const merged = { ...base, entries };
     const record = asRead(merged);
+    if (current === undefined) {
+      // A file seen absent holds none of the patch's earlier writes, whatever was found before.
+      marks.delete(patch);
+    }
     if (read && record) {
       mark(patch, { base: read, record }, found);
     }

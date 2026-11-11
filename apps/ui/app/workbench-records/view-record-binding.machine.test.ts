@@ -603,6 +603,31 @@ describe('view record binding', () => {
     });
   });
 
+  describe('review round 6 rows', () => {
+    it('should acknowledge again once the re-save after a field-only drop is on file', () => {
+      const harness = mount();
+      harness.press();
+      harness.drag([1, 0, 0], 4);
+      const posedEdit = harness.edits.at(-1)!;
+      harness.publish(posedEdit, 'own', { camera: posedEdit.camera });
+      harness.applied.length = 0;
+      harness.publish(workbenchRecords.view.schema.parse({ ...posedEdit, fieldOfView: 30 }));
+      expect(harness.applied).toEqual([]);
+      const resave = harness.edits.at(-1)!;
+      expect(resave.fieldOfView).toBe(posedEdit.fieldOfView);
+      harness.publish(resave, 'own', { fieldOfView: resave.fieldOfView });
+      expect(harness.applied).toEqual([resave]);
+      harness.release();
+    });
+
+    it('should save a Fit view that is the entry first frame', () => {
+      const harness = mount({ framed: false });
+      harness.send({ type: 'frameGeometry', bounds: box(2), margin: 0.1, source: 'fit' });
+      expect(harness.binding.getSnapshot().value).toMatchObject({ camera: 'framed' });
+      expect(harness.poseEdits()).toHaveLength(1);
+    });
+  });
+
   describe('camera rule', () => {
     it('should re-save on adoptionDropped only when a person made the pose', () => {
       const person = mount();

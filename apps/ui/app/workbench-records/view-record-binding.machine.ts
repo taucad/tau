@@ -11,7 +11,7 @@
  * ├── section  settled ──sectionEdited──▶ editing ──sectionSettled──▶ settled
  * │            editing: a foreign section waits, and is adopted on sectionSettled (the section quiet gate)
  * └── context  record, owners, pose{view, by}, fieldOfView, revision, lastWrittenRevision, adoptions, sectionPending,
- *              applying, requests
+ *              dropped, applying, requests, fault
  * ```
  *
  * - **Origin is the attribution (D2, I6).** A publication labelled `own` is never adopted; it only becomes the base of
@@ -283,7 +283,8 @@ const observeCamera = (
     // Automatic framing, `persisted`, `viewport` and `bounds` are never written (D20, I7).
     return { framed, context: observed };
   }
-  if (!wasFramed) {
+  // A person's Fit view is the entry's first frame itself, so it is written as any framed person change is.
+  if (!wasFramed && source !== 'fit') {
     // Before the entry's first frame no pose is written (as the hook did): framing still holds the record's pose and
     // applies it after that frame, so a move of the empty canvas would put a pose on file the view then leaves. A field
     // of view is not part of that pose, so the person's is written now rather than lost (the hook, which built no camera
@@ -487,6 +488,7 @@ const answerAdoption = (
     // MC-R18: an answer to a superseded or foreign request.
     return undefined;
   }
+  const { turns } = context.adoptions.find(({ requestId }) => requestId === event.requestId)!;
   const adoptions = context.adoptions.filter(({ requestId }) => requestId !== event.requestId);
   if (event.type === 'adoptionApplied') {
     return acknowledged({ ...context, adoptions }, enq);
@@ -500,7 +502,9 @@ const answerAdoption = (
     return answered;
   }
   const owners: ViewOwners = { ...context.owners, camera: pose.view, fieldOfView: context.fieldOfView };
-  return edited({ context: answered, editRecord, owners }, enq);
+  // A field-only drop leaves the person's pose on file, so the re-save (whose patch holds no camera, or nothing at all)
+  // puts the view back on file by itself: the binding does not wait for a camera write to acknowledge again.
+  return edited({ context: turns ? answered : { ...answered, dropped: undefined }, editRecord, owners }, enq);
 };
 
 const viewRecordBindingDefinition = setup({

@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(199);
+    expect(metrics).toHaveLength(200);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -697,6 +697,7 @@ describe('TauMetrics', () => {
     const series = [
       TauMetrics.agentEvidenceAdmissions,
       TauMetrics.agentEvidenceDeliveries,
+      TauMetrics.agentEvidenceSuperseded,
       TauMetrics.agentEvidenceBacklogRows,
       TauMetrics.agentEvidenceBacklogHeldBytes,
       TauMetrics.agentEvidenceErasureTraces,
@@ -708,6 +709,7 @@ describe('TauMetrics', () => {
     ).toEqual({
       tau_agent_evidence_admissions_total: 'counter',
       tau_agent_evidence_deliveries_total: 'counter',
+      tau_agent_evidence_superseded_receipts_total: 'counter',
       tau_agent_evidence_backlog_rows: 'gauge',
       tau_agent_evidence_backlog_held_bytes: 'gauge',
       tau_agent_evidence_erasure_traces_total: 'counter',

@@ -46,6 +46,9 @@ const admissionOutcome = (
   switch (outcome.kind) {
     case 'receipt': {
       const { disposition, duplicate } = outcome.receipt;
+      if (outcome.superseded === true) {
+        return 'superseded';
+      }
       return disposition === 'accepted' && duplicate ? 'duplicate' : disposition;
     }
     case 'refused': {
@@ -247,6 +250,9 @@ export class EvidenceIngressService {
     }
 
     count(admissionOutcome(outcome, granted));
+    if (outcome.kind === 'receipt' && outcome.superseded === true) {
+      this.metrics.agentEvidenceSuperseded.add(1, { reason: 'reprojected' });
+    }
     switch (outcome.kind) {
       case 'receipt': {
         return outcome.receipt;

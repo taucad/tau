@@ -398,6 +398,7 @@ const cardTitles = [
   'Credit limit reached',
   'Tau paused this turn',
   'The model refused this request',
+  'Tau could not send this request',
   'This model is paused',
   'Tau could not start this turn',
   'Funded operation limit reached',

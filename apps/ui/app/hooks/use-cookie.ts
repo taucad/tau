@@ -2,9 +2,9 @@ import { useContext, useMemo, useSyncExternalStore } from 'react';
 import * as Cookies from 'es-cookie';
 import { Topic } from '@taucad/events';
 import { metaConfig } from '#constants/meta.constants.js';
-import { isFunction } from '#utils/function.utils.js';
-import { serverVisiblePreferences } from '#constants/cookie.constants.js';
-import type { CookieName } from '#constants/cookie.constants.js';
+import { isFunction } from '@taucad/ui-core/utils/function.utils';
+import { serverVisiblePreferences } from '@taucad/ui-core/constants/cookie.constants';
+import type { CookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { noServerPreferences, serverPreferencesContext } from '#hooks/server-preferences.js';
 import type { ServerPreferences } from '#hooks/server-preferences.js';
 

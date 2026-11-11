@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { legalUrl } from '#lib/legal-url.js';
 import { CreditCard } from 'lucide-react';
-import { formatCredits } from '#utils/credits.utils.js';
+import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
 import { formatCreditAtomsDisplay, topupPrincipalBoundsMinor } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';

@@ -4,7 +4,7 @@ import { Theme, useTheme, themeOptions } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
 import { useColor } from '#hooks/use-color.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { ColorPicker } from '@taucad/ui-kit/components/color-picker';
 import { Button } from '@taucad/ui/components/button';

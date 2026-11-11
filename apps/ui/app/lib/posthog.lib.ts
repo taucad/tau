@@ -1,7 +1,7 @@
 import * as Cookies from 'es-cookie';
 import type { PostHogConfig } from 'posthog-js';
 import { ENV } from '#environment.config.js';
-import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
+import { redactInvitationTokens } from '@taucad/ui-core/lib/invitation-token.lib';
 
 /** One captured event, as much of it as this redaction reads. */
 type AnalyticsEvent = Readonly<{ properties?: Record<string, unknown> }>;

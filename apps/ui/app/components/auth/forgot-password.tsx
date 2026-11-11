@@ -11,7 +11,7 @@ import { Field, FieldDescription, FieldError, FieldGroup } from '@taucad/ui/comp
 import { Input } from '@taucad/ui/components/input';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
-import { getCaptchaComponentFromPlugins } from '#utils/auth-plugin.js';
+import { getCaptchaComponentFromPlugins } from '@taucad/ui-core/utils/auth-plugin';
 import { Label } from '@taucad/ui/components/label';
 import { useAuthEmailDraft } from '#components/auth/auth-email-draft.js';
 
@@ -78,8 +78,8 @@ export function ForgotPassword({ className }: ForgotPasswordProps): React.JSX.El
   return (
     <Card className={cn('w-full max-w-sm', className)}>
       <CardHeader>
-        <CardTitle className='text-xl font-semibold'>
-          <h1>{localization.auth.forgotPassword}</h1>
+        <CardTitle level={1} variant='title'>
+          {localization.auth.forgotPassword}
         </CardTitle>
       </CardHeader>
 

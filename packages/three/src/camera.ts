@@ -1,11 +1,12 @@
 import { OrthographicCamera, PerspectiveCamera, Quaternion, Vector3 } from 'three';
-import type { Actor, CallbackActorLogic } from 'xstate';
-import { createActor, createCallbackLogic } from 'xstate';
+import type { Actor } from 'xstate';
+import { createCallbackLogic } from 'xstate';
 import { createCameraState, createCameraView, resolveCameraState } from '@taucad/camera';
-import type { CameraState, CameraVector } from '@taucad/camera';
+import type { CameraState, CameraVector, CameraView } from '@taucad/camera';
 import type { RenderFrame } from '@taucad/spatial';
-import { cameraMachine, selectCameraDriverSnapshot } from '@taucad/camera/machine';
+import { cameraMachine, createCameraActor, selectCameraDriverSnapshot } from '@taucad/camera/machine';
 import type {
+  CameraActorOptions,
   CameraDriverEvent,
   CameraDriverInput,
   CameraDriverSnapshot,
@@ -64,17 +65,9 @@ export const readThreeCameraState = ({ camera, target, renderFrame }: ReadThreeC
   });
 };
 
-/** Values used to synchronize the retained native cameras. */
-type ThreeCameraDriverOptions = Readonly<{
-  perspectiveCamera: PerspectiveCamera;
-  orthographicCamera: OrthographicCamera;
-  getRenderFrame: () => RenderFrame;
-  getClipPlanes?: () => ThreeCameraClipPlanePolicy | undefined;
-  onUpdate?: (camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void;
-}>;
-
 /** Options for {@link createThreeCameraRig}. */
-type ThreeCameraRigOptions = CameraMachineInput &
+type ThreeCameraRigOptions = Pick<CameraMachineInput, 'initialView' | 'pixelBudget'> &
+  Pick<CameraActorOptions, 'clock' | 'inspect' | 'onRejectedEvent'> &
   Readonly<{
     clipPlanes?: ThreeCameraClipPlanePolicy;
     renderFrame?: RenderFrame;
@@ -117,8 +110,9 @@ const validateClipPlanes = (clipPlanes: ThreeCameraClipPlanePolicy): ThreeCamera
       throw new RangeError(`clipPlanes.presentationPlane.normal[${index}] must be finite.`);
     }
   }
-  if (Math.hypot(...normal) === 0) {
-    throw new RangeError('clipPlanes.presentationPlane.normal must have non-zero length.');
+  // The camera actor refuses a normal whose length is zero or overflows, so the rig does too.
+  if (!(Math.hypot(...normal) > 0 && Math.hypot(...normal) < Infinity)) {
+    throw new RangeError('clipPlanes.presentationPlane.normal must have a finite non-zero length.');
   }
   if (!Number.isFinite(plane.offsetMeters)) {
     throw new RangeError('clipPlanes.presentationPlane.offsetMeters must be finite.');
@@ -267,6 +261,10 @@ const validateRenderFrameForView = (renderFrame: RenderFrame, frameId: string): 
     );
   }
   toThreeRenderPoint({ renderFrame, pointMeters: renderFrame.originMeters });
+  // The camera actor refuses a scale whose reciprocal overflows, so the rig does too.
+  if (!Number.isFinite(1 / renderFrame.metersPerRenderUnit)) {
+    throw new RangeError('renderFrame.metersPerRenderUnit must have a finite reciprocal.');
+  }
   return renderFrame;
 };
 
@@ -341,37 +339,31 @@ const configureOrthographicCamera = ({
   camera.updateMatrixWorld(true);
 };
 
-const synchronizeCameras = ({
-  options,
-  snapshot,
-}: {
-  options: ThreeCameraDriverOptions;
-  snapshot: CameraDriverSnapshot;
-}): ThreeCamera => {
-  const renderFrame = validateRenderFrameForView(options.getRenderFrame(), snapshot.view.frameId);
-  const clipPlanes = options.getClipPlanes?.();
-  configurePerspectiveCamera({ camera: options.perspectiveCamera, clipPlanes, snapshot, renderFrame });
-  configureOrthographicCamera({ camera: options.orthographicCamera, clipPlanes, snapshot, renderFrame });
-  const activeCamera =
-    snapshot.projection.kind === 'orthographic' ? options.orthographicCamera : options.perspectiveCamera;
-  options.onUpdate?.(activeCamera, snapshot);
-  return activeCamera;
+/* Presents `snapshot` on both native cameras and returns the one its projection selects. */
+const synchronizeCameras = (
+  perspectiveCamera: PerspectiveCamera,
+  orthographicCamera: OrthographicCamera,
+  snapshot: CameraDriverSnapshot,
+): ThreeCamera => {
+  const renderFrame = validateRenderFrameForView(snapshot.renderFrame, snapshot.view.frameId);
+  const clipPlanes = snapshot.clipPolicy;
+  configurePerspectiveCamera({ camera: perspectiveCamera, clipPlanes, snapshot, renderFrame });
+  configureOrthographicCamera({ camera: orthographicCamera, clipPlanes, snapshot, renderFrame });
+  return snapshot.projection.kind === 'orthographic' ? orthographicCamera : perspectiveCamera;
 };
 
-const createThreeCameraDriver = (
-  options: ThreeCameraDriverOptions,
-): CallbackActorLogic<CameraDriverEvent, CameraDriverInput> => {
-  let latestSnapshot: CameraDriverSnapshot | undefined;
-  return createCallbackLogic<CameraDriverEvent, CameraDriverInput>(({ input, receive }) => {
-    latestSnapshot ??= input.snapshot;
-    synchronizeCameras({ options, snapshot: latestSnapshot });
-    receive((event) => {
-      latestSnapshot = event.snapshot;
-      synchronizeCameras({ options, snapshot: latestSnapshot });
-    });
-    return () => undefined;
-  });
-};
+const sameRenderFrame = (left: RenderFrame, right: RenderFrame): boolean =>
+  left.anchorFrameId === right.anchorFrameId &&
+  left.metersPerRenderUnit === right.metersPerRenderUnit &&
+  left.originMeters.every((value, index) => value === right.originMeters[index]);
+
+const sameClipPlanes = (
+  left: ThreeCameraClipPlanePolicy | undefined,
+  right: ThreeCameraClipPlanePolicy | undefined,
+): boolean =>
+  left?.farPaddingVerticalSpans === right?.farPaddingVerticalSpans &&
+  left?.presentationPlane?.offsetMeters === right?.presentationPlane?.offsetMeters &&
+  left?.presentationPlane?.normal.every((value, index) => value === right?.presentationPlane?.normal[index]) !== false;
 
 /**
  * Creates two persistent native endpoint cameras driven by one canonical actor.
@@ -404,6 +396,19 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
   const perspectiveCamera = new PerspectiveCamera();
   const orthographicCamera = new OrthographicCamera();
   const initialView = createCameraView(options.initialView);
+  /*
+   * The mirror: the rig's render frame and clip policy, which the native cameras present with the latest camera
+   * snapshot's view. A rig setter changes the mirror and presents at once.
+   *
+   * The reconciliation rule, the only one, per kind (frame, policy), keeps at most one rig value in flight to the rig's
+   * own actor. The rig sends that actor the mirror (at start, after a setter, after a snapshot) only while the actor runs
+   * (started, neither stopped nor errored), nothing of that kind is in flight and the actor's last snapshot does not
+   * already carry it, so a later snapshot always carries the sent value, even when the actor answers it as a duplicate.
+   * While a value is in flight, a snapshot that carries it confirms it (the rig then sends the mirror if it has moved
+   * on) and one that differs is stale and is ignored; with nothing in flight, a snapshot that differs from the mirror is
+   * a change the actor took from elsewhere and becomes the mirror. Another actor run on this driver, such as one
+   * restored from a persisted snapshot, is sent the mirror when it starts and never changes it.
+   */
   let renderFrame = validateRenderFrameForView(
     options.renderFrame ?? identityRenderFrame(initialView.frameId),
     initialView.frameId,
@@ -411,28 +416,92 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
   let clipPlanes = options.clipPlanes ? validateClipPlanes(options.clipPlanes) : undefined;
   let activeCamera: ThreeCamera =
     initialView.requestedVerticalFieldOfView === 0 ? orthographicCamera : perspectiveCamera;
-
-  const driverOptions: ThreeCameraDriverOptions = {
-    perspectiveCamera,
-    orthographicCamera,
-    getRenderFrame: () => renderFrame,
-    getClipPlanes: () => clipPlanes,
-    onUpdate(camera, snapshot) {
-      activeCamera = camera;
-      options.onUpdate?.(camera, snapshot);
-    },
+  // The value of each kind in flight to the rig's own actor, boxed because no clip policy is a value.
+  let sentFrame: readonly [RenderFrame] | undefined;
+  let sentClip: readonly [ThreeCameraClipPlanePolicy | undefined] | undefined;
+  // The last snapshot of the rig's own actor, once it started.
+  let held: CameraDriverSnapshot | undefined;
+  /* Sends the rig's own actor each mirrored value the rule allows. */
+  const flush = (): void => {
+    if (!held || actorRef.getSnapshot().status !== 'active') {
+      return;
+    }
+    if (!sentFrame && !sameRenderFrame(held.renderFrame, renderFrame)) {
+      sentFrame = [renderFrame];
+      actorRef.send({ type: 'setRenderFrame', renderFrame });
+    }
+    if (!sentClip && !sameClipPlanes(held.clipPolicy, clipPlanes)) {
+      sentClip = [clipPlanes];
+      actorRef.send({ type: 'setClipPolicy', clipPolicy: clipPlanes });
+    }
   };
-  const actorRef = createActor(
-    cameraMachine.provide({ actors: { cameraDriver: createThreeCameraDriver(driverOptions) } }),
-    {
-      input: { initialView, pixelBudget: options.pixelBudget },
+  let disposed = false;
+  // The last presentation, so a synchronization that changes nothing presented does not notify again. A view is a new
+  // object on every camera change, of any actor, so its identity (not the revision) tells a change.
+  let presented: readonly [CameraView, RenderFrame, ThreeCameraClipPlanePolicy | undefined] | undefined;
+
+  /* Presents the latest view in the mirrored frame and policy, and notifies once per distinct presentation. */
+  const present = (notify = true): void => {
+    if (presented?.[0] === latest.view && presented[1] === renderFrame && presented[2] === clipPlanes) {
+      return;
+    }
+    const snapshot: CameraDriverSnapshot = { ...latest, renderFrame, clipPolicy: clipPlanes };
+    activeCamera = synchronizeCameras(perspectiveCamera, orthographicCamera, snapshot);
+    if (notify) {
+      presented = [latest.view, renderFrame, clipPlanes];
+      options.onUpdate?.(activeCamera, snapshot);
+    }
+  };
+
+  const cameraDriver = createCallbackLogic<CameraDriverEvent, CameraDriverInput>(
+    ({ input, receive, sendBack, system }) => {
+      // The driver is shared by every actor made from this logic, such as one restored from a persisted snapshot.
+      const own = system === actorRef.system;
+      if (own) {
+        held = input.snapshot;
+        flush();
+      } else {
+        // An actor this rig did not create learns the mirror in one event each: its driver input is the one it was
+        // first invoked with, not its restored context.
+        sendBack({ type: 'setRenderFrame', renderFrame });
+        sendBack({ type: 'setClipPolicy', clipPolicy: clipPlanes });
+      }
+      presented = undefined;
+      present();
+      receive(({ snapshot }) => {
+        // Another actor never changes the mirror.
+        if (own) {
+          held = snapshot;
+          if (!sentFrame) {
+            if (!sameRenderFrame(snapshot.renderFrame, renderFrame)) {
+              ({ renderFrame } = snapshot);
+            }
+          } else if (sameRenderFrame(snapshot.renderFrame, sentFrame[0])) {
+            sentFrame = undefined;
+          }
+          if (!sentClip) {
+            if (!sameClipPlanes(snapshot.clipPolicy, clipPlanes)) {
+              clipPlanes = snapshot.clipPolicy;
+            }
+          } else if (sameClipPlanes(snapshot.clipPolicy, sentClip[0])) {
+            sentClip = undefined;
+          }
+        }
+        latest = snapshot;
+        flush();
+        present();
+      });
     },
   );
-  synchronizeCameras({
-    options: { ...driverOptions, onUpdate: undefined },
-    snapshot: selectCameraDriverSnapshot(actorRef.getSnapshot()),
+  const actorRef = createCameraActor({
+    machine: cameraMachine.provide({ actors: { cameraDriver } }),
+    input: { initialView, pixelBudget: options.pixelBudget, renderFrame, clipPolicy: clipPlanes },
+    clock: options.clock,
+    inspect: options.inspect,
+    onRejectedEvent: options.onRejectedEvent,
   });
-  let disposed = false;
+  let latest = selectCameraDriverSnapshot(actorRef.getSnapshot());
+  present(false);
 
   return {
     perspectiveCamera,
@@ -446,43 +515,28 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
     },
     setRenderFrame(nextRenderFrame) {
       const validated = validateRenderFrameForView(nextRenderFrame, initialView.frameId);
-      if (
-        validated.anchorFrameId === renderFrame.anchorFrameId &&
-        validated.metersPerRenderUnit === renderFrame.metersPerRenderUnit &&
-        validated.originMeters.every((value, index) => value === renderFrame.originMeters[index])
-      ) {
+      if (sameRenderFrame(validated, renderFrame)) {
         return;
       }
       renderFrame = validated;
-      synchronizeCameras({
-        options: driverOptions,
-        snapshot: selectCameraDriverSnapshot(actorRef.getSnapshot()),
-      });
+      present();
+      flush();
     },
     readState() {
-      const { target } = actorRef.getSnapshot().context.view;
       return readThreeCameraState({
         camera: activeCamera,
-        target: toThreeRenderPoint({ renderFrame, pointMeters: target }),
+        target: toThreeRenderPoint({ renderFrame, pointMeters: latest.view.target }),
         renderFrame,
       });
     },
     setClipPlanes(nextClipPlanes) {
       const validated = nextClipPlanes ? validateClipPlanes(nextClipPlanes) : undefined;
-      if (
-        validated?.farPaddingVerticalSpans === clipPlanes?.farPaddingVerticalSpans &&
-        validated?.presentationPlane?.offsetMeters === clipPlanes?.presentationPlane?.offsetMeters &&
-        validated?.presentationPlane?.normal.every(
-          (value, index) => value === clipPlanes?.presentationPlane?.normal[index],
-        ) !== false
-      ) {
+      if (sameClipPlanes(validated, clipPlanes)) {
         return;
       }
       clipPlanes = validated;
-      synchronizeCameras({
-        options: driverOptions,
-        snapshot: selectCameraDriverSnapshot(actorRef.getSnapshot()),
-      });
+      present();
+      flush();
     },
     dispose() {
       if (disposed) {

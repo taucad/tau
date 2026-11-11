@@ -1,4 +1,4 @@
-import { stringToColor } from '#utils/color.utils.js';
+import { stringToColor } from '@taucad/ui-core/utils/color.utils';
 
 /**
  * Consistent colour for a usage dimension value (provider, model or activity),

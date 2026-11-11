@@ -1,4 +1,4 @@
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 
 /**

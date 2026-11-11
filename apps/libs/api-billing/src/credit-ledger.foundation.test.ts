@@ -2933,7 +2933,7 @@ describe('post-hoc supplier metering', () => {
       // $1.40, $0.26 and $4.40 per million: a route that carried no valuation before.
       routeId: 'together-glm-5.3',
       providerWire: 'openai-completions',
-      body: { messages: [{ role: 'user', content: 'hello' }], max_completion_tokens: 500 },
+      body: { messages: [{ role: 'user', content: 'hello' }], max_tokens: 500 },
       cacheWriteTier: 'none',
       supplierCostPicoUsd: 3_680_000_000n,
     },

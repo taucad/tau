@@ -9,6 +9,11 @@ import { createWorkbenchViewStore, fenceClosedView, finishClosedView } from '#wo
 import type { ViewRecordPatch, ViewRecordState } from '#workbench-records/view-store.js';
 
 const encoder = new TextEncoder();
+/**
+ * Milliseconds for the rows that run 100 interleavings per field: each interleaving starts two stores, and a store is
+ * a state machine actor now, so these rows take seconds on a loaded machine.
+ */
+const interleavingTimeout = 60_000;
 const seed = (): WorkbenchView => workbenchRecords.view.schema.parse({ version: 1, entryPath: 'a.ts' });
 
 function memory() {
@@ -985,74 +990,78 @@ describe('workbench view checked store', () => {
       expect(data.writes).toHaveBeenCalledOnce();
     }
   });
-  it('merges every person field with a stale foreign base over 100 repetitions each', async () => {
-    const person = workbenchRecords.view.schema.parse({
-      ...seed(),
-      entryPath: 'person.ts',
-      name: 'Person',
-      camera: { kind: 'preset', preset: 'front' },
-      fieldOfView: 45,
-      upDirection: 'y',
-      display: { ...seed().display, axes: false, grid: false },
-      grid: { unit: 'in' },
-      section: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 1, isFlipped: false }] },
-      measurements: [{ id: 'm1', frameId: 'f', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
-    });
-    const foreign = workbenchRecords.view.schema.parse({
-      ...seed(),
-      entryPath: 'foreign.ts',
-      name: 'Foreign',
-      camera: { kind: 'preset', preset: 'back' },
-      fieldOfView: 30,
-      upDirection: 'x',
-      display: { ...seed().display, lines: false, surfaces: false },
-      grid: { unit: 'ft' },
-      section: { active: false, cuts: [{ kind: 'plane', plane: 'xy', offset: 2, isFlipped: false }] },
-      measurements: [{ id: 'm2', frameId: 'f', startPoint: [0, 0, 0], endPoint: [0, 1, 0], distance: 1 }],
-    });
-    for (const field of [
-      'entryPath',
-      'name',
-      'camera',
-      'fieldOfView',
-      'upDirection',
-      'display',
-      'grid',
-      'section',
-      'measurements',
-    ] as const) {
-      for (let i = 0; i < 100; i++) {
-        const data = memory();
-        const store = makeStore(data);
-        await store.read();
-        data.set(foreign);
-        expect(await store.edit({ ...seed(), [field]: person[field] })).toBe(true);
-        const result = workbenchRecords.view.read(data.get()!);
-        expect(result.status).toBe('current');
-        if (result.status !== 'current') {
-          continue;
-        }
-        if (field === 'display') {
-          expect(result.record.display).toEqual({ ...foreign.display, axes: false, grid: false });
-        } else {
-          expect(result.record[field]).toEqual(person[field]);
-        }
-        for (const sibling of [
-          'entryPath',
-          'name',
-          'camera',
-          'fieldOfView',
-          'upDirection',
-          'section',
-          'measurements',
-        ] as const) {
-          if (sibling !== field) {
-            expect(result.record[sibling]).toEqual(foreign[sibling]);
+  it(
+    'merges every person field with a stale foreign base over 100 repetitions each',
+    async () => {
+      const person = workbenchRecords.view.schema.parse({
+        ...seed(),
+        entryPath: 'person.ts',
+        name: 'Person',
+        camera: { kind: 'preset', preset: 'front' },
+        fieldOfView: 45,
+        upDirection: 'y',
+        display: { ...seed().display, axes: false, grid: false },
+        grid: { unit: 'in' },
+        section: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 1, isFlipped: false }] },
+        measurements: [{ id: 'm1', frameId: 'f', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
+      });
+      const foreign = workbenchRecords.view.schema.parse({
+        ...seed(),
+        entryPath: 'foreign.ts',
+        name: 'Foreign',
+        camera: { kind: 'preset', preset: 'back' },
+        fieldOfView: 30,
+        upDirection: 'x',
+        display: { ...seed().display, lines: false, surfaces: false },
+        grid: { unit: 'ft' },
+        section: { active: false, cuts: [{ kind: 'plane', plane: 'xy', offset: 2, isFlipped: false }] },
+        measurements: [{ id: 'm2', frameId: 'f', startPoint: [0, 0, 0], endPoint: [0, 1, 0], distance: 1 }],
+      });
+      for (const field of [
+        'entryPath',
+        'name',
+        'camera',
+        'fieldOfView',
+        'upDirection',
+        'display',
+        'grid',
+        'section',
+        'measurements',
+      ] as const) {
+        for (let i = 0; i < 100; i++) {
+          const data = memory();
+          const store = makeStore(data);
+          await store.read();
+          data.set(foreign);
+          expect(await store.edit({ ...seed(), [field]: person[field] })).toBe(true);
+          const result = workbenchRecords.view.read(data.get()!);
+          expect(result.status).toBe('current');
+          if (result.status !== 'current') {
+            continue;
+          }
+          if (field === 'display') {
+            expect(result.record.display).toEqual({ ...foreign.display, axes: false, grid: false });
+          } else {
+            expect(result.record[field]).toEqual(person[field]);
+          }
+          for (const sibling of [
+            'entryPath',
+            'name',
+            'camera',
+            'fieldOfView',
+            'upDirection',
+            'section',
+            'measurements',
+          ] as const) {
+            if (sibling !== field) {
+              expect(result.record[sibling]).toEqual(foreign[sibling]);
+            }
           }
         }
       }
-    }
-  });
+    },
+    interleavingTimeout,
+  );
 
   it('adopts in two windows without an echo and preserves a queued revert', async () => {
     const data = memory();
@@ -1076,170 +1085,182 @@ describe('workbench view checked store', () => {
     });
   });
 
-  it('reconciles concurrent two-window writes for every view field and display toggle', async () => {
-    const changes: ReadonlyArray<
-      Readonly<{
-        field: string;
-        edit: (base: WorkbenchView) => WorkbenchView;
-        value: (record: WorkbenchView) => unknown;
-      }>
-    > = [
-      { field: 'entryPath', edit: (v) => ({ ...v, entryPath: 'person.ts' }), value: (v) => v.entryPath },
-      { field: 'name', edit: (v) => ({ ...v, name: 'Person' }), value: (v) => v.name },
-      { field: 'camera', edit: (v) => ({ ...v, camera: { kind: 'preset', preset: 'front' } }), value: (v) => v.camera },
-      { field: 'fieldOfView', edit: (v) => ({ ...v, fieldOfView: 45 }), value: (v) => v.fieldOfView },
-      { field: 'upDirection', edit: (v) => ({ ...v, upDirection: 'y' }), value: (v) => v.upDirection },
-      { field: 'grid.unit', edit: (v) => ({ ...v, grid: { unit: 'in' } }), value: (v) => v.grid.unit },
-      { field: 'section', edit: (v) => ({ ...v, section: { active: true, cuts: [] } }), value: (v) => v.section },
-      {
-        field: 'measurements',
-        edit: (v) => ({
-          ...v,
-          measurements: [{ id: 'm1', frameId: 'f', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
-        }),
-        value: (v) => v.measurements,
-      },
-      ...(['surfaces', 'lines', 'gizmo', 'grid', 'axes', 'matcap', 'postProcessing'] as const).map((field) => ({
-        field: `display.${field}`,
-        edit: (v: WorkbenchView) => ({ ...v, display: { ...v.display, [field]: !v.display[field] } }),
-        value: (v: WorkbenchView) => v.display[field],
-      })),
-    ];
-    for (const change of changes) {
-      for (let iteration = 0; iteration < 100; iteration++) {
-        const data = memory();
-        const first = makeStore(data);
-        const second = makeStore(data);
-        await Promise.all([first.read(), second.read()]);
-        const base = seed();
-        const foreign =
-          change.field === 'name'
-            ? { ...base, fieldOfView: 35 }
-            : change.field.startsWith('display.')
-              ? { ...base, name: 'Foreign' }
-              : { ...base, display: { ...base.display, axes: false } };
-        const release = data.delay();
-        const writes = Promise.all(
-          iteration % 2 === 0
-            ? [first.edit(change.edit(base)), second.edit(foreign)]
-            : [second.edit(foreign), first.edit(change.edit(base))],
-        );
-        await Promise.resolve();
-        release();
-        expect(await writes).toEqual([true, true]);
-        const result = workbenchRecords.view.read(data.get()!);
-        expect(result.status, change.field).toBe('current');
-        if (result.status !== 'current') {
-          continue;
+  it(
+    'reconciles concurrent two-window writes for every view field and display toggle',
+    async () => {
+      const changes: ReadonlyArray<
+        Readonly<{
+          field: string;
+          edit: (base: WorkbenchView) => WorkbenchView;
+          value: (record: WorkbenchView) => unknown;
+        }>
+      > = [
+        { field: 'entryPath', edit: (v) => ({ ...v, entryPath: 'person.ts' }), value: (v) => v.entryPath },
+        { field: 'name', edit: (v) => ({ ...v, name: 'Person' }), value: (v) => v.name },
+        {
+          field: 'camera',
+          edit: (v) => ({ ...v, camera: { kind: 'preset', preset: 'front' } }),
+          value: (v) => v.camera,
+        },
+        { field: 'fieldOfView', edit: (v) => ({ ...v, fieldOfView: 45 }), value: (v) => v.fieldOfView },
+        { field: 'upDirection', edit: (v) => ({ ...v, upDirection: 'y' }), value: (v) => v.upDirection },
+        { field: 'grid.unit', edit: (v) => ({ ...v, grid: { unit: 'in' } }), value: (v) => v.grid.unit },
+        { field: 'section', edit: (v) => ({ ...v, section: { active: true, cuts: [] } }), value: (v) => v.section },
+        {
+          field: 'measurements',
+          edit: (v) => ({
+            ...v,
+            measurements: [{ id: 'm1', frameId: 'f', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
+          }),
+          value: (v) => v.measurements,
+        },
+        ...(['surfaces', 'lines', 'gizmo', 'grid', 'axes', 'matcap', 'postProcessing'] as const).map((field) => ({
+          field: `display.${field}`,
+          edit: (v: WorkbenchView) => ({ ...v, display: { ...v.display, [field]: !v.display[field] } }),
+          value: (v: WorkbenchView) => v.display[field],
+        })),
+      ];
+      for (const change of changes) {
+        for (let iteration = 0; iteration < 100; iteration++) {
+          const data = memory();
+          const first = makeStore(data);
+          const second = makeStore(data);
+          await Promise.all([first.read(), second.read()]);
+          const base = seed();
+          const foreign =
+            change.field === 'name'
+              ? { ...base, fieldOfView: 35 }
+              : change.field.startsWith('display.')
+                ? { ...base, name: 'Foreign' }
+                : { ...base, display: { ...base.display, axes: false } };
+          const release = data.delay();
+          const writes = Promise.all(
+            iteration % 2 === 0
+              ? [first.edit(change.edit(base)), second.edit(foreign)]
+              : [second.edit(foreign), first.edit(change.edit(base))],
+          );
+          await Promise.resolve();
+          release();
+          expect(await writes).toEqual([true, true]);
+          const result = workbenchRecords.view.read(data.get()!);
+          expect(result.status, change.field).toBe('current');
+          if (result.status !== 'current') {
+            continue;
+          }
+          expect(change.value(result.record), change.field).toEqual(change.value(change.edit(base)));
+          if (change.field === 'name') {
+            expect(result.record.fieldOfView).toBe(35);
+          } else if (change.field.startsWith('display.')) {
+            expect(result.record.name).toBe('Foreign');
+          } else {
+            expect(result.record.display.axes).toBe(false);
+          }
+          const count = data.writes.mock.calls.length;
+          await Promise.all([first.read(), second.read()]);
+          expect(data.writes).toHaveBeenCalledTimes(count);
         }
-        expect(change.value(result.record), change.field).toEqual(change.value(change.edit(base)));
-        if (change.field === 'name') {
-          expect(result.record.fieldOfView).toBe(35);
-        } else if (change.field.startsWith('display.')) {
-          expect(result.record.name).toBe('Foreign');
-        } else {
-          expect(result.record.display.axes).toBe(false);
-        }
-        const count = data.writes.mock.calls.length;
-        await Promise.all([first.read(), second.read()]);
-        expect(data.writes).toHaveBeenCalledTimes(count);
       }
-    }
-  });
+    },
+    interleavingTimeout,
+  );
 
-  it('lets the delayed checked writer win each competing multi-valued view field', async () => {
-    const variants: ReadonlyArray<
-      Readonly<{
-        field: string;
-        a: (v: WorkbenchView) => WorkbenchView;
-        b: (v: WorkbenchView) => WorkbenchView;
-        value: (v: WorkbenchView) => unknown;
-      }>
-    > = [
-      {
-        field: 'entryPath',
-        a: (v) => ({ ...v, entryPath: 'person.ts' }),
-        b: (v) => ({ ...v, entryPath: 'foreign.ts' }),
-        value: (v) => v.entryPath,
-      },
-      {
-        field: 'name',
-        a: (v) => ({ ...v, name: 'Person' }),
-        b: (v) => ({ ...v, name: 'Foreign' }),
-        value: (v) => v.name,
-      },
-      {
-        field: 'camera',
-        a: (v) => ({ ...v, camera: { kind: 'preset', preset: 'front' } }),
-        b: (v) => ({ ...v, camera: { kind: 'preset', preset: 'back' } }),
-        value: (v) => v.camera,
-      },
-      {
-        field: 'fieldOfView',
-        a: (v) => ({ ...v, fieldOfView: 45 }),
-        b: (v) => ({ ...v, fieldOfView: 35 }),
-        value: (v) => v.fieldOfView,
-      },
-      {
-        field: 'upDirection',
-        a: (v) => ({ ...v, upDirection: 'y' }),
-        b: (v) => ({ ...v, upDirection: 'x' }),
-        value: (v) => v.upDirection,
-      },
-      {
-        field: 'grid.unit',
-        a: (v) => ({ ...v, grid: { unit: 'in' } }),
-        b: (v) => ({ ...v, grid: { unit: 'ft' } }),
-        value: (v) => v.grid.unit,
-      },
-      {
-        field: 'section',
-        a: (v) => ({ ...v, section: { active: true, cuts: [] } }),
-        b: (v) => ({
-          ...v,
-          section: { active: false, cuts: [{ kind: 'plane', plane: 'xy', offset: 2, isFlipped: false }] },
-        }),
-        value: (v) => v.section,
-      },
-      {
-        field: 'measurements',
-        a: (v) => ({
-          ...v,
-          measurements: [{ id: 'm1', frameId: 'f', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
-        }),
-        b: (v) => ({
-          ...v,
-          measurements: [{ id: 'm2', frameId: 'f', startPoint: [0, 0, 0], endPoint: [0, 1, 0], distance: 1 }],
-        }),
-        value: (v) => v.measurements,
-      },
-    ];
-    for (const variant of variants) {
-      for (let i = 0; i < 100; i++) {
-        const data = memory();
-        const a = makeStore(data);
-        const b = makeStore(data);
-        await Promise.all([a.read(), b.read()]);
-        const release = data.delay();
-        const first = i % 2 === 0 ? a.edit(variant.a(seed())) : b.edit(variant.b(seed()));
-        const second = i % 2 === 0 ? b.edit(variant.b(seed())) : a.edit(variant.a(seed()));
-        await Promise.resolve();
-        release();
-        expect(await Promise.all([first, second])).toEqual([true, true]);
-        const result = workbenchRecords.view.read(data.get()!);
-        expect(result.status, variant.field).toBe('current');
-        if (result.status !== 'current') {
-          continue;
+  it(
+    'lets the delayed checked writer win each competing multi-valued view field',
+    async () => {
+      const variants: ReadonlyArray<
+        Readonly<{
+          field: string;
+          a: (v: WorkbenchView) => WorkbenchView;
+          b: (v: WorkbenchView) => WorkbenchView;
+          value: (v: WorkbenchView) => unknown;
+        }>
+      > = [
+        {
+          field: 'entryPath',
+          a: (v) => ({ ...v, entryPath: 'person.ts' }),
+          b: (v) => ({ ...v, entryPath: 'foreign.ts' }),
+          value: (v) => v.entryPath,
+        },
+        {
+          field: 'name',
+          a: (v) => ({ ...v, name: 'Person' }),
+          b: (v) => ({ ...v, name: 'Foreign' }),
+          value: (v) => v.name,
+        },
+        {
+          field: 'camera',
+          a: (v) => ({ ...v, camera: { kind: 'preset', preset: 'front' } }),
+          b: (v) => ({ ...v, camera: { kind: 'preset', preset: 'back' } }),
+          value: (v) => v.camera,
+        },
+        {
+          field: 'fieldOfView',
+          a: (v) => ({ ...v, fieldOfView: 45 }),
+          b: (v) => ({ ...v, fieldOfView: 35 }),
+          value: (v) => v.fieldOfView,
+        },
+        {
+          field: 'upDirection',
+          a: (v) => ({ ...v, upDirection: 'y' }),
+          b: (v) => ({ ...v, upDirection: 'x' }),
+          value: (v) => v.upDirection,
+        },
+        {
+          field: 'grid.unit',
+          a: (v) => ({ ...v, grid: { unit: 'in' } }),
+          b: (v) => ({ ...v, grid: { unit: 'ft' } }),
+          value: (v) => v.grid.unit,
+        },
+        {
+          field: 'section',
+          a: (v) => ({ ...v, section: { active: true, cuts: [] } }),
+          b: (v) => ({
+            ...v,
+            section: { active: false, cuts: [{ kind: 'plane', plane: 'xy', offset: 2, isFlipped: false }] },
+          }),
+          value: (v) => v.section,
+        },
+        {
+          field: 'measurements',
+          a: (v) => ({
+            ...v,
+            measurements: [{ id: 'm1', frameId: 'f', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
+          }),
+          b: (v) => ({
+            ...v,
+            measurements: [{ id: 'm2', frameId: 'f', startPoint: [0, 0, 0], endPoint: [0, 1, 0], distance: 1 }],
+          }),
+          value: (v) => v.measurements,
+        },
+      ];
+      for (const variant of variants) {
+        for (let i = 0; i < 100; i++) {
+          const data = memory();
+          const a = makeStore(data);
+          const b = makeStore(data);
+          await Promise.all([a.read(), b.read()]);
+          const release = data.delay();
+          const first = i % 2 === 0 ? a.edit(variant.a(seed())) : b.edit(variant.b(seed()));
+          const second = i % 2 === 0 ? b.edit(variant.b(seed())) : a.edit(variant.a(seed()));
+          await Promise.resolve();
+          release();
+          expect(await Promise.all([first, second])).toEqual([true, true]);
+          const result = workbenchRecords.view.read(data.get()!);
+          expect(result.status, variant.field).toBe('current');
+          if (result.status !== 'current') {
+            continue;
+          }
+          expect(variant.value(result.record), variant.field).toEqual(
+            variant.value(i % 2 === 0 ? variant.a(seed()) : variant.b(seed())),
+          );
+          const count = data.writes.mock.calls.length;
+          await Promise.all([a.read(), b.read()]);
+          expect(data.writes).toHaveBeenCalledTimes(count);
         }
-        expect(variant.value(result.record), variant.field).toEqual(
-          variant.value(i % 2 === 0 ? variant.a(seed()) : variant.b(seed())),
-        );
-        const count = data.writes.mock.calls.length;
-        await Promise.all([a.read(), b.read()]);
-        expect(data.writes).toHaveBeenCalledTimes(count);
       }
-    }
-  });
+    },
+    interleavingTimeout,
+  );
 
   it('preserves invalid and newer bytes, and Reset is checked against reviewed bytes', async () => {
     const data = memory();
@@ -1326,5 +1347,87 @@ describe('workbench view checked store', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('should publish nothing from a read or a timer that returns after the view is fenced', async () => {
+    vi.useFakeTimers();
+    const data = memory();
+    const onChange = vi.fn();
+    const reading = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-fenced01',
+      files: { ...data.files, readFile: async () => reading.promise },
+      onChange,
+      onError: vi.fn(),
+      editDebounce: 100,
+    });
+    const path = `/root/${workbenchPaths.view('v-fenced01')}`;
+    try {
+      const read = store.read();
+      const edited = store.edit({ ...seed(), name: 'Never written' });
+      await fenceClosedView(path);
+      reading.resolve(data.get()!);
+      await vi.runAllTimersAsync();
+
+      expect(await read).toBe(false);
+      expect(await edited).toBe(false);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(data.writes).not.toHaveBeenCalled();
+      expect(store.ready()).toBe(false);
+    } finally {
+      finishClosedView(path);
+      store.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('should report no health after dispose, even when the write on the wire replies later', async () => {
+    const data = memory();
+    const onHealth = vi.fn();
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-health01',
+      files: data.files,
+      onChange: () => undefined,
+      onError: vi.fn(),
+      onHealth,
+    });
+    await store.read();
+    const release = data.delay();
+    const edited = store.edit({ ...seed(), name: 'Front' });
+    await vi.waitFor(() => {
+      expect(data.writes).toHaveBeenCalledTimes(1);
+    });
+    store.dispose();
+    onHealth.mockClear();
+    release();
+
+    expect(await edited).toBe(true);
+    expect(onHealth).not.toHaveBeenCalled();
+  });
+
+  it('should report no error after dispose when the write on the wire fails later', async () => {
+    const data = memory();
+    const onError = vi.fn();
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-error001',
+      files: data.files,
+      onChange: () => undefined,
+      onError,
+    });
+    await store.read();
+    const failing = Promise.withResolvers<CheckedFileWriteResult>();
+    data.writes.mockImplementationOnce(async () => failing.promise);
+    const edited = store.edit({ ...seed(), name: 'Front' });
+    await vi.waitFor(() => {
+      expect(data.writes).toHaveBeenCalledTimes(1);
+    });
+    store.dispose();
+    failing.reject(new Error('offline'));
+
+    expect(await edited).toBe(false);
+    expect(onError).not.toHaveBeenCalled();
   });
 });

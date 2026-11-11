@@ -172,7 +172,7 @@ vi.mock('@taucad/ui/components/button', () => ({
   ),
 }));
 
-vi.mock('#utils/filesystem.utils.js', () => ({
+vi.mock('@taucad/ui-core/utils/filesystem.utils', () => ({
   decodeTextFile: (_bytes: Uint8Array<ArrayBuffer>) => 'cube(10);',
 }));
 

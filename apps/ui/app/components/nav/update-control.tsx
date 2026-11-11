@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { Loader } from '@taucad/ui/components/loader';
 import { ArrowUpRight, ChevronRight, X } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
@@ -78,7 +79,9 @@ export function UpdateControl({
             }
           >
             <div className='flex items-center justify-between gap-2'>
-              <h2 className='text-sm leading-5 font-medium'>{title}</h2>
+              <Heading level={2} variant='label'>
+                {title}
+              </Heading>
               <Button
                 variant='ghost'
                 size='icon-xs'

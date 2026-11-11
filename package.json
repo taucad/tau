@@ -1,6 +1,6 @@
 {
   "name": "@taucad/tau-source",
-  "description": "The AI-Native CAD Platform",
+  "description": "Open-source, AI-native CAD",
   "homepage": "https://github.com/taucad/tau",
   "license": "Apache-2.0",
   "private": true,

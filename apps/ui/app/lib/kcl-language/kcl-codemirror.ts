@@ -27,7 +27,7 @@ import { KclLspClient } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
 import { semanticTokenTypes } from '#lib/kcl-language/lsp/kcl-lsp-types.js';
 import { KclSymbolService, formatModuleHover, formatSymbolHover } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
 import type { KclSymbol } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
-import { applyLspCompletion } from '#lib/lsp-completion-apply.js';
+import { applyLspCompletion } from '@taucad/ui-core/lib/lsp-completion-apply';
 import {
   kclDefinition,
   kclDocumentationMarkdown,

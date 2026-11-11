@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor } from 'xstate';
-import type { EditorState, EditorStateInput } from '#types/editor.types.js';
-import { defaultPanelState } from '#constants/editor.constants.js';
+import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
+import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import { editorMachine } from '#machines/editor.machine.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
-import type { MachineActors } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 
 // ---------------------------------------------------------------------------
 // Stubs
@@ -1072,6 +1072,30 @@ describe('ready.operation.ensuringFocusedChat', () => {
 
     // The route reads `requestedChatId` back to know the bare URL was consumed.
     expect(actor.getSnapshot().context.requestedChatId).toBeUndefined();
+    expect(actor.getSnapshot().context.focusedChatId).toBe(focusedChatId);
+    expect(actor.getSnapshot().matches({ ready: { operation: 'idle' } })).toBe(true);
+    expect(ensureInvocationCount).toBe(1);
+    actor.stop();
+  });
+
+  it('keeps the focused chat when the route names that same chat instead of revalidating it', async () => {
+    let ensureInvocationCount = 0;
+    const actor = await startAndLoad({
+      loadResult: stubEditorState,
+      ensureResult: async (input) => {
+        ensureInvocationCount += 1;
+        return {
+          type: 'focusedChatEnsured',
+          focusedChatId: input.requestedChatId ?? input.persistedChatId ?? 'chat-recovered',
+        };
+      },
+    });
+    expect(ensureInvocationCount).toBe(1);
+    const { focusedChatId } = actor.getSnapshot().context;
+
+    actor.send({ type: 'setRequestedChatId', chatId: focusedChatId });
+
+    expect(actor.getSnapshot().context.requestedChatId).toBe(focusedChatId);
     expect(actor.getSnapshot().context.focusedChatId).toBe(focusedChatId);
     expect(actor.getSnapshot().matches({ ready: { operation: 'idle' } })).toBe(true);
     expect(ensureInvocationCount).toBe(1);

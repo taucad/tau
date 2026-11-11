@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { PreviewParameterScope } from '#routes/w.$workspace.$project_.preview/preview-parameter-scope.js';
 import { useCallback } from 'react';
 import { Link } from 'react-router';
@@ -9,7 +10,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { Loader } from '@taucad/ui/components/loader';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { downloadBlob } from '@taucad/utils/file';
-import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
+import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import { PreviewWorkbenchLayout } from '#components/share/preview-workbench-layout.js';
 import { desktopTitlebarInset } from '#components/layout/page.js';
 import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
@@ -93,9 +94,13 @@ export function OwnedPreviewWorkbench(): React.JSX.Element {
               <span className='hidden @min-[768px]/preview:inline'>Projects</span>
             </Link>
           </Button>
-          <h1 className='order-last w-full min-w-0 truncate text-center text-sm font-medium @min-[640px]/preview:order-none @min-[640px]/preview:w-auto @min-[640px]/preview:flex-1'>
+          <Heading
+            level={1}
+            variant='label'
+            className='order-last w-full min-w-0 truncate text-center @min-[640px]/preview:order-none @min-[640px]/preview:w-auto @min-[640px]/preview:flex-1'
+          >
             {project?.name}
-          </h1>
+          </Heading>
           <div className='flex shrink-0 items-center gap-1 @min-[640px]/preview:gap-2'>
             {workbenchTrigger}
             <Button

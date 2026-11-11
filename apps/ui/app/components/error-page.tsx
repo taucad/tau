@@ -1,13 +1,14 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { AlertCircle, ArrowLeft, RefreshCcw, WifiOff } from 'lucide-react';
 import { Loader } from '@taucad/ui/components/loader';
 import { lazy, Suspense, useCallback, useEffect, useSyncExternalStore } from 'react';
 import { isRouteErrorResponse, useLocation, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
-import { chatObservationConflict, quarantineChatObservation } from '#lib/chat-observation-guard.js';
+import { chatObservationConflict, quarantineChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
 import { PageNotFound } from '#components/page-not-found.js';
 import { reportUiError } from '#lib/error-reporting.js';
-import { isTransientNetworkFailure } from '#lib/network-failure.js';
-import { isWeakKey } from '#lib/weak-key.js';
+import { isTransientNetworkFailure } from '@taucad/ui-core/lib/network-failure';
+import { isWeakKey } from '@taucad/ui-core/lib/weak-key';
 import { describeSupersession, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
 import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
@@ -141,9 +142,9 @@ export function ErrorPage(): React.JSX.Element {
           <div className='flex size-12 items-center justify-center rounded-full bg-feature/10'>
             <AlertCircle className='size-6 text-feature' />
           </div>
-          <h1 className='text-lg font-semibold text-foreground'>
+          <Heading level={1} variant='title' className='text-foreground'>
             {error.status} {error.statusText}
-          </h1>
+          </Heading>
           {error.data ? <p className='max-w-sm text-sm text-muted-foreground'>{error.data}</p> : undefined}
           <p className='max-w-xs text-sm text-pretty text-muted-foreground'>
             Our team has been notified and will investigate shortly.
@@ -181,9 +182,9 @@ export function ErrorPage(): React.JSX.Element {
           <div className='flex size-12 items-center justify-center rounded-full bg-feature/10'>
             <RefreshCcw className='size-6 text-feature' />
           </div>
-          <h1 className='text-lg font-semibold text-foreground'>
+          <Heading level={1} variant='title' className='text-foreground'>
             {isRolledBack ? 'Tau has been replaced' : 'Tau has been updated'}
-          </h1>
+          </Heading>
           <p className='max-w-xs text-sm text-pretty text-muted-foreground'>
             {describeSupersession(supersedingBuildId)}
           </p>
@@ -210,7 +211,9 @@ export function ErrorPage(): React.JSX.Element {
           <div className='flex size-12 items-center justify-center rounded-full bg-feature/10'>
             <WifiOff className='size-6 text-feature' />
           </div>
-          <h1 className='text-lg font-semibold text-foreground'>Couldn’t reach Tau</h1>
+          <Heading level={1} variant='title' className='text-foreground'>
+            Couldn’t reach Tau
+          </Heading>
           <p className='max-w-xs text-sm text-pretty text-muted-foreground'>
             Check your connection, then try again. Tau retries when your device is back online.
           </p>
@@ -239,7 +242,9 @@ export function ErrorPage(): React.JSX.Element {
           </div>
 
           {/* Error Title */}
-          <h1 className='text-lg font-semibold text-foreground'>Something went wrong</h1>
+          <Heading level={1} variant='title' className='text-foreground'>
+            Something went wrong
+          </Heading>
 
           {/* Reassurance Message */}
           <p className='max-w-xs text-sm text-pretty text-muted-foreground'>
@@ -286,5 +291,9 @@ export function ErrorPage(): React.JSX.Element {
     );
   }
 
-  return <h1>Unknown Error</h1>;
+  return (
+    <Heading level={1} variant='title'>
+      Unknown Error
+    </Heading>
+  );
 }

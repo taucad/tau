@@ -9,7 +9,7 @@ import type { RevisionCard } from '#hooks/use-revisions.js';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import { useRevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
-import { formatRelativeTime } from '#utils/date.utils.js';
+import { formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
 import { backupByDefaultNotice, useTauCloudEligibility, useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import {

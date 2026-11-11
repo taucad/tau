@@ -12,7 +12,7 @@ import type { TurnPlacementFact } from '@taucad/agent-host';
 import type { createBrowserAgentHostClient } from '#services/agent-host-client.js';
 import type { AgentHostWorkerProtocol } from '#workers/agent-host.contract.js';
 import { agentHostWorkerProtocolSchemas, parseAgentHostWorkerConnect } from '#workers/agent-host.contract.js';
-import { rootedProvider } from '#workers/test/rooted-provider.fixture.js';
+import { rootedProvider } from '@taucad/ui-core/workers/test/rooted-provider.fixture';
 import { randomUuid } from '@taucad/utils/id';
 
 let provider: FileSystemProvider | undefined;

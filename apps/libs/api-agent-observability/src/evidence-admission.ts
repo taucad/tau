@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import type { Evidence } from '@taucad/agent-observability/contract';
 import { evidenceKeys } from '@taucad/agent-observability/identity';
 import type { Database, OwnerLockTransaction } from '@taucad/api-database/owner-lock';
@@ -30,9 +30,12 @@ export type EvidenceReceipt = Readonly<{
   expiresAt: string;
 }>;
 
-/** The outcome of one admission. Every refusal is a bounded code; none carries the payload. */
+/**
+ * The outcome of one admission. Every refusal is a bounded code; none carries the payload. A `superseded` receipt is
+ * an earlier projection of the same source, answered as a replay because it is delivered or on its way (LD12).
+ */
 export type EvidenceAdmissionOutcome =
-  | Readonly<{ kind: 'receipt'; receipt: EvidenceReceipt }>
+  | Readonly<{ kind: 'receipt'; receipt: EvidenceReceipt; superseded?: true }>
   | Readonly<{ kind: 'refused' | 'conflict' | 'fenced' | 'capacity' }>;
 
 /** Everything one admission depends on, resolved by the caller from authenticated server state. */
@@ -77,6 +80,10 @@ const toReceipt = (
  *   enqueues it again;
  * - changed source bytes, a changed semantic identity or changed projection
  *   bytes under one identity are a conflict, not another fact;
+ * - a new projection of a source whose earlier projection was delivered or is
+ *   still on its way settles `superseded`: it is answered with that receipt,
+ *   as a replay, and enqueues nothing, so a fact reaches Langfuse once (LD12).
+ *   One whose earlier projection was rejected or expired unsent is admitted;
  * - a deletion-fenced project, and an erased account or project, admit nothing;
  * - the receipt, the source protection and the sealed backlog row commit
  *   together, before the caller answers.
@@ -111,6 +118,49 @@ class AdmissionRefusal extends Error {
   }
 }
 
+/** How a held receipt answers a replay: `expired` past retention, else as current policy allows. */
+const dispositionOf = (
+  row: Pick<typeof agentEvidenceReceipt.$inferSelect, 'expiresAt'>,
+  input: EvidenceAdmissionInput,
+): EvidenceReceipt['disposition'] => {
+  if (row.expiresAt.getTime() <= input.now.getTime()) {
+    return 'expired';
+  }
+  return input.allowed.replay ? 'accepted' : 'revoked';
+};
+
+/**
+ * The earlier projection of a source that was delivered or is still on its way: its row is pending, sending,
+ * uncertain or confirmed, or it expired after a send was recorded (a gap may still land). A rejected row, and one that
+ * expired before any send, reached nothing, so a new projection may take its place.
+ */
+const deliveredProjection = async (
+  transaction: OwnerLockTransaction,
+  held: ReadonlyArray<typeof agentEvidenceReceipt.$inferSelect>,
+): Promise<typeof agentEvidenceReceipt.$inferSelect | undefined> => {
+  if (held.length === 0) {
+    return undefined;
+  }
+  const [live] = await transaction
+    .select({ receiptId: agentEvidenceOutbox.receiptId })
+    .from(agentEvidenceOutbox)
+    .where(
+      and(
+        inArray(
+          agentEvidenceOutbox.receiptId,
+          held.map((row) => row.id),
+        ),
+        or(
+          inArray(agentEvidenceOutbox.state, ['pending', 'sending', 'uncertain', 'confirmed']),
+          and(eq(agentEvidenceOutbox.state, 'expired'), isNotNull(agentEvidenceOutbox.traceId)),
+        ),
+      ),
+    )
+    .orderBy(asc(agentEvidenceOutbox.createdAt))
+    .limit(1);
+  return live === undefined ? undefined : held.find((row) => row.id === live.receiptId);
+};
+
 const admitWithin = async (
   transaction: OwnerLockTransaction,
   input: EvidenceAdmissionInput,
@@ -134,9 +184,11 @@ const admitWithin = async (
     if (replay.projectionDigest !== evidence.projection.digest) {
       return { kind: 'conflict' };
     }
-    const disposition =
-      replay.expiresAt.getTime() <= input.now.getTime() ? 'expired' : input.allowed.replay ? 'accepted' : 'revoked';
-    return { kind: 'receipt', receipt: toReceipt(replay, disposition, true) };
+    return { kind: 'receipt', receipt: toReceipt(replay, dispositionOf(replay, input), true) };
+  }
+  const earlier = await deliveredProjection(transaction, held);
+  if (earlier !== undefined) {
+    return { kind: 'receipt', receipt: toReceipt(earlier, dispositionOf(earlier, input), true), superseded: true };
   }
   if (!input.allowed.admit) {
     return { kind: 'refused' };

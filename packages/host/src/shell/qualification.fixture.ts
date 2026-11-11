@@ -4,7 +4,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, readlinkSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -109,6 +109,30 @@ export const processesWith = (marker: string): string[] =>
  */
 export const digestOf = (path: string): string =>
   `sha256:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+
+/**
+ * A digest of a whole tree: every entry's relative name, type, mode and bytes (a link's target), in name order, so an
+ * added, removed, renamed, re-moded or rewritten file changes it.
+ *
+ * @param root - The tree's root.
+ * @returns `sha256:<hex>`.
+ */
+export const treeDigestOf = (root: string): string => {
+  const hash = createHash('sha256');
+  const names = (readdirSync(root, { recursive: true }) as string[]).toSorted();
+  for (const name of names) {
+    const path = join(root, name);
+    const status = lstatSync(path);
+    hash.update(`${name}\0${status.mode.toString(8)}\0`);
+    if (status.isSymbolicLink()) {
+      hash.update(readlinkSync(path));
+    } else if (status.isFile()) {
+      hash.update(readFileSync(path));
+    }
+    hash.update('\0');
+  }
+  return `sha256:${hash.digest('hex')}`;
+};
 
 /**
  * Wait until a condition holds or a deadline passes, polling it.

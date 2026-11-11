@@ -9,6 +9,7 @@
 import { Link } from 'react-router';
 import { Pause, Play } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
+import { Heading } from '@taucad/ui/components/heading';
 import type { PausedState } from '#lib/kill-memory.js';
 
 /** The gate's copy, by state. */
@@ -67,10 +68,9 @@ export function PausedModelGate({
           <img src={thumbnailUrl} alt='' className='mx-auto mb-4 h-40 w-48 rounded-md object-contain' />
         )}
         <p className='text-sm font-medium text-muted-foreground'>{name}</p>
-        {/* oxlint-disable-next-line tau-lint/no-raw-page-heading -- Full-screen gate, laid out like the "Run this model" gate rather than a product page. */}
-        <h1 id='paused-model-title' className='mt-1 text-xl font-semibold tracking-tight'>
+        <Heading level={1} variant='title' id='paused-model-title' className='mt-1'>
           {copy.title}
-        </h1>
+        </Heading>
         <p className='mt-2 text-sm text-muted-foreground'>{copy.text}</p>
         {thumbnailUrl === undefined && facts !== undefined ? (
           <p className='mt-3 font-mono text-xs text-muted-foreground'>{facts}</p>

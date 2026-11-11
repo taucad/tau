@@ -2,7 +2,7 @@ import { setup, types } from 'xstate';
 import type { DirectoryPick } from '#constants/browser.constants.js';
 import { hostPathName } from '#filesystem/desktop-bridge.js';
 import type { Workspace } from '#filesystem/handle-store.js';
-import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 
 export type PreparedWorkspaceCatalog = {
   readonly projectCount: number;

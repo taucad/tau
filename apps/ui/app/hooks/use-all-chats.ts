@@ -1,4 +1,4 @@
-import { filesystemSourceIdentity } from '#services/filesystem-source-identity.js';
+import { filesystemSourceIdentity } from '@taucad/ui-core/services/filesystem-source-identity';
 import { useQuery } from '@tanstack/react-query';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { useProjectManager } from '#hooks/use-project-manager.js';

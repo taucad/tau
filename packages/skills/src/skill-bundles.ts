@@ -14,7 +14,7 @@ import { dirname, join, posix, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * The packages that own a Tau CAD skill bundle.
+ * The packages that own a Tau skill bundle.
  *
  * Every entry is a declared dependency of this package, so each resolves from
  * this module's own graph on any host. Packages that deliberately ship no

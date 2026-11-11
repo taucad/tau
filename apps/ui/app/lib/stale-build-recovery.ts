@@ -59,9 +59,9 @@ import {
   sendWaitingErrors,
   setErrorDescriber,
 } from '#lib/error-reporting.js';
-import { isPageHidden, notePageHide, notePageShow } from '#lib/page-visibility.js';
-import { readSessionStorage } from '#lib/session-storage.js';
-import { isWeakKey } from '#lib/weak-key.js';
+import { isPageHidden, notePageHide, notePageShow } from '@taucad/ui-core/lib/page-visibility';
+import { readSessionStorage } from '@taucad/ui-core/lib/session-storage';
+import { isWeakKey } from '@taucad/ui-core/lib/weak-key';
 
 /**
  * What a module load failure turned out to be.

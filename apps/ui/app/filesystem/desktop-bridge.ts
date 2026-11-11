@@ -78,6 +78,8 @@ type DesktopShell = {
   readonly agentHost: {
     retain(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
     release(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
+    /** Absent on a shell that predates the rating relay (LW8). */
+    rated?(rating: DesktopRunRating): Promise<void>;
   };
   readonly machines?: {
     completeBinding(input: DesktopMachineBindingCompletion): Promise<unknown>;
@@ -91,6 +93,15 @@ type DesktopShell = {
   /** Ask main to broker a port for one concern; answered by a relayed message. */
   requestServicesPort(requestId: string, concern: string, context?: Readonly<Record<string, string>>): void;
 };
+
+/** One rating the account gave a run's reply in the desktop app. @public */
+export type DesktopRunRating = Readonly<{
+  projectId: string;
+  chatId: string;
+  runId: string;
+  value: 'positive' | 'negative';
+  at: number;
+}>;
 
 export type DesktopQuickLookResult = { readonly success: true } | { readonly success: false; readonly error: string };
 
@@ -268,6 +279,11 @@ export type DesktopBridge = {
     retain(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
     /** Release that hold and await launcher shutdown when it was the last one. */
     release(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
+    /**
+     * Tell the desktop project host that the account rated a run (LW8). The host that ran the turn reports it under
+     * the feedback grant once the run has ended; any other drops it, and a shell without the relay drops it too.
+     */
+    rated(rating: DesktopRunRating): Promise<void>;
   };
   readonly machines: {
     /**
@@ -448,6 +464,7 @@ export const desktopBridge = (): DesktopBridge | undefined => {
         shell.agentHost.retain(workspaceRoot, projectId, attachmentId),
       release: async (workspaceRoot, projectId, attachmentId) =>
         shell.agentHost.release(workspaceRoot, projectId, attachmentId),
+      rated: async (rating) => shell.agentHost.rated?.(rating),
     },
     machines: {
       connect: async () => connectServices('machines'),

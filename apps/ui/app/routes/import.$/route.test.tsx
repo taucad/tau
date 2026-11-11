@@ -1,4 +1,4 @@
-import { createProjectFixture } from '#lib/project.fixture.js';
+import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,10 +9,10 @@ import { largeObjectThresholdBytes, RevisionPortError } from '@taucad/revisions'
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
 import { GithubRequestError } from '#lib/github-connections.js';
 import type { getGitHubClient } from '#lib/github-api.js';
-import { ImportChannelError } from '#machines/import-staging.js';
-import type * as ImportStagingModule from '#machines/import-staging.js';
+import { ImportChannelError } from '@taucad/ui-core/machines/import-staging';
+import type * as ImportStagingModule from '@taucad/ui-core/machines/import-staging';
 import ImportRoute from '#routes/import.$/route.js';
-import { githubProjectBinding } from '#lib/github-project-binding.js';
+import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import type * as LinkedImportModule from '#lib/github-linked-import.js';
 import type * as ReactRouterModule from 'react-router';
 
@@ -82,7 +82,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: () => ({ fileManagerRef: { getSnapshot: () => ({ context: { worker: {} } }) } }),
   waitForFileManagerServices: async () => undefined,
 }));
-vi.mock('#machines/import-staging.js', async (importOriginal) => ({
+vi.mock('@taucad/ui-core/machines/import-staging', async (importOriginal) => ({
   ...(await importOriginal<typeof ImportStagingModule>()),
   openImportSession: () => ({
     plan: importChannel.plan,

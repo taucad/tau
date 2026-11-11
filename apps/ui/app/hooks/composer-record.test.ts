@@ -11,7 +11,7 @@ import type { ComposerRecordPatch, ComposerRecordReadResult } from '@taucad/chat
 import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
 import { createComposerRecordActor, draftPersistenceFor } from '#hooks/composer-record.js';
 import { composerRecordMachine } from '#machines/composer-record.machine.js';
-import { spyOnSend } from '#lib/xstate-test.utils.js';
+import { spyOnSend } from '@taucad/ui-core/lib/xstate-test.utils';
 
 const unused = async (): Promise<never> => {
   throw new Error('The selection hand-off never touches the store.');

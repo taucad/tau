@@ -382,6 +382,31 @@ type NativeWatcher = {
     options?: { ignore?: string[] },
   ): Promise<NativeSubscription>;
 };
+/*
+ * @parcel/watcher keeps one native backend per process and tears it down, on a libuv pool thread, when its last
+ * subscription closes. A `subscribe` sent while that close is still queued or running takes the same backend, binds to
+ * it after the close dropped it, and resolves: a watch admitted on a destroyed backend, never told of anything again.
+ * So each native subscribe and unsubscribe of this isolate starts only once the one before it settled.
+ * ponytail: the order is per isolate, so a watch opened from another worker thread of the process is not covered.
+ */
+let nativeLifecycle: Promise<void> = Promise.resolve();
+const serializeNative = async <T>(operation: () => Promise<T>): Promise<T> => {
+  const previous = nativeLifecycle;
+  const settled = Promise.withResolvers<void>();
+  nativeLifecycle = settled.promise;
+  try {
+    await previous;
+    return await operation();
+  } finally {
+    settled.resolve();
+  }
+};
+const serializedWatcher = (watcher: NativeWatcher): NativeWatcher => ({
+  subscribe: async (directory, handler, options) => {
+    const subscription = await serializeNative(async () => watcher.subscribe(directory, handler, options));
+    return { unsubscribe: async () => serializeNative(async () => subscription.unsubscribe()) };
+  },
+});
 type WatchClosures = { pending: Set<Promise<void>>; admissions: Set<Promise<void>>; failures: unknown[] };
 const watchClosures = new WeakMap<NodeFsProvider, WatchClosures>();
 
@@ -1117,7 +1142,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     this._openSubscriptions.add(unsubscribe);
     try {
       const module = await import('@parcel/watcher');
-      native = module.default;
+      native = serializedWatcher(module.default);
     } catch (error) {
       unsubscribe();
       throw new Error('Node filesystem observation requires @parcel/watcher. Install it in the Node host.', {

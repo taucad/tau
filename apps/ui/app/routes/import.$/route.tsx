@@ -430,6 +430,7 @@ export default function ImportRoute(): React.JSX.Element {
                     },
                   },
                   files: {},
+                  origin: 'github',
                   location: target.location,
                   staging: { ...staging, carriesWorkbenchLayout: input.files.has(workbenchLayoutPath) },
                 }),
@@ -487,6 +488,7 @@ export default function ImportRoute(): React.JSX.Element {
                     },
                   },
                   files: {},
+                  origin: input.origin,
                   location: target.location,
                   staging: {
                     ...staging,

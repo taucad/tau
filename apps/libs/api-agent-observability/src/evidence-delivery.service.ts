@@ -4,7 +4,10 @@ import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { evidenceSchema } from '@taucad/agent-observability/contract';
 import type { Evidence } from '@taucad/agent-observability/contract';
+import type { PersonalIdentity } from '@taucad/agent-observability/content-redaction';
+import { eq } from 'drizzle-orm';
 import { DatabaseService } from '@taucad/api-database';
+import { user } from '@taucad/api-database/schema';
 import { readProjectDeletion } from '@taucad/api-database/project-lifecycle';
 import type { Environment } from '@taucad/api-core';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
@@ -15,7 +18,8 @@ import { openEvidence } from '#evidence-seal.js';
 import { leasePending, leaseUncertain, prepareSend, settleDelivery, sweepBacklog } from '#evidence-delivery.js';
 import type { DeliverySettlement, LeasedDelivery } from '#evidence-delivery.js';
 import { LangfuseClient } from '#langfuse-client.js';
-import { langfuseObservation, pseudonymKey, receiptSpanId } from '#langfuse-observation.js';
+import { exportableEvidence, langfuseObservation, pseudonymKey, receiptSpanId } from '#langfuse-observation.js';
+import type { OtlpSpan } from '#langfuse-observation.js';
 
 /** Delivery pacing. Fixed and low: vendor availability never gates the API. */
 export const deliveryTiming = Object.freeze({
@@ -55,6 +59,15 @@ const deliveryOutcome = (settlement: DeliverySettlement): AgentEvidenceDeliveryO
     }
   }
 };
+
+/**
+ * The Langfuse units one accepted request wrote (LW24): an observation for each span, and a trace as well for each span
+ * with no parent, a run's root or a helper or direct call.
+ */
+const spanUnits = (spans: readonly OtlpSpan[]): Readonly<{ observations: number; traces: number }> => ({
+  observations: spans.length,
+  traces: spans.filter((span) => span.parentSpanId === undefined).length,
+});
 
 const supersededReason: Readonly<Record<'object' | 'no-object', AgentEvidenceSupersededReason>> = {
   object: 'object',
@@ -294,6 +307,14 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     return 'reason' in settlement ? `${settlement.kind}:${settlement.reason}` : settlement.kind;
   }
 
+  /** Add the units Langfuse is known to hold, once per object, to `tau.agent_evidence.langfuse_units`. */
+  private countUnits({ observations, traces }: Readonly<{ observations: number; traces: number }>): void {
+    this.metrics.agentEvidenceLangfuseUnits.add(observations, { kind: 'observation' });
+    if (traces > 0) {
+      this.metrics.agentEvidenceLangfuseUnits.add(traces, { kind: 'trace' });
+    }
+  }
+
   private open(row: LeasedDelivery): Evidence | 'unsealable' | 'invalid' | 'key-unavailable' {
     const version = Number(row.payload?.split('.', 1)[0]);
     if (!this.keys.has(version)) {
@@ -324,15 +345,37 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Whether the plane's purpose still allows delivery and the project is not deletion-fenced. */
-  private async revocation(row: LeasedDelivery): Promise<'revoked' | 'deleted' | undefined> {
+  /**
+   * What the receipt may be sent as now: nothing for a deletion-fenced project or a purpose no longer effective, and
+   * for content its fact alone while only `summary` is effective (rule 5). Content carries the account's registered
+   * email and name for the export redaction pass.
+   */
+  private async exportable(
+    row: LeasedDelivery,
+    evidence: Evidence,
+  ): Promise<Readonly<{ evidence: Evidence; identity?: PersonalIdentity }> | 'revoked' | 'deleted'> {
     const { database } = this.databaseService;
     if ((await readProjectDeletion(database, row.projectId)) !== undefined) {
       return 'deleted';
     }
     const authority = await this.telemetryPurposes.getAdmissionAuthority(row.principalId, row.projectId);
-    const state = authority.effective.purposes.find((purpose) => purpose.purpose === row.plane);
-    return state?.allowed === true ? undefined : 'revoked';
+    const allowed = (purpose: string): boolean =>
+      authority.effective.purposes.find((state) => state.purpose === purpose)?.allowed === true;
+    if (!allowed(row.plane) && row.plane !== 'content') {
+      return 'revoked';
+    }
+    const exported = exportableEvidence(evidence, { summary: allowed('summary'), content: allowed('content') });
+    if (exported === undefined) {
+      return 'revoked';
+    }
+    if (exported.payload.plane !== 'content') {
+      return { evidence: exported };
+    }
+    const account = await database.query.user.findFirst({
+      where: eq(user.id, row.principalId),
+      columns: { email: true, name: true },
+    });
+    return { evidence: exported, identity: { email: account?.email, name: account?.name } };
   }
 
   private async deliver(
@@ -356,13 +399,13 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     if (typeof evidence === 'string') {
       return this.settle(row, { kind: 'rejected', reason: evidence });
     }
-    const revoked = await this.revocation(row);
-    if (revoked !== undefined) {
-      return this.settle(row, { kind: 'expired', reason: revoked });
+    const exportable = await this.exportable(row, evidence);
+    if (typeof exportable === 'string') {
+      return this.settle(row, { kind: 'expired', reason: exportable });
     }
     const observation = langfuseObservation(
-      evidence,
-      { environment: this.environment, protection: row.protection },
+      exportable.evidence,
+      { environment: this.environment, protection: row.protection, identity: exportable.identity },
       pseudonym,
     );
     if (observation === undefined) {
@@ -389,7 +432,12 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     const outcome = await client.send(observation.spans, this.shutdown.signal);
     switch (outcome.kind) {
       case 'accepted': {
-        return this.settle(row, { kind: 'sent', reason: 'acknowledged' });
+        const settled = await this.settle(row, { kind: 'sent', reason: 'acknowledged' });
+        /* A worker that lost its lease leaves the row abandoned, and reconciliation counts it once it is found. */
+        if (settled !== 'lease-lost') {
+          this.countUnits(spanUnits(observation.spans));
+        }
+        return settled;
       }
       case 'uncertain': {
         return this.settle(row, { kind: 'sent', reason: outcome.reason });
@@ -418,7 +466,15 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       this.shutdown.signal,
     );
     if (found === 'present') {
-      return this.settle(row, { kind: 'confirmed' });
+      const settled = await this.settle(row, { kind: 'confirmed' });
+      /*
+       * An acknowledged send was counted at its answer; one whose answer was uncertain is counted once it is found.
+       * Its payload is gone by then, so only the object read back is counted.
+       */
+      if (settled !== 'lease-lost' && row.reason !== 'acknowledged') {
+        this.countUnits({ observations: 1, traces: 0 });
+      }
+      return settled;
     }
     const sentAt = row.sentAt?.getTime() ?? 0;
     if (found === 'absent' && now.getTime() - sentAt >= deliveryTiming.gapAfterMilliseconds) {

@@ -22,7 +22,15 @@ describe('CancelPlanSettings', () => {
     render(<CancelPlanSettings binding={binding} />);
 
     expect(screen.getByRole('group', { name: 'Cancel plan' })).toHaveAccessibleDescription(
-      "If you cancel, you'll keep full access to your plan features until the end of your billing period",
+      'You keep Pro until the end of your billing period.',
+    );
+  });
+
+  it('names the date the plan runs to when the paid period is known', () => {
+    render(<CancelPlanSettings binding={binding} paidThrough={new Date(2026, 11, 8)} />);
+
+    expect(screen.getByRole('group', { name: 'Cancel plan' })).toHaveAccessibleDescription(
+      `You keep Pro until ${new Date(2026, 11, 8).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}.`,
     );
   });
 
@@ -47,7 +55,7 @@ describe('CancelPlanSettings', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Cancel plan' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not open cancellation. Try again.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t open the cancellation page. Try again.');
     expect(screen.getByRole('button', { name: 'Cancel plan' })).toBeEnabled();
   });
 

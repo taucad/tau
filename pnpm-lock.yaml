@@ -4460,6 +4460,9 @@ importers:
 
   apps/www:
     dependencies:
+      '@taucad/billing':
+        specifier: workspace:*
+        version: link:../libs/billing
       '@taucad/consent':
         specifier: workspace:*
         version: link:../libs/consent
@@ -4469,6 +4472,9 @@ importers:
       '@taucad/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@taucad/ui-kit':
+        specifier: workspace:*
+        version: link:../libs/ui-kit
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../libs/utils
@@ -5046,6 +5052,9 @@ importers:
       '@taucad/agent-tools':
         specifier: workspace:*
         version: link:../agent-tools
+      '@taucad/chat':
+        specifier: workspace:*
+        version: link:../chat
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../packages/core/geometry
@@ -22926,6 +22935,7 @@ packages:
 
   node-abort-controller@3.1.1:
     resolution: {integrity: sha512-AGK2yQKIjRuqnc6VkX2Xj5d+QW8xZ87pa1UK6yA6ouUyuxfHuMP6umE5QK7UmTeOAymo+Zx1Fxiuw9rVx8taHQ==}
+    deprecated: This package is no longer needed on supported Node.js versions. Node.js 16+ includes AbortController and AbortSignal as built-in globals. All Node.js versions requiring this polyfill are end-of-life. Use the built-in globals instead.
 
   node-addon-api@7.1.1:
     resolution: {integrity: sha512-5m3bsyrjFWE1xf7nz7YXdN4udnVtXK6/Yfgn5qnahL6bCkf2yKt4k3nuTKAtT4r3IG8JNR2ncsIMdZuAzJjHQQ==}

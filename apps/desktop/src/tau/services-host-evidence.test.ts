@@ -24,7 +24,92 @@ const noRows = vi.fn(async ({ cursor }: { cursor: number }) => ({
   events: [],
 }));
 
+const at = Date.now() + 60_000;
+/** One run whose turn wrote `main.ts`, a second apart, under one term. */
+const runRows = [
+  { type: 'run.lifecycle', state: 'admitted' },
+  {
+    type: 'turn.history-projection-committed',
+    retainedMessageIds: [],
+    message: { id: 'turn-1', role: 'user', content: 'SYNTHETIC_PROMPT' },
+    context: { version: 1, systemPrompt: 'SYNTHETIC_SYSTEM', initialMessages: [], postCompactionMessages: [] },
+  },
+  { type: 'run.lifecycle', state: 'running', attempt: 1 },
+  { type: 'run.lifecycle', state: 'completed', attempt: 1 },
+  {
+    type: 'turn.finalized',
+    turnId: 'turn-1',
+    runId: 'run-1',
+    chatId: 'chat-1',
+    projectId: 'project-1',
+    revisionId: 'rev-1',
+    changedPaths: ['main.ts'],
+    trigger: 'turn',
+    runIds: ['run-1'],
+  },
+].map((body, sequence) => ({
+  version: 1,
+  leaderEpoch: 'term-1',
+  sequence,
+  recordedAt: new Date(at + sequence * 1000).toISOString(),
+  runId: 'run-1',
+  ...body,
+}));
+const oneRun = vi.fn(async ({ cursor }: { cursor: number }) => ({
+  cursor,
+  nextCursor: runRows.length,
+  endCursor: runRows.length,
+  events: cursor === 0 ? (runRows as unknown as never[]) : [],
+}));
+
 describe('desktopChatObserver', () => {
+  it('should report a run’s content and its design as the revision holds it, only while content is allowed (LW6)', async () => {
+    const bodies: unknown[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/v1/telemetry-purposes')) {
+        return new Response(
+          JSON.stringify({
+            epoch: 'policy-1',
+            projectId: 'project-1',
+            purposes: [
+              { purpose: 'summary', allowed: true },
+              { purpose: 'content', allowed: true },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      bodies.push(JSON.parse(await new Response(init?.body).text()));
+      return new Response(JSON.stringify({ receipt: 'r-1', disposition: 'accepted', duplicate: false }), {
+        status: 200,
+      });
+    });
+    const design = vi.fn(async () => [{ path: 'main.ts', text: 'SYNTHETIC_DESIGN', bytes: 16 }]);
+    const observer = desktopChatObserver({
+      directory,
+      apiBaseUrl: 'https://api.test',
+      projectId: 'project-1',
+      principal: () => 'user-1',
+      token: () => 'session-token',
+      fetch: fetchMock,
+    })(oneRun, { design });
+
+    observer.onChatQuiescent('chat-1', true);
+    await vi.waitFor(() => {
+      expect(bodies).toHaveLength(1);
+    });
+    observer.close();
+
+    expect(design).toHaveBeenCalledWith({ revision: 'rev-1', paths: ['main.ts'] });
+    expect(bodies).toMatchObject([
+      { payload: { plane: 'content', fact: { kind: 'outcome', turn: { host: 'desktop' } } } },
+    ]);
+    expect(JSON.stringify(bodies)).toContain('SYNTHETIC_PROMPT');
+    expect(JSON.stringify(bodies)).toContain('SYNTHETIC_DESIGN');
+    expect(JSON.stringify(bodies)).not.toContain('SYNTHETIC_SYSTEM');
+  });
+
   it('should ask for the grant with the session’s bearer', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', { status: 401 }));
     const observer = desktopChatObserver({

@@ -6,6 +6,7 @@ import {
   assertNoQuery,
   invocationSignal,
   readAttribution,
+  readHostLabels,
   readTurnTelemetry,
   readSingleHeader,
   validateAttemptId,
@@ -32,6 +33,7 @@ export class LlmGatewayController {
       signal: invocationSignal(request, reply),
       ...readAttribution(request),
       ...readTurnTelemetry(request),
+      ...readHostLabels(request),
       anthropicVersion: readSingleHeader(request, 'anthropic-version'),
       anthropicBeta: readSingleHeader(request, 'anthropic-beta'),
     });
@@ -53,6 +55,7 @@ export class LlmGatewayController {
       signal: invocationSignal(request, reply),
       ...readAttribution(request),
       ...readTurnTelemetry(request),
+      ...readHostLabels(request),
     });
   }
 
@@ -72,6 +75,7 @@ export class LlmGatewayController {
       signal: invocationSignal(request, reply),
       ...readAttribution(request),
       ...readTurnTelemetry(request),
+      ...readHostLabels(request),
     });
   }
 }

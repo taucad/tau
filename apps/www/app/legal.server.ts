@@ -46,13 +46,37 @@ const plainText = (html: string): string =>
     .replaceAll(/&(amp|lt|gt|quot|#x27|#39);/gu, (_match, name: string) => entities[name] ?? '');
 
 /**
- * Anchor every section heading and let wide tables scroll inside a keyboard-reachable region instead of the page.
- * The input is the serializer's own output for repository-owned Markdown, so its tags are regular.
- * @param html - Rendered document body.
- * @returns The body with heading ids and table regions.
+ * Stable fragment ids for clauses that other surfaces link to. A clause is a
+ * paragraph that opens with a bold lead; the id is fixed here, so the link
+ * survives a reworded lead only by a deliberate edit to this table, and a lead
+ * that no longer matches fails the render instead of leaving a dead link.
+ * The app's Add credits dialog links its "Refund policy" to `terms#refunds`.
  */
-const decorate = (html: string): string =>
-  html
+export const clauseAnchors: Partial<Record<LegalSlug, Readonly<Record<string, string>>>> = {
+  terms: { 'Refunds of top-ups.': 'refunds' },
+};
+
+const anchorClauses = (slug: LegalSlug, html: string): string => {
+  let anchored = html;
+  for (const [lead, id] of Object.entries(clauseAnchors[slug] ?? {})) {
+    const opening = `<p><strong>${lead}</strong>`;
+    if (!anchored.includes(opening)) {
+      throw new Error(`Legal document "${slug}" has no clause that opens with "${lead}" for #${id}`);
+    }
+    anchored = anchored.replace(opening, `<p id="${id}"><strong>${lead}</strong>`);
+  }
+  return anchored;
+};
+
+/**
+ * Anchor every section heading and linked clause, and let wide tables scroll inside a keyboard-reachable region
+ * instead of the page. The input is the serializer's own output for repository-owned Markdown, so its tags are regular.
+ * @param slug - Document identifier, which selects the clause anchors.
+ * @param html - Rendered document body.
+ * @returns The body with heading ids, clause ids and table regions.
+ */
+const decorate = (slug: LegalSlug, html: string): string =>
+  anchorClauses(slug, html)
     .replaceAll(
       /<h([2-6])>([\s\S]*?)<\/h\1>/gu,
       (_match, level: string, inner: string) => `<h${level} id="${slugify(plainText(inner))}">${inner}</h${level}>`,
@@ -77,7 +101,7 @@ export const renderLegalDocument: (slug: LegalSlug) => { title: string; html: st
   const titleEnd = source.indexOf('\n');
   const result = {
     title: source.slice(2, titleEnd).trim(),
-    html: decorate(String(processor.processSync(source.slice(titleEnd + 1)))),
+    html: decorate(slug, String(processor.processSync(source.slice(titleEnd + 1)))),
   };
   rendered.set(slug, result);
   return result;

@@ -3,6 +3,7 @@ import type { Evidence } from '#contract.js';
 import type { EvidenceReceipt, SubmitOutcome } from '#delivery.js';
 import { createEvidenceOutbox, evidenceContentType, memoryPendingStore, submitEvidence } from '#delivery.js';
 import { projectRun } from '#projection.js';
+import { verifyEvidenceDigest } from '#identity.js';
 
 const at = Date.parse('2026-10-29T00:00:00.000Z');
 
@@ -64,14 +65,22 @@ describe('submitEvidence', () => {
   });
 
   it.each([
-    [409, { code: 'EVIDENCE_POLICY_STALE' }, { kind: 'stale' }],
-    [403, { code: 'EVIDENCE_PURPOSE' }, { kind: 'stale' }],
+    [409, { code: 'EVIDENCE_POLICY_STALE' }, { kind: 'stale', code: 'EVIDENCE_POLICY_STALE' }],
+    [403, { code: 'EVIDENCE_PURPOSE' }, { kind: 'stale', code: 'EVIDENCE_PURPOSE' }],
     [409, { code: 'EVIDENCE_CONFLICT' }, { kind: 'refused', code: 'EVIDENCE_CONFLICT' }],
     [400, { code: 'EVIDENCE_INVALID' }, { kind: 'refused', code: 'EVIDENCE_INVALID' }],
     [410, { code: 'PROJECT_DELETED' }, { kind: 'gone' }],
     [401, {}, { kind: 'unauthenticated' }],
-    [429, { code: 'EVIDENCE_BUSY', retryAfterSeconds: 1 }, { kind: 'retry', afterMilliseconds: 1000 }],
-    [503, { code: 'EVIDENCE_CAPACITY', retryAfterSeconds: 60 }, { kind: 'retry', afterMilliseconds: 60_000 }],
+    [
+      429,
+      { code: 'EVIDENCE_BUSY', retryAfterSeconds: 1 },
+      { kind: 'retry', afterMilliseconds: 1000, code: 'EVIDENCE_BUSY' },
+    ],
+    [
+      503,
+      { code: 'EVIDENCE_CAPACITY', retryAfterSeconds: 60 },
+      { kind: 'retry', afterMilliseconds: 60_000, code: 'EVIDENCE_CAPACITY' },
+    ],
     [503, {}, { kind: 'retry', afterMilliseconds: 30_000 }],
   ])('reads HTTP %i as what it means for the envelope', async (status, body, expected) => {
     const [evidence] = await envelopes(1);
@@ -170,5 +179,89 @@ describe('EvidenceOutbox', () => {
 
     expect(submit).toHaveBeenCalledTimes(1);
     expect(box.report()).toMatchObject({ revoked: 1 });
+  });
+});
+
+describe('a content envelope the API will not take (LW6)', () => {
+  const contentEnvelopes = async (): Promise<Evidence[]> => {
+    const projection = await projectRun(
+      {
+        chatId: 'chat-1',
+        runId: 'run-1',
+        termination: 'completed',
+        tools: [],
+        intervals: [],
+        ending: { source: { chatId: 'chat-1', leaderEpoch: 'epoch-a', sequence: 1 }, at },
+        content: { prompt: 'SYNTHETIC_PROMPT', reply: 'SYNTHETIC_REPLY', changedPaths: [] },
+      },
+      {
+        principal: 'user-a',
+        project: 'project-a',
+        policyEpoch: 'epoch-1',
+        protection: 'free',
+        uploader: 'device-a',
+        ownsEpoch: () => true,
+        grantedAt: at,
+        hostBuild: undefined,
+        content: { since: at },
+      },
+    );
+    return [...projection.evidence];
+  };
+
+  it.each<[string, SubmitOutcome]>([
+    ['withdrawn', { kind: 'stale', code: 'EVIDENCE_PURPOSE' }],
+    ['at capacity', { kind: 'retry', afterMilliseconds: 60_000, code: 'EVIDENCE_CAPACITY' }],
+    ['refused by an older API', { kind: 'refused', code: 'EVIDENCE_INVALID' }],
+  ])('should send the same fact as its summary when its content is %s', async (_, refusal) => {
+    const submit = vi
+      .fn<(evidence: Evidence) => Promise<SubmitOutcome>>()
+      .mockResolvedValueOnce(refusal)
+      .mockResolvedValue(receipt());
+    const store = memoryPendingStore();
+    const box = createEvidenceOutbox({ store, submit, now: () => at });
+    await box.bind(scope);
+    const [content] = await contentEnvelopes();
+    expect(content?.payload.plane).toBe('content');
+    await box.enqueue([content!]);
+
+    expect(await box.drain()).toEqual({ stop: 'empty' });
+    const summary = submit.mock.calls[1]![0];
+    expect(summary.payload).toEqual({ plane: 'summary', fact: content!.payload.fact });
+    expect(summary).toMatchObject({
+      source: content!.source,
+      projection: { redactor: 'summary-only' },
+      coverage: { input: 'omitted', output: 'omitted' },
+    });
+    expect(await verifyEvidenceDigest(summary)).toBe(true);
+    expect(JSON.stringify(summary)).not.toContain('SYNTHETIC');
+    expect(box.report()).toMatchObject({ accepted: 1, summarized: 1, stale: 0, refused: 0 });
+  });
+
+  it('should still purge on a stale epoch, and hold the summary when the content does not fit the queue', async () => {
+    const [content] = await contentEnvelopes();
+    const stale = createEvidenceOutbox({
+      store: memoryPendingStore(),
+      submit: async () => ({ kind: 'stale', code: 'EVIDENCE_POLICY_STALE' }),
+      now: () => at,
+    });
+    await stale.bind(scope);
+    await stale.enqueue([content!]);
+    expect(await stale.drain()).toEqual({ stop: 'stale' });
+
+    const summaryBytes = new TextEncoder().encode(
+      JSON.stringify({ ...content!, payload: { plane: 'summary', fact: content!.payload.fact } }),
+    ).byteLength;
+    const store = memoryPendingStore();
+    const small = createEvidenceOutbox({
+      store,
+      submit: async () => receipt(),
+      now: () => at,
+      limits: { items: 10, bytes: summaryBytes + 64, batch: 4 },
+    });
+    await small.bind(scope);
+    expect(await small.enqueue([content!])).toMatchObject({ held: 1, full: 0, summarized: 1 });
+    const [held] = await store.oldest(1);
+    expect(held?.evidence.payload.plane).toBe('summary');
   });
 });

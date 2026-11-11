@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { evidenceSchema, parseEvidence, evidenceLimits } from '#contract.js';
+import { evidenceSchema, parseEvidence, evidenceLimits, contentLimits } from '#contract.js';
 import type { Evidence } from '#contract.js';
 import { authorizeEvidence, operationalEvidence } from '#authority.js';
 import type { EvidenceAuthority } from '#authority.js';
@@ -76,24 +76,76 @@ const authority = (evidence: Evidence): EvidenceAuthority => ({
   sourceProofs: new Map(evidence.lineage.map((source) => [source.source, { ...source, proof: source.proof! }])),
   retentionProofs: new Map([[evidence.retention.proof, { ...evidence.retention }]]),
 });
+const textPart = (text: string) => {
+  const bytes = new TextEncoder().encode(text).byteLength;
+  return { text, originalBytes: bytes, retainedBytes: bytes, redaction: 'none' } as const;
+};
 const content = (evidence: Evidence): Evidence => ({
   ...evidence,
   payload: {
     plane: 'content',
-    family: 'instruction',
-    stage: 'admitted',
-    blocks: [
-      {
-        kind: 'text',
-        role: 'system',
-        format: 'text',
-        text: 'PRIVATE_CONTENT',
-        source: digest,
-        originalBytes: 15,
-        retainedBytes: 15,
-        redaction: 'none',
-      },
-    ],
+    fact: { kind: 'instruction', mode: 'initial', message: 'original-user-message' },
+    input: { messages: [{ role: 'user', parts: [{ kind: 'text', ...textPart('PRIVATE_CONTENT') }] }], omitted: 0 },
+    output: null,
+    context: null,
+    parameters: {},
+  },
+});
+const providerFact = {
+  kind: 'provider',
+  logicalCall: 'logical-1',
+  attempt: null,
+  billing: null,
+  requestedModel: null,
+  resolvedModel: null,
+  provider: null,
+  response: null,
+  firstOutput: null,
+  purpose: 'generation',
+  callKind: 'run',
+  stop: 'toolUse',
+  usage: { input: 1, output: 2, cacheRead: null, cacheWrite: null, reasoning: null, missing: 'none' },
+} as const;
+/** A generation's content: the new message and tool result in, readable thinking, text and a tool call out. */
+const generation = (): Evidence => ({
+  ...fixture(),
+  source: { kind: 'invocation', invocation: 'call-1', digest },
+  semantic: { kind: 'provider', id: 'call-1' },
+  payload: {
+    plane: 'content',
+    fact: providerFact,
+    input: {
+      messages: [
+        {
+          role: 'tool',
+          parts: [{ kind: 'tool-result', call: 'toolu_1', error: false, digest: null, ...textPart('{"ok":true}') }],
+        },
+        {
+          role: 'user',
+          parts: [
+            { kind: 'text', ...textPart('Make it taller') },
+            { kind: 'media', mime: 'image/png', bytes: 2048, digest },
+          ],
+        },
+      ],
+      omitted: 0,
+    },
+    output: {
+      messages: [
+        {
+          role: 'assistant',
+          parts: [
+            { kind: 'thinking', ...textPart('The user wants height') },
+            { kind: 'text', ...textPart('Raising it.') },
+            { kind: 'tool-call', call: 'toolu_2', name: 'edit_file', ...textPart('{"path":"main.ts"}') },
+          ],
+        },
+      ],
+      omitted: 0,
+    },
+    context: { historyMessages: 9, history: digest, system: digest, tools: digest },
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- provider request parameter names
+    parameters: { max_tokens: 8192, 'thinking.type': 'enabled', 'thinking.budget_tokens': 4096 },
   },
 });
 const parse = (value: unknown) => parseEvidence(new TextEncoder().encode(JSON.stringify(value)));
@@ -359,13 +411,13 @@ it('should reject omitted protected ancestors, unscoped diagnosis and host finan
   });
 });
 
-it('should reject dishonest content lengths, duplicate lineage and unbound media', () => {
+it('should reject dishonest content lengths and duplicate lineage', () => {
   const evidence = content(fixture());
   expect(parse(evidence).ok).toBe(true);
   if (evidence.payload.plane !== 'content') {
     throw new Error('fixture');
   }
-  const text = evidence.payload.blocks[0]!;
+  const text = evidence.payload.input!.messages[0]!.parts[0]!;
   if (text.kind !== 'text') {
     throw new Error('fixture');
   }
@@ -374,18 +426,62 @@ it('should reject dishonest content lengths, duplicate lineage and unbound media
   text.originalBytes = 2;
   text.retainedBytes = 2;
   expect(parse(evidence).ok).toBe(true);
-  evidence.payload.blocks.push({
-    kind: 'media',
-    artifact: 'media',
-    digest,
-    source: 'b'.repeat(64),
-    mime: 'image/png',
-    bytes: 42,
-  });
+  /* The 64 KiB part cap is in UTF-8 bytes: a part within it in characters but over it in bytes is refused. */
+  text.text = 'é'.repeat(40_000);
+  text.originalBytes = 80_000;
+  text.retainedBytes = 80_000;
   expect(parse(evidence).ok).toBe(false);
-  evidence.payload.blocks.pop();
+  text.text = 'é';
+  text.originalBytes = 2;
+  text.retainedBytes = 2;
   evidence.lineage.push({ ...evidence.lineage[0]! });
   expect(parse(evidence).ok).toBe(false);
+});
+
+it("should parse a generation's input and output in one envelope, bound to the fact it describes", () => {
+  expect(parse(generation()).ok).toBe(true);
+  const wrongFamily = { ...generation(), semantic: { kind: 'tool', id: 'call-1' } };
+  expect(parse(wrongFamily).ok).toBe(false);
+});
+
+it('should refuse signatures, encrypted reasoning and raw image bytes in a content part', () => {
+  const withPart = (extra: Readonly<Record<string, unknown>>): unknown => {
+    const evidence = generation();
+    if (evidence.payload.plane !== 'content') {
+      throw new Error('fixture');
+    }
+    const [assistant] = evidence.payload.output!.messages;
+    return {
+      ...evidence,
+      payload: {
+        ...evidence.payload,
+        output: { messages: [{ ...assistant, parts: [...assistant!.parts, extra] }], omitted: 0 },
+      },
+    };
+  };
+  expect(parse(withPart({ kind: 'thinking', ...textPart('x'), signature: 'sig' })).ok).toBe(false);
+  expect(parse(withPart({ kind: 'redacted-thinking', data: 'encrypted' })).ok).toBe(false);
+  expect(parse(withPart({ kind: 'media', mime: 'image/png', bytes: 3, digest: null, data: 'AAAA' })).ok).toBe(false);
+});
+
+it('should bound messages, parts and parameters', () => {
+  const evidence = generation();
+  if (evidence.payload.plane !== 'content') {
+    throw new Error('fixture');
+  }
+  const [message] = evidence.payload.input!.messages;
+  const tooMany = {
+    ...evidence,
+    payload: {
+      ...evidence.payload,
+      input: { messages: Array.from({ length: contentLimits.messages + 1 }, () => message), omitted: 0 },
+    },
+  };
+  expect(parse(tooMany).ok).toBe(false);
+  const parameters = Object.fromEntries(
+    Array.from({ length: contentLimits.parameters + 1 }, (_, index) => [`p_${String.fromCodePoint(97 + index)}`, 1]),
+  );
+  expect(parse({ ...evidence, payload: { ...evidence.payload, parameters } }).ok).toBe(false);
 });
 
 it('should represent direct, funded and compaction calls without inventing a billing link or missing usage', () => {
@@ -426,6 +522,40 @@ it('should represent direct, funded and compaction calls without inventing a bil
       expect(compareEvidence(evidence, replay)).toBe('duplicate');
     }
   }
+});
+
+it('should carry the optional host labels on a provider fact, bounded like every id', () => {
+  const providerEvidence = (labels?: Record<string, unknown>): unknown => ({
+    ...fixture(),
+    source: { kind: 'invocation', invocation: 'call-1', digest },
+    semantic: { kind: 'provider', id: 'call-1' },
+    payload: {
+      plane: 'summary',
+      fact: {
+        kind: 'provider',
+        logicalCall: 'logical-1',
+        attempt: null,
+        billing: null,
+        purpose: 'generation',
+        requestedModel: null,
+        resolvedModel: null,
+        provider: null,
+        response: null,
+        firstOutput: null,
+        stop: 'stop',
+        usage: { input: 1, output: 1, cacheRead: null, cacheWrite: null, reasoning: null, missing: 'none' },
+        ...(labels === undefined ? {} : { labels }),
+      },
+    },
+  });
+  /* A fact written before LW17 has no labels and still parses. */
+  expect(parse(providerEvidence()).ok).toBe(true);
+  expect(
+    parse(providerEvidence({ host: 'browser', build: '0123456789ab', kernel: 'replicad', model: 'route-1' })).ok,
+  ).toBe(true);
+  expect(parse(providerEvidence({ host: 'unknown' })).ok).toBe(true);
+  expect(parse(providerEvidence({ host: 'x'.repeat(129) })).ok).toBe(false);
+  expect(parse(providerEvidence({ host: 'browser', plan: 'pro' })).ok).toBe(false);
 });
 
 it('should refuse a valid retention proof borrowed from a different source fact', () => {
@@ -479,4 +609,114 @@ it("should parse a provider fact's declared call kind, absent from an older API,
     expect(parse(provider(callKind)).ok).toBe(true);
   }
   expect(parse(provider('chat')).ok).toBe(false);
+});
+
+it("should parse a tool fact's name, absent from an older host, and refuse a name of any other shape", () => {
+  /* Untyped, so a name of the wrong shape reaches the parser as a JavaScript caller would send it. */
+  const tool = (extra: Readonly<Record<string, unknown>> = {}): Readonly<Record<string, unknown>> => ({
+    ...fixture(),
+    source: { kind: 'row', chat: 'chat-1', leaderEpoch: 'device-a', sequence: 7, digest },
+    semantic: { kind: 'tool', id: 'call-1' },
+    payload: {
+      plane: 'summary',
+      fact: {
+        kind: 'tool',
+        call: 'call-1',
+        dispatch: 'dispatch-1',
+        toolClass: 'write',
+        toolVersion: null,
+        schemaVersion: null,
+        modelCall: null,
+        outcome: 'completed',
+        revisionBefore: null,
+        revisionAfter: null,
+        ...extra,
+      },
+    },
+  });
+  expect(parse(tool()).ok).toBe(true);
+  expect(parse(tool({ name: 'edit_file' })).ok).toBe(true);
+  expect(parse(tool({ name: 'external-tool' })).ok).toBe(true);
+  for (const name of ['', 'mcp server/tool', 'a'.repeat(65), 'Edit File']) {
+    expect(parse(tool({ name }))).toEqual({ ok: false, code: 'EVIDENCE_INVALID' });
+  }
+  /* A field this contract does not know is refused whole, with the fixed code: how an older API answers a newer host. */
+  expect(parse(tool({ toolName: 'edit_file' }))).toEqual({ ok: false, code: 'EVIDENCE_INVALID' });
+});
+
+/** A run's root content: the user's message in; the reply, the changed design source and a check line out (LW6). */
+const rootContent = (extra: Readonly<Record<string, unknown>> = {}): Readonly<Record<string, unknown>> => ({
+  ...fixture(),
+  semantic: { kind: 'outcome', id: 'run-1' },
+  payload: {
+    plane: 'content',
+    fact: {
+      kind: 'outcome',
+      termination: 'completed',
+      success: 'unknown',
+      assessment: null,
+      turn: {
+        startRevision: null,
+        finalRevision: digest,
+        filesChanged: 1,
+        checksPassed: 1,
+        checksFailed: 0,
+        priorTurns: 2,
+        modelCalls: 3,
+        toolCalls: 4,
+        host: 'browser',
+        kernel: null,
+        model: 'model-1',
+      },
+    },
+    input: { messages: [{ role: 'user', parts: [{ kind: 'text', ...textPart('Make it taller') }] }], omitted: 0 },
+    output: {
+      messages: [
+        {
+          role: 'assistant',
+          parts: [
+            { kind: 'text', ...textPart('Raised it.') },
+            { kind: 'source', path: 'main.ts', digest: null, ...textPart('export default 1;') },
+            {
+              kind: 'source',
+              path: 'big.ts',
+              digest,
+              text: '',
+              originalBytes: 200_000,
+              retainedBytes: 0,
+              redaction: 'truncated',
+            },
+            { kind: 'check', result: 'passed', ...textPart('test_model passed: spec#1') },
+          ],
+        },
+      ],
+      omitted: 0,
+    },
+    context: null,
+    parameters: {},
+    ...extra,
+  },
+});
+
+it("should parse a run's root content with its design source and check lines, and its turn measures", () => {
+  expect(parse(rootContent()).ok).toBe(true);
+  const summary = rootContent() as { payload: { fact: unknown } };
+  expect(parse({ ...rootContent(), payload: { plane: 'summary', fact: summary.payload.fact } }).ok).toBe(true);
+  /* The measures are optional, so an older host's outcome still parses. */
+  const { turn: _turn, ...older } = summary.payload.fact as Readonly<Record<string, unknown>>;
+  expect(parse({ ...rootContent(), payload: { plane: 'summary', fact: older } }).ok).toBe(true);
+  const badCheck = rootContent({
+    output: {
+      messages: [{ role: 'assistant', parts: [{ kind: 'check', result: 'great', ...textPart('x') }] }],
+      omitted: 0,
+    },
+  });
+  expect(parse(badCheck).ok).toBe(false);
+  const badPath = rootContent({
+    output: {
+      messages: [{ role: 'assistant', parts: [{ kind: 'source', path: '', digest: null, ...textPart('x') }] }],
+      omitted: 0,
+    },
+  });
+  expect(parse(badPath).ok).toBe(false);
 });

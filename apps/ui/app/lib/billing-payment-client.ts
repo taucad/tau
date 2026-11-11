@@ -43,7 +43,7 @@ export class BillingPaymentConflict extends Error {
 }
 
 /** Shown wherever a purchase control is unavailable because this deployment cannot collect payment. */
-export const purchasesUnavailableMessage = 'Purchases are not available yet.';
+export const purchasesUnavailableMessage = 'You can’t buy credits yet. We’re still setting up payments.';
 
 /** The API refused a purchase because this deployment cannot collect payment; retrying cannot help. */
 export class BillingCollectionUnavailable extends Error {

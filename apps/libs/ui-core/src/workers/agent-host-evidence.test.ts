@@ -61,7 +61,7 @@ const purposes = (allowed: readonly string[]) =>
     JSON.stringify({
       epoch: 'policy-1',
       projectId: 'project-1',
-      purposes: ['summary', 'feedback'].map((purpose) => ({
+      purposes: ['summary', 'feedback', 'content'].map((purpose) => ({
         purpose,
         allowed: allowed.includes(purpose),
         decided: true,
@@ -107,12 +107,37 @@ describe('createWorkerEvidence', () => {
       expect(sent).toHaveLength(2);
     });
 
+    /* A first-party tool is named, with its class (LW5); the browser host says what it is on the outcome. */
     expect(sent).toMatchObject([
-      { scope: { principal: 'user-1', project: 'project-1', policyEpoch: 'policy-1' }, semantic: { kind: 'tool' } },
-      { semantic: { kind: 'outcome' }, versions: { hostBuild: 'abc1234' } },
+      {
+        scope: { principal: 'user-1', project: 'project-1', policyEpoch: 'policy-1' },
+        semantic: { kind: 'tool' },
+        payload: { plane: 'summary', fact: { name: 'read_file', toolClass: 'read' } },
+      },
+      {
+        semantic: { kind: 'outcome' },
+        versions: { hostBuild: 'abc1234' },
+        payload: { plane: 'summary', fact: { turn: { host: 'browser' } } },
+      },
     ]);
     expect(JSON.stringify(sent)).not.toContain(secret);
-    expect(JSON.stringify(sent)).not.toContain('read_file');
+  });
+
+  it('should report the run’s message and the tool’s arguments and result only while content is allowed (LW6)', async () => {
+    const { evidence, sent } = setup(['summary', 'content']);
+
+    evidence.onChatQuiescent('chat-1', true);
+    await vi.waitFor(() => {
+      expect(sent).toHaveLength(2);
+    });
+
+    expect(sent).toMatchObject([
+      { semantic: { kind: 'tool' }, payload: { plane: 'content' } },
+      { semantic: { kind: 'outcome' }, payload: { plane: 'content' } },
+    ]);
+    expect(JSON.stringify(sent)).toContain(secret);
+    /* The system prompt is never this turn's content. */
+    expect(JSON.stringify(sent).split(secret)).toHaveLength(4);
   });
 
   it('should send nothing while the server grants no summaries', async () => {

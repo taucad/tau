@@ -1,6 +1,7 @@
 import type { PendingEvidenceStore } from '#delivery.js';
 import { createEvidenceOutbox, submitEvidence } from '#delivery.js';
-import type { ProjectedRun } from '#projection.js';
+import type { ProjectedRun, ProjectionContext } from '#projection.js';
+import type { DesignReader } from '#host-content.js';
 import type { EffectivePurposesAnswer, EvidenceReporter, ReportingGrant, ReportingPurpose } from '#reporter.js';
 import { createEvidenceReporter, purposeGrantOf } from '#reporter.js';
 
@@ -8,7 +9,8 @@ import { createEvidenceReporter, purposeGrantOf } from '#reporter.js';
  * One host's agent-observability composition (blueprint T10/T11): the browser
  * project host and the Node project host compose this the same way. When a
  * chat the host leads goes quiescent, its own committed rows are observed and
- * reported under the summary grant the server answers now. A rating the
+ * reported under the summary grant the server answers now, with their content
+ * where the same answer allows content too (LW6). A rating the
  * account gives on this device is reported under the separate feedback grant,
  * from its own queue, and only by a host composed with one.
  *
@@ -41,8 +43,16 @@ export type HostEvidenceOptions = Readonly<{
   store: PendingEvidenceStore;
   /** The feedback plane's own queue; a host without one reports no ratings. */
   feedbackStore?: PendingEvidenceStore;
-  /** Observe one chat's own turns now. */
+  /**
+   * Observe one chat's own turns now. A host that observes them with content (`observeOwnTurns(read, chatId,
+   * { content: true })`) has it sent only while the server's answer allows `content` for this account and project
+   * (LW6); otherwise only summaries leave.
+   */
   observe: (chatId: string) => Promise<ObservedChat>;
+  /** What kind of host this is, written on each run's outcome. */
+  host?: ProjectionContext['host'];
+  /** Reads a run's changed model files at its final revision, never the live workspace; without it a root has no design. */
+  design?: DesignReader | undefined;
   now?: () => number;
   schedule?: (callback: () => void, milliseconds: number) => () => void;
 }>;
@@ -141,6 +151,8 @@ export const createHostEvidence = (options: HostEvidenceOptions): HostEvidence =
       now,
       purpose,
       ...(options.schedule === undefined ? {} : { schedule: options.schedule }),
+      ...(options.host === undefined ? {} : { host: options.host }),
+      ...(options.design === undefined || purpose !== 'summary' ? {} : { design: options.design }),
     });
   const reporter = reporterFor('summary', options.store);
   const feedback = options.feedbackStore === undefined ? undefined : reporterFor('feedback', options.feedbackStore);

@@ -14,6 +14,7 @@ let registeredItems: CommandPaletteItem[] = [];
 let isTauDebugEnabled = false;
 let geometryFormat: 'gltf' | 'svg' | undefined;
 let cameraState: Record<string, unknown> | undefined;
+let cameraPresented = false;
 let hasProjectContext = true;
 const openPanel = vi.fn();
 const captureCadImages =
@@ -44,8 +45,8 @@ const cadActor = {
   on: () => ({ unsubscribe: vi.fn() }),
 };
 const graphicsActor = {
-  // A canvas presents the camera once it attaches its controls adapter.
-  getSnapshot: () => ({ context: { cameraState, controlsAdapter: cameraState ? { canvasId: 'canvas' } : undefined } }),
+  // A canvas presents the camera once it attaches its controls adapter, and the flag outlives that canvas.
+  getSnapshot: () => ({ context: { cameraState, cameraPresented: cameraPresented || cameraState !== undefined } }),
 };
 
 vi.mock('#hooks/use-project-availability.js', () => ({
@@ -200,6 +201,7 @@ describe('ProjectCommandPaletteItems', () => {
     isTauDebugEnabled = false;
     geometryFormat = undefined;
     cameraState = undefined;
+    cameraPresented = false;
     hasProjectContext = true;
     openPanel.mockClear();
     captureCadImages.mockReset();
@@ -485,17 +487,15 @@ describe('ProjectCommandPaletteItems', () => {
     expect(downloadBlob).not.toHaveBeenCalled();
   });
 
-  it('reacts to a canvas attaching and detaching its controls for a stable graphics actor', () => {
+  /* A hidden viewer tab detaches its canvas, but the camera keeps its pose, so capture stays available. */
+  it('enables PNG capture once a canvas presents the camera, and keeps it after that canvas detaches', () => {
     geometryFormat = 'gltf';
+    cameraPresented = false;
     const view = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
     expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(true);
 
-    cameraState = { position: [1, 2, 3] };
+    cameraPresented = true;
     view.rerender(<ProjectCommandPaletteItems match={match} />);
     expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(false);
-
-    cameraState = undefined;
-    view.rerender(<ProjectCommandPaletteItems match={match} />);
-    expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(true);
   });
 });

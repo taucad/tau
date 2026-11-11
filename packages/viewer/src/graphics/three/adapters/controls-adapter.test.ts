@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CameraControlsImpl from 'camera-controls';
-import { OrthographicCamera, Raycaster, Scene } from 'three';
+import { OrthographicCamera, Raycaster, Scene, Vector3 } from 'three';
 import type { Camera, PerspectiveCamera } from 'three';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor, InspectionEvent } from 'xstate';
@@ -330,6 +330,23 @@ describe('controls adapter', () => {
     expect(inputPoses).toEqual([]);
   });
 
+  it('orbits about an up direction the camera took before its canvas attached', () => {
+    const harness = createHarness();
+    harness.graphics.send({ type: 'setUpDirection', payload: 'y' });
+    harness.attach();
+    const controls = harness.controls();
+    const target = controls.getTarget(new Vector3());
+    const before = controls.camera.position.clone().sub(target);
+
+    void controls.rotate(0.5, 0, false);
+    controls.update(0);
+
+    const after = controls.camera.position.clone().sub(target);
+    expect(controls.camera.up.toArray()).toEqual([0, 1, 0]);
+    expect(after.y).toBeCloseTo(before.y, 9);
+    expect(after.z).not.toBeCloseTo(before.z, 3);
+  });
+
   it('ends a held gesture when its canvas leaves mid-drag, so the camera is not stuck dragging', () => {
     const harness = createHarness();
     harness.attach();
@@ -347,6 +364,8 @@ describe('controls adapter', () => {
     expect(harness.graphics.getSnapshot().context.controlsAdapter).toBeUndefined();
     expect(harness.graphics.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
     expect(harness.state.controls).toBeNull();
+    // The camera keeps its pose, so it still counts as presented.
+    expect(harness.graphics.getSnapshot().context.cameraPresented).toBe(true);
     // The stopped adapter no longer listens: a late event from the disposed controls reaches nobody.
     harness.graphicsEvents.length = 0;
     controls.dispatchEvent({ type: 'controlstart' });

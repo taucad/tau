@@ -356,6 +356,11 @@ export interface GraphicsContext {
    * stops with its canvas, so a canvas remount replaces it and never runs two.
    */
   controlsAdapter: Readonly<{ canvasId: string; ref: AnyActor }> | undefined;
+  /**
+   * Whether a canvas has presented the camera at least once. It stays set after the canvas detaches (a hidden tab), since
+   * the camera keeps its pose.
+   */
+  cameraPresented: boolean;
   /** See {@link ViewCameraFraming}: a plain-data bridge the framing actor (G5b) deletes. */
   cameraFraming: ViewCameraFraming;
 
@@ -1118,6 +1123,7 @@ const graphicsMachineDefinition = setup({
       kinematicsRef: spawn(actors.kinematics, { id: 'kinematics', input: {} }),
       cameraRef: spawn(actors.camera, { id: 'camera', input: cameraSeed(input, input.upDirection ?? 'z') }),
       controlsAdapter: undefined,
+      cameraPresented: false,
       cameraFraming: {
         identity: undefined,
         pendingView: input.camera?.cameraView,
@@ -1308,7 +1314,7 @@ const graphicsMachineDefinition = setup({
             return {};
           }
           const ref = enq.spawn(event.adapter, { id: `controls:${event.canvasId}` });
-          return { context: { controlsAdapter: { canvasId: event.canvasId, ref } } };
+          return { context: { controlsAdapter: { canvasId: event.canvasId, ref }, cameraPresented: true } };
         },
 
         // Controls adapter events: the camera owns the gesture phase; graphics owns click and hover suppression.

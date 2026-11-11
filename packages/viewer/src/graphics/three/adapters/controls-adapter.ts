@@ -235,7 +235,8 @@ export const createControlsAdapter = ({
         echoRevision = snapshot.revision;
         try {
           retargetCameraControls({ controls, camera: nativeCamera });
-          if (published?.up.some((value, index) => value !== snapshot.view.up[index])) {
+          // The controls took the camera's up when they were made; the camera may have turned it before they attached.
+          if (published === undefined || published.up.some((value, index) => value !== snapshot.view.up[index])) {
             controls.updateCameraUp();
           }
           syncControlsLookAt({

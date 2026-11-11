@@ -4,8 +4,8 @@ import { highlightLines } from '@taucad/grammars';
 import { cn } from '@taucad/ui/utils/cn';
 import { HighlightedLine } from '#components/code/highlighted-line.js';
 import { maxHighlightedCodeLength, useHighlightLanguage } from '#components/code/use-highlighted-lines.js';
-import type { HighlightLanguageInput } from '#lib/code-language-resolution.js';
-import { resolveHighlightLanguage } from '#lib/code-language-resolution.js';
+import type { HighlightLanguageInput } from '@taucad/ui-core/lib/code-language-resolution';
+import { resolveHighlightLanguage } from '@taucad/ui-core/lib/code-language-resolution';
 
 /** Number of context lines to show above and below each change group. */
 const contextLines = 1;

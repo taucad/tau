@@ -1,6 +1,6 @@
 import { Topic } from '@taucad/events';
 import type { FileParameterEntry, JSONValue } from '@taucad/types';
-import type { ParameterDraftKey, ParameterSetService } from '#services/parameter-set-service.js';
+import type { ParameterDraftKey, ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import type { ParameterDraft } from '@taucad/viewer/parameters/parameter-edit';
 
 const identity = { manifestRevision: 'manifest' };

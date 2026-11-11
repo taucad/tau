@@ -26,7 +26,7 @@ import type { UIMatch } from 'react-router';
 import { useProject, useMainGraphics } from '#hooks/use-project.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { downloadBlob } from '@taucad/utils/file';
-import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
+import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import { randomUuid } from '@taucad/utils/id';
 import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';

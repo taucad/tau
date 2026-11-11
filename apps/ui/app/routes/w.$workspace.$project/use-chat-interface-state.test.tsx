@@ -29,7 +29,7 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 
 const { useChatInterfaceState } = await import('./use-chat-interface-state.js');
-const { mobileDrawerOpenSnapPoint } = await import('#constants/editor.constants.js');
+const { mobileDrawerOpenSnapPoint } = await import('@taucad/ui-core/constants/editor.constants');
 
 describe('useChatInterfaceState mobile drawer', () => {
   beforeEach(() => {

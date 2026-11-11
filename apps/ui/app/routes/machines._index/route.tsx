@@ -1,8 +1,9 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useDesktopScheme } from '#hooks/use-desktop-scheme.js';
 import { useFeature } from '#flags/use-feature.js';
 import { MachinesDisabled } from '#components/machines/machines-disabled.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { memo, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
@@ -20,9 +21,9 @@ import { presentMachine } from '#components/machines/machine-presentation.js';
 import { useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
-import { searchParameterName } from '#constants/search-parameter.constants.js';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import { z } from 'zod';
-import { stringParameter, enumParameter } from '#utils/search-parameter.codecs.js';
+import { stringParameter, enumParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import { machineUrl } from '#utils/machine-url.utils.js';
 
 export const meta = (): Array<{ title: string }> => [{ title: 'Machines · Tau' }];
@@ -46,7 +47,9 @@ const MachineRow = memo(function MachineRow({
       >
         <Printer aria-hidden className='size-5 shrink-0' />
         <div className='min-w-0 flex-1'>
-          <h2 className='text-sm font-medium wrap-break-word'>{entry.name}</h2>
+          <Heading level={2} variant='label' className='wrap-break-word'>
+            {entry.name}
+          </Heading>
           <p className='text-xs text-muted-foreground'>{entry.descriptor.model}</p>
         </div>
         <span className='flex items-center gap-2 text-xs'>

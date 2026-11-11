@@ -25,7 +25,7 @@ import { Label } from '@taucad/ui/components/label';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { osClass } from '#telemetry/platform-class.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { desktopDeepLink } from '#lib/desktop-deep-link.js';
+import { desktopDeepLink } from '@taucad/ui-core/lib/desktop-deep-link';
 import { browserDesktopScheme, useDesktopScheme } from '#hooks/use-desktop-scheme.js';
 
 /**
@@ -159,7 +159,7 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
           <div className='mb-2 flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary'>
             <Spinner className='size-5' />
           </div>
-          <CardTitle className='text-xl font-semibold'>Opening Tau Desktop</CardTitle>
+          <CardTitle variant='title'>Opening Tau Desktop</CardTitle>
           <CardDescription>
             Your browser asks whether to open Tau. Choose <strong>Open</strong> to continue there.
           </CardDescription>
@@ -186,7 +186,7 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
           <div className='mb-2 flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary'>
             <CircleAlert className='size-5' aria-hidden='true' />
           </div>
-          <CardTitle className='text-xl font-semibold'>Tau Desktop didn’t open</CardTitle>
+          <CardTitle variant='title'>Tau Desktop didn’t open</CardTitle>
           <CardDescription>
             Tau Desktop may not be installed on this computer, or the browser did not offer to open it.
           </CardDescription>

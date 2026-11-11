@@ -37,7 +37,7 @@ export const ChatErrorAccountRestricted = memo(function ({
       description='Tau has paused spending on this account while we look at a billing issue. Contact support to continue.'
       actions={
         <Button asChild variant='outline' size='xs'>
-          <a href='mailto:support@tau.new'>
+          <a href='mailto:help@tau.new'>
             <Mail className='size-3.5' />
             Contact support
           </a>

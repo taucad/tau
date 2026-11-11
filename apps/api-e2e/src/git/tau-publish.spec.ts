@@ -72,7 +72,8 @@ it('should publish a named graph revision through the CLI and serve its bytes to
     const connected = await fetch(`${gitE2EApiUrl}/v1/projects/${projectId}`, {
       method: 'PUT',
       headers: { authorization: `Bearer ${owner.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'V9 Publish E2E' }),
+      /* Its commit is stock git's, with no Tau record: a project linked to GitHub admits it (B4). */
+      body: JSON.stringify({ name: 'V9 Publish E2E', origin: 'github' }),
     });
     expect(connected.status, await connected.clone().text()).toBeLessThan(300);
 

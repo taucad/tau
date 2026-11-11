@@ -6,7 +6,7 @@
 import type { ViewerNode, WorkbenchLaneNode, WorkbenchLayout, WorkbenchTab } from '@taucad/workbench';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
-import { digestBytes } from '#utils/crypto.utils.js';
+import { digestBytes } from '@taucad/ui-core/utils/crypto.utils';
 import { createRecordHealth, isPotentiallyApplied } from '#workbench-records/record-health.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
 

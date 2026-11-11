@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode, Ref } from 'react';
 import type { BrowserCommand, BrowserSnapshot } from '@taucad/types/browser';
@@ -430,7 +431,9 @@ export function BrowserSurface({
           ) : (
             <div className='flex h-full flex-col items-center justify-center gap-3 p-6 text-center'>
               <Globe className='size-6 text-muted-foreground' />
-              <h2 className='text-sm font-medium'>Browse alongside your work</h2>
+              <Heading level={2} variant='label'>
+                Browse alongside your work
+              </Heading>
               <p className='max-w-xs text-sm text-muted-foreground'>
                 Open a reference, explore a supplier, or search the web.
               </p>
@@ -453,7 +456,7 @@ export function BrowserSurface({
       ) : (
         <div className='min-h-0 flex-1 overflow-auto p-4' data-review-id={`browser-${panel}`}>
           <div className='mb-4 flex items-center justify-between'>
-            <h2 className='text-sm font-medium'>
+            <Heading level={2} variant='label'>
               {panel === 'site'
                 ? 'Site information'
                 : panel === 'settings'
@@ -461,7 +464,7 @@ export function BrowserSurface({
                   : panel === 'history'
                     ? 'History'
                     : 'Downloads'}
-            </h2>
+            </Heading>
             <Button
               variant='ghost'
               size='icon-sm'

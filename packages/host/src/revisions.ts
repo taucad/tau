@@ -435,7 +435,7 @@ const revisionJson = (value: unknown): JsonValue =>
  * The machine plus the account, which is what "this device" means on disk: two
  * users on one machine hold two checkouts and write two chat segments. Stable
  * across restarts, needs no record of its own, and is never a credential — the
- * browser's equivalent is `apps/ui/app/lib/device-id.ts` and neither mints the
+ * browser's equivalent is `apps/libs/ui-core/src/lib/device-id.ts` and neither mints the
  * other's.
  */
 export const hostDeviceId = `${hostname()}:${userInfo().username}`;
@@ -1610,6 +1610,11 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         break;
       case 'syncNow':
         actor.send({ type: 'syncNow' });
+        break;
+      /* Audit R6: the page's signed-in person changed; the remote is read afresh under the new session. */
+      case 'sessionChanged':
+        actor.send({ type: 'remote', event: { type: 'sessionChanged' } });
+        actor.send({ type: 'sync', event: { type: 'sessionChanged' } });
         break;
       /* XD3, rounds 18 and 19: another device's run has been quiet here a while; pulls show whether it stayed quiet.
        * Round 27: through the placement's pull, so the page hears where this device cannot pull the chat at all. */

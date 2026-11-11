@@ -16,7 +16,7 @@ import type { RuntimeOperationBegin, RuntimeOperationObservation } from '@taucad
 import { readRendererMemory } from '@taucad/viewer/lib/renderer-telemetry';
 import { readKillWork, recordKillWork, recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import type { KillPhase } from '#lib/memory-kill-signal.js';
-import { setKernelHeapReader, setRendererMemoryReader } from '#lib/memory-sampler.js';
+import { setKernelHeapReader, setRendererMemoryReader } from '@taucad/ui-core/lib/memory-sampler';
 
 /** The phase each runtime operation begins; operations not listed leave the phase alone. */
 const phaseOfOperation: Readonly<Partial<Record<string, KillPhase>>> = {

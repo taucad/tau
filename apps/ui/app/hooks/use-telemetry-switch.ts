@@ -11,12 +11,12 @@ import { useEffect } from 'react';
 import { useSession } from '@better-auth-ui/react';
 import { resolveTelemetryConsent } from '@taucad/telemetry/client';
 import type { DevicePreference, ReportingConsent } from '@taucad/telemetry/client';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useCookieConsent } from '#hooks/use-cookie-consent.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
 import { authClient } from '#lib/auth-client.js';
-import { isGlobalPrivacyControlEnabled } from '#lib/global-privacy-control.lib.js';
+import { isGlobalPrivacyControlEnabled } from '@taucad/ui-core/lib/global-privacy-control.lib';
 import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
 
 /**

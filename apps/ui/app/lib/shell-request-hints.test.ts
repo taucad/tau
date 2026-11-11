@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readShellRequestHints, sidebarOpenCookieName } from '#lib/shell-request-hints.js';
-import { sidebarDefaultOpen } from '#constants/sidebar.constants.js';
+import { sidebarDefaultOpen } from '@taucad/ui-core/constants/sidebar.constants';
 
 const requestWith = (headers: Record<string, string>): Request =>
   new Request('https://tau.new/', { headers: new Headers(headers) });

@@ -40,18 +40,12 @@ const settled = (operation: string, chargedAtoms: bigint, terminalRevision = 1n)
   normalization: 'openai-responses-v1',
 });
 
-let receipts = 0;
 const delivered = async (settlements: readonly ObservedSettlement[]): Promise<LangfuseObservationRow[]> =>
   Promise.all(
     settlements.map(async (settlement) => {
-      receipts++;
       const evidence = await settlementEvidence(settlement, 'user-a', authority);
-      const { span } = langfuseObservation(
-        evidence,
-        { environment: 'synthetic', receipt: `evr_${receipts}`, protection: 'free' },
-        pseudonym,
-      );
-      return rowOf(span);
+      const observation = langfuseObservation(evidence, { environment: 'synthetic', protection: 'free' }, pseudonym);
+      return rowOf(observation!.spans[0]!);
     }),
   );
 
@@ -100,6 +94,32 @@ describe('reconcileLedger', () => {
       missing: { settlements: 1 },
       unexpected: { settlements: 1, credits: 0.0001 },
     });
+  });
+
+  it('reads a settlement langfuse-v4.3 wrote as the same settlement, and counts it once beside its v5 row', async () => {
+    const charged = [settled('op-1', 2_000_000n), settled('op-2', 500_000n)];
+    const rows = await delivered(charged);
+    /* The v4.3 mapper wrote a family and a source beside the same facts; v5 writes neither. */
+    const older = rows.map((row) => ({
+      ...row,
+      id: `${row.id}-v4.3`,
+      metadata: { ...row.metadata, mapper: 'langfuse-v4.3', family: 'financial', source: `source-${row.id}` },
+    }));
+
+    const reconciliation = await reconcileLedger(
+      charged.map((settlement) => ledgerOf(settlement)),
+      [older[0]!, ...rows, older[1]!],
+      'synthetic',
+    );
+
+    expect(reconciliation).toMatchObject({ matched: 2, observed: { settlements: 2, credits: 2.5 }, drift: 0 });
+    await expect(
+      reconcileLedger(
+        [ledgerOf(charged[0]!)],
+        [{ ...rows[0]!, metadata: { ...rows[0]!.metadata, mapper: 'other' } }],
+        'synthetic',
+      ),
+    ).resolves.toMatchObject({ matched: 0, missing: { settlements: 1 } });
   });
 
   it("never joins another principal's settlement, a later revision, or another environment", async () => {

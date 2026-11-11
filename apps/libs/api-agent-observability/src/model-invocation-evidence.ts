@@ -3,10 +3,10 @@ import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '@tauca
 import type { SourceProtection } from '#evidence-admission.js';
 import { evidenceRetentionMilliseconds } from '#evidence-admission.js';
 import type { ProviderFact, ProviderStreamSummary } from '#provider-stream-facts.js';
-import type { ModelInvocationSurface, ModelProviderWire } from '@taucad/api-llm-gateway';
+import type { ModelInvocationIntent, ModelInvocationSurface, ModelProviderWire } from '@taucad/api-llm-gateway';
 
 /** Bumped whenever the facts written for the same attempt change. */
-export const apiProviderMapper = 'api-provider-v2';
+export const apiProviderMapper = 'api-provider-v3';
 
 /* An evidence id admits word characters, `:`, `.` and `-`; anything else in an image reference is replaced. */
 const releaseUnsafe = /[^\w:.-]/gu;
@@ -60,6 +60,9 @@ export const executionOfAttempt = async (attemptKey: string): Promise<string> =>
   return run === undefined ? contractId('inv', attemptKey) : contractId('run', run);
 };
 
+/* A model id the contract can carry as it is; any other is not a model name a reader could use. */
+const modelIdShape = /^[\w:.-]{1,128}$/u;
+
 /** One supplier attempt as the API saw it relay. */
 export type ObservedAttempt = Readonly<{
   principal: string;
@@ -70,7 +73,11 @@ export type ObservedAttempt = Readonly<{
   chat: string | undefined;
   surface: ModelInvocationSurface;
   wire: ModelProviderWire;
+  /** The activity the caller asserted (`compaction`) or the surface implies; absent from an older recorder. */
+  activity?: ModelInvocationIntent['activity'] | undefined;
   requestedModel: string | undefined;
+  /** The supplier's model id for the requested route, which names the model when the stream did not. */
+  supplierModel?: string | undefined;
   /** The supplier the route resolved to, when the API knows it. */
   provider: string | undefined;
   /** The funded operation, when Tau Cloud billed the attempt. */
@@ -94,6 +101,24 @@ const stopOf = (attempt: ObservedAttempt): ProviderFact['stop'] => {
     return 'error';
   }
   return attempt.stream?.stop ?? 'error';
+};
+
+/**
+ * What kind of model call an attempt was (LF-13): a host run's call when its gateway attempt key names a run, a helper
+ * endpoint's call, or any other direct gateway call. A chat hint does not decide it, because a helper sends one too.
+ */
+const callKindOf = (attempt: ObservedAttempt): NonNullable<ProviderFact['callKind']> => {
+  if (attempt.surface !== 'gateway') {
+    return 'helper';
+  }
+  return hostAttemptKey.test(attempt.attemptKey) ? 'run' : 'direct';
+};
+
+const purposeOf = (attempt: ObservedAttempt): ProviderFact['purpose'] => {
+  if (attempt.surface !== 'gateway') {
+    return 'helper';
+  }
+  return attempt.activity === 'compaction' ? 'compaction' : 'generation';
 };
 
 /**
@@ -136,14 +161,17 @@ export const providerAttemptEvidence = async (
     attempt: operation ?? null,
     billing: operation ?? null,
     requestedModel: requestedModel ?? null,
-    resolvedModel: stream?.resolvedModel ?? null,
+    resolvedModel:
+      stream?.resolvedModel ??
+      (attempt.supplierModel !== undefined && modelIdShape.test(attempt.supplierModel) ? attempt.supplierModel : null),
     provider: provider ?? null,
     response: stream?.response ?? null,
     firstOutput:
       stream?.firstChunk === undefined
         ? null
         : { domain: 'api-relay', chunk: stream.firstChunk, text: stream.firstText ?? null },
-    purpose: attempt.surface === 'gateway' ? 'generation' : 'helper',
+    purpose: purposeOf(attempt),
+    callKind: callKindOf(attempt),
     stop: stopOf(attempt),
     usage,
   };

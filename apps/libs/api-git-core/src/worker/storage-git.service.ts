@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcessByStdio } from 'node:child_process';
+import process from 'node:process';
 import { createHash, randomBytes } from 'node:crypto';
 import type { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -376,7 +377,7 @@ export class StorageGitService extends GitLeaseHost {
         }),
         ...(args.abort === undefined ? {} : { abort: args.abort }),
         environment: {
-          /* The `pre-receive` hook reads all three: it refuses a push that did
+          /* The `pre-receive` hook reads these three: it refuses a push that did
              not come through this admission check, one whose quarantine does
              not fit in what is left of the plan, and one that would take the
              repository past D20's ceiling (D17, D20). */
@@ -386,6 +387,15 @@ export class StorageGitService extends GitLeaseHost {
           TAU_GIT_QUOTA_REMAINING_BYTES: String(grant.remainingBytes),
           // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
           TAU_GIT_CEILING_REMAINING_BYTES: String(ceilingRemaining),
+          /* B4: every commit new to the history must name this account (D28: the
+             session's, never the body's), checked by Node because a Tau record
+             is JSON; and the forge whose commits Tau did not record may pass. */
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
+          TAU_GIT_PUSHER: grant.committedBy,
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
+          TAU_GIT_NODE: process.execPath,
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
+          ...(grant.forge === undefined ? {} : { TAU_GIT_FORGE: grant.forge }),
           /* D17: the plan refusal's sentence, addressed to this caller. */
           ...(grant.quotaSentence === undefined
             ? {}

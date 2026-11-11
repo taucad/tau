@@ -1,8 +1,8 @@
 import { setup, types } from 'xstate';
 import { logLevels } from '@taucad/types/constants';
 import type { LogEntry, LogOptions } from '@taucad/types';
-import { LogRingBuffer } from '#utils/log-ring-buffer.js';
-import { eventSchemas } from '#lib/xstate.lib.js';
+import { LogRingBuffer } from '@taucad/ui-core/utils/log-ring-buffer';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 
 const defaultMaxLogs = 1000;
 let logIdCounter = 0;

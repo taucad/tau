@@ -1,5 +1,5 @@
 import { isTauTemporarySiblingName } from '@taucad/fs-client/file-tree-service';
-import type { FileItem } from '#types/editor.types.js';
+import type { FileItem } from '@taucad/ui-core/types/editor.types';
 
 const editorHiddenExact = new Set([
   '.DS_Store',

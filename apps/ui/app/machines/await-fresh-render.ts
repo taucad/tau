@@ -1,7 +1,7 @@
 /* oxlint-disable eslint/no-await-in-loop -- Each retry must wait for the document and projection selected by the previous step. */
 import { waitFor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
-import { defaultOperationTimeout } from '#constants/editor.constants.js';
+import { defaultOperationTimeout } from '@taucad/ui-core/constants/editor.constants';
 import type { cadMachine } from '#machines/cad.machine.js';
 
 /** Timeout while waiting for the CAD unit's current document and default view. */

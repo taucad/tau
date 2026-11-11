@@ -14,6 +14,8 @@ import { toPiToolContent } from '#harness/tools.js';
 import { MessageIdentities, piMessageToProvider, providerMessageToPi } from '#harness/session-record.js';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { ModelCallRequest } from '#harness/model-call-middleware.js';
+import { chatStateMessage } from '#log/event-types.js';
+import type { UserProviderMessage } from '#log/event-types.js';
 
 const model: Model<Api> = {
   id: 'stub',
@@ -392,5 +394,65 @@ describe('TurnContextSnapshot skills pin', () => {
     expect(second.initialMessages.find((message) => message.id === skillsUpdateMessageId)?.content).toContain(
       '**gears**',
     );
+  });
+});
+
+describe('TurnContextSnapshot state note', () => {
+  const workspace: UserProviderMessage = { id: 'tau:snapshot-context:run-1', role: 'user', content: 'workspace' };
+  const plan = chatStateMessage({ text: 'plan mode', isDefault: false });
+  const defaults = chatStateMessage({ text: 'defaults', isDefault: true });
+  const contents = (messages: readonly UserProviderMessage[]): unknown[] => messages.map((message) => message.content);
+
+  it.each([
+    {
+      when: 'a change the history does not carry',
+      note: plan,
+      initial: ['workspace', 'plan mode'],
+      after: ['workspace', 'plan mode'],
+    },
+    {
+      when: 'a note the history already carries',
+      note: plan,
+      carried: 'plan mode',
+      initial: ['workspace'],
+      after: ['workspace', 'plan mode'],
+    },
+    {
+      when: 'a change from another note',
+      note: plan,
+      carried: 'testing off',
+      initial: ['workspace', 'plan mode'],
+      after: ['workspace', 'plan mode'],
+    },
+    {
+      when: 'the defaults in a chat that carries no note',
+      note: defaults,
+      initial: ['workspace'],
+      after: ['workspace'],
+    },
+    {
+      when: 'a return to the defaults',
+      note: defaults,
+      carried: 'plan mode',
+      initial: ['workspace', 'defaults'],
+      after: ['workspace', 'defaults'],
+    },
+    {
+      when: 'the defaults already said',
+      note: defaults,
+      carried: 'defaults',
+      initial: ['workspace'],
+      after: ['workspace'],
+    },
+  ])('should handle $when', async ({ note, carried, initial, after }) => {
+    const context = await createTurnContextSnapshot({
+      chatId: 'chat-1',
+      systemPrompt: 'static',
+      contextMessages: [note, workspace],
+      carriedStateNote: carried,
+    });
+    /* The note closes the block, next to the person's message, wherever the client put it. */
+    expect(contents(context.initialMessages)).toEqual(initial);
+    expect(contents(context.postCompactionMessages)).toEqual(after);
   });
 });

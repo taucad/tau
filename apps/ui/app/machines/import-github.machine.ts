@@ -1,6 +1,6 @@
 import { createCallbackLogic, setup, types } from 'xstate';
 import type { AnyActorRef, EnqueueObject, SystemRegistry } from 'xstate';
-import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { isReservedBranchName } from '@taucad/revisions';
 import { getGitHubClient } from '#lib/github-api.js';
 import { normalizeRepositoryFolder, parseGitHubUrl } from '#routes/import.$/import.utils.js';

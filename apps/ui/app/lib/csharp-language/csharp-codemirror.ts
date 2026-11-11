@@ -21,7 +21,7 @@ import type { CsharpLanguageAssets } from '@taucad/csharp-language/protocol';
 import type { DocumentChange, EditorDocument } from '#lib/editor-document.js';
 import type { EditorDiagnostic } from '#lib/editor-diagnostics.js';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
-import { applyLspCompletion } from '#lib/lsp-completion-apply.js';
+import { applyLspCompletion } from '@taucad/ui-core/lib/lsp-completion-apply';
 import { applyLspWorkspaceEdit, captureLspEditBasis } from '#lib/lsp-workspace-edit.js';
 
 /** The language-server surface the editor uses; `CsharpLanguageClient` in the app, a fake in tests. */

@@ -100,6 +100,7 @@ describe('shell split graph (pre-split)', () => {
     expect(hostShellProductionFiles).toEqual([
       'packages/host/src/shell/shell-contract.ts',
       'packages/host/src/shell/shell-environment.ts',
+      'packages/host/src/shell/shell-git-view.ts',
       'packages/host/src/shell/shell-grant.ts',
       'packages/host/src/shell/shell-output.ts',
       'packages/host/src/shell/shell-service.ts',

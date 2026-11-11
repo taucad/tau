@@ -16,7 +16,7 @@ import type { RemoteFacet, SyncFacet } from '@taucad/revisions';
 import type { RevisionSyncRegionProps } from '#routes/w.$workspace.$project/revision-sync-region.js';
 import { GithubRequestError } from '#lib/github-connections.js';
 import type * as GithubConnectionsModule from '#lib/github-connections.js';
-import { githubProjectBinding } from '#lib/github-project-binding.js';
+import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 
 const githubToken = vi.hoisted(() =>
   vi.fn(async () => ({

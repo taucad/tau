@@ -69,6 +69,7 @@ import {
   otherName,
   processesWith,
   seeded,
+  treeDigestOf,
 } from '#shell/qualification.fixture.js';
 
 const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
@@ -1701,6 +1702,146 @@ describe.runIf(enabled)('shell qualification', () => {
         chmodSync(logs, 0o755);
       }
       expect(readdirSync(logs)).toHaveLength(before);
+    },
+  );
+
+  /*
+   * E14 (blueprint E1): read-only git through a filtered view. The view shares the real object store, so objects only
+   * `refs/tau/*` reaches stay readable by id: the operator accepted that residual (2026-11-10T12:34Z), and this row
+   * observes it rather than claiming otherwise. Ref names, the real config and every other file of `.git` stay unread.
+   */
+  qualification(
+    'E14',
+    'git log, diff, show and blame read history through a view of branches and tags; every write fails',
+    async () => {
+      const history = join(root, 'projects', 'history');
+      const secret = 'ghp_E14SEEDEDSECRET0123456789abcdef';
+      const git = (input: string | undefined, ...arguments_: string[]): string =>
+        execFileSync('git', arguments_, {
+          cwd: history,
+          encoding: 'utf8',
+          ...(input === undefined ? {} : { input }),
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: {
+            PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+            HOME: root,
+            GIT_CONFIG_NOSYSTEM: '1',
+            GIT_AUTHOR_NAME: 'Fixture',
+            GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+            GIT_COMMITTER_NAME: 'Fixture',
+            GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
+          },
+        });
+      mkdirSync(history, { recursive: true });
+      git(undefined, 'init', '--quiet', '--initial-branch=main');
+      writeFileSync(join(history, 'part.scad'), 'cube(1);\n');
+      git(undefined, 'add', 'part.scad');
+      git(undefined, 'commit', '--quiet', '-m', 'First part');
+      writeFileSync(join(history, 'part.scad'), 'cube(2);\n');
+      git(undefined, 'commit', '--quiet', '-am', 'Grow the part');
+      git(undefined, 'branch', 'feature');
+      git(undefined, 'tag', '-a', 'v1', '-m', 'Version 1');
+      const chat = git('E14-PAST-CHAT-STATE\n', 'hash-object', '-w', '--stdin').trim();
+      git(undefined, 'update-ref', 'refs/tau/chats/c1', chat);
+      git(undefined, 'update-ref', 'refs/remotes/origin/tau/ops/device', chat);
+      git(undefined, 'remote', 'add', 'origin', `https://x-access-token:${secret}@example.invalid/repo.git`);
+      git(undefined, 'config', 'credential.helper', `!echo password=${secret}`);
+      git(undefined, 'config', 'lfs.url', `https://${secret}@lfs.example.invalid`);
+      git(undefined, 'config', 'http.extraheader', `Authorization: Bearer ${secret}`);
+      git(undefined, 'pack-refs', '--all');
+      git(undefined, 'gc', '--quiet');
+      /* Tau's derived ignores, as a Tau store carries them, for the records the service creates and the stand-ins. */
+      writeFileSync(join(history, '.git', 'info', 'exclude'), '/.tau/*\n/thumbnail.webp\n/exports/\n');
+      const store = join(history, '.git');
+      const before = treeDigestOf(store);
+
+      const reads = [
+        shellCall('e14-log', { command: 'git log --format=%s' }),
+        shellCall('e14-diff', { command: 'git diff HEAD~1 HEAD -- part.scad' }),
+        shellCall('e14-show', { command: 'git show HEAD~1:part.scad' }),
+        shellCall('e14-blame', { command: 'git blame --porcelain part.scad' }),
+        shellCall('e14-refs', { command: "git for-each-ref --format='%(refname)'" }),
+        shellCall('e14-config', { command: 'git config --list --show-origin; git remote -v' }),
+        /* Accepted residual: an object only `refs/tau` reaches is still readable by id through the shared store. */
+        shellCall('e14-residual', {
+          command: 'git cat-file --batch-all-objects --batch | grep -a E14-PAST-CHAT-STATE',
+        }),
+      ];
+      const probes = [
+        shellCall('e14-secret', {
+          command: `cat .git/config .git/packed-refs .git/HEAD 2>&1; ls -a .git 2>&1; grep -ra ${secret} "$GIT_DIR" .git 2>&1; env`,
+        }),
+        shellCall('e14-real-dir', { command: 'GIT_DIR=$PWD/.git git log --format=%s' }),
+      ];
+      const writes = [
+        'git commit --allow-empty -m forged',
+        'git tag forged',
+        'git branch forged',
+        'git update-ref refs/heads/forged HEAD',
+        'git symbolic-ref HEAD refs/heads/feature',
+        'git hash-object -w part.scad',
+        'git notes add -m forged HEAD',
+        'git gc',
+        'git pack-refs --all',
+        'git config core.fsmonitor forged',
+        'touch "$GIT_DIR/forged"',
+        'printf forged >> "$GIT_DIR/config"',
+        'ln -s / "$GIT_DIR/forged-link"',
+        'touch .git/objects/forged',
+        'mkdir .git/objects/ff',
+        `rm -f .git/objects/pack/*`,
+        'mv .git/objects .git/objects-moved',
+      ].map((command, index) => shellCall(`e14-write-${String(index)}`, { command }));
+      /* On Linux a write beside the objects lands in the denied `.git`'s masking tmpfs (as in E03): judged outside. */
+      const masked = [shellCall('e14-masked', { command: 'touch .git/forged; printf forged > .git/HEAD' })];
+      /* The view carries a copy of the checkout's index, so status compares against it, never against an empty one. */
+      const status = [
+        shellCall('e14-status-clean', { command: 'git status --porcelain' }),
+        shellCall('e14-status-edited', { command: "printf 'cube(9);\\n' > part.scad && git status --porcelain" }),
+      ];
+      const { outputs } = await drive('e14', [...reads, ...probes, ...writes, ...masked, ...status], {
+        cwd: history,
+      });
+      expect(ok(outputs.at(-2)).stdout.text).toBe('');
+      expect(ok(outputs.at(-1)).stdout.text).toBe(' M part.scad\n');
+
+      expect(ok(outputs[0]).stdout.text).toBe('Grow the part\nFirst part\n');
+      expect(ok(outputs[1]).stdout.text).toMatch(/-cube\(1\);\n\+cube\(2\);/u);
+      expect(ok(outputs[2]).stdout.text).toBe('cube(1);\n');
+      expect(ok(outputs[3]).stdout.text).toMatch(/summary Grow the part/u);
+      expect(ok(outputs[4]).stdout.text).toBe('refs/heads/feature\nrefs/heads/main\nrefs/tags/v1\n');
+      /* Only the view's fresh config, the machine's own system config and the runtime's command line are read. */
+      const config = ok(outputs[5]).stdout.text;
+      expect(config).not.toContain(secret);
+      expect(config).not.toMatch(/remote\.|credential|extraheader|lfs\.url|origin/u);
+      const sources = config
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.split('\t')[0]);
+      expect(
+        sources.filter((source) => !/^(?:file:\/etc\/gitconfig|command line:)$/u.test(source ?? '')),
+      ).toStrictEqual([
+        expect.stringMatching(/^file:.*\/tau-shell-[^/]+\/git\/config$/u),
+        expect.stringMatching(/^file:.*\/tau-shell-[^/]+\/git\/config$/u),
+      ]);
+      expect(ok(outputs[6]).stdout.text).toContain('E14-PAST-CHAT-STATE');
+      const leaked = completed(outputs[7]);
+      expect(`${leaked.stdout.text}${leaked.stderr.text}`).not.toContain(secret);
+      expect(leaked.stdout.text).not.toMatch(/\[remote|refs\/tau/u);
+      expect(completed(outputs[8]).exitCode).not.toBe(0);
+      const failed = outputs
+        .slice(reads.length + probes.length, reads.length + probes.length + writes.length)
+        .map((output, index) => ({
+          command: writes[index]!.input,
+          exitCode: completed(output).exitCode,
+        }));
+      expect(failed.filter((entry) => entry.exitCode === 0)).toStrictEqual([]);
+      /* Outside bytes are the judge: the real store is byte for byte what it was. */
+      expect(treeDigestOf(store)).toBe(before);
+      expect(git(undefined, 'for-each-ref', '--format=%(refname)')).toBe(
+        'refs/heads/feature\nrefs/heads/main\nrefs/remotes/origin/tau/ops/device\nrefs/tags/v1\nrefs/tau/chats/c1\n',
+      );
+      measurements = { writesRefused: failed.length };
     },
   );
 

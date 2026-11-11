@@ -112,8 +112,9 @@ const usage = `Usage: revisions-maintenance <command>
       read-only lease per project that has a candidate; --dry-run lists the
       candidates and hydrates nothing.
 
-  collect-blobs [--dry-run]
+  collect-blobs [--confirm] [--dry-run]
       Delete publication blobs whose reference count is zero, in one bounded batch.
+      Above 500 unreferenced blobs the pass deletes nothing unless --confirm.
 
   mark-erasure --owner <id>
       Record a verified erasure request: the owner's tombstone becomes due now.
@@ -615,7 +616,13 @@ async function main(): Promise<void> {
       }
       case 'collect-blobs': {
         const result = await pass('collect-blobs', async () =>
-          collectZeroCountBlobs({ database, driver, report, dryRun: args.includes('--dry-run') }),
+          collectZeroCountBlobs({
+            database,
+            driver,
+            report,
+            confirm: args.includes('--confirm'),
+            dryRun: args.includes('--dry-run'),
+          }),
         );
         console.log(JSON.stringify(result));
         break;

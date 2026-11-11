@@ -1,6 +1,6 @@
 # Tau API
 
-Backend API service for Tau CAD, built with NestJS and Better Auth.
+Backend API service for Tau, built with NestJS and Better Auth.
 
 ## Better Auth Schema Generation
 

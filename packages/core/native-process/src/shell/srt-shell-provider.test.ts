@@ -21,12 +21,15 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { processTable, terminationDeadline } from '#shell/process-tree.js';
+import { seatbeltDecision, seatbeltProfileOf } from '#shell/seatbelt.fixture.js';
+import type { ProfileFilesystem } from '#shell/seatbelt.fixture.js';
 import { createShellCustody } from '#shell/shell-custody.js';
 import { holdProtectedStandIns } from '#shell/shell-stand-ins.js';
 import type { ShellLaunch, ShellLaunchOutcome, ShellPipesProcess, ShellProcess } from '#shell/shell-provider.js';
 import {
   bindOwnPty,
   createSandboxShellProvider,
+  seatbeltReadDenies,
   shellSandboxCommand,
   shellSandboxProfile,
 } from '#shell/srt-shell-provider.js';
@@ -751,6 +754,122 @@ describe('shellSandboxProfile read-only roots', () => {
     );
     expect(profile.filesystem['denyRead']).not.toContain('/srv/project/.tau/chats');
     expect(profile.filesystem['denyRead']).not.toContain('/srv/project/exports');
+  });
+});
+
+describe('seatbeltReadDenies', () => {
+  it('should spell a denied directory that holds a readable path as the glob of its own name', () => {
+    expect(
+      seatbeltReadDenies(
+        ['/srv/project/.git', '/srv/project/.tau/binding.json', '/home/person/.ssh'],
+        ['/srv/project', '/srv/project/.git/objects'],
+      ),
+    ).toStrictEqual(['/srv/project/.gi[t]', '/srv/project/.tau/binding.json', '/home/person/.ssh']);
+  });
+
+  it('should keep the literal spelling when the path already reads as a glob or ends in a character no bracket holds', () => {
+    expect(
+      seatbeltReadDenies(['/srv/[x]/.git', '/srv/p/odd-'], ['/srv/[x]/.git/objects', '/srv/p/odd-/inner']),
+    ).toStrictEqual(['/srv/[x]/.git', '/srv/p/odd-']);
+  });
+});
+
+/*
+ * The macOS profile at the generation level (blueprint E1, review finding 2): the provider's lists for a checkout
+ * whose `.git/objects` is read-only inside the denied `.git`, through the runtime's own Seatbelt generator, judged by
+ * last-match-wins. Proven here on every platform; the kernel's enforcement is observed only on a Mac.
+ */
+describe('shellSandboxProfile on macOS', () => {
+  const darwinProfile = (launch: Parameters<typeof shellSandboxProfile>[0]): ProfileFilesystem => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' });
+    try {
+      return (shellSandboxProfile(launch, { home: '/Users/person' }) as { filesystem: ProfileFilesystem }).filesystem;
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+  };
+
+  const checkoutLaunch = (root: string): Parameters<typeof shellSandboxProfile>[0] => {
+    for (const directory of ['.git/objects/ab', '.git/refs/tau/chats', '.tau/chats', 'src']) {
+      mkdirSync(join(root, 'project', directory), { recursive: true });
+    }
+    mkdirSync(join(root, 'view'));
+    mkdirSync(join(root, 'home'));
+    const project = join(root, 'project');
+    return {
+      filesystem: {
+        readable: [],
+        writable: [project, join(root, 'home')],
+        readOnly: [join(project, '.tau', 'chats'), join(project, '.git', 'objects'), join(root, 'view')],
+        denied: [join(project, '.git'), join(project, '.tau', 'binding.json')],
+      },
+      network: { domains: [] },
+    };
+  };
+
+  it('should let a launch read but never write the objects inside the denied .git, and keep the rest of .git denied', () => {
+    const root = fixtureRoot();
+    const project = join(root, 'project');
+    const profile = seatbeltProfileOf(darwinProfile(checkoutLaunch(root)));
+    const decide = (operation: string, path: string): string => seatbeltDecision(profile, { operation, path });
+
+    expect(decide('file-read-data', join(project, 'src', 'main.scad'))).toBe('allow');
+    expect(decide('file-read-data', join(project, '.git', 'objects', 'ab', 'cdef'))).toBe('allow');
+    expect(decide('file-read-data', join(project, '.git', 'objects', 'pack', 'pack-1.pack'))).toBe('allow');
+    expect(decide('file-read-data', join(root, 'view', 'HEAD'))).toBe('allow');
+    for (const hidden of ['config', 'HEAD', 'packed-refs', 'refs/tau/chats/c1', 'lfs/objects/x', 'credentials', '']) {
+      expect(decide('file-read-data', join(project, '.git', hidden)), hidden).toBe('deny');
+    }
+    /* A name a long session creates later is denied too: the deny is the directory, not a list of its children. */
+    expect(decide('file-read-data', join(project, '.git', 'created-later'))).toBe('deny');
+    expect(decide('file-read-data', join(project, '.tau', 'binding.json'))).toBe('deny');
+    for (const operation of ['file-write-data', 'file-write-create', 'file-write-unlink']) {
+      expect(decide(operation, join(project, '.git', 'objects', 'ab', 'cdef')), operation).toBe('deny');
+      expect(decide(operation, join(project, '.git', 'objects', 'new')), operation).toBe('deny');
+      expect(decide(operation, join(project, '.git', 'config')), operation).toBe('deny');
+      expect(decide(operation, join(project, '.git')), operation).toBe('deny');
+      expect(decide(operation, join(root, 'view', 'HEAD')), operation).toBe('deny');
+    }
+    expect(decide('file-write-data', join(project, 'src', 'main.scad'))).toBe('allow');
+  });
+
+  it('should leave the objects denied with the literal deny the runtime would re-emit, the failure this fixes', () => {
+    const root = fixtureRoot();
+    const project = join(root, 'project');
+    const filesystem = darwinProfile(checkoutLaunch(root));
+    const literal = seatbeltProfileOf({
+      ...filesystem,
+      denyRead: filesystem.denyRead.map((path) => path.replace('.gi[t]', '.git')),
+    });
+
+    expect(
+      seatbeltDecision(literal, { operation: 'file-read-data', path: join(project, '.git', 'objects', 'x') }),
+    ).toBe('deny');
+  });
+});
+
+describe.runIf(process.platform === 'linux')('shellSandboxProfile read-only path inside a denied one on Linux', () => {
+  it('should never bind the denied directory writable to pin a read-only path inside it', () => {
+    const profile = shellSandboxProfile(
+      {
+        filesystem: {
+          readable: [],
+          writable: ['/srv/project'],
+          readOnly: ['/srv/project/.git/objects', '/srv/project/.tau/chats'],
+          denied: ['/srv/project/.git'],
+        },
+        network: { domains: [] },
+      },
+      { home: '/home/person' },
+    ) as { filesystem: Record<string, string[]> };
+
+    expect(profile.filesystem['allowWrite']).toStrictEqual(['/srv/project', '/srv/project/.tau']);
+    expect(profile.filesystem['allowRead']).toContain('/srv/project/.git/objects');
+    expect(profile.filesystem['denyRead']).toContain('/srv/project/.git');
+    expect(profile.filesystem['denyWrite']).toStrictEqual(
+      expect.arrayContaining(['/srv/project/.git', '/srv/project/.git/objects']),
+    );
   });
 });
 

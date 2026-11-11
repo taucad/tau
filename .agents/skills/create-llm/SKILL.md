@@ -9,7 +9,7 @@ Use this skill when adding, updating, enabling, or evaluating an LLM in Tau's mo
 
 ## Where execution actually happens
 
-Chat turns do not run in the API. The API is a relay: the portable agent host builds the provider request in the browser or desktop host and the API's model gateway forwards it to the provider with the operator's or Tau Cloud's credentials. A new model therefore has to be correct in three places: the catalog row, the gateway route, and the host transport that chooses the wire and the reasoning options.
+Chat turns do not run in the API. The API is a relay: the portable agent host builds the provider request in the browser or desktop host and the API's model gateway forwards it to the provider with the operator's or Tau Cloud's credentials. A new model therefore has to be correct in three places: the catalog row, the gateway route, and the host transport that chooses the wire and the reasoning options. A model Tau Cloud funds has a fourth: its funded route in `apps/libs/api-billing/src/billable-model-qualification.ts`, which every Tau Cloud request must pass before it reaches the supplier.
 
 The API calls a provider itself in one narrow case only: self-host helper surfaces (`project_name`, `commit_name`) executed by `DirectModelInvocationService.invokeHelper`. It resolves the selected catalog row's gateway route, builds a native request with the helper codec (`providers/helper-wire.ts`: one request builder and one stream reader per wire, mapping the row's `configuration` to that wire) and sends it through the same `executeGatewayProviderRequest` transport. A new wire or a new request option a helper must forward is a codec change there; there are no per-provider client classes. Do not treat that path as the chat path.
 
@@ -20,9 +20,10 @@ The API calls a provider itself in one narrow case only: self-host helper surfac
 3. Decide whether an existing gateway provider serves the model or whether a new provider id is needed.
 4. Add or update the catalog row with complete model, provider, cost, context, support, and configuration fields.
 5. Wire the host transport if the model needs a wire, compat override, or reasoning option the provider does not already have.
-6. Apply enablement gates before exposing the model publicly.
-7. Run focused unit checks, then the live ladder.
-8. Report exact commands, live status, and any unrelated blockers.
+6. If Tau Cloud funds the model, add or update its funded route: rates, output ceiling, and an `outputParameter` that names the field the host actually sends.
+7. Apply enablement gates before exposing the model publicly.
+8. Run focused unit checks, then the live ladder.
+9. Report exact commands, live status, and any unrelated blockers.
 
 ## Key Rules
 
@@ -34,6 +35,7 @@ The API calls a provider itself in one narrow case only: self-host helper surfac
 - Cap catalog context windows at Tau's effective `200_000` policy unless that policy changes.
 - Keep text-only or uncertain models hidden until Tau can route image inputs safely.
 - A new model row is validated only when the live matrix row for its provider passes. A skipped live run is not validated.
+- The live matrix runs with Tau Cloud off, so it never runs funded-route qualification, metering or settlement. A funded model is validated on Tau Cloud only by the route contract test plus one funded turn with tools on staging.
 - Preserve unrelated user or dirty-worktree changes.
 
 ## Reference

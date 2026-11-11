@@ -9,8 +9,9 @@ import { afterAll, describe, expect, it } from 'vitest';
 /*
  * The push-to-`main` native rows run only for affected work (Wave 0M, AF-1): the plan selects the
  * projects affected since the newest successful push run of the same workflow on `main`, and every
- * project when there is none. Dispatches (and native-hosts' nightly) keep every row; pull requests
- * keep Nx affected against the base `nrwl/nx-set-shas` exported. The scripts run here with `gh`,
+ * project when there is none. Dispatches (and native-hosts' nightly) keep every row; native-darwin's
+ * pull requests keep Nx affected against the base `nrwl/nx-set-shas` exported, and native-hosts runs on
+ * none (`ci.yml` calls it in the merge queue with its own plan's rows). The scripts run here with `gh`,
  * `git` and `pnpm` stubbed, so each event's selection is pinned by behaviour, not by text.
  */
 
@@ -270,7 +271,7 @@ describe('native-darwin row selection', () => {
 
 describe('native-hosts row selection', () => {
   const plan = step(hostsPath, 'plan').run!;
-  /** `affected` is the `--projects build123d,picogk,cli` answer, then the `test:native-linux` one. */
+  /** `affected` is the `--projects tag:ci:native-hosts` answer, then the `test:native-linux` one. */
   const select = (event: string, pushBase: string, [affectedHosts, affectedNative]: readonly [string, string]) =>
     run(plan, [
       ['GITHUB_EVENT_NAME', event],
@@ -289,7 +290,7 @@ describe('native-hosts row selection', () => {
       'native-linux': '',
     });
     expect(affected.calls).toContain(
-      'nx show projects --affected --base=older --head=head --projects build123d,picogk,cli',
+      'nx show projects --affected --base=older --head=head --projects tag:ci:native-hosts',
     );
     expect(affected.calls).toContain(
       'nx show projects --affected --base=older --head=head --with-target test:native-linux',
@@ -333,10 +334,12 @@ describe('native-hosts row selection', () => {
     expect(result.calls).not.toContain('--affected');
   });
 
-  it('should never start the Intel row on a pull request', () => {
-    const result = select('pull_request', '', ['["cli"]', '[]']);
-    expect(result.outputs).toMatchObject({ linux: 'true', intel: 'false' });
-    expect(result.calls).not.toContain('--base=');
-    expect(select('pull_request', '', ['[]', '[]']).outputs['linux']).toBe('false');
+  it('should run on no pull request, and skip its plan when ci.yml calls it in the merge queue', () => {
+    const workflow = load(readFileSync(resolve(root, hostsPath), 'utf8')) as {
+      readonly on: Record<string, unknown>;
+      readonly jobs: Record<string, { readonly if?: string }>;
+    };
+    expect(Object.keys(workflow.on).sort()).toEqual(['push', 'schedule', 'workflow_call', 'workflow_dispatch']);
+    expect(workflow.jobs['plan']?.if).toBe("github.event_name != 'merge_group'");
   });
 });

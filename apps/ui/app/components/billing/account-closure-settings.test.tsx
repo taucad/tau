@@ -133,7 +133,7 @@ describe('AccountClosureSettings', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'A payment needs attention before this account can close.',
     );
-    expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:support@tau.new');
+    expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:help@tau.new');
     expect(screen.queryByRole('button', { name: 'Open Add credits' })).not.toBeInTheDocument();
   });
 

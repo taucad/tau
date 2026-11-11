@@ -476,6 +476,39 @@ describe('environmentSchema', () => {
     }
   });
 
+  it('should leave the purpose-specific senders unset when omitted or empty', () => {
+    const omitted = Object.fromEntries(
+      Object.entries(baseEnvironment()).filter(
+        ([key]) => key !== 'TAU_EMAIL_FROM_NOTIFICATIONS' && key !== 'TAU_EMAIL_FROM_BILLING',
+      ),
+    );
+    const empty = { ...baseEnvironment(), TAU_EMAIL_FROM_NOTIFICATIONS: '', TAU_EMAIL_FROM_BILLING: '' };
+
+    for (const environment of [omitted, empty]) {
+      const result = environmentSchema.safeParse(environment);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        // No default address in code: EmailService falls back to TAU_EMAIL_FROM.
+        expect(result.data.TAU_EMAIL_FROM_NOTIFICATIONS).toBeUndefined();
+        expect(result.data.TAU_EMAIL_FROM_BILLING).toBeUndefined();
+      }
+    }
+  });
+
+  it('should accept the purpose-specific senders when set', () => {
+    const result = environmentSchema.safeParse({
+      ...baseEnvironment(),
+      TAU_EMAIL_FROM_NOTIFICATIONS: 'Tau <notifications@taucad.dev>',
+      TAU_EMAIL_FROM_BILLING: 'Tau Billing <billing@taucad.dev>',
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.TAU_EMAIL_FROM_NOTIFICATIONS).toBe('Tau <notifications@taucad.dev>');
+      expect(result.data.TAU_EMAIL_FROM_BILLING).toBe('Tau Billing <billing@taucad.dev>');
+    }
+  });
+
   it('should reject TAU_VIEW_COOKIE_SECRET shorter than 32 characters', () => {
     const result = environmentSchema.safeParse({
       ...baseEnvironment(),

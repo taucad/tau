@@ -4,6 +4,7 @@ import marketingEvents, {
   admitFrom,
   config,
   parseMarketingEvent,
+  publicOrigin,
   rateLimit,
   resetCollectorState,
   toPostHogCapture,
@@ -126,6 +127,28 @@ describe('marketingEvents', () => {
     expect(await statusOf(marketingEvents(post(valid, { 'content-type': 'text/plain' })))).toBe(415);
     expect(await statusOf(marketingEvents(new Request(`${origin}/api/marketing-events`)))).toBe(405);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('should take the visitor origin the staging router names, only on a netlify.app alias', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{"status":"Ok"}', { status: 200 })),
+    );
+    const alias = 'https://staging--tau-ui.netlify.app/api/marketing-events';
+    const routed = (headers: Record<string, string>): Request =>
+      new Request(alias, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...headers },
+        body: JSON.stringify({ ...valid, event_id: crypto.randomUUID() }),
+      });
+
+    expect(publicOrigin(routed({ 'x-tau-public-host': 'taucad.dev' }))).toBe('https://taucad.dev');
+    expect(
+      await statusOf(marketingEvents(routed({ origin: 'https://taucad.dev', 'x-tau-public-host': 'taucad.dev' }))),
+    ).toBe(202);
+    expect(await statusOf(marketingEvents(routed({ origin: 'https://taucad.dev' })))).toBe(403);
+    expect(publicOrigin(post(valid, { 'x-tau-public-host': 'evil.example' }))).toBe(origin);
+    expect(publicOrigin(routed({ 'x-tau-public-host': 'evil.example/x' }))).toBe('https://staging--tau-ui.netlify.app');
   });
 
   it('should honour a privacy signal on the request', async () => {

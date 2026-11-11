@@ -602,6 +602,56 @@ describe('funded journey', () => {
   );
 
   it(
+    'should settle a funded Kimi K3.1 Pro turn that calls a tool [FD-13 P0]',
+    matrixRow('FD-13', 'P0', async (evidence): Promise<Verdict> => {
+      if (paid?.action.state !== 'fulfilled') {
+        return { outcome: 'blocked', defect: 'H-03', evidence: ['TU-01 left no funded account'] };
+      }
+      /* The first funded exercise of Together's tariff, settlement and supplier path: every Together route was
+       * refused before admission while its route named another output field than the host sends (taucad/tau#1763). */
+      const call = await callGateway(account.api, 'kimi', {
+        prompt: 'Read the file main.scad with the read_file tool. Call the tool; do not answer in text.',
+        maximumTokens: 4096,
+      });
+      const streamFile = `${evidenceStamp()}-fd-13-kimi-stream.txt`;
+      await writeFile(join(runDirectory, streamFile), call.stream ?? '');
+      evidence.push(
+        `Kimi K3.1 Pro: ${describeCall(call)}`,
+        `final usage event: ${finalUsage(call.stream) ?? 'none in the stream'}`,
+        streamFile,
+      );
+      if (call.status !== 200 || call.operationId === undefined) {
+        return { outcome: 'fail', defect: 'unclassified', evidence };
+      }
+      const refusal = streamRefusal(call.stream);
+      if (refusal !== undefined) {
+        evidence.push(
+          `the gateway ended the stream with ${refusal.code}${refusal.providerCode === undefined ? '' : ` (${refusal.providerCode})`}`,
+        );
+        return { outcome: 'fail', defect: 'unclassified', evidence };
+      }
+      const calledTool = /"tool_calls"\s*:\s*\[\s*\{[^\]]*"read_file"/u.test(call.stream ?? '');
+      evidence.push(calledTool ? 'the stream calls read_file' : 'the stream carries no read_file call');
+      const operation = await waitForTerminal(account.api, call.operationId, 330_000);
+      const operationFile = `${evidenceStamp()}-fd-13-kimi-operation.json`;
+      await writeFile(join(runDirectory, operationFile), JSON.stringify(operation, null, 2));
+      evidence.push(describeOperation(operation), operationFile);
+      if (operation.state !== 'terminal') {
+        evidence.push('still pending 330 s after the stream ended');
+        return { outcome: 'fail', defect: 'unclassified', evidence };
+      }
+      const charged = BigInt(operation.receipt.chargedCreditAtoms);
+      if (operation.receipt.customerState !== 'settled' || charged <= 0n) {
+        evidence.push(`billing never priced the turn: ${operation.receipt.customerState} at ${charged} atoms`);
+        return { outcome: 'fail', defect: 'unclassified', evidence };
+      }
+      expect(calledTool).toBe(true);
+      return { outcome: 'pass', evidence };
+    }),
+    400_000,
+  );
+
+  it(
     'should explain a settled model call by its operation receipt [US-03 P1]',
     matrixRow('US-03', 'P1', async (evidence) => {
       if (settled === undefined) {

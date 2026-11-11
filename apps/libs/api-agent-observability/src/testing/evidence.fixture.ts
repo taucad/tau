@@ -22,11 +22,20 @@ type Overrides = Readonly<{
   lineageDigest?: string;
   now?: number;
   authority?: Evidence['authority'];
+  /** A summary fact in place of the default instruction, for a test that needs one that maps to a Langfuse object. */
+  fact?: Extract<Evidence['payload'], { plane: 'summary' }>['fact'];
+  /** The fact's semantic id; two sources that share it name one Langfuse object. */
+  semantic?: string;
 }>;
 
-const payloadOf = (plane: Evidence['payload']['plane'], text: string, source: string): Evidence['payload'] => {
+const payloadOf = (
+  overrides: Overrides,
+  plane: Evidence['payload']['plane'],
+  text: string,
+  source: string,
+): Evidence['payload'] => {
   if (plane === 'summary') {
-    return { plane, fact: { kind: 'instruction', mode: 'initial', message: 'message-1' } };
+    return { plane, fact: overrides.fact ?? { kind: 'instruction', mode: 'initial', message: 'message-1' } };
   }
   if (plane === 'feedback') {
     return { plane, fact: { kind: 'rating', scale: 'thumbs.1', value: 'negative', evidence: 'presented-1' } };
@@ -70,7 +79,11 @@ export const evidenceFixture = async (overrides: Overrides = {}): Promise<Eviden
       sequence: overrides.sequence ?? 7,
       digest: sourceDigest,
     },
-    semantic: { kind: plane === 'feedback' ? 'rating' : 'instruction', id: 'message-1' },
+    semantic: {
+      kind:
+        plane === 'feedback' ? 'rating' : plane === 'summary' && overrides.fact ? overrides.fact.kind : 'instruction',
+      id: overrides.semantic ?? 'message-1',
+    },
     projection: { version: overrides.projectionVersion ?? 'v1', redactor: 'r1', digest: '0'.repeat(64) },
     delivery: {
       uploader: overrides.uploader ?? 'device-a',
@@ -119,10 +132,24 @@ export const evidenceFixture = async (overrides: Overrides = {}): Promise<Eviden
       artifacts: 'unsupported',
       permission: 'complete',
     },
-    payload: payloadOf(plane, text, lineageDigest),
+    payload: payloadOf(overrides, plane, text, lineageDigest),
   };
   return { ...evidence, projection: { ...evidence.projection, digest: await evidenceDigest(evidence) } };
 };
+
+/** A settled tool call's summary fact: one that maps to a Langfuse object. */
+export const toolFact = (call = 'call-1'): Extract<Evidence['payload'], { plane: 'summary' }>['fact'] => ({
+  kind: 'tool',
+  call,
+  dispatch: 'dispatch-1',
+  toolClass: 'other',
+  toolVersion: null,
+  schemaVersion: null,
+  modelCall: null,
+  outcome: 'completed',
+  revisionBefore: null,
+  revisionAfter: null,
+});
 
 /** The envelope as the host sends it. */
 export const encodeEvidence = (evidence: unknown): Uint8Array<ArrayBuffer> =>

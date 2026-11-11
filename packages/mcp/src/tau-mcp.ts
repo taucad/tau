@@ -68,7 +68,7 @@ const instructionsFor = (tested: boolean): string =>
   [
     'Use your native filesystem and shell tools to inspect and edit the current Tau project.',
     'Use your native skill loader for the Tau skills available in this session.',
-    "For Tau CAD state, prefer this session's Tau MCP tools over generic computer-use, UI-automation, or operating-system tools.",
+    "For Tau state, prefer this session's Tau MCP tools over generic computer-use, UI-automation, or operating-system tools.",
     ...(tested
       ? [
           'Before editing geometry, create or update executable GeoSpec tests for the requested requirements.',

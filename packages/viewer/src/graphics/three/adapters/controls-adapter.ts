@@ -6,6 +6,8 @@
  * canvas. The `camera-controls` instance, its DOM surface, the R3F root and the native cameras live in the adapter's
  * closure, never in a machine's context (charter D4).
  *
+ * The controls listen on R3F's event source when the canvas has one, else on the canvas.
+ *
  * Controls to camera:
  * - `controlstart`, `controlend`: `interactionStarted`, `interactionEnded`, sent back to graphics, which forwards them to
  *   the camera and owns click and hover suppression.
@@ -328,9 +330,27 @@ export const createControlsAdapter = ({
       ['wake', invalidate],
     ] as const;
 
+    /*
+     * The pointer surface: R3F's event source when the canvas has one (its wrapper then takes no pointer events, so the
+     * canvas would never see a gesture), else the canvas. R3F connects its events before the canvas is created and
+     * reconnects them when the source changes, so each frame checks for a new one.
+     */
+    let surface: HTMLElement | undefined;
+    const followSurface = (state: RootState): void => {
+      const next = (state.events.connected as HTMLElement | undefined) ?? gl.domElement;
+      if (next !== surface) {
+        if (surface !== undefined) {
+          controls.disconnect();
+        }
+        surface = next;
+        controls.connect(next);
+      }
+    };
+
     // Viewport: the canvas's CSS size, read before the controls update in every frame.
     const viewportObserver = {
       current(state: RootState): void {
+        followSurface(state);
         const { width, height } = state.size;
         if (width <= 0 || height <= 0) {
           return;
@@ -354,7 +374,6 @@ export const createControlsAdapter = ({
     for (const [type, listener] of listeners) {
       controls.addEventListener(type, listener);
     }
-    controls.connect(gl.domElement);
     viewportObserver.current(root.get());
     const unsubscribeFrame = (root.internal.subscribe as FrameSubscribe)(viewportObserver, viewportPriority, {
       getState: root.get,

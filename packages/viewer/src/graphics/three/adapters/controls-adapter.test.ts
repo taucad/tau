@@ -81,6 +81,7 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
     camera: rig.activeCamera as Camera,
     controls: null as RootState['controls'],
     gl: { domElement: document.createElement('div') },
+    events: { connected: undefined as HTMLElement | undefined },
     scene,
     raycaster: new Raycaster(),
     size: { width: 800, height: 600, top: 0, left: 0 },
@@ -350,6 +351,28 @@ describe('controls adapter', () => {
     harness.graphicsEvents.length = 0;
     controls.dispatchEvent({ type: 'controlstart' });
     expect(harness.graphicsEvents).toEqual([]);
+  });
+
+  /* With an `eventSource`, R3F's wrapper takes no pointer events, so the canvas never sees a gesture. */
+  it("listens on R3F's event source when the canvas has one, and follows it when it changes", () => {
+    const harness = createHarness();
+    const region = document.createElement('div');
+    harness.state.events.connected = region;
+    harness.attach();
+    const attribute = 'data-camera-controls-version';
+
+    expect(region.hasAttribute(attribute)).toBe(true);
+    expect(harness.state.gl.domElement.hasAttribute(attribute)).toBe(false);
+
+    const next = document.createElement('div');
+    harness.state.events.connected = next;
+    const calls = vi.mocked(harness.state.internal.subscribe).mock.calls as unknown as Array<
+      [{ current: (state: RootState) => void }]
+    >;
+    calls[0]?.[0].current(harness.state);
+
+    expect(region.hasAttribute(attribute)).toBe(false);
+    expect(next.hasAttribute(attribute)).toBe(true);
   });
 
   it('runs one adapter per surface, ignoring a re-delivery for the same canvas', () => {

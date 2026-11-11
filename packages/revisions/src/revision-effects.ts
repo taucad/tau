@@ -3405,8 +3405,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /*
    * RM-R9: a turn's revision names its admitting attempt and which of its two
    * revisions it is, and lists the checkout's other leases. The actor is the
-   * run's for a result; a base holds bytes nobody in this attempt wrote, so it
-   * keeps the attribution of the first other lease, or the person's.
+   * run's for a result. A base holds the person's own edits, saved before the
+   * agent started, so it is the person's (A5). Any other cut keeps the
+   * attribution of the first other lease, or the person's.
    */
   const provenanceOf = (
     trigger: CheckoutCutTrigger,
@@ -3416,12 +3417,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const { turn, restoredFrom } = about;
     const runId = turn?.key.runId;
     const heldRunIds = leaseIds.filter((id) => id !== runId).toSorted();
-    const actor = options.actor?.({ runId: turn?.turnCut === 'result' ? runId : heldRunIds[0], trigger });
+    const actorRunId = turn === undefined ? heldRunIds[0] : turn.turnCut === 'result' ? runId : undefined;
+    const actor = options.actor?.({ runId: actorRunId, trigger });
     return Object.freeze({
       /* Only the restore row is the restore's: the cut before it records the
        * person's own bytes under the same trigger (D1, A9). */
       source:
-        trigger === 'turn'
+        trigger === 'turn' && turn?.turnCut !== 'base'
           ? 'agent'
           : restoredFrom === undefined
             ? trigger === 'merge'

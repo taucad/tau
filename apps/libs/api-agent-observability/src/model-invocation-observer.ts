@@ -108,6 +108,7 @@ export class ObservedModelInvocationService implements ModelInvocationService {
       activity: intent.activity,
       requestedModel: model,
       supplierModel: route.modelId,
+      labels: intent.hostLabels,
       provider: route.provider,
       operation,
       startedAt,

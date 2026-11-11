@@ -566,6 +566,43 @@ describe('view record binding', () => {
     });
   });
 
+  describe('review round 5 rows', () => {
+    const dropOverMachinePose = () => {
+      const harness = mount();
+      harness.press();
+      harness.drag([1, 0, 0], 4);
+      harness.release();
+      harness.send({ type: 'frameGeometry', bounds: box(8), margin: 0.1, source: 'framing' });
+      harness.applied.length = 0;
+      const dropped = posed(initial(), pose([0, 1, 0], 9));
+      harness.publish(dropped);
+      harness.clock.advance(settle * 4);
+      return { harness, dropped };
+    };
+
+    it('should not acknowledge a later record that changes only the field of view of a dropped camera', () => {
+      const { harness, dropped } = dropOverMachinePose();
+      harness.publish(workbenchRecords.view.schema.parse({ ...dropped, fieldOfView: 30 }));
+      expect(harness.view()).toMatchObject({ direction: [1, 0, 0] });
+      expect(harness.applied).toEqual([]);
+    });
+
+    it('should not acknowledge an own write that leaves a dropped camera on file', () => {
+      const { harness } = dropOverMachinePose();
+      harness.binding.send({ type: 'ownersChanged', owners: { gridUnit: 'in' } });
+      const written = harness.edits.at(-1)!;
+      harness.publish(written, 'own', { grid: { unit: 'in' } });
+      expect(harness.applied).toEqual([]);
+      // A write that carries the camera puts the view's camera back on file, and that one is acknowledged.
+      harness.press();
+      harness.drag([-1, 0, 0], 4);
+      harness.release();
+      const repose = harness.edits.at(-1)!;
+      harness.publish(repose, 'own', { camera: repose.camera });
+      expect(harness.applied).toEqual([repose]);
+    });
+  });
+
   describe('camera rule', () => {
     it('should re-save on adoptionDropped only when a person made the pose', () => {
       const person = mount();

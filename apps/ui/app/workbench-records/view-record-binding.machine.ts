@@ -55,7 +55,12 @@ import type {
 import type { PersistedCameraView, PersistedSectionView } from '@taucad/viewer/graphics/graphics-settings';
 import type { WorkbenchView } from '@taucad/workbench';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
-import { foreignChanges, nextRecord, viewDisplayOwners } from '#workbench-records/view-record-binding-changes.js';
+import {
+  foreignChanges,
+  nextRecord,
+  ownsCamera,
+  viewDisplayOwners,
+} from '#workbench-records/view-record-binding-changes.js';
 import type {
   ViewCameraAdoption,
   ViewGraphicsAdoption,
@@ -156,7 +161,7 @@ type BindingContext = Readonly<{
    * `recordPublished` handler writes it from either section state (MC-R26 debt, accepted as for R5 and G1).
    */
   sectionPending: PersistedSectionView | undefined;
-  /** The record whose camera adoption the camera dropped; records after it that change no camera field are not shown either. */
+  /** The record whose camera adoption the camera dropped; later records that ask for no new pose, and own writes without the camera, are not acknowledged. */
   dropped: WorkbenchView | undefined;
   /** The publication the acknowledgement waits for. */
   applying: WorkbenchView | undefined;
@@ -281,7 +286,8 @@ const observeCamera = (
   if (!wasFramed) {
     // Before the entry's first frame no pose is written (as the hook did): framing still holds the record's pose and
     // applies it after that frame, so a move of the empty canvas would put a pose on file the view then leaves. A field
-    // of view is not part of that pose, so the person's is written now, as the hook wrote it on every persist.
+    // of view is not part of that pose, so the person's is written now rather than lost (the hook, which built no camera
+    // settings before the first frame, dropped it).
     if (source !== 'fov') {
       return { framed, context: observed };
     }
@@ -313,12 +319,15 @@ const observeRecord = (
       event.patch?.section !== undefined &&
       context.sectionPending !== undefined &&
       !same(record.section, context.sectionPending);
+    // After a drop, only a write that carries the camera puts the view's camera back on file (CameraAuthority README:
+    // the file keeps the foreign pose until this view's next write of it), so any other own write is not acknowledged.
+    const stillDropped = context.dropped !== undefined && !ownsCamera(record, event.patch);
     return acknowledged(
       {
         ...context,
         record,
-        applying: record,
-        dropped: undefined,
+        applying: stillDropped ? undefined : record,
+        dropped: stillDropped ? context.dropped : undefined,
         ...(supersedes ? { sectionPending: undefined, owners: { ...context.owners, section: record.section } } : {}),
       },
       enq,
@@ -343,9 +352,11 @@ const observeRecord = (
       sectionPending = undefined;
     }
   }
-  // After a dropped adoption, a record that changes no camera field (a forced re-read, or an edit of other fields) still
-  // holds the camera the view does not show, so it is not acknowledged either.
-  const stillDropped = context.dropped !== undefined && changes.camera === undefined;
+  // After a dropped adoption, a record that asks for no new pose or orientation (a forced re-read, or an edit of other
+  // fields, field of view and up direction included) still holds the camera the view does not show, so it is not
+  // acknowledged either.
+  const stillDropped =
+    context.dropped !== undefined && changes.camera?.pose === undefined && changes.camera?.orientation === undefined;
   const handled: BindingContext = {
     ...context,
     record,

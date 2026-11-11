@@ -101,8 +101,14 @@ export const cameraAdoptionOf = (
   return { orientation: viewCameraOrientation({ camera, upDirection: record.upDirection })! };
 };
 
-/* A field is this view's own when the acknowledged patch carries it; only the other fields can be foreign. */
-const ownsCamera = (record: WorkbenchView, patch: ViewRecordPatch | undefined): boolean => {
+/**
+ * Whether this view's own write carried the record's active camera.
+ *
+ * @param record - The record the write produced.
+ * @param patch - The fields the write carried.
+ * @returns True when the patch holds the camera, or the selected kernel view's camera.
+ */
+export const ownsCamera = (record: WorkbenchView, patch: ViewRecordPatch | undefined): boolean => {
   if (!patch) {
     return false;
   }

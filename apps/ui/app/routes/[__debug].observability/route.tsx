@@ -97,6 +97,8 @@ const triggerObservabilityRevisionFailure = async (status: (message: string) => 
   }, 15_000);
   try {
     client.open();
+    /* The page names who its revisions are by before anything else (B1), as a project page does. */
+    client.send({ command: 'setActor', actor: { kind: 'user', id: 'observability-harness' } });
     // The root exists before the restore command; this read never fetches a remote.
     const restore = async (): Promise<void> => {
       await client.log();

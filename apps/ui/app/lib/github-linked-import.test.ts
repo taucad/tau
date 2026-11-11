@@ -115,7 +115,9 @@ describe('prepareLinkedGithubImport', () => {
     expect(generation).toBe(4);
     expect(request).toMatchObject({
       author: noreply,
-      setup: { provenance: { actor: { kind: 'user', id: 'tau-user-1', ...noreply }, capture: 'save', via: 'browser' } },
+      setup: {
+        provenance: { actor: { kind: 'user', id: 'tau-user-1', ...noreply }, capture: 'import', via: 'browser' },
+      },
     });
     setRevisionSessionUser(undefined);
   });

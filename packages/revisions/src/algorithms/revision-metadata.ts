@@ -35,7 +35,19 @@ export const revisionIdentitySchema = z.discriminatedUnion('kind', [
  *
  * @public
  */
-export const revisionCaptureSchema = z.enum(['turn', 'save', 'idle', 'hidden', 'close', 'merge', 'restore', 'switch']);
+export const revisionCaptureSchema = z.enum([
+  'turn',
+  'save',
+  'idle',
+  'hidden',
+  'close',
+  'merge',
+  'restore',
+  'switch',
+  /* The Start version, V1 (A6): a project made in Tau, or one brought in. */
+  'create',
+  'import',
+]);
 
 /**
  * Which Tau leg recorded a revision, as `RevisionVia` names it (blueprint B1).

@@ -20,7 +20,18 @@ const identities: ReadonlyArray<readonly [string, RevisionIdentity]> = [
   ['an agent for an anonymous person', { kind: 'agent', id: 'agent', runId: 'run-2', onBehalfOf: anonymous }],
 ];
 
-const captures: readonly RevisionTrigger[] = ['turn', 'save', 'idle', 'hidden', 'close', 'merge', 'restore', 'switch'];
+const captures: readonly RevisionTrigger[] = [
+  'turn',
+  'save',
+  'idle',
+  'hidden',
+  'close',
+  'merge',
+  'restore',
+  'switch',
+  'create',
+  'import',
+];
 const legs: readonly RevisionVia[] = ['browser', 'desktop', 'cli', 'serve', 'cloud'];
 
 const trailerOf = (provenance: RevisionProvenance): RevisionTrailer => ({

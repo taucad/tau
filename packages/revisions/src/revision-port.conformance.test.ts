@@ -353,6 +353,8 @@ const conformance = (adapter: Adapter): void => {
         'merge',
         'restore',
         'switch',
+        'create',
+        'import',
       ];
       const legs: readonly RevisionVia[] = ['browser', 'desktop', 'cli', 'serve', 'cloud'];
       const cases = identities.flatMap((actor, actorIndex) =>

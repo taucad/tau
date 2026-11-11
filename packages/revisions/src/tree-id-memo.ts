@@ -57,6 +57,18 @@ export const recordBlobOid = (content: Uint8Array<ArrayBuffer>, format: ObjectFo
   blobOids.set(content, held);
 };
 
+/**
+ * Whether bytes a tree holds already have an id in this format, hashed or
+ * taken, so a caller offering ids for them asks only for what it lacks.
+ *
+ * @param content - The tree's own bytes for one file.
+ * @param format - The object format.
+ * @returns `true` when {@link blobOid} would answer without hashing.
+ * @internal
+ */
+export const hasBlobOid = (content: Uint8Array<ArrayBuffer>, format: ObjectFormat): boolean =>
+  blobOids.get(content)?.[format] !== undefined;
+
 /* Whole trees: the gate, the claim and the port's write ask of one tree. */
 const treeObjects = new WeakMap<ImmutableRevisionTree, Partial<Record<ObjectFormat, TreeObject>>>();
 

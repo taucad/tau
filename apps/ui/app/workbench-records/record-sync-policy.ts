@@ -36,6 +36,12 @@ export type RecordPolicy<T, P> = Readonly<{
   merge: (current: T | undefined, next: T, patch: P) => T;
   /** A patch that changes nothing, so no write is owed for it. */
   isEmpty: (patch: P) => boolean;
+  /**
+   * `true` when the file's absence is not a record to adopt: after a foreign read of absence the last record stays
+   * the base of the person's next diff, so a later edit carries only the fields it changes. For a kind whose `merge`
+   * onto an absent file needs every field, leave it unset.
+   */
+  keepsBaseOnAbsence?: true;
 }>;
 
 /** Whether two reads returned the same content. Absence (`null`) equals only absence. */

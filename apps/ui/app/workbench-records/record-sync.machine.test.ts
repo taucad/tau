@@ -894,6 +894,163 @@ describe('recordSync', () => {
     });
   });
 
+  describe('absence', () => {
+    const afterAbsence = async (keeps: boolean) => {
+      let file: RecordBytes | null = bytesOf('name=seed;size=1');
+      const { actor, commands, context } = createRecordSync({
+        machine: createRecordSyncMachine(keeps ? { ...policy, keepsBaseOnAbsence: true } : policy),
+        ports: {
+          read: async () => ({ status: 'read', bytes: file }),
+          write: async () => ({ status: 'conflict' }),
+        },
+      });
+      actor.start();
+      await commands.read();
+      file = null;
+      await commands.read();
+      const { intended } = context();
+      actor.stop();
+      return intended;
+    };
+
+    it('should keep the last record as the base of the next diff only when the policy keeps its base on absence', async () => {
+      expect(await afterAbsence(true)).toEqual({ name: 'seed', size: '1' });
+      expect(await afterAbsence(false)).toBeUndefined();
+    });
+  });
+
+  describe('restore', () => {
+    it('should write the saved record once, on the reviewed bytes, and attribute its bytes as own', async () => {
+      const store = harness({ file: 'name=seed' });
+      await store.observe();
+      const restored = store.commands.restore({ name: 'saved' }, bytesOf('name=seed'), 'restore-1');
+
+      expect(store.writes[0]?.input).toMatchObject({
+        kind: 'restore',
+        requestId: 'restore-1',
+        data: 'name=saved',
+        expected: bytesOf('name=seed'),
+      });
+
+      await store.reply();
+
+      expect(await restored).toBe(true);
+      expect(store.published().at(-1)).toEqual(['own', 'name=saved']);
+      expect(store.emitted.findLast((event) => event.type === 'published')).toMatchObject({
+        patch: { name: 'saved' },
+      });
+      expect(store.context().intended).toEqual({ name: 'saved' });
+
+      // A watch echo of the restore's bytes is this store's own write (I5).
+      void store.commands.read();
+      await store.serve();
+
+      expect(store.context().origin).toBe('own');
+    });
+
+    it('should refuse a restore while an edit is pending, deferred or being written', async () => {
+      const store = harness({ file: 'name=seed', editDebounce: 100 });
+      await store.observe();
+      const edited = store.commands.edit({ name: 'Front' });
+
+      expect(await store.commands.restore({ name: 'saved' }, bytesOf('name=seed'))).toBe(false);
+
+      store.clock.advance(100);
+      await flush();
+
+      expect(await store.commands.restore({ name: 'saved' }, bytesOf('name=seed'))).toBe(false);
+
+      store.writes[0]?.settle({ status: 'failed', error: new Error('offline'), lost: false });
+      await flush();
+
+      expect(await edited).toBe(false);
+      expect(store.context().deferred).toEqual({ name: 'Front' });
+      expect(await store.commands.restore({ name: 'saved' }, bytesOf('name=seed'))).toBe(false);
+      expect(store.writes).toHaveLength(1);
+    });
+
+    it('should refuse a restore when the file no longer holds the reviewed bytes, or holds a refused record', async () => {
+      const store = harness({ file: 'name=theirs' });
+      await store.observe();
+
+      expect(await store.commands.restore({ name: 'saved' }, bytesOf('name=seed'))).toBe(false);
+
+      store.foreign('!broken');
+      void store.commands.read();
+      await store.serve();
+
+      expect(await store.commands.restore({ name: 'saved' }, bytesOf('!broken'))).toBe(false);
+      expect(store.writes).toHaveLength(0);
+    });
+
+    it('should end a restore that conflicts without rebasing it onto the foreign bytes', async () => {
+      const store = harness({ file: 'name=seed' });
+      await store.observe();
+      const restored = store.commands.restore({ name: 'saved' }, bytesOf('name=seed'));
+      store.foreign('name=theirs');
+      await store.reply();
+      await store.serve();
+
+      expect(await restored).toBe(false);
+      expect(store.writes).toHaveLength(1);
+      expect(store.published().at(-1)).toEqual(['foreign', 'name=theirs']);
+      expect(store.context().deferred).toBeUndefined();
+      expect(await store.commands.flush()).toBe(true);
+      expect(store.writes).toHaveLength(1);
+    });
+
+    it('should not retry a restore whose write failed, and owe nothing after it', async () => {
+      const store = harness({ file: 'name=seed' });
+      await store.observe();
+      const restored = store.commands.restore({ name: 'saved' }, bytesOf('name=seed'));
+      store.writes[0]?.settle({ status: 'failed', error: new Error('offline'), lost: false });
+      await flush();
+
+      expect(await restored).toBe(false);
+      expect(store.context().deferred).toBeUndefined();
+
+      store.clock.advance(60_000);
+      await flush();
+
+      expect(store.writes).toHaveLength(1);
+      expect(await store.commands.flush()).toBe(true);
+      expect(store.writes).toHaveLength(1);
+    });
+
+    it('should not retry a restore whose reply was lost, and read the file back to attribute it', async () => {
+      const store = harness({ file: 'name=seed' });
+      await store.observe();
+      const restored = store.commands.restore({ name: 'saved' }, bytesOf('name=seed'));
+      store.land(0);
+      store.writes[0]?.settle(lostReply());
+      await flush();
+
+      expect(await restored).toBe(false);
+      expect(store.context().deferred).toBeUndefined();
+      expect(store.context().ownWrites.map((write) => write.state)).toEqual(['lost']);
+
+      void store.commands.read();
+      await store.serve();
+      store.clock.advance(60_000);
+      await flush();
+
+      expect(store.context().origin).toBe('own');
+      expect(store.writes).toHaveLength(1);
+    });
+
+    it('should answer a restore whose owner no longer wants it with no', async () => {
+      const store = harness({ file: 'name=seed' });
+      await store.observe();
+      const restored = store.commands.restore({ name: 'saved' }, bytesOf('name=seed'));
+      store.writes[0]?.settle({ status: 'ineligible' });
+      await flush();
+
+      expect(await restored).toBe(false);
+      expect(store.context().ownWrites).toEqual([]);
+      expect(store.context().deferred).toBeUndefined();
+    });
+  });
+
   describe('the close fence (rule 7)', () => {
     it('should start no write after the close and answer what waited', async () => {
       const store = harness({ editDebounce: 100 });
@@ -1274,6 +1431,7 @@ describe('recordSync', () => {
       { type: 'edit', requestId: 'e', next: { name: `n${String(snapshot.context.nextWriteId)}` } },
       { type: 'ensure', requestId: 'c', seed: { name: 'seed' } },
       { type: 'reset', requestId: 'c', next: { name: 'fresh' }, reviewed: null },
+      { type: 'restore', requestId: 'c', next: { name: 'saved' }, reviewed: null },
       { type: 'flush', requestId: 'f' },
       { type: 'close' },
     ];

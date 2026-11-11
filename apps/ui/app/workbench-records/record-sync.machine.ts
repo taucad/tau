@@ -34,8 +34,8 @@
  *
  * The spec's `EagerWriter` is this machine's writer: after a lost reply it reads the file back before it writes again
  * (`Resolve`), and it issues its next write, or finds nothing left to write (`Forget`), in the macrostep of the
- * conflict read or read-back it waited for. A refusal, `ensure`, `reset` and the health report take no part in
- * attribution and are not modelled.
+ * conflict read or read-back it waited for. A refusal, `ensure`, `reset`, `restore` and the health report take no
+ * part in attribution and are not modelled.
  */
 /* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 import { createAsyncLogic, matchesState, setup, types } from 'xstate';
@@ -92,14 +92,14 @@ export type OwnWrite<P> = Readonly<{
 }>;
 
 type Cycle<T, P> = Readonly<{
-  kind: 'edit' | 'ensure' | 'reset';
+  kind: 'edit' | 'ensure' | 'reset' | 'restore';
   /** What started it: an edit, a flush or command, or the retry timer. */
   trigger: 'edit' | 'request' | 'timer';
   /** The record the person asked for; its fields fill what the file lacks. */
   next: T | undefined;
   /** The fields to carry onto the file's record; `undefined` owes nothing. */
   patch: P | undefined;
-  /** Reset only: the refused bytes the person reviewed. */
+  /** Reset and restore only: the bytes the person reviewed, which the write expects. */
   reviewed: RecordBytes | null;
   requests: readonly string[];
   /** Checked writes this cycle has issued. */
@@ -112,7 +112,7 @@ type Cycle<T, P> = Readonly<{
 
 type Command<T> =
   | Readonly<{ kind: 'ensure'; requestId: string; next: T }>
-  | Readonly<{ kind: 'reset'; requestId: string; next: T; reviewed: RecordBytes | null }>;
+  | Readonly<{ kind: 'reset' | 'restore'; requestId: string; next: T; reviewed: RecordBytes | null }>;
 
 /** State owned by one `recordSync` actor. */
 export type RecordSyncContext<T, P> = Readonly<{
@@ -185,6 +185,11 @@ export type RecordSyncEvent<T> =
   | { type: 'ensure'; requestId: string; seed: T }
   /** Replace a refused record; `reviewed` is the exact refused bytes the person saw. */
   | { type: 'reset'; requestId: string; next: T; reviewed: RecordBytes | null }
+  /**
+   * Replace the record shown with `next`, once, while the file still holds `reviewed`, the exact bytes the person saw.
+   * Refused while anything is owed; never rebased onto other bytes and never retried.
+   */
+  | { type: 'restore'; requestId: string; next: T; reviewed: RecordBytes | null }
   /** Write everything owed now; answered `true` once nothing is owed. */
   | { type: 'flush'; requestId: string }
   | { type: 'close' }
@@ -223,8 +228,8 @@ export type CheckedWriteInput = Readonly<{
   writeId: number;
   data: string;
   expected: RecordBytes | null;
-  kind: 'edit' | 'ensure' | 'reset';
-  /** The command's request id, for an `ensure` or a `reset`; empty for an edit. */
+  kind: 'edit' | 'ensure' | 'reset' | 'restore';
+  /** The command's request id, for an `ensure`, a `reset` or a `restore`; empty for an edit. */
   requestId: string;
 }>;
 
@@ -276,6 +281,7 @@ export const recordSyncIgnoredEvents = [
   ['intent.fenced', 'close'],
   ['write.fenced', 'ensure'],
   ['write.fenced', 'reset'],
+  ['write.fenced', 'restore'],
   ['write.fenced', 'flush'],
   ['write.fenced', 'close'],
 ] as const satisfies ReadonlyArray<readonly [state: string, eventType: string]>;
@@ -394,7 +400,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
           trigger: 'request',
           next: command.next,
           patch: undefined,
-          reviewed: command.kind === 'reset' ? command.reviewed : null,
+          reviewed: command.kind === 'ensure' ? null : command.reviewed,
           requests: [command.requestId],
           attempt: 0,
           flushed,
@@ -450,8 +456,9 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
       } else if (outcome === 'retry' && cycle.trigger === 'timer') {
         patch.retryDelay = Math.min(context.retryDelay * 2, maxRetryDelay);
       }
-    } else if (cycle.kind === 'reset') {
+    } else if (cycle.kind === 'reset' || cycle.kind === 'restore') {
       /* A saved reset replaces what was deferred when it formed; edits folded in since (a later reset, the close) stay owed. */
+      /* A restore forms only when nothing is owed, so it has nothing to replace and, unsaved, owes nothing. */
       if (saved) {
         if (latest && deferred === undefined) {
           patch.intended = context.published.record;
@@ -561,7 +568,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
     },
   }).createMachine({
     id: 'record-sync',
-    version: '1',
+    version: '2',
     /* A fault no transition modelled is recorded; the composition root then answers every request `false` (MC-R12). */
     onError: refines('Unmodelled', ({ context, event }) => ({
       context: { fault: messageOf(event.error), faults: context.faults + 1 },
@@ -689,7 +696,11 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                         readFailures: 0,
                         readBack: context.readBack === 'reading' ? 'none' : context.readBack,
                         health: { ...context.health, read: 'ok' },
-                        ...(notify && !own && !published.refusal && settledIntent
+                        ...(notify &&
+                        !own &&
+                        !published.refusal &&
+                        settledIntent &&
+                        (published.record !== undefined || policy.keepsBaseOnAbsence !== true)
                           ? { intended: published.record }
                           : {}),
                       },
@@ -811,6 +822,32 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
               },
             };
           }),
+          /* Refused unless the person's view is the settled file: nothing owed, waiting or being written. */
+          restore: refines('Unmodelled', ({ context, event, value }, enq) => {
+            if (matchesState({ write: 'fenced' }, value)) {
+              return undefined;
+            }
+            const settled =
+              !context.closeFenced &&
+              context.origin !== 'none' &&
+              context.published.refusal === undefined &&
+              context.health.read === 'ok' &&
+              context.readBack === 'none' &&
+              context.pending === undefined &&
+              context.deferred === undefined &&
+              context.cycle === undefined &&
+              context.commands.length === 0 &&
+              sameBytes(context.published.bytes, event.reviewed);
+            if (!settled) {
+              answer(enq, [event.requestId], false);
+              return {};
+            }
+            return {
+              context: {
+                commands: [{ kind: 'restore', requestId: event.requestId, next: event.next, reviewed: event.reviewed }],
+              },
+            };
+          }),
           close: refines('CloseFence', ({ context, value }, enq) => {
             if (matchesState({ write: 'fenced' }, value)) {
               return undefined;
@@ -885,7 +922,16 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                 return { target: 'awaitingBase', context: { ...formed.patch, cycle } };
               }
               const { published } = context;
-              if (cycle.kind === 'reset') {
+              if (cycle.kind === 'restore') {
+                /* One attempt on the reviewed bytes: after a conflict the file is someone else's, and the restore ends. */
+                if (
+                  published.refusal !== undefined ||
+                  !sameBytes(published.bytes, cycle.reviewed) ||
+                  cycle.attempt > 0
+                ) {
+                  return end('blocked');
+                }
+              } else if (cycle.kind === 'reset') {
                 if (
                   published.refusal?.code !== 'INVALID_RECORD' ||
                   !sameBytes(published.bytes, cycle.reviewed) ||
@@ -928,7 +974,11 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                   return end('saved');
                 }
                 data = policy.serialize(merged);
-                if (cycle.kind === 'edit' && published.record && data === policy.serialize(published.record)) {
+                if (
+                  (cycle.kind === 'edit' || cycle.kind === 'restore') &&
+                  published.record &&
+                  data === policy.serialize(published.record)
+                ) {
                   return end('saved');
                 }
               } catch (error) {
@@ -940,7 +990,9 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                   ? undefined
                   : cycle.kind === 'ensure' && cycle.next !== undefined
                     ? policy.diff(undefined, cycle.next)
-                    : cycle.patch;
+                    : cycle.kind === 'restore' && cycle.next !== undefined
+                      ? policy.diff(published.record, cycle.next)
+                      : cycle.patch;
               return {
                 target: 'writing',
                 context: reported(
@@ -958,7 +1010,7 @@ const buildRecordSyncMachine = (policy: RecordPolicy<unknown, unknown>) => {
                     inFlight: {
                       writeId,
                       data,
-                      expected: cycle.kind === 'reset' ? cycle.reviewed : published.bytes,
+                      expected: cycle.kind === 'reset' || cycle.kind === 'restore' ? cycle.reviewed : published.bytes,
                       requestId: cycle.kind === 'edit' ? '' : (cycle.requests[0] ?? ''),
                     },
                   },

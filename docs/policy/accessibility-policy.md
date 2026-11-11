@@ -3,7 +3,7 @@ title: 'Accessibility Policy'
 description: 'Guidelines for accessible UI and ARIA-driven E2E testing across the Tau codebase. Covers semantic HTML, ARIA conventions, Vitest Browser selectors, and screenshot tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-08-21'
+updated: '2026-11-10'
 related: []
 ---
 
@@ -41,6 +41,7 @@ Accessible UI ensures all users, including those using assistive technology, can
 
 - Use native landmark elements (`<nav>`, `<main>`, `<aside>`) instead of generic `<div>` with `role`.
 - Dialog-like surfaces (drawers, modals) must have `aria-labelledby` pointing to their title element.
+- Heading levels follow the document outline, never the look: one `h1` per route, and each nested heading one level below the heading that owns its region. The look comes from the `Heading` variant ([UI Policy](ui-policy.md) §3).
 
 ## E2E Test Selector Strategy
 

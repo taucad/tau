@@ -199,7 +199,7 @@ export default function AuthDesktopRoute(): React.JSX.Element {
             {handoffIcon(view)}
           </div>
 
-          <CardTitle className='text-xl font-semibold'>{handoffTitle[view]}</CardTitle>
+          <CardTitle variant='title'>{handoffTitle[view]}</CardTitle>
 
           <CardDescription>{handoffDescription[view]}</CardDescription>
         </CardHeader>

@@ -1,4 +1,35 @@
-import { setup, types } from 'xstate';
+/**
+ * The kinematics actor: one per view, spawned by the graphics actor. It holds each unit's mechanism and evaluates its
+ * pose for coordinate edits, animation playback and part drags, and it owns the viewer's part-drag gesture.
+ *
+ * ```text
+ * kinematics: idle → pressed → dragging (steady ⇄ coalescing) → idle ; dragging → cancelled → idle
+ * context: unitsById, revision, gesture?, dragAdapter?
+ * ```
+ *
+ * - **idle**: no press holds the viewer. `pressPart` claims a mouse or pen press on a movable part of an armed unit
+ *   and starts its DOM adapter, the callback logic the press carries. The adapter holds the camera, the scene root,
+ *   the drag plane and the DOM elements in its closure (none of them enters context), suspends the camera controls
+ *   while it runs and reports the pointer as `movePointer`, `releasePointer`, `losePointer` and `interruptGesture`.
+ * - **pressed**: the press has not travelled {@link kinematicsDragThresholdPx} yet, so a release is still a click.
+ * - **dragging**: the press became a drag of the grabbed link. Pointer targets coalesce for
+ *   {@link kinematicsDragMoveWindow} on the injected clock before one solve; a release solves the waiting target
+ *   first, so the pose ends where the pointer did.
+ * - **cancelled**: Escape restored the pre-drag pose; the press holds the camera until its release.
+ *
+ * The adapter is built per press by the viewer's pointer-down handler and arrives in `pressPart`, as the canvas actor's
+ * host arrives in `hostCreated`: the graphics actor spawns this actor in its context factory, so no composition root
+ * provides a `dragAdapter` slot by name yet; the default slot throws. `gesture` and `dragAdapter` are optional root
+ * keys rather than per-state context (MC-R26), as in the viewer's other machines.
+ *
+ * A drag that ends (kept on release, or restored on cancel) emits `poseSettled` once, so a listener can re-measure the
+ * unit's bounds after the pose stops moving. Every fact here is ephemeral and memory-only: it is derived from the
+ * presented mechanism and the pointer, and never persisted or seeded.
+ *
+ * @module
+ */
+import { createCallbackLogic, setup, types } from 'xstate';
+import type { ActorRefFrom, CallbackActorLogic, EnqueueObject, SystemRegistry } from 'xstate';
 import {
   evaluatePose,
   findLinkByComponent,
@@ -157,13 +188,83 @@ export type KinematicsUnitState = Readonly<{
 }>;
 
 /**
- * Context of the kinematics machine: the state of each unit by ID and the revision counter.
+ * CSS pixels a press on a movable part travels before it becomes a drag rather than a click.
+ *
+ * @public
+ */
+export const kinematicsDragThresholdPx = 4;
+
+/**
+ * How long the drag collects pointer targets before it solves once for the latest, on the actor's clock. About one
+ * display frame, so a fast pointer costs one solve per frame rather than one per pointer event. Milliseconds.
+ *
+ * @public
+ */
+export const kinematicsDragMoveWindow = 16;
+
+/**
+ * Commands the kinematics actor sends to the drag adapter it started for a press.
+ *
+ * @public
+ */
+export type KinematicsDragAdapterCommand =
+  /** The press became a drag: capture the pointer, show the grabbing cursor and hold the viewer's hover on the part. */
+  { type: 'dragStarted' };
+
+/**
+ * The DOM adapter of one press: callback logic built around the viewer's camera, scene root, drag plane and DOM
+ * elements, which stay in its closure. The kinematics actor starts it from `pressPart` and stops it when the press
+ * ends; stopping restores the camera controls, the cursor and the pointer capture.
+ *
+ * @public
+ */
+export type KinematicsDragAdapterLogic = CallbackActorLogic<KinematicsDragAdapterCommand, undefined>;
+
+/**
+ * The press the kinematics actor is following: the part and pointer it claimed and where it started.
+ *
+ * @public
+ */
+export type KinematicsGesture = Readonly<{
+  unitId: string;
+  componentId: string;
+  pointerId: number;
+  /** The pressed client point, from which the drag threshold is measured. */
+  start: Readonly<{ clientX: number; clientY: number }>;
+  /** The grabbed surface point in mechanism space at the pose of the press. */
+  point: SpatialVector;
+  /** The latest pointer target waiting for the coalescing window, in mechanism space. */
+  pendingTarget: SpatialVector | undefined;
+}>;
+
+/**
+ * Context of the kinematics machine: the state of each unit by ID, the revision counter and the press it follows.
  *
  * @public
  */
 export type KinematicsMachineContext = {
   unitsById: Record<string, KinematicsUnitState>;
   /** Monotonic source of unit revisions, so a cleared and reloaded unit never repeats one. */
+  revision: number;
+  /** The claimed press; set outside `idle`. */
+  gesture: KinematicsGesture | undefined;
+  /** The press's DOM adapter, a child this actor started; set outside `idle`. */
+  dragAdapter: ActorRefFrom<KinematicsDragAdapterLogic> | undefined;
+};
+
+/**
+ * Events the kinematics machine emits.
+ *
+ * @public
+ */
+export type KinematicsEmitted = {
+  /**
+   * A drag of the unit ended and its pose stopped moving: kept where the pointer released it, or restored by a
+   * cancel. Emitted once per drag, after the final pose is in context.
+   */
+  type: 'poseSettled';
+  unitId: string;
+  /** The unit's pose revision once settled. */
   revision: number;
 };
 
@@ -200,7 +301,41 @@ export type KinematicsMachineEvent =
   /** Arms or disarms viewer drags for the unit; disarming during a drag cancels it like `dragCancel`. */
   | { type: 'setDragEnabled'; unitId: string; enabled: boolean }
   /** The components a pane row points at; an empty list clears the highlight. */
-  | { type: 'setHoveredComponents'; unitId: string; componentIds: readonly string[] };
+  | { type: 'setHoveredComponents'; unitId: string; componentIds: readonly string[] }
+  /**
+   * A primary mouse or pen press on a component in the viewer. Claimed only in `idle`, for a movable link of an armed
+   * unit: the actor then starts `adapter` for the press. `point` is the grabbed surface point in mechanism space.
+   */
+  | {
+      type: 'pressPart';
+      unitId: string;
+      componentId: string;
+      pointerId: number;
+      clientX: number;
+      clientY: number;
+      point: SpatialVector;
+      adapter: KinematicsDragAdapterLogic;
+    }
+  /**
+   * The pressed pointer moved. `buttons` is the DOM bitmask (bit 0 is the primary button); `target` is the pointer on
+   * the drag plane in mechanism space, `undefined` when the pointer ray misses the plane.
+   */
+  | {
+      type: 'movePointer';
+      pointerId: number;
+      clientX: number;
+      clientY: number;
+      buttons: number;
+      target: SpatialVector | undefined;
+    }
+  /** The pressed pointer was released: a drag keeps its pose. */
+  | { type: 'releasePointer'; pointerId: number }
+  /** The browser took the pressed pointer away (cancelled, or capture lost): a drag is cancelled. */
+  | { type: 'losePointer'; pointerId: number }
+  /** The window lost focus or the tab was hidden, so the release may never arrive: a drag is cancelled. */
+  | { type: 'interruptGesture' }
+  /** Escape: a drag is cancelled and the press holds the camera until its release. */
+  | { type: 'cancelGesture' };
 
 const stoppedPlayback: KinematicsPlayback = { status: 'stopped', animationId: undefined, time: 0, speed: 1 };
 
@@ -376,21 +511,332 @@ function assignUnit(
   };
 }
 
+/** The adapter slot is filled per press from `pressPart`; nothing starts it from the registry. */
+const missingDragAdapter: KinematicsDragAdapterLogic = createCallbackLogic<KinematicsDragAdapterCommand, undefined>(
+  () => {
+    throw new Error('The kinematics drag adapter starts from pressPart, with the viewer objects it was built around.');
+  },
+);
+
+const kinematicsActors = { dragAdapter: missingDragAdapter };
+
+type KinematicsEnqueue = EnqueueObject<
+  KinematicsMachineEvent,
+  KinematicsEmitted,
+  SystemRegistry,
+  typeof kinematicsActors
+>;
+
+type KinematicsPatch = Partial<KinematicsMachineContext>;
+
+/** The link a press on `componentId` would drag: armed, in the mechanism and not grounded; otherwise `undefined`. */
+const findDraggableLink = (unit: KinematicsUnitState, componentId: string): string | undefined => {
+  const link =
+    unit.mechanism === undefined ? undefined : findLinkByComponent({ mechanism: unit.mechanism, componentId });
+  // Drags start only while the pane arms them, and a grounded link (the root, or welded to it) never moves.
+  return !unit.dragEnabled ||
+    unit.mechanism === undefined ||
+    link === undefined ||
+    isGroundedKinematicsLink(unit.mechanism, link)
+    ? undefined
+    : link;
+};
+
+/** Start dragging the link that owns `componentId` from `point`; `undefined` when the unit cannot drag it. */
+const startDrag = (
+  context: KinematicsMachineContext,
+  { unitId, componentId, point }: Readonly<{ unitId: string; componentId: string; point: SpatialVector }>,
+): KinematicsPatch | undefined => {
+  const unit = getKinematicsUnitState(context, unitId);
+  const link = findDraggableLink(unit, componentId);
+  if (link === undefined) {
+    return undefined;
+  }
+  const linkTransform = unit.pose?.linkTransforms[link];
+  const dragging: KinematicsUnitState = {
+    ...unit,
+    playback: pausedWhilePlaying(unit.playback),
+    drag: {
+      componentId,
+      link,
+      localPoint: linkTransform === undefined ? point : toLinkLocal(linkTransform, point),
+      target: point,
+      status: 'solved',
+      startCoordinates: unit.coordinates,
+    },
+  };
+  return assignUnit(context, unitId, dragging);
+};
+
+/** Solve the unit's drag toward `target`; `{}` when the unit has no drag. */
+const moveDrag = (context: KinematicsMachineContext, unitId: string, target: SpatialVector): KinematicsPatch => {
+  const unit = getKinematicsUnitState(context, unitId);
+  const { drag, mechanism } = unit;
+  if (drag === undefined || mechanism === undefined) {
+    return {};
+  }
+  const outcome = solvePose({
+    mechanism,
+    seed: unit.coordinates,
+    goals: [{ type: 'point', link: drag.link, localPoint: drag.localPoint, target }],
+  });
+  if (outcome.status === 'invalid') {
+    return assignUnit(context, unitId, { ...unit, issues: outcome.issues, drag: { ...drag, target } });
+  }
+  // A blocked solve still applies its best limit-satisfying pose, so the part follows as far as it can.
+  const posed = withPose(unit, driverCoordinates(unit.degreesOfFreedom, outcome.pose.coordinates));
+  return assignUnit(context, unitId, {
+    ...posed,
+    drag: {
+      ...drag,
+      target,
+      status: outcome.status,
+      reason: outcome.status === 'blocked' ? outcome.reason : undefined,
+    },
+  });
+};
+
+/** Report the settled pose of a unit whose drag just ended, read from the context the ending produced. */
+const emitPoseSettled = (next: KinematicsMachineContext, unitId: string, enq: KinematicsEnqueue): void => {
+  enq.emit({ type: 'poseSettled', unitId, revision: getKinematicsUnitState(next, unitId).revision });
+};
+
+/** End the unit's drag where it is and emit `poseSettled`; `{}` when the unit has no drag. */
+const endDrag = (context: KinematicsMachineContext, unitId: string, enq: KinematicsEnqueue): KinematicsPatch => {
+  const unit = getKinematicsUnitState(context, unitId);
+  if (unit.drag === undefined) {
+    return {};
+  }
+  const patch = assignUnit(context, unitId, { ...unit, drag: undefined });
+  emitPoseSettled({ ...context, ...patch }, unitId, enq);
+  return patch;
+};
+
+/** Cancel the unit's drag, restore its pre-drag drivers and emit `poseSettled`; `{}` when the unit has no drag. */
+const cancelDrag = (context: KinematicsMachineContext, unitId: string, enq: KinematicsEnqueue): KinematicsPatch => {
+  const unit = getKinematicsUnitState(context, unitId);
+  if (unit.drag === undefined) {
+    return {};
+  }
+  const patch = assignUnit(context, unitId, withPose({ ...unit, drag: undefined }, unit.drag.startCoordinates));
+  emitPoseSettled({ ...context, ...patch }, unitId, enq);
+  return patch;
+};
+
+/** Solve the target still waiting for its coalescing window, so the pose reaches where the pointer last was. */
+const flushPendingTarget = (context: KinematicsMachineContext): KinematicsMachineContext => {
+  const { gesture } = context;
+  if (gesture?.pendingTarget === undefined) {
+    return context;
+  }
+  const moved = { ...context, ...moveDrag(context, gesture.unitId, gesture.pendingTarget) };
+  return { ...moved, gesture: { ...gesture, pendingTarget: undefined } };
+};
+
+/** The press is over: its adapter stops (restoring the camera, cursor and capture) and the actor returns to idle. */
+const finishGesture = (context: KinematicsMachineContext, patch: KinematicsPatch, enq: KinematicsEnqueue) => {
+  if (context.dragAdapter) {
+    enq.stop(context.dragAdapter);
+  }
+  return { target: '#kinematics.idle', context: { ...patch, gesture: undefined, dragAdapter: undefined } } as const;
+};
+
+/** Whether a pointer event belongs to the claimed press; another pointer's events are not this gesture's. */
+const isGesturePointer = (context: KinematicsMachineContext, pointerId: number): boolean =>
+  context.gesture?.pointerId === pointerId;
+
+/** A move without the primary button (bit 0 of `buttons`): the release happened where the page could not see it. */
+const isReleasedMove = (buttons: number): boolean => buttons % 2 === 0;
+
+/** Release a drag: solve the waiting target, keep the pose and end the press. */
+const releaseDrag = (context: KinematicsMachineContext, enq: KinematicsEnqueue) => {
+  const flushed = flushPendingTarget(context);
+  const { gesture } = flushed;
+  const patch: KinematicsPatch = {
+    unitsById: flushed.unitsById,
+    revision: flushed.revision,
+    ...(gesture === undefined ? {} : endDrag(flushed, gesture.unitId, enq)),
+  };
+  return finishGesture(context, patch, enq);
+};
+
+/** Cancel a drag whose release will not arrive and end the press. */
+const abortDrag = (context: KinematicsMachineContext, enq: KinematicsEnqueue) =>
+  finishGesture(context, context.gesture === undefined ? {} : cancelDrag(context, context.gesture.unitId, enq), enq);
+
 /**
  * State machine that holds each unit's mechanism and evaluates its pose for coordinate edits, animation playback and
- * part drags.
+ * part drags, and follows the viewer's part-drag gesture.
  *
  * @public
  */
 export const kinematicsMachine = setup({
+  actors: kinematicsActors,
   schemas: {
     context: types<KinematicsMachineContext>(),
     events: eventSchemas<KinematicsMachineEvent>(),
+    emitted: eventSchemas<KinematicsEmitted>(),
     input: types<KinematicsMachineInput>(),
+    tags: types<'dragging' | 'pressHeld'>(),
   },
 }).createMachine({
   id: 'kinematics',
-  context: { unitsById: {}, revision: 0 },
+  context: { unitsById: {}, revision: 0, gesture: undefined, dragAdapter: undefined },
+  initial: 'idle',
+  states: {
+    idle: {
+      on: {
+        pressPart: ({ context, event }, enq) => {
+          if (findDraggableLink(getKinematicsUnitState(context, event.unitId), event.componentId) === undefined) {
+            // Refused: the press stays with the camera and the click (unarmed, grounded or not in the mechanism).
+            return {};
+          }
+          const dragAdapter = enq.spawn(event.adapter, { id: 'dragAdapter' });
+          const gesture: KinematicsGesture = {
+            unitId: event.unitId,
+            componentId: event.componentId,
+            pointerId: event.pointerId,
+            start: { clientX: event.clientX, clientY: event.clientY },
+            point: event.point,
+            pendingTarget: undefined,
+          };
+          return { target: 'pressed', context: { gesture, dragAdapter } };
+        },
+      },
+    },
+    pressed: {
+      tags: ['pressHeld'],
+      on: {
+        movePointer: ({ context, event }, enq) => {
+          const { gesture } = context;
+          if (gesture === undefined || !isGesturePointer(context, event.pointerId)) {
+            // Another pointer's move: not this press's.
+            return {};
+          }
+          if (isReleasedMove(event.buttons)) {
+            return finishGesture(context, {}, enq);
+          }
+          const travelled = Math.hypot(event.clientX - gesture.start.clientX, event.clientY - gesture.start.clientY);
+          if (travelled < kinematicsDragThresholdPx) {
+            // Still a click: nothing moves until the press travels the threshold.
+            return {};
+          }
+          const started = startDrag(context, gesture);
+          // The press became a gesture either way: capture, cursor, hover and the click guard after release.
+          if (context.dragAdapter) {
+            enq.sendTo(context.dragAdapter, { type: 'dragStarted' });
+          }
+          if (started === undefined) {
+            // The unit was disarmed or lost the link since the press: hold the press, as a cancelled drag does.
+            return { target: 'cancelled' };
+          }
+          return {
+            target: event.target === undefined ? 'dragging' : 'dragging.coalescing',
+            context: { ...started, gesture: { ...gesture, pendingTarget: event.target } },
+          };
+        },
+        releasePointer: ({ context, event }, enq) =>
+          // Another pointer's release is not this press's.
+          isGesturePointer(context, event.pointerId) ? finishGesture(context, {}, enq) : {},
+        losePointer: ({ context, event }, enq) =>
+          // Another pointer's loss is not this press's.
+          isGesturePointer(context, event.pointerId) ? finishGesture(context, {}, enq) : {},
+        interruptGesture: ({ context }, enq) => finishGesture(context, {}, enq),
+      },
+    },
+    dragging: {
+      tags: ['dragging', 'pressHeld'],
+      initial: 'steady',
+      states: {
+        steady: {
+          on: {
+            movePointer: ({ context, event }, enq) => {
+              if (!isGesturePointer(context, event.pointerId) || context.gesture === undefined) {
+                // Another pointer's move: not this press's.
+                return {};
+              }
+              if (isReleasedMove(event.buttons)) {
+                return releaseDrag(context, enq);
+              }
+              if (event.target === undefined) {
+                // The pointer ray misses the drag plane: the part stays where it is.
+                return {};
+              }
+              return {
+                target: 'coalescing',
+                context: { gesture: { ...context.gesture, pendingTarget: event.target } },
+              };
+            },
+          },
+        },
+        coalescing: {
+          after: {
+            [kinematicsDragMoveWindow]: ({ context }) => {
+              const flushed = flushPendingTarget(context);
+              return {
+                target: 'steady',
+                context: { unitsById: flushed.unitsById, revision: flushed.revision, gesture: flushed.gesture },
+              };
+            },
+          },
+          on: {
+            movePointer: ({ context, event }, enq) => {
+              if (!isGesturePointer(context, event.pointerId) || context.gesture === undefined) {
+                // Another pointer's move: not this press's.
+                return {};
+              }
+              if (isReleasedMove(event.buttons)) {
+                return releaseDrag(context, enq);
+              }
+              if (event.target === undefined) {
+                // The pointer ray misses the drag plane: the waiting target stays the latest one.
+                return {};
+              }
+              // The window keeps running: the solve waits for it, then takes this latest target.
+              return { context: { gesture: { ...context.gesture, pendingTarget: event.target } } };
+            },
+          },
+        },
+      },
+      on: {
+        releasePointer: ({ context, event }, enq) =>
+          // Another pointer's release is not this press's.
+          isGesturePointer(context, event.pointerId) ? releaseDrag(context, enq) : {},
+        losePointer: ({ context, event }, enq) =>
+          // Another pointer's loss is not this press's.
+          isGesturePointer(context, event.pointerId) ? abortDrag(context, enq) : {},
+        interruptGesture: ({ context }, enq) => abortDrag(context, enq),
+        cancelGesture: ({ context }, enq) => {
+          const { gesture } = context;
+          const patch = gesture === undefined ? {} : cancelDrag(context, gesture.unitId, enq);
+          return {
+            target: '#kinematics.cancelled',
+            context: {
+              ...patch,
+              gesture: gesture === undefined ? undefined : { ...gesture, pendingTarget: undefined },
+            },
+          };
+        },
+      },
+    },
+    cancelled: {
+      tags: ['pressHeld'],
+      on: {
+        movePointer: ({ context, event }, enq) =>
+          // Moves after a cancel change nothing; only one without the primary button ends the press.
+          isGesturePointer(context, event.pointerId) && isReleasedMove(event.buttons)
+            ? finishGesture(context, {}, enq)
+            : {},
+        releasePointer: ({ context, event }, enq) =>
+          // Another pointer's release is not this press's.
+          isGesturePointer(context, event.pointerId) ? finishGesture(context, {}, enq) : {},
+        losePointer: ({ context, event }, enq) =>
+          // Another pointer's loss is not this press's.
+          isGesturePointer(context, event.pointerId) ? finishGesture(context, {}, enq) : {},
+        interruptGesture: ({ context }, enq) => finishGesture(context, {}, enq),
+      },
+    },
+  },
   on: {
     loadMechanism: ({ context, event }) => {
       const unit = getKinematicsUnitState(context, event.unitId);
@@ -416,7 +862,7 @@ export const kinematicsMachine = setup({
       );
       return { context: assignUnit(context, event.unitId, loaded) };
     },
-    clearMechanism: ({ context, event }) => {
+    clearMechanism: ({ context, event }, enq) => {
       const unit = getKinematicsUnitState(context, event.unitId);
       if (unit.mechanism === undefined) {
         return {};
@@ -426,7 +872,9 @@ export const kinematicsMachine = setup({
         dragEnabled: unit.dragEnabled,
         playback: { ...stoppedPlayback, speed: unit.playback.speed },
       };
-      return { context: assignUnit(context, event.unitId, cleared) };
+      const patch = assignUnit(context, event.unitId, cleared);
+      // The viewer clears a unit as it unmounts it: a press on that unit ends with it and gives the camera back.
+      return context.gesture?.unitId === event.unitId ? finishGesture(context, patch, enq) : { context: patch };
     },
     setCoordinate: ({ context, event }) => {
       const unit = getKinematicsUnitState(context, event.unitId);
@@ -531,78 +979,13 @@ export const kinematicsMachine = setup({
       return { context: assignUnit(context, event.unitId, ticked) };
     },
     dragStart: ({ context, event }) => {
-      const unit = getKinematicsUnitState(context, event.unitId);
-      const link =
-        unit.mechanism === undefined
-          ? undefined
-          : findLinkByComponent({ mechanism: unit.mechanism, componentId: event.componentId });
-      // Drags start only while the pane arms them, and a grounded link (the root, or welded to it) never moves.
-      if (
-        !unit.dragEnabled ||
-        unit.mechanism === undefined ||
-        link === undefined ||
-        isGroundedKinematicsLink(unit.mechanism, link)
-      ) {
-        return {};
-      }
-      const linkTransform = unit.pose?.linkTransforms[link];
-      const dragging: KinematicsUnitState = {
-        ...unit,
-        playback: pausedWhilePlaying(unit.playback),
-        drag: {
-          componentId: event.componentId,
-          link,
-          localPoint: linkTransform === undefined ? event.point : toLinkLocal(linkTransform, event.point),
-          target: event.point,
-          status: 'solved',
-          startCoordinates: unit.coordinates,
-        },
-      };
-      return { context: assignUnit(context, event.unitId, dragging) };
+      const started = startDrag(context, event);
+      // Ignored unless the pane arms drags and the component is on a movable link.
+      return started === undefined ? {} : { context: started };
     },
-    dragMove: ({ context, event }) => {
-      const unit = getKinematicsUnitState(context, event.unitId);
-      const { drag, mechanism } = unit;
-      if (drag === undefined || mechanism === undefined) {
-        return {};
-      }
-      const outcome = solvePose({
-        mechanism,
-        seed: unit.coordinates,
-        goals: [{ type: 'point', link: drag.link, localPoint: drag.localPoint, target: event.target }],
-      });
-      if (outcome.status === 'invalid') {
-        const rejected = { ...unit, issues: outcome.issues, drag: { ...drag, target: event.target } };
-        return { context: assignUnit(context, event.unitId, rejected) };
-      }
-      // A blocked solve still applies its best limit-satisfying pose, so the part follows as far as it can.
-      const posed = withPose(unit, driverCoordinates(unit.degreesOfFreedom, outcome.pose.coordinates));
-      const moved: KinematicsUnitState = {
-        ...posed,
-        drag: {
-          ...drag,
-          target: event.target,
-          status: outcome.status,
-          reason: outcome.status === 'blocked' ? outcome.reason : undefined,
-        },
-      };
-      return { context: assignUnit(context, event.unitId, moved) };
-    },
-    dragEnd: ({ context, event }) => {
-      const unit = getKinematicsUnitState(context, event.unitId);
-      if (unit.drag === undefined) {
-        return {};
-      }
-      return { context: assignUnit(context, event.unitId, { ...unit, drag: undefined }) };
-    },
-    dragCancel: ({ context, event }) => {
-      const unit = getKinematicsUnitState(context, event.unitId);
-      if (unit.drag === undefined) {
-        return {};
-      }
-      const restored = withPose({ ...unit, drag: undefined }, unit.drag.startCoordinates);
-      return { context: assignUnit(context, event.unitId, restored) };
-    },
+    dragMove: ({ context, event }) => ({ context: moveDrag(context, event.unitId, event.target) }),
+    dragEnd: ({ context, event }, enq) => ({ context: endDrag(context, event.unitId, enq) }),
+    dragCancel: ({ context, event }, enq) => ({ context: cancelDrag(context, event.unitId, enq) }),
     setHoveredComponents: ({ context, event }) => {
       const unit = getKinematicsUnitState(context, event.unitId);
       const isSame =
@@ -614,15 +997,90 @@ export const kinematicsMachine = setup({
       const hoveredComponentIds = event.componentIds.length === 0 ? noComponents : event.componentIds;
       return { context: assignUnit(context, event.unitId, { ...unit, hoveredComponentIds }) };
     },
-    setDragEnabled: ({ context, event }) => {
+    setDragEnabled: ({ context, event }, enq) => {
       const unit = getKinematicsUnitState(context, event.unitId);
       if (unit.dragEnabled === event.enabled) {
         return {};
       }
       const next = { ...unit, dragEnabled: event.enabled, drag: undefined };
-      // Disarming mid-drag cancels the drag exactly like `dragCancel`: the pre-drag drivers come back.
+      // Disarming mid-drag cancels the drag exactly like `dragCancel`: the pre-drag drivers come back. A press in
+      // flight holds the camera until its release, as after Escape.
       const armed = unit.drag === undefined ? next : withPose(next, unit.drag.startCoordinates);
-      return { context: assignUnit(context, event.unitId, armed) };
+      const patch = assignUnit(context, event.unitId, armed);
+      if (unit.drag !== undefined) {
+        emitPoseSettled({ ...context, ...patch }, event.unitId, enq);
+      }
+      return { context: patch };
     },
   },
 });
+
+/**
+ * The `[state, eventType]` pairs {@link kinematicsMachine} leaves unanswered (MC-R17): pointer reports with no press
+ * to follow, a second press while one holds the viewer, and Escape with no drag to cancel.
+ *
+ * @public
+ */
+export const kinematicsIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  ['idle', 'movePointer'],
+  ['idle', 'releasePointer'],
+  ['idle', 'losePointer'],
+  ['idle', 'interruptGesture'],
+  ['idle', 'cancelGesture'],
+  ['pressed', 'pressPart'],
+  ['pressed', 'cancelGesture'],
+  ['dragging.steady', 'pressPart'],
+  ['dragging.coalescing', 'pressPart'],
+  ['cancelled', 'pressPart'],
+  ['cancelled', 'cancelGesture'],
+];
+
+/**
+ * Every {@link KinematicsMachineEvent} type, in the union's order.
+ *
+ * @public
+ */
+export const kinematicsEventTypes = [
+  'loadMechanism',
+  'clearMechanism',
+  'setCoordinate',
+  'reset',
+  'play',
+  'selectAnimation',
+  'pause',
+  'seek',
+  'setPlaybackSpeed',
+  'tick',
+  'dragStart',
+  'dragMove',
+  'dragEnd',
+  'dragCancel',
+  'setDragEnabled',
+  'setHoveredComponents',
+  'pressPart',
+  'movePointer',
+  'releasePointer',
+  'losePointer',
+  'interruptGesture',
+  'cancelGesture',
+] as const satisfies ReadonlyArray<KinematicsMachineEvent['type']>;
+
+/**
+ * Whether the kinematics actor is dragging a part: a press that travelled the threshold and was not cancelled.
+ *
+ * @param snapshot - The kinematics actor's snapshot.
+ * @returns `true` while a drag follows the pointer.
+ * @public
+ */
+export const selectKinematicsDragging = (snapshot: Readonly<{ hasTag: (tag: 'dragging') => boolean }>): boolean =>
+  snapshot.hasTag('dragging');
+
+/**
+ * Whether a press holds the viewer (pressed, dragging or cancelled), so the kinematics actor claims no other press.
+ *
+ * @param snapshot - The kinematics actor's snapshot.
+ * @returns `true` from a claimed press until its release.
+ * @public
+ */
+export const selectKinematicsPressHeld = (snapshot: Readonly<{ hasTag: (tag: 'pressHeld') => boolean }>): boolean =>
+  snapshot.hasTag('pressHeld');

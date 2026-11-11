@@ -183,18 +183,14 @@ describe('ledgerSettlements PostgreSQL foundation', () => {
     const pseudonym = pseudonymKey(Uint8Array.from(randomBytes(32)));
     const authority = { policyEpoch: 'epoch-1', protection: 'free', project: 'project-a' } as const;
     const rows = await Promise.all(
-      charged.map(async ({ operation, receipt }, index) => {
+      charged.map(async ({ operation, receipt }) => {
         const evidence = await settlementEvidence(
           { operation, receipt, normalization: 'test-v1' },
           fixture.userId,
           authority,
         );
-        const { span } = langfuseObservation(
-          evidence,
-          { environment: 'synthetic', receipt: `evr_${index}`, protection: 'free' },
-          pseudonym,
-        );
-        return rowOf(span);
+        const observation = langfuseObservation(evidence, { environment: 'synthetic', protection: 'free' }, pseudonym);
+        return rowOf(observation!.spans[0]!);
       }),
     );
     expect(await reconcileLedger(settlements, rows, 'synthetic')).toEqual({

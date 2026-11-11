@@ -36,10 +36,11 @@ import {
   hydratesFromOthersPerOwnerPerDay,
   hydratesPerCallerPerDay,
   isRemovableRef,
+  linkedForges,
   quotaRefusalSentence,
   repositoryStoreKey,
 } from '@taucad/api-git-core/git.constants';
-import type { GitService as GitSmartService, QuotaAudience } from '@taucad/api-git-core/git.constants';
+import type { GitService as GitSmartService, LinkedForge, QuotaAudience } from '@taucad/api-git-core/git.constants';
 import { OwnerInFlightGate } from '@taucad/api-git-core/admission/owner-in-flight';
 import { advertiseReferences } from '@taucad/api-git-core/advertisement';
 import type { AdvertisementDialect } from '@taucad/api-git-core/advertisement';
@@ -762,10 +763,13 @@ export class GitRepositoryService implements PublicationRepositoryLeases {
     const { access } = args;
     const release = await this.admitRpc(access, 'receive_pack');
     try {
-      const facts = await this.grantFacts(access, { committedBy: args.committedBy, authoritative: true });
+      const [facts, forge] = await Promise.all([
+        this.grantFacts(access, { committedBy: args.committedBy, authoritative: true }),
+        this.linkedForge(access.projectId),
+      ]);
       await this.spendHydrate(access, 'receive_pack');
       const result = await this.forwardWrite(access, async () =>
-        this.executor.receivePack(facts, {
+        this.executor.receivePack(forge === undefined ? facts : { ...facts, forge }, {
           body: args.body,
           gzipped: args.gzipped,
           ...(args.abort === undefined ? {} : { abort: args.abort }),
@@ -1193,6 +1197,20 @@ export class GitRepositoryService implements PublicationRepositoryLeases {
       recordedGeneration: row?.derivedGeneration ?? 0,
       route,
     };
+  }
+
+  /**
+   * The forge a project is linked to (B4), from `project.origin`: a push's
+   * authorship check passes commits Tau did not record only on such a
+   * project. Read with the push, never from the request.
+   */
+  private async linkedForge(projectId: string): Promise<LinkedForge | undefined> {
+    const [row] = await this.databaseService.database
+      .select({ origin: project.origin })
+      .from(project)
+      .where(eq(project.id, projectId))
+      .limit(1);
+    return linkedForges.find((forge) => forge === row?.origin);
   }
 
   /**

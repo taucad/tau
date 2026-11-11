@@ -1611,6 +1611,11 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       case 'syncNow':
         actor.send({ type: 'syncNow' });
         break;
+      /* Audit R6: the page's signed-in person changed; the remote is read afresh under the new session. */
+      case 'sessionChanged':
+        actor.send({ type: 'remote', event: { type: 'sessionChanged' } });
+        actor.send({ type: 'sync', event: { type: 'sessionChanged' } });
+        break;
       /* XD3, rounds 18 and 19: another device's run has been quiet here a while; pulls show whether it stayed quiet.
        * Round 27: through the placement's pull, so the page hears where this device cannot pull the chat at all. */
       case 'pullRemote': {

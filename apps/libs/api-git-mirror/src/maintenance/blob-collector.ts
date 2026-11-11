@@ -38,18 +38,35 @@ import { assertSingletonProcessGroup } from '#maintenance/singleton.js';
 /** Blobs removed in one pass. Bounded so an operator run has a knowable cost. */
 export const zeroCountBlobBatch = 500;
 
+/**
+ * Above this many unreferenced blobs a pass deletes nothing unless the operator
+ * confirms it (`collect-blobs --confirm`). It is a human check on an
+ * irreversible delete across both tiers, not a capacity limit, and it mirrors
+ * the purge's object bound: the collector trusts `blob_ref` alone, so a bug or
+ * a manual change that zeroes reference counts would otherwise turn the daily
+ * pass into a quiet deleter of a batch of user content a day (R11). Steady
+ * state unpublishes far fewer blobs than this between two daily passes.
+ */
+export const maxCollectedBlobsWithoutConfirmation = 500;
+
 export type BlobCollectionResult = {
   /** Zero-count blobs this pass considered. */
   planned: readonly string[];
   /** Blobs whose row and bytes were removed. */
   collected: readonly string[];
   bytes: number;
+  /** The backlog was above {@link maxCollectedBlobsWithoutConfirmation} and the run was not confirmed. */
+  refused: boolean;
 };
 
 export type BlobCollectionArguments = {
   database: DatabaseType;
   driver: ObjectStorageService;
   batchSize?: number;
+  /** The operator passed `--confirm`, allowing a pass above the bound. */
+  confirm?: boolean;
+  /** Overrides {@link maxCollectedBlobsWithoutConfirmation}; the suite lowers it. */
+  blobBound?: number;
   dryRun?: boolean;
   report?: (line: string) => void;
 };
@@ -58,17 +75,31 @@ export const collectZeroCountBlobs = async (args: BlobCollectionArguments): Prom
   assertSingletonProcessGroup();
 
   const report = args.report ?? ((): void => undefined);
-  const candidates = await args.database.query.blobRef.findMany({
+  const batch = args.batchSize ?? zeroCountBlobBatch;
+  const bound =
+    args.confirm === true ? Number.POSITIVE_INFINITY : (args.blobBound ?? maxCollectedBlobsWithoutConfirmation);
+  // One row past the bound is enough to know the backlog is above it.
+  const rows = await args.database.query.blobRef.findMany({
     where: eq(blobRef.refcount, 0),
-    limit: args.batchSize ?? zeroCountBlobBatch,
+    limit: Number.isFinite(bound) ? Math.max(batch, bound + 1) : batch,
   });
+  const candidates = rows.slice(0, batch);
 
   const planned = candidates.map((candidate) => candidate.sha256);
   const plannedBytes = candidates.reduce((total, candidate) => total + Number(candidate.sizeBytes), 0);
-  report(`blob collection plan: ${String(planned.length)} unreferenced blobs, ${String(plannedBytes)} bytes`);
+  report(
+    `blob collection plan: ${String(planned.length)}${rows.length > batch ? '+' : ''} unreferenced blobs, ${String(plannedBytes)} bytes`,
+  );
 
   if (args.dryRun === true || planned.length === 0) {
-    return { planned, collected: [], bytes: 0 };
+    return { planned, collected: [], bytes: 0, refused: false };
+  }
+
+  if (rows.length > bound) {
+    report(
+      `refusing blob collection: more than ${String(bound)} unreferenced blobs is above the bound; check blob_ref, then re-run collect-blobs --confirm`,
+    );
+    return { planned, collected: [], bytes: 0, refused: true };
   }
 
   const removed = await args.database.transaction(async (transaction) => {
@@ -92,5 +123,5 @@ export const collectZeroCountBlobs = async (args: BlobCollectionArguments): Prom
 
   const bytes = removed.reduce((total, row) => total + Number(row.sizeBytes), 0);
   report(`collected ${String(collected.length)} blobs, ${String(bytes)} bytes`);
-  return { planned, collected, bytes };
+  return { planned, collected, bytes, refused: false };
 };

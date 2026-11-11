@@ -1,13 +1,17 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import * as Cookies from 'es-cookie';
 import Home, { handle, meta } from '#routes/_index/route.js';
 
 vi.mock('#components/project-library/project-library.js', () => ({
-  ProjectLibrary: () => <div data-testid='project-library' />,
+  ProjectLibrary: ({ emptyContent }: { readonly emptyContent?: React.ReactNode }) => (
+    <div data-testid='project-library'>{emptyContent}</div>
+  ),
 }));
+
+vi.mock('#components/project-grid.js', () => ({ CommunityProjectGrid: () => <ul aria-label='examples' /> }));
 
 vi.mock('#routes/_index/homepage-chat-hero.js', () => ({
   HomepageChatHero: () => <div data-testid='homepage-chat-hero' />,
@@ -25,6 +29,15 @@ describe('Home route', () => {
 
     const hero = screen.getByTestId('homepage-chat-hero');
     expect(hero.nextElementSibling).toBe(screen.getByTestId('project-library'));
+  });
+
+  it('should offer the community builds as the empty library content', () => {
+    renderHome();
+
+    const library = within(screen.getByTestId('project-library'));
+    expect(library.getByRole('heading', { level: 2, name: 'Built with Tau' })).toBeInTheDocument();
+    expect(library.getByRole('list', { name: 'examples' })).toBeInTheDocument();
+    expect(library.getByRole('link', { name: 'View all' })).toHaveAttribute('href', '/community');
   });
 
   it('should record the app preference and drop the marker when a marketing link opens Home', async () => {

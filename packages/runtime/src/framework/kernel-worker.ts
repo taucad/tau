@@ -6667,9 +6667,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             {
               type: 'boolean',
               description:
-                key === 'includeEdges'
-                  ? 'Include auxiliary visible edge overlays.'
-                  : 'Include Tau CAD topology metadata.',
+                key === 'includeEdges' ? 'Include auxiliary visible edge overlays.' : 'Include Tau topology metadata.',
             },
           ]),
         ),

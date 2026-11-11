@@ -23,4 +23,18 @@ describe('shellEnvironment', () => {
     expect(environment).not.toHaveProperty('COLORTERM');
     expect(environment).not.toHaveProperty('CLICOLOR');
   });
+
+  it('points git at a read-only view when the launch has one', () => {
+    const environment = shellEnvironment({
+      ...options,
+      terminal: false,
+      git: { directory: '/private/root/git', objects: '/project/.git/objects', workTree: '/project' },
+    });
+    expect(environment).toMatchObject({
+      GIT_DIR: '/private/root/git',
+      GIT_WORK_TREE: '/project',
+      GIT_OPTIONAL_LOCKS: '0',
+    });
+    expect(shellEnvironment({ ...options, terminal: false })).not.toHaveProperty('GIT_DIR');
+  });
 });

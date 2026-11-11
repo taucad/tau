@@ -190,3 +190,39 @@ export const getProviderFacingToolInputSchemas = ({
     return [{ toolName: name, toolPartType, schema: toolInputSchemas[toolPartType] }];
   });
 };
+
+/**
+ * The tool grant one turn carries: what is declared to the model, and what the chat's settings mask.
+ *
+ * Every tool the model supports is declared on every turn, with testing on, so the declared list is the same bytes
+ * whatever the settings are: it is part of the provider's cached prefix and of what replayed reasoning is bound to.
+ * What the tool choice or the testing switch turns off is masked where a call is made: the host refuses a call to a
+ * declared tool the returned `toolChoice` does not name.
+ *
+ * @param options - The chat's tool choice and testing switch, and the model's support.
+ * @returns `allowedTools`, the declared tools, and `toolChoice`, the mode itself when it masks nothing a list could
+ * say, else the tools left on.
+ * @public
+ *
+ * @example <caption>Testing turned off</caption>
+ * ```typescript
+ * import { getProviderFacingToolGrant } from '@taucad/chat/schemas';
+ *
+ * const grant = getProviderFacingToolGrant({ toolChoice: 'auto', testingEnabled: false });
+ * // grant.allowedTools includes 'test_model'; grant.toolChoice lists every tool but it
+ * ```
+ */
+export const getProviderFacingToolGrant = (
+  options: ProviderFacingToolSchemaOptions,
+): { toolChoice: ToolSelection; allowedTools: ToolName[] } => {
+  const names = (toolChoice: ToolSelection, testingEnabled: boolean): ToolName[] =>
+    getProviderFacingToolInputSchemas({ toolChoice, testingEnabled, modelSupport: options.modelSupport }).map(
+      ({ toolName: name }) => name,
+    );
+  const allowedTools = names('auto', true);
+  const usable = names(options.toolChoice, options.testingEnabled);
+  return {
+    allowedTools,
+    toolChoice: options.toolChoice === 'none' || usable.length === allowedTools.length ? options.toolChoice : usable,
+  };
+};

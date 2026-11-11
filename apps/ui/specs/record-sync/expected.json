@@ -10,10 +10,25 @@
       "expect": "pass",
       "ref": "The same properties when one write reply is lost and the write may land at any later step: 3 writes, 3 edits, 2 foreign writes, 2 repeated change events"
     },
+    "RecordSync.target-eager.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "The same properties with EagerWriter, the writer as recordSync schedules it, at 3 writes, 2 edits, 2 foreign writes, 1 repeated change event and 1 lost reply: after a lost reply it writes again only once a read that started after the loss has completed, and it writes in the same task as the conflict read or read-back it waited for, or finds nothing left to write"
+    },
     "RecordSync.liveness-flush.cfg": {
       "tier": "pr",
       "expect": "pass",
       "ref": "EditEventuallySettled and EventuallyCurrent under weak fairness of the store, the authority and the watch; one reply may be lost, and the lost write need not land. A bounded claim: two edits, one foreign write and one lost reply need at most 5 writes, and the same configuration violates EditEventuallySettled at 4 writes, or with a second foreign write, by exhausting MaxWrites, so a liveness failure after widening a bound is first a bound artefact"
+    },
+    "RecordSync.liveness-eager.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "EditEventuallySettled and EventuallyCurrent with EagerWriter under the same fairness and bounds as liveness-flush, with weak fairness of the read-back the writer starts"
+    },
+    "RecordSync.export.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "The EagerWriter target, labelled, at two writes, two edits, one foreign write and one lost reply over two byte values, with no repeated change event and no forced read, so the graph stays under 1 MB (graphs.RecordSync)"
     },
     "RecordSync.today-slots.cfg": {
       "tier": "pr",
@@ -157,6 +172,12 @@
       },
       "kind": "witness",
       "ref": "Fence off: a pending edit is written after the view closed"
+    }
+  },
+  "graphs": {
+    "RecordSync": {
+      "config": "RecordSync.export.cfg",
+      "phase": "rd.purpose"
     }
   }
 }

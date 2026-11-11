@@ -89,7 +89,7 @@ const refusalNotice = (action: WirePaymentAction | undefined): Notice => {
 
 function SupportLink(): React.JSX.Element {
   return (
-    <a className='underline' href='mailto:support@tau.new'>
+    <a className='underline' href='mailto:help@tau.new'>
       Contact support
     </a>
   );

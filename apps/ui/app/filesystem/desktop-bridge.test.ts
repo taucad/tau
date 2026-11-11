@@ -43,6 +43,7 @@ const installShellGlobal = (
   const selectDirectory = vi.fn(async () => '/Users/tester/Projects');
   const retainAgentHost = vi.fn(async () => undefined);
   const releaseAgentHost = vi.fn(async () => undefined);
+  const rateAgentRun = vi.fn(async (_rating: unknown) => undefined);
   const completeMachineBinding = vi.fn(
     async (_input: unknown): Promise<unknown> => ({ status: 'bound', machineId: 'bambu:sim' }),
   );
@@ -61,7 +62,7 @@ const installShellGlobal = (
   vi.stubGlobal('tau', {
     relayTag,
     requestServicesPort,
-    agentHost: { retain: retainAgentHost, release: releaseAgentHost },
+    agentHost: { retain: retainAgentHost, release: releaseAgentHost, rated: rateAgentRun },
     machines: { completeBinding: completeMachineBinding },
     nodeFs: { homeRoot },
     appIcon: { setTheme: setAppIconTheme },
@@ -75,6 +76,7 @@ const installShellGlobal = (
     requestServicesPort,
     retainAgentHost,
     releaseAgentHost,
+    rateAgentRun,
     completeMachineBinding,
     selectDirectory,
     setAppIconTheme,
@@ -276,6 +278,30 @@ describe('desktopBridge', () => {
 
     expect(retainAgentHost).toHaveBeenCalledExactlyOnceWith('/projects/widget', 'project-widget', 'window-1');
     expect(releaseAgentHost).toHaveBeenCalledExactlyOnceWith('/projects/widget', 'project-widget', 'window-1');
+  });
+
+  /* LW8: the desktop host that ran a turn reports its rating, so a rating made here reaches it through main. */
+  it('forwards a run’s rating to the preload surface', async () => {
+    const { rateAgentRun } = installShellGlobal();
+    const { desktopBridge } = await loadBridge();
+    const rating = { projectId: 'project-widget', chatId: 'chat-1', runId: 'run-1', value: 'positive', at: 1 } as const;
+
+    await desktopBridge()?.agentHost.rated(rating);
+
+    expect(rateAgentRun).toHaveBeenCalledExactlyOnceWith(rating);
+  });
+
+  it('drops a rating on a shell that predates the rating relay', async () => {
+    installShellGlobal();
+    Reflect.deleteProperty(
+      (globalThis as unknown as { tau: { agentHost: Record<string, unknown> } }).tau.agentHost,
+      'rated',
+    );
+    const { desktopBridge } = await loadBridge();
+
+    await expect(
+      desktopBridge()?.agentHost.rated({ projectId: 'p', chatId: 'c', runId: 'r', value: 'negative', at: 1 }),
+    ).resolves.toBeUndefined();
   });
 
   it('gives each connect its own request id', async () => {

@@ -157,6 +157,23 @@ type SyncMachineContextFields = Readonly<{
    * and the state that finishes the current effect fetches for it.
    */
   pendingFetch: boolean;
+  /**
+   * A session change not yet read under the new session (audit R6): a refusal
+   * of an answer asked under the last session that lands in `failed` opens
+   * again, and a busy `manual` remote reads again once it settles. Cleared by
+   * `opening`, `pushing` and a disconnect; the pull held through quiescing is
+   * `heldSessionPull`'s.
+   */
+  pendingSession: boolean;
+  /**
+   * A session change not yet pulled when the host began quiescing, or one that
+   * arrived during it (audit R6). Kept apart from `pendingSession`, which a push
+   * started during the hold clears: the release pulls for this one, unless the
+   * machine is in `failed` (which reopens only while `pendingSession` is set, so
+   * a refusal of a push started after the change stays terminal) or in
+   * `conflicted.offering` (which pulls once its push is answered).
+   */
+  heldSessionPull: boolean;
   /** Holds new background work while the host waits for close. */
   quiescing: boolean;
   /** Transport cancellation was requested; local reconciliation still completes. */
@@ -258,6 +275,11 @@ export type SyncMachineEvent =
   | Readonly<{ type: 'remoteRefused'; code: string; message: string }>
   /** A durable project record changed after the current push snapshot was built. */
   | Readonly<{ type: 'recordsChanged' }>
+  /**
+   * The page's signed-in person changed (audit R6): the remote is read afresh
+   * under the new session, its move stream included, as a fresh root would.
+   */
+  | Readonly<{ type: 'sessionChanged' }>
   /** Push now, and — with a `pushId` — tell the requester how it ended. */
   | Readonly<{ type: 'syncNow'; pushId?: string; remote?: string }>
   /** One explicit push; never retried without another request. */
@@ -933,6 +955,14 @@ const answerPushes = (
   }
 };
 
+/**
+ * A session change the conflict line's push waited for (audit R6): the pull follows its answer.
+ *
+ * @returns `opening` when a change is still unread and the host is not quiescing.
+ */
+const sessionPullOf = (context: SyncMachineContext): '#sync.opening' | undefined =>
+  context.pendingSession && !context.quiescing ? '#sync.opening' : undefined;
+
 /* A close cannot promise a new push. Answer the request without retaining a
  * wake-up that could restart transport as the successful close releases its hold. */
 const holdPushRequest = (context: SyncMachineContext, event: Readonly<{ pushId?: string }>, enq: SyncEnqueue) => {
@@ -1231,7 +1261,7 @@ const syncMachineDefinition = setup({
   },
 }).createMachine({
   id: 'sync',
-  version: '6',
+  version: '7',
   context: ({ input }) => ({
     projectId: input.projectId,
     branch: input.branch ?? defaultBranch,
@@ -1260,6 +1290,8 @@ const syncMachineDefinition = setup({
     ahead: false,
     conflictRef: undefined,
     pendingFetch: false,
+    pendingSession: false,
+    heldSessionPull: false,
     quiescing: false,
     transportStopped: false,
     leaseSettled: false,
@@ -1294,11 +1326,27 @@ const syncMachineDefinition = setup({
   /* Connectivity and the remote are facts about the host, not about which state
    * the scheduler is in, so they are handled once at the root. */
   on: {
-    quiesce: ({ context, event, value }) => {
+    quiesce: ({ context, event, value, guards }, enq) => {
       if (event.phase === 'release') {
+        const hasRemote = guards.hasRemote(context);
+        /* `failed.settled` opens again on its own once quiescing ends while `pendingSession` is set;
+         * a refusal of a push started after the change stays terminal. `conflicted.offering` pulls
+         * once its push settles, so the line's answer is not dropped. */
+        const busy = typeof value !== 'string' && (value['failed'] !== undefined || value['conflicted'] === 'offering');
+        if (context.heldSessionPull && hasRemote && !busy) {
+          /* A session change held through the close is pulled now (audit R6). */
+          enq.raise({ type: 'remoteMoved', generation: 0, refs: [] });
+        }
         return {
           ...(value === 'queued' ? { target: '.queued', reenter: true } : {}),
-          context: { quiescing: false, transportStopped: false, pendingFetch: false, pendingFlush: false },
+          context: {
+            quiescing: false,
+            transportStopped: false,
+            pendingFetch: false,
+            pendingFlush: false,
+            pendingSession: context.pendingSession && hasRemote,
+            heldSessionPull: false,
+          },
         };
       }
       return {
@@ -1307,6 +1355,8 @@ const syncMachineDefinition = setup({
           transportStopped: event.phase === 'cancel' || context.transportStopped,
           pendingFetch: false,
           pendingFlush: false,
+          /* A session change not yet pulled is held to the release (audit R6). */
+          heldSessionPull: context.heldSessionPull || context.pendingSession,
         },
       };
     },
@@ -1330,6 +1380,26 @@ const syncMachineDefinition = setup({
     remoteRefused: (_arguments, enq) => {
       enq.raise({ type: 'remoteMoved', generation: 0, refs: [] });
       return {};
+    },
+    /*
+     * The page's signed-in person changed (audit R6, rule 19). The remote is
+     * read afresh under the new session without abandoning anything in flight:
+     * the move stream is watched again (a refused one is never re-read for the
+     * remote it already watches), and the remote is pulled as a move would be,
+     * at once from an idle state and when a busy one settles (`conflicted.offering`
+     * takes the change itself, so its push is answered first). `pendingSession`
+     * survives the busy state: an answer it gets under the last session that
+     * lands in `failed` opens again from there. Every `opening` clears it.
+     */
+    sessionChanged: ({ context, guards }, enq) => {
+      if (!guards.hasRemote(context)) {
+        /* No remote: nothing is read under any session, so the change is taken and changes nothing (MC-R17). */
+        return {};
+      }
+      enq.sendTo('remoteMoves', { type: 'unwatch' });
+      enq.sendTo('remoteMoves', { type: 'watch', remote: context.remote ?? '' });
+      enq.raise({ type: 'remoteMoved', generation: 0, refs: [] });
+      return { context: { pendingSession: true, heldSessionPull: context.heldSessionPull || context.quiescing } };
     },
     leaseRetired: { context: { leaseSettled: true } },
     /* The root forwards every answer to a cut no turn asked for; only `minting`
@@ -1389,6 +1459,8 @@ const syncMachineDefinition = setup({
        * had never reached a remote, silently, while the row went blank. */
       context: {
         remote: undefined,
+        pendingSession: false,
+        heldSessionPull: false,
         hasAppliedRemote: false,
         chats: 'unknown',
         recordProjection: undefined,
@@ -1578,6 +1650,8 @@ const syncMachineDefinition = setup({
             attemptStartedAt: Date.now(),
             recordQueueDirty: false,
             pendingFetch: false,
+            pendingSession: false,
+            heldSessionPull: false,
             leaseSettled: false,
             arrived: undefined,
           },
@@ -1777,6 +1851,9 @@ const syncMachineDefinition = setup({
           pendingFlush: false,
         },
       }),
+      /* A manual remote pulls on nothing but a request: a session change remembered while busy is read now (audit R6). */
+      always: ({ context, guards }) =>
+        context.pendingSession && !context.quiescing && guards.hasRemote(context) ? { target: 'opening' } : undefined,
       on: {
         pushNow: ({ context, event }) =>
           context.online
@@ -1915,6 +1992,8 @@ const syncMachineDefinition = setup({
           context: {
             pendingMint: false,
             pendingFlush: false,
+            /* A push that starts now runs under the session in force: a refusal of it is this session's (audit R6). */
+            pendingSession: false,
             explicitPush: false,
             ahead: false,
             pushIds: [...context.pushIds, ...context.nextPushIds],
@@ -2336,6 +2415,21 @@ const syncMachineDefinition = setup({
       states: {
         offering: {
           always: ({ context }) => (context.automaticPush ? undefined : { target: 'offered' }),
+          on: {
+            /* The conflict line's push is kept (audit R6): its answer is recorded, then the pull follows.
+             * The stream is only stopped here: `opening` watches it afresh, so a refusal of it under
+             * the new session cannot pre-empt the push. */
+            sessionChanged: ({ context, guards }, enq) => {
+              if (!guards.hasRemote(context)) {
+                /* No remote: nothing is read under any session, so the change is taken and changes nothing (MC-R17). */
+                return {};
+              }
+              enq.sendTo('remoteMoves', { type: 'unwatch' });
+              return {
+                context: { pendingSession: true, heldSessionPull: context.heldSessionPull || context.quiescing },
+              };
+            },
+          },
           invoke: {
             src: 'push',
             input: ({ context }) => ({
@@ -2355,12 +2449,15 @@ const syncMachineDefinition = setup({
               };
               const refused = event.output.refs.find((entry) => entry.status === 'rejected');
               if (refused === undefined) {
-                return { target: 'offered', context: { leases, attempt: 0, retryAfterMilliseconds: undefined } };
+                return {
+                  target: sessionPullOf(context) ?? 'offered',
+                  context: { leases, attempt: 0, retryAfterMilliseconds: undefined },
+                };
               }
               enq(reportConflictLineFailure, 'refused', refused.name, refused.reason);
               const quota = (event.output.overQuota ?? []).length > 0 || isStorageRefusal(refused.reason ?? '');
               return {
-                target: quota ? 'offered' : 'owed',
+                target: sessionPullOf(context) ?? (quota ? 'offered' : 'owed'),
                 context: { leases, attempt: context.attempt + 1, retryAfterMilliseconds: undefined },
               };
             },
@@ -2368,7 +2465,7 @@ const syncMachineDefinition = setup({
               const { error } = event;
               enq(reportConflictLineFailure, 'push', error);
               return {
-                target: isFatal(error) ? 'offered' : 'owed',
+                target: sessionPullOf(context) ?? (isFatal(error) ? 'offered' : 'owed'),
                 context: { attempt: context.attempt + 1, retryAfterMilliseconds: retryAfterOf(error) },
               };
             },
@@ -2437,6 +2534,14 @@ const syncMachineDefinition = setup({
     failed: {
       entry: ({ context }, enq) => ({ context: settleEveryPush(context, enq, 'failed') }),
       on: {
+        sessionChanged: ({ context, guards }, enq) => {
+          if (!guards.hasRemote(context)) {
+            /* No remote: nothing is read under any session, so the change is taken and changes nothing (MC-R17). */
+            return {};
+          }
+          enq.sendTo('remoteMoves', { type: 'unwatch' });
+          return context.quiescing ? { context: { pendingSession: true } } : { target: 'opening' };
+        },
         syncNow: ({ context, event }, enq) =>
           context.quiescing
             ? holdPushRequest(context, event, enq)
@@ -2461,28 +2566,36 @@ const syncMachineDefinition = setup({
       initial: 'settled',
       states: {
         settled: {
-          always: ({ context }) =>
-            owesUnrecordedMint(context)
-              ? {
-                  target: 'recording',
-                  context: {
-                    pending: nextPending({
-                      pending: context.pending,
-                      outcomes: [
-                        {
-                          name: historyRefOf(context.branch),
-                          status: 'rejected',
-                          head: context.localHead,
-                          ...(context.error === undefined ? {} : { reason: context.error }),
-                        },
-                      ],
-                      leases: context.leases,
-                      remote: context.remote,
-                      now: Date.now(),
-                    }),
-                  },
-                }
-              : undefined,
+          /* After any owed entry is recorded, a refusal answered under the last
+           * session opens again under this one, the stream watched afresh (audit R6). */
+          always: ({ context, guards }, enq) => {
+            if (owesUnrecordedMint(context)) {
+              return {
+                target: 'recording',
+                context: {
+                  pending: nextPending({
+                    pending: context.pending,
+                    outcomes: [
+                      {
+                        name: historyRefOf(context.branch),
+                        status: 'rejected',
+                        head: context.localHead,
+                        ...(context.error === undefined ? {} : { reason: context.error }),
+                      },
+                    ],
+                    leases: context.leases,
+                    remote: context.remote,
+                    now: Date.now(),
+                  }),
+                },
+              };
+            }
+            if (!context.pendingSession || context.quiescing || !guards.hasRemote(context)) {
+              return undefined;
+            }
+            enq.sendTo('remoteMoves', { type: 'unwatch' });
+            return { target: '#sync.opening' };
+          },
         },
         recording: {
           invoke: {

@@ -5,9 +5,10 @@ import { createHash } from 'node:crypto';
 import { Accessor, Document, WebIO } from '@gltf-transform/core';
 import { Engine } from 'geospec-engine/node';
 import { describe, expect, it, vi } from 'vitest';
-import { runTauGeoSpecTests } from '#testing/tau-geospec-harness.js';
-import type { TauModelRendererOutput } from '#testing/tau-geospec-harness.js';
 import { GeoSpecModelLoadError } from 'geospec/model';
+
+import { runTauGeoSpecTests } from '#geospec/tau-geospec-harness.js';
+import type { TauModelRendererOutput } from '#geospec/tau-geospec-harness.js';
 
 type TestVmFileSystem = {
   exists(path: string): Promise<boolean>;
@@ -100,8 +101,17 @@ const createGeometrySource = async (sizeX: number, sizeY = 1, sizeZ = 1): Promis
   return { format: 'glb', source: await new WebIO().writeBinary(document), name: 'box' };
 };
 
-// A byte-for-byte copy of taucad/geospec's `fixtures/contact/valve-seat-cone-positive/model.step`.
-const brepFixture = resolve(import.meta.dirname, '__fixtures__/valve-seat-cone-positive.step');
+/*
+ * The seat-and-valve assembly of taucad/geospec's `fixtures/contact/valve-seat-cone-positive/model.step`,
+ * read by OCCT 8.0's STEP reader (which heals on read) and written back with its product, solid and
+ * face names restored. The upstream bytes fail `toBeValidBrep` (`invalid-solid`), and the topology
+ * matchers refuse an invalid solid with `GEOSPEC_UNSUPPORTED_EVIDENCE`; this copy is valid.
+ * The seat is a 6 mm ring (bore Ø20, outer Ø32) whose top bore edge carries a 3 mm chamfer cone,
+ * labelled `seatCone`.
+ */
+const brepFixture = resolve(import.meta.dirname, '__fixtures__/valve-seat-cone.step');
+// A 40 × 30 × 3 mm OCCT box: a convex planar solid, inside the wall-thickness matcher's qualified domain.
+const plateFixture = resolve(import.meta.dirname, '__fixtures__/plate-40x30x3.step');
 
 describe('runTauGeoSpecTests', () => {
   it('releases renderer results that arrive after a test timeout', async () => {
@@ -467,11 +477,16 @@ describe('runTauGeoSpecTests', () => {
         "describe('brep feature checks', () => {",
         "  it('should validate exact feature evidence', async () => {",
         "    const model = await loadModel({ file: 'main.ts', format: 'step' });",
+        '    expectGeo(model).toBeValidBrep();',
         '    expectGeo(model).toHavePlanarFace({ normal: { x: 0, y: 0, z: 1 }, offset: 6, area: { greaterThan: 270 }, tolerance: 0.05 });',
         "    expectGeo(model).toHaveCylindricalFace({ radius: 16, axis: 'z', tolerance: 0.05 });",
-        "    expectGeo(model).toHaveCircularHole({ diameter: 20, through: false, axis: 'z', center: { x: 0, y: 0 }, tolerance: 0.05 });",
-        "    expectGeo(model).toHaveChamferFeature({ distance: 3, selection: 'revolved chamfer (axis z)', tolerance: 0.05 });",
-        '    expectGeo(model).toHaveMinimumWallThickness({ value: { greaterThanOrEqual: 3 }, tolerance: 0.05 });',
+        // The Ø20 bore runs from the seat's base into the chamfer cone that opens it at the top: a through hole.
+        "    expectGeo(model).toHaveCircularHole({ diameter: 20, through: true, axis: 'z', center: { x: 0, y: 0 }, tolerance: 0.05 });",
+        // `selection` names the source face label of the treatment.
+        "    expectGeo(model).toHaveChamferFeature({ distance: 3, selection: 'seatCone', tolerance: 0.05 });",
+        "    const plate = await loadModel({ file: 'plate.ts', format: 'step' });",
+        '    expectGeo(plate).toBeValidBrep();',
+        '    expectGeo(plate).toHaveMinimumWallThickness({ value: { greaterThanOrEqual: 3 }, tolerance: 0.05 });',
         '  });',
         '});',
       ].join('\n'),
@@ -483,25 +498,41 @@ describe('runTauGeoSpecTests', () => {
       entryPaths: ['main.geospec.ts'],
       renderer: async (input) => {
         rendererCalls.push(input);
+        const plate = input.file === 'plate.ts';
         return {
-          source: new Uint8Array(await readFile(brepFixture)),
+          source: new Uint8Array(await readFile(plate ? plateFixture : brepFixture)),
           format: 'step',
-          name: 'valve-seat-cone-positive',
+          name: plate ? 'plate-40x30x3' : 'valve-seat-cone',
         };
       },
     });
 
     expect(result.failures).toEqual([]);
-    expect(result.passes).toEqual([
+    expect(result.passes.map(({ reports: _reports, ...row }) => row)).toEqual([
       {
         id: 'main.geospec.ts:brep feature checks > should validate exact feature evidence',
         requirement: 'brep feature checks > should validate exact feature evidence',
         targetFile: 'main.geospec.ts',
       },
     ]);
+    // A pass row carries every exact claim's engine report, and each one passed on its own evidence.
+    expect(
+      result.passes[0]?.reports?.map((report) => [report.claim['capability'], report.polarity, report.status]),
+    ).toEqual([
+      ['toBeValidBrep', 'positive', 'passed'],
+      ['toHavePlanarFace', 'positive', 'passed'],
+      ['toHaveCylindricalFace', 'positive', 'passed'],
+      ['toHaveCircularHole', 'positive', 'passed'],
+      ['toHaveChamferFeature', 'positive', 'passed'],
+      ['toBeValidBrep', 'positive', 'passed'],
+      ['toHaveMinimumWallThickness', 'positive', 'passed'],
+    ]);
     expect(result.passed).toBe(1);
     expect(result.total).toBe(1);
-    expect(rendererCalls).toEqual([expect.objectContaining({ file: 'main.ts', format: 'step' })]);
+    expect(rendererCalls).toEqual([
+      expect.objectContaining({ file: 'main.ts', format: 'step' }),
+      expect.objectContaining({ file: 'plate.ts', format: 'step' }),
+    ]);
   });
 });
 

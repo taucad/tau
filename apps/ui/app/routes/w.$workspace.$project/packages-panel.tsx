@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useState } from 'react';
 import { CircleAlert, Lock, LockOpen } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -144,7 +145,9 @@ export function PackagesPanel(): React.JSX.Element {
   return (
     <section aria-label='Packages' className='overflow-hidden rounded-xl border border-border bg-card'>
       <div className='flex items-center justify-between gap-2 border-b px-3 py-1.5'>
-        <h2 className='text-[13px] font-medium text-foreground'>Packages</h2>
+        <Heading level={2} variant='label' className='text-foreground'>
+          Packages
+        </Heading>
         <Button
           size='xs'
           disabled={isInstalling}

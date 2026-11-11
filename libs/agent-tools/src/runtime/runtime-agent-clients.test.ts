@@ -974,7 +974,7 @@ describe('createRuntimeAgentClients default view options', () => {
 
   it('should add no remedy when the route carries the refused content, whose cause the runtime states', async () => {
     /* The glTF transcoder's refusal: the route carries topology, but Draco compression cannot keep it. */
-    const message = 'Draco compression cannot preserve Tau CAD topology metadata. Export without topology.';
+    const message = 'Draco compression cannot preserve Tau topology metadata. Export without topology.';
     const fixture = runtimeFixture({
       export: () => ({
         success: false,

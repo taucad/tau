@@ -3,6 +3,10 @@
  * project host's own rows, the signed-in session's bearer, and an owner-only queue file per project under the app's
  * user data. It works the same whether or not a renderer is open. A project only reports when the server's current
  * answer for this account and project allows summaries; a signed-out desktop sends nothing and keeps nothing.
+ *
+ * Desktop parity (blueprint LW8): every fact names the build its bundle was stamped with (`tauDesktopHostBuild`), and
+ * the account's ratings wait in a second owner-only queue per project, apart from the summaries, so a rating given
+ * before a restart is still sent after it under the feedback grant.
  */
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -12,6 +16,13 @@ import { createHostEvidence } from '@taucad/agent-observability/host-evidence';
 import type { HostEvidence } from '@taucad/agent-observability/host-evidence';
 import { ownerOnlyFiles } from '@taucad/agent-observability/node-pending-files';
 import { filePendingStore } from '@taucad/agent-observability/pending-stores';
+
+/**
+ * The commit this bundle was built from, as the build stamped it; a bundle stamped with none reports no build.
+ *
+ * @returns The build id, or `undefined`.
+ */
+const desktopHostBuild = (): string | undefined => (tauDesktopHostBuild === '' ? undefined : tauDesktopHostBuild);
 
 /** What one project's observer is composed from. @internal */
 export type DesktopEvidenceOptions = Readonly<{
@@ -46,14 +57,17 @@ export const desktopChatObserver =
       }
       return baseFetch(input, { ...init, headers });
     };
+    const queueFile = `${encodeURIComponent(options.projectId)}.json`;
     return createHostEvidence({
       apiBaseUrl: options.apiBaseUrl.replace(/\/+$/u, ''),
       principal: options.principal,
       project: options.projectId,
       uploader: `desktop-${randomUUID()}`,
-      hostBuild: undefined,
+      hostBuild: desktopHostBuild(),
       fetch: withBearer,
-      store: filePendingStore(join(options.directory, `${encodeURIComponent(options.projectId)}.json`), ownerOnlyFiles),
+      store: filePendingStore(join(options.directory, queueFile), ownerOnlyFiles),
+      /* A directory of its own, so no project id can name the other queue's file. */
+      feedbackStore: filePendingStore(join(options.directory, 'feedback', queueFile), ownerOnlyFiles),
       observe: async (chatId) => observeOwnTurns(read, chatId),
     });
   };

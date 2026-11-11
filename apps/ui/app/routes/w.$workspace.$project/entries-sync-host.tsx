@@ -217,9 +217,7 @@ export function EntriesSyncHost(): React.JSX.Element {
           cadRef={cadRef}
           modelInteractionRef={modelInteractionRef}
           entry={entriesRecord?.entries[path]}
-          localPatch={
-            published?.record === entriesRecord && published?.patch?.path === path ? published.patch.fields : undefined
-          }
+          localPatch={published?.record === entriesRecord ? published?.patch?.fields[path] : undefined}
           recordPresent={entriesRecord !== undefined}
           ready={ready}
           write={write}
@@ -250,7 +248,7 @@ export function EntryOwner({
   cadRef: ActorRefFrom<typeof cadMachine>;
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   entry: Entry | undefined;
-  localPatch?: EntryRecordPatch['fields'];
+  localPatch?: EntryRecordPatch['fields'][string];
   recordPresent: boolean;
   ready: boolean;
   write: (path: string, next: Entry) => Promise<boolean>;

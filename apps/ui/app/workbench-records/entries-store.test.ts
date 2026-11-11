@@ -291,7 +291,7 @@ describe('workbench entries checked store', () => {
     await committed.promise;
     await entries.read();
     expect(onChange.mock.lastCall?.[1]).toBe('write');
-    expect(onChange.mock.lastCall?.[2]).toEqual({ path: 'a.ts', fields: { renderTimeout: 240_000 } });
+    expect(onChange.mock.lastCall?.[2]).toEqual({ fields: { 'a.ts': { renderTimeout: 240_000 } } });
     data.setBytes(
       encoder.encode(
         workbenchRecords.entries.serialize({
@@ -472,7 +472,7 @@ describe('workbench entries checked store', () => {
       await entries.read();
       expect(onChange.mock.lastCall?.[0].record?.entries['a.ts']?.renderTimeout).toBe(240_000);
       expect(onChange.mock.lastCall?.[1]).toBe('write');
-      expect(onChange.mock.lastCall?.[2]).toEqual({ path: 'a.ts', fields: { renderTimeout: 240_000 } });
+      expect(onChange.mock.lastCall?.[2]).toEqual({ fields: { 'a.ts': { renderTimeout: 240_000 } } });
       heldReads.resolve();
       await inFlightWatch;
       expect(await saving).toBe(true);
@@ -1033,7 +1033,7 @@ describe('workbench entries store over recordSync', () => {
     }
   });
 
-  it('attributes a write of two entries as own without naming either entry’s fields', async () => {
+  it('attributes a write of two entries as own, naming each entry’s fields', async () => {
     vi.useFakeTimers();
     const m = memory();
     const onChange = vi.fn<(state: { record?: WorkbenchEntries }, source: 'read' | 'write', patch?: unknown) => void>();
@@ -1054,8 +1054,10 @@ describe('workbench entries store over recordSync', () => {
       expect(await Promise.all([first, second])).toEqual([true, true]);
       expect(m.writes).toHaveBeenCalledOnce();
       expect(onChange.mock.lastCall?.[1]).toBe('write');
-      expect(onChange.mock.lastCall?.[2]).toBeUndefined();
-      // A rename names no entry's fields either.
+      expect(onChange.mock.lastCall?.[2]).toEqual({
+        fields: { 'a.ts': { renderTimeout: 15_000 }, 'b.ts': { renderTimeout: 30_000 } },
+      });
+      // A rename alone names no entry's fields.
       expect(await entries.changePaths({ type: 'rename', oldPath: 'b.ts', newPath: 'c.ts' })).toBe(true);
       expect(onChange.mock.lastCall?.[1]).toBe('write');
       expect(onChange.mock.lastCall?.[2]).toBeUndefined();
@@ -1084,5 +1086,118 @@ describe('workbench entries store over recordSync', () => {
     expect(await entries.read()).toBe(false);
     expect(onChange).not.toHaveBeenCalled();
     expect(m.writes).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['after a failed write', 'deferred'],
+    ['made while a write is on the wire', 'pending'],
+  ] as const)(
+    'keeps a delete and a rename onto the deleted path, %s, through a lost reply of the write that carried them',
+    async (_case, how) => {
+      const m = memory();
+      m.setBytes(
+        encoder.encode(
+          workbenchRecords.entries.serialize({
+            version: 1,
+            entries: { 'a.ts': { renderTimeout: 1000 }, 'c.ts': { renderTimeout: 3000 } },
+          }),
+        ),
+      );
+      let call = 0;
+      const entries = createWorkbenchEntriesStore({
+        root: '/root',
+        files: {
+          ...m.files,
+          writeFileChecked: async (input) => {
+            call += 1;
+            const mine = call;
+            if (how === 'deferred' && mine === 1) {
+              throw new Error('offline');
+            }
+            const result = await m.files.writeFileChecked(input);
+            if (mine === 2) {
+              throw Object.assign(new Error('reply lost'), { applicationState: 'potentially-applied' });
+            }
+            return result;
+          },
+        },
+        onChange: () => undefined,
+        onError: () => undefined,
+      });
+      try {
+        await entries.read();
+        const expected: WorkbenchEntries['entries'] = { 'a.ts': { renderTimeout: 3000 } };
+        if (how === 'pending') {
+          const release = m.delay();
+          const edited = entries.edit('x.ts', { renderTimeout: 5000 });
+          await vi.waitFor(() => {
+            expect(call).toBe(1);
+          });
+          const changed = [
+            entries.changePaths({ type: 'delete', path: 'a.ts' }),
+            entries.changePaths({ type: 'rename', oldPath: 'c.ts', newPath: 'a.ts' }),
+          ];
+          release();
+          await Promise.all([edited, ...changed]);
+          expected['x.ts'] = { renderTimeout: 5000 };
+        } else {
+          await entries.changePaths({ type: 'delete', path: 'a.ts' });
+          await entries.changePaths({ type: 'rename', oldPath: 'c.ts', newPath: 'a.ts' });
+        }
+        let flushed = false;
+        for (let attempt = 0; attempt < 5 && !flushed; attempt++) {
+          flushed = await entries.flush();
+        }
+        expect(flushed).toBe(true);
+        expect(workbenchRecords.entries.read(m.get()!)).toEqual({
+          status: 'current',
+          record: { version: 1, entries: expected },
+        });
+      } finally {
+        entries.dispose();
+      }
+    },
+  );
+
+  it('gives a path renamed onto an edited one the renamed entry, as the edit and the rename one after the other', async () => {
+    vi.useFakeTimers();
+    const m = memory();
+    m.setBytes(
+      encoder.encode(
+        workbenchRecords.entries.serialize({
+          version: 1,
+          entries: {
+            'a.ts': { renderTimeout: 1000, components: { hidden: ['x'], isolated: [], opacity: [] } },
+            'b.ts': { renderTimeout: 2000 },
+          },
+        }),
+      ),
+    );
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: m.files,
+      editDebounce: 500,
+      onChange: () => undefined,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    try {
+      await entries.read();
+      const edited = entries.edit('b.ts', { renderTimeout: 9000 });
+      const renamed = entries.changePaths({ type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' });
+      await vi.runAllTimersAsync();
+      expect([await edited, await renamed]).toEqual([true, true]);
+      expect(workbenchRecords.entries.read(m.get()!)).toEqual({
+        status: 'current',
+        record: {
+          version: 1,
+          entries: { 'b.ts': { renderTimeout: 1000, components: { hidden: ['x'], isolated: [], opacity: [] } } },
+        },
+      });
+    } finally {
+      entries.dispose();
+      vi.useRealTimers();
+    }
   });
 });

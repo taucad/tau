@@ -675,4 +675,92 @@ describe('entry owner reconciliation', () => {
     expect(operationTimeout).toBe(300_000);
     view.unmount();
   });
+
+  it('keeps a newer live timeout when an own write of two entries lands with an older one', async () => {
+    hostFiles.set(
+      new TextEncoder().encode(
+        workbenchRecords.entries.serialize({
+          version: 1,
+          entries: { 'a.ts': { renderTimeout: 30_000 }, 'b.ts': { renderTimeout: 30_000 } },
+        }),
+      ),
+    );
+    hostFiles.writeFileChecked.mockClear();
+    hostContentService = undefined;
+    const unit = (initial: number) => {
+      const state = { operationTimeout: initial };
+      return {
+        state,
+        getSnapshot: () => ({ context: state }),
+        send: vi.fn((event: { type: string; operationTimeout: number }) => {
+          if (event.type === 'setOperationTimeout') {
+            state.operationTimeout = event.operationTimeout;
+          }
+        }),
+      };
+    };
+    const a = unit(30_000);
+    const b = unit(30_000);
+    hostProject = {
+      projectId: 'p',
+      geometryUnits: new Map([
+        ['a.ts', a],
+        ['b.ts', b],
+      ]),
+      modelInteractionRef: { getSnapshot: () => ({ context: { unitsById: {} } }), send: vi.fn() },
+      entriesRecord: undefined,
+      setEntriesRecord: (record: WorkbenchEntries) => {
+        hostProject['entriesRecord'] = record;
+      },
+      registerWorkbenchRecordProducer: () => () => undefined,
+      registerEntryPathChange: () => () => undefined,
+      setAppliedEntryRevision: () => undefined,
+    };
+    const view = render(<EntriesSyncHost />);
+    await waitFor(() => {
+      expect(hostProject['entriesRecord']).toBeDefined();
+    });
+    view.rerender(<EntriesSyncHost />);
+    const authority = Promise.withResolvers<void>();
+    const write = hostFiles.writeFileChecked.getMockImplementation()!;
+    hostFiles.writeFileChecked.mockImplementationOnce(async (input) => {
+      await authority.promise;
+      return write(input);
+    });
+    try {
+      a.state.operationTimeout = 45_000;
+      b.state.operationTimeout = 60_000;
+      view.rerender(<EntriesSyncHost />);
+      // One checked write carries both entries' timeouts; it is held while the person changes a.ts again.
+      await waitFor(
+        () => {
+          expect(hostFiles.writeFileChecked).toHaveBeenCalledOnce();
+        },
+        { timeout: 1500 },
+      );
+      a.state.operationTimeout = 90_000;
+      view.rerender(<EntriesSyncHost />);
+      a.send.mockClear();
+      await act(async () => {
+        authority.resolve();
+        await Promise.resolve();
+      });
+      await waitFor(
+        () => {
+          expect(workbenchRecords.entries.read(hostFiles.get()!)).toMatchObject({
+            status: 'current',
+            record: { entries: { 'a.ts': { renderTimeout: 90_000 }, 'b.ts': { renderTimeout: 60_000 } } },
+          });
+        },
+        { timeout: 1500 },
+      );
+      view.rerender(<EntriesSyncHost />);
+      // The own write's patch names a.ts's timeout, so its older value never reaches the live model.
+      expect(a.send).not.toHaveBeenCalledWith({ type: 'setOperationTimeout', operationTimeout: 45_000 });
+      expect(a.state.operationTimeout).toBe(90_000);
+    } finally {
+      authority.resolve();
+      view.unmount();
+    }
+  });
 });

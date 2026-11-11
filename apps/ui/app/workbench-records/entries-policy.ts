@@ -3,7 +3,7 @@
  * algebra that lets a person's per-entry settings, and the renames and deletes of the files they belong to, land on
  * bytes another window, an agent or sync wrote in the meantime.
  *
- * A patch is the path changes in the order they were made, then the fields changed on each path after them. A path
+ * A patch is the person's changes in the order they were made: path changes, and the fields changed on each path. A path
  * change cannot be seen in two records (a renamed entry looks like one removed and one added, and would lose what
  * another party changed on it), so the record a person asks for carries the changes that made it from its base in
  * `moves`. `moves` is never written: `serialize` drops it and `read` never returns it.
@@ -23,11 +23,18 @@ export type EntryPathChange = Readonly<
   { type: 'rename'; oldPath: string; newPath: string } | { type: 'delete'; path: string }
 >;
 
-/** What a person changed: the path changes in order, then the fields of each path after them. */
-export type EntriesPatch = Readonly<{
+/** One step of a person's change: path changes in order, then the fields of each path after them. */
+export type EntriesStep = Readonly<{
   moves: readonly EntryPathChange[];
   fields: Readonly<Record<string, EntryFields>>;
 }>;
+
+/**
+ * What a person changed: steps applied in the order they were made. Steps are kept apart rather than folded into
+ * one, because a field change made before a path change cannot always be carried past it (a rename onto a path
+ * replaces whatever the file holds there, which the patch cannot know).
+ */
+export type EntriesPatch = readonly EntriesStep[];
 
 /** An entries record, and the path changes that made it from the record it was edited from. */
 export type EntriesRecord = WorkbenchEntries & { readonly moves?: readonly EntryPathChange[] };
@@ -123,10 +130,70 @@ const combineFields = (earlier: EntryFields | undefined, later: EntryFields): En
   ...((earlier?.components ?? later.components) ? { components: { ...earlier?.components, ...later.components } } : {}),
 });
 
+const combineFieldMaps = (
+  earlier: Readonly<Record<string, EntryFields>>,
+  later: Readonly<Record<string, EntryFields>>,
+): Record<string, EntryFields> => {
+  const combined = { ...earlier };
+  for (const [path, fields] of Object.entries(later)) {
+    combined[path] = combineFields(combined[path], fields);
+  }
+  return combined;
+};
+
 /** The record as it is written: without the path changes that made it. */
 export const withoutMoves = (record: EntriesRecord): WorkbenchEntries => {
   const { moves: _moves, ...written } = record;
   return written;
+};
+
+/**
+ * What each patch wrote, by the text it produced, and the two patches a combined patch is made of. A path change is
+ * not idempotent (a delete followed by a rename onto the deleted path removes the renamed entry when applied again),
+ * yet the writer applies a patch again to the bytes it read back after a lost reply. A patch merged onto the very
+ * text it produced, or a combined patch whose earlier part produced the text, applies only what is left. Both maps
+ * are keyed by the patch object, which the machine keeps from issue to retry.
+ */
+const produced = new WeakMap<EntriesPatch, Set<string>>();
+const parts = new WeakMap<EntriesPatch, Readonly<{ earlier: EntriesPatch; later: EntriesPatch }>>();
+
+const serializeEntries = (record: WorkbenchEntries): string => workbenchRecords.entries.serialize(record);
+
+const combinePatches = (earlier: EntriesPatch, later: EntriesPatch): EntriesPatch => {
+  const last = earlier.at(-1);
+  const [first, ...rest] = later;
+  // A step with no path change folds into the step before it: fields over fields combine exactly.
+  const combined =
+    last && first?.moves.length === 0
+      ? [...earlier.slice(0, -1), { moves: last.moves, fields: combineFieldMaps(last.fields, first.fields) }, ...rest]
+      : [...earlier, ...later];
+  parts.set(combined, { earlier, later });
+  return combined;
+};
+
+/** The part of `patch` still to apply to a file that holds `text`. */
+const remaining = (patch: EntriesPatch, text: string | undefined): EntriesPatch => {
+  if (text !== undefined && produced.get(patch)?.has(text)) {
+    return [];
+  }
+  const made = parts.get(patch);
+  if (!made) {
+    return patch;
+  }
+  const left = remaining(made.earlier, text);
+  if (left === made.earlier) {
+    return patch;
+  }
+  return left.length === 0 ? made.later : combinePatches(left, made.later);
+};
+
+/** The fields a patch leaves on each path of the record it is merged onto: the person's own fields there. */
+export const authoredFields = (patch: EntriesPatch): Record<string, EntryFields> => {
+  let fields: Record<string, EntryFields> = {};
+  for (const step of patch) {
+    fields = combineFieldMaps(moveKeys(fields, step.moves), step.fields);
+  }
+  return fields;
 };
 
 /** The entries record's codec and patch algebra. */
@@ -141,7 +208,7 @@ export const entriesPolicy: RecordPolicy<EntriesRecord, EntriesPatch> = {
           message: result.message,
         };
   },
-  serialize: (record) => workbenchRecords.entries.serialize(withoutMoves(record)),
+  serialize: (record) => serializeEntries(withoutMoves(record)),
   diff(base, next) {
     const moves = next.moves ?? [];
     const moved = movePaths(base?.entries ?? {}, moves);
@@ -152,26 +219,27 @@ export const entriesPolicy: RecordPolicy<EntriesRecord, EntriesPatch> = {
         fields.set(path, changed);
       }
     }
-    return { moves, fields: Object.fromEntries(fields) };
+    return moves.length === 0 && fields.size === 0 ? [] : [{ moves, fields: Object.fromEntries(fields) }];
   },
-  combine(earlier, later) {
-    if (earlier === undefined) {
-      return later;
-    }
-    // What was changed before a path change goes where the change takes its path, or with it when it is deleted.
-    const moved = moveKeys(earlier.fields, later.moves);
-    for (const [path, fields] of Object.entries(later.fields)) {
-      moved[path] = combineFields(moved[path], fields);
-    }
-    return { moves: [...earlier.moves, ...later.moves], fields: moved };
-  },
+  combine: (earlier, later) => (earlier === undefined ? later : combinePatches(earlier, later)),
   merge(current, _next, patch) {
     const base: WorkbenchEntries = current === undefined ? { version: 1, entries: {} } : withoutMoves(current);
-    const entries = movePaths(base.entries, patch.moves);
-    for (const [path, fields] of Object.entries(patch.fields)) {
-      entries[path] = mergeEntry(entries[path], fields);
+    let { entries } = base;
+    for (const step of remaining(patch, current === undefined ? undefined : serializeEntries(base))) {
+      entries = movePaths(entries, step.moves);
+      for (const [path, fields] of Object.entries(step.fields)) {
+        entries[path] = mergeEntry(entries[path], fields);
+      }
     }
-    return { ...base, entries };
+    const merged = { ...base, entries };
+    try {
+      const texts = produced.get(patch) ?? new Set<string>();
+      texts.add(serializeEntries(merged));
+      produced.set(patch, texts);
+    } catch {
+      // A record that cannot be written produces no text; the writer reports the same error when it serializes.
+    }
+    return merged;
   },
-  isEmpty: (patch) => patch.moves.length === 0 && Object.keys(patch.fields).length === 0,
+  isEmpty: (patch) => patch.every((step) => step.moves.length === 0 && Object.keys(step.fields).length === 0),
 };

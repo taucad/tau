@@ -14,7 +14,7 @@ import {
 } from 'fast-check';
 import type { Arbitrary } from 'fast-check';
 import type { WorkbenchEntries } from '@taucad/workbench';
-import { entriesPolicy, matchesPath, movePaths } from '#workbench-records/entries-policy.js';
+import { authoredFields, entriesPolicy, matchesPath, movePaths } from '#workbench-records/entries-policy.js';
 import type { EntriesRecord, EntryPathChange } from '#workbench-records/entries-policy.js';
 
 type Entry = WorkbenchEntries['entries'][string];
@@ -36,6 +36,13 @@ const entryArbitrary: Arbitrary<Entry> = record(
     ),
   },
   { requiredKeys: [] },
+  // An entry with no settings is the defaults, which no entry means too: the store never writes one, and a path change
+  // of a path with no entry moves nothing, so an empty one would make the record mean what its file does not.
+).filter(
+  (entry) =>
+    entry.renderTimeout !== undefined ||
+    (entry.components !== undefined &&
+      entry.components.hidden.length + entry.components.isolated.length + entry.components.opacity.length > 0),
 );
 
 const entriesArbitrary: Arbitrary<WorkbenchEntries> = record({
@@ -43,16 +50,16 @@ const entriesArbitrary: Arbitrary<WorkbenchEntries> = record({
   entries: dictionary(constantFrom(...paths), entryArbitrary, { maxKeys: 4 }),
 });
 
-/**
- * One path change. Renames go to paths no record holds: a file is renamed onto a free path, and onto a taken one
- * the outcome depends on whether its source still exists, which a patch cannot know.
- */
+/** One path change: a rename onto a free or a taken path, never into or out of its own directory. */
 const pathChangeArbitrary: Arbitrary<EntryPathChange> = oneof(
   record({
     type: constant<'rename'>('rename'),
     oldPath: constantFrom(...paths),
-    newPath: integer({ min: 0, max: 99 }).map((n) => `moved-${n}`),
-  }),
+    newPath: oneof(
+      constantFrom(...paths),
+      integer({ min: 0, max: 3 }).map((n) => `moved-${n}`),
+    ),
+  }).filter((change) => !matchesPath(change.newPath, change.oldPath) && !matchesPath(change.oldPath, change.newPath)),
   record({ type: constant<'delete'>('delete'), path: constantFrom(...paths) }),
 );
 
@@ -163,30 +170,28 @@ describe('entriesPolicy patch algebra', () => {
     );
   });
 
-  it('should change nothing when a field patch is applied to its own result', () => {
-    // A path change is not idempotent in general: a rename moves whatever a foreign write put at its old path again.
+  it('should change nothing when a patch is applied to the text it produced', () => {
+    // Path changes are not idempotent on their own (a delete and a rename onto the deleted path); the writer applies
+    // a patch again to its own bytes after a lost reply, and the policy knows the text the patch produced.
     assert(
       property(optional(entriesArbitrary), historyArbitrary, (current, { base, first }) => {
-        const patch = { ...diff(base, first), moves: [] };
+        const patch = diff(base, first);
         const once = merge(current, first, patch);
         expect(entriesValue(merge(once, first, patch))).toBe(entriesValue(once));
       }),
     );
   });
 
-  it('should apply a path change once its old path is gone', () => {
+  it('should apply only the later patch of a combined one whose earlier patch produced the text', () => {
     assert(
-      property(optional(entriesArbitrary), historyArbitrary, (current, { base, first }) => {
-        const patch = diff(base, first);
-        const once = merge(current, first, patch);
-        const reapplied = merge(once, first, patch);
-        const sources = patch.moves.map((change) => (change.type === 'rename' ? change.oldPath : change.path));
-        const untouched = Object.keys(once.entries).every(
-          (path) => !sources.some((source) => matchesPath(path, source)),
+      property(optional(entriesArbitrary), historyArbitrary, (current, { base, first, second, third }) => {
+        const earlier = diff(base, first);
+        const middle = diff(first, second);
+        const later = diff(second, third);
+        const once = merge(current, first, earlier);
+        expect(entriesValue(merge(once, third, combine(combine(earlier, middle), later)))).toBe(
+          entriesValue(merge(merge(once, second, middle), third, later)),
         );
-        if (untouched) {
-          expect(entriesValue(reapplied)).toBe(entriesValue(once));
-        }
       }),
     );
   });
@@ -196,15 +201,19 @@ describe('entriesPolicy patch algebra', () => {
       property(historyArbitrary, entriesArbitrary, ({ base, first }, foreign) => {
         const patch = diff(base, first);
         const merged = merge(foreign, first, patch);
+        const fields = authoredFields(patch);
         // The person's fields hold in the merged record, and every entry they did not touch is the foreign one.
-        for (const [path, fields] of Object.entries(patch.fields)) {
-          if (Object.hasOwn(fields, 'renderTimeout')) {
-            expect(merged.entries[path]?.renderTimeout).toBe(fields.renderTimeout);
+        for (const [path, changed] of Object.entries(fields)) {
+          if (Object.hasOwn(changed, 'renderTimeout')) {
+            expect(merged.entries[path]?.renderTimeout).toBe(changed.renderTimeout);
           }
         }
-        const moved = movePaths(foreign.entries, patch.moves);
+        const moved = movePaths(
+          foreign.entries,
+          patch.flatMap((step) => step.moves),
+        );
         for (const [path, entry] of Object.entries(moved)) {
-          if (!Object.hasOwn(patch.fields, path)) {
+          if (!Object.hasOwn(fields, path)) {
             expect(merged.entries[path]).toEqual(entry);
           }
         }
@@ -244,15 +253,29 @@ describe('entriesPolicy path changes', () => {
     });
   });
 
-  it('should carry an earlier field change through a later rename and drop it with a later delete', () => {
-    const earlier = { moves: [], fields: { 'a.ts': { renderTimeout: 15_000 }, 'b.ts': { renderTimeout: 7000 } } };
-    const later = {
-      moves: [
-        { type: 'rename', oldPath: 'a.ts', newPath: 'c.ts' },
-        { type: 'delete', path: 'b.ts' },
-      ] as const,
-      fields: {},
+  it('should name the fields an earlier change left on a path that a later rename moved, and none a delete removed', () => {
+    const earlier = [{ moves: [], fields: { 'a.ts': { renderTimeout: 15_000 }, 'b.ts': { renderTimeout: 7000 } } }];
+    const later = [
+      {
+        moves: [
+          { type: 'rename', oldPath: 'a.ts', newPath: 'c.ts' },
+          { type: 'delete', path: 'b.ts' },
+        ] satisfies EntryPathChange[],
+        fields: {},
+      },
+    ];
+    expect(authoredFields(combine(earlier, later))).toEqual({ 'c.ts': { renderTimeout: 15_000 } });
+  });
+
+  it('should give a path renamed onto an edited one the renamed entry', () => {
+    const current: WorkbenchEntries = {
+      version: 1,
+      entries: { 'a.ts': { renderTimeout: 1 }, 'b.ts': { renderTimeout: 2 } },
     };
-    expect(combine(earlier, later)).toEqual({ moves: later.moves, fields: { 'c.ts': { renderTimeout: 15_000 } } });
+    const edited: EntriesRecord = { version: 1, entries: { ...current.entries, 'b.ts': { renderTimeout: 3 } } };
+    const change: EntryPathChange = { type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' };
+    const renamed: EntriesRecord = { version: 1, entries: movePaths(edited.entries, [change]), moves: [change] };
+    const patch = combine(diff(current, edited), diff(edited, renamed));
+    expect(merge(current, renamed, patch).entries).toEqual({ 'b.ts': { renderTimeout: 1 } });
   });
 });

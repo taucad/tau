@@ -9,7 +9,7 @@ import { workbenchPaths } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
-import { entriesPolicy, movePaths, withoutMoves } from '#workbench-records/entries-policy.js';
+import { authoredFields, entriesPolicy, movePaths, withoutMoves } from '#workbench-records/entries-policy.js';
 import type { EntriesPatch, EntryFields, EntryPathChange as PathChange } from '#workbench-records/entries-policy.js';
 import { isPotentiallyApplied } from '#workbench-records/record-health.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
@@ -27,8 +27,8 @@ type Files = Readonly<{
   }) => Promise<CheckedFileWriteResult>;
 }>;
 
-/** The fields of one entry a person changed, as one own write carried them. */
-export type EntryRecordPatch = Readonly<{ path: string; fields: EntryFields }>;
+/** The fields of each entry a person changed, as one own write carried them, keyed by entry path. */
+export type EntryRecordPatch = Readonly<{ fields: Readonly<Record<string, EntryFields>> }>;
 export type EntryPathChange = PathChange;
 
 export type EntriesState = Readonly<{
@@ -42,17 +42,10 @@ const entriesRecordSyncMachine = createRecordSyncMachine(entriesPolicy);
 
 const emptyRecord: WorkbenchEntries = { version: 1, entries: {} };
 
-/**
- * The person's fields an own write carried, as one entry's patch. A write that carried a path change, or the fields
- * of more than one entry, names no single entry's fields: its publication is attributed own without them.
- */
+/** The person's fields an own write carried, by the entry path they are on in the written record. */
 const entryPatchOf = (patch: EntriesPatch | undefined): EntryRecordPatch | undefined => {
-  if (patch === undefined || patch.moves.length > 0) {
-    return undefined;
-  }
-  const changed = Object.entries(patch.fields);
-  const [only] = changed;
-  return changed.length === 1 && only ? { path: only[0], fields: only[1] } : undefined;
+  const fields = patch === undefined ? {} : authoredFields(patch);
+  return Object.keys(fields).length > 0 ? { fields } : undefined;
 };
 
 /** Checked per-entry settings; a person's timeout and component changes merge independently. */

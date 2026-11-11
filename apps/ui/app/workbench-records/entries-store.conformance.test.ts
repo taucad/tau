@@ -6,7 +6,13 @@
  * `record-sync.machine.conformance.test.ts` replays the suite over opaque bytes, with a stand-in policy that writes
  * whatever the model picks. Here the model's two byte values are two entries files, which differ in one entry's
  * render timeout, and each edit asks for the timeout the model's next writes carry. The machine then computes every
- * write itself, through the policy: what it writes, and whether it finds nothing left to write.
+ * write itself, through the policy's codec, diff and merge: what it writes, whether it finds nothing left to write,
+ * and how it attributes what it reads back.
+ *
+ * What this shows is that the protocol holds over the entries record's real bytes. It does not check the patch
+ * algebra: in the model a foreign write only flips the one field the person also writes, so a merge that dropped
+ * foreign changes, or a combine that dropped earlier edits, would replay the same. `entries-policy.test.ts` carries
+ * the algebra's laws, and `entries-store.test.ts` the path changes.
  *
  * A field patch gives every write of one edit the same bytes, while the model may pick other bytes for a later
  * write of the same edit (after a conflict or a read-back). Those behaviours have no edit history that this policy

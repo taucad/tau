@@ -147,11 +147,12 @@ export const seedViewer = (
  * The live view's settings, as the page reports them for the server to keep.
  *
  * @param graphicsRef - The page's graphics actor.
- * @returns The settings, or `undefined` before a canvas presents the camera.
+ * @returns The settings, or `undefined` before the page seeds the viewer for an entry.
  */
 export const liveViewSettings = (graphicsRef: GraphicsActorRef): TauViewerViewSettings | undefined => {
   const { context } = graphicsRef.getSnapshot();
-  return context.controlsAdapter === undefined
+  /* Seeding latches the entry's identity; an SVG model has a view camera but no canvas or controls adapter. */
+  return context.cameraFraming.identity === undefined
     ? undefined
     : viewSettingsOf(context, context.cameraRef.getSnapshot().context.view.requestedVerticalFieldOfView);
 };

@@ -67,19 +67,27 @@ export const readThreeCameraState = ({ camera, target, renderFrame }: ReadThreeC
 };
 
 /** Options for {@link createThreeCameraRig}. */
-type ThreeCameraRigOptions = Partial<Pick<CameraMachineInput, 'initialView' | 'pixelBudget'>> &
-  Pick<CameraActorOptions, 'clock' | 'inspect' | 'onRejectedEvent'> &
+type ThreeCameraRigOptions = Pick<CameraActorOptions, 'clock' | 'inspect' | 'onRejectedEvent'> &
   Readonly<{
     clipPlanes?: ThreeCameraClipPlanePolicy;
     renderFrame?: RenderFrame;
     onUpdate?: (camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void;
-    /**
-     * A running camera actor the rig presents instead of creating its own, such as a graphics actor's child. The rig
-     * takes its view, frame and policy, follows it only while {@link ThreeCameraRig.connect | connected}, and never
-     * stops it. `initialView`, `pixelBudget` and the actor options are then unused.
-     */
-    actorRef?: Actor<CameraMachine>;
-  }>;
+  }> &
+  (
+    | (Pick<CameraMachineInput, 'initialView'> &
+        Partial<Pick<CameraMachineInput, 'pixelBudget'>> &
+        Readonly<{ actorRef?: undefined }>)
+    | Readonly<{
+        /**
+         * A running camera actor the rig presents instead of creating its own, such as a graphics actor's child. The
+         * rig takes its view, frame and policy, follows it only while {@link ThreeCameraRig.connect | connected}, and
+         * never stops it. The actor options are then unused.
+         */
+        actorRef: Actor<CameraMachine>;
+        initialView?: undefined;
+        pixelBudget?: undefined;
+      }>
+  );
 
 /** Host clipping policy applied after each bounds-derived endpoint synchronization. */
 type ThreeCameraClipPlanePolicy = Readonly<{

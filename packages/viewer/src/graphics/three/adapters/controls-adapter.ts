@@ -17,7 +17,9 @@
  * Camera to canvas, once per presented change: the controls, the retained consumers, the raycaster clipping and R3F's
  * camera. The controls are written for every change except the one this adapter's own `update` reported (the person's
  * gesture, which the controls already hold), unless that change also brought a new render frame or a new native camera.
- * A pose another sender reports with the source `input` (a restored or adopted view) is written like any other. Each
+ * A pose another sender reports with the source `input` (a restored or adopted view) is written like any other. For an
+ * orthographic gesture the controls' own zoom is handed the presented zoom, since the rig presents the span through the
+ * frustum and `camera-controls` forces its zoom on every update. Each
  * write is stamped with the change's revision so the `update` it causes is an echo the camera ignores.
  */
 import type { RootState } from '@react-three/fiber';
@@ -202,6 +204,8 @@ export const createControlsAdapter = ({
     let echoRevision: number | undefined;
     // Set while this adapter reports a pose its controls made: the change it causes is already on the controls.
     let observing = false;
+    // The zoom the controls forced onto the camera when they reported the pose being presented.
+    let observedZoom = 1;
     let held = false;
     let moved = false;
     let published:
@@ -238,6 +242,18 @@ export const createControlsAdapter = ({
             target: toThreeRenderPoint({ renderFrame: snapshot.renderFrame, pointMeters: snapshot.view.target }),
             transition: false,
           });
+          controls.update(0);
+        } finally {
+          echoRevision = undefined;
+        }
+      } else if (nativeCamera instanceof OrthographicCamera && observedZoom !== nativeCamera.zoom) {
+        /*
+         * The rig presents an orthographic span through the frustum at zoom 1, but `camera-controls` keeps its own zoom
+         * and forces it on every update: hand it the presented zoom, or each update would shrink the span again.
+         */
+        echoRevision = snapshot.revision;
+        try {
+          void controls.zoomTo(nativeCamera.zoom, false);
           controls.update(0);
         } finally {
           echoRevision = undefined;
@@ -296,6 +312,7 @@ export const createControlsAdapter = ({
       }
       const nextFrame = resolvePoseRenderFrame({ renderFrame, target: pose.target, verticalSpan: pose.verticalSpan });
       observing = true;
+      observedZoom = controls.camera.zoom;
       try {
         camera.send({ type: 'poseObserved', ...pose, source: 'input', ...(nextFrame && { renderFrame: nextFrame }) });
       } finally {

@@ -254,6 +254,28 @@ describe('controls adapter', () => {
     }
   });
 
+  /* The rig presents an orthographic span through the frustum at zoom 1, while camera-controls forces its own zoom on
+   * every update: a zoom gesture must settle at the span it asked for, not shrink it again each frame. */
+  it('settles an orthographic zoom gesture at the span it asked for', () => {
+    const harness = createHarness({ cameraView, cameraFovAngle: 0 });
+    harness.attach();
+    const controls = harness.controls();
+    expect(harness.rig.activeCamera).toBe(harness.rig.orthographicCamera);
+    const span = (): number => harness.camera.getSnapshot().context.view.verticalSpan;
+    const before = span();
+
+    void controls.zoomTo(2, false);
+    controls.update(0);
+    const zoomed = span();
+    for (let frame = 0; frame < 8; frame += 1) {
+      controls.update(1 / 60);
+    }
+
+    expect(zoomed).toBeCloseTo(before / 2, 6);
+    expect(span()).toBeCloseTo(zoomed, 9);
+    expect(harness.rig.orthographicCamera.zoom).toBe(1);
+  });
+
   /* A restored or adopted view arrives as `poseObserved` with the source `input` from a sender that is not the
    * controls; camera-controls rewrites the native camera from its own state every frame, so it must take that pose. */
   it('writes a pose another sender reports as input onto the controls, so the next frame keeps it', () => {

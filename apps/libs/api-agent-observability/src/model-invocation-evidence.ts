@@ -7,7 +7,12 @@ import { evidenceRetentionMilliseconds } from '#evidence-admission.js';
 import type { ProviderFact, ProviderStreamSummary } from '#provider-stream-facts.js';
 import { contentSection, sectionTextBudget } from '#provider-content.js';
 import type { ContentMessage, ContentPayload, ContentSection, RequestContent } from '#provider-content.js';
-import type { ModelInvocationIntent, ModelInvocationSurface, ModelProviderWire } from '@taucad/api-llm-gateway';
+import type {
+  HostLabels,
+  ModelInvocationIntent,
+  ModelInvocationSurface,
+  ModelProviderWire,
+} from '@taucad/api-llm-gateway';
 
 /** Bumped whenever the facts written for the same attempt change. */
 export const apiProviderMapper = 'api-provider-v3';
@@ -82,6 +87,8 @@ export type ObservedAttempt = Readonly<{
   requestedModel: string | undefined;
   /** The supplier's model id for the requested route, which names the model when the stream did not. */
   supplierModel?: string | undefined;
+  /** The host labels the caller asserted (LW17), when it sent any. */
+  labels?: HostLabels | undefined;
   /** The supplier the route resolved to, when the API knows it. */
   provider: string | undefined;
   /** The funded operation, when Tau Cloud billed the attempt. */
@@ -140,6 +147,22 @@ const purposeOf = (attempt: ObservedAttempt): ProviderFact['purpose'] => {
   return attempt.activity === 'compaction' ? 'compaction' : 'generation';
 };
 
+/**
+ * The provider fact's host labels, each made a valid evidence id, as a member ready to spread into the fact; empty
+ * when the caller sent none, so a fact without labels is the fact written before LW17.
+ *
+ * @param labels - The labels the header boundary admitted.
+ * @returns The fact's `labels` member, or nothing.
+ */
+const labelsOf = async (
+  labels: HostLabels | undefined,
+): Promise<{ readonly labels?: NonNullable<ProviderFact['labels']> }> => {
+  const entries = await Promise.all(
+    Object.entries(labels ?? {}).map(async ([key, value]) => [key, await contractId('label', value)] as const),
+  );
+  return entries.length === 0 ? {} : { labels: Object.fromEntries(entries) };
+};
+
 /** The fact, source and identities one attempt's envelopes share, summary or content. */
 const attemptFact = async (
   attempt: ObservedAttempt,
@@ -156,6 +179,7 @@ const attemptFact = async (
     optionalId('model', attempt.requestedModel),
     optionalId('provider', attempt.provider),
   ]);
+  const labels = await labelsOf(attempt.labels);
   const { stream } = attempt;
   const usage: ProviderFact['usage'] = stream?.usage ?? {
     input: null,
@@ -184,6 +208,7 @@ const attemptFact = async (
     callKind: callKindOf(attempt),
     stop: stopOf(attempt),
     usage,
+    ...labels,
   };
   /* The content envelope shares this source, so a call is one fact whichever plane carries it. */
   const sourceDigest = await sha256Hex(

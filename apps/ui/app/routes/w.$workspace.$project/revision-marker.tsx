@@ -83,9 +83,11 @@ import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-re
 import type { AffectedPublication } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import { revisionName, revisionTriggerLabel } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 
-/** Whether a revision is one of the autosaves History folds. */
+/** Whether a revision is one of the autosaves History folds: a turn's base cut is one too (A5). */
 export const isAutosave = (revision: RevisionCard): boolean =>
-  revision.trigger === 'idle' || revision.trigger === 'hidden' || revision.trigger === 'close';
+  revision.turnCut === 'base' ||
+  (revision.turnId === undefined &&
+    (revision.trigger === 'idle' || revision.trigger === 'hidden' || revision.trigger === 'close'));
 
 /* The file's state is muted at 90%, the lightest step that keeps 4.5:1 on the
    file list in every theme; a hovered row returns it to the full muted colour. */
@@ -412,7 +414,7 @@ export function RevisionDetails({
         ] as const)),
     ...(parent === undefined ? [] : ([['Parent', parent]] as const)),
     ...(branch === undefined ? [] : ([['Branch', branch]] as const)),
-    ['Trigger', revisionTriggerLabel(revision.trigger)],
+    ['Trigger', revisionTriggerLabel(revision.trigger, revision.turnCut)],
     ...(revision.createdAt > 0
       ? ([
           [

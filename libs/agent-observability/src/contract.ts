@@ -118,6 +118,13 @@ const summary = z.discriminatedUnion('kind', [
     callKind: z.enum(['run', 'helper', 'direct']).optional(),
     stop: z.enum(['stop', 'length', 'toolUse', 'error', 'aborted', 'pending', 'deferred']),
     usage,
+    /**
+     * The host labels the caller asserted with the call (LW17), each `unknown` outside its vocabulary. Absent on a call
+     * that sent none, such as a helper or direct call, and on every fact written before them.
+     */
+    labels: z
+      .strictObject({ host: id.optional(), build: id.optional(), kernel: id.optional(), model: id.optional() })
+      .optional(),
   }),
   z.strictObject({
     kind: z.literal('tool'),

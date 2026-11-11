@@ -1313,6 +1313,10 @@ const graphicsMachineDefinition = setup({
           return { context: { suppressNextModelPointerClick: false } };
         },
         interactionMoved: ({ context }, enq) => {
+          if (!context.cameraRef.getSnapshot().matches({ gesture: 'held' })) {
+            // A move with no held gesture (a stray control event) neither guards a click nor drops the hover.
+            return {};
+          }
           enq.sendTo(context.cameraRef, { type: 'interactionMoved' });
           if (context.viewerHoverSuppressionReasons.includes('cameraControls')) {
             return { context: { suppressNextModelPointerClick: true } };

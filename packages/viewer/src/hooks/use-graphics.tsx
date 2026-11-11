@@ -54,6 +54,8 @@ const createViewPresentation = (
   const connectorRef: RefObject<CameraUpdateHandler | undefined> = { current: undefined };
   const consumers = new Set<RenderFrameUpdateHandler>();
   const listeners = new Set<() => void>();
+  // The frame this mount presents: set before its listeners hear of a change, so a store read in the notification sees
+  // the new frame.
   let renderFrame: RenderFrame | undefined;
   /* A frame the camera took (a rebased gesture) reaches the retained resources before the camera is published. */
   const changeRenderFrame = (next: RenderFrame): void => {
@@ -79,7 +81,7 @@ const createViewPresentation = (
     cameraRig: rig,
     cameraConnectorRef: connectorRef,
     cameraConsumersRef: { current: new Set<CameraUpdateHandler>() },
-    getRenderFrame: () => rig.renderFrame,
+    getRenderFrame: () => renderFrame ?? rig.renderFrame,
     setRenderFrame: (next: RenderFrame): void => {
       const previous = rig.renderFrame;
       if (

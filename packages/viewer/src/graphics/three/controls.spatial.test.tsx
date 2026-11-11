@@ -16,8 +16,17 @@ const mocks = vi.hoisted(() => {
     cameraControlProperties: undefined as Record<string, unknown> | undefined,
     handlesPicker: undefined as unknown,
     cubePicker: undefined as unknown,
+    frames: [] as Array<{ callback: (state: unknown, delta: number) => void; priority: number | undefined }>,
   };
 });
+
+vi.mock('@react-three/fiber', () => ({
+  // The canvas's controls adapter has not attached yet: the root holds no controls.
+  useThree: (selector: (state: { controls: null }) => unknown) => selector({ controls: null }),
+  useFrame: (callback: (state: unknown, delta: number) => void, priority?: number) => {
+    mocks.frames.push({ callback, priority });
+  },
+}));
 
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useCameraRig: () => ({ actorRef: { getSnapshot: () => ({ context: { view: { target: [0, 0, 0] } } }) } }),
@@ -66,15 +75,21 @@ describe('Controls', () => {
     mocks.cameraControlProperties = undefined;
     mocks.handlesPicker = undefined;
     mocks.cubePicker = undefined;
+    mocks.frames.length = 0;
   });
 
-  /* `initialTarget` is a render-unit API that camera-controls writes into the live camera in its own
-   * state initializer, two frames before `ActorBridge` exists. Handing it metres pointed the camera
-   * at a target 1000x away for those frames, which is what a restored view was caught showing. */
-  it('should hand the camera controls their initial target in render units', () => {
-    renderControls();
+  /* The controls adapter creates the controls and presents the camera on them before anything listens, so there is no
+   * initial target to hand them; this component only gives the adapter's controls their feel and their frame update. */
+  it('should update the controls before the scene draws and render nothing before the adapter attaches', () => {
+    const view = renderControls();
 
-    expect(mocks.cameraControlProperties?.['initialTarget']).toEqual([-10_000, -20_000, -30_000]);
+    expect(mocks.frames.map(({ priority }) => priority)).toContain(-1);
+    expect(() => {
+      for (const { callback } of mocks.frames) {
+        callback({}, 1 / 60);
+      }
+    }).not.toThrow();
+    expect(view.container.querySelector('primitive')).toBeNull();
   });
 
   it('should hand the section handles the view cube plane picker', async () => {

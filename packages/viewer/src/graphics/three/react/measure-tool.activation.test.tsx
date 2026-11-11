@@ -8,6 +8,7 @@ import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
 import { GraphicsProvider, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import { graphicsMachine } from '#machines/graphics.machine.js';
+import type { GraphicsCameraRef } from '#machines/graphics.machine.js';
 import { MeasureTool, restingPointerOver } from '#graphics/three/react/measure-tool.jsx';
 import { hasSceneTag, sceneTag } from '#graphics/three/utils/scene-tags.js';
 import {
@@ -15,6 +16,20 @@ import {
   getMeshMeasurementFeatures,
 } from '#graphics/three/utils/measurement-features.js';
 import type { MeasurementFeatureWorkerClient } from '#graphics/three/utils/measurement-features-worker-client.js';
+
+/** Reports a pose the person made with the controls, as the controls adapter does on `update`. */
+const observeInputPose = (cameraRef: GraphicsCameraRef): void => {
+  const { frameId, target, direction, up, verticalSpan } = cameraRef.getSnapshot().context.view;
+  cameraRef.send({
+    type: 'poseObserved',
+    source: 'input',
+    frameId,
+    target,
+    direction,
+    up,
+    verticalSpan: verticalSpan * 2,
+  });
+};
 
 const worker = vi.hoisted(() => ({
   /** Feature graph requests the worker has not answered yet; a test answers them. */
@@ -563,8 +578,9 @@ describe('MeasureTool activation', () => {
     });
     dispatch('pointerdown', pixelOf(0, -1, 1));
     // The camera controls report the drag before the tool has re-rendered with it.
-    actor.send({ type: 'controlsInteractionStart' });
-    actor.send({ type: 'controlsInteractionMoved' });
+    actor.send({ type: 'interactionStarted' });
+    actor.send({ type: 'interactionMoved' });
+    observeInputPose(actor.getSnapshot().context.cameraRef);
     dispatch('pointerup', pixelOf(0, -1, 1));
 
     await answerWorker();
@@ -577,13 +593,14 @@ describe('MeasureTool activation', () => {
       actor.send({ type: 'setMeasureActive', payload: true });
     });
     act(() => {
-      actor.send({ type: 'controlsInteractionStart' });
-      actor.send({ type: 'controlsInteractionMoved' });
+      actor.send({ type: 'interactionStarted' });
+      actor.send({ type: 'interactionMoved' });
+      observeInputPose(actor.getSnapshot().context.cameraRef);
     });
     dispatch('pointerdown', pixelOf(0, -1, 1));
     // The drag ends and its click guard is cleared before the release, so only the press's own record says it moved.
     act(() => {
-      actor.send({ type: 'controlsInteractionEnd' });
+      actor.send({ type: 'interactionEnded' });
       actor.send({ type: 'clearModelPointerClickGuard' });
     });
     dispatch('pointerup', pixelOf(0, -1, 1));
@@ -645,8 +662,9 @@ describe('MeasureTool activation', () => {
   it('drops a waiting click when a camera drag starts while it waits', async () => {
     clickWhilePreparing();
     act(() => {
-      actor.send({ type: 'controlsInteractionStart' });
-      actor.send({ type: 'controlsInteractionMoved' });
+      actor.send({ type: 'interactionStarted' });
+      actor.send({ type: 'interactionMoved' });
+      observeInputPose(actor.getSnapshot().context.cameraRef);
     });
 
     await answerWorker();
@@ -683,8 +701,9 @@ describe('MeasureTool activation', () => {
     expect(measurementMarks()).toEqual(0);
     // A camera drag starts: the tool rebinds its listeners.
     act(() => {
-      actor.send({ type: 'controlsInteractionStart' });
-      actor.send({ type: 'controlsInteractionMoved' });
+      actor.send({ type: 'interactionStarted' });
+      actor.send({ type: 'interactionMoved' });
+      observeInputPose(actor.getSnapshot().context.cameraRef);
     });
     runFrames();
 

@@ -2,11 +2,26 @@ import { describe, expect, it } from 'vitest';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { GeometryComponentManifest } from '@taucad/types';
 import { graphicsMachine } from '#machines/graphics.machine.js';
+import type { GraphicsCameraRef } from '#machines/graphics.machine.js';
 import {
   deriveModelInteractionUnitId,
   getModelInteractionUnitState,
   modelInteractionMachine,
 } from '#machines/model-interaction.machine.js';
+
+/** Reports a pose the person made with the controls, as the controls adapter does on `update`. */
+const observeInputPose = (cameraRef: GraphicsCameraRef): void => {
+  const { frameId, target, direction, up, verticalSpan } = cameraRef.getSnapshot().context.view;
+  cameraRef.send({
+    type: 'poseObserved',
+    source: 'input',
+    frameId,
+    target,
+    direction,
+    up,
+    verticalSpan: verticalSpan * 2,
+  });
+};
 
 const capabilities = {
   canHide: true,
@@ -344,10 +359,10 @@ describe('graphicsMachine model interaction', () => {
     actor.send({ type: 'setHoveredModelComponent', unitId, componentId: housingComponentId, source: 'viewer' });
 
     const modelRef = actor.getSnapshot().context.modelInteractionRef;
-    actor.send({ type: 'controlsInteractionStart' });
+    actor.send({ type: 'interactionStarted' });
 
-    expect(actor.getSnapshot().context.cameraInteracting).toBe(true);
-    expect(actor.getSnapshot().context.cameraInteractionHadMovement).toBe(false);
+    expect(actor.getSnapshot().context.cameraRef.getSnapshot().matches({ gesture: 'held' })).toBe(true);
+    expect(actor.getSnapshot().context.cameraRef.getSnapshot().matches({ input: 'dragging' })).toBe(false);
     expect(actor.getSnapshot().context.suppressNextModelPointerClick).toBe(false);
     expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
     expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).hoveredComponentId).toBe(
@@ -359,15 +374,17 @@ describe('graphicsMachine model interaction', () => {
       housingComponentId,
     );
 
-    actor.send({ type: 'controlsInteractionMoved' });
-    expect(actor.getSnapshot().context.cameraInteractionHadMovement).toBe(true);
+    actor.send({ type: 'interactionMoved' });
+    // The controls report the move and the pose it made; the pose is what makes the camera `dragging`.
+    observeInputPose(actor.getSnapshot().context.cameraRef);
+    expect(actor.getSnapshot().context.cameraRef.getSnapshot().matches({ input: 'dragging' })).toBe(true);
     expect(actor.getSnapshot().context.suppressNextModelPointerClick).toBe(true);
     expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual(['cameraControls']);
     expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).hoveredComponentId).toBeUndefined();
 
-    actor.send({ type: 'controlsInteractionEnd' });
-    expect(actor.getSnapshot().context.cameraInteracting).toBe(false);
-    expect(actor.getSnapshot().context.cameraInteractionHadMovement).toBe(false);
+    actor.send({ type: 'interactionEnded' });
+    expect(actor.getSnapshot().context.cameraRef.getSnapshot().matches({ gesture: 'held' })).toBe(false);
+    expect(actor.getSnapshot().context.cameraRef.getSnapshot().matches({ input: 'dragging' })).toBe(false);
     expect(actor.getSnapshot().context.suppressNextModelPointerClick).toBe(true);
     expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
 
@@ -388,17 +405,17 @@ describe('graphicsMachine model interaction', () => {
     actor.send({ type: 'setHoveredModelComponent', unitId, componentId: housingComponentId, source: 'viewer' });
     const modelRef = actor.getSnapshot().context.modelInteractionRef;
 
-    actor.send({ type: 'controlsInteractionMoved' });
+    actor.send({ type: 'interactionMoved' });
     expect(actor.getSnapshot().context.suppressNextModelPointerClick).toBe(false);
 
-    actor.send({ type: 'controlsInteractionStart' });
+    actor.send({ type: 'interactionStarted' });
     expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
     expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).hoveredComponentId).toBe(
       housingComponentId,
     );
-    actor.send({ type: 'controlsInteractionEnd' });
+    actor.send({ type: 'interactionEnded' });
 
-    expect(actor.getSnapshot().context.cameraInteracting).toBe(false);
+    expect(actor.getSnapshot().context.cameraRef.getSnapshot().matches({ gesture: 'held' })).toBe(false);
     expect(actor.getSnapshot().context.suppressNextModelPointerClick).toBe(false);
     expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
     expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).hoveredComponentId).toBe(

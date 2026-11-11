@@ -65,7 +65,9 @@ const trailerSchema = z.object({
     heldRunIds: z.array(z.string()).optional(),
     turnId: z.string().optional(),
     actor: actorSchema.optional(),
-    trigger: z.enum(['turn', 'save', 'idle', 'hidden', 'close', 'merge', 'restore', 'switch']).optional(),
+    trigger: z
+      .enum(['turn', 'save', 'idle', 'hidden', 'close', 'merge', 'restore', 'switch', 'create', 'import'])
+      .optional(),
     restoredFrom: z.string().optional(),
     createdAt: z.number(),
   }),

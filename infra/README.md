@@ -32,4 +32,4 @@ await fetch('http://localhost:4000/v1/telemetry-purposes', {
 });
 ```
 
-Add `content` or `feedback` the same way to capture them too. Runs then appear in the local project once the delivery worker drains the backlog.
+Add `content` or `feedback` the same way to capture them too. Content also needs `TAU_OBSERVABILITY_CONTENT_CAPTURE=on` (or `allowlist` with your account id in `TAU_OBSERVABILITY_CONTENT_ACCOUNTS`); unset, it records no prompt or reply. Runs then appear in the local project once the delivery worker drains the backlog.

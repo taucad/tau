@@ -153,6 +153,15 @@ export { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-
 export type { RevisionLogRequest, RevisionPlace, RevisionRow } from '#revision-verbs.js';
 export { numberVersions } from '#version-numbers.js';
 export {
+  parseStartRecord,
+  serializeStartRecord,
+  startReadingOf,
+  startRecordPath,
+  startSummary,
+  startTrigger,
+} from '#start-version.js';
+export type { StartOrigin, StartReading } from '#start-version.js';
+export {
   generatedGitattributesContent,
   generatedGitattributesPath,
   generatedIgnoreContent,

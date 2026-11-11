@@ -20,15 +20,27 @@ export type RevisionBranchName = string & { readonly [branchNameBrand]: true };
 /**
  * What asked for a revision, as the checkpoint policy names it.
  *
- * The same union `checkoutMachine` accepts as `CheckoutCutTrigger`; it is
+ * The union `checkoutMachine` accepts as `CheckoutCutTrigger`, plus the Start
+ * version's `create` and `import`, which only store creation mints; it is
  * declared here because it is provenance vocabulary — a fact recorded *about a
  * revision* — and `checkout.machine` imports nothing but XState, so it cannot
- * import it back. `checkout.machine.test-d.ts` asserts the two are identical,
- * which is what keeps the one union from becoming two.
+ * import it back. `checkout.machine.test-d.ts` asserts the two differ by
+ * exactly those, which is what keeps the one union from becoming two.
  *
  * @public
  */
-export type RevisionTrigger = 'turn' | 'save' | 'idle' | 'hidden' | 'close' | 'merge' | 'restore' | 'switch';
+export type RevisionTrigger =
+  | 'turn'
+  | 'save'
+  | 'idle'
+  | 'hidden'
+  | 'close'
+  | 'merge'
+  | 'restore'
+  | 'switch'
+  /* The Start version, V1: a project made in Tau, or one brought in (A6, `start-version.ts`). */
+  | 'create'
+  | 'import';
 
 /**
  * A signed-in (or deliberately anonymous) person (S37, A26).

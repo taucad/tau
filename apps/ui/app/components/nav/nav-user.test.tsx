@@ -8,6 +8,7 @@ import { MemoryRouter } from 'react-router';
 import { NavUser } from '#components/nav/nav-user.js';
 import * as Cookies from 'es-cookie';
 import { metaConfig } from '#constants/meta.constants.js';
+import type * as UseFeatureModule from '#flags/use-feature.js';
 
 const clientEnvironment = globalThis.window.ENV;
 const useNetworkConnectivityMock = vi.hoisted(() => vi.fn(() => true));
@@ -40,6 +41,16 @@ vi.mock('#components/auth/user/user-button.js', () => ({
     </div>
   ),
 }));
+
+const onboardingFlag = vi.hoisted(() => ({ isEnabled: false }));
+vi.mock('#flags/use-feature.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof UseFeatureModule>();
+  return {
+    ...actual,
+    useFeature: (flag: Parameters<typeof actual.useFeature>[0]) =>
+      flag === 'onboarding' ? onboardingFlag.isEnabled : actual.useFeature(flag),
+  };
+});
 
 vi.mock('#hooks/use-network-connectivity.js', () => ({
   useNetworkConnectivity: useNetworkConnectivityMock,
@@ -85,6 +96,7 @@ vi.mock('#components/tier-badge.js', () => ({
 describe('NavUser', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    onboardingFlag.isEnabled = false;
     useNetworkConnectivityMock.mockReturnValue(true);
     useEntitlementsMock.mockReturnValue({ tier: 'free', isResolved: true });
   });
@@ -155,6 +167,22 @@ describe('NavUser', () => {
     expect(screen.getByText('Community Discord')).toBeInTheDocument();
     expect(screen.getByText(`Tau v${metaConfig.version}`)).toBeInTheDocument();
     expect(screen.queryByText('About Tau')).not.toBeInTheDocument();
+  });
+
+  /* Onboarding E3: Help opens setup, and its explainer at step 4. */
+  it('should offer Set up Tau and How Tau works in Help with onboarding on', () => {
+    onboardingFlag.isEnabled = true;
+    render(<NavUser />, { wrapper: MemoryRouter });
+
+    expect(screen.getByRole('link', { name: 'Set up Tau' })).toHaveAttribute('href', '/welcome?entry=help');
+    expect(screen.getByRole('link', { name: 'How Tau works' })).toHaveAttribute('href', '/welcome?entry=help&step=how');
+  });
+
+  it('should leave the setup entries out of Help with onboarding off', () => {
+    render(<NavUser />, { wrapper: MemoryRouter });
+
+    expect(screen.queryByRole('link', { name: 'Set up Tau' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'How Tau works' })).not.toBeInTheDocument();
   });
 
   /* On a phone the Help menu opens in a drawer. */

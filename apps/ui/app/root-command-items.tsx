@@ -1,4 +1,4 @@
-import { Code2, Cog, List, LogIn, LogOut, MessageCircle } from 'lucide-react';
+import { Code2, Cog, List, LogIn, LogOut, MessageCircle, Sparkles } from 'lucide-react';
 import { useSession } from '@better-auth-ui/react';
 import { authClient } from '#lib/auth-client.js';
 import type { UIMatch } from 'react-router';
@@ -6,11 +6,15 @@ import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { useFeature } from '#flags/use-feature.js';
+import { setupEntryCopy } from '#components/onboarding/setup-copy.js';
+import { setupHref } from '#components/onboarding/setup-entry.js';
 
 export function RootCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
   const { data: authData } = useSession(authClient);
   const { signIn, signOut } = useAuthLinks();
   const { open: openSettings } = useSettingsDialog();
+  const isOnboardingEnabled = useFeature('onboarding');
 
   useCommandPaletteItems(
     match.id,
@@ -48,6 +52,14 @@ export function RootCommandPaletteItems({ match }: { readonly match: UIMatch }):
         shortcut: '⌘,',
       },
       {
+        id: 'set-up-tau',
+        label: setupEntryCopy.setUpTau,
+        group: 'Settings',
+        icon: <Sparkles />,
+        link: setupHref('palette'),
+        visible: isOnboardingEnabled,
+      },
+      {
         id: 'sign-in',
         label: 'Sign in',
         group: 'Settings',
@@ -64,7 +76,7 @@ export function RootCommandPaletteItems({ match }: { readonly match: UIMatch }):
         visible: Boolean(authData),
       },
     ],
-    [authData, signIn, signOut],
+    [authData, isOnboardingEnabled, signIn, signOut],
   );
 
   return undefined;

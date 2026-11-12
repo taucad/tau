@@ -42,4 +42,23 @@ describe("arrange_workbench's leaves on the device (BD7, V8)", () => {
     markViewFieldsSet(ports, 'v-1', { upDirection: 'z', 'grid.unit': 'mm' });
     expect(exceptions()).toEqual(['display.grid']);
   });
+
+  it('returns the leaves whose exception write the store refused or found newer', () => {
+    defaults = { 'display.grid': false };
+    const unsaved = markViewFieldsSet(
+      {
+        ...ports,
+        addException: () => 'refused',
+        removeException: () => 'newer',
+      },
+      'v-1',
+      { 'display.grid': true, 'display.axes': true },
+    );
+    expect(unsaved).toEqual(['display.grid', 'display.axes']);
+  });
+
+  it('returns no leaf when every exception write was saved', () => {
+    defaults = { 'display.grid': false };
+    expect(markViewFieldsSet(ports, 'v-1', { 'display.grid': true, 'display.axes': true })).toEqual([]);
+  });
 });

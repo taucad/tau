@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { useSelector } from '@xstate/react';
 import type { KernelId } from '@taucad/types/constants';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -23,12 +24,12 @@ import { getEmptyCode, getMainFile } from '#utils/kernel.utils.js';
  */
 export function StartFromTemplate(): React.JSX.Element {
   const { projectRef } = useProject();
+  const project = useSelector(projectRef, (state) => state.context.project);
   const fileManager = useFileManager();
   const [isWriting, setIsWriting] = useState(false);
 
   const start = useCallback(
     async (kernel: KernelId): Promise<void> => {
-      const { project } = projectRef.getSnapshot().context;
       if (project === undefined) {
         return;
       }
@@ -56,7 +57,7 @@ export function StartFromTemplate(): React.JSX.Element {
         setIsWriting(false);
       }
     },
-    [fileManager, projectRef],
+    [fileManager, project, projectRef],
   );
 
   return (

@@ -95,7 +95,8 @@ describe('withEntryAdoption', () => {
       runTests: async () => output as Awaited<ReturnType<RpcGeoSpecClient['runTests']>>,
     };
     const adopted = withEntryAdoption({ kernelClient: ready(), geospec }, { fileSystem });
-    await adopted.geospec.runTests({ files: ['parts/check.geospec.ts'] } as never);
+    const args: unknown = { files: ['parts/check.geospec.ts'] };
+    await adopted.geospec.runTests(args as Parameters<RpcGeoSpecClient['runTests']>[0]);
     expect(mainOf(files)).toBe('parts/vase.scad');
   });
 

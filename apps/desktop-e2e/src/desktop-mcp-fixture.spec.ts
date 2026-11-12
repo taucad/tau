@@ -114,7 +114,10 @@ test('serves the utility MCP endpoint to an agent it spawned', async () => {
     const evidence = readFileSync(eventsPath, 'utf8')
       .split('\n')
       .findLast((line) => line.includes('"role":"tool-output"') && line.includes('"toolName":"test_model"'));
-    expect(evidence).toMatch(/"content":\{"failures":.*"total":\d+\}/u);
+    /* The verdict carries more than failures and total since 7409bf77af and
+     * fde22afb4e (runStatus, lineageStatus, tests) and 1f7b734a0f (projectRoot),
+     * so `total` is no longer its last key. */
+    expect(evidence).toMatch(/"content":\{"failures":.*"total":\d+,"runStatus":"[a-z-]+"/u);
     expect(evidence).toMatch(/"agentId":"codex"/u);
     /* The capture left the MCP payload as a file of this chat: an endpoint
      * mounted without its project root threw a Node `path` TypeError here

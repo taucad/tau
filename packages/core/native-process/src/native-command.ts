@@ -6,8 +6,8 @@ import {
   launchInNativeSandbox,
   releaseNativeSandbox,
   spawnInNativeSandbox,
-} from '#native-sandbox.js';
-import type { NativeSandboxLaunch } from '#native-sandbox.js';
+} from '@taucad/sandbox';
+import type { NativeSandboxLaunch } from '@taucad/sandbox';
 
 /** Characters of each output stream kept; a longer stream keeps its tail. */
 const outputLimit = 64 * 1024;

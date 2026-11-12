@@ -391,7 +391,7 @@ jobs:
           import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
           import { join } from 'node:path';
 
-          import { launchInNativeSandbox } from '../../packages/core/native-process/src/native-sandbox.ts';
+          import { launchInNativeSandbox } from '../../libs/sandbox/src/native-sandbox.ts';
 
           type Spec = {
             readonly name: string;

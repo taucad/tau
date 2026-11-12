@@ -9,7 +9,13 @@ import type {
   PinnedMeasurement,
 } from '@taucad/viewer/graphics/graphics-settings';
 import { areSectionCutsEqual } from '@taucad/viewer/graphics/section-cuts';
-import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import {
+  selectGraphicsFramed,
+  selectGraphicsFraming,
+  selectGraphicsFramingIdentity,
+} from '@taucad/viewer/machines/graphics.machine';
+import type { GraphicsPendingPose, graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { useGraphicsCamera } from '@taucad/viewer/hooks/use-graphics';
@@ -41,6 +47,57 @@ const cameraViewEqual = (left: PersistedCameraView, right: PersistedCameraView):
 const sectionViewEqual = (left: PersistedSectionView, right: PersistedSectionView): boolean =>
   left.active === right.active && areSectionCutsEqual(left.cuts, right.cuts);
 const sameRecordField = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
+/** Whether the view's entry has had its first geometry framed. */
+const selectFramed = (graphicsRef: ActorRefFrom<typeof graphicsMachine>): boolean =>
+  selectGraphicsFramed(graphicsRef.getSnapshot());
+
+/** The entry the view's framing frames. */
+const selectFramingIdentity = (graphicsRef: ActorRefFrom<typeof graphicsMachine>): string | undefined =>
+  selectGraphicsFramingIdentity(graphicsRef.getSnapshot());
+
+/** The view's framing actor. */
+const selectFramingActor = (
+  graphicsRef: ActorRefFrom<typeof graphicsMachine>,
+): ReturnType<typeof selectGraphicsFraming> => selectGraphicsFraming(graphicsRef.getSnapshot());
+
+/** Whether the record may name `entryPath`'s pending pose: framing waits for that entry, or names none yet. */
+const mayRefreshPendingPose = (graphicsRef: ActorRefFrom<typeof graphicsMachine>, entryPath: string): boolean => {
+  const identity = selectFramingIdentity(graphicsRef);
+  return !selectFramed(graphicsRef) && (identity === undefined || identity === entryPath);
+};
+
+/** Whether framing frames, or waits for, an entry other than `entryPath`. */
+const framesAnotherEntry = (graphicsRef: ActorRefFrom<typeof graphicsMachine>, entryPath: string): boolean => {
+  const identity = selectFramingIdentity(graphicsRef);
+  return identity !== undefined && identity !== entryPath;
+};
+
+/** Whether `entryPath` waits for its first frame: framing frames another entry, or none yet. */
+const isAwaitingFirstFrame = (graphicsRef: ActorRefFrom<typeof graphicsMachine>, entryPath: string): boolean =>
+  !selectFramed(graphicsRef) || selectFramingIdentity(graphicsRef) !== entryPath;
+
+/** The camera's pose now. */
+const selectCameraView = (
+  camera: NonNullable<ReturnType<typeof useGraphicsCamera>>,
+): ReturnType<NonNullable<ReturnType<typeof useGraphicsCamera>>['getSnapshot']>['context']['view'] =>
+  camera.getSnapshot().context.view;
+
+/** Whether the camera is quiet: no drag holds it and no settle window is open, so a persisted adoption applies. */
+const selectCameraInputIdle = (camera: NonNullable<ReturnType<typeof useGraphicsCamera>>): boolean =>
+  camera.getSnapshot().matches({ input: 'idle' });
+
+/* The changes no person makes: the first frame, the record's pose applied over it, and bounds and viewport updates. */
+const firstFrameSources: ReadonlySet<string> = new Set(['framing', 'persisted', 'bounds', 'viewport']);
+
+/** A record's camera, as the pose framing applies after the entry's first frame. */
+const pendingPoseOf = (record: WorkbenchView, requestId: string): GraphicsPendingPose | undefined => {
+  if (record.camera.kind === 'pose') {
+    return { requestId, pose: record.camera };
+  }
+  const orientation = viewCameraOrientation(record);
+  return orientation === undefined ? undefined : { requestId, orientation };
+};
+
 const activeCameraRecord = (record: WorkbenchView): WorkbenchView => {
   const selected = record.selectedKernelView;
   if (!selected) {
@@ -120,10 +177,14 @@ export function useViewSettingsSync({
   const gridUnit = useSelector(graphicsRef, (s) => s.context.displayUnits.length.symbol);
   const upDirection = useSelector(graphicsRef, (s) => s.context.upDirection);
   /* The camera's owner is the graphics actor, not this hook's host. It exists before any canvas mounts, so a pose is
-   * persisted only once a canvas has framed the view (`framing.initialized`), never from the seeded default. */
+   * persisted only once the view's framing has framed the entry (`framed`), never from the seeded default. The framing
+   * state is read when it is needed, not rendered from. */
   const camera = useGraphicsCamera(graphicsRef);
-  const framing = useSelector(graphicsRef, (s) => s.context.cameraFraming);
-  const session = useMemo(() => (camera ? { rig: { actorRef: camera }, framing } : undefined), [camera, framing]);
+  const session = useMemo(() => (camera ? { rig: { actorRef: camera } } : undefined), [camera]);
+  /* The framed entry the first-frame receipt below was taken for; a new entry's first frame takes a new one. */
+  const firstFrameEntryRef = useRef<{ identity: string | undefined } | undefined>(undefined);
+  /* The framed entry a person last changed the pose of: a pose read after that is the person's, not the first frame. */
+  const personChangedEntryRef = useRef<{ identity: string | undefined } | undefined>(undefined);
   const cameraFovAngle = useSelector(session?.rig.actorRef, (s) => s?.context.view.requestedVerticalFieldOfView);
   /* A viewer that is not rendering glTF has no pose to persist, so it clears the stale one. */
   const artifactMimeType = useSelector(graphicsRef, (s) => s.context.artifact?.mimeType);
@@ -224,11 +285,12 @@ export function useViewSettingsSync({
         (!localCameraReceipt && !sameRecordField(previous.camera, cameraRecord.camera)) ||
         Boolean(pendingCameraRecordRef.current));
     if (needsCamera && (!localCameraReceipt || !previous || selectedChanged)) {
-      if (session && !session.framing.initialized) {
-        // oxlint-disable-next-line react/immutability -- The session framing record is mutable actor-owned state, not React state.
-        session.framing.pendingView = cameraRecord.camera.kind === 'pose' ? cameraRecord.camera : undefined;
-        // oxlint-disable-next-line react/immutability -- The first geometry frame consumes this actor-owned marker.
-        session.framing.preserveOrientationOnFirstFrame = cameraRecord.camera.kind !== 'pose';
+      /* Before the entry's first frame, framing applies the record's camera over that frame. The provider names the
+       * entry; the record only refreshes the pending pose of the entry framing already waits for (or names one when
+       * none is named), so a record for another entry never un-frames the one on screen. */
+      if (session && entryPath !== undefined && mayRefreshPendingPose(graphicsRef, entryPath)) {
+        const pendingPose = pendingPoseOf(cameraRecord, `record:${viewId}`);
+        graphicsRef.send({ type: 'entryChanged', identity: entryPath, ...(pendingPose ? { pendingPose } : {}) });
       }
       pendingCameraRecordRef.current = cameraRecord;
       cameraAdoptionPendingRef.current = true;
@@ -284,6 +346,7 @@ export function useViewSettingsSync({
     }
     const actor = session.rig.actorRef;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let waitedForEntry = false;
     const apply = (): void => {
       const remaining = poseSettle - (Date.now() - lastCameraEmissionRef.current);
       if (remaining > 0) {
@@ -294,8 +357,34 @@ export function useViewSettingsSync({
       if (!latest) {
         return;
       }
+      if (entryPath !== undefined && framesAnotherEntry(graphicsRef, entryPath)) {
+        /* The camera shows another entry: the record waits until framing names its own. */
+        waitedForEntry = true;
+        timer = setTimeout(apply, poseSettle);
+        return;
+      }
+      if (waitedForEntry && entryPath !== undefined && mayRefreshPendingPose(graphicsRef, entryPath)) {
+        /* Framing names the record's entry again and waits for its first frame, which applies the record's camera. */
+        waitedForEntry = false;
+        const pendingPose = pendingPoseOf(latest, `record:${viewId}`);
+        graphicsRef.send({ type: 'entryChanged', identity: entryPath, ...(pendingPose ? { pendingPose } : {}) });
+      }
       const current = actor.getSnapshot().context.view;
-      if (latest.camera.kind === 'pose') {
+      const adoption =
+        entryPath !== undefined && isAwaitingFirstFrame(graphicsRef, entryPath)
+          ? pendingPoseOf(latest, `record:${viewId}`)
+          : undefined;
+      if (adoption && !selectCameraInputIdle(actor)) {
+        /* The camera drops an adoption while it drags or settles (D15); the record waits for it to go quiet. */
+        timer = setTimeout(apply, poseSettle);
+        return;
+      }
+      if (adoption) {
+        /* Shown before the first frame without starting the camera's settle window, which would drop the adoption
+         * that frame sends: the same fields, applied in one automatic change. */
+        actor.send({ type: 'adoptPersistedPose', ...adoption, ...(adoption.orientation ? { margin: 0.1 } : {}) });
+        adoptedPoseRef.current = latest.camera.kind === 'pose' ? latest.camera : selectCameraView(actor);
+      } else if (latest.camera.kind === 'pose') {
         actor.send({ type: 'poseObserved', source: 'input', ...latest.camera });
         adoptedPoseRef.current = latest.camera;
       } else {
@@ -324,7 +413,7 @@ export function useViewSettingsSync({
         clearTimeout(sectionTimer);
       }
     };
-  }, [graphicsRef, onRecordApplied, record, recordLocalPatch, session]);
+  }, [entryPath, graphicsRef, onRecordApplied, record, recordLocalPatch, session, viewId]);
 
   // Rebuilt only when the measurements themselves change, so the shallow
   // comparison below can bail out on an unchanged settings object.
@@ -367,7 +456,10 @@ export function useViewSettingsSync({
         if (artifactMimeType !== undefined && artifactMimeType !== 'model/gltf-binary') {
           return { cameraFovAngle, cameraView: undefined };
         }
-        if (!session.framing.initialized) {
+        if (!selectFramed(graphicsRef)) {
+          firstFrameEntryRef.current = undefined;
+          firstFrameReceiptRef.current = undefined;
+          personChangedEntryRef.current = undefined;
           return {};
         }
         const { view } = session.rig.actorRef.getSnapshot().context;
@@ -379,10 +471,15 @@ export function useViewSettingsSync({
           verticalSpan: view.verticalSpan,
           perspectiveZoom: view.perspectiveZoom,
         };
-        const { firstFrameView } = session.framing;
-        if (firstFrameReceiptRef.current?.view !== firstFrameView) {
-          firstFrameReceiptRef.current = firstFrameView ? { view: firstFrameView, consumed: false } : undefined;
+        /* The first read after the entry is framed: a pose the first frame made (no person change since) is the
+         * automatic first frame, not a person's pose, until a pose that differs from it consumes the receipt. */
+        const framedEntry = selectFramingIdentity(graphicsRef);
+        if (!firstFrameEntryRef.current || firstFrameEntryRef.current.identity !== framedEntry) {
+          firstFrameEntryRef.current = { identity: framedEntry };
+          const personChanged = personChangedEntryRef.current?.identity === framedEntry;
+          firstFrameReceiptRef.current = personChanged ? undefined : { view: next, consumed: false };
         }
+        const firstFrameView = firstFrameReceiptRef.current?.view;
         if (includePose && firstFrameView && !cameraViewEqual(firstFrameView, next) && firstFrameReceiptRef.current) {
           firstFrameReceiptRef.current.consumed = true;
         }
@@ -523,13 +620,32 @@ export function useViewSettingsSync({
     /* The camera actor also emits when its input state changes (dragging, settling, idle); only a new revision is
      * a view change. */
     let cameraRevision = session?.rig.actorRef.getSnapshot().context.revision;
+    /* The pose at the last view change: a field of view or up change that leaves it is no person pose. */
+    let cameraPose = session ? selectCameraView(session.rig.actorRef) : undefined;
     const cameraSubscription = session?.rig.actorRef.subscribe(({ context }) => {
       if (context.revision === cameraRevision) {
         return;
       }
       cameraRevision = context.revision;
+      const posed = cameraPose === undefined || !cameraViewEqual(cameraPose, context.view);
+      cameraPose = context.view;
+      if (!selectFramed(graphicsRef)) {
+        personChangedEntryRef.current = undefined;
+      } else if (posed && !firstFrameSources.has(context.lastChange.source)) {
+        personChangedEntryRef.current = { identity: selectFramingIdentity(graphicsRef) };
+      }
       lastCameraEmissionRef.current = Date.now();
       restartSettle(true);
+    });
+    /* Every first frame takes a new receipt: an entry that waits for geometry forgets the last one, even when it is
+     * the entry framed before (a switch away and back) and no camera change or read happens while it waits. */
+    const framingSubscription = selectFramingActor(graphicsRef).subscribe((framing) => {
+      if (framing.matches('framed')) {
+        return;
+      }
+      firstFrameEntryRef.current = undefined;
+      firstFrameReceiptRef.current = undefined;
+      personChangedEntryRef.current = undefined;
     });
     /* The graphics actor emits for every event it handles; only a new cut list is a change. An edit that
      * changes no value keeps the list, so comparing references is enough. */
@@ -545,6 +661,7 @@ export function useViewSettingsSync({
 
     return () => {
       cameraSubscription?.unsubscribe();
+      framingSubscription.unsubscribe();
       sectionSubscription.unsubscribe();
       if (settleTimer === undefined) {
         return;

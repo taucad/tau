@@ -34,6 +34,14 @@ const startGraphics = (radius = 0.1): GraphicsActor => {
   ).start();
   actors.push(actor);
   actor.send({ type: 'sceneRadiusUpdated', radius, centerMeters: [0, 0, 0] });
+  if (radius > 0) {
+    actor.send({
+      type: 'geometryBoundsMeasured',
+      key: 'model',
+      bounds: { min: [-radius, -radius, -radius], max: [radius, radius, radius] },
+      radius,
+    });
+  }
   return actor;
 };
 
@@ -78,6 +86,13 @@ describe('graphics viewer shortcuts', () => {
 
     const empty = startGraphics(0);
     expect(press(empty, pressOf('fitView'))).toBe('noModelToFit');
+  });
+
+  it('should not report a fit while a new entry waits for its first presentation', () => {
+    const actor = startGraphics();
+    actor.send({ type: 'entryChanged', identity: 'src/other.ts' });
+
+    expect(press(actor, pressOf('fitView'))).toBe('noModelToFit');
   });
 
   it('should toggle Section, cutting away the side the camera faces', () => {

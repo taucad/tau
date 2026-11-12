@@ -41,7 +41,8 @@ export const staticAuthConfig = {
     cliDeviceAuthorization('https://tau.new'),
     // `bearer()` stays LAST: its after-hook reads the `set-cookie` every earlier
     // plugin may have written and re-emits it as `set-auth-token`.
-    bearer(),
+    // Only signed session tokens (`token.signature`): a session row alone never authenticates.
+    bearer({ requireSignature: true }),
   ],
   emailAndPassword: {
     enabled: true,

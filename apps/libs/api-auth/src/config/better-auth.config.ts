@@ -227,7 +227,8 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     oneTimeToken({ storeToken: 'hashed' }),
     cliDeviceAuthorization(configService.get('TAU_FRONTEND_URL', { infer: true })),
     // `bearer()` stays LAST (see auth.ts).
-    bearer(),
+    // Only signed session tokens (`token.signature`): a session row alone never authenticates.
+    bearer({ requireSignature: true }),
   ];
 
   // Validation: Ensure plugin arrays are in sync

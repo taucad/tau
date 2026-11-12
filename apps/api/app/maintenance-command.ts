@@ -29,6 +29,11 @@ import { freezeEverything, parseFreezeSeconds, thawEverything } from '@taucad/ap
 import { RedisInFlightRegistry } from '@taucad/api-git-core/routing/in-flight';
 import type { ScheduledMaintenanceCommand } from '@taucad/api-git-mirror/maintenance/liveness';
 import { holdInStandby } from '@taucad/api-git-mirror/maintenance/standby';
+import {
+  inventoryLfsIntegrity,
+  lfsIntegrityPages,
+  parseLfsIntegrityConcurrency,
+} from '@taucad/api-git-mirror/maintenance/lfs-integrity';
 import { applicationNameOf } from '@taucad/api-database/application-name';
 
 /**
@@ -111,6 +116,17 @@ const usage = `Usage: revisions-maintenance <command>
       window and that a fresh walk of its repository still does not reach. One
       read-only lease per project that has a candidate; --dry-run lists the
       candidates and hydrates nothing.
+
+  lfs-integrity [--concurrency <n>]
+      Read-only inventory for go-live STO-17: HEAD every LFS reservation of an
+      active project in this account at its tenant key with ChecksumMode
+      ENABLED and count tenant.equal (stored SHA-256 is the oid),
+      tenant.absent, tenant.composite and tenant.different, plus legacy (only
+      the pre-D24 key) and missing. Each different object prints one
+      revisions_maintenance.lfs_integrity_different line (ids, key and digest
+      only); progress every 5000 objects; one revisions_maintenance.lfs_integrity
+      summary. --concurrency HEADs in flight, 1-32, default 8. Exits 1 when any
+      object differs, a HEAD failed or the run was stopped. Never scheduled.
 
   collect-blobs [--confirm] [--dry-run]
       Delete publication blobs whose reference count is zero, in one bounded batch.
@@ -612,6 +628,28 @@ async function main(): Promise<void> {
             await writeLine(JSON.stringify(outcome));
           }
         });
+        break;
+      }
+      case 'lfs-integrity': {
+        const concurrency = parseLfsIntegrityConcurrency(option(args, 'concurrency'));
+        const stop = new AbortController();
+        const stopInventory = (): void => {
+          stop.abort();
+        };
+        process.once('SIGTERM', stopInventory);
+        process.once('SIGINT', stopInventory);
+        try {
+          const summary = await inventoryLfsIntegrity(
+            { pages: lfsIntegrityPages(database, { accountId: driver.account.id }), storage: driver },
+            { concurrency, report: writeLine, signal: stop.signal },
+          );
+          if (summary.tenant.different > 0 || summary.errors > 0 || summary.interrupted) {
+            process.exitCode = 1;
+          }
+        } finally {
+          process.removeListener('SIGTERM', stopInventory);
+          process.removeListener('SIGINT', stopInventory);
+        }
         break;
       }
       case 'collect-blobs': {

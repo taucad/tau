@@ -834,4 +834,52 @@ describe('ObjectStorageService', () => {
     });
     /* eslint-enable @typescript-eslint/naming-convention -- end AWS SDK PascalCase inputs scope */
   });
+
+  describe('stored checksum on head', () => {
+    const whole = `${'B'.repeat(43)}=`;
+    // The SDK's `send` overloads defeat spy typing; the prototype is unchanged at runtime.
+    const sendable = S3Client.prototype as unknown as {
+      send: (command: { input: Record<string, unknown> }) => Promise<unknown>;
+    };
+
+    const headWith = async (checksum: string | undefined) => {
+      /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK response fields use PascalCase */
+      const send = vi
+        .spyOn(sendable, 'send')
+        .mockResolvedValue({
+          ContentLength: 3,
+          ETag: '"e"',
+          ...(checksum === undefined ? {} : { ChecksumSHA256: checksum }),
+        });
+      /* eslint-enable @typescript-eslint/naming-convention -- end AWS SDK response fields */
+      try {
+        const head = await service.headBlob({ namespace: 'tenants', key: 'owner/lfs/project/oid', checksum: true });
+        expect(send.mock.calls[0]?.[0].input).toHaveProperty('ChecksumMode', 'ENABLED');
+        return head;
+      } finally {
+        send.mockRestore();
+      }
+    };
+
+    it('should report a whole-object checksum and no composite flag', async () => {
+      const head = await headWith(whole);
+
+      expect(head?.checksumSha256).toBe(whole);
+      expect(head).not.toHaveProperty('checksumComposite');
+    });
+
+    it('should drop a multipart composite checksum and flag it', async () => {
+      const head = await headWith(`${whole}-3`);
+
+      expect(head).not.toHaveProperty('checksumSha256');
+      expect(head?.checksumComposite).toBe(true);
+    });
+
+    it('should report neither when the store holds no checksum', async () => {
+      const head = await headWith(undefined);
+
+      expect(head).not.toHaveProperty('checksumSha256');
+      expect(head).not.toHaveProperty('checksumComposite');
+    });
+  });
 });

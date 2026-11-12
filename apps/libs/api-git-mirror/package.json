@@ -25,6 +25,7 @@
   },
   "exports": {
     "./maintenance/blob-collector": "./src/maintenance/blob-collector.ts",
+    "./maintenance/lfs-integrity": "./src/maintenance/lfs-integrity.ts",
     "./maintenance/lfs-relocation": "./src/maintenance/lfs-relocation.ts",
     "./maintenance/liveness": "./src/maintenance/liveness.ts",
     "./maintenance/project-purge": "./src/maintenance/project-purge.ts",

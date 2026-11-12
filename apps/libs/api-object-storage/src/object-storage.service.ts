@@ -120,6 +120,8 @@ export type HeadBlobResult = {
    * checksum (`<digest>-<parts>`) is not the object's hash and is left out.
    */
   checksumSha256?: string;
+  /** `true` when `checksum` was asked and the store reported such a composite instead; for the integrity inventory. */
+  checksumComposite?: true;
 };
 
 /** One object in a prefix listing, keyed relative to its namespace. */
@@ -492,6 +494,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         etag: response.ETag?.replaceAll('"', '') ?? '',
         cacheControl: response.CacheControl ?? '',
         ...(checksumSha256 === undefined || checksumSha256.includes('-') ? {} : { checksumSha256 }),
+        ...(checksumSha256?.includes('-') === true ? { checksumComposite: true } : {}),
       };
     } catch (error) {
       if (isS3ObjectMissing(error)) {

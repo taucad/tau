@@ -2506,9 +2506,9 @@ export const openProjectRevisions = async (
           /* `conflicted` is a resting state with no exit this verb can take,
                so leaving it out meant waiting out the bound and then reporting a
                timeout that had not happened (review R3). It is reached only when
-               another device pushes between this one's connect and its pull —
-               the ordinary diverged open is refused by the remote itself, one
-               state earlier (`remote.phase: 'failed'`). */
+               this device's line and the remote's both hold work: connect
+               offers only a branch that contains the remote's, so the pull is
+               where a diverged open is decided. */
           resolve(
             Object.freeze({
               status: 'refused',

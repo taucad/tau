@@ -30,6 +30,8 @@ export const staticAuthConfig = {
     apiKey(),
     magicLink({
       expiresIn: tokenLifetimeSeconds.magicLink,
+      // The `verification` row holds a hash, so a database read never yields a usable sign-in link.
+      storeToken: 'hashed',
       sendMagicLink() {
         // No-op for mock configuration
       },

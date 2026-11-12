@@ -210,6 +210,8 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     }),
     magicLink({
       expiresIn: tokenLifetimeSeconds.magicLink,
+      // The `verification` row holds a hash, so a database read never yields a usable sign-in link.
+      storeToken: 'hashed',
       // `context` is optional on this callback, so the device row is best-effort and omits itself.
       async sendMagicLink({ email, url, token }, context) {
         await emailService.sendMagicLink({

@@ -1120,6 +1120,7 @@ const prefixStampFor = (input: {
     messages: fitted.context.messages,
     stamps: fitted.stamps,
     settings: settingsOf(request),
+    transcriptEffort: carriesEffortInTranscript(request) ? request.reasoning?.effort : undefined,
     release: input.release,
     summary: request.messages.findLast((message) => isCompactionSummaryRow(message))?.id,
     cleared: fitted.context.messages.filter((message) => message.role === 'toolResult' && isClearedToolResult(message))

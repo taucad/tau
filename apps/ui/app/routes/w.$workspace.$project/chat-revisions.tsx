@@ -9,7 +9,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type { KeyboardEvent } from 'react';
-import { ChevronDown, CircleAlert, CircleDashed, GitBranch, History, Plus, Undo2, XIcon } from 'lucide-react';
+import { ChevronDown, CircleAlert, CircleDashed, Cloud, GitBranch, History, Plus, Undo2, XIcon } from 'lucide-react';
 import { Link, useLocation } from 'react-router';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
@@ -493,17 +493,19 @@ const isSetupCard = (revision: RevisionCard): boolean =>
  * Consecutive entries of Tau's own setup are one compact line, the head among
  * them: Current never marks them ({@link currentRevisionOf}).
  *
- * On History's lanes a fold never joins entries of two lines (D2).
+ * The newest backed-up entry starts a group of its own, so *Backed up to here*
+ * sits between groups and never inside a fold (D4). On History's lanes a fold
+ * never joins entries of two lines (D2).
  *
  * @param revisions - The line's history, newest first.
  * @param headRevisionId - The revision the checkout reflects, which never folds into autosaves.
- * @param lineOf - The line each entry is drawn on, when History draws lanes.
+ * @param options - `backedUpTo`, the newest entry the remote holds, which no newer entry folds with; `lineOf`, the line each entry is drawn on when History draws lanes.
  * @returns The rows and folds History renders.
  */
 export const groupRevisionHistory = (
   revisions: readonly RevisionCard[],
   headRevisionId: string | undefined,
-  lineOf?: ReadonlyMap<string, string>,
+  { backedUpTo, lineOf }: Readonly<{ backedUpTo?: string; lineOf?: ReadonlyMap<string, string> }> = {},
 ): readonly HistoryGroup[] => {
   const groups: HistoryGroup[] = [];
   const isSameLine = (group: HistoryGroup | undefined, revision: RevisionCard): boolean =>
@@ -512,9 +514,10 @@ export const groupRevisionHistory = (
     lineOf.get(group.kind === 'revision' ? group.revision.revisionId : group.revisions[0]!.revisionId) ===
       lineOf.get(revision.revisionId);
   for (const revision of revisions) {
+    const startsGroup = revision.revisionId === backedUpTo;
     if (isSetupCard(revision)) {
       const previous = groups.at(-1);
-      if (previous?.kind === 'setup' && isSameLine(previous, revision)) {
+      if (previous?.kind === 'setup' && !startsGroup && isSameLine(previous, revision)) {
         groups[groups.length - 1] = { kind: 'setup', revisions: [...previous.revisions, revision] };
       } else {
         groups.push({ kind: 'setup', revisions: [revision] });
@@ -527,7 +530,7 @@ export const groupRevisionHistory = (
       !revision.conflicted &&
       isAutosave(revision);
     const previous = groups.at(-1);
-    if (foldable && previous?.kind === 'autosaves' && isSameLine(previous, revision)) {
+    if (foldable && previous?.kind === 'autosaves' && !startsGroup && isSameLine(previous, revision)) {
       groups[groups.length - 1] = { kind: 'autosaves', revisions: [...previous.revisions, revision] };
     } else if (foldable) {
       groups.push({ kind: 'autosaves', revisions: [revision] });
@@ -631,6 +634,35 @@ function DayDivider({
         )}
       />
       <span className='pt-1.5 pl-1 text-xs text-muted-foreground'>{label}</span>
+    </li>
+  );
+}
+
+/**
+ * How far the backup has reached (D4, canvas `state-offline`): one dashed line
+ * under the entries that are not backed up yet. Nothing above it is at risk on
+ * this device; it is simply not backed up yet.
+ *
+ * @param props - The key it is measured by on History's lanes.
+ * @returns The boundary row.
+ */
+function BackupBoundary({ graphKey }: { readonly graphKey?: string }): React.JSX.Element {
+  /* On History's lanes the graph's rails pass through the boundary, and it is measured as one of the graph's rows. */
+  const isOnLanes = useContext(HistoryLanesContext);
+  return (
+    <li data-row='boundary' className={timelineRow} data-graph-key={isOnLanes ? graphKey : undefined}>
+      <span
+        aria-hidden
+        className={cn(
+          'relative flex justify-center',
+          !isOnLanes && 'before:absolute before:-top-0.5 before:bottom-0 before:w-px before:bg-border',
+        )}
+      />
+      <span className='flex min-w-0 items-center gap-1.5 py-1 pr-2 pl-1 text-xs leading-5 text-muted-foreground'>
+        <Cloud aria-hidden className='size-3.5 shrink-0' />
+        Backed up to here
+        <span aria-hidden className='h-px min-w-4 flex-1 border-t border-dashed' />
+      </span>
     </li>
   );
 }
@@ -808,9 +840,10 @@ function BranchChipRow({
   );
 }
 
-/** One display step of the list: a day, a branch's chip, or a row or fold. */
+/** One display step of the list: a day, *Backed up to here*, a branch's chip, or a row or fold. */
 type HistoryStep =
   | Readonly<{ kind: 'day'; key: string; label: string }>
+  | Readonly<{ kind: 'backup'; key: string }>
   | Readonly<{ kind: 'chip'; key: string; branch: string; startsFrom?: string }>
   | Readonly<{ kind: 'group'; group: HistoryGroup; isLast: boolean }>;
 
@@ -902,8 +935,8 @@ const graphRowsOf = ({
     return { key: revision.revisionId, node, anchor: isCompact ? setupAnchor : rowAnchor, height: isCompact ? 24 : 30 };
   };
   for (const step of steps) {
-    if (step.kind === 'day') {
-      rows.push({ key: step.key, anchor: 12, height: 26 });
+    if (step.kind === 'day' || step.kind === 'backup') {
+      rows.push({ key: step.key, anchor: 12, height: step.kind === 'day' ? 26 : 28 });
       continue;
     }
     if (step.kind === 'chip') {
@@ -1157,9 +1190,14 @@ function HistoryList(): React.JSX.Element {
     loadOlder,
   } = useHistorySource(view, branch);
   const lineOf = onLanes?.lineOf;
+  /* D4: the newest entry any branch's remote head names; the entries above it are the ones not backed up. */
+  const backedUpTo = useMemo(() => {
+    const remoteHeads = new Set((status?.branches ?? []).flatMap((facet) => facet.remoteHead ?? []));
+    return revisions.find((revision) => remoteHeads.has(revision.revisionId))?.revisionId;
+  }, [revisions, status?.branches]);
   const groups = useMemo(
-    () => groupRevisionHistory(revisions, headRevisionId, lineOf),
-    [revisions, headRevisionId, lineOf],
+    () => groupRevisionHistory(revisions, headRevisionId, { backedUpTo, lineOf }),
+    [revisions, headRevisionId, backedUpTo, lineOf],
   );
   const currentRevisionId = useMemo(() => currentRevisionOf(revisions, headRevisionId), [revisions, headRevisionId]);
   const nextVersion = useMemo(() => nextVersionNumber(revisions), [revisions]);
@@ -1344,6 +1382,9 @@ function HistoryList(): React.JSX.Element {
     if (previous === undefined || dayOf(firstOf(previous)) !== day) {
       steps.push({ kind: 'day', key: `day-${day}`, label: day });
     }
+    if (index > 0 && holds(group, backedUpTo)) {
+      steps.push({ kind: 'backup', key: 'backup-boundary' });
+    }
     if (onLanes !== undefined) {
       steps.push(...chipStepsBefore(group, onLanes, chipped));
     }
@@ -1358,20 +1399,31 @@ function HistoryList(): React.JSX.Element {
 
   const items: React.JSX.Element[] = [];
   for (const step of steps) {
-    if (step.kind === 'day') {
-      items.push(<DayDivider key={step.key} label={step.label} hasLine={items.length > 0} graphKey={step.key} />);
-    } else if (step.kind === 'chip') {
-      items.push(
-        <BranchChipRow
-          key={step.key}
-          branch={step.branch}
-          slot={onLanes?.slots.get(step.branch)}
-          note={onLanes?.notes.get(step.branch) ?? ''}
-          isCurrent={step.branch === branch}
-        />,
-      );
-    } else {
-      items.push(renderGroup(step.group, step.group === shown[0], step.isLast));
+    switch (step.kind) {
+      case 'day': {
+        items.push(<DayDivider key={step.key} label={step.label} hasLine={items.length > 0} graphKey={step.key} />);
+        break;
+      }
+      case 'backup': {
+        items.push(<BackupBoundary key={step.key} graphKey={step.key} />);
+        break;
+      }
+      case 'chip': {
+        items.push(
+          <BranchChipRow
+            key={step.key}
+            branch={step.branch}
+            slot={onLanes?.slots.get(step.branch)}
+            note={onLanes?.notes.get(step.branch) ?? ''}
+            isCurrent={step.branch === branch}
+          />,
+        );
+        break;
+      }
+      case 'group': {
+        items.push(renderGroup(step.group, step.group === shown[0], step.isLast));
+        break;
+      }
     }
   }
   /* Below Show older: kept rows older than the page, each under its own day. */

@@ -20,6 +20,7 @@ import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.j
 import { lanesScenarios, oneBranchRows } from '#routes/w.$workspace.$project/history-lanes.test-harness.js';
 import type { LanesScenario } from '#routes/w.$workspace.$project/history-lanes.test-harness.js';
 
+/* eslint-disable @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
 vi.hoisted(() => {
   globalThis.window.ENV = {
     ...globalThis.window.ENV,
@@ -27,6 +28,7 @@ vi.hoisted(() => {
     TAU_GIT_REMOTE_ALLOW_PRIVATE: false,
   };
 });
+/* eslint-enable @typescript-eslint/naming-convention -- back to the workspace rule for the rest of the file. */
 vi.mock('#cloud/commercial-features.js', async () => {
   const cloud = await import('#cloud/commercial-features.cloud.js');
   return { CommercialUpgradeLabel: cloud.CommercialUpgradeLabel, useCommercialFeatures: () => ({}) };

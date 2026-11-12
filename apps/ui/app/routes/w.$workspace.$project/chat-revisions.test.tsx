@@ -191,6 +191,37 @@ describe('Revisions pane', () => {
     expect(groups[1]).toMatchObject({ kind: 'autosaves', revisions: [{ revisionId: 'a' }, { revisionId: 'b' }] });
   });
 
+  it('should never fold autosaves of two lines together, nor across the backup boundary (D2, D4)', () => {
+    const card = (revisionId: string): RevisionCard => ({
+      revisionId,
+      n: undefined,
+      createdAt: 1,
+      summary: '',
+      actor: '',
+      turnId: undefined,
+      conflicted: false,
+      tags: [],
+      capture: 'hidden',
+    });
+    const autosaves = [card('a'), card('b'), card('c'), card('d')];
+    const lineOf = new Map([
+      ['a', 'main'],
+      ['b', 'side'],
+      ['c', 'side'],
+      ['d', 'side'],
+    ]);
+
+    const groups = groupRevisionHistory(autosaves, undefined, { backedUpTo: 'd', lineOf });
+
+    /* `a` stands alone on main, `b` and `c` fold on side, and `d`, the backed-up entry, starts its own group. */
+    expect(
+      groups.map((group) =>
+        group.kind === 'revision' ? [group.revision.revisionId] : group.revisions.map((entry) => entry.revisionId),
+      ),
+    ).toStrictEqual([['a'], ['b', 'c'], ['d']]);
+    expect(groups.map((group) => group.kind)).toStrictEqual(['revision', 'autosaves', 'revision']);
+  });
+
   it('merges consecutive setup entries into one line, the head among them, and never marks one Current (A4)', () => {
     const card = (revisionId: string, parent: string | undefined, isSetup: boolean): RevisionCard => ({
       revisionId,
@@ -1442,6 +1473,66 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.queryByRole('button', { name: /^Thicker base 3 · /u })).not.toBeInTheDocument();
     await user.click(fold);
     expect(screen.getByRole('button', { name: /^Thicker base 3 · /u })).toBeInTheDocument();
+  });
+
+  describe('Backed up to here (D4)', () => {
+    /* The canvas's `state-offline`: rev-1 is on Tau Cloud; rev-2 (an autosave) and rev-3 are not. */
+    const offline = (remoteHead: string | undefined): void => {
+      revisionStatusHarness.rows = [
+        row({ revisionId: 'rev-3', summary: 'Tighten lid tolerance', capture: 'save' }),
+        row({ revisionId: 'rev-2', summary: 'Add strain relief', capture: 'idle' }),
+        row({ revisionId: 'rev-1', summary: 'Reroute the USB-C cutout', capture: 'idle' }),
+        row({ revisionId: 'rev-0', summary: 'Start', capture: 'idle' }),
+      ];
+      revisionStatusHarness.status = {
+        ...revisionStatusHarness.status,
+        headRevisionId: 'rev-3',
+        sync: { ...revisionStatusHarness.status.sync, state: 'queued', online: false, pendingCount: 1 },
+        branches: [
+          {
+            name: 'main',
+            head: 'rev-3',
+            checkoutId: 'live',
+            checkoutRoot: '/projects/p',
+            leaseChatIds: [],
+            ...(remoteHead === undefined ? {} : { remoteHead }),
+          },
+        ],
+      };
+    };
+    const entries = (): string[] =>
+      [...screen.getByRole('list', { name: 'History entries' }).children].map((item) =>
+        item instanceof HTMLElement && item.dataset['row'] === 'boundary'
+          ? 'boundary'
+          : (item.querySelector('[data-revision-row]')?.getAttribute('aria-label')?.split(' · ')[0] ?? ''),
+      );
+
+    it('sits under exactly the entries that are not backed up, and no autosave folds across it', async () => {
+      offline('rev-1');
+
+      renderPane();
+
+      await screen.findByText('Backed up to here');
+      expect(entries().filter(Boolean)).toStrictEqual([
+        'Tighten lid tolerance',
+        'Add strain relief',
+        'boundary',
+        '2 autosaves',
+      ]);
+    });
+
+    it.each([
+      ['everything is backed up', 'rev-3'],
+      ['nothing is backed up', undefined],
+      ['the remote holds an entry this line does not have', 'rev-elsewhere'],
+    ] as const)('draws no line when %s', async (_, remoteHead) => {
+      offline(remoteHead);
+
+      renderPane();
+
+      await screen.findByRole('list', { name: 'History entries' });
+      expect(screen.queryByText('Backed up to here')).not.toBeInTheDocument();
+    });
   });
 
   /* A4: the operator's two `idle` autosaves that changed only `.gitignore` are one compact setup line. */

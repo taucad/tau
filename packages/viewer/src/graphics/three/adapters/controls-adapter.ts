@@ -16,6 +16,9 @@
  *   (a far pan or a deep zoom) the frame rides on the same event, so one gesture step is one camera change.
  * - `transitionstart`, `wake`, `update`, `control`, `controlstart`: a render request.
  *
+ * Graphics to controls: `navigate`, one orbit, pan or zoom step from a key or a single-click control, moves the
+ * controls at once; the next frame's `update` reports the pose with the source `input`, as a drag's does.
+ *
  * Camera to canvas, once per presented change: the controls, the retained consumers, the raycaster clipping and R3F's
  * camera. The controls are written for every change except the one this adapter's own `update` reported (the person's
  * gesture, which the controls already hold), unless that change also brought a new render frame or a new native camera.
@@ -53,6 +56,7 @@ import type { RenderFrame } from '@taucad/spatial';
 import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
 import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import { attachCameraWheelRouter } from '#graphics/three/controls/camera-wheel-router.js';
+import { applyCameraNavigationStep } from '#graphics/three/controls/camera-navigation.js';
 import type { CameraInputRouting, CameraPivotPicker } from '#graphics/three/controls/camera-wheel-router.js';
 import { hasSceneTagInHierarchy, sceneTag } from '#graphics/three/utils/scene-tags.js';
 import { raycastFirstVisibleMeshHit } from '#graphics/three/utils/bvh-raycast.js';
@@ -305,7 +309,7 @@ export const createControlsAdapter = ({
   isInteractionLocked = () => false,
   getCameraRouting,
 }: ControlsAdapterDependencies): ControlsAdapterLogic =>
-  createCallbackLogic(({ sendBack }) => {
+  createCallbackLogic(({ sendBack, receive }) => {
     installCameraControls();
     const camera = rig.actorRef;
     const { gl } = root.get();
@@ -430,6 +434,25 @@ export const createControlsAdapter = ({
         observing = false;
       }
     };
+    /*
+     * A navigation step graphics forwards (an arrow key or a single-click control): the controls move at once and step
+     * on the next frame, whose `update` reports the pose as the person's input. Not while the view cube holds the lock.
+     */
+    receive((event) => {
+      if (event.type !== 'navigate' || isInteractionLocked()) {
+        return;
+      }
+      const routing = getCameraRouting?.();
+      const moved = applyCameraNavigationStep({
+        controls,
+        step: event.step,
+        enablePan: routing?.enablePan,
+        enableZoom: routing?.enableZoom,
+      });
+      if (moved) {
+        invalidate();
+      }
+    });
     const listeners = [
       ['controlstart', onControlStart],
       ['control', onControl],

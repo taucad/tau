@@ -10,7 +10,10 @@ import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
 
-const mocks = vi.hoisted(() => ({ hasGridReadout: true, isMobile: false }));
+const mocks = vi.hoisted(() => ({ hasGridReadout: true, isMobile: false, viewerControls: false }));
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: (flag: string) => (flag === 'viewerControls' ? mocks.viewerControls : false),
+}));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => mocks.isMobile }));
 const editorSnapshot = { context: { focusedChatId: 'chat-test' as string | undefined } };
 const editorRef = { getSnapshot: () => editorSnapshot, subscribe: () => ({ unsubscribe: () => undefined }) };
@@ -39,6 +42,7 @@ afterEach(() => {
   activeActor = undefined;
   mocks.hasGridReadout = true;
   mocks.isMobile = false;
+  mocks.viewerControls = false;
   editorSnapshot.context.focusedChatId = 'chat-test';
 });
 
@@ -105,6 +109,21 @@ const sectionRow = (): HTMLElement => screen.getByRole('group', { name: 'Section
 const measuringRow = (): HTMLElement => screen.getByRole('group', { name: 'Measuring options' });
 
 describe('ChatViewerControls', () => {
+  describe('with viewerControls (FL1)', () => {
+    it('should offer the single-click camera controls and navigation keys only with the flag on', () => {
+      renderBar(startGraphics());
+      expect(screen.queryByRole('group', { name: 'Camera' })).toBeNull();
+    });
+
+    it('should add the camera controls beside the bar with the flag on', () => {
+      mocks.viewerControls = true;
+      renderBar(startGraphics());
+      const camera = screen.getByRole('group', { name: 'Camera' });
+      expect(within(camera).getByRole('button', { name: 'Zoom in' })).toBeTruthy();
+      expect(within(camera).getByRole('button', { name: 'Pan with the arrows' })).toBeTruthy();
+    });
+  });
+
   describe('at rest', () => {
     it('should keep model tools available without mounting chat capture before chat discovery', () => {
       editorSnapshot.context.focusedChatId = undefined;

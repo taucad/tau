@@ -42,6 +42,7 @@
     "./cad/kernel-settings": "./src/cad/kernel-settings.tsx",
     "./cad/material-swatch": "./src/cad/material-swatch.tsx",
     "./cad/measure-control": "./src/cad/measure-control.tsx",
+    "./cad/navigation-controls": "./src/cad/navigation-controls.tsx",
     "./cad/measure-tool-row": "./src/cad/measure-tool-row.tsx",
     "./cad/part-preview-image": "./src/cad/part-preview-image.tsx",
     "./cad/part-properties-panel": "./src/cad/part-properties-panel.tsx",
@@ -62,6 +63,7 @@
     "./graphics/section-cuts": "./src/graphics/section-cuts.ts",
     "./graphics/three/canvas-three-gl": "./src/graphics/three/canvas-three-gl.ts",
     "./graphics/three/controls/camera-controls-feel": "./src/graphics/three/controls/camera-controls-feel.ts",
+    "./graphics/three/controls/camera-navigation": "./src/graphics/three/controls/camera-navigation.ts",
     "./graphics/three/controls/camera-presets": "./src/graphics/three/controls/camera-presets.ts",
     "./graphics/three/controls/camera-wheel-router": "./src/graphics/three/controls/camera-wheel-router.ts",
     "./graphics/three/controls/section-handles": "./src/graphics/three/controls/section-handles.ts",
@@ -165,6 +167,11 @@
         "import": "./dist/cad/measure-control.mjs",
         "default": "./dist/cad/measure-control.mjs"
       },
+      "./cad/navigation-controls": {
+        "types": "./dist/cad/navigation-controls.d.mts",
+        "import": "./dist/cad/navigation-controls.mjs",
+        "default": "./dist/cad/navigation-controls.mjs"
+      },
       "./cad/measure-tool-row": {
         "types": "./dist/cad/measure-tool-row.d.mts",
         "import": "./dist/cad/measure-tool-row.mjs",
@@ -264,6 +271,11 @@
         "types": "./dist/graphics/three/controls/camera-controls-feel.d.mts",
         "import": "./dist/graphics/three/controls/camera-controls-feel.mjs",
         "default": "./dist/graphics/three/controls/camera-controls-feel.mjs"
+      },
+      "./graphics/three/controls/camera-navigation": {
+        "types": "./dist/graphics/three/controls/camera-navigation.d.mts",
+        "import": "./dist/graphics/three/controls/camera-navigation.mjs",
+        "default": "./dist/graphics/three/controls/camera-navigation.mjs"
       },
       "./graphics/three/controls/camera-presets": {
         "types": "./dist/graphics/three/controls/camera-presets.d.mts",

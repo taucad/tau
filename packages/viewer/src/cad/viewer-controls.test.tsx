@@ -27,7 +27,7 @@ afterEach(() => {
   mocks.isMobile = false;
 });
 
-function renderBar(mobileAction?: React.ReactNode): void {
+function renderBar(mobileAction?: React.ReactNode, navigation?: Readonly<{ navigation?: boolean }>): void {
   actor = createActor(
     graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
     { input: {} },
@@ -36,7 +36,7 @@ function renderBar(mobileAction?: React.ReactNode): void {
     <KeyboardProvider>
       <TooltipProvider>
         <GraphicsProvider graphicsRef={actor}>
-          <ViewerControls mobileAction={mobileAction} />
+          <ViewerControls mobileAction={mobileAction} {...navigation} />
         </GraphicsProvider>
       </TooltipProvider>
     </KeyboardProvider>,
@@ -73,6 +73,20 @@ describe('ViewerControls host action', () => {
     const names = controlNames();
     expect(names).not.toContain('Enter fullscreen');
     expect(names[names.indexOf('Fit view') + 1]).toBe('View in your space');
+  });
+});
+
+describe('ViewerControls navigation (N2)', () => {
+  it('adds no camera controls unless the host asks for them', () => {
+    renderBar();
+    expect(screen.queryByRole('group', { name: 'Camera' })).toBeNull();
+  });
+
+  it('adds the camera controls, outside the controls line, when the host asks for them', () => {
+    renderBar(undefined, { navigation: true });
+    const camera = screen.getByRole('group', { name: 'Camera' });
+    expect(within(camera).getByRole('button', { name: 'Orbit left' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Viewer controls' }).contains(camera)).toBe(false);
   });
 });
 

@@ -100,6 +100,7 @@ const samples: Samples = {
   setGridSizeLocked: [{ type: 'setGridSizeLocked', payload: true }],
   setGridUnit: [{ type: 'setGridUnit', payload: { unit: 'in' } }],
   fitView: [{ type: 'fitView' }],
+  navigateCamera: [{ type: 'navigateCamera', step: { kind: 'orbit', direction: 'left' } }],
   cameraViewChanged: [
     { type: 'cameraViewChanged', verticalSpan: 1 },
     { type: 'cameraViewChanged', verticalSpan: 0 },

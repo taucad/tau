@@ -469,7 +469,7 @@ describe('controls adapter', () => {
       const [[ticker]] = subscriptions as [[{ current: (state: RootState, delta: number) => void }, number]];
       const controls = harness.controls();
       const lock = createViewportGizmoInteractionLock();
-      const gizmo = Object.assign(new EventDispatcher<Record<string, object>>(), {
+      const gizmo = Object.assign(new EventDispatcher<Record<string, Record<string, unknown>>>(), {
         target: new Vector3(),
         update: vi.fn(),
       });

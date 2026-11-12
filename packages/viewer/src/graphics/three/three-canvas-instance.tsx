@@ -2,7 +2,7 @@ import type { RootState } from '@react-three/fiber';
 import { Canvas, flushSync as flushThreeSync } from '@react-three/fiber';
 import { useSelector } from '@xstate/react';
 import { flushSync } from 'react-dom';
-import type { ActorRefFrom, SnapshotFrom } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
 import type { RefCallback } from 'react';
 import type { Group } from 'three';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
@@ -41,10 +41,6 @@ import type { webglContextMachine } from '#machines/webgl-context.machine.js';
 /** The world up axis graphics keeps, read when the camera's up changes. */
 const selectGraphicsUpDirection = (graphicsRef: ReturnType<typeof useGraphics>): 'x' | 'y' | 'z' =>
   graphicsRef.getSnapshot().context.upDirection;
-
-/** The world up axis in a graphics snapshot, which the grid lies across. */
-const selectUpDirection = (snapshot: SnapshotFrom<ReturnType<typeof useGraphics>>): 'x' | 'y' | 'z' =>
-  snapshot.context.upDirection;
 
 /** Whether this mount's canvas actor still takes events: a detached one stopped with its surface. */
 const selectCanvasRunning = (canvas: CanvasRef | undefined): canvas is CanvasRef =>
@@ -274,19 +270,18 @@ export function ThreeCanvasInstance({
 
   /*
    * The grid's place in the scene: the canvas actor pads the camera's clip planes for the grid while it is drawn,
-   * reported from the scene's own mount and unmount as the surface's attach is. The marker lies across the axis `Grid`
-   * draws on (graphics' world up), and it re-reports to each canvas actor this mount attaches: a new axis or a Suspense
-   * reveal (which re-attaches the surface but not the scene, a separate root) gives the callback a new identity, so
-   * React detaches it and attaches it again.
+   * reported from the scene's own mount and unmount as the surface's attach is; graphics tells the canvas the axis the
+   * grid lies across. The marker re-reports to each canvas actor this mount attaches: a Suspense reveal (which
+   * re-attaches the surface but not the scene, a separate root) gives the callback a new identity, so React detaches it
+   * and attaches it again.
    */
-  const gridUpDirection = useSelector(graphicsRef, selectUpDirection);
   const presentGrid = useCallback<RefCallback<Group>>(
     (marker) => {
       if (selectCanvasRunning(canvasRef)) {
-        canvasRef.send({ type: 'gridChanged', grid: { enabled: marker !== null, upDirection: gridUpDirection } });
+        canvasRef.send({ type: 'gridChanged', enabled: marker !== null });
       }
     },
-    [canvasRef, gridUpDirection],
+    [canvasRef],
   );
 
   const bindCanvas = useCallback<RefCallback<HTMLCanvasElement>>(

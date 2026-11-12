@@ -24,8 +24,8 @@
  * - the surface's size reaches the camera as `setViewport` in the macrostep that reports it (`hostCreated`,
  *   `surfaceResized`), so the frame that resized presents the new viewport;
  * - the camera's clip policy holds the infinite grid's far padding and presentation plane for the grid the canvas's
- *   scene draws (`gridChanged`, reported by the scene's own mount, with the axis the grid lies across), and is cleared
- *   when the canvas stops drawing.
+ *   scene draws (`gridChanged`, reported by the scene's own mount), across the world up axis graphics reports
+ *   (`upDirectionChanged`, in the macrostep the camera turns), and is cleared when the canvas stops drawing.
  *
  * Every fact here is ephemeral: it is derived from the mounted surface and never persisted or seeded.
  *
@@ -131,6 +131,8 @@ export type CanvasInput = Readonly<{
   reattached?: boolean;
   /** The view's camera: the canvas presents its viewport and clip policy on it. A canvas without one presents none. */
   camera?: CanvasCameraRef;
+  /** The world up axis the grid lies across, until graphics reports another with `upDirectionChanged`. */
+  upDirection?: CanvasGrid['upDirection'];
 }>;
 
 /**
@@ -156,8 +158,10 @@ export type CanvasEvent =
   | { type: 'rendererFailed'; failure: CanvasFailure }
   | { type: 'framePresented' }
   | { type: 'contextLost' }
-  /** The grid entered or left the canvas's scene, or turned to another world up axis. */
-  | { type: 'gridChanged'; grid: CanvasGrid };
+  /** The grid entered or left the canvas's scene. */
+  | { type: 'gridChanged'; enabled: boolean }
+  /** Graphics turned the view to another world up axis, which the grid lies across. */
+  | { type: 'upDirectionChanged'; upDirection: CanvasGrid['upDirection'] };
 
 /**
  * Events the canvas actor emits.
@@ -259,9 +263,10 @@ type ContextBudgetRef = ActorRefFrom<typeof contextBudgetLogic>;
 
 type CameraSurfaceCommand =
   | { type: 'viewport'; viewport: CanvasSurface }
-  | { type: 'clipPolicy'; clipPolicy: CameraClipPolicy | undefined };
+  | { type: 'grid'; enabled: boolean }
+  | { type: 'upDirection'; upDirection: CanvasGrid['upDirection'] };
 
-type CameraSurfaceInput = Readonly<{ camera: CanvasCameraRef; clipPolicy: CameraClipPolicy | undefined }>;
+type CameraSurfaceInput = Readonly<{ camera: CanvasCameraRef; grid: CanvasGrid }>;
 
 /** Whether the camera still takes events: graphics stops it last, after this canvas. */
 const selectCameraRunning = (camera: CanvasCameraRef): boolean => camera.getSnapshot().status === 'active';
@@ -270,16 +275,19 @@ const selectCameraRunning = (camera: CanvasCameraRef): boolean => camera.getSnap
 const selectPresentedViewport = (camera: CanvasCameraRef): CanvasSurface => camera.getSnapshot().context.view.viewport;
 
 /**
- * Presents one surface on the view's camera: sets the clip policy when it starts, forwards the surface's viewport and
- * policy changes, and clears the policy when it stops. A viewport the camera already presents is not sent again, so a
- * remount or a re-reported size makes no camera change.
+ * Presents one surface on the view's camera: holds the grid it draws and sets the grid's clip policy when it starts and
+ * whenever the grid enters, leaves or turns, forwards the surface's viewport, and clears the policy when it stops. A
+ * viewport the camera already presents is not sent again, so a remount or a re-reported size makes no camera change.
  */
 const cameraSurfaceLogic = createCallbackLogic<CameraSurfaceCommand, CameraSurfaceInput>(({ input, receive }) => {
   const { camera } = input;
-  camera.send({ type: 'setClipPolicy', clipPolicy: input.clipPolicy });
+  let { grid } = input;
+  camera.send({ type: 'setClipPolicy', clipPolicy: resolveGridClipPolicy(grid) });
   receive((command) => {
-    if (command.type === 'clipPolicy') {
-      camera.send({ type: 'setClipPolicy', clipPolicy: command.clipPolicy });
+    if (command.type === 'grid' || command.type === 'upDirection') {
+      grid =
+        command.type === 'grid' ? { ...grid, enabled: command.enabled } : { ...grid, upDirection: command.upDirection };
+      camera.send({ type: 'setClipPolicy', clipPolicy: resolveGridClipPolicy(grid) });
       return;
     }
     const { width, height, pixelRatio } = command.viewport;
@@ -402,7 +410,7 @@ const canvasMachineDefinition = setup({
       input.kind === 'canvas' && input.camera
         ? spawn(canvasActors.cameraSurface, {
             id: 'cameraSurface',
-            input: { camera: input.camera, clipPolicy: undefined },
+            input: { camera: input.camera, grid: { enabled: false, upDirection: input.upDirection ?? 'z' } },
           })
         : undefined,
     // Holds the viewer's place in the context budget for the canvas's whole life, Retry's fallback included.
@@ -520,7 +528,13 @@ const canvasMachineDefinition = setup({
     // Only a canvas that still presents the camera changes its policy; a lost or failed one has none to change.
     gridChanged: ({ context, event }, enq) => {
       if (context.cameraSurface) {
-        enq.sendTo(context.cameraSurface, { type: 'clipPolicy', clipPolicy: resolveGridClipPolicy(event.grid) });
+        enq.sendTo(context.cameraSurface, { type: 'grid', enabled: event.enabled });
+      }
+      return {};
+    },
+    upDirectionChanged: ({ context, event }, enq) => {
+      if (context.cameraSurface) {
+        enq.sendTo(context.cameraSurface, { type: 'upDirection', upDirection: event.upDirection });
       }
       return {};
     },
@@ -547,6 +561,7 @@ export const canvasEventTypes = [
   'framePresented',
   'contextLost',
   'gridChanged',
+  'upDirectionChanged',
 ] as const satisfies ReadonlyArray<CanvasEvent['type']>;
 
 type CanvasMachineDefinition = typeof canvasMachineDefinition;

@@ -967,10 +967,9 @@ describe('ThreeCanvasInstance', () => {
       </ThreeCanvasInstance>,
     );
     expect(camera().clipPolicy).toEqual(grid('z'));
-    // The grid lies across graphics' world up, as `Grid` draws it.
-    act(() => {
-      graphicsHolder.current?.send({ type: 'setUpDirection', payload: 'x' });
-    });
+    // The grid lies across graphics' world up, as `Grid` draws it: the policy turns with the camera's up, in the
+    // macrostep graphics takes the new axis, before React renders again.
+    graphicsHolder.current?.send({ type: 'setUpDirection', payload: 'x' });
     expect(camera().clipPolicy).toEqual(grid('x'));
 
     // The grid the canvas draws decides the policy, whatever graphics' own grid setting says.

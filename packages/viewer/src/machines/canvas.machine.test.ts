@@ -54,7 +54,8 @@ const samples: Record<CanvasEvent['type'], readonly CanvasEvent[]> = {
   rendererFailed: [{ type: 'rendererFailed', failure: { kind: 'renderer', message: 'no context' } }],
   framePresented: [{ type: 'framePresented' }],
   contextLost: [{ type: 'contextLost' }],
-  gridChanged: [{ type: 'gridChanged', grid: { enabled: true, upDirection: 'y' } }],
+  gridChanged: [{ type: 'gridChanged', enabled: true }],
+  upDirectionChanged: [{ type: 'upDirectionChanged', upDirection: 'y' }],
 };
 const pathOptions = {
   input: { canvasId: 'c', kind: 'canvas' } satisfies CanvasInput,
@@ -493,7 +494,7 @@ describe('canvas camera presentation', () => {
     const canvas = startCanvas({ ...defaultInput, camera });
     // No grid is in the scene until the scene mounts one.
     expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
-    canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'z' } });
+    canvas.send({ type: 'gridChanged', enabled: true });
     expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy('z'));
     canvas.stop();
     expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
@@ -502,14 +503,19 @@ describe('canvas camera presentation', () => {
 
   it('should follow the grid in and out of the scene and across a new world up', () => {
     const camera = startCamera();
-    const canvas = startCanvas({ ...defaultInput, camera });
-    canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'x' } });
+    const canvas = startCanvas({ ...defaultInput, camera, upDirection: 'x' });
+    canvas.send({ type: 'gridChanged', enabled: true });
     expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy('x'));
     canvas.send(hostCreated());
-    canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'z' } });
+    canvas.send({ type: 'upDirectionChanged', upDirection: 'z' });
     expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy('z'));
-    canvas.send({ type: 'gridChanged', grid: { enabled: false, upDirection: 'z' } });
+    canvas.send({ type: 'gridChanged', enabled: false });
     expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
+    // A new axis while no grid is drawn keeps the camera unpadded, and the grid comes back across it.
+    canvas.send({ type: 'upDirectionChanged', upDirection: 'y' });
+    expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
+    canvas.send({ type: 'gridChanged', enabled: true });
+    expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy('y'));
     canvas.stop();
     camera.stop();
   });
@@ -519,11 +525,11 @@ describe('canvas camera presentation', () => {
       const camera = startCamera();
       const canvas = startCanvas({ ...defaultInput, camera });
       canvas.send(hostCreated());
-      canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'z' } });
+      canvas.send({ type: 'gridChanged', enabled: true });
       canvas.send(ending);
       expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
       const { revision } = camera.getSnapshot().context;
-      canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'z' } });
+      canvas.send({ type: 'gridChanged', enabled: true });
       canvas.send({ type: 'surfaceResized', surface: { width: 320, height: 240, pixelRatio: 1 } });
       expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
       expect(camera.getSnapshot().context.revision).toBe(revision);
@@ -536,7 +542,7 @@ describe('canvas camera presentation', () => {
     const camera = startCamera();
     const placeholder = startCanvas({ canvasId: 'p', kind: 'placeholder', camera });
     placeholder.send(hostCreated());
-    placeholder.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'z' } });
+    placeholder.send({ type: 'gridChanged', enabled: true });
     expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
     expect(camera.getSnapshot().context.view.viewport).toEqual({ width: 1280, height: 720, pixelRatio: 1 });
     placeholder.stop();
@@ -546,7 +552,7 @@ describe('canvas camera presentation', () => {
   it('should leave the camera alone once graphics has stopped it', () => {
     const camera = startCamera();
     const canvas = startCanvas({ ...defaultInput, camera });
-    canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'z' } });
+    canvas.send({ type: 'gridChanged', enabled: true });
     camera.stop();
     // A send to a stopped actor does not throw; it only warns that the event dead-lettered.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

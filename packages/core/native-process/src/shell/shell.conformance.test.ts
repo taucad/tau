@@ -593,6 +593,61 @@ describe.runIf(enabled)('shell conformance', () => {
     });
   }
 
+  conformance(
+    'E10',
+    'a parent that exits or is aborted leaves no background, TERM-resistant or re-parented writer behind',
+    async () => {
+      const writer = (path: string): string => `while :; do printf b >> ${path}; sleep 0.1; done`;
+      /* A TERM-resistant grandchild under a TERM-resistant child; on Linux also a setsid writer and a double fork
+       * whose intermediate parent exits at once, so the writer is re-parented before the launch settles. The macOS
+       * setsid/double-fork form stays the disclosed C06b residual. */
+      const tree = (prefix: string): { paths: string[]; command: string[] } => {
+        const [background, stubborn, detached, doubled] = ['background', 'stubborn', 'detached', 'doubled'].map(
+          (name) => join(work, `${prefix}-${name}`),
+        ) as [string, string, string, string];
+        return {
+          paths: [background, stubborn, ...(linux ? [detached, doubled] : [])],
+          command: [
+            `( ${writer(background)} ) &`,
+            `( trap '' TERM HUP INT; ( trap '' TERM HUP INT; ${writer(stubborn)} ) & wait ) &`,
+            ...(linux ? [`setsid sh -c '${writer(detached)}' &`, `( ( sh -c '${writer(doubled)}' & ) & )`] : []),
+          ],
+        };
+      };
+      const sizesOf = (paths: readonly string[]): number[] =>
+        paths.map((path) => (existsSync(path) ? statSync(path).size : 0));
+
+      const exited = tree('e10-exit');
+      const result = await run([...exited.command, 'sleep 1', 'exit 0'].join('\n'));
+
+      expect(result.exitCode, result.stderr).toBe(0);
+      const settled = sizesOf(exited.paths);
+      expect(
+        settled.every((size) => size > 0),
+        JSON.stringify(settled),
+      ).toBe(true);
+      await delay(1500);
+      expect(sizesOf(exited.paths)).toStrictEqual(settled);
+
+      const aborted = tree('e10-abort');
+      const controller = new AbortController();
+      const process_ = await start(
+        launchOf([...aborted.command, 'sleep 300'].join('\n'), { signal: controller.signal }),
+      );
+      const deadline = Date.now() + 10_000;
+      while (sizesOf(aborted.paths).some((size) => size === 0) && Date.now() < deadline) {
+        // oxlint-disable-next-line no-await-in-loop -- poll until every writer has written once.
+        await delay(100);
+      }
+      expect(sizesOf(aborted.paths).every((size) => size > 0)).toBe(true);
+      controller.abort();
+      await process_.exited;
+      const stopped = sizesOf(aborted.paths);
+      await delay(1500);
+      expect(sizesOf(aborted.paths)).toStrictEqual(stopped);
+    },
+  );
+
   conformance('C07', 'abort stops a running command and settles once', async () => {
     const controller = new AbortController();
     const process_ = await start(launchOf('sleep 300', { signal: controller.signal }));

@@ -220,6 +220,55 @@ const settingsCatalog = [
     icon: Rotate3D,
     group: 'Workspace',
     entries: [
+      /* Navigation. */
+      {
+        id: 'viewer-mouse-controls',
+        label: 'Mouse controls',
+        description: 'Which buttons orbit, pan and zoom',
+        keywords: [
+          'mouse',
+          'orbit',
+          'pan',
+          'zoom',
+          'rotate',
+          'preset',
+          'navigation',
+          'camera',
+          'solidworks',
+          'blender',
+        ],
+      },
+      {
+        id: 'viewer-trackpad-gestures',
+        label: 'Trackpad gestures',
+        description: 'Two-finger scroll pans and pinch zooms, replacing mouse controls here',
+        keywords: ['trackpad', 'touchpad', 'pinch', 'scroll', 'laptop', 'this device'],
+      },
+      {
+        id: 'viewer-zoom-to-cursor',
+        label: 'Zoom to cursor',
+        description: 'Zoom toward the pointer instead of the view centre',
+        keywords: ['zoom', 'pointer', 'wheel', 'navigation'],
+      },
+      {
+        id: 'viewer-orbit-around-cursor',
+        label: 'Orbit around cursor',
+        description: 'Rotate about the point under the pointer',
+        keywords: ['orbit', 'rotate', 'pivot', 'pointer', 'navigation'],
+      },
+      {
+        id: 'viewer-invert-zoom',
+        label: 'Invert zoom',
+        description: 'Scroll up to zoom out',
+        keywords: ['zoom', 'reverse', 'wheel', 'scroll', 'direction'],
+      },
+      /* Gizmo. Show gizmo is the View defaults row. */
+      {
+        id: 'viewer-gizmo-style',
+        label: 'Gizmo style',
+        description: 'The orientation control you click to snap views',
+        keywords: ['view cube', 'cube', 'axis balls', 'axes', 'triad', 'orientation'],
+      },
       /* View defaults: one entry per inheritable leaf the person can set (no up axis). */
       {
         id: 'viewer-projection',

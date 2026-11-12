@@ -7,7 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { resolveViewSettings, tauViewDefaults, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
-import { personRecordStores } from '#preferences/person-record.store.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
+import { metaConfig } from '#constants/meta.constants.js';
+import { deviceRecordStore, personRecordStores } from '#preferences/person-record.store.js';
 import { useViewLevels } from '#workbench-records/view-levels.js';
 import { viewExceptions } from '#workbench-records/view-exceptions.js';
 
@@ -28,6 +30,7 @@ vi.mock('#flags/feature-flags.js', () => ({
 
 const { ViewerSettings } = await import('#components/settings/viewer/viewer-settings.js');
 const { resetSessionPerspectiveAngleForTesting } = await import('#components/settings/viewer/view-defaults-group.js');
+const { viewerPersonPropertyNames } = await import('#components/settings/viewer/viewer-person-properties.js');
 
 const renderSection = (): ReturnType<typeof render> =>
   render(
@@ -45,6 +48,11 @@ const choose = async (label: string, option: string): Promise<void> => {
   await userEvent.keyboard('{Enter}');
   await userEvent.click(await screen.findByRole('option', { name: new RegExp(`^${option}`, 'u') }));
 };
+
+/* A `$set` capture as PostHog receives it, named as analytics names the property. */
+const personProperties = (property: keyof typeof viewerPersonPropertyNames, value: string): unknown => ({
+  $set: { [viewerPersonPropertyNames[property]]: value },
+});
 
 const events = (name: string): unknown[] =>
   state.capture.mock.calls.filter(([event]) => event === name).map(([, properties]) => properties);
@@ -200,5 +208,150 @@ describe('View defaults (V4)', () => {
     await userEvent.click(within(row('Axes')).getByRole('switch', { name: 'Axes' }));
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
     expect(viewDefaults()).toEqual({ 'display.lines': false, 'display.axes': false });
+  });
+});
+
+describe('Navigation and Gizmo (V2, V3, M2)', () => {
+  it('shows the tool answer’s suggestion until one is chosen, and Reset returns to it', async () => {
+    personRecordStores.profile.write({ tool: 'solidworks' });
+    renderSection();
+    const select = (): HTMLElement => screen.getByRole('combobox', { name: 'Mouse controls' });
+    expect(select()).toHaveTextContent('Middle-drag orbit, Ctrl pan');
+    expect(personRecordStores.viewer.read().controls.preset).toBeUndefined();
+    await choose('Mouse controls', 'Right-drag orbit');
+    expect(personRecordStores.viewer.read().controls.preset).toBe('right-orbit');
+    expect(events('viewer_preset_selected')).toEqual([{ preset: 'right-orbit', suggested: false, source: 'settings' }]);
+    expect(events('$set')).toEqual([personProperties('mousePreset', 'right-orbit')]);
+    await userEvent.click(within(row('Mouse controls')).getByRole('button', { name: 'Reset to the suggestion' }));
+    expect(personRecordStores.viewer.read().controls.preset).toBeUndefined();
+    expect(select()).toHaveTextContent('Middle-drag orbit, Ctrl pan');
+    expect(events('$set').at(-1)).toEqual(personProperties('mousePreset', 'middle-ctrl'));
+    // With no preset stored, a changed tool answer moves the shown preset (C9).
+    act(() => {
+      personRecordStores.profile.write({ tool: 'fusion' });
+    });
+    expect(select()).toHaveTextContent('Middle-drag pan, Shift orbit');
+  });
+
+  it('lists the six presets with the suggestion marked, and reports choosing it as suggested', async () => {
+    personRecordStores.profile.write({ tool: 'blender' });
+    renderSection();
+    screen.getByRole('combobox', { name: 'Mouse controls' }).focus();
+    await userEvent.keyboard('{Enter}');
+    const options = await screen.findAllByRole('option');
+    expect(options.map((option) => option.textContent)).toEqual([
+      'Tau default',
+      'Right-drag orbit',
+      'Middle-drag orbit, Ctrl pan',
+      'Middle-drag orbit, Shift panSuggested',
+      'Middle-drag pan, Shift orbit',
+      'Alt-drag navigation',
+    ]);
+    await userEvent.click(options[0]!);
+    await choose('Mouse controls', 'Middle-drag orbit, Shift pan');
+    expect(events('viewer_preset_selected')).toEqual([
+      { preset: 'tau', suggested: false, source: 'settings' },
+      { preset: 'middle-shift', suggested: true, source: 'settings' },
+    ]);
+  });
+
+  it('resets to Tau’s default with no tool answer', async () => {
+    renderSection();
+    await choose('Mouse controls', 'Alt-drag navigation');
+    await userEvent.click(within(row('Mouse controls')).getByRole('button', { name: 'Reset to Tau default' }));
+    expect(screen.getByRole('combobox', { name: 'Mouse controls' })).toHaveTextContent('Tau default');
+  });
+
+  it('notes the Alt preset’s window-manager hazard on Linux only (C14)', () => {
+    state.os = 'linux';
+    personRecordStores.viewer.write({ controls: { preset: 'alt' } });
+    const linux = renderSection();
+    expect(within(row('Mouse controls')).getByText(/Alt-drag to move windows/u)).toBeInTheDocument();
+    linux.unmount();
+    state.os = 'windows';
+    renderSection();
+    expect(screen.queryByText(/Alt-drag to move windows/u)).not.toBeInTheDocument();
+  });
+
+  it('shows the toggles’ built-in values while unset and stores a value when changed', async () => {
+    renderSection();
+    expect(screen.getByRole('switch', { name: 'Zoom to cursor' })).toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Orbit around cursor' })).not.toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Invert zoom' })).not.toBeChecked();
+    expect(personRecordStores.viewer.read().controls).toEqual({});
+    await userEvent.click(screen.getByRole('switch', { name: 'Zoom to cursor' }));
+    await userEvent.click(screen.getByRole('switch', { name: 'Orbit around cursor' }));
+    await userEvent.click(screen.getByRole('switch', { name: 'Invert zoom' }));
+    expect(personRecordStores.viewer.read().controls).toEqual({
+      zoomToCursor: false,
+      orbitAboutCursor: true,
+      invertZoom: true,
+    });
+  });
+
+  it('names the person properties as setup and analytics do', () => {
+    expect(viewerPersonPropertyNames).toEqual({
+      mousePreset: 'mouse_preset',
+      gizmoStyle: 'gizmo_style',
+      inputDevice: 'input_device',
+    });
+  });
+
+  it('keeps trackpad gestures in this device’s record, with a This device badge', async () => {
+    renderSection();
+    expect(within(row('Trackpad gestures')).getByText('This device')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('switch', { name: 'Trackpad gestures' }));
+    expect(deviceRecordStore.read().inputDevice).toBe('trackpad');
+    expect(personRecordStores.viewer.read().controls).toEqual({});
+    expect(events('$set')).toEqual([personProperties('inputDevice', 'trackpad')]);
+    await userEvent.click(screen.getByRole('switch', { name: 'Trackpad gestures' }));
+    expect(deviceRecordStore.read().inputDevice).toBe('mouse');
+  });
+
+  it('lists the four gizmo styles with the suggestion marked', async () => {
+    personRecordStores.profile.write({ tool: 'game-engine' });
+    renderSection();
+    expect(screen.getByRole('combobox', { name: 'Gizmo style' })).toHaveTextContent('Axis balls');
+    screen.getByRole('combobox', { name: 'Gizmo style' }).focus();
+    await userEvent.keyboard('{Enter}');
+    const options = await screen.findAllByRole('option');
+    expect(options.map((option) => option.textContent)).toEqual([
+      'Cube',
+      'Classic cube',
+      'Axis ballsSuggested',
+      'Axes',
+    ]);
+  });
+
+  it('stores a gizmo style without touching Show gizmo, and Show gizmo without touching the style', async () => {
+    personRecordStores.profile.write({ tool: 'blender' });
+    renderSection();
+    await userEvent.click(within(row('Show gizmo')).getByRole('switch', { name: 'Show gizmo' }));
+    expect(personRecordStores.viewer.read().gizmo).toEqual({});
+    expect(viewDefaults()).toEqual({ 'display.gizmo': false });
+    await choose('Gizmo style', 'Classic cube');
+    expect(personRecordStores.viewer.read().gizmo).toEqual({ style: 'classic-cube' });
+    expect(viewDefaults()).toEqual({ 'display.gizmo': false });
+    expect(events('viewer_gizmo_selected')).toEqual([{ style: 'classic-cube', suggested: false, source: 'settings' }]);
+    expect(events('$set')).toEqual([personProperties('gizmoStyle', 'classic-cube')]);
+    await userEvent.click(within(row('Show gizmo')).getByRole('switch', { name: 'Show gizmo' }));
+    expect(personRecordStores.viewer.read().gizmo).toEqual({ style: 'classic-cube' });
+    expect(viewDefaults()).toEqual({ 'display.gizmo': true });
+    await userEvent.click(within(row('Gizmo style')).getByRole('button', { name: 'Reset to the suggestion' }));
+    expect(personRecordStores.viewer.read().gizmo).toEqual({});
+    expect(viewDefaults()).toEqual({ 'display.gizmo': true });
+  });
+
+  it('follows a change another tab stores, without a reload', () => {
+    renderSection();
+    act(() => {
+      const name = `${metaConfig.cookiePrefix}${cookieName.viewerPreferences}`;
+      localStorage.setItem(
+        name,
+        JSON.stringify({ value: { version: 1, controls: { preset: 'shift-middle' }, gizmo: {}, viewDefaults: {} } }),
+      );
+      globalThis.dispatchEvent(new StorageEvent('storage', { key: name }));
+    });
+    expect(screen.getByRole('combobox', { name: 'Mouse controls' })).toHaveTextContent('Middle-drag pan, Shift orbit');
   });
 });

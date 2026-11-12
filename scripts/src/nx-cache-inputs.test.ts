@@ -72,6 +72,16 @@ describe('nx cache inputs', () => {
     expect(shared).toContainEqual({ runtime: 'node --version' });
   });
 
+  it('should build the API image on the Node that setup-nx gives CI, so its task hashes match CI cache entries', () => {
+    const setupNx = load(read('.github/actions/setup-nx/action.yml')) as {
+      readonly inputs: Record<string, { readonly default?: string }>;
+    };
+    const ciNode = setupNx.inputs['node-version']?.default;
+    const imageNode = /^ARG NODE_VERSION=(\S+)$/mu.exec(read('apps/api/Dockerfile'))?.[1];
+    expect(ciNode).toMatch(/^\d+\.\d+\.\d+$/u);
+    expect(imageNode).toBe(ciNode);
+  });
+
   it('should declare every environment value ci.yml gives a test task as an input of the test default', () => {
     expect(nx.targetDefaults['test']?.inputs).toContain('serviceEnvironment');
     const undeclared = [...testEnvironment()].filter(

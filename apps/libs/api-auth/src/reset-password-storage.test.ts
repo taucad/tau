@@ -36,7 +36,8 @@ describe('password-reset token storage', () => {
       );
     await post('sign-up/email', { email: 'owner@example.test', password: 'first-password-strong-1', name: 'Owner' });
 
-    expect((await post('request-password-reset', { email: 'owner@example.test' })).status).toBe(200);
+    const requested = await post('request-password-reset', { email: 'owner@example.test' });
+    expect(requested.status).toBe(200);
     expect(resetToken).not.toBe('');
     const identifiers = store['verification']?.map((row) => String(row['identifier'])) ?? [];
     expect(identifiers.some((identifier) => identifier.includes(resetToken))).toBe(false);
@@ -44,8 +45,7 @@ describe('password-reset token storage', () => {
     expect((await post('reset-password', { token: resetToken, newPassword: 'second-password-strong-2' })).status).toBe(
       200,
     );
-    expect(
-      (await post('sign-in/email', { email: 'owner@example.test', password: 'second-password-strong-2' })).status,
-    ).toBe(200);
+    const signedIn = await post('sign-in/email', { email: 'owner@example.test', password: 'second-password-strong-2' });
+    expect(signedIn.status).toBe(200);
   });
 });

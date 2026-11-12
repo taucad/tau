@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type CameraControlsImpl from 'camera-controls';
-import { Raycaster, Scene, Vector3 } from 'three';
+import { BoxGeometry, Mesh, MeshBasicMaterial, Raycaster, Scene, Vector2, Vector3 } from 'three';
 import type { Camera } from 'three';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
@@ -409,6 +409,194 @@ describe('camera input router in the browser', () => {
       outside.dispatchEvent(event);
       outside.remove();
       expect(event.defaultPrevented).toBe(false);
+    });
+  });
+
+  describe('zoom to cursor (C10)', () => {
+    /** A world point's screen position on the 800 x 600 surface. */
+    const toScreen = (viewer: Viewer, point: Vector3): readonly [number, number] => {
+      const { camera } = viewer.controls;
+      camera.updateMatrixWorld();
+      const ndc = point.clone().project(camera);
+      return [(ndc.x + 1) * 400, (1 - ndc.y) * 300];
+    };
+
+    /** Two model points under (600, 200): the cursor ray's points at a third and at twice the target's depth. */
+    const pointsUnder = (viewer: Viewer): readonly Vector3[] => {
+      const { camera } = viewer.controls;
+      camera.updateMatrixWorld();
+      const raycaster = new Raycaster();
+      raycaster.setFromCamera(new Vector2(0.5, 1 / 3), camera);
+      const depth = viewer.controls.distance;
+      return [raycaster.ray.at(depth / 3, new Vector3()), raycaster.ray.at(depth * 2, new Vector3())];
+    };
+
+    it.each([
+      { name: 'unset', input: { preset: 'tau' } },
+      { name: 'on', input: { preset: 'tau', zoomToCursor: true } },
+    ] as const)('$name: every model point under the cursor stays within 2 px, in and out', ({ input }) => {
+      const viewer = mountRoutedViewer(input);
+      for (const deltaY of [-120, 120, -60, -60]) {
+        const points = pointsUnder(viewer);
+        const before = readCamera(viewer);
+        wheel(viewer, { deltaY, clientX: 600, clientY: 200 });
+        expect(Math.sign(readCamera(viewer).distance - before.distance)).toBe(Math.sign(deltaY));
+        for (const point of points) {
+          const [x, y] = toScreen(viewer, point);
+          expect(Math.hypot(x - 600, y - 200)).toBeLessThan(2);
+        }
+      }
+    });
+
+    it('a pinch zooms to the cursor too', () => {
+      const viewer = mountRoutedViewer({ preset: 'tau' });
+      const points = pointsUnder(viewer);
+      wheel(viewer, { deltaY: -30, ctrlKey: true, clientX: 600, clientY: 200 });
+      for (const point of points) {
+        const [x, y] = toScreen(viewer, point);
+        expect(Math.hypot(x - 600, y - 200)).toBeLessThan(2);
+      }
+    });
+
+    it('keeps the cursor point in orthographic', () => {
+      const viewer = mountRoutedViewer({ preset: 'tau' }, { projection: 'orthographic' });
+      const [, far] = pointsUnder(viewer);
+      const origin = new Vector3(0, 0, 0);
+      const [originX, originY] = toScreen(viewer, origin);
+      wheel(viewer, { deltaY: -120, clientX: 600, clientY: 200 });
+      // Zooming in pushes every other point away from the cursor.
+      const [movedX, movedY] = toScreen(viewer, origin);
+      expect(Math.hypot(movedX - 600, movedY - 200)).toBeGreaterThan(Math.hypot(originX - 600, originY - 200) + 10);
+      const [x, y] = toScreen(viewer, far!);
+      expect(Math.hypot(x - 600, y - 200)).toBeLessThan(2);
+    });
+
+    it('off: the zoom is toward the orbit target', () => {
+      const viewer = mountRoutedViewer({ preset: 'tau', zoomToCursor: false });
+      const before = readCamera(viewer);
+      wheel(viewer, { deltaY: -120, clientX: 600, clientY: 200 });
+      const after = readCamera(viewer);
+      expect(after.distance).toBeLessThan(before.distance);
+      expect(after.target).toEqual(before.target);
+      expect(classify(before, after)).toBe('zoom');
+    });
+  });
+
+  describe('orbit around cursor (C11)', () => {
+    /** A box whose near face sits under (560, 260), well off the target, so a pivot there differs from the target. */
+    const sceneWithBox = (): Scene => {
+      const scene = new Scene();
+      const box = new Mesh(new BoxGeometry(4, 4, 4), new MeshBasicMaterial());
+      box.position.set(1.5, 1.5, 0.5);
+      scene.add(box);
+      scene.updateMatrixWorld(true);
+      return scene;
+    };
+
+    const toScreen = (viewer: Viewer, point: Vector3): readonly [number, number] => {
+      const { camera } = viewer.controls;
+      camera.updateMatrixWorld();
+      const ndc = point.clone().project(camera);
+      return [(ndc.x + 1) * 400, (1 - ndc.y) * 300];
+    };
+
+    const surfacePointUnder = (
+      viewer: Viewer,
+      scene: Scene,
+      [x, y]: readonly [number, number],
+    ): Vector3 | undefined => {
+      const raycaster = new Raycaster();
+      viewer.controls.camera.updateMatrixWorld();
+      raycaster.setFromCamera(new Vector2(x / 400 - 1, 1 - y / 300), viewer.controls.camera);
+      return raycaster.intersectObjects(scene.children, true)[0]?.point;
+    };
+
+    const orbitFrom = (viewer: Viewer, start: readonly [number, number], onStep: () => void): void => {
+      const init = { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1 };
+      viewer.surface.dispatchEvent(new PointerEvent('pointerdown', { ...init, clientX: start[0], clientY: start[1] }));
+      settle(viewer);
+      for (let index = 1; index <= 6; index += 1) {
+        viewer.surface.dispatchEvent(
+          new PointerEvent('pointermove', {
+            ...init,
+            button: -1,
+            clientX: start[0] + index * 9,
+            clientY: start[1] + index * 5,
+          }),
+        );
+        settle(viewer);
+        onStep();
+      }
+      viewer.surface.dispatchEvent(
+        new PointerEvent('pointerup', { ...init, buttons: 0, clientX: start[0] + 54, clientY: start[1] + 30 }),
+      );
+      settle(viewer);
+    };
+
+    it('on: the surface point under the press stays within 2 px during the orbit', () => {
+      const scene = sceneWithBox();
+      const viewer = mountRoutedViewer({ preset: 'tau', orbitAboutCursor: true }, { scene });
+      const start = [440, 290] as const;
+      const pivot = surfacePointUnder(viewer, scene, start);
+      expect(pivot).toBeDefined();
+      const before = readCamera(viewer);
+      let steps = 0;
+      orbitFrom(viewer, start, () => {
+        steps += 1;
+        const [x, y] = toScreen(viewer, pivot!);
+        expect(Math.hypot(x - start[0], y - start[1])).toBeLessThan(2);
+      });
+      expect(steps).toBe(6);
+      const after = readCamera(viewer);
+      expect(Math.abs(after.azimuth - before.azimuth)).toBeGreaterThan(0.05);
+    });
+
+    it('on, with nothing under the press: the orbit is about the target', () => {
+      const viewer = mountRoutedViewer({ preset: 'tau', orbitAboutCursor: true }, { scene: sceneWithBox() });
+      const before = readCamera(viewer);
+      orbitFrom(viewer, [40, 40], () => undefined);
+      expect(classify(before, readCamera(viewer))).toBe('orbit');
+    });
+
+    it.each([
+      { name: 'unset', input: { preset: 'tau' } },
+      { name: 'off', input: { preset: 'tau', orbitAboutCursor: false } },
+    ] as const)('$name: the orbit is about the target', ({ input }) => {
+      const viewer = mountRoutedViewer(input, { scene: sceneWithBox() });
+      const before = readCamera(viewer);
+      orbitFrom(viewer, [440, 290], () => undefined);
+      expect(classify(before, readCamera(viewer))).toBe('orbit');
+    });
+  });
+
+  describe('invert zoom (C12)', () => {
+    it.each([
+      { name: 'the wheel', init: { deltaY: 60 } },
+      { name: 'a pinch', init: { deltaY: 60, ctrlKey: true } },
+    ])('on: $name zooms in the opposite direction', ({ init }) => {
+      const plain = mountRoutedViewer({ preset: 'tau' });
+      const inverted = mountRoutedViewer({ preset: 'tau', invertZoom: true });
+      const before = readCamera(plain);
+      wheel(plain, init);
+      wheel(inverted, init);
+      expect(readCamera(plain).distance).toBeGreaterThan(before.distance);
+      expect(readCamera(inverted).distance).toBeLessThan(before.distance);
+    });
+
+    it('on: a Safari pinch zooms in the opposite direction', () => {
+      const viewer = mountRoutedViewer({ preset: 'tau', invertZoom: true });
+      const before = readCamera(viewer);
+      for (const [type, scale] of [
+        ['gesturestart', 1],
+        ['gesturechange', 1.25],
+        ['gestureend', 1.25],
+      ] as const) {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperties(event, { scale: { value: scale }, clientX: { value: 400 }, clientY: { value: 300 } });
+        viewer.surface.dispatchEvent(event);
+        settle(viewer);
+      }
+      expect(readCamera(viewer).distance).toBeCloseTo(before.distance * 1.25, 6);
     });
   });
 });

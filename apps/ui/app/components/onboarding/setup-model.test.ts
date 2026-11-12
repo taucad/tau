@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LanguageId } from '@taucad/preferences';
-import { emptyDeviceRecord, emptyPersonProfile, emptyViewerPreferences } from '@taucad/preferences';
+import { emptyDeviceRecord, emptyPersonProfile, emptyViewerPreferences, familiarProducts } from '@taucad/preferences';
+import { familiarFromText } from '#components/onboarding/setup-copy.js';
 import {
   announceChangedRows,
   answerRows,
@@ -50,9 +51,16 @@ describe('setup model', () => {
     expect(presetReason(undefined)).toBe('Tau’s default. Pick another if it is closer to what you know');
     expect(presetReason('solidworks')).toBe('Suggested because you use SolidWorks');
     expect(presetReason('slicer')).toBe('Tau’s default. Pick another if it is closer to what you know');
-    expect(presetReason('game-engine')).toBe(
-      'Suggested from your answer. Pick another if it is closer to what you know',
-    );
+    expect(presetReason('game-engine')).toBe('Suggested because you use Maya, Unity or Unreal');
+    expect(presetReason('nx-creo')).toBe('Suggested because you use Creo');
+    expect(presetReason('kicad')).toBe('Tau’s default. Pick another if it is closer to what you know');
+  });
+
+  it('says where each preset is familiar from, from the documented products', () => {
+    expect(familiarFromText(familiarProducts('middle-shift'))).toBe('Familiar from Blender and Creo');
+    expect(familiarFromText(familiarProducts('alt'))).toBe('Familiar from Maya, Unity and Unreal');
+    expect(familiarFromText(familiarProducts('middle-ctrl'))).toBe('Familiar from SolidWorks');
+    expect(familiarFromText([])).toBeUndefined();
   });
 
   it('reads None from the gizmo view default and the style otherwise', () => {

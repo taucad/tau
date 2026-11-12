@@ -1,12 +1,18 @@
 import { Fragment, useId } from 'react';
 import type { DeviceRecord, MousePresetId, PersonProfile, ViewerPreferences } from '@taucad/preferences';
-import { effectivePreset, gizmoStyleIds, mousePresetIds, suggestedPreset } from '@taucad/preferences';
+import { effectivePreset, familiarProducts, gizmoStyleIds, mousePresetIds, suggestedPreset } from '@taucad/preferences';
 import { resolveCameraMapping } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import type { CameraMappingId } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { Switch } from '@taucad/ui/components/switch';
 import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
-import { gestureCopy, gizmoCopy, presetCopy, viewerStepCopy } from '#components/onboarding/setup-copy.js';
+import {
+  familiarFromText,
+  gestureCopy,
+  gizmoCopy,
+  presetCopy,
+  viewerStepCopy,
+} from '#components/onboarding/setup-copy.js';
 import type { GizmoChoiceId } from '#components/onboarding/setup-copy.js';
 import { gizmoChoice, legendBindings, presetReason } from '#components/onboarding/setup-model.js';
 import { SetupViewerPreview } from '#components/onboarding/setup-viewer-preview.js';
@@ -120,7 +126,7 @@ export function SetupViewerStep({
                     {presetCopy[option].name}
                   </span>
                   <span id={`${id}-${option}`} className='text-xs text-muted-foreground'>
-                    {presetCopy[option].familiar}
+                    {familiarFromText(familiarProducts(option))}
                   </span>
                 </span>
               </label>
@@ -129,7 +135,7 @@ export function SetupViewerStep({
           <p className='text-xs text-muted-foreground' data-testid='setup-preset-reason'>
             {isTrackpad ? viewerStepCopy.trackpadNote : null}
             {!isTrackpad && preset === suggestion ? presetReason(profile.tool) : null}
-            {!isTrackpad && preset !== suggestion ? presetCopy[preset].familiar : null}
+            {!isTrackpad && preset !== suggestion ? familiarFromText(familiarProducts(preset)) : null}
           </p>
         </fieldset>
 

@@ -32,7 +32,6 @@ import {
   presetCopy,
   presetReasonText,
   setupStepIds,
-  toolCopy,
   viewerRowText,
   viewerStepCopy,
 } from '#components/onboarding/setup-copy.js';
@@ -138,13 +137,13 @@ export const gizmoChoice = (viewer: ViewerPreferences, profile: PersonProfile): 
  */
 export const presetReason = (tool: ToolId | undefined): string => {
   if (tool === undefined) {
-    return presetReasonText({ tool: undefined, named: false, isTauDefault: true });
+    return presetReasonText({ isAnswered: false, names: [], isTauDefault: true });
   }
   const suggestion = toolSuggestions[tool];
   return presetReasonText({
-    tool: toolCopy[tool],
-    named: suggestion.named,
-    isTauDefault: suggestion.preset === suggestedPreset(undefined) && !suggestion.named,
+    isAnswered: true,
+    names: suggestion.names,
+    isTauDefault: suggestion.preset === suggestedPreset(undefined) && suggestion.names.length === 0,
   });
 };
 

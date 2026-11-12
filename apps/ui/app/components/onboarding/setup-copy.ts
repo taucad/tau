@@ -194,15 +194,35 @@ export const homeRowExample: Readonly<Record<Exclude<GoalId, 'exploring'>, strin
  */
 export const homeRowText = (example: string): string => `Suggests “${example}”`;
 
-/** Step 3's mouse presets: Settings → Viewer's name, and the products the camera research documents for it. */
-export const presetCopy: Readonly<Record<MousePresetId, Readonly<{ name: string; familiar: string }>>> = {
-  tau: { name: mousePresetCopy.tau.name, familiar: 'Familiar from OpenSCAD and Bambu Studio' },
-  'right-orbit': { name: mousePresetCopy['right-orbit'].name, familiar: 'Familiar from Onshape and Tinkercad' },
-  'middle-ctrl': { name: mousePresetCopy['middle-ctrl'].name, familiar: 'Familiar from SolidWorks' },
-  'middle-shift': { name: mousePresetCopy['middle-shift'].name, familiar: 'Familiar from Blender and Creo' },
-  'shift-middle': { name: mousePresetCopy['shift-middle'].name, familiar: 'Familiar from Fusion and Inventor' },
-  alt: { name: mousePresetCopy.alt.name, familiar: 'Familiar from Maya, Unity and Unreal' },
+/** Step 3's mouse preset names: Settings → Viewer's, so the two cannot drift apart. */
+export const presetCopy: Readonly<Record<MousePresetId, Readonly<{ name: string }>>> = {
+  tau: { name: mousePresetCopy.tau.name },
+  'right-orbit': { name: mousePresetCopy['right-orbit'].name },
+  'middle-ctrl': { name: mousePresetCopy['middle-ctrl'].name },
+  'middle-shift': { name: mousePresetCopy['middle-shift'].name },
+  'shift-middle': { name: mousePresetCopy['shift-middle'].name },
+  alt: { name: mousePresetCopy.alt.name },
 };
+
+/**
+ * A list of product names for a sentence: "A", "A and B", "A, B and C".
+ *
+ * @param names - The names, in order.
+ * @param conjunction - The word before the last name.
+ * @returns The list.
+ */
+const nameList = (names: readonly string[], conjunction: 'and' | 'or'): string =>
+  names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} ${conjunction} ${names.at(-1) ?? ''}`;
+
+/**
+ * A preset's "Familiar from …" line, from the products the camera research documents for it
+ * (`familiarProducts` in `@taucad/preferences`), or nothing when it documents none.
+ *
+ * @param names - The products.
+ * @returns The line, or `undefined`.
+ */
+export const familiarFromText = (names: readonly string[]): string | undefined =>
+  names.length === 0 ? undefined : `Familiar from ${nameList(names, 'and')}`;
 
 /** The gizmo choices: the four styles and None, which hides the gizmo. */
 export type GizmoChoiceId = GizmoStyleId | 'none';
@@ -236,18 +256,20 @@ export const viewerStepCopy = {
 } as const;
 
 /**
- * Why a preset is preselected (Finding 2, Q27): a product is named only when the camera research documents it.
+ * Why a preset is preselected (Finding 2, Q27): a product is named only when the camera research documents it, so
+ * the line names the tool answer's documented products (`toolSuggestions[tool].names`), never the answer itself.
  *
- * @param input - The tool's label, whether it may be named, and whether the suggestion is Tau's own default.
+ * @param input - Whether there is a tool answer, the products it may name, and whether the suggestion is Tau's own
+ *   default.
  * @returns The line.
  */
 export const presetReasonText = (
-  input: Readonly<{ tool: string | undefined; named: boolean; isTauDefault: boolean }>,
+  input: Readonly<{ isAnswered: boolean; names: readonly string[]; isTauDefault: boolean }>,
 ): string => {
-  if (input.tool !== undefined && input.named) {
-    return `Suggested because you use ${input.tool}`;
+  if (input.isAnswered && input.names.length > 0) {
+    return `Suggested because you use ${nameList(input.names, 'or')}`;
   }
-  if (input.tool === undefined || input.isTauDefault) {
+  if (!input.isAnswered || input.isTauDefault) {
     return `Tau’s default. ${viewerStepCopy.pickAnother}`;
   }
   return `Suggested from your answer. ${viewerStepCopy.pickAnother}`;

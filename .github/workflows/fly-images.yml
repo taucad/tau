@@ -1,0 +1,172 @@
+# Reusable workflow: build the API-family Fly images of one commit once.
+#
+# The API (`api`) and the private apps `storage`, `mirror` and `maintenance` are targets
+# of `apps/api/Dockerfile` that share its `deps`, `build` and `pruned` stages. Built in a
+# deploy job each, those stages were built four times per push, each job exporting its
+# own `mode=max` registry cache (about 4.5 min a job; CI audit 2026-11-12, F5 items 3
+# and 4). Here one job builds the shared stages once, exports one registry cache, then
+# builds each requested target from the builder's own cache and pushes it to that app's
+# registry repository, `registry.fly.io/<app>:<sha>` (`.github/actions/fly-app`). The
+# deploy jobs then call `deploy.yml` with `prebuilt: true`.
+#
+# Each app has its own Fly deploy token, and Docker keeps one credential per registry
+# host, so the pushes log in one app at a time, in turn, each immediately before its own
+# push; the shared build uses the API's token for the cache ref under `tau-api-<env>`.
+# Tokens go to `docker login --password-stdin` and build secrets go through files in
+# `RUNNER_TEMP`; nothing here prints either.
+#
+# The API's Sentry maps are uploaded in the shared `build` stage when `api` is among the
+# apps, so every image of that build carries the same injected debug ids. Build
+# arguments and secrets are the same for every target, so each target reuses the stages
+# the shared build made rather than rebuilding them.
+
+name: Build Fly images
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: 'staging or production'
+      apps:
+        required: true
+        type: string
+        description: 'JSON array of apps to deploy; entries other than api, storage, mirror and maintenance are ignored'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ inputs.environment }} Fly images
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # Deploy order, so a slow push delays the first deploy least.
+      - name: Select the Fly apps
+        id: apps
+        env:
+          APPS: ${{ inputs.apps }}
+        run: |
+          set -euo pipefail
+          apps=$(jq -r '. as $wanted | ["storage", "api", "mirror", "maintenance"] | map(select(. as $app | $wanted | index($app))) | join(" ")' <<< "$APPS")
+          [ -n "$apps" ] || { echo "::error::None of ${APPS} is an API-family Fly app."; exit 1; }
+          echo "Building: ${apps}"
+          echo "apps=${apps}" >> "$GITHUB_OUTPUT"
+          if [[ " $apps " == *" api "* ]]; then echo "sentry=true" >> "$GITHUB_OUTPUT"; else echo "sentry=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Resolve the shared cache
+        id: cache
+        uses: ./.github/actions/fly-app
+        with:
+          app: api
+          environment: ${{ inputs.environment }}
+
+      - name: Require the Sentry source-map credential
+        if: steps.apps.outputs.sentry == 'true'
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+            echo "::error::Set Sensitive sentry_auth_token in HCP tau-repo and apply its GitHub environment mappings."
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        with:
+          # Hosted runners are discarded; removing the builder cost 1.5 to 2 min a job.
+          cleanup: false
+
+      # One file per build secret, read by every build below. The server is set only when a
+      # token is present (fork and Dependabot runs get none, and Nx fails on a tokenless 403).
+      - name: Write the build secrets
+        env:
+          SENTRY_AUTH_TOKEN: ${{ steps.apps.outputs.sentry == 'true' && secrets.SENTRY_AUTH_TOKEN || '' }}
+          NX_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
+          NX_CACHE_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/build-secrets"
+          printf '%s' "$SENTRY_AUTH_TOKEN" > "$RUNNER_TEMP/build-secrets/sentry_auth_token"
+          printf '%s' "$NX_CACHE_SERVER" > "$RUNNER_TEMP/build-secrets/nx_cache_server"
+          printf '%s' "$NX_CACHE_TOKEN" > "$RUNNER_TEMP/build-secrets/nx_cache_token"
+
+      # The stages every target shares, with the one registry cache (read and written under
+      # the API's app with the API's token). Nothing is pushed: the result stays in the
+      # builder's cache for the targets below.
+      - name: Build the shared stages
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CACHE_REF: ${{ steps.cache.outputs.cache_ref }}
+          DOCKERFILE: ${{ steps.cache.outputs.dockerfile }}
+          SENTRY: ${{ steps.apps.outputs.sentry }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$FLY_API_TOKEN" | docker login registry.fly.io --username x --password-stdin
+          secrets="$RUNNER_TEMP/build-secrets"
+          docker buildx build . \
+            --file "$DOCKERFILE" \
+            --target pruned \
+            --build-arg "SENTRY_UPLOAD_ENABLED=${SENTRY}" \
+            --secret "id=sentry_auth_token,src=${secrets}/sentry_auth_token" \
+            --secret "id=nx_cache_server,src=${secrets}/nx_cache_server" \
+            --secret "id=nx_cache_token,src=${secrets}/nx_cache_token" \
+            --cache-from "type=registry,ref=${CACHE_REF}" \
+            --cache-to "type=registry,ref=${CACHE_REF},mode=max"
+
+      # One app at a time: log in with its own token, then build its target from the
+      # builder's cache and push it. A failed push fails the job, so no deploy runs on a
+      # partial set.
+      - name: Push each app's image
+        env:
+          APPS: ${{ steps.apps.outputs.apps }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          SENTRY: ${{ steps.apps.outputs.sentry }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_STORAGE_API_TOKEN: ${{ secrets.FLY_STORAGE_API_TOKEN }}
+          FLY_MIRROR_API_TOKEN: ${{ secrets.FLY_MIRROR_API_TOKEN }}
+          FLY_MAINTENANCE_API_TOKEN: ${{ secrets.FLY_MAINTENANCE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          secrets="$RUNNER_TEMP/build-secrets"
+          for app in $APPS; do
+            resolved=$(.github/actions/fly-app/resolve.sh "$app" "$ENVIRONMENT")
+            declare -A target=()
+            while IFS='=' read -r key value; do
+              target[$key]="$value"
+            done <<< "$resolved"
+            token_name="${target[token_secret]}"
+            token="${!token_name:-}"
+            if [ -z "$token" ]; then
+              echo "::error::Set ${target[token_hcp]:-the API deploy token}_${ENVIRONMENT} in HCP tau-repo and apply its ${token_name} GitHub environment mapping."
+              exit 1
+            fi
+            echo "::group::${app}: ${target[image]}"
+            printf '%s' "$token" | docker login registry.fly.io --username x --password-stdin
+            docker buildx build . \
+              --file "${target[dockerfile]}" \
+              --target "${target[docker_target]}" \
+              --build-arg "SENTRY_UPLOAD_ENABLED=${SENTRY}" \
+              --secret "id=sentry_auth_token,src=${secrets}/sentry_auth_token" \
+              --secret "id=nx_cache_server,src=${secrets}/nx_cache_server" \
+              --secret "id=nx_cache_token,src=${secrets}/nx_cache_token" \
+              --tag "${target[image]}" \
+              --push
+            echo "::endgroup::"
+            unset target
+          done
+
+      - name: Remove the registry login and build secrets
+        if: always()
+        run: |
+          docker logout registry.fly.io || true
+          rm -rf "$RUNNER_TEMP/build-secrets"

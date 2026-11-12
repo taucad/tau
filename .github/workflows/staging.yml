@@ -199,6 +199,30 @@ jobs:
         if: steps.check.outputs.settled != 'true'
         run: echo "::notice::CI on $GITHUB_SHA has not finished; staging-gate.yml reruns this run when it does."
 
+  # The API-family images (API, storage, mirror, maintenance: targets of one Dockerfile)
+  # are built once for the push, in one job (`fly-images.yml`), and each deploy job below
+  # deploys its prebuilt image. Built per deploy job, the shared stages were built four
+  # times and the chain reached its last app 55 to 102 min after the push (CI audit
+  # 2026-11-12, F5). It needs the gates every API-family deploy needs; the API's billing
+  # gate stays on the API deploy itself.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  build-fly-images-staging:
+    name: Build Fly images (Staging)
+    needs: [plan, ci]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (contains(fromJSON(needs.plan.outputs.deploy-apps), 'api') || contains(fromJSON(needs.plan.outputs.deploy-apps), 'storage') ||
+      contains(fromJSON(needs.plan.outputs.deploy-apps), 'mirror') || contains(fromJSON(needs.plan.outputs.deploy-apps), 'maintenance')) &&
+      needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
+      (needs.ci.outputs.api == 'success' || needs.ci.outputs.api == 'not-affected' || needs.ci.outputs.api == 'reused')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/fly-images.yml
+    with:
+      environment: staging
+      apps: ${{ needs.plan.outputs.deploy-apps }}
+    secrets: inherit
+
   # The API ships to Fly (`tau-api-staging`); the UI, docs and the marketing review
   # site publish to Netlify (`taucad` site, `taucad.dev`), which no longer builds
   # from Git and has no PR deploy previews. Every deploy job skips a commit a newer
@@ -213,9 +237,10 @@ jobs:
   # the API back; a failed one does.
   deploy-api-staging:
     name: Deploy API (Staging)
-    needs: [plan, ci, deploy-storage-staging]
+    needs: [plan, ci, build-fly-images-staging, deploy-storage-staging]
     if: >-
       !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'api') &&
+      needs.build-fly-images-staging.result == 'success' &&
       needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
       (needs.ci.outputs.api == 'success' || needs.ci.outputs.api == 'not-affected' || needs.ci.outputs.api == 'reused') &&
       (needs.ci.outputs.billing-e2e == 'success' || needs.ci.outputs.billing-e2e == 'not-affected' || needs.ci.outputs.billing-e2e == 'reused') &&
@@ -228,6 +253,7 @@ jobs:
     with:
       environment: staging
       app: api
+      prebuilt: true
     secrets: inherit
 
   # The private B2 copier (`tau-mirror-staging`, W13 DM1): the `mirror` project,
@@ -238,9 +264,10 @@ jobs:
   # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
   deploy-mirror-staging:
     name: Deploy mirror (Staging)
-    needs: [plan, ci, deploy-api-staging]
+    needs: [plan, ci, build-fly-images-staging, deploy-api-staging]
     if: >-
       !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'mirror') &&
+      needs.build-fly-images-staging.result == 'success' &&
       needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
       (needs.ci.outputs.api == 'success' || needs.ci.outputs.api == 'not-affected' || needs.ci.outputs.api == 'reused') &&
       (needs.deploy-api-staging.result == 'success' || needs.deploy-api-staging.result == 'skipped')
@@ -251,6 +278,7 @@ jobs:
     with:
       environment: staging
       app: mirror
+      prebuilt: true
     secrets: inherit
 
   # The private git storage app (`tau-storage-staging`, north star DC1): the
@@ -261,9 +289,10 @@ jobs:
   # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
   deploy-storage-staging:
     name: Deploy storage (Staging)
-    needs: [plan, ci]
+    needs: [plan, ci, build-fly-images-staging]
     if: >-
       !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'storage') &&
+      needs.build-fly-images-staging.result == 'success' &&
       needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
       (needs.ci.outputs.api == 'success' || needs.ci.outputs.api == 'not-affected' || needs.ci.outputs.api == 'reused')
     permissions:
@@ -273,6 +302,7 @@ jobs:
     with:
       environment: staging
       app: storage
+      prebuilt: true
     secrets: inherit
 
   # The private maintenance app (`tau-maintenance-staging`, north star DC4): the
@@ -286,9 +316,10 @@ jobs:
   # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
   deploy-maintenance-staging:
     name: Deploy maintenance (Staging)
-    needs: [plan, ci, deploy-api-staging]
+    needs: [plan, ci, build-fly-images-staging, deploy-api-staging]
     if: >-
       !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'maintenance') &&
+      needs.build-fly-images-staging.result == 'success' &&
       needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
       (needs.ci.outputs.api == 'success' || needs.ci.outputs.api == 'not-affected' || needs.ci.outputs.api == 'reused') &&
       (needs.deploy-api-staging.result == 'success' || needs.deploy-api-staging.result == 'skipped')
@@ -299,6 +330,7 @@ jobs:
     with:
       environment: staging
       app: maintenance
+      prebuilt: true
     secrets: inherit
 
   # The staging UI: built in Actions and published by the Netlify CLI. It needs the

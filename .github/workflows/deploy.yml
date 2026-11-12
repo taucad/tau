@@ -15,8 +15,14 @@
 # Flycast only (no Sentry upload, no CORS smoke); it must end with no public IP
 # and must leave every `tau-api` Machine as it found it.
 #
-# The build pipeline:
-#   1. Authenticate Docker against `registry.fly.io` using FLY_API_TOKEN.
+# Staging builds once: `fly-images.yml` builds every API-family image a push deploys
+# in one job (the shared `deps`/`build`/`pruned` stages once, one registry cache ref)
+# and pushes each to its own app, and `staging.yml` calls this workflow with
+# `prebuilt: true`, which only deploys `registry.fly.io/<app>:<sha>`.
+#
+# Without `prebuilt` (production through `release-build.yml` and `deploy-production.yml`,
+# and a manual dispatch) this job builds its own app:
+#   1. Authenticate Docker against `registry.fly.io` with the app's token.
 #   2. Build via `docker/build-push-action` so we can opt-in to:
 #        - Registry-backed BuildKit cache (`type=registry,mode=max`) so
 #          intermediate `deps`/`build` stages survive across runs and across
@@ -28,8 +34,8 @@
 #          a layer (R8). The Dockerfile mounts them as
 #          `NX_SELF_HOSTED_REMOTE_CACHE_SERVER` and
 #          `NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN`.
-#   3. Push the resulting image to `registry.fly.io/<app>:<sha>` and deploy
-#      it via `flyctl deploy --image ...` so Fly.io skips its own builder.
+#   3. Push the resulting image to `registry.fly.io/<app>:<sha>`.
+# Either way the deploy is `flyctl deploy --image ...`, so Fly.io skips its own builder.
 #
 # The UI is built in Actions and published to Netlify by `deploy-ui.yml`.
 # See docs/architecture/ui-deployment-topology.md.
@@ -47,6 +53,11 @@ on:
         required: true
         type: string
         description: 'App to deploy (api, mirror, maintenance or storage)'
+      prebuilt:
+        required: false
+        type: boolean
+        default: false
+        description: 'Deploy the image `fly-images.yml` already pushed for this commit instead of building it here'
   workflow_dispatch:
     # Manual trigger from GitHub UI
     inputs:
@@ -94,104 +105,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      # The app-to-Fly mapping is shared with `fly-images.yml` (`.github/actions/fly-app`).
       - name: Resolve deploy targets
         id: targets
+        uses: ./.github/actions/fly-app
+        with:
+          app: ${{ inputs.app }}
+          environment: ${{ inputs.environment }}
+
+      # Each private app deploys with its own token, from HCP tau-repo; the API's is always mapped.
+      - name: Require the ${{ inputs.app }} deploy token
+        if: steps.targets.outputs.token_hcp != ''
         env:
-          FLY_TOKEN_MIRROR: ${{ secrets.FLY_MIRROR_API_TOKEN }}
-          FLY_TOKEN_MAINTENANCE: ${{ secrets.FLY_MAINTENANCE_API_TOKEN }}
-          FLY_TOKEN_STORAGE: ${{ secrets.FLY_STORAGE_API_TOKEN }}
+          TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
+          TOKEN_SECRET: ${{ steps.targets.outputs.token_secret }}
+          TOKEN_HCP: ${{ steps.targets.outputs.token_hcp }}
+          ENVIRONMENT: ${{ inputs.environment }}
         run: |
-          # Every app but the API builds a target of the API's Dockerfile and has
-          # its Fly configs in its own project.
-          DOCKERFILE="apps/api/Dockerfile"
-          DOCKER_TARGET=""
-          TOKEN_SECRET="FLY_API_TOKEN"
-          if [ "${{ inputs.app }}" = "mirror" ] || [ "${{ inputs.app }}" = "maintenance" ]; then
-            case "${{ inputs.app }}" in
-              mirror)
-                PREFIX="tau-mirror"; TOKEN_SECRET="FLY_MIRROR_API_TOKEN"
-                TOKEN_HCP="fly_mirror_deploy_token"; TOKEN_VALUE="$FLY_TOKEN_MIRROR" ;;
-              maintenance)
-                PREFIX="tau-maintenance"; TOKEN_SECRET="FLY_MAINTENANCE_API_TOKEN"
-                TOKEN_HCP="fly_maintenance_deploy_token"; TOKEN_VALUE="$FLY_TOKEN_MAINTENANCE" ;;
-            esac
-            case "${{ inputs.environment }}" in
-              staging) FLY_APP="${PREFIX}-staging"; CONFIG_FILE="apps/${{ inputs.app }}/fly.staging.toml" ;;
-              production) FLY_APP="${PREFIX}"; CONFIG_FILE="apps/${{ inputs.app }}/fly.prod.toml" ;;
-              *) echo "::error::Invalid environment: ${{ inputs.environment }}"; exit 1 ;;
-            esac
-            [ -n "$TOKEN_VALUE" ] || {
-              echo "::error::Set ${TOKEN_HCP}_${{ inputs.environment }} in HCP tau-repo and apply its ${TOKEN_SECRET} GitHub environment mapping."
-              exit 1
-            }
-            echo "fly_app=${FLY_APP}" >> "$GITHUB_OUTPUT"
-            echo "config_file=${CONFIG_FILE}" >> "$GITHUB_OUTPUT"
-            echo "image=registry.fly.io/${FLY_APP}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-            echo "cache_ref=registry.fly.io/${FLY_APP}:buildcache" >> "$GITHUB_OUTPUT"
-            echo "dockerfile=${DOCKERFILE}" >> "$GITHUB_OUTPUT"
-            echo "docker_target=${{ inputs.app }}" >> "$GITHUB_OUTPUT"
-            echo "token_secret=${TOKEN_SECRET}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ "${{ inputs.app }}" = "storage" ]; then
-            if [ "${{ inputs.environment }}" != "staging" ]; then
-              echo "::error::Only staging deploys tau-storage so far."
-              exit 1
-            fi
-            [ -n "$FLY_TOKEN_STORAGE" ] || {
-              echo "::error::Set fly_storage_deploy_token_staging in HCP tau-repo and apply its FLY_STORAGE_API_TOKEN GitHub environment mapping."
-              exit 1
-            }
-            {
-              echo "fly_app=tau-storage-staging"
-              echo "config_file=apps/storage/fly.staging.toml"
-              echo "image=registry.fly.io/tau-storage-staging:${GITHUB_SHA}"
-              echo "cache_ref=registry.fly.io/tau-storage-staging:buildcache"
-              echo "dockerfile=${DOCKERFILE}"
-              echo "docker_target=storage"
-              echo "token_secret=FLY_STORAGE_API_TOKEN"
-              echo "api_app=tau-api-staging"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "dockerfile=${DOCKERFILE}" >> "$GITHUB_OUTPUT"
-          echo "docker_target=${DOCKER_TARGET}" >> "$GITHUB_OUTPUT"
-          echo "token_secret=${TOKEN_SECRET}" >> "$GITHUB_OUTPUT"
-          if [ "${{ inputs.environment }}" = "staging" ]; then
-            FLY_APP="tau-api-staging"
-            CONFIG_FILE="apps/${{ inputs.app }}/fly.staging.toml"
-            API_URL="https://api.taucad.dev"
-            UI_ORIGIN="https://taucad.dev"
-          elif [ "${{ inputs.environment }}" = "production" ]; then
-            FLY_APP="tau-api"
-            CONFIG_FILE="apps/${{ inputs.app }}/fly.prod.toml"
-            API_URL="https://api.tau.new"
-            UI_ORIGIN="https://tau.new"
-          else
-            echo "::error::Invalid environment: ${{ inputs.environment }}"
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Set ${TOKEN_HCP}_${ENVIRONMENT} in HCP tau-repo and apply its ${TOKEN_SECRET} GitHub environment mapping."
             exit 1
           fi
-          echo "fly_app=${FLY_APP}" >> "$GITHUB_OUTPUT"
-          echo "config_file=${CONFIG_FILE}" >> "$GITHUB_OUTPUT"
-          echo "image=registry.fly.io/${FLY_APP}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-          echo "cache_ref=registry.fly.io/${FLY_APP}:buildcache" >> "$GITHUB_OUTPUT"
-          # CORS smoke-test inputs (R13 — see
-          # docs/research/staging-cors-coep-safari-rendering-audit.md).
-          # Keyed on environment so the same workflow validates both staging
-          # and production reachability with no further per-env branching.
-          echo "api_url=${API_URL}" >> "$GITHUB_OUTPUT"
-          echo "ui_origin=${UI_ORIGIN}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Fly.io CLI
         uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master
 
       - name: Set up Docker Buildx
+        if: ${{ !inputs.prebuilt }}
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
         with:
           # Hosted runners are discarded; removing the builder cost 1.5 to 2 min a job.
           cleanup: false
 
       - name: Authenticate to registry.fly.io
+        if: ${{ !inputs.prebuilt }}
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           registry: registry.fly.io
@@ -199,7 +146,7 @@ jobs:
           password: ${{ secrets[steps.targets.outputs.token_secret] }}
 
       - name: Require the Sentry source-map credential
-        if: inputs.app == 'api'
+        if: inputs.app == 'api' && !inputs.prebuilt
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: |
@@ -209,6 +156,7 @@ jobs:
           fi
 
       - name: Build and push ${{ inputs.app }} image
+        if: ${{ !inputs.prebuilt }}
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .

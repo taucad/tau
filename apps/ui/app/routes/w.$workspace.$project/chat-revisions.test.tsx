@@ -22,6 +22,7 @@ import {
   groupRevisionHistory,
 } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
+import { requestBranchControl } from '#routes/w.$workspace.$project/revision-pane-requests.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';
@@ -81,11 +82,19 @@ vi.mock('#hooks/use-revision-status.js', async () => {
 });
 /* One stable array: `useSyncExternalStore` re-renders forever when its snapshot
  * is a new reference on every read. */
+/* C2: the chats whose current run has not settled, which the header reads as the agent working. */
+const sessions = vi.hoisted(() => ({ observed: [] as string[], running: new Set<string>() }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
   useChatSessionStore: () => ({
-    observedChatIdsOf: () => [],
+    observedChatIdsOf: () => sessions.observed,
     subscribeMembership: () => () => undefined,
+    subscribeProjection: () => () => undefined,
+    getProjection: (chatId: string) => ({ chatId, ledger: { position: { cursor: 0 }, runs: {} } }),
   }),
+}));
+vi.mock('#machines/chat-projection.logic.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  selectRunPhase: ({ chatId }: { readonly chatId: string }) => (sessions.running.has(chatId) ? 'running' : 'completed'),
 }));
 const chats = [
   { id: 'chat-1', name: 'Optimize bracket', checkoutId: 'co-2' },
@@ -140,9 +149,17 @@ const renderPane = (): void => {
   render(<RevisionsPanelBody />, { wrapper });
 };
 
+/** The branch chip is the branch menu; New branch… opens its form under the chip (C2). */
+const openNewBranch = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
+  await user.click(await screen.findByRole('button', { name: 'Branch: main. Switch branch' }));
+  await user.click(await screen.findByRole('menuitem', { name: 'New branch…' }));
+};
+
 beforeEach(() => {
   revisionStatusHarness.reset();
   turnOutcomes = [];
+  sessions.observed = [];
+  sessions.running.clear();
 });
 
 describe('Revisions pane', () => {
@@ -610,7 +627,7 @@ describe('Revisions pane', () => {
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-1' };
 
     renderPane();
-    await user.click(await screen.findByRole('button', { name: 'New branch' }));
+    await openNewBranch(user);
     await user.type(screen.getByRole('textbox', { name: 'Branch name' }), 'enclosure-v2');
     await user.click(screen.getByRole('button', { name: 'Create branch' }));
 
@@ -629,7 +646,7 @@ describe('Revisions pane', () => {
 
     renderPane();
     expect(screen.queryByRole('list', { name: 'Branches' })).not.toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: 'New branch' }));
+    await openNewBranch(user);
     /* The one naming form, which says where the branch starts (round 14). */
     expect(screen.getByText('Starts from where you are now. main stays as it is.')).toBeInTheDocument();
     await user.type(screen.getByRole('textbox', { name: 'Branch name' }), 'enclosure-v2');
@@ -697,15 +714,15 @@ describe('Revisions pane', () => {
     const refusing = refuseCreateBranch('enclosure-v2');
 
     renderPane();
-    await user.click(await screen.findByRole('button', { name: 'New branch' }));
+    await openNewBranch(user);
     await user.type(screen.getByRole('textbox', { name: 'Branch name' }), 'enclosure-v2');
     await user.click(screen.getByRole('button', { name: 'Create branch' }));
     await refusing.settled();
 
     expect(refusing.asked).toEqual(['enclosure-v2']);
     expect(refusing.unhandled).toEqual([]);
-    /* And the pane is still here, with its *New branch* ready to try again. */
-    expect(screen.getByRole('button', { name: 'New branch' })).toBeInTheDocument();
+    /* And the pane is still here, with its branch menu ready to try again. */
+    expect(screen.getByRole('button', { name: 'Branch: main. Switch branch' })).toBeInTheDocument();
   });
 
   it('says the checkout has changes that are not in a revision yet, and offers to drop them', async () => {
@@ -723,8 +740,8 @@ describe('Revisions pane', () => {
     await waitFor(() => {
       expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
     });
-    await user.click(screen.getByRole('button', { name: 'More' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Discard changes' }));
+    /* C2: Discard is a button beside Save, not a ⋮ item; it acts at once and can be undone. */
+    await user.click(screen.getByRole('button', { name: 'Discard' }));
     expect(revisionStatusHarness.commands.restore).toHaveBeenCalledWith('rev-4');
   });
 
@@ -755,7 +772,7 @@ describe('Revisions pane', () => {
     expect(screen.getByRole('button', { name: 'Undo restore' })).toBeInTheDocument();
   });
 
-  it('shows the Sync region only once a remote exists, and offers to open it otherwise', async () => {
+  it('offers Back up on the backup line, not in the header (C2)', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
     revisionStatusHarness.status = {
@@ -766,12 +783,14 @@ describe('Revisions pane', () => {
 
     renderPane();
     expect(screen.queryByRole('radio', { name: 'Tau Cloud' })).not.toBeInTheDocument();
+    const header = await screen.findByRole('region', { name: 'Where you are' });
+    expect(within(header).queryByRole('button', { name: /Back up/u })).not.toBeInTheDocument();
+    const line = screen.getByRole('region', { name: 'Backup' });
+    expect(line).toHaveTextContent('This device only');
 
-    await user.click(await screen.findByRole('button', { name: 'Back up' }));
+    await user.click(within(line).getByRole('button', { name: 'Back up to Tau Cloud' }));
 
-    expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeInTheDocument();
-    /* A29: the offer that opened Sync does not keep standing beside it. */
-    expect(screen.queryByRole('button', { name: 'Back up' })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeChecked();
   });
 
   it('names no git word in what a person reads (A18, I12)', async () => {
@@ -1262,31 +1281,13 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.getByRole('heading', { name: 'History' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Where you are' })).not.toHaveTextContent('main');
     /* HQ7: nothing is offered over a line nobody has located yet. */
-    expect(screen.queryByRole('button', { name: 'New branch' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Switch branch/u })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'More' })).not.toBeInTheDocument();
-  });
-
-  /* Canvas round 16: the strip's Details keep Head, Branch tip and This device. */
-  it.each([
-    ['web', 'Workbench (browser)'],
-    ['desktop', 'Workbench (desktop app)'],
-  ] as const)('names this device in the strip’s Details on the %s build', async (target, device) => {
-    vi.stubEnv('TAU_TARGET', target);
-    const user = userEvent.setup();
-    revisionStatusHarness.rows = [row({ revisionId: 'rev-4', revisionNumber: 4 })];
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
-    renderPane();
-
-    const strip = await screen.findByRole('region', { name: 'Where you are' });
-    await user.click(within(strip).getByRole('button', { name: 'Details' }));
-    const details = within(strip).getByLabelText('Details of where you are');
-    expect(details).toHaveTextContent(`This device${device}`);
-    vi.unstubAllEnvs();
   });
 
   /*
    * B5: with Tau's debug setting off, no 40-character id renders anywhere in
-   * the pane, with every row and both Details open; with it on, the ids the
+   * the pane, with every row and its Details open; with it on, the ids the
    * entry is stored under are there.
    */
   describe('stored ids (B5)', () => {
@@ -1305,10 +1306,9 @@ describe('Revisions pane vocabulary and History', () => {
       ];
       revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: oid('a') };
       renderPane();
-      const strip = await screen.findByRole('region', { name: 'Where you are' });
-      await user.click(within(strip).getByRole('button', { name: 'Details' }));
       for (const name of [/^Thicker base 2 · /u, /^Thicker base 1 · /u]) {
-        const entry = screen.getByRole('button', { name });
+        // oxlint-disable-next-line no-await-in-loop -- one row opens at a time, as a person opens them.
+        const entry = await screen.findByRole('button', { name });
         // oxlint-disable-next-line no-await-in-loop -- one row opens at a time, as a person opens them.
         await user.click(entry);
         // oxlint-disable-next-line no-await-in-loop -- ditto.
@@ -1319,7 +1319,6 @@ describe('Revisions pane vocabulary and History', () => {
 
     it('renders no 40-character id with the debug setting off', async () => {
       const pane = await openEverything();
-      expect(screen.getByLabelText('Details of where you are')).not.toHaveTextContent('Head');
       expect(pane.textContent).not.toMatch(/[\da-f]{40}/u);
       /* The pseudonym reads Anonymous; its hash is a diagnostic too. */
       expect(pane.textContent).toContain('Anonymous');
@@ -1332,7 +1331,6 @@ describe('Revisions pane vocabulary and History', () => {
         flags.tauDebug = false;
       });
       const pane = await openEverything();
-      expect(screen.getByLabelText('Details of where you are')).toHaveTextContent(`Head${oid('a')}`);
       expect(document.querySelector('dl[aria-label^="Details for "]')).toHaveTextContent(
         `ID${oid('a')}Tree${oid('b')}Parent${oid('c')}`,
       );
@@ -1572,5 +1570,247 @@ describe('Backup by default (D19)', () => {
     });
     expect(screen.queryByText('Backs up to Tau Cloud automatically.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Turn off backup' })).not.toBeInTheDocument();
+  });
+});
+
+/*
+ * C2 (canvas `pane-header-states`): the header's ten states. Each is the
+ * branch chip, at most one version, one sentence and at most two verbs; the
+ * chip is the only menu trigger, and there is no ⋮, no Details and no number.
+ */
+describe('History header (C2)', () => {
+  const tau = {
+    remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+    sync: { ...revisionStatusHarness.status.sync, state: 'backedUp' },
+  } as const;
+  const version = row({
+    revisionId: 'rev-3',
+    revisionNumber: 3,
+    summary: 'Ready for print',
+    versions: [{ number: 3, name: 'Ready for print' }],
+  });
+  const entry = row({ revisionId: 'rev-4', revisionNumber: 4, summary: 'Thicker base', parent: 'rev-3' });
+  const states = [
+    { id: 'at-rest', status: { headRevisionId: 'rev-4' }, sentence: 'Saved · Backed up', verbs: [] },
+    {
+      id: 'at-version',
+      status: { headRevisionId: 'rev-3' },
+      sentence: 'Saved · Backed up',
+      verbs: [],
+      version: 'V3 · Ready for print',
+    },
+    {
+      id: 'unsaved',
+      status: { headRevisionId: 'rev-3', dirty: true },
+      sentence: 'Unsaved changes',
+      verbs: ['Discard', 'Save'],
+    },
+    {
+      id: 'agent-working',
+      status: { headRevisionId: 'rev-3', dirty: true },
+      running: 'chat-2',
+      sentence: 'Agent is working · saves when it finishes',
+      verbs: [],
+    },
+    {
+      id: 'after-restore',
+      status: { headRevisionId: 'rev-4', restore: { ...revisionStatusHarness.status.restore, undoable: true } },
+      sentence: 'Saved · Backed up',
+      verbs: ['Undo restore'],
+    },
+    {
+      id: 'conflict',
+      status: {
+        headRevisionId: 'rev-4',
+        attention: 1,
+        conflicts: [
+          {
+            revisionId: 'merge-1',
+            branch: 'main',
+            into: 'main',
+            foreign: false,
+            busy: false,
+            ready: false,
+            paths: [],
+            labels: undefined,
+          },
+        ],
+      },
+      sentence: 'Needs your decision on main',
+      verbs: [],
+    },
+    {
+      id: 'save-unconfirmed',
+      status: { headRevisionId: 'rev-4', attention: 1 },
+      sentence: 'Couldn’t confirm the save',
+      verbs: ['Try again'],
+    },
+    {
+      id: 'signed-out',
+      status: {
+        headRevisionId: 'rev-4',
+        sync: { ...tau.sync, state: 'failed', pendingCount: 1, reason: 'unauthorized' },
+      },
+      sentence: 'Not backed up · Sign in to back up',
+      verbs: ['Sign in'],
+    },
+    { id: 'view-only', status: { headRevisionId: 'rev-4' }, role: 'read', sentence: 'Saved · View only', verbs: [] },
+    {
+      id: 'work-arrived',
+      status: { headRevisionId: 'rev-4', sync: { ...tau.sync, arrived: 'rev-9' } },
+      sentence: 'New changes are ready',
+      verbs: [],
+    },
+  ] as const;
+
+  it.each(states)('says $id in one sentence with its verbs, and offers no other menu', async (state) => {
+    revisionStatusHarness.rows = [entry, version];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      ...tau,
+      ...(state.status as Partial<typeof revisionStatusHarness.status>),
+    };
+    if ('role' in state) {
+      revisionStatusHarness.role = state.role;
+    }
+    if ('running' in state) {
+      sessions.observed = [state.running];
+      sessions.running.add(state.running);
+    }
+
+    renderPane();
+
+    const header = await screen.findByRole('region', { name: 'Where you are' });
+    await waitFor(() => {
+      expect(within(header).getByRole('status', { name: 'History status' })).toHaveTextContent(state.sentence);
+    });
+    const chip = within(header).getByRole('button', { name: 'Branch: main. Switch branch' });
+    /* The chip is the one menu trigger: no ⋮, no Details. */
+    expect(
+      within(header)
+        .getAllByRole('button')
+        .filter((button) => button.hasAttribute('aria-haspopup')),
+    ).toEqual([chip]);
+    expect(within(header).queryByRole('button', { name: /^(?:More|Details)$/u })).not.toBeInTheDocument();
+    const verbs = [...within(header).queryAllByRole('button'), ...within(header).queryAllByRole('link')]
+      .filter((control) => control !== chip)
+      .map((control) => control.textContent);
+    expect(verbs).toEqual(state.verbs);
+    /* No number, and the version only while the files are exactly at it. */
+    expect(header.textContent).not.toMatch(/\bRev \d/u);
+    if ('version' in state) {
+      expect(header).toHaveTextContent(state.version);
+    } else {
+      expect(header.textContent).not.toMatch(/\bV\d/u);
+    }
+  });
+
+  it('discards at once, as a restore of the entry the files are at', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.rows = [entry];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4', dirty: true };
+
+    renderPane();
+    const header = await screen.findByRole('region', { name: 'Where you are' });
+    await user.click(await within(header).findByRole('button', { name: 'Discard' }));
+
+    expect(revisionStatusHarness.commands.restore).toHaveBeenCalledWith('rev-4');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
+  it('switches branch from the chip, and lists no conflict line as a branch', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.rows = [entry];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: 'rev-4',
+      branches: [
+        { name: 'main', head: 'rev-4', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        { name: 'enclosure-v2', head: 'rev-4', checkoutId: 'co-2', checkoutRoot: '/checkouts/co-2', leaseChatIds: [] },
+        {
+          name: 'conflicts/main/device-2',
+          head: 'merge-1',
+          checkoutId: undefined,
+          checkoutRoot: undefined,
+          leaseChatIds: [],
+        },
+      ],
+      conflicts: [
+        {
+          revisionId: 'merge-1',
+          branch: 'conflicts/main/device-2',
+          into: 'main',
+          foreign: true,
+          busy: false,
+          ready: false,
+          paths: [],
+          labels: undefined,
+        },
+      ],
+    };
+
+    renderPane();
+    await user.click(await screen.findByRole('button', { name: 'Branch: main. Switch branch' }));
+    const menu = await screen.findByRole('menu');
+    expect(
+      within(menu)
+        .getAllByRole('menuitemradio')
+        .map((item) => item.textContent),
+    ).toEqual(['main', 'enclosure-v2']);
+    expect(within(menu).getByRole('menuitemradio', { name: 'main' })).toBeChecked();
+    await user.click(within(menu).getByRole('menuitemradio', { name: 'enclosure-v2' }));
+    expect(revisionStatusHarness.commands.switchTo).toHaveBeenCalledWith('enclosure-v2');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
+  it('opens the branch menu or New branch… when the palette asks', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.rows = [entry];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
+
+    renderPane();
+    await screen.findByRole('button', { name: 'Branch: main. Switch branch' });
+    act(() => {
+      requestBranchControl('p', 'switch-branch');
+    });
+    expect(await screen.findByRole('menu')).toHaveTextContent('Switch branch');
+    await user.keyboard('{Escape}');
+    act(() => {
+      requestBranchControl('p', 'new-branch');
+    });
+    expect(await screen.findByRole('textbox', { name: 'Branch name' })).toBeInTheDocument();
+  });
+
+  it('presses the toolbar chip while History is on screen', async () => {
+    revisionStatusHarness.rows = [entry];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
+    const view = render(
+      <TooltipProvider>
+        <RevisionStatusAction />
+      </TooltipProvider>,
+      { wrapper },
+    );
+    const chip = (): HTMLElement => screen.getByRole('button', { name: /^Open History\./u });
+    expect(chip()).toHaveAttribute('aria-pressed', 'false');
+
+    view.rerender(
+      <TooltipProvider>
+        <RevisionStatusAction />
+        <ChatRevisions isExpanded />
+      </TooltipProvider>,
+    );
+    await waitFor(() => {
+      expect(chip()).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    view.rerender(
+      <TooltipProvider>
+        <RevisionStatusAction />
+        <ChatRevisions isExpanded={false} />
+      </TooltipProvider>,
+    );
+    await waitFor(() => {
+      expect(chip()).toHaveAttribute('aria-pressed', 'false');
+    });
   });
 });

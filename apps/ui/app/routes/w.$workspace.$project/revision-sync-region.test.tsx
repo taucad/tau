@@ -107,6 +107,11 @@ const syncFacet = (overrides: Partial<SyncFacet> = {}): SyncFacet => ({
   ...overrides,
 });
 
+/** The line's *Back up to Tau Cloud*, which opens where to back up on a project on this device only (C2). */
+const openBackUp = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
+  await user.click(screen.getByRole('button', { name: 'Back up to Tau Cloud' }));
+};
+
 const renderRegion = (
   remote: RemoteFacet,
   sync: SyncFacet = syncFacet(),
@@ -185,18 +190,37 @@ describe('RevisionSyncRegion', () => {
     });
   });
 
-  it('offers the three remote kinds and says what connecting asks for', () => {
+  it('says This device only with Back up to Tau Cloud, which opens the three remote kinds (C2)', async () => {
+    const user = userEvent.setup();
     renderRegion(facet());
 
-    expect(screen.getByRole('radio', { name: 'This device only' })).toBeChecked();
-    expect(screen.getByRole('radio', { name: 'Tau Cloud' })).not.toBeChecked();
+    const line = screen.getByRole('region', { name: 'Backup' });
+    expect(line).toHaveTextContent('This device only');
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    await openBackUp(user);
+
+    expect(screen.getByRole('radio', { name: 'This device only' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'GitHub or another Git host' })).not.toBeChecked();
-    expect(screen.getByRole('button', { name: 'Back up to Tau Cloud' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Back up to Tau Cloud' })).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Back up to Tau Cloud' })).toHaveFocus();
+    });
+  });
+
+  it('offers no Back up to a viewer who cannot change the backup', () => {
+    renderRegion(facet(), syncFacet(), { role: 'read' });
+
+    expect(screen.getByRole('region', { name: 'Backup' })).toHaveTextContent('This device only');
+    expect(screen.queryByRole('button', { name: 'Back up to Tau Cloud' })).not.toBeInTheDocument();
   });
 
   it('asks to connect when Tau Cloud is picked', async () => {
     const user = userEvent.setup();
     const { connect, setSyncChats } = renderRegion(facet());
+    await openBackUp(user);
 
     await user.click(screen.getByRole('radio', { name: 'Tau Cloud' }));
 
@@ -546,6 +570,7 @@ describe('RevisionSyncRegion', () => {
   it('asks for an address rather than connecting when Git remote is picked', async () => {
     const user = userEvent.setup();
     const { connect } = renderRegion(facet());
+    await openBackUp(user);
 
     await user.click(screen.getByRole('radio', { name: 'GitHub or another Git host' }));
 
@@ -570,6 +595,7 @@ describe('RevisionSyncRegion', () => {
       });
       const user = userEvent.setup();
       renderRegion(facet());
+      await openBackUp(user);
 
       await user.click(screen.getByRole('radio', { name: 'GitHub or another Git host' }));
       await user.click(screen.getByText('Another Git host'));
@@ -583,6 +609,7 @@ describe('RevisionSyncRegion', () => {
   it('refuses an address the proxy would refuse, while the person is still typing', async () => {
     const user = userEvent.setup();
     renderRegion(facet());
+    await openBackUp(user);
     await user.click(screen.getByRole('radio', { name: 'GitHub or another Git host' }));
     await user.click(screen.getByText('Another Git host'));
 
@@ -595,6 +622,7 @@ describe('RevisionSyncRegion', () => {
   it('explains that GitHub selections use Git LFS', async () => {
     const user = userEvent.setup();
     renderRegion(facet());
+    await openBackUp(user);
 
     await user.click(screen.getByRole('radio', { name: 'GitHub or another Git host' }));
     await user.click(screen.getByText('Another Git host'));
@@ -609,6 +637,7 @@ describe('RevisionSyncRegion', () => {
   it('connects a repository selected through the shared GitHub picker', async () => {
     const user = userEvent.setup();
     const { connect } = renderRegion(facet());
+    await openBackUp(user);
     await user.click(screen.getByRole('radio', { name: 'GitHub or another Git host' }));
     await user.click(screen.getByRole('button', { name: 'Pick GitHub repository' }));
 
@@ -1282,6 +1311,7 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
   it('offers Available on Pro for Tau Cloud and a Git remote on every plan (C5, N4)', async () => {
     const user = userEvent.setup();
     const region = renderRegion(facet(), syncFacet(), { canSyncFiles: false });
+    await openBackUp(user);
 
     expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeDisabled();
     expect(screen.getByRole('radio', { name: 'GitHub or another Git host' })).toBeEnabled();
@@ -1295,8 +1325,9 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
   });
 
   /* D16: an entitled account is told what its plan includes, not what it withholds. */
-  it('should name the included allowance on the Tau Cloud choice instead of a plan gate', () => {
+  it('should name the included allowance on the Tau Cloud choice instead of a plan gate', async () => {
     renderRegion(facet(), syncFacet(), { storageLimitBytes: 1024 ** 3 });
+    await openBackUp(userEvent.setup());
 
     expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeEnabled();
     expect(screen.getByText('1 GB included')).toBeInTheDocument();

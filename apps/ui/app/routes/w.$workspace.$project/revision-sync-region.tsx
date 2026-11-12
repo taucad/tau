@@ -547,7 +547,8 @@ export function RevisionSyncRegion({
   const [url, setUrl] = useState(remote.kind === 'git' ? (remote.url ?? '') : '');
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const [pendingConnection, setPendingConnection] = useState<PendingConnection>();
-  const [changingBackup, setChangingBackup] = useState(remote.phase !== 'connected');
+  /* A project on this device only shows its line and Back up; the chooser opens from there (C2). */
+  const [changingBackup, setChangingBackup] = useState(remote.phase !== 'connected' && remote.phase !== 'none');
   const [reconnecting, setReconnecting] = useState(false);
   /* A connect in flight from this region: *Replace backup* waits for it. */
   const [committing, setCommitting] = useState(false);
@@ -562,7 +563,17 @@ export function RevisionSyncRegion({
   const failureSentence =
     sync.reason === 'damaged' ? describeRevisionFailure('backup', 'REMOTE_DAMAGED').description : sync.error;
   const manageRef = useRef<HTMLButtonElement>(null);
+  const backUpRef = useRef<HTMLButtonElement>(null);
   const [isManaging, setIsManaging] = useState(false);
+  /* Manage is 288 px, or the pane's width less its inset when the pane is narrower (C2). */
+  const [manageWidth, setManageWidth] = useState<number>();
+  const openManage = (isOpen: boolean): void => {
+    if (isOpen) {
+      const line = manageRef.current?.closest('[data-slot="backup-line"]');
+      setManageWidth(line === null || line === undefined ? undefined : Math.min(288, line.clientWidth - 16));
+    }
+    setIsManaging(isOpen);
+  };
   /* A fetch-only link can still be changed for a writable one; a view-only or removed collaborator cannot. */
   const canManage = role !== 'read' && role !== 'revoked' && isLineKnown;
   /* Backup is continuous, so only GitHub's fetch is a verb of its own; Try again follows a failure (M8). */
@@ -629,7 +640,7 @@ export function RevisionSyncRegion({
    * no Connect, no Cancel, no summary — with focus on `<body>`. */
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect -- C9: the draft mirrors the external connection phase, which no render-time derivation sees.
-    setChangingBackup(remote.phase !== 'connected');
+    setChangingBackup(remote.phase !== 'connected' && remote.phase !== 'none');
     if (remote.phase === 'connected') {
       setChoice(undefined);
     }
@@ -873,13 +884,19 @@ export function RevisionSyncRegion({
   /* Manage (M8): what the ⋮ and Details held, behind one labelled button. */
   const manage =
     isConnected && !changingBackup && hasSettings ? (
-      <Popover open={isManaging} onOpenChange={setIsManaging}>
+      <Popover open={isManaging} onOpenChange={openManage}>
         <PopoverTrigger asChild>
           <Button ref={manageRef} size='xs' variant='ghost' className='-my-0.5 -mr-2 shrink-0'>
             Manage
           </Button>
         </PopoverTrigger>
-        <PopoverContent align='end' side='top' aria-label='Manage backup' className='flex w-72 flex-col gap-3 p-3'>
+        <PopoverContent
+          align='end'
+          side='top'
+          aria-label='Manage backup'
+          className='flex w-72 flex-col gap-3 p-3'
+          style={manageWidth === undefined ? undefined : { width: manageWidth }}
+        >
           <div className='flex min-w-0 flex-col'>
             <span className='text-sm font-medium break-words'>{connectedLabel}</span>
             <span className='text-xs text-muted-foreground tabular-nums'>
@@ -1035,13 +1052,17 @@ export function RevisionSyncRegion({
             >
               {remote.kind === 'none' ? 'Back up to Tau Cloud' : 'Change backup'}
             </Button>
-            {isConnected ? (
+            {isConnected || remote.kind === 'none' ? (
               <Button
                 size='sm'
                 variant='ghost'
                 onClick={() => {
                   setChoice(undefined);
                   setChangingBackup(false);
+                  /* Back to the line's Back up, which renders again once the chooser closes. */
+                  globalThis.requestAnimationFrame(() => {
+                    backUpRef.current?.focus();
+                  });
                 }}
               >
                 Cancel
@@ -1273,10 +1294,28 @@ export function RevisionSyncRegion({
       ) : undefined}
     </div>
   ) : remote.kind === 'none' ? (
-    <span className='flex min-w-0 flex-1 items-start gap-1.5'>
-      <CloudOff aria-hidden className='mt-px size-3.5 shrink-0 text-muted-foreground' />
-      <span>This device only</span>
-    </span>
+    <>
+      {/* The sentence keeps one line; Back up wraps under it in a narrow pane (canvas `state-narrow`). */}
+      <span className='flex flex-1 items-start gap-1.5 whitespace-nowrap'>
+        <CloudOff aria-hidden className='mt-px size-3.5 shrink-0 text-muted-foreground' />
+        <span>This device only</span>
+      </span>
+      {/* The header's Back up moved here (C2): it opens the chooser above the line. */}
+      {canManage && !changingBackup ? (
+        <Button
+          ref={backUpRef}
+          size='xs'
+          variant='outline'
+          className='-my-0.5 shrink-0'
+          onClick={() => {
+            setChoice(canSyncFiles ? 'tau' : undefined);
+            setChangingBackup(true);
+          }}
+        >
+          Back up to Tau Cloud
+        </Button>
+      ) : undefined}
+    </>
   ) : (
     <>
       <span className='flex min-w-0 flex-1 items-start gap-1.5'>
@@ -1315,7 +1354,7 @@ export function RevisionSyncRegion({
       className={cn('flex shrink-0 flex-col border-t border-border bg-sidebar text-xs', className)}
     >
       {above.length === 0 ? null : <div className='flex flex-col gap-3 border-b px-3 py-2'>{above}</div>}
-      <div className='flex min-w-0 items-start gap-2 px-3 py-1.5'>{line}</div>
+      <div className='flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1 px-3 py-1.5'>{line}</div>
       {/* I11: disconnecting is the one backup action that asks first. */}
       <AlertDialog
         open={confirmingDisconnect && isConnected}

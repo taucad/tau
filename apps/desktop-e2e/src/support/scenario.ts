@@ -36,6 +36,39 @@ export const expectCount = async (locator: Locator, count: number, timeout = 30_
 /** The composer editor, on the home page and inside a project alike. */
 export const composerOf = (page: Page): Locator => page.locator(composerSelector).first();
 
+/**
+ * The composer, on screen. Under 1120 px a project shows one auxiliary lane
+ * (V2 §1, `resolveCompactAuxiliary`), so a new project's Parameters or an
+ * opened History leaves the chat lane's composer mounted but hidden; a person
+ * presses *Toggle Chat lane*, which makes chat the auxiliary. The home page
+ * has no lanes and its composer is already visible.
+ *
+ * @param page - The renderer page.
+ * @returns The visible composer.
+ */
+export const revealComposer = async (page: Page): Promise<Locator> => {
+  const composer = composerOf(page);
+  const toggle = page
+    .getByRole('button', { name: 'Toggle Chat lane', exact: true, pressed: false })
+    .filter({ visible: true })
+    .first();
+  await expect
+    .poll(
+      async () => {
+        if (await composer.isVisible()) {
+          return true;
+        }
+        if (await toggle.isVisible()) {
+          await toggle.click({ timeout: 5000 }).catch(() => undefined);
+        }
+        return false;
+      },
+      { message: 'The chat composer must be on screen', timeout: 60_000 },
+    )
+    .toBe(true);
+  return composer;
+};
+
 /** The chat's stop button — present exactly while a run is in flight. */
 export const stopButtonOf = (page: Page): Locator => page.getByRole('button', { name: 'Stop', exact: true }).last();
 
@@ -109,7 +142,8 @@ const agentList = (page: Page): Locator => page.locator('[data-slot="agent-list"
  */
 export const selectChatModel = async (page: Page, modelName: string): Promise<void> => {
   await parkPointer(page);
-  await composerOf(page).click();
+  const composer = await revealComposer(page);
+  await composer.click();
   /* The shortcut opens the agent sheet. With a choice of agents, Tau's models are
    * reached through its Agent row, from whichever agent the chat is on. */
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Slash' : 'Control+Slash');
@@ -230,7 +264,7 @@ export const sendPrompt = async (page: Page, prompt: string): Promise<void> => {
    * recorded its revision — longer than the bytes its tools wrote take to land
    * on disk, which is what most callers just waited for. */
   await expectCount(stopButtonOf(page), 0, 120_000);
-  const composer = composerOf(page);
+  const composer = await revealComposer(page);
   await composer.click();
   await composer.fill(prompt);
   await page.keyboard.press('Enter');

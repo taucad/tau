@@ -56,6 +56,8 @@ export type PreparedAdmission = Readonly<{
   start: readonly LogRowBody[];
   /** The checkout the person chose, for placement (W8 TS-R12). */
   checkoutId?: string;
+  /** The text of the person's request, which titles the turn's result in History (Q9). */
+  request?: string;
 }>;
 
 /** What `prepareResume` hands back: how the next attempt runs, and its intent rows (`running{selection}`, recovery). */
@@ -65,6 +67,8 @@ export type PreparedResume = Readonly<{
   /** `start` replays the journaled payload; `continue` runs from history; `complete` ends with no call (tail answered). */
   mode: 'start' | 'continue' | 'complete';
   intent: readonly LogRowBody[];
+  /** The text of the admitted request, which titles the turn's result in History (Q9). */
+  request?: string;
 }>;
 
 /** A request an external agent asked a person to decide (W10). */
@@ -155,7 +159,7 @@ export type ChatRunEffectArgs = {
   steerDriver: Readonly<{ key: TurnAttemptKey; commandId: string; message: string }>;
   abortDriver: Readonly<{ key: TurnAttemptKey; reason: 'cancel' | 'interrupt' | 'close' | 'relinquish' }>;
   decideApproval: Readonly<{ key: TurnAttemptKey; resolution: ApprovalResolution }>;
-  admitPlacement: Readonly<{ key: TurnAttemptKey; checkoutId?: string }>;
+  admitPlacement: Readonly<{ key: TurnAttemptKey; checkoutId?: string; request?: string }>;
   completePlacement: Readonly<{ key: TurnAttemptKey; cut: boolean }>;
   abandonPlacement: Readonly<{ key: TurnAttemptKey }>;
   acknowledgePlacement: Readonly<{ key: TurnAttemptKey }>;

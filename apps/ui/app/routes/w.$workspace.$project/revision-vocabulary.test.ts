@@ -133,7 +133,7 @@ describe('the Start version', () => {
   const card = (over: Partial<RevisionCard> & Pick<RevisionCard, 'revisionId'>): RevisionCard => ({
     n: undefined,
     createdAt: 1,
-    summary: 'Agent turn t1',
+    summary: 'Agent change',
     actor: 'You',
     turnId: undefined,
     conflicted: false,

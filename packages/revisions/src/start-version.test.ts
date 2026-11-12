@@ -45,7 +45,7 @@ describe('the Start version (A6)', () => {
       startReadingOf({
         parents: [],
         provenance: { source: 'user', capture: 'turn' },
-        summary: { generated: 'Agent turn t1' },
+        summary: { generated: 'Agent change' },
       }),
     ).toBe('created');
   });

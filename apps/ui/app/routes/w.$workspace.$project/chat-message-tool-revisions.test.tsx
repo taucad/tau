@@ -193,9 +193,9 @@ describe('ChatMessageToolRevisions', () => {
           {
             where: 'main',
             revisions: [
-              revision({ revisionId: 'a1', summary: 'Agent turn msg_01HZX7', source: 'agent', who: agent }),
+              revision({ revisionId: 'a1', summary: 'Agent change', source: 'agent', who: agent }),
               /* A turn's base cut: the person's own edits, saved before the agent started (A5). */
-              revision({ revisionId: 'a2', summary: 'Agent turn msg_01HZX7', source: 'user' }),
+              revision({ revisionId: 'a2', summary: 'Autosave', source: 'user' }),
               revision({ revisionId: 'a3', summary: 'Saved changes (idle)' }),
               revision({ revisionId: 'a4', summary: 'Saved changes (save)' }),
               revision({ revisionId: 'a5', summary: 'Make the lid walls 2.4 mm', source: 'agent', who: agent }),

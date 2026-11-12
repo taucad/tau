@@ -84,7 +84,7 @@ type AdmitCode =
  */
 export type TurnPlacementAdapter<Tools> = Readonly<{
   admit: (
-    input: Request & Readonly<{ checkoutId?: string | undefined }>,
+    input: Request & Readonly<{ checkoutId?: string | undefined; request?: string | undefined }>,
   ) => Promise<Answer<Readonly<{ placement: Placement<Tools> }>, AdmitCode>>;
   complete: (
     input: Request & Readonly<{ cut: boolean }>,
@@ -849,7 +849,7 @@ export const createTurnPlacementPort = <Tools>(
   };
 
   return {
-    admit: async ({ requestId, key, checkoutId }) => {
+    admit: async ({ requestId, key, checkoutId, request }) => {
       if (fenced) {
         return fencedAnswer(requestId);
       }
@@ -884,7 +884,12 @@ export const createTurnPlacementPort = <Tools>(
         await options.settle?.();
       }
       const heard = listen(key, (event) => (event.type === 'placed' || event.type === 'refused' ? event : undefined));
-      actor.send({ type: 'admitTurn', key, ...(intent === undefined ? {} : { checkoutId: intent }) });
+      actor.send({
+        type: 'admitTurn',
+        key,
+        ...(intent === undefined ? {} : { checkoutId: intent }),
+        ...(request === undefined ? {} : { request }),
+      });
       const event = await heard.answer;
       if (event.type === 'fenced') {
         return fencedAnswer(requestId);

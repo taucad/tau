@@ -7,6 +7,7 @@ import { clearPostHogStorage, posthogConfig } from '#lib/posthog.lib.js';
 import { setAnalyticsLinkSource } from '#lib/analytics-link.lib.js';
 import type { AnalyticsLink } from '#lib/analytics-link.lib.js';
 import { AnalyticsContextProvider } from '#hooks/use-analytics.js';
+import { connectRemoteFlags, disconnectRemoteFlags } from '#flags/remote-flags.js';
 import type { Analytics } from '#hooks/use-analytics.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog configuration keys are SDK wire names. */
@@ -27,6 +28,22 @@ const loadSdk = async (): Promise<PostHog> => {
     sdk = module_.posthog;
   }
   return sdk;
+};
+
+type ConsoleGlobal = { posthog?: unknown };
+
+/**
+ * Makes the admitted client reachable as `window.posthog`, as PostHog's own snippet does, so an operator can run
+ * `posthog.featureFlags.overrideFeatureFlags(...)` from the console. It exists only while analytics are admitted, and
+ * a `posthog` global this boundary did not set is left alone.
+ */
+const setConsoleClient = (client: PostHog | undefined): void => {
+  const target = globalThis as ConsoleGlobal;
+  if (client !== undefined) {
+    target.posthog ??= client;
+  } else if (sdk !== undefined && target.posthog === sdk) {
+    delete target.posthog;
+  }
 };
 
 const isCapturing = (): boolean => sdk?.__loaded === true && !sdk.has_opted_out_capturing();
@@ -100,6 +117,9 @@ function PostHogLifecycle({
     if (!isActive) {
       hasBeenInactive.current = true;
       setAnalyticsLinkSource(undefined);
+      // PostHog-backed flags return to their defaults before the client forgets its flags.
+      disconnectRemoteFlags();
+      setConsoleClient(undefined);
       /* Nothing to stop where the singleton was never fetched: it captures nothing until `init`,
          which only an admission reaches. The storage a previous admission left is still cleared. */
       if (sdk?.__loaded === true) {
@@ -130,6 +150,8 @@ function PostHogLifecycle({
       }
       if (posthog.__loaded) {
         posthog.set_config({ disable_persistence: false, advanced_disable_flags: false });
+        // The withdrawal reset dropped the evaluated flags; fetch them again for the readmitted person.
+        posthog.reloadFeatureFlags();
       } else {
         posthog.init(apiKey, options);
       }
@@ -142,6 +164,8 @@ function PostHogLifecycle({
         posthog.capture('$opt_in');
       }
       setAnalyticsLinkSource(readAnalyticsLink);
+      connectRemoteFlags(posthog);
+      setConsoleClient(posthog);
       setAdmittedGeneration(generation);
       if (!isReplayEnabled) {
         return;
@@ -156,6 +180,8 @@ function PostHogLifecycle({
       withdrawn = true;
       cancelReplay?.();
       setAnalyticsLinkSource(undefined);
+      disconnectRemoteFlags();
+      setConsoleClient(undefined);
     };
     // `options` and `isReplayEnabled` are fixed per host, so only `isActive` re-runs this.
   }, [isActive, options, isReplayEnabled]);

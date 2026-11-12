@@ -106,6 +106,9 @@ test('should retain record intent through direct close and quit, then finish onl
       return gate[action]();
     }, action);
   const closeProject = async (): Promise<void> => {
+    /* A fine pointer sees a sidebar row's actions only while it hovers the row
+     * (R13, e307f65cff), so reach the row first, as a person does. */
+    await page.locator('[data-slot="project-trigger"]').filter({ hasText: 'Record reliability' }).hover();
     await page.getByRole('button', { name: 'More actions for Record reliability', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Close Record reliability', exact: true }).click();
   };

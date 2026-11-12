@@ -3,11 +3,12 @@ title: 'Cross-Provider Content Contract Policy'
 description: 'Portable assistant history, provider-boundary projection, and lossless reasoning/tool metadata across supported model providers'
 status: active
 created: '2026-05-02'
-updated: '2026-09-17'
+updated: '2026-11-10'
 related:
   - docs/policy/interrupted-tool-call-contract.md
   - docs/policy/chat-request-config-policy.md
   - docs/research/cross-provider-thinking-block-portability.md
+  - docs/research/provider-reasoning-replay-contract.md
   - docs/research/langchain-v1-tool-call-roundtrip-regression.md
   - docs/policy/testing-policy.md
   - docs/research/project-chat-draft-persistence-blueprint.md
@@ -37,6 +38,8 @@ Preserve signed reasoning payloads, provider response item IDs, and other native
 
 Never fabricate, rewrite, or transplant a cryptographic signature between providers. The codec for the provider that issued the signature owns its replay.
 
+Persist assistant text and reasoning exactly as the provider wrote them. A signed reasoning block is bound to those bytes and to every byte before it, so a stored rewrite is an edit that every later request replays. Normalise for display in the renderer (`normalizeLatexDelimiters`), never in the log.
+
 ### 3. Project only at the selected provider boundary
 
 Select the honest provider wire in `packages/agent-host/src/transport/gateway-model-transport.ts` before network I/O:
@@ -58,7 +61,7 @@ Materialisation and the pi `onPayload` document rewrite are the only seam where 
 
 Provider projection may remove empty blocks or content scopes unsupported by the target. Perform that normalization, including attachment materialisation, on the outbound projection. Keep the event log unchanged so a later provider can still use the original portable or native metadata.
 
-For OpenAI-compatible providers that expose `reasoning_content`, preserve its round trip through the portable metadata channel. For Anthropic, preserve signed thinking and native tool blocks when the replay remains on Anthropic.
+For OpenAI-compatible providers that expose `reasoning_content`, preserve its round trip through the portable metadata channel. For Anthropic, preserve signed thinking and native tool blocks when the replay remains on the model that minted them and Rule 9 holds.
 
 ### 5. Keep tool calls structurally paired
 
@@ -84,15 +87,31 @@ Contract tests must cover same-provider replay, cross-provider replay, tool-call
 - Anthropic signed thinking and native tool blocks;
 - rejection of unsupported wires before fetch;
 - preservation of the durable event log after target-specific projection;
-- each document wire shape, and a sentinel leak or missing side-table entry failing before fetch.
+- each document wire shape, and a sentinel leak or missing side-table entry failing before fetch;
+- Rule 9 on every wire family: stale reasoning left out under a changed prefix, the durable rows byte-identical after projection.
 
 Use fixture structure assertions and captured wire requests; snapshots alone are insufficient for these invariants.
+
+### 9. Replay native reasoning only under the prefix that minted it
+
+A provider binds native reasoning (a thinking block, a reasoning item, a tool call's thought signature) to the request prefix it was produced under: the model, the system text, the tool definitions and every earlier message. Anthropic refuses a replayed block whose prefix changed; other providers drop it or ignore it.
+
+- **Stamp every generation request.** `stampPrefix` (`packages/agent-host/src/transport/prefix-stamp.ts`) computes a chained digest of that prefix, with native reasoning left out, and the reply's row persists it as `metadata.prefix`.
+- **One rule, in the transport, the same on every wire.** A same-model assistant row replays its native reasoning only when the chain at its position equals the digest the row recorded. Every other same-model row, and a row with no stamp, is sent without it. Another model's row stays under Rule 2.
+- **Leave stale reasoning out; do nothing else to it.** Never render it as text, and never change the durable row.
+- **Do not strip by cause.** Compaction, clearing, a mode change or a new feature that edits history adds no strip of its own. The digest sees the change, whatever made it.
+- **Move the epoch with the rules.** Bump `prefixCodecEpoch` when the digest's composition, the codec version or the replay rule changes, so rows stamped under other rules stop matching.
+- **Provider controls are catalog facts, read per model.** `support.reasoning.replayBinding` says the provider takes the control over a mismatched block: the transport asks it to drop and report in production and to refuse in every live suite. `support.reasoning.effortInTranscript` says the provider reads the reasoning level from the transcript. A client sends either form only for a row that declares it. These two are the only per-provider differences in the replay path.
+- **A provider-reported drop is a defect.** The rule leaves a stale block out before the provider sees it. A reported drop is recorded as an `unsanctioned` prefix break ([Context Engineering Policy](context-engineering-policy.md), cache rule 8).
+
+**Why**: A replay refused for a changed prefix fails the turn, and resuming repeats it. A rule keyed on the prefix itself needs no knowledge of what changed it, so a future edit cannot bring the failure back.
 
 ## Ownership
 
 - Portable message and event schema: `packages/agent-host/src/log/event-types.ts`
 - Runtime hydration and extraction: `packages/agent-host/src/harness/session-record.ts`
 - Provider selection and codecs: `packages/agent-host/src/transport/gateway-model-transport.ts`
+- Prefix stamp and replay rule: `packages/agent-host/src/transport/prefix-stamp.ts`; stamp vocabulary: `packages/agent-host/src/log/prefix-stamp.ts`
 - Document rewrite and Vertex response shim: `packages/agent-host/src/transport/document-payload.ts`, `packages/agent-host/src/transport/vertex-completions-shim.ts`
 - Normalized model stream port: `packages/agent-host/src/waist/ports.ts`
 - Authenticated byte proxy: `apps/libs/api-llm-gateway`

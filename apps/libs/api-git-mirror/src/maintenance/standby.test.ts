@@ -1,6 +1,6 @@
 import process from 'node:process';
 import { describe, expect, it, vi } from 'vitest';
-import { holdInStandby } from '#maintenance/standby.js';
+import { holdInStandby, retryingCheck } from '#maintenance/standby.js';
 
 describe('holdInStandby (DC4)', () => {
   it('should verify every check, report once and then wait until stopped', async () => {
@@ -69,10 +69,119 @@ describe('holdInStandby (DC4)', () => {
     ]);
   });
 
+  it('should log the error code (SQLSTATE) and name but never the message', async () => {
+    const report = vi.fn<(line: string) => void>();
+    const failure = Object.assign(new Error('connect postgres://tau:s3cr3t@db.internal/tau refused'), {
+      name: 'PostgresError',
+      code: '57P03',
+    });
+
+    await expect(
+      holdInStandby({
+        checks: {
+          database: async () => {
+            throw failure;
+          },
+        },
+        signal: new AbortController().signal,
+        report,
+      }),
+    ).rejects.toThrow("Maintenance standby check 'database' failed");
+
+    expect(report.mock.calls.map(([line]) => JSON.parse(line) as unknown)).toEqual([
+      { event: 'revisions_maintenance.standby_failed', check: 'database', error: 'PostgresError', code: '57P03' },
+    ]);
+    expect(report.mock.calls[0]?.[0]).not.toContain('s3cr3t');
+  });
+
+  it('should not log a code that is not a bare identifier', async () => {
+    const report = vi.fn<(line: string) => void>();
+
+    await expect(
+      holdInStandby({
+        checks: {
+          database: async () => {
+            throw Object.assign(new Error('refused'), { code: 'user=tau password=s3cr3t' });
+          },
+        },
+        signal: new AbortController().signal,
+        report,
+      }),
+    ).rejects.toThrow();
+
+    expect(report.mock.calls.map(([line]) => JSON.parse(line) as unknown)).toEqual([
+      { event: 'revisions_maintenance.standby_failed', check: 'database', error: 'Error' },
+    ]);
+  });
+
   it('should return at once when already stopped', async () => {
     const stop = new AbortController();
     stop.abort();
 
     await expect(holdInStandby({ checks: {}, signal: stop.signal, report: () => undefined })).resolves.toBeUndefined();
+  });
+});
+
+describe('retryingCheck', () => {
+  it('should pass when a transient failure is followed by success', async () => {
+    const stop = new AbortController();
+    const report = vi.fn<(line: string) => void>();
+    const database = vi
+      .fn<() => Promise<unknown>>()
+      .mockRejectedValueOnce(Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }))
+      .mockResolvedValueOnce('ok');
+
+    const held = holdInStandby({
+      checks: { database: retryingCheck(database, { attempts: 3, retryDelay: 1 }) },
+      signal: stop.signal,
+      report,
+    });
+    await vi.waitFor(() => {
+      expect(report).toHaveBeenCalledTimes(1);
+    });
+
+    expect(JSON.parse(report.mock.calls[0]?.[0] ?? '{}')).toEqual({
+      event: 'revisions_maintenance.standby',
+      verified: ['database'],
+    });
+    expect(database).toHaveBeenCalledTimes(2);
+    stop.abort();
+    await held;
+  });
+
+  it('should still fail after the bounded attempts, reporting the last error code', async () => {
+    const report = vi.fn<(line: string) => void>();
+    const database = vi.fn(async () => {
+      throw Object.assign(new Error('the database system is starting up'), { name: 'PostgresError', code: '57P03' });
+    });
+
+    await expect(
+      holdInStandby({
+        checks: { database: retryingCheck(database, { attempts: 3, retryDelay: 1 }) },
+        signal: new AbortController().signal,
+        report,
+      }),
+    ).rejects.toThrow("Maintenance standby check 'database' failed");
+
+    expect(database).toHaveBeenCalledTimes(3);
+    expect(report.mock.calls.map(([line]) => JSON.parse(line) as unknown)).toEqual([
+      { event: 'revisions_maintenance.standby_failed', check: 'database', error: 'PostgresError', code: '57P03' },
+    ]);
+  });
+
+  it('should wait the retryDelay between attempts', async () => {
+    vi.useFakeTimers();
+    try {
+      const check = vi.fn<() => Promise<unknown>>().mockRejectedValueOnce(new Error('refused')).mockResolvedValue('ok');
+      const result = retryingCheck(check, { attempts: 3, retryDelay: 2000 })();
+
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(check).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(result).resolves.toBe('ok');
+      expect(check).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,19 +1,21 @@
 /**
- * The restore dialog renders the plan the worker computed — it does not have one
- * (S19, PC9).
+ * Restore and Switch act at once and offer Undo in their toast (C7, I11).
  *
- * `restore.machine` sits beside the trees, so "risky" is a real deletion in the
- * diff of head against the target, or a checkout that has diverged from its
- * head. The dialog asks only when that plan says to ask, and names the count
- * that plan found; a safe restore applies with no question at all.
+ * A restore is a new entry on top that *Undo restore* takes back, and a switch
+ * saves unsaved work on the branch it leaves before it moves, so neither asks:
+ * this surface renders no dialog in any state, and every settled verb is a
+ * toast whose action undoes it. The one dialog left in History guards what
+ * cannot be undone, disconnecting the backup, and lives with the Sync region.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import type { RevisionRow } from '@taucad/revisions';
 import { RevisionRestore } from '#routes/w.$workspace.$project/revision-restore.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
-const toastSuccess = vi.hoisted(() => vi.fn<(title: string, options?: { description?: string }) => void>());
+type ToastOptions = { description?: string; action?: { label: string; onClick: () => void } };
+const toastSuccess = vi.hoisted(() => vi.fn<(title: string, options?: ToastOptions) => void>());
 const toastError = vi.hoisted(() => vi.fn<(title: string, options?: { description?: string }) => void>());
 const toastInfo = vi.hoisted(() => vi.fn());
 
@@ -30,11 +32,29 @@ vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture }) })
 const raiseHeldSave = vi.hoisted(() => vi.fn());
 vi.mock('#routes/w.$workspace.$project/held-save-toast.js', () => ({ useHeldSaveToast: () => raiseHeldSave }));
 
-const plan = (over: Partial<(typeof revisionStatusHarness)['status']['restore']>): void => {
-  revisionStatusHarness.status = {
-    ...revisionStatusHarness.status,
-    restore: { asking: false, busy: false, removedPathCount: 0, dirty: false, revisionNumber: 3, ...over },
-  };
+const revisionRow = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
+  revisionNumber: undefined,
+  changeId: `change-${over.revisionId}`,
+  who: { kind: 'recorded', identity: { kind: 'user', id: 'user-1' } },
+  source: 'user',
+  createdAt: 1_788_220_800_000,
+  summary: 'Saved changes',
+  conflicted: false,
+  turnId: undefined,
+  tags: [],
+  ...over,
+});
+
+const emit = (toast: Parameters<Parameters<typeof revisionStatusHarness.toasts.add>[0]>[0]): void => {
+  for (const listener of revisionStatusHarness.toasts) {
+    listener(toast);
+  }
+};
+
+/** The toast's action, pressed the way a person presses Undo. */
+const pressUndo = (options: ToastOptions | undefined): void => {
+  expect(options?.action?.label).toBe('Undo');
+  options?.action?.onClick();
 };
 
 beforeEach(() => {
@@ -69,86 +89,107 @@ describe('RevisionRestore', () => {
     expect(toastSuccess).not.toHaveBeenCalled();
   });
 
-  it('names the deletions the plan found, not a page-side guess', () => {
-    plan({ asking: true, removedPathCount: 2 });
-
-    render(<RevisionRestore />);
-
-    expect(screen.getByText(/2 files added since will be removed\./)).toBeInTheDocument();
-    /* D1: the dialog says the restore is a new revision, so History loses nothing. */
-    expect(screen.getByText(/as a new revision, so nothing in History is lost\./)).toBeInTheDocument();
-  });
-
-  it('asks about unsaved editor changes without inventing a deletion', () => {
-    plan({ asking: true, removedPathCount: 0, dirty: true });
-
-    render(<RevisionRestore />);
-
-    /* D1: dirty work is minted before the restore touches it, so nothing is overwritten. */
-    expect(screen.getByText(/Your unsaved edits are saved first\./)).toBeInTheDocument();
-    expect(screen.queryByText(/will be removed/)).not.toBeInTheDocument();
-  });
-
-  it('never asks about a restore the plan found safe, even while it applies', () => {
-    plan({ asking: false, busy: true, removedPathCount: 0, dirty: false });
-
-    render(<RevisionRestore />);
-
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    expect(screen.queryByText('Restore this revision?')).not.toBeInTheDocument();
-  });
-
-  it('hands confirm and cancel straight to the machine', () => {
-    plan({ asking: true, removedPathCount: 1 });
-
-    render(<RevisionRestore />);
-    /* The verb keeps its object through the confirmation (DESIGN: controls name their effect). */
-    expect(screen.getByText('Restore Rev 3?')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Restore Rev 3' }));
-    expect(revisionStatusHarness.commands.confirm).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(revisionStatusHarness.commands.cancel).toHaveBeenCalledTimes(1);
-  });
-
-  it('asks D10\u2019s question for a branch verb, and answers the machine (review R4)', () => {
+  it('shows no dialog while a restore or a switch runs (I11)', () => {
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branchVerb: {
-        busy: false,
-        asking: true,
-        operation: 'switch',
-        branch: 'bracket-fillet',
-        question: 'A chat is working in the files you have open. Move anyway?',
-      },
+      restore: { busy: true, revisionNumber: 3 },
+      branchVerb: { busy: true, operation: 'switch', branch: 'bracket-fillet' },
     };
 
-    render(<RevisionRestore />);
+    const { container } = render(<RevisionRestore />);
 
-    expect(screen.getByText('Work in bracket-fillet?')).toBeInTheDocument();
-    expect(screen.getByText('A chat is working in the files you have open. Move anyway?')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
-    expect(revisionStatusHarness.commands.confirmBranch).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(revisionStatusHarness.commands.cancelBranch).toHaveBeenCalledTimes(1);
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('asks nothing for a branch verb that needs no person', () => {
+  it('names what a restore brought back, and its Undo is Undo restore', async () => {
+    revisionStatusHarness.rows = [revisionRow({ revisionId: 'rev-2', revisionNumber: 2, summary: 'Add vent slots' })];
     render(<RevisionRestore />);
 
-    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
+    emit({ type: 'restored', mode: 'restore', revisionId: 'rev-2', revisionNumber: 2 });
+
+    await waitFor(() => {
+      expect(toastSuccess).toHaveBeenCalledOnce();
+    });
+    const [title, options] = toastSuccess.mock.calls[0] ?? [];
+    expect(title).toBe('Restored “Add vent slots”');
+    expect(revisionStatusHarness.rowRequests).toEqual(['rev-2']);
+    pressUndo(options);
+    expect(revisionStatusHarness.commands.undo).toHaveBeenCalledOnce();
   });
 
-  it('reports the restore the worker attested, with Undo', () => {
+  it('names a restored version by its number, and a target it cannot read without a number (A9)', async () => {
+    revisionStatusHarness.rows = [
+      revisionRow({
+        revisionId: 'rev-4',
+        revisionNumber: 4,
+        tags: ['Ready for print'],
+        versions: [{ name: 'Ready for print', number: 3 }],
+      }),
+    ];
     render(<RevisionRestore />);
 
-    for (const listener of revisionStatusHarness.toasts) {
-      listener({ type: 'restored', revisionNumber: 3 });
-    }
+    emit({ type: 'restored', mode: 'restore', revisionId: 'rev-4', revisionNumber: 4 });
+    emit({ type: 'restored', mode: 'restore', revisionId: 'rev-gone', revisionNumber: undefined });
+
+    await waitFor(() => {
+      expect(toastSuccess).toHaveBeenCalledTimes(2);
+    });
+    expect(toastSuccess.mock.calls.map(([title]) => title).toSorted()).toEqual([
+      'Restored V3',
+      'Restored an earlier point',
+    ]);
+  });
+
+  it('says an Undo restore undid the restore, and offers no second Undo', () => {
+    render(<RevisionRestore />);
+
+    emit({ type: 'restored', mode: 'undoRestore', revisionId: 'rev-1', revisionNumber: 1 });
+
+    expect(toastSuccess.mock.calls).toEqual([['Undid the restore']]);
+  });
+
+  it('says a switch that saved first where it saved, and its Undo switches back (I11)', () => {
+    render(<RevisionRestore />);
+
+    emit({ type: 'branch', operation: 'switch', branch: 'enclosure-v2', from: 'main', saved: true });
 
     const [title, options] = toastSuccess.mock.calls[0] ?? [];
-    expect(title).toBe('Restored Rev 3');
-    expect(options).toMatchObject({ action: { label: 'Undo restore' } });
+    expect(title).toBe('Saved your changes on main, then switched to enclosure-v2');
+    pressUndo(options);
+    expect(revisionStatusHarness.commands.switchTo).toHaveBeenCalledWith('main');
+  });
+
+  it('says a clean switch moved, with Undo, and offers none when it cannot say where from', () => {
+    render(<RevisionRestore />);
+
+    emit({ type: 'branch', operation: 'switch', branch: 'enclosure-v2', from: 'main' });
+    emit({ type: 'branch', operation: 'switch', branch: 'main' });
+
+    expect(toastSuccess.mock.calls[0]?.[0]).toBe('Switched to enclosure-v2');
+    pressUndo(toastSuccess.mock.calls[0]?.[1]);
+    expect(revisionStatusHarness.commands.switchTo).toHaveBeenCalledWith('main');
+    expect(toastSuccess.mock.calls[1]).toEqual(['Switched to main', undefined]);
+  });
+
+  it('says a refused switch in the branch menu\u2019s words', () => {
+    render(<RevisionRestore />);
+
+    emit({ type: 'refused', branch: 'enclosure-v2', reason: 'A chat is working in these files.' });
+
+    expect(toastError).toHaveBeenCalledWith("Couldn't switch to enclosure-v2", {
+      description: 'A chat is working in these files.',
+    });
+  });
+
+  /* Merge acts at once but has no Undo yet (D3): the toast says what happened and nothing more. */
+  it('says a merge landed, with no dialog before it', () => {
+    render(<RevisionRestore />);
+
+    emit({ type: 'branch', operation: 'merge', branch: 'enclosure-v2' });
+
+    expect(toastSuccess.mock.calls).toEqual([['Merged enclosure-v2']]);
   });
 
   /* V5 A6, TS-R17: a save another run's lease held names that run, never "Nothing to save". */
@@ -250,16 +291,6 @@ describe('RevisionRestore', () => {
           'A later revision changed the same lines, so Rev 2 can’t be undone. Restore an earlier revision instead.',
       },
     ]);
-  });
-
-  it('names a restore of a revision off the line without inventing its number (A9)', () => {
-    render(<RevisionRestore />);
-
-    for (const listener of revisionStatusHarness.toasts) {
-      listener({ type: 'restored', revisionNumber: undefined });
-    }
-
-    expect(toastSuccess.mock.calls[0]?.[0]).toBe('Restored an earlier revision');
   });
 
   /* The refusal crosses the boundary as a code; the page owns the words (P4).

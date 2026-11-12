@@ -10,18 +10,16 @@ expectTypeOf(branchMachine).toExtend<AnyStateMachine>();
  * output is a type error at the host rather than a runtime surprise. */
 expectTypeOf<keyof BranchActors>().toEqualTypeOf<'checkBranch' | 'applySwitch' | 'merge' | 'rename'>();
 
-/* The five verbs of the architecture's `branch.machine` row, plus the two the
- * confirmation needs, the three answers to its delegated registry requests
- * (by request id, RM-R11), and the four answers to the cut a *New branch*
- * asks the root for (P3). */
+/* The five verbs of the architecture's `branch.machine` row, the three answers
+ * to its delegated registry requests (by request id, RM-R11), and the four
+ * answers to the cut a *New branch* or a *Switch* asks the root for (P3, I11).
+ * No event confirms anything: no verb asks a person (I11). */
 expectTypeOf<BranchMachineEvent['type']>().toEqualTypeOf<
   | 'switch'
   | 'merge'
   | 'discard'
   | 'create'
   | 'rename'
-  | 'confirm'
-  | 'cancel'
   | 'selectBranch'
   | 'checkoutAdded'
   | 'checkoutRemoved'

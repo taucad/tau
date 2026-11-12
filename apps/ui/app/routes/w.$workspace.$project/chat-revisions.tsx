@@ -291,7 +291,7 @@ function OrientationStrip({
             placeholder='enclosure-v2'
             note={`Starts from ${headName ?? 'this revision'}. ${where.branch ?? 'This branch'} stays as it is.`}
             saveLabel='Create branch'
-            isBusy={(status?.branchVerb.busy ?? false) || (status?.branchVerb.asking ?? false)}
+            isBusy={status?.branchVerb.busy ?? false}
             align='end'
             onSave={(name) => {
               // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- the toast channel owns this refusal; only the loose rejection is ours
@@ -1135,7 +1135,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
               branchFacts={branchFacts}
               conflicts={conflicts}
               /* A verb waiting on a person is still in flight (review R4). */
-              isBusy={(status?.branchVerb.busy ?? false) || (status?.branchVerb.asking ?? false)}
+              isBusy={status?.branchVerb.busy ?? false}
               isWritable={canWrite}
               onSwitch={commands.switchTo}
               onMerge={commands.mergeBranch}
@@ -1162,35 +1162,35 @@ export function RevisionsPanelBody(): React.JSX.Element {
             <HistoryList />
           )}
         </RevisionRegion>
-
-        {/* A29/D26: *Sync* appears once a remote does, or once the person asks to back up. */}
-        {isSyncOpen ? (
-          <RevisionSyncRegion
-            remote={status.remote}
-            sync={status.sync}
-            onConnect={commands.connectRemote}
-            onDisconnect={commands.disconnectRemote}
-            onCancel={commands.cancelRemote}
-            onSync={commands.syncNow}
-            onPushGithub={commands.pushGithub}
-            syncChats={project?.syncChats !== false}
-            onSyncChatsChange={(enabled) => {
-              // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose
-              void updateProject(projectId, { syncChats: enabled }).catch(reportSyncSettingError);
-            }}
-            canSyncFiles={canSyncFiles}
-            onUpgrade={canUpgradePlan ? requestUpgrade : undefined}
-            storageLimitBytes={storageLimitBytes}
-            signInHref={signIn}
-            role={projectRole}
-            isSignedOut={isSignedOut}
-            projectId={projectId}
-            isLineKnown={line.kind !== 'unknown'}
-            /* Sync pushes every branch; an unborn one is not on GitHub yet (D92). */
-            branch={line.kind === 'branch' ? line.name : undefined}
-          />
-        ) : null}
       </div>
+
+      {/* A29/D26: *Sync* appears once a remote does, or once the person asks to back up. */}
+      {isSyncOpen ? (
+        <RevisionSyncRegion
+          remote={status.remote}
+          sync={status.sync}
+          onConnect={commands.connectRemote}
+          onDisconnect={commands.disconnectRemote}
+          onCancel={commands.cancelRemote}
+          onSync={commands.syncNow}
+          onPushGithub={commands.pushGithub}
+          syncChats={project?.syncChats !== false}
+          onSyncChatsChange={(enabled) => {
+            // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose
+            void updateProject(projectId, { syncChats: enabled }).catch(reportSyncSettingError);
+          }}
+          canSyncFiles={canSyncFiles}
+          onUpgrade={canUpgradePlan ? requestUpgrade : undefined}
+          storageLimitBytes={storageLimitBytes}
+          signInHref={signIn}
+          role={projectRole}
+          isSignedOut={isSignedOut}
+          projectId={projectId}
+          isLineKnown={line.kind !== 'unknown'}
+          /* Sync pushes every branch; an unborn one is not on GitHub yet (D92). */
+          branch={line.kind === 'branch' ? line.name : undefined}
+        />
+      ) : null}
     </div>
   );
 }

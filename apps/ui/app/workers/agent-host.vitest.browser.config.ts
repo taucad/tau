@@ -8,6 +8,7 @@ import { authoritativeGatewayWireFixtures } from '../../../../packages/agent-hos
 
 export default defineConfig({
   root: fileURLToPath(new URL('../..', import.meta.url)),
+  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
   plugins: [
     {
       name: 'agent-host-gateway-fixture',

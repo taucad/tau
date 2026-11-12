@@ -609,7 +609,9 @@ export const createEntriesPolicy = (onDropped?: DroppedFields): RecordPolicy<Ent
       const set = next.set?.[path];
       const changed =
         set === undefined ? diffEntry(moved[path], entry) : combineFields(diffEntry(moved[path], entry), set);
-      if (Object.keys(changed).length > 0) {
+      // An entry made where the moves leave none is a change even with every field at its default: a later rename of
+      // its path moves it onto the new path, replacing the entry there, where a missing entry moves nothing.
+      if (Object.keys(changed).length > 0 || !Object.hasOwn(moved, path)) {
         fields.set(path, changed);
       }
     }

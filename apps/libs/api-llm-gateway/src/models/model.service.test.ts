@@ -157,6 +157,37 @@ describe('modelList', () => {
       }
     });
 
+    it('should declare transcript effort on exactly the models whose provider accepted the form (U14, per model)', () => {
+      /* Probed through the gateway on 2026-11-10: the other Anthropic and OpenAI rows answer 400, both Grok rows 422. */
+      expect(
+        getCloudCatalogEntries()
+          .filter((model) => model.support?.reasoning?.effortInTranscript === true)
+          .map((model) => model.id),
+      ).toEqual([
+        'anthropic-claude-fable-5.2',
+        'anthropic-claude-fable-5.1',
+        'anthropic-claude-opus-5.5',
+        'anthropic-claude-opus-5',
+        'anthropic-claude-sonnet-5.5',
+        'anthropic-claude-haiku-5.5',
+        'openai-gpt-6.1-terra',
+        'openai-gpt-6-astra',
+        'openai-gpt-6-sol',
+        'openai-gpt-6-luna',
+        'openai-gpt-5.6-sol',
+        'openai-gpt-5.6-terra',
+        'openai-gpt-5.6-luna',
+      ]);
+    });
+
+    it('should declare the replay binding control on every Anthropic row that thinks, and on no other', () => {
+      for (const model of getCloudCatalogEntries()) {
+        expect(model.support?.reasoning?.replayBinding === true, model.id).toBe(
+          model.provider.id === 'anthropic' && model.configuration.thinking !== undefined,
+        );
+      }
+    });
+
     it('should only offer xhigh and max on models that accept them', () => {
       const extraHigh = getCloudCatalogEntries()
         .filter((model) => model.support?.reasoning?.levels.includes('xhigh'))

@@ -711,6 +711,14 @@ describe('prefix breaks (provider reasoning replay contract P1)', () => {
     { type: 'message.appended', message: reply('reply-2', stamp) },
     { type: 'message.appended', message: reply('reply-3', { ...stamp, break: 'settings' }) },
     { type: 'message.appended', message: reply('reply-4', { ...stamp, break: 'not-a-cause' }) },
+    /* The provider left out two replayed blocks whose prefix had changed: blocks the replay rule should have. */
+    (() => {
+      const message = reply('reply-5', stamp);
+      return {
+        type: 'message.appended',
+        message: { ...message, metadata: { ...message.metadata, reasoningDroppedByProvider: 2 } },
+      };
+    })(),
     life('completed'),
   ]);
 
@@ -718,6 +726,8 @@ describe('prefix breaks (provider reasoning replay contract P1)', () => {
     expect(foldChatLedger(emptyChatLedger, rows).runs['run-1']?.prefixBreaks).toEqual([
       { cause: 'clearing', provider: 'anthropic', dropped: 9, cache: 'miss' },
       { cause: 'settings', provider: 'anthropic', dropped: 0 },
+      /* Nothing the client knows explains a block the provider had to leave out: it counts as a defect. */
+      { cause: 'unsanctioned', provider: 'anthropic', dropped: 2 },
     ]);
   });
 

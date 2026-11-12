@@ -140,8 +140,6 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'undo' }>
   /** *Undo*: reverse this device's newest operation on the selected line (D15). */
   | Readonly<{ command: 'undoOperation' }>
-  | Readonly<{ command: 'confirm' }>
-  | Readonly<{ command: 'cancel' }>
   | Readonly<{ command: 'switch'; branch: string }>
   | Readonly<{ command: 'followChat'; chatId: string }>
   | Readonly<{ command: 'pinTo'; checkoutId: string }>
@@ -149,16 +147,13 @@ export type WorkerRevisionCommand =
    * The *Branches* region's verbs (S26, A2/D10).
    *
    * Named `…Branch` for the same reason the Sync region's are named `…Remote`:
-   * one flat namespace per project, and `confirm`/`cancel` already belong to
-   * restore. Each one is `branch.machine`'s own event — the region drives a
-   * machine, not a promise.
+   * one flat namespace per project. Each one is `branch.machine`'s own event —
+   * the region drives a machine, not a promise. None asks first (I11).
    */
   | Readonly<{ command: 'createBranch'; name: string; from?: string }>
   | Readonly<{ command: 'discardBranch'; branch: string; checkoutId?: string }>
   | Readonly<{ command: 'mergeBranch'; branch: string }>
   | Readonly<{ command: 'renameBranch'; branch: string; name: string }>
-  | Readonly<{ command: 'confirmBranch' }>
-  | Readonly<{ command: 'cancelBranch' }>
   /*
    * The Sync region's verbs (S26, S34).
    *
@@ -330,8 +325,17 @@ export type WorkerRevisionEvent =
  * @public
  */
 export type RevisionToast =
-  /** `revisionNumber` is `undefined` for a target that is not on the line (D5, A9). */
-  | Readonly<{ type: 'restored'; revisionNumber: number | undefined }>
+  /**
+   * A *Restore* or *Undo restore* landed. `revisionId` names the revision whose
+   * files came back; only a `restore` offers Undo (I11). `revisionNumber` is
+   * `undefined` for a target that is not on the line (D5, A9).
+   */
+  | Readonly<{
+      type: 'restored';
+      mode: 'restore' | 'undoRestore';
+      revisionId: string;
+      revisionNumber: number | undefined;
+    }>
   /** *Undo* landed; the number is the revision it undid (D15). */
   | Readonly<{ type: 'undone'; revisionNumber: number | undefined }>
   /** `heldBy`: the run whose lease held the save; its edits land in that run's revision (TS-R17, V5 A6). */
@@ -343,6 +347,10 @@ export type RevisionToast =
       /** What a `create` made, for a caller correlating one (P4). */
       checkoutId?: string;
       checkoutRoot?: string;
+      /** The branch a *Switch* left, which its Undo switches back to (I11). */
+      from?: string;
+      /** A *Switch* saved the unsaved work on `from` before it moved. */
+      saved?: true;
     }>
   /** A *Switch* the D10 guard would not make, in the words it gave (review R3). */
   | Readonly<{ type: 'refused'; branch: string; reason: string }>
@@ -1270,7 +1278,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * them, so they cross the port rather than being re-derived on the page. */
   const restoreChild = actor.getSnapshot().children.restore;
   restoreChild?.on('toast.restored', (toast) => {
-    toasts.emit({ type: 'restored', revisionNumber: toast.revisionNumber });
+    toasts.emit({
+      type: 'restored',
+      mode: toast.mode,
+      revisionId: toast.revisionId,
+      revisionNumber: toast.revisionNumber,
+    });
   });
   restoreChild?.on('toast.undone', (toast) => {
     toasts.emit({ type: 'undone', revisionNumber: toast.revisionNumber });
@@ -1289,8 +1302,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * lease removal is silent"). */
   /* D10 answers *Switch* with a refusal the person who asked must see: a verb
    * that quietly does nothing is exactly what "no outcome is silent" forbids
-   * (A25, I12; review R3). The resolved arm needs no notice — the workbench
-   * moving is the notice. */
+   * (A25, I12; review R3). A re-root moves no file, so no branch verb settles
+   * it; it still says so, with the branch to go back to (I11). */
   /*
    * A save that failed says why (I12, W18 DEF-7).
    *
@@ -1327,6 +1340,16 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   });
   actor.on('switchRefused', (refusal) => {
     toasts.emit({ type: 'refused', branch: refusal.branch, reason: refusal.reason });
+  });
+  actor.on('switchResolved', (resolved) => {
+    if (resolved.mode === 'reroot') {
+      toasts.emit({
+        type: 'branch',
+        operation: 'switch',
+        branch: resolved.branch,
+        ...(resolved.from === undefined ? {} : { from: resolved.from }),
+      });
+    }
   });
   actor.on('childToast', ({ type: _type, ...toast }) => {
     toasts.emit({ ...toast, type: 'notice' });
@@ -1379,6 +1402,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       branch: toast.branch,
       ...(toast.checkoutId === undefined ? {} : { checkoutId: toast.checkoutId }),
       ...(toast.checkoutRoot === undefined ? {} : { checkoutRoot: toast.checkoutRoot }),
+      ...(toast.from === undefined ? {} : { from: toast.from }),
+      ...(toast.saved === undefined ? {} : { saved: toast.saved }),
     });
   });
   branchChild?.on('toast.error', (toast) => {
@@ -1783,25 +1808,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           });
           return;
         }
-        case 'confirmBranch': {
-          actor.send({ type: 'branch', event: { type: 'confirm' } });
-          return;
-        }
-        case 'cancelBranch': {
-          actor.send({ type: 'branch', event: { type: 'cancel' } });
-          return;
-        }
         case 'switch': {
           actor.send({ type: 'switch', requestId: randomUuid(), branch: command.branch });
           return;
         }
         case 'undo':
         case 'undoOperation': {
-          actor.getSnapshot().children.restore?.send({ type: command.command });
-          break;
-        }
-        case 'confirm':
-        case 'cancel': {
           actor.getSnapshot().children.restore?.send({ type: command.command });
           break;
         }

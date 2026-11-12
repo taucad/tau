@@ -51,7 +51,10 @@ export type RevisionCard = {
   readonly turnId: string | undefined;
   readonly conflicted: boolean;
   readonly tags?: readonly string[];
-  readonly trigger: RevisionRow['trigger'];
+  /** What asked for it, as the trailer's `capture` names it; absent on a commit Tau did not record. */
+  readonly capture: RevisionRow['capture'];
+  /** The trailer Tau recorded, shown only behind Tau's debug setting (B5); absent on a commit Tau did not record. */
+  readonly trailer?: string;
   /**
    * The revision a restore brought back (D1): present only on the row a restore
    * minted, which is how History names a *Restored* row (A9).
@@ -61,6 +64,8 @@ export type RevisionCard = {
   readonly turnCut?: RevisionRow['turnCut'];
   /** The revision this one follows, its first parent by id; absent on a branch's first revision. */
   readonly parent?: string;
+  /** A merge's other parents, the sides it brought in, by id; absent on an ordinary revision. */
+  readonly otherParents?: readonly string[];
   /** An automatic entry that changed only Tau's own setup files (A4): one compact line in History. */
   readonly isSetup?: true;
   /** How this entry reads as the Start version, V1, when it is one (A6). */
@@ -170,8 +175,8 @@ const titleOf = (row: RevisionRow): string => {
   if (row.turnId !== undefined && row.summary === `Agent turn ${row.turnId}`) {
     return 'Agent change';
   }
-  if (row.trigger !== undefined && row.summary === `Saved changes (${row.trigger})`) {
-    return row.trigger === 'save' ? 'Saved changes' : 'Autosave';
+  if (row.capture !== undefined && row.summary === `Saved changes (${row.capture})`) {
+    return row.capture === 'save' ? 'Saved changes' : 'Autosave';
   }
   return row.summary;
 };
@@ -189,10 +194,12 @@ const cardOf = (row: RevisionRow, who: RevisionWhoContext): RevisionCard => {
     turnId: row.turnId,
     conflicted: row.conflicted,
     tags: row.tags,
-    trigger: row.trigger,
+    capture: row.capture,
+    ...(row.trailer === undefined ? {} : { trailer: row.trailer }),
     ...(row.turnCut === undefined ? {} : { turnCut: row.turnCut }),
     ...(row.restoredFrom === undefined ? {} : { restoredFrom: row.restoredFrom }),
     ...(row.parent === undefined ? {} : { parent: row.parent }),
+    ...(row.otherParents === undefined ? {} : { otherParents: row.otherParents }),
     ...(row.isSetup === true ? { isSetup: true } : {}),
     ...(row.start === undefined ? {} : { start: row.start }),
   };
@@ -348,7 +355,7 @@ const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] 
                           turnId: event.turnId,
                           conflicted: false,
                           tags: [],
-                          trigger: 'turn',
+                          capture: 'turn',
                           changedPaths: event.changedPaths,
                           ...(event.treeId === undefined ? {} : { treeId: event.treeId }),
                         },

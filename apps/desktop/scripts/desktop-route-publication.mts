@@ -28,20 +28,56 @@ export const desktopManifestDigest = (manifest: DesktopArtifactManifest): string
     .digest('hex');
 
 /**
- * Explicitly selected publication scope. `all` keeps the original admission; `macos` is a staging-only Apple silicon
- * rollout that must carry exactly its ZIP and DMG and no other architecture's or platform's artifact. Intel is excluded
- * by operator ruling until a GPU-capable Intel Mac host can qualify it.
+ * Explicitly selected publication scope the publisher workflows accept. `all` keeps the original admission; `macos` is
+ * the Apple silicon rollout that must carry exactly its ZIP and DMG and no other architecture's or platform's
+ * artifact. Intel is excluded by operator ruling until a GPU-capable Intel Mac host can qualify it.
  */
 export const desktopPublicationScopes = ['all', 'macos'] as const;
 export type DesktopPublicationScope = (typeof desktopPublicationScopes)[number];
-const macosScopeArtifacts = ['darwin-arm64'].flatMap((target) =>
-  ['macos-dmg', 'macos-zip'].map((kind) => `${target}:${kind}`),
-);
+/**
+ * Platform scopes route admission understands (D-H5, operator ruling 2026-11-10: each platform is promoted on its own
+ * receipts from its own candidate). `linux` is admitted here before the publisher workflows select it.
+ */
+export const desktopAdmissionScopes = [...desktopPublicationScopes, 'linux'] as const;
+export type DesktopAdmissionScope = (typeof desktopAdmissionScopes)[number];
+/** Every route and artifact of each platform scope: a platform candidate carries exactly these and nothing else. */
+const platformScopes = {
+  macos: {
+    name: 'Mac-only',
+    target: 'darwin-arm64',
+    routes: ['macos-zip'],
+    kinds: ['macos-dmg', 'macos-zip'],
+    refusal: (channel: string) => `Mac-only publication requires exactly ${channel} ZIP and DMG for Apple silicon`,
+  },
+  linux: {
+    name: 'Linux-only',
+    target: 'linux-x64',
+    routes: ['linux-apt', 'linux-appimage'],
+    kinds: [
+      'linux-appimage',
+      'linux-appimage-deb-runtime',
+      'linux-appimage-deb-selector',
+      'linux-deb-runtime',
+      'linux-deb-selector',
+      'linux-tar',
+    ],
+    refusal: () => 'Linux-only publication requires exactly the APT and AppImage routes for linux-x64',
+  },
+} as const satisfies Record<
+  Exclude<DesktopAdmissionScope, 'all'>,
+  {
+    name: string;
+    target: DesktopReleaseTarget;
+    routes: ReadonlyArray<keyof typeof catalogKinds>;
+    kinds: readonly DesktopArtifactKind[];
+    refusal: (channel: string) => string;
+  }
+>;
 
 /** Determine complete advertised routes; archives alone never qualify a new route. */
 export const desktopCandidateRoutes = (
   manifest: DesktopArtifactManifest,
-  scope: DesktopPublicationScope = 'all',
+  scope: DesktopAdmissionScope = 'all',
 ): Array<{ route: keyof typeof catalogKinds; target: DesktopReleaseTarget }> => {
   const result: Array<{ route: keyof typeof catalogKinds; target: DesktopReleaseTarget }> = [];
   for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64'] as const) {
@@ -57,20 +93,26 @@ export const desktopCandidateRoutes = (
       }
     }
   }
-  // Deliberately retained: production publishes only all five routes from one candidate. The Mac-only staging scope
-  // below does not relax it; a later per-platform production cutover must change this rule through reviewed code.
-  if (result.length === 0 || (manifest.channel === 'production' && result.length !== 5)) {
-    throw new Error('Installer publication requires complete routes (all five in production)');
+  if (result.length === 0) {
+    throw new Error('Installer publication requires complete routes');
   }
-  if (scope === 'macos') {
-    const present = manifest.artifacts.map((artifact) => `${artifact.target}:${artifact.kind}`).sort();
-    if (
-      manifest.channel !== 'staging' ||
-      JSON.stringify(present) !== JSON.stringify([...macosScopeArtifacts].sort()) ||
-      result.length !== 1
-    ) {
-      throw new Error('Mac-only publication requires exactly staging ZIP and DMG for Apple silicon');
+  // D-H5: production publishes every route of the promoted platform scope from that platform's own candidate. The
+  // all-platform scope's routes are all five, so an `all` production candidate still needs every one of them.
+  if (scope === 'all') {
+    if (manifest.channel === 'production' && result.length !== 5) {
+      throw new Error('Installer publication requires complete routes (all five in production)');
     }
+    return result;
+  }
+  const platform = platformScopes[scope];
+  const present = manifest.artifacts.map((artifact) => `${artifact.target}:${artifact.kind}`).sort();
+  const expected = platform.kinds.map((kind) => `${platform.target}:${kind}`).sort();
+  const routes = result.map(({ route, target }) => `${target}:${route}`).sort();
+  if (
+    JSON.stringify(present) !== JSON.stringify(expected) ||
+    JSON.stringify(routes) !== JSON.stringify(platform.routes.map((route) => `${platform.target}:${route}`).sort())
+  ) {
+    throw new Error(platform.refusal(manifest.channel));
   }
   return result;
 };
@@ -90,7 +132,7 @@ export type DesktopCleanHostQualification = 'passed' | 'pending';
 export const qualifyDesktopScopedRoutes = (
   input: unknown,
   proofs: readonly unknown[],
-  policy: { trust: DesktopRouteTrust; scope: DesktopPublicationScope },
+  policy: { trust: DesktopRouteTrust; scope: DesktopAdmissionScope },
 ): {
   manifest: DesktopArtifactManifest;
   routes: Array<ReturnType<typeof desktopCandidateRoutes>[number] & { cleanHost: DesktopCleanHostQualification }>;
@@ -98,14 +140,17 @@ export const qualifyDesktopScopedRoutes = (
   const { trust, scope } = policy;
   const manifest = parseDesktopArtifactManifest(input);
   const receipts = proofs.map((proof) => parseDesktopAcceptanceReceipt(proof, manifest));
-  const routes = desktopCandidateRoutes(manifest, z.enum(desktopPublicationScopes).parse(scope));
+  const routes = desktopCandidateRoutes(manifest, z.enum(desktopAdmissionScopes).parse(scope));
+  // A platform scope admits only its own platform's receipts; any other platform's evidence is refused, not ignored.
   if (
-    scope === 'macos' &&
-    receipts.some((receipt) => !receipt.route.startsWith('macos-') || !receipt.target.startsWith('darwin-'))
+    scope !== 'all' &&
+    receipts.some(
+      (receipt) => !receipt.route.startsWith(`${scope}-`) || receipt.target !== platformScopes[scope].target,
+    )
   ) {
-    throw new Error('Mac-only publication cannot admit another platform route');
+    throw new Error(`${platformScopes[scope].name} publication cannot admit another platform route`);
   }
-  // `desktopCandidateRoutes` already refuses the Mac-only scope outside staging; restate it where VM is relaxed.
+  // Only a staging Mac-only publication may record clean-host acceptance as pending; production always needs VM receipts.
   const cleanHostMayBePending = scope === 'macos' && manifest.channel === 'staging';
   return {
     manifest,
@@ -178,7 +223,7 @@ export const createDesktopInstallerCatalog = (options: {
   receipts: readonly unknown[];
   trust: DesktopRouteTrust;
   approval: unknown;
-  scope?: DesktopPublicationScope;
+  scope?: DesktopAdmissionScope;
 }): DesktopInstallerCatalog => {
   const { manifest, routes } = qualifyDesktopScopedRoutes(options.manifest, options.receipts, {
     trust: options.trust,

@@ -17,14 +17,14 @@ const logger = new Logger('GitRouting');
  * and rules read them with `max` (W14, the accounting-scheduler pattern).
  *
  * @param metrics - The API's instruments.
- * @param database - The database the route table lives in.
+ * @param database - The database the route table lives in; the gauges read it on the background pool.
  */
 export const observeFrozenRoutes = (metrics: MetricsService, database: DatabaseService): void => {
   let summary: ReturnType<typeof readFrozenSummary> | undefined;
   /* One read per collection, shared by both gauges' callbacks: kept for a second, then dropped. */
   const read = async (): ReturnType<typeof readFrozenSummary> => {
     if (summary === undefined) {
-      summary = readFrozenSummary(database.database);
+      summary = readFrozenSummary(database.background);
       setTimeout(() => {
         summary = undefined;
       }, 1000).unref();

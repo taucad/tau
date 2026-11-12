@@ -1,0 +1,61 @@
+name: 'Fly app'
+description: >-
+  Resolves an API-family app (`api`, `mirror`, `maintenance`, `storage`) and an
+  environment to its Fly app, config, image, Docker target and token secret name.
+
+# The mapping lives in `resolve.sh` next to this file, which `fly-images.yml` also runs
+# for each app it builds, so a build and its deploy can never disagree on an image tag.
+
+inputs:
+  app:
+    description: 'api, mirror, maintenance or storage'
+    required: true
+  environment:
+    description: 'staging or production'
+    required: true
+
+outputs:
+  fly_app:
+    description: 'The Fly app, e.g. `tau-api-staging`'
+    value: ${{ steps.resolve.outputs.fly_app }}
+  config_file:
+    description: 'The Fly config for the environment'
+    value: ${{ steps.resolve.outputs.config_file }}
+  image:
+    description: '`registry.fly.io/<fly_app>:<commit>`'
+    value: ${{ steps.resolve.outputs.image }}
+  cache_ref:
+    description: "The app's registry BuildKit cache ref"
+    value: ${{ steps.resolve.outputs.cache_ref }}
+  dockerfile:
+    description: 'The Dockerfile every API-family app builds from'
+    value: ${{ steps.resolve.outputs.dockerfile }}
+  docker_target:
+    description: 'The Dockerfile target of the app'
+    value: ${{ steps.resolve.outputs.docker_target }}
+  token_secret:
+    description: 'The name of the GitHub environment secret holding the deploy token'
+    value: ${{ steps.resolve.outputs.token_secret }}
+  token_hcp:
+    description: 'The HCP tau-repo variable the token comes from, without its environment suffix; empty for the API'
+    value: ${{ steps.resolve.outputs.token_hcp }}
+  api_app:
+    description: 'storage only: the API app whose Machines the storage deploy must leave untouched'
+    value: ${{ steps.resolve.outputs.api_app }}
+  api_url:
+    description: 'api only: the public API URL for the CORS smoke'
+    value: ${{ steps.resolve.outputs.api_url }}
+  ui_origin:
+    description: 'api only: the UI origin for the CORS smoke'
+    value: ${{ steps.resolve.outputs.ui_origin }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve the Fly app
+      id: resolve
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+        ENVIRONMENT: ${{ inputs.environment }}
+      run: '"$GITHUB_ACTION_PATH/resolve.sh" "$APP" "$ENVIRONMENT" >> "$GITHUB_OUTPUT"'

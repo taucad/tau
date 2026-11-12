@@ -84,27 +84,31 @@ export function DesktopUpdateControl({
         restarting: 'Restarting Tau',
         'move-required': 'Move Tau to Applications',
       }[phase];
+  /* The user already asked to restart: the download's completion installs without a second ask. */
+  const restartsWhenReady = phase === 'downloading' && snapshot.installWhenReady === true;
   const detail = actionFailed
     ? 'Try again. Your current session is still open.'
-    : (snapshot.detail ??
-      {
-        'system-managed': 'Your administrator manages updates through APT.',
-        disabled: 'Automatic updates are disabled for this build.',
-        checking: 'Looking for the latest version of Tau.',
-        current: 'You have the latest version.',
-        downloading: 'Keep working. We’ll let you know here when it’s ready.',
-        ready:
-          snapshot.installOnQuit === false
-            ? 'Saves your work, then restarts to install. Quitting normally leaves the update for later.'
-            : 'Saves your work, then restarts. Otherwise, installs when you quit Tau.',
-        available: 'Download the latest version. Your session will stay open.',
-        error: 'We’ll retry automatically. Your work is unaffected.',
-        saving: 'Saving your work before restarting…',
-        'restart-blocked': 'Tau stayed open. Finish saving or reviewing active machines, then try again.',
-        restarting: 'Reopening your workspace…',
-        'move-required':
-          'Tau can’t update itself from where it’s running. Move Tau to Applications to receive updates.',
-      }[phase]);
+    : restartsWhenReady
+      ? 'Tau will save your work and restart as soon as the download finishes.'
+      : (snapshot.detail ??
+        {
+          'system-managed': 'Your administrator manages updates through APT.',
+          disabled: 'Automatic updates are disabled for this build.',
+          checking: 'Looking for the latest version of Tau.',
+          current: 'You have the latest version.',
+          downloading: 'Keep working. We’ll let you know here when it’s ready.',
+          ready:
+            snapshot.installOnQuit === false
+              ? 'Saves your work, then restarts to install. Quitting normally leaves the update for later.'
+              : 'Saves your work, then restarts. Otherwise, installs when you quit Tau.',
+          available: 'Download the latest version. Your session will stay open.',
+          error: 'We’ll retry automatically. Your work is unaffected.',
+          saving: 'Saving your work before restarting…',
+          'restart-blocked': 'Tau stayed open. Finish saving or reviewing active machines, then try again.',
+          restarting: 'Reopening your workspace…',
+          'move-required':
+            'Tau can’t update itself from where it’s running. Move Tau to Applications to receive updates.',
+        }[phase]);
   const Icon = failed
     ? ShieldAlert
     : busy || phase === 'downloading'
@@ -117,7 +121,9 @@ export function DesktopUpdateControl({
   const act = async (): Promise<void> => {
     setActionFailed(false);
     try {
-      if (phase === 'ready' || phase === 'restart-blocked') {
+      if (phase === 'ready' || phase === 'restart-blocked' || phase === 'downloading' || phase === 'error') {
+        /* Before the download finishes, main holds the request and restarts when it does. A retry from a failed
+         * attempt carries it too, so one click takes an update from failed to installed. */
         await bridge.install();
       } else if (phase === 'available' || phase === 'move-required') {
         /* For move-required, main moves Tau to Applications and relaunches it from there. */
@@ -136,11 +142,13 @@ export function DesktopUpdateControl({
         ? 'Retry restart'
         : phase === 'available'
           ? 'Download'
-          : phase === 'move-required'
-            ? 'Move to Applications'
-            : phase === 'current' || phase === 'system-managed'
-              ? 'Check again'
-              : 'Retry';
+          : phase === 'downloading'
+            ? 'Restart when ready'
+            : phase === 'move-required'
+              ? 'Move to Applications'
+              : phase === 'current' || phase === 'system-managed'
+                ? 'Check again'
+                : 'Retry';
   return (
     <UpdateControl
       title={title}
@@ -152,7 +160,7 @@ export function DesktopUpdateControl({
       releasePage={snapshot.releasePage}
       isOpen={open}
       action={
-        phase === 'downloading' || phase === 'disabled'
+        restartsWhenReady || phase === 'disabled'
           ? undefined
           : {
               label: actionLabel,

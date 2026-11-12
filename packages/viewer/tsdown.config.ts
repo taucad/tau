@@ -73,7 +73,6 @@ const baseConfig: UserConfig = {
     'src/graphics/three/three-canvas-instance.tsx',
     'src/graphics/three/three-context.tsx',
     'src/graphics/three/three-graphics-backend-context.tsx',
-    'src/graphics/three/use-camera-framing.ts',
     'src/graphics/three/utils/camera-controls-adapter.ts',
     'src/graphics/three/utils/geometry-presentation-admission.ts',
     'src/graphics/three/utils/infinite-grid-frame.ts',

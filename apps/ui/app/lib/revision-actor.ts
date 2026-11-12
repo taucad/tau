@@ -43,7 +43,7 @@
 
 import { Topic } from '@taucad/events';
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
-import type { RevisionUserActor } from '@taucad/revisions';
+import type { RevisionRowWho, RevisionUserActor } from '@taucad/revisions';
 import { randomUuid } from '@taucad/utils/id';
 import { ENV } from '#environment.config.js';
 import { useFeature } from '#flags/use-feature.js';
@@ -375,8 +375,6 @@ export type RevisionPushRecord = Readonly<{
 export type RevisionWhoContext = Readonly<{
   /** The account signed in on this device, or `undefined` signed out. */
   session: RevisionSessionUser | undefined;
-  /** This project's id: what the browser leg records an entry as when it has no session. */
-  projectId: string | undefined;
   /**
    * Tau Cloud's push record (A3). `undefined` until that package reads it:
    * every entry then falls to "made on this device", its git author, or no name.
@@ -401,15 +399,20 @@ export type RevisionWho = Readonly<{
 }>;
 
 /**
- * The entry a who is asked of: its id, the recorded actor and source, and for a
- * commit Tau did not write the commit's own author name.
+ * The entry a who is asked of: its id, its source, and its typed who (B2): the
+ * identity Tau recorded, or the git author of a commit Tau did not write.
  *
  * @public
  */
-export type RevisionWhoEntry = Readonly<{ revisionId: string; actor: string; source: string; authorName?: string }>;
+export type RevisionWhoEntry = Readonly<{ revisionId: string; who: RevisionRowWho; source: string }>;
 
-/** What a disk host records when it has no account to record (`packages/host`). */
-const hostFallbackId = 'tau-host';
+/** The person a recorded identity names: the user, or the user an agent ran for. */
+const personOf = (who: RevisionRowWho): RevisionUserActor | undefined => {
+  if (who.kind === 'unrecorded') {
+    return undefined;
+  }
+  return who.identity.kind === 'agent' ? who.identity.onBehalfOf : who.identity;
+};
 
 const nobody: RevisionWho = { line: '', isYou: false, isAgent: false };
 
@@ -424,14 +427,14 @@ const nobody: RevisionWho = { line: '', isYou: false, isAgent: false };
  */
 const pushedWho = (
   input: Readonly<{
-    entry: RevisionWhoEntry;
+    person: RevisionUserActor | undefined;
     context: RevisionWhoContext;
     pusher: RevisionPusher;
     anonymous: string;
     isShared: boolean;
   }>,
 ): RevisionWho => {
-  const { entry, context, pusher } = input;
+  const { person, context, pusher } = input;
   const joined = (parts: readonly string[]): string => {
     const named = parts.filter((part) => part !== '');
     return named.length === 0
@@ -439,7 +442,7 @@ const pushedWho = (
       : [...named, ...(pusher.viaDevice === true ? ['by a cloud agent host'] : [])].join(' · ');
   };
   /* A client never shows what it was not given, and never unmasks a pseudonym the record did not mark for the owner. */
-  if (pusher.kind === 'anonymous' || (entry.actor.startsWith('anon:') && pusher.recordedAnonymous !== true)) {
+  if (pusher.kind === 'anonymous' || (person?.anonymous === true && pusher.recordedAnonymous !== true)) {
     return { line: joined([input.anonymous]), isYou: false, isAgent: false };
   }
   const nameOf = (accountId: string, name: string): string => (context.session?.id === accountId ? 'You' : name);
@@ -447,13 +450,13 @@ const pushedWho = (
   const recorded =
     pusher.recordedAnonymous === true
       ? 'Anonymous'
-      : entry.actor === pusher.accountId
+      : person === undefined || person.id === pusher.accountId
         ? undefined
-        : context.pushRecord?.memberName(entry.actor);
+        : context.pushRecord?.memberName(person.id);
   if (recorded === undefined) {
     return { line: joined([input.isShared ? nameOf(pusher.accountId, pusher.name) : '']), isYou, isAgent: false };
   }
-  const recordedAs = pusher.recordedAnonymous === true ? recorded : nameOf(entry.actor, recorded);
+  const recordedAs = pusher.recordedAnonymous === true || person === undefined ? recorded : nameOf(person.id, recorded);
   return { line: joined([nameOf(pusher.accountId, pusher.name), `recorded as ${recordedAs}`]), isYou, isAgent: false };
 };
 
@@ -465,9 +468,9 @@ const pushedWho = (
  * In order: an agent's result reads `Agent`; an entry on Tau Cloud is the
  * account that pushed it; an entry made on this device is whoever is signed in
  * here, and nobody signed out; a commit Tau did not write is its git author;
- * anything else shows no name. The recorded actor is never printed and never
- * trusted for a name, so an OS login name or an environment address an older
- * host recorded shows no name rather than a guess. A single-person project
+ * anything else shows no name. The recorded identity is read by its type (B2),
+ * never printed and never trusted for a name, and no id is parsed for what it
+ * might mean. A single-person project
  * shows no who line on its person's entries; a shared one names every entry,
  * yours as `You` (Q2). An anonymous entry reads `Anonymous`, its hash only
  * behind the debug setting (Q3).
@@ -478,7 +481,7 @@ const pushedWho = (
  * recorded entry (`recorded as Anonymous`). A push a host device made on the
  * account's behalf adds `by a cloud agent host` to a line that names someone.
  *
- * @param entry - The entry's id, recorded actor and source.
+ * @param entry - The entry's id, source and typed who.
  * @param context - The session, project, push record and debug setting.
  * @returns The who line and what it stands for.
  * @public
@@ -492,22 +495,25 @@ export const revisionWho = (entry: RevisionWhoEntry, context: RevisionWhoContext
   if (entry.source === 'agent') {
     return { line: 'Agent', isYou: false, isAgent: true };
   }
-  const isAnonymous = entry.actor.startsWith('anon:');
+  const person = personOf(entry.who);
+  const isAnonymous = person?.anonymous === true;
+  /* The pseudonym's hash, behind the debug setting only: the id with the prefix every pseudonym carries (Q3). */
   const anonymous =
-    context.showAnonymousId && isAnonymous ? `Anonymous · ${entry.actor.slice('anon:'.length)}` : 'Anonymous';
+    context.showAnonymousId && isAnonymous ? `Anonymous · ${person.id.replace(/^anon:/u, '')}` : 'Anonymous';
   const pusher = context.pushRecord?.pushedBy(entry.revisionId);
   if (pusher !== undefined) {
-    return pushedWho({ entry, context, pusher, anonymous, isShared });
+    return pushedWho({ person, context, pusher, anonymous, isShared });
   }
   if (isAnonymous) {
     return { line: anonymous, isYou: false, isAgent: false };
   }
-  const { session } = context;
-  if (entry.actor === hostFallbackId || entry.actor === context.projectId || entry.actor === session?.id) {
-    return session === undefined ? nobody : account(session.id, session.name ?? '');
+  /* Made on this device by whoever is signed in here: the recorded person is the session's account. */
+  const mine = context.session === undefined || person?.id !== context.session.id ? undefined : context.session;
+  if (mine !== undefined) {
+    return account(mine.id, mine.name ?? '');
   }
-  if (entry.source === 'import' && entry.authorName !== undefined && entry.authorName !== '') {
-    return { line: entry.authorName, isYou: false, isAgent: false };
+  if (entry.who.kind === 'unrecorded' && entry.who.authorName !== undefined && entry.who.authorName !== '') {
+    return { line: entry.who.authorName, isYou: false, isAgent: false };
   }
   return nobody;
 };
@@ -533,10 +539,7 @@ export const useRevisionWhoContext = (projectId: string | undefined): RevisionWh
     () => undefined,
   );
   const pushRecord = useMemo(() => (pushes === undefined ? undefined : revisionPushRecordOf(pushes)), [pushes]);
-  return useMemo(
-    () => ({ session, projectId, pushRecord, showAnonymousId }),
-    [projectId, pushRecord, session, showAnonymousId],
-  );
+  return useMemo(() => ({ session, pushRecord, showAnonymousId }), [pushRecord, session, showAnonymousId]);
 };
 
 /**

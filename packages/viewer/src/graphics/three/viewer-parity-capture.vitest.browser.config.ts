@@ -13,8 +13,9 @@ import { defineConfig } from 'vitest/config';
  *   PARITY_CONFIG           fixture manifest, `{ fixtures: [{ name, glb }], outDir?, backends? }`; a relative `glb` is
  *                           relative to the workspace root (default: libs/tau-examples/fixtures/viewer-parity/fixtures.json)
  *   PARITY_VIEWER_OUT       output directory (default: out/test-results/viewer-parity/viewer)
- *   PARITY_FIXTURES         comma-separated fixture names to capture (default: every fixture), for reruns
- *   PARITY_SHARD            `<index>/<count>`: capture every count-th fixture from the index-th (1-based), for CI shards
+ *   PARITY_FIXTURES         comma-separated fixture names to capture (default: every fixture), for reruns and for the
+ *                           CI shards, which viewer-parity.yml deals by measured capture seconds
+ *   PARITY_SHARD            `<index>/<count>`: capture every count-th fixture from the index-th (1-based), for a split by count
  *   TAU_E2E_WEBGPU_PROFILE  software (SwiftShader, CI) | hardware
  *   PARITY_HEADED           1 runs Chromium headed (under xvfb-run on Linux) with --ignore-gpu-blocklist. Headless
  *                           Chromium on SwiftShader loses the WebGPU device on its first canvas present and the viewer

@@ -250,7 +250,7 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     const count = (key: string): void => {
       counts[key] = (counts[key] ?? 0) + 1;
     };
-    const { database } = this.databaseService;
+    const { background: database } = this.databaseService;
     try {
       const swept = await sweepBacklog(database, now);
       counts['expired'] = swept.expired;
@@ -364,7 +364,7 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
 
   private async settle(row: LeasedDelivery, settlement: DeliverySettlement): Promise<string> {
     const held = await settleDelivery(
-      this.databaseService.database,
+      this.databaseService.background,
       { receiptId: row.receiptId, owner: this.owner },
       settlement,
     );
@@ -425,7 +425,7 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     row: LeasedDelivery,
     evidence: Evidence,
   ): Promise<Readonly<{ evidence: Evidence; identity?: PersonalIdentity }> | 'revoked' | 'deleted'> {
-    const { database } = this.databaseService;
+    const { background: database } = this.databaseService;
     if ((await readProjectDeletion(database, row.projectId)) !== undefined) {
       return 'deleted';
     }
@@ -534,7 +534,7 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     }
     const [object] = observation.spans;
     const claim = await prepareSend(
-      this.databaseService.database,
+      this.databaseService.background,
       { receiptId: row.receiptId, owner: this.owner },
       {
         traceId: observation.identity.traceId,
@@ -599,7 +599,7 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     now: Date,
   ): Promise<HeldSettlement | 'hold' | 'unsettled'> {
     const taken = await takeSettlement(
-      this.databaseService.database,
+      this.databaseService.background,
       { principalId: row.principalId, projectId: row.projectId, semanticKey: generationSettlementKey(generation) },
       { owner: this.owner, leaseMilliseconds: deliveryTiming.leaseMilliseconds, now },
     );
@@ -645,7 +645,7 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     await settleDelivery(
-      this.databaseService.database,
+      this.databaseService.background,
       { receiptId: row.receiptId, owner: this.owner },
       { kind: 'hold', reason: 'generation', notBefore: new Date(now.getTime() + deliveryTiming.recheckMilliseconds) },
     );
@@ -657,7 +657,7 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
    * Reconciliation then reads it as missing, never as drift.
    */
   private async awaitGeneration(row: LeasedDelivery, settlement: Evidence, now: Date): Promise<string> {
-    const generation = await generationState(this.databaseService.database, {
+    const generation = await generationState(this.databaseService.background, {
       principalId: row.principalId,
       projectId: row.projectId,
       semanticKey: settledGenerationKey(settlement),

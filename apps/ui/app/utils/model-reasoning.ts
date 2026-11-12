@@ -28,19 +28,8 @@ const anthropicReasoning = (configuration: Model['configuration'] | undefined): 
   return undefined;
 };
 
-/**
- * The reasoning a catalog row sends by default, in the host's one shape.
- *
- * The catalog keeps each provider's own field — Anthropic's adaptive thinking
- * and `outputConfig.effort`, Vertex's `thinkingLevel`, everyone else's
- * `reasoning` — because those fields are also what the API's name and commit
- * profiles send on the provider wire. This is the one reader that collapses them.
- *
- * @param model - The catalog row, when the catalog has loaded.
- * @returns The default reasoning, or `undefined` for a model with none.
- * @public
- */
-export const modelReasoning = (model: Model | undefined): ModelReasoning | undefined => {
+/** Each provider's own catalog field, collapsed into the host's one shape. */
+const providerReasoning = (model: Model | undefined): ModelReasoning | undefined => {
   const configuration = model?.configuration;
   switch (model?.provider.id) {
     case 'anthropic': {
@@ -57,6 +46,33 @@ export const modelReasoning = (model: Model | undefined): ModelReasoning | undef
       return configuration?.reasoning;
     }
   }
+};
+
+/**
+ * The reasoning a catalog row sends by default, in the host's one shape.
+ *
+ * The catalog keeps each provider's own field — Anthropic's adaptive thinking
+ * and `outputConfig.effort`, Vertex's `thinkingLevel`, everyone else's
+ * `reasoning` — because those fields are also what the API's name and commit
+ * profiles send on the provider wire. This is the one reader that collapses them, and
+ * it adds the two reasoning forms the row's `support.reasoning` declares the
+ * provider accepts for this model.
+ *
+ * @param model - The catalog row, when the catalog has loaded.
+ * @returns The default reasoning, or `undefined` for a model with none.
+ * @public
+ */
+export const modelReasoning = (model: Model | undefined): ModelReasoning | undefined => {
+  const reasoning = providerReasoning(model);
+  const declared = model?.support?.reasoning;
+  /* Only what this API's catalog declares for the row: a newer client against an older API sends neither form. */
+  return reasoning === undefined
+    ? undefined
+    : {
+        ...reasoning,
+        ...(declared?.effortInTranscript === true ? { effortInTranscript: true } : {}),
+        ...(declared?.replayBinding === true ? ({ replayBinding: 'drop' } as const) : {}),
+      };
 };
 
 /**

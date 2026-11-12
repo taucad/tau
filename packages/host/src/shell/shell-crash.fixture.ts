@@ -11,9 +11,9 @@ import { join } from 'node:path';
 import { createTauAgentHost } from '@taucad/agent-host';
 import { createNodeEventLog } from '@taucad/agent-host/node';
 import { createSandboxShellProvider } from '@taucad/native-process-core/shell';
+import { probeHostShell } from '@taucad/shell-service';
 
 import { createHostToolRegistry } from '#agent-tools.js';
-import { probeHostShell } from '#shell/shell-service.js';
 import { placementOver, scriptedTransport } from '#shell/tau-host.fixture.js';
 
 const required = (name: string): string => {

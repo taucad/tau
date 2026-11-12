@@ -115,6 +115,12 @@ const samples: Samples = {
   canvasAttached: [{ type: 'canvasAttached', canvasId: 'c', kind: 'placeholder' }],
   canvasDetached: [{ type: 'canvasDetached', canvasId: 'c' }],
   controlsAttached: [{ type: 'controlsAttached', canvasId: 'c', adapter: createCallbackLogic(() => undefined) }],
+  sectionInputAttached: [{ type: 'sectionInputAttached', inputId: 's', adapter: createCallbackLogic(() => undefined) }],
+  sectionInputDetached: [{ type: 'sectionInputDetached', inputId: 's' }],
+  entryChanged: [{ type: 'entryChanged', identity: 'part.ts' }],
+  geometryBoundsMeasured: [
+    { type: 'geometryBoundsMeasured', key: 'k', bounds: { min: [-1, -1, -1], max: [1, 1, 1] }, radius: Math.sqrt(3) },
+  ],
   setSectionViewActive: [
     { type: 'setSectionViewActive', payload: true },
     { type: 'setSectionViewActive', payload: false },
@@ -168,6 +174,27 @@ const samples: Samples = {
   setHoveredMeasurement: [{ type: 'setHoveredMeasurement', payload: undefined }],
   setMeasurementName: [{ type: 'setMeasurementName', id: 'missing', name: 'n' }],
   toggleMeasurementPinned: [{ type: 'toggleMeasurementPinned', id: 'missing' }],
+  viewerShortcutPressed: [
+    {
+      type: 'viewerShortcutPressed',
+      shortcut: 'grid',
+      pressId: 'bar:1',
+      camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+    },
+    {
+      type: 'viewerShortcutPressed',
+      shortcut: 'escape',
+      pressId: 'bar:2',
+      camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+    },
+    {
+      type: 'viewerShortcutPressed',
+      shortcut: 'removeCut',
+      pressId: 'bar:3',
+      cutId: 'missing',
+      camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+    },
+  ],
   interactionStarted: [{ type: 'interactionStarted' }],
   interactionMoved: [{ type: 'interactionMoved' }],
   interactionEnded: [{ type: 'interactionEnded' }],
@@ -334,6 +361,23 @@ describe('graphics machine totality baseline', () => {
     expect(unansweredEvents(machine, { ...options, ignore: graphicsIgnoredEvents })).toEqual([]);
   });
 
+  it('should claim F and G in every reachable state, which the blanket shortcut pair cannot check', () => {
+    const alwaysClaimed = (['fitView', 'grid'] as const).map(
+      (shortcut): GraphicsEvent => ({
+        type: 'viewerShortcutPressed',
+        shortcut,
+        pressId: 'bar:always',
+        camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+      }),
+    );
+    const unclaimed = getShortestPaths(machine, options).flatMap(({ state: snapshot }) =>
+      alwaysClaimed
+        .filter((event) => !snapshot.can(event))
+        .map((event) => `${dotted(snapshot.value)}: ${(event as { shortcut: string }).shortcut}`),
+    );
+    expect(unclaimed).toEqual([]);
+  });
+
   it('should declare no baseline pair that the machine now answers', () => {
     const gaps: UnansweredEvent[] = unansweredEvents(machine, options);
     const stale = graphicsIgnoredEvents.filter(
@@ -362,6 +406,7 @@ describe('graphics machine totality baseline', () => {
       'cameraViewChanged',
       'canvasDetached',
       'controlsAttached',
+      'sectionInputDetached',
       'adoptSectionView',
       'updateSectionCut',
       'removeSectionCut',
@@ -371,7 +416,7 @@ describe('graphics machine totality baseline', () => {
       'clearArtifact',
       'gltfPresentationCommitted',
     ];
-    const withSelectSectionCut = [...everywhere.slice(0, 6), 'selectSectionCut', ...everywhere.slice(6)];
+    const withSelectSectionCut = [...everywhere.slice(0, 7), 'selectSectionCut', ...everywhere.slice(7)];
     expect(silent).toEqual([
       {
         state: 'operational.backend.probing | operational.section.off | operational.measure.off',

@@ -1419,6 +1419,9 @@ export const uiStopTauServeFixture: BrowserCommand = async (commandContext) => {
     return;
   }
   tauServeFixtures.delete(commandContext.sessionId);
+  /* The daemon's workspace is the only copy of the chats it ran (they never reach OPFS), so keep them for
+   * `formal:logs` before disposal removes the workspace, as `uiCloseTarget` does for a daemon still running. */
+  await captureChatLogs(fixture.workspace, chatLogDestination('ui-e2e', commandContext.testPath));
   await fixture.dispose();
 };
 

@@ -32,6 +32,7 @@ const setup = () => {
     openExternal: vi.fn(),
     log: vi.fn(),
     schedule: vi.fn(),
+    retry: vi.fn(),
   };
   return { backend, options, commit, release };
 };
@@ -80,6 +81,63 @@ describe('platform update consent', () => {
     expect(backend.finish).toHaveBeenCalledOnce();
     expect(release).toHaveBeenCalledOnce();
     expect(options.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+  });
+  it('installs when the download finishes after a request made while it was downloading', async () => {
+    const { backend, options, commit } = setup();
+    const downloading = Promise.withResolvers<undefined>();
+    backend.download = vi.fn(async () => downloading.promise);
+    const updater = startPlatformUpdateController(options, backend);
+    await vi.waitFor(() => {
+      expect(updater.snapshot().phase).toBe('downloading');
+    });
+    const requested = updater.install();
+    expect(updater.snapshot()).toMatchObject({ phase: 'downloading', installWhenReady: true });
+    expect(commit).not.toHaveBeenCalled();
+    downloading.resolve(undefined);
+    await requested;
+    await vi.waitFor(() => {
+      expect(backend.finish).toHaveBeenCalledOnce();
+    });
+    expect(commit).toHaveBeenCalledOnce();
+    expect(backend.download).toHaveBeenCalledOnce();
+    expect(updater.snapshot().installWhenReady).toBeUndefined();
+  });
+  it('takes a failed update to installed from a single retry request, and drops the request on failure', async () => {
+    const { backend, options, commit } = setup();
+    const retry = vi.fn();
+    backend.check = vi
+      .fn<PlatformUpdateBackend['check']>()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue({ version: '0.2.0', tag: 'desktop@0.2.0', releasePage: 'https://example.test/release' });
+    const updater = startPlatformUpdateController({ ...options, retry }, backend);
+    await vi.waitFor(() => {
+      expect(updater.snapshot().phase).toBe('error');
+    });
+    expect(retry).toHaveBeenCalledOnce();
+    expect(retry.mock.calls[0]?.[1]).toBe(15_000);
+
+    await updater.install();
+    expect(updater.snapshot().phase).toBe('error');
+    expect(updater.snapshot().installWhenReady).toBeUndefined();
+    expect(commit).not.toHaveBeenCalled();
+
+    await updater.install();
+    await vi.waitFor(() => {
+      expect(backend.finish).toHaveBeenCalledOnce();
+    });
+    expect(commit).toHaveBeenCalledOnce();
+  });
+  it('holds no restart request for an APT-managed installation', async () => {
+    const { backend, options } = setup();
+    Object.defineProperty(backend, 'systemManaged', { value: true });
+    backend.check = vi.fn(async () => undefined);
+    const updater = startPlatformUpdateController(options, backend);
+    await updater.check();
+    await updater.install();
+    expect(updater.snapshot().phase).toBe('system-managed');
+    expect(updater.snapshot().installWhenReady).toBeUndefined();
+    expect(backend.prepare).not.toHaveBeenCalled();
   });
   it('save rejection leaves the prepared candidate untouched and releases its lease', async () => {
     const { backend, options, commit, release } = setup();

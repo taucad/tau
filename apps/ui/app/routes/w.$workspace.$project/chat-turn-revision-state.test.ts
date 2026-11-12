@@ -21,7 +21,7 @@ const revision: RevisionCard = {
   actor: 'Tau',
   turnId: 'u1',
   conflicted: false,
-  trigger: 'turn',
+  capture: 'turn',
 };
 
 const placement = { checkoutId: 'live', baseRevisionId: 'rev-4', mode: 'direct' } as const;

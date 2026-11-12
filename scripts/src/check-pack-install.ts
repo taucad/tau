@@ -130,10 +130,108 @@ export const unrewrittenSiblings = (manifest: Manifest, published: ReadonlySet<s
 const toleratedImportFailures: Record<string, string> = {};
 
 /**
+ * The installed `@taucad/native-process-core/shell` with no `supervisor` option (shell split D11).
+ * The provider then starts the default supervisor, `./srt-supervisor.mjs` beside its own emitted
+ * module inside the bundled `@taucad/sandbox` mirror: a layout no conformance row sees, because the
+ * rows run from source. One pipe launch of the system Bash must start and print its marker where
+ * the runner can sandbox it (on Linux the toolchain and nested user namespace `setup-linux-sandbox`
+ * verifies on the release gate; on macOS ripgrep). Elsewhere the supervisor must still start and
+ * answer for itself; a refusal the provider writes because the supervisor never answered, or before
+ * it started, is red everywhere.
+ */
+const nativeProcessShellProbe = `
+import { spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createSandboxShellProvider } from '@taucad/native-process-core/shell';
+
+const marker = 'tau-native-process-shell-probe';
+const onPath = (name) => spawnSync('/bin/sh', ['-c', \`command -v \${name}\`], { stdio: 'ignore' }).status === 0;
+// On Linux, the shape setup-linux-sandbox verifies: bwrap without capabilities opening a nested user namespace.
+const nestedNamespace = () =>
+  spawnSync(
+    'bwrap',
+    ['--unshare-user', '--cap-drop', 'ALL', '--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', '--proc', '/proc',
+      '--', 'unshare', '--user', '--map-root-user', '--pid', '--fork', '--mount-proc', 'true'],
+    { stdio: 'ignore' },
+  ).status === 0;
+const toolchain =
+  process.platform === 'linux'
+    ? ['bwrap', 'socat', 'rg', 'unshare'].every(onPath) && nestedNamespace()
+    : process.platform === 'darwin' && onPath('rg');
+const providerRefusals = [
+  'the sandbox supervisor ',
+  'the host process runs inside',
+  'a protected path could not be prepared',
+  'This launch was not prepared',
+];
+const root = await mkdtemp(join(tmpdir(), 'tau-shell-'));
+const home = join(root, 'home');
+const temporary = join(root, 'tmp');
+await mkdir(home, { mode: 0o700 });
+await mkdir(temporary, { mode: 0o700 });
+const provider = createSandboxShellProvider();
+let executionId;
+try {
+  ({ executionId } = await provider.prepare({ privateRoot: root, resource: undefined }));
+  const outcome = await provider.launch({
+    executionId,
+    executablePath: '/bin/bash',
+    arguments: ['--noprofile', '--norc', '-c', \`printf %s \${marker}\`],
+    workingDirectory: home,
+    commandId: 'shell:pack-probe',
+    filesystem: { readable: [], writable: [home, temporary], denied: [] },
+    network: { domains: [] },
+    environment: { PATH: '/usr/bin:/bin', HOME: home, TMPDIR: temporary, LANG: 'C.UTF-8', TERM: 'dumb' },
+    stdio: { kind: 'pipes' },
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (outcome.status === 'started') {
+    if (outcome.process.kind !== 'pipes') {
+      throw new Error('the default supervisor started a terminal for a pipe launch');
+    }
+    let stdout = '';
+    const drained = (async () => {
+      for await (const chunk of outcome.process.stdout) {
+        stdout += Buffer.from(chunk).toString('utf8');
+      }
+    })();
+    const discarded = (async () => {
+      for await (const _chunk of outcome.process.stderr) {
+        // drained only so the shell never blocks on a full pipe
+      }
+    })();
+    const exit = await outcome.process.exited;
+    await Promise.all([drained, discarded]);
+    if (exit.exitCode !== 0 || stdout !== marker) {
+      throw new Error(\`the sandboxed probe shell ended \${JSON.stringify(exit)} with \${JSON.stringify(stdout)}\`);
+    }
+  } else if (outcome.status === 'unsupported') {
+    throw new Error(\`the default supervisor path answered unsupported \${outcome.requirement}: \${outcome.message}\`);
+  } else if (toolchain || providerRefusals.some((prefix) => outcome.message.startsWith(prefix))) {
+    throw new Error(\`the default supervisor path is unavailable: \${outcome.message}\`);
+  }
+} finally {
+  if (executionId !== undefined) {
+    const [recovery] = await provider.recover({ executionIds: [executionId] });
+    if (recovery?.status === 'stopped') {
+      await rm(root, { recursive: true, force: true });
+      await provider.release({ executionId });
+    }
+  } else {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+`;
+
+/**
  * Payloads that only fail when instantiated, keyed by package name; the source runs inside the
  * installed application.
  */
-const instantiationProbes: Record<string, string> = {};
+const instantiationProbes: Record<string, string> = {
+  '@taucad/native-process-core': nativeProcessShellProbe,
+};
 
 const invariant: (condition: unknown, message: string) => asserts condition = (condition, message) => {
   if (!condition) {
@@ -483,6 +581,15 @@ globalThis.__TAU_PARAMETER_PACK_SMOKE__ = 'committed width=25 and settled';
 console.log(globalThis.__TAU_PARAMETER_PACK_SMOKE__);
 `;
 
+/** The content type a consumer's server gives one packaged asset: WASM streams compile only from `application/wasm`. */
+const assetContentTypes: Readonly<Record<string, string>> = {
+  wasm: 'application/wasm',
+  json: 'application/json',
+  glb: 'model/gltf-binary',
+};
+const assetContentType = (url: string): string =>
+  assetContentTypes[url.slice(url.lastIndexOf('.') + 1)] ?? 'application/octet-stream';
+
 const runBrowserModule = async (
   modulePath: string,
   assertPage: (page: Page) => Promise<void>,
@@ -501,7 +608,7 @@ const runBrowserModule = async (
       return;
     }
     if (request.url !== undefined && Object.hasOwn(assets, request.url)) {
-      response.writeHead(200, { 'content-type': 'application/wasm' });
+      response.writeHead(200, { 'content-type': assetContentType(request.url) });
       response.end(readFileSync(assets[request.url]!));
       return;
     }
@@ -528,7 +635,13 @@ const runBrowserModule = async (
       }
     });
     await page.goto(`http://127.0.0.1:${String(port)}/`);
-    await assertPage(page);
+    try {
+      await assertPage(page);
+    } catch (error) {
+      /* A timed-out wait names no cause; the page's own errors usually do. */
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${message}\nPage errors:\n${errors.join('\n') || '(none)'}`, { cause: error });
+    }
     invariant(errors.length === 0, `Packed browser module failed:\n${errors.join('\n')}`);
   } finally {
     await browser?.close();
@@ -1109,12 +1222,23 @@ const runInstalledTscircuit = async (appRoot: string, zodVersion: string): Promi
   );
   const wasmAsset = join(dirname(esbuildPackage), 'dist/vm/wasm/esbuild.wasm');
   invariant(existsSync(wasmAsset), `Installed esbuild WASM asset is missing: ${wasmAsset}`);
+  /* The KiCad pack's footprints and models are `new URL('../assets/kicad/…', import.meta.url)` files beside the
+   * kernel. A browser bundle that does not copy assets keeps them relative to its own URL, so a consumer serves the
+   * package's `dist/assets/kicad` at `assets/kicad` beside the bundle, as it serves esbuild's WASM. */
+  const tscircuitPackage = createRequire(pathToFileURL(join(appRoot, 'package.json'))).resolve(
+    '@taucad/tscircuit/package.json',
+  );
+  const kicadRoot = join(dirname(tscircuitPackage), 'dist/assets/kicad');
+  invariant(existsSync(kicadRoot), `Installed tscircuit KiCad pack is missing: ${kicadRoot}`);
+  const kicadAssets = Object.fromEntries(
+    readdirSync(kicadRoot).map((name) => [`/assets/kicad/${name}`, join(kicadRoot, name)]),
+  );
   await runBrowserModule(
     bundle,
     async (page) => {
       await page.waitForFunction(() => document.querySelector('#root')?.textContent === 'tscircuit GLB and SVG passed');
     },
-    { '/wasm/esbuild.wasm': wasmAsset },
+    { '/wasm/esbuild.wasm': wasmAsset, ...kicadAssets },
   );
   console.log('Packed tscircuit Node and Chromium GLB/SVG render passed.');
 };

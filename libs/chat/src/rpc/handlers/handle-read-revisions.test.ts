@@ -9,7 +9,7 @@ const client: RpcRevisionsClient = {
       {
         revisionNumber: 2,
         revisionId: 'b'.repeat(40),
-        actor: 'ada',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'ada' } } as const,
         source: 'user',
         createdAt: 1_789_000_000_000,
         summary: 'Second',
@@ -18,7 +18,7 @@ const client: RpcRevisionsClient = {
       {
         revisionNumber: 1,
         revisionId: 'a'.repeat(40),
-        actor: 'ada',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'ada' } } as const,
         source: 'user',
         createdAt: 1_788_000_000_000,
         summary: 'First',
@@ -70,6 +70,33 @@ describe('handleReadRevisions', () => {
     expect(result).toMatchObject({ success: true, branch: 'main' });
     expect(result.success && result.revisions).toHaveLength(1);
     expect(result.success && result.revisions?.[0]?.revisionNumber).toBe(2);
+  });
+
+  /* B2: a host's row carries its trailer and ids for its own pane; the agent reads the schema's row and no more. */
+  it('hands the agent the typed who and none of the host row’s diagnostics', async () => {
+    const hostRow = {
+      revisionNumber: 1,
+      revisionId: 'a'.repeat(40),
+      who: { kind: 'unrecorded', authorName: 'octo-dev' },
+      source: 'import',
+      createdAt: 1_788_000_000_000,
+      summary: 'Initial commit',
+      conflicted: false,
+      treeId: 'd'.repeat(40),
+      trailer: 'Tau-Metadata: {}',
+    } as const;
+    const result = await handleReadRevisions({ action: 'log' }, { ...client, log: async () => [hostRow] });
+    expect(result.success && result.revisions).toStrictEqual([
+      {
+        revisionNumber: 1,
+        revisionId: 'a'.repeat(40),
+        who: { kind: 'unrecorded', authorName: 'octo-dev' },
+        source: 'import',
+        createdAt: 1_788_000_000_000,
+        summary: 'Initial commit',
+        conflicted: false,
+      },
+    ]);
   });
 
   it('asks for the newer revision rather than guessing one', async () => {

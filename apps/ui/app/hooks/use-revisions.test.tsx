@@ -60,7 +60,10 @@ vi.mock('#hooks/chat-session-store-provider.js', () => {
 const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
   revisionNumber: undefined,
   changeId: `change-${over.revisionId}`,
-  actor: 'tau-browser-agent-host',
+  who: {
+    kind: 'recorded',
+    identity: { kind: 'agent', id: 'agent', runId: 'run-1', onBehalfOf: { kind: 'user', id: 'usr_other' } },
+  },
   source: 'agent',
   createdAt: 1_788_220_800_000,
   summary: 'Agent turn u1',
@@ -495,11 +498,25 @@ describe('useRevisions', () => {
   /* A5, fixture B4: a turn's base cut reads as the person's autosave, old trailer and new; the result is unchanged. */
   it('titles a turn base cut Autosave, by the person, and carries turnCut to its card', async () => {
     setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
-    const turn = { turnId: 'u1', trigger: 'turn', summary: 'Agent turn u1' } as const;
+    const turn = { turnId: 'u1', capture: 'turn', summary: 'Agent turn u1' } as const;
     revisionStatusHarness.rows = [
-      row({ ...turn, revisionId: 'rev-2', revisionNumber: 2, source: 'agent', actor: 'agent', turnCut: 'result' }),
+      row({
+        ...turn,
+        revisionId: 'rev-2',
+        revisionNumber: 2,
+        source: 'agent',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'agent' } },
+        turnCut: 'result',
+      }),
       /* `readRevisionLog` reads every base cut as `source: 'user'`, whatever an earlier build recorded. */
-      row({ ...turn, revisionId: 'rev-1', revisionNumber: 1, source: 'user', actor: 'user-1', turnCut: 'base' }),
+      row({
+        ...turn,
+        revisionId: 'rev-1',
+        revisionNumber: 1,
+        source: 'user',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'user-1' } },
+        turnCut: 'base',
+      }),
     ];
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
@@ -783,7 +800,7 @@ describe('useRevisionChangesSince', () => {
       actor: '',
       turnId: undefined,
       conflicted: false,
-      trigger: 'save',
+      capture: 'save',
     };
     revisionStatusHarness.diff = [{ path: 'main.scad', kind: 'modified' }];
     const { result, rerender } = renderHook(() => useRevisionChangesSince(card), { wrapper });
@@ -818,7 +835,7 @@ describe('useRevisionChanges', () => {
       actor: '',
       turnId: 'u1',
       conflicted: false,
-      trigger: 'turn',
+      capture: 'turn',
     };
 
     const { result } = renderHook(() => useRevisionChanges(card), { wrapper });
@@ -847,7 +864,7 @@ describe('useRevisionChanges', () => {
       actor: '',
       turnId: undefined,
       conflicted: false,
-      trigger: 'save',
+      capture: 'save',
     };
     const { result } = renderHook(
       () => ({ paths: useRevisionChangesSince(card), file: useRevisionFileComparison('rev-1', 'main.ts', 'checkout') }),
@@ -966,7 +983,7 @@ describe('useRevisionChanges', () => {
       actor: '',
       turnId: 'u9',
       conflicted: false,
-      trigger: 'turn',
+      capture: 'turn',
       changedPaths: ['main.scad'],
     };
 
@@ -1059,17 +1076,17 @@ describe('useRevisionChanges', () => {
         revisionId: 'rev-2',
         revisionNumber: 2,
         source: 'user',
-        actor: 'anon:2722de98',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'anon:2722de98', anonymous: true } },
         summary: 'Saved changes (save)',
-        trigger: 'save',
+        capture: 'save',
       }),
       row({
         revisionId: 'rev-3',
         revisionNumber: 3,
         source: 'user',
-        actor: 'anon:2722de98',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'anon:2722de98', anonymous: true } },
         summary: 'Tapered wall',
-        trigger: 'save',
+        capture: 'save',
       }),
     ];
 
@@ -1092,40 +1109,57 @@ describe('useRevisionChanges', () => {
   /*
    * Fixtures L1–L4 (blueprint A2): the ids an older host recorded when it had
    * no account — the project id, `tau-host`, an OS login name and an
-   * environment address. Each reads as the signed-in person or shows no name,
-   * and none is ever printed.
+   * environment address. Each shows no name, and none is ever printed. An
+   * older build's trailer no longer parses (B1), so such an entry reads as a
+   * commit Tau did not record; one that names the id is still no one's (B2:
+   * no id is matched against a known fallback).
    */
-  it('reads the fallback ids an older host recorded as you, or as no name, never as the id', async () => {
+  it('reads the fallback ids an older host recorded as no name, never as the id', async () => {
     setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
+    const fallback = (id: string): RevisionRow['who'] => ({ kind: 'recorded', identity: { kind: 'user', id } });
     revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-4', revisionNumber: 4, source: 'user', actor: 'p', trigger: 'idle' }),
-      row({ revisionId: 'rev-3', revisionNumber: 3, source: 'user', actor: 'tau-host', trigger: 'save' }),
-      row({ revisionId: 'rev-2', revisionNumber: 2, source: 'user', actor: 'richard', trigger: 'idle' }),
-      row({ revisionId: 'rev-1', revisionNumber: 1, source: 'user', actor: 'maker@example.com', trigger: 'save' }),
+      row({ revisionId: 'rev-5', revisionNumber: 5, source: 'import', who: { kind: 'unrecorded' } }),
+      row({ revisionId: 'rev-4', revisionNumber: 4, source: 'user', who: fallback('p'), capture: 'idle' }),
+      row({ revisionId: 'rev-3', revisionNumber: 3, source: 'user', who: fallback('tau-host'), capture: 'save' }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, source: 'user', who: fallback('richard'), capture: 'idle' }),
+      row({
+        revisionId: 'rev-1',
+        revisionNumber: 1,
+        source: 'user',
+        who: fallback('maker@example.com'),
+        capture: 'save',
+      }),
     ];
 
     const { result } = renderHook(() => useRevisions(), { wrapper });
     await waitFor(() => {
-      expect(result.current.revisions).toHaveLength(4);
+      expect(result.current.revisions).toHaveLength(5);
     });
 
-    const [projectIdRow, tauHostRow, loginNameRow, addressRow] = result.current.revisions;
-    /* L1 and L2 are this host's own fallback ids: made on this device, by whoever is signed in. */
-    expect(projectIdRow?.isYours).toBe(true);
-    expect(tauHostRow?.isYours).toBe(true);
-    /* L3 and L4 cannot be told from another account's id without the push record (A3): no name. */
-    expect(loginNameRow?.isYours).toBeUndefined();
-    expect(addressRow?.isYours).toBeUndefined();
-    expect(result.current.revisions.map((revision) => revision.actor)).toEqual(['', '', '', '']);
+    /* Without the push record (A3) none can be told from another account's id: no name, and none is yours. */
+    expect(result.current.revisions.map((revision) => revision.isYours)).toEqual(Array.from({ length: 5 }));
+    expect(result.current.revisions.map((revision) => revision.actor)).toEqual(['', '', '', '', '']);
   });
 
   /* Q2: a single-person project shows no who line on any row, the person's own or not. */
   it('gives no row of a single-person project a who line except the agent and an anonymous entry', async () => {
     setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
     revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-3', revisionNumber: 3, source: 'user', actor: 'user-1', trigger: 'save' }),
-      row({ revisionId: 'rev-2', revisionNumber: 2, source: 'user', actor: 'user-2', trigger: 'save' }),
-      row({ revisionId: 'rev-1', revisionNumber: 1, source: 'import', actor: 'unknown' }),
+      row({
+        revisionId: 'rev-3',
+        revisionNumber: 3,
+        source: 'user',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'user-1' } },
+        capture: 'save',
+      }),
+      row({
+        revisionId: 'rev-2',
+        revisionNumber: 2,
+        source: 'user',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'user-2' } },
+        capture: 'save',
+      }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, source: 'import', who: { kind: 'unrecorded' } }),
     ];
 
     const { result } = renderHook(() => useRevisions(), { wrapper });
@@ -1139,7 +1173,13 @@ describe('useRevisionChanges', () => {
   /* F4: the session is a store the hook subscribes to, not a value it read once. */
   it('renames a revision to the person who signs in mid-session, without the rows changing', async () => {
     revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-1', revisionNumber: 1, source: 'user', actor: 'user-1', trigger: 'save' }),
+      row({
+        revisionId: 'rev-1',
+        revisionNumber: 1,
+        source: 'user',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'user-1' } },
+        capture: 'save',
+      }),
     ];
 
     const { result } = renderHook(() => useRevisions(), { wrapper });
@@ -1164,11 +1204,17 @@ describe('useRevisionChanges', () => {
         revisionId: 'rev-3',
         revisionNumber: 3,
         source: 'restore',
-        actor: 'user-1',
-        trigger: 'restore',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'user-1' } },
+        capture: 'restore',
         restoredFrom: 'rev-1',
       }),
-      row({ revisionId: 'rev-2', revisionNumber: 2, source: 'user', actor: 'user-1', trigger: 'restore' }),
+      row({
+        revisionId: 'rev-2',
+        revisionNumber: 2,
+        source: 'user',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'user-1' } },
+        capture: 'restore',
+      }),
     ];
 
     const { result } = renderHook(() => useRevisions(), { wrapper });
@@ -1247,9 +1293,27 @@ describe('useRevisions with Tau Cloud push records (A3)', () => {
     });
     setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
     revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-3', revisionNumber: 3, source: 'user', actor: 'user-maya', parent: 'rev-2' }),
-      row({ revisionId: 'rev-2', revisionNumber: 2, source: 'user', actor: 'root', parent: 'rev-1' }),
-      row({ revisionId: 'rev-1', revisionNumber: 1, source: 'user', actor: 'tau-host' }),
+      row({
+        revisionId: 'rev-3',
+        revisionNumber: 3,
+        source: 'user',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'user-maya' } },
+        parent: 'rev-2',
+      }),
+      row({
+        revisionId: 'rev-2',
+        revisionNumber: 2,
+        source: 'user',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'root' } },
+        parent: 'rev-1',
+      }),
+      /* Made on this device by the signed-in person: version 2 records the account, never a fallback id (B1). */
+      row({
+        revisionId: 'rev-1',
+        revisionNumber: 1,
+        source: 'user',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'user-1' } },
+      }),
     ];
   });
 
@@ -1259,7 +1323,12 @@ describe('useRevisions with Tau Cloud push records (A3)', () => {
     const { result } = renderHook(() => useRevisions(), { wrapper });
 
     await waitFor(() => {
-      expect(result.current.revisions.map((card) => card.actor)).toEqual(['Bea · recorded as Maya', 'Bea', 'Bea']);
+      /* `root` names no member and reads as the pusher alone; the entry recorded as you, pushed by Bea, says both. */
+      expect(result.current.revisions.map((card) => card.actor)).toEqual([
+        'Bea · recorded as Maya',
+        'Bea',
+        'Bea · recorded as You',
+      ]);
     });
     expect(result.current.revisions.some((card) => card.isYours === true)).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -1279,7 +1348,7 @@ describe('useRevisions with Tau Cloud push records (A3)', () => {
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
-    /* This device's own fallback id is still the signed-in person, from step 3. */
+    /* An entry made here by the signed-in account is still theirs, from step 3. */
     expect(result.current.revisions[2]?.isYours).toBe(true);
   });
 

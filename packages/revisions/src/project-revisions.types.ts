@@ -47,18 +47,12 @@ export type RevisionStatusProjection = Readonly<{
   /** Checkouts that need a person: a failed cut or a head that lost its CAS. */
   attention: number;
   /**
-   * What the restore child is doing, for the one surface that asks (S19).
-   *
-   * The plan's file sets stay with the host behind `planId`; these are the two
-   * facts the confirmation renders — how many files the restore deletes, and
-   * whether the checkout has diverged from its head — plus whether it is
-   * waiting to be confirmed at all.
+   * What the restore child is doing (S19). Nothing here asks a person: a
+   * restore acts at once and *Undo restore* takes it back (I11). The plan's
+   * file sets stay with the host behind `planId`.
    */
   restore: Readonly<{
-    asking: boolean;
     busy: boolean;
-    removedPathCount: number;
-    dirty: boolean;
     revisionNumber: number | undefined;
     /**
      * Whether *Undo restore* has something to undo: this checkout's head is the
@@ -98,10 +92,8 @@ export type RevisionStatusProjection = Readonly<{
   /** What the branch verbs are doing, for the one region that drives them. */
   branchVerb: Readonly<{
     busy: boolean;
-    asking: boolean;
     operation: BranchOperation | undefined;
     branch: string | undefined;
-    question: string | undefined;
   }>;
   /**
    * Every branch whose head is a conflicted revision (A22, S33).

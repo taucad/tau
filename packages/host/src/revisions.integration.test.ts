@@ -818,7 +818,7 @@ for (const row of ports) {
 
         const after = await readRevisionLog(held.port, { branch: 'isolated-run' });
         expect(after).toHaveLength(before.length + 1);
-        expect(after[0]).toMatchObject({ trigger: 'close' });
+        expect(after[0]).toMatchObject({ capture: 'close' });
       },
       30_000,
     );

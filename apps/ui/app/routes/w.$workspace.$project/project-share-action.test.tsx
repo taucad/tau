@@ -1,5 +1,5 @@
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as XStateModule from 'xstate';
@@ -93,6 +93,13 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel }),
 }));
 
+/* C4: People with access renders under the share methods; its own rules are `revision-collaborators.test.tsx`'s. */
+vi.mock('#routes/w.$workspace.$project/revision-collaborators.js', () => ({
+  ProjectPeopleWithAccess: ({ projectId }: { readonly projectId: string }) => (
+    <section aria-label='People with access'>{projectId}</section>
+  ),
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   capturedPanelProperties = undefined;
@@ -164,6 +171,17 @@ beforeEach(() => {
 });
 
 describe('ProjectShareWorkbenchPanel', () => {
+  it('lists People with access beside the share methods (C4)', () => {
+    render(
+      <MemoryRouter initialEntries={['/w/home/share-fixture']}>
+        <ProjectShareWorkbenchPanel />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Share panel fixture')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'People with access' })).toHaveTextContent(project.id);
+  });
+
   /* E1: the entry's CAD actor owns its operation timeout, so a unit this panel has to spawn for the
    * thumbnail is seeded from the durable per-entry record instead of starting on the default. */
   it('seeds a unit it spawns with the durable operation timeout', async () => {

@@ -458,12 +458,15 @@ describe('SectionHandles', () => {
   it('should listen on the surface once under StrictMode, giving a press back once', async () => {
     const added = vi.spyOn(EventTarget.prototype, 'addEventListener');
     harness = mountHandles({ isStrict: true });
-    // StrictMode's second effect pass cancels the first one's stop, so one adapter runs.
+    // StrictMode replays the handles' ref: graphics stops the first section input before it starts the second, so one
+    // adapter listens.
     await Promise.resolve();
-    const capturedPresses = added.mock.calls.filter(
-      ([type, , options]) => type === 'pointerdown' && typeof options === 'object' && options.capture === true,
+    const livePresses = added.mock.calls.filter(
+      ([type, , options]) =>
+        type === 'pointerdown' && typeof options === 'object' && options.capture === true && !options.signal?.aborted,
     );
-    expect(capturedPresses).toHaveLength(1);
+    expect(livePresses).toHaveLength(1);
+    expect(harness.actor.getSnapshot().context.sectionInput).toBeDefined();
 
     harness.pointer('pointerdown', { x: 400, y: 300 });
     harness.pointer('pointermove', { x: 400, y: 250 });
@@ -634,7 +637,7 @@ describe('SectionHandles', () => {
         drag: planeDrag,
         end: async () => {
           cleanup();
-          // The section input stops a microtask after its unmount, as every `useActorRef` actor does.
+          // Graphics stops the section input when the handles' ref is cleared; one microtask settles any late send.
           await Promise.resolve();
         },
       },
@@ -758,7 +761,8 @@ describe('SectionHandles', () => {
         // Its press is held from the camera and stopped before Measure and the model, and then does nothing.
         const received: string[] = [];
         harness.actor.system.inspect((inspection) => {
-          if (inspection.type === '@xstate.transition') {
+          // The section input is a graphics child in the same system; only graphics' own events are counted.
+          if (inspection.type === '@xstate.transition' && inspection.actorRef === harness?.actor) {
             received.push(inspection.eventType);
           }
         });

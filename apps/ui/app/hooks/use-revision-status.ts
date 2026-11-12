@@ -1644,8 +1644,6 @@ export type RevisionCommands = Readonly<{
   undo: () => void;
   /** *Undo*: reverse this device's newest operation on the line (D15). */
   undoOperation: () => void;
-  confirm: () => void;
-  cancel: () => void;
   switchTo: (branch: string) => void;
   followChat: (chatId: string) => void;
   pinTo: (checkoutId: string) => void;
@@ -1655,8 +1653,6 @@ export type RevisionCommands = Readonly<{
   discardBranch: (branch: string, checkoutId?: string) => void;
   mergeBranch: (branch: string) => void;
   renameBranch: (branch: string, name: string) => void;
-  confirmBranch: () => void;
-  cancelBranch: () => void;
   /**
    * The *Needs resolution* card's verbs (S33, W10).
    *
@@ -1748,8 +1744,6 @@ export const useRevisionCommands = (): RevisionCommands => {
       restore: (revisionId: string) => client?.send({ command: 'restore', revisionId }),
       undo: () => client?.send({ command: 'undo' }),
       undoOperation: () => client?.send({ command: 'undoOperation' }),
-      confirm: () => client?.send({ command: 'confirm' }),
-      cancel: () => client?.send({ command: 'cancel' }),
       switchTo: (branch: string) => client?.send({ command: 'switch', branch }),
       followChat: (chatId: string) => client?.send({ command: 'followChat', chatId }),
       pinTo: (checkoutId: string) => client?.send({ command: 'pinTo', checkoutId }),
@@ -1767,8 +1761,6 @@ export const useRevisionCommands = (): RevisionCommands => {
         }),
       mergeBranch: (branch: string) => client?.send({ command: 'mergeBranch', branch }),
       renameBranch: (branch: string, name: string) => client?.send({ command: 'renameBranch', branch, name }),
-      confirmBranch: () => client?.send({ command: 'confirmBranch' }),
-      cancelBranch: () => client?.send({ command: 'cancelBranch' }),
       resolveFile: (revisionId: string, path: string, side: 'mine' | 'theirs') =>
         client?.send({ command: 'resolve', revisionId, path, side }),
       openConflictInEditor: (revisionId: string, path: string) =>

@@ -25,7 +25,10 @@
   },
   "exports": {
     "./maintenance/blob-collector": "./src/maintenance/blob-collector.ts",
+    "./maintenance/lfs-integrity": "./src/maintenance/lfs-integrity.ts",
     "./maintenance/lfs-relocation": "./src/maintenance/lfs-relocation.ts",
+    "./maintenance/lfs-relocation-run": "./src/maintenance/lfs-relocation-run.ts",
+    "./maintenance/lfs-reservation-scope": "./src/maintenance/lfs-reservation-scope.ts",
     "./maintenance/liveness": "./src/maintenance/liveness.ts",
     "./maintenance/project-purge": "./src/maintenance/project-purge.ts",
     "./maintenance/purge": "./src/maintenance/purge.ts",

@@ -82,10 +82,11 @@ describe('credential-free billing CI', () => {
 
   it('should select billing contracts by the billing plan output and gate staging on completed billing tests', () => {
     const path = '.github/workflows/ci.yml';
-    // Billing contracts run exactly when a project with the suite (`api-billing`) or one it depends on is affected.
+    // Billing contracts run exactly when a project with the suite (`api-billing`) or one it depends on is
+    // affected, in the merge queue and on `main` (`pr: queue`: a pull request leaves them to the queue).
     const plan = job(path, 'plan').steps?.find((step) => step.id === 'plan');
     const selectors = JSON.parse(plan?.env?.['LANE_SELECTORS'] ?? '{}') as Record<string, unknown>;
-    expect(selectors['billing']).toEqual({ targets: ['test:billing-foundation'] });
+    expect(selectors['billing']).toEqual({ targets: ['test:billing-foundation'], pr: 'queue' });
     expect(plan?.run).toContain('billing=$(flag billing)');
     expect(plan?.run).toContain('echo "billing=$billing"');
     // Assembled so the source holds no template-like string literal.

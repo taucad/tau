@@ -53,12 +53,10 @@ import type { InterruptRequest, JsonValue } from '@taucad/agent-host';
 import { createNodeEventLog } from '@taucad/agent-host/node';
 import { createSandboxShellProvider } from '@taucad/native-process-core/shell';
 import type { ShellLaunch, ShellProvider } from '@taucad/native-process-core/shell';
+import { probeHostShell, shellLimits } from '@taucad/shell-service';
+import type { HostShell, PermissionMode, ShellCheckout, ShellInput, ShellOutput } from '@taucad/shell-service';
 
 import { createHostToolRegistry } from '#agent-tools.js';
-import { shellLimits } from '#shell/shell-contract.js';
-import type { PermissionMode, ShellInput, ShellOutput } from '#shell/shell-contract.js';
-import { probeHostShell } from '#shell/shell-service.js';
-import type { HostShell, ShellCheckout } from '#shell/shell-service.js';
 import { placementOver, scriptedTransport } from '#shell/tau-host.fixture.js';
 import type { ScriptedResponse } from '#shell/tau-host.fixture.js';
 import {
@@ -1810,20 +1808,21 @@ describe.runIf(enabled)('shell qualification', () => {
       expect(ok(outputs[2]).stdout.text).toBe('cube(1);\n');
       expect(ok(outputs[3]).stdout.text).toMatch(/summary Grow the part/u);
       expect(ok(outputs[4]).stdout.text).toBe('refs/heads/feature\nrefs/heads/main\nrefs/tags/v1\n');
-      /* Only the view's fresh config, the machine's own system config and the runtime's command line are read. */
+      /*
+       * Only the view's fresh config and the runtime's command line are read: never the real config, and never the
+       * machine's system config (Xcode's git bundles one with `credential.helper=osxkeychain`). The view's config holds
+       * the format settings the store has, which differ by platform (macOS adds `ignorecase` and `precomposeunicode`).
+       */
       const config = ok(outputs[5]).stdout.text;
       expect(config).not.toContain(secret);
       expect(config).not.toMatch(/remote\.|credential|extraheader|lfs\.url|origin/u);
       const sources = config
         .split('\n')
         .filter(Boolean)
-        .map((line) => line.split('\t')[0]);
-      expect(
-        sources.filter((source) => !/^(?:file:\/etc\/gitconfig|command line:)$/u.test(source ?? '')),
-      ).toStrictEqual([
-        expect.stringMatching(/^file:.*\/tau-shell-[^/]+\/git\/config$/u),
-        expect.stringMatching(/^file:.*\/tau-shell-[^/]+\/git\/config$/u),
-      ]);
+        .map((line) => line.split('\t')[0] ?? '');
+      const files = sources.filter((source) => source !== 'command line:');
+      expect(files.length).toBeGreaterThanOrEqual(2);
+      expect(files.filter((source) => !/^file:.*\/tau-shell-[^/]+\/git\/config$/u.test(source))).toStrictEqual([]);
       expect(ok(outputs[6]).stdout.text).toContain('E14-PAST-CHAT-STATE');
       const leaked = completed(outputs[7]);
       expect(`${leaked.stdout.text}${leaked.stderr.text}`).not.toContain(secret);
@@ -1854,7 +1853,7 @@ describe.runIf(enabled)('shell qualification', () => {
       const mebibytes = 256;
       const bytes = mebibytes * 1024 * 1024;
       const receipts = mkdtempSync(join(root, 's01-supervisor-resources-'));
-      const shellModule = createRequire(import.meta.url).resolve('@taucad/native-process-core/shell');
+      const shellModule = createRequire(import.meta.url).resolve('@taucad/sandbox/shell');
       const shellDirectory = join(dirname(shellModule), 'shell');
       const preload = pathToFileURL(join(shellDirectory, 'qualification-resource.fixture.ts'));
       preload.searchParams.set('directory', receipts);

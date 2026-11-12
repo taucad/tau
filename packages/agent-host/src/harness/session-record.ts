@@ -698,6 +698,8 @@ export function providerMessageToPi(
       model: typeof metadata.model === 'string' ? metadata.model : model.id,
       ...(typeof metadata.responseModel === 'string' ? { responseModel: metadata.responseModel } : {}),
       ...(typeof metadata.responseId === 'string' ? { responseId: metadata.responseId } : {}),
+      /* Pi-ai puts the level back in front of the reply when the model reads its effort from the transcript. */
+      ...(typeof metadata.reasoningLevel === 'string' ? { providerThinkingLevel: metadata.reasoningLevel } : {}),
       ...(Array.isArray(metadata.diagnostics)
         ? { diagnostics: metadata.diagnostics as AssistantMessage['diagnostics'] }
         : {}),

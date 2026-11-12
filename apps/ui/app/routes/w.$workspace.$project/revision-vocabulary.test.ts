@@ -121,13 +121,13 @@ describe('the Start version', () => {
     actor: 'You',
     turnId: undefined,
     conflicted: false,
-    trigger: undefined,
+    capture: undefined,
     ...over,
   });
 
   it('is titled Start, and a restore of it is Restored V1', () => {
     const start = card({ revisionId: 'r1', n: 1, start: 'created' });
-    const restore = card({ revisionId: 'r3', n: 3, trigger: 'restore', restoredFrom: 'r1' });
+    const restore = card({ revisionId: 'r3', n: 3, capture: 'restore', restoredFrom: 'r1' });
 
     expect(revisionTitle(start, [restore, start])).toBe('Start');
     expect(revisionTitle(restore, [restore, start])).toBe('Restored V1');

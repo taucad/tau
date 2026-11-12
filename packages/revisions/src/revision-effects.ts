@@ -1803,8 +1803,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       );
     }
     /* A complete feed keeps its own cursor, the paths it names; an index keeps this one. A capture
-     * from the feed leaves the cursor older than `last`, which only names more paths next time. */
-    if ((options.completeChanges === true || cursor !== undefined) && started > memos.lastCapture) {
+     * from the feed leaves the cursor older than `last`, which only names more paths next time.
+     * A fill's check is never `last`: its bytes carry no recorded id, so the next cut walks,
+     * reusing them from the memo, and offers them to an import's record (D12). */
+    if (
+      leavesRecords !== true &&
+      (options.completeChanges === true || cursor !== undefined) &&
+      started > memos.lastCapture
+    ) {
       memos.lastCapture = started;
       memos.last = heldTree(tree);
       memos.ignore =
@@ -2024,6 +2030,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         treeWrites.set(place.id, (treeWrites.get(place.id) ?? 0) + 1);
         /* The write owns its generation's word (`fillSoon`): no check meanwhile starts a second fill. */
         answeredFills.set(place.id, generationOf(place.id));
+        /* A retry for the old generation would do nothing: the new tree's fill speaks, and re-arms one if it throws. */
+        cancelFillRetry(place.id);
         largeObjects.forget(place.id);
       }
       return options.onApplyingTree?.(place, paths, bracket);
@@ -2107,12 +2115,70 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const answeredFills = new Map<string, number>();
   const checkingFills = new Set<string>();
   const resumeTimers = new Set<ReturnType<typeof setTimeout>>();
+  /* Checks in a row that threw, per checkout: the next one waits longer (L7). A check that answers clears it. */
+  const failedChecks = new Map<string, number>();
+  /* The one retry waiting per checkout: a failure re-arms it, so retries never multiply into parallel chains. */
+  const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let fillsStopped = false;
   const generationOf = (checkoutId: string): number => treeWrites.get(checkoutId) ?? 0;
+  const cancelFillRetry = (checkoutId: string): void => {
+    const timer = retryTimers.get(checkoutId);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      resumeTimers.delete(timer);
+      retryTimers.delete(checkoutId);
+    }
+  };
+  /* A check that answered: the backoff starts over and no retry is still waiting. */
+  const fillAnswered = (checkoutId: string): void => {
+    failedChecks.delete(checkoutId);
+    cancelFillRetry(checkoutId);
+  };
   const unanswerFill = (checkoutId: string): void => {
     if (answeredFills.get(checkoutId) === generationOf(checkoutId)) {
       answeredFills.delete(checkoutId);
     }
+  };
+  /*
+   * A check that threw is tried again on its own, live or linked, with backoff (L7; blueprint T3): readiness never
+   * waits on another path happening to meet the checkout. A newer tree write owns the next word, so a retry for an
+   * older generation does nothing.
+   */
+  const checkFillLater = (place: Checkout, generation: number): void => {
+    if (fillsStopped) {
+      return;
+    }
+    const failures = (failedChecks.get(place.id) ?? 0) + 1;
+    failedChecks.set(place.id, failures);
+    const wait = fillCheckRetryMilliseconds[Math.min(failures, fillCheckRetryMilliseconds.length) - 1];
+    cancelFillRetry(place.id);
+    const timer = setTimeout(() => {
+      resumeTimers.delete(timer);
+      retryTimers.delete(place.id);
+      if (generationOf(place.id) !== generation) {
+        return;
+      }
+      // async-iife: bootstrap -- a background retry; a listing that fails retries the checkout it had.
+      void (async (): Promise<void> => {
+        let current: Checkout | undefined = place;
+        try {
+          const places = await listPlaces('background');
+          current = places.find((candidate) => candidate.id === place.id);
+        } catch {
+          /* Not known to be gone: the check itself says whether it still fails. */
+        }
+        /* A checkout removed meanwhile ends its chain: no retry checks files that are gone. */
+        if (current === undefined) {
+          failedChecks.delete(place.id);
+          return;
+        }
+        if (generationOf(place.id) === generation) {
+          checkFill(current);
+        }
+      })();
+    }, wait); // Bound: fillCheckRetryMilliseconds.
+    resumeTimers.add(timer);
+    retryTimers.set(place.id, timer);
   };
   const checkFill = (place: Checkout): void => {
     if (fillsStopped || checkingFills.has(place.id) || answeredFills.get(place.id) === generationOf(place.id)) {
@@ -2133,17 +2199,46 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
           answeredFills.set(place.id, generation);
           await largeObjects.fill(place, head === undefined ? undefined : revisionId(head), placeholders);
+          fillAnswered(place.id);
         } catch (error) {
           if (answeredFills.get(place.id) === generation) {
             answeredFills.delete(place.id);
           }
           console.warn('[revisions] large-object placeholders could not be checked', error);
+          checkFillLater(place, generation);
         } finally {
           checkingFills.delete(place.id);
         }
       })();
     }, 0);
     resumeTimers.add(timer);
+  };
+  /*
+   * Tree writes running on each checkout, and the checkouts a Try again was pressed on meanwhile. The write's own
+   * fill gives its tree's word, so the press waits for the write: it checks again only when the write opened no new
+   * generation, or left the one it opened unanswered.
+   */
+  const runningTreeWrites = new Map<string, number>();
+  const retriesDuringWrite = new Set<string>();
+  const recheckFill = (place: Checkout): void => {
+    fillAnswered(place.id);
+    answeredFills.delete(place.id);
+    checkFill(place);
+  };
+  const endTreeWrite = (place: Checkout, generationBefore: number): void => {
+    const remaining = (runningTreeWrites.get(place.id) ?? 1) - 1;
+    if (remaining > 0) {
+      runningTreeWrites.set(place.id, remaining);
+      return;
+    }
+    runningTreeWrites.delete(place.id);
+    if (!retriesDuringWrite.delete(place.id)) {
+      return;
+    }
+    const generation = generationOf(place.id);
+    if (generation === generationBefore || answeredFills.get(place.id) !== generation) {
+      recheckFill(place);
+    }
   };
   /* A close: no fill starts again, and none is still writing when this resolves. */
   const stopFills = async (): Promise<void> => {
@@ -2152,6 +2247,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       clearTimeout(timer);
     }
     resumeTimers.clear();
+    retryTimers.clear();
     await largeObjects.stop();
   };
   /* As the root starts, every checkout: a reload may show any of them, live or linked. A
@@ -2266,15 +2362,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             return;
           }
           await largeObjects.fill(place, head === undefined ? undefined : revisionId(head), placeholders);
+          fillAnswered(place.id);
         } catch (error) {
-          /* Unanswered, so the checkout's next capture checks again: readiness never waits on a word nobody gives. */
+          /* Unanswered, and checked again with backoff: readiness never waits on a word nobody gives (L7). */
           if (answeredFills.get(place.id) === (writes ?? 0)) {
             answeredFills.delete(place.id);
           }
           console.warn('[revisions] large-object placeholders could not be checked', error);
+          checkFillLater(place, writes ?? 0);
         }
       })();
     };
+    runningTreeWrites.set(place.id, (runningTreeWrites.get(place.id) ?? 0) + 1);
     try {
       const answer = await materializeTree(place, built, { ...materialization, purpose: 'tree' });
       fillSoon(written);
@@ -2289,6 +2388,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         fillSoon(undefined);
       }
       throw error;
+    } finally {
+      endTreeWrite(place, generationBefore);
     }
   };
 
@@ -3541,9 +3642,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }),
         revisionId: to,
         revisionNumber: number,
-        /* Step 1 minted the files, so the head's tree is what they are. */
-        removedPathCount: ours.entries().filter(({ path }) => !merged.tree.has(path)).length,
-        dirty: false,
       };
     }
     const code: RestoreFailureCode = 'NOTHING_TO_UNDO';
@@ -4245,8 +4343,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       const place = await readPlaceOf(checkoutId);
       /* A checkout a failed write left torn is put back first, then its tree is given the fill's word (L5). */
       await repairTornCheckout(place);
-      answeredFills.delete(place.id);
-      checkFill(place);
+      /* During a tree write, the write's own fill answers; a second fill now would fetch the same objects again. */
+      if (runningTreeWrites.has(place.id)) {
+        retriesDuringWrite.add(place.id);
+        return;
+      }
+      recheckFill(place);
     },
     readEntryClosure: entryClosureOf,
     chatDevice: async () => {
@@ -4656,7 +4758,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             return planUndo(input.checkoutId, input.skip);
           }
           const place = await placeOf(input.checkoutId);
-          const head = await headOf(place);
           /* *Undo restore* is a restore of the restore row's first parent (D2). */
           const restored = input.firstParent === true ? await port.readRevision(revisionId(input.target)) : undefined;
           const target = input.firstParent === true ? restored?.parents[0] : input.target;
@@ -4666,18 +4767,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if ((await port.readRevision(revisionId(target))) === undefined) {
             throw new RevisionPortError('UNKNOWN_REVISION', `No recorded revision to restore: ${target}`);
           }
-          /* E5: the memoised capture, not a fresh one. Step 1 already minted
-           * what the checkout had (D1), so `dirty` here only asks for a
-           * confirmation; what protects the bytes is `applyPlan`'s `validate`,
-           * which proves the head again inside the fence before one is written. */
-          const live = await capture(place);
-          /* What the restore removes, by oid diff from the head the files equal (D10): no blob is read to count it. */
-          const changes = head === undefined ? [] : await port.diff({ from: revisionId(head), to: revisionId(target) });
-          const removed =
-            head === undefined
-              ? live.entries().map(({ path }) => path)
-              : changes.filter(({ kind }) => kind === 'deleted').map(({ path }) => path);
-          const headTreeId = await treeIdOf(head);
+          /* Nothing is asked here (I11): step 1 already minted what the checkout
+           * had (D1), and `applyPlan`'s `validate` proves the head again inside
+           * the fence before one byte is written. */
           return {
             /* D2's undo also records which restore it undid, so *Undo* (D15) passes over both. */
             planId: plans.put(input.checkoutId, {
@@ -4687,8 +4779,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             }),
             revisionId: target,
             revisionNumber: await ordinalOnLine(place, target),
-            removedPathCount: removed.length,
-            dirty: headTreeId !== (await checkoutTreeId(place.id, live)),
           };
         },
       ),
@@ -4815,6 +4905,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
          * this process can no longer reach (EQ7). */
         checkoutMemos.delete(input.id);
         swept.delete(input.id);
+        /* No retry checks a checkout that is gone, and a checkout of the same id later starts its backoff over. */
+        cancelFillRetry(input.id);
+        failedChecks.delete(input.id);
       }),
 
       /* A turn's retirement names its attempt and is checked like the turn's own; a run-only one drops the record. */
@@ -4835,33 +4928,21 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
      */
     branch: {
       /* D10, answered where the trees are. *Switch* into a branch that already
-       * has a checkout re-roots and asks nothing; into one that does not, the
-       * live tree is rewritten — so it asks exactly when that would throw away
-       * work no revision holds (A25). */
+       * has a checkout re-roots; into one that does not, the live tree is
+       * rewritten. Neither asks (I11): `branch.machine` records the live
+       * checkout's unsaved work on the branch it leaves before it moves. */
       checkBranch: fromAuthorityPromise<BranchCheckActorOutput, BranchCheckActorInput>(async ({ input }) => {
         await ensureStore();
         if (input.operation !== 'switch') {
-          return { needsConfirmation: false };
+          return {};
         }
         const places = await listPlaces();
         const linked = places.find((place) => place.branch === input.branch && place.kind === 'linked');
         if (linked !== undefined) {
-          return { needsConfirmation: false, checkoutId: linked.id, mode: 'reroot' };
+          return { checkoutId: linked.id, mode: 'reroot' };
         }
         const live = places.find((place) => place.kind === 'live');
-        if (live === undefined) {
-          return { needsConfirmation: false };
-        }
-        const headTreeId = await treeIdOf(await headOf(live));
-        const dirty = headTreeId !== (await checkoutTreeId(live.id, await captureFresh(live)));
-        return dirty
-          ? {
-              needsConfirmation: true,
-              question: 'The files you have open have changes that are not in a revision yet. Moving replaces them.',
-              checkoutId: live.id,
-              mode: 'applyToLive',
-            }
-          : { needsConfirmation: false, checkoutId: live.id, mode: 'applyToLive' };
+        return live === undefined ? {} : { checkoutId: live.id, mode: 'applyToLive' };
       }),
 
       /* Apply-to-live: the *other* half of one verb a person never
@@ -4890,7 +4971,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }
         /*
          * By oid diff from the checkout's head when the files are that head
-         * (D10); files the person agreed to replace are not, and until the
+         * (D10), which they are once `branch.machine`'s recording cut saved
+         * them (I11); files that changed since that cut are not, and until the
          * index knows which paths those are, the branch's whole tree is read
          * (its large objects from this store alone, for the fill).
          */
@@ -6623,6 +6705,11 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
   };
 };
 
+/**
+ * The waits before a fill check that threw runs again on its own, by failures in a row; the last repeats (L7). A
+ * check is a local scan, so the first wait is short; a transfer that fails has its own waits in the fill.
+ */
+const fillCheckRetryMilliseconds: readonly [number, ...number[]] = [500, 2000, 5000, 15_000, 30_000, 60_000];
 /* The stream tail is a zero-wait GET; do not let it hold the active pull. */
 const streamTailWaitMilliseconds = 2000;
 const nestedBoundMarginMilliseconds = 2000;

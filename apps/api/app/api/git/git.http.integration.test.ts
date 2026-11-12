@@ -1044,8 +1044,8 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
   it('backs up a version named with spaces, refuses another at its number, and backs up its rename', async () => {
     const clone = path.join(workspace, 'version-numbers');
     await gitOk(['clone', remoteFor(callers.writer.token), clone], workspace);
-    /** One annotated version tag on the clone's head, named `name`, made at `date`. */
-    const version = async (number: number, name: string, date: string): Promise<void> => {
+    /** One annotated version tag on the clone's head: version `id`, named `name`, made at `date`. */
+    const version = async (number: number, name: string, id: string, date: string): Promise<void> => {
       const outcome = await runGit(
         [
           'tag',
@@ -1055,7 +1055,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
           '-m',
           name,
           '-m',
-          `Tau-Tag: ${JSON.stringify({ version: 2, name })}`,
+          `Tau-Tag: ${JSON.stringify({ version: 2, id, name })}`,
         ],
         clone,
         { GIT_COMMITTER_DATE: date },
@@ -1063,31 +1063,40 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       expect(outcome.code, outcome.stderr).toBe(0);
     };
     const push = async (number: number) => runGit(['push', '--force', 'origin', `refs/tags/v${String(number)}`], clone);
-    const madeAt = '2026-11-12T10:00:00Z';
+    const ready = randomBytes(16).toString('hex');
+    const lid = randomBytes(16).toString('hex');
 
-    await version(4, 'Ready for print', madeAt);
+    await version(4, 'Ready for print', ready, '2026-11-12T10:00:00Z');
     const first = await push(4);
     expect(first.code, first.stderr).toBe(0);
 
-    /* Another device's version at the same number. */
-    await version(4, 'Lid fit', '2026-11-12T10:05:00Z');
+    /* Another device's version at the same number, made in the same second: another id. */
+    await version(4, 'Lid fit', lid, '2026-11-12T10:00:00Z');
     const taken = await push(4);
     expect(taken.code).not.toBe(0);
     expect(taken.stderr).toContain(`${versionNumberTakenMarker} — refs/tags/v4 names V4`);
     expect(taken.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
 
     /* The device's renumbered version: the next free number is backed up. */
-    await version(5, 'Lid fit', '2026-11-12T10:05:00Z');
+    await version(5, 'Lid fit', lid, '2026-11-12T10:05:00Z');
     const renumbered = await push(5);
     expect(renumbered.code, renumbered.stderr).toBe(0);
 
-    /* A rename keeps the entry and when it was made: the same ref takes the new name. */
-    await version(4, 'Ready for print, final', madeAt);
+    /* A rename keeps the version's id: the same ref takes the new name. */
+    await version(4, 'Ready for print, final', ready, '2026-11-12T10:10:00Z');
     const renamed = await push(4);
     expect(renamed.code, renamed.stderr).toBe(0);
+
+    /* A tag that is not a version never takes a number. */
+    const lightweight = await runGit(['tag', '--force', 'v6'], clone);
+    expect(lightweight.code, lightweight.stderr).toBe(0);
+    const refused = await push(6);
+    expect(refused.code).not.toBe(0);
+    expect(refused.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_TAG_INVALID);
     const advertisement = await advertised();
     expect(advertisement).toContain('refs/tags/v4');
     expect(advertisement).toContain('refs/tags/v5');
+    expect(advertisement).not.toContain('refs/tags/v6');
   }, 120_000);
 
   /** Ruling P55: an account with no relation to the project is told it does not exist. */

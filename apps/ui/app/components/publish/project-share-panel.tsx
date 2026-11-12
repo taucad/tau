@@ -814,9 +814,14 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
    * names, so nothing here waits.
    *
    * @param draft - Everything only a person decides.
+   * @param revisionId - The entry a republished version names, when this page knows it.
    */
-  const sendPublish = (draft: PublishDraft): void => {
-    commands.publishProject(draft.tag);
+  const sendPublish = (draft: PublishDraft, revisionId?: string): void => {
+    if (revisionId === undefined) {
+      commands.publishProject(draft.tag);
+    } else {
+      commands.publishProject(draft.tag, revisionId);
+    }
     commands.confirmPublish(draft);
   };
 
@@ -876,16 +881,22 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       return;
     }
 
+    /* The version itself, by number: the machine publishes its own entry under
+     * its stored name, so the publication's title never renames it (B6). */
     const number = versionNumberOfTag(publication.tag);
-    sendPublish({
-      tag: publishFacet.tags.find((version) => version.number === number)?.name ?? publication.title,
-      ...(number === undefined ? {} : { version: number }),
-      projectName,
-      entryPath,
-      visibility: publication.visibility,
-      title: publication.title,
-      ...(publication.description ? { description: publication.description } : {}),
-    });
+    const version = publishFacet.tags.find((candidate) => candidate.number === number);
+    sendPublish(
+      {
+        tag: version?.name ?? '',
+        ...(number === undefined ? {} : { version: number }),
+        projectName,
+        entryPath,
+        visibility: publication.visibility,
+        title: publication.title,
+        ...(publication.description ? { description: publication.description } : {}),
+      },
+      version?.revisionId,
+    );
   };
 
   return () => {

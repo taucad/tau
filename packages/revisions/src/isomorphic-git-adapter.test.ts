@@ -395,30 +395,30 @@ describe('isomorphic-git tag ref locking', () => {
       summary: { generated: 'First' },
     });
     const firstRevision = revisionId(first.commitId);
-    const second = await materializer.writeRevision({
-      parents: [firstRevision],
-      tree: tree('cube(2);\n'),
-      provenance,
-      summary: { generated: 'Second' },
-    });
-    await materializer.tag({ name: 'Base', revisionId: firstRevision, note: 'Local move', createdAt: 100 });
-    await materializer.tag({ number: 2, name: 'Fetched name', revisionId: firstRevision });
-    const previousTag = await materializer.readRef('refs/tags/v2');
-
-    delayTagWrite = true;
-    const materializing = materializer.updateRef({
-      name: 'refs/tags/v2',
-      expectedHead: previousTag,
-      head: revisionId(second.commitId),
-    });
-    await materializationReached.promise;
-    const moving = mover.tag({
-      number: 2,
-      name: 'Local rename',
+    const madeBy = { kind: 'user', id: 'user-fetched', name: 'Fetched Person' } as const;
+    const base = await materializer.tag({
+      name: 'Base',
       revisionId: firstRevision,
       note: 'Local move',
-      createdAt: 100,
+      actor: madeBy,
+      createdAt: 1_790_000_000_000,
     });
+    const baseTag = await materializer.readRef('refs/tags/v2');
+    /* The fetched version: V2 renamed elsewhere, still an annotated tag with the same id. */
+    await materializer.tag({ number: 2, name: 'Fetched name', revisionId: firstRevision });
+    const fetchedTag = await materializer.readRef('refs/tags/v2');
+    await storage.writeFile('.git/refs/tags/v2', encoder.encode(`${baseTag!}\n`));
+
+    /* A fetch materializing the fetched tag holds the ref's lock while it writes, as the adapter's fetch does. */
+    delayTagWrite = true;
+    const materializing = navigator.locks.request(
+      `tau:revision-ref:${storage.id}:.git:refs/tags/v2`,
+      { mode: 'exclusive' },
+      async () => filesystem.writeFile('.git/refs/tags/v2', encoder.encode(`${fetchedTag!}\n`)),
+    );
+    await materializationReached.promise;
+    /* No note, time or actor in: whatever the rename keeps comes from the version it finds. */
+    const moving = mover.tag({ number: 2, name: 'Local rename', revisionId: firstRevision });
     const beforeRelease = await Promise.race([
       moving.then(() => 'moved'),
       new Promise<'waiting'>((resolve) => {
@@ -431,8 +431,16 @@ describe('isomorphic-git tag ref locking', () => {
     await Promise.all([materializing, moving]);
 
     expect(beforeRelease).toBe('waiting');
-    expect(await mover.listTags()).toEqual([
-      expect.objectContaining({ number: 2, name: 'Local rename', revisionId: firstRevision, note: 'Local move' }),
+    expect(await mover.listTags()).toStrictEqual([
+      {
+        id: base.id,
+        number: 2,
+        name: 'Local rename',
+        revisionId: firstRevision,
+        note: 'Local move',
+        actor: madeBy,
+        createdAt: 1_790_000_000_000,
+      },
     ]);
     expect(new Set(requestedLocks.filter((name) => name.endsWith('refs/tags/v2')))).toEqual(
       new Set([`tau:revision-ref:${storage.id}:.git:refs/tags/v2`]),

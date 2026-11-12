@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
-import { createActor } from 'xstate';
+import { createActor, toPromise } from 'xstate';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
@@ -52,10 +52,11 @@ const temporaryRoot = async (label: string): Promise<string> => {
 };
 
 /*
- * Tau Cloud's rule, in a test's words: a version is `refs/tags/v<n>`, and a
- * push that creates a number the remote already holds, or replaces its tag
- * with another version's (another entry or creation time), is refused behind
- * the marker the client matches. A rename keeps both, so it passes.
+ * Tau Cloud's rule, in a test's words: only a version — an annotated tag with
+ * a `Tau-Tag` record carrying its id — may hold `refs/tags/v<n>`, and a push
+ * that creates a number the remote already holds, or replaces its tag with
+ * another version (another id), is refused behind the marker the client
+ * matches. A rename keeps the id, so it passes.
  */
 const versionNumberHook = `#!${process.execPath}
 'use strict';
@@ -64,12 +65,26 @@ const git = (args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
 const zero = /^0+$/;
 const pushed = require('node:fs').readFileSync(0, 'utf8').split('\\n').filter(Boolean).map((line) => line.split(' '));
 const held = new Set(git(['for-each-ref', '--format=%(refname)', 'refs/tags/']).split('\\n').filter(Boolean));
-const identity = (oid) => git(['cat-file', '-p', oid]).split('\\n\\n')[0].split('\\n').filter((line) => line.startsWith('object ') || line.startsWith('tagger ')).join('\\n');
+const idOf = (oid) => {
+  if (git(['cat-file', '-t', oid]) !== 'tag') return null;
+  const line = git(['cat-file', 'tag', oid]).split('\\n').findLast((candidate) => candidate.startsWith('Tau-Tag: '));
+  try {
+    const record = JSON.parse(line.slice('Tau-Tag: '.length));
+    return record.version === 2 && /^[0-9a-f]{32}$/.test(record.id) && record.name ? record.id : null;
+  } catch {
+    return null;
+  }
+};
 let refused = false;
 for (const [old, now, ref] of pushed) {
   const match = /^refs\\/tags\\/v([1-9][0-9]*)$/.exec(ref);
   if (match === null || zero.test(now)) continue;
-  const taken = match[1] === '1' || (zero.test(old) ? held.has(ref) : identity(old) !== identity(now));
+  if (idOf(now) === null) {
+    process.stderr.write('Tau: refused ' + ref + ' — a version tag must be an annotated tag with its Tau-Tag record.\\n');
+    refused = true;
+    continue;
+  }
+  const taken = match[1] === '1' || (zero.test(old) ? held.has(ref) : idOf(old) === null || idOf(old) !== idOf(now));
   if (taken) {
     process.stderr.write(${JSON.stringify(versionNumberTakenMarker)} + ' — ' + ref + ' names V' + match[1] + ': another version already holds its number.\\n');
     refused = true;
@@ -115,7 +130,16 @@ const legs: readonly Leg[] = [
 const device = async (leg: Leg, label: string, remoteUrl: string) => {
   const root = await temporaryRoot(label);
   const filesystem: RevisionFileSystem = new NodeFsProvider(root);
-  const port = leg.port(root, filesystem, remoteUrl);
+  const leggedPort = leg.port(root, filesystem, remoteUrl);
+  /* Every ref each push offered, in order, so a row can say what a retry carried. */
+  const offers: string[][] = [];
+  const port: RevisionPort = {
+    ...leggedPort,
+    push: async (input) => {
+      offers.push(input.refs.map((ref) => ref.name));
+      return leggedPort.push(input);
+    },
+  };
   await port.init({ author });
   await port.setRemote({ name: 'tau', url: remoteUrl });
   const actors = createRevisionActors({
@@ -167,7 +191,7 @@ const device = async (leg: Leg, label: string, remoteUrl: string) => {
     const tags = await port.listTags();
     return Object.fromEntries(tags.map((tag) => [tag.name, tag.number]));
   };
-  return { port, sync, said, numbers };
+  return { port, actors, sync, said, numbers, offers };
 };
 
 describe.runIf(gitToolchainOnPath).each(legs)('version numbers across two devices — $name', (leg) => {
@@ -199,12 +223,14 @@ describe.runIf(gitToolchainOnPath).each(legs)('version numbers across two device
         note: 'Hinge',
         createdAt: 1000,
       });
+      /* The same entry in the same second: only the id tells the two versions apart (R1). */
       const lid = await two.port.tag({
         name: 'Lid fit',
         revisionId: revisionId(head),
         note: 'Lid fit',
-        createdAt: 2000,
+        createdAt: 1000,
       });
+      expect(lid.id).not.toBe(hinge.id);
       expect([hinge.number, lid.number]).toStrictEqual([2, 2]);
 
       /* A backs up first and keeps V2. */
@@ -212,7 +238,12 @@ describe.runIf(gitToolchainOnPath).each(legs)('version numbers across two device
       expect(one.said).toStrictEqual([]);
 
       /* B's V2 is refused as taken: it becomes V3, is backed up, and B says so once. */
+      const offeredBefore = two.offers.length;
       await two.sync(head);
+      /* The retry offers the moved version at V3 and no longer offers its old ref (R5). */
+      const retry = two.offers.slice(offeredBefore).find((names) => names.includes('refs/tags/v3'));
+      expect(retry).toBeDefined();
+      expect(retry).not.toContain('refs/tags/v2');
       expect(two.said).toStrictEqual([
         { type: 'versionsRenumbered', renumbered: [{ name: 'Lid fit', from: 2, to: 3 }] },
       ]);
@@ -240,6 +271,118 @@ describe.runIf(gitToolchainOnPath).each(legs)('version numbers across two device
       await two.sync(undefined);
       expect(await two.numbers()).toStrictEqual({ 'Hinge pin, final': 2, 'Lid fit': 3 });
       expect(two.said).toHaveLength(1);
+
+      /* Both rename V2 at once, and A backs up first: B's rename is refused, the remote's name
+       * wins on B, and B never offers its own again under the lease it then holds (R4). */
+      await one.port.tag({ number: 2, name: 'Hinge pin, A', revisionId: revisionId(head) });
+      await two.port.tag({ number: 2, name: 'Hinge pin, B', revisionId: revisionId(head) });
+      await one.sync(head);
+      await two.sync(head);
+      expect(await two.numbers()).toStrictEqual({ 'Hinge pin, A': 2, 'Lid fit': 3 });
+      await two.sync(head);
+      expect(await remote.git(['cat-file', 'tag', 'refs/tags/v2'])).toContain('"name":"Hinge pin, A"');
+      expect(await two.numbers()).toStrictEqual({ 'Hinge pin, A': 2, 'Lid fit': 3 });
+      expect(two.said).toHaveLength(1);
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  it('finishes a move that stopped after its new tag was written, and takes no other number (R6)', async () => {
+    const remoteRoot = await temporaryRoot('remote-r6');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    const hook = join(remote.repositoryPath, 'hooks', 'pre-receive');
+    await writeFile(hook, versionNumberHook);
+    await chmod(hook, 0o755);
+    try {
+      const one = await device(leg, 'r6a', remote.url);
+      const receipt = await one.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([['lid.scad', encoder.encode('cube(10);\n')]]),
+        provenance: { source: 'user', ...recordedBy('actor-b6'), createdAt: Date.UTC(2026, 10, 11, 9, 0, 0) },
+        summary: { generated: 'Lid' },
+      });
+      const head = receipt.commitId;
+      await one.port.updateRef({ name: mainRef, expectedHead: undefined, head: revisionId(head) });
+      await one.sync(head);
+      const two = await device(leg, 'r6b', remote.url);
+      await two.sync(undefined);
+
+      /* B names V2 offline; A backs up its own V2 first. */
+      const lid = await two.port.tag({ name: 'Lid fit', revisionId: revisionId(head), createdAt: 2000 });
+      await one.port.tag({ name: 'Hinge pin', revisionId: revisionId(head), createdAt: 1000 });
+      await one.sync(head);
+      /* B's earlier move to V3 wrote the new tag and stopped before V2 was let go. */
+      await two.port.tag({
+        id: lid.id,
+        number: 3,
+        name: lid.name,
+        revisionId: lid.revisionId,
+        createdAt: lid.createdAt,
+      });
+
+      await two.sync(head);
+      expect(await two.numbers()).toStrictEqual({ 'Hinge pin': 2, 'Lid fit': 3 });
+      const listed = await two.port.listTags();
+      expect(listed.find((tag) => tag.number === 3)?.id).toBe(lid.id);
+      expect(await remote.git(['for-each-ref', '--format=%(refname)', 'refs/tags/'])).toBe(
+        'refs/tags/v2\nrefs/tags/v3',
+      );
+      expect(two.said).toStrictEqual([
+        { type: 'versionsRenumbered', renumbered: [{ name: 'Lid fit', from: 2, to: 3 }] },
+      ]);
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  it('gives a rename the remote refused back to the remote, and never offers it again (R4)', async () => {
+    const remoteRoot = await temporaryRoot('remote-r4');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    const hook = join(remote.repositoryPath, 'hooks', 'pre-receive');
+    await writeFile(hook, versionNumberHook);
+    await chmod(hook, 0o755);
+    try {
+      const one = await device(leg, 'r4a', remote.url);
+      const receipt = await one.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([['lid.scad', encoder.encode('cube(10);\n')]]),
+        provenance: { source: 'user', ...recordedBy('actor-b6'), createdAt: Date.UTC(2026, 10, 11, 9, 0, 0) },
+        summary: { generated: 'Lid' },
+      });
+      const head = receipt.commitId;
+      await one.port.updateRef({ name: mainRef, expectedHead: undefined, head: revisionId(head) });
+      await one.port.tag({ name: 'Base cut', revisionId: revisionId(head) });
+      await one.sync(head);
+      const two = await device(leg, 'r4b', remote.url);
+      await two.sync(undefined);
+      expect(await two.numbers()).toStrictEqual({ 'Base cut': 2 });
+
+      /* A renames V2 and backs it up; B renames it too and pushes without fetching first. */
+      await one.port.tag({ number: 2, name: 'From A', revisionId: revisionId(head) });
+      await one.sync(head);
+      await two.port.tag({ number: 2, name: 'From B', revisionId: revisionId(head) });
+      const offeredBefore = two.offers.length;
+      const pushed = await toPromise(
+        createActor(two.actors.sync.push, {
+          input: { remote: 'tau', branch: 'main', leases: { [mainRef]: head } },
+        }).start(),
+      );
+
+      /* The remote's name won on B, nothing B renamed reached the remote, and the retry did not offer V2. */
+      expect(pushed.refs).toContainEqual(expect.objectContaining({ name: 'refs/tags/v2', status: 'upToDate' }));
+      expect(await two.numbers()).toStrictEqual({ 'From A': 2 });
+      expect(await remote.git(['cat-file', 'tag', 'refs/tags/v2'])).toContain('"name":"From A"');
+      const offered = two.offers.slice(offeredBefore);
+      expect(offered[0]).toContain('refs/tags/v2');
+      for (const retry of offered.slice(1)) {
+        expect(retry).not.toContain('refs/tags/v2');
+      }
+
+      /* And a later sync on B leaves A's name alone. */
+      await two.sync(head);
+      expect(await remote.git(['cat-file', 'tag', 'refs/tags/v2'])).toContain('"name":"From A"');
+      expect(two.said).toStrictEqual([]);
     } finally {
       await remote.close();
     }

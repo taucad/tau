@@ -5862,28 +5862,56 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               taken = error;
               return undefined;
             });
+            /* A rename the remote refused because another device renamed the
+             * same version first: the remote's name wins (Revisions Policy
+             * rule 19), and it is never offered again under a refreshed lease. */
+            const lostRenames = (pushed?.refs ?? []).flatMap((entry) => {
+              const number =
+                entry.status === 'rejected' && entry.reason === 'leaseLost'
+                  ? versionNumberOfTag(entry.name)
+                  : undefined;
+              return number === undefined ? [] : [number];
+            });
+            let adopted: readonly SyncRefOutcome[] = [];
             if (
               taken !== undefined ||
-              pushed?.refs.some(
-                (entry) =>
-                  entry.status === 'rejected' &&
-                  (isVersionNumberRefusal(entry.reason) ||
-                    (entry.reason === 'leaseLost' && versionNumberOfTag(entry.name) !== undefined)),
-              ) === true
+              lostRenames.length > 0 ||
+              pushed?.refs.some((entry) => entry.status === 'rejected' && isVersionNumberRefusal(entry.reason)) === true
             ) {
-              renumbered = await renumberUnpushedVersions(port, { remote: input.remote, signal });
-              if (renumbered.length > 0) {
-                for (const tag of await port.listRefs('refs/tags')) {
-                  localHeads.set(tag.name, String(tag.head));
-                }
-                leasedTags = leasesOf(await port.listRefs(trackedTags));
+              renumbered = await renumberUnpushedVersions(port, { remote: input.remote, adopt: lostRenames, signal });
+              const [localTags, trackedNow] = await Promise.all([
+                port.listRefs('refs/tags'),
+                port.listRefs(trackedTags),
+              ]);
+              for (const tag of localTags) {
+                localHeads.set(tag.name, String(tag.head));
+              }
+              leasedTags = leasesOf(trackedNow);
+              const local = new Map(localTags.map((tag) => [tag.name, String(tag.head)] as const));
+              /* A lost rename that now holds the remote's own tag has nothing left to offer. */
+              adopted = lostRenames
+                .map((number) => versionTagRef(number))
+                .filter((name) => local.has(name) && local.get(name) === leasedTags[name])
+                .map((name): SyncRefOutcome => Object.freeze({ name, status: 'upToDate', head: leasedTags[name] }));
+              const settled = new Set([
+                ...adopted.map((entry) => entry.name),
+                /* A moved version's old ref is gone here, or the remote's again. */
+                ...renumbered.map((step) => versionTagRef(step.from)),
+              ]);
+              if (renumbered.length > 0 || adopted.length > 0) {
                 /* A moved version is at a ref the first offer did not name. */
-                offeredHistory = [...offeredHistory, ...renumbered.map((step) => versionTagRef(step.to))];
-                pushed = await offerHistory({});
+                offeredHistory = [
+                  ...new Set([
+                    ...offeredHistory.filter((name) => !settled.has(name)),
+                    ...renumbered.map((step) => versionTagRef(step.to)),
+                  ]),
+                ];
+                pushed = offeredHistory.length === 0 ? { refs: [] } : await offerHistory({});
               } else if (pushed === undefined) {
                 throw taken;
               }
             }
+            results.push(...adopted);
             results.push(...(pushed?.refs ?? []).map((entry) => outcomeOf(entry, localHeads)));
           } catch (error) {
             /* A refusal of the whole push — a credential, a plan, a missing

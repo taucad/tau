@@ -515,6 +515,12 @@ export type ConflictRecord = Readonly<{
  */
 export type RevisionTag = Readonly<{
   /**
+   * Its identity: random, minted when the version is made and kept by a
+   * rename or a move to another number. Two versions are the same version
+   * exactly when their ids are equal (`isSameVersion`).
+   */
+  id: string;
+  /**
    * Its number, `V<n>`, once per project (blueprint B6), and its ref,
    * `refs/tags/v<n>`. V1 is the Start entry, which has no tag, so a tag's
    * number is 2 or more.
@@ -556,11 +562,18 @@ export type CreateRevisionTagInput = Readonly<{
   note?: string;
   actor?: RevisionActor;
   /**
-   * The version's number. Absent, this is a new version and takes the highest
-   * known plus one. A number that already names a version renames it: it keeps
-   * its entry, creation time and actor (`versionTagWrite`).
+   * The version's number, 2 or more. Absent, this is a new version and takes
+   * the lowest number above every `refs/tags/v<n>` this store holds, version
+   * or not. A number that already names a version renames it: it keeps its
+   * id, entry, creation time and actor (`versionTagWrite`). A number another
+   * tag holds that is not a version is refused.
    */
   number?: number;
+  /**
+   * The version's id. Only a move to another number passes it, so the moved
+   * version stays the same version; a new version mints its own.
+   */
+  id?: string;
   /** Milliseconds since the Unix epoch. Defaults to the store's clock. */
   createdAt?: number;
 }>;
@@ -757,7 +770,11 @@ export type RevisionPort = Readonly<{
    * in the pane is this, and keeps the number (Q13).
    */
   tag(input: CreateRevisionTagInput): Promise<RevisionTag>;
-  /** Every version in this store, or in a remote's tracking refs, lowest number first. */
+  /**
+   * Every version in this store, or in a remote's tracking refs, lowest
+   * number first. A `refs/tags/v<n>` that is not an annotated tag with a valid
+   * `Tau-Tag` record is not listed, but it still holds its number.
+   */
   listTags(input?: ListRevisionTagsInput): Promise<readonly RevisionTag[]>;
   /**
    * Remove this store's tag for one number. Only renumbering uses it: a

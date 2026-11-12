@@ -1874,14 +1874,19 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }
     },
     changed,
-    tag: async (input) =>
-      options.port.tag({
+    tag: async (input) => {
+      const written = await options.port.tag({
         name: input.name,
         revisionId: revisionId(input.revisionId),
         ...(input.note === undefined ? {} : { note: input.note }),
         ...(input.number === undefined ? {} : { number: input.number }),
         ...(person === undefined ? {} : { actor: person }),
-      }),
+      });
+      /* A new version or a rename is owed to the remote like any record: the
+       * next push carries its tag, even when no revision is made after it (B6). */
+      actor.send({ type: 'sync', event: { type: 'recordsChanged' } });
+      return written;
+    },
     log: async (request) => readRevisionLog(options.port, request),
     divergence: async (head, base) => options.port.divergence({ head: revisionId(head), base: revisionId(base) }),
     diff: async (revision, from, compareOptions) => {

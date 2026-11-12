@@ -309,6 +309,9 @@ export const versionNumberRefusals = {
   /** Another version on Tau Cloud already holds the number, or it is V1, which Start holds. */
   GIT_PUSH_VERSION_NUMBER_TAKEN:
     'another version already holds its number. Tau gives a version that is not backed up yet the next free number and backs it up again.',
+  /** The ref is a version's, but what it names is not a version: not an annotated tag with a valid Tau-Tag record. */
+  GIT_PUSH_VERSION_TAG_INVALID:
+    'a version tag must be an annotated tag with its Tau-Tag record. Only Tau writes version tags at refs/tags/v<number>.',
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- end of the refusal codes */
 
@@ -323,14 +326,20 @@ export type VersionNumberRefusal = keyof typeof versionNumberRefusals;
  * quarantine is visible to it) so the program spawns nothing; an object
  * missing from stdin is a refusal.
  *
- * The number is the ref's, so a pushed `refs/tags/v<n>` is refused
+ * Only a version may hold `refs/tags/v<n>`: an annotated tag whose message
+ * ends in a valid `Tau-Tag` record (`{ version: 2, id, name, … }`). Anything
+ * else there — a lightweight tag, a tag another tool wrote, a record without
+ * its id — is `GIT_PUSH_VERSION_TAG_INVALID`, because once it landed it would
+ * hold a number no reader can show and no push can clear.
+ *
+ * The number is the ref's, so a pushed version is refused
  * (`GIT_PUSH_VERSION_NUMBER_TAKEN`, printed after the fixed marker the client
  * matches) when:
  *
  * - `n` is 1, which Start holds;
  * - it creates a number Tau Cloud already holds;
- * - it replaces the tag there with another version's: a tag naming another
- *   object, or made by another tagger at another time. A rename keeps both
+ * - it replaces the tag there with another version: a record with another
+ *   `id`, or anything over a tag that is not a version. A rename keeps the id
  *   and passes, so a backed-up number never changes (I6).
  *
  * An object that cannot be read is `GIT_PUSH_RECORD_UNREADABLE`. A tag under
@@ -357,7 +366,41 @@ try {
       held.add(line.slice(space + 1));
     }
   }
-  const identities = new Map();
+  const trailerPrefix = 'Tau-Tag: ';
+  const versionId = /^[0-9a-f]{32}$/;
+  /* A version's id, or null for an object that is not a version. */
+  const versionOf = (type, body) => {
+    if (type !== 'tag') {
+      return null;
+    }
+    const split = body.indexOf('\n\n');
+    const lines = (split === -1 ? '' : body.slice(split + 2)).split('\n');
+    let line;
+    for (const candidate of lines) {
+      if (candidate.startsWith(trailerPrefix)) {
+        line = candidate;
+      }
+    }
+    if (line === undefined) {
+      return null;
+    }
+    let record;
+    try {
+      record = JSON.parse(line.slice(trailerPrefix.length));
+    } catch {
+      return null;
+    }
+    return record !== null &&
+      typeof record === 'object' &&
+      record.version === 2 &&
+      typeof record.id === 'string' &&
+      versionId.test(record.id) &&
+      typeof record.name === 'string' &&
+      record.name.length > 0
+      ? record.id
+      : null;
+  };
+  const versions = new Map();
   const batch = require('node:fs').readFileSync(0);
   {
     let offset = 0;
@@ -370,13 +413,7 @@ try {
       const size = Number(header[2]);
       const body = batch.toString('utf8', end + 1, end + 1 + size);
       offset = end + 2 + size;
-      if (header[1] !== 'tag') {
-        identities.set(header[0], header[1] + ' ' + header[0]);
-        continue;
-      }
-      const split = body.indexOf('\n\n');
-      const lines = (split === -1 ? body : body.slice(0, split)).split('\n');
-      identities.set(header[0], lines.filter((line) => line.startsWith('object ') || line.startsWith('tagger ')).join('\n'));
+      versions.set(header[0], versionOf(header[1], body));
     }
   }
   const refused = [];
@@ -388,10 +425,14 @@ try {
     if (match === null) {
       continue;
     }
-    const before = zero.test(old) ? undefined : identities.get(old);
-    if (!identities.has(now) || (!zero.test(old) && before === undefined)) {
+    if (!versions.has(now) || (!zero.test(old) && !versions.has(old))) {
       refused.push('Tau: refused ' + ref + ' — ' + refusals.GIT_PUSH_RECORD_UNREADABLE);
-    } else if (match[1] === '1' || (before === undefined ? held.has(ref) : before !== identities.get(now))) {
+    } else if (versions.get(now) === null) {
+      refused.push('Tau: refused ' + ref + ' — ' + refusals.GIT_PUSH_VERSION_TAG_INVALID);
+    } else if (
+      match[1] === '1' ||
+      (zero.test(old) ? held.has(ref) : versions.get(old) === null || versions.get(old) !== versions.get(now))
+    ) {
       refused.push(marker + ' — ' + ref + ' names V' + match[1] + ': ' + refusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
     }
   }

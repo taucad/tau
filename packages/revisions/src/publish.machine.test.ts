@@ -57,6 +57,7 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
 
 /* V2, on the older revision; the remote holds its tag object `tag-v2` (B6). */
 const tagV2: RevisionTag = {
+  id: '2'.repeat(32),
   number: 2,
   name: 'Ready for print',
   revisionId: revisionId('rev-1'),
@@ -168,6 +169,7 @@ const start = (
   const actors: PublishActors = {
     listVersions: versions(head),
     createTag: record<RevisionTag, PublishTagActorInput>('createTag', (input) => ({
+      id: '3'.repeat(32),
       number: input.number ?? 3,
       name: input.name,
       revisionId: revisionId(input.revisionId),
@@ -483,17 +485,75 @@ describe('publishMachine', () => {
     actor.stop();
   });
 
-  it('19: renames the version the person picked, at its own ref (B6)', async () => {
-    const { actor, calls } = start();
+  it('19: republishes the version picked by number on its own entry, under its stored name (R8)', async () => {
+    const { actor, calls, emitted } = start();
 
-    actor.send({ type: 'publish', requestId: 'pub-1', revisionId: 'rev-1' });
+    /* Opened on the branch head, rev-2, with the publication's title as the draft's name. */
+    actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
-    actor.send({ type: 'confirm', draft: { ...draft, tag: 'Final fit', version: 2 } });
+    actor.send({ type: 'confirm', draft: { ...draft, tag: 'Demo', version: 2 } });
     await settle();
 
-    expect(calls[0]?.input).toStrictEqual({ name: 'Final fit', revisionId: 'rev-1', number: 2 });
+    /* V2 names rev-1 and is called "Ready for print": neither the head nor the title changes it. */
+    expect(calls[0]?.input).toStrictEqual({ name: 'Ready for print', revisionId: 'rev-1', number: 2 });
     expect(calls.find((call) => call.name === 'push')?.input).toMatchObject({ tag: 'v2', expectedTag: 'tag-v2' });
-    expect(calls.find((call) => call.name === 'createPublication')?.input).toMatchObject({ tag: 'v2' });
+    expect(calls.find((call) => call.name === 'createPublication')?.input).toMatchObject({
+      tag: 'v2',
+      revisionId: 'rev-1',
+    });
+    expect(emitted).toContainEqual(expect.objectContaining({ type: 'published', tag: 'v2' }));
+    actor.stop();
+  });
+
+  it('19: republishes by number when the confirm arrives before the names were read (R8)', async () => {
+    const settler = Promise.withResolvers<PublishVersionsActorOutput>();
+    const { actor, calls } = start({ listVersions: createAsyncLogic({ run: async () => settler.promise }) });
+
+    actor.send({ type: 'publish', requestId: 'pub-1' });
+    actor.send({ type: 'confirm', draft: { ...draft, tag: '', version: 2 } });
+    settler.resolve(head);
+    await settle();
+
+    expect(calls[0]?.input).toStrictEqual({ name: 'Ready for print', revisionId: 'rev-1', number: 2 });
+    expect(actor.getSnapshot().matches('success')).toBe(true);
+    actor.stop();
+  });
+
+  it('19: refuses to republish a version this device does not hold, rather than make another (R8)', async () => {
+    const { actor, calls, emitted } = start();
+
+    actor.send({ type: 'publish', requestId: 'pub-1' });
+    await settle();
+    actor.send({ type: 'confirm', draft: { ...draft, tag: 'Demo', version: 7 } });
+    await settle();
+
+    expect(actor.getSnapshot().matches('error')).toBe(true);
+    expect(calls).toStrictEqual([]);
+    expect(emitted).toContainEqual(expect.objectContaining({ type: 'toast.error' }));
+    actor.stop();
+  });
+
+  it('20: publishes the number the push backed the version up at, after a renumbering (R7)', async () => {
+    const { actor, calls, emitted } = startPushing();
+
+    /* The push moved V3 to V4 before its backup; the settlement follows. */
+    actor.send({ type: 'versionsRenumbered', renumbered: [{ name: 'Lid fit', from: 3, to: 4 }] });
+    actor.send({ type: 'pushSettled', pushId: 'push-1', outcome: 'backedUp' });
+    await settle();
+
+    expect(calls.find((call) => call.name === 'createPublication')?.input).toMatchObject({ tag: 'v4' });
+    expect(emitted).toContainEqual(expect.objectContaining({ type: 'published', tag: 'v4' }));
+    actor.stop();
+  });
+
+  it('20: keeps its number when the renumbering moved another version (R7)', async () => {
+    const { actor, calls } = startPushing();
+
+    actor.send({ type: 'versionsRenumbered', renumbered: [{ name: 'Hinge', from: 5, to: 6 }] });
+    actor.send({ type: 'pushSettled', pushId: 'push-1', outcome: 'backedUp' });
+    await settle();
+
+    expect(calls.find((call) => call.name === 'createPublication')?.input).toMatchObject({ tag: 'v3' });
     actor.stop();
   });
 

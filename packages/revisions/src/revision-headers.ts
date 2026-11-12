@@ -280,30 +280,32 @@ export const taggerSignature = (actor: RevisionActor | undefined, createdAt: num
 /** A named version's own metadata, as its annotated tag carries it (S31). @public */
 export type RevisionTagTrailer = Readonly<{
   /**
+   * The version's identity: 32 random lowercase hex digits, minted when the
+   * version is made and kept by a rename or a move to another number. Two
+   * versions made on two devices differ here even on the same entry in the
+   * same second, which is what Tau Cloud and renumbering compare.
+   */
+  id: string;
+  /**
    * The version's name, free text such as "Ready for print". The ref is
    * `refs/tags/v<number>` (`versionTagRef`), so the name is read from here and
-   * never from the ref. `undefined` only for a lightweight tag, which has no
-   * message.
+   * never from the ref.
    */
-  name: string | undefined;
+  name: string;
   note: string | undefined;
   actor: RevisionActor | undefined;
 }>;
 
+/** What a version id looks like: 16 random bytes as lowercase hex. @public */
+export const versionIdPattern = /^[\da-f]{32}$/u;
+
 const tagTrailerSchema = z.object({
   version: z.literal(2),
+  id: z.string().regex(versionIdPattern),
   name: z.string().min(1),
   note: z.string().optional(),
   actor: actorSchema.optional(),
 });
-
-const unnamedTagTrailer: RevisionTagTrailer = Object.freeze({ name: undefined, note: undefined, actor: undefined });
-
-/* A message's first line, as `git tag -n` shows it: the name of a tag Tau did not write. */
-const subjectOf = (message: string): string | undefined => {
-  const subject = message.split('\n', 1)[0]?.trim() ?? '';
-  return subject === '' ? undefined : subject;
-};
 
 /**
  * Build an annotated tag's message: the note (or the name), then the machine trailer.
@@ -312,14 +314,15 @@ const subjectOf = (message: string): string | undefined => {
  * shows the note, and Tau reads the trailer. The number is the ref's, so the
  * trailer does not repeat it.
  *
- * @param input - The name and what is recorded about it.
+ * @param input - The version's identity, its name and what is recorded about it.
  * @returns The exact tag message bytes both adapters write.
  * @public
  */
-export const revisionTagMessage = (input: Readonly<{ name: string }> & Omit<RevisionTagTrailer, 'name'>): string => {
+export const revisionTagMessage = (input: RevisionTagTrailer): string => {
   const title = (input.note ?? input.name).replaceAll(/[\n\r]+/gu, ' ').trim();
   const trailer = JSON.stringify({
     version: 2,
+    id: input.id,
     name: input.name,
     ...(input.note === undefined ? {} : { note: input.note }),
     ...(input.actor === undefined ? {} : { actor: input.actor }),
@@ -328,29 +331,34 @@ export const revisionTagMessage = (input: Readonly<{ name: string }> & Omit<Revi
 };
 
 /**
- * Recover a named version's name, note and actor from its tag message.
+ * Recover a version's identity, name, note and actor from its tag message.
+ *
+ * Only a tag with a valid `Tau-Tag` record is a version (I7: there is no
+ * reader for any other shape). A tag Tau did not write, a record without an
+ * `id` and a lightweight tag all answer `undefined`: such a tag still holds
+ * its number, but it is not a version.
  *
  * @param message - Full tag message, or `undefined` for a lightweight tag.
- * @returns The trailer. A tag Tau did not write is named by its message's
- *   first line and has no note or actor; a lightweight tag has nothing.
+ * @returns The trailer, or `undefined` when the tag is not a version.
  * @public
  */
-export const parseRevisionTagMessage = (message: string | undefined): RevisionTagTrailer => {
-  if (message === undefined) {
-    return unnamedTagTrailer;
+export const parseRevisionTagMessage = (message: string | undefined): RevisionTagTrailer | undefined => {
+  const line = message?.split('\n').findLast((candidate) => candidate.startsWith(tagTrailerPrefix));
+  if (line === undefined) {
+    return undefined;
   }
-  const line = message.split('\n').findLast((candidate) => candidate.startsWith(tagTrailerPrefix));
   let parsed: unknown;
   try {
-    parsed = line === undefined ? undefined : JSON.parse(line.slice(tagTrailerPrefix.length));
+    parsed = JSON.parse(line.slice(tagTrailerPrefix.length));
   } catch {
-    parsed = undefined;
+    return undefined;
   }
   const result = tagTrailerSchema.safeParse(parsed);
   if (!result.success) {
-    return Object.freeze({ name: subjectOf(message), note: undefined, actor: undefined });
+    return undefined;
   }
   return Object.freeze({
+    id: result.data.id,
     name: result.data.name,
     note: result.data.note,
     actor: result.data.actor === undefined ? undefined : Object.freeze(result.data.actor),

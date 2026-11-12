@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import process from 'node:process';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -1061,20 +1062,28 @@ describe('pre-receive version-number check (B6)', () => {
     git('init', '--quiet', '--initial-branch=main', '.');
     git('commit', '--quiet', '--allow-empty', '-m', 'base');
     const base = git('rev-parse', 'HEAD');
-    /** One annotated version tag on the base commit named `name`, by a tagger at `seconds`. */
-    const tag = async (ref: string, name: string, seconds = 1_790_000_000): Promise<string> => {
+    /**
+     * One annotated tag on the base commit named `name`: a version with `id`,
+     * by a tagger at `seconds`. `record` replaces the whole `Tau-Tag` record,
+     * and `null` leaves the trailer out.
+     */
+    const tag = async (
+      ref: string,
+      name: string,
+      options: Readonly<{ id?: string; seconds?: number; record?: unknown }> = {},
+    ): Promise<string> => {
       const file = path.join(fixture, '.git', `tag-${String(Math.random()).slice(2)}`);
+      const record = 'record' in options ? options.record : { version: 2, id: options.id ?? versionId(), name };
       await writeFile(
         file,
         [
           `object ${base}`,
           'type commit',
           `tag ${ref}`,
-          `tagger Someone <${pusher}@users.noreply.tau.new> ${String(seconds)} +0000`,
+          `tagger Someone <${pusher}@users.noreply.tau.new> ${String(options.seconds ?? 1_790_000_000)} +0000`,
           '',
           name,
-          '',
-          `Tau-Tag: ${JSON.stringify({ version: 2, name })}`,
+          ...(record === null ? [] : ['', `Tau-Tag: ${JSON.stringify(record)}`]),
           '',
         ].join('\n'),
         'utf8',
@@ -1106,15 +1115,18 @@ describe('pre-receive version-number check (B6)', () => {
           resolve({ code: code ?? undefined, stderr: Buffer.concat(stderr).toString('utf8') });
         });
       });
-    return { git, tag, push, dispose: async () => rm(fixture, { recursive: true, force: true }) };
+    return { git, base, tag, push, dispose: async () => rm(fixture, { recursive: true, force: true }) };
   };
+
+  /** A fresh version id: 16 random bytes as lowercase hex, as Tau mints them. */
+  const versionId = (): string => randomBytes(16).toString('hex');
 
   it('refuses a new version at a number Tau Cloud holds, behind the marker the client matches', async () => {
     const repository = await versionRepository();
     onTestFinished(repository.dispose);
     repository.git('update-ref', 'refs/tags/v4', await repository.tag('v4', 'Hinge'));
     const outcome = await repository.push([
-      `${none} ${await repository.tag('v4', 'Lid fit', 1_790_000_100)} refs/tags/v4`,
+      `${none} ${await repository.tag('v4', 'Lid fit', { seconds: 1_790_000_100 })} refs/tags/v4`,
     ]);
     expect(outcome.code).toBe(1);
     expect(outcome.stderr).toContain(`${versionNumberTakenMarker} — refs/tags/v4 names V4`);
@@ -1144,14 +1156,58 @@ describe('pre-receive version-number check (B6)', () => {
   it('passes a rename at the same number, and refuses another version taking that number', async () => {
     const repository = await versionRepository();
     onTestFinished(repository.dispose);
+    const id = versionId();
+    const held = await repository.tag('v4', 'Hinge', { id });
+    repository.git('update-ref', 'refs/tags/v4', held);
+    /* The same id under a new name and a later tagger time: this version, renamed. */
+    const renamed = await repository.push([
+      `${held} ${await repository.tag('v4', 'Hinge pin, final', { id, seconds: 1_790_000_200 })} refs/tags/v4`,
+    ]);
+    expect(renamed.code, renamed.stderr).toBe(0);
+    /* Another device's version: another id. */
+    const replaced = await repository.push([
+      `${held} ${await repository.tag('v4', 'Lid fit', { seconds: 1_790_000_100 })} refs/tags/v4`,
+    ]);
+    expect(replaced.code).toBe(1);
+    expect(replaced.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
+  });
+
+  it('tells two versions apart by id, even on the same entry by the same tagger in the same second', async () => {
+    const repository = await versionRepository();
+    onTestFinished(repository.dispose);
     const held = await repository.tag('v4', 'Hinge');
     repository.git('update-ref', 'refs/tags/v4', held);
-    const renamed = await repository.push([`${held} ${await repository.tag('v4', 'Hinge pin, final')} refs/tags/v4`]);
-    expect(renamed.code, renamed.stderr).toBe(0);
-    /* Another device's version: made at another time, so not this one renamed. */
-    const replaced = await repository.push([
-      `${held} ${await repository.tag('v4', 'Lid fit', 1_790_000_100)} refs/tags/v4`,
-    ]);
+    const twin = await repository.tag('v4', 'Lid fit');
+    const outcome = await repository.push([`${held} ${twin} refs/tags/v4`]);
+    expect(outcome.code).toBe(1);
+    expect(outcome.stderr).toContain(`${versionNumberTakenMarker} — refs/tags/v4 names V4`);
+  });
+
+  it.each([
+    ['a lightweight tag', 'lightweight'],
+    ['a tag with no Tau-Tag record', null],
+    ['a record without its id', { version: 2, name: 'Lid' }],
+    ['a record with a malformed id', { version: 2, id: 'not-an-id', name: 'Lid' }],
+    ['a record with an empty name', { version: 2, id: 'a'.repeat(32), name: '' }],
+    ['an older record shape', { version: 1, id: 'a'.repeat(32), name: 'Lid' }],
+  ])('refuses %s at a version ref, so it never holds a number', async (_label, record) => {
+    const repository = await versionRepository();
+    onTestFinished(repository.dispose);
+    const object = record === 'lightweight' ? repository.base : await repository.tag('v5', 'Lid', { record });
+    const outcome = await repository.push([`${none} ${object} refs/tags/v5`]);
+    expect(outcome.code).toBe(1);
+    expect(outcome.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_TAG_INVALID);
+    expect(outcome.stderr).toContain('Tau: nothing was written.');
+  });
+
+  it('refuses a version over a number a tag that is not a version already holds', async () => {
+    const repository = await versionRepository();
+    onTestFinished(repository.dispose);
+    repository.git('update-ref', 'refs/tags/v5', repository.base);
+    const created = await repository.push([`${none} ${await repository.tag('v5', 'Lid')} refs/tags/v5`]);
+    expect(created.code).toBe(1);
+    expect(created.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
+    const replaced = await repository.push([`${repository.base} ${await repository.tag('v5', 'Lid')} refs/tags/v5`]);
     expect(replaced.code).toBe(1);
     expect(replaced.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
   });

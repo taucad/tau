@@ -37,7 +37,7 @@ import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
 
 import type { RevisionTag } from '#revision-port.js';
-import type { SyncPushOutcome } from '#sync.types.js';
+import type { SyncPushOutcome, VersionRenumbering } from '#sync.types.js';
 import type {
   PublishPublicationActorInput,
   PublishPublicationActorOutput,
@@ -105,6 +105,8 @@ export type PublishMachineEvent =
   | Readonly<{ type: 'confirm'; draft: PublishDraft }>
   | Readonly<{ type: 'cancel' }>
   | Readonly<{ type: 'pushSettled'; pushId: string; outcome: SyncPushOutcome }>
+  /* The push moved versions that were not backed up to new numbers (B6). */
+  | Readonly<{ type: 'versionsRenumbered'; renumbered: readonly VersionRenumbering[] }>
   | Readonly<{ type: 'reset' }>;
 
 /** Facts publishMachine emits for a host that holds only the root. @public */
@@ -209,6 +211,16 @@ const existingVersion = (context: PublishMachineContext): RevisionTag | undefine
       (context.draft?.version === undefined ? tag.name === context.draft?.tag : tag.number === context.draft.version),
   );
 
+/*
+ * The version a republish names by number (B6): it publishes that version's
+ * own entry under its stored name, whatever the branch head or the
+ * publication's title is now, so a republish never renames a version.
+ */
+const republished = (draft: PublishDraft | undefined, tags: readonly RevisionTag[]): RevisionTag | undefined =>
+  draft?.version === undefined ? undefined : tags.find((tag) => tag.number === draft.version);
+
+const notOnThisDevice = 'That version is not on this device yet. Sync this project, then publish it again.';
+
 /* The tag `pushing` and `publishing` name once `tagging` has made it: `v<number>`,
  * as `versionTagName` spells it (a machine imports no value from the port). */
 const versionTagOf = (context: PublishMachineContext): string =>
@@ -271,6 +283,7 @@ const publishMachineDefinition = setup({
     cancel: () => ({}),
     reset: () => ({}),
     pushSettled: () => ({}),
+    versionsRenumbered: () => ({}),
   },
   states: {
     idle: {
@@ -307,12 +320,16 @@ const publishMachineDefinition = setup({
                   context: { tags: event.output.tags, ...failWith(context, enq, noRevisionsYet) },
                 };
               }
+              const version = republished(context.draft, event.output.tags);
               const read = {
                 tags: event.output.tags,
-                revisionId: context.revisionId ?? event.output.revisionId,
+                revisionId: version?.revisionId ?? context.revisionId ?? event.output.revisionId,
                 expected: event.output.expected,
                 remoteTags: event.output.remoteTags,
               };
+              if (context.draft?.version !== undefined && version === undefined) {
+                return { target: '#publish.error', context: { ...read, ...failWith(context, enq, notOnThisDevice) } };
+              }
               /* A name was confirmed while the read was in flight. */
               return context.draft === undefined
                 ? { target: 'ready', context: read }
@@ -330,10 +347,19 @@ const publishMachineDefinition = setup({
         },
         ready: {
           on: {
-            confirm: ({ context, event }, enq) =>
-              context.revisionId === undefined
-                ? { target: '#publish.error', context: failWith(context, enq, noRevisionsYet) }
-                : { target: '#publish.tagging', context: { draft: event.draft } },
+            confirm: ({ context, event }, enq) => {
+              if (context.revisionId === undefined) {
+                return { target: '#publish.error', context: failWith(context, enq, noRevisionsYet) };
+              }
+              const version = republished(event.draft, context.tags);
+              if (event.draft.version !== undefined && version === undefined) {
+                return { target: '#publish.error', context: failWith(context, enq, notOnThisDevice) };
+              }
+              return {
+                target: '#publish.tagging',
+                context: { draft: event.draft, revisionId: version?.revisionId ?? context.revisionId },
+              };
+            },
           },
         },
       },
@@ -356,7 +382,8 @@ const publishMachineDefinition = setup({
         input: ({ context }) => {
           const existing = existingVersion(context);
           return {
-            name: context.draft?.tag ?? '',
+            /* A republish keeps the version's stored name; only a new publish names it. */
+            name: republished(context.draft, context.tags)?.name ?? context.draft?.tag ?? '',
             revisionId: context.revisionId ?? '',
             ...(context.draft?.note === undefined ? {} : { note: context.draft.note }),
             ...(existing === undefined ? {} : { number: existing.number }),
@@ -445,6 +472,13 @@ const publishMachineDefinition = setup({
             ),
           };
         },
+        /* The version this publish made moved before its first backup: the
+           row and the `published` event name the number it was backed up at. */
+        versionsRenumbered: ({ context, event }) => ({
+          context: {
+            version: event.renumbered.find((step) => step.from === context.version)?.to ?? context.version,
+          },
+        }),
         cancel: { target: 'idle' },
       },
     },

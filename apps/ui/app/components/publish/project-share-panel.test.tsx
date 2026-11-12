@@ -105,6 +105,7 @@ vi.mock('#hooks/use-settings-dialog.js', async (importOriginal) => {
 });
 
 const tag = (number: number, name: string): RevisionTag => ({
+  id: String(number).padStart(32, '0'),
   number,
   name,
   revisionId: `rev-${name}` as RevisionTag['revisionId'],
@@ -855,13 +856,30 @@ describe('ProjectSharePanel', () => {
     /* The number comes from the publication's tag and the name from the version, never the tag (B6). */
     expect(await screen.findByText('V2 · Ready for print')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Republish this version' }));
-    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledWith('Ready for print');
+    /* The version's own entry, not the branch head, so the snapshot is the one published before. */
+    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledWith(
+      'Ready for print',
+      'rev-Ready for print',
+    );
     expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledWith(
       expect.objectContaining({ tag: 'Ready for print', version: 2 }),
     );
 
     await userEvent.click(screen.getByRole('button', { name: 'Publish another version' }));
     expect(screen.getByRole('combobox', { name: /version name/i })).toBeInTheDocument();
+  });
+
+  it('never offers the publication title as a version name when this page has not read the versions', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    publishFacet({ tags: [] });
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Republish this version' }));
+    /* By number alone: the machine reads V2 and keeps its stored name (B6). */
+    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledWith('');
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledWith(
+      expect.objectContaining({ tag: '', version: 2, title: 'Demo' }),
+    );
   });
 
   it('switches private publications to public without removing listed grants', async () => {

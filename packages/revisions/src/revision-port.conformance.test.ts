@@ -37,6 +37,7 @@ import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
 import { createRevisionHttpClient } from '#http-client.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
+import { versionNumberOfTag } from '#version-numbers.js';
 import { conflictLabels, materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { readRevisionLog } from '#revision-verbs.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
@@ -411,7 +412,10 @@ const conformance = (adapter: Adapter): void => {
         createdAt,
       });
 
+      expect(created.id).toMatch(/^[\da-f]{32}$/u);
       expect(created).toStrictEqual({
+        /* A fresh id, which a rename keeps (R1). */
+        id: created.id,
         /* The first version after Start is V2 (B6). */
         number: 2,
         name: 'Ready for print',
@@ -446,6 +450,41 @@ const conformance = (adapter: Adapter): void => {
       await port.deleteTag(2);
       expect(await port.listTags()).toStrictEqual([]);
       await expect(port.deleteTag(2)).resolves.toBeUndefined();
+    }, 180_000);
+
+    it('never replaces or numbers over a tag that is not a version, and refuses a bad name or number first (R2, R10)', async () => {
+      /* A lightweight v4: not a version, but it holds its number. */
+      await port.updateRef({ name: 'refs/tags/v4', expectedHead: undefined, head: base });
+      expect(await port.listTags()).toStrictEqual([]);
+      const created = await port.tag({ name: 'Lid', revisionId: child });
+      expect(created.number).toBe(5);
+      await expect(port.tag({ number: 4, name: 'Lid', revisionId: base })).rejects.toMatchObject({
+        code: 'UNSUPPORTED_OPERATION',
+      });
+      await expect(port.tag({ name: '', revisionId: child })).rejects.toMatchObject({ code: 'UNSUPPORTED_OPERATION' });
+      await expect(port.tag({ number: 1, name: 'Start', revisionId: child })).rejects.toMatchObject({
+        code: 'UNSUPPORTED_OPERATION',
+      });
+      const tagReferences = await port.listRefs('refs/tags');
+      expect(tagReferences.map((ref) => ref.name)).toStrictEqual(['refs/tags/v4', 'refs/tags/v5']);
+      expect(await port.readRef('refs/tags/v4')).toBe(base);
+    }, 180_000);
+
+    it('gives versions made at once their own numbers: choosing and claiming are one step (R3)', async () => {
+      const names = ['One', 'Two', 'Three', 'Four'];
+      const before = await port.listRefs('refs/tags');
+      const highest = Math.max(1, ...before.map((ref) => versionNumberOfTag(ref.name) ?? 1));
+      const made = await Promise.all(names.map(async (name) => port.tag({ name, revisionId: child })));
+      expect(made.map((tag) => tag.number).toSorted((left, right) => left - right)).toStrictEqual([
+        highest + 1,
+        highest + 2,
+        highest + 3,
+        highest + 4,
+      ]);
+      const listed = await port.listTags();
+      const mine = listed.filter((tag) => made.some((written) => written.number === tag.number));
+      expect(mine.map((tag) => tag.name).toSorted()).toStrictEqual(names.toSorted());
+      expect(new Set(mine.map((tag) => tag.id)).size).toBe(4);
     }, 180_000);
 
     /**

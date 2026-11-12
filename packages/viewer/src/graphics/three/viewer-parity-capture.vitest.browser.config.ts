@@ -100,7 +100,14 @@ export default defineConfig({
           ...(executablePath ? { executablePath } : { channel: 'chromium' }),
           args: [
             '--enable-unsafe-webgpu',
-            ...(webGpuProfile === 'software' ? ['--use-webgpu-adapter=swiftshader'] : []),
+            ...(webGpuProfile === 'software'
+              ? [
+                  '--use-webgpu-adapter=swiftshader',
+                  '--use-angle=swiftshader',
+                  '--enable-features=Vulkan',
+                  '--use-vulkan=swiftshader',
+                ]
+              : []),
             ...(headed ? ['--ignore-gpu-blocklist'] : []),
           ],
         },

@@ -135,6 +135,36 @@ for (const name of ['desktop-route-row-macos-dmg-arm64', 'desktop-route-vm-recei
     verifyDesktopReceiptProvenance(vmRun, { ...macVm, name }, { environment: 'vm', manifest, scope: 'macos' }),
   );
 }
+// Bound platform scopes (Mac and Linux, staging and production) admit a descendant qualification head, which the
+// mandatory sidecar then binds by S≤K≤H≤P; the all-platform scope keeps exact source on both channels.
+const descendant = 'e'.repeat(40);
+const productionCopy: typeof manifest = { ...manifest, channel: 'production' };
+for (const candidate of [manifest, productionCopy]) {
+  for (const [scope, environment, name, path] of [
+    ['linux', 'ci', 'desktop-linux-ci-receipts', run.path],
+    ['linux', 'vm', 'desktop-linux-vm-receipts', vmRun.path],
+    ['macos', 'ci', 'desktop-macos-ci-receipts', run.path],
+    ['macos', 'vm', 'desktop-macos-vm-receipts', vmRun.path],
+  ] as const) {
+    const admitted = verifyDesktopReceiptProvenance(
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
+      { ...run, path, head_sha: descendant },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
+      { ...artifact, name, workflow_run: { id: 123, head_sha: descendant } },
+      { environment, manifest: candidate, scope },
+    );
+    assert.equal(admitted.workflowCommit, descendant);
+  }
+  assert.throws(() =>
+    verifyDesktopReceiptProvenance(
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
+      { ...run, head_sha: descendant },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
+      { ...artifact, workflow_run: { id: 123, head_sha: descendant } },
+      { environment: 'ci', manifest: candidate, scope: 'all' },
+    ),
+  );
+}
 // Only a staging Mac-only publication may omit the clean-host VM run; every other omission fails before any fetch.
 // The guard reads only the channel, so a production-labelled copy suffices without five-route fixtures.
 const production: typeof manifest = { ...manifest, channel: 'production' };

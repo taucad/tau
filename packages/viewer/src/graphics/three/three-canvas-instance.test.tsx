@@ -959,28 +959,33 @@ describe('ThreeCanvasInstance', () => {
     expect(camera().clipPolicy).toBeUndefined();
   });
 
-  it('keeps the grid clip policy when a Suspense boundary hides and reveals the canvas', async () => {
-    const { tree, release, pending } = suspendable({ enableGrid: true });
-    const { rerender, unmount } = render(tree(false));
+  it('re-reports the drawn grid to a new canvas actor while the scene stays mounted', async () => {
+    // As after a Suspense reveal in real R3F: the surface's canvas actor is replaced, but the scene (its own root) and
+    // the grid marker in it never unmount, so only the marker's new callback identity can tell the new actor.
+    const view = render(
+      <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
+        {null}
+      </ThreeCanvasInstance>,
+    );
     await waitFor(() => {
       expect(backend()).toBe('webgl');
     });
-    expect(camera().clipPolicy).toBeDefined();
+    const canvasId = graphicsHolder.current!.getSnapshot().context.canvas!.canvasId;
+    const marker = screen.getByTestId('graphics-backend-provider').querySelector('group');
     act(() => {
-      rerender(tree(true));
+      graphicsHolder.current?.send({ type: 'canvasDetached', canvasId });
     });
     expect(camera().clipPolicy).toBeUndefined();
-    await act(async () => {
-      release();
-      await pending;
-      rerender(tree(false));
+    act(() => {
+      graphicsHolder.current?.send({ type: 'canvasAttached', canvasId, kind: 'canvas', reattached: true });
     });
-    expect(canvas()?.getSnapshot().value).toBe('ready');
+    // The same marker element: nothing in the scene re-mounted.
+    expect(screen.getByTestId('graphics-backend-provider').querySelector('group')).toBe(marker);
     expect(camera().clipPolicy).toEqual({
       farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
       presentationPlane: infiniteGridPresentationPlaneByUpDirection.z,
     });
-    unmount();
+    view.unmount();
   });
 
   it('presents the surface size on the camera from the renderer it creates', async () => {

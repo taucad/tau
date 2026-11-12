@@ -67,7 +67,7 @@ const manifest = {
 };
 
 describe('createDotnetLayer', () => {
-  it('should pin a layer by its digest at the CDN key and at the release named after it', () => {
+  it('should pin a layer by its digest at the dependency host key and at the release named after it', () => {
     expect(rule.releaseTag(record.sha256)).toBe('sample-layer-0123456789abcdef');
     expect(rule.dependencyFile(record)).toEqual({
       name: 'worker',
@@ -77,7 +77,7 @@ describe('createDotnetLayer', () => {
       origin: {
         kind: 'url',
         urls: [
-          `https://cdn.tau.new/${dependencyKey(record.sha256)}`,
+          `https://dependencies.tau.new/${dependencyKey(record.sha256)}`,
           'https://github.com/taucad/tau/releases/download/sample-layer-0123456789abcdef/tau-sample-layer-darwin-arm64.tar.gz',
         ],
       },

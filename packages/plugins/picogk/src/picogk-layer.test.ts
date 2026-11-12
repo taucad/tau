@@ -35,7 +35,7 @@ const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, '../tau-pl
 >;
 
 describe('picogk layer record', () => {
-  it('pins the layer by its digest at the CDN key and the release named after it', () => {
+  it('pins the layer by its digest at the dependency host key and the release named after it', () => {
     expect(layerDependencyFile(record)).toEqual({
       name: 'worker',
       integrity: `sha256-${Buffer.from(record.sha256, 'hex').toString('base64')}`,
@@ -44,7 +44,7 @@ describe('picogk layer record', () => {
       origin: {
         kind: 'url',
         urls: [
-          `https://cdn.tau.new/blobs/sha256/${record.sha256}`,
+          `https://dependencies.tau.new/blobs/sha256/${record.sha256}`,
           'https://github.com/taucad/tau/releases/download/picogk-layer-0123456789abcdef/tau-picogk-layer-darwin-arm64.tar.gz',
         ],
       },
@@ -57,7 +57,7 @@ describe('picogk layer record', () => {
     const composed = composeManifest(manifest, record);
     const text = manifestText(composed);
 
-    expect(text).toContain(`"https://cdn.tau.new/blobs/sha256/${record.sha256}"`);
+    expect(text).toContain(`"https://dependencies.tau.new/blobs/sha256/${record.sha256}"`);
     expect(text).toContain('builds.dotnet.microsoft.com/dotnet/Runtime/10.0.11/');
     expect(manifestText(composeManifest(composed, record))).toBe(text);
     expect(manifestText(manifest)).not.toBe(text);

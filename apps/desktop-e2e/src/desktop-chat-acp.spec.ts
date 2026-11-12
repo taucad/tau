@@ -215,19 +215,6 @@ if (turbojetSourcePath !== undefined && !existsSync(turbojetSourcePath)) {
  * resolve beside the app, and its CLI must answer — an adapter whose CLI is
  * missing is never advertised, so there would be no row to click.
  */
-/**
- * Open the newest turn's save card: its Restore button lives inside the
- * collapsed details since 43884ce6a, so the card is expanded before the button
- * is read. An entry has no number (M11), so the card is found by its place.
- */
-const openRevisionCard = async (page: Page): Promise<void> => {
-  const trigger = page.getByRole('button', { name: /· details$/u }).last();
-  await trigger.waitFor({ state: 'visible', timeout: 60_000 });
-  if ((await trigger.getAttribute('data-state')) !== 'open') {
-    await trigger.click();
-  }
-};
-
 const codexAvailable = ((): boolean => {
   try {
     createRequire(join(import.meta.dirname, '../../desktop/package.json')).resolve(
@@ -1363,10 +1350,8 @@ test.skipIf(!codexAvailable)(
        * tree over the other. */
       // Selecting a chat checkout does not move the independently browsed workbench.
       await expectCurrentBranch(page, 'main');
-      /* The chat's card opens in place and reaches the same verbs History does: View and its More. */
-      await openRevisionCard(page);
-      await expectVisible(page.getByRole('button', { name: 'More', exact: true }).last(), 60_000);
-      await expectVisible(page.getByRole('button', { name: 'View', exact: true }), 60_000);
+      /* The chat's marker is one line whose View opens the entry in History (C5): no menu in the chat. */
+      await expectVisible(page.getByRole('button', { name: 'View', exact: true }).last(), 60_000);
       expect(liveSource()).toBe(seededSource);
 
       await branchRow(page, candidateBranch)

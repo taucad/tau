@@ -555,6 +555,42 @@ describe('I1 request prefix identity across consecutive user turns', () => {
   });
 });
 
+/**
+ * A chat whose old tool results are cleared in place and no summary is written. Clearing stands in for a summary only
+ * when it lands the history at a fifth of the window by itself (ruling U15), so the results have to be most of the
+ * history: forty reads of about 550 tokens against a 32,768-token window, of which clearing keeps the newest five.
+ * The last read's reply reports a request over the trigger, so the pass runs before the next step of the same run.
+ */
+const clearingReads = 40;
+const clearingWindow = 32_768;
+const clearingChat: Turn[] = [
+  {
+    ...turnOne,
+    contextWindow: clearingWindow,
+    summarize: 'Earlier work.',
+    clientContext: undefined,
+    fileBody: `module nut() {} // ${'x'.repeat(2200)}`,
+    replies: [
+      ...Array.from(
+        { length: clearingReads },
+        (_, index): ScriptedReply => ({
+          tool: 'read_file',
+          input: { targetFile: `part-${String(index)}.scad` },
+          inputTokens: index === clearingReads - 1 ? 27_000 : 3,
+        }),
+      ),
+      { ...done, inputTokens: 200 },
+    ],
+  },
+  {
+    ...turnTwo,
+    contextWindow: clearingWindow,
+    summarize: 'Earlier work.',
+    clientContext: undefined,
+    fileBody: `module nut() {} // ${'x'.repeat(2200)}`,
+  },
+];
+
 describe('P2 native reasoning is replayed only under the prefix that minted it', () => {
   const window = { contextWindow: 8192, summarize: 'Earlier work.' } as const;
   const replayed = (run: ChatRun): string[][] => run.sent.map((request) => replayedSignatures(request.body));
@@ -607,22 +643,13 @@ describe('P2 native reasoning is replayed only under the prefix that minted it',
   });
 
   it('should leave out the reasoning minted after a cleared tool result, inside the run that cleared it', async () => {
-    const reads: ScriptedReply[] = Array.from({ length: 10 }, (_, index) => ({
-      tool: 'read_file',
-      input: { targetFile: `part-${String(index)}.scad` },
-      inputTokens: index === 9 ? 7000 : 3,
-    }));
-    const long = { ...window, clientContext: undefined, fileBody: `module nut() {} // ${'x'.repeat(1600)}` };
-    const run = await runChat([
-      { ...turnOne, ...long, replies: [...reads, { ...done, inputTokens: 200 }] },
-      { ...turnTwo, ...long },
-    ]);
+    const run = await runChat(clearingChat);
     const signatures = replayed(run);
-    /* Ten replies thought before the results were cleared. The first precedes the first cleared result and stays
-     * valid; the nine after it are left out, in the open tool loop, and stay out on the next turn. */
-    expect(signatures[9]).toHaveLength(9);
-    expect(signatures[10]).toEqual(['sig-1']);
-    expect(signatures[11]).toEqual(['sig-1', 'sig-11']);
+    /* Every read's reply thought before the results were cleared. The first precedes the first cleared result and
+     * stays valid; the ones after it are left out, in the open tool loop, and stay out on the next turn. */
+    expect(signatures[clearingReads - 1]).toHaveLength(clearingReads - 1);
+    expect(signatures[clearingReads]).toEqual(['sig-1']);
+    expect(signatures[clearingReads + 1]).toEqual(['sig-1', `sig-${String(clearingReads + 1)}`]);
   });
 
   it('should leave out the reasoning a summary’s retained tail holds', async () => {
@@ -906,19 +933,9 @@ describe('P1 typed prefix breaks on the durable log', () => {
   });
 
   it('should record one clearing break on the first reply after old tool results were cleared in place', async () => {
-    const reads: ScriptedReply[] = Array.from({ length: 10 }, (_, index) => ({
-      tool: 'read_file',
-      input: { targetFile: `part-${String(index)}.scad` },
-      inputTokens: index === 9 ? 7000 : 3,
-    }));
-    /* Long results and no skills catalog: clearing alone frees enough of the window, so no summary is written. */
-    const long = { ...window, clientContext: undefined, fileBody: `module nut() {} // ${'x'.repeat(1600)}` };
-    const run = await runChat([
-      { ...turnOne, ...long, replies: [...reads, { ...done, inputTokens: 200 }] },
-      { ...turnTwo, ...long },
-    ]);
+    const run = await runChat(clearingChat);
     expect(run.breaks.flat().filter((cause) => cause !== undefined)).toEqual(['clearing']);
-    expect(run.breaks[0]!.indexOf('clearing')).toBe(10);
+    expect(run.breaks[0]!.indexOf('clearing')).toBe(clearingReads);
   });
 
   it('should record an unsanctioned break when a defect rewrites an earlier message with nothing to explain it', async () => {

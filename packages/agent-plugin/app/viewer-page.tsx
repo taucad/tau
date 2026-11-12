@@ -61,7 +61,13 @@ import type { ViewerStageStatus } from '@taucad/workbench-panes/shell/viewer-sta
 import { createComponentReveal, createPageComponentActions } from '#app/sources/component-menu.jsx';
 import { createFilesSource } from '#app/sources/files-source.js';
 import { WorkbenchLane } from '#app/workbench-lane.jsx';
-import { entryPathOf, liveViewSettings, readWorkbenchState, seedViewer } from '#app/workbench-state.js';
+import {
+  createPageViewFields,
+  entryPathOf,
+  liveViewSettings,
+  readWorkbenchState,
+  seedViewer,
+} from '#app/workbench-state.js';
 import { PageViewerIssues } from '#app/page-issues.jsx';
 import type { PageIssues } from '#app/page-issues.jsx';
 import { laneStoreFor } from '#app/lane-store.js';
@@ -442,8 +448,13 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       graphicsBackend: 'webgl',
     },
   });
+  /* The bar's view commands, so the page reports the inheritable leaves the person set and no other. */
+  const [viewFields] = useState(() => createPageViewFields(graphicsRef));
   seedRef.current = (model, saved) => {
-    seedViewer(graphicsRef, entryPathOf(model), saved);
+    const sources = seedViewer(graphicsRef, entryPathOf(model), saved);
+    if (sources !== undefined) {
+      viewFields.seed(sources);
+    }
   };
   const environment = useMemo(
     (): ViewerEnvironment => ({
@@ -595,9 +606,16 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
           references: addedFrom(addedKeyOf(model)),
           motion: motionOf(context.kinematicsRef, unit.unitId),
         });
-        /* The display, section and measurements the server keeps in the view record. */
+        /* The section and measurements the server keeps in the view record, and the leaves the person set. */
         const settings = liveViewSettings(graphicsRef);
-        return settings === undefined ? reported : { ...reported, settings };
+        return settings === undefined
+          ? reported
+          : {
+              ...reported,
+              settings,
+              viewFields: viewFields.commanded(),
+              viewFieldSequence: viewFields.sequence(),
+            };
       },
       follows: () => latest.current.view.follows,
       linked: () => latest.current.view.linked,
@@ -900,7 +918,12 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                             onNotice={setNotice}
                           >
                             {({ segment, list }) => (
-                              <ViewerControls {...barControls} leading={segment} aboveControls={list} />
+                              <ViewerControls
+                                {...barControls}
+                                viewFields={viewFields}
+                                leading={segment}
+                                aboveControls={list}
+                              />
                             )}
                           </PageViewerIssues>
                         </>

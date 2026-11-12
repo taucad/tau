@@ -142,6 +142,11 @@ describe('provider-facing tool schema compatibility', () => {
     expect(toolDescriptions[toolName.arrangeWorkbench].length).toBeGreaterThan(0);
   });
 
+  it('tells the model a named view leaf is set in that view and view settings go through arrange_workbench', () => {
+    expect(arrangeWorkbenchDescription.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(150);
+    expect(arrangeWorkbenchDescription).toMatchSnapshot();
+  });
+
   it('keeps arrange_workbench provider-safe and within the approved 14 KiB ceiling', () => {
     const schema = providerSchemaFor(toolName.arrangeWorkbench);
     expect(Object.keys(schema.properties ?? {})).toEqual([

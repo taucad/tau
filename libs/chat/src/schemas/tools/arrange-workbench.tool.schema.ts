@@ -116,13 +116,15 @@ export type ArrangeWorkbenchOutput = z.output<typeof arrangeWorkbenchOutputSchem
 export type ArrangeWorkbenchErrorCode = 'VALIDATION_ERROR' | 'FILE_NOT_FOUND' | 'RECORD_CONFLICT' | 'INVALID_RECORD';
 
 /** Provider-facing description (≤150 words, host-neutral; context-engineering-policy:290). @public */
-export const arrangeWorkbenchDescription = `Show the person views: open views from a named viewpoint or any direction, open files and panes, close tabs, set a view's camera, section cuts, display, grid unit and measurements, or a file's render timeout and hidden components.
+export const arrangeWorkbenchDescription = `Show the person views: open views from any viewpoint, files and panes, close tabs, and set a view's camera, section cuts, display, grid unit and measurements or a file's render timeout and hidden components.
 
-Each key you send replaces that key; omitted keys stay. A lane (\`viewer\`, \`workbench\`) you send replaces that lane. New views are shown at once; \`open\` adds tabs to a lane's first group and activates them. Camera: a preset (isometric, front, back, right, left, top, bottom) or \`look\` with a direction from the model toward the camera; both frame the model. Lengths are metres.
+Keys you send replace; omitted keys stay. A lane (\`viewer\`, \`workbench\`) you send replaces that lane. New views show at once; \`open\` adds tabs to a lane's first group and activates them. Camera: a preset or \`look\` (a direction from the model toward the camera) frames the model. Lengths are metres.
 
-Pass \`basedOn\` (the layout digest from the workbench snapshot) to refuse the write if the person rearranged since.
+Display toggles, grid unit, field of view or up direction you send are set in that view over the person's default; omitted ones keep their current state. Change view settings only here.
 
-Returns the records written and the tabs a window will show; the person sees a card and can restore the previous arrangement. Read .tau/workbench/layout.json, views/<id>.json and entries.json with read_file.`;
+Pass \`basedOn\` (the snapshot's layout digest) to refuse if the person rearranged since.
+
+Returns the records written and tabs shown; the person can restore the previous arrangement. Read records under .tau/workbench/ with read_file.`;
 
 /**
  * Why a window could not show a tab the record names (blueprint B7). One reason in this cut: `kernel` and `console`

@@ -36,6 +36,7 @@ import {
 import type { AgentHostTransport } from '@taucad/chat-ui/services/agent-host-transport';
 import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-agent-host-client';
 import { createBrowserAgentWorker } from '#services/browser-agent-worker.js';
+import { markDeviceViewFieldsSet } from '#workbench-records/view-fields-set.js';
 
 /** The page's telemetry context for a provided host, only when the page would record its entries. */
 const telemetryContextOf = (
@@ -628,6 +629,10 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
     /* Runtime telemetry (FR-14): the host's and the GeoSpec runner's entries, recorded by this page's one reporter. */
     channel.onNotify('telemetry', ({ entry }) => {
       pageTelemetry()?.recordForwarded(entry);
+    });
+    /* `arrange_workbench` set leaves in a view: the device's exceptions live in this page's storage (BD7). */
+    channel.onNotify('viewFieldsSet', (set) => {
+      markDeviceViewFieldsSet(set);
     });
     channel.onNotify('rebridgeRequested', ({ projectId, hostId }) => {
       if (current !== live || live.dead) {

@@ -489,6 +489,8 @@ describe('Tau MCP viewer', () => {
         section: { active: false, cuts: [] },
         measurements: [],
       },
+      viewFields: { 'display.grid': false, 'grid.unit': 'in', fieldOfView: 0 },
+      viewFieldSequence: { 'display.grid': 3, 'grid.unit': 1, fieldOfView: 0 },
       mechanism: { preserved: true, joints: 2, animations: ['four-sun-turns'] },
       playback: { status: 'paused', animationId: 'four-sun-turns', time: 2, speed: 1 },
       coordinates: { sun: 360, carrier: 90 },
@@ -498,13 +500,22 @@ describe('Tau MCP viewer', () => {
       const taken = await sync({ [field]: values[field] });
       expect(taken.isError).toBeFalsy();
     }
+    /* A page reports its section and measurements alone; the inheritable leaves come as `viewFields`. */
+    const sectionOnly = await sync({ settings: { section: { active: false, cuts: [] }, measurements: [] } });
+    expect(sectionOnly.isError).toBeFalsy();
     /* What an older server does with a field it does not take: the whole sync fails, hence the guard. */
     const rejected = await sync({ explodedView: { factor: 2 } });
     expect(rejected.isError).toBe(true);
+    const unknownLeaf = await sync({ viewFields: { 'display.shadows': true } });
+    expect(unknownLeaf.isError).toBe(true);
+    const unknownSequence = await sync({ viewFieldSequence: { 'display.shadows': 1 } });
+    expect(unknownSequence.isError).toBe(true);
+    const fractionalSequence = await sync({ viewFieldSequence: { 'display.grid': 1.5 } });
+    expect(fractionalSequence.isError).toBe(true);
     await client.close();
   });
 
-  it("should leave the page's view settings out of what view_state tells the model", async () => {
+  it("should leave the page's view settings and commanded leaves out of what view_state tells the model", async () => {
     const settings: NonNullable<TauViewerViewState['settings']> = {
       fieldOfView: 45,
       upDirection: 'z',
@@ -521,7 +532,12 @@ describe('Tau MCP viewer', () => {
       section: { active: false, cuts: [] },
       measurements: [],
     };
-    const viewer = { ...createViewer(), viewState: async () => ({ view: { ...view, settings } }) };
+    const viewFields = { 'display.grid': false } as const;
+    const viewFieldSequence = { 'display.grid': 2 };
+    const viewer = {
+      ...createViewer(),
+      viewState: async () => ({ view: { ...view, settings, viewFields, viewFieldSequence } }),
+    };
     const client = await connect(clients.claudeDesktop, viewer);
 
     const result = await client.callTool({ name: 'view_state', arguments: {} });

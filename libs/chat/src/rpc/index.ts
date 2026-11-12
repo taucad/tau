@@ -7,6 +7,7 @@ export type {
   RpcFileStat,
   RpcRuntimeClient,
   RpcWorkbenchClient,
+  ViewFieldsSet,
   RpcGraphicsClient,
   RpcImageClient,
   CaptureImagesClientInput,

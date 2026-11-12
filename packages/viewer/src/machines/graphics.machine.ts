@@ -1,6 +1,7 @@
 import { createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
 import type {
   ActorRefFrom,
+  CallbackActorLogic,
   AnyActor,
   EnqueueObject,
   MetaObject,
@@ -17,9 +18,14 @@ import { idPrefix } from '@taucad/types/constants';
 import { getLengthUnit, metersPerLengthUnit } from '#constants/length-units.js';
 import type { LengthSymbol, UnitSystem } from '#constants/length-units.js';
 import { generatePrefixedId } from '@taucad/utils/id';
+import { createCameraView } from '@taucad/camera';
+import { cameraMachine } from '@taucad/camera/machine';
+import type { CameraMachineEmitted } from '@taucad/camera/machine';
 import type {
+  CameraOwnedSettings,
   GraphicsBackendPreference,
   GraphicsOwnedSettings,
+  PersistedCameraView,
   PersistedSectionView,
   PinnedMeasurement,
   ResolvedGraphicsBackend,
@@ -58,6 +64,47 @@ export type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
  * @public
  */
 export type KinematicsRef = ActorRefFrom<typeof kinematicsMachine>;
+
+/**
+ * Actor reference for the camera spawned by a graphics actor: the view's camera, whose lifetime is the graphics
+ * actor's (charter D5, I11).
+ *
+ * @public
+ */
+export type GraphicsCameraRef = ActorRefFrom<typeof cameraMachine>;
+
+/**
+ * The controls adapter a canvas hands graphics once its renderer exists: a callback actor whose closure holds the
+ * canvas's `camera-controls` instance, DOM surface and native cameras (charter D4). It sends back the gesture events.
+ *
+ * @public
+ */
+export type ControlsAdapterLogic = CallbackActorLogic<
+  { type: 'stop' },
+  unknown,
+  { type: 'interactionStarted' } | { type: 'interactionMoved' } | { type: 'interactionEnded' }
+>;
+
+/**
+ * One-time framing record for an entry identity, mutated in place by the canvas framing hook.
+ *
+ * ponytail: a temporary bridge from the deleted camera-session registry, plain data only (charter D4). The framing
+ * actor (G5b) replaces it and deletes this field.
+ *
+ * @public
+ */
+export type ViewCameraFraming = {
+  /** Entry path whose geometry this record describes; a change re-latches the other fields. */
+  identity: string | undefined;
+  /** Persisted pose to apply once the first geometry has been framed. */
+  pendingView: PersistedCameraView | undefined;
+  /** A record orientation already applied to the camera before first geometry; fit without configured angles. */
+  preserveOrientationOnFirstFrame: boolean;
+  /** The automatic first-frame result, so its fitted span and zoom are not mistaken for a person orbit. */
+  firstFrameView: PersistedCameraView | undefined;
+  /** Whether the first real geometry has already been framed for this identity. */
+  initialized: boolean;
+};
 
 /**
  * A reason for ignoring pointer clicks on the model, such as an active measure tool.
@@ -292,8 +339,6 @@ export interface GraphicsContext {
   hoveredMeasurementId?: string;
 
   // State flags
-  cameraInteracting: boolean;
-  cameraInteractionHadMovement: boolean;
   suppressNextModelPointerClick: boolean;
   modelPointerClickSuppressionReasons: ModelPointerClickSuppressionReason[];
   viewerHoverSuppressionReasons: ViewerHoverSuppressionReason[];
@@ -304,6 +349,20 @@ export interface GraphicsContext {
   modelInteractionUnitId?: string;
   /** Per-view mechanism pose, keyed by the same unit ids as model interaction. */
   kinematicsRef: KinematicsRef;
+  /** The view's camera. Its pose, render frame and clip policy outlive every canvas and provider mount. */
+  cameraRef: GraphicsCameraRef;
+  /**
+   * The attached canvas's controls adapter: the only listener on its `camera-controls` instance (charter I9). It
+   * stops with its canvas, so a canvas remount replaces it and never runs two.
+   */
+  controlsAdapter: Readonly<{ canvasId: string; ref: AnyActor }> | undefined;
+  /**
+   * Whether a canvas has presented the camera at least once. It stays set after the canvas detaches (a hidden tab), since
+   * the camera keeps its pose.
+   */
+  cameraPresented: boolean;
+  /** See {@link ViewCameraFraming}: a plain-data bridge the framing actor (G5b) deletes. */
+  cameraFraming: ViewCameraFraming;
 
   // Geometry data from CAD
   artifact: KnownArtifact | undefined;
@@ -328,6 +387,7 @@ export type GraphicsEvent =
   | { type: 'setGridUnit'; payload: { unit: LengthSymbol } }
   // Camera events
   | { type: 'fitView' }
+  /** The camera child's `viewChanged`, folded into the visible span. */
   | { type: 'cameraViewChanged'; verticalSpan: number }
   // Visibility events
   | { type: 'setSurfaceVisibility'; payload: boolean }
@@ -358,6 +418,11 @@ export type GraphicsEvent =
     }
   /** The surface left the document: its canvas actor stops and returns its budget. */
   | { type: 'canvasDetached'; canvasId: string }
+  /**
+   * The attached surface's renderer exists: graphics starts its controls adapter, which stops with the surface. A
+   * re-delivery for the running adapter's surface changes nothing.
+   */
+  | { type: 'controlsAttached'; canvasId: string; adapter: ControlsAdapterLogic }
   // Section view events
   /** Turning the section on with no cuts adds the default plane, removing the side `viewDirection` faces. */
   | { type: 'setSectionViewActive'; payload: boolean; viewDirection?: SectionVector }
@@ -418,10 +483,11 @@ export type GraphicsEvent =
   | { type: 'setHoveredMeasurement'; payload: string | undefined }
   | { type: 'setMeasurementName'; id: string; name: string }
   | { type: 'toggleMeasurementPinned'; id: string }
-  // Controls events
-  | { type: 'controlsInteractionStart' }
-  | { type: 'controlsInteractionMoved' }
-  | { type: 'controlsInteractionEnd' }
+  // Controls adapter events, forwarded to the camera
+  | { type: 'interactionStarted' }
+  /** Sent once per gesture, on its first movement. */
+  | { type: 'interactionMoved' }
+  | { type: 'interactionEnded' }
   | {
       type: 'beginViewerModelHoverSuppression';
       reason: ViewerHoverSuppressionReason;
@@ -576,6 +642,7 @@ export const graphicsEventTypes = [
   'webGpuCanvasLost',
   'canvasAttached',
   'canvasDetached',
+  'controlsAttached',
   'setSectionViewActive',
   'adoptSectionView',
   'addSectionCut',
@@ -617,9 +684,9 @@ export const graphicsEventTypes = [
   'setHoveredMeasurement',
   'setMeasurementName',
   'toggleMeasurementPinned',
-  'controlsInteractionStart',
-  'controlsInteractionMoved',
-  'controlsInteractionEnd',
+  'interactionStarted',
+  'interactionMoved',
+  'interactionEnded',
   'beginViewerModelHoverSuppression',
   'endViewerModelHoverSuppression',
   'markModelPointerGestureMoved',
@@ -678,6 +745,8 @@ export type GraphicsEmitted =
  */
 // oxlint-disable-next-line typescript/consistent-type-definitions -- an interface, not a type alias, so declarations reference it by name (TS7056)
 export interface GraphicsInput extends Partial<GraphicsOwnedSettings> {
+  /** The camera's create-only seed: the view's persisted field of view and pose. */
+  camera?: Partial<CameraOwnedSettings>;
   measureSnapDistance?: number; // Default 10px for a fine pointer
   modelInteractionRef?: ModelInteractionRef;
 }
@@ -788,9 +857,32 @@ const graphicsActors = {
   modelInteraction: modelInteractionMachine,
   kinematics: kinematicsMachine,
   canvas: canvasMachine,
+  camera: cameraMachine,
 };
 
 type GraphicsEnqueue = EnqueueObject<GraphicsEvent, GraphicsEmitted, SystemRegistry, typeof graphicsActors>;
+
+/** Whether the person is holding a camera gesture (pointer down on the controls). */
+const selectGestureHeld = (cameraRef: GraphicsCameraRef): boolean =>
+  cameraRef.getSnapshot().matches({ gesture: 'held' });
+
+/**
+ * The controls adapter stops with its canvas: a new or detached surface ends the old gesture listener. A gesture it
+ * held ends with it, so the camera cannot stay `gesture.held` and hover suppression cannot stick (G3 report).
+ */
+const stopControlsAdapter = (
+  context: GraphicsContext,
+  enq: GraphicsEnqueue,
+): Pick<GraphicsContext, 'controlsAdapter' | 'viewerHoverSuppressionReasons'> => {
+  if (context.controlsAdapter) {
+    enq.stop(context.controlsAdapter.ref);
+    enq.sendTo(context.cameraRef, { type: 'interactionEnded' });
+  }
+  return {
+    controlsAdapter: undefined,
+    viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, 'cameraControls'),
+  };
+};
 type GraphicsPatch = Partial<GraphicsContext>;
 type ModelInteractionMessage = Parameters<ModelInteractionRef['send']>[0];
 
@@ -899,6 +991,37 @@ const webGpuOffContext = ({ context }: { context: GraphicsContext }): GraphicsPa
   resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
 });
 
+/** The camera's opening direction when the view has no persisted pose. */
+const initialCameraDirection = [Math.sqrt(3 / 8), -Math.sqrt(3 / 8), 0.5] as const;
+const upAxisVectors = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] } as const;
+
+/* The camera seed as the view-camera registry built it: the persisted pose and field of view, else the default pose. */
+const cameraSeed = (input: GraphicsInput, upDirection: 'x' | 'y' | 'z') => {
+  const pixelRatio: unknown = Reflect.get(globalThis, 'devicePixelRatio');
+  return {
+    pixelBudget: 0.25,
+    initialView: createCameraView({
+      ...(input.camera?.cameraView ?? {
+        target: [0, 0, 0],
+        direction: initialCameraDirection,
+        up: upAxisVectors[upDirection],
+        // Keep the seed bounds in front of the camera so the empty scene has stable depth precision.
+        verticalSpan: 4,
+        perspectiveZoom: 1,
+      }),
+      frameId: 'tau:root',
+      // Matches `defaultGraphicsSettings.cameraFovAngle`.
+      requestedVerticalFieldOfView: input.camera?.cameraFovAngle ?? 60,
+      viewport: {
+        width: 1,
+        height: 1,
+        pixelRatio: Math.min(typeof pixelRatio === 'number' && pixelRatio > 0 ? pixelRatio : 1, 2),
+      },
+      bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
+    }),
+  };
+};
+
 const graphicsMachineDefinition = setup({
   actors: graphicsActors,
   schemas: {
@@ -994,8 +1117,6 @@ const graphicsMachineDefinition = setup({
       hoveredMeasurementId: undefined,
 
       // State flags
-      cameraInteracting: false,
-      cameraInteractionHadMovement: false,
       suppressNextModelPointerClick: false,
       modelPointerClickSuppressionReasons: [],
       viewerHoverSuppressionReasons: [],
@@ -1004,6 +1125,16 @@ const graphicsMachineDefinition = setup({
       ownsModelInteractionRef,
       modelInteractionUnitId: undefined,
       kinematicsRef: spawn(actors.kinematics, { id: 'kinematics', input: {} }),
+      cameraRef: spawn(actors.camera, { id: 'camera', input: cameraSeed(input, input.upDirection ?? 'z') }),
+      controlsAdapter: undefined,
+      cameraPresented: false,
+      cameraFraming: {
+        identity: undefined,
+        pendingView: input.camera?.cameraView,
+        preserveOrientationOnFirstFrame: false,
+        firstFrameView: undefined,
+        initialized: false,
+      },
 
       // Shapes
       artifact: undefined,
@@ -1020,15 +1151,27 @@ const graphicsMachineDefinition = setup({
       enq.stop(context.modelInteractionRef);
     }
     enq.stop(context.kinematicsRef);
+    if (context.controlsAdapter) {
+      enq.stop(context.controlsAdapter.ref);
+    }
     if (context.canvas) {
       enq.stop(context.canvas.ref);
     }
+    enq.stop(context.cameraRef);
   },
   initial: 'operational',
   states: {
     operational: {
       /* Seeded cuts set context directly; this raise only enters the section region's `on` state. */
       entry: ({ context }, enq) => {
+        enq.listen(
+          context.cameraRef,
+          'viewChanged',
+          (event): GraphicsEvent => ({
+            type: 'cameraViewChanged',
+            verticalSpan: (event as CameraMachineEmitted & { type: 'viewChanged' }).verticalSpan,
+          }),
+        );
         if (context.isSectionViewActive) {
           enq.raise({ type: 'setSectionViewActive', payload: true });
         }
@@ -1083,7 +1226,12 @@ const graphicsMachineDefinition = setup({
           return {};
         },
         cameraViewChanged: ({ context, event, self }, enq) => {
-          if (!Number.isFinite(event.verticalSpan) || event.verticalSpan <= 0) {
+          // Every camera change emits `viewChanged`; only a new span re-derives the grid.
+          if (
+            !Number.isFinite(event.verticalSpan) ||
+            event.verticalSpan <= 0 ||
+            event.verticalSpan === context.cameraVisibleSpan
+          ) {
             return {};
           }
           // Recalculate grid sizes based on new controls state
@@ -1116,7 +1264,14 @@ const graphicsMachineDefinition = setup({
         setAxesVisibility: { context: ({ event }) => ({ enableAxes: event.payload }) },
         setMatcapVisibility: { context: ({ event }) => ({ enableMatcap: event.payload }) },
         setPostProcessingVisibility: { context: ({ event }) => ({ enablePostProcessing: event.payload }) },
-        setUpDirection: { context: ({ event }) => ({ upDirection: event.payload }) },
+        setUpDirection: ({ context, event }, enq) => {
+          if (event.payload === context.upDirection) {
+            return {};
+          }
+          // The camera keeps its view direction and takes the new world up, unless the two are parallel.
+          enq.sendTo(context.cameraRef, { type: 'setUpDirection', axis: event.payload });
+          return { context: { upDirection: event.payload } };
+        },
         setGraphicsBackendPreference: {
           context: ({ context, event }) => ({
             graphicsBackendPreference: event.payload,
@@ -1132,6 +1287,7 @@ const graphicsMachineDefinition = setup({
           if (context.canvas) {
             enq.stop(context.canvas.ref);
           }
+          const adapter = stopControlsAdapter(context, enq);
           const ref = enq.spawn(actors.canvas, {
             id: `canvas:${event.canvasId}`,
             input: {
@@ -1142,7 +1298,7 @@ const graphicsMachineDefinition = setup({
               reattached: event.reattached,
             },
           });
-          return { context: { canvas: { canvasId: event.canvasId, ref } } };
+          return { context: { canvas: { canvasId: event.canvasId, ref }, ...adapter } };
         },
         canvasDetached: ({ context, event }, enq) => {
           if (context.canvas?.canvasId !== event.canvasId) {
@@ -1150,27 +1306,38 @@ const graphicsMachineDefinition = setup({
             return {};
           }
           enq.stop(context.canvas.ref);
-          return { context: { canvas: undefined } };
+          return { context: { canvas: undefined, ...stopControlsAdapter(context, enq) } };
         },
-
-        // Controls events
-        controlsInteractionStart: {
-          context: {
-            cameraInteracting: true,
-            cameraInteractionHadMovement: false,
-            suppressNextModelPointerClick: false,
-          },
-        },
-        controlsInteractionMoved: ({ context }, enq) => {
-          if (!context.cameraInteracting) {
+        controlsAttached: ({ context, event }, enq) => {
+          if (context.canvas?.canvasId !== event.canvasId) {
+            // Stale: that surface is no longer attached.
             return {};
           }
-          if (!context.viewerHoverSuppressionReasons.includes('cameraControls')) {
-            clearViewerHover(context, enq, 'viewer');
+          if (context.controlsAdapter?.canvasId === event.canvasId) {
+            // Idempotent re-delivery: this surface's adapter is already running.
+            return {};
           }
+          const ref = enq.spawn(event.adapter, { id: `controls:${event.canvasId}` });
+          return { context: { controlsAdapter: { canvasId: event.canvasId, ref }, cameraPresented: true } };
+        },
+
+        // Controls adapter events: the camera owns the gesture phase; graphics owns click and hover suppression.
+        interactionStarted: ({ context }, enq) => {
+          enq.sendTo(context.cameraRef, { type: 'interactionStarted' });
+          return { context: { suppressNextModelPointerClick: false } };
+        },
+        interactionMoved: ({ context }, enq) => {
+          if (!selectGestureHeld(context.cameraRef)) {
+            // A move with no held gesture (a stray control event) neither guards a click nor drops the hover.
+            return {};
+          }
+          enq.sendTo(context.cameraRef, { type: 'interactionMoved' });
+          if (context.viewerHoverSuppressionReasons.includes('cameraControls')) {
+            return { context: { suppressNextModelPointerClick: true } };
+          }
+          clearViewerHover(context, enq, 'viewer');
           return {
             context: {
-              cameraInteractionHadMovement: true,
               suppressNextModelPointerClick: true,
               viewerHoverSuppressionReasons: addSuppressionReason(
                 context.viewerHoverSuppressionReasons,
@@ -1179,15 +1346,16 @@ const graphicsMachineDefinition = setup({
             },
           };
         },
-        controlsInteractionEnd: {
-          context: ({ context }) => ({
-            cameraInteracting: false,
-            cameraInteractionHadMovement: false,
-            viewerHoverSuppressionReasons: removeSuppressionReason(
-              context.viewerHoverSuppressionReasons,
-              'cameraControls',
-            ),
-          }),
+        interactionEnded: ({ context }, enq) => {
+          enq.sendTo(context.cameraRef, { type: 'interactionEnded' });
+          return {
+            context: {
+              viewerHoverSuppressionReasons: removeSuppressionReason(
+                context.viewerHoverSuppressionReasons,
+                'cameraControls',
+              ),
+            },
+          };
         },
         beginViewerModelHoverSuppression: ({ context, event }, enq) => {
           if (context.viewerHoverSuppressionReasons.includes(event.reason)) {
@@ -2111,3 +2279,13 @@ export const graphicsMachine = checkedGraphicsMachineDefinition as unknown as Gr
  */
 export const selectPresentedGeometryKey = (snapshot: GraphicsSnapshot): string =>
   snapshot.context.gltfPresentation.presentedKey ?? snapshot.context.artifactKey;
+
+/**
+ * Whether the person is dragging the view's camera: a pose their held gesture made, read at the moment it is needed.
+ *
+ * @param cameraRef - The view's camera.
+ * @returns Whether the camera is in `input.dragging`.
+ * @public
+ */
+export const selectCameraDragging = (cameraRef: GraphicsCameraRef): boolean =>
+  cameraRef.getSnapshot().matches({ input: 'dragging' });

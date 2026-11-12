@@ -42,6 +42,7 @@ import type {
   SyncQueueRecord,
   SyncRefOutcome,
   SyncFailureReason,
+  VersionRenumbering,
 } from '#sync.types.js';
 
 /** Input accepted when creating the syncMachine actor. @public */
@@ -332,6 +333,11 @@ export type SyncMachineEmitted =
   /** The correlated answer to one `syncNow { pushId }` (the `publish.machine` row). */
   | Readonly<{ type: 'pushSettled'; pushId: string; outcome: SyncPushOutcome }>
   /**
+   * This device's own versions took new numbers before their first backup
+   * (B6): told once, on the push that moved them ("V4 Lid fit is now V5").
+   */
+  | Readonly<{ type: 'versionsRenumbered'; renumbered: readonly VersionRenumbering[] }>
+  /**
    * One push or pull settled, for the host's telemetry sender (W36 D1). Bounded
    * facts only: the host adds where it runs and reports it, never this machine.
    */
@@ -410,6 +416,11 @@ export type SyncPushActorOutput = Readonly<{
   quotaMessage?: string;
   /** What it said about room, when it said anything (C13). */
   quotaStorage?: RemoteStorageRefusal;
+  /**
+   * This device's versions that took the next free number because Tau Cloud
+   * refused theirs as taken (B6), before this push offered them again.
+   */
+  renumbered?: readonly VersionRenumbering[];
 }>;
 
 /** What one open pull is asked for. @public */
@@ -1261,7 +1272,7 @@ const syncMachineDefinition = setup({
   },
 }).createMachine({
   id: 'sync',
-  version: '7',
+  version: '8',
   context: ({ input }) => ({
     projectId: input.projectId,
     branch: input.branch ?? defaultBranch,
@@ -2052,6 +2063,10 @@ const syncMachineDefinition = setup({
                 ...(event.output.quotaStorage === undefined ? {} : { storage: event.output.quotaStorage }),
               },
             });
+          }
+          /* B6: the push that moved this device's versions says so, once. */
+          if ((event.output.renumbered ?? []).length > 0) {
+            enq.emit({ type: 'versionsRenumbered', renumbered: event.output.renumbered ?? [] });
           }
           /* F9: bytes reached the remote, so its stored figure is stale. */
           if (event.output.refs.some((entry) => entry.status === 'updated') && context.parentRef !== undefined) {

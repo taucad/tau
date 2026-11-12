@@ -48,7 +48,7 @@ import {
   timelineRowHover,
   timelineMarker,
 } from '#components/revisions/revision-timeline.js';
-import { RevisionRow } from '#routes/w.$workspace.$project/revision-marker.js';
+import { RevisionRow, isAutosave } from '#routes/w.$workspace.$project/revision-marker.js';
 import { ConflictDecision, RevisionBranches } from '#routes/w.$workspace.$project/revision-branches.js';
 import type { ConflictMaterialization } from '#routes/w.$workspace.$project/revision-branches.js';
 import { RevisionSyncRegion } from '#routes/w.$workspace.$project/revision-sync-region.js';
@@ -77,6 +77,7 @@ import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
 import { projectChatIdFromSearch } from '#utils/project-url.utils.js';
 import { useProject } from '#hooks/use-project.js';
+import { useFeature } from '#flags/use-feature.js';
 import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
@@ -154,6 +155,8 @@ function OrientationStrip({
   const { requestUpgrade, canUpgradePlan } = useCommercialFeatures();
   const { signIn } = useAuthLinks();
   const isAnonymous = useAnonymousRevisions(workspace);
+  /* The id the files are at is a diagnostic: it renders only with Tau's debug setting on (B5). */
+  const isDebug = useFeature('tauDebug');
   const isUnknown = line.kind === 'unknown';
   const canWrite = role !== 'read' && role !== 'revoked';
   /* No head, no branch point; and nothing is offered over a line nobody has located yet (HQ7). */
@@ -334,8 +337,12 @@ function OrientationStrip({
             aria-label='Details of where you are'
             className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 pt-1 pr-1 pl-5 text-xs'
           >
-            <dt className='text-muted-foreground'>Head</dt>
-            <dd className='font-mono break-all'>{head?.revisionId ?? '—'}</dd>
+            {isDebug ? (
+              <>
+                <dt className='text-muted-foreground'>Head</dt>
+                <dd className='font-mono break-all'>{head?.revisionId ?? '—'}</dd>
+              </>
+            ) : null}
             <dt className='text-muted-foreground'>Branch tip</dt>
             <dd>
               {where.branch === undefined ? '—' : `${where.branch} → ${revisionName(tip ?? revisions[0]?.n) ?? '—'}`}
@@ -351,13 +358,20 @@ function OrientationStrip({
 
 type HistoryGroup =
   | Readonly<{ kind: 'revision'; revision: RevisionCard }>
-  | Readonly<{ kind: 'autosaves'; revisions: readonly RevisionCard[] }>;
+  | Readonly<{ kind: 'autosaves'; revisions: readonly RevisionCard[] }>
+  | Readonly<{ kind: 'setup'; revisions: readonly RevisionCard[] }>;
+
+/* Tau's own setup changes, one compact line (A4): flagged at read, never named or conflicted. */
+const isSetupCard = (revision: RevisionCard): boolean =>
+  revision.isSetup === true && (revision.tags?.length ?? 0) === 0 && !revision.conflicted;
 
 /**
  * Fold only consecutive, unnamed autosaves; meaningful revisions stay visible.
+ * Consecutive entries of Tau's own setup are one compact line, the head among
+ * them: Current never marks them ({@link currentRevisionOf}).
  *
  * @param revisions - The line's history, newest first.
- * @param headRevisionId - The revision the checkout reflects, which never folds.
+ * @param headRevisionId - The revision the checkout reflects, which never folds into autosaves.
  * @returns The rows and folds History renders.
  */
 export const groupRevisionHistory = (
@@ -366,12 +380,20 @@ export const groupRevisionHistory = (
 ): readonly HistoryGroup[] => {
   const groups: HistoryGroup[] = [];
   for (const revision of revisions) {
+    if (isSetupCard(revision)) {
+      const previous = groups.at(-1);
+      if (previous?.kind === 'setup') {
+        groups[groups.length - 1] = { kind: 'setup', revisions: [...previous.revisions, revision] };
+      } else {
+        groups.push({ kind: 'setup', revisions: [revision] });
+      }
+      continue;
+    }
     const foldable =
       revision.revisionId !== headRevisionId &&
       (revision.tags?.length ?? 0) === 0 &&
-      revision.turnId === undefined &&
       !revision.conflicted &&
-      (revision.trigger === 'idle' || revision.trigger === 'hidden' || revision.trigger === 'close');
+      isAutosave(revision);
     const previous = groups.at(-1);
     if (foldable && previous?.kind === 'autosaves') {
       groups[groups.length - 1] = { kind: 'autosaves', revisions: [...previous.revisions, revision] };
@@ -388,13 +410,40 @@ export const groupRevisionHistory = (
   );
 };
 
+/**
+ * The entry that reads Current: the newest one at or below the head that is
+ * not Tau's own setup (A4). Tau's housekeeping on top of an entry never takes
+ * the most prominent mark in the list; the files do include it.
+ *
+ * @param revisions - The line's history, newest first.
+ * @param headRevisionId - The revision the checkout reflects.
+ * @returns The id that reads Current.
+ */
+export const currentRevisionOf = (
+  revisions: readonly RevisionCard[],
+  headRevisionId: string | undefined,
+): string | undefined => {
+  const byId = new Map(revisions.map((revision) => [revision.revisionId, revision] as const));
+  let current = headRevisionId === undefined ? undefined : byId.get(headRevisionId);
+  while (current !== undefined && isSetupCard(current) && current.parent !== undefined) {
+    const parent = byId.get(current.parent);
+    if (parent === undefined) {
+      return headRevisionId;
+    }
+    current = parent;
+  }
+  return current?.revisionId ?? headRevisionId;
+};
+
 /** History shows this many rows (revisions and folds) before Show more (round 4). */
 const rowLimit = 12;
 
 const firstOf = (group: HistoryGroup): RevisionCard =>
   group.kind === 'revision' ? group.revision : group.revisions[0]!;
 const keyOf = (group: HistoryGroup): string =>
-  group.kind === 'revision' ? group.revision.revisionId : `fold-${group.revisions[0]!.revisionId}`;
+  group.kind === 'revision'
+    ? group.revision.revisionId
+    : `${group.kind === 'setup' ? 'setup' : 'fold'}-${group.revisions[0]!.revisionId}`;
 const holds = (group: HistoryGroup, revisionId: string | undefined): boolean =>
   revisionId !== undefined &&
   (group.kind === 'revision'
@@ -499,6 +548,77 @@ const onHistoryKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
 };
 
 /**
+ * Tau's own setup changes as one compact line (A4, canvas "Tau's own setup
+ * changes"): 24 px, muted text, a 6 px hollow marker, no fill and no Current.
+ * The chevron opens the individual entries in place.
+ *
+ * @param props - The entries, where the line sits, and its disclosure.
+ * @returns The line.
+ */
+function SetupLine({
+  rowKey,
+  revisions,
+  isFirst,
+  isLast,
+  isOpen,
+  onOpenChange,
+  children,
+}: {
+  readonly rowKey: string;
+  readonly revisions: readonly RevisionCard[];
+  readonly isFirst: boolean;
+  readonly isLast: boolean;
+  readonly isOpen: boolean;
+  readonly onOpenChange: (isOpen: boolean) => void;
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  const newest = revisions[0]!;
+  const oldest = revisions.at(-1)!;
+  const span = [...new Set([clockOf(oldest), clockOf(newest)].filter(Boolean))].join('–');
+  const label = `Tau updated project setup${revisions.length > 1 ? ` · ${String(revisions.length)} changes` : ''}`;
+  return (
+    <Collapsible asChild open={isOpen} onOpenChange={onOpenChange}>
+      <li className='flex flex-col'>
+        <CollapsibleTrigger asChild>
+          <button
+            type='button'
+            data-revision-row={rowKey}
+            aria-label={`${label}${span === '' ? '' : ` · ${span}`}`}
+            className={cn(timelineRowButton, timelineRowHover, 'h-6')}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                timelineGutter({ hasTop: !isFirst, hasBottom: !isLast || isOpen }),
+                'before:h-1.5 after:top-5',
+              )}
+            >
+              <span className='relative mt-1 flex size-4 items-center justify-center'>
+                <span className='size-1.5 rounded-full border border-muted-foreground' />
+              </span>
+            </span>
+            <span className={timelineRowContent}>
+              <span className='min-w-0 flex-1 truncate text-xs leading-4 text-muted-foreground'>{label}</span>
+              <span className='flex shrink-0 items-center gap-1.5 text-xs leading-4 text-muted-foreground'>
+                <span className='hidden whitespace-nowrap tabular-nums @[22rem]:inline'>{span}</span>
+                <ChevronDown
+                  aria-hidden
+                  className='size-3 transition-transform group-data-[state=open]/row:rotate-180 motion-reduce:transition-none'
+                />
+              </span>
+            </span>
+          </button>
+        </CollapsibleTrigger>
+        {/* The entries mount only while the line is open: each one's files are a query of its own (C52). */}
+        <CollapsibleContent className={disclosureMotion}>
+          <ol className={cn(timelineList, 'pt-0.5')}>{children}</ol>
+        </CollapsibleContent>
+      </li>
+    </Collapsible>
+  );
+}
+
+/**
  * History's rows: twelve, then Show more, with the row you are on, the one
  * opened for you and any conflicted row never behind it; consecutive autosaves
  * fold; days divide. The list is one Tab stop (A1 item 14).
@@ -518,6 +638,7 @@ function HistoryList(): React.JSX.Element {
   const revealed = useRevisionReveal(projectId);
   const branch = line.kind === 'unknown' ? undefined : line.name;
   const groups = useMemo(() => groupRevisionHistory(revisions, headRevisionId), [revisions, headRevisionId]);
+  const currentRevisionId = useMemo(() => currentRevisionOf(revisions, headRevisionId), [revisions, headRevisionId]);
   const [openRows, setOpenRows] = useState<ReadonlySet<string>>(() => new Set());
   const [openFolds, setOpenFolds] = useState<ReadonlySet<string>>(() => new Set());
   const [isAllShown, setIsAllShown] = useState(false);
@@ -525,7 +646,7 @@ function HistoryList(): React.JSX.Element {
   /* *View revision* reaches its row wherever it is: behind Show more, inside a fold, below the loaded page, and opened (DESIGN: a reveal expands to its target). */
   if (revealed !== undefined) {
     const holder = groups.find((group) => holds(group, revealed));
-    if (holder?.kind === 'autosaves' && !openFolds.has(keyOf(holder))) {
+    if (holder !== undefined && holder.kind !== 'revision' && !openFolds.has(keyOf(holder))) {
       setOpenFolds((current) => new Set(current).add(keyOf(holder)));
     }
     if (!openRows.has(revealed)) {
@@ -559,7 +680,7 @@ function HistoryList(): React.JSX.Element {
   const shown = isAllShown ? groups : groups.slice(0, Math.max(rowLimit, pinned + 1));
   const hidden = groups.slice(shown.length);
   const hiddenCount = hidden.reduce(
-    (count, group) => count + (group.kind === 'autosaves' ? group.revisions.length : 1),
+    (count, group) => count + (group.kind === 'revision' ? 1 : group.revisions.length),
     0,
   );
   const [active, setActive] = useState<string | undefined>(headRevisionId);
@@ -610,6 +731,25 @@ function HistoryList(): React.JSX.Element {
     };
 
   const renderGroup = (group: HistoryGroup, isFirst: boolean, isLast: boolean): React.JSX.Element => {
+    if (group.kind === 'setup') {
+      const key = keyOf(group);
+      const isFoldOpen = openFolds.has(key);
+      return (
+        <SetupLine
+          key={key}
+          rowKey={key}
+          revisions={group.revisions}
+          isFirst={isFirst}
+          isLast={isLast}
+          isOpen={isFoldOpen}
+          onOpenChange={toggle(setOpenFolds, key)}
+        >
+          {group.revisions.map((revision, index) =>
+            renderGroup({ kind: 'revision', revision }, false, isLast && index === group.revisions.length - 1),
+          )}
+        </SetupLine>
+      );
+    }
     if (group.kind === 'autosaves') {
       const newest = group.revisions[0]!;
       const oldest = group.revisions.at(-1)!;
@@ -666,7 +806,7 @@ function HistoryList(): React.JSX.Element {
         key={revision.revisionId}
         revision={revision}
         title={revisionTitle(revision, named)}
-        isCurrent={revision.revisionId === headRevisionId}
+        isCurrent={revision.revisionId === currentRevisionId}
         isDirty={isDirty}
         branch={branch}
         isOpen={openRows.has(revision.revisionId)}

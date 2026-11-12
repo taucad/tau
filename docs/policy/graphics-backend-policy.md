@@ -117,7 +117,7 @@ Coalesce high-frequency pointer work through `createRafCoalescer`, with the late
 
 ### 11. Model gesture state explicitly
 
-Send measurement and overlay pointer events to their owning XState machine. Use `graphics.machine`'s `cameraInteracting`, driven by OrbitControls `start` and `end`, to discard camera drags. Do not infer orbiting from camera position or quaternion deltas.
+Send measurement and overlay pointer events to their owning XState machine. Use the view camera's `input.dragging` state, entered only by a pose the person made while the controls adapter's gesture is held, to discard camera drags. Do not infer orbiting from camera position or quaternion deltas.
 
 ### 12. Validate behavior, not only graph shape
 

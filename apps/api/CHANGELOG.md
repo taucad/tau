@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.10.0 (2026-11-12)
+
+### Features
+
+- feat(revisions): Name imported commits by their git author and register linked projects as GitHub (B3, B4c) (#1827) (43ecc4fbd)
+- feat(chat): Route the kernel in turn from the chat's kernel preference (AKS M4) (#1825) (394893654)
+- feat(revisions): Number versions once per project, allocated by Tau Cloud (B6) (#1816) (2252cbe73)
+- feat(revisions)!: Require a typed identity and write trailer version 2 (B1) (#1818) (84e6d2c51)
+- feat(api-agent-observability): Carry ledger cost on each generation and drop tau.financial rows (LW4) (#1811) (618ca6da0)
+- feat(api-agent-observability): Write ratings, run termination and task success as Langfuse scores (LW7) (#1809) (e286e92ea)
+- feat(agent-observability): Name tools and send run root and tool content from every host (LW5, LW6) (#1808) (b9b45beda)
+- feat(revisions): Start every project with V1 · Start (#1766) (1c9fd4ee3)
+
+### Fixes
+
+- fix(api-database): Close the Supabase Data API and require signed bearer tokens (#1829) (1cfbd0870)
+- fix(revisions): Write nothing tracked at open and fold Tau's setup entries (#1756) (cf6478ef2)
+- fix(billing): Accept plan_expiry journal kind on the balance wire (#1820) (18401b34f)
+
+### Other changes
+
+- test(api): Add the kernel routing L2 runner on a real tau mcp process (AKS-3b) (#1828) (63284ed05)
+- Langfuse LW17: host labels from browser, desktop and daemon, and per-run release and tags (#1819) (d516ab2d9)
+- refactor(agent-host): Delete two model-call middlewares nothing calls (#1753) (b8a5e12a5)
+- test(api): Add the kernel routing spike runner and live suite (AKS-S1) (#1783) (c3ed122d8)
+- Content evidence: cap parts in UTF-8 bytes, label interrupted output truncated (#1817) (2f39ceeac)
+- test(ui): Add the UI-wide React event-layer lint ceiling (#1710) (b4602c669)
+
+## 0.9.0 (2026-11-11)
+
+### Features
+
+- feat(api-agent-observability): Count Langfuse units and alert at 70% of Hobby's allowance (LW24) (#1806) (f56bc5601)
+- feat(ui): Redesign billing screens, copy and shared components (#1786) (91ffe6243)
+- feat(api-llm-gateway): Carry host, build, kernel and model labels into the provider fact (Langfuse LW17) (#1798) (a5440ce14)
+- feat(revisions): Read and write a turn's base cut as the person's (#1767) (dbabc0025)
+- feat(api): Refuse pushed revisions that do not name the pusher (#1788) (665276e5f)
+- feat(api-agent-observability): Langfuse v5 mapping, one trace and root per run, and trust Langfuse's delete (LW1, LW2) (#1800) (87c6fc46e)
+- feat(api-email): Send each kind of email from its purpose's sender (#1797) (897a2c3b4)
+- feat(camera): Give the camera actor input states, provenance and atomic events (G3) (#1761) (5b14f8f52)
+- feat(agent-host): Keep the request prefix across a chat's settings (#1782) (560c9ffc9)
+
+### Fixes
+
+- fix(api-git-mirror): Cap blob collection and retire the unattended R2 writers (#1802) (0137fe33a)
+- fix(api-billing): Require the output field Together requests carry (#1763) (bcf3929e0)
+- fix(api-billing): Name the expected output field and record refusals before admission (#1792) (2584fb51f)
+- fix(agent-tools): Run the GeoSpec harness test on a valid BRep in the test shards (#1779) (aa1fb2edf)
+- fix(filesystem): Serialize native watcher subscribe and unsubscribe (#1776) (008728315)
+- fix(revisions): give every checkout its fill word, so a new project's viewer leaves "Downloading model files" (#1742) (d8581a532)
+
+### Other changes
+
+- ci(root): Select native hosts and viewer parity in the CI plan, merge queue only (#1773) (0dbd19d92)
+- chore(root): Apply the brand policy to names, one-liners and avatars (#1760) (ca9355b24)
+- refactor(revisions): Make revision identity changes events on the open client (#1707) (20abec4ff)
+- ci(api): Select the Docker smoke test by the API image's own Nx target (#1768) (fc735509b)
+- refactor(ui): Cut the ui-core app library from the app's lib, utils and constants (UI wave E, first slice) (#1686) (ead76cc3d)
+
 ## 0.8.0 (2026-11-10)
 
 ### Features

@@ -10,8 +10,9 @@ import { createRevisionActors } from '#revision-effects.js';
 import { ImmutableRevisionTree, revisionTreeFiles } from '#algorithms/revision-tree.js';
 import { createLargeObjectAdoption } from '#large-object-adoption.js';
 import type { Checkout } from '#revision-port.js';
-import { generatedGitattributesContent } from '#workspace-config.js';
+import { generatedGitattributesContent, generatedGitattributesPath } from '#workspace-config.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
+import { testIdentity } from '#test/identity.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -79,7 +80,7 @@ const killable = (filesystem: RevisionFileSystem) => {
 /* One project on disk, its root reading and writing through `view`. */
 const project = async (view: RevisionFileSystem): Promise<RevisionActors> => {
   const port = createIsomorphicGitRevisionPort({ filesystem: view });
-  return createRevisionActors({ port, projectId: 'project-1', filesystem: async () => view });
+  return createRevisionActors({ identity: testIdentity, port, projectId: 'project-1', filesystem: async () => view });
 };
 
 /* A root past its start-up: the repository made, the generated files written and the first fill scan done. */
@@ -94,6 +95,8 @@ const authored = async (): Promise<NodeFsProvider> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-adoption-'));
   roots.push(root);
   const raw = new NodeFsProvider(root);
+  /* A project past its first save carries Tau's attributes file; opening writes none (A4). */
+  await raw.writeFile(generatedGitattributesPath, generatedGitattributesContent(undefined));
   await raw.writeFile('main.scad', 'import("models/part.step");\n');
   await raw.mkdir('models', { recursive: true });
   await raw.writeFile('models/part.step', part);
@@ -137,7 +140,12 @@ describe('adopting a large file (D9)', () => {
       ...port,
       describe: async () => ({ ...(await describe()), keepsLargeObjectFiles: true }),
     });
-    const actors = createRevisionActors({ port: keeping, projectId: 'project-1', filesystem: async () => raw });
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port: keeping,
+      projectId: 'project-1',
+      filesystem: async () => raw,
+    });
     expect(await actors.adoptLargeObjects(undefined)).toStrictEqual({ adopted: [], left: [] });
     expect(await whole(raw)).toBe('file');
     await actors.settled();

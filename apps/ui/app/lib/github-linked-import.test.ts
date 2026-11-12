@@ -1,10 +1,11 @@
 import { projectManifestSchemaUrl, serializeProjectManifest, projectToManifest } from '@taucad/types';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { largeObjectThresholdBytes } from '@taucad/revisions';
+import type { RevisionRow } from '@taucad/revisions';
 import type * as GithubConnections from '#lib/github-connections.js';
 import { githubConnections } from '#lib/github-connections.js';
 import { prepareLinkedGithubImport, readLinkedGithubManifest } from '#lib/github-linked-import.js';
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { revisionWho, setRevisionSessionUser } from '#lib/revision-actor.js';
 
 vi.mock('#lib/github-connections.js', () => ({
   githubConnections: { token: vi.fn() },
@@ -65,6 +66,27 @@ describe('readLinkedGithubManifest', () => {
 });
 
 describe('prepareLinkedGithubImport', () => {
+  /* A GitHub connection belongs to a signed-in Tau account (B1). */
+  beforeEach(() => {
+    setRevisionSessionUser({ id: 'tau-user-1' });
+  });
+  afterEach(() => {
+    setRevisionSessionUser(undefined);
+  });
+
+  it('should refuse to record an import with no Tau account to name, rather than a stand-in id (B1)', async () => {
+    setRevisionSessionUser(undefined);
+
+    await expect(
+      prepareLinkedGithubImport({
+        selection: { ...selection, files: [] },
+        targetBranch: 'main',
+        manifest: new TextEncoder().encode('{}'),
+        mainFile: 'main.scad',
+      }),
+    ).rejects.toThrow('Sign in to Tau');
+  });
+
   it('refuses a large ordinary Git blob before fetching or rewriting repository history', async () => {
     await expect(
       prepareLinkedGithubImport({
@@ -94,9 +116,37 @@ describe('prepareLinkedGithubImport', () => {
     expect(generation).toBe(4);
     expect(request).toMatchObject({
       author: noreply,
-      setup: { provenance: { actorId: 'tau-user-1', actor: { kind: 'user', id: 'tau-user-1', ...noreply } } },
+      setup: {
+        provenance: { actor: { kind: 'user', id: 'tau-user-1', ...noreply }, capture: 'import', via: 'browser' },
+      },
     });
     setRevisionSessionUser(undefined);
+  });
+
+  /* B3, O5 inverted: an upstream commit the import brought in is its git author's in History, not the importer's. */
+  it('should name an imported upstream commit by its git author, not the person who linked it (B3)', () => {
+    /* The row `readRevisionLog` reads for a commit Tau did not record (the conformance row pins the read). */
+    const upstream: RevisionRow = {
+      revisionNumber: 1,
+      revisionId: 'b'.repeat(40),
+      changeId: '',
+      actor: 'unknown',
+      authorName: 'Octo Dev',
+      source: 'import',
+      createdAt: 0,
+      summary: 'Upstream change',
+      conflicted: false,
+      turnId: undefined,
+      tags: [],
+    };
+    const context = {
+      session: { id: 'tau-user-1', name: 'Ada' },
+      projectId: 'prj_1',
+      pushRecord: undefined,
+      showAnonymousId: false,
+    };
+
+    expect(revisionWho(upstream, context)).toStrictEqual({ line: 'Octo Dev', isYou: false, isAgent: false });
   });
 
   it('should describe the pinned branch for the worker to fetch, with a credential for that repository alone (I6)', async () => {

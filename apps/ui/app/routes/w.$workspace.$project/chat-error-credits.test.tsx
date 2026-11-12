@@ -53,10 +53,11 @@ describe('ChatErrorCredits', () => {
 
     const { container } = render(<ChatErrorCredits resumable description={description} />);
 
-    expect(screen.getByText('Credit limit reached')).toBeInTheDocument();
+    expect(screen.getByText('You’re out of credits')).toBeInTheDocument();
     expect(screen.getByText(description)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /resume/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^billing$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add credits' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^billing$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
 
@@ -69,9 +70,7 @@ describe('ChatErrorCredits', () => {
     render(<ChatErrorCredits resumable />);
 
     expect(
-      screen.getByText(
-        'Your available monthly and purchased credits do not cover this turn. Add credits, then resume this chat.',
-      ),
+      screen.getByText('You don’t have enough credits for this turn. Add credits, then resume.'),
     ).toBeInTheDocument();
   });
 
@@ -85,15 +84,16 @@ describe('ChatErrorCredits', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
-  it('should keep billing available and ask to send the draft when no saved run exists', async () => {
+  it('should keep Add credits available and ask to send the draft when no saved run exists', async () => {
     render(<ChatErrorCredits resumable={false} />);
 
-    expect(screen.getByText('Add credits, then send your message.')).toBeInTheDocument();
+    expect(screen.getByText('Add credits, then send your message again.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Billing' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add credits' }));
 
-    expect(openSettingsDialog).toHaveBeenCalledWith('billing');
+    expect(screen.getByTestId('topup-modal')).toHaveAttribute('data-open', 'true');
+    expect(openSettingsDialog).not.toHaveBeenCalled();
     expect(continueChat).not.toHaveBeenCalled();
     expect(regenerate).not.toHaveBeenCalled();
   });
@@ -107,17 +107,7 @@ describe('ChatErrorCredits', () => {
     expect(continueChat).not.toHaveBeenCalled();
   });
 
-  it('should open billing settings when Billing is clicked', async () => {
-    const user = userEvent.setup();
-    render(<ChatErrorCredits resumable />);
-
-    await user.click(screen.getByRole('button', { name: /^billing$/i }));
-
-    expect(openSettingsDialog).toHaveBeenCalledTimes(1);
-    expect(openSettingsDialog).toHaveBeenCalledWith('billing');
-  });
-
-  it('should offer the in-place top-up when a payment method is on file (flow A)', async () => {
+  it('should open the Add credits dialog in place when a payment method is on file', async () => {
     useEntitlementsMock.mockReturnValue({ ...entitlementsFromTier('pro'), hasPaymentMethod: true });
     const user = userEvent.setup();
     render(<ChatErrorCredits resumable />);
@@ -136,7 +126,7 @@ describe('ChatErrorCredits', () => {
     render(
       <ChatErrorCredits
         resumable
-        description='Your available monthly and purchased credits do not cover this turn.'
+        description='You don’t have enough credits for this turn.'
         details={{
           requiredCreditAtoms: '3084332',
           availableCreditAtoms: '2960000',
@@ -146,10 +136,12 @@ describe('ChatErrorCredits', () => {
     );
 
     // 3,084,332 - 2,960,000 = 124,332 atoms -> 13 whole credits (rounded up).
-    expect(screen.getByText('Tau paused this turn: 13 more credits needed for Astra.')).toBeInTheDocument();
     expect(
-      screen.queryByText('Your available monthly and purchased credits do not cover this turn.'),
-    ).not.toBeInTheDocument();
+      screen.getByText(
+        'This turn needs 13 more credits on Astra. Add credits or switch to a cheaper model, then resume.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('You don’t have enough credits for this turn.')).not.toBeInTheDocument();
   });
 
   it('should keep the provider description when the refusal carried no shortfall', () => {
@@ -176,11 +168,25 @@ describe('ChatErrorCredits', () => {
     expect(screen.getByRole('button', { name: /switch model/i })).toBeInTheDocument();
   });
 
-  it('should keep flow B (settings route) without a payment method and never mount the modal', () => {
+  it('should offer Add credits without a saved card too, because the dialog takes a new card', async () => {
+    const user = userEvent.setup();
     render(<ChatErrorCredits resumable />);
 
-    expect(screen.getByRole('button', { name: /^billing$/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /add credits/i })).not.toBeInTheDocument();
-    expect(screen.queryByTestId('topup-modal')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^billing$/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Add credits' }));
+
+    expect(screen.getByTestId('topup-modal')).toHaveAttribute('data-open', 'true');
+    expect(openSettingsDialog).not.toHaveBeenCalled();
+  });
+
+  it('should leave the sentence about resuming out when there is no run to resume', () => {
+    render(
+      <ChatErrorCredits
+        resumable={false}
+        details={{ requiredCreditAtoms: '3084332', availableCreditAtoms: '2960000', routeId: 'openai-gpt-6-astra' }}
+      />,
+    );
+
+    expect(screen.getByText('This turn needs 13 more credits on Astra.')).toBeInTheDocument();
   });
 });

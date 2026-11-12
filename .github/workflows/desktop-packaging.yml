@@ -150,7 +150,7 @@ jobs:
           docker run --rm -e TAU_APT_DISPOSABLE_CONTAINER=1 -e TAU_APT_ENROLLMENT_SCRIPT=/configure-linux-apt.sh --mount type=bind,source="$PWD/apps/desktop/scripts/configure-linux-apt.test.mts",target=/test.mts,readonly --mount type=bind,source="$PWD/apps/desktop/scripts/configure-linux-apt.sh",target=/configure-linux-apt.sh,readonly node:24.20.0-bookworm-slim bash -c 'apt-get update -qq && apt-get install -y -qq gnupg && node /test.mts'
       - name: Route contracts, protected publication and first-download verification
         if: runner.os == 'Linux'
-        run: pnpm nx run-many -p desktop -t test-route-publication test-route-transport test-publication-authority test-receipt-provenance test-first-download test-installer-candidate
+        run: pnpm nx run-many -p desktop -t test-route-publication test-route-transport test-publication-authority test-receipt-provenance test-first-download test-installer-candidate test-linux-receipts-replay
       - name: Signed APT publication, interruption and metadata renewal
         if: runner.os == 'Linux'
         shell: bash

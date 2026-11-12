@@ -22,6 +22,8 @@ export const purposeRefusals = [
   'project-mixed-source',
   /* The entitlement could not be established affirmatively, so it cannot authorise reuse. */
   'tier-unverified',
+  /* The deployment's content capture mode does not permit this account, so content is not recorded (LD15). */
+  'capture-off',
 ] as const;
 
 /** Why a purpose is not available. */

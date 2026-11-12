@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { RevisionDiffEntry, RevisionLine, RevisionRow } from '@taucad/revisions';
+import type { RevisionDiffEntry, RevisionLine, RevisionRow, StartReading } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
 import type { RevisionWhoContext } from '#lib/revision-actor.js';
@@ -57,8 +57,14 @@ export type RevisionCard = {
    * minted, which is how History names a *Restored* row (A9).
    */
   readonly restoredFrom?: string;
+  /** A turn's base cut, the person's own edits saved before the agent started (A5): it reads and folds as an autosave. */
+  readonly turnCut?: RevisionRow['turnCut'];
   /** The revision this one follows, its first parent by id; absent on a branch's first revision. */
   readonly parent?: string;
+  /** An automatic entry that changed only Tau's own setup files (A4): one compact line in History. */
+  readonly isSetup?: true;
+  /** How this entry reads as the Start version, V1, when it is one (A6). */
+  readonly start?: StartReading;
   /**
    * Paths the settling host attested, for a card whose revision is not in this
    * page's graph. Otherwise the diff is asked of the graph on demand.
@@ -157,6 +163,10 @@ const headLog = (head: string | undefined, rows: readonly RevisionRow[], wanted:
  * @returns The headline every revision surface shows.
  */
 const titleOf = (row: RevisionRow): string => {
+  /* A5: a turn's base cut is the person's own edits, saved before the agent started. */
+  if (row.turnCut === 'base' && row.summary === `Agent turn ${row.turnId ?? ''}`) {
+    return 'Autosave';
+  }
   if (row.turnId !== undefined && row.summary === `Agent turn ${row.turnId}`) {
     return 'Agent change';
   }
@@ -180,8 +190,11 @@ const cardOf = (row: RevisionRow, who: RevisionWhoContext): RevisionCard => {
     conflicted: row.conflicted,
     tags: row.tags,
     trigger: row.trigger,
+    ...(row.turnCut === undefined ? {} : { turnCut: row.turnCut }),
     ...(row.restoredFrom === undefined ? {} : { restoredFrom: row.restoredFrom }),
     ...(row.parent === undefined ? {} : { parent: row.parent }),
+    ...(row.isSetup === true ? { isSetup: true } : {}),
+    ...(row.start === undefined ? {} : { start: row.start }),
   };
 };
 

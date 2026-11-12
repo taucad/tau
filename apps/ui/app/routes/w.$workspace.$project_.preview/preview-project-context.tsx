@@ -6,7 +6,7 @@ export type PreviewProjectMetadata = {
   readonly name: string;
   readonly description: string;
   readonly tags: readonly string[];
-  readonly assets: { readonly main: { readonly entryPath: string; readonly thumbnail?: string } };
+  readonly assets: { readonly main?: { readonly entryPath: string; readonly thumbnail?: string } | undefined };
   readonly author?: { readonly name: string; readonly avatar: string };
 };
 

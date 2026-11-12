@@ -85,3 +85,31 @@ for (const change of [{ channel: 'production' }, { sourceCommit: 'a'.repeat(40) 
     });
   });
 }
+// Staging Mac clean-host C is the notarized newest-green ancestor of the vm dispatch: an ancestor source is admitted
+// there (its authenticated binding sidecar carries S≤K≤H), while Windows, production and reversed ancestry stay refused.
+const parent = execFileSync('git', ['rev-parse', 'HEAD~1'], { encoding: 'utf8' }).trim();
+assertQualificationSource({
+  sourceCommit: parent,
+  workflowCommit: current,
+  scope: 'macos',
+  channel: 'staging',
+  kind: 'vm',
+});
+for (const options of [
+  { scope: 'windows', channel: 'staging', kind: 'vm' },
+  { scope: 'all', channel: 'production', kind: 'vm' },
+  { scope: 'all', channel: 'production', kind: 'ci' },
+] as const) {
+  assert.throws(() => {
+    assertQualificationSource({ sourceCommit: parent, workflowCommit: current, ...options });
+  });
+}
+assert.throws(() => {
+  assertQualificationSource({
+    sourceCommit: current,
+    workflowCommit: parent,
+    scope: 'macos',
+    channel: 'staging',
+    kind: 'vm',
+  });
+});

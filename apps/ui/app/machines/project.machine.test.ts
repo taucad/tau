@@ -577,7 +577,18 @@ describe('projectMachine', () => {
         loadResult: stubProjectWithMechanical,
       });
       actor.send({ type: 'setMainFile', path: 'other.ts' });
-      expect(actor.getSnapshot().context.project?.assets.main.entryPath).toBe('other.ts');
+      expect(actor.getSnapshot().context.project?.assets.main?.entryPath).toBe('other.ts');
+      actor.stop();
+    });
+
+    it('should adopt the first main file of an entry-less project', async () => {
+      const { main: _main, ...entrylessAssets } = stubProject.assets;
+      const actor = await startAndLoad({
+        loadResult: { ...stubProject, assets: entrylessAssets },
+      });
+      expect(actor.getSnapshot().context.project?.assets.main).toBeUndefined();
+      actor.send({ type: 'setMainFile', path: 'main.scad' });
+      expect(actor.getSnapshot().context.project?.assets.main?.entryPath).toBe('main.scad');
       actor.stop();
     });
 

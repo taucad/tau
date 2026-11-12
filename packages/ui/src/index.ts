@@ -46,3 +46,4 @@ export * from '#components/textarea.js';
 export * from '#components/toggle-group.js';
 export * from '#components/toggle.js';
 export * from '#components/tooltip.js';
+export * from '#components/view-stack.js';

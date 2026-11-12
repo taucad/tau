@@ -11,6 +11,11 @@ const strictEnvironmentBoolean = (defaultValue: boolean) =>
 const unsetWhenEmpty = <T extends z.ZodType>(schema: T) =>
   z.preprocess((value) => (value === '' ? undefined : value), schema);
 
+/** The Langfuse scores agent evidence writes (Langfuse remediation LW7), each with its own score config. */
+export const langfuseScoreNames = ['user-rating', 'run-termination', 'task-success'] as const;
+/** One Langfuse score's name. */
+export type LangfuseScoreName = (typeof langfuseScoreNames)[number];
+
 export const environmentSchemaBase = z.object({
   /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
   NODE_ENV: z.enum(['development', 'production', 'test']),
@@ -62,6 +67,57 @@ export const environmentSchemaBase = z.object({
    */
   TAU_OBSERVABILITY_NOTICE_VERSION: unsetWhenEmpty(z.string().min(1).optional()).describe(
     'The approved agent-observability purpose notice in force. Unset keeps every new purpose unavailable.',
+  ),
+  /*
+   * Langfuse remediation LD15: whether model input and output may be recorded at all. `off`, the default, records
+   * content for no account, whatever its purposes say; `allowlist` records it only for the staff accounts in
+   * TAU_OBSERVABILITY_CONTENT_ACCOUNTS; `on` defers to each account's own `content` purpose. Not a secret.
+   */
+  TAU_OBSERVABILITY_CONTENT_CAPTURE: unsetWhenEmpty(z.enum(['off', 'allowlist', 'on']).default('off')).describe(
+    'Agent content capture for Langfuse: off (default), allowlist or on.',
+  ),
+  TAU_OBSERVABILITY_CONTENT_ACCOUNTS: unsetWhenEmpty(
+    z
+      .string()
+      .optional()
+      .transform((value) =>
+        (value ?? '')
+          .split(',')
+          .map((account) => account.trim())
+          .filter((account) => account.length > 0),
+      )
+      .pipe(z.array(z.string().regex(/^[\w-]{1,128}$/u, 'must be comma-separated account ids'))),
+  ).describe('Comma-separated staff account ids whose content is captured when the capture mode is allowlist.'),
+  /*
+   * Langfuse remediation LW7: the score config each Langfuse score names, per project, as `name=id` pairs. The
+   * operator creates the configs and enters their ids (LW9); a score whose id is not set is written without one,
+   * so roots and scores never wait for the configs. Tau never reads score configs from Langfuse (charter D6, ruling 9). Not a secret.
+   */
+  TAU_OBSERVABILITY_SCORE_CONFIG_IDS: unsetWhenEmpty(
+    z
+      .string()
+      .optional()
+      .transform((value) =>
+        (value ?? '')
+          .split(',')
+          .map((pair) => pair.trim())
+          .filter((pair) => pair.length > 0)
+          .map((pair) => {
+            const separator = pair.indexOf('=');
+            return separator === -1 ? [pair, ''] : [pair.slice(0, separator), pair.slice(separator + 1)];
+          }),
+      )
+      .pipe(
+        z
+          .array(z.tuple([z.enum(langfuseScoreNames), z.string().regex(/^[\w-]{1,128}$/u)]))
+          .refine((pairs) => new Set(pairs.map(([name]) => name)).size === pairs.length, 'names a score twice')
+          .transform(
+            (pairs): Partial<Record<LangfuseScoreName, string>> =>
+              Object.fromEntries(pairs) as Partial<Record<LangfuseScoreName, string>>,
+          ),
+      ),
+  ).describe(
+    'Comma-separated name=id pairs naming the Langfuse score config of user-rating, run-termination and task-success.',
   ),
   /*
    * Blueprint T06: the key sealing accepted evidence in the delivery backlog.
@@ -512,6 +568,13 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       code: 'custom',
       message: 'TAU_OBSERVABILITY_PAYLOAD_KEY is required when evidence delivery is enabled',
       path: ['TAU_OBSERVABILITY_PAYLOAD_KEY'],
+    });
+  }
+  if (data.TAU_OBSERVABILITY_CONTENT_CAPTURE === 'allowlist' && data.TAU_OBSERVABILITY_CONTENT_ACCOUNTS.length === 0) {
+    context.addIssue({
+      code: 'custom',
+      message: 'TAU_OBSERVABILITY_CONTENT_ACCOUNTS must name at least one account when content capture is allowlist',
+      path: ['TAU_OBSERVABILITY_CONTENT_ACCOUNTS'],
     });
   }
   if (

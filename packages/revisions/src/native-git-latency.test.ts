@@ -27,6 +27,7 @@ import { revisionTreeId } from '#revision-effects.js';
 import { readRevisionLog } from '#revision-verbs.js';
 import type { RevisionPort } from '#revision-port.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { recordedBy } from '#test/identity.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 const roots: string[] = [];
@@ -90,7 +91,7 @@ describe.runIf(gitToolchainOnPath)('native-leg latency budgets', () => {
       const receipt = await port.writeRevision({
         parents: head === undefined ? [] : [head],
         tree: treeOf([['a.txt', encoder.encode(`revision ${String(index)}\n`)]]),
-        provenance: { source: 'user', actorId: 'latency', createdAt: 1_757_000_000_000 + index * 1000 },
+        provenance: { source: 'user', ...recordedBy('latency'), createdAt: 1_757_000_000_000 + index * 1000 },
         summary: { generated: `Revision ${String(index)}` },
       });
       const next = revisionId(receipt.commitId);
@@ -123,7 +124,7 @@ describe.runIf(gitToolchainOnPath)('native-leg latency budgets', () => {
           ],
         ),
       ),
-      provenance: { source: 'user', actorId: 'latency', createdAt: 1_757_000_000_000 },
+      provenance: { source: 'user', ...recordedBy('latency'), createdAt: 1_757_000_000_000 },
       summary: { generated: 'Four thousand files' },
     });
 

@@ -1,5 +1,5 @@
 import type { ConstantRecord, ChatError } from '@taucad/types';
-import type { KernelId } from '@taucad/types/constants';
+import type { KernelId, KernelPreference } from '@taucad/types/constants';
 import type { messageRole, messageStatus } from '#constants/message.constants.js';
 import type { CadAgentExecution } from '#schemas/agent-config.schema.js';
 import type { MyUIMessage } from '#types/message.types.js';
@@ -44,6 +44,12 @@ export type Chat = {
    * fall back to the cookie default.
    */
   activeKernel?: KernelId;
+  /**
+   * The chat's kernel preference, `auto` or one kernel (automatic kernel selection blueprint D2), written only while
+   * the `autoKernel` flag is on. A row without it reads as Auto, unless its legacy {@link Chat.activeKernel} differs
+   * from the project's owner, which marks a real manual pick.
+   */
+  kernelPreference?: KernelPreference;
   /**
    * Durable checkout for this chat's future turns. A linked checkout's id derives from its branch, so the branch is
    * the portable fact: a device that has no checkout with this id places the turn on the one holding that branch,

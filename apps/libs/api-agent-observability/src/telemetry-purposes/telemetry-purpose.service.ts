@@ -14,8 +14,12 @@ import type { Environment } from '@taucad/api-core';
 import { Span } from '@taucad/api-observability';
 import { tierAssuranceKey } from '#telemetry-purposes/tier-assurance.js';
 import type { TierAssuranceSource } from '#telemetry-purposes/tier-assurance.js';
-import type { ProjectAuthority, RecordedPurposeDecision } from '#telemetry-purposes/purpose-authority.js';
-import { purposeEpoch, resolvePurposeAuthority } from '#telemetry-purposes/purpose-authority.js';
+import type {
+  ContentCaptureSetting,
+  ProjectAuthority,
+  RecordedPurposeDecision,
+} from '#telemetry-purposes/purpose-authority.js';
+import { contentCapturePermits, purposeEpoch, resolvePurposeAuthority } from '#telemetry-purposes/purpose-authority.js';
 import type {
   EffectiveTelemetryPurposes,
   UpdateTelemetryPurposesInput,
@@ -97,6 +101,7 @@ export class TelemetryPurposeService {
           tier: assurance.tier,
           tierAssured: assurance.assured,
           improvementDefault,
+          contentCapture: contentCapturePermits(this.contentCapture(), userId),
           project: projectAuthority,
         }),
         answeredAt: Date.now(),
@@ -218,6 +223,13 @@ export class TelemetryPurposeService {
   /** The approved production notice in force, or `undefined` while none is (T01 gate). */
   public noticeVersion(): string | undefined {
     return this.configService.get('TAU_OBSERVABILITY_NOTICE_VERSION', { infer: true });
+  }
+
+  /** The deployment's content capture mode and allowlist (LD15); an unset mode is `off`. */
+  public contentCapture(): ContentCaptureSetting {
+    const mode = this.configService.get('TAU_OBSERVABILITY_CONTENT_CAPTURE', { infer: true });
+    const accounts = this.configService.get('TAU_OBSERVABILITY_CONTENT_ACCOUNTS', { infer: true });
+    return { mode, accounts: Array.isArray(accounts) ? accounts : [] };
   }
 
   /** The account's "Improve Tau for everyone" switch; on unless the account turned it off. */

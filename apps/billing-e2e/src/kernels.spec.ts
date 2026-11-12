@@ -50,7 +50,7 @@ describe('kernels', () => {
         const shown = (await visibleText(banner)) || 'no banner within 90 s';
         evidence.push(`project ${project}`, `banner "${shown}"`, await screenshot(page, 'en-01-zoo-free'));
         expect(close).toEqual({ code: 4403, reason: 'PRO_REQUIRED' });
-        expect(shown).toContain('Zoo execution requires Pro. Upgrade to Pro, then retry.');
+        expect(shown).toContain('Zoo needs a Pro plan. Upgrade to Pro, then try again.');
         return { outcome: 'pass', evidence };
       } finally {
         await browsing.browser.close();

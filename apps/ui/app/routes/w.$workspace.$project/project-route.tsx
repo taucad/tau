@@ -208,7 +208,7 @@ export function ProjectRouteGate({
         if (access.status === 'ready') {
           /* What a retained subtree needs to keep running after the person
            * navigates on: recorded the once, from the resolved route. */
-          const requirement = nativeKernelRequirementForEntryPath(access.project.assets.main.entryPath);
+          const requirement = nativeKernelRequirementForEntryPath(access.project.assets.main?.entryPath);
           setRetainedKernels((prior) =>
             Object.hasOwn(prior, requestedProjectId)
               ? prior
@@ -305,7 +305,7 @@ export function ProjectRouteGate({
   const pending = resolved !== undefined && resolved.projectId !== requestedProjectId;
   const nativeRequirement =
     resolved?.access.status === 'ready'
-      ? nativeKernelRequirementForEntryPath(resolved.access.project.assets.main.entryPath)
+      ? nativeKernelRequirementForEntryPath(resolved.access.project.assets.main?.entryPath)
       : undefined;
 
   /*

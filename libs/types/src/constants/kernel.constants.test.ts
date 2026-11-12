@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isKernelId, kernelConfigurations, languageFromKernel } from '#constants/kernel.constants.js';
+import {
+  catalogKernelOfRuntimeKernel,
+  isKernelId,
+  kernelConfigurations,
+  languageFromKernel,
+} from '#constants/kernel.constants.js';
 
 describe('kernel configuration identity', () => {
   it('should start Zoo projects and files with the latest stable bundled KCL version', () => {
@@ -137,5 +142,12 @@ describe('kernel configuration identity', () => {
     expect(isKernelId('openrscad')).toBe(false);
     expect(isKernelId('opencascade')).toBe(false);
     expect(isKernelId('tau')).toBe(false);
+  });
+
+  it('maps a runtime kernel id to the catalog kernel it authors', () => {
+    expect(catalogKernelOfRuntimeKernel('openrscad')).toBe('openscad');
+    expect(catalogKernelOfRuntimeKernel('opencascade')).toBe('opencascadejs');
+    expect(catalogKernelOfRuntimeKernel('replicad')).toBe('replicad');
+    expect(catalogKernelOfRuntimeKernel('gltf')).toBeUndefined();
   });
 });

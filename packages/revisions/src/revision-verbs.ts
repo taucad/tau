@@ -22,6 +22,13 @@ import type { RevisionId } from '#algorithms/index.js';
 import { revisionId } from '#algorithms/index.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import type { RevisionDiffEntry, RevisionLogEntry, RevisionPort } from '#revision-port.js';
+import { numberVersions } from '#version-numbers.js';
+import { generatedSetupPaths } from '#workspace-config.js';
+import { startReadingOf } from '#start-version.js';
+import type { StartReading } from '#start-version.js';
+
+/** One named version on a row: its name and its number, `V<n>` (B6). @public */
+export type RevisionVersion = Readonly<{ name: string; number: number }>;
 
 /** One revision as a person reads it. @public */
 export type RevisionRow = Readonly<{
@@ -37,6 +44,8 @@ export type RevisionRow = Readonly<{
   treeId?: string;
   /** Who made it: the model id for an agent turn, the user's actor otherwise. */
   actor: string;
+  /** The git author of a commit Tau did not record (B3), which History names. */
+  authorName?: string;
   source: RevisionProvenance['source'];
   /** Milliseconds since the Unix epoch. */
   createdAt: number;
@@ -55,15 +64,20 @@ export type RevisionRow = Readonly<{
    */
   tags: readonly string[];
   /**
+   * The same named versions with their numbers, lowest first (blueprint B6):
+   * `V<n>` once per project, read from each tag the way `tags` is. Present
+   * only on a row a version names. The Start entry is V1 and has no tag.
+   */
+  versions?: readonly RevisionVersion[];
+  /**
    * What asked for this revision (S30), when the store recorded it.
    *
    * History folds consecutive `idle`, `hidden` and `close` rows into one
    * *n autosaves* row (A20), and only the trigger can tell an autosave from a
-   * `save` the person asked for. Derived at read like `tags` (I3), and
-   * `undefined` for a revision written before the vocabulary existed — which is
-   * also why the field is optional: a fixture that predates it is still a row.
+   * `save` the person asked for. Read from the trailer's `capture` (B1), and
+   * `undefined` for a commit Tau did not record.
    */
-  trigger?: RevisionProvenance['trigger'];
+  trigger?: RevisionProvenance['capture'];
   /**
    * The revision a restore brought back (D1), by id.
    *
@@ -72,6 +86,13 @@ export type RevisionRow = Readonly<{
    * this, never the trigger, is what names a *Restored* row (A9).
    */
   restoredFrom?: string;
+  /**
+   * Which of a turn's two entries this is (RM-R9): its `base`, the person's own
+   * edits saved before the agent started, or its `result`. Absent on an entry
+   * no turn minted. A base cut is the person's (A5), so its row reads
+   * `source: 'user'` whatever source an earlier build recorded for it.
+   */
+  turnCut?: RevisionProvenance['turnCut'];
   /**
    * The revision this one follows: its first parent, by id, or `undefined` for
    * a branch's first revision. A merge's second parent is the side it brought
@@ -85,6 +106,19 @@ export type RevisionRow = Readonly<{
    * sides appear further down the order.
    */
   otherParents?: readonly string[];
+  /**
+   * An automatic entry (`idle`, `hidden` or `close`) that changed only Tau's
+   * own setup files, the root `.gitignore` and `.gitattributes` (A4). Decided
+   * at read by which files changed, never by a declared kind, so no one can
+   * fold a model edit out of sight under Tau's name. Absent on every other row.
+   */
+  isSetup?: true;
+  /**
+   * How this entry reads as the Start version, V1, when it is one (A6): the
+   * entry Tau minted when it created the store, or an older project's root
+   * entry. Derived at read like `tags` (I3), so no tag is needed.
+   */
+  start?: StartReading;
 }>;
 
 /** Where the reader is, and what else this project holds. @public */
@@ -268,25 +302,95 @@ const numbersOn = async (
 const rowOf = (
   entry: RevisionLogEntry,
   revisionNumber: number | undefined,
-  tags: readonly string[] = [],
+  versions: readonly RevisionVersion[] = [],
 ): RevisionRow =>
   Object.freeze({
     revisionNumber,
     revisionId: entry.id,
     changeId: entry.changeId,
     treeId: entry.treeId,
-    actor: entry.provenance.actorId,
-    source: entry.provenance.source,
+    /* B2 types this row's who; until then a commit Tau did not record reads as `unknown`, as before B1. */
+    actor: entry.provenance.actor?.id ?? 'unknown',
+    ...(entry.authorName === undefined ? {} : { authorName: entry.authorName }),
+    /* A5: a turn's base holds the person's bytes, never the agent's. */
+    source: entry.provenance.turnCut === 'base' ? 'user' : entry.provenance.source,
     createdAt: entry.provenance.createdAt,
     summary: entry.summary.edited ?? entry.summary.generated,
     conflicted: entry.conflicted,
     turnId: entry.provenance.turnId,
-    tags,
-    trigger: entry.provenance.trigger,
+    tags: Object.freeze(versions.map((version) => version.name).toSorted()),
+    ...(versions.length === 0
+      ? {}
+      : { versions: Object.freeze(versions.toSorted((left, right) => left.number - right.number)) }),
+    trigger: entry.provenance.capture,
     ...(entry.provenance.restoredFrom === undefined ? {} : { restoredFrom: entry.provenance.restoredFrom }),
+    ...(entry.provenance.turnCut === undefined ? {} : { turnCut: entry.provenance.turnCut }),
     ...(entry.parents[0] === undefined ? {} : { parent: entry.parents[0] }),
     ...(entry.parents.length > 1 ? { otherParents: Object.freeze(entry.parents.slice(1)) } : {}),
+    ...startOf(entry),
   });
+
+/*
+ * Setup verdicts already read, by revision id. A revision's changes against its
+ * first parent are fixed by its id, so an entry is never stale.
+ *
+ * ponytail: insertion-order eviction at 4 096 ids, as `ordinals`; a miss is read again.
+ */
+const setupVerdicts = new Map<string, boolean>();
+
+/**
+ * The entries that are Tau's own setup: automatic saves whose only changes
+ * against their first parent are Tau's setup files (A4). Decided by the files,
+ * never by a declared kind, so a model edit can never be folded under Tau's name.
+ *
+ * @param port - The store, asked once for every entry it has not judged yet.
+ * @param page - The entries read.
+ * @returns The ids of the setup entries among them.
+ */
+const setupEntriesOf = async (port: RevisionPort, page: readonly RevisionLogEntry[]): Promise<ReadonlySet<string>> => {
+  const candidates = page.filter(
+    ({ provenance: { capture }, parents }) =>
+      (capture === 'idle' || capture === 'hidden' || capture === 'close') && parents.length === 1,
+  );
+  /* This page's verdicts, held apart from the cache: a page longer than the
+   * cache's bound would otherwise evict a verdict it is about to read. */
+  const verdicts = new Map<string, boolean>();
+  const unjudged = candidates.filter((entry) => {
+    const known = setupVerdicts.get(entry.id);
+    if (known !== undefined) {
+      verdicts.set(entry.id, known);
+    }
+    return known === undefined;
+  });
+  if (unjudged.length > 0) {
+    const changed =
+      port.firstParentChanges === undefined
+        ? new Map(
+            await Promise.all(
+              unjudged.map(async (entry) => {
+                const changes = await port.diff({ from: entry.parents[0], to: entry.id });
+                return [entry.id, changes.map((change) => change.path)] as const;
+              }),
+            ),
+          )
+        : await port.firstParentChanges(unjudged.map((entry) => entry.id));
+    for (const { id } of unjudged) {
+      const paths = changed.get(id) ?? [];
+      const verdict = paths.length > 0 && paths.every((path) => generatedSetupPaths.has(path));
+      verdicts.set(id, verdict);
+      setupVerdicts.set(id, verdict);
+    }
+    while (setupVerdicts.size > maximumOrdinals) {
+      setupVerdicts.delete(setupVerdicts.keys().next().value!);
+    }
+  }
+  return new Set(candidates.filter((entry) => verdicts.get(entry.id) === true).map((entry) => entry.id));
+};
+
+const startOf = (entry: RevisionLogEntry): Readonly<{ start?: StartReading }> => {
+  const start = startReadingOf(entry);
+  return start === undefined ? {} : { start };
+};
 
 /**
  * Read one branch's history, newest first.
@@ -319,18 +423,25 @@ export const readRevisionLog = async (
     return Object.freeze([]);
   }
   const numbers = await numbersOn(port, head, entries);
-  /* One `listTags` for the whole page, not one per row. */
-  const named = new Map<string, string[]>();
-  for (const tag of await port.listTags()) {
-    named.set(tag.revisionId, [...(named.get(tag.revisionId) ?? []), tag.name]);
+  /* One `listTags` for the whole page, not one per row; each tag arrives numbered (B6). */
+  const named = new Map<string, RevisionVersion[]>();
+  for (const tag of numberVersions(await port.listTags())) {
+    named.set(tag.revisionId, [
+      ...(named.get(tag.revisionId) ?? []),
+      Object.freeze({ name: tag.name, number: tag.number }),
+    ]);
   }
   /* The port's own order, not the chain's: a merge is followed by the side it
    * merged, and those revisions are in this branch's history without being on
    * its first-parent line, so they appear with no number of their own. */
-  const rows = [...entries.values()].map((entry) =>
-    rowOf(entry, numbers.get(entry.id), Object.freeze((named.get(entry.id) ?? []).toSorted())),
-  );
-  return Object.freeze(limit === undefined ? rows : rows.slice(0, limit));
+  const page = limit === undefined ? [...entries.values()] : [...entries.values()].slice(0, limit);
+  const setup = await setupEntriesOf(port, page);
+  const rows = page.map((entry) => {
+    const row = rowOf(entry, numbers.get(entry.id), named.get(entry.id));
+    /* The Start entry is V1 and reads as itself, never folded into the setup line. */
+    return setup.has(entry.id) && row.start === undefined ? Object.freeze({ ...row, isSetup: true }) : row;
+  });
+  return Object.freeze(rows);
 };
 
 /**

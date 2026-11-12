@@ -23,7 +23,7 @@ import { ResourceQueue } from '@taucad/filesystem';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileMode } from '@taucad/filesystem';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
-import type { RevisionProvenance } from '#revision-authority.js';
+import type { RecordedProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
 import type { DecodedCommit } from '#git-objects.js';
 import { CommandAbortedError, runGitCommand } from '#git-command.js';
@@ -47,6 +47,7 @@ import {
 import type { RevisionTrailer } from '#revision-headers.js';
 import { walkRevisionLog } from '#revision-log-order.js';
 import { RevisionPortError } from '#revision-port.js';
+import { numberVersions, versionNumberFor } from '#version-numbers.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import type {
   AddCheckoutInput,
@@ -99,7 +100,6 @@ import {
 } from '#remotes.js';
 import type { Remote } from '#remotes.js';
 import {
-  generatedGitattributesContent,
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
@@ -539,9 +539,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     const trailer = parseRevisionCommitMessage(commit.message);
     /* A project Tau did not write carries no trailer, and its date is still the
      * one git shows: the commit's own author time. */
-    const unattributed: RevisionProvenance = {
+    const unattributed: RecordedProvenance = {
       source: 'import',
-      actorId: 'unknown',
       createdAt: commit.author.seconds * 1000,
     };
     return Object.freeze({
@@ -551,6 +550,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       treeId: commit.tree,
       summary: trailer?.summary ?? { generated: commit.message.split('\n')[0] ?? '' },
       provenance: trailer?.provenance ?? unattributed,
+      /* B3: a commit Tau did not record reads as its git author, as GitHub shows it. */
+      ...(trailer === undefined ? { authorName: commit.author.name } : {}),
       conflicted: commit.conflictedTrees !== undefined,
     });
   };
@@ -1471,7 +1472,22 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       note: trailer.note,
       actor: trailer.actor,
       createdAt: decoded.tagger.seconds * 1000,
+      ...(trailer.number === undefined ? {} : { number: trailer.number }),
     });
+  };
+
+  /* Every named version, by name, each with the number it reads as (B6). */
+  const listTags = async (): Promise<readonly RevisionTag[]> => {
+    const records = await text(['for-each-ref', '--format=%(refname)%00%(objectname)', `${tagRefPrefix}/`]);
+    const names = records
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => line.split('\0')[0] ?? '')
+      .map((ref) => ref.slice(tagRefPrefix.length + 1))
+      .filter((name) => name !== '')
+      .toSorted();
+    const tags = await Promise.all(names.map(async (name) => readTagRef(name)));
+    return numberVersions(tags.filter((entry) => entry !== undefined));
   };
 
   const resolve = async (ref: string): Promise<string | undefined> => {
@@ -1941,10 +1957,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * policy rules 5 and 13).
    *
    * Every session reaches the same answer for the same folder: before the
-   * store exists the answer is what `init` will leave behind (a folder whose
-   * own ignore and attributes files both exist, neither carrying Tau's block,
-   * stays the person's), and `init` forgets it once the store is made, so the
-   * next question reads the disk again.
+   * store exists the folder is Tau's, because Tau is about to create its store
+   * (A6), and `init` forgets the answer once the store is made, so the next
+   * question reads the disk again.
    */
   let opened: Promise<Readonly<{ owned: boolean; adopted: boolean }>> | undefined;
   const openState = async (): Promise<Readonly<{ owned: boolean; adopted: boolean }>> => {
@@ -1957,7 +1972,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           ),
         );
         const theirs = !hasGeneratedBlock(ignore) && !hasGeneratedBlock(attributes);
-        return { owned, adopted: owned ? theirs : theirs && ignore !== undefined && attributes !== undefined };
+        /* Whether a store is Tau's is decided by Tau having created it (A6): a
+         * folder with no store yet is Tau's once `init` makes one, whatever its
+         * own ignore and attributes files say, and the Start mint merges both
+         * generated blocks into them, so the next session reads it as Tau's too. */
+        return { owned, adopted: owned && theirs };
       } catch (error) {
         /* A refusal is asked again, never remembered: the path may be mended. */
         opened = undefined;
@@ -2019,26 +2038,16 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     if (adopted && owned) {
       await assertAdoptable();
     }
-    if (!adopted && input.createSetupFiles !== false) {
-      const [ignore, attributes] = await Promise.all(
-        [generatedIgnorePath, generatedGitattributesPath].map(async (path) =>
-          readFile(join(repositoryPath, path), 'utf8').catch(() => undefined),
-        ),
-      );
-      /* Created, never merged into (D16): a file that exists is the person's,
-       * or already Tau's. A brand-new project gets both files, versioned (D24),
-       * so a stock clone reads it the way Tau wrote it. */
-      if (!owned && ignore === undefined) {
-        await writeFile(
-          join(repositoryPath, generatedIgnorePath),
-          generatedIgnoreContent(undefined, input.additionalIgnores ?? []),
-        );
-      }
-      /* A project an older build created carries Tau's ignore block and no
-       * attributes file (DEF-W22-1); the file it gets here is what keeps its
-       * large files pointers once the cut reads the rule from the tree. */
-      if (attributes === undefined && (!owned || hasGeneratedBlock(ignore))) {
-        await writeFile(join(repositoryPath, generatedGitattributesPath), generatedGitattributesContent(undefined));
+    /* Opening a project writes nothing in the tracked tree (I4): only a store
+     * this call creates gets Tau's ignore file, created, never merged into
+     * (D16). The attributes file is never written here: the cut supplies it in
+     * the recorded tree and writes its live copy in the same mint
+     * (`revision-effects`, A4), so a project an older build created without
+     * one (DEF-W22-1) is left exactly as it was until something is saved. */
+    if (!owned && !adopted && input.createSetupFiles !== false) {
+      const ignorePath = join(repositoryPath, generatedIgnorePath);
+      if ((await readFile(ignorePath, 'utf8').catch(() => undefined)) === undefined) {
+        await writeFile(ignorePath, generatedIgnoreContent(undefined, input.additionalIgnores ?? []));
       }
     }
     // Only now: the repository is created after the file that decides what a
@@ -2332,12 +2341,13 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         throw new RevisionPortError('UNKNOWN_REVISION', 'The revision this name would point at is not in the store.');
       }
       const createdAt = input.createdAt ?? Date.now();
+      const number = input.number ?? versionNumberFor(await listTags(), input.name);
       const object = encodeTag({
         objectFormat: await format(),
         object: input.revisionId,
         tag: input.name,
         tagger: taggerSignature(input.actor, createdAt),
-        message: revisionTagMessage({ name: input.name, note: input.note, actor: input.actor }),
+        message: revisionTagMessage({ name: input.name, note: input.note, actor: input.actor, number }),
       });
       const written = await run(['hash-object', '-t', 'tag', '-w', '--stdin'], { input: [object.body] });
       if (written.exitCode !== 0) {
@@ -2354,21 +2364,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         note: input.note,
         actor: input.actor,
         createdAt,
+        number,
       });
     },
 
-    listTags: async (): Promise<readonly RevisionTag[]> => {
-      const records = await text(['for-each-ref', '--format=%(refname)%00%(objectname)', `${tagRefPrefix}/`]);
-      const names = records
-        .split('\n')
-        .filter((line) => line !== '')
-        .map((line) => line.split('\0')[0] ?? '')
-        .map((ref) => ref.slice(tagRefPrefix.length + 1))
-        .filter((name) => name !== '')
-        .toSorted();
-      const tags = await Promise.all(names.map(async (name) => readTagRef(name)));
-      return Object.freeze(tags.filter((entry) => entry !== undefined));
-    },
+    listTags,
 
     deleteTag: async (name: string): Promise<void> => {
       const removed = await run(['update-ref', '-d', `${tagRefPrefix}/${name}`]);
@@ -2518,6 +2518,35 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       const counts = await text(['rev-list', '--left-right', '--count', `${input.head}...${input.base}`]);
       const [ahead, behind] = counts.split(/\s+/u).map(Number);
       return Object.freeze({ ahead: ahead ?? 0, behind: behind ?? 0 });
+    },
+
+    /* One `diff-tree --stdin` for the whole set (rule 20's log cost): Git names
+     * each revision that changed something, then its paths; a revision that
+     * changed nothing, or is a root, prints nothing at all. */
+    firstParentChanges: async (ids: readonly RevisionId[]): Promise<ReadonlyMap<string, readonly string[]>> => {
+      const changes = new Map<string, string[]>();
+      if (ids.length === 0) {
+        return changes;
+      }
+      const wanted = new Set<string>(ids);
+      const records = textDecoder
+        .decode(
+          await output(['diff-tree', '--stdin', '-r', '-z', '--no-renames', '--name-only'], {
+            input: [textEncoder.encode(`${ids.join('\n')}\n`)],
+          }),
+        )
+        .split('\0')
+        .filter((record) => record !== '');
+      let paths: string[] | undefined;
+      for (const record of records) {
+        if (wanted.has(record) && !changes.has(record)) {
+          paths = [];
+          changes.set(record, paths);
+        } else {
+          paths?.push(record);
+        }
+      }
+      return changes;
     },
 
     diff: async (input: RevisionDiffInput): Promise<readonly RevisionDiffEntry[]> => {

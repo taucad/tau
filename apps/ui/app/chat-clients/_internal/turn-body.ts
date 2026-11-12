@@ -102,6 +102,20 @@ const requireTauExecution: (agent: CadAgentConfigInput) => asserts agent is TauA
 };
 
 /**
+ * The kernel facts the prompt renders from: the owner and the available list the snapshot's `kernel` object carries
+ * (AKS-7), so the Tau agent's text and an external agent's snapshot come from one state frozen with the turn (D2).
+ */
+const kernelFacts = (
+  agent: CadAgentConfigInput,
+): Pick<NonNullable<Parameters<typeof getCadSystemPrompt>[3]>, 'kernelOwner' | 'kernelProfile'> => {
+  const kernel = agent.snapshot?.kernel;
+  return {
+    ...(kernel?.owner === undefined ? {} : { kernelOwner: kernel.owner }),
+    kernelProfile: { available: kernel?.available ?? [] },
+  };
+};
+
+/**
  * The CAD system prompt and its cache blocks for one chat on one model row.
  *
  * Always the prompt of agent mode with testing on. The chat's mode and testing switch ride in the turn's state note
@@ -113,6 +127,7 @@ const hostPrompt = (
   model: ResolvedModel['model'],
 ): Pick<BrowserHostAdmissionConfig, 'systemPrompt' | 'systemPromptBlocks'> => {
   const prompt = getCadSystemPrompt(agent.kernel, 'agent', true, {
+    ...kernelFacts(agent),
     chatId,
     modelId: agent.execution.model,
     contextWindow: model?.details.contextWindow,
@@ -250,7 +265,10 @@ const externalAgentContext = (input: {
   readonly chatId: string;
 }): AgentHostExternalContext => {
   const { agent } = input;
-  const prompt = getCadSystemPrompt(agent.kernel, agent.mode, agent.testingEnabled, { chatId: input.chatId });
+  const prompt = getCadSystemPrompt(agent.kernel, agent.mode, agent.testingEnabled, {
+    ...kernelFacts(agent),
+    chatId: input.chatId,
+  });
   return {
     systemPrompt: [prompt.static, prompt.dynamic].join('\n\n'),
     ...(agent.snapshot === undefined ? {} : { snapshot: toStrictJson(agent.snapshot) }),

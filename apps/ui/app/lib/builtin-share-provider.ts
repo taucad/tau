@@ -62,18 +62,19 @@ const resolveBuiltin = async (input: ShareResolveInput, context: ShareProviderCo
   if (!example) {
     throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'This catalog project does not exist.');
   }
+  const entryPath = example.manifest.assets.main?.entryPath;
+  if (entryPath === undefined) {
+    throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'This catalog project has no model file.');
+  }
   const files = await fetchBuiltinFiles(input);
   const snapshotFiles = await Promise.all(
     files.map(async (file) => ({
       ...file,
       sha256: await sha256(file.content),
-      role: roleFor(file.path, example.manifest.assets.main.entryPath),
+      role: roleFor(file.path, entryPath),
     })),
   );
-  const packed = await context.artifactCodec.pack(
-    { entryPath: example.manifest.assets.main.entryPath, files: snapshotFiles, warnings: [] },
-    input.signal,
-  );
+  const packed = await context.artifactCodec.pack({ entryPath, files: snapshotFiles, warnings: [] }, input.signal);
   return context.artifactCodec.openArchive(packed.archive, input.signal);
 };
 

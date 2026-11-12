@@ -81,7 +81,6 @@ import type {
   PublishDraft,
   PublishPublicationActorInput,
   PublishPublicationActorOutput,
-  RevisionActor,
   RevisionDiffEntry,
   RevisionEngineDescriptor,
   RevisionLogRequest,
@@ -91,6 +90,7 @@ import type {
   RevisionStatusProjection,
   RevisionTag,
   RevisionUserActor,
+  RevisionVia,
   SyncPushOutcome,
 } from '@taucad/revisions';
 import { GitToolchainError, createNativeGitRevisionPort, resolveGitToolchain } from '@taucad/revisions/node';
@@ -106,6 +106,7 @@ import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
 import { defaultConfigDirectory } from '#credential-store.js';
 import { actorFor, hostRevisionActor, revisionUserActorSchema } from '#revision-actor.js';
+import type { HostRevisionActorResolver } from '#revision-actor.js';
 
 /**
  * How this host reads and writes `.tau/parameters/**` for the per-key merge (D12).
@@ -248,12 +249,11 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
    */
   readonly checkouts?: Map<string, TurnCheckout> | undefined;
   /**
-   * Actor recorded on this host's revisions.
-   *
-   * W5 replaces it with the turn's real author (the model row, or the external
-   * agent id); until then every host turn is the host itself.
+   * Which Tau leg this host records through (blueprint B1): `desktop` for the
+   * desktop app, `serve` for `tau serve`, `cloud` for a Tau Cloud agent host.
+   * Required: the trailer names it on every capture.
    */
-  readonly actorId?: string | undefined;
+  readonly via: RevisionVia;
   /**
    * The actor recorded on every revision this host mints until a `setActor` request names the session (S37, A26, A1).
    *
@@ -261,9 +261,7 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
    * Tau account passes `hostRevisionActor(account)`. Once a renderer sends `setActor`, its session wins: it is the
    * person signed in on this device, anonymity already applied, so switching it later rewrites nothing.
    */
-  readonly actor?:
-    | ((input: { readonly runId: string | undefined; readonly trigger: string }) => RevisionActor | undefined)
-    | undefined;
+  readonly actor?: HostRevisionActorResolver | undefined;
   /**
    * Observe this workspace's own writes, so the checkout knows it is dirty.
    *
@@ -276,6 +274,20 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
    * never has two counters.
    */
   readonly watchWorkspace?: boolean | undefined;
+};
+
+/** One file as a revision holds it. @public */
+export type RevisionFileRead = Readonly<{ path: string; text: string | undefined; bytes: number }>;
+
+const fatalUtf8 = new TextDecoder('utf-8', { fatal: true });
+
+/** A file's text, or none when it is not UTF-8. */
+const textOf = (bytes: Uint8Array<ArrayBuffer>): string | undefined => {
+  try {
+    return fatalUtf8.decode(bytes);
+  } catch {
+    return undefined;
+  }
 };
 
 /** One project's running revision actor tree. @public */
@@ -299,6 +311,12 @@ export type ProjectRevisions = {
     describe(): Promise<RevisionPlace>;
     /** Both sides of a conflicted revision as text; absent `revision` reads the one waiting on this branch. */
     conflict(revision: string | undefined): Promise<RevisionConflictRead | undefined>;
+    /**
+     * The named files as a revision holds them, never as the live checkout does (agent observability, LW6): each
+     * one's UTF-8 text, or none when it is not text, and its size. A path the revision does not hold is left out, and
+     * a revision the store cannot read answers none.
+     */
+    files(revision: string, paths: readonly string[]): Promise<readonly RevisionFileRead[]>;
   }>;
   /**
    * The trusted host's exact revision execution holds (I7): a contained command holds its execution on the attempt's
@@ -605,10 +623,12 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
-    ...(options.actorId === undefined ? {} : { actorId: options.actorId }),
-    /* A1: the session the renderer last sent, else the account or pseudonym this host was wired with; never the OS
-     * login name or an environment email, and never the opaque fallback id (I1). */
-    actor: (input) => (session === undefined ? fallbackActor(input) : actorFor(session, input.runId)),
+    /* A1, B1: the session the renderer last sent, else the account or pseudonym this host was wired with; never the
+     * OS login name, an environment email or a fallback id (I1). */
+    identity: {
+      via: options.via,
+      resolve: (input) => (session === undefined ? fallbackActor(input) : actorFor(session, input.runId)),
+    },
     /*
      * Which device this host is (W13, W17).
      *
@@ -1781,6 +1801,20 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           revision ?? conflicts.find((conflict) => line.kind === 'branch' && conflict.into === line.name)?.revisionId;
         return id === undefined ? undefined : tree.readConflict(id);
       },
+      files: async (revision: string, paths: readonly string[]) => {
+        let held: Awaited<ReturnType<RevisionPort['readTree']>>;
+        try {
+          held = await port.readTree(revisionId(revision));
+        } catch {
+          return [];
+        }
+        return held === undefined
+          ? []
+          : paths.flatMap((path): RevisionFileRead[] => {
+              const bytes = held.get(path);
+              return bytes === undefined ? [] : [{ path, text: textOf(bytes), bytes: bytes.byteLength }];
+            });
+      },
     }),
     changed: (checkoutId, paths) => {
       /* One increment per content-change event, whatever its path count: the
@@ -2099,8 +2133,8 @@ export const openProjectRevisions = async (
         ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
         ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
         parameters: parameterCodec,
-        /* The account the terminal's token belongs to, else this device's pseudonym (A1, AC15). */
-        actor: hostRevisionActor(options.actor),
+        /* The account the terminal's token belongs to, else this device's pseudonym (A1, AC15), through the CLI (B1). */
+        identity: { via: 'cli', resolve: hostRevisionActor(options.actor) },
         ...(remoteUrl === undefined ? {} : { remoteUrl }),
         ...(publishPublication === undefined ? {} : { publishPublication }),
         ...(registerRemoteProject === undefined ? {} : { registerRemoteProject }),

@@ -53,6 +53,7 @@ import { startGitHttpBackend } from '#test/git-http-backend.js';
 /* `git` and `git lfs`, probed as a disk host probes them: without `git-lfs` the
  * large-object rows would fail product-shaped instead of skipping. */
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { recordedBy } from '#test/identity.js';
 
 /*
  * `git` runs asynchronously here, always. The fixture's HTTP server shares this
@@ -71,7 +72,7 @@ const tree = (files: Readonly<Record<string, string>>): ImmutableRevisionTree =>
 
 const provenance = {
   source: 'user',
-  actorId: 'actor-w12',
+  ...recordedBy('actor-w12'),
   createdAt: Date.UTC(2026, 8, 13, 7, 0, 0),
 } as const satisfies RevisionProvenance;
 

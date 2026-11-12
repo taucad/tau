@@ -1,6 +1,6 @@
 // oxlint-disable-next-line eslint-plugin-import/no-named-as-default -- standard zod default import
 import type z from 'zod';
-import type { messageMetadataSchema, snapshotSchema } from '#schemas/metadata.schema.js';
+import type { messageMetadataSchema, snapshotKernelSchema, snapshotSchema } from '#schemas/metadata.schema.js';
 import type { contextPayloadSchema, skillMetadataSchema } from '#schemas/context-payload.schema.js';
 
 /**
@@ -17,6 +17,12 @@ export type MyMetadata = z.infer<typeof messageMetadataSchema>;
  * @public
  */
 export type ChatSnapshot = z.infer<typeof snapshotSchema>;
+
+/**
+ * The snapshot's `kernel` object: preference, owner, availability with neutral reasons, and the rendered kernel text.
+ * @public
+ */
+export type SnapshotKernel = z.infer<typeof snapshotKernelSchema>;
 
 /**
  * Client-assembled context payload carrying skills catalog and memory content.

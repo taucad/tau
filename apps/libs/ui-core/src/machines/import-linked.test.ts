@@ -40,8 +40,14 @@ const request: LinkedImportRequest = {
   author,
   setup: {
     files: [],
-    provenance: { source: 'import', actorId: 'tau-user-1', trigger: 'save', createdAt: Date.UTC(2026, 10, 8) },
-    summary: { generated: 'Set up this repository as a Tau project' },
+    provenance: {
+      source: 'import',
+      actor: { kind: 'user', id: 'tau-user-1' },
+      capture: 'import',
+      via: 'browser',
+      createdAt: Date.UTC(2026, 10, 8),
+    },
+    summary: { generated: 'Imported from GitHub' },
   },
 };
 

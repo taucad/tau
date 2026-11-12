@@ -17,7 +17,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
   useQueryClient: () => ({ invalidateQueries: query.invalidateQueries }),
 }));
 vi.mock('#lib/billing-payment-client.js', () => ({
-  purchasesUnavailableMessage: 'Purchases are not available yet.',
+  purchasesUnavailableMessage: 'You can’t buy credits yet. We’re still setting up payments.',
   createPaymentRequestId: () => 'request_1',
   createPortalAction,
   followPaymentRedirect,
@@ -88,10 +88,13 @@ describe('BillingSettings', () => {
 
   it('renders source balances and holds from the C03 explanation', () => {
     renderSettings();
-    expect(screen.getByTestId('credit-balance')).toHaveTextContent('4 credits available');
-    expect(screen.getByText('Purchased credits · Never expire')).toBeInTheDocument();
+    expect(screen.getByTestId('credit-balance')).toHaveTextContent(/^4 credits$/u);
     expect(screen.getByText('<1% left')).toBeInTheDocument();
-    expect(screen.getByText('1 credit reserved for active work.')).toBeInTheDocument();
+    expect(
+      screen.getByText('1 more are on hold for work in progress. Purchased credits never expire.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Monthly credits' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Purchased credits' })).toBeInTheDocument();
     expect(screen.queryByText('Balance details')).not.toBeInTheDocument();
     expect(screen.queryByText('Total available')).not.toBeInTheDocument();
   });
@@ -121,9 +124,11 @@ describe('BillingSettings', () => {
     });
     renderSettings();
     expect(screen.queryByTestId('credit-balance')).toBeNull();
-    expect(screen.getByRole('alert')).toHaveTextContent('Balance unavailable.');
-    expect(screen.getByRole('button', { name: /add more/i })).toBeEnabled();
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Couldn’t load your balanceYour credits are safe. This is a display problem.',
+    );
+    expect(screen.getByRole('button', { name: 'Add credits' })).toBeEnabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(query.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['billing', 'credits'] });
   });
 
@@ -131,14 +136,18 @@ describe('BillingSettings', () => {
     useCredits.mockReturnValue(undefined);
     query.fetching = 1;
     renderSettings();
-    expect(screen.getByRole('status')).toHaveTextContent('Loading balance…');
-    expect(screen.getByRole('button', { name: /add more/i })).toBeEnabled();
+    const loading = screen.getByText('Loading balance…').closest('[role=status]');
+    expect(loading).toHaveAttribute('aria-busy', 'true');
+    // The skeleton has the shape of the balance it stands in for: a heading line and a caption line.
+    expect(loading?.querySelectorAll('[data-slot=skeleton]')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Add credits' })).toBeEnabled();
   });
 
   it('names no plan until entitlements resolve', () => {
     useEntitlements.mockReturnValue({ ...entitlement('free'), isResolved: false });
     renderSettings();
-    expect(screen.getByText('Loading plan…')).toBeInTheDocument();
+    const loading = screen.getByText('Loading plan…').closest('[role=status]');
+    expect(loading?.querySelectorAll('[data-slot=skeleton]')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: /subscribe/i })).toBeNull();
     expect(screen.queryByText('Free')).toBeNull();
   });
@@ -148,19 +157,24 @@ describe('BillingSettings', () => {
     const date = paidThrough.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
     useEntitlements.mockReturnValue({ ...entitlement('pro'), paidThrough });
     const { unmount } = renderSettings();
-    expect(screen.getByText(`Renews on ${date}`)).toBeInTheDocument();
+    expect(screen.getByText(`$20/month · Renews ${date}`)).toBeInTheDocument();
     unmount();
     useEntitlements.mockReturnValue({ ...entitlement('pro'), paidThrough, cancelAtPeriodEnd: true });
     renderSettings();
-    expect(screen.getByText(new RegExp(`Pro until ${date}`, 'u'))).toBeInTheDocument();
-    expect(screen.queryByText(/Renews on/u)).toBeNull();
+    expect(screen.getByText(`$20/month · Ends ${date}`)).toBeInTheDocument();
+    expect(screen.getByText('Canceled')).toBeInTheDocument();
+    expect(
+      screen.getByText(`Your Pro plan ends on ${date}. You can resume it any time before then.`),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume plan' })).toBeEnabled();
+    expect(screen.queryByText(/Renews/u)).toBeNull();
   });
 
   it('renders lifecycle controls in authenticated billing settings', () => {
     renderSettings();
     expect(screen.queryByText('Automatic reload controls')).not.toBeInTheDocument();
     expect(screen.queryByText('API CAD Gateway')).not.toBeInTheDocument();
-    expect(screen.getByText('$20 per month USD')).toBeInTheDocument();
+    expect(screen.getByText('$20/month')).toBeInTheDocument();
     expect(screen.getByText('Cancel plan controls')).toBeInTheDocument();
   });
 
@@ -168,5 +182,43 @@ describe('BillingSettings', () => {
     useEntitlements.mockReturnValue({ ...entitlement('pro'), cancelAtPeriodEnd: true });
     renderSettings();
     expect(screen.queryByText('Cancel plan controls')).not.toBeInTheDocument();
+  });
+
+  it('says a failed payment in plain words and offers the portal from the notice', async () => {
+    createPortalAction.mockResolvedValue({ state: 'redirect_required', ownerId: 'user-a' });
+    useEntitlements.mockReturnValue({ ...entitlement('pro'), status: 'past_due' });
+    renderSettings();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'We couldn’t charge your card. Update your payment method within 7 days to keep Pro. Your credits aren’t affected.',
+    );
+    expect(screen.getByText('Payment failed')).toHaveAttribute('data-tone', 'warning');
+    expect(screen.getByText('$20/month · Payment due')).toBeInTheDocument();
+    expect(screen.queryByText('Past due')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Update payment method' }));
+    expect(createPortalAction).toHaveBeenCalledOnce();
+  });
+
+  it('shows the saved card through the shared payment method component', () => {
+    useEntitlements.mockReturnValue({ ...entitlement('pro'), paymentMethod: { brand: 'visa', last4: '8252' } });
+    renderSettings();
+    expect(screen.getByText('Payment method')).toBeInTheDocument();
+    expect(screen.getByText('Visa •••• 8252')).toBeInTheDocument();
+  });
+
+  it('gives every way the subscription page can fail one message with what to do', async () => {
+    createPortalAction.mockRejectedValue(new Error('offline'));
+    renderSettings();
+    await userEvent.click(screen.getByRole('button', { name: 'Manage subscription' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t open the subscription page. Try again.');
+  });
+
+  it('tells an Enterprise customer how to change the plan in one line with the address', () => {
+    useEntitlements.mockReturnValue(entitlement('enterprise'));
+    renderSettings();
+    expect(screen.getByRole('link', { name: 'enterprise@tau.new' })).toHaveAttribute(
+      'href',
+      'mailto:enterprise@tau.new',
+    );
+    expect(screen.queryByRole('link', { name: 'Contact your Tau team' })).toBeNull();
   });
 });

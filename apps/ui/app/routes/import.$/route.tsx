@@ -430,6 +430,7 @@ export default function ImportRoute(): React.JSX.Element {
                     },
                   },
                   files: {},
+                  origin: 'github',
                   location: target.location,
                   staging: { ...staging, carriesWorkbenchLayout: input.files.has(workbenchLayoutPath) },
                 }),
@@ -487,6 +488,7 @@ export default function ImportRoute(): React.JSX.Element {
                     },
                   },
                   files: {},
+                  origin: input.origin,
                   location: target.location,
                   staging: {
                     ...staging,
@@ -846,7 +848,7 @@ export default function ImportRoute(): React.JSX.Element {
     const supportedPaths = paths.filter((path) =>
       supportedKernelExtensions.some((extension) => path.endsWith(extension)),
     );
-    const manifestMain = manifest?.success === true ? manifest.data.assets.main.entryPath : undefined;
+    const manifestMain = manifest?.success === true ? manifest.data.assets.main?.entryPath : undefined;
     const unsupportedLargeBlob = selection.files.find((file) => file.size >= largeObjectThresholdBytes);
     setLinkedSelection(selection);
     setLinkedMainFile(

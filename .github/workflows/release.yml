@@ -24,6 +24,17 @@
 #     closed and its branch deleted. A branch whose release commit would not
 #     change is left alone, so an unrelated push to `main` starts no CI on it.
 #
+# Release pull requests open as drafts, and a draft runs no CI (`ci.yml`), so
+# regenerating them on every push costs nothing. The release manager marks one
+# ready for review when about to merge it (`gh pr ready <number>`), which starts
+# its one CI run; merging still needs that run, because a draft can be neither
+# merged nor queued. The bot never converts a pull request a person marked
+# ready back to draft: a regeneration with new content then re-runs its CI, as
+# any push to a ready pull request does. A pull request the bot itself opened
+# ready (before drafts) is converted to draft on its next content change. A
+# pull request in the merge queue is not regenerated, because its branch is
+# locked (GH006); the push after it lands regenerates every application.
+#
 # Merging a release pull request is the whole release act for that application:
 # the UI and API reach production from its `release-build.yml` run once the
 # release is verified, and a desktop
@@ -198,6 +209,19 @@ jobs:
             node scripts/src/release-apps.ts prepare "$app" > "$RUNNER_TEMP/plan.json"
             subject=$(jq -r '.subject // empty' "$RUNNER_TEMP/plan.json")
             pr_number=$(gh pr list --base main --head "$branch" --state open --json number --jq '.[0].number // empty')
+            pr_draft=""
+            if [ -n "$pr_number" ]; then
+              pr_state=$(gh api graphql -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" -F number="$pr_number" \
+                -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { isDraft isInMergeQueue } } }' \
+                --jq '.data.repository.pullRequest | "\(.isDraft) \(.isInMergeQueue)"')
+              pr_draft=${pr_state% *}
+              # A queued pull request's branch cannot be pushed (GH006), and it is
+              # about to land as reviewed; the push that lands it regenerates the rest.
+              if [ "${pr_state#* }" = true ]; then
+                echo "$app: #$pr_number is in the merge queue; left as it is"
+                continue
+              fi
+            fi
 
             if [ -z "$subject" ]; then
               if [ -n "$pr_number" ]; then
@@ -235,6 +259,19 @@ jobs:
               echo "$app: $subject is unchanged"
               continue
             fi
+
+            # Keep a person's ready mark. A ready pull request with no
+            # `ready_for_review` event was opened ready by this workflow before
+            # release pull requests became drafts: make it a draft before its
+            # changed content is pushed, so the push starts no CI.
+            if [ "$pr_draft" = false ]; then
+              marked_ready=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$pr_number/timeline" \
+                --jq '.[] | select(.event == "ready_for_review") | .event')
+              if [ -z "$marked_ready" ]; then
+                gh pr ready "$pr_number" --undo
+              fi
+            fi
+
             git push --force "$remote" "HEAD:refs/heads/$branch"
 
             jq -r '.releases[] | "### \(.tag)\n\n" +
@@ -253,6 +290,9 @@ jobs:
               echo "- This pull request is **bot-managed**: it is regenerated on pushes to \`main\`"
               echo "  and closes itself when nothing is left to release. Do not push to"
               echo "  \`$branch\` or enable auto-merge."
+              echo "- It opens as a draft, which runs no CI. Mark it ready for review only when"
+              echo "  you are about to merge it (\`gh pr ready <number>\`): that starts its one CI"
+              echo "  run. It stays ready; a regeneration after that re-runs its CI."
               echo "- Squash merge it with the title unchanged; the release workflow keys on it."
               case "$app" in
                 ui|api) echo "- That run deploys it to production once it verifies the release; there is no further approval. Roll back with **Deploy release to production** (\`deploy-production.yml\`)." ;;
@@ -261,7 +301,7 @@ jobs:
             } > "$RUNNER_TEMP/body.md"
 
             if [ -z "$pr_number" ]; then
-              gh pr create --base main --head "$branch" --title "$subject" --body-file "$RUNNER_TEMP/body.md"
+              gh pr create --draft --base main --head "$branch" --title "$subject" --body-file "$RUNNER_TEMP/body.md"
             else
               gh pr edit "$pr_number" --title "$subject" --body-file "$RUNNER_TEMP/body.md"
             fi

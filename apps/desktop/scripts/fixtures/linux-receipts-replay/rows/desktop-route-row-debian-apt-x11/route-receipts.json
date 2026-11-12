@@ -1,0 +1,120 @@
+[
+  {
+    "schemaVersion": 1,
+    "status": "passed",
+    "tag": "desktop-staging@0.1.0-staging.889",
+    "channel": "staging",
+    "version": "1.8.89",
+    "sourceCommit": "0f54f34f1254b6429cf7bdaab605bf366c571263",
+    "target": "linux-x64",
+    "route": "linux-apt",
+    "artifacts": [
+      {
+        "name": "tau-staging-runtime-1.8.89_1.8.89_amd64.deb",
+        "sha256": "91c15f95bafb092948b7ee2510c0eced05376d12d33c9bc66300fcc2a05c3e53"
+      },
+      {
+        "name": "tau-staging_1.8.89_amd64.deb",
+        "sha256": "9c0a3533345842b3e669c066b5ca1148389f6d1e0ed65a7a4bfaca379d7f9239"
+      }
+    ],
+    "baseline": {
+      "version": "1.8.87",
+      "artifactSha256": "9171e5a8bcd64503f553e115305f32dbd11e768f7360f704f2c95960428a8293"
+    },
+    "installed": {
+      "version": "1.8.89",
+      "executableSha256": "8ba952ac7f9b566b5d0fa5ec72f1cafec1187a4c621ccbce6de2913f9eac7c14"
+    },
+    "environment": {
+      "os": "6.12.116+deb13-cloud-amd64 PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"13\"\nVERSION=\"13 (trixie)\"\nVERSION_CODENAME=trixie\nDEBIAN_VERSION_FULL=13.7\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\"",
+      "arch": "x64",
+      "kind": "vm",
+      "sandbox": "enabled",
+      "host": {
+        "platform": "linux",
+        "runner": "tau-q-42706520569-1-debian13-apt",
+        "nativeArch": "x64",
+        "host": {
+          "provider": "gcp",
+          "template": "ci-gpu-debian13-20261108050137644200000002",
+          "instance": "tau-q-42706520569-1-debian13-apt",
+          "zone": "us-central1-a"
+        },
+        "distribution": {
+          "id": "debian",
+          "versionId": "13"
+        },
+        "kernel": "6.12.116+deb13-cloud-amd64",
+        "appArmor": "enabled",
+        "usernsRestriction": "absent",
+        "graphics": {
+          "mode": "stock",
+          "glRenderer": "Tesla T4/PCIe/SSE2",
+          "webglRenderer": "ANGLE (NVIDIA Corporation, Tesla T4/PCIe/SSE2, OpenGL 4.5.0)"
+        },
+        "account": {
+          "name": "consumer",
+          "uid": 1001,
+          "administrator": false
+        },
+        "consent": {
+          "account": "tau",
+          "step": "apt-install-browser-downloads"
+        },
+        "downloads": [
+          {
+            "stage": "initial",
+            "name": "tau-staging-runtime-1.8.87_1.8.87_amd64.deb",
+            "sha256": "9171e5a8bcd64503f553e115305f32dbd11e768f7360f704f2c95960428a8293",
+            "size": 241971536,
+            "urlPath": "/releases/desktop-staging%400.1.0-staging.887/tau-staging-runtime-1.8.87_1.8.87_amd64.deb",
+            "browser": "Chromium 156.0.8078.4",
+            "madeExecutable": false
+          },
+          {
+            "stage": "initial",
+            "name": "tau-staging_1.8.87_amd64.deb",
+            "sha256": "08993aa7e809c491adf07982f45ae003beedb2e1fa5e5f3d2bb4ca22becb1ef2",
+            "size": 83176,
+            "urlPath": "/releases/desktop-staging%400.1.0-staging.887/tau-staging_1.8.87_amd64.deb",
+            "browser": "Chromium 156.0.8078.4",
+            "madeExecutable": false
+          },
+          {
+            "stage": "reinstall",
+            "name": "tau-staging-runtime-1.8.89_1.8.89_amd64.deb",
+            "sha256": "91c15f95bafb092948b7ee2510c0eced05376d12d33c9bc66300fcc2a05c3e53",
+            "size": 241958008,
+            "urlPath": "/releases/desktop-staging%400.1.0-staging.889/tau-staging-runtime-1.8.89_1.8.89_amd64.deb",
+            "browser": "Chromium 156.0.8078.4",
+            "madeExecutable": false
+          },
+          {
+            "stage": "reinstall",
+            "name": "tau-staging_1.8.89_amd64.deb",
+            "sha256": "9c0a3533345842b3e669c066b5ca1148389f6d1e0ed65a7a4bfaca379d7f9239",
+            "size": 83170,
+            "urlPath": "/releases/desktop-staging%400.1.0-staging.889/tau-staging_1.8.89_amd64.deb",
+            "browser": "Chromium 156.0.8078.4",
+            "madeExecutable": false
+          }
+        ],
+        "installedPath": "/usr/bin/tau-staging",
+        "desktopEntry": "/usr/share/applications/tau-staging.desktop",
+        "launch": "desktop-entry"
+      }
+    },
+    "trust": {
+      "kind": "release",
+      "identity": "3607A6E9CD4D8CADF550483665C92879E20F7436/76CA5F7A0E66A532B75D002A698C5ABADE0A83CB"
+    },
+    "checks": {
+      "cleanInstall": true,
+      "upgrade": true,
+      "dataPreserved": true
+    },
+    "suite": "clean-host-route-a-b-c-v1",
+    "logs": "https://github.com/taucad/tau/actions/runs/42706520569"
+  }
+]

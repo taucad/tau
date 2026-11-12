@@ -14,7 +14,9 @@ import {
 } from '#lib/geospec-candidate-git.js';
 
 const encoder = new TextEncoder();
-const provenance = { source: 'user', actorId: 'candidate-test', createdAt: 0 } as const;
+const person = { kind: 'user', id: 'usr_candidate' } as const;
+const identity = { via: 'browser', resolve: () => person } as const;
+const provenance = { source: 'user', actor: person, capture: 'save', via: 'browser', createdAt: 0 } as const;
 
 describe('raw candidate closure', () => {
   it('reads a parentless candidate without the revision port tree reader', async () => {
@@ -95,7 +97,7 @@ describe('raw candidate closure', () => {
     const filesystem = new MemoryProvider();
     try {
       const port = mock<RevisionPort>();
-      const common = { projectId: 'p1', port, filesystem, remote: 'origin', readConsent: async () => false };
+      const common = { projectId: 'p1', port, filesystem, remote: 'origin', identity, readConsent: async () => false };
       await expect(fetchGeoSpecCandidates(common)).rejects.toThrow('off on this device');
       await expect(publishGeoSpecCandidate({ ...common, candidate: encoder.encode('{}') })).rejects.toThrow(
         'off on this device',
@@ -134,6 +136,7 @@ describe('raw candidate closure', () => {
         filesystem,
         remote: 'origin',
         candidate,
+        identity,
         readConsent: async () => true,
       });
       expect(status).toBe('upToDate');
@@ -169,6 +172,7 @@ describe('raw candidate closure', () => {
           filesystem,
           remote: 'origin',
           candidate: encoder.encode('{}'),
+          identity,
           readConsent: async () => ++reads < 3,
         }),
       ).rejects.toThrow('off on this device');

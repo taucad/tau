@@ -272,7 +272,7 @@ describe('desktop-route-promotion.yml full candidate request (D-DS3)', () => {
     expect(job?.if).toBe("github.ref == 'refs/heads/main'");
     expect(job?.permissions).toEqual({ contents: 'read', actions: 'write' });
     expect(step?.if).toBe(
-      "github.event_name == 'workflow_dispatch' && inputs.operation == 'promote-routes' && inputs.scope != 'macos'",
+      "github.event_name == 'workflow_dispatch' && inputs.operation == 'promote-routes' && inputs.scope == 'all'",
     );
   });
 

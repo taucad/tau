@@ -525,7 +525,15 @@
       "cache": false,
       "options": {
         "cwd": ".",
-        "command": "node --import @oxc-node/core/register apps/desktop/scripts/desktop-installer-candidate.test.mts"
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/desktop-installer-candidate.test.mts && node --import @oxc-node/core/register apps/desktop/scripts/fetch-desktop-installer-candidate.test.mts"
+      }
+    },
+    "test-linux-receipts-replay": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/linux-receipts-replay.test.mts"
       }
     },
     "test-route-transport": {

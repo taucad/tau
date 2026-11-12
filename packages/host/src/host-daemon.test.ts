@@ -1667,6 +1667,76 @@ describe('startHostDaemon', () => {
     30_000,
   );
 
+  /* LW17: every model call names the host and build the composition was given, and its model, as headers. */
+  it.each([false, true])(
+    'should send the host labels it was given with each model call with tauCloudEnabled=%s',
+    async (tauCloudEnabled) => {
+      temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-labels-'));
+      process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+      process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+      const relay = await startRelay();
+      const labels: Array<Readonly<Record<string, string | string[] | undefined>>> = [];
+      const gateway = createServer((request, response) => {
+        labels.push({
+          host: request.headers['x-tau-host-kind'],
+          build: request.headers['x-tau-host-build'],
+          kernel: request.headers['x-tau-kernel'],
+          model: request.headers['x-tau-model'],
+        });
+        response.writeHead(401, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ code: 'UNAUTHENTICATED', message: 'Fixture response after reading labels.' }));
+      });
+      resources.push(gateway);
+      await new Promise<void>((resolve) => {
+        gateway.listen(0, '127.0.0.1', resolve);
+      });
+      const address = gateway.address();
+      if (!address || typeof address === 'string') {
+        throw new TypeError('Expected a TCP gateway address.');
+      }
+      projectHostSpy.mockClear();
+      const daemon = startHostDaemon({
+        relayUrl: relay.url,
+        relay: false,
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+        agent: {
+          ...(await agentOptionsIn(temporaryDirectory)),
+          tauCloudEnabled,
+          tauApiToken: 'cli-account-session',
+          gatewayBaseUrl: `http://127.0.0.1:${String(address.port)}`,
+          hostLabels: { kind: 'daemon', build: '1.2.3' },
+        },
+      });
+      try {
+        await daemon.ready;
+        const project = projectHostSpy.mock.calls.at(-1)?.[0];
+        if (!project) {
+          throw new TypeError('Expected the daemon to open a project host.');
+        }
+        const stream = project.modelTransport.stream({
+          attemptId: 'attempt-host-labels',
+          invocationPurpose: 'generation',
+          modelId: 'fixture-model',
+          providerKind: 'vertexai',
+          systemPrompt: 'Reply briefly.',
+          messages: [{ id: 'user-1', role: 'user', content: 'Hello' }],
+          tools: [],
+          signal: AbortSignal.timeout(10_000),
+        });
+        const consume = async () => {
+          for await (const event of stream) {
+            void event;
+          }
+        };
+        await expect(consume()).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
+        expect(labels.at(-1)).toEqual({ host: 'daemon', build: '1.2.3', kernel: undefined, model: 'fixture-model' });
+      } finally {
+        await daemon.close();
+      }
+    },
+    30_000,
+  );
+
   /* W6.r1 round 3 (GI-Q6): the account the pairing exchange returned, stored with the credential, is the principal
    * the daemon's credential port and its funded transport name. */
   it.each([true, false])(

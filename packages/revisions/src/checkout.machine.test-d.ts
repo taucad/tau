@@ -17,7 +17,8 @@ expectTypeOf<CheckoutMachineEmitted['type']>().toExtend<string>();
  * provenance union it fills; this assertion is what keeps the pair from
  * drifting into two.
  */
-expectTypeOf<CheckoutCutTrigger>().toEqualTypeOf<RevisionTrigger>();
+/* The Start version's two triggers are minted at store creation, never by a checkout cut (A6). */
+expectTypeOf<CheckoutCutTrigger>().toEqualTypeOf<Exclude<RevisionTrigger, 'create' | 'import'>>();
 
 declare const checkout: ActorRefFrom<typeof checkoutMachine>;
 

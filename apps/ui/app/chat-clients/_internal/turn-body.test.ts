@@ -2,7 +2,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CadAgentConfigInput, CadAgentExecution } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
-import { agentHostConfig, dialExecutionHost } from '#chat-clients/_internal/turn-body.js';
+import { agentHostClientConfig, agentHostConfig, dialExecutionHost } from '#chat-clients/_internal/turn-body.js';
+import { buildSnapshotKernel, renderKernelGuidance } from '@taucad/chat/prompts';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { AgentHostPlacementError, daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { createAgentHostClient } from '#services/agent-host-client.js';
@@ -139,5 +140,39 @@ describe('chat settings in a Tau admission (U10)', () => {
     expect(note?.content).toContain(marker);
     expect(note?.metadata?.tauInternal?.['default']).toBeUndefined();
     expect(admit(settings).systemPrompt).not.toContain(marker);
+  });
+});
+
+describe('the kernel text an admission freezes (automatic kernel selection D2)', () => {
+  const profile = { available: ['openscad', 'replicad'] } as const;
+  const agent = (kernel: CadAgentConfigInput['kernel'], owner?: { kernel: 'openscad'; entryPath: string }) =>
+    ({
+      profile: 'cad',
+      execution: { kind: 'tau', model: 'anthropic-claude-sonnet-5.5' },
+      kernel,
+      mode: 'agent',
+      toolChoice: 'auto',
+      testingEnabled: true,
+      snapshot: { kernel: buildSnapshotKernel({ preference: kernel, ...(owner ? { owner } : {}), profile }) },
+    }) satisfies CadAgentConfigInput;
+  const systemPrompt = (input: CadAgentConfigInput): string =>
+    agentHostClientConfig({
+      agent: input,
+      chatId: 'chat-auto',
+      resolvedModel: { model: undefined } as unknown as ResolvedModel,
+    }).systemPrompt;
+
+  it('should render the same text the snapshot carries, from its owner and available list', () => {
+    const entryless = agent('auto');
+    const owned = agent('auto', { kernel: 'openscad', entryPath: 'main.scad' });
+
+    expect(systemPrompt(entryless)).toContain(renderKernelGuidance({ preference: 'auto', profile }));
+    expect(systemPrompt(entryless)).toContain(entryless.snapshot.kernel.guidance);
+    expect(systemPrompt(owned)).toContain(owned.snapshot.kernel.guidance);
+    expect(systemPrompt(owned)).not.toContain('### Kernels available here');
+  });
+
+  it("should keep a manual pick's pin sentence", () => {
+    expect(systemPrompt(agent('replicad'))).toContain('This project uses Replicad; activate the cad-replicad skill.');
   });
 });

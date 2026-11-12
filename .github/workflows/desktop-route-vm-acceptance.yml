@@ -22,7 +22,8 @@
 # repository) and reads system state, and later updates stay with the system's unattended upgrades. Every row fails
 # closed in its preflight unless the host is the stock distribution with AppArmor, its stock user-namespace policy, a
 # hardware GL renderer and no prior Tau package, tree, repository, AppImage, desktop entry or profile. There is one GPU:
-# the Linux scope shares route qualification's Linux staging concurrency group, so the two can never overlap.
+# the Linux scope shares route qualification's Linux staging concurrency group, so the two can never overlap. The
+# first row is a canary that runs alone; the other five wait until it passes (D-H8).
 name: Desktop clean-host route acceptance
 
 on:
@@ -43,7 +44,7 @@ on:
         required: true
         type: string
       candidate_c:
-        description: Successful trusted installer-candidate run C; Mac and Windows need this dispatch's main commit, Linux a trusted ancestor
+        description: Successful trusted installer-candidate run C; Windows needs this dispatch's main commit, Mac and Linux a trusted ancestor
         required: true
         type: string
       runner_group:
@@ -99,6 +100,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.selection.outputs.matrix }}
+      linux_canary: ${{ steps.selection.outputs.linux_canary }}
       windows_host: ${{ steps.selection.outputs.windows_host }}
     steps:
       - name: Fail closed unless this is an operator-enabled platform staging dispatch on main
@@ -134,7 +136,9 @@ jobs:
               { id: 'debian-apt-x11', route: 'linux-apt', distro: 'debian' },
               { id: 'debian-appimage-x11', route: 'linux-appimage', distro: 'debian' },
             ];
-            appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(linux)}\n`);
+            // Canary first (D-H8): one row runs alone and the other five wait for it, so a defect costs one row.
+            appendFileSync(process.env.GITHUB_OUTPUT, `linux_canary=${JSON.stringify(linux.slice(0, 1))}\n`);
+            appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(linux.slice(1))}\n`);
             process.exit(0);
           }
           if (process.env.SCOPE === 'windows') {
@@ -281,7 +285,6 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate_c }}
-      DESKTOP_ASSETS_DIR: ${{ github.workspace }}/out/qualification-candidate
       TAU_QUALIFICATION_CHANNEL: staging
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
     steps:
@@ -290,13 +293,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
-      - name: Re-admit the exact final candidate
-        run: pnpm nx run desktop:fetch-installer-candidate
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: desktop-route-row-*
           path: out/qualification-rows
-      - name: Require both Apple silicon clean-host rows and bind every receipt to the final source
+      # The collector re-admits candidate C itself and writes qualification-binding.json: C's notarized source is the
+      # newest green ancestor at build time, so it is bound to this run's main commit by authenticated S≤K≤H ancestry
+      # (the publisher adds ≤P), as the Mac-only CI receipts are, never by a caller-supplied source.
+      - name: Require both Apple silicon clean-host rows and bind every receipt to the final candidate and this run
         run: pnpm nx run desktop:collect-qualification-rows
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -306,7 +310,9 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-macos-vm-receipts
-          path: out/qualification-receipts/route-receipts.json
+          path: |
+            out/qualification-receipts/route-receipts.json
+            out/qualification-receipts/qualification-binding.json
           if-no-files-found: error
 
   windows:
@@ -393,7 +399,8 @@ jobs:
           path: out/qualification-receipts/*.json
           if-no-files-found: error
 
-  linux:
+  # The canary row runs alone first; every other Linux row waits for it (D-H8). It shares the row steps below.
+  linux-canary:
     if: inputs.scope == 'linux'
     needs: admission
     environment: desktop-qualification-staging
@@ -405,13 +412,10 @@ jobs:
       actions: read
       id-token: write
     strategy:
-      fail-fast: false
-      # Every row holds the project's one spot T4 (tau-cloud GPU quota), so they run one at a time.
-      max-parallel: 1
       matrix:
-        include: ${{ fromJSON(needs.admission.outputs.matrix) }}
+        include: ${{ fromJSON(needs.admission.outputs.linux_canary) }}
     runs-on: ubuntu-24.04
-    env:
+    env: &linux-row-env
       GH_TOKEN: ${{ github.token }}
       TAU_QUALIFICATION_DISPOSABLE_HOST: '1'
       TAU_QUALIFICATION_DIRECTORY: ${{ github.workspace }}/out/route-qualification
@@ -425,7 +429,7 @@ jobs:
       TAU_APPIMAGE_KEY_ID: ${{ vars.TAU_APPIMAGE_KEY_ID }}
       TAU_APT_PRIMARY_FINGERPRINT: ${{ vars.TAU_APT_PRIMARY_FINGERPRINT }}
       TAU_APT_SIGNING_FINGERPRINT: ${{ vars.TAU_APT_SIGNING_FINGERPRINT }}
-    steps:
+    steps: &linux-row-steps
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
@@ -463,8 +467,29 @@ jobs:
           path: out/route-qualification/route-receipts.json
           if-no-files-found: error
 
+  linux:
+    if: inputs.scope == 'linux'
+    needs: [admission, linux-canary]
+    environment: desktop-qualification-staging
+    timeout-minutes: 150
+    # id-token lets each row sign in to Google Cloud keylessly; tau-ci admits only this repository's main branch in the
+    # staging qualification environment (tau-cloud stacks/gcp).
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      # Every row holds the project's one spot T4 (tau-cloud GPU quota), so they run one at a time.
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJSON(needs.admission.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    env: *linux-row-env
+    steps: *linux-row-steps
+
   linux-receipts:
-    needs: linux
+    needs: [linux-canary, linux]
     # All six rows are the complete Linux receipt set; collection refuses any missing or extra row.
     if: inputs.scope == 'linux'
     environment: desktop-qualification-staging

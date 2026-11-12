@@ -9,9 +9,10 @@ import {
   workbenchTabSchema,
 } from '@taucad/workbench';
 import { fileDigestSchema, refusalReasons } from '#schemas/tools/arrange-workbench.tool.schema.js';
-import { messageStatuses } from '#constants/message.constants.js';
+import { messageStatuses, snapshotKernelUnavailableReason } from '#constants/message.constants.js';
 import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
 import { cadReferencesSchema } from '#references/cad-reference.schema.js';
+import { kernelPreferences, kernelProviders } from '@taucad/types/constants';
 
 /**
  * Schema for a file entry in the project filesystem.
@@ -49,6 +50,28 @@ const fileReferenceSchema = z.union([
 
 /** The most files a snapshot's `fileTree` lists (D18). @public */
 export const maxSnapshotFileTreeEntries = 500;
+
+/**
+ * The snapshot's `kernel` object (automatic kernel selection blueprint D4, AKS-7): what an external agent needs to
+ * choose or keep a kernel. The snapshot reaches the vendor of an ACP agent, so an unavailable kernel carries only the
+ * neutral reason and the object names no plan.
+ *
+ * @public
+ */
+export const snapshotKernelSchema = z.strictObject({
+  /** The chat's preference: `auto`, or the kernel the person picked. */
+  preference: z.enum(kernelPreferences),
+  /** The kernel the runtime binds for the project's main entry; absent while the project is entry-less. */
+  owner: z.strictObject({ kernel: z.enum(kernelProviders), entryPath: projectPathSchema }).optional(),
+  /** The kernels routing may choose here, in catalog order. */
+  available: z.array(z.enum(kernelProviders)),
+  /** Every other catalog kernel, each with the neutral reason. */
+  unavailable: z.array(
+    z.strictObject({ kernel: z.enum(kernelProviders), reason: z.literal(snapshotKernelUnavailableReason) }),
+  ),
+  /** The rendered `kernel_skill` text for the current state: the routing card while the project is entry-less. */
+  guidance: z.string(),
+});
 
 /**
  * Schema for the editor context snapshot.
@@ -107,6 +130,8 @@ export const snapshotSchema = z.object({
       refused: z.array(z.strictObject({ tab: workbenchTabSchema, reason: z.enum(refusalReasons) })).max(16),
     })
     .optional(),
+  /** Kernel preference, owner, availability and the rendered kernel text (automatic kernel selection, AKS-7). */
+  kernel: snapshotKernelSchema.optional(),
   /** The components the person has selected in the viewer, in the entry the viewer shows (blueprint D6). */
   viewerSelection: z
     .strictObject({

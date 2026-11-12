@@ -102,7 +102,7 @@ export function DynamicPreviewProvider({
     [project, updateName, updateDescription],
   );
 
-  const mainFile = project?.assets.main.entryPath;
+  const mainFile = project?.assets.main?.entryPath;
 
   if (isLoaded && !project) {
     return (

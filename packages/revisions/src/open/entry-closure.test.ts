@@ -8,9 +8,10 @@ import { lfsPointerFor } from '#lfs.js';
 import { readEntryClosure } from '#open/entry-closure.js';
 import type { ReadTreeOptions, RevisionPort } from '#revision-port.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
+import { recordedBy } from '#test/identity.js';
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
-const provenance = { source: 'user', actorId: 'entry-closure-test', createdAt: 1_756_742_400_000 } as const;
+const provenance = { source: 'user', ...recordedBy('entry-closure-test'), createdAt: 1_756_742_400_000 } as const;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const providers: MemoryProvider[] = [];

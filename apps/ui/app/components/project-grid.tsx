@@ -11,7 +11,12 @@ import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import type { BuiltinProjectCardModel, ProjectFiles } from '#constants/project-examples.js';
 import { loadBuiltinProjectFiles } from '#constants/project-examples.js';
-import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
+import {
+  ProjectCard,
+  ProjectCardCadPreview,
+  ProjectCardMedia,
+  projectCardVerticalFieldOfView,
+} from '#components/project-card.js';
 import { RemixDialog } from '#components/share/fork-action.js';
 import type { RemixSource } from '#components/share/fork-action.js';
 
@@ -75,7 +80,7 @@ function CommunityProjectCard({
   const [files, setFiles] = useState<ProjectFiles>();
   const filesPromise = useRef<Promise<ProjectFiles> | undefined>(undefined);
 
-  const mainFile = assets.main.entryPath;
+  const mainFile = assets.main?.entryPath;
 
   const ensureFiles = useCallback(async (): Promise<ProjectFiles> => {
     filesPromise.current ??= loadBuiltinProjectFiles({ project });
@@ -119,8 +124,14 @@ function CommunityProjectCard({
           isPreviewVisible={isPreviewVisible}
           onPreviewVisibilityChange={handlePreviewVisibilityChange}
         >
-          {files ? (
-            <CadPreviewProvider projectId={id} mainFile={mainFile} files={files}>
+          {/* An entry-less project has no model to preview yet. */}
+          {files && mainFile !== undefined ? (
+            <CadPreviewProvider
+              projectId={id}
+              mainFile={mainFile}
+              files={files}
+              initialVerticalFieldOfView={projectCardVerticalFieldOfView}
+            >
               <ProjectCardCadPreview />
             </CadPreviewProvider>
           ) : null}

@@ -1,7 +1,8 @@
 import { LlmGatewayError, resolveGatewayModelRoute } from '@taucad/api-llm-gateway';
 import type { ModelInvocationIntent, ModelInvocationResult, ModelInvocationService } from '@taucad/api-llm-gateway';
 import type { ObservedAttempt } from '#model-invocation-evidence.js';
-import type { ModelInvocationEvidenceRecorder } from '#model-invocation-recorder.service.js';
+import type { CapturedContent, ModelInvocationEvidenceRecorder } from '#model-invocation-recorder.service.js';
+import { ProviderOutputCapture } from '#provider-content.js';
 import { ProviderStreamFacts } from '#provider-stream-facts.js';
 
 /** Refusals that come from a supplier the attempt reached, as opposed to Tau's own admission. */
@@ -49,9 +50,16 @@ const routeOf = (
  * Wraps the selected funded or direct invocation owner and observes each
  * attempt it relays. The response's bytes, status, headers, cancellation and
  * completion are the inner owner's: bytes are forwarded before they are
- * read, nothing is teed or buffered, and the observer never awaits anything
- * the request path waits on. Replays of a held operation (`pending`,
- * `terminal`) are not new supplier attempts and are not recorded.
+ * read, and the observer never awaits anything the request path waits on.
+ * Replays of a held operation (`pending`, `terminal`) are not new supplier
+ * attempts and are not recorded.
+ *
+ * Content (LW3): the account's purpose lookup starts when the request arrives
+ * and is not awaited. At the first chunk the relay asks it once: if the
+ * capture mode and the account's `content` purpose permit it, the output is
+ * assembled from the parsed frames, bounded, and the request body is kept by
+ * reference for the recorder; if the lookup has not answered, the call is
+ * `missing`. Nothing about capture can delay, alter or fail the relay (LI7).
  */
 export class ObservedModelInvocationService implements ModelInvocationService {
   private readonly admits: boolean;
@@ -85,6 +93,11 @@ export class ObservedModelInvocationService implements ModelInvocationService {
     const route = routeOf(intent, model);
     let operation: string | undefined;
     const { onAdmitted } = intent;
+    /* Started now and never awaited here; the first chunk reads it, the record reuses it. */
+    const eligible = this.recorder.contentEligible(intent.authUserId) && intent.activity !== 'compaction';
+    const permission = this.recorder.permission(intent.authUserId, project);
+    let capture: ObservedAttempt['capture'];
+    let captured: CapturedContent | undefined;
     const attempt = (ended: ObservedAttempt['ended'], stream: ObservedAttempt['stream']): ObservedAttempt => ({
       principal: intent.authUserId,
       project,
@@ -95,12 +108,14 @@ export class ObservedModelInvocationService implements ModelInvocationService {
       activity: intent.activity,
       requestedModel: model,
       supplierModel: route.modelId,
+      labels: intent.hostLabels,
       provider: route.provider,
       operation,
       startedAt,
       duration: this.clock() - started,
       stream,
       ended,
+      ...(captured === undefined ? { capture: capture ?? 'omitted' } : {}),
     });
 
     let result: ModelInvocationResult;
@@ -114,9 +129,9 @@ export class ObservedModelInvocationService implements ModelInvocationService {
       });
     } catch (error) {
       if (intent.signal.aborted) {
-        this.recorder.record(attempt('aborted', undefined));
+        this.recorder.record(attempt('aborted', undefined), permission);
       } else if ((!this.admits || operation !== undefined) && supplierRefusals.has(gatewayErrorType(error) ?? '')) {
-        this.recorder.record(attempt('failed', undefined));
+        this.recorder.record(attempt('failed', undefined), permission);
       }
       throw error;
     }
@@ -126,17 +141,41 @@ export class ObservedModelInvocationService implements ModelInvocationService {
     operation ??= result.operationId;
 
     const facts = new ProviderStreamFacts(intent.providerWire, started, this.clock);
+    let decided = false;
+    const decide = (): void => {
+      decided = true;
+      if (!eligible) {
+        capture = 'omitted';
+        return;
+      }
+      try {
+        const answer = permission.content();
+        if (answer === true) {
+          const output = new ProviderOutputCapture(intent.providerWire);
+          facts.capture(output);
+          captured = { body: intent.body, output };
+        } else {
+          capture = answer === undefined ? 'missing' : 'omitted';
+        }
+      } catch {
+        capture = 'omitted';
+        captured = undefined;
+      }
+    };
     let settled = false;
     const settle = (ended: ObservedAttempt['ended']): void => {
       if (!settled) {
         settled = true;
-        this.recorder.record(attempt(ended, facts.summary()));
+        this.recorder.record(attempt(ended, facts.summary()), permission, captured);
       }
     };
     /* `cancel` is in the Streams standard and Node, not yet in TypeScript's lib. */
     const transformer: Transformer<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>> & { cancel: () => void } = {
       transform(chunk, controller) {
         controller.enqueue(chunk);
+        if (!decided) {
+          decide();
+        }
         facts.accept(chunk);
       },
       flush() {

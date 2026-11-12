@@ -12,6 +12,7 @@ import {
 
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { recordedBy } from '#test/identity.js';
 
 /* Tau's block, so a cut adds a line for each file over the threshold (D16). */
 const tauAttributes = [generatedGitattributesPath, generatedGitattributesContent(undefined)] as const;
@@ -61,7 +62,7 @@ if (delayed && !fs.existsSync(${JSON.stringify(release)})) {
   const receipt = await source.writeRevision({
     parents: [],
     tree: new ImmutableRevisionTree([tauAttributes, ['large.bin', bytes]]),
-    provenance: { source: 'user', actorId: 'test', createdAt: 1 },
+    provenance: { source: 'user', ...recordedBy('test'), createdAt: 1 },
     summary: { generated: 'Large file' },
   });
   const head = revisionId(receipt.commitId);
@@ -186,7 +187,7 @@ describe.runIf(gitToolchainOnPath)('native LFS operation bounds', () => {
       const competing = await fixture.clone.writeRevision({
         parents: [],
         tree: new ImmutableRevisionTree([['local.txt', new Uint8Array([42])]]),
-        provenance: { source: 'user', actorId: 'test', createdAt: 2 },
+        provenance: { source: 'user', ...recordedBy('test'), createdAt: 2 },
         summary: { generated: 'Concurrent fetch' },
       });
       const winner = revisionId(competing.commitId);

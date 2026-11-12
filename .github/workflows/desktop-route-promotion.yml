@@ -43,7 +43,8 @@ jobs:
   # schedule. Automatic staging candidates are Apple silicon only, so promoting all routes of one asks
   # `release-desktop-staging.yml` for a full candidate (`intel`) of the same commit and stops: the
   # operator promotes that tag once its installer candidate and qualification runs are green. A
-  # production tag (`desktop@*`) always packages both, and the Apple silicon-only scope needs no Intel.
+  # production tag (`desktop@*`) always packages both. Only the `all` scope asks for Intel, so a
+  # per-platform scope (`macos` today, and a `linux` scope once publication has one) never does.
   candidate:
     name: Require a full candidate
     if: github.ref == 'refs/heads/main'
@@ -54,7 +55,7 @@ jobs:
       actions: write
     steps:
       - name: Request a full candidate for an Apple silicon-only one
-        if: github.event_name == 'workflow_dispatch' && inputs.operation == 'promote-routes' && inputs.scope != 'macos'
+        if: github.event_name == 'workflow_dispatch' && inputs.operation == 'promote-routes' && inputs.scope == 'all'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

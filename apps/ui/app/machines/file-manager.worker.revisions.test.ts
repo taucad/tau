@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIsomorphicGitRevisionPort, lfsObjectPath, lfsPointerFor, RevisionPortError } from '@taucad/revisions';
-import type { RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
+import type { Remote, RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
 import { revisionId } from '@taucad/revisions/algorithms';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import type { RootedFileSystem } from '@taucad/filesystem';
@@ -190,6 +190,8 @@ const harness = (
         frames.push(data);
       });
       channel.port2.start();
+      /* The page names who its revisions are by before anything else (B1): a capture with no person is refused. */
+      channel.port2.postMessage({ command: 'setActor', actor: { kind: 'user', id: 'usr_page', name: 'Page Person' } });
       const client: Client = {
         port: channel.port2,
         frames,
@@ -1603,9 +1605,13 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await finish(session, turnKey(1));
     await turnFinalized(alpha, 'turn-1');
 
+    /* The hidden save cut nothing: the log is the turn's result over its base cut, and the base cut is the
+     * person's (blueprint A5), so the agent's write is never read as theirs. */
     const rows = await root.log();
-    expect(rows.map((row) => row.source)).not.toContain('user');
-    expect(rows[0]?.turnId).toBe('turn-1');
+    expect(rows.map((row) => [row.source, row.trigger, row.turnId])).toEqual([
+      ['agent', 'turn', 'turn-1'],
+      ['user', 'turn', 'turn-1'],
+    ]);
   });
 
   /*
@@ -1859,6 +1865,54 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       ]);
       /* The first advertisement came before the PUT, and the next after it. */
       expect(advertisements.slice(0, 2)).toEqual([requests.indexOf(puts[0]!), requests.indexOf(puts[0]!) + 1]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  /* B4c: a GitHub linked import configures its GitHub remote; registering that project names it GitHub-linked. */
+  it('should register a GitHub-linked project with the GitHub origin (B4c)', async () => {
+    const bodies: Array<BodyInit | undefined> = [];
+    let registered = false;
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      listRemotes: async (): Promise<readonly Remote[]> => [
+        ...(await port.listRemotes()),
+        {
+          name: 'github-3',
+          url: 'https://github.com/octo/design.git',
+          kind: 'git',
+          provider: 'github',
+          repositoryId: '3',
+          fetchOnly: false,
+        },
+      ],
+      listRemoteRefs: async () => {
+        if (!registered) {
+          throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+        }
+        return [];
+      },
+    }));
+    await fixture.service
+      .createRootedFileSystem('/projects/alpha')
+      .writeFile('tau.json', JSON.stringify({ name: 'Alpha project' }));
+    const alpha = await fixture.open('alpha');
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        registered = true;
+        bodies.push(init.body ?? undefined);
+      }
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof globalThis.fetch;
+
+    try {
+      alpha.send({ command: 'remoteCredential', apiBaseUrl: 'https://api.test' });
+      alpha.send({ command: 'connectRemote', kind: 'tau' });
+      await alpha.settle();
+
+      expect(bodies).toEqual([JSON.stringify({ name: 'Alpha project', origin: 'github' })]);
     } finally {
       globalThis.fetch = original;
     }

@@ -28,6 +28,23 @@ describe('messageMetadataSchema', () => {
 });
 
 describe('snapshotSchema', () => {
+  it('accepts the kernel object and refuses a reason that is not the neutral one', () => {
+    const kernel = {
+      preference: 'auto',
+      owner: { kernel: 'openscad', entryPath: 'main.scad' },
+      available: ['openscad'],
+      unavailable: [{ kernel: 'zoo', reason: 'not available here' }],
+      guidance: 'This project uses OpenSCAD.',
+    };
+
+    expect(snapshotSchema.safeParse({ kernel }).success).toBe(true);
+    expect(
+      snapshotSchema.safeParse({ kernel: { ...kernel, unavailable: [{ kernel: 'zoo', reason: 'requires Pro' }] } })
+        .success,
+    ).toBe(false);
+    expect(snapshotSchema.safeParse({ kernel: { ...kernel, preference: 'Auto' } }).success).toBe(false);
+  });
+
   it('accepts a basic file when its text line count is unknown', () => {
     expect(
       snapshotSchema.safeParse({

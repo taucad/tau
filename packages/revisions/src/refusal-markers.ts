@@ -79,3 +79,25 @@ export const incompleteRepositoryMarker = "Tau: this project's cloud copy is dam
  */
 export const isIncompleteRepositoryRefusal = (message: string | undefined): boolean =>
   message?.includes(incompleteRepositoryMarker) ?? false;
+
+/**
+ * The fixed first words of the hosted remote's `GIT_PUSH_VERSION_NUMBER_TAKEN`
+ * refusal (blueprint B6): a version tag whose number another version already
+ * holds on Tau Cloud. The server prints it from `versionNumberTakenMarker` in
+ * `apps/libs/api-git-core/src/git.constants.ts`; those two copies, both
+ * tested, are the only ones.
+ */
+export const versionNumberTakenMarker = 'Tau: version number taken';
+
+/**
+ * Whether a refusal the remote wrote says a version's number is taken.
+ *
+ * The one refusal this device clears by itself: it gives its own version that
+ * is not backed up the next free number and pushes again.
+ *
+ * @param message - The sentence the remote sent, verbatim.
+ * @returns True when it is the taken-number refusal.
+ * @public
+ */
+export const isVersionNumberRefusal = (message: string | undefined): boolean =>
+  message?.includes(versionNumberTakenMarker) ?? false;

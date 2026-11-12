@@ -94,10 +94,11 @@ export const resolvePortableArtifact = (
   const parsed = parseProjectManifestBytes(manifestFile.content);
   const legacy = parsed.success ? undefined : convertLegacyProjectManifestBytes(manifestFile.content);
   const manifest = parsed.success ? parsed.data : legacy?.success ? legacy.data.manifest : undefined;
-  if (!manifest || !artifact.files.some(({ path }) => path === manifest.assets.main.entryPath)) {
+  const entryPath = manifest?.assets.main?.entryPath;
+  if (!manifest || entryPath === undefined || !artifact.files.some(({ path }) => path === entryPath)) {
     return undefined;
   }
-  const parameterFile = artifact.files.find(({ path }) => path === parameterEntryPath(manifest.assets.main.entryPath));
+  const parameterFile = artifact.files.find(({ path }) => path === parameterEntryPath(entryPath));
   let parameters: Record<string, unknown> = {};
   let parameterDiagnostic: string | undefined;
   if (parameterFile) {
@@ -348,7 +349,8 @@ export const PortableShareSurface = (): React.JSX.Element => {
     description: resolved.manifest.description,
     visibility: 'private',
     viewerRole: 'public',
-    entryPath: resolved.manifest.assets.main.entryPath,
+    // Resolution admits only a manifest whose main entry is in the artifact.
+    entryPath: resolved.manifest.assets.main?.entryPath ?? '',
     ownerSnapshot: null,
     forkCount: 0,
     viewCount: 0,

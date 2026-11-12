@@ -1,6 +1,6 @@
 {
   "name": "@taucad/api",
-  "version": "0.8.0",
+  "version": "0.10.0",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
@@ -45,6 +45,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/agent-tools": "workspace:*",
     "@taucad/api-testing": "workspace:*",

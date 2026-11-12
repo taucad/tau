@@ -41,6 +41,7 @@ import { createAgentLauncher, serveAgentChannel } from '@taucad/agent-host/launc
 import type { AgentLauncher, AgentLauncherOptions } from '@taucad/agent-host/launcher';
 import { createBrowserChatStore, createRootedLogObserver } from '@taucad/agent-host/browser';
 import type { BrowserChatStoreOptions } from '@taucad/agent-host/browser';
+import type { GatewayHostLabels } from '@taucad/agent-host/wire';
 import { createConfiguredGatewayModelTransport } from '#cloud/gateway-model-transport.js';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
@@ -604,6 +605,19 @@ export const hostBuildOf = (release: string | undefined): string | undefined => 
   return label === unknownBuildRelease ? undefined : label;
 };
 
+/**
+ * The host labels every gateway call from this worker carries (LW17): the browser host, and the same build its evidence
+ * reports, so a run's generations and its host facts read one release. The transport adds each call's model; the run's
+ * kernel is not known to the host, so none is sent.
+ *
+ * @param release - The page's label, absent from an older page.
+ * @returns The labels for the gateway transport.
+ */
+export const browserHostLabels = (release: string | undefined): GatewayHostLabels => {
+  const build = hostBuildOf(release);
+  return build === undefined ? { kind: 'browser' } : { kind: 'browser', build };
+};
+
 const composeProjectHost = async (
   provide: AgentHostProjectProvide,
   worker: ResidentWorkerContext,
@@ -888,6 +902,7 @@ const composeProjectHost = async (
     principal: () => provide.principal,
     /* A prompt or tool text change under another release is a `definitions` prefix break, not a mode change. */
     release: hostBuildOf(provide.release),
+    hostLabels: browserHostLabels(provide.release),
   };
   /* T3: set as a release drains. A new start is refused HOST_CLOSED; another tab that forwarded it keeps it for this
    * host's release or a successor (M2, C11). */

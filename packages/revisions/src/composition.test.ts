@@ -42,6 +42,7 @@ import type { TurnAttemptKey } from '#turn.types.js';
 import { createFakeCallbackActors, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
 import type { FakeCallbackActors, FakePromiseActors } from '@taucad/xstate-testing/fakes';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { testIdentity, testPerson } from '#test/identity.js';
 
 /** Let every queued microtask and the actors' promise handlers run. */
 const flush = async (): Promise<void> => {
@@ -676,8 +677,10 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
       clock: stoppedClock(),
       /* A stopped clock never passes the floor between mints (D11). */
       mintFloor: 0,
-      actorId: 'actor-1',
-      actor: () => ({ kind: 'agent', id: 'model-1', runId: 'run-1' }),
+      identity: {
+        via: 'browser',
+        resolve: () => ({ kind: 'agent', id: 'model-1', runId: 'run-1', onBehalfOf: testPerson }),
+      },
       deviceId: () => 'device-1',
       onPlacement: (placement) => {
         placements.push(placement);
@@ -825,6 +828,7 @@ describe('composition root options (MC-R4)', () => {
     const actorIds: string[] = [];
     const rejections: string[] = [];
     const { actor, settled } = createProjectRevisionsActor({
+      identity: testIdentity,
       port,
       projectId: 'project-1',
       filesystem: () => filesystem,
@@ -867,6 +871,7 @@ describe('placement over a real port (RM-R12)', () => {
     await filesystem.writeFile('main.ts', 'export const size = 1;\n');
     const order: string[] = [];
     const { actor, settled } = createProjectRevisionsActor({
+      identity: testIdentity,
       port,
       projectId: 'project-1',
       filesystem: () => filesystem,

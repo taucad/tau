@@ -138,6 +138,7 @@ export const fetchDesktopQualifiedReceipts = async (
       verifyQualificationBinding(binding, {
         manifest,
         candidate,
+        kind: environment,
         runId: admitted.runId,
         workflowCommit: admitted.workflowCommit,
         publicationCommit,

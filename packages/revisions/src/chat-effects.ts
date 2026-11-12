@@ -55,9 +55,8 @@ export const createChatEffects = (
     deviceId: RevisionActorsOptions['deviceId'];
     /** Names this host's segments by actor form (EQ10(a)); the host id only gates. */
     recordDevices: Pick<OpsLog, 'deviceFor' | 'ownDevices'>;
-    actor: RevisionActorsOptions['actor'];
+    identity: RevisionActorsOptions['identity'];
     onChatsProjected: RevisionActorsOptions['onChatsProjected'];
-    actorId: string;
     now: () => number;
   }>,
 ): Readonly<{
@@ -121,7 +120,7 @@ export const createChatEffects = (
   ) => Promise<SyncRefOutcome>;
   staysPerRef: (error: unknown) => boolean;
 }> => {
-  const { port, recordsFileSystem, deviceId, recordDevices, actor, onChatsProjected, actorId, now } = dependencies;
+  const { port, recordsFileSystem, deviceId, recordDevices, identity, onChatsProjected, now } = dependencies;
 
   /**
    * What every chat-ref effect needs, or `undefined` on a host with no device id.
@@ -139,12 +138,12 @@ export const createChatEffects = (
       }>
     | undefined
   > => {
-    const identity = deviceId?.();
-    if (identity === undefined || identity === '') {
+    const hostId = deviceId?.();
+    if (hostId === undefined || hostId === '') {
       return undefined;
     }
     try {
-      const segment = await recordDevices.deviceFor(actor?.({ runId: undefined, trigger: 'save' }));
+      const segment = await recordDevices.deviceFor(identity.resolve({ runId: undefined, trigger: 'save' }));
       return {
         port,
         filesystem: await recordsFileSystem(),
@@ -152,7 +151,7 @@ export const createChatEffects = (
         /* The host id named this host's segments before record devices did, so
          * a segment it wrote then is still its own, never projected back as
          * another device's (EQ10 ruling, RV-W7 #8). */
-        ownDevices: new Set([...(await recordDevices.ownDevices()), identity]),
+        ownDevices: new Set([...(await recordDevices.ownDevices()), hostId]),
       };
     } catch (error) {
       /* A device file this host cannot read names no segment: no chat is
@@ -177,7 +176,7 @@ export const createChatEffects = (
     if (context === undefined || !syncChats) {
       return [];
     }
-    const person = actor?.({ runId: undefined, trigger: 'save' });
+    const person = identity.resolve({ runId: undefined, trigger: 'save' });
     const chats = await (async (): Promise<readonly string[]> => {
       try {
         return await context.filesystem.readdir('.tau/chats');
@@ -193,8 +192,8 @@ export const createChatEffects = (
             ...context,
             chatId,
             syncChats,
-            actorId,
-            ...(person === undefined ? {} : { actor: person }),
+            actor: person,
+            via: identity.via,
             now: now(),
             remote,
           });
@@ -460,13 +459,13 @@ export const createChatEffects = (
     }
     const remoteHead = await port.readRef(remoteTrackingRef(input.remote, input.name));
     input.signal?.throwIfAborted();
-    const person = actor?.({ runId: undefined, trigger: 'save' });
+    const person = identity.resolve({ runId: undefined, trigger: 'save' });
     const replayed = await replayChatSegment({
       ...context,
       chatId: input.chatId,
       syncChats: input.syncChats,
-      actorId,
-      ...(person === undefined ? {} : { actor: person }),
+      actor: person,
+      via: identity.via,
       now: now(),
       onto: remoteHead,
     });

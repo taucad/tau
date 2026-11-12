@@ -1,3 +1,6 @@
+/** A version that moved to the next free number before its first backup (B6). @public */
+export type VersionRenumbering = Readonly<{ name: string; from: number; to: number }>;
+
 /** One ref's outcome, which is the unit a push reports in (A39, W11b §1). @public */
 export type SyncRefOutcome = Readonly<{
   /** Fully-qualified local ref, e.g. `refs/heads/main` or `refs/tau/chats/c1`. */

@@ -578,6 +578,7 @@ const journalKindSchema = z.enum([
   'promotion_grant',
   'reversal',
   'compensation',
+  'plan_expiry',
 ]);
 const journalTotalSchema = z
   .object({ kind: journalKindSchema, ...totalsShape })

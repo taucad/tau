@@ -34,6 +34,7 @@
     ".": "./src/index.ts",
     "./contract": "./src/contract.ts",
     "./content-redaction": "./src/content-redaction.ts",
+    "./host-content": "./src/host-content.ts",
     "./delivery": "./src/delivery.ts",
     "./authority": "./src/authority.ts",
     "./identity": "./src/identity.ts",

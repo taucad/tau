@@ -18,6 +18,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import {
   ChatRevisions,
   RevisionsPanelBody,
+  currentRevisionOf,
   groupRevisionHistory,
 } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
@@ -156,6 +157,36 @@ describe('Revisions pane', () => {
 
     expect(groups.map((group) => group.kind)).toStrictEqual(['revision', 'autosaves', 'revision']);
     expect(groups[1]).toMatchObject({ kind: 'autosaves', revisions: [{ revisionId: 'a' }, { revisionId: 'b' }] });
+  });
+
+  it('merges consecutive setup entries into one line, the head among them, and never marks one Current (A4)', () => {
+    const card = (revisionId: string, parent: string | undefined, isSetup: boolean): RevisionCard => ({
+      revisionId,
+      n: 1,
+      createdAt: 1,
+      summary: '',
+      actor: 'You',
+      turnId: undefined,
+      conflicted: false,
+      tags: [],
+      trigger: isSetup ? 'idle' : 'save',
+      ...(parent === undefined ? {} : { parent }),
+      ...(isSetup ? { isSetup: true } : {}),
+    });
+    const revisions = [
+      card('setup-2', 'setup-1', true),
+      card('setup-1', 'agent', true),
+      card('agent', 'start', false),
+      card('start', undefined, false),
+    ];
+
+    expect(groupRevisionHistory(revisions, 'setup-2').map((group) => group.kind)).toStrictEqual([
+      'setup',
+      'revision',
+      'revision',
+    ]);
+    expect(currentRevisionOf(revisions, 'setup-2')).toBe('agent');
+    expect(currentRevisionOf(revisions, 'agent')).toBe('agent');
   });
 
   it('names its Close after the panel, as its tooltip does (I6)', () => {
@@ -1271,6 +1302,59 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.queryByRole('button', { name: 'Rev 3 · Thicker base' })).not.toBeInTheDocument();
     await user.click(fold);
     expect(screen.getByRole('button', { name: 'Rev 3 · Thicker base' })).toBeInTheDocument();
+  });
+
+  /* A4: the operator's two `idle` autosaves that changed only `.gitignore` are one compact setup line. */
+  it("shows Tau's setup entries as one compact line, and Current on the newest entry that is not setup", async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-4', revisionNumber: 4, trigger: 'idle', isSetup: true }),
+      row({ revisionId: 'rev-3', revisionNumber: 3, trigger: 'idle', isSetup: true }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, trigger: 'save', summary: 'Add vent slots' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, trigger: 'save' }),
+    ].map((entry, index, all) => {
+      const parent = all[index + 1]?.revisionId;
+      return parent === undefined ? entry : { ...entry, parent };
+    });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
+
+    renderPane();
+
+    const line = await screen.findByRole('button', { name: /^Tau updated project setup · 2 changes/u });
+    expect(line).toHaveClass('h-6');
+    expect(line).not.toHaveTextContent('Current');
+    expect(screen.queryByRole('button', { name: /autosaves/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rev 4 · Thicker base' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText('Current')).toHaveLength(1);
+    });
+    expect(screen.getByRole('button', { name: 'Rev 2 · Add vent slots' })).toHaveTextContent('Current');
+
+    await user.click(line);
+    expect(screen.getByRole('button', { name: 'Rev 4 · Thicker base' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rev 3 · Thicker base' })).toBeInTheDocument();
+  });
+
+  it('lists Tau’s setup files last, under a plain Project setup label (A4)', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-2', revisionNumber: 2, trigger: 'save' })];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
+    revisionStatusHarness.diff = [
+      { path: '.gitattributes', kind: 'added' },
+      { path: 'main.scad', kind: 'modified' },
+    ];
+
+    renderPane();
+
+    await user.click(await screen.findByRole('button', { name: 'Rev 2 · Thicker base' }));
+    const files = await screen.findByRole('list', { name: 'Changed files' });
+    /* The label is not a file, so assistive technology counts only the two files as items. */
+    expect(
+      within(files)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toStrictEqual([expect.stringContaining('main.scad'), expect.stringContaining('.gitattributes')]);
+    expect(files.textContent).toMatch(/main\.scad.*Project setup.*\.gitattributes/u);
   });
 
   it('is one Tab stop, on the row you are on, and moves by arrow keys (A1 item 14)', async () => {

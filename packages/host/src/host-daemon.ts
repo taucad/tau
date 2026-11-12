@@ -322,6 +322,7 @@ export type HostDaemonOptions = {
   readonly observeChats?: (
     projectId: string,
     read: Parameters<NonNullable<ProjectHostOptions['observeChats']>>[0],
+    sources: Parameters<NonNullable<ProjectHostOptions['observeChats']>>[1],
   ) => ReturnType<NonNullable<ProjectHostOptions['observeChats']>>;
 };
 
@@ -1012,7 +1013,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       syncTelemetryPlacement: 'daemon',
       via: daemonRevisionVia(),
       ...(agent.revisionActor === undefined ? {} : { revisionActor: agent.revisionActor }),
-      ...(observeChats === undefined ? {} : { observeChats: (read) => observeChats(projectId, read) }),
+      ...(observeChats === undefined
+        ? {}
+        : { observeChats: (read, sources) => observeChats(projectId, read, sources) }),
       /* The session, not this daemon's device credential: the Git endpoints and
        * `PUT /v1/projects/<id>` authenticate an account, and a paired device
        * credential is only ever offered to the agent relay. A terminal has no

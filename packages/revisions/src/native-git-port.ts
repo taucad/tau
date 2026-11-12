@@ -99,7 +99,6 @@ import {
 } from '#remotes.js';
 import type { Remote } from '#remotes.js';
 import {
-  generatedGitattributesContent,
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
@@ -2021,26 +2020,16 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     if (adopted && owned) {
       await assertAdoptable();
     }
-    if (!adopted && input.createSetupFiles !== false) {
-      const [ignore, attributes] = await Promise.all(
-        [generatedIgnorePath, generatedGitattributesPath].map(async (path) =>
-          readFile(join(repositoryPath, path), 'utf8').catch(() => undefined),
-        ),
-      );
-      /* Created, never merged into (D16): a file that exists is the person's,
-       * or already Tau's. A brand-new project gets both files, versioned (D24),
-       * so a stock clone reads it the way Tau wrote it. */
-      if (!owned && ignore === undefined) {
-        await writeFile(
-          join(repositoryPath, generatedIgnorePath),
-          generatedIgnoreContent(undefined, input.additionalIgnores ?? []),
-        );
-      }
-      /* A project an older build created carries Tau's ignore block and no
-       * attributes file (DEF-W22-1); the file it gets here is what keeps its
-       * large files pointers once the cut reads the rule from the tree. */
-      if (attributes === undefined && (!owned || hasGeneratedBlock(ignore))) {
-        await writeFile(join(repositoryPath, generatedGitattributesPath), generatedGitattributesContent(undefined));
+    /* Opening a project writes nothing in the tracked tree (I4): only a store
+     * this call creates gets Tau's ignore file, created, never merged into
+     * (D16). The attributes file is never written here: the cut supplies it in
+     * the recorded tree and writes its live copy in the same mint
+     * (`revision-effects`, A4), so a project an older build created without
+     * one (DEF-W22-1) is left exactly as it was until something is saved. */
+    if (!owned && !adopted && input.createSetupFiles !== false) {
+      const ignorePath = join(repositoryPath, generatedIgnorePath);
+      if ((await readFile(ignorePath, 'utf8').catch(() => undefined)) === undefined) {
+        await writeFile(ignorePath, generatedIgnoreContent(undefined, input.additionalIgnores ?? []));
       }
     }
     // Only now: the repository is created after the file that decides what a
@@ -2520,6 +2509,35 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       const counts = await text(['rev-list', '--left-right', '--count', `${input.head}...${input.base}`]);
       const [ahead, behind] = counts.split(/\s+/u).map(Number);
       return Object.freeze({ ahead: ahead ?? 0, behind: behind ?? 0 });
+    },
+
+    /* One `diff-tree --stdin` for the whole set (rule 20's log cost): Git names
+     * each revision that changed something, then its paths; a revision that
+     * changed nothing, or is a root, prints nothing at all. */
+    firstParentChanges: async (ids: readonly RevisionId[]): Promise<ReadonlyMap<string, readonly string[]>> => {
+      const changes = new Map<string, string[]>();
+      if (ids.length === 0) {
+        return changes;
+      }
+      const wanted = new Set<string>(ids);
+      const records = textDecoder
+        .decode(
+          await output(['diff-tree', '--stdin', '-r', '-z', '--no-renames', '--name-only'], {
+            input: [textEncoder.encode(`${ids.join('\n')}\n`)],
+          }),
+        )
+        .split('\0')
+        .filter((record) => record !== '');
+      let paths: string[] | undefined;
+      for (const record of records) {
+        if (wanted.has(record) && !changes.has(record)) {
+          paths = [];
+          changes.set(record, paths);
+        } else {
+          paths?.push(record);
+        }
+      }
+      return changes;
     },
 
     diff: async (input: RevisionDiffInput): Promise<readonly RevisionDiffEntry[]> => {

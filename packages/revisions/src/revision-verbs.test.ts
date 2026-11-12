@@ -20,10 +20,11 @@ import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { RevisionId } from '#algorithms/index.js';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
-import type { RevisionPort } from '#revision-port.js';
+import type { RevisionLogEntry, RevisionPort } from '#revision-port.js';
 import { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { recordedBy } from '#test/identity.js';
+import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 
 /* Every commit object the browser leg reads goes through `readObject`. */
 const objectReads = vi.hoisted(() => ({ count: 0 }));
@@ -363,5 +364,89 @@ describe('revision verbs', () => {
 
     expect(page.map((row) => row.revisionNumber)).toEqual([30, 29, 28, 27, 26]);
     expect(page).toEqual(whole.slice(0, 5));
+  });
+});
+
+/* A4: a page longer than the setup-verdict cache still flags every setup entry it holds. */
+describe('setup entries on a long page', () => {
+  it('flags every setup entry of a page longer than the verdict cache', async () => {
+    const length = 4100;
+    const idOf = (index: number): RevisionId => revisionId(index.toString(16).padStart(40, '0'));
+    const entries: RevisionLogEntry[] = Array.from({ length }, (_, offset) => {
+      const index = length - offset;
+      return {
+        id: idOf(index),
+        changeId: `change-${String(index)}`,
+        parents: index === 1 ? [] : [idOf(index - 1)],
+        treeId: 'a'.repeat(40),
+        summary: { generated: 'Saved changes (idle)' },
+        provenance: { source: 'user', ...recordedBy('ada'), capture: 'idle', createdAt },
+        conflicted: false,
+      };
+    });
+    const head = idOf(length);
+    const port: Partial<RevisionPort> = {
+      readHead: async () => ({ branch: 'main', head }),
+      log: async () => entries,
+      listTags: async () => [],
+      firstParentChanges: async (ids) => new Map(ids.map((id) => [id, [generatedIgnorePath]] as const)),
+    };
+
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log read asks only these four methods.
+    const rows = await readRevisionLog(port as RevisionPort);
+
+    expect(rows).toHaveLength(length);
+    /* Every entry but the root, which has no first parent to change against. */
+    expect(rows.filter((row) => row.isSetup === true)).toHaveLength(length - 1);
+  });
+
+  /* A6 beside A4: the Start entry records Tau's setup files, yet it is V1 and never folds into the setup line. */
+  it('reads the Start entry as V1, never as setup, though it changed only the setup files', async () => {
+    const idOf = (index: number): RevisionId => revisionId(index.toString(16).padStart(40, '0'));
+    const entries: RevisionLogEntry[] = [
+      {
+        id: idOf(3),
+        changeId: 'change-3',
+        parents: [idOf(2)],
+        treeId: 'a'.repeat(40),
+        summary: { generated: 'Saved changes (idle)' },
+        provenance: { source: 'user', ...recordedBy('ada'), capture: 'idle', createdAt },
+        conflicted: false,
+      },
+      {
+        id: idOf(2),
+        changeId: 'change-2',
+        parents: [idOf(1)],
+        treeId: 'b'.repeat(40),
+        summary: { generated: 'Start' },
+        provenance: { source: 'user', ...recordedBy('ada'), capture: 'create', createdAt },
+        conflicted: false,
+      },
+      {
+        id: idOf(1),
+        changeId: 'change-1',
+        parents: [],
+        treeId: 'c'.repeat(40),
+        summary: { generated: 'Initial commit' },
+        /* A commit Tau did not write: no actor, capture or leg (B1). */
+        provenance: { source: 'import', createdAt },
+        conflicted: false,
+      },
+    ];
+    const port: Partial<RevisionPort> = {
+      readHead: async () => ({ branch: 'main', head: idOf(3) }),
+      log: async () => entries,
+      listTags: async () => [],
+      firstParentChanges: async (ids) =>
+        new Map(ids.map((id) => [id, [generatedIgnorePath, generatedGitattributesPath]] as const)),
+    };
+
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log read asks only these four methods.
+    const rows = await readRevisionLog(port as RevisionPort);
+    const byId = new Map(rows.map((row) => [row.revisionId, row]));
+
+    expect(byId.get(idOf(2))?.start).toBe('created');
+    expect(byId.get(idOf(2))?.isSetup).toBeUndefined();
+    expect(byId.get(idOf(3))?.isSetup).toBe(true);
   });
 });

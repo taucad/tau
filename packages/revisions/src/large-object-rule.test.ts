@@ -3,14 +3,14 @@
  * open that keeps a project an older build created on it.
  *
  * A browser project from before W22 DEF-W22-1 recorded Tau's ignore block and
- * no attributes file, its part files pointers by family alone. Its first open
- * on this build creates `.gitattributes` with Tau's block (never merging into
- * a file that exists), so the next cut keeps every unchanged part the pointer
- * HEAD holds: the only change is the attributes file itself, and no part's
- * whole bytes become a Git blob a push would carry.
+ * no attributes file, its part files pointers by family alone. Its open on
+ * this build writes nothing (I4); the next cut supplies `.gitattributes` with
+ * Tau's block (A4, never merging into a file that exists), so it keeps every
+ * unchanged part the pointer HEAD holds: the only change is the attributes
+ * file itself, and no part's whole bytes become a Git blob a push would carry.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -19,7 +19,7 @@ import { MemoryProvider } from '@taucad/filesystem/backend';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { revisionTreeId } from '#git-tree-id.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
-import { cleanLargeObjects, lfsPointerFor, readLfsPointer } from '#lfs.js';
+import { cleanLargeObjects, lfsPointerFor, readLfsPointer, withOwedAttributes } from '#lfs.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import type { RevisionPort } from '#revision-port.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
@@ -50,13 +50,18 @@ const olderHead = new ImmutableRevisionTree([
   ['models/part.step', pointerBytes],
 ]);
 
-/* The checkout after the open: what HEAD holds, the part filled, and the attributes file the open made. */
+/* The checkout after the open: what HEAD holds, the part filled, and no attributes file (I4). */
+const capturedOnOpen = new ImmutableRevisionTree([
+  [generatedIgnorePath, ignore],
+  ['main.scad', 'import("models/part.step");\n'],
+  ['models/part.step', part],
+]);
+
+/* What the next cut records from it: the attributes file the tree owes (A4). */
 const capturedAfterOpen = (attributes: string): ImmutableRevisionTree =>
   new ImmutableRevisionTree([
     [generatedGitattributesPath, attributes],
-    [generatedIgnorePath, ignore],
-    ['main.scad', 'import("models/part.step");\n'],
-    ['models/part.step', part],
+    ...capturedOnOpen.entries().map(({ path, content }) => [path, content] as const),
   ]);
 
 /* HEAD plus the one file the migration adds: the only change the next cut may record. */
@@ -70,7 +75,7 @@ const expectedTree = new ImmutableRevisionTree([
 /** Record the older build's HEAD verbatim, open the store as this build does, and cut the filled checkout. */
 const migrate = async (
   open: () => RevisionPort,
-  readAttributes: () => Promise<string>,
+  hasAttributes: () => Promise<boolean>,
 ): Promise<Readonly<{ head: string; next: string; treeId: string; port: RevisionPort }>> => {
   const older = open();
   await older.init({ author, createSetupFiles: false });
@@ -84,7 +89,12 @@ const migrate = async (
   await older.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(head.commitId) });
   const port = open();
   await port.init({ author });
-  const captured = capturedAfterOpen(await readAttributes());
+  /* The open wrote nothing in the tracked tree; the cut supplies the file the tree owes. */
+  expect(await hasAttributes()).toBe(false);
+  const captured = withOwedAttributes(capturedOnOpen);
+  if (captured === undefined) {
+    throw new Error('A tree with Tau’s ignore block and no attributes file owes one.');
+  }
   const next = await port.writeRevision({
     parents: [revisionId(head.commitId)],
     tree: captured,
@@ -109,7 +119,7 @@ describe('an older Tau project, opened on this build (DEF-W22-1, D16)', () => {
 
     const { next, treeId, port } = await migrate(
       () => createIsomorphicGitRevisionPort({ filesystem }),
-      async () => filesystem.readFile(generatedGitattributesPath, 'utf8'),
+      async () => filesystem.exists(generatedGitattributesPath),
     );
 
     expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(ignore);
@@ -132,7 +142,11 @@ describe('an older Tau project, opened on this build (DEF-W22-1, D16)', () => {
 
       const { head, next, treeId } = await migrate(
         () => createNativeGitRevisionPort({ repositoryPath: project }),
-        async () => readFile(join(project, generatedGitattributesPath), 'utf8'),
+        async () =>
+          access(join(project, generatedGitattributesPath)).then(
+            () => true,
+            () => false,
+          ),
       );
 
       expect(git(['rev-parse', `${next}^{tree}`])).toBe(treeId);

@@ -58,6 +58,7 @@ export type {
   ProjectRevisions,
   ProjectRevisionsOptions,
   RevisionDiscardOutcome,
+  RevisionFileRead,
   RevisionOpenOutcome,
   RevisionPublishOutcome,
   RevisionSaveOutcome,
@@ -71,6 +72,7 @@ export { isolationHeaders, serveStaticUi } from '#static-ui.js';
 export type { StaticUiHandler, StaticUiOptions } from '#static-ui.js';
 export { createProjectHost, createProjectHostActor } from '#project-host.js';
 export type {
+  ChatObservationSources,
   ProjectFileSystem,
   ProjectHost,
   ProjectHostActor,

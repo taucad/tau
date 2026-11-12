@@ -45,7 +45,7 @@ import type { Checkout, RevisionPort } from '#revision-port.js';
 import { RevisionPortError } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
-import { tauRevisionPolicy } from '#workspace-config.js';
+import { generatedGitattributesContent, generatedGitattributesPath, tauRevisionPolicy } from '#workspace-config.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { testIdentity } from '#test/identity.js';
 
@@ -1201,9 +1201,11 @@ describe('a checkout stopped inside an apply', () => {
 
   it('should leave the files as they were or as the revision wanted them, with no temporary sibling behind', async () => {
     const options = trustedStats;
+    /* A current project carries its attributes file, so the base save writes nothing but its revision (A4). */
+    const files = { ...baseFiles, [generatedGitattributesPath]: generatedGitattributesContent(undefined) };
     /* The clean run says how many steps there are to stop at, and what the two
      * admissible outcomes hash to. */
-    const clean = await project(baseFiles, options);
+    const clean = await project(files, options);
     const cleanActors = clean.open();
     const base = await save(cleanActors);
     await agentWrites(clean.tree);
@@ -1225,7 +1227,7 @@ describe('a checkout stopped inside an apply', () => {
 
     for (const step of Array.from({ length: steps }, (_, index) => index + 1)) {
       // oxlint-disable-next-line no-await-in-loop -- one whole project per step, in order.
-      const stopped = await project(baseFiles, { ...options, failMutation: (sequence) => sequence === step });
+      const stopped = await project(files, { ...options, failMutation: (sequence) => sequence === step });
       // oxlint-disable-next-line no-await-in-loop -- the base revision of this step's project.
       const stoppedBase = await save(stopped.open());
       // oxlint-disable-next-line no-await-in-loop -- this step's turn.

@@ -652,19 +652,24 @@ describe('createProjectHost', () => {
   it('should hand its chat observer the host’s own-row read and close it with the host', async () => {
     const close = vi.fn();
     let read: Parameters<NonNullable<ProjectHostOptions['observeChats']>>[0] | undefined;
+    let sources: Parameters<NonNullable<ProjectHostOptions['observeChats']>>[1] | undefined;
     const options = await desktopProjectHostOptions();
     const project = createProjectHost({
       ...options,
-      observeChats: (ownRows) => {
+      observeChats: (ownRows, reads) => {
         read = ownRows;
+        sources = reads;
         return { onChatQuiescent: () => undefined, close };
       },
     });
 
     const batch = await read!({ chatId: 'chat-1', cursor: 0, limit: 16 });
+    /* The design a run left is read at its revision, never from the live workspace (LW6). */
+    const design = await sources!.design({ revision: 'unknown-revision', paths: ['main.ts'] });
     await project.close();
 
     expect(batch.events).toEqual([]);
+    expect(design).toEqual([]);
     expect(close).toHaveBeenCalledTimes(1);
   });
 

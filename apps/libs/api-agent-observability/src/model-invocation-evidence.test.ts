@@ -178,6 +178,15 @@ describe('providerContentEvidence', () => {
     expect(content!.coverage.input).toBe('truncated');
   });
 
+  it('labels the output truncated when the relay ended before the stream finished', async () => {
+    for (const ended of ['aborted', 'failed'] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- two cases, in order
+      const content = await providerContentEvidence({ ...captured('x'), ended }, authority);
+
+      expect(content!.coverage).toMatchObject({ input: 'complete', output: 'truncated' });
+    }
+  });
+
   it('labels an unreadable request body unsupported and still records the output', async () => {
     const attempt = captured('x');
     const content = await providerContentEvidence(

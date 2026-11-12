@@ -1,5 +1,5 @@
 import type { Evidence } from '#contract.js';
-import { canonicalEvidence, evidenceKeys } from '#identity.js';
+import { canonicalEvidence, evidenceDigest, evidenceKeys } from '#identity.js';
 
 /*
  * Host evidence delivery (blueprint T09).
@@ -28,10 +28,13 @@ export type EvidenceReceipt = Readonly<{
 export type SubmitOutcome =
   /** Held by the API; drop the local copy. */
   | Readonly<{ kind: 'receipt'; receipt: EvidenceReceipt }>
-  /** Try again later; the envelope is unchanged. */
-  | Readonly<{ kind: 'retry'; afterMilliseconds: number }>
-  /** The grant this was captured under is no longer current: drop everything held under it. */
-  | Readonly<{ kind: 'stale' }>
+  /** Try again later; the envelope is unchanged. `code` is the API's reason, when it gave one. */
+  | Readonly<{ kind: 'retry'; afterMilliseconds: number; code?: string }>
+  /**
+   * The grant this was captured under is no longer current: drop everything held under it. `EVIDENCE_PURPOSE` says the
+   * envelope's own purpose is not allowed, which for a content envelope leaves its summary to send.
+   */
+  | Readonly<{ kind: 'stale'; code?: string }>
   /** The project is deleted from Tau Cloud: drop everything held for it. */
   | Readonly<{ kind: 'gone' }>
   /** The session is not signed in: stop until it is. */
@@ -118,10 +121,14 @@ export const submitEvidence = async (
     return { kind: 'gone' };
   }
   if (code === 'EVIDENCE_POLICY_STALE' || code === 'EVIDENCE_PURPOSE') {
-    return { kind: 'stale' };
+    return { kind: 'stale', code };
   }
   if (response.status === 429 || response.status >= 500) {
-    return { kind: 'retry', afterMilliseconds: retryAfterOf(response, body) };
+    return {
+      kind: 'retry',
+      afterMilliseconds: retryAfterOf(response, body),
+      ...(code === undefined ? {} : { code }),
+    };
   }
   return { kind: 'refused', code: code ?? `HTTP_${response.status}` };
 };
@@ -205,7 +212,18 @@ export const defaultOutboxLimits: OutboxLimits = Object.freeze({ items: 2000, by
 /** What the outbox did, counted by reason, for the host's own coverage report. @public */
 export type OutboxCounts = Readonly<
   Record<
-    'held' | 'duplicate' | 'outOfScope' | 'full' | 'accepted' | 'revoked' | 'expired' | 'stale' | 'gone' | 'refused',
+    | 'held'
+    | 'duplicate'
+    | 'outOfScope'
+    | 'full'
+    | 'accepted'
+    | 'revoked'
+    | 'expired'
+    | 'stale'
+    | 'gone'
+    | 'refused'
+    /* Content envelopes sent or held as their summary instead: refused, withdrawn, at capacity or too large to hold. */
+    | 'summarized',
     number
   >
 >;
@@ -227,7 +245,36 @@ const zeroCounts = (): Record<keyof OutboxCounts, number> => ({
   stale: 0,
   gone: 0,
   refused: 0,
+  summarized: 0,
 });
+
+/**
+ * A content envelope's summary: the same fact and source, without its sections, with its digest computed again
+ * (LW6). The API keeps either, never both, so a refused or withdrawn content envelope still reports its fact.
+ *
+ * @param evidence - A content envelope.
+ * @returns Its summary, or `undefined` for any other envelope.
+ * @public
+ */
+export const summaryOfContent = async (evidence: Evidence): Promise<Evidence | undefined> => {
+  const { payload } = evidence;
+  if (payload.plane !== 'content') {
+    return undefined;
+  }
+  const summary: Evidence = {
+    ...evidence,
+    projection: { ...evidence.projection, redactor: 'summary-only', digest: '0'.repeat(64) },
+    coverage: { ...evidence.coverage, input: 'omitted', output: 'omitted' },
+    payload: { plane: 'summary', fact: payload.fact },
+  };
+  return { ...summary, projection: { ...summary.projection, digest: await evidenceDigest(summary) } };
+};
+
+/** Whether the API's answer refuses a content envelope's content but would take its summary. */
+const refusesContent = (outcome: SubmitOutcome): boolean =>
+  outcome.kind === 'refused' ||
+  (outcome.kind === 'stale' && outcome.code === 'EVIDENCE_PURPOSE') ||
+  (outcome.kind === 'retry' && outcome.code === 'EVIDENCE_CAPACITY');
 
 const inScope = (scope: DeliveryScope, evidence: Evidence): boolean =>
   evidence.scope.principal === scope.principal &&
@@ -292,6 +339,14 @@ export const createEvidenceOutbox = (options: OutboxOptions): EvidenceOutbox => 
       return undefined;
     }
     const outcome = await submit(item.evidence, signal);
+    if (refusesContent(outcome)) {
+      const summary = await summaryOfContent(item.evidence);
+      if (summary !== undefined) {
+        /* The same source key: the summary takes the content's place and is answered for it. */
+        counts.summarized += 1;
+        return send({ ...item, evidence: summary }, scope, signal);
+      }
+    }
     switch (outcome.kind) {
       case 'receipt': {
         await store.release([item.key]);
@@ -370,13 +425,27 @@ export const createEvidenceOutbox = (options: OutboxOptions): EvidenceOutbox => 
           counts.expired += 1;
           continue;
         }
-        const bytes = new TextEncoder().encode(canonicalEvidence(item)).byteLength;
         const size = await store.size();
-        if (size.items + 1 > limits.items || size.bytes + bytes > limits.bytes) {
+        const fits = (envelope: Evidence): number | undefined => {
+          const bytes = new TextEncoder().encode(canonicalEvidence(envelope)).byteLength;
+          return size.items + 1 > limits.items || size.bytes + bytes > limits.bytes ? undefined : bytes;
+        };
+        let envelope = item;
+        let bytes = fits(envelope);
+        if (bytes === undefined) {
+          /* A content envelope too large to hold is held as its summary, so its fact is still reported (LW6). */
+          const summary = await summaryOfContent(item);
+          bytes = summary === undefined ? undefined : fits(summary);
+          if (summary !== undefined && bytes !== undefined) {
+            envelope = summary;
+            counts.summarized += 1;
+          }
+        }
+        if (bytes === undefined) {
           counts.full += 1;
           continue;
         }
-        const held = await store.hold({ key: evidenceKeys(item).source, evidence: item, bytes });
+        const held = await store.hold({ key: evidenceKeys(envelope).source, evidence: envelope, bytes });
         counts[held] += 1;
       }
       return { ...counts };

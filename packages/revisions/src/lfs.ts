@@ -21,6 +21,7 @@
 
 import type { ImmutableRevisionTree } from '#algorithms/index.js';
 import { adoptRevisionTree, revisionTreeFiles } from '#algorithms/revision-tree.js';
+import type { RevisionTreeFile } from '#algorithms/revision-tree.js';
 
 import { digestHex } from '#object-hash.js';
 import type { ObjectFormat } from '#object-hash.js';
@@ -28,7 +29,9 @@ import { blobOid } from '#tree-id-memo.js';
 import {
   generatedGitattributesContent,
   generatedGitattributesPath,
+  generatedIgnorePath,
   hasGeneratedAttributesBlock,
+  hasGeneratedBlock,
   isAttributesPath,
   isLargeObjectPath,
   largeObjectThresholdBytes,
@@ -367,4 +370,35 @@ const attributesBytesOf = (text: string): Uint8Array<ArrayBuffer> => {
     attributesBytes = { text, bytes: textEncoder.encode(text) };
   }
   return attributesBytes.bytes;
+};
+
+/**
+ * The captured tree with Tau's attributes file, where the tree owes one (A4).
+ *
+ * A tree owes the file when its root ignore file carries Tau's block and it
+ * has no root attributes file: a project Tau created, before its first save,
+ * or one an older build created without it (DEF-W22-1). Opening a project
+ * writes nothing in the tracked tree (I4), so the file arrives with the first
+ * revision that records something else, and the caller writes its live copy
+ * in that same mint. A tree with no Tau ignore block is the person's (D16),
+ * and one that already has the file keeps it as it is.
+ *
+ * @param tree - The captured tree.
+ * @returns The tree with the generated attributes file, or `undefined` when nothing is owed.
+ */
+export const withOwedAttributes = (tree: ImmutableRevisionTree): ImmutableRevisionTree | undefined => {
+  const files = revisionTreeFiles(tree);
+  const ignore = files.get(generatedIgnorePath);
+  if (
+    files.has(generatedGitattributesPath) ||
+    ignore === undefined ||
+    !hasGeneratedBlock(decoder.decode(ignore.content))
+  ) {
+    return undefined;
+  }
+  const attributes: RevisionTreeFile = Object.freeze({
+    content: attributesBytesOf(generatedGitattributesContent(undefined)),
+    mode: '100644',
+  });
+  return adoptRevisionTree(new Map([...files, [generatedGitattributesPath, attributes]]));
 };

@@ -263,6 +263,68 @@ export const runGit = async (
   }
 };
 
+/** The author address Tau writes for a person with no address of their own (`revisionAuthorSignature`). */
+export const tauNoreplyAddress = (userId: string): string => `${userId}@users.noreply.tau.new`;
+
+/**
+ * The message a Tau client writes for one person's save: a title, the
+ * version-2 `Tau-Metadata` trailer and its two readable trailers, in the shape
+ * `revisionCommitMessage` (`packages/revisions/src/revision-headers.ts`) emits.
+ *
+ * Tau Cloud refuses a pushed commit with no Tau record on a project that is
+ * not linked to GitHub, and one whose record names anyone but the pusher
+ * (665276e5f3, blueprint B4). A stock-git peer standing in for another of the
+ * owner's devices therefore records its commits the way that device would.
+ *
+ * @param userId - The pushing account's user id, which the record names.
+ * @param title - The commit's first line.
+ * @param parents - The commit's parent ids, which the trailer repeats.
+ * @returns The full commit message.
+ */
+export const tauRecordedMessage = (userId: string, title: string, parents: readonly string[]): string => {
+  const trailer = {
+    version: 2,
+    parents: [...parents],
+    provenance: {
+      source: 'user',
+      actor: { kind: 'user', id: userId },
+      capture: 'save',
+      via: 'cli',
+      createdAt: Date.now(),
+    },
+    summary: { generated: title },
+  };
+  return `${title}\n\nTau-Metadata: ${JSON.stringify(trailer)}\nTau-Actor: user ${userId}\nTau-Trigger: save\n`;
+};
+
+/**
+ * Commit the index of a stock-git clone as the owner's Tau-recorded save.
+ *
+ * @param git - Runs `git` in the clone, with whatever credentials it carries.
+ * @param userId - The pushing account's user id.
+ * @param title - The commit's first line.
+ * @returns `git commit`'s outcome.
+ */
+export const commitAsTauSave = async (
+  git: (...args: readonly string[]) => ReturnType<typeof runGit>,
+  userId: string,
+  title: string,
+): ReturnType<typeof runGit> => {
+  const parent = await git('rev-parse', '--verify', '--quiet', 'HEAD');
+  const head = parent.stdout.trim();
+  return git(
+    '-c',
+    `user.name=${userId}`,
+    '-c',
+    `user.email=${tauNoreplyAddress(userId)}`,
+    'commit',
+    '--quiet',
+    '--cleanup=verbatim',
+    '-m',
+    tauRecordedMessage(userId, title, head === '' ? [] : [head]),
+  );
+};
+
 /** The `Authorization` value stock git sends once the API challenges it. */
 export const basicAuthorization = (token: string): string =>
   `Basic ${Buffer.from(`x:${token}`, 'utf8').toString('base64')}`;

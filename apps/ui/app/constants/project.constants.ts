@@ -153,6 +153,36 @@ function ecosystemFiles(options: CreateInitialProjectOptions): Record<string, st
 }
 
 /**
+ * The package files a project of one ecosystem reads, without a main file: what an entry-less project gains when its
+ * first model binds a kernel (automatic kernel selection blueprint D3).
+ *
+ * @param options - The project's name, ecosystem, npm dependencies and kernel template.
+ * @returns Each file's bytes, keyed by project path.
+ */
+export function createKernelPackageFiles(
+  options: Omit<CreateInitialProjectOptions, 'mainFileName' | 'emptyCodeContent'>,
+): CreateInitialProjectResult['files'] {
+  const files: CreateInitialProjectResult['files'] = {};
+  for (const [path, text] of Object.entries(
+    ecosystemFiles({ ...options, mainFileName: '', emptyCodeContent: new Uint8Array() }),
+  )) {
+    files[path] = { content: encoder.encode(text) };
+  }
+  return files;
+}
+
+/**
+ * The manifest of a project created under Auto (blueprint D3): a name and no main entry, so the first model the agent
+ * writes and evaluates becomes main and binds the kernel.
+ *
+ * @param projectName - The project's name.
+ * @returns The manifest data.
+ */
+export function createEntrylessProject(projectName: string): Omit<ProjectManifest, '$schema'> {
+  return { name: projectName, description: '', tags: [], assets: {} };
+}
+
+/**
  * The files and manifest of a new project: the main file plus the files its ecosystem's own tools read, so the folder
  * runs outside Tau. An `npm` project gets a minimal `package.json`; a `pypi` project the kernel's `pyproject.toml`,
  * `pylock.toml` and `uv.lock`; a `nuget` project a `<Name>.csproj` and its `packages.lock.json`; a `kcl` project Zoo's

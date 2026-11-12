@@ -37,9 +37,11 @@ export function NewProjectChatComposer({
   enableKernelChips = true,
 }: NewProjectChatComposerProperties): React.JSX.Element {
   const navigate = useNavigate();
-  const { kernel, setKernel } = useKernel();
+  const { kernel, setKernel, preference } = useKernel();
   /* With the `autoKernel` flag on the kernel is the bar's pill (D8), so the chips above the box leave. */
   const isAutoEnabled = useFeature('autoKernel');
+  /* Under Auto the project starts entry-less and the agent picks the kernel from the prompt (blueprint D3). */
+  const creationKernel = isAutoEnabled ? preference : kernel;
   const projectManager = useProjectManager();
   const location = useProjectCreationLocation();
   const presentLocationError = useProjectCreationLocationError();
@@ -113,7 +115,7 @@ export function NewProjectChatComposer({
         .context.draftAttachments.map(({ byteLength: _byteLength, ...stored }) => stored);
       try {
         const created = await projectManager.createProject({
-          kernel,
+          kernel: creationKernel,
           /* The chip's value verbatim — not a Tau execution rebuilt from the
            * model. Rebuilding dropped `hostId` (and any `acp` choice),
            * so a project started from a "Tau Host · …" chip ran its first turn
@@ -146,7 +148,7 @@ export function NewProjectChatComposer({
       consumeDraft,
       draftActorRef,
       execution,
-      kernel,
+      creationKernel,
       location,
       navigate,
       presentLocationError,

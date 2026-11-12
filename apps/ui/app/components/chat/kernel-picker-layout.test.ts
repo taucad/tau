@@ -101,7 +101,13 @@ describe('kernelPillFace', () => {
       text: 'Auto · Replicad',
       label: 'Kernel: Auto, running Replicad',
       isMismatch: false,
+      isAutoRunning: true,
     });
+  });
+
+  it('should keep the Auto mark off a manual pick of the same kernel, so the two never look alike', () => {
+    expect(kernelPillFace({ preference: 'replicad', owner: 'replicad' }).isAutoRunning).toBe(false);
+    expect(kernelPillFace({ preference: 'auto' }).isAutoRunning).toBe(false);
   });
 
   it('should mark a manual pick that differs from the owner and name both kernels', () => {

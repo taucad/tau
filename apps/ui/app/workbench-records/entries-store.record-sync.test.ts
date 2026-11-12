@@ -1298,6 +1298,79 @@ describe('workbench entries store over recordSync', () => {
       }
     });
 
+    it('does not swap entries back when another party resets the components of one entry of a landed swap', async () => {
+      const m = memory();
+      const held = () => {
+        const read = workbenchRecords.entries.read(m.get()!);
+        return read.status === 'current' ? read.record.entries : {};
+      };
+      m.setBytes(
+        encoder.encode(
+          workbenchRecords.entries.serialize({
+            version: 1,
+            entries: {
+              'a.ts': { renderTimeout: 1000, components: { hidden: ['y'], isolated: ['z'], opacity: [] } },
+              'c.ts': { renderTimeout: 3000 },
+              'z.ts': { renderTimeout: 5 },
+            },
+          }),
+        ),
+      );
+      let lost = false;
+      const entries = createWorkbenchEntriesStore({
+        root: '/root',
+        editDebounce: 60_000,
+        files: {
+          ...m.files,
+          writeFileChecked: async (input) => {
+            const result = await m.files.writeFileChecked(input);
+            const swapped = held()['c.ts']?.renderTimeout === 1000 && held()['t.ts'] === undefined;
+            if (!lost && result.status === 'applied' && swapped) {
+              lost = true;
+              const rest = held();
+              m.setBytes(
+                encoder.encode(
+                  workbenchRecords.entries.serialize({
+                    version: 1,
+                    entries: { ...rest, 'c.ts': { renderTimeout: 1000 } },
+                  }),
+                ),
+              );
+              throw Object.assign(new Error('reply lost'), { applicationState: 'potentially-applied' });
+            }
+            return result;
+          },
+        },
+        onChange: () => undefined,
+        onError: () => undefined,
+      });
+      try {
+        await entries.read();
+        const release = m.delay();
+        const edited = entries.edit('z.ts', { renderTimeout: 6 });
+        const first = entries.flush();
+        await vi.waitFor(() => {
+          expect(m.writes).toHaveBeenCalledTimes(1);
+        });
+        const swap = [
+          entries.changePaths({ type: 'rename', oldPath: 'a.ts', newPath: 't.ts' }),
+          entries.changePaths({ type: 'rename', oldPath: 'c.ts', newPath: 'a.ts' }),
+          entries.changePaths({ type: 'rename', oldPath: 't.ts', newPath: 'c.ts' }),
+        ];
+        release();
+        await Promise.all([edited, first, ...swap]);
+        await entries.flush();
+        expect(lost).toBe(true);
+        expect(held()).toEqual({
+          'a.ts': { renderTimeout: 3000 },
+          'c.ts': { renderTimeout: 1000 },
+          'z.ts': { renderTimeout: 6 },
+        });
+      } finally {
+        entries.dispose();
+      }
+    });
+
     it('applies a swap that did not land when another party clears a field on each side and deletes a path it deletes', async () => {
       const m = memory();
       const held = () => {

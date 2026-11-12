@@ -332,62 +332,46 @@ const fieldsOf = (entry: Entry | undefined): string[] =>
       ];
 
 /**
- * Which of the two the file holds on a path the write changed: what it replaced, or what it wrote. For an entry it made
- * or removed, the entry as it was, or what it wrote: the absence, or a made entry by any field it set (exactly, when
- * every field is the default). For an entry it changed, whichever its changed fields hold more of, as another party may
- * have changed some since; neither when as many hold each.
+ * How far the file leans towards what the write wrote on a path it changed. A removed entry counts one for its absence,
+ * and one against when the file holds it exactly as it was (another entry there is someone else's). An entry now gone
+ * that the write made counts one against, and one it changed counts nothing. Otherwise each field the write changed
+ * counts one for if the file holds it as written and one against if as replaced, and a made entry one more when the
+ * file holds it exactly or with a field the write set.
  */
-const heldSide = (
-  before: Entry | undefined,
-  after: Entry | undefined,
-  now: Entry | undefined,
-): 'replaced' | 'written' | undefined => {
-  if (before === undefined || after === undefined) {
-    if (JSON.stringify(now) === JSON.stringify(before)) {
-      return 'replaced';
-    }
-    if (after === undefined || now === undefined) {
-      return after === now ? 'written' : undefined;
-    }
-    const [made, held] = [fieldsOf(after), fieldsOf(now)];
-    const empty = fieldsOf({});
-    return JSON.stringify(now) === JSON.stringify(after) ||
-      made.some((field, index) => field !== empty[index] && held[index] === field)
-      ? 'written'
-      : undefined;
+const leaning = (before: Entry | undefined, after: Entry | undefined, now: Entry | undefined): number => {
+  if (now === undefined) {
+    return after === undefined ? 1 : before === undefined ? -1 : 0;
   }
-  const [replaced, wrote, held] = [fieldsOf(before), fieldsOf(after), fieldsOf(now)];
+  if (after === undefined) {
+    return JSON.stringify(now) === JSON.stringify(before) ? -1 : 0;
+  }
+  const [replaced, wrote, held] = [fieldsOf(before ?? {}), fieldsOf(after), fieldsOf(now)];
   let balance = 0;
+  let wroteHeld = false;
   for (const [index, field] of wrote.entries()) {
     if (field !== replaced[index]) {
+      wroteHeld ||= held[index] === field;
       balance += held[index] === field ? 1 : held[index] === replaced[index] ? -1 : 0;
     }
   }
-  return balance > 0 ? 'written' : balance < 0 ? 'replaced' : undefined;
+  const made = before === undefined && (wroteHeld || JSON.stringify(now) === JSON.stringify(after));
+  return balance + (made ? 1 : 0);
 };
 
 /**
- * Whether the file holds the path changes of a write of `steps`: on the paths they touch, no path holds more of what
- * the write replaced than of what it wrote, and some path holds more of what it wrote. Another party may have changed
- * any of those entries since, so a path holding as much of each says nothing. Fields elsewhere say nothing either:
- * they are applied again whatever the file holds.
+ * Whether the file holds the path changes of a write of `steps`: over the paths they touch, more of the facts the
+ * write changed hold as it wrote them than as they were. Another party may have changed any of those entries since,
+ * so no one path decides; fields elsewhere say nothing, as they are applied again whatever the file holds.
  */
 const holds = (current: WorkbenchEntries, write: Write, steps: readonly EntriesStep[]): boolean => {
   const paths = new Set([...Object.keys(write.base.entries), ...Object.keys(write.record.entries)]);
-  let written = false;
+  let balance = 0;
   for (const path of paths) {
-    const before = write.base.entries[path];
-    const after = write.record.entries[path];
-    if (!moves(steps, path) || JSON.stringify(before) === JSON.stringify(after)) {
-      continue;
+    if (moves(steps, path)) {
+      balance += leaning(write.base.entries[path], write.record.entries[path], current.entries[path]);
     }
-    const side = heldSide(before, after, current.entries[path]);
-    if (side === 'replaced') {
-      return false;
-    }
-    written ||= side === 'written';
   }
-  return written;
+  return balance > 0;
 };
 
 /**

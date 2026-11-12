@@ -9,7 +9,7 @@
     "test:scenarios": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "The CLI's end-to-end suites (tiers 4 and 5): the built `tau` binary, `tau serve`, `tau mcp` and `tau agent` as real child processes against real kernels. Kept out of `cli:test` and the affected test shards: CI runs it in its own lane, `CLI end-to-end`, when this project is affected."
+        "description": "The CLI's end-to-end suites (tiers 4 and 5): the built `tau` binary, `tau serve`, `tau mcp` and `tau agent` as real child processes against real kernels. Kept out of `cli:test` and the affected test shards: CI runs it in its own sharded lane, `CLI end-to-end (<n>/<count>)`, when this project is affected; `TAU_CI_SHARD` selects a shard's files (vitest.scenarios.config.ts)."
       },
       "dependsOn": [
         "^copy-assets",
@@ -22,7 +22,7 @@
           "target": "seed"
         }
       ],
-      "inputs": ["default", "^production", "serviceEnvironment"],
+      "inputs": ["default", "^production", "serviceEnvironment", { "env": "TAU_CI_SHARD" }],
       "cache": true,
       "options": {
         "cwd": "{projectRoot}",

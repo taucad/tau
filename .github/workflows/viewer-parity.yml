@@ -9,7 +9,10 @@ name: Viewer parity
 #    downloads these same files, so the viewer and nanoraster always draw identical bytes; some exports are not
 #    byte-deterministic between runs (replicad/bottle), so nothing pins their bytes. The cache key is the hash of the
 #    fixtures' example sources, the exporter, the manifest and the lockfile.
-# 1. `viewer` (four shards): the production viewer in headed Chromium under Xvfb on SwiftShader WebGPU. Headless
+# 1. `viewer` (four shards): each shard deals the manifest's fixtures by measured capture seconds
+#    (fixtures/viewer-parity/capture-seconds.json) with the dealer the `ci.yml` test shards use
+#    (scripts/src/test-shard-dealer.ts), heaviest first to the lightest shard, so the shards partition the fixtures and
+#    finish together; a fixture the snapshot does not list weighs its default. The production viewer in headed Chromium under Xvfb on SwiftShader WebGPU. Headless
 #    Chromium loses the SwiftShader WebGPU device on its first present and the viewer falls back to WebGL2; the capture
 #    refuses such a frame. The software-adapter AO gate is the harness's one bypass (I2), named in the test. Each frame
 #    is written twice: with the canvas's own alpha (the coverage) and as the page shows it, the canvas's premultiplied
@@ -123,11 +126,23 @@ jobs:
         run: |
           pnpm exec playwright install --with-deps chromium
           sudo apt-get install -y xvfb
+      - name: Deal this shard's fixtures
+        id: deal
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          fixtures=$(jq -c '[.fixtures[].name]' libs/tau-examples/fixtures/viewer-parity/fixtures.json |
+            node scripts/src/test-shard-dealer.ts --shard "$SHARD" --shards 4 \
+              --durations libs/tau-examples/fixtures/viewer-parity/capture-seconds.json)
+          # An empty PARITY_FIXTURES captures every fixture, so a shard the deal leaves empty fails instead.
+          test -n "$fixtures"
+          echo "Shard fixtures: $fixtures"
+          echo "fixtures=$fixtures" >> "$GITHUB_OUTPUT"
       - name: Capture the viewer's frames
         env:
           TAU_E2E_WEBGPU_PROFILE: software
           PARITY_HEADED: '1'
-          PARITY_SHARD: ${{ matrix.shard }}/4
+          PARITY_FIXTURES: ${{ steps.deal.outputs.fixtures }}
         run: xvfb-run -a -s '-screen 0 1280x1024x24' pnpm nx run viewer:capture:viewer-parity
       - name: Upload the viewer references
         if: always()

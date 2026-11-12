@@ -52,8 +52,44 @@ export type RevisionWhere = Readonly<{
   isSignedOut?: boolean;
 }>;
 
+/**
+ * What a sentence needs to name an entry: a History card, or the one row a
+ * toast read for an entry off the loaded page. @public
+ */
+export type EntryNaming = Readonly<{
+  summary: string;
+  createdAt: number;
+  capture?: RevisionCard['capture'];
+  turnCut?: RevisionCard['turnCut'];
+  start?: RevisionCard['start'];
+  versions?: RevisionCard['versions'];
+  restoredFrom?: RevisionCard['restoredFrom'];
+}>;
+
 /** A decision waiting on the person, said one way on every surface (HQ1, HQ6). @public */
 export const needsDecision = 'Needs your decision';
+
+/** The action on a toast for a verb that acted at once (I11). @public */
+export const undoLabel = 'Undo';
+
+/** What an *Undo restore* says: one more entry on top that put the files back. @public */
+export const undidRestoreSentence = 'Undid the restore';
+
+/**
+ * What a *Switch* says once it has moved: whether it saved unsaved work first,
+ * and on which branch, because that is where its Undo goes back to (I11).
+ *
+ * @param to - The branch switched to.
+ * @param from - The branch left, when known.
+ * @param saved - The switch saved unsaved changes on `from` first.
+ * @returns The toast's sentence.
+ * @public
+ */
+export const switchedSentence = (to: string, from: string | undefined, saved: boolean): string =>
+  saved && from !== undefined ? `Saved your changes on ${from}, then switched to ${to}` : `Switched to ${to}`;
+
+/** A *Switch* that was refused, in the words the branch menu uses (M4, M5). @public */
+export const switchRefusedSentence = (branch: string): string => `Couldn’t switch to ${branch}`;
 
 /** A settled missing cloud listing does not distinguish deletion from removed access. @public */
 export const cloudUnavailable = 'Cloud copy unavailable';
@@ -96,7 +132,7 @@ export const versionPhrase = (version: Readonly<{ number: number; name: string }
  * @returns Its number and name, or `undefined` for an entry that is not a version.
  * @public
  */
-export const versionOf = (revision: RevisionCard): Readonly<{ number: number; name: string }> | undefined => {
+export const versionOf = (revision: EntryNaming): Readonly<{ number: number; name: string }> | undefined => {
   if (revision.start !== undefined) {
     return { number: 1, name: startTitle };
   }
@@ -148,7 +184,7 @@ export const entryTime = (createdAt: number): string =>
  * @returns `V2`, `the 10:31 AM autosave` or `“Add vent slots”`, or `undefined` when nothing names it.
  * @public
  */
-export const entryReference = (revision: RevisionCard | undefined): string | undefined => {
+export const entryReference = (revision: EntryNaming | undefined): string | undefined => {
   if (revision === undefined) {
     return undefined;
   }
@@ -171,19 +207,24 @@ export const entryReference = (revision: RevisionCard | undefined): string | und
  * @returns The sentence.
  * @public
  */
-export const restoredSentence = (target: RevisionCard | undefined): string => {
+export const restoredSentence = (target: EntryNaming | undefined): string => {
   const reference = entryReference(target);
   return reference === undefined ? 'Restored an earlier point' : `Restored ${reference}`;
 };
 
 /**
  * What an undo toast says it reversed: `Undid “Thicker walls for the lid”`.
+ * A restore's own title only repeats what it restored, so undoing one says
+ * {@link undidRestoreSentence}, as the row the undo records does.
  *
  * @param target - The entry it undid, when this page has read it.
  * @returns The sentence.
  * @public
  */
-export const undidSentence = (target: RevisionCard | undefined): string => {
+export const undidSentence = (target: EntryNaming | undefined): string => {
+  if (target?.restoredFrom !== undefined) {
+    return undidRestoreSentence;
+  }
   const reference = entryReference(target);
   return reference === undefined ? 'Undid an earlier change' : `Undid ${reference}`;
 };

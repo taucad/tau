@@ -332,15 +332,18 @@ describe('History copy (C8, M11)', () => {
     });
 
     const signals: readonly RevisionToast[] = [
-      { type: 'restored', revisionNumber: 3 },
-      { type: 'restored', revisionNumber: 5 },
-      { type: 'restored', revisionNumber: undefined },
+      { type: 'restored', mode: 'restore', revisionId: 'rev-3', revisionNumber: 3 },
+      { type: 'restored', mode: 'restore', revisionId: 'rev-5', revisionNumber: 5 },
+      { type: 'restored', mode: 'restore', revisionId: 'rev-gone', revisionNumber: undefined },
+      { type: 'restored', mode: 'undoRestore', revisionId: 'rev-5', revisionNumber: 5 },
       { type: 'undone', revisionNumber: 2 },
+      { type: 'undone', revisionNumber: 6 },
       { type: 'undone', revisionNumber: undefined },
       { type: 'nothingToSave' },
       ...(['switch', 'merge', 'discard', 'create', 'rename'] as const).map(
         (operation) => ({ type: 'branch', operation, branch: 'x' }) as const,
       ),
+      { type: 'branch', operation: 'switch', branch: 'x', from: 'main', saved: true },
       { type: 'refused', branch: 'x', reason: 'Your files changed.' },
       { type: 'mergeConflicted', branch: 'x', into: 'main', paths: ['lid.tsx', 'base.tsx'] },
       ...(['restore', 'branch', 'save', 'connection'] as const).flatMap((subject) => [
@@ -383,6 +386,7 @@ describe('History copy (C8, M11)', () => {
     expect(toasts.length).toBeGreaterThan(signals.length);
     expect(toasts).toContain('Restored V2 · Undo');
     expect(toasts).toContain('Undid “Agent change”');
+    expect(toasts).toContain('Undid the restore');
     for (const toast of toasts) {
       expectHistoryCopy('toast', toast);
     }

@@ -1,50 +1,29 @@
 import { useEffect, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { toast } from '@taucad/ui/components/sonner';
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@taucad/ui/components/alert-dialog';
-import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
-import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
+import { useRevisionClient, useRevisionCommands } from '#hooks/use-revision-status.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { revisionWarningCodes } from '#lib/revision-failure-reporting.js';
 import type { RevisionFailureSubject } from '@taucad/ui-core/lib/revision-failure-copy';
 import type { BranchOperation } from '@taucad/revisions';
+import type { RevisionToast } from '#machines/file-manager.worker.revisions.js';
 import { useRevisions } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionClient } from '#types/revision-client.types.js';
 import {
-  entryReference,
   needsDecision,
   restoredSentence,
+  switchedSentence,
+  switchRefusedSentence,
+  undidRestoreSentence,
   undidSentence,
+  undoLabel,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { useHeldSaveToast } from '#routes/w.$workspace.$project/held-save-toast.js';
 
-/** What the question above a waiting branch verb asks. Document words only (A18, I12). */
-const branchVerbTitle: Readonly<Record<BranchOperation, string>> = {
-  switch: 'Work in',
-  merge: 'Bring in',
-  discard: 'Discard',
-  create: 'Start',
-  rename: 'Rename to',
-};
-
-const branchVerbAction: Readonly<Record<BranchOperation, string>> = {
-  switch: 'Switch branch',
-  merge: 'Merge branch',
-  discard: 'Discard branch changes',
-  create: 'Create branch',
-  rename: 'Rename branch',
-};
-
-/** What a settled branch verb says. Document words only (A18, I12). */
-const branchSettledCopy: Readonly<Record<BranchOperation, (branch: string) => string>> = {
-  switch: (branch) => `Switched to ${branch}`,
+/** What a settled branch verb other than *Switch* says. Document words only (A18, I12). */
+const branchSettledCopy: Readonly<Record<Exclude<BranchOperation, 'switch'>, (branch: string) => string>> = {
   merge: (branch) => `Merged ${branch}`,
   discard: (branch) => `Closed ${branch}`,
   create: (branch) => `Created ${branch}`,
@@ -67,28 +46,100 @@ const revisionFailureEvent: Readonly<Record<RevisionFailureSubject, string>> = {
 };
 
 /**
- * The one surface a restore needs a person for (S19, PC9).
+ * Says a branch verb settled. A switch acted at once (I11), so its Undo is a
+ * switch back to where the person was; a switch with nowhere to go back offers none.
  *
- * `restore.machine` runs in the worker beside the graph, so the plan is
- * computed where the trees are: the real diff of head against the target over
- * versioned paths, plus whether the checkout has diverged from its head. Those
- * two facts ride the `RevisionStatus` projection, and this renders them — no
- * page-side plan, no second restore writer.
+ * @param entry - The settled verb.
+ * @param switchTo - Moves the working copy to a branch.
  */
-export function RevisionRestore(): React.JSX.Element {
-  const status = useRevisionStatus();
+function raiseBranchSettled(
+  entry: Extract<RevisionToast, { type: 'branch' }>,
+  switchTo: (branch: string) => void,
+): void {
+  if (entry.operation !== 'switch') {
+    toast.success(branchSettledCopy[entry.operation](entry.branch));
+    return;
+  }
+  const { from } = entry;
+  toast.success(
+    switchedSentence(entry.branch, from, entry.saved === true),
+    from === undefined || from === entry.branch
+      ? undefined
+      : {
+          action: {
+            label: undoLabel,
+            onClick: () => {
+              switchTo(from);
+            },
+          },
+        },
+  );
+}
+
+/**
+ * Says a *Restore* or *Undo restore* landed. *Undo restore* is itself the
+ * undo: it says so and offers no second one. A restore acted at once (I11):
+ * its toast names what came back by its version or title — the loaded card,
+ * or one row read wherever it sits in History — and offers *Undo restore*.
+ *
+ * @param entry - The settled restore.
+ * @param context - What names it and what takes it back.
+ * @param context.loaded - History's loaded page.
+ * @param context.client - Reads the restored row when the page does not hold it.
+ * @param context.undo - Takes the restore back.
+ */
+function raiseRestored(
+  entry: Extract<RevisionToast, { type: 'restored' }>,
+  {
+    loaded,
+    client,
+    undo,
+  }: Readonly<{ loaded: readonly RevisionCard[]; client: Pick<RevisionClient, 'log'>; undo: () => void }>,
+): void {
+  if (entry.mode === 'undoRestore') {
+    toast.success(undidRestoreSentence);
+    return;
+  }
+  const card = loaded.find((revision) => revision.revisionId === entry.revisionId);
+  if (card !== undefined) {
+    toast.success(restoredSentence(card), { action: { label: undoLabel, onClick: undo } });
+    return;
+  }
+  const announce = async (): Promise<void> => {
+    let restored: Parameters<typeof restoredSentence>[0];
+    try {
+      [restored] = await client.log({ from: entry.revisionId, limit: 1 });
+    } catch {
+      /* The files are back either way; an unread row is named without its title. */
+      restored = undefined;
+    }
+    toast.success(restoredSentence(restored), { action: { label: undoLabel, onClick: undo } });
+  };
+  // async-iife: toast -- one row read names what came back; a failed read still says the restore landed.
+  void announce();
+}
+
+/**
+ * The toasts the revision tree raises for a person (S19, PC9).
+ *
+ * Restore and Switch act at once and offer Undo here, in the toast (I11): a
+ * restore is a new entry on top that *Undo restore* takes back, and a switch
+ * saves unsaved work on the branch it leaves before it moves, so its Undo is
+ * one more switch back. Nothing here asks first; the one dialog that guards
+ * what cannot be undone is disconnecting the backup, which the Sync region owns.
+ *
+ * @returns Nothing: the toasts are the surface.
+ */
+export function RevisionRestore(): ReactNode {
   const commands = useRevisionCommands();
   const client = useRevisionClient();
   const analytics = useAnalytics();
   const raiseHeldSave = useHeldSaveToast();
-  const restore = status?.restore;
+  /* A toast names an entry by its title or version, never by its number (M11): the loaded page answers which one. */
   const { revisions } = useRevisions();
-  /* A toast names an entry by its title or version, never by its number (M11): the loaded line answers which one. */
-  const entryAt = (n: number | undefined): RevisionCard | undefined =>
-    n === undefined ? undefined : revisions.find((revision) => revision.n === n);
-  const entryAtRef = useRef(entryAt);
+  const loaded = useRef(revisions);
   useEffect(() => {
-    entryAtRef.current = entryAt;
+    loaded.current = revisions;
   });
 
   useEffect(() => {
@@ -145,7 +196,7 @@ export function RevisionRestore(): React.JSX.Element {
        * forbids (A25, I12; review R3). */
       if (entry.type === 'refused') {
         analytics.capture('revision_branch_refused', { branch: entry.branch });
-        toast.error(`Couldn’t switch to ${entry.branch}`, { description: entry.reason });
+        toast.error(switchRefusedSentence(entry.branch), { description: entry.reason });
         return;
       }
       /* A branch verb settles out of sight of the row that started it — the row
@@ -153,7 +204,7 @@ export function RevisionRestore(): React.JSX.Element {
        * so (A25: no removal is silent). */
       if (entry.type === 'branch') {
         analytics.capture('revision_branch_settled', { operation: entry.operation });
-        toast.success(branchSettledCopy[entry.operation](entry.branch));
+        raiseBranchSettled(entry, commands.switchTo);
         return;
       }
       /* The two conflict notices are not messages for a person: the marker text
@@ -176,86 +227,18 @@ export function RevisionRestore(): React.JSX.Element {
       /* D15: an undo row names what it undid, as a restore row names its source. */
       if (entry.type === 'undone') {
         analytics.capture('revision_undone', { revision: entry.revisionNumber });
-        toast.success(undidSentence(entryAtRef.current(entry.revisionNumber)));
+        const { revisionNumber } = entry;
+        toast.success(
+          undidSentence(
+            revisionNumber === undefined ? undefined : loaded.current.find((revision) => revision.n === revisionNumber),
+          ),
+        );
         return;
       }
-      analytics.capture('revision_restored', { revision: entry.revisionNumber });
-      /* A target off the line has no title this page can read, and none is invented (A9). */
-      toast.success(restoredSentence(entryAtRef.current(entry.revisionNumber)), {
-        action: { label: 'Undo', onClick: commands.undo },
-      });
+      analytics.capture('revision_restored', { revision: entry.revisionNumber, mode: entry.mode });
+      raiseRestored(entry, { loaded: loaded.current, client, undo: commands.undo });
     });
   }, [analytics, client, commands, raiseHeldSave]);
 
-  const deleteCount = restore?.removedPathCount ?? 0;
-  const restoreTarget = entryReference(entryAt(restore?.revisionNumber));
-  const branchVerb = status?.branchVerb;
-  return (
-    <>
-      <AlertDialog
-        open={restore?.asking ?? false}
-        onOpenChange={(next) => {
-          if (!next) {
-            commands.cancel();
-          }
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {restoreTarget === undefined ? 'Restore this point?' : `Restore ${restoreTarget}?`}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {/* D1: a restore is a new entry on the line, so the dialog says nothing is lost. */}
-              {`Your files go back to ${restoreTarget ?? 'this point'} as a new entry, so nothing in History is lost. `}
-              {deleteCount > 0
-                ? `${String(deleteCount)} ${deleteCount === 1 ? 'file' : 'files'} added since will be removed. `
-                : ''}
-              {restore?.dirty === true ? 'Your unsaved edits are saved first. ' : ''}
-              You can undo this restore.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <Button autoFocus variant='outline' onClick={commands.cancel}>
-              Cancel
-            </Button>
-            <Button onClick={commands.confirm}>
-              {restoreTarget === undefined ? 'Restore' : `Restore ${restoreTarget}`}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      {/* The other verb that needs a person: D10's guard answers `checkBranch`
-        with a question, and `branch.machine` waits in `confirming` until it is
-        answered. Without this the state has no exit — the verb is stuck and the
-        rows look idle (review R4). */}
-      <AlertDialog
-        open={branchVerb?.asking ?? false}
-        onOpenChange={(next) => {
-          if (!next) {
-            commands.cancelBranch();
-          }
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {branchVerb?.branch === undefined
-                ? 'Continue?'
-                : `${branchVerbTitle[branchVerb.operation ?? 'switch']} ${branchVerb.branch}?`}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {branchVerb?.question ?? 'This affects the files you have open.'}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <Button autoFocus variant='outline' onClick={commands.cancelBranch}>
-              Cancel
-            </Button>
-            <Button onClick={commands.confirmBranch}>{branchVerbAction[branchVerb?.operation ?? 'switch']}</Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
-  );
+  return null;
 }

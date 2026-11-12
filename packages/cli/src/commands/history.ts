@@ -113,7 +113,12 @@ type RevisionRow = Awaited<ReturnType<ProjectRevisionVerbs['log']>>[number];
 const whoField = (who: RevisionRow['who']): string =>
   who.kind === 'recorded' ? who.identity.id : (who.authorName ?? '');
 
-/** A history entry's short id, as History's open row shows it (M11). */
+/**
+ * A history entry's short id, as History's open row shows it (M11).
+ *
+ * @param revisionId - The entry's full id.
+ * @returns Its first seven characters.
+ */
 const shortId = (revisionId: string): string => revisionId.slice(0, 7);
 
 /**
@@ -578,16 +583,12 @@ const switchCommand = defineCommand({
   args: {
     ...projectArguments,
     branch: { type: 'positional', description: 'Branch to move to', required: true },
-    force: {
-      type: 'boolean',
-      description: 'Switch even though the project has changes that are not saved in history yet',
-      required: false,
-    },
   },
   async run({ args }) {
     const { revisions } = await open(args.project);
     try {
-      const outcome = await revisions.switchTo(args.branch, { confirm: args.force === true });
+      /* Unsaved changes are saved on the branch being left first, so nothing asks (I11). */
+      const outcome = await revisions.switchTo(args.branch);
       if (args.json) {
         await emit({ kind: 'history-switch', ok: outcome.status === 'switched', ...outcome });
       }
@@ -597,11 +598,7 @@ const switchCommand = defineCommand({
         }
         return;
       }
-      throw cliError(
-        outcome.status === 'needs-confirmation' ? 'SWITCH_NEEDS_CONFIRMATION' : 'SWITCH_REFUSED',
-        outcome.status === 'needs-confirmation' ? `${outcome.reason} Save first, or pass --force.` : outcome.reason,
-        exitCodes.refused,
-      );
+      throw cliError('SWITCH_REFUSED', outcome.reason, exitCodes.refused);
     } finally {
       await revisions.close();
     }

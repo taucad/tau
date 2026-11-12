@@ -8,7 +8,8 @@
  * link, redeeming its code and listing the daemon) in the `apps/desktop` and `apps/ui` unit tests, T8 in
  * `apps/ui-e2e` and `apps/desktop-e2e`, T9 in `apps/ui-e2e/src/support/serve-ui-build.test.ts`, the published
  * closure of T1 in `scripts/src/check-pack-install.ts`, and the prepare-then-export half of T6 in
- * `build123d-export.integration.test.ts` (each dependency file fetched once from a no-fallback mirror).
+ * `build123d-export.integration.test.ts` (each dependency file fetched once from a no-fallback mirror). T11's fixture
+ * sweep is `examples-check.integration.test.ts`, which a sharded lane splits across its shards.
  */
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -16,9 +17,8 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import type { AddressInfo, Server } from 'node:net';
-import { availableParallelism, tmpdir } from 'node:os';
-import { dirname, join, resolve as resolvePath } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -37,10 +37,8 @@ import { testRecord } from '../../../packages/cli/src/commands/test.js';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- the CLI's own source, reached in process: `@taucad/cli` exports no internals.
 import { loadCliRuntime } from '../../../packages/cli/src/runtime-options.js';
 /* oxlint-enable no-restricted-imports */
+import { cliBinPath, recordOf, repoRoot, scenarioProcesses } from '#cli-scenarios.test-utils.js';
 
-const repoRoot = resolvePath(dirname(fileURLToPath(import.meta.url)), '../../..');
-const cliBinPath = resolvePath(repoRoot, 'packages/cli/dist/bin/tau.mjs');
-const examplesRoot = resolvePath(repoRoot, 'libs/tau-examples/src/kernels');
 /** Whether PicoGK's tau-plugin.json declares this host: darwin-arm64, or linux-x64 on glibc 2.28 or later. */
 const picogkDeclaredHost =
   (process.platform === 'darwin' && process.arch === 'arm64') ||
@@ -52,107 +50,9 @@ const picogkDeclaredHost =
       )[1] ?? 0,
     ) >= 28);
 
-/** What one run of the built `tau` produced. */
-type Run = {
-  readonly code: number | undefined;
-  readonly signal: NodeJS.Signals | undefined;
-  readonly pid: number | undefined;
-  readonly timedOut: boolean;
-  /** Milliseconds from spawning the process until its output streams close. */
-  readonly elapsed: number;
-  readonly stdout: string;
-  readonly stderr: string;
-};
-
 let scratch = '';
 
-/**
- * The environment every scenario runs in: an empty home and config directory, no managed profile, and no CI opener.
- *
- * @param extra - Variables this scenario adds.
- * @returns The child environment.
- */
-const isolated = (extra: Readonly<Record<string, string>> = {}): Record<string, string> => {
-  /* Built by assignment so no environment key is a source literal. */
-  const env: Record<string, string> = { ...(process.env as Record<string, string>) };
-  env['HOME'] = join(scratch, 'home');
-  env['TAU_CONFIG_DIR'] = join(scratch, 'config');
-  env['XDG_CONFIG_HOME'] = join(scratch, 'home', '.config');
-  env['XDG_CACHE_HOME'] = join(scratch, 'home', '.cache');
-  env['XDG_DATA_HOME'] = join(scratch, 'home', '.local', 'share');
-  env['TAU_ACQUISITION'] = '';
-  env['TAU_DEPENDENCY_DIR'] = '';
-  env['TAU_DEPENDENCY_MIRROR'] = '';
-  env['TAU_HOST_RELAY_URL'] = '';
-  env['TAU_HOST_UI_DIR'] = '';
-  env['TAU_HOST_AGENT_PORT'] = '';
-  env['NX_PREFER_NODE_STRIP_TYPES'] = 'true';
-  env['CI'] = 'true';
-  return { ...env, ...extra };
-};
-
-/** The argv that runs the built binary; the workspace's `@taucad/*` export TypeScript source, so it needs a loader. */
-const binArguments = (args: readonly string[]): string[] => [
-  '--import',
-  '@oxc-node/core/register',
-  cliBinPath,
-  ...args,
-];
-
-/**
- * Run the built `tau` to completion.
- *
- * @param args - Its arguments.
- * @param options - Environment additions and a working directory.
- * @returns Its exit code, termination diagnostics and fully drained output.
- */
-const tau = async (
-  args: readonly string[],
-  options: {
-    readonly env?: Readonly<Record<string, string>>;
-    readonly cwd?: string;
-    readonly runTimeout?: number;
-  } = {},
-): Promise<Run> =>
-  new Promise((resolve, reject) => {
-    const started = performance.now();
-    const child = spawn(process.execPath, binArguments(args), {
-      cwd: options.cwd ?? repoRoot,
-      env: isolated(options.env),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
-      stderr += chunk;
-    });
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, options.runTimeout ?? 300_000);
-    child.once('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.once('exit', () => {
-      clearTimeout(timer);
-    });
-    child.once('close', (code, signal) => {
-      resolve({
-        code: code ?? undefined,
-        signal: signal ?? undefined,
-        pid: child.pid,
-        timedOut,
-        elapsed: Math.round(performance.now() - started),
-        stdout,
-        stderr,
-      });
-    });
-  });
+const { isolated, binArguments, tau } = scenarioProcesses(() => scratch);
 
 /** A long-running `tau` whose stdout is watched as it arrives. */
 type Running = {
@@ -238,13 +138,6 @@ ${
 }});
 `,
   );
-};
-
-/** The one JSON record a `--json` run printed. */
-const recordOf = (run: Run): Record<string, unknown> => {
-  const lines = run.stdout.trim().split('\n').filter(Boolean);
-  expect(lines, `${run.stdout}\n${run.stderr}`).toHaveLength(1);
-  return JSON.parse(lines[0]!) as Record<string, unknown>;
 };
 
 /** Hold a loopback port so a scenario can watch `tau serve` move past it. */
@@ -601,85 +494,6 @@ describe('T10 — MCP over stdio from the built binary', () => {
 });
 
 describe('T11 — tau check and tau test in CI', () => {
-  it('should classify every libs/tau-examples fixture with the three exit codes, one record each', async () => {
-    type Entry = { kernel: string; name: string; mainFile?: string; files: string[] };
-    const manifest = JSON.parse(
-      await readFile(resolvePath(repoRoot, 'libs/tau-examples/src/manifest.json'), 'utf8'),
-    ) as Entry[];
-    const broken = join(scratch, 'broken');
-    await mkdir(broken, { recursive: true });
-    /* A kernel is chosen by the model's imports, so the synthetic error imports one and then throws. */
-    await writeFile(
-      join(broken, 'main.ts'),
-      "import { primitives } from '@jscad/modeling';\nexport default function main() {\n  if (primitives) throw new Error('a model error');\n  return primitives;\n}\n",
-    );
-    const inputs = [
-      ...manifest.map((entry) => ({
-        label: `${entry.kernel}/${entry.name}`,
-        file: join(
-          examplesRoot,
-          entry.kernel,
-          entry.name,
-          entry.mainFile ?? entry.files.find((file) => file.startsWith('test-exports/')) ?? '',
-        ),
-      })),
-      { label: 'synthetic/model-error', file: join(broken, 'main.ts') },
-    ];
-    const statusExit: Record<string, number> = { ok: 0, error: 1, refused: 3 };
-    const outcomes: Array<
-      Pick<Run, 'code' | 'signal' | 'pid' | 'timedOut' | 'elapsed'> & { label: string; status: unknown }
-    > = [];
-    const queue = [...inputs];
-    const worker = async (): Promise<void> => {
-      for (let input = queue.shift(); input !== undefined; input = queue.shift()) {
-        // oxlint-disable-next-line no-await-in-loop -- a bounded pool drains the queue.
-        const run = await tau(['check', input.file, '--json']);
-        let status: unknown;
-        try {
-          ({ status } = recordOf(run));
-        } catch {
-          status = `unparsed: ${run.stderr.slice(-400)}`;
-        }
-        outcomes.push({
-          label: input.label,
-          code: run.code,
-          signal: run.signal,
-          pid: run.pid,
-          timedOut: run.timedOut,
-          elapsed: run.elapsed,
-          status,
-        });
-      }
-    };
-    await Promise.all(Array.from({ length: Math.max(2, Math.min(4, availableParallelism() - 1)) }, worker));
-
-    /* Evidence: one line per fixture where the run asks for it. */
-    const log = process.env['TAU_CLI_SCENARIO_LOG'];
-    if (log !== undefined && log !== '') {
-      await writeFile(
-        log,
-        outcomes
-          .toSorted((left, right) => left.label.localeCompare(right.label))
-          .map(
-            ({ label, code, status, signal, pid, timedOut, elapsed }) =>
-              `${String(code)} ${String(status)} ${label}\t${JSON.stringify({ signal, pid, timedOut, elapsed })}`,
-          )
-          .join('\n'),
-      );
-    }
-    const unclassified = outcomes.filter(
-      ({ code, status }) =>
-        typeof status !== 'string' || statusExit[status] === undefined || statusExit[status] !== code,
-    );
-    expect(unclassified).toEqual([]);
-    expect(outcomes).toHaveLength(inputs.length);
-    expect(new Set(outcomes.map(({ code }) => code))).toEqual(new Set([0, 1, 3]));
-    expect(outcomes.find(({ label }) => label === 'synthetic/model-error')?.code).toBe(1);
-    expect(outcomes.filter(({ label }) => /^(?:build123d|picogk)\//u.test(label)).every(({ code }) => code === 3)).toBe(
-      true,
-    );
-  }, 1_800_000);
-
   it('should exit 0 when every GeoSpec test passes and 1 with a failure, one record each', async () => {
     const passing = join(scratch, 'geospec-pass');
     const failing = join(scratch, 'geospec-fail');

@@ -736,28 +736,19 @@ const thinkThenReadLedger = (limit: number): string =>
 const bulkFiles = ['rows-a.ts', 'rows-b.ts'] as const;
 const smallFiles = ['alpha.ts', 'beta.ts', 'left.ts', 'right.ts', 'delta.ts'] as const;
 
-/** @returns A lower bound on what pi's characters-over-four estimator counts for one scripted file's result. */
-const estimatedTokens = (file: string): number => Math.floor((scriptedFiles[file]?.length ?? 0) / 4);
-
 /**
- * A window a history is over the compaction threshold of, and back under the target of once its bulk leaves.
+ * A window a history is just over the compaction threshold of.
  *
- * Compaction starts above 80 % of the window and tool-result clearing is taken when it brings the estimate to 70 %
- * or less, so the window has to lie between `(anchor - evictable) / 0.7` and `anchor / 0.8`. The midpoint keeps both
- * edges equally far; a fixed fill ratio sits on one of them as the system prompt grows.
+ * Compaction starts above 80 % of the window, and a pass has to land the history at a fifth of the window: a summary
+ * keeps that much, and tool-result clearing is taken only when it gets there alone. So the row's fixture decides the
+ * tier (a bulk that is most of the history clears; one result within what clearing keeps is summarised), and the
+ * window only has to trigger. Dividing by 0.82 keeps the request 2.4 % over the threshold however the system prompt
+ * grows.
  *
  * @param anchor - Provider-reported tokens of the newest answer.
- * @param evictable - Estimated tokens of the tool results compaction can take out.
  * @returns The context window for the compacting leg.
  */
-const windowThatEvicts = (anchor: number, evictable: number): number => {
-  if (evictable <= anchor / 8) {
-    expect.fail(
-      `the bulk (${String(evictable)} estimated tokens) is under an eighth of the history (${String(anchor)}), so no window both triggers compaction and is satisfied by evicting it; enlarge the bulk files`,
-    );
-  }
-  return Math.ceil(((anchor - evictable) / 0.7 + anchor / 0.8) / 2);
-};
+const windowThatCompacts = (anchor: number): number => Math.floor(anchor / 0.82);
 
 /**
  * Estimated tokens of headroom the mid-loop leg starts with: more than its prompt, less than the ledger it reads
@@ -946,10 +937,7 @@ for (const replayModelId of replayModelIds) {
                 index: 3,
                 effort: 'high',
                 prompt: thinkTurn(31_415),
-                contextWindow: windowThatEvicts(
-                  anchorTokens(earlier.at(-1)!),
-                  bulkFiles.reduce((total, file) => total + estimatedTokens(file), 0),
-                ),
+                contextWindow: windowThatCompacts(anchorTokens(earlier.at(-1)!)),
                 maxTokens: compactionMaxTokens,
                 onCompaction: (outcome) => compactions.push(outcome),
               }),
@@ -1074,8 +1062,7 @@ for (const replayModelId of replayModelIds) {
             async () => leg(2, thinkTurn(48_271)),
             async () => leg(3, thinkTurn(31_415)),
             // One result is within what clearing keeps, so only a summary can evict it; the two turns after it are the tail.
-            async (earlier) =>
-              leg(4, thinkTurn(27_183), windowThatEvicts(anchorTokens(earlier.at(-1)!), estimatedTokens('rows-a.ts'))),
+            async (earlier) => leg(4, thinkTurn(27_183), windowThatCompacts(anchorTokens(earlier.at(-1)!))),
             async () => leg(5, thinkTurn(16_180)),
           ]);
         });

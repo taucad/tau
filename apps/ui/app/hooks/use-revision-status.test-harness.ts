@@ -28,10 +28,7 @@ const emptyStatus = (): RevisionStatusProjection => ({
   follow: 'chat',
   attention: 0,
   restore: {
-    asking: false,
     busy: false,
-    removedPathCount: 0,
-    dirty: false,
     revisionNumber: undefined,
     undoable: false,
     canUndo: false,
@@ -50,7 +47,7 @@ const emptyStatus = (): RevisionStatusProjection => ({
     quota: undefined,
   },
   branches: [{ name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
-  branchVerb: { busy: false, asking: false, operation: undefined, branch: undefined, question: undefined },
+  branchVerb: { busy: false, operation: undefined, branch: undefined },
   publish: { phase: 'idle', tags: [], publicationId: undefined, shareUrl: undefined, error: undefined },
   sync: {
     state: 'noRemote',
@@ -98,8 +95,6 @@ export const revisionStatusHarness = {
     restore: vi.fn<(revisionId: string) => void>(),
     undo: vi.fn(),
     undoOperation: vi.fn(),
-    confirm: vi.fn(),
-    cancel: vi.fn(),
     switchTo: vi.fn<(branch: string) => void>(),
     /* Resolves like the real verb does (P4); a caller places a chat on it. */
     createBranch: vi.fn<(name: string, from?: string) => Promise<BranchCreated>>(async (name) => ({
@@ -110,8 +105,6 @@ export const revisionStatusHarness = {
     discardBranch: vi.fn<(branch: string, checkoutId?: string) => void>(),
     mergeBranch: vi.fn<(branch: string) => void>(),
     renameBranch: vi.fn<(branch: string, name: string) => void>(),
-    confirmBranch: vi.fn(),
-    cancelBranch: vi.fn(),
     resolveFile: vi.fn<(revisionId: string, path: string, side: 'mine' | 'theirs') => void>(),
     openConflictInEditor: vi.fn<(revisionId: string, path: string) => void>(),
     resolveFileInEditor: vi.fn<(revisionId: string, path: string, content: string) => void>(),

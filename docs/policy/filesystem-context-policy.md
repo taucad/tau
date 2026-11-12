@@ -3,8 +3,9 @@ title: 'Filesystem Context Policy'
 description: 'Rules for the filesystem-backed context management pipeline: transcripts, tool offloading, skills, memory, compaction, and middleware ordering.'
 status: active
 created: '2026-03-24'
-updated: '2026-10-30'
+updated: '2026-11-10'
 related:
+  - docs/research/provider-reasoning-replay-contract.md
   - docs/policy/context-engineering-policy.md
   - docs/policy/filesystem-authority-policy.md
   - docs/research/client-host-topology-and-filesystem-authority.md
@@ -69,8 +70,9 @@ Invariants:
 - **Compaction wraps the model call outermost**, so an overflow retry re-enters every request-shaping middleware.
 - **One compaction pass per model call.** No ephemeral per-call lane or memo beside the durable lanes.
 - **The log is append-only and a refused compaction leaves it byte-identical.** Run every check before the first append. A pass writes either tool-result clearings or one `history.compacted`, never both, and never a clearing for a row it evicts.
-- **A cut always evicts when more than one message exists.** Tool results are never cut points, retained tool results keep their calls, whole turn clusters are evicted together, and the retained tail is checked against the budget the trigger computed (window − reserve − measured overhead). Both tiers must land at least the keep-recent budget below the trigger threshold, so the next message does not compact again; a summary that falls short escalates the cut in the same pass.
-- **Accept tool-result clearing only when it restores that headroom.** Each clearing invalidates the cached prefix; otherwise go straight to a summary and persist no clearings.
+- **A cut always evicts when more than one message exists.** Tool results are never cut points, retained tool results keep their calls, whole turn clusters are evicted together, and the retained tail is checked against the budget the trigger computed (window − reserve − measured overhead). A summary that leaves the request within the keep-recent budget of the trigger threshold escalates the cut in the same pass, so the next message does not compact again.
+- **Both tiers land at a fifth of the window.** A pass rewrites the provider's cached prefix from its first change and makes the reasoning behind that point unreplayable, so what it buys is the distance to the next pass. A summary keeps at most a fifth of the window of the newest history, or less when the measured overhead leaves less. Landing just under the trigger freed 26,000 tokens for 112,000 rewritten on recorded long chats (`docs/research/provider-reasoning-replay-contract.md`, Finding 11 and ruling U15).
+- **Accept tool-result clearing only when it reaches that landing point by itself.** Otherwise go straight to a summary and persist no clearings. The emergency clearings below are the exception.
 - **Degrade, do not refuse.** A summarizer that fails, returns nothing or cannot fit its input yields a placeholder summary that names the evicted range and points at the project files, and the attempt records why. The run's own abort stops compaction before anything is written. A tool result the model has not answered yet that alone exceeds the budget is cleared, with a marker telling the model to narrow its request, before any wider eviction is considered, because the only cut after it evicts every earlier turn; so is any result larger than a whole request, which no summarizer can read. A result the model already answered is evicted and summarized with its turn. Tau never sends the same unreduced history again, and never partially reconstructs a native provider turn without its provider-required signatures and ids.
 - **Pinned content survives verbatim**: the person's newest message and every `<safety>` block are preserved; for the other `keepContextTags` tags the newest instance is preserved and older instances are evictable, so reminders cannot accumulate into an unevictable history.
 - **A compaction failure is a resumable turn failure, not a dead chat.** Compaction codes are resumable, Resume keeps the turn's work, and every attempt records its lane, tier, token counts, eviction count and any discarded overflow response in the existing log events.

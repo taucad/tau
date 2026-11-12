@@ -24,13 +24,51 @@ env:
   NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
 jobs:
-  formal-nightly:
-    name: Formal nightly tiers
+  # One job per project with a `formal:nightly` target, each with its own budget: a single serial job
+  # ran out of its 60 minutes on every scheduled run of 2026-11-07 to 2026-11-11 (CI throughput review,
+  # Q-4). On split run 43164083769 six projects took 2 to 9 minutes and `agent-host` alone took 55, so
+  # each job has 120 for headroom over a single 60-minute budget. The per-project
+  # durations size the queue lane and the release-gate matrix (RG-1) that follow.
+  projects:
+    name: List the formal nightly projects
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 15
     permissions: # Required for nrwl/nx-set-shas (in setup-nx) to read workflow runs
       actions: 'read'
       contents: 'read'
+    outputs:
+      projects: ${{ steps.list.outputs.projects }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: List the projects
+        id: list
+        run: |
+          # `tail -1` keeps the JSON array and drops Nx's log lines.
+          projects=$(pnpm nx show projects --with-target formal:nightly --json | tail -1)
+          echo "Formal nightly projects: $projects"
+          if [ "$(jq 'length' <<< "$projects")" -eq 0 ]; then
+            echo "::error::No project has a formal:nightly target."
+            exit 1
+          fi
+          echo "projects=$projects" >> "$GITHUB_OUTPUT"
+
+  formal-nightly:
+    name: Formal nightly tiers (${{ matrix.project }})
+    needs: projects
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions: # Required for nrwl/nx-set-shas (in setup-nx) to read workflow runs
+      actions: 'read'
+      contents: 'read'
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.projects.outputs.projects) }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -43,14 +81,18 @@ jobs:
         with:
           tools: tlc,lean,apalache
 
-      - name: Run every formal nightly tier
-        run: pnpm nx run-many -t formal:nightly --parallel=1
+      # Streamed, because Nx holds a task's output until it ends and a job that reaches its budget
+      # would lose it.
+      - name: Run the project's formal nightly tier
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: pnpm nx run-many -t formal:nightly --projects "$PROJECT" --parallel=1 --outputStyle=stream
 
       - name: Upload formal reports and captured logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: formal-nightly-reports
+          name: formal-nightly-reports-${{ matrix.project }}
           path: |
             out/reports/formal
             out/test-results/chat-logs

@@ -29,6 +29,11 @@ import { freezeEverything, parseFreezeSeconds, thawEverything } from '@taucad/ap
 import { RedisInFlightRegistry } from '@taucad/api-git-core/routing/in-flight';
 import type { ScheduledMaintenanceCommand } from '@taucad/api-git-mirror/maintenance/liveness';
 import { holdInStandby } from '@taucad/api-git-mirror/maintenance/standby';
+import {
+  inventoryLfsIntegrity,
+  lfsIntegrityExclusions,
+  parseLfsIntegrityConcurrency,
+} from '@taucad/api-git-mirror/maintenance/lfs-integrity';
 import { relocateLegacyLfsObjects } from '@taucad/api-git-mirror/maintenance/lfs-relocation';
 import {
   lfsRelocationProjects,
@@ -37,6 +42,7 @@ import {
 } from '@taucad/api-git-mirror/maintenance/lfs-relocation-run';
 import { activeLfsReservationPages } from '@taucad/api-git-mirror/maintenance/lfs-reservation-scope';
 import { applicationNameOf } from '@taucad/api-database/application-name';
+import { optionValue, optionalOperand as optionalOperandOf, requiredOperand } from '#maintenance-arguments.js';
 
 /**
  * `revisions-maintenance`: the singleton entry for everything that must happen
@@ -119,6 +125,21 @@ const usage = `Usage: revisions-maintenance <command>
       read-only lease per project that has a candidate; --dry-run lists the
       candidates and hydrates nothing.
 
+  lfs-integrity [--concurrency <n>]
+      Read-only inventory of stored LFS checksums. Scope: the reservation rows
+      of active projects in this account; no bucket listing, so bytes with no
+      row are not seen. HEADs each at its tenant key with ChecksumMode ENABLED
+      and counts tenant.equal (stored SHA-256 is the oid), tenant.absent,
+      tenant.composite and tenant.different, plus legacy (only the pre-D24
+      key), unfinalized (no bytes, upload never finished) and missing (no
+      bytes for a finalized reservation). Each different, size-mismatched or
+      failed object prints its own revisions_maintenance.lfs_integrity_*
+      line (ids, key and digest only); progress every 5000 objects; one
+      revisions_maintenance.lfs_integrity summary, which also counts the rows
+      left out (skippedOtherAccount, deletedProjectRows). --concurrency HEADs
+      in flight, 1-32, default 8. Exits 1 when any object differs or has the
+      wrong size, a HEAD failed or the run was stopped. Never scheduled.
+
   relocate-lfs [--confirm] [--project <id>] [--after <projectId>] [--concurrency <n>]
       Move pre-D24 LFS objects from blobs/ to their owner's tenant key. A dry
       run unless --confirm: every active project in this account with an LFS
@@ -174,23 +195,12 @@ TAU_S3_RESTORE_BUCKET, TAU_S3_RESTORE_ACCESS_KEY_ID,
 TAU_S3_RESTORE_SECRET_ACCESS_KEY and the optional TAU_S3_RESTORE_REGION and
 TAU_S3_RESTORE_FORCE_PATH_STYLE for restore, and REDIS_URL for freeze-all.`;
 
-/** `--flag value`, with no positional arguments anywhere in this command. */
-const option = (args: readonly string[], name: string): string | undefined => {
-  const index = args.indexOf(`--${name}`);
-  return index === -1 ? undefined : args[index + 1];
-};
+const option = optionValue;
 
-const required = (args: readonly string[], name: string): string => {
-  const value = option(args, name);
-  if (value === undefined || value === '' || value.startsWith('--')) {
-    throw new Error(`--${name} is required\n\n${usage}`);
-  }
-  return value;
-};
+const required = (args: readonly string[], name: string): string => requiredOperand(args, name, usage);
 
-/** A flag whose operand is optional to give but required once the flag is: `--project` alone is refused. */
 const optionalOperand = (args: readonly string[], name: string): string | undefined =>
-  args.includes(`--${name}`) ? required(args, name) : undefined;
+  optionalOperandOf(args, name, usage);
 
 const environmentValue = (name: string): string => {
   const value = process.env[name];
@@ -641,6 +651,32 @@ async function main(): Promise<void> {
             await writeLine(JSON.stringify(outcome));
           }
         });
+        break;
+      }
+      case 'lfs-integrity': {
+        const concurrency = parseLfsIntegrityConcurrency(optionalOperand(args, 'concurrency'));
+        const stop = new AbortController();
+        const stopInventory = (): void => {
+          stop.abort();
+        };
+        process.once('SIGTERM', stopInventory);
+        process.once('SIGINT', stopInventory);
+        try {
+          const summary = await inventoryLfsIntegrity(
+            {
+              pages: activeLfsReservationPages(database, { accountId: driver.account.id }),
+              storage: driver,
+              exclusions: async () => lfsIntegrityExclusions(database, { accountId: driver.account.id }),
+            },
+            { concurrency, report: writeLine, signal: stop.signal },
+          );
+          if (summary.tenant.different > 0 || summary.sizeMismatch > 0 || summary.errors > 0 || summary.interrupted) {
+            process.exitCode = 1;
+          }
+        } finally {
+          process.removeListener('SIGTERM', stopInventory);
+          process.removeListener('SIGINT', stopInventory);
+        }
         break;
       }
       case 'relocate-lfs': {

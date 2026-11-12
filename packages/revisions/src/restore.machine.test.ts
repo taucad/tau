@@ -16,11 +16,9 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  * Path table — `restore.machine` (catalogue: 12).
  *
  *  1  `restore { revisionId }` first mints the checkout: a `restore` cut through the parent (D1)
- *  2  the pre-restore cut's answer plans against the selected checkout; a plan that removes
- *     nothing and finds a clean tree applies without asking
- *  3  a plan that removes files asks first, and `confirm` applies
- *  4  a dirty tree asks even when the plan removes nothing
- *  5  `cancel` returns to `idle` and never applies
+ *  2  the pre-restore cut's answer plans against the selected checkout and applies without asking
+ *  3  nothing asks a person (I11): the plan goes straight to `applying`, and `toast.restored`
+ *     names the revision whose files came back and which verb it was, so the page offers Undo
  *  6  the restore stays pinned to the checkout it planned against: a re-root mid-restore
  *     re-targets only the next verb (A6)
  *  7  the applied tree is minted as a `restore` revision carrying `restoredFrom`; the line
@@ -51,30 +49,17 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  */
 const knownDefects: IgnoredEvents = {
   restore: [
-    /* W5: a verb or a confirmation that reaches a state not waiting for it is
-     * dropped without an answer. (Cut answers are taken at the root.) */
-    ['idle', 'cancel'],
-    ['idle', 'confirm'],
-    ['recording', 'cancel'],
-    ['recording', 'confirm'],
+    /* W5: a verb that reaches a state not waiting for it is dropped without
+     * an answer. (Cut answers are taken at the root.) */
     ['recording', 'restore'],
     ['recording', 'undo'],
     ['recording', 'undoOperation'],
-    ['planning', 'cancel'],
-    ['planning', 'confirm'],
     ['planning', 'restore'],
     ['planning', 'undo'],
     ['planning', 'undoOperation'],
-    ['confirming', 'restore'],
-    ['confirming', 'undo'],
-    ['confirming', 'undoOperation'],
-    ['applying', 'cancel'],
-    ['applying', 'confirm'],
     ['applying', 'restore'],
     ['applying', 'undo'],
     ['applying', 'undoOperation'],
-    ['minting', 'cancel'],
-    ['minting', 'confirm'],
     ['minting', 'restore'],
     ['minting', 'undo'],
     ['minting', 'undoOperation'],
@@ -125,8 +110,6 @@ const plan = {
   planId: 'plan-1',
   revisionId: 'rev-3',
   revisionNumber: 3,
-  removedPathCount: 0,
-  dirty: false,
 };
 
 const types = (events: ReadonlyArray<{ type: string }>): readonly string[] => events.map((event) => event.type);
@@ -224,6 +207,8 @@ describe('restoreMachine', () => {
     expect(actor.getSnapshot().context.restoredRevisionId).toBe('rev-6');
     expect(emitted.find((event) => event.type === 'toast.restored')).toEqual({
       type: 'toast.restored',
+      mode: 'restore',
+      revisionId: 'rev-3',
       revisionNumber: 3,
     });
     /* The checkout's own mint moved its head; nothing names a detached one. */
@@ -247,51 +232,42 @@ describe('restoreMachine', () => {
     actor.stop();
   });
 
-  it('asks before a plan that removes files, then applies on confirm', async () => {
+  it('acts at once: the plan applies with no state that waits for a person (I11)', async () => {
     const harness = start();
     const { actor, promises } = harness;
 
     actor.send({ type: 'restore', revisionId: 'rev-3' });
-    mintBefore(harness);
-    promises.settle('computePlan', { output: { ...plan, removedPathCount: 2 } });
+    /* The pre-restore cut saved unsaved work, so even a dirty checkout loses nothing. */
+    mintBefore(harness, 'revisionMinted');
+    promises.settle('computePlan', { output: plan });
     await flush();
-
-    expect(actor.getSnapshot().matches('confirming')).toBe(true);
-
-    actor.send({ type: 'confirm' });
 
     expect(actor.getSnapshot().matches('applying')).toBe(true);
+    expect(Object.keys(restoreMachine.states)).not.toContain('confirming');
 
     actor.stop();
   });
 
-  it('asks when the tree is dirty even if nothing is removed', async () => {
+  it('names the verb on the toast an Undo restore raises, so the page offers no second Undo', async () => {
     const harness = start();
-    const { actor, promises } = harness;
+    const { actor, promises, emitted } = harness;
 
-    actor.send({ type: 'restore', revisionId: 'rev-3' });
+    await applyRestore(harness);
+    actor.send({ type: 'revisionMinted', ...ours(harness), revisionId: 'rev-6' });
+    actor.send({ type: 'undo' });
     mintBefore(harness);
-    promises.settle('computePlan', { output: { ...plan, dirty: true } });
+    promises.settle('computePlan', { output: { planId: 'plan-2', revisionId: 'rev-5', revisionNumber: 5 } });
     await flush();
-
-    expect(actor.getSnapshot().matches('confirming')).toBe(true);
-
-    actor.stop();
-  });
-
-  it('cancels without applying', async () => {
-    const harness = start();
-    const { actor, promises } = harness;
-
-    actor.send({ type: 'restore', revisionId: 'rev-3' });
-    mintBefore(harness);
-    promises.settle('computePlan', { output: { ...plan, removedPathCount: 1 } });
+    promises.settle('applyPlan', { output: { revisionId: 'rev-5', treeId: 'tree-5' } });
     await flush();
-    actor.send({ type: 'cancel' });
+    actor.send({ type: 'revisionMinted', ...ours(harness), revisionId: 'rev-7' });
 
-    expect(actor.getSnapshot().matches('idle')).toBe(true);
-    expect(promises.inputsFor('applyPlan')).toEqual([]);
-    expect(actor.getSnapshot().context.planId).toBeUndefined();
+    expect(emitted.findLast((event) => event.type === 'toast.restored')).toEqual({
+      type: 'toast.restored',
+      mode: 'undoRestore',
+      revisionId: 'rev-5',
+      revisionNumber: 5,
+    });
 
     actor.stop();
   });
@@ -550,8 +526,6 @@ describe('restoreMachine', () => {
       { type: 'undo' },
       { type: 'undoOperation' },
       { type: 'lineMinted' },
-      { type: 'confirm' },
-      { type: 'cancel' },
       { type: 'selectCheckout', checkoutId: 'checkout-b', branch: 'main' },
       /* The root's answers to this machine's own cuts (`restore-<n>`, RM-R1). */
       ...['restore-1', 'restore-2'].flatMap((requestId): RestoreMachineEvent[] => [
@@ -566,7 +540,7 @@ describe('restoreMachine', () => {
       /* Effect outcomes reach the states behind each invoke; they are not public. */
       events: [
         ...publicEvents,
-        { type: `xstate.done.actor.${planInvoke}`, output: { ...plan, removedPathCount: 1 } },
+        { type: `xstate.done.actor.${planInvoke}`, output: plan },
         { type: `xstate.error.actor.${planInvoke}`, error: new Error('unknown revision') },
         { type: `xstate.done.actor.${applyInvoke}`, output: { revisionId: 'rev-3', treeId: 'tree-3', branch: 'main' } },
       ],
@@ -609,7 +583,7 @@ describe('restoreMachine — Undo (D15)', () => {
     mintBefore(harness, 'revisionMinted');
 
     expect(promises.inputsFor('computePlan')).toEqual([{ checkoutId: 'checkout-1', undo: true, skip: 'rev-5' }]);
-    promises.settle('computePlan', { output: { ...plan, revisionNumber: 4, removedPathCount: 2 } });
+    promises.settle('computePlan', { output: { ...plan, revisionNumber: 4 } });
     await flush();
     expect(actor.getSnapshot().matches('applying')).toBe(true);
     promises.settle('applyPlan', { output: { revisionId: 'rev-3', treeId: 'tree-2' } });

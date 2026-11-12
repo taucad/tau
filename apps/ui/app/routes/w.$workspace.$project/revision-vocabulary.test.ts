@@ -15,8 +15,12 @@ import {
   selectRevisionFacts,
   selectStripVerbs,
   startFact,
+  switchedSentence,
+  switchRefusedSentence,
   syncCopy,
+  undidRestoreSentence,
   undidSentence,
+  undoLabel,
   versionOf,
   versionPhrase,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
@@ -317,6 +321,7 @@ describe('the copy table', () => {
         card({ revisionId: 'v', versions: [{ number: 2, name: 'Fit check' }] }),
         'Restored V2',
       ],
+      ['Restored Rev 1 (the Start version)', card({ revisionId: 's', start: 'created' }), 'Restored V1'],
       ['Restored Rev 2 (an entry)', card({ revisionId: 'e' }), 'Restored “Add vent slots”'],
       ['Restored an earlier revision', undefined, 'Restored an earlier point'],
     ] as const)('says “%s” as the table proposes', (_, target, sentence) => {
@@ -328,6 +333,23 @@ describe('the copy table', () => {
         'Undid “Thicker walls for the lid”',
       );
       expect(undidSentence(undefined)).toBe('Undid an earlier change');
+      expect(undidSentence(card({ revisionId: 'r', summary: 'Restored V1', restoredFrom: 'v1' }))).toBe(
+        'Undid the restore',
+      );
+    });
+
+    it('says an Undo restore undid the restore, and every toast that acted at once offers Undo (I11)', () => {
+      expect(undidRestoreSentence).toBe('Undid the restore');
+      expect(undoLabel).toBe('Undo');
+    });
+
+    it('says where a switch saved first, and a refused switch in the branch menu’s words', () => {
+      expect(switchedSentence('enclosure-v2', 'main', true)).toBe(
+        'Saved your changes on main, then switched to enclosure-v2',
+      );
+      expect(switchedSentence('enclosure-v2', 'main', false)).toBe('Switched to enclosure-v2');
+      expect(switchedSentence('enclosure-v2', undefined, true)).toBe('Switched to enclosure-v2');
+      expect(switchRefusedSentence('enclosure-v2')).toBe('Couldn’t switch to enclosure-v2');
     });
   });
 });

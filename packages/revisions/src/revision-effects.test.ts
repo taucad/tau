@@ -1483,20 +1483,13 @@ describe('restore, through the machine that owns it', () => {
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
     const tree = await startTree(port, filesystem, { onApplyingTree });
     const first = await tree.save();
-    /* A second revision that adds a file, so restoring the first is a deletion
-     * — the risky plan that needs confirmation. */
+    /* A second revision that adds a file, so restoring the first is a deletion,
+     * which still acts at once: the restore is undoable (I11). */
     await filesystem.writeFile('extra.txt', 'added later\n');
     const second = await tree.save();
 
     const restoreRef = tree.actor.getSnapshot().children.restore;
     restoreRef?.send({ type: 'restore', revisionId: first });
-    await expect.poll(() => restoreRef?.getSnapshot().value, { timeout: 10_000 }).toBe('confirming');
-    /* The plan is the real one: restoring the first revision removes the file
-     * the second added, and nothing else; the line numbers it `Rev 1`. */
-    expect(restoreRef?.getSnapshot().context.removedPathCount).toBe(1);
-    expect(restoreRef?.getSnapshot().context.revisionNumber).toBe(1);
-
-    restoreRef?.send({ type: 'confirm' });
     /* The first `restore` answer is the pre-restore cut's: a clean tree mints nothing. */
     const restored = await tree.minted('restore', 2);
 
@@ -1520,6 +1513,46 @@ describe('restore, through the machine that owns it', () => {
       closure: ['tau.json'],
     });
     expect(release).toHaveBeenCalledOnce();
+    tree.actor.stop();
+  }, 30_000);
+
+  /*
+   * C7, I11: a *Switch* asks nobody, so it must lose nothing. The unsaved edit
+   * is recorded on the branch being left before the other branch's files are
+   * written, and the toast's Undo — a switch back — returns both the files and
+   * the branch to where they were.
+   */
+  it('saves unsaved work on the branch a switch leaves, and switching back returns the files and the branch', async () => {
+    const { port, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const tree = await startTree(port, filesystem);
+    const first = await tree.save();
+    await port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(first) });
+    const line = () => selectRevisionStatus(tree.actor.getSnapshot()).line;
+    /* Unsaved work: the bytes a switch used to ask before replacing. */
+    await filesystem.writeFile('main.ts', 'export const size = 2;\n');
+
+    tree.actor.send({ type: 'switch', requestId: 'switch-1', branch: 'feature' });
+    await expect.poll(line, { timeout: 20_000 }).toEqual({ kind: 'branch', name: 'feature' });
+    await expect
+      .poll(() => tree.actor.getSnapshot().children.branch?.getSnapshot().value, { timeout: 20_000 })
+      .toBe('idle');
+
+    /* `main` moved to a revision that holds the edit, on top of where it was; the files are `feature`'s. */
+    const saved = await port.readRef('main');
+    expect(saved).not.toBe(first);
+    const savedRecord = await port.readRevision(revisionId(String(saved)));
+    expect(savedRecord?.parents).toEqual([first]);
+    expect(await filesystem.readFile('main.ts', 'utf8')).toBe('export const size = 1;\n');
+
+    tree.actor.send({ type: 'switch', requestId: 'switch-2', branch: 'main' });
+    await expect.poll(line, { timeout: 20_000 }).toEqual({ kind: 'branch', name: 'main' });
+    await expect
+      .poll(async () => filesystem.readFile('main.ts', 'utf8'), { timeout: 20_000 })
+      .toBe('export const size = 2;\n');
+    await expect.poll(() => selectRevisionStatus(tree.actor.getSnapshot()).headRevisionId).toBe(saved);
+    /* Going back saved nothing new: `feature` still points where it did. */
+    await expect(port.readRef('feature')).resolves.toBe(first);
     tree.actor.stop();
   }, 30_000);
 
@@ -1941,8 +1974,6 @@ describe('restore, through the machine that owns it', () => {
     const restoreRef = tree.actor.getSnapshot().children.restore;
     restoreRef?.send({ type: 'restore', revisionId: first });
     const before = await tree.minted('restore');
-    await expect.poll(() => restoreRef?.getSnapshot().value, { timeout: 10_000 }).toBe('confirming');
-    restoreRef?.send({ type: 'confirm' });
     const restored = await tree.minted('restore', 2);
 
     /* Two rows: the pre-restore cut (the person's own bytes) and the restore. */
@@ -2083,7 +2114,7 @@ describe('restore, through the machine that owns it', () => {
     expect(await filesystem.readFile('main.ts', 'utf8')).toBe('export const size = 9;\n');
   }, 30_000);
 
-  it('applies nothing, in the agent sentence, when a turn took the files while the question was open (A3, M4)', async () => {
+  it('applies nothing, in the agent sentence, when a turn took the files between plan and apply (A3, M4)', async () => {
     const { port, actors } = await fixture({ 'main.ts': 'export const size = 1;\n' });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
     const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
@@ -2103,7 +2134,7 @@ describe('restore, through the machine that owns it', () => {
       checkoutId: 'live',
       target: first.revisionId,
     });
-    /* Another window's turn leases the checkout before the person confirms. */
+    /* Another window's turn leases the checkout between the plan and the apply. */
     await run(actors.turn.writeLease, {
       key: { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 0 },
       checkoutId: 'live',

@@ -117,9 +117,12 @@ export type HeadBlobResult = {
   /**
    * The base64 SHA-256 the store verified on write, when `checksum` was asked
    * and the object was written whole with one. A multipart object's composite
-   * checksum (`<digest>-<parts>`) is not the object's hash and is left out.
+   * checksum (`ChecksumType: COMPOSITE`, or `<digest>-<parts>` from a store that
+   * omits the type) is not the object's hash and is left out.
    */
   checksumSha256?: string;
+  /** `true` when `checksum` was asked and the store reported such a composite instead; for the integrity inventory. */
+  checksumComposite?: true;
 };
 
 /** One object in a prefix listing, keyed relative to its namespace. */
@@ -485,13 +488,16 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         { abortSignal: args.signal },
       );
       const checksumSha256 = response.ChecksumSHA256;
+      // The SDK's `ChecksumType` names a multipart composite; a store that omits it still marks one `<digest>-<parts>`.
+      const composite = response.ChecksumType === 'COMPOSITE' || checksumSha256?.includes('-') === true;
 
       return {
         contentType: response.ContentType ?? 'application/octet-stream',
         size: Number(response.ContentLength ?? 0),
         etag: response.ETag?.replaceAll('"', '') ?? '',
         cacheControl: response.CacheControl ?? '',
-        ...(checksumSha256 === undefined || checksumSha256.includes('-') ? {} : { checksumSha256 }),
+        ...(checksumSha256 === undefined || composite ? {} : { checksumSha256 }),
+        ...(composite ? { checksumComposite: true } : {}),
       };
     } catch (error) {
       if (isS3ObjectMissing(error)) {

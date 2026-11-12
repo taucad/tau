@@ -12,7 +12,8 @@
  *
  * The names are opaque, so other sharded lanes deal with it too, each from its own snapshot through `--durations`:
  * the `pkgcheck-<n>` lanes deal the affected projects with a package check by measured `pkgcheck` seconds
- * (`pkgcheck-shard-durations.json`).
+ * (`pkgcheck-shard-durations.json`), and the `Viewer references` shards of `viewer-parity.yml` deal the parity
+ * fixtures by measured capture seconds (`libs/tau-examples/fixtures/viewer-parity/capture-seconds.json`).
  *
  * Usage: node scripts/src/test-shard-dealer.ts --shard <n> [--shards <count>] [--durations <file>] < projects.json
  * Prints the shard's projects comma-separated (empty when it has none).

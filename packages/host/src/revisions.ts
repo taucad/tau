@@ -12,7 +12,7 @@
  */
 
 import { waitFor } from 'xstate';
-import type { ActorOptions, AnyActorLogic, SnapshotFrom } from 'xstate';
+import type { ActorOptions, AnyActorLogic } from 'xstate';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, watch as watchDirectory } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
@@ -68,10 +68,8 @@ import {
   tauRemoteUrl,
   watchRevisionStream,
 } from '@taucad/revisions';
-import { selectBranchNeedsConfirmation } from '@taucad/revisions/branch-machine';
 import type { SyncMachineEmitted } from '@taucad/revisions/sync-machine';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
-import type { branchMachine } from '@taucad/revisions/branch-machine';
 import { isAmbientCut } from '@taucad/revisions/checkout-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
 import { sameRevisionStatus } from '@taucad/revisions/revision-projection';
@@ -872,6 +870,8 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       kind: 'toast',
       value: revisionJson({
         type: 'restored',
+        mode: toast.mode,
+        revisionId: toast.revisionId,
         revisionNumber: toast.revisionNumber,
       }),
     });
@@ -928,6 +928,22 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   /* The remote and resolution children's own sentences (L2-F8). */
   actor.on('childToast', ({ type: _type, ...toast }) => {
     emitChannel({ kind: 'toast', value: revisionJson({ ...toast, type: 'notice' }) });
+  });
+  /* A re-root moves no file, so no branch verb settles it; it is still a
+   * *Switch* a person made, and says so with the branch to go back to (I11). */
+  actor.on('switchResolved', (resolved) => {
+    if (resolved.mode !== 'reroot') {
+      return;
+    }
+    emitChannel({
+      kind: 'toast',
+      value: revisionJson({
+        type: 'branch',
+        operation: 'switch',
+        branch: resolved.branch,
+        ...(resolved.from === undefined ? {} : { from: resolved.from }),
+      }),
+    });
   });
   actor.on('switchRefused', (refusal) => {
     emitChannel({
@@ -1513,8 +1529,6 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         break;
       case 'undo':
       case 'undoOperation':
-      case 'confirm':
-      case 'cancel':
         actor.getSnapshot().children.restore?.send({ type: request.command });
         break;
       case 'switch':
@@ -1590,12 +1604,6 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           type: 'branch',
           event: { type: 'rename', requestId: requestIdOf(request), branch: text('branch'), name: text('name') },
         });
-        break;
-      case 'confirmBranch':
-        actor.send({ type: 'branch', event: { type: 'confirm' } });
-        break;
-      case 'cancelBranch':
-        actor.send({ type: 'branch', event: { type: 'cancel' } });
         break;
       case 'connectRemote': {
         const kind = request['kind'];
@@ -1884,8 +1892,6 @@ export const requireRevisionToolchain = async (
 /** What a `switch` did, or why it did not (S13, D10). @public */
 export type RevisionSwitchOutcome =
   | Readonly<{ status: 'switched'; branch: string; line: string }>
-  /** The tree has changes this switch would overwrite; the caller decides. */
-  | Readonly<{ status: 'needs-confirmation'; branch: string; reason: string }>
   | Readonly<{ status: 'refused'; branch: string; reason: string }>;
 
 /** What a `discard` did, or why it did not (S36). @public */
@@ -1960,8 +1966,8 @@ export type ProjectRevisionVerbs = {
   diff(from: string | undefined, to: string): Promise<readonly RevisionDiffEntry[]>;
   /** Where the live tree is, and every branch this project holds. */
   describe(): Promise<RevisionPlace>;
-  /** Put the live tree on one branch. */
-  switchTo(branch: string, options?: Readonly<{ confirm?: boolean }>): Promise<RevisionSwitchOutcome>;
+  /** Put the live tree on one branch, saving its unsaved work on the branch it leaves first (I11). */
+  switchTo(branch: string): Promise<RevisionSwitchOutcome>;
   /** Remove one branch's linked checkout, refusing while it holds unsaved work. */
   discard(branch: string): Promise<RevisionDiscardOutcome>;
   /** Name or re-point one immutable revision. */
@@ -2164,10 +2170,7 @@ export const openProjectRevisions = async (
     }
   };
 
-  const switchTo = async (
-    branch: string,
-    verb: Readonly<{ confirm?: boolean }> = {},
-  ): Promise<RevisionSwitchOutcome> => {
+  const switchTo = async (branch: string): Promise<RevisionSwitchOutcome> => {
     const { actor } = await started();
     const child = actor.getSnapshot().children.branch;
     if (child === undefined) {
@@ -2179,8 +2182,9 @@ export const openProjectRevisions = async (
     }
     /*
      * One verb, one owner. The root resolves D10 and hands the decision to
-     * `branch.machine`, which owns the lifecycle — its confirmation, its failure
-     * edge, and the single `applySwitch` actor that rewrites the tree. This host
+     * `branch.machine`, which owns the lifecycle — the cut that saves unsaved
+     * work first (I11), its failure edge, and the single `applySwitch` actor
+     * that rewrites the tree. This host
      * used to choreograph the apply itself over the `restore` child, which was a
      * host re-implementing a machine (I20); now it only reports what the machine
      * settled on (W7 review R3).
@@ -2210,34 +2214,12 @@ export const openProjectRevisions = async (
           resolve(Object.freeze({ status: 'refused', branch, reason: event.message }));
         }
       });
-      /* The machine parks in `confirming` when its own check says a person is
-       * needed; an unconfirmed switch cancels rather than waiting. */
-      const watching = child.subscribe((snapshot: SnapshotFrom<typeof branchMachine>) => {
-        if (!selectBranchNeedsConfirmation(snapshot) || snapshot.context.requestId !== requestId) {
-          return;
-        }
-        if (verb.confirm === true) {
-          child.send({ type: 'confirm' });
-          return;
-        }
-        child.send({ type: 'cancel' });
-        resolve(
-          Object.freeze({
-            status: 'needs-confirmation',
-            branch,
-            reason:
-              snapshot.context.question ??
-              'This project has changes that are not in a revision yet, and switching would overwrite them.',
-          }),
-        );
-      });
       actor.send({ type: 'switch', requestId, branch });
       return () => {
         refused.unsubscribe();
         rerooted.unsubscribe();
         settled.unsubscribe();
         failed.unsubscribe();
-        watching.unsubscribe();
       };
     });
     if (outcome.status !== 'switched') {

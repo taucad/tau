@@ -292,7 +292,7 @@ function OrientationStrip({
             placeholder='enclosure-v2'
             note={`Starts from where you are now. ${where.branch ?? 'This branch'} stays as it is.`}
             saveLabel='Create branch'
-            isBusy={(status?.branchVerb.busy ?? false) || (status?.branchVerb.asking ?? false)}
+            isBusy={status?.branchVerb.busy ?? false}
             align='end'
             onSave={(name) => {
               // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- the toast channel owns this refusal; only the loose rejection is ours
@@ -1134,7 +1134,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
               branchFacts={branchFacts}
               conflicts={conflicts}
               /* A verb waiting on a person is still in flight (review R4). */
-              isBusy={(status?.branchVerb.busy ?? false) || (status?.branchVerb.asking ?? false)}
+              isBusy={status?.branchVerb.busy ?? false}
               isWritable={canWrite}
               onSwitch={commands.switchTo}
               onMerge={commands.mergeBranch}

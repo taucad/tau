@@ -37,6 +37,8 @@ type Job = {
   readonly uses?: string;
   readonly with?: Record<string, string>;
   readonly env?: Record<string, string>;
+  readonly name?: string;
+  readonly strategy?: { readonly matrix?: Record<string, unknown> };
 };
 type Workflow = {
   readonly on?: {
@@ -88,10 +90,18 @@ const nxTargets = (command: string): ReadonlyArray<{ readonly target: string; re
 const planStep = ci.jobs['plan']?.steps?.find((step) => step.id === 'plan');
 const planScript = planStep?.run ?? '';
 
-/** The plan's lane selectors: each lane is the affected projects carrying every tag and target listed. */
+/**
+ * The plan's lane selectors: each lane is the affected projects carrying every tag and target listed, and
+ * `pr` is its pull-request rule (`queue`: none on a pull request; `touched`: only the projects its diff touches).
+ */
 const laneSelectors = JSON.parse(planStep?.env?.['LANE_SELECTORS'] ?? '{}') as Record<
   string,
-  { readonly type?: string; readonly tags?: readonly string[]; readonly targets?: readonly string[] }
+  {
+    readonly type?: string;
+    readonly tags?: readonly string[];
+    readonly targets?: readonly string[];
+    readonly pr?: 'queue' | 'touched';
+  }
 >;
 
 /** Plan outputs computed from the affected projects through a lane selector, keyed by output name. */
@@ -134,19 +144,20 @@ describe('ci.yml affected-only lanes', () => {
     expect(planScript.match(/\bnx show projects\b/gu)).toHaveLength(1);
     // A selector naming a tag or target that no project has fails the plan instead of leaving its lane off.
     expect(planScript).toContain('error("lane selectors name a tag or target no project has');
+    expect(planScript).toContain('error("lane selectors name a pull-request rule other than queue or touched")');
     expect(laneSelectors).toEqual({
       apps: { type: 'app' },
-      api: { tags: ['scope:api'] },
+      api: { tags: ['scope:api'], pr: 'touched' },
       'api-image': { targets: ['docker:smoke'] },
-      billing: { targets: ['test:billing-foundation'] },
-      'cli-e2e': { targets: ['test:scenarios'] },
+      billing: { targets: ['test:billing-foundation'], pr: 'queue' },
+      'cli-e2e': { targets: ['test:scenarios'], pr: 'queue' },
       size: { targets: ['size'] },
-      formal: { targets: ['formal'] },
-      'geospec-examples': { targets: ['test-geospec'] },
-      browser: { tags: ['ci:browser'], targets: ['verify-browser'] },
-      'native-hosts': { tags: ['ci:native-hosts'] },
-      'native-linux': { targets: ['test:native-linux'] },
-      'viewer-parity': { targets: ['test:viewer-parity'] },
+      formal: { targets: ['formal'], pr: 'queue' },
+      'geospec-examples': { targets: ['test-geospec'], pr: 'queue' },
+      browser: { tags: ['ci:browser'], targets: ['verify-browser'], pr: 'queue' },
+      'native-hosts': { tags: ['ci:native-hosts'], pr: 'queue' },
+      'native-linux': { targets: ['test:native-linux'], pr: 'queue' },
+      'viewer-parity': { targets: ['test:viewer-parity'], pr: 'queue' },
       desktop: { tags: ['ci:desktop'] },
     });
   });
@@ -246,21 +257,22 @@ describe('ci.yml affected-only lanes', () => {
     expect(check.indexOf('if [ "$DRAFT" = true ]; then')).toBeLessThan(check.indexOf('test "$PLAN_RESULT" = success'));
   });
 
-  it('should leave the service, formal, browser, GeoSpec, CLI end-to-end, native-host and viewer-parity lanes to the merge queue on a pull request', () => {
-    const slim = planScript.slice(planScript.indexOf('if [ "$GITHUB_EVENT_NAME" = pull_request ]; then'));
-    expect(slim).toMatch(/^\s*native_linux=''$/mu);
-    for (const lane of [
-      'api',
-      'billing',
-      'formal',
-      'browser',
-      'geospec_examples',
-      'cli_e2e',
-      'native_hosts',
-      'viewer_parity',
-    ]) {
-      expect(slim, lane).toMatch(new RegExp(`^\\s*${lane}=false$`, 'mu'));
+  it('should apply the pull-request rule of each lane from its selector alone, naming no lane', () => {
+    const start = planScript.indexOf('if [ "$GITHUB_EVENT_NAME" = pull_request ]; then');
+    const block = planScript.slice(start, planScript.indexOf('\nfi\n', start));
+    // One pull-request rule, applied to the selection before any flag is read from it.
+    expect(planScript.match(/if \[ "\$GITHUB_EVENT_NAME" = pull_request \]; then/gu)).toHaveLength(1);
+    expect(start).toBeGreaterThan(planScript.indexOf('selected=$lanes'));
+    expect(start).toBeLessThan(planScript.indexOf('flag() {'));
+    expect(block).toContain('if $rule == "queue" then .value = []');
+    expect(block).toContain('elif $rule == "touched" then');
+    for (const key of Object.keys(laneSelectors)) {
+      expect(block, key).not.toMatch(new RegExp(`\\b${key.replaceAll('-', '_')}=|"${key}"`, 'u'));
     }
+    // Touched files are Nx's own: `git diff --no-renames --relative` from the merge base of its base and head.
+    expect(block).toContain(
+      'git diff --name-only --no-renames --relative "$(git merge-base "$NX_BASE" "$head")" "$head"',
+    );
     // The PR-only Docker smoke test keeps its own flag: Nx's selection of the image's project.
     expect(planScript).toContain('api_image=$(flag api-image)');
     expect(planScript).toContain('echo "api-image=$api_image"');
@@ -402,6 +414,21 @@ describe('ci.yml affected-only lanes', () => {
     // A push that reuses the merge-queue verdict skips the lane, as it skips the shards: the flag is read
     // from the selection the reuse rule emptied.
     expect(planScript).toContain('cli_e2e=$(flag cli-e2e)');
+  });
+
+  it('should shard the CLI end-to-end lane and name each shard to the target through TAU_CI_SHARD', () => {
+    const lane = ci.jobs['cli-e2e'];
+    const shards = lane?.strategy?.matrix?.['shard'] as readonly number[] | undefined;
+    expect(shards).toEqual([1, 2]);
+    expect(lane?.name).toBe(`CLI end-to-end (${expression('matrix.shard')}/${String(shards?.length)})`);
+    expect(lane?.env?.['TAU_CI_SHARD']).toBe(`${expression('matrix.shard')}/${String(shards?.length)}`);
+    const target = (
+      JSON.parse(readFileSync(resolve(root, 'apps/cli-e2e/project.json'), 'utf8')) as {
+        targets: Record<string, { inputs?: unknown[] }>;
+      }
+    ).targets['test:scenarios'];
+    // Without the input both shards would share one cache entry and the second would replay the first.
+    expect(target?.inputs).toContainEqual({ env: 'TAU_CI_SHARD' });
   });
 });
 
@@ -752,5 +779,197 @@ describe('queue-verdict action', () => {
     const outputs = verdict([]);
     expect(outputs['run-id']).toBe('');
     expect(outputs['affected-base']).toBe('');
+  });
+});
+
+describe('plan lane selection', () => {
+  /** A project of the fixture graph: its root, tags and target names. */
+  type Node = {
+    readonly root: string;
+    readonly type?: string;
+    readonly tags?: readonly string[];
+    readonly targets?: readonly string[];
+  };
+  // Every tag and target a selector names exists, as the plan requires; the API family is one app and two
+  // libraries, and `core` is a library the API depends on (affected through a dependency only).
+  const nodes: Record<string, Node> = {
+    workspace: { root: '.', type: 'lib' },
+    core: { root: 'packages/core', type: 'lib' },
+    api: { root: 'apps/api', type: 'app', tags: ['scope:api'], targets: ['test', 'docker:smoke'] },
+    'api-e2e': { root: 'apps/api-e2e', type: 'app', tags: ['scope:api'], targets: ['test'] },
+    'api-billing': {
+      root: 'apps/libs/api-billing',
+      type: 'lib',
+      tags: ['scope:api'],
+      targets: ['test', 'test:billing-foundation'],
+    },
+    ui: {
+      root: 'apps/ui',
+      type: 'app',
+      tags: ['ci:browser', 'ci:desktop'],
+      targets: ['verify-browser', 'size', 'test:viewer-parity', 'formal'],
+    },
+    cli: {
+      root: 'packages/cli',
+      type: 'lib',
+      tags: ['ci:native-hosts'],
+      targets: ['test:scenarios', 'test-geospec', 'test:native-linux'],
+    },
+  };
+  const everything = Object.keys(nodes).filter((name) => name !== 'workspace');
+
+  /** Runs the plan step with `pnpm` answering `affected` and the graph, `git` answering `files`, and returns its outputs. */
+  const plan = (
+    event: string,
+    {
+      affected,
+      files,
+      selectors = planStep?.env?.['LANE_SELECTORS'] ?? '',
+    }: { readonly affected: readonly string[]; readonly files: readonly string[]; readonly selectors?: string },
+  ): {
+    readonly status: number | undefined;
+    readonly stdout: string;
+    readonly stderr: string;
+    readonly outputs: Record<string, string>;
+  } => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-ci-plan-'));
+    try {
+      const graph = {
+        graph: {
+          nodes: Object.fromEntries(
+            Object.entries(nodes).map(([name, node]) => [
+              name,
+              {
+                name,
+                type: node.type,
+                data: {
+                  root: node.root,
+                  tags: node.tags ?? [],
+                  targets: Object.fromEntries((node.targets ?? []).map((target) => [target, {}])),
+                },
+              },
+            ]),
+          ),
+        },
+      };
+      writeFileSync(join(directory, 'fixture-graph.json'), JSON.stringify(graph));
+      writeFileSync(join(directory, 'affected.json'), JSON.stringify(affected));
+      writeFileSync(join(directory, 'files'), files.map((file) => `${file}\n`).join(''));
+      writeFileSync(
+        join(directory, 'pnpm'),
+        [
+          '#!/usr/bin/env bash',
+          'set -euo pipefail',
+          'case "$*" in',
+          '  "nx show projects --affected --json") echo "NX log line"; cat "$FIXTURES/affected.json" ;;',
+          '  "nx graph --file="*) cp "$FIXTURES/fixture-graph.json" "$(cut -d= -f2- <<< "$3")" ;;',
+          '  *) echo "unexpected pnpm $*" >&2; exit 1 ;;',
+          'esac',
+          '',
+        ].join('\n'),
+        { mode: 0o700 },
+      );
+      // `git merge-base <base> <head>` answers the base; `git diff --name-only … <base> <head>` the PR's files.
+      writeFileSync(
+        join(directory, 'git'),
+        [
+          '#!/usr/bin/env bash',
+          'set -euo pipefail',
+          'case "$1" in',
+          '  merge-base) [ "$2 $3" = "base-sha head-sha" ] && echo merge-base-sha ;;',
+          '  diff) [ "$*" = "diff --name-only --no-renames --relative merge-base-sha head-sha" ] && cat "$FIXTURES/files" ;;',
+          '  *) echo "unexpected git $*" >&2; exit 1 ;;',
+          'esac',
+          '',
+        ].join('\n'),
+        { mode: 0o700 },
+      );
+      const output = join(directory, 'output');
+      writeFileSync(output, '');
+      const result = spawnSync('bash', ['-e', '-c', planScript], {
+        cwd: directory,
+        encoding: 'utf8',
+        env: Object.fromEntries([
+          ['PATH', `${directory}:${process.env['PATH'] ?? ''}`],
+          ['FIXTURES', directory],
+          ['RUNNER_TEMP', directory],
+          ['GITHUB_EVENT_NAME', event],
+          ['GITHUB_OUTPUT', output],
+          ['NX_BASE', 'base-sha'],
+          ['NX_HEAD', 'head-sha'],
+          ['REUSED', ''],
+          ['LANE_SELECTORS', selectors],
+        ]),
+      });
+      const outputs = Object.fromEntries(
+        readFileSync(output, 'utf8')
+          .split('\n')
+          .filter((line) => line !== '')
+          .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]),
+      );
+      return { status: result.status ?? undefined, stdout: result.stdout, stderr: result.stderr, outputs };
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  };
+
+  it('should run every affected lane in the merge queue', () => {
+    const { status, stderr, outputs } = plan('merge_group', {
+      affected: everything,
+      files: ['packages/core/src/index.ts'],
+    });
+    expect(status, stderr).toBe(0);
+    expect(outputs).toMatchObject({ api: 'true', billing: 'true', formal: 'true', browser: 'true', 'cli-e2e': 'true' });
+  });
+
+  it('should leave a touched-rule lane to the queue on a pull request that affects it only through a dependency', () => {
+    const { status, stderr, outputs } = plan('pull_request', {
+      affected: everything,
+      files: ['packages/core/src/index.ts'],
+    });
+    expect(status, stderr).toBe(0);
+    expect(outputs['api']).toBe('false');
+    // Lanes without a pull-request rule run as Nx selected them.
+    expect(outputs['apps']).toBe('["api","api-e2e","ui"]');
+    expect(outputs['size']).toBe('true');
+    expect(outputs['api-image']).toBe('true');
+  });
+
+  it('should run a touched-rule lane on a pull request whose own diff touches one of its projects', () => {
+    const { status, stderr, outputs } = plan('pull_request', {
+      affected: everything,
+      files: ['packages/core/src/index.ts', 'apps/libs/api-billing/src/ledger.ts'],
+    });
+    expect(status, stderr).toBe(0);
+    expect(outputs['api']).toBe('true');
+    // A queue-rule lane stays in the queue even when the diff touches its project.
+    expect(outputs['billing']).toBe('false');
+    for (const lane of ['formal', 'browser', 'geospec-examples', 'cli-e2e', 'native-hosts', 'viewer-parity']) {
+      expect(outputs[lane], lane).toBe('false');
+    }
+    expect(outputs['native-linux']).toBe('');
+    expect(outputs['browser-projects']).toBe('[]');
+  });
+
+  it('should own a file by the deepest project root above it, as Nx does', () => {
+    // `apps/api-e2e/…` is not under `apps/api`; a root-level file belongs to the workspace project.
+    const outside = plan('pull_request', {
+      affected: ['api', 'workspace'],
+      files: ['pnpm-lock.yaml', 'apps/api-docs/readme.md'],
+    });
+    expect(outside.status, outside.stderr).toBe(0);
+    expect(outside.outputs['api']).toBe('false');
+    const sibling = plan('pull_request', { affected: ['api', 'api-e2e'], files: ['apps/api-e2e/src/smoke.test.ts'] });
+    expect(sibling.status, sibling.stderr).toBe(0);
+    expect(sibling.stdout).toContain('Pull request (touched) api: ["api-e2e"]');
+    const own = plan('pull_request', { affected: ['api'], files: ['apps/api/app/main.ts'] });
+    expect(own.stdout).toContain('Pull request (touched) api: ["api"]');
+  });
+
+  it('should fail the plan on a pull-request rule it does not know', () => {
+    const selectors = JSON.stringify({ ...laneSelectors, api: { tags: ['scope:api'], pr: 'sometimes' } });
+    const { status, stderr } = plan('merge_group', { affected: everything, files: [], selectors });
+    expect(status).not.toBe(0);
+    expect(stderr).toContain('lane selectors name a pull-request rule other than queue or touched');
   });
 });

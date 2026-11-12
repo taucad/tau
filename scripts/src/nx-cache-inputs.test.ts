@@ -10,7 +10,8 @@ import { describe, expect, it } from 'vitest';
  * every task hash and marked all projects affected. They are out now, and two things replace what
  * they implicitly covered: the runner's Node version is a `runtime` input, and every environment
  * value the cache-writing workflow hands to a `test` task is an `env` input of `serviceEnvironment`.
- * A new `env:` entry in `ci.yml` that a task reads therefore has to be declared here first.
+ * A new `env:` entry in `ci.yml` that a task reads therefore has to be declared here first, or, when only one lane
+ * sets it for targets that read it, as an `env` input of each of those targets.
  */
 
 const root = resolve(import.meta.dirname, '../..');
@@ -54,18 +55,65 @@ const notTaskInputs = new Set([
 /** Environment that reaches an `nx … -t test` command in `ci.yml`: workflow, job and step level. */
 const testEnvironment = (): ReadonlySet<string> => {
   const names = new Set(Object.keys(ci.env ?? {}));
-  for (const job of Object.values(ci.jobs)) {
-    for (const step of job.steps ?? []) {
-      if (step.run && /\bnx\b[^\n]*-t test\b/.test(step.run)) {
-        for (const name of [...Object.keys(job.env ?? {}), ...Object.keys(step.env ?? {})]) {
-          names.add(name);
-        }
-      }
+  for (const step of testSteps()) {
+    for (const name of step.env) {
+      names.add(name);
     }
   }
   return names;
 };
 
+/** Each `ci.yml` step that runs an `nx … -t test…` command: the targets it names and the job and step environment. */
+function testSteps(): Array<{ readonly targets: readonly string[]; readonly env: readonly string[] }> {
+  return Object.values(ci.jobs).flatMap((job) =>
+    (job.steps ?? []).flatMap((step) =>
+      step.run && /\bnx\b[^\n]*-t test\b/.test(step.run)
+        ? [
+            {
+              targets: [...step.run.matchAll(/\bnx\b[^\n]*?-t ((?:\w[\w:-]* ?)+)/gu)].flatMap((match) =>
+                (match[1] ?? '').trim().split(' '),
+              ),
+              env: [...Object.keys(job.env ?? {}), ...Object.keys(step.env ?? {})],
+            },
+          ]
+        : [],
+    ),
+  );
+}
+
+/** The `env` inputs each explicitly configured target declares, by target name, across every project.json. */
+const projectTargetEnvironment = (): ReadonlyMap<string, ReadonlyArray<ReadonlySet<string>>> => {
+  const byTarget = new Map<string, Array<ReadonlySet<string>>>();
+  const files = execFileSync('git', ['ls-files', '*project.json'], { cwd: root, encoding: 'utf8' })
+    .split('\n')
+    .filter((file) => file.endsWith('project.json'));
+  for (const file of files) {
+    const { targets } = JSON.parse(read(file)) as { targets?: Record<string, { inputs?: readonly Input[] }> };
+    for (const [target, { inputs }] of Object.entries(targets ?? {})) {
+      const env = new Set(
+        (inputs ?? []).flatMap((input) =>
+          typeof input === 'object' && typeof input['env'] === 'string' ? [input['env']] : [],
+        ),
+      );
+      byTarget.set(target, [...(byTarget.get(target) ?? []), env]);
+    }
+  }
+  return byTarget;
+};
+
+/**
+ * Whether every target a step runs declares the name itself: a value only a sharded lane sets (`TAU_CI_SHARD`) is an
+ * input of the targets that read it, not of every `test` task.
+ */
+const declaredByEveryTarget = (name: string): boolean =>
+  testSteps()
+    .filter((step) => step.env.includes(name))
+    .every((step) =>
+      step.targets.every((target) => {
+        const declared = projectTargetEnvironment().get(target) ?? [];
+        return declared.length > 0 && declared.every((env) => env.has(name));
+      }),
+    );
 /*
  * `.dockerignore` matching as BuildKit applies it: each pattern is anchored at the context root, `**`
  * spans directories, a pattern that matches a directory excludes everything below it, and the last
@@ -197,7 +245,7 @@ describe('nx cache inputs', () => {
   it('should declare every environment value ci.yml gives a test task as an input of the test default', () => {
     expect(nx.targetDefaults['test']?.inputs).toContain('serviceEnvironment');
     const undeclared = [...testEnvironment()].filter(
-      (name) => !notTaskInputs.has(name) && !declaredEnvironment.has(name),
+      (name) => !notTaskInputs.has(name) && !declaredEnvironment.has(name) && !declaredByEveryTarget(name),
     );
     expect(undeclared).toEqual([]);
   });
@@ -206,5 +254,11 @@ describe('nx cache inputs', () => {
     const names = testEnvironment();
     expect(names).toContain('DATABASE_URL');
     expect(names).toContain('TAU_API_URL');
+  });
+
+  it('should accept a lane-only value only when every target its lane runs declares it', () => {
+    expect(testEnvironment()).toContain('TAU_CI_SHARD');
+    expect(declaredByEveryTarget('TAU_CI_SHARD')).toBe(true);
+    expect(declaredByEveryTarget('DATABASE_URL')).toBe(false);
   });
 });

@@ -135,19 +135,23 @@ jobs:
           # host). No job here runs it: the packaged suite runs on every staging candidate instead
           # (operator decision D-DS1 (b), `desktop-packaged.yml`), so the lane is informational and
           # `lanes.json` records it for the observed desktop lane rate.
+          # `pr` is a lane's pull-request rule; without it a pull request runs the lane as the queue does.
+          # "queue": the lane runs in the merge queue only. "touched": a pull request runs the lane only
+          # for the selected projects that own a file of its own diff (Nx's file-to-project map: the
+          # deepest project root above the file), never for one that is affected only through a dependency.
           LANE_SELECTORS: >-
             {"apps": {"type": "app"},
-             "api": {"tags": ["scope:api"]},
+             "api": {"tags": ["scope:api"], "pr": "touched"},
              "api-image": {"targets": ["docker:smoke"]},
-             "billing": {"targets": ["test:billing-foundation"]},
-             "cli-e2e": {"targets": ["test:scenarios"]},
+             "billing": {"targets": ["test:billing-foundation"], "pr": "queue"},
+             "cli-e2e": {"targets": ["test:scenarios"], "pr": "queue"},
              "size": {"targets": ["size"]},
-             "formal": {"targets": ["formal"]},
-             "geospec-examples": {"targets": ["test-geospec"]},
-             "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"]},
-             "native-hosts": {"tags": ["ci:native-hosts"]},
-             "native-linux": {"targets": ["test:native-linux"]},
-             "viewer-parity": {"targets": ["test:viewer-parity"]},
+             "formal": {"targets": ["formal"], "pr": "queue"},
+             "geospec-examples": {"targets": ["test-geospec"], "pr": "queue"},
+             "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"], "pr": "queue"},
+             "native-hosts": {"tags": ["ci:native-hosts"], "pr": "queue"},
+             "native-linux": {"targets": ["test:native-linux"], "pr": "queue"},
+             "viewer-parity": {"targets": ["test:viewer-parity"], "pr": "queue"},
              "desktop": {"tags": ["ci:desktop"]}}
         run: |
           # `pipefail` so a failing `nx` call fails the step instead of leaving an empty
@@ -161,6 +165,8 @@ jobs:
             | ([$selectors[] | .targets[]?] - [$nodes[] | .data.targets // {} | keys[]]) as $unknown_targets
             | if ($unknown_tags + $unknown_targets) != [] then
                 error("lane selectors name a tag or target no project has: \($unknown_tags + $unknown_targets | join(", "))")
+              elif ([$selectors[] | .pr // empty] - ["queue", "touched"]) != [] then
+                error("lane selectors name a pull-request rule other than queue or touched")
               else . end
             | $selectors | map_values(. as $selector
               | [$affected[] | . as $name | $nodes[$name] | select(. != null)
@@ -178,6 +184,29 @@ jobs:
           if [ -n "$REUSED" ]; then
             lanes=$(jq -c 'map_values([])' <<< "$lanes")
             echo "Reusing merge-queue run $REUSED: its required gate passed every lane it selected on this commit; no lane runs again."
+          fi
+          # A pull request applies each lane's `pr` rule. The "queue" lanes run on the exact commit that
+          # lands: a PR run of them proved nothing the queue does not prove again, and PR runs held about six
+          # times the queue's runner minutes when the 60-job pool was the queue's bottleneck (2026-11-10).
+          # A "touched" lane runs for the projects the diff itself changes, where a deterministic failure
+          # would otherwise first evict a queue entry and rebuild every entry behind it (F15). The files are
+          # Nx's own (`git diff --no-renames --relative` from the merge base of NX_BASE and NX_HEAD).
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            head=${NX_HEAD:-HEAD}
+            lanes=$(git diff --name-only --no-renames --relative "$(git merge-base "$NX_BASE" "$head")" "$head" \
+              | jq -cRn --argjson lanes "$lanes" --argjson selectors "$LANE_SELECTORS" \
+                  --slurpfile graph "$RUNNER_TEMP/graph.json" '
+                ($graph[0].graph.nodes | with_entries({key: (.value.data.root | if . == "" then "." else rtrimstr("/") end), value: .key})) as $roots
+                | def owner: split("/") as $parts
+                    | [range($parts | length; 0; -1) as $depth | $parts[:$depth] | join("/")] + ["."]
+                    | map($roots[.] // empty) | first // empty;
+                [inputs | owner] as $touched
+                | $lanes | with_entries(.key as $lane | $selectors[$lane].pr as $rule
+                  | if $rule == "queue" then .value = []
+                    elif $rule == "touched" then .value |= map(. as $name | select($touched | index([$name]) != null))
+                    else . end)')
+            jq -r --argjson selectors "$LANE_SELECTORS" \
+              'to_entries[] | select($selectors[.key].pr != null) | "Pull request (\($selectors[.key].pr)) \(.key): \(.value | tojson)"' <<< "$lanes"
           fi
           flag() { jq -r --arg lane "$1" 'if .[$lane] == [] then "false" else "true" end' <<< "$lanes"; }
           api=$(flag api)
@@ -198,26 +227,8 @@ jobs:
             native_hosts=false
             native_linux=''
           fi
-          # A pull request runs the fast lanes only. The service, formal, browser, GeoSpec,
-          # CLI end-to-end, native-host and viewer-parity lanes run in the merge queue, on the exact commit
-          # that lands: a PR run of them proved nothing the queue does not prove again, and
-          # PR runs held about six times the queue's runner minutes when the 60-job pool was
-          # the queue's bottleneck (2026-11-10). `api-image` keeps the PR-only Docker smoke
-          # test on the PRs that affect the API image.
+          # `api-image` keeps the PR-only Docker smoke test on the PRs that affect the API image.
           api_image=$(flag api-image)
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            api=false
-            billing=false
-            formal=false
-            browser=false
-            geospec_examples=false
-            cli_e2e=false
-            native_hosts=false
-            native_linux=''
-            viewer_parity=false
-            browser_projects='[]'
-            echo "Pull request: service, formal, browser, GeoSpec, CLI end-to-end, native-host and viewer-parity lanes run in the merge queue."
-          fi
           {
             echo "apps=$(jq -c '.apps' <<< "$lanes")"
             echo "browser-projects=$browser_projects"

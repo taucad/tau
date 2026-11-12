@@ -1229,6 +1229,25 @@ export const uiReadPostHogSummary: BrowserCommand<
   };
 };
 
+/** One captured PostHog event with the properties it carried, as the fixture decoded them. */
+export type PostHogCapturedEvent = Readonly<{ event: string; properties: Readonly<Record<string, unknown>> }>;
+
+/**
+ * The captured events named in `names`, in capture order, each with its decoded `properties`. A spec uses it to
+ * assert an event's exact properties (onboarding M1), where the summary only says whether a string appeared.
+ */
+export const uiReadPostHogEvents: BrowserCommand<[names: readonly string[]], readonly PostHogCapturedEvent[]> = (
+  commandContext,
+  names,
+) =>
+  sessionFor(commandContext)
+    .posthogEvents.filter(({ event }) => names.includes(event))
+    .map(({ event, decoded }) => {
+      const [line = '{}'] = decoded.split('\n');
+      const parsed = JSON.parse(line) as { readonly properties?: Readonly<Record<string, unknown>> };
+      return { event, properties: parsed.properties ?? {} };
+    });
+
 /** Release a response parked mid-stream; omit `turn` for the newest one. */
 export const uiReleaseAgentHostGatewayFixture: BrowserCommand<[turn?: string]> = (commandContext, turn) => {
   releaseGate(
@@ -3421,6 +3440,7 @@ export const uiBrowserCommands = {
   uiReadAgentHostApiRequests,
   uiReadLinkedGithubFixture,
   uiReadPostHogSummary,
+  uiReadPostHogEvents,
   uiReadAgentHostGatewayState,
   uiReleaseAgentHostGatewayRequest,
   uiWaitForAgentHostGatewayGate,

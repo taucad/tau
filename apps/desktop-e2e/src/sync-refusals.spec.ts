@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { desktopE2EApiUrl, desktopE2EDesktopCloudEnabled } from '#support/config.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import {
+  backupLine,
   forgetBackupByDefault,
   connectTauCloud,
   openBackupChooser,
@@ -121,7 +122,7 @@ const openRevisions = async (client: PageClient): Promise<void> => {
     .click({ timeout: 120_000 });
 };
 
-/** Open History and its Sync region through the product's own offer. */
+/** Open History and its Backup line's chooser through the product's own offer (C4). */
 const openSync = async (client: PageClient): Promise<void> => {
   await openRevisions(client);
   await openBackupChooser(client.page);
@@ -420,7 +421,7 @@ describe('a Pro owner and a decision that travels (D14)', () => {
     const { client } = required(pro);
     await createProject(client, 'W6 Reserved Name');
     const { page } = client;
-    /* *New branch* is offered from a revision: record one first. A fresh
+    /* *New branch…* is offered from a revision: record one first. A fresh
      * project opens with Files already showing, where the Files chord closes it;
      * Revisions first leaves the chord to open Files, as it does after a connect. */
     await page
@@ -428,7 +429,14 @@ describe('a Pro owner and a decision that travels (D14)', () => {
       .first()
       .click({ timeout: 120_000 });
     await mintRevision(client, 'reserved.scad');
-    await page.getByRole('button', { name: 'New branch', exact: true }).first().click({ timeout: 120_000 });
+    /* C2/D3 (59f8f356a8, bee2a79e41): the branch chip is the branch menu, and
+     * *New branch…* is its last item; the branches are its radio items. */
+    const chip = page
+      .getByRole('button', { name: /^Branch: .+\. Switch branch$/u })
+      .filter({ visible: true })
+      .first();
+    await chip.click({ timeout: 120_000 });
+    await page.getByRole('menuitem', { name: 'New branch…', exact: true }).click({ timeout: 120_000 });
     await page.getByLabel('Branch name').fill('conflicts');
     await page.getByRole('button', { name: 'Create branch', exact: true }).click();
 
@@ -437,7 +445,12 @@ describe('a Pro owner and a decision that travels (D14)', () => {
         timeout: 60_000,
       })
       .toBeGreaterThan(0);
-    expect(await page.getByRole('list', { name: 'Branches' }).getByText('conflicts', { exact: true }).count()).toBe(0);
+    await page.keyboard.press('Escape');
+    await chip.click();
+    const branches = page.getByRole('menuitemradio');
+    await branches.first().waitFor({ state: 'visible', timeout: 30_000 });
+    expect(await page.getByRole('menuitemradio', { name: /^conflicts(?:\s|$)/u }).count()).toBe(0);
+    await page.keyboard.press('Escape');
   }, 900_000);
 });
 
@@ -460,7 +473,29 @@ describe('a free-tier owner (W8)', () => {
 
   const regionText = async (client: PageClient): Promise<string> =>
     // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- Playwright's locator method keeps rendered line breaks.
-    client.page.getByRole('region', { name: 'Sync' }).filter({ visible: true }).first().innerText();
+    backupLine(client.page).innerText();
+
+  /**
+   * The Backup line with its *Manage* popover, where C4 (dbee175fd2) moved the
+   * storage figure (`x of 1 GB`). Opened and closed per read, so a poll can
+   * call it; a line with no Manage reads as the line alone.
+   */
+  const figureText = async (client: PageClient): Promise<string> => {
+    const { page } = client;
+    const line = await regionText(client);
+    const manage = backupLine(page).getByRole('button', { name: 'Manage', exact: true });
+    if (!(await manage.isVisible())) {
+      return line;
+    }
+    await manage.click();
+    const popover = page.getByRole('dialog', { name: 'Manage backup' });
+    await popover.waitFor({ state: 'visible', timeout: 10_000 });
+    // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- Playwright's locator method keeps rendered line breaks.
+    const managed = await popover.innerText();
+    await page.keyboard.press('Escape');
+    await popover.waitFor({ state: 'hidden', timeout: 10_000 });
+    return `${line}\n${managed}`;
+  };
 
   /** A stock-git clone of the project as the owner, for pushes a client would not make. */
   const clonePeer = async (projectId: string, label: string): Promise<Readonly<{ directory: string; git: GitIn }>> => {
@@ -544,19 +579,20 @@ describe('a free-tier owner (W8)', () => {
     await openRevisions(client);
 
     await openBackupChooser(client.page);
-    const region = client.page.getByRole('region', { name: 'Sync' }).filter({ visible: true }).first();
+    const region = backupLine(client.page);
     const choice = region.getByRole('radio', { name: 'Tau Cloud' });
     await expect.poll(async () => choice.isEnabled(), { timeout: 60_000 }).toBe(true);
     expect(await regionText(client), 'D16: the chooser says what Free includes').toContain('1 GB included');
     await choice.click();
-    await region.getByRole('button', { name: 'Connect backup', exact: true }).click();
+    /* C4 (dbee175fd2): the chooser's apply verb names the destination. */
+    await region.getByRole('button', { name: 'Back up to Tau Cloud', exact: true }).click();
     await expect.poll(async () => backupText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
-    await expect.poll(async () => regionText(client), { message: 'D18: x of 1 GB', timeout: 120_000 }).toMatch(figure);
+    await expect.poll(async () => figureText(client), { message: 'D18: x of 1 GB', timeout: 120_000 }).toMatch(figure);
 
     await client.page.reload({ waitUntil: 'domcontentloaded' });
     await openSync(client);
     await expect
-      .poll(async () => regionText(client), { message: 'D18: the figure after a reopen', timeout: 120_000 })
+      .poll(async () => figureText(client), { message: 'D18: the figure after a reopen', timeout: 120_000 })
       .toMatch(figure);
 
     const slug = await openCloudOnlyProject(b.page, {
@@ -567,12 +603,12 @@ describe('a free-tier owner (W8)', () => {
     desktopRoot = join(b.homeRoot, slug);
     await openSync(b);
     await expect
-      .poll(async () => regionText(b), { message: 'D18: the desktop reads the figure', timeout: 180_000 })
+      .poll(async () => figureText(b), { message: 'D18: the desktop reads the figure', timeout: 180_000 })
       .toMatch(figure);
     await b.page.reload({ waitUntil: 'domcontentloaded' });
     await openSync(b);
     await expect
-      .poll(async () => regionText(b), { message: 'D18: the desktop figure after a reopen', timeout: 180_000 })
+      .poll(async () => figureText(b), { message: 'D18: the desktop figure after a reopen', timeout: 180_000 })
       .toMatch(figure);
   }, 900_000);
 
@@ -604,7 +640,8 @@ describe('a free-tier owner (W8)', () => {
       );
       await expect
         .poll(async () => revisionStrip(b.page).textContent(), { timeout: 30_000 })
-        .toContain('Over your plan');
+        /* C1 (13ae1b6fab): the quota ask reads *Storage is full*. */
+        .toContain('Storage is full');
     } finally {
       await spendProjectStorage(allowanceProjectId, 0);
       await rm(peer.directory, { recursive: true, force: true });
@@ -627,11 +664,12 @@ describe('a free-tier owner (W8)', () => {
       expect(actions, 'D17: the owner gets exactly one action').toHaveLength(1);
       expect(actions[0]).toMatch(/Upgrade/u);
       const listed = await regionText(client);
-      expect(listed).toContain('These files are over your plan and were not backed up:');
+      expect(listed).toContain('These files don’t fit in your plan and aren’t backed up:');
       expect(listed).toContain('over-allowance.step');
       const strip = revisionStrip(client.page);
       expect(await strip.getByRole('button', { name: /Upgrade/u }).count(), 'D17: the strip offers Upgrade').toBe(1);
-      expect(await strip.getByRole('button', { name: 'Sync now', exact: true }).count()).toBe(0);
+      /* C2/C4: the retry verb is *Try again* (dbee175fd2); a plan refusal offers none. */
+      expect(await strip.getByRole('button', { name: 'Try again', exact: true }).count()).toBe(0);
     } finally {
       await spendProjectStorage(projectId, 0);
     }
@@ -665,9 +703,9 @@ describe('a free-tier owner (W8)', () => {
         'D17: no plan action for a collaborator',
       ).toEqual([]);
       const listed = await regionText(guest.client);
-      expect(listed).toContain('These files did not fit in the project owner’s plan and were not backed up:');
+      expect(listed).toContain('These files don’t fit in the project owner’s plan and aren’t backed up:');
       expect(listed).toContain('shared-over.step');
-      expect(listed, 'D18: a collaborator draws no figure').not.toMatch(figure);
+      expect(await figureText(guest.client), 'D18: a collaborator draws no figure').not.toMatch(figure);
       expect(
         await revisionStrip(guest.client.page)
           .getByRole('button', { name: /Upgrade/u })
@@ -738,8 +776,13 @@ describe('a free-tier owner (W8)', () => {
       await client.page.reload({ waitUntil: 'domcontentloaded' });
       await openSync(client);
       await expect
-        .poll(async () => regionText(client), { message: 'D18: the retained column after a reopen', timeout: 120_000 })
-        .toMatch(/of 1 GB[\s\S]*kept for recovery, not counted/u);
+        .poll(async () => figureText(client), { message: 'D18: the charged figure after a reopen', timeout: 120_000 })
+        .toMatch(figure);
+      /* M8 (dbee175fd2): retained packs were a debug figure; neither the line
+       * nor Manage names them, so the charged figure is the only one drawn. */
+      expect(await figureText(client), 'D18: no retained figure beside the charged one').not.toMatch(
+        /kept for recovery/u,
+      );
     } finally {
       await rm(peer.directory, { recursive: true, force: true });
     }

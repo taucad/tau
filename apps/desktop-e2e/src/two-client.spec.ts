@@ -18,6 +18,7 @@ import {
 } from '#support/gateway-fixture.js';
 import { expectCount, expectVisible, selectChatModel, sendPrompt, stopButtonOf } from '#support/scenario.js';
 import {
+  backupLine,
   forgetBackupByDefault,
   connectTauCloud,
   currentRestoreRow,
@@ -223,13 +224,13 @@ const openRevisionsPane = async (client: PageClient): Promise<void> => {
     .click({ timeout: 120_000 });
 };
 
-/** Open the Revisions pane and reveal the Sync region's connect choice. */
+/** Open the Revisions pane and reveal the Backup line's connect choice. */
 const openSyncRegion = async (client: PageClient): Promise<void> => {
   const { page } = client;
   await openRevisionsPane(client);
-  /* D26/A29: the region replaces the strip's *Back up* once a remote exists, so
-   * a re-open finds the region directly. A project with no revision yet saves
-   * its first one, because nothing offers a backup before it (S1). */
+  /* C2/C4 (dbee175fd2, 59f8f356a8): the Backup line is the pane's last line;
+   * a connected one reads its remote and sync state directly, so a re-open
+   * finds it. A project with no revision yet saves its first one (S1). */
   await openBackupChooser(page);
 };
 
@@ -293,10 +294,10 @@ const revisionRowCount = async (client: BrowserClient): Promise<number> => histo
 const modifiedChip = (page: Page): Locator =>
   page.getByRole('button', { name: /^Open History\..* Unsaved changes\.$/u });
 
-/** What the Sync region says right now. */
+/** What the Backup line says right now (C4: the Sync region became the pane's last line). */
 const syncRegionText = async (client: PageClient): Promise<string> =>
   // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- Playwright's own locator method; `textContent` would drop the line breaks the copy reads by.
-  client.page.getByRole('region', { name: 'Sync' }).first().innerText();
+  backupLine(client.page).innerText();
 
 type ChatIdentity = Readonly<{ id: string; title: string }>;
 
@@ -755,13 +756,10 @@ describe('a project on the browser client', () => {
     await registerProjectOnRemote(accountOwner, projectId, 'W18 Two Client');
     await openSyncRegion(client);
     await chooseTauCloud(client);
-    /* The connected row (`revision-sync-region.tsx`) names the remote, and its
-     * *Backup settings* menu offers *Change backup…*, which no other phase
-     * renders; it prints neither the URL nor a bare *Disconnect*. */
-    const settings = client.page
-      .getByRole('region', { name: 'Sync' })
-      .first()
-      .getByRole('button', { name: 'Backup settings', exact: true });
+    /* The connected line (`revision-sync-region.tsx`) names the remote, and its
+     * *Manage* popover offers *Change…*, which no other phase renders (C4,
+     * dbee175fd2: Manage replaced the *Backup settings* menu). */
+    const settings = backupLine(client.page).getByRole('button', { name: 'Manage', exact: true });
     await expect
       .poll(
         async () => {
@@ -775,7 +773,10 @@ describe('a project on the browser client', () => {
       )
       .toBe(true);
     await settings.click();
-    await client.page.getByRole('menuitem', { name: 'Change backup…', exact: true }).waitFor({ state: 'visible' });
+    await client.page
+      .getByRole('dialog', { name: 'Manage backup' })
+      .getByRole('button', { name: 'Change…', exact: true })
+      .waitFor({ state: 'visible' });
     await client.page.keyboard.press('Escape');
   }, 900_000);
 
@@ -851,15 +852,15 @@ describe('a project on the browser client', () => {
         .poll(
           async () =>
             client.page
-              .getByText('These files are over your plan and were not backed up:', { exact: true })
+              .getByText('These files don’t fit in your plan and aren’t backed up:', { exact: true })
               .first()
               .textContent(),
           {
-            message: 'D16: the LFS batch refusal must use the exact over-plan sentence',
+            message: 'D16: the LFS batch refusal must use the exact over-plan sentence (C4 copy, dbee175fd2)',
             timeout: 120_000,
           },
         )
-        .toBe('These files are over your plan and were not backed up:');
+        .toBe('These files don’t fit in your plan and aren’t backed up:');
       await expect
         .poll(async () => syncRegionText(client), {
           message: 'D16: the LFS batch refusal must name the authored file',
@@ -2431,9 +2432,11 @@ describe('a git remote', () => {
     }
     await turnOffDefaultBackup(browser, await createProjectInBrowser(browser, 'W18 Git Remote'));
     await openSyncRegion(browser);
-    const syncRegion = browser.page.getByRole('region', { name: 'Sync' }).filter({ visible: true }).last();
-    await syncRegion.getByRole('radio', { name: 'Git remote' }).click();
-    await syncRegion.getByText('Advanced HTTPS remote', { exact: true }).click();
+    /* C4 (dbee175fd2): the chooser's Git choice is *GitHub or another Git
+     * host*, and a plain address sits under its *Another Git host* disclosure. */
+    const syncRegion = backupLine(browser.page);
+    await syncRegion.getByRole('radio', { name: 'GitHub or another Git host' }).click();
+    await syncRegion.getByText('Another Git host', { exact: true }).click();
     await syncRegion.getByLabel('Repository address').fill(gitRemote.url);
     const connect = syncRegion.getByRole('button', { name: 'Connect', exact: true });
     await expect.poll(async () => connect.isEnabled(), { timeout: 30_000 }).toBe(true);
@@ -2862,7 +2865,9 @@ describe('backup by default and one library', () => {
     await turnOffDefaultBackup(client, keptSlug);
     await client.page.reload({ waitUntil: 'domcontentloaded' });
     await openRevisionsPane(client);
-    await expect.poll(async () => statusText(client), { timeout: 120_000 }).toBe('Nothing saved yet');
+    /* A6 (1c9fd4ee34): the first open mints *V1 · Start*, so a new project is
+     * already saved here; kept local, it says so and stays unregistered. */
+    await expect.poll(async () => statusText(client), { timeout: 120_000 }).toBe('Saved on this device');
     await saveRevisionInBrowser(client);
     await expect.poll(async () => statusText(client), { timeout: 120_000 }).toBe('Saved on this device');
 
@@ -2879,10 +2884,12 @@ describe('backup by default and one library', () => {
     const third = await launchTauCloudDesktop(bearer);
     try {
       await third.page.goto('app://tau/?settings=filesystem', { waitUntil: 'domcontentloaded' });
-      await third.page
-        .getByRole('group', { name: 'Workspace for Tau Cloud projects' })
-        .getByRole('radio', { name: 'Home', exact: true })
-        .check({ timeout: 120_000 });
+      /* The setting (d19597bf0b, #1227) is the *Tau Cloud projects* select,
+       * whose options are Off, Home and each connected workspace. */
+      const destination = third.page.getByRole('combobox', { name: 'Tau Cloud projects', exact: true });
+      await destination.click({ timeout: 120_000 });
+      await third.page.getByRole('option', { name: 'Home', exact: true }).click();
+      await expect.poll(async () => destination.textContent(), { timeout: 30_000 }).toBe('Home');
       await third.page.keyboard.press('Escape');
 
       await searchLibrary(third.page, { projectsUrl, name });

@@ -6,7 +6,13 @@ import { join } from 'node:path';
 import process from 'node:process';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { desktopE2EApiUrl } from '#support/config.js';
-import { currentRestoreRow, historyRows, restoreFromHistory, revisionStatus } from '#support/revisions-pane.js';
+import {
+  backupLine,
+  currentRestoreRow,
+  historyRows,
+  restoreFromHistory,
+  revisionStatus,
+} from '#support/revisions-pane.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import { launchBrowserClient, openCloudOnlyProject, uploadFileInPage } from '#support/two-client/browser-client.js';
 import type { BrowserClient } from '#support/two-client/browser-client.js';
@@ -193,7 +199,7 @@ it('should preserve a legacy cloud identity through browser and CLI sync without
       .first()
       .click();
     await expect
-      .poll(async () => browser.page.getByRole('region', { name: 'Sync', exact: true }).first().textContent(), {
+      .poll(async () => backupLine(browser.page).textContent(), {
         timeout: 120_000,
       })
       .toContain('Backed up');

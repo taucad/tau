@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { desktopE2EFrontendUrl } from '#support/config.js';
 import { deliverDesktopDeepLink, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { openBackupChooser } from '#support/revisions-pane.js';
+import { connectTauCloud, openBackupChooser } from '#support/revisions-pane.js';
 import { expectSignedIn, expectVisible } from '#support/scenario.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import { forgetSeededProjects, seedProPlan, tauCloudOwnerIds } from '#support/two-client/tau-cloud.js';
@@ -34,10 +34,10 @@ import type { TauCloudOwnerIds } from '#support/two-client/tau-cloud.js';
  * link — and, unlike a real handler registration, needs no packaged bundle.
  */
 
-/* The invitation card is the owner's half of a *connected Tau Cloud* project
- * (`revision-sync-region.tsx`: `role === 'owner' && remote.kind === 'tau' &&
- * remote.phase === 'connected'`); the plan is seeded exactly as the two-client
- * tier seeds it. */
+/* The invitation card is the owner's half of a *connected Tau Cloud* project,
+ * in the Share panel since C4 (dbee175fd2: `ProjectPeopleWithAccess` renders
+ * for `role === 'owner' && remote.kind === 'tau' && remote.phase ===
+ * 'connected'`); the plan is seeded exactly as the two-client tier seeds it. */
 const account = tauTestAccount('share-link-copy');
 const projectName = 'R5 Share Link';
 const invitee = 'tau-desktop-share-link-invitee@example.test';
@@ -95,24 +95,25 @@ describe('desktop share links', () => {
     await page.waitForURL(/\/w\/[^/]+\/[^/?]+/u, { timeout: 180_000 });
 
     /* The same two steps `two-client.spec.ts` drives: the workbench chip opens
-     * the pane, and the region only offers the radio while no remote exists. */
+     * the pane, and the Backup line's chooser connects Tau Cloud. */
     await page
       .getByRole('button', { name: /^Open History\./u })
       .first()
       .click({ timeout: 120_000 });
     await openBackupChooser(page);
-    /* Waited for rather than sampled: the region renders before its choices do,
-     * and a sampled `isVisible()` skipped the connect entirely — leaving a
-     * project with no remote, which renders no invitation card at all. */
-    const choice = page.getByRole('radio', { name: 'Tau Cloud' }).first();
-    await expectVisible(choice, 60_000);
-    await choice.click();
-    await page.getByRole('button', { name: 'Connect backup', exact: true }).first().click();
+    /* An entitled new project connects itself after its first revision (D19);
+     * the shared helper hands the chooser over only while that has not
+     * happened, so it never clicks a choice that is about to unmount. */
+    await connectTauCloud(page);
+    await expectVisible(page.getByRole('status', { name: 'Backup status' }).filter({ hasText: 'Tau Cloud' }), 180_000);
 
-    const email = page.getByLabel('Invite by email');
+    /* C4 (dbee175fd2): People with access moved from History to Share. */
+    await page.getByRole('button', { name: 'Share', exact: true }).first().click();
+    const people = page.getByRole('region', { name: 'People with access' });
+    const email = people.getByLabel('Invite by email');
     await expectVisible(email, 180_000);
     await email.fill(invitee);
-    await page.getByRole('button', { name: 'Create invitation' }).first().click();
+    await people.getByRole('button', { name: 'Create invite link' }).click();
     const created = page.getByRole('status', { name: 'Invitation created' }).first();
     await expectVisible(created, 60_000);
 

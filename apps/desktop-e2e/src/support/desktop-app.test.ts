@@ -310,6 +310,51 @@ describe('initial main navigation readiness', () => {
   });
 });
 
+describe('desktop shutdown', () => {
+  it('should let main finish exiting after app.exit answers instead of killing it', async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-shutdown-test-'));
+    const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+    // oxlint-disable-next-line unicorn/prefer-event-target -- the child process uses Node EventEmitter semantics.
+    const exits = new EventEmitter();
+    const child = mockDeep<ReturnType<typeof application.process>>({ exitCode: null, signalCode: null });
+    child.once.mockImplementation((event, listener) => {
+      exits.once(String(event), listener);
+      return child;
+    });
+    application.evaluate.mockResolvedValue(undefined);
+    application.process.mockReturnValue(child);
+    application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
+    application.browserWindow.mockResolvedValue(mockDeep<Awaited<ReturnType<typeof application.browserWindow>>>());
+    const page = mockDeep<Awaited<ReturnType<typeof application.firstWindow>>>();
+    page.url.mockReturnValue('app://tau/');
+    const context = mockDeep<ReturnType<typeof page.context>>();
+    context.tracing.stop.mockResolvedValue();
+    page.context.mockReturnValue(context);
+    application.firstWindow.mockResolvedValue(page);
+    const launch = vi.spyOn(electron, 'launch').mockResolvedValueOnce(application);
+    try {
+      const session = await launchDesktopApp({ token: 'fixture-token', profileRoot, preserveProfile: true });
+      application.evaluate.mockImplementation(async () => {
+        /* Main answers the evaluation as its shutdown starts, and exits a moment later. */
+        setTimeout(() => {
+          Object.assign(child, { exitCode: 0 });
+          exits.emit('exit', 0, null);
+        }, 50);
+        return undefined;
+      });
+      await session.close();
+      expect(child.kill).not.toHaveBeenCalled();
+    } finally {
+      const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+      launch.mockRestore();
+      await rm(profileRoot, { recursive: true, force: true });
+      if (picked) {
+        await rm(dirname(picked), { recursive: true, force: true });
+      }
+    }
+  }, 20_000);
+});
+
 describe('owned main navigation diagnostics', () => {
   it('should retain bounded scalar navigation evidence without credentials or event interference', () => {
     // oxlint-disable-next-line unicorn/prefer-event-target -- Electron WebContents uses Node EventEmitter semantics.

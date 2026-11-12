@@ -14,7 +14,11 @@
  *   unless it is the branch you are on.
  * - A branch merged into another branch in view keeps its lane and loses its
  *   chip; its rows name it instead.
+ * - A conflict line is never a branch (D3): its entries take no lane and its
+ *   name no chip. A merge waiting on it is one pending node on the branch it
+ *   lands on, linked to the branch it brings in, which is then in view.
  */
+import type { RevisionConflictFacet, RevisionStatusProjection } from '@taucad/revisions';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { branchSlotsOf } from '#components/revisions/revision-graph-view.js';
 import type { BranchSlot } from '#components/revisions/revision-graph-view.js';
@@ -33,6 +37,18 @@ export type HistoryLanesInput = Readonly<{
   /** The branch the files are on. */
   current: string | undefined;
   filter: HistoryFilter;
+  /** The conflicts waiting on a decision, from the status projection. */
+  conflicts?: ReadonlyArray<Pick<RevisionConflictFacet, 'revisionId' | 'branch' | 'into' | 'labels'>>;
+}>;
+
+/** A merge waiting on a decision, drawn as one node on the branch it lands on. */
+export type PendingMerge = Readonly<{
+  /** The conflicted entry. */
+  revisionId: string;
+  /** The branch it lands on. */
+  into: string;
+  /** The branch it brings in, when that is a branch History can draw. */
+  from: string | undefined;
 }>;
 
 /** What History shows of the graph. */
@@ -53,6 +69,8 @@ export type HistoryLanes = Readonly<{
   notes: ReadonlyMap<string, string>;
   /** Each line's colour and shape. */
   slots: ReadonlyMap<string, BranchSlot>;
+  /** Merges waiting on a decision, each on a branch in view. */
+  pending: readonly PendingMerge[];
   /** More than one lane is in view, so History draws the graph. */
   hasLanes: boolean;
 }>;
@@ -60,13 +78,54 @@ export type HistoryLanes = Readonly<{
 const trunkName = 'main';
 
 /**
+ * The stored lines that hold a conflict waiting on a decision (D14), which no
+ * surface lists as a branch (D3). A conflict recorded on the line it lands on
+ * has no line of its own.
+ *
+ * @param conflicts - The conflicts, from the status projection.
+ * @returns Their lines' names.
+ */
+export const conflictLinesOf = (
+  conflicts: ReadonlyArray<Pick<RevisionConflictFacet, 'branch' | 'into'>> | undefined,
+): ReadonlySet<string> =>
+  new Set(
+    (conflicts ?? []).flatMap((conflict) =>
+      conflict.branch === undefined || conflict.branch === conflict.into ? [] : [conflict.branch],
+    ),
+  );
+
+/**
+ * The branches a person can pick: every branch the projection lists except the
+ * lines that hold a conflict (D3).
+ *
+ * @param status - The status projection, while it is known.
+ * @returns The branches, in the projection's order.
+ */
+export const listedBranchesOf = (
+  status: Pick<RevisionStatusProjection, 'branches' | 'conflicts'> | undefined,
+): RevisionStatusProjection['branches'] => {
+  const conflictLines = conflictLinesOf(status?.conflicts);
+  return (status?.branches ?? []).filter((branch) => !conflictLines.has(branch.name));
+};
+
+/**
  * Lay out which lines History draws.
  *
  * @param input - The graph read, where the files are, and the filter.
  * @returns The entries in view and each line's part.
  */
-export const historyLanesOf = ({ branches, revisions, lineOf, current, filter }: HistoryLanesInput): HistoryLanes => {
-  const byId = new Map(revisions.map((revision) => [revision.revisionId, revision] as const));
+export const historyLanesOf = ({
+  branches: everyLine,
+  revisions: everyEntry,
+  lineOf,
+  current,
+  filter,
+  conflicts = [],
+}: HistoryLanesInput): HistoryLanes => {
+  const conflictLines = conflictLinesOf(conflicts);
+  const branches = everyLine.filter((branch) => !conflictLines.has(branch.name));
+  const revisions = everyEntry.filter((revision) => !conflictLines.has(lineOf.get(revision.revisionId) ?? ''));
+  const byId = new Map(everyEntry.map((revision) => [revision.revisionId, revision] as const));
   const trunk = branches.some((branch) => branch.name === trunkName) ? trunkName : branches[0]?.name;
   const named = new Set(branches.map((branch) => branch.name));
   const lineOfId = (id: string): string => lineOf.get(id) ?? trunk ?? '';
@@ -93,10 +152,28 @@ export const historyLanesOf = ({ branches, revisions, lineOf, current, filter }:
   /* A4: a line made of Tau's setup changes alone is not a fork anyone made. */
   const isForked = (line: string): boolean => (ownOf.get(line) ?? []).some((revision) => revision.isSetup !== true);
 
+  /* A pending merge brings in the branch it waits on: its link is drawn to that branch's lane. */
+  const pendingAll = conflicts.flatMap((conflict): PendingMerge[] => {
+    if (conflict.branch === undefined || !conflictLines.has(conflict.branch)) {
+      return [];
+    }
+    const theirs = conflict.labels?.theirs;
+    const side = byId.get(conflict.revisionId)?.otherParents?.[0];
+    const from = theirs !== undefined && named.has(theirs) ? theirs : side === undefined ? undefined : lineOfId(side);
+    return [
+      {
+        revisionId: conflict.revisionId,
+        into: conflict.into,
+        from: from === undefined || from === conflict.into || conflictLines.has(from) ? undefined : from,
+      },
+    ];
+  });
+  const sources = new Set(pendingAll.flatMap((merge) => (merge.from === undefined ? [] : [merge.from])));
+
   const anchors = branches.filter((branch) => branch.name === current || branch.name === trunk);
   const reach = new Set(anchors.flatMap((branch) => [...ancestors(branch.head)]));
   const inView = (line: string): boolean => {
-    if (line === current || line === trunk) {
+    if (line === current || line === trunk || (sources.has(line) && isForked(line))) {
       return true;
     }
     return (
@@ -174,6 +251,7 @@ export const historyLanesOf = ({ branches, revisions, lineOf, current, filter }:
     merged,
     notes: new Map(heads.map((branch) => [branch.name, noteOf(branch)] as const)),
     slots: branchSlotsOf(lanePreference),
+    pending: pendingAll.filter((merge) => laneLines.includes(merge.into)),
     hasLanes,
   };
 };

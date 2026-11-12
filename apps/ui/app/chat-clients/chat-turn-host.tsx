@@ -31,7 +31,11 @@ export function ChatTurnHost(): ReactNode {
   const { resolveModel } = useModels();
   const {
     execution: { setActiveExecution },
+    kernel: { preference: kernelPreference, owner: kernelOwner },
   } = useChatComposer();
+  /* Auto turns report how they resolved (blueprint D10); the owner is read again when the turn settles. */
+  const kernelOwnerRef = useRef(kernelOwner);
+  const isAutoRef = useRef(kernelPreference === 'auto');
   const { admitExecution, surfaceDispatchFailure } = useTurnAdmission(agent.execution);
   /* Usage metrics (the turn's context and Tau tool names) need the stored preference; unknown reads as off. */
   const { preferences } = usePrivacyPreferences();
@@ -54,7 +58,9 @@ export function ChatTurnHost(): ReactNode {
     allowsUsageMetricsRef.current = allowsUsageMetrics;
     resolveModelRef.current = resolveModel;
     setActiveExecutionRef.current = setActiveExecution;
-  }, [agent, allowsUsageMetrics, resolveModel, setActiveExecution]);
+    kernelOwnerRef.current = kernelOwner;
+    isAutoRef.current = kernelPreference === 'auto';
+  }, [agent, allowsUsageMetrics, resolveModel, setActiveExecution, kernelOwner, kernelPreference]);
 
   const admit = useCallback(
     async (gesture: ChatTurnGesture): Promise<ChatTurn> => {
@@ -78,6 +84,9 @@ export function ChatTurnHost(): ReactNode {
       const turnTelemetry = telemetry.begin(execution, {
         kernelId: turnAgent.kernel,
         allowsUsageMetrics: allowsUsageMetricsRef.current,
+        ...(isAutoRef.current
+          ? { autoKernel: { ownerAtAdmission: kernelOwnerRef.current, readOwner: () => kernelOwnerRef.current } }
+          : {}),
       });
       const track = (turn: ChatTurn & { runId: string }): ChatTurn => {
         turnTelemetry.admitted(turn.runId);

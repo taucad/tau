@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useParams } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { Switch } from '@taucad/ui/components/switch';
 import { useSession } from '@better-auth-ui/react';
@@ -13,6 +14,7 @@ import { telemetryCopy, useTelemetrySwitch } from '#hooks/use-telemetry-switch.j
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { legalUrl } from '#lib/legal-url.js';
+import { setAnonymousRevisions, useAnonymousRevisions } from '#lib/revision-actor.js';
 
 function LearnMore(): React.JSX.Element {
   return (
@@ -129,6 +131,35 @@ function DesktopAnalyticsRow(): React.JSX.Element | undefined {
 }
 
 /**
+ * Whether what the person saves in this workspace names them (C2). The preference is the workspace's, keyed by the
+ * route's slug, and applies to the next entry: what was recorded stays as it was. Outside a workspace there is no
+ * workspace to choose for, so the row is absent.
+ */
+function HideMyNameRow(): React.JSX.Element | undefined {
+  const { workspace } = useParams();
+  const isHidden = useAnonymousRevisions(workspace ?? '');
+  if (workspace === undefined || workspace === '') {
+    return undefined;
+  }
+  return (
+    <SettingsRow
+      settingId='hide-my-name'
+      title='Hide my name in history'
+      description='Other members see “Anonymous”. The project owner can still see which account backed up a change.'
+      control={
+        <Switch
+          aria-label='Hide my name in history'
+          checked={isHidden}
+          onCheckedChange={(isChecked) => {
+            setAnonymousRevisions(workspace, isChecked);
+          }}
+        />
+      }
+    />
+  );
+}
+
+/**
  * Data controls: every choice about what Tau collects, keeps and uses, and closing the account.
  */
 export function DataControlsSettings(): React.JSX.Element {
@@ -156,6 +187,7 @@ export function DataControlsSettings(): React.JSX.Element {
           }
         />
         <ImproveServiceRow />
+        <HideMyNameRow />
         {isDesktopTarget() ? <DesktopAnalyticsRow /> : undefined}
         <SettingsRow
           settingId='cookie-preferences'

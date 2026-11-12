@@ -28,6 +28,14 @@ type FrameSubscribe = (
 const observerPriority = 6;
 
 /**
+ * Before the controls adapter steps `camera-controls` (its `tickPriority`, -1) and before anything renders: a resize
+ * reaches the camera, and so its native cameras, in the frame that resized.
+ *
+ * @public
+ */
+export const surfacePriority = -2;
+
+/**
  * The R3F root a host adapter is built around, plus the renderer factory's retirement check: a retired factory's
  * canvas was removed, so nothing it reports belongs to a live canvas.
  *
@@ -53,8 +61,9 @@ const surfaceOf = (state: RootState): CanvasSurface => ({
  *
  * - reports a lost WebGL context or WebGPU device as `contextLost`, and a WebGPU device the browser destroyed as
  *   `rendererFailed` (the viewer then remounts on WebGL);
- * - reports `surfaceResized` from the frame loop whenever the root's size or pixel ratio changes, so a canvas moved
- *   to a display with another pixel ratio re-sizes its budget slot;
+ * - reports `surfaceResized` from the frame loop, before the frame renders, whenever the root's size or pixel ratio
+ *   changes: the canvas actor hands it to the camera in that macrostep, and a canvas moved to a display with another
+ *   pixel ratio re-sizes its budget slot;
  * - observes the first frame with area and reports `framePresented` once it can be on screen. A frame's GPU work is
  *   submitted when its callbacks run, but the page paints it only once the compositor produces frames again; on a
  *   software adapter the browser first compiles every pipeline, which can hold the compositor for seconds. A second
@@ -132,13 +141,13 @@ export const createCanvasHostLogic = ({ root, isRetired }: CanvasHostRoot): Canv
       };
     }
 
-    // Every frame: report a changed surface. First frame: once one frame with area is submitted, wait two animation
-    // frames. A size or pixel-ratio change makes R3F draw, so the frame loop sees every change.
+    // Every frame, before it renders: report a changed surface. A size or pixel-ratio change makes R3F draw, so the
+    // frame loop sees every change. First frame, after it is submitted: once one frame with area is, wait two animation
+    // frames.
     let frameRequest: number | undefined;
     let submitted = false;
     let reported = surfaceOf(root.get());
-    let unsubscribeFrame: (() => void) | undefined;
-    const observer = {
+    const surfaceObserver = {
       current(): void {
         const surface = surfaceOf(root.get());
         if (
@@ -149,7 +158,12 @@ export const createCanvasHostLogic = ({ root, isRetired }: CanvasHostRoot): Canv
           reported = surface;
           report({ type: 'surfaceResized', surface });
         }
-        if (submitted || surface.width === 0 || surface.height === 0) {
+      },
+    };
+    const observer = {
+      current(): void {
+        const { width, height } = root.get().size;
+        if (submitted || width === 0 || height === 0) {
           return;
         }
         submitted = true;
@@ -162,7 +176,10 @@ export const createCanvasHostLogic = ({ root, isRetired }: CanvasHostRoot): Canv
       },
     };
     const subscribe = root.internal.subscribe as FrameSubscribe;
-    unsubscribeFrame = subscribe(observer, observerPriority, { getState: root.get });
+    const unsubscribeFrame = [
+      subscribe(surfaceObserver, surfacePriority, { getState: root.get }),
+      subscribe(observer, observerPriority, { getState: root.get }),
+    ];
     const { size } = root.get();
     if (size.width > 0 && size.height > 0) {
       // The canvas may have drawn before the observer subscribed; on demand, ask for the one frame it observes.
@@ -179,8 +196,9 @@ export const createCanvasHostLogic = ({ root, isRetired }: CanvasHostRoot): Canv
     return () => {
       life.stopped = true;
       releaseLossListener();
-      unsubscribeFrame?.();
-      unsubscribeFrame = undefined;
+      for (const unsubscribe of unsubscribeFrame) {
+        unsubscribe();
+      }
       if (frameRequest !== undefined) {
         cancelAnimationFrame(frameRequest);
         frameRequest = undefined;

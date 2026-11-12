@@ -5,7 +5,6 @@ import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import {
-  answerIfAsked,
   awaitSaved,
   editSource,
   focusSource,
@@ -185,7 +184,7 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
   await target.expectHidden(nameInput);
   await target.expectFocused(moreForOlder);
 
-  /* S5 (A9, D1, D2): a restore is a new row named by what it restored, with Undo restore on the strip and the row. */
+  /* S5 (A9, D1, D2): a restore is a new row named by what it restored, with Undo restore on the strip. */
   await restoreFromHistory(
     olderRow,
     selectors.getByCss(`${visibleRevisionsPanel} button[data-revision-row][aria-label^="Restored "]`),
@@ -387,13 +386,12 @@ const createBranch = async (name: string): Promise<void> => {
   await target.expectVisible(branchRow(name), 60_000);
 };
 
-/** Put the workbench on a branch through its row's Switch, answering the guard when it asks. */
+/** Put the workbench on a branch through its row's Switch, which acts at once (C7). */
 const workOn = async (name: string): Promise<void> => {
   if (await target.isVisible(branchRow(name, true))) {
     return;
   }
   await target.click(selectors.getByRole('button', { name: `Switch to ${name}`, exact: true }));
-  await answerIfAsked('Switch branch', branchRow(name, true));
 };
 
 test('S24: places the chat in focus on a branch from its row, then offers Switch to the branch', async () => {
@@ -430,7 +428,7 @@ test('S7: a merge that changed the same lines on both branches waits for a decis
   await target.click(branchRow(branchName).getByRole('button', { name: `Actions for ${branchName}`, exact: true }));
   await target.click(selectors.getByRole('menuitem', { name: `Merge ${branchName} into main`, exact: true }));
   const decision = selectors.getByCss(`${visibleRevisionsPanel} #revision-conflicts-heading`);
-  await answerIfAsked('Merge branch', decision, 120_000);
+  await target.expectVisible(decision, 120_000);
   /* HQ1, HQ2: one sentence, naming the line the decision lands on; main is untouched until then. */
   await target.expectText(
     revisionStrip().getByRole('status', { name: 'History status' }),

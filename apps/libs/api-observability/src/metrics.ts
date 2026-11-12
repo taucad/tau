@@ -713,6 +713,38 @@ export class MetricsService {
     advice: { explicitBucketBoundaries: [...TauMetrics.projectOpenSpanDuration.buckets] },
   });
 
+  // --- Automatic kernel selection (blueprint D10) ---
+
+  public readonly kernelAutoResolutions = this.clientMeter.createCounter(TauMetrics.kernelAutoResolutions.name, {
+    description: TauMetrics.kernelAutoResolutions.description,
+    unit: TauMetrics.kernelAutoResolutions.unit,
+  });
+
+  public readonly kernelOverrides = this.clientMeter.createCounter(TauMetrics.kernelOverrides.name, {
+    description: TauMetrics.kernelOverrides.description,
+    unit: TauMetrics.kernelOverrides.unit,
+  });
+
+  public readonly kernelOverrideTurns = this.clientMeter.createHistogram(TauMetrics.kernelOverrideTurns.name, {
+    description: TauMetrics.kernelOverrideTurns.description,
+    unit: TauMetrics.kernelOverrideTurns.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.kernelOverrideTurns.buckets] },
+  });
+
+  public readonly kernelFirstOutcomes = this.clientMeter.createCounter(TauMetrics.kernelFirstOutcomes.name, {
+    description: TauMetrics.kernelFirstOutcomes.description,
+    unit: TauMetrics.kernelFirstOutcomes.unit,
+  });
+
+  public readonly kernelTurnsToFirstRender = this.clientMeter.createHistogram(
+    TauMetrics.kernelTurnsToFirstRender.name,
+    {
+      description: TauMetrics.kernelTurnsToFirstRender.description,
+      unit: TauMetrics.kernelTurnsToFirstRender.unit,
+      advice: { explicitBucketBoundaries: [...TauMetrics.kernelTurnsToFirstRender.buckets] },
+    },
+  );
+
   // --- Storage accounting scheduler (W14 OB3) ---
 
   /* Observed at collection from the scheduler's shared snapshot, so every Machine exports the same figures. */

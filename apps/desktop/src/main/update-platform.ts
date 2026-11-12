@@ -319,8 +319,10 @@ export const startPlatformUpdater = async (options: PlatformUpdateOptions): Prom
     );
   }
   const electronUpdater = await import('electron-updater');
+  /* The release the last check found. A later check may move it while an earlier download is still pending. */
   let candidate: DesktopUpdateDescriptor | undefined;
-  let file: string | undefined;
+  /* The last release whose download finished, with its file: the only thing `prepare` installs. */
+  let staged: { readonly descriptor: DesktopUpdateDescriptor; readonly file: string } | undefined;
   let url: string | undefined;
   const descriptorUrl = `${origin}/${options.candidateTag ? `releases/${encodeURIComponent(options.candidateTag)}` : 'latest'}/desktop-update-${installation.route}-x64.json`;
   class InstalledProvider extends electronUpdater.Provider<UpdateInfo> {
@@ -423,27 +425,34 @@ export const startPlatformUpdater = async (options: PlatformUpdateOptions): Prom
       return candidate && isNewerVersion(candidate.version, installation.version) ? release(candidate) : undefined;
     },
     download: async () => {
-      const paths = await updater.downloadUpdate();
-      if (paths.length !== 1) {
+      const descriptor = candidate;
+      if (!descriptor) {
+        throw new Error('No update candidate to download');
+      }
+      /* The downloader (electron-updater) empties its pending cache before another release downloads, and again when one fails
+       * (`DownloadedUpdateHelper`), so an earlier file is gone whether or not this download succeeds. */
+      staged = undefined;
+      const [path, ...others] = await updater.downloadUpdate();
+      if (path === undefined || others.length > 0) {
         throw new Error('Expected one complete update file');
       }
-      file = paths[0];
+      staged = { descriptor, file: path };
     },
     prepare: async () => {
-      if (!file || !candidate) {
+      if (!staged) {
         throw new Error('No verified downloaded candidate');
       }
-      parseDesktopUpdateDescriptor(candidate, installation);
-      await verifyDownloadedUpdate(file, candidate);
+      const { descriptor, file: path } = staged;
+      parseDesktopUpdateDescriptor(descriptor, installation);
+      await verifyDownloadedUpdate(path, descriptor);
       if (image) {
         await acknowledgeRunningImage();
         const prepared = await image.prepareInstallation({
-          path: file,
-          sha512: candidate.sha512,
-          size: candidate.size,
-          version: candidate.version,
+          path,
+          sha512: descriptor.sha512,
+          size: descriptor.size,
+          version: descriptor.version,
         });
-        const descriptor = candidate;
         return {
           commit: () => {
             parseDesktopUpdateDescriptor(descriptor, installation);
@@ -457,8 +466,6 @@ export const startPlatformUpdater = async (options: PlatformUpdateOptions): Prom
       if (installation.route !== 'windows-nsis' || !installation.publisher) {
         throw new Error('Missing Windows publisher');
       }
-      const path = file;
-      const descriptor = candidate;
       const { publisher } = installation;
       await verifyWindowsSignature({
         path,

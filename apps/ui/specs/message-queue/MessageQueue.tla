@@ -90,6 +90,8 @@
 \* and queue paths unchanged.
 \* The session store reads and persists the chat's kernel preference beside its active kernel
 \* (automatic kernel selection M4); queue delivery, persistence and placement are unchanged.
+\* The turn host passes the Auto kernel preference and owner to turn telemetry (automatic kernel
+\* selection AKS-10); admission, delivery and the queue barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

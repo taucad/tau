@@ -61,8 +61,9 @@
     "./graphics/metadata/gltf-component-visibility": "./src/graphics/metadata/gltf-component-visibility.ts",
     "./graphics/section-cuts": "./src/graphics/section-cuts.ts",
     "./graphics/three/canvas-three-gl": "./src/graphics/three/canvas-three-gl.ts",
+    "./graphics/three/controls/camera-controls-feel": "./src/graphics/three/controls/camera-controls-feel.ts",
+    "./graphics/three/controls/camera-wheel-router": "./src/graphics/three/controls/camera-wheel-router.ts",
     "./graphics/three/controls/section-handles": "./src/graphics/three/controls/section-handles.ts",
-    "./graphics/three/controls/tau-camera-controls": "./src/graphics/three/controls/tau-camera-controls.tsx",
     "./graphics/three/controls/viewport-gizmo-interaction-lock": "./src/graphics/three/controls/viewport-gizmo-interaction-lock.tsx",
     "./graphics/three/gltf-world": "./src/graphics/three/gltf-world.ts",
     "./graphics/three/materials/infinite-grid-material": "./src/graphics/three/materials/infinite-grid-material.ts",
@@ -258,15 +259,20 @@
         "import": "./dist/graphics/three/canvas-three-gl.mjs",
         "default": "./dist/graphics/three/canvas-three-gl.mjs"
       },
+      "./graphics/three/controls/camera-controls-feel": {
+        "types": "./dist/graphics/three/controls/camera-controls-feel.d.mts",
+        "import": "./dist/graphics/three/controls/camera-controls-feel.mjs",
+        "default": "./dist/graphics/three/controls/camera-controls-feel.mjs"
+      },
+      "./graphics/three/controls/camera-wheel-router": {
+        "types": "./dist/graphics/three/controls/camera-wheel-router.d.mts",
+        "import": "./dist/graphics/three/controls/camera-wheel-router.mjs",
+        "default": "./dist/graphics/three/controls/camera-wheel-router.mjs"
+      },
       "./graphics/three/controls/section-handles": {
         "types": "./dist/graphics/three/controls/section-handles.d.mts",
         "import": "./dist/graphics/three/controls/section-handles.mjs",
         "default": "./dist/graphics/three/controls/section-handles.mjs"
-      },
-      "./graphics/three/controls/tau-camera-controls": {
-        "types": "./dist/graphics/three/controls/tau-camera-controls.d.mts",
-        "import": "./dist/graphics/three/controls/tau-camera-controls.mjs",
-        "default": "./dist/graphics/three/controls/tau-camera-controls.mjs"
       },
       "./graphics/three/controls/viewport-gizmo-interaction-lock": {
         "types": "./dist/graphics/three/controls/viewport-gizmo-interaction-lock.d.mts",

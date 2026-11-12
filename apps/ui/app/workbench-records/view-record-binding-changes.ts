@@ -2,9 +2,9 @@
  * The view-record binding's two pure functions (graphics event-driven state charter G6; D2, D6, D20; I6, I7): what a
  * foreign view record asks the live owners to adopt, and the record the owners' current values make.
  *
- * They are extracted from `useViewSettingsSync` (`#hooks/use-view-settings-sync.ts`), which stays until the wiring lane
- * (G6b) deletes it. Neither reads an actor's snapshot, a clock or React state: the binding machine holds every value
- * they read and calls them inside its transitions.
+ * They were extracted from `useViewSettingsSync`, which the wiring lane (G6b) deleted. Neither reads an actor's
+ * snapshot, a clock or React state: the binding machine holds every value they read and calls them inside its
+ * transitions.
  *
  * The ten inheritable leaves (up direction, field of view, the seven display flags and the grid unit) are command-written
  * and resolver-seeded (graphics charter ruling of 2026-11-12, amending D20, I6 and I7 for those leaves; onboarding
@@ -65,7 +65,7 @@ export type ViewGraphicsAdoption = Extract<
     type:
       | (typeof viewDisplayOwners)[number][2]
       | 'setGridUnit'
-      | 'setUpDirection'
+      | 'adoptUpDirection'
       | 'adoptPinnedMeasurements'
       | 'adoptSectionView';
   }
@@ -179,7 +179,7 @@ const graphicsChanges = ({ previous, next, patch, resolution }: Publication): Vi
     graphics.push({ type: 'setGridUnit', payload: { unit: resolution.after['grid.unit'] } });
   }
   if (seeds(resolution, 'upDirection')) {
-    graphics.push({ type: 'setUpDirection', payload: resolution.after.upDirection });
+    graphics.push({ type: 'adoptUpDirection', payload: resolution.after.upDirection });
   }
   if (!previous || (patch?.measurements === undefined && !same(previous.measurements, next.measurements))) {
     graphics.push({ type: 'adoptPinnedMeasurements', measurements: next.measurements });

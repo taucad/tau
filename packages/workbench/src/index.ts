@@ -55,3 +55,17 @@ export type {
 export { maxSectionCuts, sectionCutSchema, sectionSchema, vectorSchema } from '#section.schema.js';
 export { lengthUnits, viewFieldPaths, viewRecordV1Defaults } from '#view-fields.js';
 export type { LengthUnit, ViewFieldPath, ViewFieldValues } from '#view-fields.js';
+export {
+  readViewField,
+  resolveViewSettings,
+  tauViewDefaults,
+  viewFieldValuesOf,
+  withViewField,
+} from '#view-settings.js';
+export type {
+  PersonViewFieldDefaults,
+  ResolvedViewSettings,
+  ResolveViewSettingsInput,
+  ViewFieldsRecord,
+  ViewFieldSource,
+} from '#view-settings.js';

@@ -30,6 +30,9 @@ export const useFieldEdits = <Value extends ParameterFieldScalar>(
   const { pointer, authority, binding } = field;
   const edits = useActorRef(parameterFieldEditMachine, { input: { authority } });
   const ownValue = useSelector(edits, (snapshot) => selectOwnValue(snapshot, authority));
+  // The field's authority prop-to-actor boundary (programme control, G12, 2026-11-12): the authority reaches the row only
+  // as a prop, so this one effect reports each new value to the lineage as `observed`. A named exception in the
+  // graphics scope (react-policy 5.5).
   useEffect(() => {
     edits.send({ type: 'observed', value: authority });
   }, [edits, authority]);

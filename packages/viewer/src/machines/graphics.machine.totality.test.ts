@@ -486,7 +486,23 @@ describe('graphics machine totality baseline', () => {
         removeCut: sectionOn && sectionCuts.some(({ id }) => id === selectedSectionCutId),
       };
     };
-    const mismatched = getShortestPaths(machine, options).flatMap(({ state: snapshot }) => {
+    // Every reachable state, on 3D and on 2D geometry: the media type joins the state key, so `updateArtifact` with an
+    // SVG reaches each state again with a drawing in hand.
+    const withMediaType = {
+      ...options,
+      limit: 12_000,
+      serializeState: (snapshot: AnyMachineSnapshot) =>
+        JSON.stringify([snapshot.value, (snapshot.context as { artifact?: { mimeType: string } }).artifact?.mimeType]),
+    };
+    const reached = getShortestPaths(machine, withMediaType);
+    expect(
+      reached.some(
+        ({ state }) =>
+          (state.context as { artifact?: { mimeType: string } }).artifact?.mimeType === 'image/svg+xml' &&
+          state.matches({ operational: { section: 'on' } }),
+      ),
+    ).toBe(true);
+    const mismatched = reached.flatMap(({ state: snapshot }) => {
       const want = expected(snapshot);
       return shortcuts
         .filter((shortcut) => snapshot.can(press(shortcut)) !== want[shortcut])

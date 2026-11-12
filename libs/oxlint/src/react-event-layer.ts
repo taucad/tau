@@ -490,7 +490,7 @@ export type ReactEventLayerException = Readonly<{
 export type ReactEventLayerZero = Readonly<{
   /** URLs of the files or directories held at zero. */
   scope: readonly URL[];
-  /** Workspace-relative POSIX path to the one exception that file holds. */
+  /** Named exceptions, keyed by workspace-relative POSIX file path: the sites each file keeps and why. */
   exceptions?: Readonly<Record<string, ReactEventLayerException>>;
 }>;
 

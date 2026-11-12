@@ -164,8 +164,8 @@ export function GraphicsProvider({
   /*
    * The viewer environment's React-context-to-actor boundary (programme control ruling, 2026-11-12): the theme, the
    * accent and high contrast reach the viewer only as React context, so this composition root reports them to graphics,
-   * which repaints the view cube in place. It is the graphics scope's single named context-to-actor boundary, beside
-   * the standalone viewer's artifact boundary (inventory C10).
+   * which repaints the view cube in place. It is one of the graphics scope's named exceptions (react-policy 5.5), beside
+   * the standalone viewer's artifact boundary (inventory C10) and a parameter field's authority boundary.
    */
   const { colorScheme, isHighContrast, accentColor } = useViewerEnvironment();
   useEffect(() => {

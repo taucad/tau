@@ -26,10 +26,11 @@ const main = async (): Promise<void> => {
   // The channel's own gate, checked before identity, downloads or immutable mirroring.
   requireDesktopInstallerPublicationEnabled(channel);
   await requireDesktopPublicationAuthority(channel, operation);
-  // Selects the candidate and receipt artifact names; the Mac-only scope never publishes production.
+  // Selects the candidate and receipt artifact names. A platform scope (D-H5) selects a promotion only: renewal renews
+  // the completed promotion whatever scope promoted it.
   const scope = z.enum(desktopPublicationScopes).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
-  if (scope === 'macos' && (channel !== 'staging' || operation !== 'promote-routes')) {
-    throw new Error('Mac-only publication is a staging promotion only');
+  if (scope !== 'all' && operation !== 'promote-routes') {
+    throw new Error('Platform-scoped publication is a promotion only');
   }
   const root = resolve(z.string().min(1).parse(process.env['DESKTOP_ASSETS_DIR']));
   const base = channel === 'production' ? 'https://downloads.tau.new' : 'https://downloads.taucad.dev';

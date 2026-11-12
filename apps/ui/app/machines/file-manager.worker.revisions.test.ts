@@ -2646,9 +2646,7 @@ describe('readiness liveness over every writer (INV)', () => {
         alpha.send({ command: 'restore', revisionId: saved ?? '' });
         await vi.waitFor(
           async () => {
-            if (root.status().restore.asking) {
-              alpha.send({ command: 'confirm' });
-            } else if (lost() > asked) {
+            if (lost() > asked) {
               asked = lost();
               alpha.send({ command: 'restore', revisionId: saved ?? '' });
             }

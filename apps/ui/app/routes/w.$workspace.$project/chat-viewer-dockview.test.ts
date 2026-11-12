@@ -7,6 +7,7 @@ import type { DockviewApi, DockviewDidDropEvent, DockviewGroupPanel } from 'dock
 import type { CapabilitiesManifest } from '@taucad/runtime';
 import type { FileEntry, FileProvenanceSource, CheckedFileWriteResult } from '@taucad/types';
 import { workbenchRecords } from '@taucad/workbench';
+import type { WorkbenchView } from '@taucad/workbench';
 import { tauEditorPanelDragMime, tauFileDragMime } from '@taucad/types/constants';
 import {
   createViewerNewTab,
@@ -15,13 +16,15 @@ import {
   handleViewerDrop,
   listViewerSelectableFiles,
   replaceViewerNewTabWithFile,
-  createInheritedGraphicsSettings,
+  newViewRecordFrom,
+  recordNewView,
   adoptViewerRecordNode,
   ViewerEmptyFilePicker,
 } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 import { deleteViewFile } from '#workbench-records/view-actions.js';
+import { exceptionsForView, viewExceptions, viewExceptionsStore } from '#workbench-records/view-exceptions.js';
 
 describe('record-driven viewer adoption', () => {
   it('deletes an interim recreated view after a tool delete followed by layout close', async () => {
@@ -97,11 +100,18 @@ describe('ensureViewerGroup', () => {
 });
 
 describe('viewer split launchers', () => {
-  it('inherits preferences but clears geometry-dependent camera state for a new pane', () => {
-    const inherited = createInheritedGraphicsSettings({
-      ...defaultGraphicsSettings,
-      cameraFovAngle: 42,
-      cameraView: {
+  const formatView = workbenchRecords.view.schema.parse({ version: 1, entryPath: 'models/new.ts' });
+
+  it('keeps the leaves a source view sets, its grid unit included, and leaves its geometry state behind (V8)', () => {
+    const source = workbenchRecords.view.schema.parse({
+      version: 1,
+      entryPath: 'models/old.ts',
+      fieldOfView: 42,
+      upDirection: 'y',
+      grid: { unit: 'in' },
+      display: { ...formatView.display, grid: false, postProcessing: false },
+      camera: {
+        kind: 'pose',
         frameId: 'tau:root',
         target: [3, 4, 5],
         direction: [1, 0, 0],
@@ -109,18 +119,67 @@ describe('viewer split launchers', () => {
         verticalSpan: 12,
         perspectiveZoom: 1,
       },
-      pinnedMeasurements: [
+      measurements: [
         { id: 'measurement-1', frameId: 'tau:root', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 },
       ],
-      sectionView: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: true }] },
+      section: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: true }] },
     });
 
-    expect(inherited.cameraFovAngle).toBe(42);
-    expect(inherited.cameraView).toBeUndefined();
-    expect(inherited.pinnedMeasurements).toBeUndefined();
-    // Cuts are made through one file's geometry, so a new pane starts without them.
-    expect(inherited.sectionView).toBeUndefined();
-    expect(inherited).not.toHaveProperty('componentDisplay');
+    const created = newViewRecordFrom('models/new.ts', source);
+
+    expect(created).toEqual({
+      ...formatView,
+      fieldOfView: 42,
+      upDirection: 'y',
+      grid: { ...formatView.grid, unit: 'in' },
+      display: { ...formatView.display, grid: false, postProcessing: false },
+    });
+  });
+
+  it('keeps an inheriting source inheriting: its format values are copied, never a resolved value (V8)', () => {
+    const source = workbenchRecords.view.schema.parse({ version: 1, entryPath: 'models/old.ts' });
+    expect(newViewRecordFrom('models/new.ts', source)).toEqual(formatView);
+  });
+
+  it('holds the format value for every leaf with no active viewer (V11)', () => {
+    expect(newViewRecordFrom('models/new.ts', undefined)).toEqual(formatView);
+  });
+
+  it("copies the source's exceptions to the new id before the record is written (V8)", async () => {
+    globalThis.localStorage.clear();
+    viewExceptions.add('p', 'v-source', 'display.grid');
+    const source = workbenchRecords.view.schema.parse({ version: 1, entryPath: 'models/old.ts' });
+    const written: WorkbenchView[] = [];
+    const edit = vi.fn(async (_viewId: string, change: (current: WorkbenchView | undefined) => WorkbenchView) => {
+      // The exception is already there when the record lands.
+      expect(exceptionsForView(viewExceptionsStore.read(), 'p', 'v-new')).toEqual(['display.grid']);
+      written.push(change(undefined));
+      return true;
+    });
+
+    await recordNewView({
+      projectId: 'p',
+      viewId: 'v-new',
+      entryPath: 'models/new.ts',
+      source: { viewId: 'v-source', record: source },
+      edit,
+    });
+
+    expect(edit).toHaveBeenCalledOnce();
+    expect(written).toEqual([formatView]);
+    globalThis.localStorage.clear();
+  });
+
+  it('copies no exceptions with no active viewer', async () => {
+    globalThis.localStorage.clear();
+    await recordNewView({
+      projectId: 'p',
+      viewId: 'v-new',
+      entryPath: 'models/new.ts',
+      source: undefined,
+      edit: async () => true,
+    });
+    expect(exceptionsForView(viewExceptionsStore.read(), 'p', 'v-new')).toEqual([]);
   });
 
   it('opens a Viewer launcher in the newly split group', () => {
@@ -287,7 +346,7 @@ describe('handleViewerDrop', () => {
         position: 'right',
         group,
       } as DockviewDidDropEvent,
-      getInheritedSettings: () => settings,
+      getViewSource: () => settings,
       onViewCreated,
     });
 
@@ -322,7 +381,7 @@ describe('handleViewerDrop', () => {
         position: 'center',
         group,
       } as DockviewDidDropEvent,
-      getInheritedSettings: () => settings,
+      getViewSource: () => settings,
       onViewCreated: vi.fn(),
     });
 

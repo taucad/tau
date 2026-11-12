@@ -10,6 +10,7 @@ import type {
   IWatermarkPanelProps,
 } from 'dockview-react';
 import { positionToDirection } from 'dockview-react';
+import { withViewField } from '@taucad/workbench';
 import type { ViewerNode, WorkbenchView } from '@taucad/workbench';
 import { Box } from 'lucide-react';
 import type { CapabilitiesManifest, Evaluation } from '@taucad/runtime';
@@ -19,6 +20,7 @@ import { idPrefix, tauFileDragMime, tauEditorPanelDragMime, tauViewerPanelDragMi
 import { generatePrefixedId } from '@taucad/utils/id';
 import { fromDockview, mintViewRecordId, toDockview } from '#workbench-records/converters.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
+import { viewExceptions } from '#workbench-records/view-exceptions.js';
 import { readViewLevels } from '#workbench-records/view-levels.js';
 import { resolvedViewFields } from '#workbench-records/view-record-binding-changes.js';
 import { graphicsSettingsForView, newViewRecord } from '@taucad/workbench-panes/records/view-record';
@@ -32,7 +34,6 @@ import { useProject } from '#hooks/use-project.js';
 import { useModelAvailability } from '#hooks/use-project-availability.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
-import type { GraphicsViewSettings } from '@taucad/viewer/graphics/graphics-settings';
 import { ChatViewer } from '#routes/w.$workspace.$project/chat-viewer.js';
 import { chooseProjection } from '#routes/w.$workspace.$project/chat-viewer-projection-picker.js';
 import { Dockview } from '#components/panes/dockview.js';
@@ -227,14 +228,15 @@ export function ensureViewerGroup(api: DockviewApi): void {
   }
 }
 
-export function handleViewerDrop({
+export function handleViewerDrop<Source>({
   event,
-  getInheritedSettings,
+  getViewSource,
   onViewCreated,
 }: {
   readonly event: DockviewDidDropEvent;
-  readonly getInheritedSettings: () => GraphicsViewSettings;
-  readonly onViewCreated: (viewId: string, entryPath: string, settings: GraphicsViewSettings) => void;
+  /** The view a new one is made from, read when the view is made. */
+  readonly getViewSource: () => Source;
+  readonly onViewCreated: (viewId: string, entryPath: string, source: Source) => void;
 }): void {
   const dataTransfer = getDragDataTransfer(event.nativeEvent);
   const addViewer = (entryPath: string): void => {
@@ -249,7 +251,7 @@ export function handleViewerDrop({
         referenceGroup: event.group ?? undefined,
       },
     });
-    onViewCreated(viewId, entryPath, getInheritedSettings());
+    onViewCreated(viewId, entryPath, getViewSource());
   };
 
   const editorData = dataTransfer?.getData(tauEditorPanelDragMime);
@@ -523,19 +525,51 @@ function ViewerNewTabPanel(properties: IDockviewPanelProps<ViewerNewTabParameter
   );
 }
 
-export const createInheritedGraphicsSettings = (
-  activeSettings: GraphicsViewSettings | undefined,
-): GraphicsViewSettings => {
-  if (!activeSettings) {
-    return { ...defaultGraphicsSettings };
+/** The view a new view is made from: the active viewer's id and record. */
+export type ViewSource = Readonly<{ viewId: string; record: WorkbenchView }>;
+
+/**
+ * The record of a view made from another (onboarding blueprint, V8). With a source, the source's own file values for
+ * the inheritable leaves, its grid unit included, so a leaf it sets stays set and a leaf it inherits keeps inheriting;
+ * its camera, section and measurements stay behind, because they belong to the geometry they were made through. With
+ * none, the format values.
+ *
+ * @param entryPath - The entry the new view renders.
+ * @param source - The view it is made from, if a viewer is active.
+ * @returns The new record.
+ */
+export const newViewRecordFrom = (entryPath: string, source: WorkbenchView | undefined): WorkbenchView => {
+  if (!source) {
+    return newViewRecord(entryPath);
   }
-  return {
-    ...activeSettings,
-    // Cuts belong to the geometry they were made through, so a new pane starts without them.
-    cameraView: undefined,
-    sectionView: undefined,
-    pinnedMeasurements: undefined,
-  };
+  const { cameraView: _camera, ...settings } = graphicsSettingsForView(source);
+  return withViewField(newViewRecord(entryPath, settings), 'grid.unit', source.grid.unit);
+};
+
+/**
+ * Write the record of a view made from `source`: this device's exceptions for the source are copied to the new id
+ * first, so the new view reads as set exactly where the source does, then the record is created if it is missing.
+ *
+ * @param input - The project, the new view, its entry, the view it is made from and the record store's edit.
+ * @returns Whether the record store accepted the write.
+ */
+export const recordNewView = async ({
+  projectId,
+  viewId,
+  entryPath,
+  source,
+  edit,
+}: Readonly<{
+  projectId: string;
+  viewId: string;
+  entryPath: string;
+  source: ViewSource | undefined;
+  edit: (viewId: string, change: (current: WorkbenchView | undefined) => WorkbenchView) => Promise<boolean>;
+}>): Promise<boolean> => {
+  if (source) {
+    viewExceptions.copy(projectId, source.viewId, viewId);
+  }
+  return edit(viewId, (current) => current ?? newViewRecordFrom(entryPath, source?.record));
 };
 
 function ViewerLeftActions(properties: IDockviewHeaderActionsProps): React.JSX.Element {
@@ -661,15 +695,22 @@ export const ViewerDockview = memo(function ({
    * to defaults. This gives new panels the same FOV, visibility toggles,
    * environment preset, etc. as what the user was just looking at.
    */
-  const getInheritedSettings = useCallback((): GraphicsViewSettings => {
-    return createInheritedGraphicsSettings(
-      activeViewerPanelId
-        ? viewRecords.get(activeViewerPanelId)
-          ? graphicsSettingsForView(viewRecords.get(activeViewerPanelId)!)
-          : undefined
-        : undefined,
-    );
+  const getViewSource = useCallback((): ViewSource | undefined => {
+    const record = activeViewerPanelId ? viewRecords.get(activeViewerPanelId) : undefined;
+    return activeViewerPanelId && record ? { viewId: activeViewerPanelId, record } : undefined;
   }, [activeViewerPanelId, viewRecords]);
+
+  /* A new view's record, made from the active view: its file values and grid unit, and this device's exceptions for
+   * it copied first, so the new view reads as set exactly where the source does (V8). */
+  const createViewRecord = useCallback(
+    (viewId: string, entryPath: string, source: ViewSource | undefined): void => {
+      if (profile !== 'editor') {
+        return;
+      }
+      void recordNewView({ projectId, viewId, entryPath, source, edit: viewCommands.edit });
+    },
+    [profile, projectId, viewCommands],
+  );
 
   // A person-edited semantic lane is the only layout write from Dockview.
   useEffect(() => {
@@ -1001,15 +1042,13 @@ export const ViewerDockview = memo(function ({
         params: { viewId, entryPath },
       });
 
-      if (profile === 'editor') {
-        void viewCommands.edit(viewId, (current) => current ?? newViewRecord(entryPath, getInheritedSettings()));
-      }
+      createViewRecord(viewId, entryPath, getViewSource());
     });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, [api, getInheritedSettings, profile, projectRef, viewCommands]);
+  }, [api, createViewRecord, getViewSource, projectRef]);
 
   // Handle ready event: restore layout or seed default
   const onReady = useCallback(
@@ -1056,11 +1095,9 @@ export const ViewerDockview = memo(function ({
     (event: DockviewDidDropEvent) => {
       handleViewerDrop({
         event,
-        getInheritedSettings,
-        onViewCreated: (viewId, entryPath, graphicsSettings) => {
-          if (profile === 'editor') {
-            void viewCommands.edit(viewId, (current) => current ?? newViewRecord(entryPath, graphicsSettings));
-          }
+        getViewSource,
+        onViewCreated: (viewId, entryPath, source) => {
+          createViewRecord(viewId, entryPath, source);
           projectRef.send({
             type: 'createGeometryUnit',
             entryPath,
@@ -1069,7 +1106,7 @@ export const ViewerDockview = memo(function ({
         },
       });
     },
-    [entriesRecord, getInheritedSettings, profile, projectRef, viewCommands],
+    [createViewRecord, entriesRecord, getViewSource, projectRef],
   );
 
   // Open-file action: add a new viewer panel in the same group
@@ -1086,9 +1123,7 @@ export const ViewerDockview = memo(function ({
         ...(group ? { position: { direction: 'within', referenceGroup: group } } : {}),
       });
 
-      if (profile === 'editor') {
-        void viewCommands.edit(viewId, (current) => current ?? newViewRecord(path, getInheritedSettings()));
-      }
+      createViewRecord(viewId, path, getViewSource());
 
       projectRef.send({
         type: 'createGeometryUnit',
@@ -1096,7 +1131,7 @@ export const ViewerDockview = memo(function ({
         operationTimeout: entriesRecord?.entries[path]?.renderTimeout,
       });
     },
-    [entriesRecord, getInheritedSettings, profile, projectRef, viewCommands],
+    [createViewRecord, entriesRecord, getViewSource, projectRef],
   );
 
   useEffect(() => {

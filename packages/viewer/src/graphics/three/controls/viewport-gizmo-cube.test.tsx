@@ -37,7 +37,14 @@ const mocks = vi.hoisted(() => {
   const graphicsState = { context: { upDirection: 'z' as 'x' | 'y' | 'z' } };
   const gizmos: Array<{
     camera: unknown;
-    options: { up: 'x' | 'y' | 'z'; edges: { color: number }; right: { color: number; labelColor: number } };
+    options: {
+      up: 'x' | 'y' | 'z';
+      type: string;
+      edges: { color: number };
+      right: { color: number; labelColor: number };
+    };
+    children: Array<{ visible: boolean }>;
+    _domElement: HTMLElement;
     add: ReturnType<typeof vi.fn>;
     cameraUpdate: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
@@ -109,10 +116,14 @@ vi.mock('three-viewport-gizmo', () => ({
     public readonly dispose = vi.fn();
     public readonly update = vi.fn();
     public readonly scale = { multiplyScalar: vi.fn() };
+    public readonly children = [{ visible: true }, { visible: true }];
+    // oxlint-disable-next-line typescript/naming-convention -- The library's private pointer surface.
+    public readonly _domElement = document.createElement('div');
 
     // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly forbids constructor parameter properties.
     public readonly options: {
       up: 'x' | 'y' | 'z';
+      type: string;
       edges: { color: number };
       right: { color: number; labelColor: number };
     };
@@ -120,7 +131,12 @@ vi.mock('three-viewport-gizmo', () => ({
     public constructor(
       camera: unknown,
       _renderer: unknown,
-      options: { up: 'x' | 'y' | 'z'; edges: { color: number }; right: { color: number; labelColor: number } },
+      options: {
+        up: 'x' | 'y' | 'z';
+        type: string;
+        edges: { color: number };
+        right: { color: number; labelColor: number };
+      },
     ) {
       this.camera = camera;
       this.options = options;
@@ -170,6 +186,7 @@ vi.mock('#graphics/three/controls/viewport-gizmo-cube-axes.js', () => ({
 }));
 vi.mock('#graphics/three/controls/viewport-gizmo-cube-surface.js', () => ({
   applyViewportGizmoSurface: vi.fn(),
+  applyViewportGizmoNodeMaterials: vi.fn(),
 }));
 vi.mock('#graphics/three/controls/viewport-gizmo-controls-adapter.js', () => ({
   bindViewportGizmoControls: () => mocks.binding,
@@ -319,5 +336,35 @@ describe('ViewportGizmoCube camera retention', () => {
     mounted.rerender(withPicker());
     expect(setStyle).toHaveBeenCalledTimes(2);
     expect(setStyle.mock.calls[1]![0].face).not.toBe(style.face);
+  });
+
+  it.each([
+    { gizmoStyle: undefined, type: 'rounded-cube', triad: true },
+    { gizmoStyle: 'cube', type: 'rounded-cube', triad: true },
+    { gizmoStyle: 'classic-cube', type: 'cube', triad: true },
+    { gizmoStyle: 'axis-balls', type: 'sphere', triad: false },
+  ] as const)('draws the $gizmoStyle style as a $type gizmo', ({ gizmoStyle, type, triad }) => {
+    render(<ViewportGizmoCube gizmoStyle={gizmoStyle} />);
+    const gizmo = mocks.gizmos[0]!;
+    expect(gizmo.options.type).toBe(type);
+    expect(gizmo.add).toHaveBeenCalledTimes(triad ? 1 : 0);
+    expect(gizmo.children.every((child) => child.visible)).toBe(true);
+    expect(gizmo._domElement.style.pointerEvents).toBe('');
+  });
+
+  it('applies a style change to the open viewer without a reload (G5)', () => {
+    const mounted = render(<ViewportGizmoCube gizmoStyle='cube' />);
+    mounted.rerender(<ViewportGizmoCube gizmoStyle='axis-balls' />);
+    expect(mocks.gizmos).toHaveLength(2);
+    expect(mocks.gizmos[0]!.dispose).toHaveBeenCalledOnce();
+    expect(mocks.gizmos[1]!.options.type).toBe('sphere');
+  });
+
+  it('draws the Axes style as the triad alone, taking no click (G4)', () => {
+    render(<ViewportGizmoCube gizmoStyle='axes' />);
+    const gizmo = mocks.gizmos[0]!;
+    expect(gizmo.add).toHaveBeenCalledOnce();
+    expect(gizmo.children.every((child) => !child.visible)).toBe(true);
+    expect(gizmo._domElement.style.pointerEvents).toBe('none');
   });
 });

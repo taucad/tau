@@ -64,7 +64,6 @@
   "apps/ui/app/hooks/use-sessions.tsx": 3,
   "apps/ui/app/hooks/use-sidebar-status.ts": 6,
   "apps/ui/app/hooks/use-thumbnail-generator.ts": 3,
-  "apps/ui/app/hooks/use-view-settings-sync.ts": 11,
   "apps/ui/app/lib/csharp-language/csharp-codemirror.ts": 1,
   "apps/ui/app/lib/kcl-language/kcl-codemirror.ts": 1,
   "apps/ui/app/lib/kcl-language/kcl-navigation.ts": 1,

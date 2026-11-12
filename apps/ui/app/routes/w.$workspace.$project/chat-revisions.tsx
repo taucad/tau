@@ -41,7 +41,7 @@ import {
   timelineRowHover,
   timelineMarker,
 } from '#components/revisions/revision-timeline.js';
-import { RevisionRow, isAutosave } from '#routes/w.$workspace.$project/revision-marker.js';
+import { RevisionRow, isAutosave, nextVersionNumber } from '#routes/w.$workspace.$project/revision-marker.js';
 import { ConflictDecision, RevisionBranches } from '#routes/w.$workspace.$project/revision-branches.js';
 import type { ConflictMaterialization } from '#routes/w.$workspace.$project/revision-branches.js';
 import { RevisionSyncRegion } from '#routes/w.$workspace.$project/revision-sync-region.js';
@@ -536,7 +536,7 @@ export const currentRevisionOf = (
   return current?.revisionId ?? headRevisionId;
 };
 
-/** History shows this many rows (revisions and folds) before Show more (round 4). */
+/** History shows this many rows (revisions and folds) before Show older (round 4). */
 const rowLimit = 12;
 
 const firstOf = (group: HistoryGroup): RevisionCard =>
@@ -596,7 +596,7 @@ function DayDivider({ label, hasLine }: { readonly label: string; readonly hasLi
 
 /**
  * Roving keyboard navigation over the composite History list (L3 S27): rows,
- * autosave folds and Show more are one list; Right opens, Left closes.
+ * autosave folds and Show older are one list; Right opens, Left closes.
  *
  * @param event - The key press inside the list.
  */
@@ -720,14 +720,14 @@ function SetupLine({
 }
 
 /**
- * History's rows: twelve, then Show more, with the row you are on, the one
+ * History's rows: twelve, then Show older, with the row you are on, the one
  * opened for you and any conflicted row never behind it; consecutive autosaves
  * fold; days divide. The list is one Tab stop (A1 item 14).
  *
- * The hook holds one page (B4): once the loaded rows are all shown, Show more
+ * The hook holds one page (B4): once the loaded rows are all shown, Show older
  * reads the next page. A row that must stay in view but sits below the page —
  * one opened for you from a chat — is read on its own and kept at the end of
- * the timeline, below Show more, until a page reaches it.
+ * the timeline, below Show older, until a page reaches it.
  *
  * @returns The list.
  */
@@ -735,16 +735,17 @@ function HistoryList(): React.JSX.Element {
   const { projectId } = useProject();
   const status = useRevisionStatus();
   const { revisions, headRevisionId, line, isDirty, hasOlder, loadOlder } = useRevisions();
-  const { restore, undo, isBusy } = useRestoreToPoint();
+  const { restore, isBusy } = useRestoreToPoint();
   const revealed = useRevisionReveal(projectId);
   const branch = line.kind === 'unknown' ? undefined : line.name;
   const groups = useMemo(() => groupRevisionHistory(revisions, headRevisionId), [revisions, headRevisionId]);
   const currentRevisionId = useMemo(() => currentRevisionOf(revisions, headRevisionId), [revisions, headRevisionId]);
+  const nextVersion = useMemo(() => nextVersionNumber(revisions), [revisions]);
   const [openRows, setOpenRows] = useState<ReadonlySet<string>>(() => new Set());
   const [openFolds, setOpenFolds] = useState<ReadonlySet<string>>(() => new Set());
   const [isAllShown, setIsAllShown] = useState(false);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
-  /* *View revision* reaches its row wherever it is: behind Show more, inside a fold, below the loaded page, and opened (DESIGN: a reveal expands to its target). */
+  /* *View revision* reaches its row wherever it is: behind Show older, inside a fold, below the loaded page, and opened (DESIGN: a reveal expands to its target). */
   if (revealed !== undefined) {
     const holder = groups.find((group) => holds(group, revealed));
     if (holder !== undefined && holder.kind !== 'revision' && !openFolds.has(keyOf(holder))) {
@@ -780,17 +781,13 @@ function HistoryList(): React.JSX.Element {
   );
   const shown = isAllShown ? groups : groups.slice(0, Math.max(rowLimit, pinned + 1));
   const hidden = groups.slice(shown.length);
-  const hiddenCount = hidden.reduce(
-    (count, group) => count + (group.kind === 'revision' ? 1 : group.revisions.length),
-    0,
-  );
   const [active, setActive] = useState<string | undefined>(headRevisionId);
-  /* Show more unmounts under focus, so the first row it reveals takes focus. */
+  /* Show older unmounts under focus, so the first row it reveals takes focus. */
   const revealFocus = useRef<string>(undefined);
-  /* A page read by Show more lands a render later: the first row after the last one shown takes focus then. */
+  /* A page read by Show older lands a render later: the first row after the last one shown takes focus then. */
   const focusAfter = useRef<string>(undefined);
   const listRef = useRef<HTMLDivElement>(null);
-  // ponytail: tab stops set on the DOM after each render, so rows, folds and Show more need no tabIndex plumbing.
+  // ponytail: tab stops set on the DOM after each render, so rows, folds and Show older need no tabIndex plumbing.
   useLayoutEffect(() => {
     const rows = [...(listRef.current?.querySelectorAll<HTMLElement>('[data-revision-row]') ?? [])];
     const stop = rows.find((row) => row.dataset['revisionRow'] === active) ?? rows[0];
@@ -908,15 +905,15 @@ function HistoryList(): React.JSX.Element {
         revision={revision}
         title={revisionTitle(revision, named)}
         isCurrent={revision.revisionId === currentRevisionId}
-        isDirty={isDirty}
+        isAtFiles={revision.revisionId === headRevisionId && !isDirty}
         branch={branch}
+        nextVersion={nextVersion}
         isOpen={openRows.has(revision.revisionId)}
         isBusy={isBusy}
         isFirst={isFirst}
         isLast={isLast}
         onOpenChange={toggle(setOpenRows, revision.revisionId)}
         onRestore={restore}
-        onUndoRestore={undo}
       />
     );
   };
@@ -938,7 +935,7 @@ function HistoryList(): React.JSX.Element {
   }
   const firstHidden = hidden[0];
   const canShowOlder = firstHidden === undefined && hasOlder;
-  /* Below Show more: kept rows older than the page, each under its own day. */
+  /* Below Show older: kept rows older than the page, each under its own day. */
   const kept: React.JSX.Element[] = [];
   for (const [index, revision] of older.entries()) {
     const day = dayOf(revision);
@@ -977,7 +974,7 @@ function HistoryList(): React.JSX.Element {
                 }}
               >
                 <ChevronDown aria-hidden className='size-3' />
-                Show {hiddenCount} more
+                Show older
               </Button>
             </span>
           </li>
@@ -1002,7 +999,7 @@ function HistoryList(): React.JSX.Element {
                 ) : (
                   <ChevronDown aria-hidden className='size-3' />
                 )}
-                Show more
+                Show older
               </Button>
             </span>
           </li>

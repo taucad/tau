@@ -104,6 +104,7 @@ const samples: Samples = {
     { type: 'cameraViewChanged', verticalSpan: 1 },
     { type: 'cameraViewChanged', verticalSpan: 0 },
   ],
+  poseRevisionObserved: [{ type: 'poseRevisionObserved', revision: 1 }],
   setSurfaceVisibility: [{ type: 'setSurfaceVisibility', payload: false }],
   setLinesVisibility: [{ type: 'setLinesVisibility', payload: false }],
   setGizmoVisibility: [{ type: 'setGizmoVisibility', payload: false }],

@@ -29,7 +29,7 @@ afterEach(async ({ task }) => {
 
 const readAppFlags = async (current: DesktopSession): Promise<OnboardingFlags> =>
   current.page.evaluate((probe) => {
-    const read = (globalThis as unknown as Record<string, (() => Record<string, boolean>) | undefined>)[probe];
+    const read = (globalThis as unknown as Record<string, (() => OnboardingFlags) | undefined>)[probe];
     if (read === undefined) {
       throw new Error(`${probe} is missing: the renderer does not honour a seeded flag state`);
     }

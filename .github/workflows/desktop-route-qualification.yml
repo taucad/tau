@@ -28,7 +28,7 @@ on:
         required: true
         type: string
       candidate_c:
-        description: Successful trusted C run; staging Mac CI and Linux may pin a trusted ancestor
+        description: Successful trusted C run; the Mac and Linux platform scopes may pin a trusted ancestor (bound by qualification-binding.json)
         required: true
         type: string
 
@@ -219,7 +219,6 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate_c }}
-      DESKTOP_ASSETS_DIR: ${{ github.workspace }}/out/qualification-candidate
       TAU_QUALIFICATION_CHANNEL: ${{ inputs.channel }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
       TAU_WINDOWS_PUBLISHER: ${{ vars.TAU_WINDOWS_PUBLISHER }}
@@ -248,5 +247,5 @@ jobs:
           name: ${{ inputs.scope == 'linux' && 'desktop-linux-ci-receipts' || inputs.scope == 'macos' && 'desktop-macos-ci-receipts' || 'desktop-route-ci-receipts' }}
           path: |
             out/qualification-receipts/route-receipts.json
-            ${{ inputs.scope == 'macos' && 'out/qualification-receipts/qualification-binding.json' || '' }}
+            ${{ (inputs.scope == 'macos' || inputs.scope == 'linux') && 'out/qualification-receipts/qualification-binding.json' || '' }}
           if-no-files-found: error

@@ -616,10 +616,12 @@ try {
   assert.throws(() => {
     assertQualificationSource({ ...admitted, scope: 'windows', kind: 'vm' });
   }, /exact source/u);
-  // Production Mac has no binding yet, so it keeps the workflow's exact source.
+  // Production Mac binds an ancestor source through the same authenticated sidecar; all-platform stays exact.
   assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'macos', channel: 'production' });
+  assertQualificationSource({ ...admitted, scope: 'macos', channel: 'production' });
+  assertQualificationSource({ ...admitted, scope: 'macos', channel: 'production', kind: 'vm' });
   assert.throws(() => {
-    assertQualificationSource({ ...admitted, scope: 'macos', channel: 'production' });
+    assertQualificationSource({ ...admitted, scope: 'all', channel: 'production' });
   }, /exact source/u);
   assert.throws(() => {
     assertQualificationSource({ ...admitted, sourceCommit: '--all' });

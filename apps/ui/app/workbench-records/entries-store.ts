@@ -14,6 +14,7 @@ import {
   createEntriesPolicy,
   carriesFields,
   replacingMoves,
+  sameEntries,
   changedEntry,
   coversFields,
   originOf,
@@ -205,7 +206,9 @@ export function createWorkbenchEntriesStore(
       entriesPolicy.serialize(record);
       return undefined;
     } catch (error) {
-      return error;
+      // A record the file already holds, even over the canonical limit, asks for nothing to be written.
+      const { published } = context();
+      return published.record && sameEntries(withoutMoves(record), published.record) ? undefined : error;
     }
   };
   /**

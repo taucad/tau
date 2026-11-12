@@ -551,6 +551,19 @@ const fitted = ({
   return merged;
 };
 
+/** Whether two records hold the same entries, field for field. */
+export const sameEntries = (left: WorkbenchEntries, right: WorkbenchEntries): boolean => {
+  const paths = Object.keys(left.entries);
+  return (
+    paths.length === Object.keys(right.entries).length &&
+    paths.every(
+      (path) =>
+        Object.hasOwn(right.entries, path) &&
+        JSON.stringify(fieldsOf(left.entries[path])) === JSON.stringify(fieldsOf(right.entries[path])),
+    )
+  );
+};
+
 /** Whether `carried` sets each of `fields`, to its value or to one the person set after it. */
 export const coversFields = (carried: EntryFields | undefined, fields: EntryFields): boolean =>
   carried !== undefined &&
@@ -626,7 +639,8 @@ export const createEntriesPolicy = (onDropped?: DroppedFields): RecordPolicy<Ent
     if (read && record) {
       mark(patch, { base: read, record }, found);
     }
-    return merged;
+    // A merge that changes nothing on a file read over the canonical limit is that file: it compares as its text.
+    return current !== undefined && fileText.has(current) && sameEntries(merged, base) ? current : merged;
   },
   isEmpty: (patch) => patch.every((step) => step.moves.length === 0 && Object.keys(step.fields).length === 0),
 });

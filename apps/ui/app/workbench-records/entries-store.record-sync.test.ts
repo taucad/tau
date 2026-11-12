@@ -1342,4 +1342,49 @@ describe('workbench entries store over recordSync', () => {
       entries.dispose();
     }
   });
+
+  it.each<{ name: string; change: (entries: ReturnType<typeof createWorkbenchEntriesStore>) => Promise<boolean> }>([
+    {
+      name: 'renames a file with no settings',
+      change: async (entries) => entries.changePaths({ type: 'rename', oldPath: 'other.ts', newPath: 'other2.ts' }),
+    },
+    {
+      name: 'deletes a file with no settings',
+      change: async (entries) => entries.changePaths({ type: 'delete', path: 'other.ts' }),
+    },
+    {
+      name: 'edits an entry to what it holds',
+      change: async (entries) => entries.edit('m/1.ts', entries.snapshot().record!.entries['m/1.ts']!),
+    },
+  ])(
+    'answers saved, with nothing written, when the person $name on a compact file over the canonical limit',
+    async ({ change }) => {
+      const m = memory();
+      const many = Object.fromEntries(
+        Array.from({ length: 450 }, (_, index) => [
+          `m/${index}.ts`,
+          { renderTimeout: 15_000, components: { hidden: ['a'], isolated: [], opacity: [] } },
+        ]),
+      );
+      const compact = encoder.encode(JSON.stringify({ version: 1, entries: many }));
+      m.setBytes(compact);
+      expect(() => workbenchRecords.entries.serialize({ version: 1, entries: many })).toThrow(RangeError);
+      const onError = vi.fn();
+      const entries = createWorkbenchEntriesStore({
+        root: '/root',
+        files: m.files,
+        onChange: () => undefined,
+        onError,
+      });
+      try {
+        await entries.read();
+        expect(await change(entries)).toBe(true);
+        expect(await entries.flush()).toBe(true);
+        expect(onError).not.toHaveBeenCalled();
+        expect(m.get()).toEqual(compact);
+      } finally {
+        entries.dispose();
+      }
+    },
+  );
 });

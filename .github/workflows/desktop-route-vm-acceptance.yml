@@ -510,7 +510,6 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate_c }}
-      DESKTOP_ASSETS_DIR: ${{ github.workspace }}/out/qualification-candidate
       TAU_QUALIFICATION_CHANNEL: ${{ inputs.channel }}
       TAU_APPIMAGE_KEY_ID: ${{ vars.TAU_APPIMAGE_KEY_ID }}
       TAU_APT_PRIMARY_FINGERPRINT: ${{ vars.TAU_APT_PRIMARY_FINGERPRINT }}
@@ -521,13 +520,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
-      - name: Re-admit the exact final candidate
-        run: pnpm nx run desktop:fetch-installer-candidate
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: desktop-route-row-*
           path: out/qualification-rows
-      - name: Require all six Linux clean-host rows and bind every receipt to the final source
+      # As for Mac, the collector re-admits candidate C itself and writes qualification-binding.json, binding C's
+      # ancestor source to this run by authenticated S≤K≤H ancestry (the publisher adds ≤P).
+      - name: Require all six Linux clean-host rows and bind every receipt to the final candidate and this run
         run: pnpm nx run desktop:collect-qualification-rows
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -537,5 +536,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-linux-vm-receipts
-          path: out/qualification-receipts/route-receipts.json
+          path: |
+            out/qualification-receipts/route-receipts.json
+            out/qualification-receipts/qualification-binding.json
           if-no-files-found: error

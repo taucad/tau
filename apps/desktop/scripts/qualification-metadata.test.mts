@@ -86,7 +86,7 @@ for (const change of [{ channel: 'production' }, { sourceCommit: 'a'.repeat(40) 
   });
 }
 // Staging Mac clean-host C is the notarized newest-green ancestor of the vm dispatch: an ancestor source is admitted
-// there (its authenticated binding sidecar carries S≤K≤H), while Windows, production and reversed ancestry stay refused.
+// there (its authenticated binding sidecar carries S≤K≤H), while Windows, all-platform production and reversed ancestry stay refused.
 const parent = execFileSync('git', ['rev-parse', 'HEAD~1'], { encoding: 'utf8' }).trim();
 assertQualificationSource({
   sourceCommit: parent,

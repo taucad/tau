@@ -248,5 +248,5 @@ jobs:
           name: ${{ inputs.scope == 'linux' && 'desktop-linux-ci-receipts' || inputs.scope == 'macos' && 'desktop-macos-ci-receipts' || 'desktop-route-ci-receipts' }}
           path: |
             out/qualification-receipts/route-receipts.json
-            ${{ inputs.scope == 'macos' && 'out/qualification-receipts/qualification-binding.json' || '' }}
+            ${{ (inputs.scope == 'macos' || inputs.scope == 'linux') && 'out/qualification-receipts/qualification-binding.json' || '' }}
           if-no-files-found: error

@@ -19,6 +19,7 @@ afterEach(() => {
     actor.stop();
   }
   announced.clear();
+  chips.clear();
   vi.restoreAllMocks();
 });
 
@@ -47,6 +48,8 @@ function FieldOfView({ label }: Readonly<{ label: string }>): React.JSX.Element 
 /** What each viewer's bar announced, by viewer label. */
 const announced = new Map<string, string[]>();
 const announcementsOf = (label: string): string[] => announced.get(label) ?? [];
+/** The cut chips each viewer's bar shows, by viewer label, as the section row renders them. */
+const chips = new Map<string, readonly string[]>();
 
 /** A viewer frame with a bar holding a button and a text field, as the bar mounts the shortcuts. */
 function Viewer({ label }: Readonly<{ label: string }>): React.JSX.Element {
@@ -60,6 +63,11 @@ function Viewer({ label }: Readonly<{ label: string }>): React.JSX.Element {
       <div ref={barRef}>
         <button type='button'>{`${label} control`}</button>
         <input aria-label={`${label} field`} />
+        {(chips.get(label) ?? []).map((cutId) => (
+          <div key={cutId} data-section-chip={cutId}>
+            <button type='button'>{`${label} chip ${cutId}`}</button>
+          </div>
+        ))}
       </div>
     </section>
   );
@@ -267,6 +275,55 @@ describe('useViewerShortcuts', () => {
       });
       await user.keyboard('{Backspace}');
       expect(actor.getSnapshot().context).toMatchObject({ sectionCuts: [], isSectionViewActive: false });
+    });
+
+    it('should send Delete and Backspace as removeCut, preferring the focused chip of this bar to the selected cut', async () => {
+      const actor = startGraphics();
+      actor.send({ type: 'setSectionViewActive', payload: true });
+      actor.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'xy' } });
+      const [first, second] = actor.getSnapshot().context.sectionCuts;
+      expect(actor.getSnapshot().context.selectedSectionCutId).toBe(second!.id);
+      const send = recordSends(actor);
+      chips.set('Viewer', [first!.id]);
+      chips.set('Other', [second!.id]);
+      const other = startGraphics();
+      const user = userEvent.setup();
+      renderViewers(['Viewer', actor], ['Other', other]);
+      hoverViewer('Viewer');
+
+      // A chip in another bar is not this bar's: the selected cut goes.
+      focus(screen.getByRole('button', { name: `Other chip ${second!.id}` }));
+      await user.keyboard('{Delete}');
+      expect(actor.getSnapshot().context.sectionCuts).toEqual([first]);
+
+      act(() => {
+        actor.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'yz' } });
+      });
+      const [, added] = actor.getSnapshot().context.sectionCuts;
+      focus(screen.getByRole('button', { name: `Viewer chip ${first!.id}` }));
+      await user.keyboard('{Backspace}');
+
+      expect(actor.getSnapshot().context.sectionCuts).toEqual([added]);
+      expect(pressedShortcuts(send)).toEqual(['removeCut', 'removeCut']);
+      expect(announcementsOf('Viewer')).toEqual(['Cut removed', 'Cut removed']);
+    });
+
+    it('should pass Delete and Backspace through when graphics has no cut to remove', async () => {
+      const actor = startGraphics();
+      actor.send({ type: 'setSectionViewActive', payload: true });
+      actor.send({ type: 'selectSectionCut', payload: undefined });
+      const send = recordSends(actor);
+      renderViewers(['Viewer', actor]);
+      hoverViewer('Viewer');
+      focus(screen.getByRole('button', { name: 'Viewer control' }));
+
+      for (const key of ['Delete', 'Backspace']) {
+        const passedOn = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+        document.activeElement!.dispatchEvent(passedOn);
+        expect(passedOn.defaultPrevented).toBe(false);
+      }
+      expect(send).not.toHaveBeenCalled();
+      expect(actor.getSnapshot().context.sectionCuts).toHaveLength(1);
     });
 
     it('should switch to orthographic with P and back to the last perspective angle', async () => {

@@ -175,6 +175,12 @@ const samples: Samples = {
       pressId: 'bar:1',
       camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
     },
+    {
+      type: 'viewerShortcutPressed',
+      shortcut: 'escape',
+      pressId: 'bar:2',
+      camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+    },
   ],
   interactionStarted: [{ type: 'interactionStarted' }],
   interactionMoved: [{ type: 'interactionMoved' }],

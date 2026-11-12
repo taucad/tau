@@ -2319,6 +2319,8 @@ export const graphicsIgnoredEvents: ReadonlyArray<readonly [state: string, event
   ['operational.measure.on.selected', 'startMeasurement'],
   ['operational.measure.on.selecting', 'completeMeasurement'],
   ['operational.measure.on.selecting', 'cancelCurrentMeasurement'],
+  // A shortcut that does nothing here is left unhandled, so `can` says whether the bar claims the key.
+  ['operational.measure.off', 'viewerShortcutPressed'],
 ];
 
 /** The graphics machine's state value: the operational backend, section and measure regions. @public */

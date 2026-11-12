@@ -210,8 +210,7 @@ const ModelViewerCore = memo(function ModelViewerCore({
     () => knownArtifact?.mimeType === 'model/gltf-binary' && isEmptyGlb(knownArtifact.content),
     [knownArtifact],
   );
-  // The C10 React-to-actor boundary (xstate-policy, React integration): the artifact props become artifact events on
-  // the graphics actor. It only sends these two events.
+  // C10 React-to-actor boundary: artifact props become updateArtifact/clearArtifact on graphics.
   useEffect(() => {
     if (emptyModel || (effectiveState === 'ready' && !error && !knownArtifact)) {
       graphicsRef.send({ type: 'clearArtifact' });
@@ -304,9 +303,9 @@ const ModelViewerCore = memo(function ModelViewerCore({
 });
 
 /**
- * The standalone viewer's composition root (charter D5): the default graphics settings, with the camera child seeded
- * once from `initialVerticalFieldOfView` through graphics' `camera` input. It is the whole tree a standalone viewer
- * starts; the camera is graphics' child, so nothing is wired through an effect.
+ * The standalone viewer's graphics options: the default settings, with the camera child seeded once from
+ * `initialVerticalFieldOfView` through graphics' `camera` input. Graphics spawns the camera, so the tree needs no
+ * wiring beyond starting this one actor.
  */
 const createStandaloneGraphicsOptions = (
   initialVerticalFieldOfView: number | undefined,

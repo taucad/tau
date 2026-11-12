@@ -1162,35 +1162,35 @@ export function RevisionsPanelBody(): React.JSX.Element {
             <HistoryList />
           )}
         </RevisionRegion>
-
-        {/* A29/D26: *Sync* appears once a remote does, or once the person asks to back up. */}
-        {isSyncOpen ? (
-          <RevisionSyncRegion
-            remote={status.remote}
-            sync={status.sync}
-            onConnect={commands.connectRemote}
-            onDisconnect={commands.disconnectRemote}
-            onCancel={commands.cancelRemote}
-            onSync={commands.syncNow}
-            onPushGithub={commands.pushGithub}
-            syncChats={project?.syncChats !== false}
-            onSyncChatsChange={(enabled) => {
-              // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose
-              void updateProject(projectId, { syncChats: enabled }).catch(reportSyncSettingError);
-            }}
-            canSyncFiles={canSyncFiles}
-            onUpgrade={canUpgradePlan ? requestUpgrade : undefined}
-            storageLimitBytes={storageLimitBytes}
-            signInHref={signIn}
-            role={projectRole}
-            isSignedOut={isSignedOut}
-            projectId={projectId}
-            isLineKnown={line.kind !== 'unknown'}
-            /* Sync pushes every branch; an unborn one is not on GitHub yet (D92). */
-            branch={line.kind === 'branch' ? line.name : undefined}
-          />
-        ) : null}
       </div>
+
+      {/* A29/D26: *Sync* appears once a remote does, or once the person asks to back up. */}
+      {isSyncOpen ? (
+        <RevisionSyncRegion
+          remote={status.remote}
+          sync={status.sync}
+          onConnect={commands.connectRemote}
+          onDisconnect={commands.disconnectRemote}
+          onCancel={commands.cancelRemote}
+          onSync={commands.syncNow}
+          onPushGithub={commands.pushGithub}
+          syncChats={project?.syncChats !== false}
+          onSyncChatsChange={(enabled) => {
+            // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose
+            void updateProject(projectId, { syncChats: enabled }).catch(reportSyncSettingError);
+          }}
+          canSyncFiles={canSyncFiles}
+          onUpgrade={canUpgradePlan ? requestUpgrade : undefined}
+          storageLimitBytes={storageLimitBytes}
+          signInHref={signIn}
+          role={projectRole}
+          isSignedOut={isSignedOut}
+          projectId={projectId}
+          isLineKnown={line.kind !== 'unknown'}
+          /* Sync pushes every branch; an unborn one is not on GitHub yet (D92). */
+          branch={line.kind === 'branch' ? line.name : undefined}
+        />
+      ) : null}
     </div>
   );
 }

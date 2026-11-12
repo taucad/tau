@@ -54,6 +54,8 @@ import type {
   RevisionCaptureIdentity,
   RevisionDiffEntry,
   RevisionDivergence,
+  RevisionGraph,
+  RevisionGraphRequest,
   RevisionLogRequest,
   RevisionPort,
   RevisionRow,
@@ -71,6 +73,7 @@ import {
   publishOverHttp,
   readRemoteStorageOverHttp,
   readRevisionDiff,
+  readRevisionGraph,
   readRevisionLog,
   readinessOf,
   registerProjectFailureMessage,
@@ -282,6 +285,8 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'tag'; name: string; revisionId: string; note?: string }>
   | Readonly<{ command: 'deleteTag'; name: string }>
   | Readonly<{ command: 'log'; branch?: string; limit?: number; from?: string }>
+  /** Every branch's history in one walk, for History's lanes (D2). */
+  | Readonly<{ command: 'graph'; limit?: number }>
   | Readonly<{ command: 'divergence'; head: string; base: string }>
   | Readonly<{ command: 'diff'; revisionId: string; from?: string; against?: 'checkout' }>
   | Readonly<{ command: 'compare'; revisionId: string; path: string; from?: string; against?: 'checkout' }>
@@ -561,6 +566,8 @@ export type WorkerProjectRevisions = Readonly<{
   deleteTag: (name: string) => Promise<void>;
   /** One branch's history, newest first, with its first-parent `Rev N` (I3). */
   log: (request?: RevisionLogRequest) => Promise<readonly RevisionRow[]>;
+  /** Every branch's history in one walk, each row naming the line it is drawn on (D2). */
+  graph: (request?: RevisionGraphRequest) => Promise<RevisionGraph>;
   /** How far two heads have gone apart, counted by the port rather than by listing both histories. */
   divergence: (head: string, base: string) => Promise<RevisionDivergence>;
   /** Which paths one revision changed, against `from` or its own first parent. */
@@ -1857,6 +1864,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         case 'tag':
         case 'deleteTag':
         case 'log':
+        case 'graph':
         case 'divergence':
         case 'diff':
         case 'compare':
@@ -1887,6 +1895,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }),
     deleteTag: async (name) => options.port.deleteTag(name),
     log: async (request) => readRevisionLog(options.port, request),
+    graph: async (request) => readRevisionGraph(options.port, request),
     divergence: async (head, base) => options.port.divergence({ head: revisionId(head), base: revisionId(base) }),
     diff: async (revision, from, compareOptions) => {
       if (compareOptions?.against === 'checkout') {
@@ -2085,6 +2094,7 @@ export type WorkerRevisionRequest =
 export type WorkerRevisionResult =
   | Readonly<{ kind: 'githubPushed' }>
   | Readonly<{ kind: 'log'; rows: readonly RevisionRow[] }>
+  | Readonly<{ kind: 'graph'; graph: RevisionGraph }>
   | Readonly<{ kind: 'divergence'; divergence: RevisionDivergence }>
   | Readonly<{ kind: 'diff'; entries: readonly RevisionDiffEntry[] }>
   | Readonly<{ kind: 'comparison'; comparison: RevisionFileComparison }>
@@ -2297,6 +2307,11 @@ const answerOf = (
           ...(from === undefined ? {} : { from }),
         })
         .then((rows) => ({ kind: 'log', rows }) as const);
+    }
+    case 'graph': {
+      return tree
+        .graph(request.limit === undefined ? {} : { limit: request.limit })
+        .then((graph) => ({ kind: 'graph', graph }) as const);
     }
     case 'divergence': {
       return tree

@@ -20,6 +20,7 @@ import type {
   RemoteFacet,
   RevisionDiffEntry,
   RevisionDivergence,
+  RevisionGraph,
   RevisionRow,
   RevisionStatusProjection,
   RevisionTag,
@@ -387,6 +388,11 @@ export const createHostRevisionClient = (input: {
         ...(request?.limit === undefined ? {} : { limit: request.limit }),
         ...(request?.from === undefined ? {} : { from: request.from }),
       })) as unknown as readonly RevisionRow[],
+    graph: async (request) =>
+      (await ask({
+        command: 'graph',
+        ...(request?.limit === undefined ? {} : { limit: request.limit }),
+      })) as unknown as RevisionGraph,
     divergence: async (head, base) =>
       (await ask({ command: 'divergence', head, base })) as unknown as RevisionDivergence,
     diff: async (revisionId, from, options) =>
@@ -1261,6 +1267,15 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
         ...(request?.from === undefined ? {} : { from: request.from }),
       });
       return result.kind === 'log' ? result.rows : [];
+    },
+    graph: async (request) => {
+      const result = await ask({ command: 'graph', ...(request?.limit === undefined ? {} : { limit: request.limit }) });
+      if (result.kind !== 'graph') {
+        throw Object.assign(new Error('The revision root answered a graph read with something else.'), {
+          code: 'INVALID_REVISION_RESPONSE',
+        });
+      }
+      return result.graph;
     },
     divergence: async (head, base) => {
       const result = await ask({ command: 'divergence', head, base });

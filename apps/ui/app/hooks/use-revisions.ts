@@ -16,8 +16,8 @@
  * settlement's own card. One schema, two transports.
  */
 
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
-import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { keepPreviousData, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RevisionDiffEntry, RevisionLine, RevisionRow, StartReading } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
@@ -635,6 +635,67 @@ export function useRevisions(): RevisionsView {
     status,
     who,
   ]);
+}
+
+/** Every branch's history as History's lanes read it (D2). @public */
+export type RevisionGraphView = Readonly<{
+  /** Every branch read, `main` first, with its head. */
+  branches: ReadonlyArray<Readonly<{ name: string; head: string }>>;
+  /** Newest first across every branch, in the port's order; unnumbered. */
+  revisions: readonly RevisionCard[];
+  /** The line each entry is drawn on: a branch's name, or a nameless side's key. */
+  lineOf: ReadonlyMap<string, string>;
+  /** Older entries exist below the loaded ones. */
+  hasOlder: boolean;
+  /** Read the next page under the loaded rows. */
+  loadOlder: () => Promise<void>;
+}>;
+
+/**
+ * Every branch's history in one walk, for History's lanes (D2).
+ *
+ * Read only while the project has more than one branch: a one-branch project's
+ * History is the selected branch's log and reads nothing more. Keyed by every
+ * branch's head, so any save, switch, merge or new branch reads it again.
+ *
+ * @returns The graph, or `undefined` with one branch or before it is read.
+ * @public
+ */
+export function useRevisionGraph(): RevisionGraphView | undefined {
+  const { projectId } = useProject();
+  const client = useRevisionClient();
+  const status = useRevisionStatus();
+  const who = useRevisionWhoContext(projectId);
+  const [wanted, setWanted] = useState(revisionPageSize);
+  const heads = (status?.branches ?? []).flatMap((entry) =>
+    entry.head === undefined ? [] : [`${entry.name}:${entry.head}`],
+  );
+  const isEnabled = client !== undefined && heads.length > 1;
+  const { data: graph } = useQuery({
+    queryKey: ['revision-graph', projectId, heads.join('|'), wanted],
+    enabled: isEnabled,
+    queryFn: async () => client!.graph({ limit: wanted }),
+    staleTime: Number.POSITIVE_INFINITY,
+    placeholderData: keepPreviousData,
+  });
+  const rows = isEnabled ? graph?.rows : undefined;
+  useHeldGraph(projectId, rows);
+  const loadOlder = useCallback(async (): Promise<void> => {
+    setWanted((current) => current + revisionPageSize);
+  }, []);
+  return useMemo(() => {
+    if (graph === undefined || rows === undefined) {
+      return undefined;
+    }
+    const oldest = rows.at(-1);
+    return {
+      branches: graph.branches,
+      revisions: rows.map((row) => cardOf(row, who)),
+      lineOf: new Map(rows.map((row) => [row.revisionId, row.line] as const)),
+      hasOlder: rows.length >= wanted && (oldest?.parent !== undefined || oldest?.otherParents !== undefined),
+      loadOlder,
+    };
+  }, [graph, loadOlder, rows, wanted, who]);
 }
 
 /**

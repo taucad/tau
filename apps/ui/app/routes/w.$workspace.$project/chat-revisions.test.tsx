@@ -132,7 +132,10 @@ const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): Revi
    app resolves (`useAuthLinks`) rather than inventing a second one (N3). */
 const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-    <MemoryRouter>{children}</MemoryRouter>
+    {/* The app's root TooltipProvider, which an open row's ID copy glyph needs. */}
+    <TooltipProvider>
+      <MemoryRouter>{children}</MemoryRouter>
+    </TooltipProvider>
   </QueryClientProvider>
 );
 
@@ -881,8 +884,7 @@ describe('Revisions pane closeout', () => {
     await user.click(headRow);
     // The head row's own files compare with its parent; the working copy is an explicit comparison.
     expect(await screen.findByRole('button', { name: 'Compare src/main.scad' })).toBeInTheDocument();
-    await user.click(within(headRow.closest('li')!).getByRole('button', { name: 'More' }));
-    await user.click(await screen.findByRole('menuitem', { name: 'Compare with current' }));
+    await user.click(within(headRow.closest('li')!).getByRole('button', { name: 'Compare' }));
 
     const since = await screen.findByRole('list', { name: 'Changed since “Thicker base 1”' });
     expect(revisionStatusHarness.diffRequests).toContain('rev-1..checkout');
@@ -967,7 +969,7 @@ describe('Revisions pane closeout', () => {
     expect(remote).not.toHaveTextContent('Sketch lid');
   });
 
-  it('asks for no diff it does not render, and shows twelve rows before Show more (C52)', async () => {
+  it('asks for no diff it does not render, and shows twelve rows before Show older (C52)', async () => {
     const rows = Array.from({ length: 40 }, (_, index) =>
       row({ revisionId: `rev-${String(index)}`, revisionNumber: 40 - index, capture: 'save' }),
     );
@@ -980,7 +982,7 @@ describe('Revisions pane closeout', () => {
       expect(screen.getAllByRole('button', { name: /^(?:Thicker base|Change) \d+ · /u }).length).toBeGreaterThan(0);
     });
     expect(screen.getAllByRole('button', { name: /^(?:Thicker base|Change) \d+ · /u })).toHaveLength(12);
-    expect(screen.getByRole('button', { name: 'Show 28 more' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show older' })).toBeInTheDocument();
     /* A closed row asks for nothing: its files are read when it opens. */
     expect(revisionStatusHarness.diffRequests).toEqual([]);
   });
@@ -1049,9 +1051,9 @@ describe('Revisions pane closeout', () => {
     await user.click(fold);
     const base = screen.getByRole('button', { name: /^Autosave · /u });
     await user.click(base);
-    await user.click(await within(base.closest('li')!).findByRole('button', { name: 'Details' }));
-    expect(document.querySelector('dl[aria-label^="Details for "]')).toHaveTextContent(
-      'Your edits, saved before the agent started',
+    /* A5: the base cut's fact is the open row's fact line. */
+    expect(base.closest('li')!.querySelector('[data-slot="row-facts"]')).toHaveTextContent(
+      /^Your edits, saved before the agent started/u,
     );
     expect(screen.queryByText(/Agent turn/u)).not.toBeInTheDocument();
   });
@@ -1080,38 +1082,40 @@ describe('History over a long line (B2)', () => {
       ...over,
     };
   };
-  /* One cache for the whole render, as the app has: Show more lands its page in the cache it read. */
+  /* One cache for the whole render, as the app has: Show older lands its page in the cache it read. */
   const renderStablePane = (): void => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <RevisionsPanelBody />
-        </MemoryRouter>
+        <TooltipProvider>
+          <MemoryRouter>
+            <RevisionsPanelBody />
+          </MemoryRouter>
+        </TooltipProvider>
       </QueryClientProvider>,
     );
   };
-  it('reads one page, shows its rows, then reads the next page when Show more reaches the end', async () => {
+  it('reads one page, shows its rows, then reads the next page when Show older reaches the end', async () => {
     const user = userEvent.setup();
     onLongLine();
     renderStablePane();
 
-    expect(await screen.findByRole('button', { name: 'Show 38 more' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Show older' })).toBeInTheDocument();
     const history = screen.getByRole('list', { name: 'History entries' });
     const rowButtons = (): HTMLElement[] =>
       within(history).getAllByRole('button', { name: /^(?:Thicker base|Change) \d+ · /u });
     expect(revisionStatusHarness.logRequests).toEqual(['main']);
-    await user.click(screen.getByRole('button', { name: 'Show 38 more' }));
+    await user.click(screen.getByRole('button', { name: 'Show older' }));
     expect(rowButtons()).toHaveLength(50);
 
-    await user.click(screen.getByRole('button', { name: 'Show more' }));
+    await user.click(screen.getByRole('button', { name: 'Show older' }));
     await waitFor(() => {
       expect(rowButtons()).toHaveLength(100);
     });
-    /* The first row the page added takes focus, as the canvas's Show more does. */
+    /* The first row the page added takes focus, as the canvas's Show older does. */
     expect(screen.getByRole('button', { name: /^Change 70 · /u })).toHaveFocus();
 
-    await user.click(screen.getByRole('button', { name: 'Show more' }));
+    await user.click(screen.getByRole('button', { name: 'Show older' }));
     await waitFor(() => {
       expect(rowButtons()).toHaveLength(120);
     });
@@ -1136,14 +1140,12 @@ describe('History over a long line (B2)', () => {
 
     expect(await screen.findByRole('button', { name: /^Change 7 · /u })).toBeInTheDocument();
     expect(revisionStatusHarness.rowRequests).toContain('rev-7');
-    /* The page itself is still one page: twelve rows, Show more, then the kept row. */
+    /* The page itself is still one page: twelve rows, Show older, then the kept row. */
     const list = screen.getByRole('list', { name: 'History entries' });
     const names = within(list)
       .getAllByRole('button')
       .map((button) => button.getAttribute('aria-label') ?? button.textContent);
-    expect(names.findIndex((name) => name.startsWith('Change 7 · '))).toBeGreaterThan(
-      names.findIndex((name) => /^Show \d+ more/u.test(name)),
-    );
+    expect(names.findIndex((name) => name.startsWith('Change 7 · '))).toBeGreaterThan(names.indexOf('Show older'));
 
     act(() => {
       requestRevisionReveal('p', 'fillet-2');
@@ -1286,8 +1288,8 @@ describe('Revisions pane vocabulary and History', () => {
 
   /*
    * B5: with Tau's debug setting off, no 40-character id renders anywhere in
-   * the pane, with every row and both Details open; with it on, the ids the
-   * entry is stored under are there.
+   * the pane, with every row and the strip's Details open; with it on, the ids
+   * the entry is stored under are there.
    */
   describe('stored ids (B5)', () => {
     const oid = (digit: string): string => digit.repeat(40);
@@ -1311,8 +1313,6 @@ describe('Revisions pane vocabulary and History', () => {
         const entry = screen.getByRole('button', { name });
         // oxlint-disable-next-line no-await-in-loop -- one row opens at a time, as a person opens them.
         await user.click(entry);
-        // oxlint-disable-next-line no-await-in-loop -- ditto.
-        await user.click(await within(entry.closest('li')!).findByRole('button', { name: 'Details' }));
       }
       return document.body;
     };
@@ -1333,7 +1333,7 @@ describe('Revisions pane vocabulary and History', () => {
       });
       const pane = await openEverything();
       expect(screen.getByLabelText('Details of where you are')).toHaveTextContent(`Head${oid('a')}`);
-      expect(document.querySelector('dl[aria-label^="Details for "]')).toHaveTextContent(
+      expect(document.querySelector('dl[aria-label="Diagnostics"]')).toHaveTextContent(
         `ID${oid('a')}Tree${oid('b')}Parent${oid('c')}`,
       );
       expect(pane.textContent).toContain(oid('d'));
@@ -1357,7 +1357,7 @@ describe('Revisions pane vocabulary and History', () => {
     renderPane();
 
     expect(await screen.findByRole('button', { name: /^Thicker base 3 · /u })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Show 2 more' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show older' })).toBeInTheDocument();
   });
 
   it('folds consecutive autosaves into one row that opens to them', async () => {

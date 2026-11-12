@@ -442,7 +442,8 @@ describe('ChatRevisionMarker', () => {
 
     expect(screen.getByRole('menuitem', { name: 'Create version…' })).not.toBeNull();
     expect(screen.getByRole('menuitem', { name: 'New branch from here…' })).not.toBeNull();
-    expect(screen.getByRole('menuitem', { name: 'Copy ID' })).not.toBeNull();
+    /* C3: More has these two items; the ID's copy glyph is on History's fact line. */
+    expect(screen.getAllByRole('menuitem')).toHaveLength(2);
   });
 
   it('should draw the trigger’s glyph family, a failed turn in the alert purple (HQ5)', () => {

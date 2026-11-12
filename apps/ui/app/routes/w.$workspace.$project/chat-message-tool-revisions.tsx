@@ -1,4 +1,4 @@
-import { FileDiff, FilePlus, FileX, History, XCircle } from 'lucide-react';
+import { Bot, FileDiff, FilePlus, FileX, History, XCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { ToolInvocation } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
@@ -17,6 +17,12 @@ import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { useProject } from '#hooks/use-project.js';
 import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
 import type { RevisionWhoEntry } from '#lib/revision-actor.js';
+import {
+  entryTime,
+  entryTitle,
+  needsDecision,
+  versionLabel,
+} from '#routes/w.$workspace.$project/revision-vocabulary.js';
 
 /**
  * Who made a revision, from the same resolver History reads: never a model id or an account id (HQ4).
@@ -26,8 +32,13 @@ import type { RevisionWhoEntry } from '#lib/revision-actor.js';
  */
 function ActorName({ revisionId, who, source }: RevisionWhoEntry): React.JSX.Element | undefined {
   const context = useRevisionWhoContext(useProject({ enableNoContext: true })?.projectId);
-  const { line } = revisionWho({ revisionId, who, source }, context);
-  return line === '' ? undefined : <span className='shrink-0 text-xs text-muted-foreground/70'>{line}</span>;
+  const { line, isAgent } = revisionWho({ revisionId, who, source }, context);
+  return line === '' ? undefined : (
+    <span data-slot='entry-who' className='inline-flex shrink-0 items-center gap-1'>
+      {isAgent ? <Bot aria-hidden className='size-3' /> : null}
+      {line}
+    </span>
+  );
 }
 
 type RevisionsInvocation = ToolInvocation<typeof toolName.history>;
@@ -55,20 +66,11 @@ const countOf = (count: number, singular: string): string =>
   `${String(count)} ${count === 1 ? singular : `${singular}s`}`;
 
 /**
- * An entry's time, in the column where a version shows its number (M11).
- *
- * @param createdAt - Milliseconds since the Unix epoch.
- * @returns The short local time, or nothing for an entry with no time.
- */
-const timeOf = (createdAt: number): string =>
-  createdAt > 0 ? new Date(createdAt).toLocaleTimeString(undefined, { timeStyle: 'short' }) : '';
-
-/**
  * What one read answers with, under the header.
  *
- * An entry is named the way History names it — its title, its time, whoever
- * made it, and for a version its `V3` — and never by a number or a commit id,
- * which is the same rule the pane and `tau history` follow (M11). A changed
+ * An entry is named the way History names it, from the same functions: its
+ * time (a version's `V3` in its place), its title, and who made it. Never a
+ * number, a commit id or the engine's placeholder title (M6, M11). A changed
  * path is plain text rather than a file link: it is the path *that entry*
  * touched, which today's tree need not still hold.
  *
@@ -97,14 +99,18 @@ const revisionRows = (output: RevisionsOutput): ReactNode => {
           <ChatToolCardListItem className='text-muted-foreground/70 italic'>No history yet</ChatToolCardListItem>
         ) : (
           revisions.map((revision) => (
-            <ChatToolCardListItem key={revision.revisionId} icon={History}>
-              <span className='flex min-w-0 flex-1 flex-col items-start gap-0.5 @xs:flex-row @xs:gap-2'>
-                <span className='shrink-0 font-mono text-xs text-muted-foreground/70'>
-                  {revision.version === undefined ? timeOf(revision.createdAt) : `V${String(revision.version.number)}`}
+            <ChatToolCardListItem key={revision.revisionId} className='[&>span]:flex-1'>
+              <span className='flex min-w-0 items-start gap-2'>
+                <span className='w-16 shrink-0 font-mono tabular-nums'>
+                  {revision.version === undefined ? (
+                    entryTime(revision.createdAt)
+                  ) : (
+                    <span className='font-medium text-foreground'>{versionLabel(revision.version.number)}</span>
+                  )}
                 </span>
-                <span className='min-w-0 truncate'>
-                  {revision.version?.name ?? revision.summary}
-                  {revision.conflicted ? ' · Needs your decision' : ''}
+                <span className='min-w-0 flex-1 truncate text-foreground'>
+                  {entryTitle(revision)}
+                  {revision.conflicted ? ` · ${needsDecision}` : ''}
                 </span>
                 <ActorName revisionId={revision.revisionId} who={revision.who} source={revision.source} />
               </span>

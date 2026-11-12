@@ -499,7 +499,8 @@ const main = async (): Promise<void> => {
     };
     let fetchAttempt = 0;
     const fetchCandidate = (scope: string, changes: Record<string, unknown> = {}) => {
-      const directory = join(root, `fetch-${fetchAttempt++}`);
+      // A fresh checkout has no `out/`: the parent of every candidate directory starts absent.
+      const directory = join(root, `fetch-${fetchAttempt++}`, 'qualification-candidate');
       const result = spawnSync(
         process.execPath,
         ['--import', '@oxc-node/core/register', resolve('apps/desktop/scripts/fetch-desktop-installer-candidate.mts')],

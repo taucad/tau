@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, closeSync, openSync } from 'node:fs';
 import { mkdir, stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 // oxlint-disable-next-line no-restricted-imports -- Share the internal authenticated candidate metadata contract.
@@ -100,6 +100,8 @@ export const fetchInstallerCandidate = async (options: {
 }): Promise<InstallerCandidateProvenance> => {
   const provenance = admitInstallerCandidate(options);
   const root = resolve(options.directory);
+  // The parent (the workspace `out/` on a fresh checkout) may not exist yet; the candidate directory itself must be new.
+  await mkdir(dirname(root), { recursive: true });
   await mkdir(root, { recursive: false });
   const zip = resolve(root, 'candidate.zip');
   const fd = openSync(zip, 'wx');

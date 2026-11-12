@@ -29,9 +29,10 @@ import type { ChatToolRegistryOptions } from '@taucad/agent-tools/registry';
 import { toolName } from '@taucad/chat/constants';
 import type { ChatMode } from '@taucad/chat/constants';
 import { getCadSystemPrompt, getChatStateNote } from '@taucad/chat/prompts';
+import type { KernelOwner, KernelRoutingProfile } from '@taucad/chat/prompts';
 import { getProviderFacingToolGrant } from '@taucad/chat/schemas';
 import type { ToolSelection } from '@taucad/chat';
-import type { KernelId } from '@taucad/types/constants';
+import type { KernelPreference } from '@taucad/types/constants';
 import { authInstanceKey } from '@taucad/api-auth';
 import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
 import { getEnvironment } from '@taucad/api-core';
@@ -213,11 +214,14 @@ export const liveCompletionCeiling = (modelId: string): number =>
 /**
  * The real CAD system prompt a browser turn carries.
  *
- * @param options - Kernel, chat mode, chat identity and the model row the prompt describes.
+ * @param options - Kernel preference, the project's owner and the host's kernels, chat mode, chat identity and the
+ * model row the prompt describes. Auto with no owner renders the routing card for `kernelProfile`.
  * @returns The static and dynamic sections joined the way the browser joins them.
  */
 export const liveCadSystemPrompt = (options: {
-  readonly kernel?: KernelId;
+  readonly kernel?: KernelPreference;
+  readonly kernelOwner?: KernelOwner;
+  readonly kernelProfile?: KernelRoutingProfile;
   readonly mode?: ChatMode | undefined;
   readonly chatId: string;
   readonly modelId: string;
@@ -234,6 +238,8 @@ export const liveCadSystemPrompt = (options: {
       contextWindow: entry.details.contextWindow,
       ...(entry.details.knowledgeCutoff === undefined ? {} : { knowledgeCutoff: entry.details.knowledgeCutoff }),
       supportsImageInput: entry.support?.modalities?.input.includes('image') ?? false,
+      ...(options.kernelOwner === undefined ? {} : { kernelOwner: options.kernelOwner }),
+      ...(options.kernelProfile === undefined ? {} : { kernelProfile: options.kernelProfile }),
     },
   );
   return [prompt.static, prompt.dynamic].join('\n\n');

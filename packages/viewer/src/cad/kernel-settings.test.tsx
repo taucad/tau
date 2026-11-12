@@ -199,7 +199,8 @@ const openSubmenu = async (name: RegExp): Promise<HTMLElement> => {
   act(() => {
     trigger.focus();
   });
-  fireEvent.keyDown(trigger, { key: 'ArrowRight' });
+  // A submenu is a sub-view of the menu: Enter opens it in place (UX policy §7).
+  fireEvent.keyDown(trigger, { key: 'Enter' });
   return screen.findByRole('group', { name: trigger.getAttribute('aria-label')?.split(',')[0] });
 };
 
@@ -257,7 +258,7 @@ describe('kernel settings for a string enum', () => {
     expect(screen.getByRole('menuitem', { name: 'Palette, Fabrication' })).toBeInTheDocument();
   });
 
-  it('opens the values as a dropdown and sets the chosen one, keeping the other settings', async () => {
+  it('opens the values as a sub-view and sets the chosen one, keeping the other settings', async () => {
     const onChange = renderEnumSettings({ finish: 'hasl' });
     const style = await openSubmenu(/^Style/);
     expect(

@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/naming-convention -- WebSocket close-code keys are numeric protocol values. */
 /** Tau Cloud Zoo refusals; the banner matches these exact messages to offer billing. */
 export const zooCloseMessages = {
-  unavailable: 'Zoo execution is temporarily unavailable. Your project is safe; try again later.',
-  credits: 'This Zoo run needs more credits. Add credits, then retry.',
-  pro: 'Zoo execution requires Pro. Upgrade to Pro, then retry.',
+  unavailable: 'Zoo is temporarily unavailable. Your project is safe. Try again later.',
+  credits: 'You need more credits to run Zoo. Add credits, then try again.',
+  pro: 'Zoo needs a Pro plan. Upgrade to Pro, then try again.',
 } as const;
 
 /** Must match apps/api billing.constants.ts `zooCloseCodes`. */

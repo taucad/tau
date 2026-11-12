@@ -45,12 +45,15 @@ import type { Chat } from '@ai-sdk/react';
 import { isResumableRun } from '@taucad/agent-host';
 import type { ForeignRun } from '@taucad/agent-host';
 import { createAsyncLogic } from 'xstate';
-import { waitUnlessGone } from '#lib/xstate.lib.js';
+import { waitUnlessGone } from '@taucad/ui-core/lib/xstate.lib';
 import type { ActorRefFrom } from 'xstate';
 import type { CadAgentExecution, ContextUsageData, MyUIMessage, TauAgentHostId } from '@taucad/chat';
-import type { KernelEntry, KernelId } from '@taucad/types/constants';
+import type { KernelEntry, KernelId, KernelPreference } from '@taucad/types/constants';
 import { isKernelId, resolveKernel } from '@taucad/types/constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
+import { chatKernelPreference } from '#hooks/chat-kernel-preference.js';
+import { useProjectKernelOwner } from '#hooks/use-project-kernel-owner.js';
+import { useFeature } from '#flags/use-feature.js';
 import { draftMachine } from '#hooks/draft.machine.js';
 import { resizeImageActor } from '@taucad/chat-ui/hooks/resize-image.actor';
 import { useDraftImageErrorToast } from '#hooks/use-draft-image-error-toast.js';
@@ -147,12 +150,27 @@ export type ActiveChatKernel = {
   kernel: KernelEntry;
   setActiveKernel: (kernelId: KernelId) => void;
   /**
+   * The chat's kernel preference, what a turn sends (blueprint D2): Auto or one kernel. With the `autoKernel` flag off
+   * it is always {@link ActiveChatKernel.kernelId}.
+   */
+  preference: KernelPreference;
+  /**
+   * Choose Auto or a kernel. On Home it is remembered on the device; in a chat, with the `autoKernel` flag on, it
+   * changes that chat only and no longer moves the device default (E4). With the flag off it is `setActiveKernel`.
+   */
+  setActivePreference: (preference: KernelPreference) => void;
+  /**
    * The chat's own kernel when this runtime cannot execute it, such as a
    * native kernel only Tau Desktop advertises, read on the web. `kernel` is
    * the one used instead; the chat keeps its preference, so it returns
    * wherever that kernel runs. Absent when the chat's kernel is the one used.
    */
   unavailableKernel?: KernelEntry;
+  /**
+   * The kernel the project's model is written in, once its entry binds (blueprint D8). The pill reads it to show
+   * `Auto · X` and to mark a manual pick that differs. Absent on Home and before the entry binds.
+   */
+  owner?: KernelId;
 };
 
 /**
@@ -577,7 +595,13 @@ function useCookieExecution(): ActiveChatExecution {
  * so the resolved `kernel` is a definite `KernelConfiguration`.
  */
 function useCookieKernel(): ActiveChatKernel {
-  const { kernel: cookieKernel, setKernel: setCookieKernel, selectedKernel: kernel } = useKernel();
+  const {
+    kernel: cookieKernel,
+    setKernel: setCookieKernel,
+    selectedKernel: kernel,
+    preference,
+    setPreference,
+  } = useKernel();
   const setActiveKernel = useCallback(
     (next: KernelId) => {
       setCookieKernel(next);
@@ -585,8 +609,8 @@ function useCookieKernel(): ActiveChatKernel {
     [setCookieKernel],
   );
   return useMemo<ActiveChatKernel>(
-    () => ({ kernelId: cookieKernel, kernel, setActiveKernel }),
-    [cookieKernel, kernel, setActiveKernel],
+    () => ({ kernelId: cookieKernel, kernel, setActiveKernel, preference, setActivePreference: setPreference }),
+    [cookieKernel, kernel, setActiveKernel, preference, setPreference],
   );
 }
 
@@ -721,27 +745,54 @@ function useSessionExecution(session: ChatSession): ActiveChatExecution {
  */
 function useSessionKernel(session: ChatSession): ActiveChatKernel {
   const chatActiveKernel = useSelector(session.persistenceActorRef, (state) => state.context.activeKernel);
+  const storedPreference = useSelector(session.persistenceActorRef, (state) => state.context.kernelPreference);
   const { kernel: cookieKernel, setKernel: setCookieKernel } = useKernel();
+  const isAutoEnabled = useFeature('autoKernel');
+  const owner = useProjectKernelOwner();
   const knownKernel = isKernelId(chatActiveKernel) ? chatActiveKernel : undefined;
-  const sessionKernel = knownKernel !== undefined && isKernelAvailable(knownKernel) ? knownKernel : undefined;
+  /* With the flag on the row's preference decides, under the legacy-row rule; Auto runs the owner when there is one. */
+  const preference: KernelPreference | undefined = isAutoEnabled
+    ? chatKernelPreference({ stored: storedPreference, legacyKernel: chatActiveKernel, ownerKernel: owner?.kernel })
+    : undefined;
+  const chosenKernel = preference === undefined ? knownKernel : preference === 'auto' ? owner?.kernel : preference;
+  const sessionKernel = chosenKernel !== undefined && isKernelAvailable(chosenKernel) ? chosenKernel : undefined;
   const kernelId: KernelId = sessionKernel ?? cookieKernel;
   const kernel = resolveKernel(kernelId);
-  const unavailableKernelId = sessionKernel === undefined ? knownKernel : undefined;
+  const unavailableKernelId = sessionKernel === undefined ? chosenKernel : undefined;
+  const ownerKernel = owner?.kernel;
   const setActiveKernel = useCallback(
     (next: KernelId) => {
-      setCookieKernel(next);
+      if (!isAutoEnabled) {
+        setCookieKernel(next);
+      }
       session.persistenceActorRef.send({ type: 'setActiveKernel', kernel: next });
+      if (isAutoEnabled) {
+        session.persistenceActorRef.send({ type: 'setKernelPreference', preference: next });
+      }
     },
-    [session.persistenceActorRef, setCookieKernel],
+    [session.persistenceActorRef, setCookieKernel, isAutoEnabled],
+  );
+  const setActivePreference = useCallback(
+    (next: KernelPreference) => {
+      if (next !== 'auto') {
+        setActiveKernel(next);
+      } else if (isAutoEnabled) {
+        session.persistenceActorRef.send({ type: 'setKernelPreference', preference: 'auto' });
+      }
+    },
+    [session.persistenceActorRef, setActiveKernel, isAutoEnabled],
   );
   return useMemo<ActiveChatKernel>(
     () => ({
       kernelId,
       kernel,
       setActiveKernel,
+      preference: preference ?? kernelId,
+      setActivePreference,
       ...(unavailableKernelId === undefined ? {} : { unavailableKernel: resolveKernel(unavailableKernelId) }),
+      ...(ownerKernel === undefined ? {} : { owner: ownerKernel }),
     }),
-    [kernelId, kernel, setActiveKernel, unavailableKernelId],
+    [kernelId, kernel, setActiveKernel, preference, setActivePreference, unavailableKernelId, ownerKernel],
   );
 }
 

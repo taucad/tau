@@ -3,7 +3,7 @@ import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import type { FinancialActivityKind } from '@taucad/billing';
-import type { ModelInvocationService, ModelProviderWire, TurnTelemetry } from '#model-invocation.types.js';
+import type { HostLabels, ModelInvocationService, ModelProviderWire, TurnTelemetry } from '#model-invocation.types.js';
 import { modelInvocationServiceKey } from '#model-invocation.types.js';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 
@@ -23,6 +23,8 @@ export type LlmGatewayRelayInput = {
   readonly activity?: FinancialActivityKind;
   /** Turn-step telemetry labels, validated at the header boundary. */
   readonly turn?: TurnTelemetry;
+  /** Host labels for the provider fact, validated at the header boundary. */
+  readonly hostLabels?: HostLabels;
 };
 
 /** Relays one authenticated request through the shared funded invocation owner. */
@@ -53,6 +55,7 @@ export class LlmGatewayService {
       ...(input.projectHint === undefined ? {} : { projectHint: input.projectHint }),
       ...(input.chatHint === undefined ? {} : { chatHint: input.chatHint }),
       ...(input.turn === undefined ? {} : { turn: input.turn }),
+      ...(input.hostLabels === undefined ? {} : { hostLabels: input.hostLabels }),
       signal: input.signal,
       onAdmitted: (operationId) => {
         void input.reply.header('x-tau-operation-id', operationId);

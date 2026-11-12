@@ -5,8 +5,8 @@ import { useProject } from '#hooks/use-project.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
-import { searchParameterName } from '#constants/search-parameter.constants.js';
-import { stringParameter } from '#utils/search-parameter.codecs.js';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
+import { stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import { ArchivedChatsView } from '@taucad/project-workspace/components/archived-chats-view';
 
 const queryCodec = stringParameter();

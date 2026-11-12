@@ -11,6 +11,8 @@ Use this checklist after loading `SKILL.md` for model/provider work.
 | Catalog cap/shape tests            | `apps/libs/api-llm-gateway/src/models/model.service.test.ts`       |
 | Gateway routes, wires, credentials | `apps/libs/api-llm-gateway/src/providers/provider-gateway.ts`      |
 | Strict gateway request boundary    | `apps/libs/api-llm-gateway/src/billable-model-request.ts`          |
+| Funded routes: rates, ceilings     | `apps/libs/api-billing/src/billable-model-qualification.ts`        |
+| Funded route contract test         | `apps/libs/api-billing/src/billable-model-qualification.test.ts`   |
 | Provider/family enums (chat wire)  | `libs/chat/src/schemas/provider.schema.ts`                         |
 | Tool-schema contract test          | `libs/chat/src/schemas/provider-tool-schema-compat.test.ts`        |
 | Host transport: wire + reasoning   | `packages/agent-host/src/transport/gateway-model-transport.ts`     |
@@ -82,6 +84,18 @@ When a new provider is actually needed, update all relevant surfaces:
 - Extend the request boundary in `billable-model-request.ts` if the wire carries block shapes it does not yet accept.
 - Add reasoning derivation in `turn-body.ts` if the provider names its reasoning control differently.
 - Add at least one catalog row and a live matrix row.
+- If Tau Cloud funds it, add funded routes for its rows (next section).
+
+## Funded Route Checklist
+
+A provider in `fundedGatewayProviderIds` reaches its supplier on Tau Cloud only through a route in `billable-model-qualification.ts`. `CodeOwnedBillableModelQualificationResolver.resolve` refuses any request whose route, wire, output field or output bound does not match, before anything is charged or sent. For every funded row:
+
+- Add a `route(...)` with the catalog route id, display name and wire.
+- Set `contextMaximum` and `outputMaximum` to the supplier's limits on that surface. `outputMaximum` must be at least the row's `details.maxTokens`, or every turn at the catalog ceiling is refused.
+- Set `rates(input, cacheRead, cacheWrite, output)` in USD per million tokens from the supplier's published pricing, and `pricingRevision` to the date you read it. A route without rates is refused as temporarily unavailable.
+- Set `outputParameter` to the field the host transport actually sends. The default is `max_tokens` for `anthropic`, `max_output_tokens` for `openai-responses`, and `max_completion_tokens` for `openai-completions`. On `openai-completions`, pi-ai picks the field in `detectCompat` (`dist/api/openai-completions.js` in `@earendil-works/pi-ai`): it sends `max_tokens` for Together, DeepSeek, Moonshot and some other providers and base URLs, and `max_completion_tokens` otherwise, unless `piModelFor` sets `compat.maxTokensField`. Read `detectCompat` for the pinned pi-ai version; do not infer the field from the provider's docs. A mismatch refuses every turn with `Exactly one bounded output-token maximum is required`.
+- Set `allowsImage: false` for text-only models and `combinedMaximum` where the supplier bounds input plus output together.
+- Run the funded route contract test. It sends each funded row's real host request through the real resolver at the row's catalog output ceiling, so it catches a wrong field or a low ceiling. Re-check `outputParameter` for every funded route when pi-ai is upgraded.
 
 ## Catalog Row Checklist
 
@@ -154,6 +168,7 @@ Before public enablement, verify:
 - Streaming works through the configured wire.
 - Provider-specific reasoning or JSON controls are actually wired, not merely present in the row.
 - The live matrix row for the model's provider passed with this model id.
+- For a funded model: the funded route contract test passes, and after deploy one funded turn with tools succeeded on staging (taucad.dev) before the row is public on production (tau.new). The live matrix cannot stand in for this: it runs with Tau Cloud off.
 
 Hidden rows are still useful for staging, but `enabled: false` also removes the gateway route, so a hidden row cannot be smoke-tested through the gateway.
 
@@ -175,7 +190,13 @@ pnpm nx test agent-host --watch=false
 pnpm nx typecheck agent-host
 ```
 
-Then the live ladder. `api:test:live` runs an in-process live gateway harness (suites under `apps/api/app/testing/live/`: a provider matrix suite and a provider-switch suite) against real keys from `apps/api/.env`, with no running API required:
+When a funded route, a funded row's output ceiling or the pi-ai version changed:
+
+```bash
+pnpm nx test api-billing --watch=false src/billable-model-qualification.test.ts
+```
+
+Then the live ladder. `api:test:live` runs an in-process live gateway harness (suites under `apps/api/app/testing/live/`: a provider matrix suite and a provider-switch suite) against real keys from `apps/api/.env`, with no running API required. The harness boots the gateway with `ModelInvocationModule.forRoot({ tauCloudEnabled: false })` in `live-gateway.harness.ts`, so it skips route qualification, metering and settlement entirely. A green live matrix says nothing about whether Tau Cloud admits the model:
 
 ```bash
 pnpm nx run api:test:live

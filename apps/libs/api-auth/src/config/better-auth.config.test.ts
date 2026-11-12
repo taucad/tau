@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, Logger } from '@nestjs/common';
 import { betterAuth } from 'better-auth';
 import { APIError } from 'better-auth/api';
 import { getCookies } from 'better-auth/cookies';
@@ -981,6 +981,26 @@ describe('getBetterAuthConfig sign-up readiness', () => {
     expect(limited.status).toBe(429);
     expect(failedOpen.status).not.toBe(429);
     expect(consume.mock.calls[0]?.[0].key).toMatch(/^auth:rl:/u);
+  });
+
+  /* Database connection audit R1: a pooler refusal reached Loki as a bare INTERNAL_SERVER_ERROR. */
+  it('passes an error Better Auth logs to pino as its err object', () => {
+    const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const { config } = createConfig();
+      const refusal = Object.assign(new Error('(EMAXCONNSESSION) max clients reached in session mode'), {
+        code: 'XX000',
+      });
+      config.logger?.log?.('error', 'INTERNAL_SERVER_ERROR', refusal);
+      config.logger?.log?.('warn', 'Sign-up attempt for existing email: someone@tau.new', { detail: 'dropped' });
+
+      expect(error).toHaveBeenCalledWith({ err: refusal }, 'INTERNAL_SERVER_ERROR');
+      expect(warn).toHaveBeenCalledWith('Sign-up attempt for existing email: recipient@tau.new');
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+    }
   });
 
   it('keeps only the domain of an address Better Auth writes into a log message', () => {

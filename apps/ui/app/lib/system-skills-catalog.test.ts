@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { parseSkillFrontmatter } from '#hooks/use-context-payload.utils.js';
-import { createModelSkillMarkdown } from '#lib/create-model-skill.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
 import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
 
 const progressiveDisclosureSkillNames = [
-  'create-model',
   'cad-build123d',
   'cad-picogk',
   'cad-picovoxel',
@@ -81,19 +79,17 @@ describe('systemSkillsCatalog', () => {
     }
   });
 
-  it('keeps configured kernels, cad-* catalog slugs, and create-model rows set-equal', () => {
+  it('keeps configured kernels and cad-* catalog slugs set-equal, with no create-model skill', () => {
     const configured = kernelConfigurations.map(({ id }) => id).toSorted();
     const catalog = systemSkillsCatalog
       .flatMap(({ slug }) => (slug.startsWith('cad-') ? [slug.slice('cad-'.length)] : []))
       .toSorted();
-    const createModelRows = [...createModelSkillMarkdown.matchAll(/^\| `cad-([^`]+)` \|/gmu)]
-      .flatMap((match) => (match[1] ? [match[1]] : []))
-      .toSorted();
 
     expect(catalog).toEqual(configured);
-    expect(createModelRows).toEqual(configured);
-    // Every configured kernel's cad-* skill plus create-model and geospec-authoring.
-    expect(progressiveDisclosureSkillNames).toHaveLength(configured.length + 2);
+    /* The routing card in the prompt's kernel_skill section replaced /create-model (blueprint E6). */
+    expect(systemSkillsCatalog.some(({ slug }) => slug === 'create-model')).toBe(false);
+    // Every configured kernel's cad-* skill plus geospec-authoring.
+    expect(progressiveDisclosureSkillNames).toHaveLength(configured.length + 1);
   });
 
   it('preserves JSCAD multi-shape output as one flat array of named geometries', () => {

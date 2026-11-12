@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router';
-import { isFunction } from '#utils/function.utils.js';
-import type { SearchParameterName } from '#constants/search-parameter.constants.js';
-import type { SearchParameterCodec } from '#utils/search-parameter.codecs.js';
+import { isFunction } from '@taucad/ui-core/utils/function.utils';
+import type { SearchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
+import type { SearchParameterCodec } from '@taucad/ui-core/utils/search-parameter.codecs';
 
 /** How a write to the parameter affects history. */
 type SearchParameterOptions = {

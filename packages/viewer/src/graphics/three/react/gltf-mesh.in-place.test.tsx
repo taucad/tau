@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => {
       send: vi.fn(),
       getSnapshot: () => ({
         context: {
+          cameraRef: { getSnapshot: () => ({ matches: () => false }) },
           modelPointerClickSuppressionReasons: [],
           suppressNextModelPointerClick: false,
           viewerHoverSuppressionReasons: [] as string[],

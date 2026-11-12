@@ -4,9 +4,9 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PartialDeep } from 'type-fest';
 import type * as ReactRouter from 'react-router';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
-import { defaultPanelState, mobilePanelIds } from '#constants/editor.constants.js';
-import type { PanelState } from '#types/editor.types.js';
-import { mergePanelState } from '#utils/panel-state.utils.js';
+import { defaultPanelState, mobilePanelIds } from '@taucad/ui-core/constants/editor.constants';
+import type { PanelState } from '@taucad/ui-core/types/editor.types';
+import { mergePanelState } from '@taucad/ui-core/utils/panel-state.utils';
 import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
 
 /*

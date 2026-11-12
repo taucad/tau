@@ -147,6 +147,7 @@ import {
   openDirectoryChannel,
   directoryGrantChannels,
   revealPathChannel,
+  agentHostRatingChannel,
   agentHostSessionChannels,
   machinesChannels,
   externalAgentsChannel,
@@ -1166,6 +1167,31 @@ const bootstrapElectronApp = async (): Promise<void> => {
     const input = agentHostSessionInput(event, payload);
     dropDocumentAttachment(event.sender, input);
     await services.releaseAgentHost(input, quitQuiesceMilliseconds);
+  });
+  /* LW8: the account rated a run in this app. Main checks its shape and relays it to the services utility, where the
+   * project host that ran the turn reports it under the feedback grant once the run has ended. */
+  ipcMain.handle(agentHostRatingChannel, async (event, payload) => {
+    const { projectId, chatId, runId, value, at } = (payload ?? {}) as Record<string, unknown>;
+    if (
+      !trusted(event.senderFrame) ||
+      typeof projectId !== 'string' ||
+      projectId === '' ||
+      typeof chatId !== 'string' ||
+      chatId === '' ||
+      typeof runId !== 'string' ||
+      runId === '' ||
+      (value !== 'positive' && value !== 'negative') ||
+      typeof at !== 'number' ||
+      !Number.isFinite(at)
+    ) {
+      throw new Error('Desktop shell refused an invalid agent-host rating.');
+    }
+    try {
+      services.send({ type: 'agent-host-rated', projectId, chatId, runId, value, at });
+    } catch (error) {
+      /* A quiescing utility takes no request: a lost rating is only a missing feedback fact. */
+      log.log('warn', 'main.agent-host-rating', error);
+    }
   });
   /* The secret half of the binding ceremony (D10). The renderer never keeps
    * the access code: it rides this one invoke to the utility, which saves it

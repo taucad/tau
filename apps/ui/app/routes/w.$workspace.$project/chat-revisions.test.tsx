@@ -18,6 +18,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import {
   ChatRevisions,
   RevisionsPanelBody,
+  currentRevisionOf,
   groupRevisionHistory,
 } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
@@ -27,6 +28,7 @@ import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-o
 import { consumeRevisionReveal, requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import type { EditorDocument } from '#lib/editor-document.js';
+import type * as UseFeatureModule from '#flags/use-feature.js';
 
 const projectSnapshot = { context: { project: { syncChats: true } } };
 const projectRef = {
@@ -38,6 +40,16 @@ const editorRef = {
   subscribe: () => ({ unsubscribe: () => undefined }),
 };
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', projectRef, editorRef }) }));
+/* Tau's debug setting, off unless a row turns it on (B5). */
+const flags = vi.hoisted(() => ({ tauDebug: false }));
+vi.mock('#flags/use-feature.js', async (importOriginal) => {
+  const original = await importOriginal<typeof UseFeatureModule>();
+  return {
+    ...original,
+    useFeature: (flag: Parameters<typeof original.useFeature>[0]) =>
+      flag === 'tauDebug' ? flags.tauDebug : original.useFeature(flag),
+  };
+});
 const openPanel = vi.fn();
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel }),
@@ -105,7 +117,7 @@ vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({
 const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
   revisionNumber: undefined,
   changeId: `change-${over.revisionId}`,
-  actor: 'You',
+  who: { kind: 'recorded', identity: { kind: 'user', id: 'usr_test' } },
   source: 'user',
   createdAt: 1_788_220_800_000,
   summary: 'Thicker base',
@@ -136,7 +148,7 @@ describe('Revisions pane', () => {
   it('folds only consecutive unnamed autosaves', () => {
     const card = (
       revisionId: string,
-      trigger: RevisionCard['trigger'],
+      capture: RevisionCard['capture'],
       tags: readonly string[] = [],
     ): RevisionCard => ({
       revisionId,
@@ -147,7 +159,7 @@ describe('Revisions pane', () => {
       turnId: undefined,
       conflicted: false,
       tags,
-      trigger,
+      capture,
     });
     const groups = groupRevisionHistory(
       [card('head', 'idle'), card('a', 'hidden'), card('b', 'close'), card('named', 'idle', ['v1'])],
@@ -156,6 +168,36 @@ describe('Revisions pane', () => {
 
     expect(groups.map((group) => group.kind)).toStrictEqual(['revision', 'autosaves', 'revision']);
     expect(groups[1]).toMatchObject({ kind: 'autosaves', revisions: [{ revisionId: 'a' }, { revisionId: 'b' }] });
+  });
+
+  it('merges consecutive setup entries into one line, the head among them, and never marks one Current (A4)', () => {
+    const card = (revisionId: string, parent: string | undefined, isSetup: boolean): RevisionCard => ({
+      revisionId,
+      n: 1,
+      createdAt: 1,
+      summary: '',
+      actor: 'You',
+      turnId: undefined,
+      conflicted: false,
+      tags: [],
+      capture: isSetup ? 'idle' : 'save',
+      ...(parent === undefined ? {} : { parent }),
+      ...(isSetup ? { isSetup: true } : {}),
+    });
+    const revisions = [
+      card('setup-2', 'setup-1', true),
+      card('setup-1', 'agent', true),
+      card('agent', 'start', false),
+      card('start', undefined, false),
+    ];
+
+    expect(groupRevisionHistory(revisions, 'setup-2').map((group) => group.kind)).toStrictEqual([
+      'setup',
+      'revision',
+      'revision',
+    ]);
+    expect(currentRevisionOf(revisions, 'setup-2')).toBe('agent');
+    expect(currentRevisionOf(revisions, 'agent')).toBe('agent');
   });
 
   it('names its Close after the panel, as its tooltip does (I6)', () => {
@@ -925,7 +967,7 @@ describe('Revisions pane closeout', () => {
 
   it('asks for no diff it does not render, and shows twelve rows before Show more (C52)', async () => {
     const rows = Array.from({ length: 40 }, (_, index) =>
-      row({ revisionId: `rev-${String(index)}`, revisionNumber: 40 - index, trigger: 'save' }),
+      row({ revisionId: `rev-${String(index)}`, revisionNumber: 40 - index, capture: 'save' }),
     );
     revisionStatusHarness.rows = rows;
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-0' };
@@ -976,6 +1018,40 @@ describe('Revisions pane closeout', () => {
       (node) => node.getAttribute('aria-label') === null && node.getAttribute('aria-labelledby') === null,
     );
     expect(unnamed.map((node) => node.textContent)).toEqual([]);
+  });
+
+  /* A5, fixture B4: a turn's base cut is the person's autosave; the agent's result beside it is unchanged. */
+  it('reads a turn base cut as an autosave that folds with autosaves, under the agent’s result', async () => {
+    const user = userEvent.setup();
+    const turn = { capture: 'turn', turnId: 'u1', summary: 'Agent turn u1' } as const;
+    revisionStatusHarness.rows = [
+      row({
+        ...turn,
+        revisionId: 'rev-4',
+        revisionNumber: 4,
+        source: 'agent',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'agent' } },
+        turnCut: 'result',
+      }),
+      row({ ...turn, revisionId: 'rev-3', revisionNumber: 3, turnCut: 'base' }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, capture: 'idle' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, capture: 'save' }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
+
+    renderPane();
+
+    expect(await screen.findByRole('button', { name: 'Rev 4 · Agent change' })).toBeInTheDocument();
+    const fold = screen.getByRole('button', { name: /^2 autosaves/u });
+    expect(screen.queryByRole('button', { name: 'Rev 3 · Autosave' })).not.toBeInTheDocument();
+    await user.click(fold);
+    const base = screen.getByRole('button', { name: 'Rev 3 · Autosave' });
+    await user.click(base);
+    await user.click(await within(base.closest('li')!).findByRole('button', { name: 'Details' }));
+    expect(document.querySelector('dl[aria-label="Details for Rev 3"]')).toHaveTextContent(
+      'Your edits, saved before the agent started',
+    );
+    expect(screen.queryByText(/Agent turn/u)).not.toBeInTheDocument();
   });
 });
 
@@ -1080,7 +1156,7 @@ describe('History over a long line (B2)', () => {
         revisionId: 'rev-121',
         revisionNumber: 121,
         source: 'restore',
-        trigger: 'restore',
+        capture: 'restore',
         restoredFrom: 'rev-3',
         parent: 'rev-120',
       }),
@@ -1098,7 +1174,7 @@ describe('History over a long line (B2)', () => {
         revisionId: 'rev-121',
         revisionNumber: 121,
         source: 'restore',
-        trigger: 'restore',
+        capture: 'restore',
         restoredFrom: 'rev-3',
         parent: 'rev-120',
       }),
@@ -1143,7 +1219,7 @@ describe('Revisions pane vocabulary and History', () => {
     ['deciding a merge', { attention: 1, conflicts: [conflicted] }, 'Needs your decision on main'],
     ['before the line is known', { line: { kind: 'unknown' } as const, headRevisionId: undefined }, 'Loading history…'],
   ] as const)(
-    'says one sentence %s, identical in the header’s name, its card and the strip (RA11)',
+    'says one sentence %s, identical in the header’s name, its tooltip and the strip (RA11)',
     async (_, over, sentence) => {
       const user = userEvent.setup();
       revisionStatusHarness.rows = [row({ revisionId: 'rev-4', revisionNumber: 4 })];
@@ -1166,12 +1242,7 @@ describe('Revisions pane vocabulary and History', () => {
       expect(trigger.getAttribute('aria-label')).toContain(sentence.replaceAll(' · ', ', ').replace(/…$/u, ''));
       await user.tab();
       expect(trigger).toHaveFocus();
-      const card = await waitFor(() => {
-        const found = document.querySelector('[data-slot="revision-card"]');
-        expect(found).not.toBeNull();
-        return found!;
-      });
-      expect(card).toHaveTextContent(sentence);
+      expect(await screen.findByRole('tooltip')).toHaveTextContent(sentence);
     },
   );
 
@@ -1204,9 +1275,65 @@ describe('Revisions pane vocabulary and History', () => {
     const strip = await screen.findByRole('region', { name: 'Where you are' });
     await user.click(within(strip).getByRole('button', { name: 'Details' }));
     const details = within(strip).getByLabelText('Details of where you are');
-    expect(details).toHaveTextContent(/Headrev-4/u);
     expect(details).toHaveTextContent(`This device${device}`);
     vi.unstubAllEnvs();
+  });
+
+  /*
+   * B5: with Tau's debug setting off, no 40-character id renders anywhere in
+   * the pane, with every row and both Details open; with it on, the ids the
+   * entry is stored under are there.
+   */
+  describe('stored ids (B5)', () => {
+    const oid = (digit: string): string => digit.repeat(40);
+    const openEverything = async (): Promise<HTMLElement> => {
+      const user = userEvent.setup();
+      revisionStatusHarness.rows = [
+        row({ revisionId: oid('a'), revisionNumber: 2, treeId: oid('b'), parent: oid('c'), capture: 'save' }),
+        row({
+          revisionId: oid('c'),
+          revisionNumber: 1,
+          treeId: oid('d'),
+          capture: 'save',
+          who: { kind: 'recorded', identity: { kind: 'user', id: 'anon:3fa9c1d2', anonymous: true } },
+        }),
+      ];
+      revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: oid('a') };
+      renderPane();
+      const strip = await screen.findByRole('region', { name: 'Where you are' });
+      await user.click(within(strip).getByRole('button', { name: 'Details' }));
+      for (const name of ['Rev 2 · Thicker base', 'Rev 1 · Thicker base']) {
+        const entry = screen.getByRole('button', { name });
+        // oxlint-disable-next-line no-await-in-loop -- one row opens at a time, as a person opens them.
+        await user.click(entry);
+        // oxlint-disable-next-line no-await-in-loop -- ditto.
+        await user.click(await within(entry.closest('li')!).findByRole('button', { name: 'Details' }));
+      }
+      return document.body;
+    };
+
+    it('renders no 40-character id with the debug setting off', async () => {
+      const pane = await openEverything();
+      expect(screen.getByLabelText('Details of where you are')).not.toHaveTextContent('Head');
+      expect(pane.textContent).not.toMatch(/[\da-f]{40}/u);
+      /* The pseudonym reads Anonymous; its hash is a diagnostic too. */
+      expect(pane.textContent).toContain('Anonymous');
+      expect(pane.textContent).not.toContain('3fa9c1d2');
+    });
+
+    it('renders the stored ids with the debug setting on', async () => {
+      flags.tauDebug = true;
+      onTestFinished(() => {
+        flags.tauDebug = false;
+      });
+      const pane = await openEverything();
+      expect(screen.getByLabelText('Details of where you are')).toHaveTextContent(`Head${oid('a')}`);
+      expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(
+        `Revision${oid('a')}Tree${oid('b')}Parent${oid('c')}`,
+      );
+      expect(pane.textContent).toContain(oid('d'));
+      expect(pane.textContent).toContain('Anonymous · 3fa9c1d2');
+    });
   });
 
   it('names the line History shows, and says why an empty one is empty', async () => {
@@ -1218,7 +1345,7 @@ describe('Revisions pane vocabulary and History', () => {
 
   it('keeps the revision you are on in view, however far down it is (round 4)', async () => {
     revisionStatusHarness.rows = Array.from({ length: 20 }, (_, index) =>
-      row({ revisionId: `rev-${String(20 - index)}`, revisionNumber: 20 - index, trigger: 'save' }),
+      row({ revisionId: `rev-${String(20 - index)}`, revisionNumber: 20 - index, capture: 'save' }),
     );
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-3' };
 
@@ -1231,10 +1358,10 @@ describe('Revisions pane vocabulary and History', () => {
   it('folds consecutive autosaves into one row that opens to them', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-4', revisionNumber: 4, trigger: 'save' }),
-      row({ revisionId: 'rev-3', revisionNumber: 3, trigger: 'idle' }),
-      row({ revisionId: 'rev-2', revisionNumber: 2, trigger: 'idle' }),
-      row({ revisionId: 'rev-1', revisionNumber: 1, trigger: 'save' }),
+      row({ revisionId: 'rev-4', revisionNumber: 4, capture: 'save' }),
+      row({ revisionId: 'rev-3', revisionNumber: 3, capture: 'idle' }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, capture: 'idle' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, capture: 'save' }),
     ];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
 
@@ -1246,12 +1373,65 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.getByRole('button', { name: 'Rev 3 · Thicker base' })).toBeInTheDocument();
   });
 
+  /* A4: the operator's two `idle` autosaves that changed only `.gitignore` are one compact setup line. */
+  it("shows Tau's setup entries as one compact line, and Current on the newest entry that is not setup", async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-4', revisionNumber: 4, capture: 'idle', isSetup: true }),
+      row({ revisionId: 'rev-3', revisionNumber: 3, capture: 'idle', isSetup: true }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, capture: 'save', summary: 'Add vent slots' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, capture: 'save' }),
+    ].map((entry, index, all) => {
+      const parent = all[index + 1]?.revisionId;
+      return parent === undefined ? entry : { ...entry, parent };
+    });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
+
+    renderPane();
+
+    const line = await screen.findByRole('button', { name: /^Tau updated project setup · 2 changes/u });
+    expect(line).toHaveClass('h-6');
+    expect(line).not.toHaveTextContent('Current');
+    expect(screen.queryByRole('button', { name: /autosaves/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rev 4 · Thicker base' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText('Current')).toHaveLength(1);
+    });
+    expect(screen.getByRole('button', { name: 'Rev 2 · Add vent slots' })).toHaveTextContent('Current');
+
+    await user.click(line);
+    expect(screen.getByRole('button', { name: 'Rev 4 · Thicker base' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rev 3 · Thicker base' })).toBeInTheDocument();
+  });
+
+  it('lists Tau’s setup files last, under a plain Project setup label (A4)', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-2', revisionNumber: 2, capture: 'save' })];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
+    revisionStatusHarness.diff = [
+      { path: '.gitattributes', kind: 'added' },
+      { path: 'main.scad', kind: 'modified' },
+    ];
+
+    renderPane();
+
+    await user.click(await screen.findByRole('button', { name: 'Rev 2 · Thicker base' }));
+    const files = await screen.findByRole('list', { name: 'Changed files' });
+    /* The label is not a file, so assistive technology counts only the two files as items. */
+    expect(
+      within(files)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toStrictEqual([expect.stringContaining('main.scad'), expect.stringContaining('.gitattributes')]);
+    expect(files.textContent).toMatch(/main\.scad.*Project setup.*\.gitattributes/u);
+  });
+
   it('is one Tab stop, on the row you are on, and moves by arrow keys (A1 item 14)', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-3', revisionNumber: 3, trigger: 'save' }),
-      row({ revisionId: 'rev-2', revisionNumber: 2, trigger: 'save' }),
-      row({ revisionId: 'rev-1', revisionNumber: 1, trigger: 'save' }),
+      row({ revisionId: 'rev-3', revisionNumber: 3, capture: 'save' }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, capture: 'save' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, capture: 'save' }),
     ];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
 
@@ -1293,10 +1473,53 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.queryByRole('button', { name: 'Sync now' })).not.toBeInTheDocument();
   });
 
+  /* A6, Q8: every project starts with the Start version, V1, in the column where other rows show Rev and time. */
+  it.each([
+    ['created', 'Version · project created'],
+    ['github', 'Version · imported from GitHub'],
+    ['folder', 'Version · imported from a folder'],
+    ['zip', 'Version · imported from a zip'],
+  ] as const)('reads a new project’s first entry as V1 · Start, %s, before any turn', async (start, fact) => {
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-1', revisionNumber: 1, summary: 'Project created', capture: 'create', start }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-1' };
+
+    renderPane();
+
+    const start1 = await screen.findByRole('button', { name: 'V1 · Start' });
+    expect(start1).toHaveTextContent(fact);
+    expect(start1).toHaveTextContent('V1');
+    expect(start1).not.toHaveTextContent('Rev 1');
+    expect(start1).not.toHaveTextContent('Project created');
+  });
+
+  it('keeps Start under the agent’s first entry, and the agent’s entry its own Rev', async () => {
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-2', revisionNumber: 2, summary: 'Add vent slots', source: 'agent', capture: 'turn' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, summary: 'Agent turn t1', capture: 'turn', start: 'created' }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
+
+    renderPane();
+
+    expect(await screen.findByRole('button', { name: 'Rev 2 · Add vent slots' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'V1 · Start' })).toHaveTextContent('Version · project created');
+  });
+
   it('never renders an actor id, and names the agent (HQ4)', async () => {
     revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-2', revisionNumber: 2, actor: 'claude-opus-4', source: 'agent' }),
-      row({ revisionId: 'rev-1', revisionNumber: 1, actor: 'user_2abc' }),
+      row({
+        revisionId: 'rev-2',
+        revisionNumber: 2,
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'claude-opus-4' } },
+        source: 'agent',
+      }),
+      row({
+        revisionId: 'rev-1',
+        revisionNumber: 1,
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'user_2abc' } },
+      }),
     ];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
 

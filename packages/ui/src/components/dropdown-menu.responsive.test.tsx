@@ -516,33 +516,74 @@ describe('responsive dropdown menu parts in a drawer', () => {
     expect(onValueChange).toHaveBeenCalledWith('in');
   });
 
-  it('should expand a submenu in place, and close the drawer when one of its items is chosen', async () => {
+  it('should open a submenu as a sub-view with a Back row, and close the drawer when one of its items is chosen', async () => {
     const onSelect = vi.fn<(event: Event) => void>();
     const drawer = await openWith(
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger>Export</DropdownMenuSubTrigger>
-        <DropdownMenuPortal>
-          <DropdownMenuSubContent>
-            <DropdownMenuItem onSelect={onSelect}>
-              STL
-              <DropdownMenuShortcut>⌘E</DropdownMenuShortcut>
-            </DropdownMenuItem>
-          </DropdownMenuSubContent>
-        </DropdownMenuPortal>
-      </DropdownMenuSub>,
+      <>
+        <DropdownMenuItem>Rename</DropdownMenuItem>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Export</DropdownMenuSubTrigger>
+          <DropdownMenuPortal>
+            <DropdownMenuSubContent>
+              <DropdownMenuItem onSelect={onSelect}>
+                STL
+                <DropdownMenuShortcut>⌘E</DropdownMenuShortcut>
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuPortal>
+        </DropdownMenuSub>
+      </>,
     );
 
     const trigger = within(drawer).getByRole('button', { name: 'Export' });
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(within(drawer).queryByRole('button', { name: /STL/u })).not.toBeInTheDocument();
 
     fireEvent.click(trigger);
-    expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    const content = document.querySelector<HTMLElement>(`[id="${trigger.getAttribute('aria-controls')!}"]`);
-    expect(content).toHaveAttribute('role', 'group');
-    fireEvent.click(within(content!).getByRole('button', { name: /STL/u }));
+    // The sub-view replaces the items in the same drawer: one surface, its Back row named for where it goes.
+    const back = within(drawer).getByRole('button', { name: 'Back to View' });
+    expect(back).toHaveTextContent('Export');
+    expect(within(drawer).queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    await waitFor(() => {
+      expect(within(drawer).getByRole('button', { name: /STL/u })).toHaveFocus();
+    });
 
+    fireEvent.click(back);
+    expect(within(drawer).getByRole('button', { name: 'Rename' })).toBeVisible();
+    await waitFor(() => {
+      expect(within(drawer).getByRole('button', { name: 'Export' })).toHaveFocus();
+    });
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Export' }));
+    fireEvent.click(within(drawer).getByRole('button', { name: /STL/u }));
     expect(onSelect).toHaveBeenCalledOnce();
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'View' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('should step back from a sub-view on Escape before it closes the drawer', async () => {
+    const user = userEvent.setup();
+    const drawer = await openWith(
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>Export</DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          <DropdownMenuItem>STL</DropdownMenuItem>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>,
+    );
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Export' }));
+    await waitFor(() => {
+      expect(within(drawer).getByRole('button', { name: 'STL' })).toHaveFocus();
+    });
+
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('dialog', { name: 'View' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(drawer).getByRole('button', { name: 'Export' })).toHaveFocus();
+    });
+
+    await user.keyboard('{Escape}');
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'View' })).not.toBeInTheDocument();
     });

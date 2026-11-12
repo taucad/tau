@@ -9,7 +9,10 @@
 
 import { execFile } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -188,6 +191,168 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
       await revisions.close();
     }
   }, 60_000);
+
+  /*
+   * A1: a save with a token records the token's account, under its no-reply
+   * address, and never the account's email, the OS login name or an address
+   * from the environment. A token the API refuses names no one: the save is
+   * this device's pseudonym.
+   */
+  describe('who a save records', () => {
+    const accountEmail = 'account-email-a1@example.invalid';
+    const environmentEmail = 'environment-email-a1@example.invalid';
+    let server: Server;
+    let accepted: boolean;
+
+    beforeEach(async () => {
+      accepted = true;
+      server = createServer((request, response) => {
+        if (request.url === '/v1/auth/get-session' && request.headers.authorization === 'Bearer tok-a1') {
+          response.writeHead(accepted ? 200 : 401, { 'content-type': 'application/json' });
+          response.end(
+            accepted
+              ? JSON.stringify({
+                  user: { id: 'usr_cli_a1', email: accountEmail, name: 'Terminal Person' },
+                  session: { expiresAt: '2099-01-01T00:00:00.000Z' },
+                })
+              : 'null',
+          );
+          return;
+        }
+        response.writeHead(404).end();
+      });
+      await new Promise<void>((resolve) => {
+        server.listen(0, '127.0.0.1', resolve);
+      });
+      const { port } = server.address() as AddressInfo;
+      process.env['TAU_API_URL'] = `http://127.0.0.1:${String(port)}`;
+      process.env['TAU_AUTH_TOKEN'] = 'tok-a1';
+      process.env['EMAIL'] = environmentEmail;
+      process.env['GIT_AUTHOR_EMAIL'] = environmentEmail;
+    });
+
+    afterEach(async () => {
+      delete process.env['TAU_API_URL'];
+      delete process.env['TAU_AUTH_TOKEN'];
+      delete process.env['EMAIL'];
+      delete process.env['GIT_AUTHOR_EMAIL'];
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      });
+    });
+
+    const savedAuthor = async (): Promise<string> => {
+      await seed();
+      await writeFile(join(project, 'bracket.ts'), 'export const bracket = 3;\n');
+      await runCommand(await importCommand(), { rawArgs: ['save', '--project', project] });
+      expect(stdout.join('')).toMatch(/^Saved main · Rev 3\./u);
+      const { stdout: commit } = await execute('git', ['-C', project, 'cat-file', 'commit', 'refs/heads/main']);
+      for (const forbidden of [accountEmail, environmentEmail, userInfo().username]) {
+        expect(commit).not.toContain(`<${forbidden}`);
+        expect(commit).not.toContain(`${forbidden}>`);
+      }
+      const { stdout: address } = await execute('git', ['-C', project, 'log', '-1', '--format=%ae', 'refs/heads/main']);
+      return address.trim();
+    };
+
+    it('records the account the token belongs to', async () => {
+      expect(await savedAuthor()).toBe('usr_cli_a1@users.noreply.tau.new');
+    }, 60_000);
+
+    it('records this device’s pseudonym when the API does not accept the token', async () => {
+      accepted = false;
+      expect(await savedAuthor()).toMatch(/^anon:[\da-f]{8}@users\.noreply\.tau\.new$/u);
+    }, 60_000);
+
+    /*
+     * B5: `log --provenance` prints what each entry's trailer recorded — its
+     * ids, identity, capture and leg — and never an address, whether the
+     * account's, the environment's or the OS login's.
+     */
+    it('prints each entry’s recorded provenance, and no address (B5)', async () => {
+      await savedAuthor();
+      accepted = false;
+      await writeFile(join(project, 'lid.ts'), 'export const lid = 1;\n');
+      await runCommand(await importCommand(), { rawArgs: ['save', '--project', project] });
+      stdout.length = 0;
+
+      await runCommand(await importCommand(), { rawArgs: ['log', '--provenance', '--project', project] });
+      const printed = stdout.join('');
+      for (const forbidden of [accountEmail, environmentEmail, '@users.noreply', `<${userInfo().username}`]) {
+        expect(printed).not.toContain(forbidden);
+      }
+      /* Object ids and the pseudonym's hash differ per run; the shape between them does not. */
+      const oids = new Map<string, string>();
+      const stable = printed
+        .replaceAll(/\b[\da-f]{40}\b/gu, (oid) => {
+          oids.set(oid, oids.get(oid) ?? `<oid ${String(oids.size + 1)}>`);
+          return oids.get(oid)!;
+        })
+        .replaceAll(/anon:[\da-f]{8}/gu, 'anon:<hash>');
+      expect(stable).toMatchInlineSnapshot(`
+        "Rev 4     main  anon:<hash>  Saved changes (save)
+          id        <oid 1>
+          tree      <oid 2>
+          parent    <oid 3>
+          source    user
+          identity  user anon:<hash> (anonymous)
+          capture   save
+          via       cli
+        Rev 3     main  usr_cli_a1  Saved changes (save)
+          id        <oid 3>
+          tree      <oid 4>
+          parent    <oid 5>
+          source    user
+          identity  user usr_cli_a1
+          capture   save
+          via       cli
+        Rev 2     main  ada  Revision 2
+          id        <oid 5>
+          tree      <oid 6>
+          parent    <oid 7>
+          source    import
+          identity  not recorded
+          capture   not recorded
+          via       not recorded
+        Rev 1     main  ada  Revision 1
+          id        <oid 7>
+          tree      <oid 8>
+          parent    none
+          source    import
+          identity  not recorded
+          capture   not recorded
+          via       not recorded
+        "
+      `);
+    }, 60_000);
+
+    it('carries the same provenance on each JSON row, without an address (B5)', async () => {
+      await savedAuthor();
+      stdout.length = 0;
+
+      await runCommand(await importCommand(), {
+        rawArgs: ['log', '--provenance', '--json', '--limit', '1', '--project', project],
+      });
+      const printed = stdout.join('');
+      expect(printed).not.toContain(accountEmail);
+      expect(JSON.parse(printed)).toMatchObject({
+        kind: 'revisions',
+        revisions: [
+          {
+            revisionNumber: 3,
+            provenance: {
+              identity: { kind: 'user', id: 'usr_cli_a1' },
+              capture: 'save',
+              via: 'cli',
+              source: 'user',
+            },
+          },
+        ],
+      });
+    }, 60_000);
+  });
 
   it('says there is nothing new to save, and mints nothing, when the files are the last revision', async () => {
     await seed();

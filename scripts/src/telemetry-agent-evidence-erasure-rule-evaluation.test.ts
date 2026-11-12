@@ -12,9 +12,9 @@ type Series = ConstructorParameters<Oracle['SeriesStore']>[0][number];
 type Sample = Series['samples'][number];
 
 /**
- * `agent-evidence-erasure-stuck` (charter W0, invariant I6): a Langfuse read-back that never answers is counted as
- * `recheck`, so a confirmation loop that never reaches `absent` (a legacy-API 410 every five minutes) alerts instead
- * of looping silently.
+ * `agent-evidence-erasure-stuck` (charter I6 as amended by ruling 9; blueprint LI8): an accepted Langfuse delete is
+ * the erasure and nothing is read back, so the rule fires when trace deletions have been retried for 2 h with none
+ * accepted, and read-backs no longer count.
  */
 const grafanaRoot = path.resolve(import.meta.dirname, '../../infra/grafana');
 
@@ -77,45 +77,40 @@ const outcome = (name: string, increments: readonly number[], from = 0): Series 
 const simulate = (series: readonly Series[]) =>
   simulateAlert(new SeriesStore(series), rule, { from: start, to: end, evaluationInterval });
 
-/** Deletion requested an hour in, then three unanswered read-backs five minutes apart. */
-const requestedAt = start + hour;
-const rechecks = [0, 5, 10].map((offset) => requestedAt + 15 * minute + offset * minute);
+/** The first deletion an hour in, then retries on the drainer's doubling backoff, the last two hours after the first. */
+const failedAt = start + hour;
+const backoff = [0, 1, 3, 7, 15, 31, 63, 123].map((offset) => failedAt + offset * minute);
 
-describe('agent-evidence-erasure-stuck evaluated on synthetic series (W0)', () => {
-  it('should fire on three recheck increments with no absent within the window', () => {
-    const transitions = simulate([outcome('requested', [requestedAt]), outcome('recheck', rechecks)]);
+describe('agent-evidence-erasure-stuck evaluated on synthetic series (LW1)', () => {
+  it('should fire when deletions are retried for 2 h with none accepted', () => {
+    const transitions = simulate([outcome('retry', backoff)]);
 
-    expect(transitions.map(({ from, to }) => `${from}→${to}`)).toEqual([
-      'Normal→Pending',
-      'Pending→Alerting',
-      'Alerting→Normal',
-    ]);
+    expect(transitions.map(({ to }) => to)).toEqual(['Pending', 'Alerting', 'Normal']);
     const [pending, alerting] = transitions as [(typeof transitions)[number], (typeof transitions)[number]];
-    expect(pending.at).toBeGreaterThanOrEqual(rechecks[0]!);
-    expect(pending.at).toBeLessThanOrEqual(rechecks[1]!);
+    expect(pending.at).toBeGreaterThanOrEqual(backoff[0]!);
+    expect(pending.at).toBeLessThanOrEqual(backoff[0]! + 2 * minute);
     expect(alerting.at).toBe(pending.at + rule.forSeconds);
   });
 
-  it('should keep firing while a confirmation loop rechecks every five minutes', () => {
-    const loop = Array.from({ length: 48 }, (_, index) => requestedAt + 15 * minute + index * 5 * minute);
-    const transitions = simulate([outcome('recheck', loop)]);
-
-    /* The loop outlasts the run, so the alert never resolves inside it. */
-    expect(transitions.map(({ to }) => to)).toEqual(['Pending', 'Alerting']);
-    expect(transitions[1]!.at).toBeLessThan(loop.at(-1)!);
-  });
-
-  it('should stay quiet when a read-back confirms absence after the rechecks', () => {
+  it('should stay quiet when a retried deletion is accepted within the window', () => {
     const transitions = simulate([
-      outcome('recheck', rechecks),
-      outcome('absent', [rechecks[2]! + 5 * minute], requestedAt),
+      outcome('retry', backoff.slice(0, 4)),
+      outcome('accepted', [backoff[3]! + 8 * minute], failedAt),
     ]);
 
     expect(transitions.map(({ to }) => to)).not.toContain('Alerting');
   });
 
-  it('should stay Normal with no series and with a flat recheck series', () => {
+  it('should no longer count read-backs, which the drainer no longer makes', () => {
+    const loop = Array.from({ length: 48 }, (_, index) => failedAt + index * 5 * minute);
+
+    expect(simulate([outcome('recheck', loop)])).toEqual([]);
+    expect(simulate([outcome('present', loop)])).toEqual([]);
+    expect(simulate([outcome('accepted', [failedAt])])).toEqual([]);
+  });
+
+  it('should stay Normal with no series and with a flat retry series', () => {
     expect(simulate([])).toEqual([]);
-    expect(simulate([outcome('recheck', [])])).toEqual([]);
+    expect(simulate([outcome('retry', [])])).toEqual([]);
   });
 });

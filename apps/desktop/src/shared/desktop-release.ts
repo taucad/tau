@@ -149,6 +149,9 @@ const manifestSchema = z.strictObject({
 export type DesktopArtifact = z.infer<typeof artifactSchema>;
 export type DesktopArtifactManifest = z.infer<typeof manifestSchema>;
 
+/** The single-platform production candidates, as sorted target lists: Apple silicon Mac and Linux. */
+const desktopProductionPlatformTargets: ReadonlySet<string> = new Set(['darwin-arm64', 'linux-x64']);
+
 /** Parse candidate metadata without modifying the deployed legacy download.json contract. */
 export const parseDesktopArtifactManifest = (input: unknown): DesktopArtifactManifest => {
   const manifest = manifestSchema.parse(input);
@@ -180,8 +183,15 @@ export const parseDesktopArtifactManifest = (input: unknown): DesktopArtifactMan
     artifacts.add(key);
     targets.add(artifact.target);
   }
-  if (manifest.channel === 'production' && desktopReleaseTargets.some((target) => !targets.has(target))) {
-    throw new TypeError('Production artifact manifests require every supported target');
+  // D-H5 (operator ruling 2026-11-10): production is either the all-platform candidate or one platform's own candidate
+  // (Apple silicon Mac, or Linux), which publication admits only with every route of that platform.
+  const productionTargets = [...targets].sort().join(',');
+  if (
+    manifest.channel === 'production' &&
+    desktopReleaseTargets.some((target) => !targets.has(target)) &&
+    !desktopProductionPlatformTargets.has(productionTargets)
+  ) {
+    throw new TypeError('Production artifact manifests require every supported target or one complete platform');
   }
   for (const target of targets) {
     if (artifacts.has(`${target}:macos-dmg`) && !artifacts.has(`${target}:macos-zip`)) {

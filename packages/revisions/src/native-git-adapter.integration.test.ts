@@ -24,6 +24,7 @@ import {
   generatedIgnoreContent,
   generatedIgnorePath,
 } from '#workspace-config.js';
+import { recordedBy } from '#test/identity.js';
 
 const execute = promisify(execFile);
 const createdAt = Date.UTC(2026, 7, 28, 12, 0, 0);
@@ -46,7 +47,7 @@ const makeRevision = (options: {
     tree: new ImmutableRevisionTree(options.entries),
     provenance: Object.freeze({
       source: options.source ?? 'agent',
-      actorId: 'actor-local',
+      ...recordedBy('actor-local'),
       runId: 'run-local',
       createdAt,
     }),
@@ -133,7 +134,7 @@ nativeGitIntegration('native Git adapter integration', () => {
       const receipt = await revisionPort.writeRevision({
         parents: [],
         tree: new ImmutableRevisionTree([['part.ts', 'export const part = 1;\n']]),
-        provenance: { source: 'user', actorId: 'person-1', createdAt },
+        provenance: { source: 'user', ...recordedBy('person-1'), createdAt },
         summary: { generated: 'Base' },
       });
       const head = revisionId(receipt.commitId);
@@ -270,7 +271,9 @@ nativeGitIntegration('native Git adapter integration', () => {
       provenance: Object.freeze({
         createdAt: revision.provenance.createdAt,
         runId: revision.provenance.runId,
-        actorId: revision.provenance.actorId,
+        via: revision.provenance.via,
+        capture: revision.provenance.capture,
+        actor: revision.provenance.actor,
         source: revision.provenance.source,
       }),
       summary: Object.freeze({ generated: revision.summary.generated }),
@@ -340,11 +343,12 @@ nativeGitIntegration('native Git adapter integration', () => {
    * G0-9 on the disk leg: `init` is also the open seam
    * (`revision-effects.ensureStore` calls it once per authority, and `git init`
    * is skipped for a store that is already here). The setup files are created,
-   * never merged into (D16): an existing ignore file keeps its stale block, the
-   * attributes file is created beside it, and a project already current is not
-   * rewritten, which a pinned mtime is the only way to observe here.
+   * never merged into (D16): an existing ignore file keeps its stale block, no
+   * attributes file is written (A4: opening writes nothing tracked), and a
+   * project already current is not rewritten, which a pinned mtime is the only
+   * way to observe here.
    */
-  it('should leave an existing ignore file as written on open, create the attributes file, and then leave both alone', async () => {
+  it('should leave an existing ignore file as written on open, write no attributes file, and then leave both alone', async () => {
     const ignorePath = join(repositoryPath, generatedIgnorePath);
     const attributesPath = join(repositoryPath, generatedGitattributesPath);
     const stale = `# mine\n*.log\n# BEGIN Tau generated — derived content is never versioned\n/.git/\n/.jj/\n/.tau/binding.json\nnode_modules/\n# END Tau generated\n`;
@@ -353,20 +357,19 @@ nativeGitIntegration('native Git adapter integration', () => {
     await openPort().init({ author: { name: 'Tau', email: 'tau@example.com' } });
 
     expect(await readFile(ignorePath, 'utf8')).toBe(stale);
-    expect(await readFile(attributesPath, 'utf8')).toBe(generatedGitattributesContent(undefined));
+    await expect(stat(attributesPath)).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await readFile(join(repositoryPath, '.git', 'info', 'exclude'), 'utf8')).toContain(
       generatedIgnoreContent(undefined),
     );
     const pinned = Date.UTC(2020, 0, 1);
     await utimes(ignorePath, new Date(pinned), new Date(pinned));
-    await utimes(attributesPath, new Date(pinned), new Date(pinned));
 
     await openPort().init({ author: { name: 'Tau', email: 'tau@example.com' } });
 
     const ignoreStat = await stat(ignorePath);
-    const attributesStat = await stat(attributesPath);
     expect(ignoreStat.mtimeMs).toBe(pinned);
-    expect(attributesStat.mtimeMs).toBe(pinned);
+    expect(await readFile(ignorePath, 'utf8')).toBe(stale);
+    await expect(stat(attributesPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   const write = async (
@@ -376,7 +379,7 @@ nativeGitIntegration('native Git adapter integration', () => {
     const receipt = await port.writeRevision({
       parents: options.parents,
       tree: new ImmutableRevisionTree([['part.ts', options.content]]),
-      provenance: { source: 'agent', actorId: options.label, runId: `run-${options.label}`, createdAt },
+      provenance: { source: 'agent', ...recordedBy(options.label), runId: `run-${options.label}`, createdAt },
       summary: { generated: `Revision ${options.label}` },
     });
     return revisionId(receipt.commitId);
@@ -549,7 +552,7 @@ exec git "$@"
       base,
       ours,
       theirs,
-      provenance: { source: 'merge', actorId: 'merge-coordinator', createdAt },
+      provenance: { source: 'merge', ...recordedBy('merge-coordinator'), createdAt },
       summary: { generated: 'Merge alternatives' },
     });
     const oracle = mergeRevisionTrees(base.tree, ours.tree, theirs.tree);
@@ -573,7 +576,7 @@ exec git "$@"
       base: absent,
       ours: addedOurs,
       theirs: addedTheirs,
-      provenance: { source: 'merge', actorId: 'merge-coordinator', createdAt },
+      provenance: { source: 'merge', ...recordedBy('merge-coordinator'), createdAt },
       summary: { generated: 'Conflicting additions' },
     });
     expect(addAdd).toMatchObject({ status: 'conflicted', conflicts: [{ type: 'add-add', path: 'new.txt' }] });
@@ -589,7 +592,7 @@ exec git "$@"
       base,
       ours: deleted,
       theirs: modified,
-      provenance: { source: 'merge', actorId: 'merge-coordinator', createdAt },
+      provenance: { source: 'merge', ...recordedBy('merge-coordinator'), createdAt },
       summary: { generated: 'Modify delete conflict' },
     });
     expect(modifyDelete).toMatchObject({
@@ -613,7 +616,7 @@ exec git "$@"
       base: binaryBase,
       ours: binaryOurs,
       theirs: binaryTheirs,
-      provenance: { source: 'merge', actorId: 'merge-coordinator', createdAt },
+      provenance: { source: 'merge', ...recordedBy('merge-coordinator'), createdAt },
       summary: { generated: 'Binary conflict' },
     });
     expect(binary).toMatchObject({ status: 'conflicted', conflicts: [{ type: 'binary', path: 'part.bin' }] });
@@ -824,7 +827,7 @@ exec git "$@"
         ['models/bracket.step', bytes],
         ['src/part.ts', 'export const part = 1;\n'],
       ]),
-      provenance: { source: 'user', actorId: 'lfs', createdAt },
+      provenance: { source: 'user', ...recordedBy('lfs'), createdAt },
       summary: { generated: 'Large object' },
     });
     const recorded = revisionId(receipt.commitId);
@@ -875,7 +878,7 @@ exec git "$@"
         ['models/big.step', model],
         ['small.txt', 'a line\n'],
       ]),
-      provenance: { source: 'user', actorId: 'lfs', createdAt },
+      provenance: { source: 'user', ...recordedBy('lfs'), createdAt },
       summary: { generated: 'Large objects' },
     });
     const recorded = revisionId(receipt.commitId);
@@ -918,7 +921,7 @@ exec git "$@"
         [generatedGitattributesPath, generatedGitattributesContent(undefined)],
         ['models/bracket.step', bytes],
       ]),
-      provenance: { source: 'user', actorId: 'lfs', createdAt },
+      provenance: { source: 'user', ...recordedBy('lfs'), createdAt },
       summary: { generated: 'Large object' },
     });
     const pointerText = `${await git(repositoryPath, 'show', `${revisionId(first.commitId)}:models/bracket.step`)}\n`;
@@ -929,7 +932,7 @@ exec git "$@"
         [generatedGitattributesPath, generatedGitattributesContent(undefined)],
         ['models/bracket.step', pointerText],
       ]),
-      provenance: { source: 'user', actorId: 'lfs', createdAt },
+      provenance: { source: 'user', ...recordedBy('lfs'), createdAt },
       summary: { generated: 'Un-smudged checkout' },
     });
     const recorded = revisionId(second.commitId);
@@ -960,7 +963,7 @@ exec git "$@"
     const receipt = await port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['mixed.txt', crlf]]),
-      provenance: { source: 'user', actorId: 'pin', createdAt },
+      provenance: { source: 'user', ...recordedBy('pin'), createdAt },
       summary: { generated: 'Line endings' },
     });
     const recorded = revisionId(receipt.commitId);

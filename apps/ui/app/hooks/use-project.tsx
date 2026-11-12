@@ -3,7 +3,7 @@
 import { recordInteraction } from '#lib/kill-work-context.js';
 import { parameterRecordInputValues } from '@taucad/parameters';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
-import { isMemoryConstrainedDevice, runtimeRecycleHeapBytes } from '#lib/device-memory-class.js';
+import { isMemoryConstrainedDevice, runtimeRecycleHeapBytes } from '@taucad/ui-core/lib/device-memory-class';
 import { usePreviewParameterLifetime } from '#hooks/use-preview-parameter-lifetime.js';
 import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
@@ -39,8 +39,8 @@ import type { WorkbenchEntries, WorkbenchView } from '@taucad/workbench';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import { fileContentBytes } from '@taucad/fs-client/file-content-service';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
-import type { MachineActors } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
 import { projectMachine } from '#machines/project.machine.js';
@@ -57,9 +57,9 @@ import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { Chat } from '@taucad/chat';
 import type { ChatStorage } from '#types/storage.types.js';
 import { localKernelOptions } from '#constants/local-kernel-options.js';
-import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
-import { createParameterSetService } from '#services/parameter-set-service.js';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
+import { useComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
+import { createParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { isNotFound } from '@taucad/chat-ui/db/attachment-store';
 import { toast } from 'sonner';
@@ -91,7 +91,7 @@ type ProjectContextType = {
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
-  /** The main entry path from project.assets.main.entryPath. */
+  /** The main entry path from project.assets.main?.entryPath. */
   mainEntryPath: string;
   logRef: ActorRefFrom<typeof logMachine>;
   resolveParameterEntry: (filePath: string, manifest: ParameterManifest) => void;
@@ -1042,9 +1042,9 @@ export function ProjectProvider({
   );
 
   const getMainFilename = useCallback(async () => {
-    const snapshot = await waitFor(actorRef, (state) => Boolean(state.context.project?.assets.main.entryPath));
+    const snapshot = await waitFor(actorRef, (state) => Boolean(state.context.project?.assets.main?.entryPath));
 
-    if (!snapshot.context.project?.assets.main.entryPath) {
+    if (!snapshot.context.project?.assets.main?.entryPath) {
       throw new Error('Main file not found');
     }
 

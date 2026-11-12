@@ -2,21 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { OrthographicCamera, PerspectiveCamera, Raycaster, Vector2, Vector3 } from 'three';
 import {
   createKinematicsDragPlane,
-  hasExceededKinematicsDragThreshold,
   intersectKinematicsDragPlane,
   toKinematicsPointerNdc,
 } from '#graphics/three/utils/kinematics-drag-math.js';
 
 describe('kinematics drag math', () => {
-  describe('threshold', () => {
-    it('should keep a press below 4 px a click and start a drag at 4 px', () => {
-      const start = { clientX: 100, clientY: 100 };
-
-      expect(hasExceededKinematicsDragThreshold(start, { clientX: 102, clientY: 102 })).toBe(false);
-      expect(hasExceededKinematicsDragThreshold(start, { clientX: 100, clientY: 104 })).toBe(true);
-    });
-  });
-
   describe('pointer to drag-plane target', () => {
     it('should map the canvas centre and edges into normalized device coordinates', () => {
       const rect = { left: 10, top: 20, width: 200, height: 100 };

@@ -142,6 +142,12 @@ test('should fall back to the app origin and print a release line only when give
   const released = agentPage({ origin: 'https://tau.new', release: 'Current release: 0.1.0-beta.7 (npm tag `beta`).' });
   expect(released).toContain('folder.\n\nCurrent release: 0.1.0-beta.7 (npm tag `beta`).\n\n## Install');
 });
+test('should serve the generated kernel digest without its markers', () => {
+  const text = agentPage({ origin: 'https://tau.new' });
+  expect(text).toContain('## Which kernel\n\nIf the project has no model file, choose a kernel before writing one.');
+  expect(text).not.toContain('<!--');
+  expect(text).not.toMatch(/\bDefault: replicad\b/u);
+});
 test('should reject unreviewed prose, unsafe slugs, invalid dates and duplicate articles', () => {
   const article = {
     status: 'published',
@@ -287,4 +293,17 @@ test('should start every new project from the app home', () => {
     // The entry script writes the app preference before following it, so `/` opens the app, not this site.
     expect(link).toContain('data-open-app=""');
   }
+});
+
+test('should draw the pricing page from the shared plan cards and catalogue', () => {
+  const html = renderToStaticMarkup(<MemoryRouter>{pricing()}</MemoryRouter>);
+  expect(html.match(/data-slot="plan-card"/gu)).toHaveLength(3);
+  // Features still in development carry the coming-soon icon, and one legend under the cards explains it.
+  expect(html).toContain('data-coming-soon');
+  expect(html.match(/data-slot="coming-soon-legend"/gu)).toHaveLength(1);
+  expect(html).toContain('1 GB cloud backup and sync');
+  expect(html).not.toContain('US$');
+  const pro = /<a\b[^>]*data-placement="pricing-pro"[^>]*>/u.exec(html)?.[0];
+  expect(pro).toContain('settings=billing');
+  expect(html).toContain('Upgrade to Pro');
 });

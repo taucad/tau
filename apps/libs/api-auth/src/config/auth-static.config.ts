@@ -30,6 +30,8 @@ export const staticAuthConfig = {
     apiKey(),
     magicLink({
       expiresIn: tokenLifetimeSeconds.magicLink,
+      // The `verification` row holds a hash, so a database read never yields a usable sign-in link.
+      storeToken: 'hashed',
       sendMagicLink() {
         // No-op for mock configuration
       },
@@ -41,7 +43,8 @@ export const staticAuthConfig = {
     cliDeviceAuthorization('https://tau.new'),
     // `bearer()` stays LAST: its after-hook reads the `set-cookie` every earlier
     // plugin may have written and re-emits it as `set-auth-token`.
-    bearer(),
+    // Only signed session tokens (`token.signature`): a session row alone never authenticates.
+    bearer({ requireSignature: true }),
   ],
   emailAndPassword: {
     enabled: true,
@@ -69,6 +72,11 @@ export const staticAuthConfig = {
     updateAge: 60 * 60 * 24, // 24 hours
   },
   account: accountOptions,
+  // Password-reset tokens live in the `verification` identifier; hashing it means a database read
+  // never yields a working reset link. Other identifiers keep their plugins' own storage.
+  verification: {
+    storeIdentifier: { default: 'plain', overrides: { 'reset-password:': 'hashed' } },
+  },
   rateLimit: {
     enabled: true,
     window: 10,

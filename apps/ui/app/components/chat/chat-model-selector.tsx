@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { memo, useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Check, Plus } from 'lucide-react';
@@ -116,9 +117,9 @@ export const ChatModelSelector = memo(function ({
               <div className='space-y-2'>
                 <div className='flex items-center gap-2'>
                   <SvgIcon id={item.details.family} className='size-5 shrink-0' />
-                  <h4 className='text-sm font-semibold'>
+                  <Heading level={4} variant='label'>
                     {item.provider.name} {item.name}
-                  </h4>
+                  </Heading>
                 </div>
                 {item.description ? <p className='text-sm text-muted-foreground'>{item.description}</p> : null}
                 {item.details.contextWindow ? (

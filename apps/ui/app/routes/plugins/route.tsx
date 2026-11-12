@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { fileContentBytes } from '@taucad/fs-client/file-content-service';
 import { z } from 'zod';
 import { ObservationService } from '@taucad/fs-client/observation-service';
@@ -35,9 +36,9 @@ import { cn } from '@taucad/ui/utils/cn';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useSkillsCatalogState } from '#hooks/use-skills-catalog.js';
 import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
-import { tauStoreSkills } from '#lib/tau-plugin-store-catalog.js';
+import { tauStoreSkills } from '@taucad/ui-core/lib/tau-plugin-store-catalog';
 import type { SystemSkill } from '#lib/system-skills-catalog.js';
-import type { TauStoreSkill } from '#lib/tau-plugin-store-catalog.js';
+import type { TauStoreSkill } from '@taucad/ui-core/lib/tau-plugin-store-catalog';
 
 export const meta: MetaFunction = () => [{ title: 'Plugins · Tau' }];
 
@@ -232,7 +233,9 @@ function StoreSection({
   return (
     <section className='space-y-3'>
       <div>
-        <h2 className='text-sm font-medium'>{title}</h2>
+        <Heading level={2} variant='label'>
+          {title}
+        </Heading>
         <Separator className='mt-2' />
       </div>
       <ul className={cn('grid gap-x-10', columns === 2 ? 'md:grid-cols-2' : 'md:grid-cols-1')}>

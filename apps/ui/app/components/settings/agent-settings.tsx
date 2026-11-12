@@ -3,7 +3,7 @@ import { SettingsGroup, SettingsItem, SettingsRow } from '#components/settings/s
 import type { SettingId } from '#components/settings/settings-registry.js';
 import { Switch } from '@taucad/ui/components/switch';
 import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
 import { DefaultPermissionsSetting } from '#components/settings/default-permissions-setting.js';
 import { desktopPermissions } from '#filesystem/desktop-permissions.js';

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   convertLegacyProjectManifestBytes,
+  mainEntryPath,
   parseProjectManifestBytes,
   projectManifestMaxBytes,
   projectManifestSchemaUrl,
@@ -22,6 +23,14 @@ describe('project manifest schema', () => {
   it('round-trips the strict v1 contract', () => {
     const parsed = parseProjectManifestBytes(serializeProjectManifest(manifest));
     expect(parsed).toEqual({ success: true, data: manifest });
+  });
+
+  it('round-trips an entry-less project, whose manifest declares no main yet', () => {
+    const entryLess = projectToManifest({ name: 'Bracket', description: '', tags: [], assets: {} });
+    expect(entryLess.assets).toEqual({});
+    expect(mainEntryPath(entryLess)).toBeUndefined();
+    expect(parseProjectManifestBytes(serializeProjectManifest(entryLess))).toEqual({ success: true, data: entryLess });
+    expect(mainEntryPath(manifest)).toBe('main.ts');
   });
 
   it('rejects unknown top-level and nested properties', () => {

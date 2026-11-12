@@ -1,28 +1,20 @@
-import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
+import { createContext, useContext, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { selectCameraDriverSnapshot } from '@taucad/camera/machine';
 import type { CameraMachineSnapshot } from '@taucad/camera/machine';
 import type { RenderFrame } from '@taucad/spatial';
+import { createThreeCameraRig } from '@taucad/three/camera';
 import type { ThreeCameraRig } from '@taucad/three/camera';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
+import type { GraphicsCameraRef, graphicsMachine, ViewCameraFraming } from '#machines/graphics.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { kinematicsMachine } from '#machines/kinematics.machine.js';
-import {
-  acquireViewCameraSession,
-  getGraphicsCameraRegistryVersion,
-  getViewCameraSession,
-  hasGraphicsCameraRig,
-  notifyViewCameraSession,
-  subscribeGraphicsCameraRegistry,
-} from '#services/graphics-camera-registry.js';
+import { asCameraActor, latchViewCameraFraming } from '#services/graphics-camera-registry.js';
 import type {
   CameraUpdateHandler,
   RenderFrameUpdateHandler,
-  ViewCameraFraming,
   ViewCameraSeed,
-  ViewCameraSession,
 } from '#services/graphics-camera-registry.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
@@ -42,112 +34,113 @@ type GraphicsContextValue = {
 };
 
 const GraphicsContext = createContext<GraphicsContextValue | undefined>(undefined);
-/** Re-renders external camera consumers when a view camera session is created or released. */
-const useCameraRegistryVersion = (): number =>
-  useSyncExternalStore(
-    subscribeGraphicsCameraRegistry,
-    getGraphicsCameraRegistryVersion,
-    getGraphicsCameraRegistryVersion,
-  );
 
 /**
- * Returns a registry query whose identity changes with camera session lifetime.
+ * Returns a graphics actor's camera from outside its provider: the view's camera, which lives as long as the graphics
+ * actor does.
  *
+ * @param graphicsRef - The graphics actor, if any.
+ * @returns Its camera actor, or `undefined` with no graphics actor.
  * @public
  */
-export const useGraphicsCameraRigQuery = (): ((graphicsRef: GraphicsActorRef | undefined) => boolean) => {
-  const version = useCameraRegistryVersion();
-  return useMemo(
-    () => (graphicsRef: GraphicsActorRef | undefined) =>
-      version === getGraphicsCameraRegistryVersion() && hasGraphicsCameraRig(graphicsRef),
-    [version],
-  );
-};
+export const useGraphicsCamera = (graphicsRef: GraphicsActorRef | undefined): GraphicsCameraRef | undefined =>
+  useSelector(graphicsRef, (snapshot) => snapshot?.context.cameraRef);
 
-/**
- * Returns a view's camera session from outside its provider, re-rendering when one comes or goes.
- *
- * The write-side host reads a view whose pane may not be mounted: until some canvas acquires the
- * session there is no live camera, and the view's camera keys are left as the person left them.
- * @public
- */
-export const useViewCameraSession = (graphicsRef: GraphicsActorRef | undefined): ViewCameraSession | undefined => {
-  /* The session is read through the store rather than beside it: a registry read in the render body
-   * is state the React Compiler cannot see changing, and it memoised the `undefined` a host that
-   * rendered before any canvas saw -- for the life of the graphics actor. A dependency on the
-   * registry version does not fix that; the compiler recomputes the dependencies from what the
-   * callback reads and drops it again. */
-  const getSession = useCallback(() => getViewCameraSession(graphicsRef), [graphicsRef]);
-  return useSyncExternalStore(subscribeGraphicsCameraRegistry, getSession, getSession);
+/** The view's camera, read once when a presentation is made. */
+const selectViewCamera = (graphicsRef: GraphicsActorRef): GraphicsCameraRef =>
+  graphicsRef.getSnapshot().context.cameraRef;
+
+/** The view's framing record, a plain-data bridge in graphics context. */
+const selectViewFraming = (graphicsRef: GraphicsActorRef): ViewCameraFraming =>
+  graphicsRef.getSnapshot().context.cameraFraming;
+
+/* The per-mount presentation of the view's camera: the native cameras, the publication slots and the render frame. */
+const createViewPresentation = (
+  graphicsRef: GraphicsActorRef,
+): Omit<GraphicsContextValue, 'graphicsRef' | 'framing'> => {
+  const connectorRef: RefObject<CameraUpdateHandler | undefined> = { current: undefined };
+  const consumers = new Set<RenderFrameUpdateHandler>();
+  const listeners = new Set<() => void>();
+  // The frame this mount presents: set before its listeners hear of a change, so a store read in the notification sees
+  // the new frame.
+  let renderFrame: RenderFrame | undefined;
+  /* A frame the camera took (a rebased gesture) reaches the retained resources before the camera is published. */
+  const changeRenderFrame = (next: RenderFrame): void => {
+    renderFrame = next;
+    for (const update of consumers) {
+      update(next);
+    }
+    for (const listener of listeners) {
+      listener();
+    }
+  };
+  const rig = createThreeCameraRig({
+    actorRef: asCameraActor(selectViewCamera(graphicsRef)),
+    onUpdate(camera, snapshot) {
+      if (snapshot.renderFrame !== renderFrame) {
+        changeRenderFrame(snapshot.renderFrame);
+      }
+      connectorRef.current?.(camera, snapshot);
+    },
+  });
+  renderFrame = rig.renderFrame;
+  return {
+    cameraRig: rig,
+    cameraConnectorRef: connectorRef,
+    cameraConsumersRef: { current: new Set<CameraUpdateHandler>() },
+    getRenderFrame: () => renderFrame ?? rig.renderFrame,
+    setRenderFrame: (next: RenderFrame): void => {
+      const previous = rig.renderFrame;
+      if (
+        next.anchorFrameId === previous.anchorFrameId &&
+        next.metersPerRenderUnit === previous.metersPerRenderUnit &&
+        next.originMeters.every((value, index) => value === previous.originMeters[index])
+      ) {
+        return;
+      }
+      // The consumers retarget first, then the rig presents the camera in the new frame.
+      changeRenderFrame(next);
+      rig.setRenderFrame(next);
+    },
+    subscribeRenderFrame: (listener: () => void): (() => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    renderFrameConsumersRef: { current: consumers },
+  };
 };
 
 /**
  * Provider that makes a per-view graphics machine and its capabilities available to all descendants.
- * Binds the view's camera session, whose owner is the graphics actor rather than this mount.
+ *
+ * The view's camera is the graphics actor's child, so a remounted provider finds the camera the person left. The
+ * provider builds the native cameras that present it on this mount; they hold no subscription until a canvas's
+ * controls adapter connects them, so a discarded render leaves nothing behind. `seed.identity` re-latches the
+ * framing record for a new entry.
  * Placed in ChatViewer (and standalone viewers like hero-viewer, converter).
  * @public
  */
 export function GraphicsProvider({
   graphicsRef,
   seed,
-  initialVerticalFieldOfView,
   children,
 }: {
   readonly graphicsRef: GraphicsActorRef;
   readonly seed?: ViewCameraSeed;
-  /** Standalone hosts with no persisted record; folded into the create-only camera seed. */
-  readonly initialVerticalFieldOfView?: number;
   readonly children: React.ReactNode;
 }): React.JSX.Element {
   'use no memo';
 
-  const session = acquireViewCameraSession(graphicsRef, {
-    identity: seed?.identity,
-    camera:
-      initialVerticalFieldOfView === undefined
-        ? seed?.camera
-        : { ...seed?.camera, cameraFovAngle: initialVerticalFieldOfView },
-  });
+  const framing = selectViewFraming(graphicsRef);
+  latchViewCameraFraming(framing, seed ?? {});
+  let [presentation, setPresentation] = useState(() => ({ graphicsRef, ...createViewPresentation(graphicsRef) }));
+  if (presentation.graphicsRef !== graphicsRef) {
+    // A new graphics actor is a new view: present its camera on new native cameras.
+    presentation = { graphicsRef, ...createViewPresentation(graphicsRef) };
+    setPresentation(presentation);
+  }
 
-  useLayoutEffect(() => {
-    notifyViewCameraSession(session);
-  }, [session]);
-
-  const value = useMemo((): GraphicsContextValue => {
-    const { renderFrame, rig } = session;
-    return {
-      graphicsRef,
-      cameraRig: rig,
-      cameraConnectorRef: session.connectorRef,
-      cameraConsumersRef: session.consumersRef,
-      getRenderFrame: () => renderFrame.current,
-      setRenderFrame: (next: RenderFrame): void => {
-        const previous = renderFrame.current;
-        if (
-          next.anchorFrameId === previous.anchorFrameId &&
-          next.metersPerRenderUnit === previous.metersPerRenderUnit &&
-          next.originMeters.every((value, index) => value === previous.originMeters[index])
-        ) {
-          return;
-        }
-        // oxlint-disable-next-line react/immutability -- the render frame belongs to the view camera session, whose owner is the graphics actor rather than this mount.
-        renderFrame.current = next;
-        for (const update of renderFrame.consumers) {
-          update(next);
-        }
-        rig.setRenderFrame(next);
-        for (const listener of renderFrame.listeners) {
-          listener();
-        }
-      },
-      subscribeRenderFrame: (listener: () => void): (() => void) => {
-        renderFrame.listeners.add(listener);
-        return () => renderFrame.listeners.delete(listener);
-      },
-      renderFrameConsumersRef: { current: renderFrame.consumers },
-      framing: session.framing,
-    };
-  }, [graphicsRef, session]);
+  const value = useMemo((): GraphicsContextValue => ({ ...presentation, framing }), [framing, presentation]);
 
   return <GraphicsContext.Provider value={value}>{children}</GraphicsContext.Provider>;
 }

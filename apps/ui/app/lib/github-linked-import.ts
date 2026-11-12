@@ -5,13 +5,13 @@ import {
   serializeProjectManifest,
 } from '@taucad/types';
 import type { ProjectManifest, ProjectManifestParseResult } from '@taucad/types';
-import { largeObjectThresholdBytes } from '@taucad/revisions';
+import { largeObjectThresholdBytes, startSummary, startTrigger } from '@taucad/revisions';
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
 import { ENV } from '#environment.config.js';
 import { githubConnections } from '#lib/github-connections.js';
-import { githubNoreplyAuthor } from '#lib/github-project-binding.js';
+import { githubNoreplyAuthor } from '@taucad/ui-core/lib/github-project-binding';
 import { getRevisionSessionUser } from '#lib/revision-actor.js';
-import type { LinkedImportRequest } from '#machines/import-linked.js';
+import type { LinkedImportRequest } from '@taucad/ui-core/machines/import-linked';
 import { declaresManifest } from '@taucad/project-workspace/utils/project-manifest-equivalence';
 
 /* The largest worktree a linked import materializes; the worker's own bound for every answer but the pack. */
@@ -124,7 +124,12 @@ export async function prepareLinkedGithubImport({
     );
   }
   const author = githubNoreplyAuthor(selection.connection.subject, selection.connection.login);
-  const actorId = getRevisionSessionUser()?.id ?? `github:${String(selection.connection.subject)}`;
+  /* B1, I1: the Tau person who linked it, and no stand-in. A GitHub connection
+   * belongs to a signed-in account, so there is always one to name. */
+  const person = getRevisionSessionUser();
+  if (person === undefined) {
+    throw new Error('Sign in to Tau to import a repository from GitHub.');
+  }
   const credential = await githubConnections.token(selection.connection.id, {
     repositoryId: selection.repository.id,
     operation: 'read',
@@ -168,12 +173,13 @@ export async function prepareLinkedGithubImport({
       provenance: {
         source: 'import',
         /* The Tau person who linked it, so History reads it as theirs (D33). */
-        actorId,
-        actor: { kind: 'user', id: actorId, ...author },
-        trigger: 'save',
+        actor: { kind: 'user', id: person.id, ...author },
+        /* The Start version, V1 (A6): History reads it as "imported from GitHub". */
+        capture: startTrigger('github'),
+        via: 'browser',
         createdAt: Date.now(),
       },
-      summary: { generated: 'Set up this repository as a Tau project' },
+      summary: { generated: startSummary('github') },
     },
   };
   return { request, generation: credential.generation };

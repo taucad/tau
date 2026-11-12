@@ -14,11 +14,14 @@
  * 4. `section.on`, `measure.on.selecting`: `setSectionViewActive(true)`, `setMeasureActive(true)`
  * 5. `section.off`, `measure.on.selected`: `setMeasureActive(true)`, `startMeasurement`
  * 6. `section.on`, `measure.on.selected`: `setSectionViewActive(true)`, `setMeasureActive(true)`, `startMeasurement`
+ *
+ * The `backend` region runs beside them: each row above holds in `backend.probing` (initial), in `backend.resolved`
+ * (the probe answers last) and in `backend.lost` (the probe answers, then `webGpuCanvasLost`), eighteen rows in all.
  */
 import { pathTable, unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 import type { UnansweredEvent } from '@taucad/xstate-testing/paths';
 import { describe, expect, it } from 'vitest';
-import { createAsyncLogic, matchesState, transition } from 'xstate';
+import { createAsyncLogic, createCallbackLogic, matchesState, transition } from 'xstate';
 import type { AnyMachineSnapshot, StateValue } from 'xstate';
 import { getShortestPaths } from 'xstate/graph';
 import type { GeometryComponentManifest } from '@taucad/types';
@@ -109,11 +112,9 @@ const samples: Samples = {
   setUpDirection: [{ type: 'setUpDirection', payload: 'y' }],
   setGraphicsBackendPreference: [{ type: 'setGraphicsBackendPreference', payload: 'webgl' }],
   webGpuCanvasLost: [{ type: 'webGpuCanvasLost' }],
-  rendererInitialized: [{ type: 'rendererInitialized', payload: { canvasId: 'c', backend: 'webgl' } }],
-  rendererRemoved: [{ type: 'rendererRemoved', canvasId: 'c' }],
-  canvasMounted: [{ type: 'canvasMounted', canvasId: 'c' }],
-  rendererPresented: [{ type: 'rendererPresented', canvasId: 'c' }],
-  canvasUnmounted: [{ type: 'canvasUnmounted', canvasId: 'c' }],
+  canvasAttached: [{ type: 'canvasAttached', canvasId: 'c', kind: 'placeholder' }],
+  canvasDetached: [{ type: 'canvasDetached', canvasId: 'c' }],
+  controlsAttached: [{ type: 'controlsAttached', canvasId: 'c', adapter: createCallbackLogic(() => undefined) }],
   setSectionViewActive: [
     { type: 'setSectionViewActive', payload: true },
     { type: 'setSectionViewActive', payload: false },
@@ -167,9 +168,30 @@ const samples: Samples = {
   setHoveredMeasurement: [{ type: 'setHoveredMeasurement', payload: undefined }],
   setMeasurementName: [{ type: 'setMeasurementName', id: 'missing', name: 'n' }],
   toggleMeasurementPinned: [{ type: 'toggleMeasurementPinned', id: 'missing' }],
-  controlsInteractionStart: [{ type: 'controlsInteractionStart' }],
-  controlsInteractionMoved: [{ type: 'controlsInteractionMoved' }],
-  controlsInteractionEnd: [{ type: 'controlsInteractionEnd' }],
+  viewerShortcutPressed: [
+    {
+      type: 'viewerShortcutPressed',
+      shortcut: 'grid',
+      pressId: 'bar:1',
+      camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+    },
+    {
+      type: 'viewerShortcutPressed',
+      shortcut: 'escape',
+      pressId: 'bar:2',
+      camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+    },
+    {
+      type: 'viewerShortcutPressed',
+      shortcut: 'removeCut',
+      pressId: 'bar:3',
+      cutId: 'missing',
+      camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+    },
+  ],
+  interactionStarted: [{ type: 'interactionStarted' }],
+  interactionMoved: [{ type: 'interactionMoved' }],
+  interactionEnded: [{ type: 'interactionEnded' }],
   beginViewerModelHoverSuppression: [{ type: 'beginViewerModelHoverSuppression', reason: 'cameraControls' }],
   endViewerModelHoverSuppression: [{ type: 'endViewerModelHoverSuppression', reason: 'cameraControls' }],
   markModelPointerGestureMoved: [{ type: 'markModelPointerGestureMoved' }],
@@ -209,10 +231,12 @@ const samples: Samples = {
 
 const machine = graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } });
 const events: readonly GraphicsEvent[] = Object.values(samples).flat();
+/** The probe's answer, which takes the `backend` region out of `probing`; built in, so never sampled as public. */
+const probeAnswered = { type: 'xstate.done.actor.probeWebGpuInvocation', output: true } as unknown as GraphicsEvent;
 const options = {
   input: {},
-  events,
-  limit: 2000,
+  events: [...events, probeAnswered],
+  limit: 4000,
   serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
 };
 
@@ -238,20 +262,90 @@ describe('graphics machine totality baseline', () => {
         events: row.events.map((event) => event.type),
       })),
     ).toEqual([
-      { state: 'operational.section.off | operational.measure.off', events: [] },
-      { state: 'operational.section.on | operational.measure.off', events: ['setSectionViewActive'] },
-      { state: 'operational.section.off | operational.measure.on.selecting', events: ['setMeasureActive'] },
+      { state: 'operational.backend.probing | operational.section.off | operational.measure.off', events: [] },
       {
-        state: 'operational.section.on | operational.measure.on.selecting',
+        state: 'operational.backend.probing | operational.section.on | operational.measure.off',
+        events: ['setSectionViewActive'],
+      },
+      {
+        state: 'operational.backend.probing | operational.section.off | operational.measure.on.selecting',
+        events: ['setMeasureActive'],
+      },
+      {
+        state: 'operational.backend.resolved | operational.section.off | operational.measure.off',
+        events: ['xstate.done.actor.probeWebGpuInvocation'],
+      },
+      {
+        state: 'operational.backend.probing | operational.section.on | operational.measure.on.selecting',
         events: ['setSectionViewActive', 'setMeasureActive'],
       },
       {
-        state: 'operational.section.off | operational.measure.on.selected',
+        state: 'operational.backend.resolved | operational.section.on | operational.measure.off',
+        events: ['setSectionViewActive', 'xstate.done.actor.probeWebGpuInvocation'],
+      },
+      {
+        state: 'operational.backend.probing | operational.section.off | operational.measure.on.selected',
         events: ['setMeasureActive', 'startMeasurement'],
       },
       {
-        state: 'operational.section.on | operational.measure.on.selected',
+        state: 'operational.backend.resolved | operational.section.off | operational.measure.on.selecting',
+        events: ['setMeasureActive', 'xstate.done.actor.probeWebGpuInvocation'],
+      },
+      {
+        state: 'operational.backend.lost | operational.section.off | operational.measure.off',
+        events: ['xstate.done.actor.probeWebGpuInvocation', 'webGpuCanvasLost'],
+      },
+      {
+        state: 'operational.backend.probing | operational.section.on | operational.measure.on.selected',
         events: ['setSectionViewActive', 'setMeasureActive', 'startMeasurement'],
+      },
+      {
+        state: 'operational.backend.resolved | operational.section.on | operational.measure.on.selecting',
+        events: ['setSectionViewActive', 'setMeasureActive', 'xstate.done.actor.probeWebGpuInvocation'],
+      },
+      {
+        state: 'operational.backend.lost | operational.section.on | operational.measure.off',
+        events: ['setSectionViewActive', 'xstate.done.actor.probeWebGpuInvocation', 'webGpuCanvasLost'],
+      },
+      {
+        state: 'operational.backend.resolved | operational.section.off | operational.measure.on.selected',
+        events: ['setMeasureActive', 'startMeasurement', 'xstate.done.actor.probeWebGpuInvocation'],
+      },
+      {
+        state: 'operational.backend.lost | operational.section.off | operational.measure.on.selecting',
+        events: ['setMeasureActive', 'xstate.done.actor.probeWebGpuInvocation', 'webGpuCanvasLost'],
+      },
+      {
+        state: 'operational.backend.resolved | operational.section.on | operational.measure.on.selected',
+        events: [
+          'setSectionViewActive',
+          'setMeasureActive',
+          'startMeasurement',
+          'xstate.done.actor.probeWebGpuInvocation',
+        ],
+      },
+      {
+        state: 'operational.backend.lost | operational.section.on | operational.measure.on.selecting',
+        events: [
+          'setSectionViewActive',
+          'setMeasureActive',
+          'xstate.done.actor.probeWebGpuInvocation',
+          'webGpuCanvasLost',
+        ],
+      },
+      {
+        state: 'operational.backend.lost | operational.section.off | operational.measure.on.selected',
+        events: ['setMeasureActive', 'startMeasurement', 'xstate.done.actor.probeWebGpuInvocation', 'webGpuCanvasLost'],
+      },
+      {
+        state: 'operational.backend.lost | operational.section.on | operational.measure.on.selected',
+        events: [
+          'setSectionViewActive',
+          'setMeasureActive',
+          'startMeasurement',
+          'xstate.done.actor.probeWebGpuInvocation',
+          'webGpuCanvasLost',
+        ],
       },
     ]);
     expect(unreachedStates(machine, options)).toEqual([]);
@@ -259,6 +353,23 @@ describe('graphics machine totality baseline', () => {
 
   it('should answer every sampled event in every reachable state except the declared baseline', () => {
     expect(unansweredEvents(machine, { ...options, ignore: graphicsIgnoredEvents })).toEqual([]);
+  });
+
+  it('should claim F and G in every reachable state, which the blanket shortcut pair cannot check', () => {
+    const alwaysClaimed = (['fitView', 'grid'] as const).map(
+      (shortcut): GraphicsEvent => ({
+        type: 'viewerShortcutPressed',
+        shortcut,
+        pressId: 'bar:always',
+        camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+      }),
+    );
+    const unclaimed = getShortestPaths(machine, options).flatMap(({ state: snapshot }) =>
+      alwaysClaimed
+        .filter((event) => !snapshot.can(event))
+        .map((event) => `${dotted(snapshot.value)}: ${(event as { shortcut: string }).shortcut}`),
+    );
+    expect(unclaimed).toEqual([]);
   });
 
   it('should declare no baseline pair that the machine now answers', () => {
@@ -287,23 +398,82 @@ describe('graphics machine totality baseline', () => {
     });
     const everywhere = [
       'cameraViewChanged',
+      'canvasDetached',
+      'controlsAttached',
       'adoptSectionView',
       'updateSectionCut',
       'removeSectionCut',
       'hoverSectionCut',
       'adoptPinnedMeasurements',
-      'controlsInteractionMoved',
+      'interactionMoved',
       'clearArtifact',
       'gltfPresentationCommitted',
     ];
-    const withSelectSectionCut = [...everywhere.slice(0, 4), 'selectSectionCut', ...everywhere.slice(4)];
+    const withSelectSectionCut = [...everywhere.slice(0, 6), 'selectSectionCut', ...everywhere.slice(6)];
     expect(silent).toEqual([
-      { state: 'operational.section.off | operational.measure.off', types: withSelectSectionCut },
-      { state: 'operational.section.on | operational.measure.off', types: everywhere },
-      { state: 'operational.section.off | operational.measure.on.selecting', types: withSelectSectionCut },
-      { state: 'operational.section.on | operational.measure.on.selecting', types: everywhere },
-      { state: 'operational.section.off | operational.measure.on.selected', types: withSelectSectionCut },
-      { state: 'operational.section.on | operational.measure.on.selected', types: everywhere },
+      {
+        state: 'operational.backend.probing | operational.section.off | operational.measure.off',
+        types: withSelectSectionCut,
+      },
+      { state: 'operational.backend.probing | operational.section.on | operational.measure.off', types: everywhere },
+      {
+        state: 'operational.backend.probing | operational.section.off | operational.measure.on.selecting',
+        types: withSelectSectionCut,
+      },
+      {
+        state: 'operational.backend.resolved | operational.section.off | operational.measure.off',
+        types: withSelectSectionCut,
+      },
+      {
+        state: 'operational.backend.probing | operational.section.on | operational.measure.on.selecting',
+        types: everywhere,
+      },
+      { state: 'operational.backend.resolved | operational.section.on | operational.measure.off', types: everywhere },
+      {
+        state: 'operational.backend.probing | operational.section.off | operational.measure.on.selected',
+        types: withSelectSectionCut,
+      },
+      {
+        state: 'operational.backend.resolved | operational.section.off | operational.measure.on.selecting',
+        types: withSelectSectionCut,
+      },
+      {
+        state: 'operational.backend.lost | operational.section.off | operational.measure.off',
+        types: withSelectSectionCut,
+      },
+      {
+        state: 'operational.backend.probing | operational.section.on | operational.measure.on.selected',
+        types: everywhere,
+      },
+      {
+        state: 'operational.backend.resolved | operational.section.on | operational.measure.on.selecting',
+        types: everywhere,
+      },
+      { state: 'operational.backend.lost | operational.section.on | operational.measure.off', types: everywhere },
+      {
+        state: 'operational.backend.resolved | operational.section.off | operational.measure.on.selected',
+        types: withSelectSectionCut,
+      },
+      {
+        state: 'operational.backend.lost | operational.section.off | operational.measure.on.selecting',
+        types: withSelectSectionCut,
+      },
+      {
+        state: 'operational.backend.resolved | operational.section.on | operational.measure.on.selected',
+        types: everywhere,
+      },
+      {
+        state: 'operational.backend.lost | operational.section.on | operational.measure.on.selecting',
+        types: everywhere,
+      },
+      {
+        state: 'operational.backend.lost | operational.section.off | operational.measure.on.selected',
+        types: withSelectSectionCut,
+      },
+      {
+        state: 'operational.backend.lost | operational.section.on | operational.measure.on.selected',
+        types: everywhere,
+      },
     ]);
   });
 });

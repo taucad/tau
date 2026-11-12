@@ -52,7 +52,7 @@ const mocks = vi.hoisted(() => ({
       displayUnits: { length: { metersPerUnit: 1, symbol: 'm' } },
       hoveredMeasurementId: undefined,
       isMeasureActive: true,
-      cameraInteractionHadMovement: false,
+      cameraRef: { getSnapshot: () => ({ matches: () => false }) },
     },
   },
 }));
@@ -78,6 +78,7 @@ vi.mock('#hooks/use-graphics.jsx', () => ({
     selector(mocks.graphicsSnapshot),
   useModelInteractionSelector: <T,>(selector: (snapshot: { context: { displayRevision: number } }) => T): T =>
     selector({ context: { displayRevision: 0 } }),
+  useCameraSelector: <T,>(selector: (state: { matches: () => boolean }) => T): T => selector({ matches: () => false }),
   useRenderFrame: () => mocks.renderFrame,
   useKinematicsRef: () => mocks.kinematics,
 }));

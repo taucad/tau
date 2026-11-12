@@ -1,0 +1,12 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "Stylised Owl",
+  "description": "A toy owl blended from ellipsoids and capsules with a smooth union into one watertight body.",
+  "tags": ["picovoxel", "typescript", "character", "sdf"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

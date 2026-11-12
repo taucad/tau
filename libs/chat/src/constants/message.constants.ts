@@ -18,3 +18,6 @@ export const messageStatus = {
 
 /** @public */
 export const messageStatuses = Object.values(messageStatus);
+
+/** The one reason the snapshot gives for a kernel it does not offer: never the account's plan (blueprint D4). @public */
+export const snapshotKernelUnavailableReason = 'not available here';

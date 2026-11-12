@@ -20,6 +20,9 @@ export const agentHostSessionChannels = {
   release: 'tau:agent-host:release',
 } as const;
 
+/** The account's rating of a run in the desktop app, which main relays to the project host that ran it (LW8). */
+export const agentHostRatingChannel = 'tau:agent-host:rated';
+
 /** Open a granted directory in the operating system's file manager. */
 export const openDirectoryChannel = 'tau:open-directory';
 

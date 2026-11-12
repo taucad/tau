@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { archiveTooLargeCode } from '@taucad/filesystem/content-ops';
-import { formatBytes } from '#lib/format-bytes.js';
-import { savableZipDownloadBytes, zipDownloadCeiling } from '#utils/zip-download.utils.js';
+import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
+import { savableZipDownloadBytes, zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import {
   archiveTooLargeMessage,
   FileTreeDownloadError,

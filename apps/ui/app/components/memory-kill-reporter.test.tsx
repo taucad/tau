@@ -2,7 +2,7 @@ import { render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryKillReporter } from '#components/memory-kill-reporter.js';
 import { createMemoryKillSignal } from '#lib/memory-kill-signal.js';
-import { readLastMemorySample, resetMemorySampler, takeMemorySample } from '#lib/memory-sampler.js';
+import { readLastMemorySample, resetMemorySampler, takeMemorySample } from '@taucad/ui-core/lib/memory-sampler';
 import { reportDetectedKill } from '#lib/tab-kill-reporting.js';
 import type { KillReportConsent } from '#components/memory-kill-reporter.js';
 import { createKillMemory } from '#lib/kill-memory.js';
@@ -195,6 +195,20 @@ describe('MemoryKillReporter (B-01, SB3)', () => {
       await vi.waitFor(() => {
         expect(pendingInMarker()).toEqual([]);
       });
+      expect(reportDetectedKill).not.toHaveBeenCalled();
+    });
+
+    it('sends nothing on desktop, where the minidump is the report, but still counts and settles the kill (D13)', async () => {
+      const signal = killedPage();
+      const consent = consentSource('granted');
+      render(
+        <MemoryKillReporter signal={signal} liveProjectCount={0} chatCount={0} consent={consent} sendsReport={false} />,
+      );
+
+      await vi.waitFor(() => {
+        expect(pendingInMarker()).toEqual([]);
+      });
+      expect(consent.count).toHaveBeenCalledTimes(1);
       expect(reportDetectedKill).not.toHaveBeenCalled();
     });
 

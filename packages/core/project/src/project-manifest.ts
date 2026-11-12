@@ -33,9 +33,11 @@ export const projectManifestSchema = z
     name: z.string().max(200),
     description: z.string().max(10_000),
     tags: z.array(z.string().max(100)).max(64),
+    /* `main` is absent while a project has no model file yet (an entry-less project). Readers go through
+     * `mainEntryPath` and must treat absence and a missing file alike. */
     assets: z
       .object({
-        main: projectAssetSchema,
+        main: projectAssetSchema.optional(),
       })
       .strict(),
     /* Absent means on. A project that should stay files-only carries
@@ -60,6 +62,18 @@ export const projectManifestSchema = z
 
 /** Validated project manifest stored as `tau.json`. @public */
 export type ProjectManifest = z.infer<typeof projectManifestSchema>;
+
+/**
+ * The project's declared main entry, or undefined while the project has no model file yet. A declared path can still
+ * name a missing file; callers that need a renderable entry check the file too.
+ *
+ * @param manifest - A manifest or any view with its `assets`.
+ * @returns The main entry's project-relative path.
+ * @public
+ */
+export const mainEntryPath = (manifest: {
+  readonly assets: { readonly main?: { readonly entryPath: string } | undefined };
+}): string | undefined => manifest.assets.main?.entryPath;
 
 /**
  * Fatal reason a manifest could not be read or parsed safely.
@@ -155,12 +169,15 @@ export const projectToManifest = <Project extends Omit<ProjectManifest, '$schema
   name: project.name,
   description: project.description,
   tags: [...project.tags],
-  assets: {
-    main: {
-      entryPath: project.assets.main.entryPath,
-      ...(project.assets.main.thumbnail === undefined ? {} : { thumbnail: project.assets.main.thumbnail }),
-    },
-  },
+  assets:
+    project.assets.main === undefined
+      ? {}
+      : {
+          main: {
+            entryPath: project.assets.main.entryPath,
+            ...(project.assets.main.thumbnail === undefined ? {} : { thumbnail: project.assets.main.thumbnail }),
+          },
+        },
   ...(project.syncChats === undefined ? {} : { syncChats: project.syncChats }),
   ...(project.syncLargeExports === undefined ? {} : { syncLargeExports: project.syncLargeExports }),
 });

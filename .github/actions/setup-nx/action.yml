@@ -10,6 +10,10 @@ inputs:
     description: "'false' restores the pnpm store and the cached Node.js without saving them after the job, for jobs whose end gates a workflow"
     required: false
     default: 'true'
+  affected-base:
+    description: "A commit `nx affected` diffs against in place of the one `nx-set-shas` finds: `queue-verdict`'s `affected-base` (`HEAD^1`, the merge queue's own base, on a push whose commit has a merge-group run). '' keeps `nx-set-shas`."
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -106,7 +110,7 @@ runs:
         restore-keys: |
           ${{ runner.os }}-${{ runner.arch }}-pnpm-store-
 
-    # Postinstall scripts fetch release binaries (Vale, Electron) from GitHub, which can answer 504 for
+    # Postinstall scripts fetch release binaries (Electron) from GitHub, which can answer 504 for
     # minutes at a time. A frozen install is idempotent, so retry it a bounded number of times.
     - name: Install dependencies
       run: |
@@ -139,4 +143,21 @@ runs:
         chmod +x "$bin/nx"
 
     - name: Set NX SHAs
+      if: inputs.affected-base == ''
       uses: nrwl/nx-set-shas@afb73a62d26e41464e9254689e1fd6122ee683c1 # v5.0.1
+
+    # A push to `main` whose commit has a merge-group run diffs against the queue's own base,
+    # so `nx affected` selects exactly the lanes the queue selected (`queue-verdict`).
+    - name: Set NX SHAs to the given base
+      if: inputs.affected-base != ''
+      shell: bash
+      env:
+        BASE: ${{ inputs.affected-base }}
+      run: |
+        set -euo pipefail
+        base=$(git rev-parse --verify "$BASE^{commit}")
+        {
+          echo "NX_BASE=$base"
+          echo "NX_HEAD=$(git rev-parse --verify HEAD)"
+        } >> "$GITHUB_ENV"
+        echo "nx affected diffs against $BASE ($base)."

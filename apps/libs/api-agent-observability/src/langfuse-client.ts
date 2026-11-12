@@ -1,9 +1,19 @@
-import type { ObservationIdentity, OtlpSpan } from '#langfuse-observation.js';
+import type { LangfuseScoreName } from '@taucad/api-core';
+import type { LangfuseScore, ObservationIdentity, OtlpSpan } from '#langfuse-observation.js';
 import type { LangfuseObservationRow } from '#langfuse-scorecard.js';
-import { otlpBody } from '#langfuse-observation.js';
+import { generationNames, otlpBody } from '#langfuse-observation.js';
 
-/** Where and as whom the API writes to one Langfuse project. Server-side only. */
-export type LangfuseTarget = Readonly<{ baseUrl: string; publicKey: string; secretKey: string }>;
+/**
+ * Where and as whom the API writes to one Langfuse project. Server-side only. `scoreConfigs` names the project's score
+ * config for each score (`TAU_OBSERVABILITY_SCORE_CONFIG_IDS`); config ids differ per project and are never read from
+ * Langfuse (charter D6, ruling 9).
+ */
+export type LangfuseTarget = Readonly<{
+  baseUrl: string;
+  publicKey: string;
+  secretKey: string;
+  scoreConfigs?: Readonly<Partial<Record<LangfuseScoreName, string>>> | undefined;
+}>;
 
 /**
  * What one send attempt established about the observation (T02 attempts 1–6).
@@ -17,14 +27,28 @@ export type SendOutcome =
   | Readonly<{ kind: 'accepted' }>
   | Readonly<{ kind: 'rejected' | 'not-sent' | 'uncertain'; reason: string }>;
 
+/**
+ * What one score write established (LW7). Nothing reads a score back (ruling 9), so its answer settles it: `accepted`
+ * and `rejected` are final, `not-sent` provably never reached Langfuse, and `uncertain` may have been stored after its
+ * bounded repeats.
+ */
+export type ScoreOutcome = SendOutcome;
+
+/**
+ * How many times one score write sends its identical body while the answer is uncertain. A repeat is safe: Langfuse
+ * replaces a score with the same id, name and timestamp date (LD5).
+ */
+export const scoreAttempts = 3;
+
 /** What one reconciliation read established; `unavailable` is never absence. */
 export type FindOutcome = 'present' | 'absent' | 'unavailable';
 
 /**
  * What one bulk trace deletion request established. Langfuse queues the
- * deletion, so `requested` is not removal: only a later read can say.
+ * deletion; an `accepted` delete is the erasure (charter I6 as amended by
+ * ruling 9), and nothing reads it back.
  */
-export type DeleteOutcome = Readonly<{ kind: 'requested' }> | Readonly<{ kind: 'retry'; reason: string }>;
+export type DeleteOutcome = Readonly<{ kind: 'accepted' }> | Readonly<{ kind: 'retry'; reason: string }>;
 
 /**
  * One environment's observations in a time window. `partial` is a read cut
@@ -89,6 +113,16 @@ export const classifySendResponse = (status: number, body: unknown): SendOutcome
   return { kind: 'uncertain', reason: `http-${status}` };
 };
 
+/**
+ * Classify the vendor's answer to one score write, always an array of one score. A 207 on that array means its one
+ * score was refused, and the OpenAPI says not to retry it; any other answer reads as for a span.
+ *
+ * @param status - The HTTP status.
+ * @returns The outcome, with a bounded reason code.
+ */
+export const classifyScoreResponse = (status: number): SendOutcome =>
+  status === 207 ? { kind: 'rejected', reason: 'partial' } : classifySendResponse(status, undefined);
+
 const readJson = async (response: Response): Promise<unknown> => {
   try {
     return (await response.json()) as unknown;
@@ -121,15 +155,19 @@ const observationsUrl = (target: LangfuseTarget, query: Readonly<Record<string, 
  * Langfuse v4 ingestion and read-back for agent evidence. It never logs or
  * returns request or response bodies: the span carries customer content.
  */
-/* Only Tau's own observations, by the names the mapper gives them; anything else in the project is not read. */
+/*
+ * Only generations, which carry the ledger's settled values (LW4); every other observation is left unread, since the
+ * Langfuse dashboards score runs (LQ10) and no interval list is ever read back (LF-31). A `tau.financial` span from an
+ * earlier mapper is not read.
+ */
 const observationRow = (item: unknown): LangfuseObservationRow[] => {
   const id = field(item, 'id');
-  const name = field(item, 'name');
   const startTime = field(item, 'startTime');
   const metadata = field(item, 'metadata');
+  const name = field(item, 'name');
   return typeof id === 'string' &&
     typeof name === 'string' &&
-    name.startsWith('tau.') &&
+    generationNames.has(name) &&
     typeof startTime === 'string' &&
     typeof metadata === 'object' &&
     metadata !== null
@@ -145,13 +183,13 @@ export class LangfuseClient {
   ) {}
 
   /**
-   * Send one complete observation.
+   * Send one receipt's complete observation, in one request.
    *
-   * @param span - The observation for one receipt.
+   * @param spans - The spans one receipt writes, its object first.
    * @param signal - Aborts the request on shutdown; an abort is uncertain.
    * @returns What the attempt established.
    */
-  public async send(span: OtlpSpan, signal?: AbortSignal): Promise<SendOutcome> {
+  public async send(spans: readonly OtlpSpan[], signal?: AbortSignal): Promise<SendOutcome> {
     const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
     try {
       const response = await this.fetcher(new URL('/api/public/otel/v1/traces', this.target.baseUrl), {
@@ -161,7 +199,7 @@ export class LangfuseClient {
           'content-type': 'application/json',
           'x-langfuse-ingestion-version': '4',
         },
-        body: otlpBody(span),
+        body: otlpBody(spans),
         signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
         redirect: 'error',
       });
@@ -169,6 +207,65 @@ export class LangfuseClient {
     } catch (error) {
       return classifySendError(error);
     }
+  }
+
+  /**
+   * Whether this project names a score config for a score; a score without one is written without `configId`.
+   *
+   * @param name - The score's name.
+   * @returns True when the setting names its config id.
+   */
+  public scoreConfigured(name: LangfuseScoreName): boolean {
+    return this.target.scoreConfigs?.[name] !== undefined;
+  }
+
+  /**
+   * Write one score with `POST /api/public/scores`, as an array of one that names the project's score config when the
+   * setting names one. Without a config id the same score is written by its name, data type and value alone, so roots
+   * and scores keep flowing before the configs exist. An uncertain answer repeats the identical body, at most
+   * {@link scoreAttempts} sends in all; nothing is ever read back.
+   *
+   * @param score - The score, with its fixed id and timestamp.
+   * @param signal - Aborts the request on shutdown; an abort is uncertain.
+   * @returns What the write established.
+   */
+  public async score(score: LangfuseScore, signal?: AbortSignal): Promise<ScoreOutcome> {
+    const configId = this.target.scoreConfigs?.[score.name];
+    const { id, traceId, observationId, name, value, dataType, timestamp, environment } = score;
+    const body = JSON.stringify([
+      {
+        id,
+        traceId,
+        observationId,
+        name,
+        value,
+        dataType,
+        ...(configId === undefined ? {} : { configId }),
+        timestamp,
+        environment,
+      },
+    ]);
+    let outcome: SendOutcome = { kind: 'uncertain', reason: 'unsent' };
+    for (let attempt = 0; attempt < scoreAttempts && outcome.kind === 'uncertain'; attempt++) {
+      const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- a repeat follows only an uncertain answer
+        const response = await this.fetcher(new URL('/api/public/scores', this.target.baseUrl), {
+          method: 'POST',
+          headers: { authorization: authorization(this.target), 'content-type': 'application/json' },
+          body,
+          signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
+          redirect: 'error',
+        });
+        outcome = classifyScoreResponse(response.status);
+      } catch (error) {
+        outcome = classifySendError(error);
+      }
+      if (signal?.aborted === true) {
+        break;
+      }
+    }
+    return outcome;
   }
 
   /**
@@ -222,8 +319,8 @@ export class LangfuseClient {
   }
 
   /**
-   * Read Tau's observations in one environment and window, for the Langfuse
-   * scorecard. Only the `core`, `basic` and `metadata` fields are requested, so no
+   * Read Tau's generations in one environment and window, for the Langfuse
+   * scorecard and the ledger reconciliation. Only the `core`, `basic` and `metadata` fields are requested, so no
    * input or output is ever read back.
    *
    * @param window - The environment, and the start-time bounds.
@@ -286,7 +383,7 @@ export class LangfuseClient {
    *
    * @param traceIds - The traces to delete, at most a bounded batch.
    * @param signal - Aborts the request.
-   * @returns Requested, or retry with a bounded reason.
+   * @returns Accepted, or retry with a bounded reason.
    */
   public async deleteTraces(traceIds: readonly string[], signal?: AbortSignal): Promise<DeleteOutcome> {
     const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
@@ -298,43 +395,9 @@ export class LangfuseClient {
         signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
         redirect: 'error',
       });
-      return response.ok ? { kind: 'requested' } : { kind: 'retry', reason: `http-${response.status}` };
+      return response.ok ? { kind: 'accepted' } : { kind: 'retry', reason: `http-${response.status}` };
     } catch (error) {
       return { kind: 'retry', reason: classifySendError(error).kind === 'not-sent' ? 'unreachable' : 'transport' };
-    }
-  }
-
-  /**
-   * Whether a trace still has any observation, to confirm a requested deletion.
-   * It reads one row of the v2 observations list filtered by the trace (there is
-   * no v2 detail route), and only the `core` fields, so nothing is read back but
-   * ids. Only an ok answer whose `data` is an empty array is absence; a 410
-   * (`LEGACY_API_UNAVAILABLE_FOR_NEW_ORGANIZATION`), any other non-ok answer, an
-   * unreadable body and a transport failure are `unavailable`, never absence.
-   *
-   * @param traceId - The trace.
-   * @param signal - Aborts the read.
-   * @returns Present, absent (an empty page) or unavailable.
-   */
-  public async traceExists(traceId: string, signal?: AbortSignal): Promise<FindOutcome> {
-    const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
-    try {
-      const response = await this.fetcher(observationsUrl(this.target, { traceId, fields: 'core', limit: '1' }), {
-        headers: { authorization: authorization(this.target) },
-        signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
-        redirect: 'error',
-      });
-      if (!response.ok) {
-        await response.body?.cancel();
-        return 'unavailable';
-      }
-      const data = field(await readJson(response), 'data');
-      if (!Array.isArray(data)) {
-        return 'unavailable';
-      }
-      return data.length === 0 ? 'absent' : 'present';
-    } catch {
-      return 'unavailable';
     }
   }
 }

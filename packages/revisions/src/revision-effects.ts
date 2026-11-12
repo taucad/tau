@@ -56,7 +56,7 @@ import { checkoutIdOfBranch } from '#checkout-id.js';
 import { createChatEffects, storageRefusalOf } from '#chat-effects.js';
 import { revisionTreeId } from '#git-tree-id.js';
 import { createHandles } from '#handle-table.js';
-import { createTreeIdMemo, recordBlobOid } from '#tree-id-memo.js';
+import { createTreeIdMemo, hasBlobOid, recordBlobOid } from '#tree-id-memo.js';
 import type { TreeIdMemo } from '#tree-id-memo.js';
 import {
   conflictLabels,
@@ -110,7 +110,7 @@ import type { AddCheckoutActorOutput, CheckoutsActors, ListCheckoutsActorOutput 
 import { chatProjectionConcurrency, settleBounded } from '#chat-projection-pool.js';
 import { chatIdOfRef, chatRefName, chatRefPrefix, projectChats } from '#chat-ref.js';
 import { LfsQuotaError } from '#lfs-client.js';
-import { cleanLargeObjects, largeObjectBasisOf } from '#lfs.js';
+import { cleanLargeObjects, largeObjectBasisOf, withOwedAttributes } from '#lfs.js';
 import type { LargeObjectBasis } from '#lfs.js';
 import type { ObjectFormat } from '#object-hash.js';
 import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
@@ -144,6 +144,8 @@ import { createSyncQueue } from '#sync-queue.js';
 import { createOpsLog, opsRefName, opsRefPrefix, undoCandidates } from '#ops-ref.js';
 import { restoreMachine } from '#restore.machine.js';
 import { readRevisionLog } from '#revision-verbs.js';
+import { isVersionNumberRefusal } from '#refusal-markers.js';
+import { renumberUnpushedVersions } from '#version-numbers.js';
 import { syncMachine } from '#sync.machine.js';
 import {
   generatedGitattributesContent,
@@ -170,7 +172,7 @@ import type {
   SyncRemoteMovesActorInput,
   SyncWritePendingActorInput,
 } from '#sync.machine.js';
-import type { SyncFacet, SyncQueueEntry, SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
+import type { SyncFacet, SyncQueueEntry, SyncQueueRecord, SyncRefOutcome, VersionRenumbering } from '#sync.types.js';
 import type {
   RestoreActors,
   RestoreApplyPlanActorOutput,
@@ -178,8 +180,9 @@ import type {
   RestoreComputePlanActorOutput,
   RestoreFailureCode,
 } from '#restore.machine.js';
-import type { RevisionActor, RevisionProvenance } from '#revision-authority.js';
+import type { RevisionIdentity, RevisionProvenance } from '#revision-authority.js';
 import { RevisionPortError } from '#revision-port.js';
+import { parseStartRecord, startRecordPath, startSummary, startTrigger } from '#start-version.js';
 import type {
   Checkout,
   CheckoutRecord,
@@ -474,6 +477,12 @@ export type RevisionActors = Readonly<{
    * read-through of every consumer first.
    */
   adoptLargeObjects: (checkoutId: string | undefined) => Promise<LargeObjectAdoption>;
+  /**
+   * Check the checkout's large objects again now, even if its current write
+   * generation was answered: the visible way out of a wait the person can see
+   * (Try again). A running fill is replaced by the new check's.
+   */
+  checkLargeObjects: (checkoutId: string | undefined) => Promise<void>;
   /**
    * The entry closure of the checkout's head (`tau.json` and the files it
    * names), read by the oids its tree names without reading any other blob
@@ -891,8 +900,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     writeRevision: async (input: WriteRevisionInput): Promise<RevisionReceipt> => {
       const receipt = await options.port.writeRevision(input);
       if (input.parents.length > 1) {
-        const actor = options.actor?.({ runId: undefined, trigger: 'merge' });
-        mintedOperations.set(receipt.commitId, { kind: 'merge', actor, actorId: input.provenance.actorId });
+        mintedOperations.set(receipt.commitId, { kind: 'merge', actor: input.provenance.actor });
       }
       return receipt;
     },
@@ -909,7 +917,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const policy = options.policy ?? tauRevisionPolicy.policy;
   const useFileSystem: UseCheckoutFileSystem =
     options.useFileSystem ?? (async (checkout, operation) => operation(await filesystem(checkout)));
-  const actorId = options.actorId ?? 'tau-host';
   /* One codec for every merge (D12): a recorded conflict re-derives as it was made. */
   const mergeOptions = options.parameters === undefined ? {} : { parameters: options.parameters };
   /* A host that cannot re-send a push remembers none: the identity function. */
@@ -930,7 +937,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return lastReading;
   };
 
-  const cuts = createHandles<{ tree: ImmutableRevisionTree; treeId: string }>('cut');
+  /* `owesAttributes`: the cut supplied Tau's attributes file, whose live copy its mint writes (A4). */
+  const cuts = createHandles<{ tree: ImmutableRevisionTree; treeId: string; owesAttributes?: true }>('cut');
   /**
    * The side chosen for each conflicted path, by conflicted revision.
    *
@@ -1126,11 +1134,28 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
   };
 
+  let created: Promise<void> | undefined;
   let opened: Promise<void> | undefined;
-  /* The store is created — with the ignore file the registry generates — before
-   * the first question is asked of it. Idempotent on both legs. */
+  /* The store alone, with the ignore file the registry generates: what a
+   * background resume needs to ask where the project's files are. It never
+   * mints the Start version, whose remote check belongs to the host's first
+   * question, after the host has set the project up (A6). */
+  const createStore = async (): Promise<void> => {
+    created ??= port.init({ author: hostAuthor });
+    await created;
+  };
+  /* The store is created before the first question is asked of it, and a new
+   * project's Start version is minted in it (A6). Idempotent on both legs. */
   const ensureStore = async (): Promise<void> => {
-    opened ??= port.init({ author: hostAuthor });
+    opened ??= (async () => {
+      await createStore();
+      try {
+        await mintStart();
+      } catch (error) {
+        /* The record stays, so the next open asks again; the project opens without its Start meanwhile. */
+        console.warn('[revisions] the Start version could not be recorded', error);
+      }
+    })();
     await opened;
   };
 
@@ -1139,6 +1164,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * actor that started it. */
   const settled = async (): Promise<void> => {
     try {
+      await created;
       await opened;
     } catch {
       /* A store that could not be created is reported where it was asked for,
@@ -1256,11 +1282,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * A port without the `checkouts` capability has exactly one: the live tree it
    * was constructed over.
    */
-  const listPlaces = async (): Promise<readonly Checkout[]> => {
+  const listPlaces = async (opening: 'question' | 'background' = 'question'): Promise<readonly Checkout[]> => {
     /* Before any question is asked of the store, including the first sweep:
      * an engine that has no repository yet cannot answer what its object
-     * format is, let alone where its checkouts are. */
-    await ensureStore();
+     * format is, let alone where its checkouts are. A background resume only
+     * creates it: the Start mint waits for the host's own first question. */
+    await (opening === 'question' ? ensureStore() : createStore());
     /* The advertised capability, not the presence of the method: an adapter
      * that has one but was constructed without a checkouts directory refuses
      * the call, and this project still has exactly one place. */
@@ -1450,8 +1477,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * facts are taken (`recorded: 'import'`), asked for after the read, for
    * bytes of the size the walk listed, and the index confirms each with a
    * provider stat at exactly the recorded size and mtime: a change it has not
-   * observed yet is hashed. Every other file is hashed by the memo as before,
-   * never read again here.
+   * observed yet is hashed. Bytes the walk reused from the capture memo, and
+   * that have no id yet, are offered too: an earlier capture (the root's start
+   * sweep) may have held a file before its import recorded it, and the memo
+   * vouches for them at the same stat the record names. Every other file is
+   * hashed by the memo as before, never read again here.
    */
   const recordedBlobOids = async (
     rooted: RevisionFileSystem,
@@ -1485,9 +1515,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       ignores?: CaptureIgnores | undefined;
       /** A comparison a newer write has made stale: the walk stops rather than finish for nobody. */
       signal?: AbortSignal | undefined;
+      /** A fill's placeholder check, which records nothing: an import's record is left for the next cut (D12). */
+      leavesRecords?: boolean | undefined;
     }>,
   ): Promise<ImmutableRevisionTree> => {
-    const { memos, bypassMemo, changed, ignores, signal } = captureOptions;
+    const { memos, bypassMemo, changed, ignores, signal, leavesRecords } = captureOptions;
     const started = ++captureSequence;
     /* The ignored paths this capture leaves out, and what they were read under (`CheckoutMemos.ignore`). */
     let ignored: ReadonlySet<string> = new Set();
@@ -1618,18 +1650,31 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         at === undefined || stats === undefined
           ? undefined
           : { epoch: at.epoch, generation: at.generation, observedAt };
+      /* The bytes this walk read, and those it reused with no id yet: an import's record answers either (D12). */
       const read = new Map<string, Uint8Array<ArrayBuffer>>();
+      const { reuse } = memoOptions;
       const captured = await captureRevisionTree(rooted, {
         exclude,
         inheritedMode: (path) => basis?.mode(path),
-        reuse: bypassMemo ? undefined : memoOptions.reuse,
+        reuse:
+          bypassMemo || reuse === undefined
+            ? undefined
+            : (path) => {
+                const held = reuse(path);
+                if (held !== undefined && !hasBlobOid(held, 'sha1')) {
+                  read.set(path, held);
+                }
+                return held;
+              },
         onRead: (path, content) => {
           read.set(path, content);
           memoOptions.onRead?.(path, content);
         },
         ...(signal === undefined ? {} : { signal }),
       });
-      await recordedBlobOids(rooted, read, stats);
+      if (leavesRecords !== true) {
+        await recordedBlobOids(rooted, read, stats);
+      }
       return captured;
     };
     /* A feed the host promised complete names the paths without asking the index, so it wins
@@ -1796,6 +1841,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       bypassMemo: boolean;
       changed?: Readonly<{ paths: readonly string[] | undefined }>;
       signal?: AbortSignal | undefined;
+      leavesRecords?: boolean | undefined;
     }>,
   ): Promise<ImmutableRevisionTree> =>
     useFileSystem(place, async (rooted) => {
@@ -1803,10 +1849,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       await sweepTemporarySiblings(place, rooted);
       /* The project directory, where an open writes placeholders; a pull resumes any other checkout's, and any
        * checkout a failed tree write owes a check is checked again here (D10). */
-      if (place.kind === 'live' || owedFills.has(place.id)) {
-        resumeFill(place);
-      }
-      const { modeBasis, bypassMemo, changed, signal } = captureOptions;
+      checkFill(place);
+      const { modeBasis, bypassMemo, changed, signal, leavesRecords } = captureOptions;
       const memos = memosOf(place.id);
       const ignoreRoot = place.kind === 'live' ? undefined : place.root;
       const ignores: CaptureIgnores | undefined =
@@ -1825,6 +1869,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         memos,
         bypassMemo,
         signal,
+        leavesRecords,
         ...(changed === undefined ? {} : { changed }),
         ...(ignores === undefined ? {} : { ignores }),
       });
@@ -1840,6 +1885,112 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /* The versioned tree of one checkout: every path the registry versions. */
   const capture = async (place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
     captureCheckout(place, { modeBasis, bypassMemo: false });
+  /* The same, for a fill's placeholder check: it warms the memo, and an import's one-shot record
+   * stays for the cut that builds the next revision, which reuses these bytes (D12). */
+  const captureForFill = async (place: Checkout): Promise<ImmutableRevisionTree> =>
+    captureCheckout(place, { bypassMemo: false, leavesRecords: true });
+
+  /**
+   * The live checkout, asked of a store that already exists, without waiting
+   * for {@link ensureStore}: the Start mint runs inside it.
+   *
+   * @returns The project directory's checkout, or `undefined` when the port lists none.
+   */
+  const livePlaceOfStore = async (): Promise<Checkout | undefined> => {
+    const descriptor = await describePort();
+    if (port.listCheckouts !== undefined && descriptor.checkouts) {
+      const checkouts = await port.listCheckouts();
+      return checkouts.find((candidate) => candidate.kind === 'live');
+    }
+    const head = await port.readHead();
+    return Object.freeze<Checkout>({
+      id: 'live',
+      projectId,
+      root: `/projects/${projectId}`,
+      kind: 'live',
+      branch: head?.branch,
+      baseRevisionId: head?.head,
+    });
+  };
+
+  /**
+   * Mint the Start version, V1, where a creation flow asked for it (A6).
+   *
+   * Runs once, as the store is opened, before any question is asked of it. A
+   * project Tau created carries {@link startRecordPath}; Tau creating the store
+   * is what makes it Tau's, so its files gain both generated blocks — the
+   * ignore block merged into a folder's own `.gitignore`, the large-object
+   * block into its `.gitattributes` — and the first entry records them with
+   * everything else, large files as LFS pointers. Only an unborn line with no
+   * remote is minted on: a project that arrives from a remote already has its
+   * history, and its record is removed unminted. A line that already has
+   * revisions is never minted on, and a record a lost race left on it is
+   * removed.
+   *
+   * Not an operation of the log: *Undo* never reaches the Start version.
+   */
+  const mintStart = async (): Promise<void> => {
+    const place = await livePlaceOfStore();
+    if (place === undefined) {
+      return;
+    }
+    /* A line with revisions already has its first entry: a record left by a lost race is dropped, never minted on. */
+    if ((await headOf(place)) !== undefined) {
+      await useFileSystem(place, async (rooted) => unlinkIfPresent(rooted, startRecordPath));
+      return;
+    }
+    await useFileSystem(place, async (rooted) => {
+      if (!(await rooted.exists(startRecordPath))) {
+        return;
+      }
+      const origin = parseStartRecord(await rooted.readFile(startRecordPath));
+      const remotes = await port.listRemotes();
+      if (origin !== undefined && place.branch !== undefined && remotes.length === 0) {
+        const readText = async (path: string): Promise<string | undefined> =>
+          (await rooted.exists(path)) ? rooted.readFile(path, 'utf8') : undefined;
+        for (const [path, generate] of [
+          [generatedIgnorePath, generatedIgnoreContent],
+          [generatedGitattributesPath, generatedGitattributesContent],
+        ] as const) {
+          // oxlint-disable-next-line no-await-in-loop -- two files, in order: the ignore block decides what the capture holds.
+          const existing = await readText(path);
+          const content = generate(existing);
+          if (content !== existing) {
+            // oxlint-disable-next-line no-await-in-loop -- as above.
+            await rooted.writeFile(path, content);
+          }
+        }
+        const tree = await captureCheckout(place, { bypassMemo: true });
+        const capture = startTrigger(origin);
+        const receipt = await options.port.writeRevision({
+          parents: [],
+          tree,
+          provenance: Object.freeze({
+            source: capture === 'create' ? 'user' : 'import',
+            /* B1: the person who created or brought in the project, never a stand-in. */
+            actor: options.identity.resolve({ runId: undefined, trigger: capture }),
+            capture,
+            via: options.identity.via,
+            createdAt: now(),
+          }),
+          summary: Object.freeze({ generated: startSummary(origin) }),
+        });
+        const moved = await options.port.updateRef({
+          name: place.branch,
+          expectedHead: undefined,
+          head: revisionId(receipt.commitId),
+        });
+        /* The record stays for the next open when the line gained a head first. */
+        if (moved.status !== 'updated') {
+          throw new RevisionPortError(
+            'CHECKOUT_CONFLICT',
+            `${place.branch} moved while the Start version was recorded.`,
+          );
+        }
+      }
+      await unlinkIfPresent(rooted, startRecordPath);
+    });
+  };
   /* A decision that discards or replaces a working copy on the strength of
    * "nothing here is unrevisioned" never trusts metadata an external replacement
    * can preserve (same size, restored mtime). The turn's own captures keep the
@@ -1863,6 +2014,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     equalEntry,
     entryOf,
     materializeTree: applyMaterializedTree,
+    repairTornCheckout,
   } = createApplyTreeEffects({
     useFileSystem,
     capture,
@@ -1870,6 +2022,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     onApplyingTree: (place, paths, bracket) => {
       if (bracket?.purpose === 'tree') {
         treeWrites.set(place.id, (treeWrites.get(place.id) ?? 0) + 1);
+        /* The write owns its generation's word (`fillSoon`): no check meanwhile starts a second fill. */
+        answeredFills.set(place.id, generationOf(place.id));
         largeObjects.forget(place.id);
       }
       return options.onApplyingTree?.(place, paths, bracket);
@@ -1928,7 +2082,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               ),
           }),
     },
-    capture: async (place) => capture(place),
+    capture: captureForFill,
     withCheckoutFence,
     materializeTree,
     /* A checkout over the host's store clones each object in place of writing its bytes (W11.3). */
@@ -1936,63 +2090,60 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       useFileSystem(place, async (rooted) => rooted.capabilities.largeObjectSources === true),
     report: options.onLargeObjects,
   });
-  /* Once per checkout per session: placeholders a reload left mid-download are picked up again. */
-  const resumedFills = new Set<string>();
-  /* Checkouts a tree write left without the fill's word (its check failed): the next capture checks again (D10). */
-  const owedFills = new Set<string>();
+  /*
+   * The fill's word, level-triggered (D10; Brain
+   * research/new-project-viewer-stuck-downloading-blueprint.md, T2-T4).
+   *
+   * A checkout's readiness waits on the fill's word for its current write
+   * generation (`treeWrites`). Only a write of a tree, a new checkout or a
+   * previous session's disk can put a placeholder in it; a mint moves the head
+   * without writing the tree, so the word is per generation, never per head.
+   * Every path that may meet a checkout (the root's start, any capture, a
+   * pull, a new checkout) asks `checkFill`, and the one check a generation
+   * owes runs once, with or without a head: with no placeholder there is
+   * nothing to fetch, so the answer needs none. A failed check is not
+   * recorded, so the next path that meets the checkout checks again.
+   */
+  const answeredFills = new Map<string, number>();
+  const checkingFills = new Set<string>();
   const resumeTimers = new Set<ReturnType<typeof setTimeout>>();
   let fillsStopped = false;
-  /*
-   * Off the caller's path: a resume starts a fill only where none runs. No
-   * place is the project directory, found as the root starts. A write of
-   * another revision's tree starts its own fill (`writeRevisionTree`).
-   */
-  const fillLater = (place: Checkout | undefined, owed = false): void => {
-    if (fillsStopped) {
+  const generationOf = (checkoutId: string): number => treeWrites.get(checkoutId) ?? 0;
+  const unanswerFill = (checkoutId: string): void => {
+    if (answeredFills.get(checkoutId) === generationOf(checkoutId)) {
+      answeredFills.delete(checkoutId);
+    }
+  };
+  const checkFill = (place: Checkout): void => {
+    if (fillsStopped || checkingFills.has(place.id) || answeredFills.get(place.id) === generationOf(place.id)) {
       return;
     }
-    /* Taken before any await, as `fillSoon` does: a tree write that begins in the gap owns the checkout's next word (D10). */
-    const writes = place === undefined ? undefined : treeWrites.get(place.id);
+    /* Taken before any await: a tree write that begins in the gap owns the checkout's next word. */
+    const generation = generationOf(place.id);
+    checkingFills.add(place.id);
     const timer = setTimeout(() => {
       resumeTimers.delete(timer);
-      // async-iife: bootstrap -- a background fill; its failures are reported through `onLargeObjects`.
+      // async-iife: bootstrap -- a background check; a fill's own failures are reported through `onLargeObjects`.
       void (async (): Promise<void> => {
-        let target = place;
         try {
-          if (target === undefined) {
-            const places = await listPlaces();
-            target = places.find((candidate) => candidate.kind === 'live');
+          const head = await headOf(place);
+          const placeholders = largeObjectPlaceholders(await captureForFill(place));
+          if (fillsStopped || generationOf(place.id) !== generation) {
+            return;
           }
-          const head = target === undefined ? undefined : await headOf(target);
-          if (target !== undefined && head !== undefined && !fillsStopped) {
-            resumedFills.add(target.id);
-            /* Owed: given its placeholders, the fill gives its word even with none to fetch. */
-            const placeholders = owed ? largeObjectPlaceholders(await capture(target)) : undefined;
-            if (place !== undefined && treeWrites.get(place.id) !== writes) {
-              return;
-            }
-            await (placeholders === undefined
-              ? largeObjects.resume(target, revisionId(head))
-              : largeObjects.fill(target, revisionId(head), placeholders));
-          }
+          answeredFills.set(place.id, generation);
+          await largeObjects.fill(place, head === undefined ? undefined : revisionId(head), placeholders);
         } catch (error) {
-          /* Unmarked, so the next capture or pull checks again. */
-          resumedFills.delete(target?.id ?? '');
-          if (owed && target !== undefined) {
-            owedFills.add(target.id);
+          if (answeredFills.get(place.id) === generation) {
+            answeredFills.delete(place.id);
           }
           console.warn('[revisions] large-object placeholders could not be checked', error);
+        } finally {
+          checkingFills.delete(place.id);
         }
       })();
     }, 0);
     resumeTimers.add(timer);
-  };
-  const resumeFill = (place: Checkout): void => {
-    const owed = owedFills.delete(place.id);
-    if (!resumedFills.has(place.id) || owed) {
-      resumedFills.add(place.id);
-      fillLater(place, owed);
-    }
   };
   /* A close: no fill starts again, and none is still writing when this resolves. */
   const stopFills = async (): Promise<void> => {
@@ -2003,8 +2154,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     resumeTimers.clear();
     await largeObjects.stop();
   };
-  /* The project directory's own placeholders, checked as the root starts: a reload that never captures still resumes. */
-  fillLater(undefined);
+  /* As the root starts, every checkout: a reload may show any of them, live or linked. A
+   * background listing: the Start mint waits for the host's own first question (A6). */
+  // async-iife: bootstrap -- the start's checks run off the caller's path; a listing that fails is checked again at the next capture.
+  void (async (): Promise<void> => {
+    try {
+      for (const place of await listPlaces('background')) {
+        checkFill(place);
+      }
+    } catch (error) {
+      console.warn('[revisions] checkouts could not be listed for their large objects', error);
+    }
+  })();
 
   /* `before` with `paths` as `written` holds them: a path `written` lacks is removed, every other path kept. */
   const overlay = (
@@ -2080,6 +2241,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }> = {},
   ): Promise<Readonly<{ paths: readonly string[]; result: Result | undefined }>> => {
     const { fillFrom, ...materialization } = write;
+    /* The generation before this write: a write refused before its bracket opened leaves that generation's word alone. */
+    const generationBefore = generationOf(place.id);
     let written: ImmutableRevisionTree | undefined;
     const built = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
       written = typeof target === 'function' ? await target(before) : target;
@@ -2089,22 +2252,25 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const fillSoon = (tree: ImmutableRevisionTree | undefined): void => {
       /* Taken before any await: a tree write that begins in the gap owns the checkout's next word (D10). */
       const writes = treeWrites.get(place.id);
+      /* This write's generation is answered here, before any await: a capture meanwhile starts no second fill. */
+      answeredFills.set(place.id, writes ?? 0);
       // async-iife: bootstrap -- a background fill; its failures are reported through `onLargeObjects`.
       void (async (): Promise<void> => {
         try {
           const head = (tree === undefined ? undefined : fillFrom) ?? (await headOf(place));
-          if (head === undefined || fillsStopped) {
+          if (fillsStopped) {
             return;
           }
-          const placeholders = largeObjectPlaceholders(tree ?? (await capture(place)));
+          const placeholders = largeObjectPlaceholders(tree ?? (await captureForFill(place)));
           if (treeWrites.get(place.id) !== writes) {
             return;
           }
-          resumedFills.add(place.id);
-          await largeObjects.fill(place, revisionId(head), placeholders);
+          await largeObjects.fill(place, head === undefined ? undefined : revisionId(head), placeholders);
         } catch (error) {
-          /* Owed, so the checkout's next capture checks again: readiness never waits on a word nobody gives. */
-          owedFills.add(place.id);
+          /* Unanswered, so the checkout's next capture checks again: readiness never waits on a word nobody gives. */
+          if (answeredFills.get(place.id) === (writes ?? 0)) {
+            answeredFills.delete(place.id);
+          }
           console.warn('[revisions] large-object placeholders could not be checked', error);
         }
       })();
@@ -2114,7 +2280,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       fillSoon(written);
       return answer;
     } catch (error) {
-      if (written !== undefined) {
+      if (written === undefined) {
+        /* A bracket opened and nothing was written: no fill speaks for its generation, so the next capture checks it. */
+        if (generationOf(place.id) !== generationBefore) {
+          unanswerFill(place.id);
+        }
+      } else {
         fillSoon(undefined);
       }
       throw error;
@@ -2150,9 +2321,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (head === undefined || fillsStopped) {
         return;
       }
-      resumedFills.add(place.id);
+      const generation = generationOf(place.id);
+      /* Captured before the generation is answered: a capture that fails leaves the next check owed. */
+      const placeholders = largeObjectPlaceholders(await captureForFill(place));
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- a close during the capture stops fills.
+      if (fillsStopped || generationOf(place.id) !== generation) {
+        return;
+      }
+      answeredFills.set(place.id, generation);
       /* Given its placeholders, the fill is registered before this returns, so the caller's wait finds it. */
-      void largeObjects.fill(place, revisionId(head), largeObjectPlaceholders(await capture(place)));
+      void largeObjects.fill(place, revisionId(head), placeholders);
     },
   });
   /* A checkout by id; the project directory when none is named. */
@@ -2540,7 +2718,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 
   /* The unwrapped store: an ops ref is not a head, and its own writes are not operations. */
-  const opsLog = createOpsLog({ port: options.port, recordsFileSystem, now, actorId });
+  const opsLog = createOpsLog({ port: options.port, recordsFileSystem, now, identity: options.identity });
 
   const {
     chatContext,
@@ -2557,9 +2735,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     recordsFileSystem,
     deviceId: options.deviceId,
     recordDevices: opsLog,
-    actor: options.actor,
+    identity: options.identity,
     onChatsProjected: options.onChatsProjected,
-    actorId,
     now,
   });
 
@@ -2574,7 +2751,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    */
   const mintedOperations = new Map<
     string,
-    Readonly<{ kind: CheckoutCutTrigger; undoes?: string; actor: RevisionActor | undefined; actorId: string }>
+    Readonly<{ kind: CheckoutCutTrigger; undoes?: string; actor: RevisionIdentity }>
   >();
 
   /**
@@ -2808,7 +2985,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (to !== undefined) {
       mintedOperations.delete(to);
     }
-    const actor = minted === undefined ? options.actor?.({ runId: undefined, trigger: 'save' }) : minted.actor;
+    const actor = minted === undefined ? options.identity.resolve({ runId: undefined, trigger: 'save' }) : minted.actor;
     try {
       await opsLog.append(actor, {
         v: 1,
@@ -2817,7 +2994,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         ...(to === undefined ? {} : { to: String(to) }),
         kind: minted?.kind ?? 'move',
         ...(minted?.undoes === undefined ? {} : { undoes: minted.undoes }),
-        actor: minted?.actorId ?? actor?.id ?? actorId,
+        actor: actor.id,
         at: now(),
       });
     } catch (error) {
@@ -3308,7 +3485,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const place = await placeOf(checkoutId);
     const head = await headOf(place);
     const empty = new ImmutableRevisionTree([]);
-    const entries = await opsLog.read(options.actor?.({ runId: undefined, trigger: 'restore' }));
+    const entries = await opsLog.read(options.identity.resolve({ runId: undefined, trigger: 'restore' }));
     const candidates =
       place.branch === undefined || head === undefined
         ? []
@@ -3375,8 +3552,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /*
    * RM-R9: a turn's revision names its admitting attempt and which of its two
    * revisions it is, and lists the checkout's other leases. The actor is the
-   * run's for a result; a base holds bytes nobody in this attempt wrote, so it
-   * keeps the attribution of the first other lease, or the person's.
+   * run's for a result. A base holds the person's own edits, saved before the
+   * agent started, so it is the person's (A5). Any other cut keeps the
+   * attribution of the first other lease, or the person's.
    */
   const provenanceOf = (
     trigger: CheckoutCutTrigger,
@@ -3386,21 +3564,23 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const { turn, restoredFrom } = about;
     const runId = turn?.key.runId;
     const heldRunIds = leaseIds.filter((id) => id !== runId).toSorted();
-    const actor = options.actor?.({ runId: turn?.turnCut === 'result' ? runId : heldRunIds[0], trigger });
+    const actorRunId = turn === undefined ? heldRunIds[0] : turn.turnCut === 'result' ? runId : undefined;
+    const actor = options.identity.resolve({ runId: actorRunId, trigger });
     return Object.freeze({
       /* Only the restore row is the restore's: the cut before it records the
        * person's own bytes under the same trigger (D1, A9). */
       source:
-        trigger === 'turn'
+        trigger === 'turn' && turn?.turnCut !== 'base'
           ? 'agent'
           : restoredFrom === undefined
             ? trigger === 'merge'
               ? 'merge'
               : 'user'
             : 'restore',
-      /* One id, not two: `actorId` *is* the actor's id whenever the host could
-       * resolve one, so nothing has to decide which of the pair to believe. */
-      actorId: actor?.id ?? actorId,
+      /* S37, B1: who, in the shape stock `git log` renders, what asked (S30), and on which leg. */
+      actor,
+      capture: trigger,
+      via: options.identity.via,
       ...(turn === undefined
         ? {}
         : {
@@ -3411,9 +3591,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             turnId: turn.key.turnId,
           }),
       ...(heldRunIds.length === 0 ? {} : { heldRunIds }),
-      /* S37: who, in the shape stock `git log` renders, and what asked (S30). */
-      ...(actor === undefined ? {} : { actor }),
-      trigger,
       ...(restoredFrom === undefined ? {} : { restoredFrom }),
       createdAt: now(),
     });
@@ -3594,7 +3771,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * @returns `conflicts/<into>/<record device>`.
    */
   const ownConflictLine = async (into: string): Promise<string> =>
-    conflictLineOf(into, await opsLog.deviceFor(options.actor?.({ runId: undefined, trigger: 'merge' })));
+    conflictLineOf(into, await opsLog.deviceFor(options.identity.resolve({ runId: undefined, trigger: 'merge' })));
 
   /**
    * The one conflict write (charter D14): sync, a branch merge and an editor all
@@ -4064,6 +4241,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     materialize,
     resolvePlaceholder,
     adoptLargeObjects,
+    checkLargeObjects: async (checkoutId) => {
+      const place = await readPlaceOf(checkoutId);
+      /* A checkout a failed write left torn is put back first, then its tree is given the fill's word (L5). */
+      await repairTornCheckout(place);
+      answeredFills.delete(place.id);
+      checkFill(place);
+    },
     readEntryClosure: entryClosureOf,
     chatDevice: async () => {
       const context = await chatContext();
@@ -4085,22 +4269,39 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const place = await placeOf(input.checkoutId);
         const own = async (): Promise<ImmutableRevisionTree> =>
           captureCheckout(place, { bypassMemo: false, changed: { paths: input.changedPaths } });
-        const tree =
+        const captured =
           options.completeChanges === true && running !== undefined && running.generation === input.generation
             ? await running.tree.catch(own)
             : await own();
-        const treeId = await checkoutTreeId(place.id, tree);
+        const capturedTreeId = await checkoutTreeId(place.id, captured);
+        const head = await headOf(place);
         /* A cut taken before the open pull lands — a close, a hidden tab —
          * follows the same rule as the pull (W13c). Before any fetch, the
          * opener's own manifest is setup too (W13d); a project with no remote
          * has no pull to merge a root into, so its first cut is an ordinary one. */
-        if ((await headOf(place)) === undefined) {
+        if (head === undefined) {
           const arriving = await arrivingTree(place);
-          if (arriving === undefined ? await holdsOnlyUnfetchedScaffold(tree) : holdsNoWorkBeforePull(tree, arriving)) {
-            return { treeId, cutId: '', nothingToSave: true };
+          if (
+            arriving === undefined
+              ? await holdsOnlyUnfetchedScaffold(captured)
+              : holdsNoWorkBeforePull(captured, arriving)
+          ) {
+            return { treeId: capturedTreeId, cutId: '', nothingToSave: true };
           }
         }
-        return { treeId, cutId: cuts.put(input.checkoutId, { tree, treeId }) };
+        /* A4: opening wrote no attributes file (I4), so the cut that records
+         * something supplies the one the tree owes, and `writeRevision` writes
+         * its live copy in the same mint. A cut that records nothing owes
+         * nothing: Tau's own file never makes an entry of its own. */
+        const owed = withOwedAttributes(captured);
+        if (owed === undefined || capturedTreeId === (await treeIdOf(head))) {
+          return {
+            treeId: capturedTreeId,
+            cutId: cuts.put(input.checkoutId, { tree: captured, treeId: capturedTreeId }),
+          };
+        }
+        const treeId = await checkoutTreeId(place.id, owed);
+        return { treeId, cutId: cuts.put(input.checkoutId, { tree: owed, treeId, owesAttributes: true }) };
       }),
 
       /* D4's and I6's comparison: the same memoised capture a cut reads, and
@@ -4169,7 +4370,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           kind: input.trigger,
           ...(undoes === undefined ? {} : { undoes }),
           actor: provenance.actor,
-          actorId: provenance.actorId,
         });
         /* The claim {@link revisionTreeId} makes, checked where it is cheap:
          * a tree id this host computed differently from the engine's would
@@ -4181,6 +4381,24 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             'ENGINE_FAILED',
             `The store recorded tree ${String(recorded)} for a cut computed as ${input.treeId}.`,
           );
+        }
+        /* A4: the attributes file this mint supplied gets its live copy now, as
+         * the store recorded it, so the checkout reads clean against the new
+         * head. A file that appeared since the cut is someone's and is kept.
+         * The revision is already minted, so a failed copy only warns: the next
+         * capture reads the file as removed and records that, never loses it. */
+        if (held.owesAttributes === true) {
+          try {
+            const recordedFiles = await recordedTree(held.tree, input.parents[0]);
+            const attributes = recordedFiles.get(generatedGitattributesPath);
+            await useFileSystem(await placeOf(input.checkoutId), async (rooted) => {
+              if (attributes !== undefined && !(await rooted.exists(generatedGitattributesPath))) {
+                await rooted.writeFile(generatedGitattributesPath, attributes);
+              }
+            });
+          } catch (error) {
+            console.warn('[revisions] the recorded attributes file could not be written to the checkout', error);
+          }
         }
         /* The revision's tree is the one just cut, so the next walk inherits
          * its modes without reading it back from the store. */
@@ -4426,7 +4644,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         if (place.branch === undefined) {
           return false;
         }
-        const entries = await opsLog.read(options.actor?.({ runId: undefined, trigger: 'restore' }));
+        const entries = await opsLog.read(options.identity.resolve({ runId: undefined, trigger: 'restore' }));
         return undoCandidates(entries, `refs/heads/${place.branch}`).length > 0;
       }),
 
@@ -4567,6 +4785,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           ...(input.from === '' ? {} : { from: revisionId(input.from) }),
         });
         await noteRemovedCheckout(added.id, false);
+        /* A new checkout is a new tree: its readiness waits on the fill's word, owed here even with nothing to fetch. */
+        checkFill(added);
         return { checkout: await recordOf(added, await readLeases()) };
       }),
 
@@ -5258,12 +5478,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* W6's tag members, on a revision that already exists. */
       createTag: fromAuthorityPromise<RevisionTag, PublishTagActorInput>(async ({ input }) => {
         await ensureStore();
-        const person = options.actor?.({ runId: undefined, trigger: 'save' });
         return port.tag({
           name: input.name,
           revisionId: revisionId(input.revisionId),
           ...(input.note === undefined ? {} : { note: input.note }),
-          ...(person === undefined ? {} : { actor: person }),
+          actor: options.identity.resolve({ runId: undefined, trigger: 'save' }),
         });
       }),
 
@@ -5448,24 +5667,54 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
         }
         const offeredHistory = history.filter((name) => !unintegrated.has(name));
+        let renumbered: readonly VersionRenumbering[] = [];
 
         if (offeredHistory.length > 0) {
           signal.throwIfAborted();
           try {
             /* The one push a `pagehide` re-send may carry (D28, S41, review 2
              * R3): the host's recorder is armed for exactly this call. */
-            const offerHistory = async (): Promise<RevisionPushResult> =>
+            const offerHistory = async (pushSession: RevisionPushSession): Promise<RevisionPushResult> =>
               port.push({
                 remote: input.remote,
                 repositoryUrl: input.repositoryUrl,
                 signal,
                 atomic: true,
                 refs: offeredHistory.map((name) => offerOf(name, input.leases)),
-                session,
+                session: pushSession,
               });
             // An explicit GitHub gesture must never arm a pagehide resend.
-            const pushed = await (input.explicit === true ? offerHistory() : recordHistoryPush(offerHistory));
-            results.push(...pushed.refs.map((entry) => outcomeOf(entry, localHeads)));
+            const first =
+              input.explicit === true ? offerHistory(session) : recordHistoryPush(async () => offerHistory(session));
+            /* B6: Tau Cloud refused a version whose number another version
+             * holds — per ref on the browser leg, thrown on the native one.
+             * Only this device has seen its provisional number, so its own
+             * versions that are not backed up take the next free numbers and
+             * the history set is offered once more, on a fresh advertisement
+             * because the remote moved. */
+            let taken: unknown;
+            let pushed = await first.catch((error: unknown) => {
+              if (!(error instanceof RevisionPortError && isVersionNumberRefusal(error.message))) {
+                throw error;
+              }
+              taken = error;
+              return undefined;
+            });
+            if (
+              taken !== undefined ||
+              pushed?.refs.some((entry) => entry.status === 'rejected' && isVersionNumberRefusal(entry.reason)) === true
+            ) {
+              renumbered = await renumberUnpushedVersions(port, { remote: input.remote, signal });
+              if (renumbered.length > 0) {
+                for (const tag of await port.listRefs('refs/tags')) {
+                  localHeads.set(tag.name, String(tag.head));
+                }
+                pushed = await offerHistory({});
+              } else if (pushed === undefined) {
+                throw taken;
+              }
+            }
+            results.push(...(pushed?.refs ?? []).map((entry) => outcomeOf(entry, localHeads)));
           } catch (error) {
             /* A refusal of the whole push — a credential, a plan, a missing
              * repository, the network — is the scheduler's to classify (its R5
@@ -5577,6 +5826,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           ...(overQuota === undefined ? {} : { overQuota }),
           ...(quotaMessage === undefined ? {} : { quotaMessage }),
           ...(quotaStorage === undefined ? {} : { quotaStorage }),
+          ...(renumbered.length === 0 ? {} : { renumbered }),
         };
       }),
 
@@ -5637,7 +5887,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         ]);
         const active = places.find((place) => place.branch === input.branch);
         if (active !== undefined) {
-          resumeFill(active);
+          checkFill(active);
         }
         const wanted = authoredFetchReferences(advertised, input.remote);
         /* Skip unchanged tips only after this effect session completed a fetch
@@ -6225,6 +6475,8 @@ export type ProjectRevisions = Readonly<{
   resolvePlaceholder: RevisionActors['resolvePlaceholder'];
   /** See {@link RevisionActors.adoptLargeObjects}. */
   adoptLargeObjects: RevisionActors['adoptLargeObjects'];
+  /** See {@link RevisionActors.checkLargeObjects}. */
+  checkLargeObjects: RevisionActors['checkLargeObjects'];
   /** See {@link RevisionActors.readEntryClosure}. */
   readEntryClosure: RevisionActors['readEntryClosure'];
   /** The record device this host's chat segments sync under; see {@link RevisionActors.chatDevice}. */
@@ -6364,6 +6616,7 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
     materialize: actors.materialize,
     resolvePlaceholder: actors.resolvePlaceholder,
     adoptLargeObjects: actors.adoptLargeObjects,
+    checkLargeObjects: actors.checkLargeObjects,
     readEntryClosure: actors.readEntryClosure,
     chatDevice: actors.chatDevice,
     pullsChats: actors.pullsChats,

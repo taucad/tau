@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import * as React from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -562,9 +563,14 @@ function FloatingPanelButtonGroup({ children, className }: FloatingPanelButtonGr
 
 function FloatingPanelContentTitle({ children, className }: FloatingPanelContentTitleProps): React.JSX.Element {
   return (
-    <h2 className={cn('text-sm font-medium text-nowrap', className)} data-slot='floating-panel-content-title'>
+    <Heading
+      level={2}
+      variant='label'
+      className={cn('text-nowrap', className)}
+      data-slot='floating-panel-content-title'
+    >
       {children}
-    </h2>
+    </Heading>
   );
 }
 
@@ -605,7 +611,9 @@ function FloatingPanelErrorContent({
         </div>
 
         {/* Error Title */}
-        <h3 className='text-lg font-semibold text-foreground'>{title}</h3>
+        <Heading level={3} variant='title' className='text-foreground'>
+          {title}
+        </Heading>
 
         {/* Description */}
         {displayDescription ? (

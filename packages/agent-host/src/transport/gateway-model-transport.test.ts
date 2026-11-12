@@ -177,7 +177,7 @@ const responseFromChunks = (chunks: readonly string[], contentType = 'text/event
  * @returns The headers the gateway was called with.
  */
 const headersFor = async (
-  options: { readonly projectId?: string } = {},
+  options: Pick<GatewayModelTransportOptions, 'projectId' | 'hostLabels'> = {},
   overrides: Partial<ModelStreamRequest> = {},
 ): Promise<Headers> => {
   let headers: Headers | undefined;
@@ -1244,6 +1244,65 @@ describe('createGatewayModelTransport', () => {
     const none = await headersFor({});
     expect(none.has('x-tau-turn-step')).toBe(false);
     expect(none.has('x-tau-turn-gap')).toBe(false);
+  });
+
+  it('sends the host, build, kernel and model labels on every call once the composition names its host', async () => {
+    /* LW17: the gateway reads exactly these names (`readHostLabels` in apps/api) and tags the API's provider fact with
+     * them. The model label is the request's own route id, so a compaction call is labelled as well. */
+    const labelled = await headersFor(
+      { hostLabels: { kind: 'browser', build: '0123456789ab', kernel: 'replicad' } },
+      { modelId: 'fixture-model' },
+    );
+    expect(labelled.get('x-tau-host-kind')).toBe('browser');
+    expect(labelled.get('x-tau-host-build')).toBe('0123456789ab');
+    expect(labelled.get('x-tau-kernel')).toBe('replicad');
+    expect(labelled.get('x-tau-model')).toBe('fixture-model');
+
+    const compaction = await headersFor({ hostLabels: { kind: 'desktop' } }, { invocationPurpose: 'compaction' });
+    expect(compaction.get('x-tau-host-kind')).toBe('desktop');
+    expect(compaction.get('x-tau-model')).toBe('fixture-model');
+    /* A build or kernel the composition cannot name is left to the gateway, which then records no such label. */
+    expect(compaction.has('x-tau-host-build')).toBe(false);
+    expect(compaction.has('x-tau-kernel')).toBe(false);
+
+    /* Server before client (I6): a composition that names no host sends none of the four, so a browser build never
+     * reaches a gateway whose CORS allow-list predates them. */
+    const unnamed = await headersFor({});
+    for (const name of ['x-tau-host-kind', 'x-tau-host-build', 'x-tau-kernel', 'x-tau-model']) {
+      expect(unnamed.has(name)).toBe(false);
+    }
+  });
+
+  it('drops a host label a header cannot carry rather than failing the call', async () => {
+    /* `Headers#set` throws on a control or non-Latin-1 character; a label is never worth a turn. */
+    const headers = await headersFor({
+      hostLabels: { kind: 'daemon', build: 'build\nwith-newline', kernel: 'k'.repeat(129) },
+    });
+    expect(headers.get('x-tau-host-kind')).toBe('daemon');
+    expect(headers.has('x-tau-host-build')).toBe(false);
+    expect(headers.has('x-tau-kernel')).toBe(false);
+  });
+
+  it('keeps the request body byte-identical with and without host labels', async () => {
+    const bodies: string[] = [];
+    const transportFor = (hostLabels?: GatewayModelTransportOptions['hostLabels']) =>
+      createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        ...(hostLabels === undefined ? {} : { hostLabels }),
+        fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+          bodies.push(init?.body as string);
+          return byteSplitResponse(authoritativeGatewayWireFixtures.anthropicToolTurn);
+        }),
+      });
+    await collect(transportFor().stream(request({ providerKind: 'anthropic', chatId: 'chat_fixture' })));
+    await collect(
+      transportFor({ kind: 'cloud', build: 'fedcba987654', kernel: 'openscad' }).stream(
+        request({ providerKind: 'anthropic', chatId: 'chat_fixture' }),
+      ),
+    );
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toBe(bodies[0]);
+    expect(bodies[0]).not.toMatch(/fedcba987654|openscad|x-tau-host/u);
   });
 
   it.each(['anthropic', 'openai', 'vertexai'] as const)(

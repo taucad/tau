@@ -3,6 +3,7 @@ import type { Revision } from '#revision-authority.js';
 import { describe, expect, it } from 'vitest';
 import { createNativeGitAdapter } from '#native-git-adapter.js';
 import type { NativeGitError } from '#native-git.types.js';
+import { recordedBy } from '#test/identity.js';
 
 const adapter = createNativeGitAdapter({
   repositoryPath: '/unused/tau-native-git-repository',
@@ -12,7 +13,7 @@ const revision: Revision = Object.freeze({
   id: revisionId('revision'),
   parents: Object.freeze([]),
   tree: new ImmutableRevisionTree([]),
-  provenance: Object.freeze({ source: 'agent', actorId: 'actor', createdAt: 0 }),
+  provenance: Object.freeze({ source: 'agent', ...recordedBy('actor'), createdAt: 0 }),
   summary: Object.freeze({ generated: 'Generated revision' }),
 });
 
@@ -60,7 +61,7 @@ describe('native Git argument validation', () => {
       value: { ...revision, parents: [revisionId('parent'), revisionId('parent')] },
     },
     { name: 'negative creation time', value: { ...revision, provenance: { ...revision.provenance, createdAt: -1 } } },
-    { name: 'empty actor', value: { ...revision, provenance: { ...revision.provenance, actorId: '' } } },
+    { name: 'empty actor', value: { ...revision, provenance: { ...revision.provenance, ...recordedBy('') } } },
     { name: 'empty summary', value: { ...revision, summary: { generated: '' } } },
   ])('rejects a revision with $name', async ({ value }) => {
     await expect(adapter.storeRevision(value)).rejects.toThrow(TypeError);

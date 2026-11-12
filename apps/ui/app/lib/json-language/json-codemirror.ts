@@ -11,7 +11,7 @@ import type { EditorView } from '@codemirror/view';
 import { Topic } from '@taucad/events';
 import type { EditorDocument, TextChange } from '#lib/editor-document.js';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
-import { lspSnippetToCodeMirror } from '#lib/lsp-completion-snippet.js';
+import { lspSnippetToCodeMirror } from '@taucad/ui-core/lib/lsp-completion-snippet';
 
 type JsonDiagnostic = Readonly<{
   from: number;

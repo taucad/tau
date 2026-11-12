@@ -11,7 +11,7 @@ import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from
 import type { AgentSessionModel } from '@taucad/agent-host';
 import { credentialPrincipal } from '@taucad/agent-host/launcher';
 import type { AgentLauncher, CredentialState } from '@taucad/agent-host/launcher';
-import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
+import type { ExternalAgentDescriptor, GatewayHostLabels } from '@taucad/agent-host/wire';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import {
   NodeFsAuthorityHost,
@@ -27,6 +27,7 @@ import type { CreateNodeMachineHostInput } from '@taucad/runtime/host/node';
 import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import { nodeGrepMatcherWorker } from '@taucad/runtime/filesystem/node';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
+import type { RevisionUserActor } from '@taucad/revisions';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types';
 
@@ -62,6 +63,7 @@ import { keyedResource } from '#keyed-resource.js';
 import { resolveNodeProjectIdentity } from '#project-identity.js';
 import { createProjectHost } from '#project-host.js';
 import type { ProjectHost, ProjectHostOptions } from '#project-host.js';
+import { daemonRevisionVia } from '#revision-actor.js';
 import { startRuntimeChild } from '#runtime-child-supervisor.js';
 import { createZooProxyChildCredential } from '#zoo-proxy-child.js';
 import type { HostZooProxyOptions } from '#zoo-proxy-child.js';
@@ -183,6 +185,11 @@ export type HostDaemonAgentOptions = {
   /** Base the model gateway hangs off, e.g. the Tau API origin. */
   readonly gatewayBaseUrl: string;
   /**
+   * The host kind and build every model call from this daemon names (LW17), as `tau serve` knows them: `daemon`, or
+   * `cloud` on a provisioned cloud host. The transport adds each call's model. Absent, a call sends no labels.
+   */
+  readonly hostLabels?: GatewayHostLabels | undefined;
+  /**
    * Account session token for project backup and local-only model requests.
    *
    * Absent, a served project still knows *where* its Tau Cloud repository is
@@ -191,6 +198,12 @@ export type HostDaemonAgentOptions = {
    * here and never written under a project.
    */
   readonly tauApiToken?: string | undefined;
+  /**
+   * The Tau account `tauApiToken` belongs to, which every project this daemon serves records as (A1).
+   *
+   * Absent, a served project records this device's pseudonym until a renderer names its session with `setActor`.
+   */
+  readonly revisionActor?: RevisionUserActor | undefined;
   /** Default model row; one admission may override it. */
   readonly model: AgentSessionModel;
   /** Default system prompt; one admission may override it. */
@@ -314,6 +327,7 @@ export type HostDaemonOptions = {
   readonly observeChats?: (
     projectId: string,
     read: Parameters<NonNullable<ProjectHostOptions['observeChats']>>[0],
+    sources: Parameters<NonNullable<ProjectHostOptions['observeChats']>>[1],
   ) => ReturnType<NonNullable<ProjectHostOptions['observeChats']>>;
 };
 
@@ -1002,7 +1016,11 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
        */
       apiBaseUrl: options.relayUrl.origin,
       syncTelemetryPlacement: 'daemon',
-      ...(observeChats === undefined ? {} : { observeChats: (read) => observeChats(projectId, read) }),
+      via: daemonRevisionVia(),
+      ...(agent.revisionActor === undefined ? {} : { revisionActor: agent.revisionActor }),
+      ...(observeChats === undefined
+        ? {}
+        : { observeChats: (read, sources) => observeChats(projectId, read, sources) }),
       /* The session, not this daemon's device credential: the Git endpoints and
        * `PUT /v1/projects/<id>` authenticate an account, and a paired device
        * credential is only ever offered to the agent relay. A terminal has no
@@ -1027,6 +1045,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
               principal: () => credentialPrincipal(credentialState),
               /* No `projectId`: a `tau serve` workspace is a directory, not a
                * cloud project, so its receipts name no project by design. */
+              ...(agent.hostLabels === undefined ? {} : { hostLabels: agent.hostLabels }),
             })
           : createGatewayModelTransport({
               baseUrl: agent.gatewayBaseUrl,
@@ -1034,6 +1053,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
               // Local-only serving does not pair a device. Use its CLI account session;
               // relayed hosts retain their live device credential, including revocation.
               auth: localAccountSession === undefined ? bearer : () => localAccountSession,
+              ...(agent.hostLabels === undefined ? {} : { hostLabels: agent.hostLabels }),
             }),
       credential: () => (localAccountSession === undefined ? credentialState : { mode: 'session' }),
       ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),

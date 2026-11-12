@@ -3,23 +3,26 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/core/native-process",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package"],
+  "tags": ["scope:shared", "type:package", "ci:shell"],
   "targets": {
-    "test:shell-conformance": {
+    "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["^build"],
+      "options": {
+        "command": "tsdown",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "test:native-sandbox-integration": {
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "The native shell conformance rows (T02, E rows a provider owns): the real sandbox provider and the machine's own Bash, positive controls before negatives, network negatives judged by canaries outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Never cached: a receipt is only evidence of the run that wrote it."
+        "description": "The kernel worker's native sandbox as the packaged app runs it: a NativeProcessSession launched through the OS sandbox, its children sampled and torn down. Skips without a usable sandbox unless CI=1, which forbids the skip (the Linux shell conformance guests run it). Never cached: it proves the machine it runs on."
       },
       "options": {
         "cwd": "{workspaceRoot}/packages/core/native-process",
-        "command": "../../../node_modules/.bin/vitest run --config vitest.config.ts src/shell/shell.conformance.test.ts",
-        "env": {
-          "TAU_SHELL_CONFORMANCE": "1"
-        }
+        "command": "../../../node_modules/.bin/vitest run --config vitest.config.ts src/native-sandbox.integration.test.ts"
       }
-    },
-    "formal": {},
-    "formal:nightly": {}
+    }
   }
 }

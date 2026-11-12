@@ -13,7 +13,7 @@ import { openBrowserProjectHost } from '#workers/agent-host.impl.js';
 import type { WorkerRevisionRequest, WorkerRevisionResponse } from '#machines/file-manager.worker.revisions.js';
 import type { BrowserProjectHost } from '#workers/agent-host.impl.js';
 import { disposeOpfsProject, opfsProject, opfsProvider } from '#workers/test/agent-host-resident.fixture.js';
-import { rootedProvider } from '#workers/test/rooted-provider.fixture.js';
+import { rootedProvider } from '@taucad/ui-core/workers/test/rooted-provider.fixture';
 
 afterEach(disposeOpfsProject);
 
@@ -41,6 +41,7 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
     await revisions.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
     let tree = createProjectRevisionsActor({
       port: revisions,
+      identity: { via: 'browser', resolve: () => ({ kind: 'user', id: 'usr_test' }) },
       projectId: options.authority.projectId,
       filesystem: () => root,
     });
@@ -62,6 +63,7 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
         await tree.settled();
         tree = createProjectRevisionsActor({
           port: revisions,
+          identity: { via: 'browser', resolve: () => ({ kind: 'user', id: 'usr_test' }) },
           projectId: options.authority.projectId,
           filesystem: () => root,
         });

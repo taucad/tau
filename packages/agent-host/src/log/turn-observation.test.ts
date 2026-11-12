@@ -384,6 +384,83 @@ describe('observeTurns', () => {
     ]);
   });
 
+  it('counts the run’s changed files and the Tau turns before it, and names its final revision', () => {
+    const second = term(
+      't1',
+      toolTurn.map((body): Body => ({ ...body, runId: 'run-2' })),
+      toolTurn.length,
+    );
+    const [first, next] = observeTurns(chatId, [...term('t1', toolTurn), ...second]);
+
+    expect(first).toMatchObject({ finalRevision: 'rev-1', filesChanged: 1, priorTurns: 0 });
+    expect(next).toMatchObject({ runId: 'run-2', priorTurns: 1 });
+  });
+
+  describe('with content (LW6)', () => {
+    const replyTurn: Body[] = [
+      ...toolTurn.slice(0, -2),
+      {
+        type: 'message.appended',
+        message: {
+          id: 'a-1',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'SYNTHETIC_EARLY_REPLY' }],
+        },
+      },
+      {
+        type: 'message.appended',
+        message: { id: 'a-2', role: 'assistant', content: [{ type: 'toolCall', id: 'c', name: 'n', arguments: {} }] },
+      },
+      {
+        type: 'message.appended',
+        message: {
+          id: 'a-3',
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'SYNTHETIC_THOUGHT' },
+            { type: 'text', text: 'SYNTHETIC_FINAL_REPLY' },
+          ],
+        },
+      },
+      ...toolTurn.slice(-2),
+    ];
+
+    it('carries this turn’s message, the final reply, each tool’s arguments and result, and the changed paths', () => {
+      const [observation] = observeTurns(chatId, term('t1', replyTurn), { content: true });
+
+      expect(observation?.content).toEqual({
+        prompt: 'SYNTHETIC_PERSON_TEXT',
+        reply: [
+          { type: 'thinking', thinking: 'SYNTHETIC_THOUGHT' },
+          { type: 'text', text: 'SYNTHETIC_FINAL_REPLY' },
+        ],
+        changedPaths: ['SYNTHETIC_CHANGED_PATH'],
+      });
+      expect(observation?.tools[0]).toMatchObject({
+        arguments: { targetFile: 'SYNTHETIC_PATH' },
+        result: 'SYNTHETIC_TOOL_RESULT',
+      });
+    });
+
+    it('keeps a Tau-internal user message out of the prompt, and carries no content unless asked', () => {
+      const internal = replyTurn.map((body) =>
+        body.type === 'turn.history-projection-committed' ? { ...body, message: user('turn-1', 'approval') } : body,
+      );
+      const [observation] = observeTurns(chatId, term('t1', internal), { content: true });
+      expect(observation?.content?.prompt).toBeUndefined();
+
+      const written = JSON.stringify(observeTurns(chatId, term('t1', replyTurn)));
+      for (const content of [
+        'SYNTHETIC_PERSON_TEXT',
+        'SYNTHETIC_FINAL_REPLY',
+        'SYNTHETIC_PATH',
+        'SYNTHETIC_TOOL_RESULT',
+      ]) {
+        expect(written).not.toContain(content);
+      }
+    });
+  });
+
   it('leaves an external agent’s run out entirely', () => {
     const external = term('t1', [
       { type: 'run.lifecycle', state: 'admitted', runId: 'run-acp' },

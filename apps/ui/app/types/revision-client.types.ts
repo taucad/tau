@@ -15,6 +15,18 @@ import type {
   WorkerRevisionEvent,
   BranchCreated,
 } from '#machines/file-manager.worker.revisions.js';
+import type { RevisionSessionUser } from '#lib/revision-actor.js';
+
+/**
+ * Where a project's GitHub credential comes from (audit R6).
+ *
+ * `github` mints it from the project's GitHub binding with the signed-in
+ * person's grant; `withdrawn` tells the root why there is none, with the
+ * sentence the Sync region shows.
+ *
+ * @public
+ */
+export type RevisionCredentialSource = Readonly<{ kind: 'github' }> | Readonly<{ kind: 'withdrawn'; reason: string }>;
 
 /** One project's live connection to its revision root. @public */
 export type RevisionClient = Readonly<{
@@ -27,6 +39,40 @@ export type RevisionClient = Readonly<{
    * credential. Memory only, on both sides (I8).
    */
   remoteCredential: (credential: GitRemoteCredential) => void;
+  /**
+   * Say who is signed in on this page (audit R6).
+   *
+   * An identity change is an event on the open client, never a reopen: the
+   * port, the root and its tree stay up. Saying the person already held
+   * (another session object, a refetch, a new display name) changes nothing,
+   * so the one automatic re-mint a refused GitHub credential gets (D2) is
+   * kept. Signing in mints the bound repository's credential and has a remote
+   * refused while signed out try again; signing out withdraws it.
+   *
+   * Like the actor (`setActor`), the change applies to the next revision:
+   * edits not yet recorded when it happens are recorded under the new
+   * identity, as a desktop host already did. The root is no longer released,
+   * so no close cut is taken under the outgoing identity first.
+   *
+   * The first call after an open or a close is the open's own: it always
+   * sends the frame, which the route queues before {@link RevisionClient.open}
+   * (D36). Resolves once that frame is sent.
+   */
+  setUser: (user: RevisionSessionUser | undefined) => Promise<void>;
+  /**
+   * Set where this project's GitHub credential comes from (audit R6).
+   *
+   * A withdrawal also stops the renewals of the credential it replaces.
+   * Resolves `true` once a fresh credential was sent.
+   */
+  setCredential: (source: RevisionCredentialSource) => Promise<boolean>;
+  /**
+   * Tell the root the signed-in person changed (audit R6), so it reads the
+   * remote afresh under the new session. Resolves once the root has taken it:
+   * every projection received after then was made after the change (one
+   * received before may be from either side).
+   */
+  sessionChanged: () => Promise<void>;
   /** Send a credential for one explicit push; the host discards it when the operation settles. */
   pushGithub: (credential: GitRemoteCredential) => Promise<void>;
   /**
@@ -121,7 +167,8 @@ export type RevisionClient = Readonly<{
    * its worker is replaced. Lifecycle close preparation uses the correlated
    * {@link RevisionClient.quiesce}; pagehide does not close because release
    * itself takes a fresh cut. The client survives its own close — the next
-   * `open`, command or mount connects again.
+   * `open`, command or mount connects again — and forgets who it was told is
+   * signed in, so the next {@link RevisionClient.setUser} is an open's again.
    */
   close: () => void;
   /**

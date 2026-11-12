@@ -136,7 +136,7 @@ describe('buildPresentationBoard', () => {
     expect(Math.abs(finish[0] - finish[2])).toBeLessThan(0.1);
   });
 
-  it('should author every solder mask as matte, with no clearcoat and reduced specular', async () => {
+  it('should author every solder mask as a matte base under a soft lacquer coat', async () => {
     const document = new Document();
     await buildPresentationBoard(document, circuitJson);
     const materials = document.getRoot().listMaterials();
@@ -144,7 +144,11 @@ describe('buildPresentationBoard', () => {
     for (const name of ['pcb-mask-top', 'pcb-mask-bottom', 'pcb-mask-copper-top', 'pcb-mask-copper-bottom']) {
       const material = materials.find((candidate) => candidate.getName() === name)!;
       expect(material.getRoughnessFactor(), name).toBe(0.6);
-      expect(material.getExtension('KHR_materials_clearcoat'), name).toBeNull();
+      const clearcoat = material.getExtension<
+        ExtensionProperty & { getClearcoatFactor: () => number; getClearcoatRoughnessFactor: () => number }
+      >('KHR_materials_clearcoat');
+      expect(clearcoat?.getClearcoatFactor(), name).toBe(0.15);
+      expect(clearcoat?.getClearcoatRoughnessFactor(), name).toBe(0.25);
       const specular = material.getExtension<ExtensionProperty & { getSpecularFactor: () => number }>(
         'KHR_materials_specular',
       );

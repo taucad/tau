@@ -114,7 +114,7 @@ describe('cloudHostObserver', () => {
     expect(envelope).toMatchObject({
       scope: { principal: 'user-1', project: 'project-1' },
       delivery: { uploader: 'device-1' },
-      payload: { plane: 'summary' },
+      payload: { plane: 'summary', fact: { turn: { host: 'cloud' } } },
     });
     expect(await readdir(join(directory, 'agent-evidence'))).toEqual(['project-1.json']);
   });

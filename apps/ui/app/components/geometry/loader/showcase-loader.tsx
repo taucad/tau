@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Ref, RefCallback, RefObject } from 'react';
 import { probeWebGpuSupport, resolveGraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-backend';
-import { readGraphicsBackendQueryOverride } from '#utils/graphics-backend-override.js';
+import { readGraphicsBackendQueryOverride } from '@taucad/ui-core/utils/graphics-backend-override';
 import {
   useDocumentHidden,
   useIsIntersecting,

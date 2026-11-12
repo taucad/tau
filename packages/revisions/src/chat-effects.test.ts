@@ -8,6 +8,7 @@ import { createMemoryProvider } from '@taucad/filesystem/backend';
 import type { RevisionPort } from '#revision-port.js';
 import { createChatEffects } from '#chat-effects.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import { testIdentity } from '#test/identity.js';
 
 const roots: string[] = [];
 afterAll(async () => {
@@ -28,10 +29,9 @@ const setup = async () => {
       throw new Error('No record filesystem is needed to offer refs.');
     },
     deviceId: undefined,
-    actor: undefined,
+    identity: testIdentity,
     onChatsProjected: undefined,
     recordDevices: { deviceFor: async () => 'test-device', ownDevices: async () => new Set<string>() },
-    actorId: 'test-actor',
     now: () => 0,
   });
   return { push, effects };
@@ -104,10 +104,9 @@ describe('chat recovery cancellation', () => {
       port,
       recordsFileSystem: async () => filesystem,
       deviceId: () => 'device',
-      actor: undefined,
+      identity: testIdentity,
       onChatsProjected: undefined,
       recordDevices: { deviceFor: async () => 'device', ownDevices: async () => new Set(['device']) },
-      actorId: 'actor',
       now: () => 0,
     });
     await expect(

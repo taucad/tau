@@ -3,6 +3,7 @@ import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLoaderData } from '
 import { RootProvider } from 'fumadocs-ui/provider/react-router';
 import type { ReactNode } from 'react';
 import { getStaticSearchIndexUrl } from '#lib/fumadocs/static-search.server.js';
+import { socialCardImage } from '#lib/site.js';
 // oxlint-disable-next-line import-x/no-unassigned-import -- Vite extracts the global stylesheet into the static client build.
 import '#styles/global.css';
 
@@ -30,11 +31,11 @@ export const meta: MetaFunction = () => [
   { property: 'og:title', content: siteTitle },
   { property: 'og:description', content: siteDescription },
   { property: 'og:url', content: 'https://docs.tau.new/' },
-  { property: 'og:image', content: 'https://tau.new/android-chrome-512x512.png' },
+  { property: 'og:image', content: socialCardImage },
   { name: 'twitter:card', content: 'summary' },
   { name: 'twitter:title', content: siteTitle },
   { name: 'twitter:description', content: siteDescription },
-  { name: 'twitter:image', content: 'https://tau.new/android-chrome-512x512.png' },
+  { name: 'twitter:image', content: socialCardImage },
 ];
 
 export const loader = async (): Promise<{ searchIndexUrl: string }> => ({

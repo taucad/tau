@@ -1,4 +1,4 @@
-import { createProjectFixture } from '#lib/project.fixture.js';
+import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { act, render, screen } from '@testing-library/react';
 import type { RenderResult } from '@testing-library/react';
 import { createContext, useContext, useState } from 'react';

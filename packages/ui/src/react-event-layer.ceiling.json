@@ -1,0 +1,5 @@
+{
+  "packages/ui/src/components/carousel.tsx": 1,
+  "packages/ui/src/components/combobox-responsive.tsx": 1,
+  "packages/ui/src/hooks/use-tick-animation.ts": 1
+}

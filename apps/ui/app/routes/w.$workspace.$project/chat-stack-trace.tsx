@@ -10,11 +10,11 @@ import { useProject } from '#hooks/use-project.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
 import { useNativeKernelDownload } from '#hooks/use-native-kernel-download.js';
 import type { NativeKernelDownload } from '#hooks/use-native-kernel-download.js';
-import { formatBytes } from '#lib/format-bytes.js';
+import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 import { useChats } from '#hooks/use-chats.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
-import { decodeTextFile } from '#utils/filesystem.utils.js';
+import { decodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { selectCadEntryIssues, selectCadFailureIssues } from '#machines/cad.machine.js';
@@ -25,7 +25,8 @@ type FormatErrorPromptOptions = {
   errors: readonly KernelIssue[];
   filePath: string;
   code: string;
-  kernel: KernelProvider;
+  /** The kernel the file is written for; absent under Auto while no kernel has bound the entry. */
+  kernel: KernelProvider | undefined;
 };
 
 /**
@@ -55,7 +56,7 @@ function formatErrorPrompt({ errors, filePath, code, kernel }: FormatErrorPrompt
 
   const subject = errors.length > 1 ? `${errors.length} issues` : 'an error';
 
-  return `I'm getting ${subject} in my ${kernel} code and need help fixing ${errors.length > 1 ? 'them' : 'it'}.
+  return `I'm getting ${subject} in my ${kernel ?? 'model'} code and need help fixing ${errors.length > 1 ? 'them' : 'it'}.
 
 **File:** ${filePath}
 
@@ -73,7 +74,7 @@ ${codeContext}
 ${
   code
     ? `**Full Code:**
-\`\`\`${languageFromKernel[kernel]}
+\`\`\`${kernel === undefined ? '' : languageFromKernel[kernel]}
 ${code}
 \`\`\`
 `
@@ -146,6 +147,8 @@ function ChatViewerIssues(props: ViewerIssuesProps): React.ReactNode {
         return;
       }
 
+      /* Under Auto the code is in the kernel the runtime bound for the entry (the snapshot's owner). */
+      const fixKernel = agent.kernel === 'auto' ? agent.snapshot?.kernel?.owner?.kernel : agent.kernel;
       const filePath = await getMainFilename();
       const fileContent = await fileManager.readFile(filePath);
       const code = decodeTextFile(fileContent);
@@ -154,7 +157,7 @@ function ChatViewerIssues(props: ViewerIssuesProps): React.ReactNode {
         errors: targets,
         filePath,
         code,
-        kernel: agent.kernel,
+        kernel: fixKernel,
       });
 
       setChatOpen(true);
@@ -176,14 +179,24 @@ function ChatViewerIssues(props: ViewerIssuesProps): React.ReactNode {
             createdAt: Date.now(),
           },
           activeExecution: agent.execution,
-          activeKernel: agent.kernel,
+          ...(fixKernel === undefined ? {} : { activeKernel: fixKernel }),
         });
         setFocusedChatId(newChat.id);
       } else {
         void cadChat.submit({ text: errorPrompt });
       }
     },
-    [getMainFilename, fileManager, agent.kernel, agent.execution, createChat, setFocusedChatId, cadChat, setChatOpen],
+    [
+      getMainFilename,
+      fileManager,
+      agent.kernel,
+      agent.snapshot?.kernel?.owner?.kernel,
+      agent.execution,
+      createChat,
+      setFocusedChatId,
+      cadChat,
+      setChatOpen,
+    ],
   );
   return <ViewerIssuesContent {...props} onFixInChat={handleFixInChat} />;
 }

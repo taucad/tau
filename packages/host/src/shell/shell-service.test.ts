@@ -14,9 +14,16 @@ import { createFakeShellProvider } from '@taucad/native-process-core/shell';
 import type { FakeShellScript, ShellExecutable, ShellLaunch } from '@taucad/native-process-core/shell';
 
 import { isShellError, shellLimits } from '#shell/shell-contract.js';
+import { createShellGitView } from '#shell/shell-git-view.js';
 import type { PermissionMode, ShellApprovalPayload, ShellInput, ShellOutput } from '#shell/shell-contract.js';
 import { createShellService, probeHostShell, shellApprovalKey } from '#shell/shell-service.js';
 import type { ShellCheckout, ShellServiceOptions } from '#shell/shell-service.js';
+
+/* The real git view, wrapped so one case can make writing it fail. */
+vi.mock(import('#shell/shell-git-view.js'), async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, createShellGitView: vi.fn(actual.createShellGitView) };
+});
 
 const executable: ShellExecutable = { kind: 'bash', path: '/bin/bash', realPath: '/bin/bash', digest: 'sha256:00' };
 const identity = {
@@ -204,6 +211,18 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
       expect.arrayContaining([join(project, '.tau', 'binding.json'), join(project, '.tau', 'project.json')]),
     );
     expect([...(filesystem.readOnly ?? []), ...filesystem.denied]).not.toContain(join(project, '.tau', 'AGENTS.md'));
+  });
+
+  it('should run without git when the host cannot write the git view', async () => {
+    vi.mocked(createShellGitView).mockRejectedValueOnce(
+      Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }),
+    );
+    const { service, provider } = harness();
+    const output = await service.run(call({ command: 'true' }));
+
+    expect(createShellGitView).toHaveBeenCalledWith(project, expect.any(String));
+    expect(output).toMatchObject({ status: 'completed', exitCode: 0 });
+    expect(provider.launches[0]!.environment).not.toHaveProperty('GIT_DIR');
   });
 
   it('should protect the records of an existing reserved case alias', async () => {

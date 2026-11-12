@@ -29,6 +29,7 @@ import {
 import { BillingAccountClosureService } from '#billing-account-closure.service.js';
 import { BillingPaymentsService } from '#billing-payments.service.js';
 import { BillingService } from '#billing.service.js';
+import { BillingUsageService } from '#billing-usage.service.js';
 import type { Environment } from '@taucad/api-core';
 import type { DatabaseService } from '@taucad/api-database';
 import type { PaidPaymentEvidence, PaymentOfferSnapshot } from '@taucad/api-database/schema/billing-payment.types';
@@ -54,6 +55,14 @@ const database = drizzle(client, { schema });
 const runtimeDatabase = drizzle(runtimeClient, { schema });
 const policy = new BillingPolicyService({ database: runtimeDatabase });
 const ledger = new CreditLedgerService({ database: runtimeDatabase }, policy);
+const usage = new BillingUsageService(
+  { database: runtimeDatabase },
+  new ConfigService({
+    BILLING_ENVIRONMENT: 'development',
+    BILLING_USAGE_CURSOR_SECRET: 'payments-test-cursor-secret-is-at-least-32-bytes',
+  }),
+  ledger,
+);
 const requests: string[] = [];
 const stripeAccountId = 'acct_payments_foundation';
 let latestCustomerId = `cus_${randomUUID().replaceAll('-', '')}`;
@@ -1757,6 +1766,22 @@ describe('billing payments PostgreSQL foundation', () => {
       .where(and(eq(creditTransaction.accountId, accountId), eq(creditTransaction.kind, 'plan_expiry')));
     expect(expiries).toHaveLength(1);
     expect(expiries[0]).toMatchObject({ periodId, planDeltaAtoms: -20_000_000n, accountDeltaAtoms: -20_000_000n });
+
+    // The ended account still reads its balance, with the expiry in both journal totals and history.
+    const explanation = await usage.getBalance({ authUserId: userId, rawQuery: {} });
+    expect(explanation.availability).toEqual({ state: 'available', reason: null });
+    expect(explanation.balance).toMatchObject({ planGrantCreditAtoms: '0', purchasedCreditAtoms: '5000000' });
+    expect(explanation.journalTotals?.byKind).toContainEqual({
+      kind: 'plan_expiry',
+      accountDeltaCreditAtoms: '-20000000',
+      netUsedCreditAtoms: '20000000',
+      eventCount: '1',
+    });
+    expect(explanation.history?.items[0]).toMatchObject({
+      transactionId: expiries[0]?.id,
+      kind: 'plan_expiry',
+      accountDeltaCreditAtoms: '-20000000',
+    });
   });
 
   it('receipts a historical invoice without reducing paidThrough and anchors grace only to a current qualified failure', async () => {

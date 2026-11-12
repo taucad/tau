@@ -13,9 +13,9 @@ import {
   acquireNativeSandbox,
   launchInNativeSandbox,
   releaseNativeSandbox,
+  sampleLinuxResident,
   spawnInNativeSandbox,
-} from '#native-sandbox.js';
-import { sampleLinuxResident } from '#child-resident.js';
+} from '@taucad/sandbox';
 
 const maxProtocolLineBytes = 1_048_576;
 const maxStderrBytes = 65_536;

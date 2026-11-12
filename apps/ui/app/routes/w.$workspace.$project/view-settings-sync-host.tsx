@@ -13,7 +13,7 @@ import { confirmFlush } from '#workbench-records/record-health.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
 import { recordIssueState, usePublishRecordIssue } from '#workbench-records/record-issues.js';
 import type { RecordIssue } from '#workbench-records/record-issues.js';
-import { digestBytes } from '#utils/crypto.utils.js';
+import { digestBytes } from '@taucad/ui-core/utils/crypto.utils';
 import type { ActorRefFrom } from 'xstate';
 import { useProject } from '#hooks/use-project.js';
 import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';

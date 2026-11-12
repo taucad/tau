@@ -200,6 +200,7 @@ const harness = async (
   const port = options.wrapPort?.(created) ?? created;
   const checkouts = new Map<string, TurnCheckout>();
   const revisions = createProjectRevisions({
+    via: 'desktop',
     workspaceRoot,
     projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
     port,
@@ -390,6 +391,7 @@ describe.runIf(gitToolchainOnPath)('a disk host that cannot record', () => {
     let missing: ReturnType<typeof createProjectRevisions> | undefined;
     try {
       missing = createProjectRevisions({
+        via: 'desktop',
         workspaceRoot,
         projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
         events: (event) => events.push(event),
@@ -428,6 +430,7 @@ describe.runIf(gitToolchainOnPath)('a disk host that cannot record', () => {
     const bundledEvents: HostRevisionEvent[] = [];
     process.env['PATH'] = '';
     const bundled = createProjectRevisions({
+      via: 'desktop',
       workspaceRoot: bundledRoot,
       projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       gitExecutable: bundledGit,
@@ -651,6 +654,18 @@ for (const row of ports) {
       read.mockRestore();
     }, 30_000);
 
+    it('reads the files a revision holds for agent observability, never the live checkout (LW6)', async () => {
+      const held = await harness(row.create);
+      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      const settlement = await held.settlementFor('run-1');
+      await writeFile(join(held.workspaceRoot, 'main.ts'), 'export const size = 99;\n');
+
+      expect(await held.revisions.history.files(String(settlement.revisionId), ['main.ts', 'missing.ts'])).toEqual([
+        { path: 'main.ts', text: 'export const size = 2;\n', bytes: 23 },
+      ]);
+      expect(await held.revisions.history.files('unknown-revision', ['main.ts'])).toEqual([]);
+    }, 30_000);
+
     it('serves the same revision graph and branch verbs over the host channel', async () => {
       const held = await harness(row.create);
       await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
@@ -803,7 +818,7 @@ for (const row of ports) {
 
         const after = await readRevisionLog(held.port, { branch: 'isolated-run' });
         expect(after).toHaveLength(before.length + 1);
-        expect(after[0]).toMatchObject({ trigger: 'close' });
+        expect(after[0]).toMatchObject({ capture: 'close' });
       },
       30_000,
     );
@@ -1050,6 +1065,7 @@ for (const row of ports) {
           const checkoutsDirectory = await mkdtemp(join(tmpdir(), 'tau-host-checkouts-'));
           roots.push(checkoutsDirectory);
           const second = createProjectRevisions({
+            via: 'desktop',
             workspaceRoot,
             projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
             port: row.create(workspaceRoot, checkoutsDirectory),
@@ -1330,6 +1346,7 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
     try {
       /* No `port`: exactly what `host-daemon.ts` and the Electron utility pass. */
       const revisions = createProjectRevisions({
+        via: 'desktop',
         workspaceRoot,
         projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       });
@@ -1367,7 +1384,9 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
         tree: new ImmutableRevisionTree([['part.ts', 'export const part = 1;\n']]),
         provenance: {
           source: 'user',
-          actorId: 'ada',
+          actor: { kind: 'user', id: 'ada' },
+          capture: 'save',
+          via: 'desktop',
           createdAt: Date.UTC(2026, 8, 12),
         },
         summary: { generated: 'First' },
@@ -1496,7 +1515,9 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
         tree: new ImmutableRevisionTree([['part.ts', 'export const part = 1;\n']]),
         provenance: {
           source: 'user',
-          actorId: 'ada',
+          actor: { kind: 'user', id: 'ada' },
+          capture: 'save',
+          via: 'desktop',
           createdAt: Date.UTC(2026, 8, 13),
         },
         summary: { generated: 'Device A' },
@@ -1513,7 +1534,13 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
         const chat = await port.writeRevision({
           parents: [],
           tree: new ImmutableRevisionTree([['chat.json', chatRecord]]),
-          provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+          provenance: {
+            source: 'user',
+            actor: { kind: 'user', id: 'ada' },
+            capture: 'save',
+            via: 'desktop',
+            createdAt: Date.UTC(2026, 8, 13),
+          },
           summary: { generated: 'Browser chat' },
         });
         await port.updateRef({ name: chatRef, expectedHead: undefined, head: revisionId(chat.commitId) });
@@ -1635,7 +1662,9 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
           tree: new ImmutableRevisionTree([['part.ts', body]]),
           provenance: {
             source: 'user',
-            actorId: 'ada',
+            actor: { kind: 'user', id: 'ada' },
+            capture: 'save',
+            via: 'desktop',
             createdAt: Date.UTC(2026, 8, 13),
           },
           summary: { generated: summary },
@@ -1707,7 +1736,9 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
         tree: new ImmutableRevisionTree([['part.ts', 'export const part = 1;\n']]),
         provenance: {
           source: 'user',
-          actorId: 'ada',
+          actor: { kind: 'user', id: 'ada' },
+          capture: 'save',
+          via: 'desktop',
           createdAt: Date.UTC(2026, 8, 12),
         },
         summary: { generated: 'First' },
@@ -1762,6 +1793,7 @@ describe('a branch refusal over the host channel', () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-branch-refusal-'));
     roots.push(workspaceRoot);
     const revisions = createProjectRevisions({
+      via: 'desktop',
       workspaceRoot,
       projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       port: createIsomorphicGitRevisionPort({
@@ -1815,6 +1847,7 @@ describe('a branch refusal over the host channel', () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-branch-early-'));
     roots.push(workspaceRoot);
     const revisions = createProjectRevisions({
+      via: 'desktop',
       workspaceRoot,
       projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       port: createIsomorphicGitRevisionPort({
@@ -1853,6 +1886,7 @@ describe('a pull the page asks for over the host channel', () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-page-pull-'));
     roots.push(workspaceRoot);
     const revisions = createProjectRevisions({
+      via: 'desktop',
       workspaceRoot,
       projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       port: createIsomorphicGitRevisionPort({
@@ -1883,6 +1917,7 @@ describe('a restore refusal over the host channel', () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-restore-refusal-'));
     roots.push(workspaceRoot);
     const revisions = createProjectRevisions({
+      via: 'desktop',
       workspaceRoot,
       projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       port: createIsomorphicGitRevisionPort({
@@ -1942,7 +1977,13 @@ describe('an editor conflict over the host channel (D14)', () => {
       const { commitId } = await port.writeRevision({
         parents: parents.map((parent) => revisionId(parent)),
         tree: new ImmutableRevisionTree([['a.txt', new TextEncoder().encode(content)]]),
-        provenance: { source: 'user', actorId: 'test', createdAt: Date.UTC(2026, 8, 26) },
+        provenance: {
+          source: 'user',
+          actor: { kind: 'user', id: 'test' },
+          capture: 'save',
+          via: 'desktop',
+          createdAt: Date.UTC(2026, 8, 26),
+        },
         summary: { generated: content },
       });
       return revisionId(commitId);
@@ -1952,7 +1993,12 @@ describe('an editor conflict over the host channel (D14)', () => {
     await port.updateRef({ name: 'main', expectedHead: undefined, head });
     await port.setHead('main');
     await writeFile(join(workspaceRoot, 'a.txt'), 'theirs\n');
-    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', port });
+    const revisions = createProjectRevisions({
+      via: 'desktop',
+      workspaceRoot,
+      projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
+      port,
+    });
     try {
       await revisions.channel.request({ command: 'open' });
 
@@ -1994,7 +2040,11 @@ describe.runIf(gitToolchainOnPath)('a Tau-managed remote credential over the hos
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-remote-credential-'));
     roots.push(workspaceRoot);
     const repositoryUrl = 'https://git.example.invalid/owner/repository.git';
-    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA' });
+    const revisions = createProjectRevisions({
+      via: 'desktop',
+      workspaceRoot,
+      projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
+    });
     const frame = (unavailable: string): Record<string, string> => ({
       command: 'remoteCredential',
       apiBaseUrl: 'https://api.tau.test',
@@ -2028,7 +2078,12 @@ describe('explicit GitHub credential custody over the host channel', () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-explicit-credential-'));
     roots.push(workspaceRoot);
     const port = createIsomorphicGitRevisionPort({ filesystem: new NodeFsProvider(workspaceRoot) });
-    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', port });
+    const revisions = createProjectRevisions({
+      via: 'desktop',
+      workspaceRoot,
+      projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
+      port,
+    });
     const request = {
       command: 'pushGithub',
       repositoryUrl: 'https://github.com/owner/repository.git',

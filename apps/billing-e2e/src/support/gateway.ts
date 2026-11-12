@@ -41,7 +41,10 @@ export const insufficientCreditDetailsSchema = z
   })
   .strict();
 
-/** The catalog routes the rows call: the program's Haiku pathway, and the route that proves settlement end to end. */
+/**
+ * The catalog routes the rows call: the program's Haiku pathway, the route that proves settlement end to end, and
+ * Together's recommended route on the OpenAI-compatible wire, called with one tool as the agent host sends it.
+ */
 export const gatewayRoutes = {
   haiku: {
     routeId: 'anthropic-claude-haiku-5.5',
@@ -67,6 +70,37 @@ export const gatewayRoutes = {
       max_output_tokens: maximumTokens,
       stream: true,
       store: false,
+    }),
+    headers: {},
+  },
+  kimi: {
+    routeId: 'together-kimi-k3.1-pro',
+    modelName: 'Kimi K3.1 Pro',
+    path: '/v1/llm/openai/v1/chat/completions',
+    body: (prompt: string, maximumTokens: number): Record<string, unknown> => ({
+      model: 'together-kimi-k3.1-pro',
+      messages: [{ role: 'user', content: prompt }],
+      stream: true,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- provider wire field
+      stream_options: { include_usage: true },
+      // The agent host's pi-ai sends `max_tokens` for provider `together`, the field the funded route requires (taucad/tau#1763).
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- provider wire field
+      max_tokens: maximumTokens,
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'read_file',
+            description: 'Read a file from the project.',
+            parameters: {
+              type: 'object',
+              properties: { targetFile: { type: 'string', description: 'Path of the file to read.' } },
+              required: ['targetFile'],
+            },
+            strict: false,
+          },
+        },
+      ],
     }),
     headers: {},
   },

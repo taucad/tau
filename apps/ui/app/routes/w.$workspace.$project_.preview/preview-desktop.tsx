@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { memo, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Box, FileCode, SlidersHorizontal } from 'lucide-react';
@@ -7,7 +8,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@taucad/ui/components/avata
 import { Separator } from '@taucad/ui/components/separator';
 import { ProjectSettingsDialog } from '#routes/w.$workspace.$project_.preview/project-settings-dialog.js';
 import { downloadBlob } from '@taucad/utils/file';
-import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
+import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import { toast } from '@taucad/ui/components/sonner';
 import { cn } from '@taucad/ui/utils/cn';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -85,9 +86,9 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
             <AvatarFallback>{author.name[0]?.toUpperCase()}</AvatarFallback>
           </Avatar>
           <div>
-            <h1 className='text-xl font-semibold'>
+            <Heading level={1} variant='title'>
               {author.name} / {project.name}
-            </h1>
+            </Heading>
             <p className='text-sm text-muted-foreground'>{project.description}</p>
           </div>
         </div>
@@ -160,7 +161,9 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
               <PreviewDetails project={project} hasGeometry={Boolean(artifact)} cadRef={cadRef} />
               <Separator />
               <div className='hidden p-6'>
-                <h3 className='mb-3 text-sm font-semibold'>Version Control</h3>
+                <Heading level={3} variant='label' className='mb-3'>
+                  Version Control
+                </Heading>
               </div>
             </div>
           </div>

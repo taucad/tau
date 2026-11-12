@@ -37,10 +37,11 @@ import { prepareServeUi } from '#serve-ui.js';
 import type { ServeUi } from '#serve-ui.js';
 import { stageUiEnvironment } from '#ui-environment.js';
 import { resolveZooAuthToken, cliZooProxyUrl } from '#zoo-proxy.js';
-import { requireGitToolchain } from '#commands/revisions.js';
+import { requireGitToolchain, tokenRevisionActor } from '#commands/revisions.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 import { cliRuntimeTelemetry } from '#runtime-telemetry.js';
 import { loadCloudHostObserver } from '#cloud-host-observer.js';
+import type { GatewayHostLabels } from '@taucad/agent-host/wire';
 // oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load the CLI's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
 import packageJson from '../../package.json' with { type: 'json' };
 import { createComputeStoreHost } from '#compute-store.js';
@@ -335,10 +336,17 @@ const agentOptions = async (
    * reason: a terminal has no cookie jar, and the device credential this daemon
    * paired with authenticates the relay only (C67). */
   const tauApiToken = await resolveAuthToken(args.gateway ?? args.apiUrl);
+  /* A1: the account that token belongs to is who every served project records as, until a renderer names its own
+   * session; without one, this device's pseudonym. Never the OS login name or an environment email. */
+  const revisionActor =
+    tauApiToken === undefined || tauApiToken === ''
+      ? undefined
+      : await tokenRevisionActor(args.gateway ?? args.apiUrl, tauApiToken);
   return {
     workspaceRoot: agentWorkspaceRoot(args.workspace, process.cwd()),
     tauCloudEnabled: tauCloudEnabled(),
     ...(tauApiToken === undefined || tauApiToken === '' ? {} : { tauApiToken }),
+    ...(revisionActor === undefined ? {} : { revisionActor }),
     /* The gateway lives on the Tau API, which is also the relay origin unless
      * the operator points somewhere else (a stub, or a self-hosted API). */
     gatewayBaseUrl: args.gateway ?? args.apiUrl,
@@ -589,6 +597,23 @@ export const resolveServePort = async (options: {
     exitCodes.refused,
   );
 };
+
+/**
+ * The host labels every model call from this daemon names (LW17): a self-hosted serve as `daemon` with this CLI's
+ * version as its build, and the provisioned cloud host (`TAU_CLOUD_HOST=1`) as `cloud` with no build, because its
+ * observer's own facts carry none (LW23) and a run's generations must read the release its root does. The transport
+ * adds each call's model; the run's kernel is not known to the host, so none is sent.
+ *
+ * @internal
+ * @param environment - The process environment.
+ * @param version - This CLI's version.
+ * @returns The labels for the daemon's gateway transport.
+ */
+export const serveHostLabels = (
+  environment: Readonly<Record<string, string | undefined>>,
+  version: string,
+): GatewayHostLabels =>
+  environment['TAU_CLOUD_HOST'] === '1' ? { kind: 'cloud' } : { kind: 'daemon', build: version };
 
 /**
  * Whether `tau serve` opens the browser: as asked, else only for a served UI on an interactive terminal outside CI
@@ -1093,6 +1118,7 @@ export const serveCommand = defineCommand({
       const configuredAgent = agent
         ? {
             ...agent,
+            hostLabels: serveHostLabels(process.env, packageJson.version),
             prepareKernel: kernels.prepareKernel,
             preparableKernels: kernels.preparableKernels,
             ...(machines ? { machines } : {}),

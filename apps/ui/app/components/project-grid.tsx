@@ -3,6 +3,7 @@ import { useState, useCallback, useMemo, useRef } from 'react';
 import { resolveKernel } from '@taucad/types/constants';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
+import { Heading } from '@taucad/ui/components/heading';
 import { cn } from '@taucad/ui/utils/cn';
 import { formatSharePath } from '@taucad/share/locator';
 import { Loader } from '@taucad/ui/components/loader';
@@ -10,7 +11,12 @@ import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import type { BuiltinProjectCardModel, ProjectFiles } from '#constants/project-examples.js';
 import { loadBuiltinProjectFiles } from '#constants/project-examples.js';
-import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
+import {
+  ProjectCard,
+  ProjectCardCadPreview,
+  ProjectCardMedia,
+  projectCardVerticalFieldOfView,
+} from '#components/project-card.js';
 import { RemixDialog } from '#components/share/fork-action.js';
 import type { RemixSource } from '#components/share/fork-action.js';
 
@@ -21,12 +27,15 @@ export type CommunityProjectGridProperties = {
   readonly limit?: number;
   /** The example that spans two columns and rows, when it is in `projects`. */
   readonly featuredLocator?: string;
+  /** One level below the heading the host puts over the grid. */
+  readonly titleLevel?: 2 | 3;
 };
 
 export function CommunityProjectGrid({
   projects,
   limit,
   featuredLocator,
+  titleLevel = 2,
 }: CommunityProjectGridProperties): React.JSX.Element {
   const displayedProjects = limit ? projects.slice(0, limit) : projects;
   /* One live preview at a time: opening another card's preview releases this one. */
@@ -41,6 +50,7 @@ export function CommunityProjectGrid({
             <CommunityProjectCard
               project={project}
               isFeatured={isFeatured}
+              titleLevel={titleLevel}
               isPreviewVisible={previewLocator === project.locator}
               onPreviewLocatorChange={setPreviewLocator}
             />
@@ -54,6 +64,7 @@ export function CommunityProjectGrid({
 type CommunityProjectCardProperties = {
   readonly project: BuiltinProjectCardModel;
   readonly isFeatured: boolean;
+  readonly titleLevel: 2 | 3;
   readonly isPreviewVisible: boolean;
   readonly onPreviewLocatorChange: (locator: string | undefined) => void;
 };
@@ -61,6 +72,7 @@ type CommunityProjectCardProperties = {
 function CommunityProjectCard({
   project,
   isFeatured,
+  titleLevel,
   isPreviewVisible,
   onPreviewLocatorChange,
 }: CommunityProjectCardProperties): React.JSX.Element {
@@ -68,7 +80,7 @@ function CommunityProjectCard({
   const [files, setFiles] = useState<ProjectFiles>();
   const filesPromise = useRef<Promise<ProjectFiles> | undefined>(undefined);
 
-  const mainFile = assets.main.entryPath;
+  const mainFile = assets.main?.entryPath;
 
   const ensureFiles = useCallback(async (): Promise<ProjectFiles> => {
     filesPromise.current ??= loadBuiltinProjectFiles({ project });
@@ -112,8 +124,14 @@ function CommunityProjectCard({
           isPreviewVisible={isPreviewVisible}
           onPreviewVisibilityChange={handlePreviewVisibilityChange}
         >
-          {files ? (
-            <CadPreviewProvider projectId={id} mainFile={mainFile} files={files}>
+          {/* An entry-less project has no model to preview yet. */}
+          {files && mainFile !== undefined ? (
+            <CadPreviewProvider
+              projectId={id}
+              mainFile={mainFile}
+              files={files}
+              initialVerticalFieldOfView={projectCardVerticalFieldOfView}
+            >
               <ProjectCardCadPreview />
             </CadPreviewProvider>
           ) : null}
@@ -122,15 +140,15 @@ function CommunityProjectCard({
       {/* Below sm the action takes its own full-width row so the title keeps its width. */}
       <div
         className={cn(
-          'flex flex-col gap-2 p-3 sm:flex-row sm:items-end sm:justify-between sm:gap-3',
-          isFeatured && 'lg:p-4',
+          'flex flex-col justify-between gap-2 p-3 sm:flex-row sm:items-end sm:gap-3',
+          isFeatured ? 'lg:p-4' : 'flex-1',
         )}
       >
-        <div className='min-w-0'>
+        <div className='min-w-0 sm:self-start'>
           <div className='flex items-center gap-2'>
-            <h2 className={cn('line-clamp-1 font-semibold', isFeatured ? 'text-xl leading-7' : 'text-base leading-6')}>
+            <Heading level={titleLevel} variant={isFeatured ? 'title' : 'item'} className='line-clamp-2'>
               {name}
-            </h2>
+            </Heading>
             {isFeatured ? <Badge variant='secondary'>Featured</Badge> : null}
           </div>
           {isFeatured ? (

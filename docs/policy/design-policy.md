@@ -3,7 +3,7 @@ title: 'Design Policy'
 description: 'Canonical Tau design principles, governance and review guidance.'
 status: active
 created: '2026-10-15'
-updated: '2026-10-15'
+updated: '2026-11-10'
 ---
 
 # Design Policy
@@ -256,7 +256,7 @@ The token architecture is three-tier — primitive → semantic → component �
 ## Typography
 
 - **Geist Variable** (`--font-sans`) for UI and prose; **Geist Mono** (`--font-mono`) for code, data, paths, and kickers. Self-hosted, `font-display: swap`. No third face, ever.
-- Scale per `docs/policy/ui-policy.md` §3: body 16/14px, code 14px, minimum 12px, H1 36px at −0.02em. Every scale step carries size, line-height, and weight together — never size alone.
+- Scale, weights and heading roles per `docs/policy/ui-policy.md` §3; minimum 12px. Headings render through `Heading` and the title slots that compose it, so every scale step carries size, line-height, and weight together — never size alone.
 - Numbers that align vertically (tables, timers, metrics) use `tabular-nums`.
 - Placeholders use normal weight; selected filenames may retain their existing
   emphasis. Active sidebar navigation and project/chat rows do not gain weight
@@ -320,9 +320,12 @@ Verify both desktop and browser behavior, not a screenshot from a stale build.
   Preserve explicit non-default weights and non-icon SVG semantics; do not
   repeat per-icon overrides. Nested row/tab actions reuse shared action variants.
 - Primitives are app-agnostic: no analytics, no cookies, no app hooks, no keyboard-service imports inside `packages/ui`. App concerns arrive by props (theme, persistence callbacks, telemetry callbacks). The dependency rule is mechanical: `type:package` may depend only on `type:package|lib|tool`.
-- Interaction defaults from `docs/policy/ux-policy.md`: inline editing over dialogs; popovers for menu-triggered edits; no nested dialogs; destructive actions confirm with the named object; `ComboBoxResponsive` is the canonical searchable select; `slider-input` is the canonical Blender-style scrub control; clickable cards use a sibling link overlay, never an ancestor `onClick`.
+- Interaction defaults from `docs/policy/ux-policy.md`: inline editing over dialogs; popovers for menu-triggered edits; no nested dialogs; destructive actions confirm with the named object; `ComboBoxResponsive` is the canonical searchable select; choosing uses `ComboBoxResponsive`, acting uses the responsive `DropdownMenu`, and nesting in either uses the shared view-stack sub-view (UX policy §7); `slider-input` is the canonical Blender-style scrub control; clickable cards use a sibling link overlay, never an ancestor `onClick`.
+- Nested lists share one look: a sub-view trigger shows a trailing ChevronRight, a disclosure row's chevron points down and turns when open, and a sub-view opens with a full-width ChevronLeft Back row naming the parent and a short horizontal slide that respects reduced motion. Variants live in `menu.variants.ts`; surfaces do not restate them.
 - Pointer cursors are native hyperlink affordances by default. Actions use `--cursor-action` through the shared semantic selector or `cursor-action` utility, every action keeps visible hover and focus feedback, and specialized text/drag/resize/help/disabled cursors remain semantic. Sidebar navigation, including anchor-backed project/chat rows, follows the shared action-cursor preference; content hyperlinks retain native pointers. Enforced by `tau-lint/no-authored-pointer-cursor` and the computed-style sidebar regression.
 - Boolean props are named `is/has/should/enable/…` (lint-enforced); keyboard handling goes through the keyboard service (`event.key`, never `event.code`; the `mod` abstraction for Cmd/Ctrl).
+
+A repeated piece has one owner and every surface imports it; dialogs and sheets close from one ghost icon button; an icon beside text sits on the centre line of the text's first line; loading content is drawn as its own shape; and a feature that is not available yet carries the coming-soon icon with a legend. [UI Policy](ui-policy.md) §5 states each rule and names the owners.
 
 ## Surfaces
 
@@ -385,8 +388,10 @@ Call Tau-provided skills **system** skills, not “Built-in”. The file tree us
 the lowercase trailing `system` badge without a redundant lock; read-only
 behavior still follows actual access metadata, never a path or label alone.
 
+Product copy is written from the person's side: it says what happened to them and what they can do, buttons are named after what they do, problems read "Couldn't … Try again.", and no state name or system term reaches the screen. [UX Policy](ux-policy.md) Rules 9–12 are the statute; `docs/research/billing-redesign-blueprint.md` holds the glossary they were drawn from.
+
 ## Governance
 
 - Changes to this document are reviewed diffs with rationale, like any code change. Rules only get stricter by default; loosening one names the cost that justifies it.
-- The enforcement inventory (what makes each rule real): `tau-lint/no-hardcoded-color`, `tau-lint/no-authored-pointer-cursor`, `boolean-prop-naming`, the MDX rule suite, role-based selector tests, axe smoke tests, contract tests on variant modules, word-budget and API-coverage tests, Vale, and the release-gate umbrella. When a new rule lands here, its gate lands with it or the rule is marked "default, unenforced" until it does.
+- The enforcement inventory (what makes each rule real): `tau-lint/no-hardcoded-color`, `tau-lint/no-authored-pointer-cursor`, `tau-lint/no-raw-heading-type`, `boolean-prop-naming`, the MDX rule suite, role-based selector tests, axe smoke tests, contract tests on variant modules, word-budget and API-coverage tests, Vale, and the release-gate umbrella. When a new rule lands here, its gate lands with it or the rule is marked "default, unenforced" until it does.
 - Promote new durable design law through [the shared learning owner](../../.agents/skills/update-agent-memory/SKILL.md) into its policy or this document, with its gate. Keep unaccepted candidates in the existing task evidence; they do not become a competing authority.

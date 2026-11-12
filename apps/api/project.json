@@ -49,6 +49,17 @@
       },
       "parallelism": true
     },
+    "docker:smoke": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Build the production API image as Fly does. CI's API Docker smoke test builds this image and boots it against Postgres and Redis; its plan selects that job when Nx marks this project affected, so only a change to the API or a project it depends on rebuilds the image."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "docker build --file apps/api/Dockerfile --tag tau-api:smoke ."
+      }
+    },
     "launch": {
       "executor": "nx:run-commands",
       "options": {
@@ -85,10 +96,13 @@
         "cwd": "{projectRoot}"
       }
     },
-    "test:geospec": {
+    "test:kernel-routing": {
       "executor": "nx:run-commands",
+      "metadata": {
+        "description": "The automatic kernel selection eval instrument without a model: the development corpus, grader and held-out set (AKS-3a, AKS-3d), and the L2 tasks with their runner on a real tau mcp process (AKS-3b). The live arms run under test:live."
+      },
       "options": {
-        "command": "vitest run --config vitest.integration.config.ts app/testing/tau-geospec-harness.test.ts",
+        "command": "vitest run --config vitest.integration.config.ts app/testing/live/kernel-routing. app/testing/live/kernel-routing-l2.tasks app/testing/live/kernel-routing-l2.runner",
         "cwd": "{projectRoot}"
       }
     },

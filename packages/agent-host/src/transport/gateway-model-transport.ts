@@ -35,7 +35,7 @@ import type {
 import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 import { gatewayProviderKinds } from '#wire/admission.schema.js';
 import { gatewayErrorCodes } from '#wire/gateway.js';
-import type { GatewayErrorCode, GatewayTurnLabels } from '#wire/gateway.js';
+import type { GatewayErrorCode, GatewayHostLabels, GatewayTurnLabels } from '#wire/gateway.js';
 import type { RefusalCode } from '#wire/refusals.js';
 
 const openAiGatewayPath = 'v1/llm/openai/v1';
@@ -245,6 +245,11 @@ export type GatewayModelTransportOptions = {
   readonly release?: string | undefined;
   /** Optional funded-operation protocol supplied only by a managed Cloud composition. */
   readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
+  /**
+   * The host, build and kernel labels every call from this composition carries, with each request's model (LW17).
+   * Omitted, the call sends none of the four, so a composition opts in only once the gateway admits them (I6).
+   */
+  readonly hostLabels?: GatewayHostLabels | undefined;
   /**
    * Host composition's native-telemetry seam. Supplied only by a composition
    * that has an enabled, permitted adapter; absent in every other build, which
@@ -750,6 +755,9 @@ const anthropicSystemBlocks = (options: {
   });
 };
 
+/* A label is sent only as printable ASCII within the gateway's bound; anything else would throw in `Headers#set`. */
+const headerLabel = /^[!-~]{1,128}$/u;
+
 const authenticatedFetch =
   (options: {
     readonly auth?: GatewayModelTransportOptions['auth'];
@@ -769,6 +777,8 @@ const authenticatedFetch =
     readonly activity?: 'compaction' | undefined;
     /** The step's turn labels, sent as headers only: never in the body, so the digest and prompt bytes ignore them. */
     readonly turn?: GatewayTurnLabels | undefined;
+    /** The composition's host labels and the request's model, sent as headers only, like {@link turn}. */
+    readonly host?: (GatewayHostLabels & { readonly model: string }) | undefined;
     readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
     readonly onInvocationBound?: ModelStreamRequest['onInvocationBound'];
     readonly systemPromptBlocks?: readonly ModelSystemPromptBlock[] | undefined;
@@ -811,6 +821,20 @@ const authenticatedFetch =
         headers.set('x-tau-turn-step', options.turn.step);
         if (options.turn.gap !== undefined) {
           headers.set('x-tau-turn-gap', options.turn.gap);
+        }
+      }
+      // Observability labels for the API's provider fact (LW17), read by `readHostLabels` in apps/api against closed
+      // vocabularies and listed in its CORS allow-list (`httpHeader.xTauHostKind` and the three beside it).
+      if (options.host !== undefined) {
+        for (const [name, value] of [
+          ['x-tau-host-kind', options.host.kind],
+          ['x-tau-host-build', options.host.build],
+          ['x-tau-kernel', options.host.kernel],
+          ['x-tau-model', options.host.model],
+        ] as const) {
+          if (value !== undefined && headerLabel.test(value)) {
+            headers.set(name, value);
+          }
         }
       }
       let body = init?.body;
@@ -1427,6 +1451,7 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
       // compaction is a kind of its own and says so.
       ...(request.invocationPurpose === 'compaction' ? { activity: 'compaction' } : {}),
       ...(request.turn === undefined ? {} : { turn: request.turn }),
+      ...(options.hostLabels === undefined ? {} : { host: { ...options.hostLabels, model: request.modelId } }),
       fundedOperations: options.fundedOperations,
       ...(options.fundedOperations && request.onInvocationBound
         ? { onInvocationBound: request.onInvocationBound }

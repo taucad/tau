@@ -16,10 +16,10 @@ describe('warehouse projects', () => {
       throw new Error('Expected a warehouse part');
     }
     const builtin = findBuiltinProject(project.locator);
-    expect(builtin?.manifest.assets.main.entryPath).toBe(project.assets.main.entryPath);
+    expect(builtin?.manifest.assets.main?.entryPath).toBe(project.assets.main?.entryPath);
     const files = await loadBuiltinProjectFiles({ project });
     expect(Object.keys(files)).toEqual(project.fileAssets.map(({ path }) => path));
-    expect(Object.keys(files)).toContain(project.assets.main.entryPath);
+    expect(Object.keys(files)).toContain(project.assets.main?.entryPath);
     expect(JSON.parse(new TextDecoder().decode(files['tau.json']?.content))).toEqual(builtin?.manifest);
     await Promise.all(
       project.fileAssets.map(async (asset) => {

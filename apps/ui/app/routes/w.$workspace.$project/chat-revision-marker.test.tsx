@@ -110,7 +110,7 @@ const revision = (over: Partial<RevisionCard> = {}): RevisionCard => ({
   actor: 'tau-browser-agent-host',
   turnId: 'u1',
   conflicted: false,
-  trigger: 'turn',
+  capture: 'turn',
   ...over,
 });
 
@@ -242,7 +242,12 @@ describe('ChatRevisionMarker', () => {
         checkouts: { projectId: 'project-1', root: () => filesystem },
       });
       await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
-      const revisions = createProjectRevisionsActor({ port, projectId: 'project-1', filesystem: () => filesystem });
+      const revisions = createProjectRevisionsActor({
+        port,
+        identity: { via: 'browser', resolve: () => ({ kind: 'user', id: 'usr_test' }) },
+        projectId: 'project-1',
+        filesystem: () => filesystem,
+      });
       revisions.actor.start();
       const toolsReady = Promise.withResolvers<RevisionFileSystem>();
       const running = Promise.withResolvers<void>();
@@ -420,7 +425,8 @@ describe('ChatRevisionMarker', () => {
     expect(within(actions).getByRole('button', { name: 'More actions for Rev 5' })).not.toBeNull();
     fireEvent.click(within(actions).getByRole('button', { name: 'Details' }));
     const details = document.querySelector('dl[aria-label="Details for Rev 5"]');
-    expect(details?.textContent).toContain('rev-5');
+    /* B5: the id is a diagnostic, behind Tau's debug setting. */
+    expect(details?.textContent).not.toContain('rev-5');
     expect(details?.textContent).toContain('main');
     /* Restore is History's; the chat reaches it by View revision. */
     expect(screen.queryByRole('button', { name: /Restore/u })).toBeNull();

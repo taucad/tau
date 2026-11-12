@@ -1,5 +1,5 @@
 import { desktopBridge, isDesktopTarget } from '#filesystem/desktop-bridge.js';
-import { registrationProbeChatId } from '#lib/chat-observation-guard.js';
+import { registrationProbeChatId } from '@taucad/ui-core/lib/chat-observation-guard';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
 import { probeBrowserAgentHostCapability } from '#services/agent-host-client.js';
 import { generatePrefixedId } from '@taucad/utils/id';

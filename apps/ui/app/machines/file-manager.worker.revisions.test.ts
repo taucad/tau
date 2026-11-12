@@ -1022,7 +1022,13 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(await project.readFile('main.scad', 'utf8')).toBe('cube(20);');
     const after = await root.log();
     expect(after).toHaveLength(before.length + 2);
-    expect(after[0]?.summary).toMatch(/^Restored Rev \d+$/u);
+    /* The head a turn minted carries only its generated title and no version,
+     * so the restore names no entry: an earlier point, never a number (A9, M11). */
+    const restored = before.find((row) => row.revisionId === head);
+    expect(restored).toMatchObject({ summary: 'Agent turn turn-1', tags: [] });
+    expect(restored?.versions ?? []).toEqual([]);
+    expect(restored?.start).toBeUndefined();
+    expect(after[0]?.summary).toBe('Restored an earlier point');
     expect(after[1]?.summary).toBe('Saved changes (restore)');
     expect(after.slice(0, 2).map((row) => row.capture)).toEqual(['restore', 'restore']);
     expect(after[0]?.source).toBe('restore');

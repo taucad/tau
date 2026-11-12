@@ -93,7 +93,7 @@ const rpcForTool: Readonly<
   [toolName.screenshot]: { rpc: rpcName.captureImages, needs: 'images' },
   [toolName.testModel]: { rpc: rpcName.runGeoSpecTests, needs: 'geospec' },
   [toolName.useSkill]: { rpc: rpcName.resolveSkill, needs: 'skillResolver' },
-  [toolName.revisions]: { rpc: rpcName.readRevisions, needs: 'revisions' },
+  [toolName.history]: { rpc: rpcName.readHistory, needs: 'revisions' },
   [toolName.getParameters]: { rpc: rpcName.getParameters, needs: 'parameters' },
   /* Rewrites the source and its parameter record together. */
   [toolName.applyParameterOperation]: {

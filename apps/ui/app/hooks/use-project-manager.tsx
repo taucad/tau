@@ -73,7 +73,7 @@ import { directoryPicker } from '#constants/browser.constants.js';
 import type { DirectoryPick } from '#constants/browser.constants.js';
 import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { removeChatPermission, seedChatPermission } from '#hooks/use-permission-mode.js';
-import { createInitialProject } from '#constants/project.constants.js';
+import { createEntrylessProject, createInitialProject } from '#constants/project.constants.js';
 import { attachmentKind, attachmentReferenceOf } from '@taucad/chat-ui/utils/attachment.utils';
 import { buildUserMessage } from '#utils/chat.utils.js';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
@@ -221,8 +221,12 @@ type CreateProjectChatOptions = {
  * Use this when starting a fresh project from scratch.
  */
 type CreateProjectFromKernel = CreateProjectChatOptions & {
-  /** The kernel/language to use for the new project */
-  kernel: KernelProvider;
+  /**
+   * The kernel/language to use for the new project, or `auto` (automatic kernel selection blueprint D3): a project
+   * with a name and a manifest and no model file, whose first chat starts on Auto; the first model the agent writes
+   * and evaluates becomes main.
+   */
+  kernel: KernelProvider | 'auto';
   /** Override default project name */
   projectName?: string;
 };
@@ -1655,7 +1659,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
       if ('kernel' in options) {
         // CreateProjectFromKernel: Generate from kernel template
-        kernel = options.kernel;
         const { projectName: requestedProjectName } = options;
         let projectName = requestedProjectName;
         if (!projectName && options.initialMessage) {
@@ -1672,18 +1675,24 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
             .catch((): string => '');
           projectName = generated.trim() || defaultProjectName;
         }
-        const mainFileName = getMainFile(options.kernel);
-        const emptyCode = getEmptyCode(options.kernel);
-        const result = createInitialProject({
-          projectName: projectName ?? defaultProjectName,
-          mainFileName,
-          emptyCodeContent: encodeTextFile(emptyCode),
-          ecosystem: getKernelOption(options.kernel).ecosystem,
-          dependencies: await getKernelDependencies(options.kernel),
-          template: await getKernelProjectTemplate(options.kernel),
-        });
-        projectData = result.projectData;
-        files = result.files;
+        if (options.kernel === 'auto') {
+          projectData = createEntrylessProject(projectName ?? defaultProjectName);
+          files = {};
+        } else {
+          kernel = options.kernel;
+          const mainFileName = getMainFile(options.kernel);
+          const emptyCode = getEmptyCode(options.kernel);
+          const result = createInitialProject({
+            projectName: projectName ?? defaultProjectName,
+            mainFileName,
+            emptyCodeContent: encodeTextFile(emptyCode),
+            ecosystem: getKernelOption(options.kernel).ecosystem,
+            dependencies: await getKernelDependencies(options.kernel),
+            template: await getKernelProjectTemplate(options.kernel),
+          });
+          projectData = result.projectData;
+          files = result.files;
+        }
       } else {
         // CreateProjectFromData: Use provided project data and files
         projectData = options.project;
@@ -1752,6 +1761,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
                 messages: chatMessages,
                 activeExecution: seededActiveExecution,
                 activeKernel: seededActiveKernel,
+                /* A project created under Auto seeds its first chat with `auto` (blueprint D2). */
+                ...('kernel' in options && options.kernel === 'auto' ? { kernelPreference: 'auto' } : {}),
                 ...(startupRequest ? { startupRequest } : {}),
               },
               ...attachmentSourceOf(options),

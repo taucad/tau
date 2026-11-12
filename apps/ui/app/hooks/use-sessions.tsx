@@ -166,7 +166,7 @@ function SessionsQuitHold(): React.ReactPortal | undefined {
           {flushError ??
             (pending === 0
               ? 'Closing your projects…'
-              : `Backing up ${pending} ${pending === 1 ? 'revision' : 'revisions'}, then closing…`)}
+              : `Backing up ${pending} ${pending === 1 ? 'change' : 'changes'}, then closing…`)}
         </p>
         {flushError ? (
           <Button

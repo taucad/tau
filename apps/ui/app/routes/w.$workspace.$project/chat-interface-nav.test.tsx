@@ -34,7 +34,7 @@ describe('mobile secondary surfaces', () => {
     expect(chatTabs.find(({ id }) => id === 'share')?.label).toBe('Share');
   });
   it('keeps revision history available under its workbench title', () => {
-    expect(chatTabs.find(({ id }) => id === 'revisions')?.label).toBe('Revisions');
+    expect(chatTabs.find(({ id }) => id === 'revisions')?.label).toBe('History');
   });
 });
 
@@ -69,7 +69,7 @@ describe('All surfaces', () => {
     );
     expect(groups).toEqual({
       Design: ['Model tree', 'Kinematics', 'Print'],
-      Activity: ['Revisions', 'Agents'],
+      Activity: ['History', 'Agents'],
       Project: ['Files', 'Editor', 'Export', 'Share', 'Details'],
       Diagnostics: ['Telemetry', 'Console'],
     });
@@ -79,8 +79,8 @@ describe('All surfaces', () => {
   });
 
   it.each([
-    [undefined, ['Revisions', 'Agents']],
-    ['desktop', ['Browser', 'Revisions', 'Agents']],
+    [undefined, ['History', 'Agents']],
+    ['desktop', ['Browser', 'History', 'Agents']],
   ] as const)(
     'should list Browser only in the desktop app and Jobs nowhere (TAU_TARGET=%s)',
     (buildTarget, activity) => {
@@ -152,7 +152,7 @@ describe('All surfaces', () => {
     const navigation = screen.getByRole('navigation', { name: 'Workbench' });
     fireEvent.click(within(navigation).getByRole('button', { name: 'All' }));
     fireEvent.click(
-      within(screen.getByRole('dialog', { name: 'All surfaces' })).getByRole('button', { name: 'Revisions' }),
+      within(screen.getByRole('dialog', { name: 'All surfaces' })).getByRole('button', { name: 'History' }),
     );
 
     expect(screen.getByRole('status', { name: 'Active surface' })).toHaveTextContent('revisions');
@@ -165,7 +165,7 @@ describe('All surfaces', () => {
 
     fireEvent.click(within(navigation).getByRole('button', { name: 'All' }));
     const sheet = screen.getByRole('dialog', { name: 'All surfaces' });
-    expect(within(sheet).getByRole('button', { name: 'Revisions' })).toHaveAttribute('aria-current', 'page');
+    expect(within(sheet).getByRole('button', { name: 'History' })).toHaveAttribute('aria-current', 'page');
     expect(within(sheet).getByRole('button', { name: 'Files' })).not.toHaveAttribute('aria-current');
   });
 
@@ -173,7 +173,7 @@ describe('All surfaces', () => {
     render(<ControlledNav />);
     fireEvent.click(within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'All' }));
 
-    for (const name of ['Files', 'Model tree', 'Revisions']) {
+    for (const name of ['Files', 'Model tree', 'History']) {
       const grid = within(screen.getByRole('dialog', { name: 'All surfaces' })).getByRole('button', {
         name,
       }).parentElement!;

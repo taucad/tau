@@ -218,7 +218,7 @@ describe('selectProjectStatusLine', () => {
       name: 'a write not confirmed',
       projection: status({ attention: 1 }),
       where: onMain,
-      text: 'Save not confirmed',
+      text: 'Couldn’t confirm the save',
       icon: CircleAlert,
       tone: 'text-feature',
     },
@@ -235,7 +235,7 @@ describe('selectProjectStatusLine', () => {
       name: 'modified',
       projection: status(),
       where: { ...onMain, isDirty: true },
-      text: 'Modified since Rev 12',
+      text: 'Unsaved changes',
       icon: FileDiff,
       tone: 'text-warning',
     },
@@ -255,13 +255,13 @@ describe('selectProjectStatusLine', () => {
     expect(line(status()).isBusy).toBe(false);
   });
 
-  it('names a branch only when it is not main, then the record issues, then Follow chat', () => {
+  it('names a branch only when it is not main, then the record issues, then Switch to', () => {
     expect(line(status()).text).not.toContain('on main');
     expect(line(status(), { ...onMain, branch: 'planetary-carrier' }, { followBranch: 'bracket-fillet' }).text).toBe(
-      'Saved · on planetary-carrier · Follow chat',
+      'Saved · on planetary-carrier · Switch to bracket-fillet',
     );
     expect(line(status(), onMain, { issues: { state: 'unconfirmed', count: 2 } }).text).toBe(
-      'Save not confirmed · 2 issues',
+      'Couldn’t confirm the save · 2 issues',
     );
   });
 
@@ -273,7 +273,7 @@ describe('selectProjectStatusLine', () => {
     expect(result.icon).toBe(GitMerge);
     expect(result.tone).toBe('text-warning');
     /* A revision's own unconfirmed write still outranks its conflict, as the shared facts rank them. */
-    expect(line(status({ attention: 2, conflicts: [conflict] })).text).toBe('Save not confirmed');
+    expect(line(status({ attention: 2, conflicts: [conflict] })).text).toBe('Couldn’t confirm the save');
   });
 
   it('keeps the turning glyph while saving even when a settings record needs a person', () => {
@@ -311,7 +311,7 @@ describe('MobileProjectTopBar', () => {
     expect(share).toHaveClass('size-10');
     expect(topBar()).toHaveClass('h-12', 'md:hidden');
     /* Export, Revisions and Details are not in the bar (D2). */
-    expect(within(topBar()).queryByRole('button', { name: /^(Export|Revisions|Details)$/u })).toBeNull();
+    expect(within(topBar()).queryByRole('button', { name: /^(Export|History|Details)$/u })).toBeNull();
   });
 
   it('reads Saved with an uncoloured glyph at rest, and keeps colour off the words (HDR-03, D3)', async () => {
@@ -347,13 +347,13 @@ describe('MobileProjectTopBar', () => {
     });
 
     const line = statusLine(titleButton());
-    expect(line).toHaveTextContent('Save not confirmed · 1 issue');
+    expect(line).toHaveTextContent('Couldn’t confirm the save · 1 issue');
     expect(line.querySelector('[data-slot=status-line-icon]')).toHaveClass('text-feature');
     expect(line.lastElementChild).not.toHaveClass('text-feature');
     // The colour says something; the glyph says it too, for a person who does not see it.
     expect(within(titleButton()).getByRole('img', { name: 'Needs attention' })).toBeInTheDocument();
     /* The bar announces the records as the desktop trigger does; no second trigger draws them. */
-    expect(screen.getByRole('status')).toHaveTextContent('Save not confirmed · 1 record');
+    expect(screen.getByRole('status')).toHaveTextContent('Couldn’t confirm the save · 1 record');
     expect(within(topBar()).getAllByRole('button')).toHaveLength(3);
 
     fireEvent.click(titleButton());
@@ -382,11 +382,11 @@ describe('MobileProjectTopBar', () => {
     const first = within(sheet)
       .getAllByRole('button')
       .find((button) => button.dataset['slot'] === 'project-sheet-row');
-    expect(first).toHaveAccessibleName('Revisions');
+    expect(first).toHaveAccessibleName('History');
     expect(first).toHaveAccessibleDescription('Needs your decision on main');
     expect(first?.closest('ul')).toHaveAccessibleName('Decision');
     // One way to Revisions on the sheet (I4).
-    expect(within(sheet).getAllByRole('button', { name: 'Revisions' })).toHaveLength(1);
+    expect(within(sheet).getAllByRole('button', { name: 'History' })).toHaveLength(1);
     fireEvent.click(first!);
     expect(openPanel).toHaveBeenLastCalledWith('revisions');
     expect(titleButton()).toHaveAttribute('aria-expanded', 'false');
@@ -396,11 +396,11 @@ describe('MobileProjectTopBar', () => {
     // An unconfirmed save outranks the conflict on the line; the decision still waits.
     revisionStatusHarness.status = status({ attention: 2, conflicts: [conflict] });
     render(<MobileProjectTopBar />, { wrapper });
-    expect(titleButton()).toHaveTextContent('Save not confirmed');
+    expect(titleButton()).toHaveTextContent('Couldn’t confirm the save');
     fireEvent.click(titleButton());
     const sheet = await screen.findByRole('dialog', { name: projectName });
     const decision = within(sheet).getByRole('list', { name: 'Decision' });
-    expect(within(decision).getByRole('button', { name: 'Revisions' })).toHaveAccessibleDescription(
+    expect(within(decision).getByRole('button', { name: 'History' })).toHaveAccessibleDescription(
       'Needs your decision on main',
     );
   });
@@ -411,22 +411,22 @@ describe('MobileProjectTopBar', () => {
     const sheet = await screen.findByRole('dialog', { name: projectName });
     expect(within(sheet).queryByRole('list', { name: 'Decision' })).toBeNull();
     expect(
-      within(within(sheet).getByRole('list', { name: 'Project' })).getByRole('button', { name: 'Revisions' }),
+      within(within(sheet).getByRole('list', { name: 'Project' })).getByRole('button', { name: 'History' }),
     ).toBeInTheDocument();
   });
 
-  it('says Follow chat as a fact and puts the verb in the project sheet (HDR-06)', async () => {
+  it('says Switch to as a fact and puts the verb in the project sheet (HDR-06)', async () => {
     onBranch();
     render(<MobileProjectTopBar />, { wrapper });
 
     await waitFor(() => {
-      expect(statusLine(titleButton())).toHaveTextContent('Saved · Follow chat');
+      expect(statusLine(titleButton())).toHaveTextContent('Saved · Switch to planetary-carrier');
     });
-    expect(within(topBar()).queryByRole('button', { name: 'Follow chat' })).toBeNull();
+    expect(within(topBar()).queryByRole('button', { name: 'Switch to planetary-carrier' })).toBeNull();
 
     fireEvent.click(titleButton());
     const sheet = await screen.findByRole('dialog', { name: projectName });
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Follow chat' }));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Switch to planetary-carrier' }));
     expect(revisionStatusHarness.commands.pinTo).toHaveBeenCalledWith('co-2');
   });
 
@@ -455,25 +455,21 @@ describe('MobileProjectTopBar', () => {
     expect(statusLine(sheet)).toHaveTextContent(/^Saved$/u);
     expect(sheet).toHaveAccessibleDescription('Saved');
     const destinations = within(within(sheet).getByRole('list', { name: 'Project' })).getAllByRole('button');
-    expect(destinations.map((row) => row.querySelector('span')?.textContent)).toEqual([
-      'Revisions',
-      'Export',
-      'Details',
-    ]);
+    expect(destinations.map((row) => row.querySelector('span')?.textContent)).toEqual(['History', 'Export', 'Details']);
     /* One destination, one place: Share is the bar's, the panes are the sheet's. */
-    for (const name of ['Share', 'Revisions', 'Export', 'Details']) {
+    for (const name of ['Share', 'History', 'Export', 'Details']) {
       expect(screen.getAllByRole('button', { name, hidden: true })).toHaveLength(1);
     }
     expect(within(sheet).queryByRole('button', { name: /Share/u })).toBeNull();
     /* Where the line is, for the Revisions row, without a second status cue. */
-    expect(within(sheet).getByRole('button', { name: 'Revisions' })).toHaveAccessibleDescription('Rev 12 · main');
+    expect(within(sheet).getByRole('button', { name: 'History' })).toHaveAccessibleDescription('main');
   });
 
   it('opens each destination in its surface and closes the sheet behind it', async () => {
     render(<MobileProjectTopBar />, { wrapper });
 
     for (const [name, panel] of [
-      ['Revisions', 'revisions'],
+      ['History', 'revisions'],
       ['Export', 'export'],
       ['Details', 'details'],
     ] as const) {
@@ -500,7 +496,7 @@ describe('MobileProjectTopBar', () => {
 
     fireEvent.click(titleButton());
     const sheet = await screen.findByRole('dialog', { name: projectName });
-    for (const name of ['Revisions', 'Export', 'Details']) {
+    for (const name of ['History', 'Export', 'Details']) {
       const row = within(sheet).getByRole('button', { name });
       expect(row).not.toHaveAttribute('aria-label');
       expect(within(row).getByText(name)).toBeInTheDocument();

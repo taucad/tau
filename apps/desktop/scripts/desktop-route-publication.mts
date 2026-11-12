@@ -28,17 +28,16 @@ export const desktopManifestDigest = (manifest: DesktopArtifactManifest): string
     .digest('hex');
 
 /**
- * Explicitly selected publication scope the publisher workflows accept. `all` keeps the original admission; `macos` is
- * the Apple silicon rollout that must carry exactly its ZIP and DMG and no other architecture's or platform's
- * artifact. Intel is excluded by operator ruling until a GPU-capable Intel Mac host can qualify it.
+ * Explicitly selected publication scope the publisher workflows accept. `all` keeps the original admission. `macos`
+ * and `linux` are platform scopes (D-H5, operator ruling 2026-11-10: each platform is promoted on its own receipts from
+ * its own candidate): `macos` must carry exactly the Apple silicon ZIP and DMG, `linux` exactly the linux-x64 APT and
+ * AppImage routes, and neither any other architecture's or platform's artifact. Intel is excluded by operator ruling
+ * until a GPU-capable Intel Mac host can qualify it.
  */
-export const desktopPublicationScopes = ['all', 'macos'] as const;
+export const desktopPublicationScopes = ['all', 'macos', 'linux'] as const;
 export type DesktopPublicationScope = (typeof desktopPublicationScopes)[number];
-/**
- * Platform scopes route admission understands (D-H5, operator ruling 2026-11-10: each platform is promoted on its own
- * receipts from its own candidate). `linux` is admitted here before the publisher workflows select it.
- */
-export const desktopAdmissionScopes = [...desktopPublicationScopes, 'linux'] as const;
+/** Route admission and publication accept the same scopes. */
+export const desktopAdmissionScopes = desktopPublicationScopes;
 export type DesktopAdmissionScope = (typeof desktopAdmissionScopes)[number];
 /** Every route and artifact of each platform scope: a platform candidate carries exactly these and nothing else. */
 const platformScopes = {

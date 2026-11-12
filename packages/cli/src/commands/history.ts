@@ -1,13 +1,14 @@
 /**
- * `tau revisions` — the revision graph from a terminal (S13, A10).
+ * `tau history` and `tau version` — a project's history from a terminal (S13, A10).
  *
  * Headless parity is the point: every verb here calls the same functions and the
  * same machines the app does (`openProjectRevisions` in `@taucad/host`), so a
- * scripted switch and a click in the Revisions pane cannot drift. No verb has
+ * scripted switch and a click in the History pane cannot drift. No verb has
  * semantics of its own.
  *
- * The words are the operator's (A18, I12): branches, revisions and projects.
- * Nothing prints "checkout", "worktree", "lease", "ref" or "HEAD".
+ * The words are the operator's (A18, I12, M11): history entries, versions,
+ * branches and projects. A save has no number; a version is `V3`. Nothing
+ * prints "revision", "checkout", "worktree", "lease", "ref" or "HEAD".
  *
  * `log --provenance` is the diagnostic (B5): under each row, the ids the entry
  * is stored under and what its trailer recorded — identity, capture and leg —
@@ -59,19 +60,19 @@ export const requireGitToolchain = async (): Promise<void> => {
   } catch (error) {
     throw cliError(
       'GIT_NOT_AVAILABLE',
-      error instanceof Error ? error.message : 'Tau records revisions with git and git-lfs.',
+      error instanceof Error ? error.message : 'Tau records history with git and git-lfs.',
       exitCodes.refused,
     );
   }
 };
 
 /**
- * Open the project's revisions, refusing a directory that has none.
+ * Open the project's history, refusing a directory that has none.
  *
  * @param project - The `--project` argument, if any.
  * @param session - The Tau Cloud API and session token a push travels with, when this verb pushes.
  * @returns The verbs, and the resolved project directory.
- * @throws CliError When no revision history exists there.
+ * @throws CliError When no history exists there.
  */
 const open = async (
   project: string | undefined,
@@ -79,7 +80,7 @@ const open = async (
 ): Promise<Readonly<{ revisions: ProjectRevisionVerbs; workspaceRoot: string }>> => {
   const workspaceRoot = resolve(project ?? process.cwd());
   /* The binaries first, so "git-lfs is not installed" never reaches a person as
-   * "this project has no revision history" (OQ-B8). */
+   * "this project has no history" (OQ-B8). */
   await requireGitToolchain();
   /* And a path that is not there is not a project without a history, which is
    * what the refusal below would otherwise call it (a1 review R14). */
@@ -92,8 +93,8 @@ const open = async (
   } catch {
     await revisions.close();
     throw cliError(
-      'NO_REVISION_HISTORY',
-      `${workspaceRoot} has no revision history. Open it in Tau, or run \`tau serve --workspace ${workspaceRoot}\` once, to start one.`,
+      'NO_HISTORY',
+      `${workspaceRoot} has no history. Open it in Tau, or run \`tau serve --workspace ${workspaceRoot}\` once, to start one.`,
       exitCodes.refused,
     );
   }
@@ -113,23 +114,58 @@ const whoField = (who: RevisionRow['who']): string =>
   who.kind === 'recorded' ? who.identity.id : (who.authorName ?? '');
 
 /**
- * `Rev 12  main  ada  Added the bracket` — the pane's own row, one line wide.
+ * A history entry's short id, as History's open row shows it (M11).
  *
- * @param row - One revision as the verbs answer it.
+ * @param revisionId - The entry's full id.
+ * @returns Its first seven characters.
+ */
+const shortId = (revisionId: string): string => revisionId.slice(0, 7);
+
+/**
+ * When an entry was recorded, to the minute in UTC, so two terminals print the same line.
+ *
+ * @param createdAt - Milliseconds since the Unix epoch.
+ * @returns `2026-11-12 05:15`, or an empty field for an entry with no time.
+ */
+const timeField = (createdAt: number): string =>
+  createdAt > 0 ? new Date(createdAt).toISOString().slice(0, 16).replace('T', ' ') : ''.padEnd(16);
+
+/**
+ * `V3   4f2a91c  2026-11-12 05:15  main  ada  Ready for print` — the pane's own row, one line wide.
+ *
+ * An entry has no number (M11); a version leads with its `V3`, and every row
+ * carries its short id, time, who and title.
+ *
+ * @param row - One entry as the verbs answer it.
  * @param branch - The branch being listed, or `undefined` in a project with none.
  * @returns The printable line.
  */
-const rowLine = (row: RevisionRow, branch: string | undefined): string =>
-  [
-    /* Wide enough for `Rev 9999`; a merged-in revision has no number and keeps
-     * the column, so the branch names line up either way (a1 review R14). */
-    (row.revisionNumber === undefined ? '' : `Rev ${String(row.revisionNumber)}`).padEnd(8),
+const rowLine = (row: RevisionRow, branch: string | undefined): string => {
+  const version = row.versions?.[0] ?? (row.start === undefined ? undefined : { number: 1, name: 'Start' });
+  const title = version?.name ?? row.summary;
+  return [
+    /* Wide enough for `V999`; an entry has none and keeps the column, so the ids line up (a1 review R14). */
+    (version === undefined ? '' : `V${String(version.number)}`).padEnd(4),
+    shortId(row.revisionId),
+    timeField(row.createdAt),
     ...[
       branch ?? '',
       whoField(row.who),
-      `${row.tags.length === 0 ? '' : `[${row.tags.join(', ')}] `}${row.conflicted ? `${row.summary} (needs resolution)` : row.summary}${row.capture === 'idle' || row.capture === 'hidden' || row.capture === 'close' ? ' (autosave)' : ''}`,
+      `${row.conflicted ? `${title} (needs your decision)` : title}${row.capture === 'idle' || row.capture === 'hidden' || row.capture === 'close' ? ' (autosave)' : ''}`,
     ].filter((field) => field !== ''),
   ].join('  ');
+};
+
+/**
+ * One entry as `--json` carries it: the row without the per-branch number an entry no longer has (M11).
+ *
+ * @param row - One entry as the verbs answer it.
+ * @returns The row, numbered only by its versions.
+ */
+const entryJson = (row: RevisionRow): Omit<RevisionRow, 'revisionNumber'> => {
+  const { revisionNumber: _position, ...entry } = row;
+  return entry;
+};
 
 /** The store a project's entries are read from, as the host opens it. */
 type ProjectPort = ReturnType<typeof createProjectRevisionPort>;
@@ -293,40 +329,128 @@ const provenanceLines = (provenance: EntryProvenance | undefined): readonly stri
   return fields.map(([label, value]) => `  ${label.padEnd(9)} ${value}`);
 };
 
-const tagCommand = defineCommand({
-  meta: { name: 'tag', description: 'Name a revision, or remove a revision name' },
+/**
+ * Every version this project holds, lowest number first (B6): V1 is the Start entry, which has no tag.
+ *
+ * @param workspaceRoot - The project directory, already opened.
+ * @returns The versions with their names, numbers and the entries they name.
+ */
+const readVersions = async (
+  workspaceRoot: string,
+): Promise<ReadonlyArray<Readonly<{ number: number; name: string; revisionId: string; note?: string }>>> => {
+  const projectId = await readProjectId({
+    stat: async (path) => stat(join(workspaceRoot, path)),
+    readFile: async (path) => new Uint8Array(await readFile(join(workspaceRoot, path))),
+  });
+  if (projectId === undefined) {
+    return [];
+  }
+  const tags = await createProjectRevisionPort({ workspaceRoot, projectId }).listTags();
+  return tags
+    .flatMap((tag) =>
+      tag.number === undefined
+        ? []
+        : [
+            {
+              number: tag.number,
+              name: tag.name,
+              revisionId: String(tag.revisionId),
+              ...(tag.note === undefined ? {} : { note: tag.note }),
+            },
+          ],
+    )
+    .toSorted((left, right) => left.number - right.number);
+};
+
+const versionCreateCommand = defineCommand({
+  meta: { name: 'create', description: 'Create a version: a named, permanent point in history' },
   args: {
     ...projectArguments,
     name: { type: 'positional', description: 'Version name', required: true },
-    revision: { type: 'positional', description: 'Revision id (defaults to the current revision)', required: false },
-    note: { type: 'string', description: 'Note stored with the name', required: false },
-    delete: { type: 'boolean', description: 'Remove this version name', required: false },
+    entry: {
+      type: 'positional',
+      description: 'History entry id (defaults to where the files are now)',
+      required: false,
+    },
+    note: { type: 'string', description: 'Note stored with the version', required: false },
   },
   async run({ args }) {
     const { revisions } = await open(args.project);
     try {
-      if (args.delete === true) {
-        await revisions.deleteTag(args.name);
-        await (args.json
-          ? emit({ kind: 'revision-tag', ok: true, deleted: args.name })
-          : writeStdout(`Removed version name ${args.name}.\n`));
-        return;
-      }
-      let revisionId = args.revision;
+      let revisionId = args.entry;
       if (revisionId === undefined) {
         ({ revisionId } = await revisions.describe());
       }
       if (revisionId === undefined) {
-        throw cliError('NO_REVISION', 'There is no revision to name yet.', exitCodes.refused);
+        throw cliError(
+          'NO_ENTRY',
+          'Nothing is saved in history yet, so there is nothing to make a version of.',
+          exitCodes.refused,
+        );
       }
       const tag = await revisions.tag({
         name: args.name,
         revisionId,
         ...(args.note === undefined ? {} : { note: args.note }),
       });
+      const label = tag.number === undefined ? tag.name : `V${String(tag.number)} · ${tag.name}`;
       await (args.json
-        ? emit({ kind: 'revision-tag', ok: true, tag })
-        : writeStdout(`${tag.name} names ${revisionId}.\n`));
+        ? emit({ kind: 'version', ok: true, version: tag })
+        : writeStdout(`Created ${label} at ${shortId(revisionId)}.\n`));
+    } finally {
+      await revisions.close();
+    }
+  },
+});
+
+const versionListCommand = defineCommand({
+  meta: { name: 'list', description: 'List this project’s versions, lowest number first' },
+  args: projectArguments,
+  async run({ args }) {
+    const { revisions, workspaceRoot } = await open(args.project);
+    try {
+      const versions = await readVersions(workspaceRoot);
+      if (args.json) {
+        await emit({ kind: 'versions', ok: true, versions });
+        return;
+      }
+      await writeStdout(
+        versions.length === 0
+          ? 'No versions yet.\n'
+          : `${versions.map((version) => `${`V${String(version.number)}`.padEnd(4)}  ${shortId(version.revisionId)}  ${version.name}`).join('\n')}\n`,
+      );
+    } finally {
+      await revisions.close();
+    }
+  },
+});
+
+const versionRenameCommand = defineCommand({
+  meta: { name: 'rename', description: 'Rename a version; it keeps its number' },
+  args: {
+    ...projectArguments,
+    name: { type: 'positional', description: 'The version’s current name', required: true },
+    to: { type: 'positional', description: 'Its new name', required: true },
+  },
+  async run({ args }) {
+    const { revisions, workspaceRoot } = await open(args.project);
+    try {
+      const versions = await readVersions(workspaceRoot);
+      const version = versions.find((candidate) => candidate.name === args.name);
+      if (version === undefined) {
+        throw cliError('NO_VERSION', `This project has no version named ${args.name}.`, exitCodes.refused);
+      }
+      /* A version is permanent (Q13): a rename keeps its number and the entry it names. */
+      const tag = await revisions.tag({
+        name: args.to,
+        revisionId: version.revisionId,
+        number: version.number,
+        ...(version.note === undefined ? {} : { note: version.note }),
+      });
+      await revisions.deleteTag(args.name);
+      await (args.json
+        ? emit({ kind: 'version', ok: true, version: tag, renamedFrom: args.name })
+        : writeStdout(`Renamed V${String(version.number)} to ${args.to}.\n`));
     } finally {
       await revisions.close();
     }
@@ -334,7 +458,7 @@ const tagCommand = defineCommand({
 });
 
 const logCommand = defineCommand({
-  meta: { name: 'log', description: 'List a branch’s revisions, newest first' },
+  meta: { name: 'log', description: 'List a branch’s history, newest first' },
   args: {
     ...projectArguments,
     branch: {
@@ -344,7 +468,7 @@ const logCommand = defineCommand({
     },
     limit: {
       type: 'string',
-      description: 'Most recent revisions to list',
+      description: 'Most recent entries to list',
       required: false,
     },
     provenance: {
@@ -370,18 +494,18 @@ const logCommand = defineCommand({
       const provenance = args.provenance === true ? await readProvenance(workspaceRoot, rows) : undefined;
       if (args.json) {
         await emit({
-          kind: 'revisions',
+          kind: 'history',
           ok: true,
           branch,
-          revisions:
+          entries:
             provenance === undefined
-              ? rows
-              : rows.map((row) => ({ ...row, provenance: provenance.get(row.revisionId) ?? null })),
+              ? rows.map((row) => entryJson(row))
+              : rows.map((row) => ({ ...entryJson(row), provenance: provenance.get(row.revisionId) ?? null })),
         });
         return;
       }
       if (rows.length === 0) {
-        await writeStdout('No revisions yet.\n');
+        await writeStdout('No history yet.\n');
         return;
       }
       const lines = rows.map((row) =>
@@ -398,18 +522,18 @@ const logCommand = defineCommand({
 });
 
 const diffCommand = defineCommand({
-  meta: { name: 'diff', description: 'List the files that changed between two revisions' },
+  meta: { name: 'diff', description: 'List the files that changed between two history entries' },
   args: {
     ...projectArguments,
-    from: { type: 'positional', description: 'Older revision', required: true },
-    to: { type: 'positional', description: 'Newer revision', required: true },
+    from: { type: 'positional', description: 'Older entry id', required: true },
+    to: { type: 'positional', description: 'Newer entry id', required: true },
   },
   async run({ args }) {
     const { revisions } = await open(args.project);
     try {
       const changes = await revisions.diff(args.from, args.to);
       if (args.json) {
-        await emit({ kind: 'revision-diff', ok: true, from: args.from, to: args.to, changes });
+        await emit({ kind: 'history-diff', ok: true, from: args.from, to: args.to, changes });
         return;
       }
       if (changes.length === 0) {
@@ -431,11 +555,18 @@ const describeCommand = defineCommand({
     try {
       const place = await revisions.describe();
       if (args.json) {
-        await emit({ kind: 'revision-place', ok: true, ...place });
+        await emit({
+          kind: 'history-place',
+          ok: true,
+          branch: place.branch,
+          revisionId: place.revisionId,
+          branches: place.branches.map(({ name, revisionId }) => ({ name, revisionId })),
+          line: place.line,
+        });
         return;
       }
       await writeStdout(
-        `${place.line}\n${place.branches.map((branch) => `  ${branch.name}  Rev ${String(branch.revisionNumber)}`).join('\n')}\n`,
+        `${place.line}\n${place.branches.map((branch) => `  ${branch.name}  ${shortId(branch.revisionId)}`).join('\n')}\n`,
       );
     } finally {
       await revisions.close();
@@ -459,7 +590,7 @@ const switchCommand = defineCommand({
       /* Unsaved changes are saved on the branch being left first, so nothing asks (I11). */
       const outcome = await revisions.switchTo(args.branch);
       if (args.json) {
-        await emit({ kind: 'revision-switch', ok: outcome.status === 'switched', ...outcome });
+        await emit({ kind: 'history-switch', ok: outcome.status === 'switched', ...outcome });
       }
       if (outcome.status === 'switched') {
         if (!args.json) {
@@ -478,7 +609,7 @@ const discardCommand = defineCommand({
   meta: {
     name: 'discard',
     description:
-      'Remove a branch’s files from this machine, keeping its revisions (a project Tau has not opened before is adopted: `.gitignore`, `.gitattributes` and `git lfs install --local`)',
+      'Remove a branch’s files from this machine, keeping its history (a project Tau has not opened before is adopted: `.gitignore`, `.gitattributes` and `git lfs install --local`)',
   },
   args: {
     ...projectArguments,
@@ -489,11 +620,11 @@ const discardCommand = defineCommand({
     try {
       const outcome = await revisions.discard(args.branch);
       if (args.json) {
-        await emit({ kind: 'revision-discard', ok: outcome.status === 'discarded', ...outcome });
+        await emit({ kind: 'history-discard', ok: outcome.status === 'discarded', ...outcome });
       }
       if (outcome.status === 'discarded') {
         if (!args.json) {
-          await writeStdout(`Removed the files of ${args.branch}. Its revisions are still here.\n`);
+          await writeStdout(`Removed the files of ${args.branch}. Its history is still here.\n`);
         }
         return;
       }
@@ -505,7 +636,7 @@ const discardCommand = defineCommand({
 });
 
 /**
- * The Tau account a session token belongs to, as a revision records it (A1).
+ * The Tau account a session token belongs to, as a history entry records it (A1).
  *
  * The account id only: never the account's email, the OS login name or an
  * environment address. A token the API does not accept, or an API that cannot
@@ -549,7 +680,7 @@ const optionalSession = async (): Promise<
   return { apiBaseUrl, apiToken, ...(actor === undefined ? {} : { actor }) };
 };
 
-/** How a save's backup reads, after `Saved main · Rev 3.` */
+/** How a save's backup reads, after `Saved on main.` */
 const backupSentences = {
   backedUp: ' Backed up.',
   noRemote: ' Saved on this device.',
@@ -559,7 +690,7 @@ const saveCommand = defineCommand({
   meta: {
     name: 'save',
     description:
-      'Record this project’s files as a revision and back it up (set TAU_API_URL and TAU_AUTH_TOKEN to back up to Tau Cloud)',
+      'Save this project’s files in history and back them up (set TAU_API_URL and TAU_AUTH_TOKEN to back up to Tau Cloud)',
   },
   args: projectArguments,
   async run({ args }) {
@@ -568,7 +699,7 @@ const saveCommand = defineCommand({
       const outcome = await revisions.save();
       if (args.json) {
         await emit({
-          kind: 'revision-save',
+          kind: 'history-save',
           ok: outcome.status === 'saved' || outcome.status === 'unchanged',
           ...outcome,
         });
@@ -579,12 +710,12 @@ const saveCommand = defineCommand({
       if (args.json) {
         return;
       }
-      /* A revision that is saved and not yet backed up is still saved: D28's
+      /* An entry that is saved and not yet backed up is still saved: D28's
        * queue carries the push, so this exits 0 and says what is owed. */
       await writeStdout(
         outcome.status === 'unchanged'
-          ? `Nothing new to save. ${outcome.line}\n`
-          : `Saved ${outcome.line}.${
+          ? `Nothing new to save on ${outcome.line}.\n`
+          : `Saved on ${outcome.line}.${
               outcome.backup === 'backedUp' || outcome.backup === 'noRemote'
                 ? backupSentences[outcome.backup]
                 : ` Not backed up: ${outcome.reason ?? 'the backup did not finish.'}`
@@ -596,19 +727,31 @@ const saveCommand = defineCommand({
   },
 });
 
-/** `tau revisions` command family. */
-export const revisionsCommand = defineCommand({
+/** `tau history` command family: every save, autosave, agent turn, restore and merge (M11). */
+export const historyCommand = defineCommand({
   meta: {
-    name: 'revisions',
-    description: 'Record, read and move between a project’s revisions',
+    name: 'history',
+    description: 'Save, read and move between a project’s history',
   },
   subCommands: {
-    save: saveCommand,
     log: logCommand,
-    describe: describeCommand,
     diff: diffCommand,
-    tag: tagCommand,
+    describe: describeCommand,
+    save: saveCommand,
     switch: switchCommand,
     discard: discardCommand,
+  },
+});
+
+/** `tau version` command family: named, permanent points, V1, V2, … once per project (M11, Q13). */
+export const versionCommand = defineCommand({
+  meta: {
+    name: 'version',
+    description: 'Create, list and rename a project’s versions',
+  },
+  subCommands: {
+    create: versionCreateCommand,
+    list: versionListCommand,
+    rename: versionRenameCommand,
   },
 });

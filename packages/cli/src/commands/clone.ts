@@ -24,7 +24,7 @@ import type { ProjectRevisionVerbs } from '@taucad/host';
 import { defineCommand } from 'citty';
 
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
-import { requireGitToolchain } from '#commands/revisions.js';
+import { requireGitToolchain } from '#commands/history.js';
 import { requireApi } from '#commands/publish.js';
 
 /** One project as `GET /v1/projects` answers it, as this command uses it. */

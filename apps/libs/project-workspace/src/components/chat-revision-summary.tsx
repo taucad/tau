@@ -22,14 +22,14 @@ export function ChatRevisionSummary({
       open={isOpen}
       onOpenChange={setIsOpen}
       role='group'
-      aria-label='Turn revision'
+      aria-label='Changes from this request'
       className='mx-2 -mt-3 rounded-b-lg border border-t-0 bg-muted/40 pt-3'
     >
       <div className='flex items-start'>
         <CollapsibleTrigger asChild>
           <button
             type='button'
-            aria-label={`${label} · revision details`}
+            aria-label={`${label} · details`}
             className='group/revision flex min-w-0 flex-1 cursor-action items-start gap-2 rounded-b-lg px-2 py-1.5 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:focus-outline'
           >
             {status}

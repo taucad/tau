@@ -100,8 +100,8 @@ export function CloseProjectDialog({
                 </>
               )}
               <p>
-                Work already saved as revisions stays on this device. If backup is unavailable, those revisions stay
-                queued for the next connection. You can reopen the project any time.
+                Work already saved in history stays on this device. If backup is unavailable, those changes stay queued
+                for the next connection. You can reopen the project any time.
               </p>
               {isBeforeDelete && <p>This does not delete the project. Choose Delete again after its work has ended.</p>}
             </div>

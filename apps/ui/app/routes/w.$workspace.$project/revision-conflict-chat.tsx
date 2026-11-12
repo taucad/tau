@@ -26,7 +26,7 @@ const resolutionPrompt = (revisionId: string, paths: readonly string[]): string 
     ...paths.map((path) => `- ${path}`),
     '',
     'Keep both sets of changes where they do not fight, and pick the one that belongs where they do.',
-    `Read both versions with the revisions tool: { action: 'conflict', revision: '${revisionId}' }.`,
+    `Read both sides with the history tool: { action: 'conflict', revision: '${revisionId}' }.`,
   ].join('\n');
 
 /**

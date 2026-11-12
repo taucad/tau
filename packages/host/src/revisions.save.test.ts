@@ -192,7 +192,7 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
       await revisions.close();
     }
 
-    expect(outcome).toMatchObject({ status: 'saved', line: 'main · Rev 2', backup: 'backedUp' });
+    expect(outcome).toMatchObject({ status: 'saved', line: 'main', backup: 'backedUp' });
     const saved = outcome.status === 'saved' ? outcome.revisionId : '';
     /* The remote holds exactly the revision the verb reported, with the new file in it. */
     expect(git(bare, ['rev-parse', 'refs/heads/main'])).toBe(saved);
@@ -213,7 +213,7 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
       expect(await revisions.openFromRemote()).toMatchObject({ status: 'opened' });
       const before = git(bare, ['rev-parse', 'refs/heads/main']);
 
-      expect(await revisions.save()).toEqual({ status: 'unchanged', line: 'main · Rev 1' });
+      expect(await revisions.save()).toEqual({ status: 'unchanged', line: 'main' });
       expect(git(bare, ['rev-parse', 'refs/heads/main'])).toBe(before);
     } finally {
       await revisions.close();

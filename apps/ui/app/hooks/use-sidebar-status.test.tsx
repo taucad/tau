@@ -683,9 +683,13 @@ describe('use-sidebar-status — pin (d): the project row rolls up its chats (A3
       expect(collapsed('bracket')).toEqual({
         mark: 'attention',
         count: 2,
-        sentence: 'Live · 2 need you · Save not confirmed',
+        sentence: 'Live · 2 need you · Couldn’t confirm the save',
       });
-      expect(expanded('bracket')).toEqual({ mark: 'attention', count: 2, sentence: 'Live · Save not confirmed' });
+      expect(expanded('bracket')).toEqual({
+        mark: 'attention',
+        count: 2,
+        sentence: 'Live · Couldn’t confirm the save',
+      });
     } finally {
       publishRecordIssue('bracket', 'entries', undefined);
       publishRecordIssue('bracket', 'layout', undefined);
@@ -1212,7 +1216,7 @@ describe('use-sidebar-status — pin (R13): closing is visible, never silent', (
     revisions('bracket', { sync: { state: 'pending', pendingCount: 1 } });
     expect(
       selectProjectRow(readProjectStatus(fakeRegistry.actor, fakeChats, 'bracket'), idleWindowMilliseconds).detail,
-    ).toBe('Backing up 1 revision, then closing…');
+    ).toBe('Backing up 1 change, then closing…');
 
     revisions('bracket');
     expect(

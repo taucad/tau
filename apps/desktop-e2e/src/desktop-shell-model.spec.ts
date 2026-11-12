@@ -227,8 +227,8 @@ it('should evaluate, test, capture and export shell-authored bytes through one r
       )
       .toBeGreaterThan(4);
     phase = 'revision marker';
-    const marker = page.locator('[role="status"][aria-label="Turn revision status"]');
-    await expect.poll(async () => marker.allTextContents()).toEqual([expect.stringMatching(/^Rev \d+ saved/u)]);
+    const marker = page.locator('[role="status"][aria-label="Save status"]');
+    await expect.poll(async () => marker.allTextContents()).toEqual([expect.stringMatching(/^Saved/u)]);
     const eventsPath = join(root, '.tau/chats', activeChatId(page), 'events.jsonl');
     phase = 'durable settlement';
     const settlements = await finalizedTurns(eventsPath);

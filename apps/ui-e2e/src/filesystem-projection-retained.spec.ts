@@ -671,7 +671,14 @@ test.describe.skipIf(!revisionsManualEnabled)('production revisions browser manu
     await sendDraft('Change the geometry for a second revision.');
     await target.expectVisible(selectors.getByText('Completed size 20.', { exact: true }).last(), 120_000);
     await expectLogInvariant(chatId, 2);
-    await target.expectVisible(selectors.getByRole('button', { name: /^Open Revisions\..*Rev [2-9]/u }), 120_000);
+    /* Two turns, two saves: an entry has no number (M11), so each turn's own marker says *Saved*. */
+    await target.expectVisible(
+      selectors
+        .getByRole('status', { name: 'Save status' })
+        .filter({ hasText: /^Saved\b/u })
+        .nth(1),
+      120_000,
+    );
     const project = await projectionProject();
     const closure = await exportProjectionProjectClosure(project);
     expect(closure.files.some((file) => file.path.startsWith('.git/'))).toBe(true);

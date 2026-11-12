@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.10.0 (2026-11-12)
+
+### Features
+
+- feat(revisions): Name imported commits by their git author and register linked projects as GitHub (B3, B4c) (#1827) (43ecc4fbd)
+- feat(chat): Route the kernel in turn from the chat's kernel preference (AKS M4) (#1825) (394893654)
+- feat(revisions): Number versions once per project, allocated by Tau Cloud (B6) (#1816) (2252cbe73)
+- feat(revisions)!: Require a typed identity and write trailer version 2 (B1) (#1818) (84e6d2c51)
+- feat(api-agent-observability): Carry ledger cost on each generation and drop tau.financial rows (LW4) (#1811) (618ca6da0)
+- feat(api-agent-observability): Write ratings, run termination and task success as Langfuse scores (LW7) (#1809) (e286e92ea)
+- feat(agent-observability): Name tools and send run root and tool content from every host (LW5, LW6) (#1808) (b9b45beda)
+- feat(revisions): Start every project with V1 · Start (#1766) (1c9fd4ee3)
+
+### Fixes
+
+- fix(api-database): Close the Supabase Data API and require signed bearer tokens (#1829) (1cfbd0870)
+- fix(revisions): Write nothing tracked at open and fold Tau's setup entries (#1756) (cf6478ef2)
+- fix(billing): Accept plan_expiry journal kind on the balance wire (#1820) (18401b34f)
+
+### Other changes
+
+- test(api): Add the kernel routing L2 runner on a real tau mcp process (AKS-3b) (#1828) (63284ed05)
+- Langfuse LW17: host labels from browser, desktop and daemon, and per-run release and tags (#1819) (d516ab2d9)
+- refactor(agent-host): Delete two model-call middlewares nothing calls (#1753) (b8a5e12a5)
+- test(api): Add the kernel routing spike runner and live suite (AKS-S1) (#1783) (c3ed122d8)
+- Content evidence: cap parts in UTF-8 bytes, label interrupted output truncated (#1817) (2f39ceeac)
+- test(ui): Add the UI-wide React event-layer lint ceiling (#1710) (b4602c669)
+
 ## 0.9.0 (2026-11-11)
 
 ### Features

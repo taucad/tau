@@ -7,6 +7,8 @@
  * 3. `failed`: `rendererFailed`
  * 4. `lost`: `contextLost` (a surface re-attached after its loss)
  * 5. `presented`: `hostCreated`, `framePresented`
+ *
+ * The camera rows drive a real camera actor: the canvas presents its viewport and its grid clip policy on it.
  */
 import type { RootState } from '@react-three/fiber';
 import { guardActors } from '@taucad/xstate-testing/inspect';
@@ -14,6 +16,8 @@ import { pathTable, unansweredEvents, unreachedStates } from '@taucad/xstate-tes
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createCallbackLogic } from 'xstate';
 import type { AnyMachineSnapshot } from 'xstate';
+import { createCameraView } from '@taucad/camera';
+import { cameraMachine } from '@taucad/camera/machine';
 import { createCanvasHostLogic } from '#graphics/three/three-canvas-instance-host.js';
 import { subscribeViewerLoadTiming } from '#lib/viewer-load-timing.js';
 import type { ViewerLoadSpan } from '#lib/viewer-load-timing.js';
@@ -21,10 +25,15 @@ import {
   canvasEventTypes,
   canvasIgnoredEvents,
   canvasMachine,
+  resolveGridClipPolicy,
   selectCanvasAwaitingFrame,
   selectCanvasBackend,
 } from '#machines/canvas.machine.js';
 import type { CanvasEvent, CanvasHostCommand, CanvasInput, CanvasSurface } from '#machines/canvas.machine.js';
+import {
+  infiniteGridFadeEndVisibleSpans,
+  infiniteGridPresentationPlaneByUpDirection,
+} from '#graphics/three/utils/infinite-grid-frame.js';
 import { webglContextMachine } from '#machines/webgl-context.machine.js';
 
 const surface: CanvasSurface = { width: 800, height: 600, pixelRatio: 2 };
@@ -44,6 +53,7 @@ const samples: Record<CanvasEvent['type'], readonly CanvasEvent[]> = {
   rendererFailed: [{ type: 'rendererFailed', failure: { kind: 'renderer', message: 'no context' } }],
   framePresented: [{ type: 'framePresented' }],
   contextLost: [{ type: 'contextLost' }],
+  gridChanged: [{ type: 'gridChanged', grid: { enabled: true, upDirection: 'y' } }],
 };
 const pathOptions = {
   input: { canvasId: 'c', kind: 'canvas' } satisfies CanvasInput,
@@ -176,7 +186,7 @@ describe('canvas lifecycle', () => {
     expect(spans.map(({ phase, outcome }) => [phase, outcome])).toEqual([['canvas.mount', 'ok']]);
     // The canvas may have drawn before the observer subscribed: it asks for the one frame it observes.
     expect(loop.invalidate).toHaveBeenCalledTimes(1);
-    expect(loop.subscribers.map(({ priority }) => priority)).toEqual([6]);
+    expect(loop.subscribers.map(({ priority }) => priority)).toEqual([-2, 6]);
 
     // Submitting the frame is not presenting it: nothing is reported until two animation frames later.
     loop.frame();
@@ -198,7 +208,7 @@ describe('canvas lifecycle', () => {
     frames.run();
     frames.run();
     expect(frames.pending).toBe(0);
-    expect(loop.subscribers.map(({ priority }) => priority)).toEqual([6]);
+    expect(loop.subscribers.map(({ priority }) => priority)).toEqual([-2, 6]);
     expect(loop.invalidate).toHaveBeenCalledTimes(1);
     canvas.stop();
   });
@@ -293,7 +303,7 @@ describe('canvas lifecycle', () => {
     canvas.send(hostCreated(host));
     canvas.send(hostCreated(host));
     expect(starts).toHaveBeenCalledOnce();
-    expect(Object.keys(canvas.getSnapshot().children)).toEqual(['loadSpans', 'host']);
+    expect(Object.keys(canvas.getSnapshot().children).toSorted()).toEqual(['host', 'loadSpans']);
     canvas.stop();
   });
 
@@ -378,5 +388,161 @@ describe('canvas lifecycle', () => {
     expect(budget.getSnapshot().context.count).toBe(0);
     canvas.stop();
     expect(spans).toEqual([]);
+  });
+});
+
+/** A running camera, as graphics holds it, presenting at 1280 by 720. */
+const startCamera = () =>
+  createActor(cameraMachine, {
+    input: {
+      initialView: createCameraView({
+        frameId: 'tau:root',
+        requestedVerticalFieldOfView: 60,
+        perspectiveZoom: 1,
+        target: [0, 0, 0],
+        direction: [1, -1, 0.7],
+        up: [0, 0, 1],
+        verticalSpan: 10,
+        viewport: { width: 1280, height: 720, pixelRatio: 1 },
+        bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
+      }),
+    },
+  }).start();
+
+const gridOn = { enabled: true, upDirection: 'z' } as const;
+const gridPolicy = (upDirection: 'x' | 'y' | 'z') => ({
+  farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
+  presentationPlane: infiniteGridPresentationPlaneByUpDirection[upDirection],
+});
+
+describe('canvas camera presentation', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('should hand the camera the surface it is created with', () => {
+    const camera = startCamera();
+    const canvas = startCanvas({ ...defaultInput, camera });
+    expect(camera.getSnapshot().context.view.viewport).toEqual({ width: 1280, height: 720, pixelRatio: 1 });
+    canvas.send(hostCreated());
+    expect(camera.getSnapshot().context.view.viewport).toEqual(surface);
+    expect(camera.getSnapshot().context.lastChange.source).toBe('viewport');
+    canvas.stop();
+    camera.stop();
+  });
+
+  it('should resize the camera in the same macrostep as the resize', () => {
+    const camera = startCamera();
+    const canvas = startCanvas({ ...defaultInput, camera });
+    canvas.send(hostCreated());
+    // Whatever reads the camera once the resize is handled, such as the controls stepping in the same frame, reads the
+    // new viewport.
+    canvas.send({ type: 'surfaceResized', surface: { width: 640, height: 480, pixelRatio: 2 } });
+    expect(camera.getSnapshot().context.view.viewport).toEqual({ width: 640, height: 480, pixelRatio: 2 });
+    canvas.stop();
+    camera.stop();
+  });
+
+  it('should present a resize from the frame loop before the frame renders', () => {
+    animationFrames();
+    const loop = scriptRoot();
+    const camera = startCamera();
+    const canvas = startCanvas({ ...defaultInput, camera });
+    canvas.send(hostCreated(createCanvasHostLogic({ root: loop.root, isRetired: () => false })));
+    let viewportAtRender: unknown;
+    // A stand-in for the render pass, after every pre-render subscriber.
+    loop.subscribers.push({
+      ref: {
+        current: () => {
+          viewportAtRender = camera.getSnapshot().context.view.viewport;
+        },
+      },
+      priority: 1,
+    });
+    loop.root.size.width = 1024;
+    loop.frame();
+    expect(viewportAtRender).toEqual({ width: 1024, height: 600, pixelRatio: 1 });
+    canvas.stop();
+    camera.stop();
+  });
+
+  it('should make no camera change for a viewport the camera already presents, nor for one without area', () => {
+    const camera = startCamera();
+    const canvas = startCanvas({ ...defaultInput, camera });
+    canvas.send(hostCreated(idleHost, { width: 1280, height: 720, pixelRatio: 1 }));
+    const { revision } = camera.getSnapshot().context;
+    canvas.send({ type: 'surfaceResized', surface: { width: 0, height: 720, pixelRatio: 1 } });
+    expect(camera.getSnapshot().context.revision).toBe(revision);
+    canvas.send({ type: 'surfaceResized', surface: { width: 1280, height: 720, pixelRatio: 1 } });
+    expect(camera.getSnapshot().context.revision).toBe(revision);
+    expect(camera.getSnapshot().context.view.viewport).toEqual({ width: 1280, height: 720, pixelRatio: 1 });
+    canvas.stop();
+    camera.stop();
+  });
+
+  it('should hold the grid clip policy from the start and clear it when the canvas stops', () => {
+    const camera = startCamera();
+    const canvas = startCanvas({ ...defaultInput, camera, grid: gridOn });
+    expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy('z'));
+    canvas.stop();
+    expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
+    camera.stop();
+  });
+
+  it('should follow the grid graphics shows: off, on, and across a new world up', () => {
+    const camera = startCamera();
+    const canvas = startCanvas({ ...defaultInput, camera, grid: { enabled: false, upDirection: 'z' } });
+    expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
+    canvas.send({ type: 'gridChanged', grid: gridOn });
+    expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy('z'));
+    canvas.send(hostCreated());
+    canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'x' } });
+    expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy('x'));
+    canvas.send({ type: 'gridChanged', grid: { enabled: false, upDirection: 'x' } });
+    expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
+    canvas.stop();
+    camera.stop();
+  });
+
+  it('should clear the clip policy and stop presenting when the context is lost or the renderer fails', () => {
+    for (const ending of [{ type: 'contextLost' }, samples.rendererFailed[0]!] as const) {
+      const camera = startCamera();
+      const canvas = startCanvas({ ...defaultInput, camera, grid: gridOn });
+      canvas.send(hostCreated());
+      canvas.send(ending);
+      expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
+      const { revision } = camera.getSnapshot().context;
+      canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'y' } });
+      canvas.send({ type: 'surfaceResized', surface: { width: 320, height: 240, pixelRatio: 1 } });
+      expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
+      expect(camera.getSnapshot().context.revision).toBe(revision);
+      canvas.stop();
+      camera.stop();
+    }
+  });
+
+  it('should present nothing on the camera from a placeholder', () => {
+    const camera = startCamera();
+    const placeholder = startCanvas({ canvasId: 'p', kind: 'placeholder', camera, grid: gridOn });
+    placeholder.send(hostCreated());
+    placeholder.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'y' } });
+    expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
+    expect(camera.getSnapshot().context.view.viewport).toEqual({ width: 1280, height: 720, pixelRatio: 1 });
+    placeholder.stop();
+    camera.stop();
+  });
+
+  it('should leave the camera alone once graphics has stopped it', () => {
+    const camera = startCamera();
+    const canvas = startCanvas({ ...defaultInput, camera, grid: gridOn });
+    camera.stop();
+    expect(() => {
+      canvas.stop();
+    }).not.toThrow();
+  });
+
+  it('should have no clip policy without a grid', () => {
+    expect(resolveGridClipPolicy({ enabled: false, upDirection: 'y' })).toBeUndefined();
+    expect(resolveGridClipPolicy({ enabled: true, upDirection: 'y' })).toEqual(gridPolicy('y'));
   });
 });

@@ -66,8 +66,7 @@ type StubRootState = {
 };
 const rigCamera = new PerspectiveCamera();
 const orthographicCamera = new OrthographicCamera();
-const setClipPlanes = vi.fn();
-const cameraRig = { activeCamera: rigCamera, perspectiveCamera: rigCamera, orthographicCamera, setClipPlanes };
+const cameraRig = { activeCamera: rigCamera, perspectiveCamera: rigCamera, orthographicCamera };
 /** Frame callbacks registered inside the stub root, run by a test as R3F's loop would. */
 type StubFrameState = { size: { width: number; height: number } };
 const frameCallbacks = vi.hoisted(
@@ -306,6 +305,8 @@ vi.mock('#graphics/three/adapters/controls-adapter.js', async () => {
 });
 
 const canvas = () => graphicsHolder.current?.getSnapshot().context.canvas?.ref;
+/** The view camera graphics holds, which the canvas presents on. */
+const camera = () => graphicsHolder.current!.getSnapshot().context.cameraRef.getSnapshot().context;
 const controlsAdapter = () => graphicsHolder.current?.getSnapshot().context.controlsAdapter;
 
 /** A canvas under a Suspense boundary that a test suspends (hiding the canvas) and then reveals. */
@@ -374,7 +375,6 @@ describe('ThreeCanvasInstance', () => {
     latestCanvasState = undefined;
     stubRootCamera = new PerspectiveCamera();
     stubCoordinateSystem = WebGLCoordinateSystem;
-    setClipPlanes.mockClear();
     rendererFailure.error = undefined;
     frameCallbacks.length = 0;
     stubInvalidate.mockClear();
@@ -613,7 +613,7 @@ describe('ThreeCanvasInstance', () => {
     await waitFor(() => {
       expect(screen.getByText('Graphics context lost')).toBeInTheDocument();
     });
-    expect(setClipPlanes).toHaveBeenLastCalledWith(undefined);
+    expect(camera().clipPolicy).toBeUndefined();
   });
 
   it('preserves the lighting owner exposure when the canvas finishes mounting', async () => {
@@ -911,59 +911,49 @@ describe('ThreeCanvasInstance', () => {
     }
   });
 
-  it('installs and clears grid presentation clipping during the canvas layout lifecycle', () => {
+  it('presents the grid clip policy graphics shows on the camera while the canvas is mounted', () => {
+    const grid = (upDirection: 'x' | 'y' | 'z') => ({
+      farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
+      presentationPlane: infiniteGridPresentationPlaneByUpDirection[upDirection],
+    });
     const { rerender, unmount } = render(
       <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
         {null}
       </ThreeCanvasInstance>,
     );
+    // From the commit that mounts the canvas, before its renderer exists.
+    expect(camera().clipPolicy).toEqual(grid('z'));
 
-    expect(setClipPlanes).toHaveBeenLastCalledWith({
-      farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
-      presentationPlane: infiniteGridPresentationPlaneByUpDirection.z,
-    });
-    const installedCallCount = setClipPlanes.mock.calls.length;
-
+    // The canvas props do not drive the camera: graphics' grid and world up do.
     rerender(
       <ThreeCanvasInstance className='unchanged-policy' enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
         {null}
       </ThreeCanvasInstance>,
     );
-    expect(setClipPlanes).toHaveBeenCalledTimes(installedCallCount);
-
-    rerender(
-      <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={() => undefined} upDirection='x'>
-        {null}
-      </ThreeCanvasInstance>,
-    );
-    expect(setClipPlanes).toHaveBeenCalledTimes(installedCallCount + 1);
-    expect(setClipPlanes).toHaveBeenLastCalledWith({
-      farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
-      presentationPlane: infiniteGridPresentationPlaneByUpDirection.x,
+    expect(camera().clipPolicy).toEqual(grid('z'));
+    act(() => {
+      graphicsHolder.current?.send({ type: 'setUpDirection', payload: 'x' });
     });
-
-    rerender(
-      <ThreeCanvasInstance enableGrid={false} graphicsBackend='webgl' onRetry={() => undefined}>
-        {null}
-      </ThreeCanvasInstance>,
-    );
-    expect(setClipPlanes).toHaveBeenLastCalledWith(undefined);
-
-    rerender(
-      <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
-        {null}
-      </ThreeCanvasInstance>,
-    );
-    expect(setClipPlanes).toHaveBeenLastCalledWith({
-      farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
-      presentationPlane: infiniteGridPresentationPlaneByUpDirection.z,
+    expect(camera().clipPolicy).toEqual(grid('x'));
+    act(() => {
+      graphicsHolder.current?.send({ type: 'setGridVisibility', payload: false });
     });
+    expect(camera().clipPolicy).toBeUndefined();
+    act(() => {
+      graphicsHolder.current?.send({ type: 'setGridVisibility', payload: true });
+    });
+    expect(camera().clipPolicy).toEqual(grid('x'));
 
-    const clearCallsBeforeUnmount = setClipPlanes.mock.calls.filter(([policy]) => policy === undefined).length;
     unmount();
-    expect(setClipPlanes).toHaveBeenLastCalledWith(undefined);
-    expect(setClipPlanes.mock.calls.filter(([policy]) => policy === undefined)).toHaveLength(
-      clearCallsBeforeUnmount + 1,
-    );
+    expect(camera().clipPolicy).toBeUndefined();
+  });
+
+  it('presents the surface size on the camera from the renderer it creates', async () => {
+    const view = render(<KeyedThreeCanvas canvasKey='viewport' />);
+    await waitFor(() => {
+      expect(backend()).toBe('webgl');
+    });
+    expect(camera().view.viewport).toEqual({ width: 800, height: 600, pixelRatio: 1 });
+    view.unmount();
   });
 });

@@ -47,7 +47,6 @@ import { resolveMetersPerRenderUnit, shouldRebaseRenderFrame, shouldRescaleRende
 import type { RenderFrame } from '@taucad/spatial';
 import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
 import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
-import { retargetCameraControls } from '#graphics/three/controls/tau-camera-controls.jsx';
 import { syncControlsLookAt } from '#graphics/three/utils/camera-controls-adapter.js';
 import type { ControlsAdapterLogic } from '#machines/graphics.machine.js';
 
@@ -61,8 +60,11 @@ type FrameSubscribe = (
   store: Readonly<{ getState: () => RootState }>,
 ) => () => void;
 
-/** Before `camera-controls` updates (-1), so a resized canvas presents its new viewport in the frame that resized. */
-const viewportPriority = -2;
+/**
+ * The controls step where R3F's controls do (-1): after the canvas reports a resize to the camera (-2), before the
+ * frame renders.
+ */
+const tickPriority = -1;
 
 const upAxes = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] } as const satisfies Record<string, CameraVector>;
 
@@ -85,14 +87,51 @@ export type ControlsAdapterDependencies = Readonly<{
   getUpAxis: () => keyof typeof upAxes;
 }>;
 
-const getPixelRatio = (): number => {
-  const pixelRatio: unknown = Reflect.get(globalThis, 'devicePixelRatio');
-  return Math.min(typeof pixelRatio === 'number' && pixelRatio > 0 ? pixelRatio : 1, 2);
+/**
+ * The parts of a `camera-controls` instance that {@link retargetCameraControls} reads and writes.
+ *
+ * @public
+ */
+export type RetargetableCameraControls = Pick<CameraControlsImpl, 'cancel' | 'updateCameraUp'> & {
+  camera: ThreeCamera;
+  mouseButtons: { wheel: CameraControlsImpl['mouseButtons']['wheel'] };
+  touches: { two: CameraControlsImpl['touches']['two'] };
 };
 
-/** The viewport the camera presents for. */
-const selectViewport = (camera: ThreeCameraRig['actorRef']): CameraDriverSnapshot['view']['viewport'] =>
-  camera.getSnapshot().context.view.viewport;
+/**
+ * Points the controls at a new camera, swapping wheel and pinch between dolly and zoom to suit its projection.
+ *
+ * @param options - The controls and the camera they should drive.
+ * @returns Whether the camera changed.
+ * @public
+ */
+export const retargetCameraControls = ({
+  controls,
+  camera,
+}: Readonly<{ controls: RetargetableCameraControls; camera: ThreeCamera }>): boolean => {
+  if (controls.camera === camera) {
+    return false;
+  }
+  controls.cancel();
+  controls.camera = camera;
+  if (camera instanceof OrthographicCamera) {
+    if (controls.mouseButtons.wheel === CameraControlsImpl.ACTION.DOLLY) {
+      controls.mouseButtons.wheel = CameraControlsImpl.ACTION.ZOOM;
+    }
+    if (controls.touches.two === CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK) {
+      controls.touches.two = CameraControlsImpl.ACTION.TOUCH_ZOOM_TRUCK;
+    }
+  } else {
+    if (controls.mouseButtons.wheel === CameraControlsImpl.ACTION.ZOOM) {
+      controls.mouseButtons.wheel = CameraControlsImpl.ACTION.DOLLY;
+    }
+    if (controls.touches.two === CameraControlsImpl.ACTION.TOUCH_ZOOM_TRUCK) {
+      controls.touches.two = CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK;
+    }
+  }
+  controls.updateCameraUp();
+  return true;
+};
 
 let installed = false;
 const installCameraControls = (): void => {
@@ -352,18 +391,15 @@ export const createControlsAdapter = ({
       }
     };
 
-    // Viewport: the canvas's CSS size, read before the controls update in every frame.
-    const viewportObserver = {
-      current(state: RootState): void {
+    /*
+     * The tick: once per frame of this canvas's loop, the controls step by the frame's delta (their damping and
+     * transitions), unless they are disabled (the view cube disables them while it turns the camera).
+     */
+    const ticker = {
+      current(state: RootState, delta: number): void {
         followSurface(state);
-        const { width, height } = state.size;
-        if (width <= 0 || height <= 0) {
-          return;
-        }
-        const pixelRatio = getPixelRatio();
-        const viewport = selectViewport(camera);
-        if (viewport.width !== width || viewport.height !== height || viewport.pixelRatio !== pixelRatio) {
-          camera.send({ type: 'setViewport', viewport: { width, height, pixelRatio } });
+        if (controls.enabled) {
+          controls.update(delta);
         }
       },
     };
@@ -379,8 +415,8 @@ export const createControlsAdapter = ({
     for (const [type, listener] of listeners) {
       controls.addEventListener(type, listener);
     }
-    viewportObserver.current(root.get());
-    const unsubscribeFrame = (root.internal.subscribe as FrameSubscribe)(viewportObserver, viewportPriority, {
+    followSurface(root.get());
+    const unsubscribeFrame = (root.internal.subscribe as FrameSubscribe)(ticker, tickPriority, {
       getState: root.get,
     });
 

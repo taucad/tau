@@ -20,10 +20,6 @@ import { Scene } from '#graphics/three/scene.jsx';
 import { AxesHelper } from '#graphics/three/react/axes-helper.jsx';
 import { ThreeGraphicsBackendProvider } from '#graphics/three/three-graphics-backend-context.jsx';
 import type { ThreeContextProperties } from '#graphics/three/three-viewer-properties.js';
-import {
-  infiniteGridFadeEndVisibleSpans,
-  infiniteGridPresentationPlaneByUpDirection,
-} from '#graphics/three/utils/infinite-grid-frame.js';
 import { setRaycasterFromCamera } from '#graphics/three/utils/raycaster-from-camera.js';
 import { WebGpuInspectorOverlay } from '#graphics/three/webgpu-inspector-overlay.jsx';
 import { cn } from '@taucad/ui/utils/cn';
@@ -96,7 +92,9 @@ const failureError = (failure: CanvasFailure): Error =>
 /**
  * One R3F `<Canvas>` mount. Its renderer lifecycle (creating, ready, presented, lost, failed) is the graphics actor's
  * canvas child, attached from the surface element's ref and hosted from R3F's `onCreated`; this component only renders
- * the canvas, its context-lost fallback or its failure from that actor's state.
+ * the canvas, its context-lost fallback or its failure from that actor's state. The canvas actor also presents the
+ * view's camera on the surface (its viewport and its grid clip policy) and graphics' controls adapter steps the
+ * controls each frame, so nothing here sends, subscribes or times.
  * `ThreeProvider` mounts this with `key` = `${graphicsBackend}:${retryCount}`, so each mount is a new canvas actor.
  * @public
  */
@@ -112,7 +110,8 @@ export function ThreeCanvasInstance({
   enablePan = false,
   secondaryMouseButtonMode = 'camera-pan',
   enableDamping = false,
-  upDirection = 'z',
+  // Graphics' world up decides the grid and the camera's clip policy, which the canvas actor presents.
+  upDirection: _upDirection,
   className,
   stageOptions,
   postProcessingSettings,
@@ -257,24 +256,6 @@ export function ThreeCanvasInstance({
       glProperty.bindCanvas(canvas ?? undefined);
     },
     [glProperty],
-  );
-
-  useLayoutEffect(() => {
-    cameraRig.setClipPlanes(
-      enableGrid && !isContextLost
-        ? {
-            farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
-            presentationPlane: infiniteGridPresentationPlaneByUpDirection[upDirection],
-          }
-        : undefined,
-    );
-  }, [cameraRig, enableGrid, isContextLost, upDirection]);
-
-  useLayoutEffect(
-    () => () => {
-      cameraRig.setClipPlanes(undefined);
-    },
-    [cameraRig],
   );
 
   const onCanvasCreated = useCallback(

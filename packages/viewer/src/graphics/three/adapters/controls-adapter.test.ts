@@ -1,15 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import CameraControlsImpl from 'camera-controls';
-import { OrthographicCamera, Raycaster, Scene, Vector3 } from 'three';
+import { OrthographicCamera, PerspectiveCamera as ThreePerspectiveCamera, Raycaster, Scene, Vector3 } from 'three';
 import type { Camera, PerspectiveCamera } from 'three';
-import { createActor, createAsyncLogic } from 'xstate';
+import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { Actor, InspectionEvent } from 'xstate';
 import type { RootState } from '@react-three/fiber';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import { createThreeCameraRig } from '@taucad/three/camera';
 import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
 import type { CameraOwnedSettings } from '#graphics/graphics-settings.js';
-import { createControlsAdapter } from '#graphics/three/adapters/controls-adapter.js';
+import { createControlsAdapter, retargetCameraControls } from '#graphics/three/adapters/controls-adapter.js';
+import type { RetargetableCameraControls } from '#graphics/three/adapters/controls-adapter.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { GraphicsCameraRef } from '#machines/graphics.machine.js';
 import { asCameraActor } from '#services/graphics-camera-registry.js';
@@ -107,6 +108,14 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
     controls: () => state.controls as unknown as CameraControlsImpl,
     attach() {
       graphics.send({ type: 'canvasAttached', canvasId: 'canvas', kind: 'canvas' });
+      // The canvas actor hands the camera the surface's viewport when its renderer exists, as `onCreated` does.
+      graphics.getSnapshot().context.canvas?.ref.send({
+        type: 'hostCreated',
+        backend: 'webgl',
+        surface: { width: 800, height: 600, pixelRatio: 1 },
+        domElement: document.createElement('canvas'),
+        host: createCallbackLogic(() => undefined),
+      });
       graphics.send({
         type: 'controlsAttached',
         canvasId: 'canvas',
@@ -125,10 +134,6 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
 };
 
 describe('controls adapter', () => {
-  beforeEach(() => {
-    vi.spyOn(globalThis, 'devicePixelRatio', 'get').mockReturnValue(1);
-  });
-
   afterEach(() => {
     for (const { graphics, rig } of harnesses.splice(0)) {
       graphics.stop();
@@ -414,5 +419,77 @@ describe('controls adapter', () => {
 
     expect(harness.graphics.getSnapshot().context.controlsAdapter).toBe(first);
     expect(harness.controls()).toBe(controls);
+  });
+
+  it('steps the controls by the frame delta once per frame, before the frame renders, while they are enabled', () => {
+    const harness = createHarness();
+    harness.attach();
+    const subscriptions = vi.mocked(harness.state.internal.subscribe).mock.calls as unknown as Array<
+      [{ current: (state: RootState, delta: number) => void }, number]
+    >;
+    // One tick for the canvas: after the canvas reports a resize (-2), where R3F's own controls step (-1).
+    expect(subscriptions.map(([, priority]) => priority)).toEqual([-1]);
+    const [[ticker]] = subscriptions as [[{ current: (state: RootState, delta: number) => void }, number]];
+    const update = vi.spyOn(harness.controls(), 'update');
+
+    ticker.current(harness.state, 1 / 60);
+    expect(update.mock.calls).toEqual([[1 / 60]]);
+
+    // The view cube disables the controls while it turns the camera.
+    harness.controls().enabled = false;
+    ticker.current(harness.state, 1 / 60);
+    expect(update).toHaveBeenCalledOnce();
+  });
+
+  it('stops stepping the controls when its canvas leaves', () => {
+    const harness = createHarness();
+    const unsubscribe = vi.fn();
+    vi.mocked(harness.state.internal.subscribe).mockReturnValue(unsubscribe);
+    harness.attach();
+    harness.graphics.send({ type: 'canvasDetached', canvasId: 'canvas' });
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+});
+
+describe('retargetCameraControls', () => {
+  it('retargets one controls instance and projection-specific input mappings', () => {
+    const perspective = new ThreePerspectiveCamera();
+    const orthographic = new OrthographicCamera();
+    const controls: RetargetableCameraControls = {
+      camera: perspective,
+      cancel: vi.fn(),
+      mouseButtons: { wheel: CameraControlsImpl.ACTION.DOLLY },
+      touches: { two: CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK },
+      updateCameraUp: vi.fn(),
+    };
+
+    expect(retargetCameraControls({ controls, camera: orthographic })).toBe(true);
+    expect(controls.camera).toBe(orthographic);
+    expect(controls.mouseButtons.wheel).toBe(CameraControlsImpl.ACTION.ZOOM);
+    expect(controls.touches.two).toBe(CameraControlsImpl.ACTION.TOUCH_ZOOM_TRUCK);
+    expect(controls.cancel).toHaveBeenCalledOnce();
+    expect(controls.updateCameraUp).toHaveBeenCalledOnce();
+
+    expect(retargetCameraControls({ controls, camera: orthographic })).toBe(false);
+    expect(controls.cancel).toHaveBeenCalledOnce();
+
+    expect(retargetCameraControls({ controls, camera: perspective })).toBe(true);
+    expect(controls.mouseButtons.wheel).toBe(CameraControlsImpl.ACTION.DOLLY);
+    expect(controls.touches.two).toBe(CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK);
+  });
+
+  it('preserves a disabled wheel policy while retargeting to orthographic', () => {
+    const controls: RetargetableCameraControls = {
+      camera: new ThreePerspectiveCamera(),
+      cancel: vi.fn(),
+      mouseButtons: { wheel: CameraControlsImpl.ACTION.NONE },
+      touches: { two: CameraControlsImpl.ACTION.NONE },
+      updateCameraUp: vi.fn(),
+    };
+
+    retargetCameraControls({ controls, camera: new OrthographicCamera() });
+
+    expect(controls.mouseButtons.wheel).toBe(CameraControlsImpl.ACTION.NONE);
+    expect(controls.touches.two).toBe(CameraControlsImpl.ACTION.NONE);
   });
 });

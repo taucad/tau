@@ -19,6 +19,13 @@
  * stop) and the project-open load spans `canvas.mount` (start to `ready`) and `frame.first`
  * (`ready` to `presented`), which are cancelled when the canvas leaves first.
  *
+ * While a Three canvas can draw (from start until it is lost, fails or stops) it presents the view's camera on its
+ * surface, through its `cameraSurface` child:
+ * - the surface's size reaches the camera as `setViewport` in the macrostep that reports it (`hostCreated`,
+ *   `surfaceResized`), so the frame that resized presents the new viewport;
+ * - the camera's clip policy holds the infinite grid's far padding and presentation plane while graphics shows the
+ *   grid, following graphics' `gridChanged`, and is cleared when the canvas stops drawing.
+ *
  * Every fact here is ephemeral: it is derived from the mounted surface and never persisted or seeded.
  *
  * @module
@@ -26,7 +33,12 @@
 
 import { createCallbackLogic, setup, types } from 'xstate';
 import type { ActorRefFrom, CallbackActorLogic, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
+import type { CameraClipPolicy, cameraMachine } from '@taucad/camera/machine';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
+import {
+  infiniteGridFadeEndVisibleSpans,
+  infiniteGridPresentationPlaneByUpDirection,
+} from '#graphics/three/utils/infinite-grid-frame.js';
 import { beginViewerLoadSpan } from '#lib/viewer-load-timing.js';
 import type { FinishViewerLoadSpan } from '#lib/viewer-load-timing.js';
 import { eventSchemas } from '#machines/machine-schemas.js';
@@ -86,6 +98,20 @@ export type CanvasHostLogic = CallbackActorLogic<CanvasHostCommand, undefined>;
 type WebglContextRef = ActorRefFrom<typeof webglContextMachine>;
 
 /**
+ * The view's camera, which a canvas presents on its surface.
+ *
+ * @public
+ */
+export type CanvasCameraRef = ActorRefFrom<typeof cameraMachine>;
+
+/**
+ * What graphics shows of the infinite grid: whether it is on, and the world up axis it lies across.
+ *
+ * @public
+ */
+export type CanvasGrid = Readonly<{ enabled: boolean; upDirection: 'x' | 'y' | 'z' }>;
+
+/**
  * Created by the graphics actor when a surface attaches.
  *
  * @public
@@ -102,6 +128,10 @@ export type CanvasInput = Readonly<{
    * are not timed.
    */
   reattached?: boolean;
+  /** The view's camera: the canvas presents its viewport and clip policy on it. A canvas without one presents none. */
+  camera?: CanvasCameraRef;
+  /** The grid graphics shows when the surface attaches; `gridChanged` follows it. */
+  grid?: CanvasGrid;
 }>;
 
 /**
@@ -126,7 +156,9 @@ export type CanvasEvent =
   /** The renderer could not be created, before `onCreated`. */
   | { type: 'rendererFailed'; failure: CanvasFailure }
   | { type: 'framePresented' }
-  | { type: 'contextLost' };
+  | { type: 'contextLost' }
+  /** Graphics turned the grid on or off, or changed the world up axis it lies across. */
+  | { type: 'gridChanged'; grid: CanvasGrid };
 
 /**
  * Events the canvas actor emits.
@@ -160,6 +192,8 @@ export interface CanvasContext {
   contextBudget: ContextBudgetRef | undefined;
   loadSpans: LoadSpansRef;
   host: CanvasHostRef | undefined;
+  /** Presents this surface's viewport and clip policy on the camera while the canvas can draw. */
+  cameraSurface: CameraSurfaceRef | undefined;
 }
 
 type LoadSpansCommand = { type: 'mounted' } | { type: 'presented' } | { type: 'cancel' };
@@ -224,6 +258,64 @@ const contextBudgetLogic = createCallbackLogic<{ type: 'resize'; bytes: number }
 
 type ContextBudgetRef = ActorRefFrom<typeof contextBudgetLogic>;
 
+type CameraSurfaceCommand =
+  | { type: 'viewport'; viewport: CanvasSurface }
+  | { type: 'clipPolicy'; clipPolicy: CameraClipPolicy | undefined };
+
+type CameraSurfaceInput = Readonly<{ camera: CanvasCameraRef; clipPolicy: CameraClipPolicy | undefined }>;
+
+/** Whether the camera still takes events: graphics stops it last, after this canvas. */
+const selectCameraRunning = (camera: CanvasCameraRef): boolean => camera.getSnapshot().status === 'active';
+
+/** The viewport the camera presents now. */
+const selectPresentedViewport = (camera: CanvasCameraRef): CanvasSurface => camera.getSnapshot().context.view.viewport;
+
+/**
+ * Presents one surface on the view's camera: sets the clip policy when it starts, forwards the surface's viewport and
+ * policy changes, and clears the policy when it stops. A viewport the camera already presents is not sent again, so a
+ * remount or a re-reported size makes no camera change.
+ */
+const cameraSurfaceLogic = createCallbackLogic<CameraSurfaceCommand, CameraSurfaceInput>(({ input, receive }) => {
+  const { camera } = input;
+  camera.send({ type: 'setClipPolicy', clipPolicy: input.clipPolicy });
+  receive((command) => {
+    if (command.type === 'clipPolicy') {
+      camera.send({ type: 'setClipPolicy', clipPolicy: command.clipPolicy });
+      return;
+    }
+    const { width, height, pixelRatio } = command.viewport;
+    const presented = selectPresentedViewport(camera);
+    if (presented.width !== width || presented.height !== height || presented.pixelRatio !== pixelRatio) {
+      camera.send({ type: 'setViewport', viewport: { width, height, pixelRatio } });
+    }
+  });
+  return () => {
+    if (selectCameraRunning(camera)) {
+      camera.send({ type: 'setClipPolicy', clipPolicy: undefined });
+    }
+  };
+});
+
+type CameraSurfaceRef = ActorRefFrom<typeof cameraSurfaceLogic>;
+
+/**
+ * The camera clip policy for the grid graphics shows: room past the far plane for the grid's fade, and the grid's plane
+ * kept in front of the near plane. No grid, no policy.
+ *
+ * @param grid - The grid graphics shows.
+ * @returns The policy, or `undefined` without a grid.
+ * @public
+ */
+export const resolveGridClipPolicy = (grid: CanvasGrid): CameraClipPolicy | undefined =>
+  grid.enabled
+    ? {
+        farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
+        presentationPlane: infiniteGridPresentationPlaneByUpDirection[grid.upDirection],
+      }
+    : undefined;
+
+const noGrid: CanvasGrid = { enabled: false, upDirection: 'z' };
+
 /** The host slot is filled per surface from `hostCreated`; nothing starts it from the registry. */
 const missingHost: CanvasHostLogic = createCallbackLogic<CanvasHostCommand, undefined>(() => {
   throw new Error('The canvas host adapter starts from hostCreated, with the R3F root it was built around.');
@@ -231,7 +323,12 @@ const missingHost: CanvasHostLogic = createCallbackLogic<CanvasHostCommand, unde
 
 type CanvasHostRef = ActorRefFrom<CanvasHostLogic>;
 
-const canvasActors = { loadSpans: loadSpansLogic, contextBudget: contextBudgetLogic, host: missingHost };
+const canvasActors = {
+  loadSpans: loadSpansLogic,
+  contextBudget: contextBudgetLogic,
+  host: missingHost,
+  cameraSurface: cameraSurfaceLogic,
+};
 
 type CanvasEnqueue = EnqueueObject<CanvasEvent, CanvasEmitted, SystemRegistry, typeof canvasActors>;
 
@@ -248,12 +345,26 @@ const resizeBudget = (context: CanvasContext, surface: CanvasSurface, enq: Canva
   }
 };
 
-/** A renderer that stopped drawing: its host adapter stops and its open spans end as cancelled. */
-const stopDrawing = (context: CanvasContext, enq: CanvasEnqueue): void => {
+/** Send the surface's viewport to the camera, once it has area (the camera refuses an empty viewport). */
+const presentViewport = (context: CanvasContext, surface: CanvasSurface, enq: CanvasEnqueue): void => {
+  if (context.cameraSurface && hasArea(surface)) {
+    enq.sendTo(context.cameraSurface, { type: 'viewport', viewport: surface });
+  }
+};
+
+/**
+ * A renderer that stopped drawing: its host adapter stops, its open spans end as cancelled and it no longer presents
+ * the camera, whose clip policy is cleared.
+ */
+const stopDrawing = (context: CanvasContext, enq: CanvasEnqueue): Pick<CanvasContext, 'host' | 'cameraSurface'> => {
   enq.sendTo(context.loadSpans, { type: 'cancel' });
   if (context.host) {
     enq.stop(context.host);
   }
+  if (context.cameraSurface) {
+    enq.stop(context.cameraSurface);
+  }
+  return { host: undefined, cameraSurface: undefined };
 };
 
 const surfaceResized = (
@@ -262,6 +373,8 @@ const surfaceResized = (
   enq: CanvasEnqueue,
 ) => {
   resizeBudget(context, event.surface, enq);
+  // In this macrostep, so the frame that resized presents the new viewport.
+  presentViewport(context, event.surface, enq);
   // A canvas that gains area after it started draws nothing until asked: ask for the frame the presentation waits on.
   if (!hasArea(context.surface) && hasArea(event.surface) && context.host) {
     enq.sendTo(context.host, { type: 'requestRender' });
@@ -286,6 +399,15 @@ const canvasMachineDefinition = setup({
     backend: undefined,
     surface: undefined,
     failure: undefined,
+    // A Three canvas presents the camera from the start: its clip policy holds from the commit that mounts it, as the
+    // grid it pads is drawn. A placeholder draws nothing and presents nothing.
+    cameraSurface:
+      input.kind === 'canvas' && input.camera
+        ? spawn(canvasActors.cameraSurface, {
+            id: 'cameraSurface',
+            input: { camera: input.camera, clipPolicy: resolveGridClipPolicy(input.grid ?? noGrid) },
+          })
+        : undefined,
     // Holds the viewer's place in the context budget for the canvas's whole life, Retry's fallback included.
     contextBudget:
       input.kind === 'canvas' && input.webglContext
@@ -300,7 +422,8 @@ const canvasMachineDefinition = setup({
     }),
     host: undefined,
   }),
-  // Stopping the canvas stops its children: the host adapter, the open load spans and the budget slot end with it.
+  // Stopping the canvas stops its children: the host adapter, the open load spans, the budget slot and the camera
+  // surface (which clears the clip policy) end with it.
   initial: 'creating',
   states: {
     creating: {
@@ -314,6 +437,7 @@ const canvasMachineDefinition = setup({
           const host = enq.spawn(event.host, { id: 'host' });
           enq.sendTo(context.loadSpans, { type: 'mounted' });
           resizeBudget(context, event.surface, enq);
+          presentViewport(context, event.surface, enq);
           enq.emit({
             type: 'surfaceAttached',
             canvasId: context.canvasId,
@@ -323,10 +447,10 @@ const canvasMachineDefinition = setup({
           });
           return { target: 'ready', context: { backend: event.backend, surface: event.surface, host } };
         },
-        rendererFailed: ({ context, event }, enq) => {
-          stopDrawing(context, enq);
-          return { target: 'failed', context: { failure: event.failure } };
-        },
+        rendererFailed: ({ context, event }, enq) => ({
+          target: 'failed',
+          context: { ...stopDrawing(context, enq), failure: event.failure },
+        }),
         // No renderer yet: R3F has not measured, and nothing waits on a size before `onCreated`.
         surfaceResized: () => ({}),
         requestRender: () => ({}),
@@ -337,8 +461,7 @@ const canvasMachineDefinition = setup({
           if (context.kind === 'placeholder') {
             return {};
           }
-          stopDrawing(context, enq);
-          return { target: 'lost' };
+          return { target: 'lost', context: stopDrawing(context, enq) };
         },
       },
     },
@@ -392,13 +515,17 @@ const canvasMachineDefinition = setup({
       }
       return {};
     },
-    contextLost: ({ context }, enq) => {
-      stopDrawing(context, enq);
-      return { target: '.lost', context: { host: undefined } };
-    },
-    rendererFailed: ({ context, event }, enq) => {
-      stopDrawing(context, enq);
-      return { target: '.failed', context: { host: undefined, failure: event.failure } };
+    contextLost: ({ context }, enq) => ({ target: '.lost', context: stopDrawing(context, enq) }),
+    rendererFailed: ({ context, event }, enq) => ({
+      target: '.failed',
+      context: { ...stopDrawing(context, enq), failure: event.failure },
+    }),
+    // Only a canvas that still presents the camera changes its policy; a lost or failed one has none to change.
+    gridChanged: ({ context, event }, enq) => {
+      if (context.cameraSurface) {
+        enq.sendTo(context.cameraSurface, { type: 'clipPolicy', clipPolicy: resolveGridClipPolicy(event.grid) });
+      }
+      return {};
     },
   },
 });
@@ -422,6 +549,7 @@ export const canvasEventTypes = [
   'rendererFailed',
   'framePresented',
   'contextLost',
+  'gridChanged',
 ] as const satisfies ReadonlyArray<CanvasEvent['type']>;
 
 type CanvasMachineDefinition = typeof canvasMachineDefinition;

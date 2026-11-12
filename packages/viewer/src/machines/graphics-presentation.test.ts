@@ -333,4 +333,21 @@ describe('graphics presentation seams before the presentation actor (G11b charac
       actor.stop();
     }
   });
+  it('should keep the presented unit and scene when a replacement fails', () => {
+    const actor = createGraphicsActor();
+    actor.start();
+    try {
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      actor.send({ type: 'gltfPresentationCommitted', revision: 1, key: 'a', unitId: 'unit:a', manifest });
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'b' });
+      actor.send({ type: 'gltfPresentationFailed', revision: 2, key: 'b' });
+
+      // The old scene stays on screen, so the view still presents its unit.
+      const { context } = actor.getSnapshot();
+      expect(context.modelInteractionUnitId).toBe('unit:a');
+      expect(context.gltfPresentation).toMatchObject({ presentedKey: 'a', presentedRevision: 1, phase: 'presented' });
+    } finally {
+      actor.stop();
+    }
+  });
 });

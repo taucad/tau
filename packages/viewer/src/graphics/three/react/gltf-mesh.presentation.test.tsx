@@ -1241,7 +1241,9 @@ describe('GltfMesh presentation protocol', () => {
         'gltfDisplayReady 2:b display-ready',
         'gltfPresentationCommitted 2:b unit:b manifest=b',
       ]);
-      expect(errors).not.toHaveBeenCalled();
+      // React's one-time element warnings also reach console.error when this row renders first; only the loader's own
+      // failure report counts.
+      expect(errors).not.toHaveBeenCalledWith('Failed to load GLTF:', expect.anything());
     });
 
     it('should stay silent when a parse rejects after the viewer unmounts', async () => {
@@ -1263,7 +1265,9 @@ describe('GltfMesh presentation protocol', () => {
       await act(async () => undefined);
 
       expect(trace()).toEqual(['gltfPreparationStarted 1:a', 'setHoveredModelComponent unit:a none']);
-      expect(errors).not.toHaveBeenCalled();
+      // React's one-time element warnings also reach console.error when this row renders first; only the loader's own
+      // failure report counts.
+      expect(errors).not.toHaveBeenCalledWith('Failed to load GLTF:', expect.anything());
     });
   });
 

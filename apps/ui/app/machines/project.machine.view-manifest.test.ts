@@ -213,4 +213,19 @@ describe('project view manifest reconciliation (G11b characterisation)', () => {
       project.stop();
     }
   });
+  it('should keep the manifest of a unit whose view failed to present a replacement', () => {
+    const project = createProjectActor().start();
+    try {
+      presentInView(project, 'v1', 'unit:a');
+      const v1 = project.getSnapshot().context.viewGraphics.get('v1')!;
+      v1.send({ type: 'updateArtifact', artifact: gltf(), hash: 'glb-unit:b' });
+      const { requestedRevision } = v1.getSnapshot().context.gltfPresentation;
+      v1.send({ type: 'gltfPresentationFailed', revision: requestedRevision, key: 'glb-unit:b' });
+
+      project.send({ type: 'reconcileViewManifest', unitId: 'unit:a' });
+      expect(heldFor(project, 'unit:a')).toEqual(kept);
+    } finally {
+      project.stop();
+    }
+  });
 });

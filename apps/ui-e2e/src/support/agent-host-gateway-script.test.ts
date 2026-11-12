@@ -79,6 +79,17 @@ describe('createGatewayScriptWalk', () => {
     expect(walk.serve(walk.record(continued('First.'))).text).toBe('Reply two.');
   });
 
+  /* 8f3d37c538: on a model that reads its effort from the transcript, the request ends with an empty `system` message
+   * carrying `output_config`. Read as the last message it turned every tool-loop continuation into a fresh ask, which
+   * rewound the walk to the turn's gated first entry and parked the run forever. */
+  it('reads past the transcript effort marker to find a continuation', () => {
+    const effort = { role: 'system', content: [], output_config: { effort: 'high' } };
+    const walk = createGatewayScriptWalk(script);
+    expect(walk.serve(walk.record({ messages: [...asked('First.').messages!, effort] })).text).toBe('Reply one.');
+    expect(walk.serve(walk.record({ messages: [...continued('First.').messages!, effort] })).text).toBe('Reply two.');
+    expect(walk.counts()).toEqual([{ turn: 'First.', asks: 1, calls: 2 }]);
+  });
+
   it('wraps the walk so a script shorter than the run still answers', () => {
     const walk = createGatewayScriptWalk(script);
     walk.serve(walk.record(asked('First.')));

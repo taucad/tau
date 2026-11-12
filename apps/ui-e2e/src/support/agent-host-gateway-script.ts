@@ -95,7 +95,10 @@ const carriesToolResults = (content: unknown): boolean =>
  * @returns The turn's user text and whether the request continues its loop.
  */
 export const gatewayRequestStep = (request: GatewayScriptRequest): GatewayRequestStep => {
-  const messages = request.messages ?? [];
+  /* A model that reads its effort from the transcript gets an empty `system`-role message carrying `output_config`
+   * before each reply and at the end (ruling U14, `gateway-model-transport.ts`, 8f3d37c538). It is a setting, not a
+   * turn, so the request's last message is the last one that is not such a marker. */
+  const messages = (request.messages ?? []).filter((message) => message.role !== 'system');
   const asked = messages.findLast((message) => message.role === 'user' && !carriesToolResults(message.content));
   return { turn: textOf(asked?.content), isContinuation: carriesToolResults(messages.at(-1)?.content) };
 };

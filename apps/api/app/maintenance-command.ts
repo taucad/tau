@@ -42,6 +42,7 @@ import {
 } from '@taucad/api-git-mirror/maintenance/lfs-relocation-run';
 import { activeLfsReservationPages } from '@taucad/api-git-mirror/maintenance/lfs-reservation-scope';
 import { applicationNameOf } from '@taucad/api-database/application-name';
+import { optionValue, optionalOperand as optionalOperandOf, requiredOperand } from '#maintenance-arguments.js';
 
 /**
  * `revisions-maintenance`: the singleton entry for everything that must happen
@@ -194,23 +195,12 @@ TAU_S3_RESTORE_BUCKET, TAU_S3_RESTORE_ACCESS_KEY_ID,
 TAU_S3_RESTORE_SECRET_ACCESS_KEY and the optional TAU_S3_RESTORE_REGION and
 TAU_S3_RESTORE_FORCE_PATH_STYLE for restore, and REDIS_URL for freeze-all.`;
 
-/** `--flag value`, with no positional arguments anywhere in this command. */
-const option = (args: readonly string[], name: string): string | undefined => {
-  const index = args.indexOf(`--${name}`);
-  return index === -1 ? undefined : args[index + 1];
-};
+const option = optionValue;
 
-const required = (args: readonly string[], name: string): string => {
-  const value = option(args, name);
-  if (value === undefined || value === '' || value.startsWith('--')) {
-    throw new Error(`--${name} is required\n\n${usage}`);
-  }
-  return value;
-};
+const required = (args: readonly string[], name: string): string => requiredOperand(args, name, usage);
 
-/** A flag whose operand is optional to give but required once the flag is: `--project` alone is refused. */
 const optionalOperand = (args: readonly string[], name: string): string | undefined =>
-  args.includes(`--${name}`) ? required(args, name) : undefined;
+  optionalOperandOf(args, name, usage);
 
 const environmentValue = (name: string): string => {
   const value = process.env[name];
@@ -664,7 +654,7 @@ async function main(): Promise<void> {
         break;
       }
       case 'lfs-integrity': {
-        const concurrency = parseLfsIntegrityConcurrency(option(args, 'concurrency'));
+        const concurrency = parseLfsIntegrityConcurrency(optionalOperand(args, 'concurrency'));
         const stop = new AbortController();
         const stopInventory = (): void => {
           stop.abort();

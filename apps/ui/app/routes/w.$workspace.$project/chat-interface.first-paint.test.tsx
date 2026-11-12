@@ -25,6 +25,8 @@ vi.mock('#providers/part-thumbnail-provider.js', () => ({
 vi.mock('#components/geometry/cad/part-gallery.js', () => ({
   PartGalleryProvider: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
 }));
+/* The product tour's host registers its palette entry; the palette is the app shell's, outside this suite. */
+vi.mock('#components/layout/command-palette.js', () => ({ useCommandPaletteItems: () => undefined }));
 vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({
   WorkspaceSkeleton: () => <div role='status' aria-label='Opening project' />,
 }));

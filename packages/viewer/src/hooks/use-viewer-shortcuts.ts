@@ -7,6 +7,7 @@ import { createCallbackLogic } from 'xstate';
 import type { ActorRefFrom, Subscription } from 'xstate';
 import { useGraphics } from '#hooks/use-graphics.jsx';
 import type {
+  GraphicsContext,
   GraphicsEvent,
   graphicsMachine,
   ViewerShortcut,
@@ -94,12 +95,71 @@ function selectShortcutGridShown(graphicsRef: GraphicsActorRef): boolean {
   return graphicsRef.getSnapshot().context.enableGrid;
 }
 
-/** A G or P value the host is still writing, per graphics actor: what the next press toggles from. */
-type PendingShortcutWrite = Readonly<{ write: number; value: boolean | number }>;
-type PendingShortcutWrites = Map<'display.grid' | 'fieldOfView', PendingShortcutWrite>;
+type ShortcutLeaf = 'display.grid' | 'fieldOfView';
+
+/* The camera child, whose field of view P writes. */
+function selectShortcutCameraRef(graphicsRef: GraphicsActorRef): GraphicsContext['cameraRef'] {
+  return graphicsRef.getSnapshot().context.cameraRef;
+}
+
+/* What graphics shows for a G or P leaf now. */
+function selectShortcutShown(graphicsRef: GraphicsActorRef, leaf: ShortcutLeaf): boolean | number {
+  return leaf === 'display.grid'
+    ? selectShortcutGridShown(graphicsRef)
+    : selectShortcutCamera(graphicsRef).requestedVerticalFieldOfView;
+}
+
+/**
+ * A G or P value the host is still writing, per graphics actor: what the next press toggles from. `stop` ends the
+ * watch that forgets it once graphics shows it.
+ */
+type PendingShortcutWrite = Readonly<{ write: number; value: boolean | number; stop: () => void }>;
+type PendingShortcutWrites = Map<ShortcutLeaf, PendingShortcutWrite>;
 const pendingShortcutWrites = new WeakMap<GraphicsActorRef, PendingShortcutWrites>();
 /* Names each write, so a write that settles clears only its own pending value, never a newer one equal to it. */
 let shortcutWrites = 0;
+
+/* Forgets a leaf's pending value, only `write`'s when one is named. */
+function forgetShortcutWrite(graphicsRef: GraphicsActorRef, leaf: ShortcutLeaf, write?: number): void {
+  const pending = pendingShortcutWrites.get(graphicsRef);
+  const entry = pending?.get(leaf);
+  if (entry === undefined || (write !== undefined && entry.write !== write)) {
+    return;
+  }
+  entry.stop();
+  pending!.delete(leaf);
+}
+
+/*
+ * Forgets `write`'s value when graphics comes to show it: the host's write reached the view. Only a change counts, so
+ * a value graphics shows already while an earlier write is still landing stays pending until it shows again.
+ */
+function watchShortcutWrite({
+  graphicsRef,
+  leaf,
+  write,
+  value,
+}: Readonly<{
+  graphicsRef: GraphicsActorRef;
+  leaf: ShortcutLeaf;
+  write: number;
+  value: boolean | number;
+}>): () => void {
+  let shown = selectShortcutShown(graphicsRef, leaf);
+  const observe = (): void => {
+    const now = selectShortcutShown(graphicsRef, leaf);
+    if (now !== shown && now === value) {
+      forgetShortcutWrite(graphicsRef, leaf, write);
+    }
+    shown = now;
+  };
+  // The grid is graphics' own; the field of view is the camera child's.
+  const subscription: Subscription =
+    leaf === 'display.grid' ? graphicsRef.subscribe(observe) : selectShortcutCameraRef(graphicsRef).subscribe(observe);
+  return () => {
+    subscription.unsubscribe();
+  };
+}
 
 /* The value a press toggles from: the one still being written, until graphics shows it, else the one shown. */
 function toggledFrom<Value extends boolean | number>(
@@ -107,17 +167,17 @@ function toggledFrom<Value extends boolean | number>(
   leaf: 'display.grid' | 'fieldOfView',
   shown: Value,
 ): Value {
-  const pending = pendingShortcutWrites.get(graphicsRef);
-  const value = pending?.get(leaf)?.value;
+  const value = pendingShortcutWrites.get(graphicsRef)?.get(leaf)?.value;
   if (value === undefined || value === shown) {
-    pending?.delete(leaf);
+    forgetShortcutWrite(graphicsRef, leaf);
     return shown;
   }
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Each leaf only ever holds its own value type.
   return value as Value;
 }
 
-/* Forgets a pending value once its write is refused or fails; a saved one is forgotten when graphics shows it. */
+/* Forgets a pending value once its write is refused or fails; a saved one is forgotten when graphics shows it
+ * ({@link watchShortcutWrite}). */
 async function settleShortcutWrite({
   graphicsRef,
   leaf,
@@ -135,9 +195,8 @@ async function settleShortcutWrite({
   } catch {
     // The host reports its own failure.
   }
-  const pending = pendingShortcutWrites.get(graphicsRef);
-  if (!saved && pending?.get(leaf)?.write === write) {
-    pending.delete(leaf);
+  if (!saved) {
+    forgetShortcutWrite(graphicsRef, leaf, write);
   }
 }
 
@@ -161,7 +220,8 @@ function issueShortcutWrite<Leaf extends 'display.grid' | 'fieldOfView'>({
   pendingShortcutWrites.set(graphicsRef, pending);
   shortcutWrites += 1;
   const write = shortcutWrites;
-  pending.set(leaf, { write, value });
+  pending.get(leaf)?.stop();
+  pending.set(leaf, { write, value, stop: watchShortcutWrite({ graphicsRef, leaf, write, value }) });
   void settleShortcutWrite({ graphicsRef, leaf, write, written });
 }
 

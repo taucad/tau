@@ -1489,8 +1489,9 @@ it("should forward a follower's cancel to the tab that leads the run", async () 
   }
 });
 
-/* RH-A22 (RH-S8): the browser host offers the read-only `revisions` tool once it has a revisions port. */
-it('should offer the revisions tool on the browser host', async () => {
+/* RH-A22 (RH-S8): the browser host offers the read-only `history` tool once it has a revisions port (#1878 renamed
+ * the agent's `revisions` tool to `history`). */
+it('should offer the history tool on the browser host', async () => {
   const { fileSystemProvider, providerBasePath } = await seededProject('revisions');
   const sessionId = `session-${crypto.randomUUID()}`;
   const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
@@ -1519,7 +1520,7 @@ it('should offer the revisions tool on the browser host', async () => {
       expect(model.bodies).toHaveLength(1);
     });
 
-    expect(gatewayToolNames(model.bodies[0] ?? '')).toContain('revisions');
+    expect(gatewayToolNames(model.bodies[0] ?? '')).toContain('history');
   } finally {
     model.restore();
     await closeSession(sessionId);
@@ -1571,7 +1572,7 @@ it('should observe fifty listed chats with no lock, writer, run actor or timer',
 });
 
 /* RH-S8 (RV9-F1): the revisions port is asked for when the host is provided, never when the client is composed; a
- * host provided while the project's revision client is closed gets no port, and so offers no `revisions` tool. */
+ * host provided while the project's revision client is closed gets no port, and so offers no `history` tool. */
 it("should broker the revisions port only after the project's revision client opens", async () => {
   const options = await opfsProject('revisions-port');
   const worker = new Worker(new URL('agent-host.worker.ts', import.meta.url), { type: 'module' });
@@ -1592,7 +1593,7 @@ it("should broker the revisions port only after the project's revision client op
     await vi.waitFor(() => {
       expect(model.bodies).toHaveLength(1);
     });
-    expect(gatewayToolNames(model.bodies[0] ?? '')).not.toContain('revisions');
+    expect(gatewayToolNames(model.bodies[0] ?? '')).not.toContain('history');
   } finally {
     model.restore();
     await closeSession(sessionId);

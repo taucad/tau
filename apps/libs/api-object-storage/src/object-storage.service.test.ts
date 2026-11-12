@@ -842,12 +842,13 @@ describe('ObjectStorageService', () => {
       send: (command: { input: Record<string, unknown> }) => Promise<unknown>;
     };
 
-    const headWith = async (checksum: string | undefined) => {
+    const headWith = async (checksum: string | undefined, checksumType?: 'COMPOSITE' | 'FULL_OBJECT') => {
       /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK response fields use PascalCase */
       const send = vi.spyOn(sendable, 'send').mockResolvedValue({
         ContentLength: 3,
         ETag: '"e"',
         ...(checksum === undefined ? {} : { ChecksumSHA256: checksum }),
+        ...(checksumType === undefined ? {} : { ChecksumType: checksumType }),
       });
       /* eslint-enable @typescript-eslint/naming-convention -- end AWS SDK response fields */
       try {
@@ -871,6 +872,20 @@ describe('ObjectStorageService', () => {
 
       expect(head).not.toHaveProperty('checksumSha256');
       expect(head?.checksumComposite).toBe(true);
+    });
+
+    it('should flag a composite the SDK names by ChecksumType even without a part suffix', async () => {
+      const head = await headWith(whole, 'COMPOSITE');
+
+      expect(head).not.toHaveProperty('checksumSha256');
+      expect(head?.checksumComposite).toBe(true);
+    });
+
+    it('should keep a whole-object checksum the SDK names FULL_OBJECT', async () => {
+      const head = await headWith(whole, 'FULL_OBJECT');
+
+      expect(head?.checksumSha256).toBe(whole);
+      expect(head).not.toHaveProperty('checksumComposite');
     });
 
     it('should report neither when the store holds no checksum', async () => {

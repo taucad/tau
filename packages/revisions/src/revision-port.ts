@@ -117,6 +117,8 @@ export type RevisionLogEntry = Readonly<{
   treeId: string;
   summary: RevisionSummary;
   provenance: RecordedProvenance;
+  /** The commit's own git author name, on a commit Tau did not record (B3); absent on one it did. */
+  authorName?: string;
   conflicted: boolean;
 }>;
 

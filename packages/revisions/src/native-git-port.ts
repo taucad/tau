@@ -550,6 +550,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       treeId: commit.tree,
       summary: trailer?.summary ?? { generated: commit.message.split('\n')[0] ?? '' },
       provenance: trailer?.provenance ?? unattributed,
+      /* B3: a commit Tau did not record reads as its git author, as GitHub shows it. */
+      ...(trailer === undefined ? { authorName: commit.author.name } : {}),
       conflicted: commit.conflictedTrees !== undefined,
     });
   };

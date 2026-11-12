@@ -44,6 +44,8 @@ export type RevisionRow = Readonly<{
   treeId?: string;
   /** Who made it: the model id for an agent turn, the user's actor otherwise. */
   actor: string;
+  /** The git author of a commit Tau did not record (B3), which History names. */
+  authorName?: string;
   source: RevisionProvenance['source'];
   /** Milliseconds since the Unix epoch. */
   createdAt: number;
@@ -309,6 +311,7 @@ const rowOf = (
     treeId: entry.treeId,
     /* B2 types this row's who; until then a commit Tau did not record reads as `unknown`, as before B1. */
     actor: entry.provenance.actor?.id ?? 'unknown',
+    ...(entry.authorName === undefined ? {} : { authorName: entry.authorName }),
     /* A5: a turn's base holds the person's bytes, never the agent's. */
     source: entry.provenance.turnCut === 'base' ? 'user' : entry.provenance.source,
     createdAt: entry.provenance.createdAt,

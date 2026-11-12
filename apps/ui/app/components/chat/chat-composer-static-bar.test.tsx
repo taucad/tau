@@ -13,6 +13,8 @@ const composer = vi.hoisted((): { value: Record<string, unknown> } => ({ value: 
 vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => composer.value }));
 const picker = vi.hoisted(() => ({ available: true }));
 vi.mock('#constants/browser.constants.js', () => ({ directoryPicker: () => ({ available: picker.available }) }));
+const flags = vi.hoisted(() => ({ autoKernel: false }));
+vi.mock('#flags/use-feature.js', () => ({ useFeature: (flag: string) => flag === 'autoKernel' && flags.autoKernel }));
 
 const haiku = {
   id: 'anthropic/claude-haiku',
@@ -33,6 +35,7 @@ const renderBar = (isEmpty = true): HTMLElement =>
 describe('ChatComposerStaticBar', () => {
   beforeEach(() => {
     picker.available = true;
+    flags.autoKernel = false;
     composer.value = {
       model: { model: haiku, effort: undefined },
       execution: { execution: { kind: 'tau' } },
@@ -85,5 +88,17 @@ describe('ChatComposerStaticBar', () => {
       cn(ghostPillClass, 'max-w-64 min-w-0 shrink gap-1 pr-2 text-foreground'),
     );
     expect(staticReasoningLevelNames).toEqual(reasoningLevelNames);
+  });
+
+  it('draws the kernel pill beside the location in the location pill’s finish once Auto is on (D8)', () => {
+    expect(renderBar().querySelector('[data-slot="kernel-pill"]')).toBeNull();
+    flags.autoKernel = true;
+    composer.value = { ...composer.value, kernel: { preference: 'auto' } };
+    const pill = renderBar().querySelector('[data-slot="kernel-pill"]');
+    expect(pill).toHaveAttribute('aria-label', 'Kernel: Auto');
+    expect(pill).toHaveTextContent('Auto');
+    expect(pill).toHaveClass('h-7', 'rounded-full', 'px-2.5', 'text-muted-foreground');
+    const location = pill?.parentElement?.querySelector('[aria-label="Create in Home"]');
+    expect(location?.compareDocumentPosition(pill!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 });

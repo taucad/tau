@@ -1,47 +1,6 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- package subpath entry */
 /**
- * `@taucad/native-process-core/shell`: the contained shell launch-session seam (blueprint W2). Internal until the
- * host shell service (W3) consumes it; nothing here is part of the published API.
- 
+ * `@taucad/native-process-core/shell`: the contained shell launch-session seam. The code lives in the private
+ * `@taucad/sandbox` library, which this package bundles; this subpath re-exports it unchanged.
  */
-export type {
-  PreparedShell,
-  ShellExecution,
-  ShellPreparation,
-  ShellRecovery,
-  ShellResource,
-  ShellExit,
-  ShellFilesystem,
-  ShellLaunch,
-  ShellLaunchOutcome,
-  ShellNetwork,
-  ShellPipesProcess,
-  ShellProcess,
-  ShellProvider,
-  ShellRequirement,
-  ShellStdio,
-  ShellTerminalProcess,
-  ShellTerminalSize,
-} from '#shell/shell-provider.js';
-export { shellBaselineDenied, zshStartupFiles } from '#shell/shell-baseline.js';
-export type { ShellBaselineOptions } from '#shell/shell-baseline.js';
-export { refusedShellEnvironment } from '#shell/shell-environment.js';
-export {
-  resolveShellExecutable,
-  resolveTerminalZsh,
-  shellCommandArguments,
-  shellInteractiveArguments,
-  shellVersionCommand,
-  terminalZshArguments,
-} from '#shell/shell-identity.js';
-export type {
-  ResolveShellExecutableOptions,
-  ShellExecutable,
-  ShellExecutableRefusal,
-  ShellKind,
-  TerminalZsh,
-} from '#shell/shell-identity.js';
-export { createSandboxShellProvider } from '#shell/srt-shell-provider.js';
-export type { SandboxShellProviderOptions } from '#shell/srt-shell-provider.js';
-export { createFakeShellProvider } from '#shell/shell-fake.js';
-export type { FakeShellOptions, FakeShellPhase, FakeShellProvider, FakeShellScript } from '#shell/shell-fake.js';
+export * from '@taucad/sandbox/shell';

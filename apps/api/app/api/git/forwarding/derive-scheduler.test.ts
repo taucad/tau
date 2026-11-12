@@ -27,7 +27,8 @@ const laggingRows = (rows: readonly Target[]): DatabaseService => {
     orderBy: () => chain,
     limit: async (count: number) => rows.slice(0, count),
   };
-  return { database: chain } as unknown as DatabaseService;
+  /* The scan polls on the background pool (database connection audit R3). */
+  return { background: chain } as unknown as DatabaseService;
 };
 
 describe('derived-state repair backoff (DC1 review S5)', () => {

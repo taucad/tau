@@ -15,6 +15,7 @@ import { useProjects } from '#hooks/use-projects.js';
 import { parseGithubGistAuthorizationReturn } from '#lib/share-providers.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ProjectWorkbenchPanesHost } from '#routes/w.$workspace.$project/workbench-panes-host.js';
+import { ProjectPeopleWithAccess } from '#routes/w.$workspace.$project/revision-collaborators.js';
 
 type ProjectShareNavigationIntent = {
   readonly shouldOpen: boolean;
@@ -206,19 +207,25 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
 
   const entryPath = project?.assets.main?.entryPath ?? '';
 
+  /* C4: People with access lives in Share, under the publishing methods. */
   return (
-    <ProjectSharePanel
-      key={projectId}
-      projectId={projectId}
-      projectName={project?.name ?? 'Untitled'}
-      projectDescription={project?.description ?? ''}
-      projectUpdatedAt={projectUpdatedAt}
-      entryPath={entryPath}
-      collectSnapshot={collectSnapshot}
-      initialMethod={navigationIntent.initialMethod}
-      githubAuthorizationOutcome={navigationIntent.githubAuthorizationOutcome}
-      githubAuthorizationFailure={navigationIntent.githubAuthorizationFailure}
-      host={ProjectShareHost}
-    />
+    <div className='flex size-full min-h-0 flex-col'>
+      <div className='min-h-0 flex-1'>
+        <ProjectSharePanel
+          key={projectId}
+          projectId={projectId}
+          projectName={project?.name ?? 'Untitled'}
+          projectDescription={project?.description ?? ''}
+          projectUpdatedAt={projectUpdatedAt}
+          entryPath={entryPath}
+          collectSnapshot={collectSnapshot}
+          initialMethod={navigationIntent.initialMethod}
+          githubAuthorizationOutcome={navigationIntent.githubAuthorizationOutcome}
+          githubAuthorizationFailure={navigationIntent.githubAuthorizationFailure}
+          host={ProjectShareHost}
+        />
+      </div>
+      <ProjectPeopleWithAccess projectId={projectId} />
+    </div>
   );
 }

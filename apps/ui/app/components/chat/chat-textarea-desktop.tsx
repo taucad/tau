@@ -24,7 +24,9 @@ import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { ChatAgentSheet, ghostPillClass } from '#components/chat/chat-agent-sheet.js';
 import { ChatAgentModeControl } from '#components/chat/chat-mode-selector.js';
 import { useAgentConfig } from '#components/chat/use-agent-config.js';
-import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
+import { ChatKernelSelector, KernelPreferenceSelector } from '#components/chat/chat-kernel-selector.js';
+import { kernelPillFace } from '#components/chat/kernel-picker-layout.js';
+import { KernelPillContent, kernelPillStyles } from '#components/chat/kernel-pill.js';
 import { ChatKernelFallbackNotice } from '#components/chat/chat-kernel-fallback-notice.js';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -35,7 +37,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
+import { useFeature } from '#flags/use-feature.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatContextIndicator } from '#components/chat/chat-context-indicator.js';
 import { ChatTextareaBorderBeam } from '@taucad/chat-ui/components/chat-textarea-border-beam';
@@ -1016,11 +1018,43 @@ function ChatSkillsRecovery({ onRetry }: { readonly onRetry: () => void }): Reac
   );
 }
 
-/** The kernel, ghost and glyph first; its label is the first to leave when the bar needs the room. */
+/**
+ * The kernel pill, in the location pill's finish so the two read as one row of choices: glyph, name, chevron, and the
+ * name is the first to leave when the bar needs the room. With the `autoKernel` flag on it opens the Auto-first selector
+ * (blueprint D8); with it off, the concrete kernel list.
+ */
 function ChatTextareaKernelControl({ focusEditor }: { readonly focusEditor: () => void }): React.JSX.Element {
   const {
-    kernel: { kernel: selectedKernel },
+    kernel: { kernel: selectedKernel, preference, owner },
   } = useChatComposer();
+  const isAutoEnabled = useFeature('autoKernel');
+  if (isAutoEnabled) {
+    const face = kernelPillFace({ preference, ...(owner === undefined ? {} : { owner }) });
+    return (
+      <Tooltip>
+        <KernelPreferenceSelector
+          data-chat-textarea-focustrap
+          popoverProperties={{ align: 'start' }}
+          onSelect={focusEditor}
+          onClose={focusEditor}
+        >
+          <TooltipTrigger asChild>
+            <Button
+              type='button'
+              variant={kernelPillStyles.variant}
+              size='sm'
+              aria-label={face.label}
+              data-slot='kernel-pill'
+              className={cn('min-w-0', kernelPillStyles.button)}
+            >
+              <KernelPillContent face={face} />
+            </Button>
+          </TooltipTrigger>
+        </KernelPreferenceSelector>
+        <TooltipContent className='max-w-64'>{face.hint}</TooltipContent>
+      </Tooltip>
+    );
+  }
   return (
     <Tooltip>
       <ChatKernelSelector
@@ -1032,16 +1066,14 @@ function ChatTextareaKernelControl({ focusEditor }: { readonly focusEditor: () =
         {({ selectedKernel: kernel }) => (
           <TooltipTrigger asChild>
             <Button
-              variant='ghost'
+              type='button'
+              variant={kernelPillStyles.variant}
               size='sm'
               aria-label={`Select kernel (${kernel.name})`}
-              className={cn(
-                ghostPillClass,
-                'min-w-0 gap-1.5 group-data-[hide-kernel]/bar:w-7 group-data-[hide-kernel]/bar:px-0',
-              )}
+              data-slot='kernel-pill'
+              className={cn('min-w-0', kernelPillStyles.button)}
             >
-              <SvgIcon id={kernel.id} className='size-4 shrink-0 grayscale' />
-              <span className='truncate text-xs group-data-[hide-kernel]/bar:hidden'>{kernel.name}</span>
+              <KernelPillContent face={kernelPillFace({ preference: kernel.id })} />
             </Button>
           </TooltipTrigger>
         )}

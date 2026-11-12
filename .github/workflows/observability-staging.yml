@@ -22,7 +22,8 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
     outputs:
-      ready: ${{ steps.deploy.outputs.ready }}
+      # A manual run inspects whatever staging serves; a deploy-triggered run also needs staging to serve its commit.
+      ready: ${{ steps.deploy.outputs.ready == 'true' && (github.event_name == 'workflow_dispatch' || steps.served.outputs.serving == 'true') }}
     steps:
       - name: Check staging deploy job
         id: deploy
@@ -43,6 +44,48 @@ jobs:
               echo 'ready=true' >> "$GITHUB_OUTPUT"
             fi
           fi
+      # Pushes land minutes apart, so staging has often moved on to a newer deploy before this run starts. Read the
+      # commit staging serves before the harness's setup and 18-minute suites: a newer one means a later run owns the
+      # check, so this one ends with the harness skipped instead of red. An older commit is polled until the deploy
+      # is served and fails after the bound, as does an unreadable page; the harness asserts the commit again.
+      - name: Check staging serves the triggering commit
+        id: served
+        if: steps.deploy.outputs.ready == 'true' && github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          STAGING_PAGE: https://taucad.dev/__debug/observability
+          ATTEMPTS: '20'
+          INTERVAL_SECONDS: '30'
+        run: |
+          set -euo pipefail
+          attempt=1
+          while :; do
+            # Only the public release label is read from the page; nothing else is printed.
+            served=$(curl -fsS --max-time 30 --cookie 'tau-entry=app' "$STAGING_PAGE" | grep -oE '"TAU_RELEASE":"[0-9a-f]{7,40}"' | head -n 1 | cut -d '"' -f 4 || true)
+            if [ -n "$served" ]; then
+              case "$HEAD_SHA" in
+                "$served"*)
+                  echo "Staging serves the triggering commit $served."
+                  echo 'serving=true' >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+              esac
+              # `ahead`: the served commit descends from the trigger, so a newer deploy replaced this one.
+              status=$(gh api "repos/$GH_REPO/compare/$HEAD_SHA...$served" --jq .status || true)
+              if [ "$status" = ahead ]; then
+                echo "::notice title=Superseded::Staging serves $served, newer than ${HEAD_SHA:0:12}; the run for that deploy checks the harness."
+                exit 0
+              fi
+            fi
+            if [ "$attempt" -ge "$ATTEMPTS" ]; then
+              echo "::error::Staging serves ${served:-no readable release}, not ${HEAD_SHA:0:12} or a newer commit, after $ATTEMPTS reads."
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep "$INTERVAL_SECONDS"
+          done
 
   harness:
     name: P1 harness availability (signal acceptance pending)
@@ -54,6 +97,11 @@ jobs:
     # `e2e_run` id. One measured pass over the four suites needs well over 20 minutes,
     # so the former budget cancelled the job mid-suite and threw away its report.
     timeout-minutes: 45
+    # A newer deploy's harness replaces an older one still running: the older one would fail on the commit check.
+    # The group sits on this job, not the workflow, so a trigger that deployed nothing never cancels a real check.
+    concurrency:
+      group: staging-observability-harness
+      cancel-in-progress: true
     environment: staging
     steps:
       - name: Checkout trusted main revision

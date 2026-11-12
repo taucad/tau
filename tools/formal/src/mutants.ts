@@ -39,6 +39,15 @@ export const findMutantFiles = (projectRoot: string): string[] => {
 export const applyMutant = (source: string, mutant: Mutant): string | undefined =>
   source.split(mutant.find).length === 2 ? source.replace(mutant.find, mutant.replace) : undefined;
 
+/**
+ * A mutant's test environment. A mutant is caught against the committed corpus and goldens; the
+ * nightly fresh-seed request (`FORMAL_FRESH_TRACES`) is for the unmutated differential run alone,
+ * so a mutant run neither regenerates fresh traces (minutes per run) nor overwrites them with the
+ * mutated code's output. `FORMAL_SIMULATED` stays: mutant runs replay the simulated behaviours.
+ */
+export const mutantEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
+  Object.fromEntries(Object.entries(env).filter(([name]) => name !== 'FORMAL_FRESH_TRACES'));
+
 /** The `#…` specifier a module is imported by: its path under `src/`, e.g. `log/event-sequence`. */
 const moduleName = (file: string): string => path.relative('src', file).replace(/\.ts$/, '');
 
@@ -81,7 +90,7 @@ const runMachineMutant = (
     const vitest = path.join(context.root, 'node_modules/.bin/vitest');
     const result = spawnSync(vitest, ['run', '--config', config], {
       cwd: source,
-      env: context.env,
+      env: mutantEnv(context.env),
       encoding: 'utf8',
       timeout: 600_000,
     });
@@ -126,21 +135,22 @@ const failingBaselines = (context: FormalContext, projectRoot: string, mutants: 
 export type MutantOptions = {
   readonly projectRoot: string;
   /** Checks a Lean mutant (FM-S7); machine mutants use Vitest. */
-  readonly lean?: (mutant: Mutant, mutated: string) => MutantResult;
+  readonly lean?: (mutant: Mutant, mutated: string) => Promise<MutantResult>;
   readonly log?: (line: string) => void;
 };
 
 /** `formal mutants <projectRoot>`: every mutant must be caught, and a stale one fails (FM-A11). */
-export const runMutants = (
+export const runMutants = async (
   context: FormalContext,
   options: MutantOptions,
-): { readonly results: MutantResult[]; readonly failures: number } => {
+): Promise<{ readonly results: MutantResult[]; readonly failures: number }> => {
   const log = options.log ?? ((line: string) => process.stdout.write(`${line}\n`));
   mkdirSync(cacheDirectory(context), { recursive: true });
-  const results = findMutantFiles(options.projectRoot).flatMap((file) => {
+  const results: MutantResult[] = [];
+  for (const file of findMutantFiles(options.projectRoot)) {
     const mutants = JSON.parse(readFileSync(file, 'utf8')) as Mutant[];
     const failing = failingBaselines(context, options.projectRoot, mutants);
-    return mutants.map((mutant): MutantResult => {
+    for (const mutant of mutants) {
       const mutated = applyMutant(readFileSync(path.join(options.projectRoot, mutant.file), 'utf8'), mutant);
       const result: MutantResult =
         mutated === undefined
@@ -149,12 +159,13 @@ export const runMutants = (
             ? { id: mutant.id, verdict: 'stale', detail: `${mutant.test ?? ''} fails without the mutant` }
             : mutant.test
               ? runMachineMutant(context, { projectRoot: options.projectRoot, mutant, mutated })
-              : (options.lean?.(mutant, mutated) ?? { id: mutant.id, verdict: 'stale' });
+              : // oxlint-disable-next-line no-await-in-loop -- one mutant at a time; its oracle runs use every core.
+                ((await options.lean?.(mutant, mutated)) ?? { id: mutant.id, verdict: 'stale' });
       log(
         `${result.verdict === 'caught' ? 'ok  ' : 'FAIL'} mutant ${mutant.id}: ${result.verdict} (${mutant.drift})${result.detail ? `\n       ${result.detail}` : ''}`,
       );
-      return result;
-    });
-  });
+      results.push(result);
+    }
+  }
   return { results, failures: results.filter((result) => result.verdict !== 'caught').length };
 };

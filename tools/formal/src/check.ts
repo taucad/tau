@@ -515,11 +515,16 @@ const simulateProject = async (
 };
 
 /** `formal mutants <projectRoot>`: machine mutants through Vitest, Lean mutants through the oracle when Lean is present. */
-export const mutantsProject = (context: FormalContext, projectRoot: string, log?: (line: string) => void): number => {
+export const mutantsProject = async (
+  context: FormalContext,
+  projectRoot: string,
+  log?: (line: string) => void,
+): Promise<number> => {
   const { lean } = locateTools(context);
   const spec = findExpectedFiles(projectRoot).find((location) => location.file.lean !== undefined)?.file.lean;
   const checker = lean && spec ? { lean: leanMutantChecker(context, { projectRoot, lean, spec }) } : {};
-  return runMutants(context, { projectRoot, ...checker, ...(log ? { log } : {}) }).failures === 0 ? 0 : 1;
+  const { failures } = await runMutants(context, { projectRoot, ...checker, ...(log ? { log } : {}) });
+  return failures === 0 ? 0 : 1;
 };
 
 /**
@@ -551,7 +556,7 @@ export const nightlyProject = async (
   statuses.push(simulation.status);
   if (findMutantFiles(projectRoot).length > 0) {
     const env = simulation.directory ? { ...context.env, FORMAL_SIMULATED: simulation.directory } : context.env; // eslint-disable-line @typescript-eslint/naming-convention -- environment variable
-    statuses.push(mutantsProject({ ...context, env }, projectRoot, log));
+    statuses.push(await mutantsProject({ ...context, env }, projectRoot, log));
   }
   return statuses.every((status) => status === 0) ? 0 : 1;
 };

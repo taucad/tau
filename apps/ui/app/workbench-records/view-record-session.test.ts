@@ -67,6 +67,9 @@ async function mount(initial: WorkbenchView = view()) {
   let bytes: Uint8Array<ArrayBuffer> | undefined = encode(initial);
   const writes: WorkbenchView[] = [];
   const listeners = new Set<(event: WatchEvent) => void>();
+  /* The connection's writes fail, as a replaced worker's do. */
+  let failWrites: PromiseWithResolvers<void> | undefined;
+  const applied = new Map<string, string | undefined>();
   const files = {
     exists: async (candidate: string) => candidate === path && bytes !== undefined,
     readFile: async () => {
@@ -80,6 +83,9 @@ async function mount(initial: WorkbenchView = view()) {
     }: {
       data: string;
     }): Promise<{ status: 'applied'; content: Uint8Array<ArrayBuffer> }> => {
+      if (failWrites !== undefined) {
+        await failWrites.promise;
+      }
       bytes = new TextEncoder().encode(data);
       writes.push(workbenchRecords.view.schema.parse(JSON.parse(data)));
       return { status: 'applied', content: bytes };
@@ -109,7 +115,7 @@ async function mount(initial: WorkbenchView = view()) {
     host: { files, watch },
     setViewRecord: (id, record) => records.set(id, record),
     setViewEntryPath: () => undefined,
-    setAppliedWorkbenchRevision: () => undefined,
+    setAppliedWorkbenchRevision: (recordPath, digest) => applied.set(recordPath, digest),
   });
   const graphics = createActor(
     graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
@@ -133,6 +139,15 @@ async function mount(initial: WorkbenchView = view()) {
     writes,
     records,
     closes,
+    applied,
+    /** Holds the connection's writes, and returns what fails them. */
+    failWrites: (): (() => void) => {
+      const held = Promise.withResolvers<void>();
+      failWrites = held;
+      return () => {
+        held.reject(new Error('The connection is gone.'));
+      };
+    },
     stop,
     file: (): WorkbenchView | undefined =>
       bytes === undefined ? undefined : workbenchRecords.view.schema.parse(JSON.parse(new TextDecoder().decode(bytes))),
@@ -259,6 +274,66 @@ describe('view record session', () => {
     expect(harness.direction()).toEqual([0, 1, 0]);
     await harness.quiet();
     expect(harness.writes.slice(written).filter((record) => record.camera.kind === 'pose')).toEqual([]);
+  });
+
+  it('should keep the section gate shut after a flush that is not a close, while the cuts are still edited', async () => {
+    const harness = await mount();
+    await harness.frame();
+    harness.graphics.send({ type: 'setSectionViewActive', payload: true });
+    await harness.quiet();
+    const [cut] = harness.graphics.getSnapshot().context.sectionCuts;
+    harness.graphics.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.5 } } });
+    await harness.ports.flush();
+    const foreignSection = { active: true, cuts: [{ kind: 'plane', plane: 'xy', offset: 0.25, isFlipped: false }] };
+    await harness.foreign(view({ section: foreignSection }));
+    expect(harness.graphics.getSnapshot().context.sectionCuts[0]).toMatchObject({ offset: 0.5 });
+    harness.clock.increment(sectionSettleDelay);
+    await settle();
+    expect(harness.graphics.getSnapshot().context.sectionCuts[0]).toMatchObject({ plane: 'xy', offset: 0.25 });
+  });
+
+  it("should keep the new store's applied revision when the replaced store's last flush fails", async () => {
+    const harness = await mount();
+    await harness.frame();
+    harness.graphics.send({ type: 'setGridVisibility', payload: false });
+    const failOldWrite = harness.failWrites();
+    let checkout = encode(view({ display: { ...view().display, axes: false } }));
+    harness.ports.replaceHost({
+      files: {
+        exists: async () => true,
+        readFile: async () => checkout,
+        writeFileChecked: async ({ data }: { data: string }) => {
+          checkout = new TextEncoder().encode(data);
+          return { status: 'applied', content: checkout };
+        },
+      },
+      watch: () => ({
+        ready: Promise.resolve(),
+        closed: new Promise<void>(() => {
+          // The checkout's watch stays open in this row.
+        }),
+        dispose: () => undefined,
+      }),
+    });
+    for (let turn = 0; turn < 5; turn++) {
+      // oxlint-disable-next-line no-await-in-loop -- the digest answers on a later task.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      // oxlint-disable-next-line no-await-in-loop -- each turn lets one port answer.
+      await settle();
+    }
+    expect(harness.graphics.getSnapshot().context.enableAxes).toBe(false);
+    expect(harness.applied.get(workbenchPaths.view(viewId))).toEqual(expect.any(String));
+    // The replaced store's last write fails after the new store's record was acknowledged.
+    failOldWrite();
+    for (let turn = 0; turn < 5; turn++) {
+      // oxlint-disable-next-line no-await-in-loop -- the failure answers on a later task.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    }
+    expect(harness.applied.get(workbenchPaths.view(viewId))).toEqual(expect.any(String));
   });
 
   it('should save a section still inside the quiet gate when the session stops or the window closes', async () => {

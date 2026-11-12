@@ -377,6 +377,9 @@ export function startViewRecordSession(input: ViewRecordSessionInput): () => voi
         });
       },
       onError: () => {
+        if (stopped || retired) {
+          return;
+        }
         // The record's health carries the failure to the settings trigger.
         generation++;
         ports.setAppliedWorkbenchRevision(recordPath, undefined);
@@ -519,10 +522,12 @@ export function startViewRecordSession(input: ViewRecordSessionInput): () => voi
   );
 
   /* A section still inside graphics' quiet gate is the person's latest: a close or a stop saves it as settled. */
-  const settleEditedSection = (): void => {
-    if (selectSectionEditing(graphics)) {
-      binding.send({ type: 'sectionSettled', section: sectionOf(selectGraphicsContext(graphics)) });
+  const settleEditedSection = (): boolean => {
+    if (!selectSectionEditing(graphics)) {
+      return false;
     }
+    binding.send({ type: 'sectionSettled', section: sectionOf(selectGraphicsContext(graphics)) });
+    return true;
   };
 
   const flushAtClose = async (): Promise<void> => {
@@ -530,7 +535,11 @@ export function startViewRecordSession(input: ViewRecordSessionInput): () => voi
     if (current === undefined) {
       return;
     }
-    settleEditedSection();
+    /* The flush saves the cuts being edited, and the gate stays shut while graphics still edits them: a session flush
+     * is not always a close, and a foreign section must not land mid-drag. */
+    if (settleEditedSection()) {
+      binding.send({ type: 'sectionEdited' });
+    }
     await confirmFlush(current.flush, `View settings for ${record?.entryPath ?? viewId} are not confirmed saved.`);
   };
   subscriptions.push(ports.addFlush(flushAtClose));

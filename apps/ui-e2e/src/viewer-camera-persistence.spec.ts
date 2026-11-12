@@ -401,6 +401,19 @@ async function partHitPoint(): Promise<{ x: number; y: number }> {
   throw new Error(`No projected point of the model is over a part: ${JSON.stringify(points.slice(0, 12))}`);
 }
 
+/** The view's saved camera as the record holds it, in one window; `undefined` when it holds no pose. */
+async function savedPose(surface?: TargetSurface): Promise<string | undefined> {
+  return target.evaluate(
+    () => {
+      const cameraView = (globalThis as unknown as CameraBridgeWindow).__TAU_SECTION_VIEW_TEST__?.getViewSettings()
+        ?.cameraView;
+      return cameraView === undefined ? undefined : JSON.stringify(cameraView);
+    },
+    undefined,
+    surface,
+  );
+}
+
 /** Polls until the camera stands within the tolerance of `expected`, after a reload restores it. */
 async function pollRestoredTo(expected: CameraPose): Promise<CameraPose> {
   return pollCameraPose((pose) => distance(pose.position, expected.position) <= toleranceMeters);
@@ -477,7 +490,21 @@ test.describe('Viewer camera persistence across windows and reloads', () => {
         await target.mouseMove(secondCenter.x - dragDistancePixels, secondCenter.y, { steps: dragSteps }, 'secondary');
         await target.mouseUp(undefined, 'secondary');
         const foreign = await readCameraPose('secondary');
-        await target.delay(poseSettleMilliseconds + editDebounceMilliseconds + 2500);
+        expect(
+          distance(foreign.position, held.position),
+          `the other window should orbit away from the held pose, or this row proves nothing: ${JSON.stringify({ held, foreign })}`,
+        ).toBeGreaterThan(toleranceMeters);
+        /* The other window's pose reaches this window's record while the drag is still held. */
+        await expect
+          .poll(
+            async () => {
+              const [here, there] = await Promise.all([savedPose(), savedPose('secondary')]);
+              return here !== undefined && here === there;
+            },
+            { timeout: crossWindowMilliseconds },
+          )
+          .toBe(true);
+        await target.delay(poseSettleMilliseconds + editDebounceMilliseconds);
         const stillHeld = await readCameraPose();
         expect(
           distance(stillHeld.position, held.position),

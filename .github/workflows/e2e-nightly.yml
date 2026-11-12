@@ -54,6 +54,7 @@ jobs:
     outputs:
       sha: ${{ steps.commit.outputs.sha }}
       suites: ${{ steps.suites.outputs.suites }}
+      sharded: ${{ steps.suites.outputs.sharded }}
       webgpu: ${{ steps.suites.outputs.webgpu }}
       packaged: ${{ steps.suites.outputs.packaged }}
       everything: ${{ steps.suites.outputs.everything }}
@@ -76,14 +77,24 @@ jobs:
         env:
           ONLY: ${{ inputs.only || 'all' }}
         run: |
-          # `tail -1` keeps the JSON array and drops Nx's log lines.
+          # `tail -1` keeps the JSON array and drops Nx's log lines. A target splits into
+          # `metadata.shards` jobs when it declares that count; each job passes
+          # `--shard=<index>/<count>` to the target, which forwards it to its test runner.
           suites='[]'
-          add_suites() {
-            suites=$(jq -c --arg target "$1" --argjson projects "$2" \
-              '. + [$projects[] | {project: ., target: $target, slug: ("\(.)-\($target)" | gsub(":"; "-"))}]' <<< "$suites")
+          add_suite() {
+            suites=$(jq -c --arg project "$1" --arg target "$2" --argjson shards "$3" \
+              '. + [range(1; $shards + 1) as $i | {project: $project, target: $target}
+                + if $shards > 1
+                  then {shard: "\($i)/\($shards)", label: "\($project) \($target) \($i)/\($shards)", slug: ("\($project)-\($target)--shard-\($i)-of-\($shards)" | gsub(":"; "-"))}
+                  else {shard: "", label: "\($project) \($target)", slug: ("\($project)-\($target)" | gsub(":"; "-"))}
+                  end
+                + {group: ("\($project)-\($target)" | gsub(":"; "-"))}]' <<< "$suites")
           }
           for target in test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated test:e2e:deploy-skew test:e2e:filesystem-scenarios; do
-            add_suites "$target" "$(pnpm nx show projects --with-target "$target" --json | tail -1)"
+            for project in $(pnpm nx show projects --with-target "$target" --json | tail -1 | jq -r '.[]'); do
+              shards=$(pnpm nx show project "$project" --json | tail -1 | jq --arg target "$target" '.targets[$target].metadata.shards // 1')
+              add_suite "$project" "$target" "$shards"
+            done
           done
           webgpu=$(pnpm nx show projects --with-target test:e2e:webgpu --json | tail -1)
           packaged=$(pnpm nx show projects --with-target test:e2e:packaged --json | tail -1)
@@ -93,15 +104,21 @@ jobs:
           fi
           echo "End-to-end suites: $suites"
           echo "suites=$suites" >> "$GITHUB_OUTPUT"
+          # The sharded suites whose chat logs `e2e-chat-logs` validates once, across their shards.
+          sharded=$(jq -c --argjson without "$SUITES_WITHOUT_CHAT" \
+            '[.[] | select(.shard != "" and (.target | IN($without[]) | not)) | {project, target, group}] | unique' <<< "$suites")
+          echo "Sharded suites with chat logs: $sharded"
+          echo "sharded=$sharded" >> "$GITHUB_OUTPUT"
           echo "webgpu=$([ "$webgpu" = '[]' ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
           echo "Packaged desktop suites: $packaged"
           echo "packaged=$(jq -r 'join(",")' <<< "$packaged")" >> "$GITHUB_OUTPUT"
           echo "everything=$([ "$ONLY" = all ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
   # One job per project and suite target: in one job they ran one after another for
-  # over 105 min (run 37221169741, 2026-10-04).
+  # over 105 min (run 37221169741, 2026-10-04). A target too long for one job declares
+  # `metadata.shards` and runs as that many jobs, named `<project> <target> <i>/<n>`.
   e2e:
-    name: Browser end-to-end (${{ matrix.suite.project }} ${{ matrix.suite.target }})
+    name: Browser end-to-end (${{ matrix.suite.label }})
     runs-on: ubuntu-latest
     timeout-minutes: 150
     needs: [plan]
@@ -164,21 +181,25 @@ jobs:
           TAU_E2E_WEBGPU_PROFILE: software
           PROJECT: ${{ matrix.suite.project }}
           TARGET: ${{ matrix.suite.target }}
-        run: xvfb-run --auto-servernum pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream
+          SHARD: ${{ matrix.suite.shard }}
+        run: xvfb-run --auto-servernum pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream ${SHARD:+"--shard=$SHARD"}
 
       # Field trace validation: every events.jsonl the suites above captured at
       # teardown is validated against ChatLog.tla, including after a failed suite.
       # `SUITES_WITHOUT_CHAT` names the suites that open no chat: `test:e2e:non-isolated` runs
       # only PicoVoxel specs, `test:e2e:deploy-skew` only the TAU-UI-6 deploy check and
       # `test:e2e:filesystem-scenarios` only the filesystem scenario harness (Chromium, small profile).
+      # A shard holds only part of its suite's logs, so `e2e-chat-logs` validates those
+      # once all its shards finish: alone, a shard that opens no chat would fail the
+      # empty-capture rule and a known defect another shard exercises would read as fixed.
       - name: Setup formal toolchains
-        if: always() && !contains(fromJSON(env.SUITES_WITHOUT_CHAT), matrix.suite.target)
+        if: always() && matrix.suite.shard == '' && !contains(fromJSON(env.SUITES_WITHOUT_CHAT), matrix.suite.target)
         uses: ./.github/actions/setup-formal
         with:
           tools: tlc
 
       - name: Validate captured chat logs
-        if: always() && !contains(fromJSON(env.SUITES_WITHOUT_CHAT), matrix.suite.target)
+        if: always() && matrix.suite.shard == '' && !contains(fromJSON(env.SUITES_WITHOUT_CHAT), matrix.suite.target)
         env:
           PROJECT: ${{ matrix.suite.project }}
         run: pnpm nx run-many -t formal:logs --projects "$PROJECT"
@@ -199,6 +220,60 @@ jobs:
             out/test-results/filesystem-scenarios
             out/test-results/chat-logs
             out/reports/formal
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload the shard's chat logs
+        if: always() && matrix.suite.shard != '' && !contains(fromJSON(env.SUITES_WITHOUT_CHAT), matrix.suite.target)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: chat-logs-${{ matrix.suite.slug }}
+          path: out/test-results/chat-logs
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Field trace validation for a sharded suite: its shards' chat logs together, so the
+  # empty-capture and vanished-defect rules judge the whole suite as they do unsharded.
+  e2e-chat-logs:
+    name: Validate chat logs (${{ matrix.suite.project }} ${{ matrix.suite.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [plan, e2e]
+    if: always() && needs.plan.outputs.sharded != '[]' && needs.plan.outputs.sharded != ''
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.plan.outputs.sharded) }}
+    steps:
+      - *checkout
+      - *setup-nx
+
+      - name: Download the shards' chat logs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: chat-logs-${{ matrix.suite.group }}--shard-*
+          path: out/test-results/chat-logs
+          merge-multiple: true
+
+      - name: Setup formal toolchains
+        uses: ./.github/actions/setup-formal
+        with:
+          tools: tlc
+
+      - name: Validate captured chat logs
+        env:
+          PROJECT: ${{ matrix.suite.project }}
+        run: pnpm nx run-many -t formal:logs --projects "$PROJECT"
+
+      - name: Upload chat log verdicts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: chat-log-verdicts-${{ matrix.suite.group }}
+          path: out/reports/formal
           if-no-files-found: ignore
           retention-days: 7
 

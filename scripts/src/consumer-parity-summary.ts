@@ -93,8 +93,9 @@ export const consumers: readonly Consumer[] = [
       {
         kind: 'job',
         workflow: nightly,
-        job: 'Browser end-to-end (ui-e2e test:e2e)',
-        match: 'exact',
+        /* Its shards, `(ui-e2e test:e2e <i>/<n>)`; the space keeps out `test:e2e:development` and the other tiers. */
+        job: 'Browser end-to-end (ui-e2e test:e2e ',
+        match: 'prefix',
         scope: 'this-run',
         proves: '`ui-e2e:test:e2e`, kernel WASM laziness',
       },

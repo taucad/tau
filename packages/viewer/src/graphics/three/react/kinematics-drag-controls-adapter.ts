@@ -64,10 +64,17 @@ const selectDragStart = (
   return { pressHeld: selectKinematicsPressHeld(kinematics), draggable: dragEnabled && mechanism !== undefined };
 };
 
-/** The graphics context a press is hit-tested against: its click suppressions and section clipping. */
+/** What a press is hit-tested against: its click suppressions and the section clipping. */
 const selectPressGraphicsContext = (
   graphicsActor: GraphicsActor,
-): ReturnType<GraphicsActor['getSnapshot']>['context'] => graphicsActor.getSnapshot().context;
+): Pick<
+  ReturnType<GraphicsActor['getSnapshot']>['context'],
+  'modelPointerClickSuppressionReasons' | 'isSectionViewActive' | 'committedSectionCuts'
+> => {
+  const { modelPointerClickSuppressionReasons, isSectionViewActive, committedSectionCuts } =
+    graphicsActor.getSnapshot().context;
+  return { modelPointerClickSuppressionReasons, isSectionViewActive, committedSectionCuts };
+};
 
 /**
  * The viewer objects one press's drag adapter is built around.

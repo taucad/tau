@@ -58,7 +58,6 @@
   "apps/ui/app/hooks/use-sessions.tsx": 3,
   "apps/ui/app/hooks/use-sidebar-status.ts": 2,
   "apps/ui/app/hooks/use-thumbnail-generator.ts": 3,
-  "apps/ui/app/machines/file-manager.worker.revisions.ts": 1,
   "apps/ui/app/routes/[__e2e].onshape-render-profile/route.tsx": 9,
   "apps/ui/app/routes/auth.$/route.tsx": 1,
   "apps/ui/app/routes/community/route.tsx": 1,

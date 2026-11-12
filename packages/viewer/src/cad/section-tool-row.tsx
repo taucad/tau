@@ -40,11 +40,16 @@ import { formatNumberEngineeringNotation } from '#utils/number.js';
 type GraphicsState = SnapshotFrom<typeof graphicsMachine>;
 type GraphicsContext = GraphicsState['context'];
 type CutProps = Readonly<{ cutId: string }>;
-type CutPatcher = (cut: SectionCut, context: GraphicsContext) => SectionCutPatch | undefined;
+/** What a cut's patch is computed against: the cuts, the display units and the geometry's centre and radius. */
+type CutPatchContext = Pick<GraphicsContext, 'sectionCuts' | 'displayUnits' | 'geometryCenter' | 'geometryRadius'>;
+type CutPatcher = (cut: SectionCut, context: CutPatchContext) => SectionCutPatch | undefined;
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 
-/** The context a cut's patch is computed against: its cuts, units and bounds as they are when the event fires. */
-const selectCutPatchContext = (graphicsRef: GraphicsActorRef): GraphicsContext => graphicsRef.getSnapshot().context;
+/** The cuts, units and bounds a cut's patch is computed against, as they are when the event fires. */
+const selectCutPatchContext = (graphicsRef: GraphicsActorRef): CutPatchContext => {
+  const { sectionCuts, displayUnits, geometryCenter, geometryRadius } = graphicsRef.getSnapshot().context;
+  return { sectionCuts, displayUnits, geometryCenter, geometryRadius };
+};
 
 /** The cut a chip, handle or pointer is previewing now. */
 const selectHoveredSectionCutId = (graphicsRef: GraphicsActorRef): string | undefined =>
@@ -231,7 +236,7 @@ export function resolveSectionTranslationControl({
  * A plane's offset from a value in display units: kept to 1 mm in every unit, as the handles do, and within the
  * offset field's range once the bounds are known.
  */
-const toPlaneOffset = (units: number, plane: SectionPlane, context: GraphicsContext): number => {
+const toPlaneOffset = (units: number, plane: SectionPlane, context: CutPatchContext): number => {
   const metres = Math.round(units * context.displayUnits.length.metersPerUnit * 1000) / 1000;
   const { minMeters, maxMeters } = resolveSectionTranslationControl({
     geometryCenterMeters: context.geometryCenter,

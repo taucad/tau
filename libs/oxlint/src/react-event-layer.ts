@@ -19,7 +19,9 @@
  *   `useFoo` or `Foo`, or one passed to `memo` or `forwardRef`) that is not inside a
  *   module-level `select*` helper (`function selectFoo` or `const selectFoo = (...) =>`).
  *   A read in actor logic, an adapter, a store factory or a callback-actor host is
- *   outside React and is not a site.
+ *   outside React and is not a site. A module-level helper is never inside a component, so
+ *   a read moved into one of any name stops counting: that a handler's reader is a narrow
+ *   `select*` function is a review convention, not something this counter checks.
  *
  * Tests, type tests, declarations and test-support modules are not counted.
  *
@@ -528,6 +530,9 @@ export function reactEventLayerZeroProblems(
     }
   }
   for (const [path, { sites, reason }] of Object.entries(exceptions)) {
+    if (!Number.isInteger(sites) || sites < 1) {
+      problems.push(`${path}: an exception's sites must be a positive integer; remove it at 0`);
+    }
     if (!isInScope(path, scope)) {
       problems.push(`${path}: a named exception must be inside the zero scope`);
     }
@@ -560,11 +565,13 @@ export function checkReactEventLayerCeiling(check: ReactEventLayerCheck): string
   const measured = measureReactEventLayer(directories, workspaceRoot);
   const scopePaths = (check.zero?.scope ?? []).map((entry) => fileURLToPath(entry).replace(/[/\\]$/, ''));
   const scope = scopePaths.map((path) => toPosix(relative(workspaceRoot, path)));
-  const missingScope = scopePaths
-    .filter((path) => !existsSync(path))
-    .map(
-      (path) => `${toPosix(relative(workspaceRoot, path))}: a zero-scope path that does not exist; move or remove it`,
-    );
+  const missingScope = scopePaths.flatMap((path) => {
+    const name = toPosix(relative(workspaceRoot, path));
+    if (!existsSync(path)) {
+      return [`${name}: a zero-scope path that does not exist; move or remove it`];
+    }
+    return isInScope(name, prefixes) ? [] : [`${name}: a zero-scope path outside the measured directories`];
+  });
   const exceptions = check.zero?.exceptions ?? {};
   const allowed: Record<string, number> = { ...ceiling };
   for (const [path, { sites }] of Object.entries(exceptions)) {

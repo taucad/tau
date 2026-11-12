@@ -598,7 +598,7 @@ The effect cleanup queues `actor.stop()` in a microtask; an effect re-run for th
 
 ### Hand a host element to an actor with a ref callback
 
-When an actor needs a DOM node, an R3F object or a renderer root, the component hands it over with a ref callback. The callback sends only an attach event with the element, and a detach event when React passes `null`. The actor spawns callback logic around the element, and that logic owns every listener, timer and teardown. The ref callback never subscribes and never keeps the element. Graphics' `controlsAttached`, `sectionInputAttached` and `viewportGizmoAttached`, and the canvas actor's `hostCreated`, follow this pattern (charter D4, ruled 2026-11-12).
+When an actor needs a DOM node or an R3F object, the component hands it over with a ref callback. The callback sends only an attach event with the element, or an adapter built around it, and a detach event when React passes `null`. The actor spawns callback logic around the element, and that logic owns every listener, timer and teardown. The ref callback never subscribes and never keeps the element. Graphics' `sectionInputAttached` and `viewportGizmoAttached` follow this pattern (charter D4, ruled 2026-11-12). A renderer root arrives the same way from R3F's `onCreated`: the canvas sends the canvas actor `hostCreated` and graphics `controlsAttached` from there, and its surface's ref callback sends them again when a Suspense boundary re-attaches the surface.
 
 ```typescript
 const attachInput = useCallback<RefCallback<THREE.Group>>(

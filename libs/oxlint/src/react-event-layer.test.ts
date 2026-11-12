@@ -290,14 +290,16 @@ describe('checkReactEventLayerCeiling', () => {
     expect(
       check({
         'pkg/src/graphics/boundary.tsx': { sites: 2, reason: ' ' },
+        'pkg/src/graphics/debt.tsx': { sites: 0, reason: 'cleared' },
         'pkg/src/other.tsx': { sites: 1, reason: 'outside' },
       }),
     ).toEqual([
       'pkg/src/graphics/boundary.tsx: a named exception needs its reason',
       'pkg/src/graphics/boundary.tsx: holds 1 site(s), below its exception of 2; lower or remove the exception',
+      "pkg/src/graphics/debt.tsx: an exception's sites must be a positive integer; remove it at 0",
       'pkg/src/other.tsx: a named exception must be inside the zero scope',
       [
-        'pkg/src/graphics/debt.tsx: 1 React event-layer site(s) is held at zero; only a named exception may keep a site. Move the work into an actor.',
+        'pkg/src/graphics/debt.tsx: 1 React event-layer site(s) exceeds its named exception of 0. Move the work into an actor.',
         '  2:1 effect calls .send',
       ].join('\n'),
     ]);

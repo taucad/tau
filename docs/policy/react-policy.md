@@ -288,17 +288,17 @@ The graphics scope is `packages/viewer`, `packages/camera` and `packages/three`,
 
 Three sanctioned shapes stand in for those effects:
 
-- **Hand a host element to an actor with a ref callback.** The ref callback sends only an attach event with the element, and a detach event when React passes `null`. The actor (callback logic spawned by graphics) owns the listeners, the timers and the teardown. `hostCreated`, `controlsAttached` and `sectionInputAttached` are this pattern.
-- **Read at the moment of an event through a narrow `select*` reader.** A handler, a frame loop or a ref callback that needs an actor's current value calls a module-level `select*` function that takes the actor and returns only what the event needs, such as `selectCameraViewDirection`. It never keeps the value.
+- **Hand a host element to an actor with a ref callback.** The ref callback sends only an attach event with the element, or an adapter built around it, and a detach event when React passes `null`. The actor (callback logic spawned by graphics) owns the listeners, the timers and the teardown. `sectionInputAttached` and `viewportGizmoAttached` are this pattern. A renderer root that R3F hands over in `onCreated` goes the same way: the canvas sends `hostCreated` and `controlsAttached` from there, and its surface's ref callback sends them again when a Suspense boundary re-attaches the surface.
+- **Read at the moment of an event through a narrow `select*` reader.** A handler, a frame loop or a ref callback that needs an actor's current value calls a module-level `select*` function that takes the actor and returns only what the event needs, such as `selectCameraViewDirection`. It never keeps the value. The counter cannot tell a narrow reader from a broad one, so review checks it.
 - **Report what happened from the handler.** A click, a key or a pointer gesture is sent from its handler, never mirrored into state for an effect to send later.
 
-A boundary where React context or a prop is the only source of a value may send that value as one event from one effect. It is a named exception, never a ceiling line. Each one names its boundary in a comment and is listed with its reason in its project's `react-event-layer.policy.node.test.ts`:
+A boundary where React context or a prop is the only source of a value may send that value as one event from one effect. It is a named exception, never a ceiling line. Each one names its boundary in a comment and is listed with its reason in its project's `react-event-layer.policy.node.test.ts`. `packages/viewer` is held at zero, with these exceptions, from G12's second change; until then its ceiling manifest still lists them:
 
-| File                                                | Boundary                                                                                                    | Ruling                    |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------- |
-| `packages/viewer/src/model-viewer.tsx`              | The standalone viewer's artifact prop sent as `updateArtifact` or `clearArtifact`                           | Inventory C10, 2026-11-12 |
-| `packages/viewer/src/hooks/use-graphics.tsx`        | The viewer environment's theme, accent and contrast, from React context, sent as `viewerEnvironmentChanged` | G8, 2026-11-12            |
-| `packages/viewer/src/parameters/use-field-edits.ts` | A parameter field's authority prop sent as `observed`                                                       | G12, 2026-11-12           |
+| File                                                | Boundary                                                                                                    | Ruling                             |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `packages/viewer/src/model-viewer.tsx`              | The standalone viewer's artifact prop sent as `updateArtifact` or `clearArtifact`                           | Inventory C10, 2026-11-12          |
+| `packages/viewer/src/hooks/use-graphics.tsx`        | The viewer environment's theme, accent and contrast, from React context, sent as `viewerEnvironmentChanged` | G8, 2026-11-12                     |
+| `packages/viewer/src/parameters/use-field-edits.ts` | A parameter field's authority prop sent as `observed`                                                       | Programme control, G12, 2026-11-12 |
 
 CORRECT:
 
@@ -324,7 +324,7 @@ useEffect(() => {
 }, [graphicsRef]);
 ```
 
-This rule is checked by the `react-event-layer.policy.node.test.ts` in each project, through `@taucad/oxlint/react-event-layer`. The counter is lexical: it counts an effect whose callback calls `.send`, `.subscribe`, `.on`, `send`, `subscribe` or a timer, and a `getSnapshot()` call inside a component or hook outside a module-level `select*` helper. A call hidden behind a helper declared elsewhere is not seen, so a reviewer checks for one.
+This rule is checked by the `react-event-layer.policy.node.test.ts` in each project, through `@taucad/oxlint/react-event-layer`. The counter is lexical: it counts an effect whose callback calls `.send`, `.subscribe`, `.on`, `send`, `subscribe` or a timer, and a `getSnapshot()` call written inside a component or hook. A call hidden behind a helper declared elsewhere, of any name, is not seen, so a reviewer checks for one.
 
 ## 6. Keys
 

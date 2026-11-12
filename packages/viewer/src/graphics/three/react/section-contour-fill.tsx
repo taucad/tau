@@ -66,10 +66,10 @@ export const sectionCapRenderPriority = 1.2;
 
 const noCuts: readonly SectionCut[] = [];
 
-/** The hover and selection the caps are emphasised by, read on each frame. */
+/** The per-unit hover and selection the caps are emphasised by, read on each frame. */
 const selectCapEmphasisContext = (
   modelInteractionRef: Pick<ReturnType<typeof useModelInteractionRef>, 'getSnapshot'>,
-): ModelInteractionContext => modelInteractionRef.getSnapshot().context;
+): Pick<ModelInteractionContext, 'unitsById'> => ({ unitsById: modelInteractionRef.getSnapshot().context.unitsById });
 
 /** The hatch line width, in CSS pixels: constant on screen, as drafting keeps one pen weight for section lining. */
 export const sectionCapLineWidthCssPixels = 1;
@@ -137,7 +137,7 @@ const resolveLoopCapFaces = (camera: THREE.Camera, pieces: readonly SectionPiece
 /** The emphasis of the component a cut face belongs to, or `none` when it has no owner. */
 export function resolveSectionSourceEmphasis(
   record: SectionSourceRecord,
-  modelInteractionContext: ModelInteractionContext,
+  modelInteractionContext: Pick<ModelInteractionContext, 'unitsById'>,
 ): ModelComponentEmphasis {
   const { owner } = record.visibleSource.source;
   return owner

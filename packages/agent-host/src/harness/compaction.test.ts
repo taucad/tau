@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Agent } from '@earendil-works/pi-agent-core';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream, normalizeContext } from '@earendil-works/pi-ai';
+import { estimateMessageTokens } from '@earendil-works/pi-ai/utils/estimate';
 import type { AssistantMessage, Context, Models, UserMessage } from '@earendil-works/pi-ai';
 import { compactionFoldOf, installCompaction } from '#harness/compaction.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
@@ -126,6 +127,64 @@ describe('Compaction', () => {
     );
   });
 
+  /* Ruling U15: a pass lands the history at a fifth of the window, and clearing stands in for a summary only when it
+   * gets there alone. Twelve read results against an 8,192-token window: seven old ones of 1,000 tokens put the
+   * history over the trigger, and clearing keeps the newest five. */
+  it.each([
+    ['take clearing alone when it lands the history at a fifth of the window', 300, 'tool_result_clearing'],
+    ['write a summary and clear nothing when clearing alone would land above it', 1500, 'summarization'],
+  ] as const)('should %s', async (_name, recentCharacters, tier) => {
+    const messages: AgentMessage[] = [{ role: 'user', content: 'read the parts', timestamp: 0 }];
+    for (let index = 0; index < 12; index++) {
+      messages.push(
+        {
+          ...answeredTurn(0, index * 2 + 1),
+          content: [
+            { type: 'toolCall', id: `call-${index}`, name: 'read_file', arguments: { targetFile: `part-${index}.ts` } },
+          ],
+          stopReason: 'toolUse',
+        },
+        {
+          role: 'toolResult',
+          toolCallId: `call-${index}`,
+          toolName: 'read_file',
+          content: [{ type: 'text', text: 'x'.repeat(index < 7 ? 4000 : recentCharacters) }],
+          isError: false,
+          timestamp: index * 2 + 2,
+        },
+      );
+    }
+    const appended: Array<Parameters<SessionRecord['append']>[0]> = [];
+    const outcomes: CompactionOutcome[] = [];
+    const compaction = installCompaction({
+      agent: new Agent({
+        streamFn: () => createAssistantMessageEventStream(),
+        initialState: { model: stubModel, messages },
+      }),
+      record: recordFor(messages, async (event) => {
+        appended.push(event);
+      }),
+      projectHistory: async () => messages,
+      contextWindow: 8192,
+      summarize: async () => 'The parts read so far.',
+      onCompaction: (outcome) => outcomes.push(outcome),
+    });
+
+    const prepared = await compaction.prepareTurn();
+
+    expect(outcomes.map((outcome) => outcome.tier)).toEqual([tier]);
+    /* Either tier leaves at most a fifth of the window of history, beside the summary it may have written. */
+    const retained = prepared
+      .filter((message) => !JSON.stringify(message).includes('<summary>'))
+      .reduce((total, message) => total + estimateMessageTokens(message), 0);
+    expect(retained).toBeLessThanOrEqual(Math.floor(8192 * 0.2));
+    /* A pass writes clearings or one summary, never both. */
+    expect(appended.map((event) => event.type).filter((type) => type !== 'message.envelope-replaced')).toEqual(
+      tier === 'summarization' ? ['history.compacted'] : [],
+    );
+    expect(appended.some((event) => event.type === 'message.envelope-replaced')).toBe(tier === 'tool_result_clearing');
+  });
+
   it('matches the transitional compactable-tool set', async () => {
     const messages: AgentMessage[] = [
       ...oversizedToolHistory('evaluate_model'),
@@ -242,7 +301,8 @@ describe('Compaction', () => {
     expect(append).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'history.compacted',
-        evictedMessageIds: ['message-1', 'message-2', 'message-3', 'message-4'],
+        /* A fifth of the window holds one of these messages: the newest stays, and the tagged first one is pinned. */
+        evictedMessageIds: ['message-1', 'message-2', 'message-3', 'message-4', 'message-5', 'message-6'],
       }),
     );
     expect(agent.state.messages).toEqual(prepared?.context?.messages);
@@ -347,7 +407,8 @@ describe('Compaction', () => {
 
     await compaction.prepareTurn();
 
-    expect(summarize.mock.calls[0]?.[0].messages).toHaveLength(5);
+    /* Ten messages of about 1,000 tokens against a landing point of 1,638 (a fifth of the window): one is kept. */
+    expect(summarize.mock.calls[0]?.[0].messages).toHaveLength(9);
   });
 
   it('should leave enough tier-two headroom for one typical assistant turn', async () => {
@@ -532,7 +593,7 @@ describe('Compaction', () => {
     const prepared = await compaction.prepareTurn();
 
     expect(JSON.stringify(prepared)).toContain(
-      'Compaction could not summarize 4 messages spanning 4 turns. The project files are the source of truth for the current work.',
+      'Compaction could not summarize 7 messages spanning 7 turns. The project files are the source of truth for the current work.',
     );
     const compacted = appended.find((event) => event.type === 'history.compacted');
     expect(compacted?.type === 'history.compacted' && compacted.details?.summary).toBe('placeholder');
@@ -689,8 +750,14 @@ describe('Compaction', () => {
     const carried = compactionFoldOf(durable as unknown as readonly AgentLogEvent[]).anchor;
     expect(carried).toMatchObject({ messageId: 'message-6', tokens: expect.any(Number) as unknown });
 
-    /* The next admission: a new session over the compacted history and a large new request. */
-    const second: AgentMessage[] = [...compacted, { role: 'user', content: 'y'.repeat(8000), timestamp: 8 }];
+    /* The next admission: a new session over the compacted history and a large new request, sized so the messages
+     * alone stay under the trigger (80 % of the window) and only the carried overhead puts the request over it. */
+    const retained = compacted.reduce((total, message) => total + estimateMessageTokens(message), 0);
+    const underTrigger = Math.floor(8192 * 0.8) - retained - 200;
+    const second: AgentMessage[] = [
+      ...compacted,
+      { role: 'user', content: 'y'.repeat(underTrigger * 4), timestamp: 8 },
+    ];
     const identities = new MessageIdentities(() => 'unused');
     for (const [index, message] of second.entries()) {
       identities.set(message, message === assistant ? 'message-6' : `second-${String(index)}`);
@@ -862,7 +929,8 @@ describe('Compaction', () => {
         runId: 'seed-run',
       }) as const;
     const seedEvents: AgentLogEvent[] = [];
-    for (let index = 0; index < 6; index++) {
+    /* Twelve calls of about 620 tokens against an 8,192-token window: past the trigger, and a fifth of the window holds two. */
+    for (let index = 0; index < 12; index++) {
       const callId = `call-${index}`;
       seedEvents.push(
         {
@@ -876,7 +944,7 @@ describe('Compaction', () => {
                 type: 'toolCall',
                 id: callId,
                 name: 'edit_file',
-                arguments: { targetFile: 'main.ts', oldString: 'x'.repeat(8000), newString: `${index}` },
+                arguments: { targetFile: 'main.ts', oldString: 'x'.repeat(2400), newString: `${index}` },
               },
             ],
             metadata: { api: 'openai-responses', provider: 'stub', model: 'stub', stopReason: 'toolUse' },
@@ -890,7 +958,7 @@ describe('Compaction', () => {
             role: 'tool-input',
             toolCallId: callId,
             toolName: 'edit_file',
-            content: { targetFile: 'main.ts', oldString: 'x'.repeat(8000), newString: `${index}` },
+            content: { targetFile: 'main.ts', oldString: 'x'.repeat(2400), newString: `${index}` },
           },
         },
         {
@@ -943,29 +1011,18 @@ describe('Compaction', () => {
     if (compacted?.type !== 'history.compacted') {
       throw new Error('Tier-two compaction did not persist its durable projection.');
     }
-    expect(compacted.evictedMessageIds).toEqual([
-      'assistant-0',
-      'input-0',
-      'output-0',
-      'assistant-1',
-      'input-1',
-      'output-1',
-      'assistant-2',
-      'input-2',
-      'output-2',
-      'assistant-3',
-      'input-3',
-      'output-3',
-    ]);
-    expect(compacted.evictedMessageIds).not.toContain('input-5');
+    expect(compacted.evictedMessageIds).toEqual(
+      Array.from({ length: 10 }, (_, index) => [`assistant-${index}`, `input-${index}`, `output-${index}`]).flat(),
+    );
+    expect(compacted.evictedMessageIds).not.toContain('input-11');
     expect(reduceEventLog(compactedEvents).map((message) => message.id)).toEqual([
       'generated-0',
-      'assistant-4',
-      'input-4',
-      'output-4',
-      'assistant-5',
-      'input-5',
-      'output-5',
+      'assistant-10',
+      'input-10',
+      'output-10',
+      'assistant-11',
+      'input-11',
+      'output-11',
       'turn-tier-2',
       'generated-1',
     ]);
@@ -995,19 +1052,19 @@ describe('Compaction', () => {
 
     expect(requests[0]?.messages.map((message) => message.id)).toEqual([
       'generated-0',
-      'assistant-4',
-      'input-4',
-      'output-4',
-      'assistant-5',
-      'input-5',
-      'output-5',
+      'assistant-10',
+      'input-10',
+      'output-10',
+      'assistant-11',
+      'input-11',
+      'output-11',
       'turn-tier-2',
       'generated-1',
       'turn-after-tier-2',
     ]);
     expect(requests[0]?.messages.filter((message) => message.role === 'tool-input')).toEqual([
-      expect.objectContaining({ id: 'input-4', toolCallId: 'call-4', toolName: 'edit_file' }),
-      expect.objectContaining({ id: 'input-5', toolCallId: 'call-5', toolName: 'edit_file' }),
+      expect.objectContaining({ id: 'input-10', toolCallId: 'call-10', toolName: 'edit_file' }),
+      expect.objectContaining({ id: 'input-11', toolCallId: 'call-11', toolName: 'edit_file' }),
     ]);
     await second.close();
   });
@@ -1378,7 +1435,7 @@ describe('Compaction', () => {
               type: 'toolCall',
               id: `call-${index}`,
               name: 'edit_file',
-              arguments: { targetFile: 'main.ts', oldString: 'x'.repeat(4000), newString: String(index) },
+              arguments: { targetFile: 'main.ts', oldString: 'x'.repeat(2800), newString: String(index) },
             },
           ],
           api: stubModel.api,
@@ -1399,7 +1456,7 @@ describe('Compaction', () => {
           role: 'toolResult',
           toolCallId: `call-${index}`,
           toolName: 'edit_file',
-          content: [{ type: 'text', text: 'y'.repeat(2000) }],
+          content: [{ type: 'text', text: 'y'.repeat(1600) }],
           isError: false,
           timestamp: index * 2 + 2,
         },

@@ -23,7 +23,7 @@ export function useRestoreToPoint(): UseRestoreToPoint {
   const status = useRevisionStatus();
   const commands = useRevisionCommands();
   const isDirty = status?.dirty ?? false;
-  const isBusy = (status?.restore.busy ?? false) || (status?.restore.asking ?? false);
+  const isBusy = status?.restore.busy ?? false;
   return useMemo(
     () => ({
       restore: commands.restore,

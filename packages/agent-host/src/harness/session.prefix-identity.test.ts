@@ -97,6 +97,8 @@ type Turn = Readonly<{
   /** The summary compaction writes; the placeholder when absent. */
   summarize?: string | undefined;
   effort?: 'medium' | 'high' | undefined;
+  /** The catalog says the model reads its effort from the transcript and takes the binding control (U14, WP5). */
+  transcriptEffort?: boolean | undefined;
   /** What `read_file` answers with; a long body gives tool-result clearing something to free. */
   fileBody?: string | undefined;
   /** The composing build's release label. */
@@ -231,7 +233,14 @@ const runChat = async (turns: readonly Turn[]): Promise<ChatRun> => {
         contextWindow: turn.contextWindow ?? 200_000,
         maxTokens: 8192,
         providerKind: 'anthropic',
-        ...(turn.effort === undefined ? {} : { reasoning: { effort: turn.effort } }),
+        ...(turn.effort === undefined
+          ? {}
+          : {
+              reasoning: {
+                effort: turn.effort,
+                ...(turn.transcriptEffort ? ({ effortInTranscript: true, replayBinding: 'drop' } as const) : {}),
+              },
+            }),
       },
       modelTransport: transport,
       toolRegistry: {
@@ -546,6 +555,42 @@ describe('I1 request prefix identity across consecutive user turns', () => {
   });
 });
 
+/**
+ * A chat whose old tool results are cleared in place and no summary is written. Clearing stands in for a summary only
+ * when it lands the history at a fifth of the window by itself (ruling U15), so the results have to be most of the
+ * history: forty reads of about 550 tokens against a 32,768-token window, of which clearing keeps the newest five.
+ * The last read's reply reports a request over the trigger, so the pass runs before the next step of the same run.
+ */
+const clearingReads = 40;
+const clearingWindow = 32_768;
+const clearingChat: Turn[] = [
+  {
+    ...turnOne,
+    contextWindow: clearingWindow,
+    summarize: 'Earlier work.',
+    clientContext: undefined,
+    fileBody: `module nut() {} // ${'x'.repeat(2200)}`,
+    replies: [
+      ...Array.from(
+        { length: clearingReads },
+        (_, index): ScriptedReply => ({
+          tool: 'read_file',
+          input: { targetFile: `part-${String(index)}.scad` },
+          inputTokens: index === clearingReads - 1 ? 27_000 : 3,
+        }),
+      ),
+      { ...done, inputTokens: 200 },
+    ],
+  },
+  {
+    ...turnTwo,
+    contextWindow: clearingWindow,
+    summarize: 'Earlier work.',
+    clientContext: undefined,
+    fileBody: `module nut() {} // ${'x'.repeat(2200)}`,
+  },
+];
+
 describe('P2 native reasoning is replayed only under the prefix that minted it', () => {
   const window = { contextWindow: 8192, summarize: 'Earlier work.' } as const;
   const replayed = (run: ChatRun): string[][] => run.sent.map((request) => replayedSignatures(request.body));
@@ -598,22 +643,13 @@ describe('P2 native reasoning is replayed only under the prefix that minted it',
   });
 
   it('should leave out the reasoning minted after a cleared tool result, inside the run that cleared it', async () => {
-    const reads: ScriptedReply[] = Array.from({ length: 10 }, (_, index) => ({
-      tool: 'read_file',
-      input: { targetFile: `part-${String(index)}.scad` },
-      inputTokens: index === 9 ? 7000 : 3,
-    }));
-    const long = { ...window, clientContext: undefined, fileBody: `module nut() {} // ${'x'.repeat(1600)}` };
-    const run = await runChat([
-      { ...turnOne, ...long, replies: [...reads, { ...done, inputTokens: 200 }] },
-      { ...turnTwo, ...long },
-    ]);
+    const run = await runChat(clearingChat);
     const signatures = replayed(run);
-    /* Ten replies thought before the results were cleared. The first precedes the first cleared result and stays
-     * valid; the nine after it are left out, in the open tool loop, and stay out on the next turn. */
-    expect(signatures[9]).toHaveLength(9);
-    expect(signatures[10]).toEqual(['sig-1']);
-    expect(signatures[11]).toEqual(['sig-1', 'sig-11']);
+    /* Every read's reply thought before the results were cleared. The first precedes the first cleared result and
+     * stays valid; the ones after it are left out, in the open tool loop, and stay out on the next turn. */
+    expect(signatures[clearingReads - 1]).toHaveLength(clearingReads - 1);
+    expect(signatures[clearingReads]).toEqual(['sig-1']);
+    expect(signatures[clearingReads + 1]).toEqual(['sig-1', `sig-${String(clearingReads + 1)}`]);
   });
 
   it('should leave out the reasoning a summary’s retained tail holds', async () => {
@@ -832,6 +868,36 @@ describe('P1 typed prefix breaks on the durable log', () => {
     ]);
   });
 
+  it('should record no break when the effort changes on a model that reads it from the transcript (U14)', async () => {
+    const run = await runChat([
+      { ...turnOne, effort: 'high', transcriptEffort: true },
+      { ...turnTwo, effort: 'medium', transcriptEffort: true, replies: [readFile, done] },
+      { ...turnTwo, effort: 'high', transcriptEffort: true, runId: 'run-3', userText: 'Thicker' },
+    ]);
+
+    /* `runChat` holds the chat to the prefix contract: no request field moved and every request only appended. */
+    expect(run.breaks).toEqual([[undefined, undefined], [undefined, undefined], [undefined]]);
+    const last = run.turns[2]![0]!;
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Anthropic's wire uses snake_case.
+    expect(last).toMatchObject({ output_config: { effort: 'high' } });
+    /* Each reply's level sits in front of it, and the level in force closes the request. */
+    const levels = (last['messages'] as Array<{ role: string; output_config?: { effort: string } }>)
+      .filter((message) => message.role === 'system')
+      .map((message) => message.output_config?.effort);
+    expect(levels).toEqual(['high', 'high', 'medium', 'medium', 'high']);
+    expect(replayedSignatures(last)).toEqual(['sig-1', 'sig-2', 'sig-3', 'sig-4']);
+  });
+
+  it('should record one settings break on the turn a chat starts carrying its effort in the transcript', async () => {
+    const run = await runChat([
+      { ...turnOne, effort: 'medium' },
+      { ...turnTwo, effort: 'medium', transcriptEffort: true, replies: [readFile, done] },
+      { ...turnTwo, effort: 'high', transcriptEffort: true, runId: 'run-3', userText: 'Thicker' },
+    ]);
+
+    expect(run.breaks).toEqual([[undefined, undefined], ['settings', undefined], [undefined]]);
+  });
+
   it('should record a definitions break when the prompt text changes under another release', async () => {
     const run = await runChat([
       { ...turnOne, release: 'ui@1' },
@@ -867,19 +933,9 @@ describe('P1 typed prefix breaks on the durable log', () => {
   });
 
   it('should record one clearing break on the first reply after old tool results were cleared in place', async () => {
-    const reads: ScriptedReply[] = Array.from({ length: 10 }, (_, index) => ({
-      tool: 'read_file',
-      input: { targetFile: `part-${String(index)}.scad` },
-      inputTokens: index === 9 ? 7000 : 3,
-    }));
-    /* Long results and no skills catalog: clearing alone frees enough of the window, so no summary is written. */
-    const long = { ...window, clientContext: undefined, fileBody: `module nut() {} // ${'x'.repeat(1600)}` };
-    const run = await runChat([
-      { ...turnOne, ...long, replies: [...reads, { ...done, inputTokens: 200 }] },
-      { ...turnTwo, ...long },
-    ]);
+    const run = await runChat(clearingChat);
     expect(run.breaks.flat().filter((cause) => cause !== undefined)).toEqual(['clearing']);
-    expect(run.breaks[0]!.indexOf('clearing')).toBe(10);
+    expect(run.breaks[0]!.indexOf('clearing')).toBe(clearingReads);
   });
 
   it('should record an unsanctioned break when a defect rewrites an earlier message with nothing to explain it', async () => {

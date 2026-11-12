@@ -307,20 +307,20 @@ describe('the head a capture inherits modes from', () => {
 });
 
 describe('the restore plan (E5)', () => {
-  it('should read no tree: an oid diff from the head names what it removes (D10)', async () => {
+  it('should read no tree to plan a restore (D10)', async () => {
     const counted = await fixture(files(20), true);
     const first = await mint(counted);
     await counted.filesystem.writeFile('added.txt', 'later\n');
     await mint(counted, first, ['added.txt']);
 
     counted.treeReads.length = 0;
-    const plan = await run<{ revisionNumber: number | undefined; removedPathCount: number; dirty: boolean }>(
+    const plan = await run<{ revisionId: string; revisionNumber: number | undefined }>(
       counted.actors.restore.computePlan,
       { checkoutId: 'live', target: first },
     );
 
     expect(counted.treeReads).toEqual([]);
-    expect(plan).toMatchObject({ revisionNumber: 1, removedPathCount: 1, dirty: false });
+    expect(plan).toMatchObject({ revisionId: first, revisionNumber: 1 });
   });
 
   it('should write a restore by oid diff: only the paths that differ are read from the store (D10, S11)', async () => {

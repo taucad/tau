@@ -1,0 +1,29 @@
+{
+  "$comment": "Viewer-capture seconds per parity fixture (both ambient-occlusion captures together) for the four `Viewer references` shards of .github/workflows/viewer-parity.yml, which deal the fixtures with scripts/src/test-shard-dealer.ts. Source: 181 successful shard jobs of merge-queue and main-push runs of ci.yml, 2026-11-10 to 2026-11-12, at least 45 samples per fixture; each fixture's value is its runner-speed-normalised median (a per-job speed factor fitted across the job's fixtures, since hosted runners differ by up to 3x on SwiftShader). A fixture not listed weighs defaultSeconds, the median fixture. Refresh when a fixture is added or a listed value moves by more than a quarter.",
+  "measuredAt": "2026-11-12",
+  "defaultSeconds": 97,
+  "seconds": {
+    "flanged-housing": 106,
+    "gear-8": 114,
+    "replicad.ibeam": 92,
+    "replicad.t-slot-rail": 99,
+    "replicad.lego": 93,
+    "smlib.parametric-plate": 105,
+    "replicad.vase": 97,
+    "replicad.bottle": 91,
+    "replicad.hex-screwdriver": 84,
+    "replicad.rao-nozzle": 106,
+    "replicad.tray": 91,
+    "replicad.wavy-vase": 91,
+    "openscad.fluted-vase": 99,
+    "manifold.manifold-logo": 141,
+    "replicad.hollow-box": 93,
+    "replicad.simple-tray": 93,
+    "picovoxel.lattice-regular": 98,
+    "picovoxel.gyroid-sdf": 127,
+    "picovoxel.sphere-minus-beams": 93,
+    "replicad.spur-gearbox": 97,
+    "jscad.planetary-gear-system": 97,
+    "replicad.heat-exchanger": 164
+  }
+}

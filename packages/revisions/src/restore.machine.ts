@@ -9,7 +9,8 @@
  *    root, which refuses it while a turn holds the checkout (A1).
  * 2. **planning / applying** — the host computes the plan and writes the target
  *    tree, proving inside the fence that the files still equal the head that
- *    step 1 left (A3).
+ *    step 1 left (A3). Nothing asks a person first: every step adds to History
+ *    and *Undo restore* takes it back, so the verb acts at once (I11).
  * 3. **minting** — the checkout child cuts again with `restoredFrom`, so the line
  *    fast-forwards to a revision whose tree is the target's. The head moves only
  *    through that cut (A4); a target equal to the head mints nothing (A8).
@@ -22,7 +23,7 @@
  * host derives from its operation log: the scoped inverse of this form's newest
  * operation on the line, never a whole earlier tree. `computePlan` and
  * `applyPlan` stay injected actors, and the plan itself never enters context:
- * `computePlan` returns the facts the guards need plus an opaque `planId` the
+ * `computePlan` returns the revision it resolved plus an opaque `planId` the
  * host holds, so the snapshot stays serializable.
  */
 
@@ -135,8 +136,6 @@ export type RestoreMachineContext = Readonly<{
   revisionId: string | undefined;
   /** Its first-parent ordinal on the line, or `undefined` off the line (D5). */
   revisionNumber: number | undefined;
-  removedPathCount: number;
-  dirty: boolean;
   reason: string | undefined;
   /** The refusal's category, when one was named (P4). */
   reasonCode: RestoreFailureCode | undefined;
@@ -178,15 +177,23 @@ export type RestoreMachineEvent =
   | Readonly<{ type: 'undoOperation' }>
   /** The selected checkout minted, so whether *Undo* has something to reverse may have changed. */
   | Readonly<{ type: 'lineMinted' }>
-  | Readonly<{ type: 'confirm' }>
-  | Readonly<{ type: 'cancel' }>
   /** The root re-roots the workbench, or its line moved; the next restore applies to whatever it selected (F10). */
   | Readonly<{ type: 'selectCheckout'; checkoutId: string; branch?: string }>
   | RestoreCutAnswer;
 
 /** Facts restoreMachine emits. @public */
 export type RestoreMachineEmitted =
-  | Readonly<{ type: 'toast.restored'; revisionNumber: number | undefined }>
+  /**
+   * A *Restore* or *Undo restore* landed. `revisionId` is the revision whose
+   * files came back, so the page can name it; `mode` says which verb it was,
+   * because only a *Restore* offers Undo (I11).
+   */
+  | Readonly<{
+      type: 'toast.restored';
+      mode: 'restore' | 'undoRestore';
+      revisionId: string;
+      revisionNumber: number | undefined;
+    }>
   /** *Undo* landed; the number is the revision it undid. */
   | Readonly<{ type: 'toast.undone'; revisionNumber: number | undefined }>
   /** `revisionNumber` names the revision an `UNDO_CONFLICT` could not undo, when it is on the line. */
@@ -229,8 +236,7 @@ export type RestoreComputePlanActorInput =
 /**
  * Output of the injected `computePlan` actor.
  *
- * `removedPathCount` and `dirty` are the two facts the risk guard needs; the
- * plan's file sets stay with the host behind `planId`.
+ * The plan's file sets stay with the host behind `planId`.
  *
  * @public
  */
@@ -239,8 +245,6 @@ export type RestoreComputePlanActorOutput = Readonly<{
   revisionId: string;
   /** First-parent ordinal on the checkout's line; `undefined` when the target is not on it (D5, A9). */
   revisionNumber: number | undefined;
-  removedPathCount: number;
-  dirty: boolean;
 }>;
 
 /** Output of the injected `applyPlan` actor. @public */
@@ -279,8 +283,6 @@ const clearTransient = {
   planId: undefined,
   revisionId: undefined,
   revisionNumber: undefined,
-  removedPathCount: 0,
-  dirty: false,
 } satisfies Partial<RestoreMachineContext>;
 
 type RestoreEnqueue = EnqueueObject<RestoreMachineEvent, RestoreMachineEmitted>;
@@ -358,10 +360,6 @@ const restoreMachineDefinition = setup({
     }),
   },
   guards: {
-    /* A restore is risky when it deletes files or the tree has diverged from head.
-     * *Undo* never asks: it reverses one operation, and what it removes stays in History. */
-    isRisky: (context: RestoreMachineContext) =>
-      context.mode !== 'undo' && (context.removedPathCount > 0 || context.dirty),
     /* The answer to the cut this verb is waiting on, by the id it sent (N2). */
     answersOurCut: (context: RestoreMachineContext, event: RestoreCutAnswer) =>
       event.requestId !== undefined && event.requestId === context.requestId,
@@ -384,8 +382,6 @@ const restoreMachineDefinition = setup({
     planId: undefined,
     revisionId: undefined,
     revisionNumber: undefined,
-    removedPathCount: 0,
-    dirty: false,
     reason: undefined,
     reasonCode: undefined,
     parentRef: input.parentRef,
@@ -506,29 +502,19 @@ const restoreMachineDefinition = setup({
             ...(context.mode === 'undoRestore' ? { firstParent: true } : {}),
           };
         },
+        /* No question: step 1 saved the files and the restore is undoable, so it applies at once (I11). */
         onDone: {
-          target: 'planned',
+          target: 'applying',
           context: ({ event }) => ({
             planId: event.output.planId,
             revisionId: event.output.revisionId,
             revisionNumber: event.output.revisionNumber,
-            removedPathCount: event.output.removedPathCount,
-            dirty: event.output.dirty,
           }),
         },
         onError: {
           target: 'failed',
           context: ({ event }) => failFromError(event.error),
         },
-      },
-    },
-    planned: {
-      always: ({ context, guards }) => (guards.isRisky(context) ? { target: 'confirming' } : { target: 'applying' }),
-    },
-    confirming: {
-      on: {
-        confirm: { target: 'applying' },
-        cancel: { target: 'settled' },
       },
     },
     /* Step 2: write the target tree; the host proves the head has not moved (A3). */
@@ -575,8 +561,14 @@ const restoreMachineDefinition = setup({
     },
     applied: {
       entry: ({ context }, enq) => {
+        if (context.mode === 'undo') {
+          enq.emit({ type: 'toast.undone', revisionNumber: context.revisionNumber });
+          return;
+        }
         enq.emit({
-          type: context.mode === 'undo' ? 'toast.undone' : 'toast.restored',
+          type: 'toast.restored',
+          mode: context.mode,
+          revisionId: context.revisionId ?? '',
           revisionNumber: context.revisionNumber,
         });
       },
@@ -629,29 +621,16 @@ export interface RestoreMachine extends RestoreMachineDefinition {}
 export const restoreMachine: RestoreMachine = restoreMachineDefinition;
 
 /**
- * Selects whether a restore is waiting for the user to confirm it.
- *
- * @param snapshot - Current machine snapshot.
- * @returns True while the machine is confirming.
- * @public
- */
-export const selectRestoreNeedsConfirmation = (snapshot: SnapshotFrom<typeof restoreMachine>): boolean =>
-  snapshot.matches('confirming');
-
-/**
  * Selects whether a restore is working on its checkout right now.
  *
- * Every step but the question: the cuts, the plan and the apply. Admissions to
- * the checkout wait for longer than this — from the pre-restore cut until the
- * verb settles, the question included (A2) — and read the pinned checkout
- * instead.
+ * Every step: the cuts, the plan and the apply. Admissions to the checkout
+ * wait on the pinned checkout until the verb settles (A2).
  *
  * @param snapshot - Current machine snapshot.
- * @returns True from the pre-restore cut to the restore cut's answer, except while confirming.
+ * @returns True from the pre-restore cut to the restore cut's answer.
  * @public
  */
-export const selectRestoreBusy = (snapshot: SnapshotFrom<typeof restoreMachine>): boolean =>
-  !snapshot.matches('idle') && !snapshot.matches('confirming');
+export const selectRestoreBusy = (snapshot: SnapshotFrom<typeof restoreMachine>): boolean => !snapshot.matches('idle');
 
 /**
  * The actor set a host provides for `restoreMachine` (S37).

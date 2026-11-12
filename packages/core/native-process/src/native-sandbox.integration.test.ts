@@ -38,7 +38,7 @@ import {
   runInNativeSandbox,
   startNativeWorker,
 } from '#index.js';
-import { linuxChildrenTree } from '#child-resident.js';
+import { linuxChildrenTree } from '@taucad/sandbox';
 
 const writeRuleBlocks = /\((allow|deny) file-write\*\n((?:\s+\((?:subpath|literal) "[^"]*"\)\n)+)/g;
 

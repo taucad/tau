@@ -205,6 +205,69 @@
         }
       ],
       "id": 10
+    },
+    {
+      "title": "Pooled client connections by process",
+      "description": "PostgreSQL connections each API process holds open, by Machine (instance), Fly process group and client pool (database connection audit R4). Each process counts only its own sockets, so the stack sums across instances, unlike tau_db_connections. The red dashed series is the session pooler's capacity for the login (tau_db_pooler_capacity, from DATABASE_POOLER_POOL_SIZE). The dashed threshold lines mark 12 (db-pooler-clients-high, warning) and 14 (db-pooler-clients-near-cap, critical): those rules add 2 to this stack for revisions-maintenance, which holds up to 2 more on the same login and exports no metrics.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 36 },
+      "targets": [
+        {
+          "expr": "sum by (instance, tau_process, tau_db_pool) (tau_db_client_connections{app=~\"$app\",service_name=~\"$service\"})",
+          "legendFormat": "{{instance}} {{tau_process}} {{tau_db_pool}}",
+          "refId": "A"
+        },
+        {
+          "expr": "max(tau_db_pooler_capacity{app=~\"$app\",service_name=~\"$service\"})",
+          "legendFormat": "pooler capacity",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": { "stacking": { "mode": "normal", "group": "A" }, "thresholdsStyle": { "mode": "dashed" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 12 },
+              { "color": "red", "value": 14 }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "pooler capacity" },
+            "properties": [
+              { "id": "custom.stacking", "value": { "mode": "none", "group": "A" } },
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
+            ]
+          }
+        ]
+      },
+      "id": 11
+    },
+    {
+      "title": "Pool connects and refusals",
+      "description": "Connections each pool opened in the last 5 minutes, by TCP outcome, and queries that failed because the pooler or PostgreSQL refused a connection (Supavisor EMAXCONN, SQLSTATE 53300). Any refusal pages (db-pool-refusals).",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 36 },
+      "targets": [
+        {
+          "expr": "sum by (tau_db_pool, outcome) (increase(tau_db_client_connects_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{tau_db_pool}} connect {{outcome}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (instance, tau_db_pool) (increase(tau_db_client_refusals_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{instance}} {{tau_db_pool}} refused",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "id": 12
     }
   ],
   "schemaVersion": 39

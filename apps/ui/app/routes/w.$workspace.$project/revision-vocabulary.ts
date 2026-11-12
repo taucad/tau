@@ -50,6 +50,49 @@ export type RevisionWhere = Readonly<{
 /** A decision waiting on the person, said one way on every surface (HQ1, HQ6). @public */
 export const needsDecision = 'Needs your decision';
 
+/** The action on a toast for a verb that acted at once (I11). @public */
+export const undoLabel = 'Undo';
+
+/**
+ * What a restore's toast says it brought back (I11): a version by its number,
+ * a named entry by its name, any other by its title.
+ *
+ * @param restored - The entry whose files came back, when it could be read.
+ * @returns "Restored V2", "Restored “Add vent slots”", or "Restored an earlier point".
+ * @public
+ */
+export const restoredSentence = (
+  restored:
+    | Readonly<{ summary: string; tags?: readonly string[]; versions?: ReadonlyArray<{ number: number }> }>
+    | undefined,
+): string => {
+  const version = restored?.versions?.[0];
+  if (version !== undefined) {
+    return `Restored V${String(version.number)}`;
+  }
+  const title = restored?.tags?.[0] ?? restored?.summary;
+  return title === undefined || title === '' ? 'Restored an earlier point' : `Restored “${title}”`;
+};
+
+/** What an *Undo restore* says: one more entry on top that put the files back. @public */
+export const undidRestoreSentence = 'Undid the restore';
+
+/**
+ * What a *Switch* says once it has moved: whether it saved unsaved work first,
+ * and on which branch, because that is where its Undo goes back to (I11).
+ *
+ * @param to - The branch switched to.
+ * @param from - The branch left, when known.
+ * @param saved - The switch saved unsaved changes on `from` first.
+ * @returns The toast's sentence.
+ * @public
+ */
+export const switchedSentence = (to: string, from: string | undefined, saved: boolean): string =>
+  saved && from !== undefined ? `Saved your changes on ${from}, then switched to ${to}` : `Switched to ${to}`;
+
+/** A *Switch* that was refused, in the words the branch menu uses (M4, M5). @public */
+export const switchRefusedSentence = (branch: string): string => `Couldn't switch to ${branch}`;
+
 /** A settled missing cloud listing does not distinguish deletion from removed access. @public */
 export const cloudUnavailable = 'Cloud copy unavailable';
 

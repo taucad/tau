@@ -593,6 +593,124 @@ describe.runIf(enabled)('shell conformance', () => {
     });
   }
 
+  conformance(
+    'E10',
+    'a parent that exits or is aborted leaves no background, TERM-resistant or re-parented writer behind',
+    async () => {
+      const writer = (path: string): string => `while :; do printf b >> ${path}; sleep 0.1; done`;
+      /* A TERM-resistant grandchild under a TERM-resistant child; on Linux also a setsid writer, a double fork
+       * whose intermediate parent exits at once (re-parented before the launch settles), and a writer that is both:
+       * outside the launch's tree and process group, so only the sandbox contains it. The macOS setsid/double-fork
+       * form stays the disclosed C06b residual. */
+      const tree = (prefix: string): { paths: string[]; command: string[] } => {
+        const [background, stubborn, detached, doubled, escaped] = [
+          'background',
+          'stubborn',
+          'detached',
+          'doubled',
+          'escaped',
+        ].map((name) => join(work, `${prefix}-${name}`)) as [string, string, string, string, string];
+        return {
+          paths: [background, stubborn, ...(linux ? [detached, doubled, escaped] : [])],
+          command: [
+            `( ${writer(background)} ) &`,
+            `( trap '' TERM HUP INT; ( trap '' TERM HUP INT; ${writer(stubborn)} ) & wait ) &`,
+            ...(linux
+              ? [
+                  `setsid sh -c '${writer(detached)}' &`,
+                  `( ( sh -c '${writer(doubled)}' & ) & )`,
+                  `setsid sh -c "( sh -c '${writer(escaped)}' & ) &" &`,
+                ]
+              : []),
+          ],
+        };
+      };
+      const sizesOf = (paths: readonly string[]): number[] =>
+        paths.map((path) => (existsSync(path) ? statSync(path).size : 0));
+
+      const exited = tree('e10-exit');
+      // The parent exits only once every writer has written, bounded at 10 s in total, never after a fixed sleep.
+      const firstWrites = `i=0; for p in ${exited.paths.join(' ')}; do while [ ! -s "$p" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; done`;
+      const result = await run([...exited.command, firstWrites, 'exit 0'].join('\n'));
+
+      expect(result.exitCode, result.stderr).toBe(0);
+      const settled = sizesOf(exited.paths);
+      expect(
+        settled.every((size) => size > 0),
+        JSON.stringify(settled),
+      ).toBe(true);
+      await delay(1500);
+      expect(sizesOf(exited.paths)).toStrictEqual(settled);
+
+      const aborted = tree('e10-abort');
+      const controller = new AbortController();
+      const process_ = await start(
+        launchOf([...aborted.command, 'sleep 300'].join('\n'), { signal: controller.signal }),
+      );
+      const deadline = Date.now() + 10_000;
+      while (sizesOf(aborted.paths).some((size) => size === 0) && Date.now() < deadline) {
+        // oxlint-disable-next-line no-await-in-loop -- poll until every writer has written once.
+        await delay(100);
+      }
+      try {
+        expect(sizesOf(aborted.paths).every((size) => size > 0)).toBe(true);
+      } finally {
+        // A failed positive control still stops the launch.
+        controller.abort();
+        await process_.exited;
+      }
+      const stopped = sizesOf(aborted.paths);
+      await delay(1500);
+      expect(sizesOf(aborted.paths)).toStrictEqual(stopped);
+    },
+  );
+
+  conformance(
+    'E17',
+    'a missing or corrupt shell or sandbox binary leaves the capability unavailable, never an unsandboxed substitute',
+    async () => {
+      /* Each broken install either refuses before starting, with a reason, or starts and fails without the workload
+       * ever running; the workload's file is the judge, and no other bubblewrap or shell is tried in its place. */
+      const corrupt = join(work, 'e17-corrupt');
+      writeFileSync(corrupt, 'not an executable\n', { mode: 0o755 });
+      const broken: Array<{ name: string; through: ShellProvider; executablePath: string }> = [
+        { name: 'missing shell', through: provider, executablePath: join(work, 'e17-missing-bash') },
+        { name: 'corrupt shell', through: provider, executablePath: corrupt },
+        ...(linux
+          ? [
+              {
+                name: 'missing bubblewrap',
+                through: createSandboxShellProvider({ bwrapPath: join(work, 'e17-missing-bwrap'), home }),
+                executablePath: shell.path,
+              },
+              {
+                name: 'corrupt bubblewrap',
+                through: createSandboxShellProvider({ bwrapPath: corrupt, home }),
+                executablePath: shell.path,
+              },
+            ]
+          : []),
+      ];
+      for (const { name, through, executablePath } of broken) {
+        const marker = join(work, `e17-ran-${name.replaceAll(' ', '-')}`);
+        const privateRoot = mkdtempSync(join(tmpdir(), 'tau-shell-'));
+        // oxlint-disable-next-line no-await-in-loop -- one broken install at a time, each judged by its own marker.
+        const { executionId } = await through.prepare({ privateRoot, resource: undefined });
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        const outcome = await through.launch({ ...launchOf(`printf ran > ${marker}`), executablePath, executionId });
+        if (outcome.status === 'started') {
+          // oxlint-disable-next-line no-await-in-loop -- as above.
+          const exit = await outcome.process.exited;
+
+          expect(exit, name).not.toStrictEqual({ exitCode: 0 });
+        } else {
+          expect(outcome.message.length, name).toBeGreaterThan(0);
+        }
+        expect(existsSync(marker), name).toBe(false);
+      }
+    },
+  );
+
   conformance('C07', 'abort stops a running command and settles once', async () => {
     const controller = new AbortController();
     const process_ = await start(launchOf('sleep 300', { signal: controller.signal }));

@@ -291,6 +291,14 @@
       "fixedBy": "outside this charter: desktop geometry-runner port ceremony"
     },
     {
+      "id": "B19",
+      "bound": "Desktop update feed request (30 s): one update check runs at a time, so a feed request that never settles would stop every later check",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "AbortSignal.timeout(30_000)",
+      "class": "External edge",
+      "owner": "desktop updater"
+    },
+    {
       "id": "C1",
       "bound": "Leader heartbeat (M2 leading)",
       "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",

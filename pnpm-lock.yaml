@@ -3569,6 +3569,19 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
+  apps/libs/preferences:
+    dependencies:
+      '@taucad/workbench':
+        specifier: workspace:*
+        version: link:../../../packages/workbench
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+    devDependencies:
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+
   apps/libs/project-workspace:
     dependencies:
       '@taucad/chat':
@@ -4249,6 +4262,9 @@ importers:
       '@taucad/picovoxel':
         specifier: workspace:*
         version: link:../../packages/plugins/picovoxel
+      '@taucad/preferences':
+        specifier: workspace:*
+        version: link:../libs/preferences
       '@taucad/project-workspace':
         specifier: workspace:*
         version: link:../libs/project-workspace

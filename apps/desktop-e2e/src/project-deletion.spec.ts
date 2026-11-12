@@ -639,7 +639,8 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
         .getByRole('button', { name: /^Open History\./u })
         .first()
         .click();
-      const sync = page.getByRole('region', { name: 'Sync', exact: true });
+      /* C4 (dbee175fd2): the Sync card is the History pane's Backup line. */
+      const sync = page.getByRole('region', { name: 'Backup', exact: true });
       await expect
         .poll(async () => sync.textContent(), { timeout: 60_000 })
         .toMatch(/no repository|deleted|not found/iu);

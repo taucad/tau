@@ -40,7 +40,7 @@ describe('createDirectShare', () => {
   };
   const mainOf = (files: Readonly<Record<string, string>>): string | undefined => {
     const parsed = parseProjectManifestBytes(new TextEncoder().encode(files['tau.json']));
-    return parsed.success ? parsed.data.assets.main.entryPath : undefined;
+    return parsed.success ? parsed.data.assets.main?.entryPath : undefined;
   };
 
   beforeEach(async () => {

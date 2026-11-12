@@ -41,6 +41,7 @@ import type {
 import { createNodeAttachmentReader } from '@taucad/agent-host/node';
 import { createSkillBundleRegistry } from '@taucad/agent-tools/registry';
 import { tauMcpInstructions } from '@taucad/mcp';
+import { tauMcpKernelDigest } from '@taucad/chat/prompts/kernel-routing-digest';
 import { isRecord } from '@taucad/utils/schema';
 import type { QuestionRecordFileSystem } from '@taucad/chat/rpc';
 
@@ -309,6 +310,10 @@ const contextBlock = (uri: string, mimeType: string, text: string): ContentBlock
  * @param first - Whether this is the first prompt on the vendor session.
  * @returns The resource blocks, or none when the client sent no context.
  */
+/** The MCP instructions and the kernel routing digest (automatic kernel selection blueprint D4): an ACP agent reaches no
+ * plugin skill, so the digest is what tells it how to choose a kernel for an entry-less project. */
+const agentGuidance = `${tauMcpInstructions}\n\n${tauMcpKernelDigest}`;
+
 const cadContextBlocks = (config: ExternalAgentTurn['config'], first: boolean): readonly ContentBlock[] => {
   if (!config) {
     return [];
@@ -316,7 +321,7 @@ const cadContextBlocks = (config: ExternalAgentTurn['config'], first: boolean): 
   const skills = config.clientContext?.skills ?? [];
   const memory = config.clientContext?.memory ?? {};
   return [
-    ...(first ? [contextBlock('tau://agent-guidance', 'text/markdown', tauMcpInstructions)] : []),
+    ...(first ? [contextBlock('tau://agent-guidance', 'text/markdown', agentGuidance)] : []),
     ...(skills.length === 0
       ? []
       : [

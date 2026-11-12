@@ -1075,7 +1075,7 @@ export function ProjectLibraryCard({
   const thumbnail = useProjectThumbnail(project.id);
   const thumbnailSource = thumbnail.url;
 
-  const mainFile = project.assets.main.entryPath;
+  const mainFile = project.assets.main?.entryPath;
   const location = projectLocationDescriptor(
     project.locator.backend === 'webaccess'
       ? { kind: 'workspace', workspaceName: project.workspaceName }
@@ -1131,7 +1131,7 @@ export function ProjectLibraryCard({
         isPreviewVisible={showPreview}
         onPreviewVisibilityChange={setShowPreview}
       >
-        {showPreview ? (
+        {showPreview && mainFile !== undefined ? (
           <SharedWorkerGate>
             <HomeFileManagerProvider key={project.id} projectId={project.id} rootDirectory={`/projects/${project.id}`}>
               <CadPreviewProvider projectId={project.id} mainFile={mainFile}>

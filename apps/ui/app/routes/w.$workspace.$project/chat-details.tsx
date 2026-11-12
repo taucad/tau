@@ -81,7 +81,7 @@ export function DetailsPanelBody({
   const projectName = useSelector(projectRef, (state) => state.context.project?.name ?? '');
   const projectDescription = useSelector(projectRef, (state) => state.context.project?.description ?? '');
   const projectTags = useSelector(projectRef, (state) => state.context.project?.tags ?? []);
-  const mainFile = useSelector(projectRef, (state) => state.context.project?.assets.main.entryPath ?? '');
+  const mainFile = useSelector(projectRef, (state) => state.context.project?.assets.main?.entryPath ?? '');
   const { fileManagerRef, activeWorkspaceName } = useFileManager();
   const backendType = useSelector(fileManagerRef, (state) => state.context.backendType);
 

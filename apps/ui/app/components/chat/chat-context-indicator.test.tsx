@@ -16,7 +16,13 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
     ({
       draftActorRef: { send: vi.fn() },
       model: { modelId: 'm', model: undefined, setActiveModel: vi.fn() },
-      kernel: { kernelId: 'openscad', kernel: resolveKernel('openscad'), setActiveKernel: vi.fn() },
+      kernel: {
+        kernelId: 'openscad',
+        kernel: resolveKernel('openscad'),
+        setActiveKernel: vi.fn(),
+        preference: 'openscad',
+        setActivePreference: vi.fn(),
+      },
       status: 'ready',
       stop: () => undefined,
       contextUsage: mockContextUsage.current,

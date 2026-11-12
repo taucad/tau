@@ -93,7 +93,7 @@ All NX targets are auto-inferred by existing file-based plugins — no manual wi
 - `typecheck` → `tools/tsgo.plugin.ts` (detects `tsconfig.json`)
 - `lint` → `@nx/eslint/plugin` (detects workspace `eslint.config.mjs`)
 - `pkgcheck` → `tools/pkgcheck.plugin.ts` for publishable packages
-- `formal`, `formal:lean` → `tools/formal.plugin.ts` (detects `specs/**/expected.json`)
+- `formal`, `formal:lean` → `tools/formal.plugin.ts` (detects `specs/**/expected.json` beside a `*.tla` or `lean-toolchain`)
 
 ## Post-generation customization
 

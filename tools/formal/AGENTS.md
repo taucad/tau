@@ -15,7 +15,7 @@ Pinned TLA+, Apalache and Lean toolchains, the formal runner and conformance lib
 
 - `src/cli.ts`: the `formal` command (`setup`, `check --tier pr|nightly|lean`, `update`, `mutants`, `nightly`, `logs`, `known`, `toolchain-id`)
 - `package.json` exports `./capture`, `./drift`, `./graph` and `./replay` for owner tests
-- `project.json`: `setup` target. `tools/formal.plugin.ts` infers `formal` (a `specs/**/expected.json` without a `lean` section) and `formal:lean` (one with it) for every project; owners opt into `formal:nightly` and `formal:logs` explicitly. All four take their configuration from `nx.json` `targetDefaults`
+- `project.json`: `setup` target. `tools/formal.plugin.ts` infers `formal` (a `specs/**/expected.json` without a `lean` section beside a `*.tla`) and `formal:lean` (one with it beside a `lean-toolchain`) for every project; owners opt into `formal:nightly` and `formal:logs` explicitly. All four take their configuration from `nx.json` `targetDefaults`
 - `toolchain.lock`: every tool pinned by URL and sha256
 
 ## Commands

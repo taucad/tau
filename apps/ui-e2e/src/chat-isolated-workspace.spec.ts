@@ -333,6 +333,9 @@ it('accepts the project Runtime mesh', async () => {
     expect(await target.evaluate(() => localStorage.getItem('tau:flags'))).toBe(
       JSON.stringify({ nativeGeoSpec: false }),
     );
+    /* The GeoSpec runner is a worker the agent-host worker starts, which Playwright's WebKit does not list, so its
+     * cardinality is read from the agent host itself in every engine. */
+    expect(await target.agentHostNestedWorkers(true, 'geospec-runner')).toHaveLength(0);
     await submitPrompt();
     if (fault !== undefined) {
       await target.expectVisible(selectors.getByText(failedText, { exact: true }), 180_000);
@@ -343,7 +346,7 @@ it('accepts the project Runtime mesh', async () => {
       expect(geospecFault!.requests).toBeGreaterThan(0);
       expect(Number.isInteger(geospecFault!.requests)).toBe(true);
       expect(geospecWasm).toBeUndefined();
-      expect(await target.workers('geospec-runner')).toHaveLength(0);
+      expect(await target.agentHostNestedWorkers(false, 'geospec-runner')).toHaveLength(0);
       const firstStorage = await readProjectStorageState();
       expect(firstStorage.configs).toHaveLength(1);
       const project = firstStorage.configs[0]!;
@@ -479,7 +482,7 @@ it('accepts the project Runtime mesh', async () => {
     expect(geospecWasm!.byteLength).toBe(geospecWasm!.expectedByteLength);
     expect(geospecWasm!.sourceSha256).toBe(geospecWasm!.expectedSha256);
     expect(geospecWasm!.sourceByteLength).toBe(geospecWasm!.expectedByteLength);
-    const runnerWorkers = await target.workers('geospec-runner');
+    const runnerWorkers = await target.agentHostNestedWorkers(false, 'geospec-runner');
     const [native, assertionApi, { createGeoSpecNativeModelLoader }] = await Promise.all([
       import('geospec-engine'),
       import('geospec/assertion-client'),

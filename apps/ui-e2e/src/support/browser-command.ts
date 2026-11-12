@@ -3091,6 +3091,82 @@ export const uiWorkerCatchUpFlow: BrowserCommand<
   );
 };
 
+/**
+ * The live dedicated workers the page-visible resident agent-host workers started (V21, S48(16)).
+ *
+ * Engine-independent nested-worker cardinality: Playwright's WebKit does not list workers created inside workers, so
+ * {@link uiTargetWorkers} cannot count them there. `install` wraps `Worker` in every agent-host worker, the same
+ * fixture-only scope patch {@link uiWorkerCatchUpFlow} uses, before those workers start any; an instance stays live
+ * from construction until `terminate()` or until it posts its own `{ type: 'closed' }` before closing itself. A read
+ * throws unless every agent-host worker carries the probe, so an empty listing always means none are running.
+ *
+ * @param commandContext - The Vitest browser command context.
+ * @param install - Install the probe (waiting for the first agent-host worker) instead of only reading it.
+ * @param urlSubstring - Keep only workers whose script URL contains this.
+ * @param surface - Which target page to read.
+ * @returns Live matching instances with stable identities and their script URLs.
+ */
+export const uiAgentHostNestedWorkers: BrowserCommand<
+  [install: boolean, urlSubstring?: string, surface?: TargetSurface],
+  readonly TargetWorker[]
+> = async (commandContext, install, urlSubstring, surface) => {
+  const page = pageFor(sessionFor(commandContext), surface);
+  const hostsOf = () => page.workers().filter((worker) => worker.url().includes('agent-host.worker'));
+  if (install && hostsOf().length === 0) {
+    await page.waitForEvent('worker', {
+      predicate: (worker) => worker.url().includes('agent-host.worker'),
+      timeout: 60_000,
+    });
+  }
+  const hosts = hostsOf();
+  if (hosts.length === 0) {
+    throw new Error('No agent-host worker is running to observe nested workers in.');
+  }
+  const listings = await Promise.all(
+    hosts.map(async (host, hostIndex) =>
+      host.evaluate(
+        ({ shouldInstall, prefix }) => {
+          type Probe = { live: Map<object, { identity: string; url: string }> };
+          const scope = globalThis as typeof globalThis & { __tauFixtureNestedWorkers?: Probe };
+          if (shouldInstall && scope.__tauFixtureNestedWorkers === undefined) {
+            const probe: Probe = { live: new Map() };
+            scope.__tauFixtureNestedWorkers = probe;
+            let sequence = 0;
+            const nativeWorker = globalThis.Worker;
+            globalThis.Worker = class extends nativeWorker {
+              public constructor(scriptUrl: string | URL, options?: WorkerOptions) {
+                super(scriptUrl, options);
+                sequence += 1;
+                probe.live.set(this, { identity: `${prefix}-${String(sequence)}`, url: String(scriptUrl) });
+                this.addEventListener('message', (event: Event) => {
+                  if ((event as MessageEvent<{ type?: unknown } | undefined>).data?.type === 'closed') {
+                    probe.live.delete(this);
+                  }
+                });
+              }
+
+              public override terminate(): void {
+                probe.live.delete(this);
+                super.terminate();
+              }
+            };
+          }
+          const probe = scope.__tauFixtureNestedWorkers;
+          return probe === undefined ? undefined : [...probe.live.values()];
+        },
+        { shouldInstall: install, prefix: `host-${String(hostIndex + 1)}-nested` },
+      ),
+    ),
+  );
+  if (listings.some((listing) => listing === undefined)) {
+    throw new Error('An agent-host worker is running without the nested-worker probe; install it first.');
+  }
+  return listings
+    .flatMap((listing) => listing ?? [])
+    .filter(({ url }) => urlSubstring === undefined || url.includes(urlSubstring))
+    .toSorted((left, right) => left.identity.localeCompare(right.identity));
+};
+
 export const uiCookies: BrowserCommand<[], TargetCookie[]> = async (commandContext) =>
   sessionFor(commandContext).context.cookies();
 
@@ -3487,6 +3563,7 @@ export const uiBrowserCommands = {
   uiStartLinkedGithubFixture,
   uiStartTauServeFixture,
   uiTargetWorkers,
+  uiAgentHostNestedWorkers,
   uiProjectionImportWork,
   uiWorkerCatchUpFlow,
   uiStopTauServeFixture,

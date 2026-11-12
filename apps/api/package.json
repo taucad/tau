@@ -45,6 +45,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/agent-tools": "workspace:*",
     "@taucad/api-testing": "workspace:*",

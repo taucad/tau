@@ -15,7 +15,8 @@ export const goalIds = ['printing', 'mechanical', 'electronics', 'product', 'art
 export type GoalId = (typeof goalIds)[number];
 
 /**
- * The tool a person used last, from setup step 2. It suggests a mouse preset and a gizmo style (Finding 7).
+ * The tool a person used last, from setup step 2. It suggests a mouse preset and a gizmo style that match that
+ * tool's camera controls (see `toolSuggestions`).
  *
  * @public
  */

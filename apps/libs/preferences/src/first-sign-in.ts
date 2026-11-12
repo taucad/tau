@@ -16,7 +16,8 @@ export type SyncedSections = {
 };
 
 /**
- * Merge this device's copy of a section with the account's on a device that has never synced (account sync, WP2).
+ * Merge this device's copy of a section with the account's on a device that has never synced, the
+ * first time account sync runs there.
  * With no account copy the device's is uploaded unchanged; with no device copy the account's is adopted. With both,
  * `person-profile` and `viewer-preferences` take the account's value leaf by leaf and the device fills only leaves the
  * account does not hold; `onboarding` merges by its own rules, so progress is never lost. No stored value changes

@@ -2,16 +2,17 @@ import type { PersonProfile, ToolId } from '#person-profile.js';
 import type { GizmoStyleId, MousePresetId, ViewerPreferences } from '#viewer-preferences.js';
 
 /**
- * What one tool answer suggests (Finding 7). `named` says whether copy may give the tool as the reason: only when the
- * camera research documents the tool's orbit, pan and zoom from a primary source (camera research R13); otherwise the
- * copy says "Suggested from your answer", or nothing for Tau's own default.
+ * What one answer to "which tool did you use last" suggests: a mouse preset and a gizmo style that match that tool's
+ * camera controls. `named` says whether copy may give the tool as the reason. It is true only when the tool's own
+ * documentation describes its orbit, pan and zoom bindings, so the match is checked against the vendor's description;
+ * otherwise the copy says "Suggested from your answer", or nothing for Tau's own default.
  *
  * @public
  */
 export type ToolSuggestion = Readonly<{ preset: MousePresetId; gizmo: GizmoStyleId; named: boolean }>;
 
 /**
- * The suggestion table of Finding 7, one row per tool answer.
+ * The suggestion for each tool answer: the preset and gizmo it starts from, and whether copy may name the tool.
  *
  * @public
  */

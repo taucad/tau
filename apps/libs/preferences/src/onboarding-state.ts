@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * The five tour tips, in order (Finding 8).
+ * The five tips of the product tour, in the order they are shown: ask, look, adjust, verify, build.
  *
  * @public
  */

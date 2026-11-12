@@ -286,8 +286,8 @@ Before merging a storage-layer change:
 
 - [ ] The data belongs in this store per Rule 0 — portable project content goes to the filesystem; only explicit host-local lifecycle state uses `projectLibraryStates`.
 - [ ] A person or device record section is written through the section store's read-merge-write and stays out of `serverVisiblePreferences`.
-- [ ] Read and write happen inside one transaction; outer promise resolves on `transaction.oncomplete`.
-- [ ] All public mutators go through `KeyedMutex.run(rowId, …)`.
+- [ ] IndexedDB read-modify-write: read and write happen inside one transaction; outer promise resolves on `transaction.oncomplete`.
+- [ ] IndexedDB stores: all public mutators go through `KeyedMutex.run(rowId, …)`.
 - [ ] New multi-writer fields have field-scoped helpers, not extra `updateChat` options.
 - [ ] No `ignoreKeys`/`customMerge` knob is reintroduced.
 - [ ] Row `updatedAt` values and project `lastActivityAt` change only for their separately defined material mutations.

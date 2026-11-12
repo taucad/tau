@@ -25,7 +25,13 @@ export {
   storedSectionSchema,
   viewerPreferencesSection,
 } from '#stored-section.js';
-export type { SectionDefinition, SectionRead, SectionWrite, StoredSection } from '#stored-section.js';
+export type {
+  SectionDefinition,
+  SectionRead,
+  SectionWrite,
+  StoredSection,
+  StoredSectionSchema,
+} from '#stored-section.js';
 export {
   effectiveGizmoStyle,
   effectivePreset,

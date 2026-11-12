@@ -11,8 +11,8 @@ import {
 } from '@taucad/preferences';
 import type { GizmoStyleId, MousePresetId, PersonProfile, ToolId, ViewerPreferences } from '@taucad/preferences';
 
-/** Finding 7's table: answer, preset, gizmo, whether copy may name the tool as the reason. */
-const finding7: ReadonlyArray<readonly [ToolId, MousePresetId, GizmoStyleId, boolean]> = [
+/** Every tool answer: its preset, its gizmo, and whether copy may name the tool as the reason. */
+const expectedSuggestions: ReadonlyArray<readonly [ToolId, MousePresetId, GizmoStyleId, boolean]> = [
   ['new', 'tau', 'cube', false],
   ['other', 'tau', 'cube', false],
   ['openscad', 'tau', 'cube', true],
@@ -30,10 +30,10 @@ const finding7: ReadonlyArray<readonly [ToolId, MousePresetId, GizmoStyleId, boo
 describe('the suggestion table', () => {
   it('has one row per tool answer', () => {
     expect(Object.keys(toolSuggestions).toSorted()).toEqual([...toolIds].toSorted());
-    expect(finding7.map(([tool]) => tool).toSorted()).toEqual([...toolIds].toSorted());
+    expect(expectedSuggestions.map(([tool]) => tool).toSorted()).toEqual([...toolIds].toSorted());
   });
 
-  it.each(finding7)('suggests for %s the preset %s and the gizmo %s', (...row) => {
+  it.each(expectedSuggestions)('suggests for %s the preset %s and the gizmo %s', (...row) => {
     const [tool, preset, gizmo, named] = row;
     expect(suggestedPreset(tool)).toBe(preset);
     expect(suggestedGizmo(tool)).toBe(gizmo);

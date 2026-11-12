@@ -3,7 +3,8 @@ import { lengthUnits } from '@taucad/workbench';
 import type { ViewFieldValues } from '@taucad/workbench';
 
 /**
- * The mouse presets P1 to P6 (camera research). Trackpad gestures are the device's `inputDevice`, never a preset.
+ * The six mouse presets: which button and modifier orbit, pan and zoom. Trackpad gestures are the device's
+ * `inputDevice`, never a preset.
  *
  * @public
  */
@@ -31,8 +32,8 @@ export const gizmoStyleIds = ['cube', 'classic-cube', 'axis-balls', 'axes'] as c
 export type GizmoStyleId = (typeof gizmoStyleIds)[number];
 
 /**
- * The person's own defaults for the nine inheritable view leaves. The up axis is a model convention and has no
- * personal level (Finding 6).
+ * The person's own defaults for the nine inheritable view leaves. The up axis is a model convention, chosen per model
+ * rather than per person, so it has no personal default.
  *
  * @public
  */

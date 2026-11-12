@@ -19,6 +19,17 @@ import type { ViewerPreferences } from '#viewer-preferences.js';
 export type StoredSection<T> = { value: T; synced?: { value: T; revision: number } };
 
 /**
+ * The zod schema {@link storedSectionSchema} builds: `{ value }` with an optional `synced` half, both strict. It parses
+ * to a {@link StoredSection} of the value schema's output.
+ *
+ * @public
+ */
+export type StoredSectionSchema<T extends z.ZodType> = z.ZodObject<{
+  value: T;
+  synced: z.ZodOptional<z.ZodObject<{ value: T; revision: z.ZodNumber }>>;
+}>;
+
+/**
  * The schema of a stored section around a value schema.
  *
  * @param value - The section's value schema.
@@ -26,13 +37,11 @@ export type StoredSection<T> = { value: T; synced?: { value: T; revision: number
  *
  * @public
  */
-export const storedSectionSchema = <T extends z.ZodType>(
-  value: T,
-): z.ZodType<StoredSection<z.infer<T>>, StoredSection<z.input<T>>> =>
+export const storedSectionSchema = <T extends z.ZodType>(value: T): StoredSectionSchema<T> =>
   z.strictObject({
     value,
     synced: z.strictObject({ value, revision: z.number().int().nonnegative() }).optional(),
-  }) as unknown as z.ZodType<StoredSection<z.infer<T>>, StoredSection<z.input<T>>>;
+  });
 
 /**
  * One section of the person or device record: its schema, the value it reads as when empty, the version this build

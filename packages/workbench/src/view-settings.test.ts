@@ -105,7 +105,8 @@ describe('resolveViewSettings', () => {
   });
 
   it('ignores a person up axis passed at runtime', () => {
-    const person = { upDirection: 'y' } as unknown as PersonViewFieldDefaults;
+    // A caller outside TypeScript can pass the up axis the type leaves out; the resolver must ignore it.
+    const person: PersonViewFieldDefaults & { upDirection: 'y' } = { upDirection: 'y' };
     expect(resolveViewSettings({ tau: tauViewDefaults, person, view: atFormat }).values.upDirection).toBe('z');
   });
 

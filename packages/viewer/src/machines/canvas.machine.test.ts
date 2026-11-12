@@ -548,9 +548,11 @@ describe('canvas camera presentation', () => {
     const canvas = startCanvas({ ...defaultInput, camera });
     canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'z' } });
     camera.stop();
-    expect(() => {
-      canvas.stop();
-    }).not.toThrow();
+    // A send to a stopped actor does not throw; it only warns that the event dead-lettered.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    canvas.stop();
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('should have no clip policy without a grid', () => {

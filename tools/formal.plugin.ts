@@ -1,7 +1,7 @@
 /**
  * NX Plugin for formal verification targets.
  *
- * Infers a project's `formal` and `formal:lean` targets from the spec directories
+ * Infers a project's `formal:tla` and `formal:lean` targets from the spec directories
  * under `{projectRoot}/specs/`, the directories `node tools/formal/src/cli.ts check`
  * reads (`findExpectedFiles` in tools/formal/src/expected.ts). A directory counts
  * only when its `expected.json` sits beside the marker of the language it checks:
@@ -9,7 +9,7 @@
  * - a `lean-toolchain` file and an `expected.json` with a `lean` section is a Lean
  *   directory, checked by `check --tier lean` → `formal:lean`;
  * - at least one `*.tla` file and an `expected.json` without a `lean` section is a
- *   TLA+ directory, checked by `check --tier pr` → `formal`.
+ *   TLA+ directory, checked by `check --tier pr` → `formal:tla`.
  *
  * Any other `expected.json` is ignored. `expected.json` is a generic name that
  * other tools use too (packages/plugins/openrscad/src/fixtures/edge-topology/
@@ -96,11 +96,11 @@ export const specDirectories = (files: readonly string[]): Map<string, SpecDirec
 export const formalTargetName = (
   directory: SpecDirectory,
   expected: ExpectedFile,
-): 'formal' | 'formal:lean' | undefined => {
+): 'formal:tla' | 'formal:lean' | undefined => {
   if (expected.lean !== undefined) {
     return directory.leanToolchain ? 'formal:lean' : undefined;
   }
-  return directory.tla ? 'formal' : undefined;
+  return directory.tla ? 'formal:tla' : undefined;
 };
 
 const createFormalTarget = (directory: SpecDirectory, workspaceRoot: string): CreateNodesResult | undefined => {

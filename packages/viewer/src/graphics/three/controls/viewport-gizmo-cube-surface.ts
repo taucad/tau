@@ -112,17 +112,17 @@ const createFaceTexture = (face: Parameters<typeof drawFaceTexture>[0]): CanvasT
   timeViewerCanvas2d('gizmo.face', () => drawFaceTexture(face));
 
 /**
- * Apply Tau's opaque, continuous surface without replacing the gizmo's picking or controls.
+ * Swaps the gizmo's mesh materials for node materials on a node backend, keeping the library's idle and hover pairs, so
+ * every gizmo style draws through the same explicit node path. Sprites (the axis balls) keep the renderer's own
+ * conversion.
  * @internal
- * @param gizmo - The newly constructed rounded-cube gizmo, before adding axes or scaling it.
- * @param style - Resolved display colors and typography.
- * @param backend - Execution family; both node backends use explicit node materials.
+ * @param gizmo - The newly constructed gizmo.
+ * @param backend - Execution family; only `webgpu` converts.
  */
-export const applyViewportGizmoSurface = (
-  gizmo: ViewportGizmo,
-  style: ViewportGizmoStyle,
-  backend: ResolvedGraphicsBackend = 'webgl',
-): void => {
+export const applyViewportGizmoNodeMaterials = (gizmo: ViewportGizmo, backend: ResolvedGraphicsBackend): void => {
+  if (backend !== 'webgpu') {
+    return;
+  }
   const nodeMaterials = new Map<MeshBasicMaterial, MeshBasicNodeMaterial>();
   const toNode = (source: MeshBasicMaterial): MeshBasicNodeMaterial => {
     let material = nodeMaterials.get(source);
@@ -145,6 +145,35 @@ export const applyViewportGizmoSurface = (
     }
     return material;
   };
+  for (const object of gizmo.children) {
+    if (!(object instanceof Mesh) || !(object.material instanceof MeshBasicMaterial)) {
+      continue;
+    }
+    const idle: unknown = object.userData['idleMaterial'];
+    const hover: unknown = object.userData['hoverMaterial'];
+    if (idle instanceof MeshBasicMaterial && hover instanceof MeshBasicMaterial) {
+      object.userData['idleMaterial'] = toNode(idle);
+      object.userData['hoverMaterial'] = toNode(hover);
+      object.material = toNode(object.material);
+    }
+  }
+  for (const source of nodeMaterials.keys()) {
+    source.dispose();
+  }
+};
+
+/**
+ * Apply Tau's opaque, continuous surface without replacing the gizmo's picking or controls.
+ * @internal
+ * @param gizmo - The newly constructed rounded-cube gizmo, before adding axes or scaling it.
+ * @param style - Resolved display colors and typography.
+ * @param backend - Execution family; both node backends use explicit node materials.
+ */
+export const applyViewportGizmoSurface = (
+  gizmo: ViewportGizmo,
+  style: ViewportGizmoStyle,
+  backend: ResolvedGraphicsBackend = 'webgl',
+): void => {
   const regions = createViewportGizmoSurfaceGeometry();
   const oldGeometries = new Set<Pick<BufferGeometry, 'dispose'>>();
   const oldTextures = new Set<Texture>();
@@ -206,23 +235,7 @@ export const applyViewportGizmoSurface = (
       hover.map = createFaceTexture({ label, color: style.hover, labelColor: style.hoverLabel, font: style.font });
     }
   }
-  if (backend === 'webgpu') {
-    for (const object of gizmo.children) {
-      if (!(object instanceof Mesh) || !(object.material instanceof MeshBasicMaterial)) {
-        continue;
-      }
-      const idle: unknown = object.userData['idleMaterial'];
-      const hover: unknown = object.userData['hoverMaterial'];
-      if (idle instanceof MeshBasicMaterial && hover instanceof MeshBasicMaterial) {
-        object.userData['idleMaterial'] = toNode(idle);
-        object.userData['hoverMaterial'] = toNode(hover);
-        object.material = toNode(object.material);
-      }
-    }
-    for (const source of nodeMaterials.keys()) {
-      source.dispose();
-    }
-  }
+  applyViewportGizmoNodeMaterials(gizmo, backend);
   for (const geometry of oldGeometries) {
     geometry.dispose();
   }

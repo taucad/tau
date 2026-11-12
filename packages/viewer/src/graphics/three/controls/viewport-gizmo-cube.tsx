@@ -21,8 +21,15 @@ import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-
 import { resolveGizmoContainer, syncGizmoFov, useGizmoResizeSync } from '#graphics/three/utils/gizmo.utils.js';
 import { useViewerEnvironment } from '#environment/viewer-environment.jsx';
 import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
-import { applyViewportGizmoSurface } from '#graphics/three/controls/viewport-gizmo-cube-surface.js';
+import {
+  applyViewportGizmoNodeMaterials,
+  applyViewportGizmoSurface,
+} from '#graphics/three/controls/viewport-gizmo-cube-surface.js';
 import { beginViewerLoadSpan } from '#lib/viewer-load-timing.js';
+import {
+  hideViewportGizmoTargets,
+  resolveViewportGizmoStyleConfig,
+} from '#graphics/three/controls/viewport-gizmo-styles.js';
 import type { GizmoStyleId } from '#graphics/three/controls/viewport-gizmo-styles.js';
 
 type ViewportGizmoCubeProps = {
@@ -39,7 +46,7 @@ type ViewportGizmoCubeProps = {
 
 const className = 'viewport-gizmo-cube';
 
-export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubeProps): ReactNode {
+export function ViewportGizmoCube({ size = 96, container, gizmoStyle = 'cube' }: ViewportGizmoCubeProps): ReactNode {
   const gl = useThree((state) => state.gl);
   const controls = useThree((state) => state.controls);
   const invalidate = useThree((state) => state.invalidate);
@@ -90,13 +97,12 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
     // A rebuild (theme, accent, size, the web font arriving) is a second span, which is what a load profile counts.
     const finishGizmoSpan = beginViewerLoadSpan('gizmo.create');
     const style = readViewportGizmoStyle({ container: containerToUse, colorScheme, isHighContrast, accentColor });
-    const faceConfig = {
-      color: style.face,
-      labelColor: style.label,
-      hover: { color: style.hover, labelColor: style.hoverLabel },
-    };
+    const styleConfig = resolveViewportGizmoStyleConfig({
+      gizmoStyle,
+      colors: style,
+      radius: viewportGizmoMetrics.radius,
+    });
     const gizmoConfig: GizmoOptions = {
-      type: 'rounded-cube',
       up: upDirection,
       placement: container ? 'top-right' : 'bottom-right',
       size,
@@ -104,7 +110,6 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
         weight: 500,
         family: style.font,
       },
-      radius: viewportGizmoMetrics.radius,
       offset: {
         bottom: 0,
         right: 0,
@@ -115,25 +120,25 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
       background: {
         enabled: false,
       },
-      corners: faceConfig,
-      edges: faceConfig,
-      right: faceConfig,
-      top: faceConfig,
-      front: faceConfig,
-      back: faceConfig,
-      left: faceConfig,
-      bottom: faceConfig,
+      ...styleConfig.options,
     };
 
     const gizmo = new ViewportGizmo(initialCameraRef.current, gl, gizmoConfig);
-    applyViewportGizmoSurface(gizmo, style, graphicsBackendThree);
+    if (styleConfig.surface === 'tau') {
+      applyViewportGizmoSurface(gizmo, style, graphicsBackendThree);
+    } else {
+      applyViewportGizmoNodeMaterials(gizmo, graphicsBackendThree);
+    }
+    if (!styleConfig.clickable) {
+      hideViewportGizmoTargets(gizmo);
+    }
     gizmoRef.current = gizmo;
 
     syncGizmoFov(gizmo, cameraRig.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView);
 
     const removeInvalidationListeners = bindViewportGizmoInvalidationEvents({ gizmo, invalidate });
 
-    gizmo.scale.multiplyScalar(0.7);
+    gizmo.scale.multiplyScalar(styleConfig.scale);
     const gizmoAxes = createViewportGizmoCubeAxes({
       axesSize: 2.1,
       rendererSize: size,
@@ -148,7 +153,9 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
       fontFamily: style.font,
       renderingBackend: graphicsBackendThree,
     });
-    gizmo.add(gizmoAxes);
+    if (styleConfig.triad) {
+      gizmo.add(gizmoAxes);
+    }
 
     const controlsBinding = bindViewportGizmoControls({
       camera: initialCameraRef.current,
@@ -262,6 +269,7 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
     cameraRig,
     upDirection,
     loadedFont,
+    gizmoStyle,
   ]);
 
   // The section plane picker beside the cube is printed in the cube's colours and font, so it follows the cube's

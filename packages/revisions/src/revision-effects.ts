@@ -730,6 +730,9 @@ const hostAuthor = Object.freeze({ name: 'Tau', email: 'noreply@tau.new' });
  */
 const divergenceWalkLimit = 1000;
 
+/* Where a branch's line goes when it gives way to the remote's at connect; host-local (`isHostLocalRef`). */
+const supersededRefPrefix = 'refs/tau/superseded';
+
 /* The mode reads an index-driven capture keeps in flight: each is one stat, no bytes. */
 const captureModeConcurrency = 16;
 
@@ -2559,6 +2562,62 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return remote === undefined
       ? undefined
       : JSON.stringify([remote.name, remote.url, remote.kind, remote.provider, remote.repositoryId, remote.fetchOnly]);
+  };
+
+  /**
+   * How this device's branch stands to the remote's at connect time.
+   *
+   * `ahead` contains the remote's head, so a push fast-forwards it; `behind`
+   * is contained by it; `forked` shares a base with it; `unrelated` shares
+   * none in a walk that reached every root. A walk that cannot be read, or
+   * that stops at its bound, is `forked`: nothing is pushed or moved on it.
+   *
+   * @param head - This device's head.
+   * @param remoteHead - The remote's head, fetched into this store.
+   * @returns The relation.
+   */
+  const openingRelation = async (
+    head: RevisionId,
+    remoteHead: RevisionId,
+  ): Promise<'ahead' | 'behind' | 'forked' | 'unrelated'> => {
+    const walk = await port.log({ heads: [remoteHead, head], limit: divergenceWalkLimit }).catch(() => undefined);
+    if (walk === undefined) {
+      return 'forked';
+    }
+    const relation = integrationOf(walk, head, remoteHead);
+    if (relation !== 'diverged') {
+      return relation === 'upToDate' ? 'ahead' : 'behind';
+    }
+    return walk.length < divergenceWalkLimit && mergeBaseOf(walk, head, remoteHead) === undefined
+      ? 'unrelated'
+      : 'forked';
+  };
+
+  /**
+   * Give way to the remote's history where this device's line shares none of
+   * it and holds no work of its own: a first revision minted over what an
+   * earlier, unfinished open left on this device. Every file it holds is the
+   * remote's, byte for byte, or setup Tau generated, so the branch goes back
+   * to unborn and the opening pull writes the remote's tree as it would on a
+   * fresh device. The line is kept on a host-local ref, never pushed. A line
+   * with work of its own stays, and the opening pull merges it.
+   *
+   * @param branch - The branch, without `refs/heads/`.
+   * @param head - This device's head.
+   * @param remoteHead - The remote's head.
+   * @returns Whether the branch gave way.
+   */
+  const yieldUnrelatedLine = async (branch: string, head: RevisionId, remoteHead: RevisionId): Promise<boolean> => {
+    const [local, remote] = await Promise.all([
+      port.readTree(head, { largeObjects: 'local' }),
+      port.readTree(remoteHead, { largeObjects: 'local' }),
+    ]);
+    if (local === undefined || remote === undefined || !holdsNoWorkBeforePull(local, remote)) {
+      return false;
+    }
+    await port.updateRef({ name: `${supersededRefPrefix}/${head}`, expectedHead: undefined, head });
+    const reset = await port.updateRef({ name: `refs/heads/${branch}`, expectedHead: head });
+    return reset.status === 'updated';
   };
 
   /* P51, D11: Tau Cloud answers `404` until the project is registered, so the
@@ -5541,11 +5600,23 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
            * first revision pushes on its own debounce. One whose branch the
            * remote already advertises at this head has nothing to send, and
            * asking costs a second `info/refs` (D11). */
-          if (
-            head === undefined ||
-            advertised.some((ref) => ref.name === `refs/heads/${branch}` && ref.head === head)
-          ) {
+          const remoteHead = advertised.find((ref) => ref.name === `refs/heads/${branch}`)?.head;
+          if (head === undefined || remoteHead === head) {
             return {};
+          }
+          /* Only a head that contains the remote's is offered: the remote's own
+           * fast-forward rule would refuse anything else, and an open that
+           * fails on that refusal never reaches the pull that integrates it.
+           * Behind or forked, the opening pull fast-forwards or merges, and
+           * the push after it sends the result. */
+          if (remoteHead !== undefined) {
+            const relation = await openingRelation(head, remoteHead);
+            if (relation === 'unrelated') {
+              await yieldUnrelatedLine(branch, head, remoteHead);
+            }
+            if (relation !== 'ahead') {
+              return {};
+            }
           }
           const result = await (async () => {
             try {
@@ -5585,8 +5656,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
           const refused = result.refs.find((entry) => entry.status === 'rejected');
           if (refused !== undefined) {
+            /* The remote refused the ref, not the transport: classified `rejected`, so no surface reads it as a
+             * download that did not finish. */
             throw new RevisionPortError(
-              'INVALID_TRANSPORT',
+              'REMOTE_REJECTED',
               `The remote refused ${refused.name}: ${refused.reason ?? 'no reason given'}`,
             );
           }

@@ -4518,6 +4518,129 @@ describe('independent sync record failures', () => {
     expect(handed.at(-1)).toBe(listings.at(-1));
   }, 30_000);
 
+  /*
+   * Leftover state: an earlier open that never finished left some of the remote's files on this device, and a cut
+   * minted them as a root revision before any fetch could name what the open brings. That line shares no history with
+   * the remote's, so offering it at connect was refused `[rejected] (non-fast-forward)` and the open failed before the
+   * pull that integrates it ever ran. Connect offers only a head that contains the remote's.
+   */
+  describe('a connect over a branch that does not contain the remote’s', () => {
+    const remoteTree = new ImmutableRevisionTree([
+      ['main.scad', 'cube(1);\n'],
+      ['part.scad', 'sphere(1);\n'],
+    ]);
+    const connectOver = async (local: Readonly<Record<string, string>>, relation: 'unrelated' | 'behind') => {
+      const context = await fixture(local);
+      await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      await context.port.setHead('main');
+      const remoteReceipt = await context.port.writeRevision({
+        parents: [],
+        tree: remoteTree,
+        provenance: { source: 'user', ...recordedBy('grace'), createdAt: Date.UTC(2026, 10, 1) },
+        summary: { generated: 'Remote' },
+      });
+      const remote = revisionId(remoteReceipt.commitId);
+      let minted = 0;
+      const write = async (
+        parents: readonly RevisionId[],
+        tree: ImmutableRevisionTree,
+        who: string,
+      ): Promise<RevisionId> => {
+        minted += 1;
+        const receipt = await context.port.writeRevision({
+          parents,
+          tree,
+          provenance: { source: 'user', ...recordedBy(who), createdAt: Date.UTC(2026, 10, 1 + minted) },
+          summary: { generated: who },
+        });
+        return revisionId(receipt.commitId);
+      };
+      /* Unrelated: a root minted over the leftover files. Behind: the remote's head, which the remote then moved past. */
+      const head =
+        relation === 'unrelated'
+          ? await write([], new ImmutableRevisionTree(Object.entries(local)), 'device-a')
+          : remote;
+      const tip =
+        relation === 'unrelated'
+          ? remote
+          : await write(
+              [remote],
+              new ImmutableRevisionTree([
+                ...remoteTree.entries().map(({ path, content }) => [path, content] as const),
+                ['more.scad', 'cylinder(1);\n'],
+              ]),
+              'grace',
+            );
+      await context.port.updateRef({ name: 'main', expectedHead: undefined, head });
+      await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+      await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: tip });
+      const pushed: RevisionPushInput[] = [];
+      const actors = createRevisionActors({
+        identity: testIdentity,
+        port: {
+          ...context.port,
+          listRemoteRefs: async () => [{ name: 'refs/heads/main', head: tip }],
+          fetch: async () => ({ refs: [] }),
+          push: async (input) => {
+            pushed.push(input);
+            return {
+              refs: input.refs.map((ref) => ({
+                name: ref.name,
+                status: 'rejected',
+                head: undefined,
+                reason: '[rejected] (non-fast-forward)',
+              })),
+            };
+          },
+        },
+        projectId: 'project-1',
+        filesystem: () => context.filesystem,
+      });
+      return { ...context, actors, pushed, head, tip };
+    };
+
+    it('gives way to the remote where the leftover line holds only the remote’s own files', async () => {
+      const context = await connectOver({ 'main.scad': 'cube(1);\n' }, 'unrelated');
+
+      await expect(run(context.actors.remote.initialSync, { remote: 'tau', branch: 'main' })).resolves.toStrictEqual(
+        {},
+      );
+      expect(context.pushed).toHaveLength(0);
+      /* The branch is unborn again, and the leftover line is kept on a host-local ref. */
+      expect(await context.port.readRef('main')).toBeUndefined();
+      expect(await context.port.readRef(`refs/tau/superseded/${context.head}`)).toBe(context.head);
+
+      /* The opening pull then writes the remote's tree, as on a fresh device. */
+      await expect(run(context.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
+        checkoutId: 'live',
+        revisionId: context.tip,
+      });
+      expect(await context.port.readRef('main')).toBe(context.tip);
+      expect(await context.filesystem.readFile('part.scad', 'utf8')).toBe('sphere(1);\n');
+    }, 30_000);
+
+    it('keeps a leftover line with work of its own for the pull to merge, and pushes nothing', async () => {
+      const context = await connectOver({ 'main.scad': 'cube(2);\n' }, 'unrelated');
+
+      await expect(run(context.actors.remote.initialSync, { remote: 'tau', branch: 'main' })).resolves.toStrictEqual(
+        {},
+      );
+      expect(context.pushed).toHaveLength(0);
+      expect(await context.port.readRef('main')).toBe(context.head);
+      expect(await context.port.listRefs('refs/tau/superseded')).toEqual([]);
+    }, 30_000);
+
+    it('pushes nothing for a branch the remote has moved past', async () => {
+      const context = await connectOver({ 'main.scad': 'cube(1);\n', 'part.scad': 'sphere(1);\n' }, 'behind');
+
+      await expect(run(context.actors.remote.initialSync, { remote: 'tau', branch: 'main' })).resolves.toStrictEqual(
+        {},
+      );
+      expect(context.pushed).toHaveLength(0);
+      expect(await context.port.readRef('main')).toBe(context.head);
+    }, 30_000);
+  });
+
   /* D11, S9: a connect whose branch the remote already holds at this head pushes nothing, so it costs one `info/refs`. */
   it('pushes nothing at connect when the remote already advertises the branch at this head', async () => {
     const context = await fixture({ 'main.ts': 'base\n' });

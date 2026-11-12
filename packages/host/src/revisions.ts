@@ -59,6 +59,7 @@ import {
   generatedGitattributesPath,
   generatedIgnorePath,
   readRevisionDiff,
+  readRevisionGraph,
   readRevisionLog,
   readRevisionPlace,
   publishOverHttp,
@@ -387,6 +388,7 @@ const unrecordingCommands: ReadonlySet<string> = new Set([
   'flushKeepalive',
   'remoteCredential',
   'log',
+  'graph',
   'divergence',
   'diff',
   'compare',
@@ -1431,6 +1433,15 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             ...(limit === undefined ? {} : { limit }),
           }),
         );
+      }
+      case 'graph': {
+        const limit = request['limit'];
+        if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1)) {
+          throw Object.assign(new Error('Revision request limit must be a positive integer.'), {
+            code: 'INVALID_REVISION_REQUEST',
+          });
+        }
+        return revisionJson(await readRevisionGraph(port, limit === undefined ? {} : { limit }));
       }
       case 'divergence':
         return revisionJson(await port.divergence({ head: revisionId(text('head')), base: revisionId(text('base')) }));

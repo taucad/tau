@@ -120,9 +120,17 @@ const createFaceTexture = (face: Parameters<typeof drawFaceTexture>[0]): CanvasT
  * @param backend - Execution family; only `webgpu` converts.
  */
 export const applyViewportGizmoNodeMaterials = (gizmo: ViewportGizmo, backend: ResolvedGraphicsBackend): void => {
-  if (backend !== 'webgpu') {
-    return;
+  if (backend === 'webgpu') {
+    convertToNodeMaterials(gizmo);
   }
+};
+
+/**
+ * Replaces each mesh's material, and its idle and hover pair, with node materials.
+ *
+ * @param gizmo - The gizmo whose meshes change.
+ */
+const convertToNodeMaterials = (gizmo: ViewportGizmo): void => {
   const nodeMaterials = new Map<MeshBasicMaterial, MeshBasicNodeMaterial>();
   const toNode = (source: MeshBasicMaterial): MeshBasicNodeMaterial => {
     let material = nodeMaterials.get(source);

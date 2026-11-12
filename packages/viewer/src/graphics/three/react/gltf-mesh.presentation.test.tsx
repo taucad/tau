@@ -11,6 +11,7 @@ import { useLayoutEffect } from 'react';
 import type { RenderFrame, SpatialMatrix } from '@taucad/spatial';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createGltfMeshPresentationHarness } from '#graphics/three/react/gltf-mesh.test-utils.jsx';
 import type { MockInstance } from 'vitest';
 import { writeGlb } from '@taucad/geometry-core';
 import type { GlbMaterial, GlbPrimitive } from '@taucad/geometry-core';
@@ -42,6 +43,8 @@ const mocks = vi.hoisted(() => ({
       context: {
         modelPointerClickSuppressionReasons: [],
         suppressNextModelPointerClick: false,
+        // The host reads the section barrier from graphics as it prepares.
+        isSectionViewActive: mocks.sectionView.isActive,
         viewerHoverSuppressionReasons: [] as string[],
       },
     }),
@@ -89,7 +92,7 @@ vi.mock('#graphics/three/three-graphics-backend-context.jsx', () => ({
 
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useCameraRig: () => mocks.cameraRig,
-  useGraphics: () => mocks.graphicsActor,
+  useGraphics: () => harness.graphics,
   useGraphicsSelector: () => false,
   useRenderFrame: () => mocks.renderFrame,
   useRenderFrameRetarget: (handler: (frame: RenderFrame) => void) => {
@@ -117,7 +120,17 @@ vi.mock('#graphics/three/react/kinematics-viewer.js', () => ({
   useKinematicsViewer: () => () => undefined,
 }));
 
-const { GltfMesh } = await import('#graphics/three/react/gltf-mesh.jsx');
+const { GltfMesh: RealGltfMesh } = await import('#graphics/three/react/gltf-mesh.jsx');
+const { deriveModelInteractionUnitId } = await import('#machines/model-interaction.machine.js');
+const harness = createGltfMeshPresentationHarness({
+  graphicsActor: mocks.graphicsActor,
+  GltfMesh: RealGltfMesh,
+  deriveUnitId: deriveModelInteractionUnitId,
+});
+const { GltfMesh } = harness;
+afterEach(() => {
+  harness.reset();
+});
 
 const surfaceMaterial: GlbMaterial = {
   doubleSided: false,
@@ -437,10 +450,12 @@ describe('GltfMesh presentation protocol', () => {
       expect(measuredTelemetry()).toEqual([expect.objectContaining({ revision: 1, key: 'a', modelEmptyFrames: 2 })]);
     });
 
-    it('should key every event with an empty key and revision 0 when neither prop is given', async () => {
+    it('should key every event with the request key, empty here, and revision 0, and leave the manifest unhashed', async () => {
       render(<GltfMesh gltfFile={buildGlb()} enableMatcap={false} />);
       await waitForCommits(['']);
 
+      // G11b: the manifest's geometry hash is the request key, unless the key is empty. A hashed manifest is an identity
+      // the model interaction compares, so an empty hash would make two hashless GLBs of one source look the same.
       expect(trace()).toEqual([
         'gltfPreparationStarted 0:',
         'gltfDisplayReady 0: display-ready',
@@ -744,6 +759,36 @@ describe('GltfMesh presentation protocol', () => {
       ]);
       expect(measuredTelemetry()).toEqual([
         expect.objectContaining({ barrier: 'analysis-ready', topologyJobsStarted: 1, topologyJobsDiscarded: 0 }),
+      ]);
+    });
+
+    it('should hold a request for its section topology when the section arm lands in the same step, before React renders it', async () => {
+      vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources').mockResolvedValue([]);
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+      render(<GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+      await waitForCommits(['a']);
+      const before = sentEvents().length;
+
+      // Graphics arms the section view and then sends a same-topology result, with no React render between them.
+      mocks.sectionView.isActive = true;
+      await act(async () => {
+        harness.present({
+          revision: 2,
+          key: 'b',
+          unitId: 'unit:b',
+          sourceFile: undefined,
+          bytes: buildGlb({ lift: 5 }),
+        });
+      });
+      await waitForCommits(['a', 'b']);
+
+      // Not written in place, which the armed section view refuses: parsed again, and held at the barrier.
+      expect(parseAsync).toHaveBeenCalledTimes(2);
+      expect(trace(before).slice(0, 4)).toEqual([
+        'setHoveredModelComponent unit:a none',
+        'gltfPreparationStarted 2:b',
+        'gltfDisplayReady 2:b analysis-ready',
+        'gltfAnalysisReady 2:b',
       ]);
     });
 

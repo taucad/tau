@@ -3,7 +3,6 @@
   "packages/viewer/src/cad/section-view-control.tsx": 1,
   "packages/viewer/src/graphics/svg/svg-viewer.tsx": 1,
   "packages/viewer/src/graphics/svg/use-panzoom-reset.tsx": 1,
-  "packages/viewer/src/graphics/three/react/gltf-mesh.tsx": 2,
   "packages/viewer/src/graphics/three/react/kinematics-drag-controls-adapter.ts": 4,
   "packages/viewer/src/graphics/three/react/kinematics-pose-composer.ts": 2,
   "packages/viewer/src/graphics/three/react/kinematics-viewer.ts": 6,

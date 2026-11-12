@@ -249,3 +249,49 @@ describe('project view manifest reconciliation (G11b)', () => {
     }
   });
 });
+
+describe('project component focus forwarding (G11b)', () => {
+  const focusOf = (project: ProjectActor, viewId: string) =>
+    project.getSnapshot().context.viewGraphics.get(viewId)!.getSnapshot().context.componentFocus;
+
+  it('should forward a focus on the shared model interaction to every view, and to a view opened after it', () => {
+    const project = createProjectActor().start();
+    try {
+      project.send({ type: 'createViewGraphics', viewId: 'v1' });
+      project.send({ type: 'createViewGraphics', viewId: 'v2' });
+      const { modelInteractionRef } = project.getSnapshot().context;
+      modelInteractionRef.send({ type: 'loadManifest', unitId: 'unit:a', manifest, source: 'viewer' });
+      modelInteractionRef.send({ type: 'focusComponent', unitId: 'unit:a', componentId: 'root' });
+      expect(focusOf(project, 'v1')).toEqual({ 'unit:a': 'root' });
+      expect(focusOf(project, 'v2')).toEqual({ 'unit:a': 'root' });
+
+      project.send({ type: 'createViewGraphics', viewId: 'v3' });
+      expect(focusOf(project, 'v3')).toEqual({ 'unit:a': 'root' });
+
+      modelInteractionRef.send({ type: 'clearFocus', unitId: 'unit:a', source: 'viewer' });
+      expect(focusOf(project, 'v1')).toEqual({});
+      expect(focusOf(project, 'v3')).toEqual({});
+    } finally {
+      project.stop();
+    }
+  });
+
+  it('should forward nothing for a model-interaction change that leaves the focus alone', () => {
+    const project = createProjectActor().start();
+    try {
+      project.send({ type: 'createViewGraphics', viewId: 'v1' });
+      const graphics = project.getSnapshot().context.viewGraphics.get('v1')!;
+      const { modelInteractionRef } = project.getSnapshot().context;
+      modelInteractionRef.send({ type: 'loadManifest', unitId: 'unit:a', manifest, source: 'viewer' });
+      const before = graphics.getSnapshot();
+      modelInteractionRef.send({
+        type: 'selectComponent',
+        unitId: 'unit:a',
+        componentId: 'root',
+      });
+      expect(graphics.getSnapshot()).toBe(before);
+    } finally {
+      project.stop();
+    }
+  });
+});

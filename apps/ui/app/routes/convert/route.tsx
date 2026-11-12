@@ -33,7 +33,7 @@ import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { cn } from '@taucad/ui/utils/cn';
 import { Loader } from '@taucad/ui/components/loader';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
-import { GraphicsProvider, useGraphicsSelector } from '@taucad/viewer/hooks/use-graphics';
+import { GraphicsProvider, useGraphics, useGraphicsSelector } from '@taucad/viewer/hooks/use-graphics';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
 import { PageNotice } from '#components/layout/page-notice.js';
@@ -179,6 +179,7 @@ export function ConverterExportPanel({ children }: Readonly<{ children: React.Re
 }
 
 function ConverterContentInner(): React.JSX.Element {
+  const graphicsRef = useGraphics();
   const [uploadedFile, setUploadedFile] = useState<UploadedFileInfo | undefined>(undefined);
   const [glbData, setGlbData] = useState<Uint8Array<ArrayBuffer> | undefined>(undefined);
   const [glbHash, setGlbHash] = useState<string | undefined>(undefined);
@@ -329,6 +330,8 @@ function ConverterContentInner(): React.JSX.Element {
         setRuntimeDocument(opened);
         setGlbData(artifact.content);
         setGlbHash(preview.rendering.hash);
+        // The viewer presents the GLB that graphics is sent.
+        graphicsRef.send({ type: 'updateArtifact', artifact, hash: preview.rendering.hash });
       } catch (error) {
         if (isCurrentOperation()) {
           let message = 'Failed to process file';
@@ -347,7 +350,7 @@ function ConverterContentInner(): React.JSX.Element {
         }
       }
     },
-    [client, converterImportFormats],
+    [client, converterImportFormats, graphicsRef],
   );
 
   const handleFormatToggle = useCallback(
@@ -375,7 +378,8 @@ function ConverterContentInner(): React.JSX.Element {
     setRuntimeDocument(undefined);
     setGlbData(undefined);
     setGlbHash(undefined);
-  }, []);
+    graphicsRef.send({ type: 'clearArtifact' });
+  }, [graphicsRef]);
 
   const handleClearFormats = useCallback(() => {
     setSelectedFormats([]);

@@ -8,7 +8,8 @@
  * Resolution order per flag:
  *  1. a flag with a `posthogKey` takes PostHog's evaluated value once the
  *     PostHog client has evaluated flags (`#flags/remote-flags`);
- *  2. otherwise a stored override, honoured only for Experimental flags;
+ *  2. otherwise a stored override, for any flag without a `posthogKey` or
+ *     `localOverride: false` (hidden flags included, for console opt-in);
  *  3. otherwise the registry default.
  * A flag with `requires` is then off whenever the flag it names is off.
  *
@@ -55,7 +56,12 @@ function readOverrides(store: MinimalReadStorage): Partial<FeatureFlags> {
     const record = parsed as Record<string, unknown>;
     const overrides: Partial<FeatureFlags> = {};
     for (const name of featureFlagNames) {
-      if (!flagRegistry[name].showInExperimental || (name === 'webGpu' && record['webGpuPreferenceVersion'] !== 1)) {
+      const definition: FlagDefinition = flagRegistry[name];
+      if (
+        definition.posthogKey !== undefined ||
+        definition.localOverride === false ||
+        (name === 'webGpu' && record['webGpuPreferenceVersion'] !== 1)
+      ) {
         continue;
       }
       const value = record[name];

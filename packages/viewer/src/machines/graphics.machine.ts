@@ -22,6 +22,7 @@ import { createCameraView } from '@taucad/camera';
 import type { CameraBounds } from '@taucad/camera';
 import { cameraMachine } from '@taucad/camera/machine';
 import type { CameraMachineEmitted, CameraMachineEvent } from '@taucad/camera/machine';
+import type { CameraNavigationStep } from '#graphics/three/controls/camera-navigation.js';
 import { resolveMetersPerRenderUnit } from '@taucad/spatial';
 import type {
   CameraOwnedSettings,
@@ -95,7 +96,7 @@ export type GraphicsCameraRef = ActorRefFrom<typeof cameraMachine>;
  * @public
  */
 export type ControlsAdapterLogic = CallbackActorLogic<
-  { type: 'stop' },
+  { type: 'stop' } | { type: 'navigate'; step: CameraNavigationStep },
   unknown,
   { type: 'interactionStarted' } | { type: 'interactionMoved' } | { type: 'interactionEnded' }
 >;
@@ -427,6 +428,12 @@ export type GraphicsEvent =
   | { type: 'setGridUnit'; payload: { unit: LengthSymbol } }
   // Camera events
   | { type: 'fitView' }
+  /**
+   * One orbit, pan or zoom step from an arrow key, a plus or minus key or a single-click control (N1, N2). Graphics
+   * hands it to the canvas's controls adapter, which moves the controls, so the pose reaches the camera as the
+   * person's input. Unhandled while no canvas has its controls, so `snapshot.can(event)` says whether a key is claimed.
+   */
+  | { type: 'navigateCamera'; step: CameraNavigationStep }
   /** The camera child's `viewChanged`, folded into the visible span. */
   | { type: 'cameraViewChanged'; verticalSpan: number }
   /**
@@ -723,6 +730,7 @@ export const graphicsEventTypes = [
   'setGridSizeLocked',
   'setGridUnit',
   'fitView',
+  'navigateCamera',
   'cameraViewChanged',
   'poseRevisionObserved',
   'setSurfaceVisibility',
@@ -1582,6 +1590,13 @@ const graphicsMachineDefinition = setup({
           // Fit view zooms and recentres the camera on the latest measurement; it never turns it (framing).
           enq.sendTo(context.framingRef, { type: 'fitRequested' });
           enq.emit({ type: 'viewFitRequested' });
+          return {};
+        },
+        navigateCamera: ({ context, event }, enq) => {
+          if (!context.controlsAdapter) {
+            return undefined;
+          }
+          enq.sendTo(context.controlsAdapter.ref, { type: 'navigate', step: event.step });
           return {};
         },
         entryChanged: ({ context, event }, enq) => {
@@ -2647,6 +2662,8 @@ export const graphicsIgnoredEvents: ReadonlyArray<readonly [state: string, event
   // A shortcut that does nothing in the current context is left unhandled, so `can` says whether the bar claims the
   // key: Escape with nothing on, Delete or Backspace with no known cut, and S, M or P on 2D geometry, in any state.
   ['*', 'viewerShortcutPressed'],
+  // A navigation step with no canvas controls to move is left unhandled, so the bar does not claim the key.
+  ['*', 'navigateCamera'],
 ];
 
 /** The graphics machine's state value: the operational backend, section and measure regions. @public */

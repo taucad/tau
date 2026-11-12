@@ -493,6 +493,60 @@ describe('controls adapter', () => {
     expect(update).toHaveBeenCalledOnce();
   });
 
+  /* N1 and N2: a navigation step graphics forwards moves the controls, and the next frame reports the pose to the
+   * camera as the person's input, as a drag does. */
+  it("moves the camera by a navigation step graphics forwards, as the person's input", () => {
+    const harness = createHarness();
+    harness.attach();
+    const controls = harness.controls();
+    const ticker = frameSubscriptions(harness)[0]!.ref;
+    const azimuth = controls.azimuthAngle;
+    const { distance } = controls;
+    const target = (): number[] => [...harness.camera.getSnapshot().context.view.target];
+    const startTarget = target();
+    const orbit = { type: 'navigateCamera', step: { kind: 'orbit', direction: 'left' } } as const;
+    harness.calls.length = 0;
+
+    expect(harness.graphics.getSnapshot().can(orbit)).toBe(true);
+    harness.graphics.send(orbit);
+    expect(harness.calls).toContain('invalidate');
+    ticker.current(harness.state, 1 / 60);
+    expect(controls.azimuthAngle).not.toBeCloseTo(azimuth, 6);
+    expect(harness.camera.getSnapshot().context.lastChange.source).toBe('input');
+    expect(target()).toEqual(startTarget);
+
+    harness.graphics.send({ type: 'navigateCamera', step: { kind: 'zoom', direction: 'in' } });
+    ticker.current(harness.state, 1 / 60);
+    expect(controls.distance).toBeLessThan(distance);
+
+    harness.graphics.send({ type: 'navigateCamera', step: { kind: 'pan', direction: 'right' } });
+    ticker.current(harness.state, 1 / 60);
+    expect(target()).not.toEqual(startTarget);
+  });
+
+  it('leaves a navigation step unhandled with no canvas controls, and moves nothing under the view cube lock', () => {
+    const harness = createHarness();
+    const step = { type: 'navigateCamera', step: { kind: 'orbit', direction: 'up' } } as const;
+    expect(harness.graphics.getSnapshot().can(step)).toBe(false);
+    harness.attach();
+    const controls = harness.controls();
+    const polar = controls.polarAngle;
+    // A view cube whose gesture holds the lock, as it does while it turns the camera.
+    let report: ((event: ViewportGizmoAdapterEvent) => void) | undefined;
+    const adapter: ViewportGizmoAdapterLogic = createCallbackLogic(({ sendBack }) => {
+      report = sendBack;
+      return undefined;
+    });
+    harness.graphics.send({ type: 'viewportGizmoAttached', gizmoId: 'cube', adapter });
+    report?.({ type: 'gizmoPressed' });
+    report?.({ type: 'gizmoTurned' });
+    expect(selectGraphicsViewportGizmoLocked(harness.graphics.getSnapshot())).toBe(true);
+    harness.graphics.send(step);
+    controls.update(0);
+    expect(controls.polarAngle).toBeCloseTo(polar, 9);
+    report?.({ type: 'gizmoReleased' });
+  });
+
   it('stops stepping the controls when its canvas leaves', () => {
     const harness = createHarness();
     const unsubscribe = vi.fn();

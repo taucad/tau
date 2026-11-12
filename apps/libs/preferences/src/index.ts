@@ -35,6 +35,7 @@ export type {
 export {
   effectiveGizmoStyle,
   effectivePreset,
+  familiarProducts,
   suggestedGizmo,
   suggestedPreset,
   toolSuggestions,

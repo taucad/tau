@@ -16,6 +16,7 @@ import type {
 } from '#machines/graphics.machine.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
+import type { CameraNavigationStep } from '#graphics/three/controls/camera-navigation.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 type ViewerShortcutPress = Extract<GraphicsEvent, { type: 'viewerShortcutPressed' }>;
@@ -35,6 +36,33 @@ const projectionKey: KeyCombination = { key: 'p' };
 const escapeKey: KeyCombination = { key: 'Escape' };
 const deleteKey: KeyCombination = { key: 'Delete' };
 const backspaceKey: KeyCombination = { key: 'Backspace' };
+
+/** One navigation key: the shortcut it names, its key and the step it takes. */
+type NavigationKey = Readonly<{ name: ViewerNavigationKey; combo: KeyCombination; step: CameraNavigationStep }>;
+
+/**
+ * The navigation step each key takes (N1): the arrow keys orbit, Shift with an arrow key pans, and plus and minus
+ * zoom. Plus is matched with and without Shift (a US layout types it with Shift, a keypad without), and `=` is the
+ * same key unshifted.
+ */
+const navigationKeys: readonly NavigationKey[] = [
+  { name: 'orbitLeft', combo: { key: 'ArrowLeft' }, step: { kind: 'orbit', direction: 'left' } },
+  { name: 'orbitRight', combo: { key: 'ArrowRight' }, step: { kind: 'orbit', direction: 'right' } },
+  { name: 'orbitUp', combo: { key: 'ArrowUp' }, step: { kind: 'orbit', direction: 'up' } },
+  { name: 'orbitDown', combo: { key: 'ArrowDown' }, step: { kind: 'orbit', direction: 'down' } },
+  { name: 'panLeft', combo: { key: 'ArrowLeft', shiftKey: true }, step: { kind: 'pan', direction: 'left' } },
+  { name: 'panRight', combo: { key: 'ArrowRight', shiftKey: true }, step: { kind: 'pan', direction: 'right' } },
+  { name: 'panUp', combo: { key: 'ArrowUp', shiftKey: true }, step: { kind: 'pan', direction: 'up' } },
+  { name: 'panDown', combo: { key: 'ArrowDown', shiftKey: true }, step: { kind: 'pan', direction: 'down' } },
+  { name: 'zoomIn', combo: { key: '+' }, step: { kind: 'zoom', direction: 'in' } },
+  { name: 'zoomIn', combo: { key: '+', shiftKey: true }, step: { kind: 'zoom', direction: 'in' } },
+  { name: 'zoomIn', combo: { key: '=' }, step: { kind: 'zoom', direction: 'in' } },
+  { name: 'zoomOut', combo: { key: '-' }, step: { kind: 'zoom', direction: 'out' } },
+];
+
+/** Focus inside one of these keeps its own arrow keys: a slider, a spin button, or a radio, tab or tool row. */
+const ownArrowKeysSelector =
+  '[role=slider],[role=spinbutton],[role=radiogroup],[role=radio],[role=tablist],[role=tab],[role=toolbar],input,select,textarea';
 
 /** The phrase the bar speaks for each outcome. */
 const outcomePhrases: Readonly<Record<ViewerShortcutOutcome, string>> = {
@@ -89,6 +117,28 @@ function selectShortcutCamera(graphicsRef: GraphicsActorRef): ViewerShortcutCame
 function selectShortcutApplies(graphicsRef: GraphicsActorRef, press: ViewerShortcutPress): boolean {
   return graphicsRef.getSnapshot().can(press);
 }
+
+/** Whether a canvas's controls would take a navigation step, so the viewer claims its key. */
+function selectNavigationApplies(graphicsRef: GraphicsActorRef, step: CameraNavigationStep): boolean {
+  return graphicsRef.getSnapshot().can({ type: 'navigateCamera', step });
+}
+
+/**
+ * Whether a navigation key belongs to the viewer holding `element`: as for every viewer key, and also only while focus
+ * is in that viewer or nowhere, never in another part of the page under a hovered viewer, and never in a control that
+ * keeps its own arrow keys.
+ */
+const isNavigationKeyTarget = (element: Element | undefined): boolean => {
+  if (!isViewerKeyTarget(element)) {
+    return false;
+  }
+  const focused = document.activeElement;
+  if (focused === null || focused === document.body) {
+    return true;
+  }
+  const frame = element?.closest('[data-viewer-frame]') ?? element;
+  return Boolean(frame?.contains(focused)) && !focused.closest(ownArrowKeysSelector);
+};
 
 /** Whether graphics shows the grid at the press, which G with view commands needs. */
 function selectShortcutGridShown(graphicsRef: GraphicsActorRef): boolean {
@@ -296,11 +346,58 @@ const viewerKeyboardAdapter = createCallbackLogic<KeyboardAdapterEvent, Keyboard
 });
 
 /**
- * The formatted keys of the shortcuts that tooltips show.
+ * The navigation shortcuts by name, as {@link ViewerShortcutKeys} formats them.
  *
  * @public
  */
-export type ViewerShortcutKeys = Readonly<{ fitView: string; section: string; measure: string }>;
+export type ViewerNavigationKey =
+  | 'orbitLeft'
+  | 'orbitRight'
+  | 'orbitUp'
+  | 'orbitDown'
+  | 'panLeft'
+  | 'panRight'
+  | 'panUp'
+  | 'panDown'
+  | 'zoomIn'
+  | 'zoomOut';
+
+/**
+ * The formatted keys of the shortcuts that tooltips show. `navigation` holds each navigation step's key, also while
+ * navigation keys are off.
+ *
+ * @public
+ */
+export type ViewerShortcutKeys = Readonly<{
+  fitView: string;
+  section: string;
+  measure: string;
+  navigation: Readonly<Record<ViewerNavigationKey, string>>;
+}>;
+
+/**
+ * What a host turns on in {@link useViewerShortcuts}.
+ *
+ * @public
+ */
+export type ViewerShortcutOptions = Readonly<{
+  /**
+   * The navigation keys (N1): the arrow keys orbit, Shift with an arrow key pans, plus and minus zoom. Off by default:
+   * the host turns them on with its viewer controls.
+   */
+  navigation?: boolean;
+}>;
+
+type NavigationBinding = Readonly<{ press: () => void; options: KeybindingOptions }>;
+
+/* Registers row `index` of `navigationKeys`. */
+const useNavigationKeybinding = (
+  bindings: readonly NavigationBinding[],
+  index: number,
+): ReturnType<typeof useKeybinding> => {
+  const binding = bindings[index]!;
+  return useKeybinding(navigationKeys[index]!.combo, binding.press, binding.options);
+};
 
 /**
  * The viewer's shortcuts: F fits the view, S and M toggle Section and Measure, G the grid, and P switches between
@@ -314,8 +411,14 @@ export type ViewerShortcutKeys = Readonly<{ fitView: string; section: string; me
  * Keys typed into a field never reach these bindings, and every viewer registers its own set, gated by
  * {@link isViewerKeyTarget} on `barRef`. The bindings keep the default priority, below a drag's Escape.
  *
+ * With `options.navigation`, the arrow keys orbit the camera, Shift with an arrow key pans it, and plus and minus zoom
+ * it, under every mouse preset (N1). Each is a `navigateCamera` step graphics hands the canvas's controls; a held key
+ * repeats. They are claimed only while focus is in the viewer or nowhere and not in a control with arrow keys of its
+ * own, such as a slider, and only once the canvas has its controls.
+ *
  * @param barRef - The bar the shortcuts belong to.
  * @param announce - Speaks each shortcut's result.
+ * @param options - What the host turns on: the navigation keys.
  * @returns The formatted keys tooltips show.
  * @public
  */
@@ -323,7 +426,9 @@ export const useViewerShortcuts = (
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- required by React
   barRef: RefObject<HTMLElement | null>,
   announce: (phrase: string) => void,
+  options: ViewerShortcutOptions = {},
 ): ViewerShortcutKeys => {
+  const isNavigationEnabled = options.navigation === true;
   const graphicsRef = useGraphics();
   const viewFields = useViewerViewFields();
   const announceRef = useRef(announce);
@@ -398,5 +503,42 @@ export const useViewerShortcuts = (
   useKeybinding(deleteKey, bindings.removeCut.press, bindings.removeCut.options);
   useKeybinding(backspaceKey, bindings.removeCut.press, bindings.removeCut.options);
 
-  return useMemo(() => ({ fitView, section, measure }), [fitView, measure, section]);
+  const navigationBindings = useMemo(
+    () =>
+      navigationKeys.map(
+        ({ step }): NavigationBinding => ({
+          press: () => {
+            graphicsRef.send({ type: 'navigateCamera', step });
+          },
+          options: {
+            ignoreInputs: true,
+            repeat: true,
+            enabled: () =>
+              isNavigationEnabled &&
+              isNavigationKeyTarget(barRef.current ?? undefined) &&
+              selectNavigationApplies(graphicsRef, step),
+          },
+        }),
+      ),
+    [barRef, graphicsRef, isNavigationEnabled],
+  );
+  // One registration per row of `navigationKeys`, always in the same order.
+  const { formattedKeyCombination: orbitLeft } = useNavigationKeybinding(navigationBindings, 0);
+  const { formattedKeyCombination: orbitRight } = useNavigationKeybinding(navigationBindings, 1);
+  const { formattedKeyCombination: orbitUp } = useNavigationKeybinding(navigationBindings, 2);
+  const { formattedKeyCombination: orbitDown } = useNavigationKeybinding(navigationBindings, 3);
+  const { formattedKeyCombination: panLeft } = useNavigationKeybinding(navigationBindings, 4);
+  const { formattedKeyCombination: panRight } = useNavigationKeybinding(navigationBindings, 5);
+  const { formattedKeyCombination: panUp } = useNavigationKeybinding(navigationBindings, 6);
+  const { formattedKeyCombination: panDown } = useNavigationKeybinding(navigationBindings, 7);
+  const { formattedKeyCombination: zoomIn } = useNavigationKeybinding(navigationBindings, 8);
+  useNavigationKeybinding(navigationBindings, 9);
+  useNavigationKeybinding(navigationBindings, 10);
+  const { formattedKeyCombination: zoomOut } = useNavigationKeybinding(navigationBindings, 11);
+
+  const navigation = useMemo(
+    () => ({ orbitLeft, orbitRight, orbitUp, orbitDown, panLeft, panRight, panUp, panDown, zoomIn, zoomOut }),
+    [orbitDown, orbitLeft, orbitRight, orbitUp, panDown, panLeft, panRight, panUp, zoomIn, zoomOut],
+  );
+  return useMemo(() => ({ fitView, section, measure, navigation }), [fitView, measure, navigation, section]);
 };

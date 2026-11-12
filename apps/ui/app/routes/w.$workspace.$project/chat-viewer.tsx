@@ -34,6 +34,7 @@ import type { ViewCameraSeed } from '@taucad/viewer/services/graphics-camera-reg
 import { ViewerIssues } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
+import { useViewerCameraInput } from '#routes/w.$workspace.$project/use-viewer-camera-input.js';
 import { ViewerKernelSettings } from '#routes/w.$workspace.$project/chat-viewer-kernel-settings.js';
 import { ViewerProjectionPicker } from '#routes/w.$workspace.$project/chat-viewer-projection-picker.js';
 import { isEmptyGlb } from '@taucad/viewer/utils/inspect-glb';
@@ -683,6 +684,8 @@ const ViewerContent = memo(function ({
   // on every emission, causing unnecessary re-renders.
   const enableSurfaces = useGraphicsSelector((state) => state.context.enableSurfaces);
   const enableGizmo = useGraphicsSelector((state) => state.context.enableGizmo);
+  // The person's preset, trackpad switch, toggles and gizmo style, with `viewerControls` on; none with it off.
+  const { cameraInput, gizmoStyle } = useViewerCameraInput();
   const enableGrid = useGraphicsSelector((state) => state.context.enableGrid);
   const enableAxes = useGraphicsSelector((state) => state.context.enableAxes);
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
@@ -908,6 +911,8 @@ const ViewerContent = memo(function ({
             eventSource={eventSource}
             gizmoContainer={gizmoContainer}
             onModelComponentSecondaryPointerCandidate={onComponentSecondaryPointerCandidate}
+            cameraInput={cameraInput}
+            gizmoStyle={gizmoStyle}
           />
         )
       }

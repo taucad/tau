@@ -70,6 +70,7 @@ import { isNotFound } from '@taucad/chat-ui/db/attachment-store';
 import { toast } from 'sonner';
 import type { EntryPathChange } from '#workbench-records/entries-store.js';
 import { createViewRecordPorts, startViewRecordSession } from '#workbench-records/view-record-session.js';
+import { deviceViewLevels } from '#workbench-records/view-levels.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
 
 type ProjectContextType = {
@@ -719,6 +720,7 @@ export function ProjectProvider({
       projectId,
       root: `/projects/${projectId}`,
       host: viewRecordHost,
+      levels: deviceViewLevels(projectId),
       setViewRecord,
       setViewEntryPath,
       setAppliedWorkbenchRevision,

@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { useSelector } from '@xstate/react';
 import type { Rendering } from '@taucad/runtime';
 import { ViewerControls } from '@taucad/viewer/cad/viewer-controls';
+import type { ViewerViewFields } from '@taucad/viewer/cad/viewer-view-fields';
 import { useProject } from '#hooks/use-project.js';
 import { CaptureViewControl } from '#components/geometry/cad/capture-view-control.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
@@ -19,6 +20,8 @@ type ChatViewerControlsProps = Readonly<{
   leading?: React.ReactNode;
   /** A row directly above the controls line, below any running tool's row: the open issues list. */
   aboveControls?: React.ReactNode;
+  /** The view's commands (`useViewerViewFieldCommands`): per-view controls write the view record through them. */
+  viewFields?: ViewerViewFields;
 }>;
 
 /**
@@ -32,6 +35,7 @@ export function ChatViewerControls({
   kernelSettings,
   leading,
   aboveControls,
+  viewFields,
 }: ChatViewerControlsProps): React.JSX.Element {
   const cadRef = useCad();
   const operationTimeoutValue = useCadSelector(selectCadOperationTimeout, defaultOperationTimeout);
@@ -53,6 +57,7 @@ export function ChatViewerControls({
       }}
       leading={leading}
       aboveControls={aboveControls}
+      viewFields={viewFields}
     />
   );
 }

@@ -10,7 +10,9 @@
  * - a camera revision becomes `cameraChanged`, with the change's source, pose and field of view;
  * - the camera's adoption answers are forwarded;
  * - framing's entry and state become `framingChanged`;
- * - graphics' settings become `ownersChanged`, with the changed fields only;
+ * - graphics' pinned measurements become `ownersChanged`, with the changed fields only;
+ * - a change of the levels above the view (the person's defaults or this device's exceptions) becomes `levelsChanged`,
+ *   so the ten inheritable leaves are seeded from their new resolution (onboarding blueprint, Finding 6);
  * - graphics' section quiet gate becomes `sectionEdited` and `sectionSettled`;
  * - the store's publications become `recordPublished`, with their origin and the patch an own write carried.
  *
@@ -42,7 +44,8 @@ import type {
   ViewBindingFramingRef,
   ViewBindingGraphicsRef,
 } from '#workbench-records/view-record-binding.machine.js';
-import type { ViewOwners } from '#workbench-records/view-record-binding-changes.js';
+import type { ViewOwners, ViewResolutionLevels } from '#workbench-records/view-record-binding-changes.js';
+import type { ViewLevelsSource } from '#workbench-records/view-levels.js';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 
 /** Milliseconds a person's edit waits for a later one before the view record is written. */
@@ -79,6 +82,8 @@ export type ViewRecordPorts = Readonly<{
   setAppliedWorkbenchRevision: (path: string, digest: `sha256:${string}` | undefined) => void;
   /** Register a session's flush; returns its removal. */
   addFlush: (flush: () => Promise<void>) => () => void;
+  /** The levels a view's inheritable leaves resolve over, and their changes (`deviceViewLevels` in the app). */
+  levels: ViewLevelsSource;
 }>;
 
 /** The ports and the host's commands over them. */
@@ -90,6 +95,12 @@ export type ViewRecordPortsHandle = ViewRecordPorts &
     flush: () => Promise<void>;
   }>;
 
+/* No person and no exceptions: every inheritable leaf shows the record's own value. */
+const noLevels: ViewLevelsSource = {
+  read: () => ({}),
+  subscribe: () => () => undefined,
+};
+
 /** One session's flush, which the close awaits. */
 type ViewRecordFlush = () => Promise<void>;
 
@@ -100,7 +111,7 @@ type ViewRecordFlush = () => Promise<void>;
  * @returns The ports, with the host's commands.
  */
 export function createViewRecordPorts(
-  input: Readonly<{ projectId: string; root: string; host: ViewRecordHost }> &
+  input: Readonly<{ projectId: string; root: string; host: ViewRecordHost; levels?: ViewLevelsSource }> &
     Pick<ViewRecordPorts, 'setViewRecord' | 'setViewEntryPath' | 'setAppliedWorkbenchRevision'>,
 ): ViewRecordPortsHandle {
   let { host } = input;
@@ -115,6 +126,7 @@ export function createViewRecordPorts(
     setViewRecord: input.setViewRecord,
     setViewEntryPath: input.setViewEntryPath,
     setAppliedWorkbenchRevision: input.setAppliedWorkbenchRevision,
+    levels: input.levels ?? noLevels,
     addFlush: (flush) => {
       flushes.add(flush);
       return () => flushes.delete(flush);
@@ -191,19 +203,11 @@ export const sectionOf = (context: GraphicsContext): PersistedSectionView => ({
   cuts: context.sectionCuts.map((cut) => toPersistedSectionCut(cut)),
 });
 
-/** The graphics-held owner values a view record keeps. */
-export const graphicsOwnersOf = (context: GraphicsContext): Omit<ViewOwners, 'camera' | 'fieldOfView'> => ({
-  display: {
-    surfaces: context.enableSurfaces,
-    lines: context.enableLines,
-    gizmo: context.enableGizmo,
-    grid: context.enableGrid,
-    axes: context.enableAxes,
-    matcap: context.enableMatcap,
-    postProcessing: context.enablePostProcessing,
-  },
-  upDirection: context.upDirection,
-  gridUnit: context.displayUnits.length.symbol,
+/**
+ * The graphics-held owner values a view record keeps. The ten inheritable leaves are not among them: view commands
+ * write those, and graphics only shows their resolution.
+ */
+export const graphicsOwnersOf = (context: GraphicsContext): Omit<ViewOwners, 'camera'> => ({
   measurements: pinnedMeasurementsOf(context),
   section: sectionOf(context),
 });
@@ -211,15 +215,8 @@ export const graphicsOwnersOf = (context: GraphicsContext): Omit<ViewOwners, 'ca
 const same = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
 
 /* The owner fields that changed since `previous`, the section excepted: it is reported when it settles. */
-const changedOwners = (
-  previous: Omit<ViewOwners, 'camera' | 'fieldOfView'>,
-  next: Omit<ViewOwners, 'camera' | 'fieldOfView'>,
-): ViewOwnerChange => ({
-  ...(same(previous.display, next.display) ? {} : { display: next.display }),
-  ...(previous.upDirection === next.upDirection ? {} : { upDirection: next.upDirection }),
-  ...(previous.gridUnit === next.gridUnit ? {} : { gridUnit: next.gridUnit }),
-  ...(same(previous.measurements, next.measurements) ? {} : { measurements: next.measurements }),
-});
+const changedOwners = (previous: Omit<ViewOwners, 'camera'>, next: Omit<ViewOwners, 'camera'>): ViewOwnerChange =>
+  same(previous.measurements, next.measurements) ? {} : { measurements: next.measurements };
 
 /** Input of {@link startViewRecordSession}. */
 export type ViewRecordSessionInput = Readonly<{
@@ -288,6 +285,7 @@ export function startViewRecordSession(input: ViewRecordSessionInput): () => voi
       camera: camera as unknown as ViewBindingCameraRef,
       framing: framing as unknown as ViewBindingFramingRef,
       owners: graphicsOwnersOf(selectGraphicsContext(graphics)),
+      levels: ports.levels.read(viewId),
     },
     // The store answers `false` after a fault or a close, and reports its own health.
     edit: async (next) => store?.store.edit(next) ?? false,
@@ -471,7 +469,20 @@ export function startViewRecordSession(input: ViewRecordSessionInput): () => voi
     }),
   );
 
-  // Graphics' settings and its section quiet gate.
+  // The levels above the view: a changed resolution seeds the inheritable leaves, and nothing is written.
+  let levels: ViewResolutionLevels = ports.levels.read(viewId);
+  subscriptions.push(
+    ports.levels.subscribe(() => {
+      const next = ports.levels.read(viewId);
+      if (same(next, levels)) {
+        return;
+      }
+      levels = next;
+      binding.send({ type: 'levelsChanged', levels: next });
+    }),
+  );
+
+  // Graphics' pinned measurements and its section quiet gate.
   let owners = graphicsOwnersOf(selectGraphicsContext(graphics));
   subscriptions.push(
     graphics.subscribe(({ context }) => {

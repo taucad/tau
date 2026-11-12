@@ -17,6 +17,7 @@ import { StepClock } from '@taucad/xstate-testing/clock';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createActor, createAsyncLogic } from 'xstate';
 import { readRecordIssues } from '#workbench-records/record-issues.js';
+import type { ViewResolutionLevels } from '#workbench-records/view-record-binding-changes.js';
 import {
   createViewRecordPorts,
   startViewRecordSession,
@@ -62,9 +63,17 @@ const settle = async (): Promise<void> => {
   }
 };
 
-async function mount(initial: WorkbenchView = view()) {
+async function mount(
+  initial: WorkbenchView = view(),
+  initialLevels: ViewResolutionLevels = {},
+  options: Readonly<{ missing?: boolean }> = {},
+) {
   const clock = new StepClock();
-  let bytes: Uint8Array<ArrayBuffer> | undefined = encode(initial);
+  /* The levels above the view, as `deviceViewLevels` gives them: read now, and a change heard by every session. */
+  let levels = initialLevels;
+  const levelListeners = new Set<() => void>();
+  /* `missing`: the view's file does not exist yet (`initial` only seeds the graphics actor). */
+  let bytes: Uint8Array<ArrayBuffer> | undefined = options.missing === true ? undefined : encode(initial);
   const writes: WorkbenchView[] = [];
   const listeners = new Set<(event: WatchEvent) => void>();
   /* The connection's writes fail, as a replaced worker's do. */
@@ -113,6 +122,13 @@ async function mount(initial: WorkbenchView = view()) {
     projectId,
     root: `/projects/${projectId}`,
     host: { files, watch },
+    levels: {
+      read: () => levels,
+      subscribe: (listener) => {
+        levelListeners.add(listener);
+        return () => levelListeners.delete(listener);
+      },
+    },
     setViewRecord: (id, record) => records.set(id, record),
     setViewEntryPath: () => undefined,
     setAppliedWorkbenchRevision: (recordPath, digest) => applied.set(recordPath, digest),
@@ -181,6 +197,26 @@ async function mount(initial: WorkbenchView = view()) {
       await settle();
     },
     direction: (): readonly number[] => camera.getSnapshot().context.view.direction,
+    /** The person's defaults or this device's exceptions change, in this tab or another. */
+    setLevels: (next: ViewResolutionLevels): void => {
+      levels = next;
+      for (const listener of levelListeners) {
+        listener();
+      }
+    },
+    /** What graphics shows for the seven display flags, in the record's order. */
+    display: (): boolean[] => {
+      const { context } = graphics.getSnapshot();
+      return [
+        context.enableSurfaces,
+        context.enableLines,
+        context.enableGizmo,
+        context.enableGrid,
+        context.enableAxes,
+        context.enableMatcap,
+        context.enablePostProcessing,
+      ];
+    },
   };
   return harness;
 }
@@ -295,7 +331,11 @@ describe('view record session', () => {
   it("should keep the new store's applied revision when the replaced store's last flush fails", async () => {
     const harness = await mount();
     await harness.frame();
-    harness.graphics.send({ type: 'setGridVisibility', payload: false });
+    // A person's pose is owed (the display flags are a view command's to write, not the session's).
+    harness.drag([1, 0, 0], 4);
+    harness.release();
+    harness.clock.increment(cameraPoseSettleMilliseconds);
+    await settle();
     const failOldWrite = harness.failWrites();
     let checkout = encode(view({ display: { ...view().display, axes: false } }));
     harness.ports.replaceHost({
@@ -354,10 +394,13 @@ describe('view record session', () => {
   it('should write what is owed when the session stops', async () => {
     const harness = await mount();
     await harness.frame();
-    harness.graphics.send({ type: 'setGridVisibility', payload: false });
+    harness.drag([1, 0, 0], 4);
+    harness.release();
+    harness.clock.increment(cameraPoseSettleMilliseconds);
+    await settle();
     harness.stop();
     await settle();
-    expect(harness.file()?.display.grid).toBe(false);
+    expect(harness.file()?.camera).toMatchObject({ kind: 'pose', direction: [1, 0, 0], verticalSpan: 4 });
   });
 
   it('should re-register a closed watch on retry and adopt later foreign edits', async () => {
@@ -413,7 +456,7 @@ describe('view record session', () => {
     await settle();
     expect(harness.graphics.getSnapshot().context.enableGrid).toBe(false);
     const before = harness.writes.length;
-    harness.graphics.send({ type: 'setGridVisibility', payload: true });
+    harness.graphics.send({ type: 'setSectionViewActive', payload: true });
     await harness.ports.flush();
     expect(written).toHaveLength(1);
     expect(harness.writes).toHaveLength(before);
@@ -428,4 +471,163 @@ describe('view record session', () => {
     expect(harness.graphics.getSnapshot().context.enableAxes).toBe(false);
     expect(readRecordIssues(projectId)).toEqual([]);
   });
+});
+
+/*
+ * The ten inheritable leaves on the live path (onboarding blueprint, Finding 6; graphics charter ruling of 2026-11-12):
+ * they flow one way, from the record resolved over the person's defaults and this device's exceptions to the owners,
+ * and only view commands write them. Carried from the deleted `useViewSettingsSync` rows of PR 4 of the onboarding
+ * plan.
+ */
+describe('view record session: inheritable leaves flow one way (onboarding WP3)', () => {
+  const tenLeaves = (record: WorkbenchView | undefined): string =>
+    JSON.stringify([record?.fieldOfView, record?.upDirection, record?.display, record?.grid]);
+  const fieldOfView = (harness: Awaited<ReturnType<typeof mount>>): number =>
+    harness.camera.getSnapshot().context.view.requestedVerticalFieldOfView;
+
+  it('should reach an open view that does not set the leaf when a personal default changes, and not one that does (V4, V7, V9)', async () => {
+    const inherits = await mount(view());
+    await inherits.frame();
+    const sets = await mount(view({ display: { ...view().display, axes: false } }));
+    await sets.frame();
+    const person = { person: { 'display.grid': false, 'display.axes': true, 'grid.unit': 'in' } } as const;
+    inherits.setLevels(person);
+    sets.setLevels(person);
+    // In the same turn, as a toggle from the menu reaches its owner.
+    expect(inherits.graphics.getSnapshot().context.enableGrid).toBe(false);
+    expect(inherits.graphics.getSnapshot().context.displayUnits.length.symbol).toBe('in');
+    expect(sets.graphics.getSnapshot().context.enableGrid).toBe(false);
+    expect(sets.graphics.getSnapshot().context.enableAxes).toBe(false);
+    // An exception keeps the view's own format value over the person's default (V7).
+    inherits.setLevels({ ...person, exceptions: ['display.grid'] });
+    expect(inherits.graphics.getSnapshot().context.enableGrid).toBe(true);
+    expect(inherits.graphics.getSnapshot().context.displayUnits.length.symbol).toBe('in');
+  });
+
+  it("should show the person's defaults in a view whose file is missing, and follow a change of them, writing nothing", async () => {
+    const harness = await mount(
+      view(),
+      { person: { 'display.grid': false, 'grid.unit': 'in', fieldOfView: 30 } },
+      {
+        missing: true,
+      },
+    );
+    await harness.frame();
+    expect(harness.graphics.getSnapshot().context.enableGrid).toBe(false);
+    expect(harness.graphics.getSnapshot().context.displayUnits.length.symbol).toBe('in');
+    expect(fieldOfView(harness)).toBe(30);
+    harness.setLevels({ person: { 'display.grid': true, 'display.axes': false } });
+    expect(harness.graphics.getSnapshot().context.enableGrid).toBe(true);
+    expect(harness.graphics.getSnapshot().context.enableAxes).toBe(false);
+    expect(harness.graphics.getSnapshot().context.displayUnits.length.symbol).toBe(view().grid.unit);
+    expect(fieldOfView(harness)).toBe(view().fieldOfView);
+    await harness.quiet();
+    expect(harness.file()).toBeUndefined();
+  });
+
+  it('should seed a personal field of view through the camera without writing it, and keep the record field of view on a later pose (V6)', async () => {
+    const harness = await mount(view());
+    await harness.frame();
+    harness.setLevels({ person: { fieldOfView: 30 } });
+    expect(fieldOfView(harness)).toBe(30);
+    await harness.quiet();
+    expect(harness.writes).toEqual([]);
+    harness.drag([1, 0, 0], 4);
+    harness.release();
+    await harness.quiet();
+    expect(harness.file()?.camera).toMatchObject({ kind: 'pose', direction: [1, 0, 0], verticalSpan: 4 });
+    expect(harness.file()?.fieldOfView).toBe(view().fieldOfView);
+  });
+
+  it('should persist the settled pose after the same gesture changes the field of view, and keep the record field of view (V6)', async () => {
+    const record = view();
+    const harness = await mount(record);
+    await harness.frame();
+    harness.drag([1, 0, 0], 4);
+    harness.camera.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 38 });
+    harness.release();
+    await harness.quiet();
+    expect(harness.file()?.camera).toMatchObject({ kind: 'pose', verticalSpan: 4 });
+    expect(harness.writes.length).toBeGreaterThan(0);
+    expect(harness.writes.every((next) => next.fieldOfView === record.fieldOfView)).toBe(true);
+  });
+
+  it('should write no inheritable leaf while a camera move and a section change persist and a personal default changes (V6)', async () => {
+    const record = view({ display: { ...view().display, postProcessing: true }, grid: { unit: 'cm' } });
+    const harness = await mount(record);
+    await harness.frame();
+    harness.drag([1, 0, 0], 5);
+    harness.graphics.send({ type: 'setSectionViewActive', payload: true });
+    // This tab changes a default, then another tab does (the section store's change reaches every session).
+    harness.setLevels({ person: { 'display.grid': false, fieldOfView: 0 } });
+    harness.setLevels({ person: { 'display.grid': false, 'display.surfaces': false } });
+    harness.release();
+    await harness.quiet();
+    harness.clock.increment(sectionSettleDelay);
+    await harness.quiet();
+    expect(harness.file()?.camera.kind).toBe('pose');
+    expect(harness.file()?.section.active).toBe(true);
+    expect(harness.writes.length).toBeGreaterThan(0);
+    for (const next of harness.writes) {
+      expect(tenLeaves(next)).toBe(tenLeaves(record));
+    }
+    // The live owners show the resolution, which no write copied into the file.
+    expect(harness.graphics.getSnapshot().context.enableGrid).toBe(false);
+    expect(harness.graphics.getSnapshot().context.enableSurfaces).toBe(false);
+    expect(fieldOfView(harness)).toBe(record.fieldOfView);
+  });
+
+  it('should write no grid unit from the live owner, and show a unit a view command wrote, here and after a reload (V13)', async () => {
+    const harness = await mount(view({ grid: { unit: 'mm' } }));
+    await harness.frame();
+    harness.graphics.send({ type: 'setGridUnit', payload: { unit: 'ft' } });
+    await harness.quiet();
+    expect(harness.writes).toEqual([]);
+    // `setViewField(view, 'grid.unit', 'ft')` writes the record through its own checked store: a publication here.
+    await harness.foreign(view({ grid: { unit: 'ft' } }));
+    expect(harness.graphics.getSnapshot().context.displayUnits.length.symbol).toBe('ft');
+    const reloaded = await mount(harness.file());
+    expect(reloaded.graphics.getSnapshot().context.displayUnits.length.symbol).toBe('ft');
+  });
+
+  it.each([
+    [
+      'post-processing on, every other leaf at its format value',
+      { display: { ...view().display, postProcessing: true } },
+    ],
+    ['post-processing off, every other leaf at its format value', {}],
+    [
+      'every leaf away from its format value',
+      {
+        fieldOfView: 0,
+        upDirection: 'y',
+        display: {
+          surfaces: false,
+          lines: false,
+          gizmo: false,
+          grid: false,
+          axes: false,
+          matcap: true,
+          postProcessing: true,
+        },
+        grid: { unit: 'in' },
+      },
+    ],
+  ])(
+    'should render an existing view file as it is written, and write nothing on opening, with no personal default (V11): %s',
+    async (_name, fields) => {
+      const record = view(fields);
+      const harness = await mount(record);
+      await harness.frame();
+      const { context } = harness.graphics.getSnapshot();
+      expect(harness.display()).toEqual(Object.values(record.display));
+      expect(context.displayUnits.length.symbol).toBe(record.grid.unit);
+      expect(context.upDirection).toBe(record.upDirection);
+      expect(fieldOfView(harness)).toBe(record.fieldOfView);
+      await harness.quiet();
+      // Opening the view writes no view file.
+      expect(harness.writes).toEqual([]);
+      expect(workbenchRecords.view.serialize(harness.file()!)).toBe(workbenchRecords.view.serialize(record));
+    },
+  );
 });

@@ -51,6 +51,7 @@
     "./cad/section-view-control": "./src/cad/section-view-control.tsx",
     "./cad/viewer-controls": "./src/cad/viewer-controls.tsx",
     "./cad/viewer-settings": "./src/cad/viewer-settings.tsx",
+    "./cad/viewer-view-fields": "./src/cad/viewer-view-fields.tsx",
     "./constants/length-units": "./src/constants/length-units.ts",
     "./environment/viewer-environment": "./src/environment/viewer-environment.tsx",
     "./graphics/graphics-backend": "./src/graphics/graphics-backend.ts",
@@ -209,6 +210,11 @@
         "types": "./dist/cad/viewer-settings.d.mts",
         "import": "./dist/cad/viewer-settings.mjs",
         "default": "./dist/cad/viewer-settings.mjs"
+      },
+      "./cad/viewer-view-fields": {
+        "types": "./dist/cad/viewer-view-fields.d.mts",
+        "import": "./dist/cad/viewer-view-fields.mjs",
+        "default": "./dist/cad/viewer-view-fields.mjs"
       },
       "./constants/length-units": {
         "types": "./dist/constants/length-units.d.mts",

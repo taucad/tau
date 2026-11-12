@@ -8,6 +8,8 @@ import type { Actor } from 'xstate';
 import { GraphicsProvider, useCameraSelector } from '#hooks/use-graphics.jsx';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { useViewerShortcuts } from '#hooks/use-viewer-shortcuts.js';
+import { ViewerViewFieldsProvider } from '#cad/viewer-view-fields.jsx';
+import type { ViewerViewFields } from '#cad/viewer-view-fields.jsx';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
 type GraphicsActor = Actor<typeof graphicsMachine>;
@@ -79,12 +81,14 @@ function Viewer({ label }: Readonly<{ label: string }>): React.JSX.Element {
   );
 }
 
-const renderViewers = (...viewers: ReadonlyArray<readonly [string, GraphicsActor]>): void => {
+const renderViewers = (...viewers: ReadonlyArray<readonly [string, GraphicsActor, ViewerViewFields?]>): void => {
   render(
     <KeyboardProvider>
-      {viewers.map(([label, actor]) => (
+      {viewers.map(([label, actor, viewFields]) => (
         <GraphicsProvider key={label} graphicsRef={actor}>
-          <Viewer label={label} />
+          <ViewerViewFieldsProvider value={viewFields}>
+            <Viewer label={label} />
+          </ViewerViewFieldsProvider>
         </GraphicsProvider>
       ))}
       <div role='menu'>
@@ -360,6 +364,146 @@ describe('useViewerShortcuts', () => {
 
       await user.keyboard('g');
       expect(actor.getSnapshot().context.enableGrid).toBe(isGridShown);
+    });
+
+    it('should set the grid and projection through the host view commands and send nothing live (V11)', async () => {
+      const actor = startGraphics();
+      const send = recordSends(actor);
+      const set = vi.fn();
+      const user = userEvent.setup();
+      renderViewers(['Viewer', actor, { set, reset: vi.fn() }]);
+      hoverViewer('Viewer');
+      const isGridShown = actor.getSnapshot().context.enableGrid;
+      const fieldOfView = actor.getSnapshot().context.cameraRef.getSnapshot().context.view.requestedVerticalFieldOfView;
+
+      await user.keyboard('g');
+      await user.keyboard('p');
+
+      expect(set.mock.calls).toEqual([
+        ['display.grid', !isGridShown],
+        ['fieldOfView', 0],
+      ]);
+      expect(pressedShortcuts(send)).toEqual([]);
+      expect(actor.getSnapshot().context.enableGrid).toBe(isGridShown);
+      expect(actor.getSnapshot().context.cameraRef.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(
+        fieldOfView,
+      );
+      expect(announcementsOf('Viewer')).toEqual([isGridShown ? 'Grid hidden' : 'Grid shown', 'Orthographic']);
+    });
+
+    it('should toggle a second G or P from the value still being written, not the stale one shown', async () => {
+      const actor = startGraphics();
+      const writes: Array<PromiseWithResolvers<boolean>> = [];
+      const set = vi.fn(async () => {
+        const write = Promise.withResolvers<boolean>();
+        writes.push(write);
+        return write.promise;
+      });
+      const user = userEvent.setup();
+      renderViewers(['Viewer', actor, { set, reset: vi.fn() }]);
+      hoverViewer('Viewer');
+      const isGridShown = actor.getSnapshot().context.enableGrid;
+      const fieldOfView = actor.getSnapshot().context.cameraRef.getSnapshot().context.view.requestedVerticalFieldOfView;
+
+      await user.keyboard('gg');
+      await user.keyboard('pp');
+
+      expect(set.mock.calls).toEqual([
+        ['display.grid', !isGridShown],
+        ['display.grid', isGridShown],
+        ['fieldOfView', 0],
+        ['fieldOfView', fieldOfView],
+      ]);
+
+      // A refused write is forgotten, so the next press reads graphics again.
+      for (const write of writes) {
+        write.resolve(true);
+      }
+      await user.keyboard('g');
+      const refused = writes.at(-1)!;
+      refused.resolve(false);
+      await refused.promise;
+      await Promise.resolve();
+      await user.keyboard('g');
+      expect(set.mock.calls.slice(-2)).toEqual([
+        ['display.grid', !isGridShown],
+        ['display.grid', !isGridShown],
+      ]);
+    });
+
+    it('should toggle G from what graphics shows once a written value reached it and the settings menu changed it', async () => {
+      const actor = startGraphics();
+      const set = vi.fn(async () => true);
+      const user = userEvent.setup();
+      renderViewers(['Viewer', actor, { set, reset: vi.fn() }]);
+      hoverViewer('Viewer');
+      const isGridShown = actor.getSnapshot().context.enableGrid;
+      const fieldOfView = actor.getSnapshot().context.cameraRef.getSnapshot().context.view.requestedVerticalFieldOfView;
+
+      await user.keyboard('g');
+      await user.keyboard('p');
+      // The host's writes reach graphics (the record's seed), then the settings menu sets both back.
+      act(() => {
+        actor.send({ type: 'setGridVisibility', payload: !isGridShown });
+        actor.getSnapshot().context.cameraRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
+      });
+      act(() => {
+        actor.send({ type: 'setGridVisibility', payload: isGridShown });
+        actor
+          .getSnapshot()
+          .context.cameraRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: fieldOfView });
+      });
+      await user.keyboard('g');
+      await user.keyboard('p');
+
+      expect(set.mock.calls).toEqual([
+        ['display.grid', !isGridShown],
+        ['fieldOfView', 0],
+        ['display.grid', !isGridShown],
+        ['fieldOfView', 0],
+      ]);
+    });
+
+    it('should keep a newer pending G when an older write with the same value fails', async () => {
+      const actor = startGraphics();
+      const writes: Array<PromiseWithResolvers<boolean>> = [];
+      const set = vi.fn(async () => {
+        const write = Promise.withResolvers<boolean>();
+        writes.push(write);
+        return write.promise;
+      });
+      const user = userEvent.setup();
+      renderViewers(['Viewer', actor, { set, reset: vi.fn() }]);
+      hoverViewer('Viewer');
+      const isGridShown = actor.getSnapshot().context.enableGrid;
+
+      // Three presses: the first and third write the same value.
+      await user.keyboard('ggg');
+      const [first] = writes;
+      first!.resolve(false);
+      await first!.promise;
+      await Promise.resolve();
+      // The third write is still pending, so the next press toggles from it.
+      await user.keyboard('g');
+
+      expect(set.mock.calls.map((call: unknown[]) => call[1])).toEqual([
+        !isGridShown,
+        isGridShown,
+        !isGridShown,
+        isGridShown,
+      ]);
+    });
+
+    it('should keep sending F, S and M to graphics with the host view commands', async () => {
+      const actor = startGraphics();
+      const send = recordSends(actor);
+      const user = userEvent.setup();
+      renderViewers(['Viewer', actor, { set: vi.fn(), reset: vi.fn() }]);
+      hoverViewer('Viewer');
+
+      await user.keyboard('f');
+
+      expect(pressedShortcuts(send)).toEqual(['fitView']);
     });
 
     it('should keep S, M and P off for 2D geometry, while F and G still work', async () => {

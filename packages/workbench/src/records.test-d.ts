@@ -1,6 +1,6 @@
 // Mistakes the workbench-package option makes unrepresentable.
-import { workbenchRecords } from '@taucad/workbench';
-import type { ViewerTab, WorkbenchTab, WorkbenchView } from '@taucad/workbench';
+import { viewRecordV1Defaults, workbenchRecords } from '@taucad/workbench';
+import type { ViewFieldPath, ViewFieldValues, ViewerTab, WorkbenchTab, WorkbenchView } from '@taucad/workbench';
 
 declare const bytes: Uint8Array<ArrayBuffer>;
 const read = workbenchRecords.layout.read(bytes);
@@ -47,3 +47,12 @@ export const componentsOnView = workbenchRecords.view.serialize({
 
 // @ts-expect-error a view's tab label is `name`, never a `title`: one word across the record, the tool and the snapshot.
 export const title = workbenchRecords.view.serialize({ version: 1, entryPath: 'main.ts', title: 'Front' });
+
+// @ts-expect-error the up axis is a model convention, never a personal default (blueprint Finding 6).
+export const personalUp: Partial<Omit<ViewFieldValues, 'upDirection'>> = { upDirection: 'y' };
+
+// @ts-expect-error a view field is a leaf path: `display` as a whole is not inheritable.
+export const wholeDisplay: ViewFieldPath = 'display';
+
+// @ts-expect-error the format values are frozen: they never change without a new record version.
+viewRecordV1Defaults.fieldOfView = 45;

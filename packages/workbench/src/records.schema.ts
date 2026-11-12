@@ -6,6 +6,7 @@
 import { z } from 'zod';
 import type { CameraView } from '@taucad/camera';
 import { sectionSchema, vectorSchema } from '#section.schema.js';
+import { lengthUnits, viewRecordV1Defaults } from '#view-fields.js';
 
 /**
  * Id of a view or a named layout: a lowercase slug, so it is a safe, case-unique file name (L3 C13). An agent chooses
@@ -281,20 +282,18 @@ export const viewCameraSchema = z.discriminatedUnion('kind', [
 /** Display toggles, named as the graphics owner names them without the `enable` prefix. */
 /** @public */
 export const viewDisplaySchema = z.strictObject({
-  surfaces: z.boolean().default(true),
-  lines: z.boolean().default(true),
-  gizmo: z.boolean().default(true),
-  grid: z.boolean().default(true),
-  axes: z.boolean().default(true),
-  matcap: z.boolean().default(false),
-  postProcessing: z.boolean().default(false),
+  surfaces: z.boolean().default(viewRecordV1Defaults['display.surfaces']),
+  lines: z.boolean().default(viewRecordV1Defaults['display.lines']),
+  gizmo: z.boolean().default(viewRecordV1Defaults['display.gizmo']),
+  grid: z.boolean().default(viewRecordV1Defaults['display.grid']),
+  axes: z.boolean().default(viewRecordV1Defaults['display.axes']),
+  matcap: z.boolean().default(viewRecordV1Defaults['display.matcap']),
+  postProcessing: z.boolean().default(viewRecordV1Defaults['display.postProcessing']),
 });
 
-/** The grid's display unit (`setGridUnit`, `constants/length-units.ts`). Session-only today; persisted from this cut (blueprint B2). */
+/** The grid's display unit (`setGridUnit`). Session-only before the workbench records; persisted since (blueprint B2). */
 /** @public */
-export const lengthUnits = ['mm', 'cm', 'm', 'in', 'ft', 'yd'] as const;
-/** @public */
-export const viewGridSchema = z.strictObject({ unit: z.enum(lengthUnits).default('mm') });
+export const viewGridSchema = z.strictObject({ unit: z.enum(lengthUnits).default(viewRecordV1Defaults['grid.unit']) });
 
 /**
  * A pinned measurement, as the owner stores it (`PinnedMeasurement`, editor.constants.ts:59-66). Ids are free strings
@@ -326,18 +325,18 @@ export const viewFieldsSchema = z.strictObject({
   name: z.string().min(1).max(40).optional(),
   camera: viewCameraSchema.default({ kind: 'preset', preset: 'isometric' }),
   /** Vertical field of view. Degrees; 0 is orthographic. The viewer's slider spans 0–90 (V1 Table 2). */
-  fieldOfView: z.number().min(0).max(90).default(60),
-  upDirection: z.enum(['x', 'y', 'z']).default('z'),
+  fieldOfView: z.number().min(0).max(90).default(viewRecordV1Defaults.fieldOfView),
+  upDirection: z.enum(['x', 'y', 'z']).default(viewRecordV1Defaults.upDirection),
   display: viewDisplaySchema.default({
-    surfaces: true,
-    lines: true,
-    gizmo: true,
-    grid: true,
-    axes: true,
-    matcap: false,
-    postProcessing: false,
+    surfaces: viewRecordV1Defaults['display.surfaces'],
+    lines: viewRecordV1Defaults['display.lines'],
+    gizmo: viewRecordV1Defaults['display.gizmo'],
+    grid: viewRecordV1Defaults['display.grid'],
+    axes: viewRecordV1Defaults['display.axes'],
+    matcap: viewRecordV1Defaults['display.matcap'],
+    postProcessing: viewRecordV1Defaults['display.postProcessing'],
   }),
-  grid: viewGridSchema.default({ unit: 'mm' }),
+  grid: viewGridSchema.default({ unit: viewRecordV1Defaults['grid.unit'] }),
   section: sectionSchema.default({ active: false, cuts: [] }),
   measurements: z.array(pinnedMeasurementSchema).max(64).default([]),
 });

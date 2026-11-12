@@ -1,10 +1,13 @@
 import { useId, useLayoutEffect, useMemo, useRef } from 'react';
+import { useViewerViewFields } from '#cad/viewer-view-fields.jsx';
+import type { ViewerViewFieldValues, ViewerViewFields } from '#cad/viewer-view-fields.jsx';
 import type { RefObject } from 'react';
 import { useActorRef } from '@xstate/react';
 import { createCallbackLogic } from 'xstate';
 import type { ActorRefFrom, Subscription } from 'xstate';
 import { useGraphics } from '#hooks/use-graphics.jsx';
 import type {
+  GraphicsContext,
   GraphicsEvent,
   graphicsMachine,
   ViewerShortcut,
@@ -87,6 +90,171 @@ function selectShortcutApplies(graphicsRef: GraphicsActorRef, press: ViewerShort
   return graphicsRef.getSnapshot().can(press);
 }
 
+/** Whether graphics shows the grid at the press, which G with view commands needs. */
+function selectShortcutGridShown(graphicsRef: GraphicsActorRef): boolean {
+  return graphicsRef.getSnapshot().context.enableGrid;
+}
+
+type ShortcutLeaf = 'display.grid' | 'fieldOfView';
+
+/* The camera child, whose field of view P writes. */
+function selectShortcutCameraRef(graphicsRef: GraphicsActorRef): GraphicsContext['cameraRef'] {
+  return graphicsRef.getSnapshot().context.cameraRef;
+}
+
+/* What graphics shows for a G or P leaf now. */
+function selectShortcutShown(graphicsRef: GraphicsActorRef, leaf: ShortcutLeaf): boolean | number {
+  return leaf === 'display.grid'
+    ? selectShortcutGridShown(graphicsRef)
+    : selectShortcutCamera(graphicsRef).requestedVerticalFieldOfView;
+}
+
+/**
+ * A G or P value the host is still writing, per graphics actor: what the next press toggles from. `stop` ends the
+ * watch that forgets it once graphics shows it.
+ */
+type PendingShortcutWrite = Readonly<{ write: number; value: boolean | number; stop: () => void }>;
+type PendingShortcutWrites = Map<ShortcutLeaf, PendingShortcutWrite>;
+const pendingShortcutWrites = new WeakMap<GraphicsActorRef, PendingShortcutWrites>();
+/* Names each write, so a write that settles clears only its own pending value, never a newer one equal to it. */
+let shortcutWrites = 0;
+
+/* Forgets a leaf's pending value, only `write`'s when one is named. */
+function forgetShortcutWrite(graphicsRef: GraphicsActorRef, leaf: ShortcutLeaf, write?: number): void {
+  const pending = pendingShortcutWrites.get(graphicsRef);
+  const entry = pending?.get(leaf);
+  if (entry === undefined || (write !== undefined && entry.write !== write)) {
+    return;
+  }
+  entry.stop();
+  pending!.delete(leaf);
+}
+
+/*
+ * Forgets `write`'s value when graphics comes to show it: the host's write reached the view. Only a change counts, so
+ * a value graphics shows already while an earlier write is still landing stays pending until it shows again.
+ */
+function watchShortcutWrite({
+  graphicsRef,
+  leaf,
+  write,
+  value,
+}: Readonly<{
+  graphicsRef: GraphicsActorRef;
+  leaf: ShortcutLeaf;
+  write: number;
+  value: boolean | number;
+}>): () => void {
+  let shown = selectShortcutShown(graphicsRef, leaf);
+  const observe = (): void => {
+    const now = selectShortcutShown(graphicsRef, leaf);
+    if (now !== shown && now === value) {
+      forgetShortcutWrite(graphicsRef, leaf, write);
+    }
+    shown = now;
+  };
+  // The grid is graphics' own; the field of view is the camera child's.
+  const subscription: Subscription =
+    leaf === 'display.grid' ? graphicsRef.subscribe(observe) : selectShortcutCameraRef(graphicsRef).subscribe(observe);
+  return () => {
+    subscription.unsubscribe();
+  };
+}
+
+/* The value a press toggles from: the one still being written, until graphics shows it, else the one shown. */
+function toggledFrom<Value extends boolean | number>(
+  graphicsRef: GraphicsActorRef,
+  leaf: 'display.grid' | 'fieldOfView',
+  shown: Value,
+): Value {
+  const value = pendingShortcutWrites.get(graphicsRef)?.get(leaf)?.value;
+  if (value === undefined || value === shown) {
+    forgetShortcutWrite(graphicsRef, leaf);
+    return shown;
+  }
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Each leaf only ever holds its own value type.
+  return value as Value;
+}
+
+/* Forgets a pending value once its write is refused or fails; a saved one is forgotten when graphics shows it
+ * ({@link watchShortcutWrite}). */
+async function settleShortcutWrite({
+  graphicsRef,
+  leaf,
+  write,
+  written,
+}: Readonly<{
+  graphicsRef: GraphicsActorRef;
+  leaf: 'display.grid' | 'fieldOfView';
+  write: number;
+  written: Promise<boolean>;
+}>): Promise<void> {
+  let saved = false;
+  try {
+    saved = await written;
+  } catch {
+    // The host reports its own failure.
+  }
+  if (!saved) {
+    forgetShortcutWrite(graphicsRef, leaf, write);
+  }
+}
+
+/* Issues one G or P value as the view's command, remembering it until graphics shows it or the write fails. */
+function issueShortcutWrite<Leaf extends 'display.grid' | 'fieldOfView'>({
+  viewFields,
+  graphicsRef,
+  leaf,
+  value,
+}: Readonly<{
+  viewFields: ViewerViewFields;
+  graphicsRef: GraphicsActorRef;
+  leaf: Leaf;
+  value: ViewerViewFieldValues[Leaf];
+}>): void {
+  const written = viewFields.set(leaf, value);
+  if (written === undefined) {
+    return;
+  }
+  const pending: PendingShortcutWrites = pendingShortcutWrites.get(graphicsRef) ?? new Map();
+  pendingShortcutWrites.set(graphicsRef, pending);
+  shortcutWrites += 1;
+  const write = shortcutWrites;
+  pending.get(leaf)?.stop();
+  pending.set(leaf, { write, value, stop: watchShortcutWrite({ graphicsRef, leaf, write, value }) });
+  void settleShortcutWrite({ graphicsRef, leaf, write, written });
+}
+
+/** G or P with the host's view commands: the same decision graphics makes, issued as the view's command. */
+function setViewField({
+  viewFields,
+  graphicsRef,
+  shortcut,
+  announce,
+}: Readonly<{
+  viewFields: ViewerViewFields;
+  graphicsRef: GraphicsActorRef;
+  shortcut: 'grid' | 'projection';
+  announce: (phrase: string) => void;
+}>): void {
+  if (shortcut === 'grid') {
+    const isShown = !toggledFrom(graphicsRef, 'display.grid', selectShortcutGridShown(graphicsRef));
+    issueShortcutWrite({ viewFields, graphicsRef, leaf: 'display.grid', value: isShown });
+    announce(outcomePhrases[isShown ? 'gridShown' : 'gridHidden']);
+    return;
+  }
+  const camera = selectShortcutCamera(graphicsRef);
+  const fieldOfView = toggledFrom(graphicsRef, 'fieldOfView', camera.requestedVerticalFieldOfView);
+  const isOrthographic = fieldOfView === 0;
+  /* Back to the perspective still shown when an orthographic write is pending, else the last one graphics kept. */
+  const perspective =
+    camera.requestedVerticalFieldOfView === 0
+      ? camera.lastPerspectiveVerticalFieldOfView
+      : camera.requestedVerticalFieldOfView;
+  issueShortcutWrite({ viewFields, graphicsRef, leaf: 'fieldOfView', value: isOrthographic ? perspective : 0 });
+  announce(outcomePhrases[isOrthographic ? 'perspective' : 'orthographic']);
+}
+
 /** What the keyboard adapter takes: one press for the graphics actor the bar shows. */
 type KeyboardAdapterEvent = Readonly<{ type: 'pressed'; graphicsRef: GraphicsActorRef; facts: ViewerShortcutFacts }>;
 
@@ -157,6 +325,7 @@ export const useViewerShortcuts = (
   announce: (phrase: string) => void,
 ): ViewerShortcutKeys => {
   const graphicsRef = useGraphics();
+  const viewFields = useViewerViewFields();
   const announceRef = useRef(announce);
   useLayoutEffect(() => {
     announceRef.current = announce;
@@ -183,6 +352,11 @@ export const useViewerShortcuts = (
     };
     const binding = (shortcut: ViewerShortcut): Readonly<{ press: () => void; options: KeybindingOptions }> => ({
       press: () => {
+        if (viewFields && (shortcut === 'grid' || shortcut === 'projection')) {
+          // G and P set their leaf in the view through the host's command; the record reaches graphics from there.
+          setViewField({ viewFields, graphicsRef, shortcut, announce: announceRef.current });
+          return;
+        }
         adapterRef.send({ type: 'pressed', graphicsRef, facts: factsFor(shortcut) });
       },
       options: {
@@ -201,7 +375,7 @@ export const useViewerShortcuts = (
       escape: binding('escape'),
       removeCut: binding('removeCut'),
     };
-  }, [adapterRef, barRef, graphicsRef]);
+  }, [adapterRef, barRef, graphicsRef, viewFields]);
 
   const { formattedKeyCombination: fitView } = useKeybinding(
     fitViewKey,

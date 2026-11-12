@@ -10,6 +10,13 @@
  * and `intent` as the pose of the store's edit that has not been written. The spec's `file.source` and
  * `intent.source` are the binding's own bookkeeping and are not compared.
  *
+ * The field of view is one of the ten inheritable leaves (graphics charter ruling of 2026-11-12, amending D20, I6 and
+ * I7 for them; onboarding blueprint Finding 6): view commands write it and the binding seeds the camera from its
+ * resolution, so no edit of the binding carries the camera's field of view. An edit is therefore identified by its
+ * pose and the field of view the camera shows, which is the record's own until a person changes it on the camera:
+ * after `Changed:fov` the binding's edit is the person's pose (the spec's `intent`), and the record keeps its field of
+ * view. Every behaviour of the covering suite ends at its `Changed:fov`, so no `Landed` of that edit is compared.
+ *
  * | Spec step                  | Harness                                                                      |
  * | -------------------------- | ---------------------------------------------------------------------------- |
  * | `PoseObserved`, `Changed`  | the camera event, as the camera's replay sends it                            |
@@ -133,7 +140,6 @@ async function startHarness() {
   ).start();
   /* The binding's edit that has not reached the file yet (the spec's `intent`): the camera of the store's last edit. */
   let intent: WorkbenchView['camera'] | undefined;
-  let intentFieldOfView = 60;
   const stop = startViewRecordSession({
     viewId,
     graphics,
@@ -143,7 +149,6 @@ async function startHarness() {
       if (event.type === '@xstate.transition' && event.event.type === 'edit' && 'next' in event.event) {
         const next = event.event['next'] as WorkbenchView;
         intent = next.camera;
-        intentFieldOfView = next.fieldOfView;
       }
     },
   });
@@ -177,7 +182,7 @@ async function startHarness() {
       if (intent?.kind !== 'pose') {
         return rigPose;
       }
-      const id = ids.get(keyOf(intent, intentFieldOfView));
+      const id = ids.get(keyOf(intent, camera.getSnapshot().context.view.requestedVerticalFieldOfView));
       if (id === undefined) {
         throw new Error(`The binding edits a pose no step made: ${JSON.stringify(intent)}.`);
       }

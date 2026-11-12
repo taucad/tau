@@ -22,6 +22,7 @@ import { Button } from '@taucad/ui/components/button';
 import { useProject } from '#hooks/use-project.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useFileContent } from '#hooks/use-file-content.js';
+import { useViewerViewFieldCommands } from '#workbench-records/view-field-commands.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { settleLiveViewOptions, useLiveViewOptions } from '#workbench-records/live-view-options.js';
 import { setLocalInstanceChoice, useLocalInstanceChoice } from '#workbench-records/local-instance.js';
@@ -559,6 +560,8 @@ const ViewerContent = memo(function ({
 }): React.JSX.Element {
   const { projectRef, entriesRecord, viewRecords } = useProject();
   const viewCommands = useWorkbenchViewCommands();
+  // The editor's per-view controls write the view record; a shared session keeps changing the live owner only.
+  const viewFields = useViewerViewFieldCommands(profile === 'editor' ? { viewId, entryPath } : undefined);
   const cadRef = useCad();
   // Lines this pane shows; the unit's default view computes edges only while some pane shows them.
   const enableLines = useGraphicsSelector((state) => state.context.enableLines);
@@ -939,6 +942,7 @@ const ViewerContent = memo(function ({
                   </>
                 }
                 aboveControls={list}
+                viewFields={viewFields}
               />
             )}
           </ViewerIssues>

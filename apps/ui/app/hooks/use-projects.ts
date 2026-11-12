@@ -9,6 +9,7 @@ import { useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { selectCaughtUp } from '#machines/chat-projection.logic.js';
 import { projectListShapeOf, projectListShapeStore } from '#lib/project-list-shape.lib.js';
+import { viewExceptions } from '#workbench-records/view-exceptions.js';
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- let types be inferred
 export function useProjects(options?: { includeDeleted?: boolean }) {
@@ -134,6 +135,8 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
       // Live composer records must stop before their directory is removed, or they write it back (D11).
       await chatSessions.removeProject(projectId);
       await permanentlyDeleteProject(projectId);
+      // This device's view exceptions for the project go with it; a trashed project keeps them for its restore.
+      viewExceptions.dropProject(projectId);
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.removeQueries({ queryKey: ['project', projectId] });
     },

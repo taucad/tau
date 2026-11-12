@@ -4,6 +4,8 @@ import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { GridSizeIndicator } from '#cad/grid-control.jsx';
+import { ViewerViewFieldsProvider } from '#cad/viewer-view-fields.jsx';
+import type { ViewerViewFields } from '#cad/viewer-view-fields.jsx';
 
 type GraphicsState = {
   readonly context: {
@@ -43,10 +45,12 @@ const nextTask = async (): Promise<void> => {
   });
 };
 
-const renderGridSizeIndicator = (): void => {
+const renderGridSizeIndicator = (viewFields?: ViewerViewFields): void => {
   render(
     <TooltipProvider>
-      <GridSizeIndicator />
+      <ViewerViewFieldsProvider value={viewFields}>
+        <GridSizeIndicator />
+      </ViewerViewFieldsProvider>
     </TooltipProvider>,
   );
 };
@@ -111,6 +115,18 @@ describe('GridSizeIndicator', () => {
 
     expect(mocks.graphicsSend).toHaveBeenLastCalledWith({ type: 'setGridUnit', payload: { unit: 'cm' } });
     expect(screen.getByRole('menu')).toBeVisible();
+  });
+
+  it('should set the unit in the view through the host view commands and send nothing live (V13)', async () => {
+    const user = userEvent.setup();
+    const set = vi.fn();
+    renderGridSizeIndicator({ set, reset: vi.fn() });
+
+    await user.click(screen.getByRole('button', { name: 'Grid 50 mm, units and grid' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: /^Inch/ }));
+
+    expect(set).toHaveBeenCalledWith('grid.unit', 'in');
+    expect(mocks.graphicsSend).not.toHaveBeenCalled();
   });
 
   it('should return focus to the readout when Escape closes its menu', async () => {

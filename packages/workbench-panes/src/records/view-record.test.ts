@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { workbenchRecords } from '@taucad/workbench';
+import { resolveViewSettings, tauViewDefaults, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import { graphicsSettingsForView, newViewRecord, viewCameraOrientation, viewSettingsOf } from '#records/view-record.js';
 
@@ -47,6 +47,25 @@ describe('view-record', () => {
       pinnedMeasurements: view.measurements,
     });
     expect(graphicsSettingsForView(record()).cameraView).toBeUndefined();
+  });
+
+  it('should seed the inheritable leaves from resolver output when given it (V9)', () => {
+    const view = record();
+    const resolved = resolveViewSettings({
+      tau: tauViewDefaults,
+      person: { 'display.grid': false, fieldOfView: 0, 'display.postProcessing': true },
+      view,
+    }).values;
+    expect(graphicsSettingsForView(view, resolved)).toMatchObject({
+      enableGrid: false,
+      enablePostProcessing: true,
+      cameraFovAngle: 0,
+      upDirection: 'z',
+    });
+    // With no level above the view, the resolution is the record itself.
+    expect(graphicsSettingsForView(view, resolveViewSettings({ tau: tauViewDefaults, view }).values)).toEqual(
+      graphicsSettingsForView(view),
+    );
   });
 
   it('should orient a preset from the shared preset table and the isometric preset by the up direction', () => {

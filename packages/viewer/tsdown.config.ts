@@ -46,6 +46,7 @@ const baseConfig: UserConfig = {
     'src/cad/section-view-control.tsx',
     'src/cad/viewer-controls.tsx',
     'src/cad/viewer-settings.tsx',
+    'src/cad/viewer-view-fields.tsx',
     'src/constants/length-units.ts',
     'src/environment/viewer-environment.tsx',
     'src/graphics/graphics-backend.ts',

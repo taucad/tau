@@ -128,14 +128,15 @@ describe('ViewSettingsSyncHost and the project-spawned view record sessions', ()
     }
     await settle();
     expect([...harness.actor.getSnapshot().context.viewRecordSessions.keys()]).toEqual(['v1', 'v2']);
-    harness.actor.getSnapshot().context.viewGraphics.get('v2')!.send({ type: 'setAxesVisibility', payload: false });
+    // A section still being edited is owed (the display flags are a view command's to write).
+    harness.actor.getSnapshot().context.viewGraphics.get('v2')!.send({ type: 'setSectionViewActive', payload: true });
     harness.actor.send({ type: 'destroyViewGraphics', viewId: 'v2' });
     await settle();
     expect([...harness.actor.getSnapshot().context.viewRecordSessions.keys()]).toEqual(['v1']);
     const written = workbenchRecords.view.schema.parse(
       JSON.parse(new TextDecoder().decode(harness.files.get(harness.pathOf('v2')))),
     );
-    expect(written.display.axes).toBe(false);
+    expect(written.section.active).toBe(true);
     expect(readRecordIssues(projectId)).toEqual([]);
   });
 

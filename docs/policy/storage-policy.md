@@ -3,7 +3,7 @@ title: 'Storage Policy'
 description: 'Store-selection boundary (what belongs in IndexedDB at all) plus rules for atomic read-modify-write semantics, field-scoped patches, and concurrent-writer safety in client-side persistent storage providers.'
 status: active
 created: '2026-04-20'
-updated: '2026-10-23'
+updated: '2026-11-12'
 related:
   - docs/policy/project-manifest-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -51,6 +51,8 @@ Before applying any rule below, put the data in the right store. Portable projec
 | Browser-local application state (editor layout, resource links)                       | Object store via `IndexedDbStorageProvider`                                                                                                     | This policy's RMW rules                                |
 | Browser-local app chrome preferences (project disclosure)                             | Dedicated `appUiPreferences` object store                                                                                                       | This policy's RMW rules                                |
 | Per-device filesystem configuration (`ProjectFileSystemConfig`, workspace handles)    | Dedicated `tau-fs-handles` database                                                                                                             | This policy + filesystem-authority policy Rules 9/11   |
+| Person record sections (`person-profile`, `viewer-preferences`, `onboarding`)         | Local storage, one key per section, each a `StoredSection` (`@taucad/preferences`)                                                              | Person record rules below                              |
+| Device record and view exceptions (`device`, `view-exceptions`)                       | Local storage, one key each, each a `StoredSection`                                                                                             | Person record rules below                              |
 | Device first-seen telemetry marker (onboarding baseline)                              | `localStorage` key `tau-first-seen` (`cookieName.firstSeen`) through the preference store; never mirrored into a cookie                         | First-seen marker rules below                          |
 
 The legacy `projects` object store remains frozen and is cleared only after each row has been converted to a verified strict-v1 filesystem project and its `updatedAt`, `deletedAt`, and `revisionState` have been mapped to verified `ProjectLibraryState`. This is legacy storage conversion, not manifest-version migration. The store must not be repurposed: its `id` key path, full-project API, and legacy cleanup race with the correct local overlay. `projectLibraryStates` is a separate store keyed by `projectId`; it may contain only the fields permitted by the manifest policy and cannot establish project existence.
@@ -68,6 +70,8 @@ Project print intent is portable project content: `.tau/machines/printer.json`, 
 The first-seen marker is a telemetry marker, not a person record, so the person-record rules (no client clock in a record) do not apply to it. It holds `{ at, reported }`: the epoch milliseconds of this device's first start and the baseline events (`first_seen`, `first_model_built`, `first_export`) already captured from it. `apps/ui/app/telemetry/onboarding-telemetry.ts` is its only reader and writer. It is stamped when the page's telemetry starts, whatever the analytics decision, so `ms_since_first_seen` counts from the first start; an event is added to `reported` only once the analytics boundary has captured it, so nothing is recorded while analytics are declined or off. It never leaves the device except as that duration, is not in `serverVisiblePreferences`, is not synced to an account, and a malformed value is replaced.
 
 `appUiPreferences` has that parity exemption for project disclosure. Expanded/collapsed project rows are browser chrome with no meaning to agents, the CLI, project collaborators, or an on-disk project. The state cannot belong to `projectLibraryStates` because it is not lifecycle or revision data, cannot belong to `editor` because it spans project routes rather than describing one project's workbench, and cannot belong to `chats` because it is not conversation data. The store therefore contains one sparse browser-profile-local row keyed by `singleton`; clearing a permanently deleted project's field is the only lifecycle coupling.
+
+The person record and the device record are browser-profile-local preferences in local storage, never IndexedDB, so they need no parity exemption. Each section is one key named in `cookieName` (`apps/libs/ui-core/src/constants/cookie.constants.ts`): `person-profile`, `viewer-preferences`, `onboarding`, `device` and `view-exceptions`. Each holds a `StoredSection` (`{ value }`; the `synced` half is written only once account sync exists) whose value carries its own `version`. Read and write them only through the section store (`apps/ui/app/preferences/section-store.ts`) and its hooks, `usePersonRecord` and `useDeviceRecord`, never through `useCookie` or a direct `localStorage` call: a write reads the raw stored text immediately before merging with the section's pure merge from `@taucad/preferences` (`mergeOnboarding`, which only adds progress, or the leaf-wise `mergeLeaves`) and writes in the same synchronous step, so a tab holding a stale copy merges into another tab's value instead of overwriting it. A write returns whether it was stored; a refused write keeps its value in memory until the tab closes and never replaces the stored value. A section whose stored `version` is higher than the build knows is neither parsed nor overwritten. None of these keys may enter `serverVisiblePreferences`, and none is keyed by account: signing in or out moves, copies and clears nothing. No client clock is written into a section.
 
 Project recency is owned by the project-domain activity boundary and persisted as `ProjectLibraryState.lastActivityAt`. Mutating chat or editor rows must never cascade a timestamp through generic storage behavior. The project domain touches local activity only after a material project/chat operation commits; navigation repair, generated labels, startup-request consumption, thumbnail writes, caches, and other derived/system activity do not affect recency.
 
@@ -281,8 +285,9 @@ const patchChat = useCallback(
 Before merging a storage-layer change:
 
 - [ ] The data belongs in this store per Rule 0 — portable project content goes to the filesystem; only explicit host-local lifecycle state uses `projectLibraryStates`.
-- [ ] Read and write happen inside one transaction; outer promise resolves on `transaction.oncomplete`.
-- [ ] All public mutators go through `KeyedMutex.run(rowId, …)`.
+- [ ] A person or device record section is written through the section store's read-merge-write and stays out of `serverVisiblePreferences`.
+- [ ] IndexedDB read-modify-write: read and write happen inside one transaction; outer promise resolves on `transaction.oncomplete`.
+- [ ] IndexedDB stores: all public mutators go through `KeyedMutex.run(rowId, …)`.
 - [ ] New multi-writer fields have field-scoped helpers, not extra `updateChat` options.
 - [ ] No `ignoreKeys`/`customMerge` knob is reintroduced.
 - [ ] Row `updatedAt` values and project `lastActivityAt` change only for their separately defined material mutations.
@@ -295,7 +300,7 @@ Before merging a storage-layer change:
 ## References
 
 - Research: `docs/research/chat-draft-resurrection-race.md`
-- Implementation: `apps/ui/app/db/indexeddb-storage.ts`, `libs/utils/src/keyed-mutex.utils.ts`, `apps/libs/chat-ui/src/db/composer-record-store.ts`, `apps/libs/chat-ui/src/db/attachment-store.ts`, `apps/ui/app/machines/composer-record.machine.ts`
+- Implementation: `apps/ui/app/db/indexeddb-storage.ts`, `apps/ui/app/preferences/section-store.ts`, `apps/libs/preferences/src/stored-section.ts`, `libs/utils/src/keyed-mutex.utils.ts`, `apps/libs/chat-ui/src/db/composer-record-store.ts`, `apps/libs/chat-ui/src/db/attachment-store.ts`, `apps/ui/app/machines/composer-record.machine.ts`
 - Contract: `apps/ui/app/types/storage.types.ts`
 - Hook surfaces: `apps/ui/app/hooks/use-chats.ts`, `apps/ui/app/hooks/use-project-manager.tsx`, `apps/ui/app/hooks/use-chat.tsx`
 - Related: `docs/policy/xstate-policy.md`, `docs/policy/filesystem-policy.md`, `docs/policy/testing-policy.md`

@@ -4,6 +4,8 @@ import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ViewerSettings } from '#cad/viewer-settings.jsx';
+import { ViewerViewFieldsProvider } from '#cad/viewer-view-fields.jsx';
+import type { ViewerViewFields } from '#cad/viewer-view-fields.jsx';
 
 type GraphicsState = {
   readonly context: {
@@ -74,22 +76,27 @@ const nextTask = async (): Promise<void> => {
   });
 };
 
-const renderViewerSettings = (): void => {
+const renderViewerSettings = (viewFields?: ViewerViewFields): void => {
   render(
     <TooltipProvider>
-      <ViewerSettings
-        operationTimeout={{
-          value: 60_000,
-          defaultValue: 180_000,
-          onChange: mocks.setOperationTimeout,
-        }}
-      />
+      <ViewerViewFieldsProvider value={viewFields}>
+        <ViewerSettings
+          operationTimeout={{
+            value: 60_000,
+            defaultValue: 180_000,
+            onChange: mocks.setOperationTimeout,
+          }}
+        />
+      </ViewerViewFieldsProvider>
     </TooltipProvider>,
   );
 };
 
-const openViewerSettings = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
-  renderViewerSettings();
+const openViewerSettings = async (
+  user: ReturnType<typeof userEvent.setup>,
+  viewFields?: ViewerViewFields,
+): Promise<void> => {
+  renderViewerSettings(viewFields);
   await user.click(screen.getByRole('button', { name: 'Viewer settings' }));
 };
 
@@ -127,6 +134,71 @@ describe('ViewerSettings', () => {
     await user.click(screen.getByRole('switch', { name: 'Edges' }));
 
     expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'setLinesVisibility', payload: false });
+  });
+
+  describe('with the host view commands (T3.5)', () => {
+    it('should set each toggle, the up direction and the field of view in the view and send nothing live', async () => {
+      const user = userEvent.setup();
+      const set = vi.fn();
+      await openViewerSettings(user, { set, reset: vi.fn() });
+
+      await user.click(screen.getByRole('switch', { name: 'Edges' }));
+      await user.click(screen.getByRole('switch', { name: 'Surfaces' }));
+      await user.click(screen.getByRole('switch', { name: /Matcap/u }));
+      await user.click(screen.getByRole('switch', { name: 'Gizmo' }));
+      await user.click(screen.getByRole('switch', { name: 'Grid' }));
+      await user.click(screen.getByRole('switch', { name: 'Axes' }));
+      await user.click(screen.getByRole('radio', { name: 'Y-up' }));
+      act(() => {
+        screen.getByRole('menuitem', { name: `${fieldOfViewName}, 42°` }).focus();
+      });
+      await user.keyboard('{ArrowRight}');
+
+      // A press on the switch itself also selects its row, so a toggle may be issued twice with one value.
+      const issued = [...new Set(set.mock.calls.map((call) => JSON.stringify(call)))].map(
+        (call) => JSON.parse(call) as unknown,
+      );
+      expect(issued).toEqual([
+        ['display.lines', false],
+        ['display.surfaces', false],
+        ['display.matcap', true],
+        ['display.gizmo', false],
+        ['display.grid', false],
+        ['display.axes', false],
+        ['upDirection', 'y'],
+        ['fieldOfView', 43],
+      ]);
+      expect(mocks.graphicsSend).not.toHaveBeenCalled();
+      expect(mocks.cameraSend).not.toHaveBeenCalled();
+    });
+    it('should step the field of view from the angle still being written, and from the camera once it is refused', async () => {
+      const user = userEvent.setup();
+      const writes: Array<PromiseWithResolvers<boolean>> = [];
+      const set = vi.fn(async (_leaf: string, _value: unknown) => {
+        const write = Promise.withResolvers<boolean>();
+        writes.push(write);
+        return write.promise;
+      });
+      await openViewerSettings(user, { set, reset: vi.fn() });
+      act(() => {
+        screen.getByRole('menuitem', { name: `${fieldOfViewName}, 42°` }).focus();
+      });
+
+      // The camera still shows 42° while both writes are in flight.
+      await user.keyboard('{ArrowRight}{ArrowRight}');
+      expect(set.mock.calls).toEqual([
+        ['fieldOfView', 43],
+        ['fieldOfView', 44],
+      ]);
+
+      // The newer write is refused: the next step counts from what the camera shows again.
+      await act(async () => {
+        writes.at(-1)!.resolve(false);
+        await writes.at(-1)!.promise;
+      });
+      await user.keyboard('{ArrowRight}');
+      expect(set).toHaveBeenLastCalledWith('fieldOfView', 43);
+    });
   });
 
   describe('closing', () => {

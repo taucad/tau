@@ -8,8 +8,8 @@
  * - {@link viewSettingsOf}: the live graphics owner's view fields besides its camera, as a record holds them.
  */
 import * as THREE from 'three';
-import { cameraPresetOrientations, lengthUnits, workbenchRecords } from '@taucad/workbench';
-import type { ViewSettings, WorkbenchView } from '@taucad/workbench';
+import { cameraPresetOrientations, lengthUnits, viewFieldValuesOf, workbenchRecords } from '@taucad/workbench';
+import type { ViewFieldValues, ViewSettings, WorkbenchView } from '@taucad/workbench';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
 import type {
   GraphicsViewSettings,
@@ -23,24 +23,33 @@ import { resolveCameraUp } from '@taucad/viewer/graphics/three/utils/camera-cont
  * Translate a portable view into the graphics owner's create-only seed.
  *
  * @param record - The view record.
+ * @param resolved - What the view shows for its inheritable leaves (`resolveViewSettings(...).values` from
+ *   `@taucad/workbench`). Absent, the record's own values are shown, as a host with no level above the view resolves
+ *   them while `tauViewDefaults` equals the format values.
  * @returns The graphics settings the record names; a preset or look camera leaves `cameraView` unset.
  * @public
  */
-export const graphicsSettingsForView = (record: WorkbenchView): GraphicsViewSettings => ({
-  ...defaultGraphicsSettings,
-  enableSurfaces: record.display.surfaces,
-  enableLines: record.display.lines,
-  enableGizmo: record.display.gizmo,
-  enableGrid: record.display.grid,
-  enableAxes: record.display.axes,
-  enableMatcap: record.display.matcap,
-  enablePostProcessing: record.display.postProcessing,
-  upDirection: record.upDirection,
-  cameraFovAngle: record.fieldOfView,
-  ...(record.camera.kind === 'pose' ? { cameraView: record.camera } : {}),
-  sectionView: record.section,
-  pinnedMeasurements: record.measurements.map((measurement) => ({ ...measurement })),
-});
+export const graphicsSettingsForView = (
+  record: WorkbenchView,
+  resolved?: Readonly<ViewFieldValues>,
+): GraphicsViewSettings => {
+  const shown = resolved ?? viewFieldValuesOf(record);
+  return {
+    ...defaultGraphicsSettings,
+    enableSurfaces: shown['display.surfaces'],
+    enableLines: shown['display.lines'],
+    enableGizmo: shown['display.gizmo'],
+    enableGrid: shown['display.grid'],
+    enableAxes: shown['display.axes'],
+    enableMatcap: shown['display.matcap'],
+    enablePostProcessing: shown['display.postProcessing'],
+    upDirection: shown.upDirection,
+    cameraFovAngle: shown.fieldOfView,
+    ...(record.camera.kind === 'pose' ? { cameraView: record.camera } : {}),
+    sectionView: record.section,
+    pinnedMeasurements: record.measurements.map((measurement) => ({ ...measurement })),
+  };
+};
 
 /**
  * A new view of an entry that keeps the active viewer's display choices when a person opens another view.

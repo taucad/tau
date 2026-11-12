@@ -358,6 +358,17 @@ describe('every action the card offered, from its new entry point (D3)', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 
+  it('should never offer to close main, from its chip, while you are on another branch', async () => {
+    const user = userEvent.setup();
+    await renderPane('graph-two-branches');
+
+    await openBranchMenu(user, 'main');
+    const menu = screen.getByRole('menu');
+
+    expect(within(menu).getByRole('menuitem', { name: 'Switch to main' })).toBeInTheDocument();
+    expect(within(menu).queryByRole('menuitem', { name: 'Close branch' })).not.toBeInTheDocument();
+  });
+
   it('should offer no Switch, Merge or Close for the branch you are on', async () => {
     const user = userEvent.setup();
     await renderPane('graph-two-branches');

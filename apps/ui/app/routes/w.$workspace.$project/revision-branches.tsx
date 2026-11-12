@@ -448,7 +448,7 @@ export type BranchMenuProps = {
  * A branch's own menu, the ⋮ on its name chip in History (D3, canvas
  * `branch-menu`): Switch to x, Merge into the branch you are on, Update from
  * main while the branch you are on is behind it, Run this chat here, Rename…
- * and Close branch. Every verb acts at once (I11); its toast says what landed.
+ * and Close branch, which the trunk never offers. Every verb acts at once (I11); its toast says what landed.
  * Rename names the branch in the one naming form under this menu's button; a
  * rename that would be refused stays listed, unavailable, with the reason under it.
  *
@@ -568,7 +568,7 @@ export function BranchMenu({
             </span>
           </DropdownMenuItem>
         )}
-        {isCurrent ? null : (
+        {isCurrent || branch === trunk ? null : (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem

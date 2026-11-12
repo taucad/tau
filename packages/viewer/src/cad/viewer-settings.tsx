@@ -117,7 +117,7 @@ function FieldOfViewRow(): React.JSX.Element {
     (value: number) => {
       const verticalFieldOfView = clamp(Math.round(value), 0, maxVerticalFieldOfView);
       if (viewFields) {
-        viewFields.set('fieldOfView', verticalFieldOfView);
+        void viewFields.set('fieldOfView', verticalFieldOfView);
         return;
       }
       cameraRig.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView });
@@ -207,7 +207,7 @@ export function ViewerSettings({
       ) =>
       (checked: boolean): void => {
         if (viewFields) {
-          viewFields.set(leaf, checked);
+          void viewFields.set(leaf, checked);
           return;
         }
         graphicsRef.send({ type, payload: checked });
@@ -221,7 +221,7 @@ export function ViewerSettings({
       matcap: toggle('display.matcap', 'setMatcapVisibility'),
       upDirection: (value: UpDirection): void => {
         if (viewFields) {
-          viewFields.set('upDirection', value);
+          void viewFields.set('upDirection', value);
           return;
         }
         graphicsRef.send({ type: 'setUpDirection', payload: value });

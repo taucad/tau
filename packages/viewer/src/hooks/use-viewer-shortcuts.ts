@@ -95,8 +95,11 @@ function selectShortcutGridShown(graphicsRef: GraphicsActorRef): boolean {
 }
 
 /** A G or P value the host is still writing, per graphics actor: what the next press toggles from. */
-type PendingShortcutWrites = Map<'display.grid' | 'fieldOfView', boolean | number>;
+type PendingShortcutWrite = Readonly<{ write: number; value: boolean | number }>;
+type PendingShortcutWrites = Map<'display.grid' | 'fieldOfView', PendingShortcutWrite>;
 const pendingShortcutWrites = new WeakMap<GraphicsActorRef, PendingShortcutWrites>();
+/* Names each write, so a write that settles clears only its own pending value, never a newer one equal to it. */
+let shortcutWrites = 0;
 
 /* The value a press toggles from: the one still being written, until graphics shows it, else the one shown. */
 function toggledFrom<Value extends boolean | number>(
@@ -105,7 +108,7 @@ function toggledFrom<Value extends boolean | number>(
   shown: Value,
 ): Value {
   const pending = pendingShortcutWrites.get(graphicsRef);
-  const value = pending?.get(leaf);
+  const value = pending?.get(leaf)?.value;
   if (value === undefined || value === shown) {
     pending?.delete(leaf);
     return shown;
@@ -118,12 +121,12 @@ function toggledFrom<Value extends boolean | number>(
 async function settleShortcutWrite({
   graphicsRef,
   leaf,
-  value,
+  write,
   written,
 }: Readonly<{
   graphicsRef: GraphicsActorRef;
   leaf: 'display.grid' | 'fieldOfView';
-  value: boolean | number;
+  write: number;
   written: Promise<boolean>;
 }>): Promise<void> {
   let saved = false;
@@ -133,7 +136,7 @@ async function settleShortcutWrite({
     // The host reports its own failure.
   }
   const pending = pendingShortcutWrites.get(graphicsRef);
-  if (!saved && pending?.get(leaf) === value) {
+  if (!saved && pending?.get(leaf)?.write === write) {
     pending.delete(leaf);
   }
 }
@@ -156,8 +159,10 @@ function issueShortcutWrite<Leaf extends 'display.grid' | 'fieldOfView'>({
   }
   const pending: PendingShortcutWrites = pendingShortcutWrites.get(graphicsRef) ?? new Map();
   pendingShortcutWrites.set(graphicsRef, pending);
-  pending.set(leaf, value);
-  void settleShortcutWrite({ graphicsRef, leaf, value, written });
+  shortcutWrites += 1;
+  const write = shortcutWrites;
+  pending.set(leaf, { write, value });
+  void settleShortcutWrite({ graphicsRef, leaf, write, written });
 }
 
 /** G or P with the host's view commands: the same decision graphics makes, issued as the view's command. */

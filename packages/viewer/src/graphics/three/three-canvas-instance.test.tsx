@@ -970,7 +970,7 @@ describe('ThreeCanvasInstance', () => {
     await waitFor(() => {
       expect(backend()).toBe('webgl');
     });
-    const canvasId = graphicsHolder.current!.getSnapshot().context.canvas!.canvasId;
+    const { canvasId } = graphicsHolder.current!.getSnapshot().context.canvas!;
     const marker = screen.getByTestId('graphics-backend-provider').querySelector('group');
     act(() => {
       graphicsHolder.current?.send({ type: 'canvasDetached', canvasId });

@@ -62,6 +62,7 @@ describe('lfsRelocationProjects', () => {
       projectId,
       oid: oid(index),
       size: index,
+      finalized: true,
     });
     async function* pages(): AsyncGenerator<readonly LfsReservation[]> {
       yield [row('p-1', 1), row('p-2', 2)];
@@ -424,5 +425,46 @@ describe('relocateLegacyLfsInventory', () => {
     expect(settled).toEqual(['project-1', 'project-2']);
     expect(relocate).toHaveBeenCalledTimes(2);
     expect(lines.some((line) => line.includes('lfs_relocation_summary'))).toBe(false);
+  });
+
+  it('should rethrow the worker failure, not a failure to close the pages', async () => {
+    const closing = new Error('page cursor already closed');
+    const pages = (fail: boolean): AsyncIterable<LfsRelocationTarget> => ({
+      [Symbol.asyncIterator]: () => {
+        let index = 0;
+        return {
+          next: async () => {
+            const value = projects[index];
+            index += 1;
+            return value === undefined ? { done: true, value: undefined } : { done: false, value };
+          },
+          return: async () => {
+            if (fail) {
+              throw closing;
+            }
+            return { done: true, value: undefined };
+          },
+        };
+      },
+    });
+    const relocate = vi.fn(async () => ({ moved: ['x'] }));
+    const failingReport = vi.fn(async (_line: string): Promise<void> => {
+      throw new Error('stdout closed');
+    });
+
+    await expect(
+      relocateLegacyLfsInventory(
+        { projects: pages(true), storage: fakeStore(allLegacy), relocate },
+        { confirm: true, concurrency: 1, report: failingReport },
+      ),
+    ).rejects.toThrow('stdout closed');
+    // With no worker failure, the close failure itself is what the run reports.
+    const { report } = collect();
+    await expect(
+      relocateLegacyLfsInventory(
+        { projects: pages(true), storage: fakeStore(allLegacy), relocate },
+        { confirm: true, concurrency: 1, report },
+      ),
+    ).rejects.toBe(closing);
   });
 });

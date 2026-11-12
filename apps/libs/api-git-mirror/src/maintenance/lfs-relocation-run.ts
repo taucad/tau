@@ -179,7 +179,8 @@ const emptySurvey: LfsRelocationSurvey = {
  * reported and the run goes on; it stays listed in the summary and holds
  * `resumeAfter` back. A stop signal lets in-flight projects finish and starts
  * no more. If reporting a line throws, no worker takes another project, the
- * ones in flight settle, and the error is rethrown without a summary.
+ * ones in flight settle, and the error is rethrown without a summary; a
+ * failure to close the project pages never replaces it.
  *
  * @param dependencies - The projects to visit (in `projectId` order), the driver and the relocation.
  * @param options - Whether to move bytes, the worker count, the line sink and a stop signal.
@@ -281,11 +282,13 @@ export const relocateLegacyLfsInventory = async (
     }
   };
 
+  // Workers never reject: each records its fault and every other worker stops after its project in flight.
+  await Promise.all(Array.from({ length: options.concurrency }, worker));
   try {
-    // Workers never reject: each records its fault and every other worker stops after its project in flight.
-    await Promise.all(Array.from({ length: options.concurrency }, worker));
-  } finally {
     await iterator.return?.();
+  } catch (error) {
+    // Closing the pages must not mask the failure that stopped the run.
+    fault ??= { error };
   }
   if (fault !== undefined) {
     throw fault.error;

@@ -581,6 +581,15 @@ globalThis.__TAU_PARAMETER_PACK_SMOKE__ = 'committed width=25 and settled';
 console.log(globalThis.__TAU_PARAMETER_PACK_SMOKE__);
 `;
 
+/** The content type a consumer's server gives one packaged asset: WASM streams compile only from `application/wasm`. */
+const assetContentTypes: Readonly<Record<string, string>> = {
+  wasm: 'application/wasm',
+  json: 'application/json',
+  glb: 'model/gltf-binary',
+};
+const assetContentType = (url: string): string =>
+  assetContentTypes[url.slice(url.lastIndexOf('.') + 1)] ?? 'application/octet-stream';
+
 const runBrowserModule = async (
   modulePath: string,
   assertPage: (page: Page) => Promise<void>,
@@ -599,7 +608,7 @@ const runBrowserModule = async (
       return;
     }
     if (request.url !== undefined && Object.hasOwn(assets, request.url)) {
-      response.writeHead(200, { 'content-type': 'application/wasm' });
+      response.writeHead(200, { 'content-type': assetContentType(request.url) });
       response.end(readFileSync(assets[request.url]!));
       return;
     }
@@ -626,7 +635,13 @@ const runBrowserModule = async (
       }
     });
     await page.goto(`http://127.0.0.1:${String(port)}/`);
-    await assertPage(page);
+    try {
+      await assertPage(page);
+    } catch (error) {
+      /* A timed-out wait names no cause; the page's own errors usually do. */
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${message}\nPage errors:\n${errors.join('\n') || '(none)'}`, { cause: error });
+    }
     invariant(errors.length === 0, `Packed browser module failed:\n${errors.join('\n')}`);
   } finally {
     await browser?.close();
@@ -1207,12 +1222,23 @@ const runInstalledTscircuit = async (appRoot: string, zodVersion: string): Promi
   );
   const wasmAsset = join(dirname(esbuildPackage), 'dist/vm/wasm/esbuild.wasm');
   invariant(existsSync(wasmAsset), `Installed esbuild WASM asset is missing: ${wasmAsset}`);
+  /* The KiCad pack's footprints and models are `new URL('../assets/kicad/…', import.meta.url)` files beside the
+   * kernel. A browser bundle that does not copy assets keeps them relative to its own URL, so a consumer serves the
+   * package's `dist/assets/kicad` at `assets/kicad` beside the bundle, as it serves esbuild's WASM. */
+  const tscircuitPackage = createRequire(pathToFileURL(join(appRoot, 'package.json'))).resolve(
+    '@taucad/tscircuit/package.json',
+  );
+  const kicadRoot = join(dirname(tscircuitPackage), 'dist/assets/kicad');
+  invariant(existsSync(kicadRoot), `Installed tscircuit KiCad pack is missing: ${kicadRoot}`);
+  const kicadAssets = Object.fromEntries(
+    readdirSync(kicadRoot).map((name) => [`/assets/kicad/${name}`, join(kicadRoot, name)]),
+  );
   await runBrowserModule(
     bundle,
     async (page) => {
       await page.waitForFunction(() => document.querySelector('#root')?.textContent === 'tscircuit GLB and SVG passed');
     },
-    { '/wasm/esbuild.wasm': wasmAsset },
+    { '/wasm/esbuild.wasm': wasmAsset, ...kicadAssets },
   );
   console.log('Packed tscircuit Node and Chromium GLB/SVG render passed.');
 };

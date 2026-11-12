@@ -605,11 +605,13 @@ try {
   assert.throws(() => {
     assertQualificationSource({ ...admitted, scope: 'unknown' });
   }, /scope\/channel/u);
-  // Mac CI may test an ancestor; its publisher requires an authenticated binding. VM remains exact-source.
+  // Staging Mac CI and clean-host (vm) may test an ancestor; their publisher requires an authenticated binding.
+  // Windows clean-host remains exact-source.
   assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'macos' });
   assertQualificationSource({ ...admitted, scope: 'macos' });
+  assertQualificationSource({ ...admitted, scope: 'macos', kind: 'vm' });
   assert.throws(() => {
-    assertQualificationSource({ ...admitted, scope: 'macos', kind: 'vm' });
+    assertQualificationSource({ ...admitted, scope: 'windows', kind: 'vm' });
   }, /exact source/u);
   assert.throws(() => {
     assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'macos', channel: 'production' });

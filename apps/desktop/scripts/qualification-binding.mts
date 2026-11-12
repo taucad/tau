@@ -1,4 +1,7 @@
-/** Authenticate staging Mac CI application and harness identities without changing public acceptance receipts. */
+/**
+ * Authenticate staging Mac CI and clean-host (vm) application and harness identities without changing public acceptance
+ * receipts.
+ */
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
 import type { DesktopArtifactManifest } from '#shared/desktop-release.js';
@@ -18,7 +21,7 @@ const bindingSchema = z.strictObject({
   schemaVersion: z.literal(1),
   scope: z.literal('macos'),
   channel: z.literal('staging'),
-  kind: z.literal('ci'),
+  kind: z.enum(['ci', 'vm']),
   sourceCommit: sha,
   manifestSha256: digest,
   workflowCommit: sha,
@@ -26,9 +29,13 @@ const bindingSchema = z.strictObject({
   candidate: candidateSchema,
 });
 
-/** Only this mode has a separately authenticated source/harness binding. */
+/**
+ * Only the staging Mac-only scope has a separately authenticated source/harness binding, for both its hosted CI rows
+ * and its clean-host (vm) rows: a notarized candidate is built from the newest green ancestor, so its source can never
+ * be the tip that a later main dispatch runs at. Production and the all-platform scope keep exact source equality.
+ */
 export const usesQualificationBinding = (scope: string, channel: string, kind: string): boolean =>
-  scope === 'macos' && channel === 'staging' && kind === 'ci';
+  scope === 'macos' && channel === 'staging' && (kind === 'ci' || kind === 'vm');
 
 /** Bind authenticated archive contents to independently admitted GitHub candidate and qualification metadata. */
 export const verifyQualificationBinding = (
@@ -36,6 +43,7 @@ export const verifyQualificationBinding = (
   options: {
     manifest: DesktopArtifactManifest;
     candidate: InstallerCandidateProvenance;
+    kind: 'ci' | 'vm';
     runId: number;
     workflowCommit: string;
     publicationCommit: string;
@@ -48,6 +56,7 @@ export const verifyQualificationBinding = (
   const sourceCommit = sha.parse(options.manifest.sourceCommit);
   if (
     options.manifest.channel !== 'staging' ||
+    binding.kind !== options.kind ||
     binding.sourceCommit !== sourceCommit ||
     binding.manifestSha256 !== desktopManifestDigest(options.manifest) ||
     binding.workflowCommit !== workflowCommit ||
@@ -72,6 +81,7 @@ export const verifyQualificationBinding = (
 export const createQualificationBinding = (options: {
   manifest: DesktopArtifactManifest;
   candidate: InstallerCandidateProvenance;
+  kind: 'ci' | 'vm';
   runId: number;
   workflowCommit: string;
 }): z.infer<typeof bindingSchema> => {
@@ -79,7 +89,7 @@ export const createQualificationBinding = (options: {
     schemaVersion: 1,
     scope: 'macos',
     channel: 'staging',
-    kind: 'ci',
+    kind: options.kind,
     sourceCommit: options.manifest.sourceCommit,
     manifestSha256: desktopManifestDigest(options.manifest),
     workflowCommit: options.workflowCommit,

@@ -44,7 +44,7 @@ on:
         required: true
         type: string
       candidate_c:
-        description: Successful trusted installer-candidate run C; Mac and Windows need this dispatch's main commit, Linux a trusted ancestor
+        description: Successful trusted installer-candidate run C; Windows needs this dispatch's main commit, Mac and Linux a trusted ancestor
         required: true
         type: string
       runner_group:
@@ -285,7 +285,6 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate_c }}
-      DESKTOP_ASSETS_DIR: ${{ github.workspace }}/out/qualification-candidate
       TAU_QUALIFICATION_CHANNEL: staging
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
     steps:
@@ -294,13 +293,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
-      - name: Re-admit the exact final candidate
-        run: pnpm nx run desktop:fetch-installer-candidate
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: desktop-route-row-*
           path: out/qualification-rows
-      - name: Require both Apple silicon clean-host rows and bind every receipt to the final source
+      # The collector re-admits candidate C itself and writes qualification-binding.json: C's notarized source is the
+      # newest green ancestor at build time, so it is bound to this run's main commit by authenticated S≤K≤H ancestry
+      # (the publisher adds ≤P), as the Mac-only CI receipts are, never by a caller-supplied source.
+      - name: Require both Apple silicon clean-host rows and bind every receipt to the final candidate and this run
         run: pnpm nx run desktop:collect-qualification-rows
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -310,7 +310,9 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-macos-vm-receipts
-          path: out/qualification-receipts/route-receipts.json
+          path: |
+            out/qualification-receipts/route-receipts.json
+            out/qualification-receipts/qualification-binding.json
           if-no-files-found: error
 
   windows:

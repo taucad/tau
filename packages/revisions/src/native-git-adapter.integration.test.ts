@@ -340,11 +340,12 @@ nativeGitIntegration('native Git adapter integration', () => {
    * G0-9 on the disk leg: `init` is also the open seam
    * (`revision-effects.ensureStore` calls it once per authority, and `git init`
    * is skipped for a store that is already here). The setup files are created,
-   * never merged into (D16): an existing ignore file keeps its stale block, the
-   * attributes file is created beside it, and a project already current is not
-   * rewritten, which a pinned mtime is the only way to observe here.
+   * never merged into (D16): an existing ignore file keeps its stale block, no
+   * attributes file is written (A4: opening writes nothing tracked), and a
+   * project already current is not rewritten, which a pinned mtime is the only
+   * way to observe here.
    */
-  it('should leave an existing ignore file as written on open, create the attributes file, and then leave both alone', async () => {
+  it('should leave an existing ignore file as written on open, write no attributes file, and then leave both alone', async () => {
     const ignorePath = join(repositoryPath, generatedIgnorePath);
     const attributesPath = join(repositoryPath, generatedGitattributesPath);
     const stale = `# mine\n*.log\n# BEGIN Tau generated — derived content is never versioned\n/.git/\n/.jj/\n/.tau/binding.json\nnode_modules/\n# END Tau generated\n`;
@@ -353,20 +354,19 @@ nativeGitIntegration('native Git adapter integration', () => {
     await openPort().init({ author: { name: 'Tau', email: 'tau@example.com' } });
 
     expect(await readFile(ignorePath, 'utf8')).toBe(stale);
-    expect(await readFile(attributesPath, 'utf8')).toBe(generatedGitattributesContent(undefined));
+    await expect(stat(attributesPath)).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await readFile(join(repositoryPath, '.git', 'info', 'exclude'), 'utf8')).toContain(
       generatedIgnoreContent(undefined),
     );
     const pinned = Date.UTC(2020, 0, 1);
     await utimes(ignorePath, new Date(pinned), new Date(pinned));
-    await utimes(attributesPath, new Date(pinned), new Date(pinned));
 
     await openPort().init({ author: { name: 'Tau', email: 'tau@example.com' } });
 
     const ignoreStat = await stat(ignorePath);
-    const attributesStat = await stat(attributesPath);
     expect(ignoreStat.mtimeMs).toBe(pinned);
-    expect(attributesStat.mtimeMs).toBe(pinned);
+    expect(await readFile(ignorePath, 'utf8')).toBe(stale);
+    await expect(stat(attributesPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   const write = async (

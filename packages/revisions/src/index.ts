@@ -152,10 +152,20 @@ export type { ConflictPerspective, RevisionConflictTerms } from '#revision-confl
 export { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';
 export type { RevisionLogRequest, RevisionPlace, RevisionRow } from '#revision-verbs.js';
 export {
+  parseStartRecord,
+  serializeStartRecord,
+  startReadingOf,
+  startRecordPath,
+  startSummary,
+  startTrigger,
+} from '#start-version.js';
+export type { StartOrigin, StartReading } from '#start-version.js';
+export {
   generatedGitattributesContent,
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
+  generatedSetupPaths,
   isTrackedLargeObjectPath,
   largeObjectThresholdBytes,
 } from '#workspace-config.js';

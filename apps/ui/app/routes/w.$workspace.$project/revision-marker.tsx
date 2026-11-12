@@ -54,6 +54,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
+import { generatedSetupPaths } from '@taucad/revisions';
 import type { RevisionDiffEntry } from '@taucad/revisions';
 import type { RevisionComparisonNotice } from '@taucad/revisions/algorithms';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
@@ -81,7 +82,12 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 import { consumeRevisionReveal, useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import type { AffectedPublication } from '#routes/w.$workspace.$project/revision-ref-removal.js';
-import { revisionName, revisionTriggerLabel } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import {
+  revisionName,
+  revisionTriggerLabel,
+  startFact,
+  startVersionName,
+} from '#routes/w.$workspace.$project/revision-vocabulary.js';
 
 /** Whether a revision is one of the autosaves History folds: a turn's base cut is one too (A5). */
 export const isAutosave = (revision: RevisionCard): boolean =>
@@ -98,6 +104,9 @@ const changeLabels: Readonly<Record<RevisionDiffEntry['kind'], string>> = {
 };
 
 const initialFileRows = 3;
+
+/* The files Tau owns as project setup, at the project root (A4). */
+const isSetupPath = (path: string): boolean => generatedSetupPaths.has(path);
 const comparisonNotices: Readonly<Record<RevisionComparisonNotice, string>> = {
   'empty-added': 'Empty file added.',
   'empty-deleted': 'Empty file deleted.',
@@ -255,9 +264,24 @@ function FileList({
   if (changes.length === 0) {
     return null;
   }
+  /* A4: Tau's own setup files last, under a plain label (canvas "An open row"). */
+  const ordered = [
+    ...changes.filter((change) => !isSetupPath(change.path)),
+    ...changes.filter((change) => isSetupPath(change.path)),
+  ];
+  const shown = isExpanded ? ordered : ordered.slice(0, initialFileRows);
+  const firstSetup = shown.findIndex((change) => isSetupPath(change.path));
   return (
     <ul aria-label={label} className='flex flex-col divide-y overflow-hidden rounded-md border bg-background'>
-      {(isExpanded ? changes : changes.slice(0, initialFileRows)).map((change, index) => (
+      {shown.flatMap((change, index) => [
+        ...(index === firstSetup
+          ? [
+              /* A label, not a file: assistive technology counts only the files as items. */
+              <li key='project-setup' role='presentation' className='px-2 py-1 text-xs text-muted-foreground'>
+                Project setup
+              </li>,
+            ]
+          : []),
         <Collapsible
           key={change.path}
           asChild
@@ -298,8 +322,8 @@ function FileList({
               />
             </CollapsibleContent>
           </li>
-        </Collapsible>
-      ))}
+        </Collapsible>,
+      ])}
       {changes.length > initialFileRows ? (
         <li>
           <button
@@ -969,6 +993,14 @@ function RevisionMarkerGlyph({
       </span>
     );
   }
+  /* A6: a version is the larger solid dot (blueprint "History, Version, Revision"). */
+  if (revision.start !== undefined) {
+    return (
+      <span className={timelineMarker}>
+        <span aria-label='Version' className='size-2.5 rounded-full bg-foreground' />
+      </span>
+    );
+  }
   if ((revision.tags?.length ?? 0) > 0) {
     return (
       <span className={timelineMarker}>
@@ -1043,13 +1075,15 @@ export function RevisionRow({
     consumeRevisionReveal(projectId, revision.revisionId);
   }, [isRevealed, projectId, revision.revisionId]);
 
-  const name = revisionName(revision.n);
+  const { start } = revision;
+  /* A6: the Start version is named V1, in the column where other rows show their number and time. */
+  const name = start === undefined ? revisionName(revision.n) : startVersionName;
   const time =
     revision.createdAt > 0
       ? new Date(revision.createdAt).toLocaleTimeString(undefined, { timeStyle: 'short' })
       : undefined;
-  /* The who-resolver decides whether a row has a who line (Q2): none on a single-person project. */
-  const actor = revision.actor === '' ? undefined : revision.actor;
+  /* The who-resolver decides whether a row has a who line (Q2): none on a single-person project. The Start version says how it began. */
+  const actor = start !== undefined || revision.actor === '' ? undefined : revision.actor;
   const canRestore = role !== 'revoked';
   /* D2, M1: Undo restore lives on the restore row while nothing has landed after it, and only where this
      device's restore machine holds its undo target — never after a reload or another device's restore. */
@@ -1084,14 +1118,25 @@ export function RevisionRow({
                 <span
                   className={cn(
                     'line-clamp-2 min-w-0 text-sm break-words',
-                    isAutosave(revision) ? 'text-muted-foreground' : 'font-medium',
+                    start === undefined
+                      ? isAutosave(revision)
+                        ? 'text-muted-foreground'
+                        : 'font-medium'
+                      : 'font-semibold',
                   )}
                 >
                   {title}
                 </span>
-                {isCurrent || actor !== undefined ? (
+                {isCurrent || actor !== undefined || start !== undefined ? (
                   <span className='flex min-w-0 flex-wrap items-center gap-x-2 text-xs leading-4 text-muted-foreground'>
                     {isCurrent ? <span className='text-foreground'>Current</span> : null}
+                    {start === undefined ? null : (
+                      <span className='min-w-0'>
+                        {startFact(start)}
+                        {/* The time the right-hand column gives other rows, where the pane has room for it. */}
+                        {time === undefined ? null : <span className='hidden @[22rem]:inline'> · {time}</span>}
+                      </span>
+                    )}
                     {actor === undefined ? null : (
                       <span className='flex min-w-0 items-center gap-1'>
                         {actor === 'Agent' ? <Bot aria-hidden className='size-3 shrink-0' /> : null}
@@ -1102,8 +1147,10 @@ export function RevisionRow({
                 ) : null}
               </span>
               <span className='flex shrink-0 items-center gap-1.5 pt-0.5 text-xs text-muted-foreground'>
-                {name === undefined ? null : <span className='font-mono'>{name}</span>}
-                {time === undefined ? null : (
+                {name === undefined ? null : (
+                  <span className={cn('font-mono', start !== undefined && 'font-medium text-foreground')}>{name}</span>
+                )}
+                {time === undefined || start !== undefined ? null : (
                   <time
                     dateTime={new Date(revision.createdAt).toISOString()}
                     className='hidden min-w-[8ch] text-right tabular-nums @[22rem]:inline'

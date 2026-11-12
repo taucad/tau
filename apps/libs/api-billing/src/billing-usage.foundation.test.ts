@@ -18,6 +18,7 @@ import { BillingPolicyService } from '#billing-policy.service.js';
 import { qualifiedMeterContracts, validateCommercialPolicy } from '#billing-policy.js';
 import { CreditLedgerService } from '#credit-ledger.service.js';
 import { BillingUsageService } from '#billing-usage.service.js';
+import { wireBalanceExplanationSchema } from '@taucad/billing';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
 import type { QualifiedAdmissionInput } from '#credit-ledger.types.js';
 
@@ -204,6 +205,18 @@ const admission = (fixture: Awaited<ReturnType<typeof createFixture>>, key: stri
 });
 
 describe('BillingUsageService PostgreSQL foundation', () => {
+  it('should accept on the balance wire every journal kind the ledger constraint stores', async () => {
+    const [cause] = await database.execute<{ definition: string }>(
+      sql`select pg_get_constraintdef(oid) definition from pg_constraint where conname = 'credit_transaction_cause'`,
+    );
+    const stored = new Set(
+      [...required(cause, 'cause constraint').definition.matchAll(/kind = '(\w+)'/gu)].map((match) => match[1]),
+    );
+    const wire = wireBalanceExplanationSchema.options[0].shape.history.shape.items.element.shape.kind.options;
+    expect(stored.size).toBeGreaterThan(0);
+    expect(wire).toEqual(expect.arrayContaining([...stored]));
+  });
+
   it('should expose admission holds at a new revision without creating a synthetic journal row', async () => {
     const fixture = await createFixture();
     const before = await usage.getBalance({ authUserId: fixture.userId, rawQuery: {} });

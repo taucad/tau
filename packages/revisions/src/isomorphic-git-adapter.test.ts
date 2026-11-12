@@ -105,9 +105,7 @@ const storeWithRemote = async (
  * the migration and the comparison is what stops it repeating.
  */
 describe('the generated block on open', () => {
-  const generatedPaths = new Set([generatedIgnorePath, generatedGitattributesPath]);
-
-  /** A provider that counts which of the two generated files `init` writes. */
+  /** A provider that records every file `init` writes under the project root, outside the store's own `.git/`. */
   const counting = (): Readonly<{ filesystem: FileSystemProvider; written: string[] }> => {
     const provider = new MemoryProvider();
     providers.push(provider);
@@ -116,7 +114,7 @@ describe('the generated block on open', () => {
       written,
       filesystem: Object.assign(provider, {
         writeFile: async (path: string, ...rest: never[]) => {
-          if (generatedPaths.has(path)) {
+          if (!path.startsWith('.git/')) {
             written.push(path);
           }
           // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the spy forwards the provider's own overloads.
@@ -149,25 +147,24 @@ node_modules/
     await port.init({ author });
 
     expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(stale);
-    /* Brand new, so the attributes file Tau's rule lives in is created beside it. */
-    expect(written).toStrictEqual([generatedGitattributesPath]);
-    expect(await filesystem.readFile(generatedGitattributesPath, 'utf8')).toBe(
-      generatedGitattributesContent(undefined),
-    );
+    /* The attributes file arrives with the first revision that records something (A4), never at open. */
+    expect(written).toStrictEqual([]);
+    expect(await filesystem.exists(generatedGitattributesPath)).toBe(false);
     expect(await filesystem.readFile('.git/info/exclude', 'utf8')).toBe(generatedIgnoreContent(undefined));
   });
 
-  it('should create both setup files for a brand-new project', async () => {
+  it('should create only the ignore file for a brand-new project (A4)', async () => {
     const { filesystem, written } = counting();
     const port = createIsomorphicGitRevisionPort({ filesystem });
 
     await port.init({ author });
 
-    expect(written).toStrictEqual([generatedIgnorePath, generatedGitattributesPath]);
+    expect(written).toStrictEqual([generatedIgnorePath]);
+    expect(await filesystem.exists(generatedGitattributesPath)).toBe(false);
     expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(generatedIgnoreContent(undefined));
   });
 
-  it('should give a project an older build created its attributes file, and nothing else (DEF-W22-1)', async () => {
+  it('should write no file under the project root when it opens a project an older build created (I4, DEF-W22-1)', async () => {
     const { filesystem, written } = counting();
     const port = createIsomorphicGitRevisionPort({ filesystem });
     await port.init({ author, createSetupFiles: false });
@@ -176,7 +173,8 @@ node_modules/
 
     await port.init({ author });
 
-    expect(written).toStrictEqual([generatedGitattributesPath]);
+    expect(written).toStrictEqual([]);
+    expect(await filesystem.exists(generatedGitattributesPath)).toBe(false);
     expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(stale);
   });
 

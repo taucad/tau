@@ -1,5 +1,6 @@
 import { useResponsiveSurfaceContainer } from '#hooks/responsive-surface.js';
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { DropdownMenu as DropdownMenuPrimitive, Slot as SlotPrimitive } from 'radix-ui';
 import { CheckIcon, ChevronRightIcon, CircleIcon, MinusIcon, XIcon } from 'lucide-react';
 import { cn } from '#utils/cn.js';
@@ -27,15 +28,21 @@ import {
   menuContentVariants,
   menuLabelVariants,
   menuSeparatorVariants,
-  menuSubTriggerOpenClass,
+  menuViewTriggerChevronClass,
   menuShortcutClass,
   menuSideAlignOffset,
-  subMenuSideAlignOffset,
   menuItemLayoutClass,
   menuItemIconClass,
   menuSwitchRowVariants,
 } from '#components/menu.variants.js';
 import { SwitchRowLabel } from '#components/switch-row-label.js';
+import {
+  useViewStack,
+  viewStackBackRowClass,
+  viewStackEnterClass,
+  ViewStackBackContent,
+} from '#components/view-stack.js';
+import type { ViewStack } from '#components/view-stack.js';
 import { useFullscreenElement } from '#hooks/use-fullscreen-element.js';
 
 /**
@@ -56,8 +63,8 @@ function DropdownMenu({
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root> & {
   /**
    * Open the items in a bottom drawer on a phone, as `ComboBoxResponsive` does; wide screens keep the menu. Every part
-   * has a drawer form: items, checkbox, radio and switch items as touch rows, a submenu as a group that expands in
-   * place, and labels, separators, groups and shortcuts as they are. Name the drawer with the content's `drawerTitle`.
+   * has a drawer form: items, checkbox, radio and switch items as touch rows, a submenu as a sub-view that replaces
+   * the items, as it does in the menu, and labels, separators, groups and shortcuts as they are. Name the drawer with the content's `drawerTitle`.
    */
   readonly isResponsive?: boolean;
 }): React.JSX.Element {
@@ -221,8 +228,64 @@ function DropdownMenuTrigger({
   );
 }
 
+type DropdownMenuViewState = {
+  readonly stack: ViewStack<string>;
+  /** Where sub-views render: inside the menu, after its own items, so they share one focus scope. */
+  readonly host: HTMLElement | undefined;
+  /** What the root view is called, for the Back row's accessible name. */
+  readonly rootTitle: string;
+};
+
+const DropdownMenuViewContext = React.createContext<DropdownMenuViewState | undefined>(undefined);
+
 /**
- * Renders the positioned dropdown-menu surface.
+ * The menu's view stack: the caller's items as the root view, hidden while a sub-view is open, and the host the
+ * sub-views render into.
+ */
+function DropdownMenuViews({
+  stack,
+  rootTitle,
+  children,
+}: {
+  readonly stack: ViewStack<string>;
+  readonly rootTitle: string;
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  const [host, setHost] = React.useState<HTMLElement | undefined>(undefined);
+  const views = React.useMemo(() => ({ stack, host, rootTitle }), [stack, host, rootTitle]);
+  return (
+    <DropdownMenuViewContext.Provider value={views}>
+      <div
+        data-slot='dropdown-menu-root-view'
+        hidden={stack.depth > 0}
+        className={stack.depth > 0 ? undefined : 'contents'}
+      >
+        {children}
+      </div>
+      <div
+        ref={(node) => {
+          setHost(node ?? undefined);
+        }}
+        data-slot='dropdown-menu-view-host'
+        className='contents'
+      />
+    </DropdownMenuViewContext.Provider>
+  );
+}
+
+/** Escape steps back one sub-view before it closes the menu. */
+const stepBackOnEscape =
+  (stack: ViewStack<string>, onEscapeKeyDown: ((event: KeyboardEvent) => void) | undefined) =>
+  (event: KeyboardEvent): void => {
+    if (stack.pop()) {
+      event.preventDefault();
+      return;
+    }
+    onEscapeKeyDown?.(event);
+  };
+
+/**
+ * Renders the positioned surface for dropdown-menu items. A submenu inside it opens as a sub-view in the same surface.
  *
  * @public
  * @example <caption>Render dropdown content.</caption>
@@ -240,6 +303,8 @@ function DropdownMenuContent({
   alignOffset,
   onClick,
   drawerTitle = 'Options',
+  children,
+  onEscapeKeyDown,
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content> & {
   /**
@@ -251,15 +316,18 @@ function DropdownMenuContent({
   const fullscreenElement = useFullscreenElement();
   const surfaceContainer = useResponsiveSurfaceContainer();
   const drawer = React.useContext(DropdownMenuDrawerContext);
+  const stack = useViewStack<string>('root');
   if (drawer) {
     return (
       <DropdownMenuDrawerContent
         title={drawerTitle}
         triggerRef={drawer.triggerRef}
         onCloseAutoFocus={properties.onCloseAutoFocus}
-        onEscapeKeyDown={properties.onEscapeKeyDown}
+        onEscapeKeyDown={stepBackOnEscape(stack, onEscapeKeyDown)}
       >
-        {properties.children}
+        <DropdownMenuViews stack={stack} rootTitle={drawerTitle}>
+          {children}
+        </DropdownMenuViews>
       </DropdownMenuDrawerContent>
     );
   }
@@ -279,6 +347,7 @@ function DropdownMenuContent({
           className,
         )}
         {...properties}
+        onEscapeKeyDown={stepBackOnEscape(stack, onEscapeKeyDown)}
         onClick={(event: React.MouseEvent<HTMLDivElement>) => {
           // Prevent clicks inside portaled dropdown content from bubbling to
           // ancestor DrawerHandle elements, which would cycle snap points via
@@ -286,7 +355,11 @@ function DropdownMenuContent({
           event.stopPropagation();
           onClick?.(event);
         }}
-      />
+      >
+        <DropdownMenuViews stack={stack} rootTitle={drawerTitle}>
+          {children}
+        </DropdownMenuViews>
+      </DropdownMenuPrimitive.Content>
     </DropdownMenuPrimitive.Portal>
   );
 }
@@ -976,7 +1049,7 @@ function DropdownMenuShortcut({ className, ...properties }: React.ComponentProps
 }
 
 /**
- * Owns the open state for a nested dropdown-menu branch.
+ * Owns the open state of a submenu, a sub-view of its menu that replaces the menu's items while open.
  *
  * @public
  * @example <caption>Create a nested menu branch.</caption>
@@ -987,53 +1060,85 @@ function DropdownMenuShortcut({ className, ...properties }: React.ComponentProps
  * createElement(DropdownMenuSub);
  * ```
  */
-function DropdownMenuSub({ ...properties }: React.ComponentProps<typeof DropdownMenuPrimitive.Sub>): React.JSX.Element {
-  const drawer = React.useContext(DropdownMenuDrawerContext);
-  if (drawer) {
-    return <DropdownMenuDrawerSub {...properties} />;
-  }
-  return <DropdownMenuPrimitive.Sub data-slot='dropdown-menu-sub' {...properties} />;
-}
-
-type DropdownMenuDrawerSubState = {
-  readonly isOpen: boolean;
-  readonly setOpen: (open: boolean) => void;
-  readonly contentId: string;
-};
-
-/** A submenu in a drawer: its trigger expands its items in place, under it. */
-const DropdownMenuDrawerSubContext = React.createContext<DropdownMenuDrawerSubState | undefined>(undefined);
-
-function DropdownMenuDrawerSub({
+function DropdownMenuSub({
   open: openProperty,
   defaultOpen = false,
   onOpenChange,
   children,
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Sub>): React.JSX.Element {
-  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
-  const contentId = React.useId();
-  const isOpen = openProperty ?? uncontrolledOpen;
+}: Pick<React.ComponentProps<typeof DropdownMenuPrimitive.Sub>, 'open' | 'defaultOpen' | 'onOpenChange' | 'children'>):
+  | React.JSX.Element
+  | undefined {
+  const views = React.useContext(DropdownMenuViewContext);
+  const parent = React.useContext(DropdownMenuSubContext);
+  const id = React.useId();
+  const [title, setTitle] = React.useState<string | undefined>(undefined);
+  const stack = views?.stack;
+  const isOpen = stack?.views.includes(id) ?? false;
+  const isTop = stack?.view === id;
   const setOpen = React.useCallback(
-    (next: boolean) => {
-      if (openProperty === undefined) {
-        setUncontrolledOpen(next);
+    (next: boolean, origin?: HTMLElement) => {
+      if (!stack) {
+        return;
       }
-      onOpenChange?.(next);
+      if (next && !stack.views.includes(id)) {
+        stack.push(id, { origin });
+      } else if (!next && stack.view === id) {
+        stack.pop();
+      }
     },
-    [openProperty, onOpenChange],
+    [stack, id],
   );
-  const sub = React.useMemo(() => ({ isOpen, setOpen, contentId }), [isOpen, setOpen, contentId]);
-  return (
-    <DropdownMenuDrawerSubContext.Provider value={sub}>
-      <div data-slot='dropdown-menu-sub' className='flex flex-col'>
-        {children}
-      </div>
-    </DropdownMenuDrawerSubContext.Provider>
+  /* Every move reports, whichever way it came: the trigger, the Back row, Escape or the caller's value. */
+  const wasOpen = React.useRef(isOpen);
+  React.useEffect(() => {
+    if (wasOpen.current !== isOpen) {
+      wasOpen.current = isOpen;
+      onOpenChange?.(isOpen);
+    }
+  }, [isOpen, onOpenChange]);
+  const wantsOpen = openProperty ?? (defaultOpen ? true : undefined);
+  React.useEffect(() => {
+    if (wantsOpen !== undefined && wantsOpen !== isOpen) {
+      setOpen(wantsOpen);
+    }
+    // Only a change of the caller's value moves the stack; the stack's own moves report through onOpenChange.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- see above
+  }, [wantsOpen]);
+  const sub = React.useMemo(
+    () => ({ id, isOpen, isTop, title, setTitle, setOpen, parentTitle: parent?.title }),
+    [id, isOpen, isTop, title, setOpen, parent?.title],
   );
+  return <DropdownMenuSubContext.Provider value={sub}>{children}</DropdownMenuSubContext.Provider>;
 }
 
+type DropdownMenuSubState = {
+  readonly id: string;
+  /** The sub-view is on the stack, at the top or under a deeper one. */
+  readonly isOpen: boolean;
+  /** The sub-view is the one shown. */
+  readonly isTop: boolean;
+  /** The sub-view's title, from its trigger: the Back row shows it. */
+  readonly title: string | undefined;
+  readonly setTitle: (title: string | undefined) => void;
+  readonly setOpen: (open: boolean, origin?: HTMLElement) => void;
+  /** The title of the sub-view this one opens from, if any. */
+  readonly parentTitle: string | undefined;
+};
+
 /**
- * Opens a nested dropdown menu when highlighted or activated.
+ * A submenu is a sub-view of its menu (UX policy §7): its trigger replaces the menu's items with its own and a Back
+ * row, in one focus scope, on pointer and touch alike. Right-click context menus keep flyouts.
+ */
+const DropdownMenuSubContext = React.createContext<DropdownMenuSubState | undefined>(undefined);
+
+/**
+ * The text a trigger names its sub-view with: its `textValue`, else its first text, else its whole text.
+ */
+const triggerTitle = (element: HTMLElement, textValue: string | undefined): string =>
+  textValue ?? (element.querySelector('span') ?? element).textContent.trim();
+
+/**
+ * Opens a submenu's items in place of the menu's, as a sub-view with a Back row.
  *
  * @public
  * @example <caption>Render a nested-menu trigger.</caption>
@@ -1048,23 +1153,27 @@ function DropdownMenuSubTrigger({
   className,
   isInset,
   children,
+  textValue,
   ...properties
-}: React.ComponentProps<typeof DropdownMenuPrimitive.SubTrigger> & {
+}: Omit<React.ComponentProps<typeof DropdownMenuPrimitive.Item>, 'onSelect'> & {
   readonly isInset?: boolean;
 }): React.JSX.Element {
   const drawer = React.useContext(DropdownMenuDrawerContext);
-  const sub = React.useContext(DropdownMenuDrawerSubContext);
+  const sub = React.useContext(DropdownMenuSubContext);
+  const open = (element: HTMLElement): void => {
+    sub?.setTitle(triggerTitle(element, textValue));
+    sub?.setOpen(true, element);
+  };
+  const chevron = <ChevronRightIcon aria-hidden className={menuViewTriggerChevronClass} />;
   if (drawer) {
-    const { onClick, disabled = false, asChild: _asChild, textValue: _textValue, ...row } = properties;
+    const { onClick, disabled = false, asChild: _asChild, ...row } = properties;
     return (
       <button
         type='button'
-        aria-expanded={sub?.isOpen ?? false}
-        aria-controls={sub?.isOpen ? sub.contentId : undefined}
+        aria-haspopup='true'
         data-slot='dropdown-menu-sub-trigger'
         {...drawerRowAttributes}
         data-inset={isInset}
-        data-state={sub?.isOpen ? 'open' : 'closed'}
         data-disabled={disabled ? '' : undefined}
         disabled={disabled}
         className={cn(menuItemVariants({ inset: isInset }), drawerRowClass, className)}
@@ -1072,36 +1181,51 @@ function DropdownMenuSubTrigger({
         onClick={(event) => {
           onClick?.(event as unknown as React.MouseEvent<HTMLDivElement>);
           if (!event.defaultPrevented) {
-            sub?.setOpen(!sub.isOpen);
+            open(event.currentTarget);
           }
         }}
       >
         {children}
-        <ChevronRightIcon
-          aria-hidden
-          className={cn(
-            'ml-auto size-4 transition-transform motion-reduce:transition-none',
-            sub?.isOpen && 'rotate-90',
-          )}
-        />
+        {chevron}
       </button>
     );
   }
   return (
-    <DropdownMenuPrimitive.SubTrigger
+    <DropdownMenuPrimitive.Item
+      aria-haspopup='true'
       data-slot='dropdown-menu-sub-trigger'
       data-inset={isInset}
-      className={cn(menuItemVariants({ inset: isInset }), menuSubTriggerOpenClass, className)}
+      textValue={textValue}
+      className={cn(menuItemVariants({ inset: isInset }), className)}
       {...properties}
+      onSelect={(event) => {
+        // Opening a sub-view keeps the menu open.
+        event.preventDefault();
+        if (event.currentTarget instanceof HTMLElement) {
+          open(event.currentTarget);
+        }
+      }}
     >
       {children}
-      <ChevronRightIcon className='ml-auto size-3.5' />
-    </DropdownMenuPrimitive.SubTrigger>
+      {chevron}
+    </DropdownMenuPrimitive.Item>
   );
 }
 
+/** Focus a new sub-view's checked row, else its first row after Back. */
+const focusFirstRow = (view: HTMLElement | undefined): void => {
+  const rows = [
+    ...(view?.querySelectorAll<HTMLElement>(
+      ':is([role^=menuitem], button, a[href]):not([data-slot=dropdown-menu-view-back], :disabled, [data-disabled])',
+    ) ?? []),
+  ].filter((row) => row.closest('[data-slot=dropdown-menu-sub-content]') === view);
+  const row = rows.find((candidate) => candidate.dataset['state'] === 'checked') ?? rows[0];
+  row?.focus({ preventScroll: true });
+};
+
 /**
- * Renders the positioned surface for a nested dropdown menu.
+ * A submenu's items as a sub-view: while open they replace the menu's items, under a Back row naming the sub-view.
+ * Escape and the Back row step back to the row that opened it.
  *
  * @public
  * @example <caption>Render nested menu content.</caption>
@@ -1114,37 +1238,72 @@ function DropdownMenuSubTrigger({
  */
 function DropdownMenuSubContent({
   className,
-  alignOffset = subMenuSideAlignOffset,
-  ...properties
-}: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>): React.JSX.Element | undefined {
+  children,
+  title: titleProperty,
+}: {
+  readonly className?: string;
+  readonly children?: React.ReactNode;
+  /** The Back row's title; defaults to the trigger's text. */
+  readonly title?: string;
+}): React.JSX.Element | undefined {
   const drawer = React.useContext(DropdownMenuDrawerContext);
-  const sub = React.useContext(DropdownMenuDrawerSubContext);
-  if (drawer) {
-    if (!sub?.isOpen) {
-      return undefined;
+  const views = React.useContext(DropdownMenuViewContext);
+  const sub = React.useContext(DropdownMenuSubContext);
+  const viewRef = React.useRef<HTMLDivElement>(null);
+  const isTop = sub?.isTop ?? false;
+  const direction = views?.stack.direction ?? 'none';
+  React.useEffect(() => {
+    if (isTop && direction === 'forward') {
+      focusFirstRow(viewRef.current ?? undefined);
     }
-    return (
-      <div
-        id={sub.contentId}
-        role='group'
-        data-slot='dropdown-menu-sub-content'
-        className={cn('flex flex-col pl-4', className)}
-      >
-        {properties.children}
-      </div>
-    );
+  }, [isTop, direction]);
+  if (!sub?.isOpen || !views?.host) {
+    return undefined;
   }
-  return (
-    <DropdownMenuPrimitive.SubContent
+  const title = titleProperty ?? sub.title ?? '';
+  const parentLabel = sub.parentTitle ?? views.rootTitle;
+  const back = (): void => {
+    sub.setOpen(false);
+  };
+  const backRow = drawer ? (
+    <button
+      type='button'
+      data-slot='dropdown-menu-view-back'
+      aria-label={`Back to ${parentLabel}`}
+      {...drawerRowAttributes}
+      className={cn(viewStackBackRowClass, drawerRowClass)}
+      onClick={back}
+    >
+      <ViewStackBackContent title={title} />
+    </button>
+  ) : (
+    <DropdownMenuPrimitive.Item
+      data-slot='dropdown-menu-view-back'
+      aria-label={`Back to ${parentLabel}`}
+      textValue={title}
+      className={viewStackBackRowClass}
+      onSelect={(event) => {
+        event.preventDefault();
+        back();
+      }}
+    >
+      <ViewStackBackContent title={title} />
+    </DropdownMenuPrimitive.Item>
+  );
+  return createPortal(
+    <div
+      ref={viewRef}
+      role='group'
+      aria-label={title}
       data-slot='dropdown-menu-sub-content'
-      alignOffset={alignOffset}
-      className={cn(
-        menuContentVariants(),
-        'shadow-lg origin-(--radix-dropdown-menu-content-transform-origin)',
-        className,
-      )}
-      {...properties}
-    />
+      hidden={!isTop}
+      className={cn('flex flex-col gap-0.5', isTop && viewStackEnterClass(direction), className)}
+    >
+      {backRow}
+      <DropdownMenuSeparator />
+      {children}
+    </div>,
+    views.host,
   );
 }
 

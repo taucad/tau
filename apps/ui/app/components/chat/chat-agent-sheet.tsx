@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Copy, Plus, Zap } from 'lucide-react';
+import { Bot, Check, ChevronDown, ChevronRight, CircleAlert, Copy, Plus, Zap } from 'lucide-react';
 import type { AcpAgentExecution, TauAgentHostId } from '@taucad/chat';
 import { reasoningLevels } from '@taucad/chat/constants';
 import type { ReasoningLevel } from '@taucad/chat/constants';
@@ -41,7 +41,8 @@ import {
   DrawerTrigger,
   useIsInsideDrawer,
 } from '@taucad/ui/components/drawer';
-import { menuItemVariants } from '@taucad/ui/components/menu.variants';
+import { menuItemVariants, menuViewBackClass } from '@taucad/ui/components/menu.variants';
+import { stepBackOnEmptySearch, ViewStackBackContent, viewStackEnterClass } from '@taucad/ui/components/view-stack';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { SwitchRow } from '@taucad/ui/components/switch';
 import { Tabs, TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
@@ -618,7 +619,7 @@ function EffortList({
       data-slot='effort-list'
       className='min-h-0 flex-1 bg-transparent outline-hidden'
       defaultValue={model.level?.id}
-      onKeyDown={backOnEmpty('', onBack)}
+      onKeyDown={stepBackOnEmptySearch('', onBack)}
     >
       <CommandList className='max-h-none min-h-0 flex-1'>
         <CommandGroup>
@@ -939,16 +940,6 @@ function ModelRow({
   );
 }
 
-/** Backspace in an empty search goes back one step; Escape does too, via the sheet's `onEscapeKeyDown`. */
-const backOnEmpty =
-  (query: string, onBack: () => void) =>
-  (event: React.KeyboardEvent): void => {
-    if (event.key === 'Backspace' && query === '') {
-      event.preventDefault();
-      onBack();
-    }
-  };
-
 /**
  * One agent's models: Tau's catalog by tier, or an external agent's own list.
  * Choosing one on an agent the chat isn't on moves the chat to that agent at
@@ -1010,7 +1001,7 @@ function ModelList({
       }
       return;
     }
-    backOnEmpty(query, onBack)(event);
+    stepBackOnEmptySearch(query, onBack)(event);
   };
   const selectedAcpModel = execution.kind === 'acp' ? execution.model : undefined;
   const inUseValue =
@@ -1203,7 +1194,7 @@ function AgentList({
       data-slot='agent-list'
       className='min-h-0 flex-1 bg-transparent'
       defaultValue={current.key}
-      onKeyDown={backOnEmpty(query, onBack)}
+      onKeyDown={stepBackOnEmptySearch(query, onBack)}
     >
       <CommandInput autoFocus={autoFocusSearch} placeholder='Search agents…' value={query} onValueChange={setQuery} />
       <CommandList className='max-h-none min-h-0 flex-1'>
@@ -1334,10 +1325,7 @@ function Sheet({
         <div
           data-slot='sheet-settings'
           /* Opening is instant; only a return from a sub-view slides. */
-          className={cn(
-            'flex flex-col',
-            hasNavigated && 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2',
-          )}
+          className={cn('flex flex-col', hasNavigated && viewStackEnterClass('back'))}
         >
           {/* The Agent and Model rows are as tall as a list row: label left, value right. */}
           <div className='flex flex-col gap-0.5 p-1'>
@@ -1430,26 +1418,27 @@ function Sheet({
         <div
           data-slot={`sheet-${view}`}
           /* Both lists are as tall as their rows, up to the cap, then scroll. */
-          className='flex max-h-[min(25rem,70vh)] flex-col motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-2'
+          className={cn('flex max-h-[min(25rem,70vh)] flex-col', viewStackEnterClass('forward'))}
         >
           {/* A full-width back row as tall as the list rows below it. */}
           <div className='flex shrink-0 border-b p-1'>
             <button
               type='button'
               aria-label={view === 'models' && isFromAgents ? 'Back to agents' : 'Back to settings'}
-              className={cn(rowClass, 'w-full gap-2 text-muted-foreground')}
+              className={cn(rowClass, menuViewBackClass)}
               onClick={back}
             >
-              <ChevronLeft aria-hidden='true' className='size-4 shrink-0' />
-              <span className='truncate'>
-                {view === 'models' && isFromAgents
-                  ? 'Agents'
-                  : view === 'effort'
-                    ? 'Effort'
-                    : view === 'options'
-                      ? 'Settings'
-                      : sheetModel.name}
-              </span>
+              <ViewStackBackContent
+                title={
+                  view === 'models' && isFromAgents
+                    ? 'Agents'
+                    : view === 'effort'
+                      ? 'Effort'
+                      : view === 'options'
+                        ? 'Settings'
+                        : sheetModel.name
+                }
+              />
             </button>
           </div>
           {view === 'options' ? (

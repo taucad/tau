@@ -302,19 +302,22 @@ const record = async (
 
 /**
  * The store's own generated files: a checkout is clean only against a tree that
- * carries them, as every real revision does.
+ * carries them, as every real revision does. Opening writes no attributes file
+ * (A4), so a device holds only the ones it has.
  *
  * @param device_ - The device whose files hold them.
- * @returns Each generated path and its text.
+ * @returns Each generated path the device holds, and its text.
  */
-const generatedFilesOf = async (device_: Device): Promise<Record<string, string>> =>
-  Object.fromEntries(
-    await Promise.all(
-      [generatedGitattributesPath, generatedIgnorePath].map(
-        async (path) => [path, new TextDecoder().decode(await device_.filesystem.readFile(path))] as const,
-      ),
+const generatedFilesOf = async (device_: Device): Promise<Record<string, string>> => {
+  const held = await Promise.all(
+    [generatedGitattributesPath, generatedIgnorePath].map(async (path) =>
+      (await device_.filesystem.exists(path))
+        ? [[path, new TextDecoder().decode(await device_.filesystem.readFile(path))] as const]
+        : [],
     ),
   );
+  return Object.fromEntries(held.flat());
+};
 
 const queueOf = async (device_: Device): Promise<SyncQueueRecord> => {
   const stored = await readFile(join(device_.root, syncQueuePath), 'utf8');

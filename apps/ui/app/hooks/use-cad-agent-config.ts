@@ -4,6 +4,9 @@ import type { ChatMode } from '@taucad/chat/constants';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { useCookie } from '#hooks/use-cookie.js';
+import { useFeature } from '#flags/use-feature.js';
+import { usePersonRecord } from '#preferences/use-person-record.js';
+import { personFieldFromProfile } from '@taucad/preferences';
 import { useChatSnapshot } from '#hooks/use-chat-snapshot.js';
 import { useContextPayload } from '#hooks/use-context-payload.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
@@ -332,6 +335,24 @@ export const useAgentHostPlacements = (): {
 };
 
 /**
+ * What Tau's own agent is told about the person this turn: the setup answers' `person` field, only while the
+ * onboarding surface is on, the "Use my setup answers" switch is on (it is by default) and the answers say something.
+ * An external agent's turn never carries one.
+ *
+ * @param executionKind - Who runs the turn.
+ * @returns The field, or `undefined`.
+ */
+const usePersonField = (executionKind: CadAgentConfigInput['execution']['kind']): CadAgentConfigInput['person'] => {
+  const isOnboardingEnabled = useFeature('onboarding');
+  const [isPersonShared] = useCookie(cookieName.chatCtxPerson, true);
+  const { profile } = usePersonRecord();
+  if (!isOnboardingEnabled || !isPersonShared || executionKind !== 'tau') {
+    return undefined;
+  }
+  return personFieldFromProfile(profile) satisfies CadAgentConfigInput['person'];
+};
+
+/**
  * Assemble the per-request CAD agent config from the producer hooks that own
  * each individual field.
  *
@@ -364,6 +385,7 @@ export const useCadAgentConfig = (): CadAgentConfigInput => {
   const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
   const snapshot = useChatSnapshot(preference);
   const contextPayload = useContextPayload();
+  const person = usePersonField(execution.kind);
 
   return {
     profile: 'cad',
@@ -374,5 +396,6 @@ export const useCadAgentConfig = (): CadAgentConfigInput => {
     testingEnabled,
     snapshot,
     contextPayload,
+    ...(person === undefined ? {} : { person }),
   };
 };

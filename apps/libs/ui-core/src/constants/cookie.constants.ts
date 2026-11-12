@@ -61,6 +61,10 @@ export const cookieName = {
   // Whether to include open files in chat context.
   // oxlint-disable-next-line unicorn-js/prevent-abbreviations -- ctx is conventional for context
   chatCtxOpen: 'chat-ctx-open',
+  // Whether Tau's own agent is told what the person makes and the code they read (Settings → Agents → "Use my setup
+  // answers"). Device-only and on by default; never server-visible.
+  // oxlint-disable-next-line unicorn-js/prevent-abbreviations -- ctx is conventional for context
+  chatCtxPerson: 'chat-ctx-person',
 
   /* Chat Tools */
   // Whether GeoSpec testing tools are enabled.

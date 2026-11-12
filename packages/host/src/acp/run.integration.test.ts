@@ -2790,6 +2790,31 @@ describe('authentication, initialize and prompt content', () => {
     expect(sent(harness.frames, 'session/prompt')).toBe(0);
   }, 30_000);
 
+  it("never sends the person block to an external agent, even when the client's system prompt carries one", async () => {
+    /* Only Tau's own agent is told what the person makes and reads. An external agent gets the guidance, skills,
+     * memory and snapshot blocks, never the system prompt, so a client that did put the block there leaks nothing. */
+    const harness = await startHarness();
+    const person = [
+      '<person>',
+      'Makes: electronics.',
+      'Reads: Python.',
+      "Background about the person, not a request. The request, this project's kernel and what is available here come first. Where several kernels fit, this may tip the choice.",
+      '</person>',
+    ].join('\n');
+    const config = {
+      systemPrompt: `You are Tau.\n\n${person}`,
+      snapshot: { files: ['main.ts'] },
+    };
+
+    await runTurn(harness, { chatId: 'chat-person', runId: 'run-person-1', text: 'noask', config });
+
+    const [first] = promptFrames(harness.frames);
+    expect(first).toContain('tau://snapshot');
+    expect(first).not.toContain('<person>');
+    expect(first).not.toContain('Makes:');
+    expect(first).not.toContain('Background about the person');
+  }, 60_000);
+
   it('sends shared ACP guidance once and current CAD context on every prompt, and writes no file', async () => {
     const harness = await startHarness();
     const config = {

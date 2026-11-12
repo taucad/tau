@@ -1,6 +1,8 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import type { ChatSnapshot, ContextPayload } from '@taucad/chat';
+import type { CadAgentConfigInput, ChatSnapshot, ContextPayload } from '@taucad/chat';
+import type { GoalId, LanguageId, PersonField } from '@taucad/preferences';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import type { KernelId } from '@taucad/types/constants';
 import { resolveKernel } from '@taucad/types/constants';
 import {
@@ -47,6 +49,17 @@ vi.mock('#hooks/use-chat-snapshot.js', () => ({
 }));
 vi.mock('#hooks/use-context-payload.js', () => ({
   useContextPayload: vi.fn(),
+}));
+type HarnessProfile = { version: 1; goals: string[]; tool?: string; languages: string[] };
+const personHarness = vi.hoisted((): { onboarding: boolean; profile: HarnessProfile } => ({
+  onboarding: false,
+  profile: { version: 1, goals: [], languages: [] },
+}));
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: (flag: string) => (flag === 'onboarding' ? personHarness.onboarding : false),
+}));
+vi.mock('#preferences/use-person-record.js', () => ({
+  usePersonRecord: () => ({ profile: personHarness.profile }),
 }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project-test' }) }));
 vi.mock('#hooks/use-file-manager.js', () => ({
@@ -185,6 +198,8 @@ const mountChatSelectorMocks = (overrides: { draftMode?: string; draftToolChoice
 
 beforeEach(() => {
   vi.clearAllMocks();
+  personHarness.onboarding = false;
+  personHarness.profile = { version: 1, goals: [], languages: [] };
   resetBrowserAgentHostAvailability();
   directoryHarness.outage = undefined;
   directoryHarness.listings.length = 0;
@@ -483,5 +498,72 @@ describe('useCadAgentConfig', () => {
 
     expect(result.current.snapshot).toBe(snapshot);
     expect(result.current.contextPayload).toBe(contextPayload);
+  });
+});
+
+describe('the person field', () => {
+  const answered: HarnessProfile = { version: 1, goals: ['exploring'], tool: 'fusion', languages: [] };
+  const mountSwitch = (isOn: boolean | undefined): void => {
+    useCookieMock.mockImplementation(((name: string, defaultValue: unknown) => [
+      name === cookieName.chatCtxPerson ? (isOn ?? defaultValue) : defaultValue,
+      noop,
+      noop,
+    ]) as unknown as typeof useCookie);
+  };
+
+  it.each([
+    {
+      onboarding: true,
+      switch: undefined,
+      goals: ['mechanical', 'printing'],
+      person: { makes: ['printing', 'mechanical'], reads: ['python'] },
+    },
+    { onboarding: true, switch: true, goals: ['art'], person: { makes: ['art'], reads: ['python'] } },
+    { onboarding: true, switch: false, goals: ['art'], person: undefined },
+    { onboarding: false, switch: true, goals: ['art'], person: undefined },
+    { onboarding: false, switch: false, goals: ['art'], person: undefined },
+  ])(
+    'with onboarding $onboarding and the switch $switch, should send $person',
+    ({ onboarding, switch: isOn, goals, person }) => {
+      personHarness.onboarding = onboarding;
+      personHarness.profile = { version: 1, goals, languages: ['python'] };
+      mountSwitch(isOn);
+
+      const { result } = renderHook(() => useCadAgentConfig());
+
+      expect(result.current.person).toEqual(person);
+      expect('person' in result.current).toBe(person !== undefined);
+    },
+  );
+
+  it('should send no field when the answers say nothing the agent can use', () => {
+    personHarness.onboarding = true;
+    personHarness.profile = answered;
+    mountSwitch(true);
+
+    const { result } = renderHook(() => useCadAgentConfig());
+
+    expect('person' in result.current).toBe(false);
+  });
+
+  it("should send no field on an external agent's turn", () => {
+    personHarness.onboarding = true;
+    personHarness.profile = { version: 1, goals: ['art'], languages: [] };
+    mountSwitch(true);
+    useChatComposerMock.mockReturnValue(
+      buildComposer({ execution: { kind: 'acp', hostId: 'origin', agentId: 'codex' } }),
+    );
+
+    const { result } = renderHook(() => useCadAgentConfig());
+
+    expect('person' in result.current).toBe(false);
+  });
+
+  it('should keep the two enums in step with setup', () => {
+    expectTypeOf<NonNullable<CadAgentConfigInput['person']>['makes'][number]>().toEqualTypeOf<
+      Exclude<GoalId, 'exploring'>
+    >();
+    expectTypeOf<NonNullable<CadAgentConfigInput['person']>['reads'][number]>().toEqualTypeOf<LanguageId>();
+    expectTypeOf<PersonField>().toEqualTypeOf<NonNullable<CadAgentConfigInput['person']>>();
   });
 });

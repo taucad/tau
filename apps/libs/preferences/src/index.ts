@@ -14,6 +14,8 @@ export {
   tourStepIds,
 } from '#onboarding-state.js';
 export type { OnboardingDelta, OnboardingState, SetupStatus, TourEnding, TourStepId } from '#onboarding-state.js';
+export { personFieldFromProfile } from '#person-field.js';
+export type { PersonField } from '#person-field.js';
 export { emptyPersonProfile, goalIds, languageIds, personProfileSchema, toolIds } from '#person-profile.js';
 export type { GoalId, LanguageId, PersonProfile, ToolId } from '#person-profile.js';
 export {

@@ -93,6 +93,9 @@ function recordConnectionsForIncarnation(fallback: RecordBridgeOpener, ready: ()
 
 export const fileManagerReadyTimeout = 30_000;
 
+/** Live mounts per rooted connection owner, so Strict Mode's disconnect-then-reconnect does not release it. */
+const rootedConnectionMounts = new WeakMap<RootedContentOwner<RootedBridgeConsumer>, number>();
+
 function createErrorAwareWaitPredicate(
   predicate: (state: FileManagerSnapshot) => boolean,
 ): (state: FileManagerSnapshot) => boolean {
@@ -1028,12 +1031,19 @@ function FileManagerProviderCore({
     [bridgeOpener, connectionsForIncarnation],
   );
 
-  useLayoutEffect(
-    () => () => {
-      rootedConnections.dispose();
-    },
-    [rootedConnections],
-  );
+  useLayoutEffect(() => {
+    rootedConnectionMounts.set(rootedConnections, (rootedConnectionMounts.get(rootedConnections) ?? 0) + 1);
+    return () => {
+      rootedConnectionMounts.set(rootedConnections, (rootedConnectionMounts.get(rootedConnections) ?? 1) - 1);
+      // Strict Mode reconnects within the same commit; only an owner that stays released is disposed, so a read a
+      // store started on the first mount is not aborted by the replayed cleanup.
+      queueMicrotask(() => {
+        if (rootedConnectionMounts.get(rootedConnections) === 0) {
+          rootedConnections.dispose();
+        }
+      });
+    };
+  }, [rootedConnections]);
 
   /*
    * The trusted stores' working copy, handed out one narrowed slice at a time

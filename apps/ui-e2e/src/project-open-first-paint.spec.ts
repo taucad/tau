@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import { treeItem } from '#support/file-tree.js';
 
 /**
  * What a person sees while a project opens (editor loading splash removal
@@ -93,11 +94,18 @@ test('opens a project without a page-wide editor splash, a blank workspace, or C
 
   await target.fill(selectors.getByCss('input#project-name'), 'First paint');
   await target.click(selectors.getByRole('button', { name: /Create Project/u }));
-  /* A new project's workbench opens on its launcher; bring the source forward so
-   * the reload below restores a code pane. */
-  const sourceTab = selectors.getByRole('tab', { name: 'main.scad', exact: true }).last();
-  await target.expectVisible(sourceTab, 60_000);
-  await target.click(sourceTab);
+  /* A new project's workbench opens on Parameters beside a New tab, with no file
+   * open (#1386). Open the source from the Files pane so the reload below
+   * restores a code pane. */
+  await target.expectVisible(selectors.getByRole('tab', { name: 'Parameters', exact: true }), 60_000);
+  await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
+  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
+  await target.fill(commandSearch, 'Open files');
+  await target.click(selectors.getByText('Open files', { exact: true }));
+  const sourceEntry = treeItem('main.scad');
+  await target.expectVisible(sourceEntry, 60_000);
+  await target.click(sourceEntry);
+  await target.expectVisible(selectors.getByRole('tab', { name: 'main.scad', exact: true }).last(), 60_000);
   await target.expectVisible(editorLines, 60_000);
   await expect
     .poll(async () => target.evaluate(() => document.querySelector('[role="tab"][aria-selected="true"]') !== null))

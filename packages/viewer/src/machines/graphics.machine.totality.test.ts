@@ -355,6 +355,23 @@ describe('graphics machine totality baseline', () => {
     expect(unansweredEvents(machine, { ...options, ignore: graphicsIgnoredEvents })).toEqual([]);
   });
 
+  it('should claim F and G in every reachable state, which the blanket shortcut pair cannot check', () => {
+    const alwaysClaimed = (['fitView', 'grid'] as const).map(
+      (shortcut): GraphicsEvent => ({
+        type: 'viewerShortcutPressed',
+        shortcut,
+        pressId: 'bar:always',
+        camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+      }),
+    );
+    const unclaimed = getShortestPaths(machine, options).flatMap(({ state: snapshot }) =>
+      alwaysClaimed
+        .filter((event) => !snapshot.can(event))
+        .map((event) => `${dotted(snapshot.value)}: ${(event as { shortcut: string }).shortcut}`),
+    );
+    expect(unclaimed).toEqual([]);
+  });
+
   it('should declare no baseline pair that the machine now answers', () => {
     const gaps: UnansweredEvent[] = unansweredEvents(machine, options);
     const stale = graphicsIgnoredEvents.filter(

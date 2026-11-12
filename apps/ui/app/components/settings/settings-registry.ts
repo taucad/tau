@@ -190,6 +190,12 @@ const settingsCatalog = [
         keywords: ['analytics', 'usage', 'events', 'tracking', 'opt out', 'privacy'],
       },
       {
+        id: 'hide-my-name',
+        label: 'Hide my name in history',
+        description: 'Other members see “Anonymous” on what you save',
+        keywords: ['anonymous', 'history', 'name', 'privacy', 'author', 'pseudonym'],
+      },
+      {
         id: 'cookie-preferences',
         label: 'Cookie preferences',
         description: 'Choose whether Tau uses optional analytics',

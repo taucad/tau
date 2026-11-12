@@ -655,12 +655,18 @@ export const revisionAccessibleName = (where: RevisionWhere, sentence: string): 
 };
 
 /** The strip's verbs, in the words the palette and the rows use. @public */
-export type StripVerb = 'Save' | 'Undo restore' | 'Undo' | 'Back up' | 'Sync now' | 'Sign in' | 'Upgrade';
+export type StripVerb = 'Discard' | 'Save' | 'Undo restore' | 'Undo' | 'Try again' | 'Sign in' | 'Upgrade';
+
+/** The header's sentence while the agent's turn holds these files (C2). @public */
+export const agentWorkingSentence = 'Agent is working · saves when it finishes';
 
 /**
- * The strip's verbs for this state: at most one primary, and the decisions and
- * recoveries that stay visible beside it. A conflict names no strip verb: its
- * card sits directly below the strip.
+ * The header's verbs for this state: at most two, one of them primary (C2).
+ * A conflict names no verb: its card sits directly below the header. Backing
+ * up is the backup line's, and sync is continuous, so neither *Back up* nor
+ * *Sync now* is a header verb; a save that was not confirmed offers *Try
+ * again*, which saves the files again. Unsaved changes offer *Discard* beside *Save*: it acts at once and
+ * can be undone.
  *
  * @param input - The projection, where the checkout is, and what the viewer may do.
  * @returns The primary verb, when one applies, and the secondary verbs.
@@ -697,20 +703,18 @@ export const selectStripVerbs = ({
   if (status === undefined || !canWrite || hasRevisionConflict(status)) {
     return { primary: undefined, secondary: [] };
   }
-  const secondary: StripVerb[] = where.isDirty ? [] : undoable ? ['Undo restore'] : canUndo ? ['Undo'] : [];
-  if (where.isDirty) {
-    return { primary: 'Save', secondary };
+  if (status.attention - status.conflicts.length > 0) {
+    return { primary: 'Try again', secondary: [] };
   }
+  if (where.isDirty) {
+    /* Discard restores the files to the entry they are at, so with no entry there is nothing to go back to. */
+    return { primary: 'Save', secondary: where.head === undefined ? [] : ['Discard'] };
+  }
+  const secondary: StripVerb[] = undoable ? ['Undo restore'] : canUndo ? ['Undo'] : [];
   if (where.head === undefined) {
     return { primary: undefined, secondary };
   }
   const { sync, remote } = status;
-  if (sync.state === 'noRemote') {
-    return { primary: 'Back up', secondary };
-  }
-  if (sync.state === 'queued') {
-    return { primary: 'Sync now', secondary };
-  }
   if (sync.state === 'failed' && asksTauSignIn(sync, remote, where.isSignedOut)) {
     return { primary: 'Sign in', secondary };
   }

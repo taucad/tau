@@ -110,6 +110,12 @@ export type MeasureToolAdapterOptions = Readonly<{
   kinematics: KinematicsRef;
   /** The tool's host functions, as last rendered; unset until the tool has rendered once. */
   host: Readonly<{ current: MeasureToolHost | undefined }>;
+  /**
+   * The pointer adapter that holds Measure's input now, shared by every adapter pair the tool builds. A session
+   * rebuilt around a new surface starts before the one it replaces stops (a `useActorRef` actor stops a microtask
+   * after its unmount), so only the holder gives the input back.
+   */
+  inputOwner: { current: symbol | undefined };
 }>;
 
 /**
@@ -231,6 +237,7 @@ export const createMeasureToolAdapters = ({
   graphics,
   kinematics,
   host,
+  inputOwner,
 }: MeasureToolAdapterOptions): MeasureToolAdapters => {
   /** The pointer adapter's hover queue while it runs. */
   let hovers: ReturnType<typeof createRafCoalescer<MeasurePointerAt>> | undefined;
@@ -355,6 +362,8 @@ export const createMeasureToolAdapters = ({
     let release: PendingRelease | undefined;
     let waiting: DeferredMeasurePress | undefined;
     let isStopped = false;
+    const ownership = Symbol('measure input owner');
+    inputOwner.current = ownership;
     const queue = createRafCoalescer<MeasurePointerAt>((at) => {
       host.current?.snapshot(at, false);
     });
@@ -421,7 +430,7 @@ export const createMeasureToolAdapters = ({
       if (point && (start === undefined || new THREE.Vector3(...start).distanceTo(new THREE.Vector3(...point)) !== 0)) {
         current.commit(snapshot);
       }
-      sendBack({ type: 'pressSettled', generation: press.generation });
+      sendBack({ type: 'pressSettled', at: press.at });
     };
 
     const decide = (decision: 'accepted' | 'cancelled' | 'ignored'): void => {
@@ -651,6 +660,11 @@ export const createMeasureToolAdapters = ({
       hoverAt = undefined;
       waiting = undefined;
       release = undefined;
+      if (inputOwner.current !== ownership) {
+        // A newer pointer adapter took the input over: its hover and readiness are its own.
+        return;
+      }
+      inputOwner.current = undefined;
       host.current?.clearHover();
       if (selectGraphics(graphics).context.measurePreviewDistance !== undefined) {
         graphics.send({ type: 'setMeasurePreviewDistance' });

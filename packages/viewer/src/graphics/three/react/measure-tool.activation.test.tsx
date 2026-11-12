@@ -687,6 +687,47 @@ describe('MeasureTool activation', () => {
     expect(measurementMarks()).toBe(marksAfterLanding);
   });
 
+  it('clears the hover a landed click drew when it placed a start and the pointer left while it waited', async () => {
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+      actor.send({ type: 'setMeasureMode', mode: 'point' });
+    });
+    dispatch('pointerdown', pixelOf(0, -1, 1));
+    dispatch('pointerup', pixelOf(0, -1, 1));
+    dispatch('pointerleave', pixelOf(0, -1, 1));
+
+    await answerWorker();
+
+    expect(actor.getSnapshot().context.currentMeasurementStart).toBeDefined();
+    runFrames();
+    const marksAfterLanding = measurementMarks();
+    // Leaving again clears any hover still drawn; only the start's own marks stay.
+    dispatch('pointerleave', pixelOf(0, -1, 1));
+    runFrames();
+    expect(measurementMarks()).toBe(marksAfterLanding);
+  });
+
+  it('stays ready when the event source is reconnected while Measure is on', async () => {
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+    });
+    expect(actor.getSnapshot().context.isMeasureInputReady).toBe(true);
+    const region = document.createElement('div');
+    region.getBoundingClientRect = canvas.getBoundingClientRect;
+    document.body.append(region);
+    try {
+      await act(async () => {
+        getState().events.disconnect?.();
+        getState().events.connect?.(region);
+        await Promise.resolve();
+      });
+
+      expect(actor.getSnapshot().context.isMeasureInputReady).toBe(true);
+    } finally {
+      region.remove();
+    }
+  });
+
   it('does not bring a hover back after a window blur when the tool rebinds', () => {
     getMeshMeasurementFeatures(model);
     dispatch('pointermove', pixelOf(0, -1, 1));

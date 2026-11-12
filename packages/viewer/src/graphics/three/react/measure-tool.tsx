@@ -366,6 +366,7 @@ export function MeasureTool(): React.JSX.Element {
   const mouseRef = useRef(new THREE.Vector2());
   // The tool's own work, as last rendered, for the measure session's adapters to call.
   const hostRef = useRef<MeasureToolHost | undefined>(undefined);
+  const inputOwnerRef = useRef<symbol | undefined>(undefined);
   const adapters = useMemo(
     () =>
       createMeasureToolAdapters({
@@ -374,6 +375,7 @@ export function MeasureTool(): React.JSX.Element {
         graphics: graphicsActor,
         kinematics: kinematicsRef,
         host: hostRef,
+        inputOwner: inputOwnerRef,
       }),
     [getRootState, graphicsActor, kinematicsRef, pointerTarget],
   );

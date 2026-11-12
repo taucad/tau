@@ -4,7 +4,7 @@
  *
  * ```text
  * measureSession: off ⇄ on
- * context: hover, pressGeneration, deferred, cameraRevision, poseRevision, inputRef
+ * context: hover, pressGeneration, deferred, inputRef
  * ```
  *
  * - **off**: Measure is off. Nothing hovers and no press is taken; a pose change still moves the press generation on.
@@ -101,8 +101,12 @@ export type MeasureSessionEvent =
   | { type: 'hoverSettingsChanged' }
   /** The targets under the press waiting under `generation` are ready, or one of them failed. */
   | { type: 'pressReady'; generation: number }
-  /** The press waiting under `generation` landed (not dropped): hover from where the pointer is now. */
-  | { type: 'pressSettled'; generation: number }
+  /**
+   * A waiting press released at `at` landed (it was current when it did): hover from where the pointer is now. Its
+   * own commit may already have moved the press generation on, so this carries where it was released, not its
+   * generation.
+   */
+  | { type: 'pressSettled'; at: MeasurePointerAt }
   /** The `measureInput` child decided a release. */
   | { type: 'inputDecided'; decision: MeasureInputEmitted['type'] };
 
@@ -119,10 +123,6 @@ export interface MeasureSessionContext {
   pressGeneration: number;
   /** The press waiting on its targets, by the generation it waits under and where it was released. */
   deferred: Readonly<{ generation: number; at: MeasurePointerAt }> | undefined;
-  /** Counts presented camera changes. */
-  cameraRevision: number;
-  /** The kinematic pose revision last reported. */
-  poseRevision: number;
   /** The release decision child. */
   inputRef: MeasureInputRef;
 }
@@ -219,14 +219,10 @@ const pressReady = ({ context, event, children }: TransitionArgs<'pressReady'>, 
 };
 
 const pressSettled = ({ context, event, children }: TransitionArgs<'pressSettled'>, enq: MeasureSessionEnqueue) => {
-  const { deferred } = context;
-  if (deferred?.generation !== event.generation) {
-    return {};
-  }
   if (!context.hover) {
     // The pointer left while the press waited: the snapshot that landed it hovered where it was released.
     command(children, enq, { type: 'hoverCleared' });
-  } else if (!isSamePoint(context.hover, deferred.at)) {
+  } else if (!isSamePoint(context.hover, event.at)) {
     // The pointer moved on while the press waited: hover from where it is now.
     command(children, enq, { type: 'hover', at: context.hover, when: 'frame' });
   }
@@ -239,7 +235,7 @@ const cameraPresented = ({ context, children }: TransitionArgs, enq: MeasureSess
     // The frame that presented the camera is the one the pointer snapshot is taken in.
     command(children, enq, { type: 'hover', at: context.hover, when: 'now' });
   }
-  return { context: { cameraRevision: context.cameraRevision + 1 } };
+  return {};
 };
 
 const cameraDragChanged = ({ context, event }: TransitionArgs<'cameraDragChanged'>, enq: MeasureSessionEnqueue) => {
@@ -263,8 +259,6 @@ const measureSessionMachineDefinition = setup({
     hover: undefined,
     pressGeneration: 0,
     deferred: undefined,
-    cameraRevision: 0,
-    poseRevision: 0,
     inputRef: spawn(actors.input, { id: 'input' }),
   }),
   entry: ({ context }, enq) => {
@@ -284,9 +278,7 @@ const measureSessionMachineDefinition = setup({
     off: {
       on: {
         measureActiveChanged: ({ event }) => (event.active ? { target: 'on' } : {}),
-        poseChanged: ({ context, event }) => ({
-          context: { ...nextGeneration(context), poseRevision: event.revision },
-        }),
+        poseChanged: ({ context }) => ({ context: nextGeneration(context) }),
       },
     },
     on: {
@@ -317,7 +309,7 @@ const measureSessionMachineDefinition = setup({
         cameraDragChanged: (args, enq) => cameraDragChanged(args, enq),
         poseChanged: (args, enq) => {
           rehover(args, enq);
-          return { context: { ...nextGeneration(args.context), poseRevision: args.event.revision } };
+          return { context: nextGeneration(args.context) };
         },
         cutsChanged: (args, enq) => {
           rehover(args, enq);
@@ -339,8 +331,9 @@ const measureSessionMachineDefinition = setup({
 
 /**
  * The `[state, eventType]` pairs {@link measureSessionMachine} leaves unanswered (MC-R17). While Measure is off there
- * is no pointer adapter: it reports no pointer, no waiting press and no decision, and the follower reports cut, start,
- * source and camera changes only while Measure is on.
+ * is no pointer adapter: it reports no pointer, no waiting press and no decision. The follower reports the cuts and
+ * the presented camera only while Measure is on; a start, source, hover-settings or camera-drag change it reports
+ * while Measure is off leaves nothing to drop or hover again.
  *
  * @public
  */

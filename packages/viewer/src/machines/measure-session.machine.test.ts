@@ -60,7 +60,7 @@ const samples: Record<MeasureSessionEvent['type'], readonly MeasureSessionEvent[
   sourceChanged: [{ type: 'sourceChanged' }],
   hoverSettingsChanged: [{ type: 'hoverSettingsChanged' }],
   pressReady: [{ type: 'pressReady', generation: 1 }],
-  pressSettled: [{ type: 'pressSettled', generation: 1 }],
+  pressSettled: [{ type: 'pressSettled', at }],
   inputDecided: [{ type: 'inputDecided', decision: 'ignored' }],
 };
 
@@ -149,11 +149,19 @@ describe('measure session', () => {
     session.actor.send({ type: 'pressReady', generation: 1 });
     expect(session.take()).toEqual([{ type: 'pressLanded', generation: 1 }]);
 
-    // The pointer moved on while it waited: once it lands, hover from where the pointer is now.
+    // The pointer moved on while it waited. Landing placed a start, which the follower reports before the landing
+    // settles: hover from where the pointer is now all the same.
     session.actor.send({ type: 'pointerMoved', at: elsewhere });
     session.take();
-    session.actor.send({ type: 'pressSettled', generation: 1 });
+    session.actor.send({ type: 'startChanged' });
+    session.actor.send({ type: 'pressSettled', at });
     expect(session.take()).toEqual([{ type: 'hover', at: elsewhere, when: 'frame' }]);
+
+    // It left while the press waited: clear the hover the landing drew.
+    session.actor.send({ type: 'pointerLeft' });
+    session.take();
+    session.actor.send({ type: 'pressSettled', at });
+    expect(session.take()).toEqual([{ type: 'hoverCleared' }]);
     session.actor.stop();
   });
 
@@ -201,11 +209,9 @@ describe('measure session', () => {
 
     session.actor.send({ type: 'cameraPresented' });
     expect(session.take()).toEqual([{ type: 'candidatesInvalidated' }, { type: 'hover', at, when: 'now' }]);
-    expect(session.actor.getSnapshot().context.cameraRevision).toBe(1);
 
     session.actor.send({ type: 'poseChanged', revision: 4 });
     expect(session.take()).toEqual([{ type: 'hover', at, when: 'frame' }]);
-    expect(session.actor.getSnapshot().context.poseRevision).toBe(4);
 
     session.actor.send({ type: 'pointerLeft' });
     session.actor.send({ type: 'cameraPresented' });

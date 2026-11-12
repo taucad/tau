@@ -28,6 +28,11 @@ export type ProviderMessageMetadata = {
   readonly model?: string | undefined;
   readonly responseModel?: string | undefined;
   readonly responseId?: string | undefined;
+  /** The reasoning level the reply ran at, when the level is carried in the transcript: the next request replays it. */
+  readonly reasoningLevel?: string | undefined;
+  /** Replayed reasoning blocks the provider reports it left out because their prefix changed. Tau's replay rule leaves
+   * such a block out first, so a positive count is a prefix change the rule did not see. */
+  readonly reasoningDroppedByProvider?: number | undefined;
   /** Provider-declared message phase. Missing or unrecognized values are not progress. */
   readonly phase?: string | undefined;
   /** Latest provider-declared reasoning summary, preserved separately from the full thought. */
@@ -500,6 +505,18 @@ export type ModelReasoningConfig = {
   readonly summary?: 'auto' | 'concise' | 'detailed' | undefined;
   readonly display?: 'summarized' | 'omitted' | undefined;
   readonly budgetTokens?: number | undefined;
+  /**
+   * The provider reads this model's effort from the transcript. Tau then appends the level as a turn of its own and
+   * holds the request field still, so an effort change keeps the provider's prompt cache. A catalog fact per model;
+   * absent, the effort rides the request field.
+   */
+  readonly effortInTranscript?: boolean | undefined;
+  /**
+   * What the provider does with a replayed reasoning block whose prefix changed since it was minted: `drop` leaves
+   * it out and reports it, `refuse` fails the request. Set only for a model whose provider takes the control;
+   * absent, nothing is sent and the provider's own default applies.
+   */
+  readonly replayBinding?: 'drop' | 'refuse' | undefined;
 };
 
 /** Model selection committed with one admission so takeover can resume it exactly. @public */

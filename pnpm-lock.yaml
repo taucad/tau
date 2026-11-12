@@ -1000,7 +1000,7 @@ pnpmfileChecksum: sha256-3KVaUDCxMNG4R+5jAV/A5zGLniaPPaZ1zCo/RcrdYwE=
 patchedDependencies:
   '@agentclientprotocol/codex-acp@1.7.0': 81707add1aafae996e70a965ff8732c8d940b19ab5c509d32c0dd67b1f86fd8f
   '@anthropic-ai/sandbox-runtime@0.0.75': 9c022eecadd2d5415a264964fd46fa04d44009ef10a5a13f2f3118c9bd8867d9
-  '@aurigax-ai/ghostty-web@0.3.6': 7f502fd3dea0c8cc0437d7b89a4ed19551eecae33f9a1535eff73c72857e3f93
+  '@aurigax-ai/ghostty-web@0.3.6': 1bbab4e853a356ff5fb48df64fd5321bc0bab76a59d0d77179a5b925cc0a87b9
   '@kittycad/lib@2.0.48': 8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9
   n8ao@1.10.2: 7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887
   react-router@7.18.2: 273b1007189eee3007a17799b583101a4fb303786d75f617016b232876c63166
@@ -4081,7 +4081,7 @@ importers:
     dependencies:
       '@aurigax-ai/ghostty-web':
         specifier: 'catalog:'
-        version: 0.3.6(patch_hash=7f502fd3dea0c8cc0437d7b89a4ed19551eecae33f9a1535eff73c72857e3f93)
+        version: 0.3.6(patch_hash=1bbab4e853a356ff5fb48df64fd5321bc0bab76a59d0d77179a5b925cc0a87b9)
       '@better-auth-ui/core':
         specifier: 'catalog:'
         version: 1.7.29(fc5e7903e0d65ced54aebcca1d18894c)
@@ -27764,7 +27764,7 @@ snapshots:
       '@csstools/css-tokenizer': 3.0.4
       lru-cache: 10.4.3
 
-  '@aurigax-ai/ghostty-web@0.3.6(patch_hash=7f502fd3dea0c8cc0437d7b89a4ed19551eecae33f9a1535eff73c72857e3f93)': {}
+  '@aurigax-ai/ghostty-web@0.3.6(patch_hash=1bbab4e853a356ff5fb48df64fd5321bc0bab76a59d0d77179a5b925cc0a87b9)': {}
 
   '@aws-sdk/checksums@3.1001.3':
     dependencies:

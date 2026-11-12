@@ -210,16 +210,28 @@ export const authoredFields = (patch: EntriesPatch): Record<string, EntryFields>
 const surelyAuthoredFields = (patch: EntriesPatch): Record<string, EntryFields> => {
   let fields: Record<string, EntryFields> = {};
   for (const step of patch) {
-    for (const change of step.moves) {
-      if (change.type === 'rename') {
-        const { newPath } = change;
-        fields = Object.fromEntries(Object.entries(fields).filter(([path]) => !matchesPath(path, newPath)));
-      }
-      fields = moveKey(fields, change);
-    }
-    fields = combineFieldMaps(fields, step.fields);
+    fields = combineFieldMaps(replacingMoves(fields, step.moves), step.fields);
   }
   return fields;
+};
+
+/**
+ * Keyed values with their keys moved by path changes, where a rename also replaces whatever was keyed under its new
+ * path, as it replaces the entry there; a deleted key is dropped.
+ */
+export const replacingMoves = <V>(
+  values: Readonly<Record<string, V>>,
+  moves: readonly EntryPathChange[],
+): Record<string, V> => {
+  let moved = { ...values };
+  for (const change of moves) {
+    if (change.type === 'rename') {
+      const { newPath } = change;
+      moved = Object.fromEntries(Object.entries(moved).filter(([path]) => !matchesPath(path, newPath)));
+    }
+    moved = moveKey(moved, change);
+  }
+  return moved;
 };
 
 /** The most marks of writes found landed a patch keeps, and the most others: as many as the writer keeps lost writes. */
@@ -427,8 +439,11 @@ const writeError = (record: WorkbenchEntries): string | undefined => {
   }
 };
 
-/** Told the paths whose fields a merge left out because the file it met could not take them all, and why. */
-export type DroppedFields = (paths: readonly string[], message: string) => void;
+/**
+ * Told, on every merge, the paths whose fields it left out because the file it met could not take them all, the paths
+ * whose fields it carried, and why. A later merge of the same change can carry what an earlier one left out.
+ */
+export type DroppedFields = (left: readonly string[], carried: readonly string[], message: string) => void;
 
 /**
  * A merge that cannot be written, made writable by leaving out the person's fields path by path, latest first: the
@@ -450,19 +465,39 @@ const fitted = ({
   onDropped: DroppedFields | undefined;
 }>): WorkbenchEntries => {
   const movedOnly = applied(base.entries, patch, { landed, fields: false });
-  const paths: string[] = [];
-  let entries = { ...merged.entries };
-  for (const path of Object.keys(surelyAuthoredFields(patch)).toReversed()) {
-    paths.push(path);
+  const without = (entries: Record<string, Entry>, path: string): Record<string, Entry> => {
     const { [path]: _left, ...rest } = entries;
-    entries = movedOnly[path] === undefined ? rest : { ...rest, [path]: movedOnly[path] };
+    return movedOnly[path] === undefined ? rest : { ...rest, [path]: movedOnly[path] };
+  };
+  const paths = Object.keys(surelyAuthoredFields(patch)).toReversed();
+  // Leave out the latest paths until the record fits, then put back each one it still fits with.
+  let entries = { ...merged.entries };
+  const left: string[] = [];
+  for (const path of paths) {
+    entries = without(entries, path);
+    left.push(path);
     if (writeError({ ...base, entries }) === undefined) {
-      onDropped?.(paths, message);
+      for (const kept of left.slice(0, -1).toReversed()) {
+        const back = { ...entries, ...(Object.hasOwn(merged.entries, kept) ? { [kept]: merged.entries[kept]! } : {}) };
+        if (writeError({ ...base, entries: back }) === undefined) {
+          entries = back;
+          left.splice(left.indexOf(kept), 1);
+        }
+      }
+      onDropped?.(
+        left,
+        paths.filter((path) => !left.includes(path)),
+        message,
+      );
       return { ...base, entries };
     }
   }
   return merged;
 };
+
+/** Whether an entry holds every field a person set on it. */
+export const carriesFields = (entry: Entry | undefined, fields: EntryFields): boolean =>
+  entry !== undefined && Object.keys(diffEntry(entry, mergeEntry(entry, fields))).length === 0;
 
 /**
  * The entries record's codec and patch algebra. `onDropped` hears of a person's fields a merge left out because another
@@ -501,7 +536,9 @@ export const createEntriesPolicy = (onDropped?: DroppedFields): RecordPolicy<Ent
     const found = landedMark(patch, current === undefined ? undefined : read);
     let merged = { ...base, entries: applied(base.entries, patch, { landed: found?.upTo ?? 0, fields: true }) };
     const unwritable = writeError(merged);
-    if (unwritable !== undefined) {
+    if (unwritable === undefined) {
+      onDropped?.([], Object.keys(surelyAuthoredFields(patch)), '');
+    } else {
       merged = fitted({ base, patch, landed: found?.upTo ?? 0, merged, message: unwritable, onDropped });
     }
     const record = asRead(merged);

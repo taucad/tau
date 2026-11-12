@@ -847,13 +847,108 @@ describe('workbench entries store over recordSync', () => {
     });
     try {
       await entries.read();
-      void entries.edit('a.ts', hidden('a', 95));
+      const crowded = entries.edit('a.ts', hidden('a', 95));
       expect(await entries.edit('d.ts', { renderTimeout: 15_000 })).toBe(true);
+      expect(await crowded).toBe(false);
       expect(await entries.flush()).toBe(false);
       expect(workbenchRecords.entries.read(m.get()!)).toMatchObject({
         record: { entries: { 'c.ts': hidden('c', 95), 'd.ts': { renderTimeout: 15_000 } } },
       });
       expect(await entries.flush()).toBe(true);
+    } finally {
+      entries.dispose();
+    }
+  });
+  it.each<{ name: string; initial: WorkbenchEntries['entries']; refusedPath: string; saved: boolean }>([
+    {
+      name: 'follows a renamed file to its new path',
+      initial: { 'a.ts': { renderTimeout: 180_000 } },
+      refusedPath: 'a.ts',
+      saved: false,
+    },
+    {
+      name: 'goes with an entry another file is renamed onto',
+      initial: { 'a.ts': { renderTimeout: 1000 }, 'b.ts': { renderTimeout: 180_000 } },
+      refusedPath: 'b.ts',
+      saved: true,
+    },
+  ])('counts a refused change that $name', async ({ initial, refusedPath, saved }) => {
+    const m = memory();
+    m.setBytes(encoder.encode(workbenchRecords.entries.serialize({ version: 1, entries: initial })));
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: m.files,
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await entries.read();
+      const many = Array.from({ length: 1025 }, (_, index) => `c${index}`);
+      expect(await entries.edit(refusedPath, { components: { hidden: many, isolated: [], opacity: [] } })).toBe(false);
+      expect(await entries.changePaths({ type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' })).toBe(true);
+      expect(entries.health().unconfirmed).toBe(!saved);
+      expect(await entries.flush()).toBe(saved);
+    } finally {
+      entries.dispose();
+    }
+  });
+
+  it('leaves out only what the file has no room for, and counts nothing a later write carried', async () => {
+    const m = memory();
+    const ids = (prefix: string, count: number) =>
+      Array.from({ length: count }, (_, index) => `${prefix}-${'x'.repeat(200)}-${index}`);
+    const hidden = (prefix: string, count: number) => ({
+      components: { hidden: ids(prefix, count), isolated: [], opacity: [] },
+    });
+    const before = { 'b.ts': hidden('b', 190) };
+    const write = (next: WorkbenchEntries['entries']) => {
+      m.setBytes(encoder.encode(workbenchRecords.entries.serialize({ version: 1, entries: next })));
+    };
+    write(before);
+    let room = false;
+    const onError = vi.fn();
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      editDebounce: 50,
+      files: {
+        ...m.files,
+        writeFileChecked: async (input) => {
+          if (room) {
+            room = false;
+            write(before);
+          }
+          return m.files.writeFileChecked(input);
+        },
+      },
+      onChange: () => undefined,
+      onError,
+    });
+    try {
+      await entries.read();
+      const large = entries.edit('a.ts', hidden('a', 95));
+      const small = entries.edit('d.ts', { renderTimeout: 15_000 });
+      write({ ...before, 'c.ts': hidden('c', 95) });
+      await entries.read();
+      expect(await small).toBe(true);
+      expect(await large).toBe(false);
+      expect(onError).toHaveBeenCalledOnce();
+      const read = workbenchRecords.entries.read(m.get()!);
+      expect(read.status === 'current' ? Object.keys(read.record.entries).toSorted() : []).toEqual([
+        'b.ts',
+        'c.ts',
+        'd.ts',
+      ]);
+      expect(await entries.flush()).toBe(false);
+      // The other party makes room again, and changes the record while the next change is written: it all lands, and
+      // nothing stays counted.
+      write({ ...before, 'd.ts': { renderTimeout: 15_000 } });
+      await entries.read();
+      const again = entries.edit('a.ts', hidden('a', 95));
+      room = true;
+      expect(await again).toBe(true);
+      expect(onError).toHaveBeenCalledOnce();
+      expect(await entries.flush()).toBe(true);
+      expect(entries.health().unconfirmed).toBe(false);
     } finally {
       entries.dispose();
     }

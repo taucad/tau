@@ -12,7 +12,8 @@ import type { ActorOptions, AnyActorLogic } from 'xstate';
 import {
   authoredFields,
   createEntriesPolicy,
-  moveKeys,
+  carriesFields,
+  replacingMoves,
   changedEntry,
   entriesPolicy,
   movePaths,
@@ -114,6 +115,8 @@ export function createWorkbenchEntriesStore(
 }> {
   const path = `${input.root}/${workbenchPaths.entries}`;
   let disposed = false;
+  /** The paths whose fields a merge left out, and no later merge carried, because the file could not take them all. */
+  const dropped = new Map<string, string>();
   /** Changes refused because the file cannot take them, by entry path: owed to the person, never to the file. */
   const refused = new Map<string, string>();
   /** The machine's health, with a refused change counted as one the file does not hold. */
@@ -124,11 +127,13 @@ export function createWorkbenchEntriesStore(
   const { actor, commands, context, on } = createRecordSync({
     // Each store's own policy, so a field its merge leaves out is counted as this store's refused change.
     machine: createRecordSyncMachine(
-      createEntriesPolicy((paths, message) => {
-        for (const path of paths) {
-          refused.set(path, message);
+      createEntriesPolicy((left, carried, message) => {
+        for (const path of carried) {
+          dropped.delete(path);
         }
-        queueMicrotask(refusalChanged);
+        for (const path of left) {
+          dropped.set(path, message);
+        }
       }),
     ),
     editDebounce: input.editDebounce,
@@ -194,19 +199,17 @@ export function createWorkbenchEntriesStore(
    * later change of that path is taken, rather than owed with every later change of every entry, which would then
    * never be written.
    */
+  const refuse = (path: string, error: unknown): false => {
+    refused.set(path, error instanceof Error ? error.message : 'The record cannot take this change.');
+    input.onError(error);
+    refusalChanged();
+    return false;
+  };
   const writable = (path: string, record: EntriesRecord): boolean => {
     const error = errorOf(record);
-    if (error !== undefined) {
-      refused.set(path, error instanceof Error ? error.message : 'The record cannot take this change.');
-      input.onError(error);
-      refusalChanged();
-      return false;
-    }
-    if (refused.delete(path)) {
-      refusalChanged();
-    }
-    return true;
+    return error === undefined || refuse(path, error);
   };
+
   /** The record the person's next change starts from: what they last asked for, else what the file holds. */
   const base = (): WorkbenchEntries => {
     const { origin, intended, published } = context();
@@ -234,7 +237,23 @@ export function createWorkbenchEntriesStore(
         owed: owed[entryPath],
       });
       const record = { ...from, entries: { ...from.entries, [entryPath]: entry }, set: { [entryPath]: fields } };
-      return writable(entryPath, record) && commands.edit(record);
+      if (!writable(entryPath, record)) {
+        return false;
+      }
+      if (refused.delete(entryPath)) {
+        refusalChanged();
+      }
+      if (!(await commands.edit(record))) {
+        return false;
+      }
+      // The write that carried the change left it out: another party's change left the record no room for it.
+      const shown = context().published.record?.entries[entryPath];
+      const left = dropped.get(entryPath);
+      if (left !== undefined && !carriesFields(shown, fields)) {
+        dropped.delete(entryPath);
+        return refuse(entryPath, new RangeError(left));
+      }
+      return true;
     },
     changePaths: async (change) => {
       if (disposed) {
@@ -256,8 +275,8 @@ export function createWorkbenchEntriesStore(
       if (!writable(change.type === 'rename' ? change.oldPath : change.path, record)) {
         return false;
       }
-      // A refused change follows its entry, and goes when the entry is deleted.
-      const kept = moveKeys(Object.fromEntries(refused), record.moves ?? []);
+      // A refused change follows its entry, and goes when the entry is deleted or replaced.
+      const kept = replacingMoves(Object.fromEntries(refused), record.moves ?? []);
       if (JSON.stringify(kept) !== JSON.stringify(Object.fromEntries(refused))) {
         refused.clear();
         for (const [path, message] of Object.entries(kept)) {

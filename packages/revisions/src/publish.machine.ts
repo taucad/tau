@@ -188,7 +188,7 @@ const failWith = (
   return { error };
 };
 
-const noRevisionsYet = 'This project has no revisions yet, so there is nothing to publish.';
+const noRevisionsYet = 'This project has no history yet, so there is nothing to publish.';
 
 const publishMachineDefinition = setup({
   schemas: {

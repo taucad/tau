@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import process from 'node:process';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { desktopE2EApiUrl } from '#support/config.js';
-import { historyRows, restoreFromHistory, revisionStatus } from '#support/revisions-pane.js';
+import { currentRestoreRow, historyRows, restoreFromHistory, revisionStatus } from '#support/revisions-pane.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import { launchBrowserClient, openCloudOnlyProject, uploadFileInPage } from '#support/two-client/browser-client.js';
 import type { BrowserClient } from '#support/two-client/browser-client.js';
@@ -189,7 +189,7 @@ it('should preserve a legacy cloud identity through browser and CLI sync without
       .poll(async () => browserFile(browser.page, slug, 'main.scad'), { timeout: 120_000 })
       .toBe('cube(7);\n');
     await browser.page
-      .getByRole('button', { name: /^Open Revisions\./u })
+      .getByRole('button', { name: /^Open History\./u })
       .first()
       .click();
     await expect
@@ -211,7 +211,7 @@ it('should preserve a legacy cloud identity through browser and CLI sync without
     expect(JSON.parse(await readFile(join(clone, '.tau/project.json'), 'utf8'))).toEqual({ version: 1, projectId });
     expect(await git(clone, ['show', `${historicalHead}:tau.json`])).toBe(legacyBytes);
     await writeFile(join(clone, 'terminal.scad'), 'sphere(3);\n');
-    const saved = await runCli(['revisions', 'save', '--project', clone, '--json'], token);
+    const saved = await runCli(['history', 'save', '--project', clone, '--json'], token);
     expect(saved.code, saved.stderr).toBe(0);
     expect(cliRecord(saved)).toMatchObject({ ok: true, backup: 'backedUp' });
     await expect
@@ -224,7 +224,7 @@ it('should preserve a legacy cloud identity through browser and CLI sync without
       .poll(async () => browserFile(browser.page, slug, '.git/refs/heads/main'), { timeout: 120_000 })
       .not.toBe(beforeSave);
     await browser.page
-      .getByRole('button', { name: /^Open Revisions\./u })
+      .getByRole('button', { name: /^Open History\./u })
       .first()
       .click();
     await expect
@@ -238,11 +238,8 @@ it('should preserve a legacy cloud identity through browser and CLI sync without
     expect(await git(peer, ['show', `${historicalHead}:tau.json`])).toBe(legacyBytes);
     expect(await git(peer, ['ls-tree', '-r', '--name-only', 'HEAD'])).not.toContain('.tau/project.json');
 
-    await restoreFromHistory(browser.page, browser.page.getByRole('button', { name: /^Rev 1 · /u }).first(), (n) =>
-      historyRows(browser.page)
-        .filter({ hasText: 'Current' })
-        .filter({ hasText: `Restored Rev ${n}` }),
-    );
+    /* The oldest entry, the one the legacy project arrived with. */
+    await restoreFromHistory(browser.page, historyRows(browser.page).last(), currentRestoreRow(browser.page));
     await expect
       .poll(async () => revisionStatus(browser.page).textContent(), { timeout: 120_000 })
       .toBe('Saved · Backed up');

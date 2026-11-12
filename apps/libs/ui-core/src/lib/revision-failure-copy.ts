@@ -1,5 +1,5 @@
 /**
- * The one place a revision refusal becomes words a person reads (P4, Rule 1).
+ * The one place a history refusal becomes words a person reads (P4, Rule 1, M5, M11).
  *
  * A machine that refuses names a `RevisionPortErrorCode`; the worker relays it
  * beside its diagnostic. The diagnostic is for the console and for tests — it
@@ -44,7 +44,10 @@ const hostedRemoteCopy: ReadonlyArray<readonly [string, string]> = [
 const engineCopy: ReadonlyArray<readonly [string, string]> = [
   ['ENGINE_FAILED', 'Tau could not read this project’s history. Reload the page and try again.'],
   ['ENGINE_UNAVAILABLE', 'This project’s history is not ready yet. Wait a moment and try again.'],
-  ['MISSING_LARGE_OBJECT', 'A file this revision needs is not on this device. Sync this project, then try again.'],
+  [
+    'MISSING_LARGE_OBJECT',
+    'A file this point in history needs is not on this device. Back up and sync, then try again.',
+  ],
   ['UNSUPPORTED_OPERATION', 'Tau cannot do that to this project.'],
 ];
 
@@ -67,38 +70,38 @@ export const revisionFailureCopy: Readonly<
   >
 > = {
   connection: {
-    title: 'History could not connect',
+    title: 'Couldn’t load history',
     fallback: 'Tau could not connect to this project’s history. Reload the page and try again.',
     codes: new Map(engineCopy),
   },
   restore: {
-    title: 'Restore failed',
-    fallback: 'Tau could not restore that revision. Reload the page and try again.',
+    title: 'Couldn’t restore',
+    fallback: 'Reload the page and try again.',
     codes: new Map([
       ...engineCopy,
       /* A1: a turn holds the files, so the restore wrote nothing — Switch's words. */
-      ['LEASE_UNAVAILABLE', 'An agent is working in this project’s files.'],
-      /* One of the restore's two revisions lost its race with another writer (A7). */
+      ['LEASE_UNAVAILABLE', 'The agent is working on these files. Try again when it finishes.'],
+      /* One of the restore's two entries lost its race with another writer (A7). */
       ['CAS_LOST', 'Something else changed this project first. Try again.'],
-      /* A3: the files moved between the revision before the restore and its write. */
+      /* A3: the files moved between the entry before the restore and its write. */
       ['CHECKOUT_CONFLICT', 'These files changed while the restore was being prepared. Try again.'],
-      ['UNKNOWN_REVISION', 'That revision is not in this project any more.'],
-      /* W0 N1: the files are the target's, but the restore's own revision lost its race; a retry would find nothing to save. */
+      ['UNKNOWN_REVISION', 'That point in history is not in this project any more.'],
+      /* W0 N1: the files are the target's, but the restore's own entry lost its race; a retry would find nothing to save. */
       [
         'RESTORE_UNRECORDED',
-        'The earlier files are back, but something else changed this project at the same time, so this restore is not in History as its own revision. Your files are kept.',
+        'The earlier files are back, but something else changed this project at the same time, so this restore is not in History as its own entry. Your files are kept.',
       ],
       /* W0 M1: Undo pressed after the selection left the line the restore was made on. */
       ['UNDO_UNAVAILABLE', 'That restore was made on another branch. Open it there to undo it.'],
       /* D15: nothing of this device's is left on the branch; nothing was written. */
       ['NOTHING_TO_UNDO', 'Nothing you did on this branch is left to undo.'],
-      /* D15: the inverse overlaps a later revision's changes, which Undo never reverts. */
+      /* D15: the inverse overlaps a later entry's changes, which Undo never reverts. */
       [
         'UNDO_CONFLICT',
-        'A later revision changed the same lines, so that change can’t be undone. Restore an earlier revision instead.',
+        'A later change touched the same lines, so this one can’t be undone. Restore an earlier point instead.',
       ],
       /* D15, RV-W7 #7: Undo never reaches past a merge made here; nothing was written. */
-      ['UNDO_PAST_MERGE', 'Your last change on this branch was a merge. Restore an earlier revision instead.'],
+      ['UNDO_PAST_MERGE', 'Your last change on this branch was a merge. Restore an earlier point instead.'],
     ]),
     titles: new Map([
       ['RESTORE_UNRECORDED', 'Files restored'],
@@ -109,18 +112,18 @@ export const revisionFailureCopy: Readonly<
     ]),
   },
   branch: {
-    title: 'That branch change did not go through',
+    title: 'Couldn’t change the branch',
     fallback: 'Tau could not finish that branch change. Reload the page and try again.',
     codes: new Map([
       ...engineCopy,
       /* A fresh project: nothing recorded, and nothing unrecorded to record. */
       ['BRANCH_NEEDS_REVISION', 'There is nothing to branch from yet. Add a file, then try again.'],
       /* D14: the name decisions travel under; the page shows the reason, not the generic refusal. */
-      ['BRANCH_NAME_RESERVED', '“conflicts” is kept for decisions that travel between devices. Choose another name.'],
+      ['BRANCH_NAME_RESERVED', '“conflicts” is reserved. Choose another name.'],
       /* D91: a rename moves only the name, so a branch something else knows by its name is left alone. */
       [
         'BRANCH_RENAME_LINKED',
-        'This branch has its own set of files open, so Tau can’t rename it. Make a new branch from it instead.',
+        'A chat is using this branch, so it can’t be renamed. Make a new branch from it instead.',
       ],
       [
         'BRANCH_RENAME_PUSHED',
@@ -133,19 +136,19 @@ export const revisionFailureCopy: Readonly<
       /* Asked before the project has anything selected to branch from; it used
        * to be reported as a name collision, which is not what happened. */
       ['CHECKOUT_UNKNOWN', 'This project has nothing open to branch from yet. Wait a moment and try again.'],
-      ['UNKNOWN_REVISION', 'The revision this branch would start from is not in this project any more.'],
+      ['UNKNOWN_REVISION', 'The point this branch would start from is not in this project any more.'],
       /* Another branch change is running or waiting for an answer (RM-R11). */
       ['REVISIONS_BUSY', 'Another branch change is still in progress. Wait for it to finish, then try again.'],
     ]),
   },
   save: {
-    title: 'That change could not be saved',
+    title: 'Couldn’t save',
     fallback: 'Tau could not record this change. Reload the page and try again.',
     codes: new Map([
       ...engineCopy,
       /* D3: another writer moved the line first; the files stay as they are, unsaved. */
       ['CAS_LOST', 'Something else changed this project first. Your changes are still here; save again.'],
-      ['UNKNOWN_REVISION', 'The revision this change builds on is not in this project any more.'],
+      ['UNKNOWN_REVISION', 'The point this change builds on is not in this project any more.'],
     ]),
   },
   backup: {
@@ -170,7 +173,7 @@ export const revisionFailureCopy: Readonly<
     ]),
   },
   removeConflictLine: {
-    title: 'That decision was not removed',
+    title: 'Couldn’t dismiss the conflict',
     fallback: 'Tau Cloud could not remove that decision. Try again.',
     codes: new Map([
       ...hostedRemoteCopy,
@@ -179,7 +182,7 @@ export const revisionFailureCopy: Readonly<
     ]),
   },
   turn: {
-    title: 'Nothing was saved for that change',
+    title: 'Nothing was saved for that request',
     fallback: 'Tau could not record what that change produced. Try sending it again.',
     codes: new Map([
       ...engineCopy,
@@ -188,36 +191,37 @@ export const revisionFailureCopy: Readonly<
       /* The earlier edits on the checkout could not be recorded before the turn began (RM-S14). */
       ['BASE_CUT_FAILED', 'Tau could not save this project’s earlier edits first. Try sending that again.'],
       ['CAS_LOST', 'Something else changed this project at the same time. Try sending that again.'],
-      ['UNKNOWN_REVISION', 'The version that change built on is not in this project any more.'],
+      ['UNKNOWN_REVISION', 'The point that change built on is not in this project any more.'],
       /* Let go before it recorded anything — a stop, a reload, an abandonment. */
-      ['TURN_RELEASED', 'The turn ended before it recorded a revision.'],
+      ['TURN_RELEASED', 'The agent stopped before anything was saved.'],
     ]),
   },
 };
 
 /**
- * What to tell a person about a refused revision verb.
+ * What to tell a person about a refused history verb.
+ *
+ * An entry has no number (M11), so no refusal quotes one: an undo that could
+ * not undo an entry says "this one", which is the entry the person just asked about.
  *
  * @param subject Which verb refused.
  * @param code The refusal's `RevisionPortErrorCode`, when it carried one.
- * @param about The branch the verb named, and the revision an undo could not undo, for the sentences that can say them.
+ * @param about The branch the verb named, for the sentence that can say it.
  * @returns The toast's title and description.
  */
 export const describeRevisionFailure = (
   subject: RevisionFailureSubject,
   code: string | undefined,
-  about: Readonly<{ branch?: string; revisionNumber?: number }> = {},
+  about: Readonly<{ branch?: string }> = {},
 ): Readonly<{ title: string; description: string }> => {
-  const { branch, revisionNumber } = about;
+  const { branch } = about;
   const copy = revisionFailureCopy[subject];
   const description = (code === undefined ? undefined : copy.codes.get(code)) ?? copy.fallback;
-  const named =
-    code === 'UNDO_CONFLICT' && revisionNumber !== undefined
-      ? `A later revision changed the same lines, so Rev ${String(revisionNumber)} can’t be undone. Restore an earlier revision instead.`
-      : description;
   return {
     title: (code === undefined ? undefined : copy.titles?.get(code)) ?? copy.title,
     description:
-      branch === undefined || code !== 'CHECKOUT_CONFLICT' ? named : `${branch} already exists. Pick another name.`,
+      branch === undefined || code !== 'CHECKOUT_CONFLICT'
+        ? description
+        : `${branch} already exists. Pick another name.`,
   };
 };

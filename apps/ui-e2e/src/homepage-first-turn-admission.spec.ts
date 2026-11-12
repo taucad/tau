@@ -20,12 +20,12 @@
  * the in-project composer after `/projects/new`, where the owner is long bound.
  * Only the homepage seed takes this path.
  *
- * The assertion is what a person can see: `Rev 1` on the Revisions chip, which
+ * The assertion is what a person can see: a save on the History chip, which
  * only a dispatched turn's lease mints inside this window (the idle mint is five
  * minutes). Signed out the run is then refused downstream — on
  * `UNAUTHENTICATED` when the API at :4000 answers this origin, on missing model
  * metadata when nothing does — and which card that is depends on the machine,
- * so it is not pinned here. Before the fix the chip stayed "You are on main."
+ * so it is not pinned here. Before the fix the chip stayed "Nothing saved yet"
  * and no card rendered at all.
  */
 
@@ -56,10 +56,13 @@ test('dispatches the turn seeded by the homepage composer (W5)', async () => {
   // under a project session the route has not registered yet (V3a).
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?(?:.*&)?chat=/u, 120_000);
 
-  /* The chip's ordinal is a graph read, and the seeded turn lands on a page
+  /* The chip's state is a graph read, and the seeded turn lands on a page
    * that is still booting its kernel, so the window is wide: the pin is that
    * this ever happens, which before the fix it did not. */
-  await target.expectVisible(selectors.getByLabelText(/Open Revisions\. You are on main, Rev 1\./u), 120_000);
+  await target.expectVisible(
+    selectors.getByLabelText(/^Open History\. You are on main\. (?!Nothing saved yet|Unsaved changes|Setting up)/u),
+    120_000,
+  );
 });
 
 test('starts the homepage seed once across a reload before the provider answers', async () => {

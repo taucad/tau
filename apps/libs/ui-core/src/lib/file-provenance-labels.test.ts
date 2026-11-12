@@ -52,18 +52,18 @@ describe('fileProvenanceLabel', () => {
 
     expect(records).toEqual({
       breadcrumbBadge: 'Artifact',
-      description: 'Supporting data used by Tau. Not included in revisions.',
+      description: 'Supporting data used by Tau. Not included in history.',
       dimmed: true,
       readOnly: false,
     });
-    expect(cache).toEqual({ description: 'Cache · not saved in revisions', dimmed: true, readOnly: false });
+    expect(cache).toEqual({ description: 'Cache · not saved in history', dimmed: true, readOnly: false });
   });
 
   /* Review R6 of a1: three registry rows are unversioned *authored* paths, and a
    * generated tsconfig is neither a record nor a cache. */
   it('does not call a generated file a record', () => {
     expect(fileProvenanceLabel(provenance({ versioned: false }), '.tau/tsconfig.generated.json')).toEqual({
-      description: 'Not saved in revisions',
+      description: 'Not saved in history',
       dimmed: true,
       readOnly: false,
     });

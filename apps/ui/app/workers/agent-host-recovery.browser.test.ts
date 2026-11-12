@@ -184,7 +184,7 @@ it.each(['admit', 'complete', 'acknowledge', 'bridges', 'active', 'restart', 're
                     index: 0,
                     id: 'history',
                     type: 'function',
-                    function: { name: 'revisions', arguments: JSON.stringify({ action: 'log', branch: 'main' }) },
+                    function: { name: 'history', arguments: JSON.stringify({ action: 'log', branch: 'main' }) },
                   },
                 ],
               },

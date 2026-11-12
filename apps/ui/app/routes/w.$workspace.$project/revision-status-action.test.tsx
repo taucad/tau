@@ -119,14 +119,14 @@ describe('selectRevisionFacts', () => {
   it.each([
     ['at a revision, not backed up anywhere', status(), onMain, History, 'none', 'Saved on this device'],
     ['backed up', status({ sync: sync({ state: 'backedUp' }) }), onMain, History, 'none', 'Saved · Backed up'],
-    ['modified', status(), { ...onMain, isDirty: true }, FileDiff, 'none', 'Modified since Rev 12'],
+    ['modified', status(), { ...onMain, isDirty: true }, FileDiff, 'none', 'Unsaved changes'],
     [
       'modified before the first save',
       status(),
       { ...onMain, head: undefined, isDirty: true },
       FileDiff,
       'none',
-      'Not saved yet',
+      'Nothing saved yet',
     ],
     ['saving', status({ minting: true }), { ...onMain, isDirty: true }, CircleDashed, 'running', 'Saving…'],
     [
@@ -135,7 +135,7 @@ describe('selectRevisionFacts', () => {
       onMain,
       CircleDashed,
       'running',
-      'Restoring Rev 9…',
+      'Restoring…',
     ],
     [
       'a branch verb running',
@@ -161,7 +161,7 @@ describe('selectRevisionFacts', () => {
       onMain,
       CloudAlert,
       'attention',
-      'Not backed up · Sign in',
+      'Not backed up · Sign in to back up',
     ],
     [
       'GitHub refusing its credential (R-U4)',
@@ -177,7 +177,7 @@ describe('selectRevisionFacts', () => {
       onMain,
       CloudAlert,
       'attention',
-      'Not backed up · Remote refused access',
+      'Not backed up · Your Git host refused access',
     ],
     [
       'GitHub refusing its credential after acknowledging everything (D68)',
@@ -193,7 +193,7 @@ describe('selectRevisionFacts', () => {
       { ...onMain, isSignedOut: true },
       CloudAlert,
       'attention',
-      'Backed up · Sign in',
+      'Backed up · Sign in to back up',
     ],
     [
       'GitHub withheld while signed out of Tau, with a revision waiting (D100)',
@@ -201,7 +201,7 @@ describe('selectRevisionFacts', () => {
       { ...onMain, isSignedOut: true },
       CloudAlert,
       'attention',
-      'Not backed up · Sign in',
+      'Not backed up · Sign in to back up',
     ],
     [
       'a Git remote refusing large files (R-U4)',
@@ -209,7 +209,7 @@ describe('selectRevisionFacts', () => {
       onMain,
       CloudAlert,
       'attention',
-      'Not backed up · Files too large for this remote',
+      'Not backed up · Some files are too large for your Git host',
     ],
     [
       'a moved GitHub repository (D11)',
@@ -225,7 +225,7 @@ describe('selectRevisionFacts', () => {
       onMain,
       CircleAlert,
       'failed',
-      'Backup failed',
+      'Couldn’t back up',
     ],
     [
       'a save that failed, over the modified glyph (RS22)',
@@ -233,7 +233,7 @@ describe('selectRevisionFacts', () => {
       { ...onMain, isDirty: true },
       CircleAlert,
       'failed',
-      'Save not confirmed',
+      'Couldn’t confirm the save',
     ],
   ] as const)('draws %s', (...row) => {
     const [, input, where, icon, mark, sentence] = row;
@@ -246,7 +246,7 @@ describe('selectRevisionFacts', () => {
       onMain,
     );
 
-    expect(facts).toMatchObject({ icon: History, mark: 'none', sentence: 'Saved · Not backed up · 3 revisions' });
+    expect(facts).toMatchObject({ icon: History, mark: 'none', sentence: 'Saved · Not backed up · 3 changes' });
   });
 
   describe('a revision that arrived while a turn holds the files (W5b, D12)', () => {
@@ -264,15 +264,15 @@ describe('selectRevisionFacts', () => {
     });
 
     it.each([
-      ['the agent on Tau Cloud', card('Agent'), 'Rev 14 arrived from Agent on Tau Cloud'],
+      ['the agent on Tau Cloud', card('Agent'), 'Changes from Agent are ready'],
       [
         'the viewer’s own other session, claiming no device (RV-W5b F11)',
         card('', true),
-        'Rev 14 arrived from another session',
+        'Changes from your other device are ready',
       ],
-      ['a member of a shared project', card('Maya'), 'Rev 14 arrived from Maya on Tau Cloud'],
-      ['nobody the resolver can name, naming nobody', card(''), 'Rev 14 arrived from Tau Cloud'],
-      ['a card History has not read yet', undefined, 'A new revision arrived'],
+      ['a member of a shared project', card('Maya'), 'Changes from Maya are ready'],
+      ['nobody the resolver can name, naming nobody', card(''), 'New changes are ready'],
+      ['a card History has not read yet', undefined, 'New changes are ready'],
     ] as const)('says it arrived from %s, calmly', (_, arrived, sentence) => {
       expect(selectRevisionFacts(arrivedStatus, onMain, arrived)).toMatchObject({
         icon: ArrowDownToLine,
@@ -291,16 +291,16 @@ describe('selectRevisionFacts', () => {
 
 describe('revisionAccessibleName', () => {
   it('says where you are, then the status sentence', () => {
-    expect(revisionAccessibleName({ ...onMain, isDirty: true }, 'Modified since Rev 12')).toBe(
-      'Open Revisions. You are on main, Rev 12. Modified since Rev 12.',
+    expect(revisionAccessibleName({ ...onMain, isDirty: true }, 'Unsaved changes')).toBe(
+      'Open History. You are on main. Unsaved changes.',
     );
   });
 
   it('says Setting up before there is a branch, without doubling an ellipsis', () => {
-    expect(revisionAccessibleName({ ...onMain, branch: undefined, head: undefined }, 'Setting up history')).toBe(
-      'Open Revisions. Setting up. Setting up history.',
+    expect(revisionAccessibleName({ ...onMain, branch: undefined, head: undefined }, 'Setting up…')).toBe(
+      'Open History. Setting up. Setting up…',
     );
-    expect(revisionAccessibleName(onMain, 'Saving…')).toBe('Open Revisions. You are on main, Rev 12. Saving…');
+    expect(revisionAccessibleName(onMain, 'Saving…')).toBe('Open History. You are on main. Saving…');
   });
 });
 
@@ -312,7 +312,7 @@ describe('RevisionStatusAction', () => {
     render(<RevisionStatusAction />, { wrapper });
 
     const trigger = await screen.findByRole('button', {
-      name: 'Open Revisions. You are on main, Rev 12. Saved on this device.',
+      name: 'Open History. You are on main. Saved on this device.',
     });
     expect(trigger).toHaveTextContent(/^main$/u);
   });
@@ -334,17 +334,17 @@ describe('RevisionStatusAction', () => {
     render(<RevisionStatusAction />, { wrapper });
 
     const trigger = await screen.findByRole('button', {
-      name: 'Open Revisions. You are on main, Rev 13. Saved on this device.',
+      name: 'Open History. You are on main. Saved on this device.',
     });
     expect(trigger).toHaveTextContent(/^main$/u);
     expect(trigger.querySelector('[data-slot="revision-icon"]')).toHaveClass('lucide-history');
     expect(trigger).not.toHaveTextContent(/Viewing|Rev 3/u);
 
     await user.tab();
-    await screen.findByRole('list', { name: 'Recent revisions' });
+    await screen.findByRole('list', { name: 'Recent changes' });
     const card = document.querySelector('[data-slot="revision-card"]');
-    expect(card?.firstElementChild).toHaveTextContent(/^main\s*Rev 13$/u);
-    expect(card).toHaveTextContent('Restored Rev 3');
+    expect(card?.firstElementChild).toHaveTextContent(/^main$/u);
+    expect(card).toHaveTextContent('Restored “Thicker base”');
   });
 
   it('names a restore by its target when that target is older than the loaded page (B4)', async () => {
@@ -356,13 +356,13 @@ describe('RevisionStatusAction', () => {
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-60' };
 
     render(<RevisionStatusAction />, { wrapper });
-    await screen.findByRole('button', { name: /^Open Revisions\. You are on main, Rev 60\./u });
+    await screen.findByRole('button', { name: /^Open History\. You are on main\./u });
     await user.tab();
-    await screen.findByRole('list', { name: 'Recent revisions' });
+    await screen.findByRole('list', { name: 'Recent changes' });
 
     const card = document.querySelector('[data-slot="revision-card"]');
     await waitFor(() => {
-      expect(card).toHaveTextContent('Restored Rev 3');
+      expect(card).toHaveTextContent('Restored “Thicker base”');
     });
     expect(revisionStatusHarness.rowRequests).toEqual(['rev-3']);
   });
@@ -389,7 +389,7 @@ describe('RevisionStatusAction', () => {
     render(<RevisionStatusAction />, { wrapper });
 
     expect(
-      await screen.findByRole('button', { name: 'Open Revisions. You are on main, Rev 12. Backed up, Sign in.' }),
+      await screen.findByRole('button', { name: 'Open History. You are on main. Backed up, Sign in to back up.' }),
     ).toBeInTheDocument();
 
     act(() => {
@@ -398,7 +398,7 @@ describe('RevisionStatusAction', () => {
 
     expect(
       await screen.findByRole('button', {
-        name: 'Open Revisions. You are on main, Rev 12. Backed up, Reconnect GitHub.',
+        name: 'Open History. You are on main. Backed up, Reconnect GitHub.',
       }),
     ).toBeInTheDocument();
   });
@@ -407,7 +407,7 @@ describe('RevisionStatusAction', () => {
     const user = userEvent.setup();
 
     render(<RevisionStatusAction />, { wrapper });
-    await user.click(screen.getByRole('button', { name: /^Open Revisions\. You are on main\./u }));
+    await user.click(screen.getByRole('button', { name: /^Open History\. You are on main\./u }));
 
     expect(openPanel).toHaveBeenCalledWith('revisions');
   });
@@ -421,14 +421,14 @@ describe('RevisionStatusAction', () => {
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-12', dirty: true };
 
     render(<RevisionStatusAction />, { wrapper });
-    await screen.findByRole('button', { name: /Modified since Rev 12\.$/u });
+    await screen.findByRole('button', { name: /Unsaved changes\.$/u });
     await user.tab();
 
-    const recent = await screen.findByRole('list', { name: 'Recent revisions' });
+    const recent = await screen.findByRole('list', { name: 'Recent changes' });
     expect(recent).toHaveTextContent('Motor mount holes');
     expect(recent).toHaveTextContent('Thinner arms');
-    expect(screen.getByText('Modified since Rev 12')).toBeInTheDocument();
-    expect(screen.getByText('Click to open Revisions')).toBeInTheDocument();
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+    expect(screen.getByText('Click to open History')).toBeInTheDocument();
   });
 
   /* Before the first save of a project backed up by default, the card agrees with the pane (W10-L B-3). */
@@ -444,7 +444,7 @@ describe('RevisionStatusAction', () => {
     });
 
     render(<RevisionStatusAction />, { wrapper });
-    await screen.findByRole('button', { name: /^Open Revisions\./u });
+    await screen.findByRole('button', { name: /^Open History\./u });
     await user.tab();
 
     expect(await screen.findByText(backup)).toBeInTheDocument();
@@ -468,7 +468,7 @@ describe('RevisionStatusAction', () => {
     };
 
     render(<RevisionStatusAction />, { wrapper });
-    await user.click(screen.getByRole('button', { name: 'Follow chat, which is working on bracket-fillet' }));
+    await user.click(screen.getByRole('button', { name: 'Switch to bracket-fillet, where the chat is working' }));
 
     expect(revisionStatusHarness.commands.pinTo).toHaveBeenCalledWith('co-2');
   });
@@ -476,7 +476,7 @@ describe('RevisionStatusAction', () => {
   it('says nothing about following while the chat is where the workbench is', () => {
     render(<RevisionStatusAction />, { wrapper });
 
-    expect(screen.queryByText('Follow chat')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Switch to /u)).not.toBeInTheDocument();
   });
 
   /* R10, M2 (I6): before the projection names the line, History is loading — never empty, never `main`. */
@@ -485,7 +485,7 @@ describe('RevisionStatusAction', () => {
 
     render(<RevisionStatusAction />, { wrapper });
 
-    const trigger = screen.getByRole('button', { name: 'Open Revisions. Setting up. Loading history…' });
+    const trigger = screen.getByRole('button', { name: 'Open History. Setting up. Loading history…' });
     expect(trigger).toHaveTextContent('Setting up');
     expect(trigger).not.toHaveTextContent(/main|Nothing saved/u);
   });
@@ -513,7 +513,7 @@ describe('RevisionStatusAction', () => {
     render(<RevisionStatusAction />, { wrapper });
 
     const trigger = await screen.findByRole('button', {
-      name: 'Open Revisions. You are on main, Rev 12. Needs your decision on main.',
+      name: 'Open History. You are on main. Needs your decision on main.',
     });
     expect(trigger.querySelector('[data-slot="revision-icon"]')).toHaveClass('lucide-git-merge', 'text-warning');
   });
@@ -531,7 +531,7 @@ describe('RevisionStatusAction', () => {
     render(<RevisionStatusAction />, { wrapper });
 
     const trigger = await screen.findByRole('button', {
-      name: 'Open Revisions. You are on main, Rev 12. Saved, Cloud copy unavailable.',
+      name: 'Open History. You are on main. Saved, Cloud copy unavailable.',
     });
     expect(trigger.querySelector('[data-slot="revision-icon"]')).toHaveClass('lucide-history');
   });

@@ -78,10 +78,10 @@ describe('RecordIssuesAction', () => {
     renderAction();
     publish('entries', issue({}));
     publish('layout', issue({ kind: 'layout', path: '.tau/workbench/layout.json', state: 'unconfirmed' }));
-    const trigger = screen.getByRole('button', { name: 'Save not confirmed · 2 records' });
-    expect(screen.getByRole('status').textContent).toBe('Save not confirmed · 2 records');
+    const trigger = screen.getByRole('button', { name: 'Couldn’t confirm the save · 2 records' });
+    expect(screen.getByRole('status').textContent).toBe('Couldn’t confirm the save · 2 records');
     await userEvent.click(trigger);
-    const dialog = await screen.findByRole('dialog', { name: 'Save not confirmed' });
+    const dialog = await screen.findByRole('dialog', { name: 'Couldn’t confirm the save' });
     expect(within(dialog).getByText('Radial Engine · 2 settings records')).toBeDefined();
     expect(within(dialog).getByRole('listitem', { name: 'Pane layout' })).toBeDefined();
     expect(within(dialog).getByRole('listitem', { name: 'Model display settings' })).toBeDefined();
@@ -133,7 +133,7 @@ describe('RecordIssuesAction', () => {
       'layout',
       issue({ kind: 'layout', path: '.tau/workbench/layout.json', state: 'unconfirmed', writing: true, retrySave }),
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Save not confirmed · 1 record' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Couldn’t confirm the save · 1 record' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Retry save' }));
     expect(screen.getByRole('listitem', { name: 'Pane layout' })).toHaveTextContent('not yet confirmed saved');
     expect(retrySave).not.toHaveBeenCalled();

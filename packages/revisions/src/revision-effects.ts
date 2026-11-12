@@ -144,6 +144,7 @@ import { createSyncQueue } from '#sync-queue.js';
 import { createOpsLog, opsRefName, opsRefPrefix, undoCandidates } from '#ops-ref.js';
 import { restoreMachine } from '#restore.machine.js';
 import { readRevisionLog } from '#revision-verbs.js';
+import type { RevisionRow } from '#revision-verbs.js';
 import { isVersionNumberRefusal } from '#refusal-markers.js';
 import { renumberUnpushedVersions } from '#version-numbers.js';
 import { syncMachine } from '#sync.machine.js';
@@ -3434,20 +3435,45 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * @param revision - The revision to number.
    * @returns `Rev N`'s `N`, or `undefined` when the revision is not on that line (A9).
    */
-  const ordinalOnLine = async (place: Checkout, revision: string): Promise<number | undefined> => {
+  const rowOnLine = async (place: Checkout, revision: string): Promise<RevisionRow | undefined> => {
     /* ponytail: the page History reads first, then the whole line; a restore
      * reaches for a recent revision, and the page's numbers come from the
      * ordinal memo (E5, E6). A per-revision lookup is the upgrade path. */
     const page = await readRevisionLog(port, { branch: place.branch, limit: ordinalPage });
     const found = page.find((row) => row.revisionId === revision);
     if (found !== undefined || page.length < ordinalPage) {
-      return found?.revisionNumber;
+      return found;
     }
     const rows = await readRevisionLog(port, { branch: place.branch });
-    return rows.find((row) => row.revisionId === revision)?.revisionNumber;
+    return rows.find((row) => row.revisionId === revision);
+  };
+  const ordinalOnLine = async (place: Checkout, revision: string): Promise<number | undefined> =>
+    (await rowOnLine(place, revision))?.revisionNumber;
+
+  /**
+   * How a restore or undo row refers to the entry it brought back (M11): a
+   * version by its number, an entry by a title a person or Tau gave it, never
+   * by a save number. A generated title (`Saved changes (…)`, `Agent turn …`)
+   * names nothing a person would recognise, so it is left out.
+   *
+   * @param row - The entry, when the line holds it.
+   * @returns `V3` or `“Add vent slots”`, or `undefined` when nothing names it.
+   */
+  const referenceOf = (row: RevisionRow | undefined): string | undefined => {
+    const version = row?.versions?.[0];
+    if (version !== undefined) {
+      return `V${String(version.number)}`;
+    }
+    if (row?.start !== undefined) {
+      return 'V1';
+    }
+    const summary = row?.summary;
+    return summary === undefined || summary.startsWith('Saved changes (') || summary.startsWith('Agent turn ')
+      ? undefined
+      : `“${summary}”`;
   };
 
-  /* A cut's generated title; a restore row reads `Restored Rev N`, never an invented number (A9). */
+  /* A cut's generated title; a restore row names what it restored, never a number (A9, M11). */
   const summaryOf = async (input: CheckoutWriteRevisionActorInput, undoes?: string): Promise<string> => {
     if (input.turn !== undefined) {
       return `Agent turn ${input.turn.key.turnId}`;
@@ -3456,12 +3482,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (undoes === undefined) {
         return `Saved changes (${input.trigger})`;
       }
-      /* D15: an undo row names the revision it undid, as a restore row names its source. */
-      const undone = await ordinalOnLine(await placeOf(input.checkoutId), undoes);
-      return undone === undefined ? 'Undid an earlier revision' : `Undid Rev ${String(undone)}`;
+      /* D15: an undo row names the entry it undid, as a restore row names its source. */
+      const undone = referenceOf(await rowOnLine(await placeOf(input.checkoutId), undoes));
+      return undone === undefined ? 'Undid an earlier change' : `Undid ${undone}`;
     }
-    const number = await ordinalOnLine(await placeOf(input.checkoutId), input.restoredFrom);
-    return number === undefined ? 'Restored an earlier revision' : `Restored Rev ${String(number)}`;
+    const restored = referenceOf(await rowOnLine(await placeOf(input.checkoutId), input.restoredFrom));
+    return restored === undefined ? 'Restored an earlier point' : `Restored ${restored}`;
   };
 
   /**
@@ -3510,7 +3536,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (operation.kind === 'merge') {
         const code: RestoreFailureCode = 'UNDO_PAST_MERGE';
         throw Object.assign(
-          new Error('Your last change on this branch was a merge. Restore an earlier revision instead.'),
+          new Error('Your last change on this branch was a merge. Restore an earlier point instead.'),
           { code },
         );
       }
@@ -3519,10 +3545,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       const number = await ordinalOnLine(place, to);
       if (merged.status === 'conflicted') {
         const code: RestoreFailureCode = 'UNDO_CONFLICT';
-        const name = number === undefined ? 'that revision' : `Rev ${String(number)}`;
         throw Object.assign(
           new Error(
-            `A later revision changed the same lines, so ${name} can’t be undone. Restore an earlier revision instead.`,
+            'A later change touched the same lines, so this one can’t be undone. Restore an earlier point instead.',
           ),
           { code, ...(number === undefined ? {} : { revisionNumber: number }) },
         );

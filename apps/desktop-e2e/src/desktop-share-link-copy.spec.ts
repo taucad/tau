@@ -97,7 +97,7 @@ describe('desktop share links', () => {
     /* The same two steps `two-client.spec.ts` drives: the workbench chip opens
      * the pane, and the region only offers the radio while no remote exists. */
     await page
-      .getByRole('button', { name: /^Open Revisions\./u })
+      .getByRole('button', { name: /^Open History\./u })
       .first()
       .click({ timeout: 120_000 });
     await openBackupChooser(page);

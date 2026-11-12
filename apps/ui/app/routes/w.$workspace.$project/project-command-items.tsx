@@ -240,7 +240,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
             {
               id: 'change-backup',
               label: 'Change backup',
-              group: 'Revisions',
+              group: 'History',
               icon: <Cloud />,
               action: handleOpenSync,
               visible: isLineKnown,
@@ -251,7 +251,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
             {
               id: 'disconnect-remote',
               label: 'Disconnect backup',
-              group: 'Revisions',
+              group: 'History',
               icon: <CloudOff />,
               action: handleOpenSync,
               visible: isLineKnown,
@@ -261,7 +261,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
             {
               id: 'connect-tau-cloud',
               label: 'Connect Tau Cloud',
-              group: 'Revisions',
+              group: 'History',
               icon: <Cloud />,
               action: handleOpenSync,
             },
@@ -269,7 +269,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       {
         id: 'sync-now',
         label: 'Sync now',
-        group: 'Revisions',
+        group: 'History',
         icon: <RefreshCw />,
         action: syncNow,
         visible: isRemoteConnected,
@@ -277,15 +277,15 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       },
       {
         id: 'save-revision',
-        label: 'Save revision',
-        group: 'Revisions',
+        label: 'Save',
+        group: 'History',
         icon: <Save />,
         action: saveRevision,
       },
       {
         id: 'undo-restore',
         label: 'Undo restore',
-        group: 'Revisions',
+        group: 'History',
         icon: <Undo2 />,
         action: undo,
         visible: canUndoRestore,
@@ -293,7 +293,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       {
         id: 'undo-operation',
         label: 'Undo',
-        group: 'Revisions',
+        group: 'History',
         icon: <Undo2 />,
         action: undoOperation,
         visible: canUndo,
@@ -384,8 +384,8 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       },
       {
         id: 'revision-history',
-        label: 'Open revision history',
-        group: 'Revisions',
+        label: 'Open history',
+        group: 'History',
         icon: <History />,
         action: () => {
           openPanel('revisions');

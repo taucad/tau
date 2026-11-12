@@ -170,7 +170,7 @@ Remote project modules execute on this machine. With a relay, `--trust-projects`
 
 ### Clone
 
-`tau clone <project>` clones a Tau Cloud project into a local folder (formerly `tau open`); `tau publish` and `tau revisions` work on the clone.
+`tau clone <project>` clones a Tau Cloud project into a local folder (formerly `tau open`); `tau publish`, `tau history` and `tau version` work on the clone.
 
 ## Agent commands
 

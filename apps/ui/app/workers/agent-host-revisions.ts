@@ -1,5 +1,5 @@
 /**
- * The read-only `revisions` tool's client in the browser project host (W6 RH-S8): requests over one port into the
+ * The read-only `history` tool's client in the browser project host (W6 RH-S8): requests over one port into the
  * file-manager worker's revision root, which the page brokers once that project's revision client has opened (RV9-F1).
  */
 import type { RpcRevisionsClient } from '@taucad/chat/rpc';
@@ -78,11 +78,6 @@ export const createPortRevisionsClient = (port: MessagePort): PortRevisionsClien
     }
     return result as Extract<WorkerRevisionResult, { kind: Kind }>;
   };
-  const numberOf = async (branch: string): Promise<number | undefined> => {
-    const { rows } = await ask({ command: 'log', branch, limit: 1 }, 'log');
-    return rows[0]?.revisionNumber;
-  };
-
   return {
     largeObjects: () => (closed ? undefined : latest?.largeObjects),
     fetchGeoSpecCandidates: async () => {
@@ -111,32 +106,19 @@ export const createPortRevisionsClient = (port: MessagePort): PortRevisionsClien
       );
       return entries;
     },
-    /* ponytail: one log read per branch, as `readRevisionPlace` walks every head; one batched read if a project's
-     * branch count ever makes this slow. */
+    /* An entry has no number (M11): where the project is reads from the projection alone, with no log read. */
     describe: async () => {
       await status.promise;
       assertOpen();
       const { line, headRevisionId, branches } = latest!;
       const branch = line.kind === 'branch' ? line.name : undefined;
-      const [revisionNumber, ...numbers] = await Promise.all([
-        branch === undefined || headRevisionId === undefined ? undefined : numberOf(branch),
-        ...branches.map(async (facet) => (facet.head === undefined ? undefined : numberOf(facet.name))),
-      ]);
       return {
         branch,
-        revisionNumber,
         revisionId: headRevisionId,
-        branches: branches.flatMap((facet, index) =>
-          facet.head === undefined
-            ? []
-            : [{ name: facet.name, revisionNumber: numbers[index] ?? 0, revisionId: facet.head }],
+        branches: branches.flatMap((facet) =>
+          facet.head === undefined ? [] : [{ name: facet.name, revisionId: facet.head }],
         ),
-        line:
-          branch === undefined
-            ? 'No revisions yet'
-            : revisionNumber === undefined
-              ? `${branch} · no revisions yet`
-              : `${branch} · Rev ${String(revisionNumber)}`,
+        line: branch === undefined || headRevisionId === undefined ? 'No history yet' : branch,
       };
     },
     conflict: async (revision) => {

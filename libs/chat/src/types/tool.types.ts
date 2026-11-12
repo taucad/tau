@@ -170,7 +170,7 @@ export type MyTools = InferUITools<{
   [toolName.evaluateModel]: AiTool<EvaluateModelInput, EvaluateModelOutput>;
   [toolName.exportModel]: AiTool<ExportModelInput, ExportModelOutput>;
   [toolName.screenshot]: AiTool<ScreenshotInput, ScreenshotOutput>;
-  [toolName.revisions]: AiTool<RevisionsInput, RevisionsOutput>;
+  [toolName.history]: AiTool<RevisionsInput, RevisionsOutput>;
   [toolName.getParameters]: AiTool<GetParametersInput, GetParametersOutput>;
   [toolName.applyParameterOperation]: AiTool<ApplyParameterOperationInput, ApplyParameterOperationOutput>;
   [toolName.updateTodos]: AiTool<UpdateTodosInput, UpdateTodosOutput>;

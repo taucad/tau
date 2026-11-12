@@ -1,8 +1,9 @@
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Topic } from '@taucad/events';
 import { toast } from '@taucad/ui/components/sonner';
 import { useProject } from '#hooks/use-project.js';
+import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
@@ -85,6 +86,12 @@ export function RevisionOutcomes(): undefined {
   const client = useRevisionClient();
   const { projectId } = useProject();
   const queryClient = useQueryClient();
+  const workspace = useProjectWorkspace({ enableNoContext: true });
+  const openHistory = (): void => {
+    workspace?.openPanel('revisions');
+  };
+  const openHistoryRef = useRef(openHistory);
+  openHistoryRef.current = openHistory;
   useEffect(() => {
     if (client === undefined) {
       return undefined;
@@ -109,8 +116,14 @@ export function RevisionOutcomes(): undefined {
       outcomes.set(projectId, [...current.filter((entry) => entry.turnId !== notice.turnId), notice]);
       topic.emit();
       if (notice.kind === 'conflicted') {
-        toast.error('That change needs your attention', {
-          description: 'Two versions of this project changed the same files. Open Revisions to sort it out.',
+        toast.error('Needs your decision', {
+          description: 'Both branches changed the same files.',
+          action: {
+            label: 'Resolve',
+            onClick: () => {
+              openHistoryRef.current();
+            },
+          },
         });
         return;
       }

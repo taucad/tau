@@ -28,12 +28,12 @@ Each agent keeps its own configuration directory — `CODEX_HOME`, `CLAUDE_CONFI
 
 ## Where the agent works
 
-Each chat picks a revision mode, and every turn is recorded as a revision either way.
+Each chat picks where the agent works, and every turn is recorded in history either way. The agent reads that history with the read-only `history` tool.
 
 - **Direct** — the agent works in the project folder itself. Its edits are the files you are looking at.
 - **Candidate** — the host materializes a checkout, the agent works there, and the result comes back as a branch you can review and merge.
 
-Tau Desktop and `tau serve` offer both. Chat and run records under `.tau/chats` and `.tau/runs` refuse agent writes; the revision store is hidden. [Workbench records](./workbench-records) differ: `arrange_workbench` writes at the live project root, including candidate turns. The editor applies them, and the card offers Restore.
+Tau Desktop and `tau serve` offer both. Chat and run records under `.tau/chats` and `.tau/runs` refuse agent writes; the history store is hidden. [Workbench records](./workbench-records) differ: `arrange_workbench` writes at the live project root, including candidate turns. The editor applies them, and the card offers Restore.
 
 ## What reaches the vendor
 

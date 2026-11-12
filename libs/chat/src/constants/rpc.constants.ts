@@ -28,7 +28,7 @@ export const rpcName = {
   editFile: 'edit_file',
   arrangeWorkbench: 'arrange_workbench',
   resolveSkill: 'resolve_skill',
-  readRevisions: 'read_revisions',
+  readHistory: 'read_history',
   writeTodos: 'write_todos',
   askQuestions: 'ask_questions',
   installPackages: 'install_packages',
@@ -87,7 +87,7 @@ export const readOnlyRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
   rpcName.exportModel,
   rpcName.getParameters,
   rpcName.resolveSkill,
-  rpcName.readRevisions,
+  rpcName.readHistory,
 ]);
 
 /**

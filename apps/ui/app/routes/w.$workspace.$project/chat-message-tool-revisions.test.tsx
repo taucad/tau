@@ -3,9 +3,10 @@
  * The agent's read-only history card (S28, I10, I3).
  *
  * Three claims: every answer shows the one line the rest of the product shows
- * (`main · Rev 12`), a revision is named as a person names it rather than by a
- * commit id, and the card offers nothing to press — the agent reads history and
- * a person owns every verb that changes it.
+ * (`main`), an entry is named as History names it — its title, time and who,
+ * and for a version its `V3` — never by a number or a commit id (M11), and the
+ * card offers nothing to press: the agent reads history and a person owns every
+ * verb that changes it.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -28,7 +29,7 @@ vi.mock('@taucad/chat-ui/components/chat-tool-card', () => ({
   }): React.JSX.Element {
     return (
       <article
-        aria-label='revisions tool card'
+        aria-label='history tool card'
         data-status={status ?? ''}
         data-collapsible={isCollapsible === false ? 'false' : 'true'}
         data-default-open={isDefaultOpen === false ? 'false' : 'true'}
@@ -50,7 +51,7 @@ vi.mock('@taucad/chat-ui/components/chat-tool-card', () => ({
     return <div>{children}</div>;
   },
   ChatToolCardList({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
-    return <ul aria-label='revisions rows'>{children}</ul>;
+    return <ul aria-label='history rows'>{children}</ul>;
   },
   ChatToolCardListItem({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
     return <li>{children}</li>;
@@ -90,7 +91,7 @@ vi.mock('#components/chat/chat-tool-error.js', () => ({
   },
 }));
 
-type RevisionsInvocation = ToolInvocation<typeof toolName.revisions>;
+type RevisionsInvocation = ToolInvocation<typeof toolName.history>;
 type RevisionsOutputAvailable = Extract<RevisionsInvocation, { state: 'output-available' }>;
 type RevisionsInput = RevisionsOutputAvailable['input'];
 type RevisionsOutput = RevisionsOutputAvailable['output'];
@@ -105,7 +106,6 @@ const answered = (input: RevisionsInput, output: RevisionsOutput): RevisionsOutp
 const revision = (
   overrides: Partial<NonNullable<RevisionsOutput['revisions']>[number]> = {},
 ): NonNullable<RevisionsOutput['revisions']>[number] => ({
-  revisionNumber: 2,
   revisionId: '96b7f7e20408020c0b6bdde67ddb99cec27aa0c1',
   who: { kind: 'recorded', identity: { kind: 'user', id: 'ada' } },
   source: 'user',
@@ -115,45 +115,78 @@ const revision = (
   ...overrides,
 });
 
+/** The time History prints for a row, in this run's locale and zone. */
+const at = (createdAt = 1_789_225_647_000): string =>
+  new Date(createdAt).toLocaleTimeString(undefined, { timeStyle: 'short' });
+
 const verb = (): string => screen.getByTestId('chat-tool-verb').textContent;
 const description = (): string => screen.getByTestId('chat-tool-description').textContent;
 const rows = (): readonly string[] =>
-  within(screen.getByRole('list', { name: 'revisions rows' }))
+  within(screen.getByRole('list', { name: 'history rows' }))
     .getAllByRole('listitem')
     .map((item) => item.textContent);
+
+/** M11: no "Rev " followed by a digit and no "revision" for a save, anywhere on the card. */
+const expectNoSaveNumber = (): void => {
+  const text = document.body.textContent;
+  expect(text).not.toMatch(/\bRev \d/u);
+  expect(text).not.toMatch(/\brevisions?\b/iu);
+};
 
 afterEach(cleanup);
 
 describe('ChatMessageToolRevisions', () => {
-  it('says where the project is and lists revisions as a person names them', () => {
+  it('says where the project is and lists entries by time and title, with no number', () => {
     render(
       <ChatMessageToolRevisions
         part={answered(
           { action: 'log' },
           {
-            where: 'main · Rev 2',
+            where: 'main',
             branch: 'main',
-            revisions: [revision(), revision({ revisionNumber: 1, revisionId: '7cbef6c', summary: 'First revision' })],
+            revisions: [
+              revision(),
+              revision({ revisionId: '7cbef6c', summary: 'First change', createdAt: 1_789_225_000_000 }),
+            ],
           },
         )}
       />,
     );
 
     expect(verb()).toBe('Read');
-    expect(description()).toBe('main · Rev 2 · 2 revisions');
+    expect(description()).toBe('main · 2 entries');
     /* Q2: a single-person project's rows carry no who line, and an id is never printed. */
-    expect(rows()).toEqual(['Rev 2Thickened the bracket', 'Rev 1First revision']);
+    expect(rows()).toEqual([`${at()}Thickened the bracket`, `${at(1_789_225_000_000)}First change`]);
     // Never a commit id, on any row (A18, I12).
     expect(screen.queryByText(/96b7f7e2/u)).toBeNull();
+    expectNoSaveNumber();
   });
 
-  it('names who made a revision as History does, never by a model or account id (HQ4)', () => {
+  it('shows a version by its number and name where an entry shows its time (M11)', () => {
+    render(
+      <ChatMessageToolRevisions
+        part={answered(
+          { action: 'log', limit: 1 },
+          {
+            where: 'main',
+            revisions: [revision({ summary: 'Saved changes (save)', version: { number: 2, name: 'Ready for print' } })],
+          },
+        )}
+      />,
+    );
+
+    expect(description()).toBe('main · 1 entry');
+    expect(rows()).toEqual(['V2Ready for print']);
+    expectNoSaveNumber();
+  });
+
+  it('names who made an entry as History does, never by a model or account id (HQ4)', () => {
     render(
       <ChatMessageToolRevisions
         part={answered(
           { action: 'log' },
           {
-            where: 'main · Rev 2',
+            where: 'main',
             revisions: [
               revision({
                 who: {
@@ -168,7 +201,6 @@ describe('ChatMessageToolRevisions', () => {
                 source: 'agent',
               }),
               revision({
-                revisionNumber: 1,
                 revisionId: '7cbef6c',
                 who: { kind: 'recorded', identity: { kind: 'user', id: 'user_2abc' } },
                 source: 'user',
@@ -180,7 +212,7 @@ describe('ChatMessageToolRevisions', () => {
     );
 
     expect(rows()[0]).toContain('Agent');
-    expect(rows()[1]).toBe('Rev 1Thickened the bracket');
+    expect(rows()[1]).toBe(`${at()}Thickened the bracket`);
     expect(screen.queryByText(/claude-opus-4|user_2abc|^agent$/u)).toBeNull();
   });
 
@@ -192,17 +224,15 @@ describe('ChatMessageToolRevisions', () => {
         part={answered(
           { action: 'log' },
           {
-            where: 'main · Rev 5',
+            where: 'main',
             revisions: [
               revision({
-                revisionNumber: 5,
                 revisionId: 'r5',
                 who: { kind: 'recorded', identity: { kind: 'user', id: 'anon:3fa9c1', anonymous: true } },
                 summary: 'Hidden',
               }),
               ...fallbacks.map((actor, index) =>
                 revision({
-                  revisionNumber: 4 - index,
                   revisionId: `r${String(4 - index)}`,
                   who: { kind: 'recorded', identity: { kind: 'user', id: actor } },
                   summary: 'Saved',
@@ -214,28 +244,18 @@ describe('ChatMessageToolRevisions', () => {
       />,
     );
 
-    expect(rows()).toEqual(['Rev 5HiddenAnonymous', 'Rev 4Saved', 'Rev 3Saved', 'Rev 2Saved', 'Rev 1Saved']);
+    expect(rows()).toEqual([`${at()}HiddenAnonymous`, `${at()}Saved`, `${at()}Saved`, `${at()}Saved`, `${at()}Saved`]);
     expect(screen.queryByText(/3fa9c1|prj_x|tau-host|richard|example\.com/u)).toBeNull();
   });
 
-  it('gives a merged-in revision no number, and marks one that needs your decision', () => {
+  it('marks an entry that needs your decision', () => {
     render(
       <ChatMessageToolRevisions
-        part={answered(
-          { action: 'log' },
-          {
-            where: 'main · Rev 2',
-            revisions: [
-              revision({ revisionNumber: undefined, revisionId: 'abc1234', summary: 'Merged side' }),
-              revision({ conflicted: true }),
-            ],
-          },
-        )}
+        part={answered({ action: 'log' }, { where: 'main', revisions: [revision({ conflicted: true })] })}
       />,
     );
 
-    expect(rows()[0]).toContain('merged in');
-    expect(rows()[1]).toContain('Needs your decision');
+    expect(rows()[0]).toContain('Needs your decision');
   });
 
   it('counts the files a diff changed and names each one with how it changed', () => {
@@ -244,7 +264,7 @@ describe('ChatMessageToolRevisions', () => {
         part={answered(
           { action: 'diff', from: 'a', to: 'b' },
           {
-            where: 'main · Rev 12',
+            where: 'main',
             changes: [
               { path: 'src/bracket.ts', kind: 'modified' },
               { path: 'models/plate.step', kind: 'added' },
@@ -256,21 +276,27 @@ describe('ChatMessageToolRevisions', () => {
     );
 
     expect(verb()).toBe('Compared');
-    expect(description()).toBe('main · Rev 12 · 3 files');
+    expect(description()).toBe('main · 3 files');
     expect(rows()).toEqual(['src/bracket.ts(modified)', 'models/plate.step(added)', 'notes.md(deleted)']);
   });
 
-  it('marks which branch a describe is on, and counts the rest', () => {
+  it('says No changes for a diff that changed nothing', () => {
+    render(<ChatMessageToolRevisions part={answered({ action: 'diff', to: 'b' }, { where: 'main', changes: [] })} />);
+
+    expect(rows()).toEqual(['No changes']);
+  });
+
+  it('marks which branch a describe is on with no number, and counts the rest', () => {
     render(
       <ChatMessageToolRevisions
         part={answered(
           { action: 'describe' },
           {
-            where: 'main · Rev 12',
+            where: 'main',
             branch: 'main',
             branches: [
-              { name: 'main', revisionNumber: 12, revisionId: 'aaa' },
-              { name: 'sketch', revisionNumber: 4, revisionId: 'bbb' },
+              { name: 'main', revisionId: 'aaa' },
+              { name: 'sketch', revisionId: 'bbb' },
             ],
           },
         )}
@@ -278,16 +304,17 @@ describe('ChatMessageToolRevisions', () => {
     );
 
     expect(verb()).toBe('Checked');
-    expect(description()).toBe('main · Rev 12 · 2 branches');
-    expect(rows()).toEqual(['mainRev 12 · this one', 'sketchRev 4']);
+    expect(description()).toBe('main · 2 branches');
+    expect(rows()).toEqual(['maincurrent', 'sketch']);
+    expectNoSaveNumber();
   });
 
   it('carries the where line with no rows to disclose, and stays uncollapsible', () => {
-    render(<ChatMessageToolRevisions part={answered({ action: 'describe' }, { where: 'No revisions yet' })} />);
+    render(<ChatMessageToolRevisions part={answered({ action: 'describe' }, { where: 'No history yet' })} />);
 
-    expect(description()).toBe('No revisions yet');
-    expect(screen.queryByRole('list', { name: 'revisions rows' })).toBeNull();
-    expect(screen.getByRole('article', { name: 'revisions tool card' }).dataset['collapsible']).toBe('false');
+    expect(description()).toBe('No history yet');
+    expect(screen.queryByRole('list', { name: 'history rows' })).toBeNull();
+    expect(screen.getByRole('article', { name: 'history tool card' }).dataset['collapsible']).toBe('false');
   });
 
   it('reads as pending while the call streams, in the verb of the action it named', () => {
@@ -297,15 +324,11 @@ describe('ChatMessageToolRevisions', () => {
 
     expect(verb()).toBe('Comparing');
     expect(description()).toBe('what changed...');
-    expect(screen.getByRole('article', { name: 'revisions tool card' }).dataset['status']).toBe('loading');
+    expect(screen.getByRole('article', { name: 'history tool card' }).dataset['status']).toBe('loading');
   });
 
   it('offers nothing to press: reading history is the whole card (I10)', () => {
-    render(
-      <ChatMessageToolRevisions
-        part={answered({ action: 'log' }, { where: 'main · Rev 2', revisions: [revision()] })}
-      />,
-    );
+    render(<ChatMessageToolRevisions part={answered({ action: 'log' }, { where: 'main', revisions: [revision()] })} />);
 
     expect(screen.queryAllByRole('button')).toEqual([]);
     expect(screen.queryAllByRole('link')).toEqual([]);
@@ -321,19 +344,20 @@ describe('ChatMessageToolRevisions', () => {
           toolCallId: 'tc_1',
           state: 'output-error',
           input: { action: 'log' },
-          errorText: 'This project has no revision history.',
+          errorText: 'This project has no history available here.',
         }}
       />,
     );
 
     const alert = screen.getByRole('alert');
-    expect(alert.dataset['noun']).toBe('revision history');
-    expect(alert.textContent).toBe('This project has no revision history.');
+    expect(alert.dataset['noun']).toBe('history');
+    expect(alert.textContent).toBe('This project has no history available here.');
   });
 
   it('shows an empty history as empty rather than as no answer', () => {
-    render(<ChatMessageToolRevisions part={answered({ action: 'log' }, { where: 'main · Rev 0', revisions: [] })} />);
+    render(<ChatMessageToolRevisions part={answered({ action: 'log' }, { where: 'main', revisions: [] })} />);
 
-    expect(rows()).toEqual(['(no revisions yet)']);
+    expect(rows()).toEqual(['No history yet']);
+    expectNoSaveNumber();
   });
 });

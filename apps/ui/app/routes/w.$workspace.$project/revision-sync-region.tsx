@@ -447,7 +447,7 @@ function MovedRepository({
   if (confirming) {
     return (
       <div className='flex flex-col gap-2'>
-        <p className='text-sm'>{`Update this project's remote to ${moved.fullName}? Every revision stays on this device.`}</p>
+        <p className='text-sm'>{`Back up to ${moved.fullName} from now on? Your history stays on this device.`}</p>
         <div className='flex flex-wrap items-center gap-2'>
           <Button
             autoFocus
@@ -879,7 +879,7 @@ export function RevisionSyncRegion({
         {role === 'revoked' ? (
           <span className='text-muted-foreground'>
             {sync.reason === 'notFound' && failureSentence !== undefined
-              ? `${failureSentence} Every revision stays on this device.`
+              ? `${failureSentence} Your history stays on this device.`
               : cloudUnavailableSentence}
           </span>
         ) : failureSentence === undefined ? (
@@ -1191,7 +1191,7 @@ export function RevisionSyncRegion({
 
       {confirmingDisconnect && remote.phase === 'connected' ? (
         <div className='flex flex-col gap-2'>
-          <p className='text-sm'>{`Disconnect ${connectedLabel}? Every revision stays on this device.`}</p>
+          <p className='text-sm'>{`Disconnect ${connectedLabel}? Your history stays on this device.`}</p>
           {/* A confirmation reads as the naming form: the dismissal first, then the verb with its glyph (round 16). */}
           <div className='flex flex-wrap items-center gap-2'>
             <Button
@@ -1225,7 +1225,7 @@ export function RevisionSyncRegion({
 
       {pendingConnection === undefined || pendingLabel === undefined ? null : (
         <div className='flex flex-col gap-2'>
-          <p className='text-sm'>{`Replace ${connectedLabel} with ${pendingLabel}? Every revision stays on this device.`}</p>
+          <p className='text-sm'>{`Replace ${connectedLabel} with ${pendingLabel}? Your history stays on this device.`}</p>
           <div className='flex flex-wrap items-center gap-2'>
             <Button
               autoFocus

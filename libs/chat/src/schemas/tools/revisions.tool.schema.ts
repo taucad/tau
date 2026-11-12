@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * The agent's read-only view of a project's revision history (S28, I10).
+ * The agent's read-only view of a project's history (S28, I10): the `history` tool.
  *
  * Read-only by design: an agent can see where it is, what changed and what came
  * before, and cannot branch, merge, restore, discard or sync. Those are a
@@ -13,7 +13,7 @@ export const revisionsInputSchema = z.object({
   action: z
     .enum(['log', 'diff', 'describe', 'conflict'])
     .describe(
-      'log: list a branch’s revisions, newest first. diff: list the files that changed between two revisions. describe: say which branch this project is on and what else it holds. conflict: read both sides of a conflict waiting for a decision.',
+      'log: list a branch’s history entries, newest first. diff: list the files that changed between two entries. describe: say which branch this project is on and what else it holds. conflict: read both sides of a conflict waiting for a decision.',
     ),
   branch: z.string().optional().describe('log only. Branch to list; defaults to the one this project is on.'),
   limit: z
@@ -22,13 +22,13 @@ export const revisionsInputSchema = z.object({
     .positive()
     .max(100)
     .optional()
-    .describe('log only. Most recent revisions to list; defaults to all of them.'),
-  from: z.string().optional().describe('diff only. The older revision id. Omit to compare against an empty project.'),
-  to: z.string().optional().describe('diff only. The newer revision id. Required for diff.'),
+    .describe('log only. Most recent entries to list; defaults to all of them.'),
+  from: z.string().optional().describe('diff only. The older entry’s id. Omit to compare against an empty project.'),
+  to: z.string().optional().describe('diff only. The newer entry’s id. Required for diff.'),
   revision: z
     .string()
     .optional()
-    .describe('conflict only. The conflicted revision id; defaults to the conflict waiting on this branch.'),
+    .describe('conflict only. The conflicted entry’s id; defaults to the conflict waiting on this branch.'),
   path: z.string().optional().describe('conflict only. One conflicted file; defaults to all of them.'),
 });
 
@@ -41,7 +41,7 @@ const revisionPersonSchema = z.object({
 });
 
 /**
- * Who made one revision, as the store holds it (blueprint B2): the identity a
+ * Who made one history entry, as the store holds it (blueprint B2): the identity a
  * commit Tau wrote records, or the git author of one it did not. Never a name
  * to print as is; the pane resolves who a row shows.
  *
@@ -62,20 +62,23 @@ export const revisionWhoSchema = z
     'Who made it: the identity Tau recorded (a person, or an agent run for a person), or a commit’s git author.',
   );
 
-/** One revision, as the history pane and the chat card show it. @public */
+/**
+ * One history entry, as the History pane and the chat card show it (blueprint
+ * M11): an entry has no number; a version carries its project-wide `V<n>`.
+ *
+ * @public
+ */
 export const revisionRowSchema = z.object({
-  revisionNumber: z
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .describe('Position on this branch — the "Rev 12" a person sees. Absent for a revision merged in from elsewhere.'),
-  revisionId: z.string(),
+  revisionId: z.string().describe('The entry’s id, for `diff`. History shows its first seven characters.'),
   who: revisionWhoSchema,
   source: z.string().describe('What made it: user, agent, restore, merge or import.'),
   createdAt: z.number().describe('Milliseconds since the Unix epoch.'),
-  summary: z.string(),
-  conflicted: z.boolean().describe('Whether this revision still needs a person to resolve it.'),
+  summary: z.string().describe('The entry’s title.'),
+  conflicted: z.boolean().describe('Whether this entry still needs a person to resolve it.'),
+  version: z
+    .object({ number: z.number().int().positive(), name: z.string() })
+    .optional()
+    .describe('Present when the entry is a version: its number, shown as "V3", and its name.'),
 });
 
 /** One changed path. @public */
@@ -84,7 +87,7 @@ export const revisionChangeSchema = z.object({
   kind: z.enum(['added', 'modified', 'deleted']),
 });
 
-/** One conflicted file's three versions. @public */
+/** One conflicted file's three sides. @public */
 export const revisionConflictFileSchema = z.object({
   path: z.string(),
   chooseOne: z
@@ -97,12 +100,12 @@ export const revisionConflictFileSchema = z.object({
 
 /** What one read answers with. @public */
 export const revisionsOutputSchema = z.object({
-  where: z.string().describe('Where this project is right now, in one line: "main · Rev 12".'),
+  where: z.string().describe('Where this project is right now, in one line: the branch name, or "No history yet".'),
   branch: z.string().optional(),
   revisions: z.array(revisionRowSchema).optional().describe('Present for log.'),
   changes: z.array(revisionChangeSchema).optional().describe('Present for diff.'),
   branches: z
-    .array(z.object({ name: z.string(), revisionNumber: z.number().int().nonnegative(), revisionId: z.string() }))
+    .array(z.object({ name: z.string(), revisionId: z.string() }))
     .optional()
     .describe('Present for describe.'),
   conflict: z

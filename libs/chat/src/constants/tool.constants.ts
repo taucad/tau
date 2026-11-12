@@ -17,7 +17,7 @@ export const toolName = {
   getParameters: 'get_parameters',
   applyParameterOperation: 'apply_parameter_operation',
   screenshot: 'screenshot',
-  revisions: 'revisions',
+  history: 'history',
   updateTodos: 'update_todos',
   askQuestions: 'ask_questions',
   installPackages: 'install_packages',

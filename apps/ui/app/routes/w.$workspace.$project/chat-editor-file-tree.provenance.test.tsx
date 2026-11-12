@@ -264,7 +264,7 @@ describe('Files tree provenance rows (north star W4)', () => {
     await expand('.tau');
 
     const row = screen.getByRole('treeitem', { name: 'chats' });
-    expect(row).toHaveAccessibleDescription('Supporting data used by Tau. Not included in revisions.');
+    expect(row).toHaveAccessibleDescription('Supporting data used by Tau. Not included in history.');
     expect(row).toHaveAttribute('aria-expanded', 'false');
     expect(within(row).getByText('chats')).toHaveClass('text-muted-foreground');
   });

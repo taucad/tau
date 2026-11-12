@@ -15,9 +15,10 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 import {
   backupCopy,
   revisionAccessibleName,
-  revisionName,
   revisionTitle,
   useRevisionFacts,
+  versionOf,
+  versionPhrase,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionFacts, RevisionWhere } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 
@@ -41,8 +42,11 @@ function RevisionHoverCard({
   /** The line's history; the card lists the last three, and a restore names what it restored from it. */
   readonly revisions: readonly RevisionCard[];
 }): React.JSX.Element {
-  const head = revisionName(where.head);
   const recent = revisions.slice(0, 3);
+  /* M11: a version shows beside the branch only while the files are exactly at it. */
+  const headCard = where.isDirty ? undefined : revisions.find((revision) => revision.n === where.head);
+  const headVersion = headCard === undefined ? undefined : versionOf(headCard);
+  const head = headVersion === undefined ? undefined : versionPhrase(headVersion);
   const named = useWithRestoreTargets(revisions);
   return (
     <div data-slot='revision-card' className='flex flex-col text-xs'>
@@ -51,9 +55,7 @@ function RevisionHoverCard({
         <span className='min-w-0 flex-1 text-sm font-medium break-all text-foreground'>
           {where.branch ?? 'Setting up'}
         </span>
-        {head === undefined ? null : (
-          <span className='mt-0.5 font-mono text-muted-foreground tabular-nums'>{head}</span>
-        )}
+        {head === undefined ? null : <span className='mt-0.5 text-muted-foreground'>{head}</span>}
       </div>
       <div className='flex min-h-6 items-center px-3 pb-2 text-foreground'>
         {facts.mark === 'none' ? null : (
@@ -72,12 +74,9 @@ function RevisionHoverCard({
         )}
       </dl>
       {recent.length === 0 ? null : (
-        <ol aria-label='Recent revisions' className='flex flex-col gap-1 border-t px-3 py-2'>
+        <ol aria-label='Recent changes' className='flex flex-col gap-1 border-t px-3 py-2'>
           {recent.map((revision) => (
             <li key={revision.revisionId} className='flex items-center gap-2'>
-              <span className='w-12 shrink-0 font-mono text-muted-foreground tabular-nums'>
-                {revisionName(revision.n)}
-              </span>
               <span className='min-w-0 flex-1 truncate'>{revisionTitle(revision, named)}</span>
               <span className='shrink-0 text-muted-foreground'>
                 {formatRelativeTime(revision.createdAt, { short: true })}
@@ -86,7 +85,7 @@ function RevisionHoverCard({
           ))}
         </ol>
       )}
-      <p className='border-t px-3 py-2 text-muted-foreground'>Click to open Revisions</p>
+      <p className='border-t px-3 py-2 text-muted-foreground'>Click to open History</p>
     </div>
   );
 }
@@ -206,11 +205,11 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
       {followChat === undefined ? null : (
         <PaneButton
           size='label'
-          aria-label={`Follow chat, which is working on ${followChat.branch}`}
+          aria-label={`Switch to ${followChat.branch}, where the chat is working`}
           tooltip={`Switch the workbench to ${followChat.branch}`}
           onClick={followChat.follow}
         >
-          Follow chat
+          {`Switch to ${followChat.branch}`}
         </PaneButton>
       )}
     </span>

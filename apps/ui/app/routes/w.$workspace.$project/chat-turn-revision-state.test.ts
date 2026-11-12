@@ -121,7 +121,7 @@ describe('deriveTurnRevisionState', () => {
     const previous = deriveTurnRevisionState(facts());
     expect(deriveTurnRevisionState(facts({ hasChanges: true, isReconnecting: true, previous }))).toEqual(previous);
     const unconfirmed = deriveTurnRevisionState(facts({ hasChanges: true, isUnreachable: true, previous }));
-    expect(turnRevisionLabel(unconfirmed, 0)).toBe('Save not confirmed');
+    expect(turnRevisionLabel(unconfirmed, 0)).toBe('Couldn’t confirm the save');
     expect(
       deriveTurnRevisionState(facts({ hasChanges: true, isUnreachable: true, previous: unconfirmed })),
     ).toStrictEqual(unconfirmed);
@@ -137,28 +137,28 @@ describe('deriveTurnRevisionState', () => {
   it('should show a working state from attempt 1’s placement', () => {
     const state = deriveTurnRevisionState(facts());
     expect(state).toStrictEqual({ kind: 'working', base: { kind: 'revision', n: 4 }, isWaiting: false });
-    expect(turnRevisionLabel(state, 0)).toBe('Starting from Rev 4');
+    expect(turnRevisionLabel(state, 0)).toBe('Working…');
   });
 
   it('should never invent a number for an unborn branch', () => {
     const state = deriveTurnRevisionState(facts({ base: { kind: 'first' } }));
-    expect(turnRevisionLabel(state, 0)).toBe('Starting first revision');
+    expect(turnRevisionLabel(state, 0)).toBe('Working…');
   });
 
   it('should name no base for a later attempt, or before the placement', () => {
-    expect(turnRevisionLabel(deriveTurnRevisionState(facts({ log: log({ attempt: 2 }) })), 0)).toBe('New revision');
-    expect(turnRevisionLabel(deriveTurnRevisionState(facts({ base: undefined })), 0)).toBe('New revision');
+    expect(turnRevisionLabel(deriveTurnRevisionState(facts({ log: log({ attempt: 2 }) })), 0)).toBe('Working…');
+    expect(turnRevisionLabel(deriveTurnRevisionState(facts({ base: undefined })), 0)).toBe('Working…');
   });
 
   it('should say Waiting for you while the attempt waits on the person', () => {
     const state = deriveTurnRevisionState(facts({ log: log({ isWaiting: true }) }));
-    expect(turnRevisionLabel(state, 0)).toBe('Starting from Rev 4 · Waiting for you');
+    expect(turnRevisionLabel(state, 0)).toBe('Waiting for you');
   });
 
   /* PV-A7: the run reads Done at its terminal row; the card alone waits on the settlement row. */
   it('should show saving until the settlement row', () => {
     const ended = facts({ log: log({ terminal: 'completed' }) });
-    expect(turnRevisionLabel(deriveTurnRevisionState(ended), 0)).toBe('Saving revision');
+    expect(turnRevisionLabel(deriveTurnRevisionState(ended), 0)).toBe('Saving…');
     const settled = deriveTurnRevisionState({ ...ended, log: log({ terminal: 'completed', settlement: finalized }) });
     /* Named, with its card still on its way: still saving, never hidden. */
     expect(settled.kind).toBe('saving');
@@ -167,7 +167,7 @@ describe('deriveTurnRevisionState', () => {
       log: log({ terminal: 'completed', settlement: finalized }),
       settled: revision,
     });
-    expect(turnRevisionLabel(shown, 2)).toBe('Rev 5 saved · 2 files');
+    expect(turnRevisionLabel(shown, 2)).toBe('Saved · 2 files');
   });
 
   /* PV-A20, TS-R11: a Stop after the agent changed files settles with its revision. */
@@ -177,7 +177,7 @@ describe('deriveTurnRevisionState', () => {
         facts({ log: log({ terminal, settlement: finalized }), settled: revision }),
       );
       expect(state).toStrictEqual({ kind: 'saved', revision, isInterrupted: true });
-      expect(turnRevisionLabel(state, 2)).toBe('Rev 5 saved · Work interrupted');
+      expect(turnRevisionLabel(state, 2)).toBe('Saved · stopped early');
     }
   });
 
@@ -211,11 +211,11 @@ describe('deriveTurnRevisionState', () => {
     expect(deriveTurnRevisionState(facts({ isReconnecting: true })).kind).toBe('working');
   });
 
-  it('should say Save not confirmed while the host cannot be reached and nothing settled', () => {
+  it('should say Couldn’t confirm the save while the host cannot be reached and nothing settled', () => {
     for (const terminal of [undefined, 'completed'] as const) {
       const state = deriveTurnRevisionState(facts({ log: log({ terminal }), isUnreachable: true }));
-      expect(turnRevisionLabel(state, 0)).toBe('Save not confirmed');
-      expect(turnRevisionDetail(state)).toContain('Rev 4 is the last confirmed revision.');
+      expect(turnRevisionLabel(state, 0)).toBe('Couldn’t confirm the save');
+      expect(turnRevisionDetail(state)).toBe('Tau couldn’t reach your files to confirm this save.');
     }
     /* The settlement row answers whatever the connection does. */
     const settled = deriveTurnRevisionState(

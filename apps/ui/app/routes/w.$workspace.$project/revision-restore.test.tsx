@@ -26,6 +26,15 @@ vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { success: toastSuccess, error: toastError, info: toastInfo, warning: toastWarning },
 }));
 const capture = vi.hoisted(() => vi.fn<(event: string, payload?: Record<string, unknown>) => void>());
+/* A toast names an entry by its title or version (M11), read from the loaded History page. */
+vi.mock('#hooks/use-revisions.js', () => ({
+  useRevisions: () => ({
+    revisions: [
+      { revisionId: 'rev-4', n: 4, createdAt: 1, summary: 'Thicker walls for the lid', actor: '', conflicted: false },
+      { revisionId: 'rev-3', n: 3, createdAt: 1, summary: 'Add vent slots', actor: '', conflicted: false },
+    ],
+  }),
+}));
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture }) }));
 const raiseHeldSave = vi.hoisted(() => vi.fn());
 vi.mock('#routes/w.$workspace.$project/held-save-toast.js', () => ({ useHeldSaveToast: () => raiseHeldSave }));
@@ -55,13 +64,13 @@ describe('RevisionRestore', () => {
         type: 'error',
         subject: 'connection',
         code: 'HOST_CONFIGURATION_MISMATCH',
-        message: 'The host refused this revision connection.',
+        message: 'The host refused this history connection.',
         generation: 1,
         connectionOperation: 'status',
       });
     }
     expect(toastError).toHaveBeenCalledOnce();
-    expect(toastError.mock.calls[0]?.[0]).toBe('History could not connect');
+    expect(toastError.mock.calls[0]?.[0]).toBe('Couldn’t load history');
     expect(capture).toHaveBeenCalledWith(
       'revision_connection_failed',
       expect.objectContaining({ code: 'HOST_CONFIGURATION_MISMATCH', generation: 1, operation: 'status' }),
@@ -75,8 +84,8 @@ describe('RevisionRestore', () => {
     render(<RevisionRestore />);
 
     expect(screen.getByText(/2 files added since will be removed\./)).toBeInTheDocument();
-    /* D1: the dialog says the restore is a new revision, so History loses nothing. */
-    expect(screen.getByText(/as a new revision, so nothing in History is lost\./)).toBeInTheDocument();
+    /* D1: the dialog says the restore is a new entry, so History loses nothing. */
+    expect(screen.getByText(/as a new entry, so nothing in History is lost\./)).toBeInTheDocument();
   });
 
   it('asks about unsaved editor changes without inventing a deletion', () => {
@@ -95,7 +104,7 @@ describe('RevisionRestore', () => {
     render(<RevisionRestore />);
 
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    expect(screen.queryByText('Restore this revision?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Restore this point?')).not.toBeInTheDocument();
   });
 
   it('hands confirm and cancel straight to the machine', () => {
@@ -103,8 +112,8 @@ describe('RevisionRestore', () => {
 
     render(<RevisionRestore />);
     /* The verb keeps its object through the confirmation (DESIGN: controls name their effect). */
-    expect(screen.getByText('Restore Rev 3?')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Restore Rev 3' }));
+    expect(screen.getByText('Restore “Add vent slots”?')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore “Add vent slots”' }));
     expect(revisionStatusHarness.commands.confirm).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -147,8 +156,8 @@ describe('RevisionRestore', () => {
     }
 
     const [title, options] = toastSuccess.mock.calls[0] ?? [];
-    expect(title).toBe('Restored Rev 3');
-    expect(options).toMatchObject({ action: { label: 'Undo restore' } });
+    expect(title).toBe('Restored “Add vent slots”');
+    expect(options).toMatchObject({ action: { label: 'Undo' } });
   });
 
   /* V5 A6, TS-R17: a save another run's lease held names that run, never "Nothing to save". */
@@ -208,7 +217,7 @@ describe('RevisionRestore', () => {
       'Files restored',
       {
         description:
-          'The earlier files are back, but something else changed this project at the same time, so this restore is not in History as its own revision. Your files are kept.',
+          'The earlier files are back, but something else changed this project at the same time, so this restore is not in History as its own entry. Your files are kept.',
       },
     ]);
     expect(toastWarning.mock.calls[1]?.[1]).toEqual({
@@ -217,8 +226,8 @@ describe('RevisionRestore', () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  /* D15: an Undo names the revision it undid, and a refusal with nothing to undo is not a failure. */
-  it('announces an Undo by the revision it undid, and warns rather than fails when nothing is left', () => {
+  /* D15: an Undo names the entry it undid, and a refusal with nothing to undo is not a failure. */
+  it('announces an Undo by the entry it undid, and warns rather than fails when nothing is left', () => {
     render(<RevisionRestore />);
 
     for (const listener of revisionStatusHarness.toasts) {
@@ -233,12 +242,12 @@ describe('RevisionRestore', () => {
         type: 'error',
         subject: 'restore',
         code: 'UNDO_CONFLICT',
-        message: 'A later revision changed the same lines, so Rev 2 can’t be undone.',
+        message: 'A later change touched the same lines, so this one can’t be undone.',
         revisionNumber: 2,
       });
     }
 
-    expect(toastSuccess.mock.calls[0]).toEqual(['Undid Rev 4']);
+    expect(toastSuccess.mock.calls[0]).toEqual(['Undid “Thicker walls for the lid”']);
     expect(toastWarning.mock.calls[0]).toEqual([
       'Nothing to undo here',
       { description: 'Nothing you did on this branch is left to undo.' },
@@ -247,19 +256,19 @@ describe('RevisionRestore', () => {
       'That change can’t be undone',
       {
         description:
-          'A later revision changed the same lines, so Rev 2 can’t be undone. Restore an earlier revision instead.',
+          'A later change touched the same lines, so this one can’t be undone. Restore an earlier point instead.',
       },
     ]);
   });
 
-  it('names a restore of a revision off the line without inventing its number (A9)', () => {
+  it('names a restore of an entry off the line without inventing its number (A9)', () => {
     render(<RevisionRestore />);
 
     for (const listener of revisionStatusHarness.toasts) {
       listener({ type: 'restored', revisionNumber: undefined });
     }
 
-    expect(toastSuccess.mock.calls[0]?.[0]).toBe('Restored an earlier revision');
+    expect(toastSuccess.mock.calls[0]?.[0]).toBe('Restored an earlier point');
   });
 
   /* The refusal crosses the boundary as a code; the page owns the words (P4).
@@ -278,7 +287,7 @@ describe('RevisionRestore', () => {
     }
 
     const [title, options] = toastError.mock.calls[0] ?? [];
-    expect(title).toBe('That branch change did not go through');
+    expect(title).toBe('Couldn’t change the branch');
     expect(options?.description).toBe('There is nothing to branch from yet. Add a file, then try again.');
     expect(options?.description).not.toMatch(/checkout|unborn/iu);
   });
@@ -296,7 +305,7 @@ describe('RevisionRestore', () => {
     }
 
     const [title, options] = toastError.mock.calls[0] ?? [];
-    expect(title).toBe('That change could not be saved');
+    expect(title).toBe('Couldn’t save');
     expect(options?.description).toBe('Tau could not record this change. Reload the page and try again.');
     // SB4: the product event keeps outcome fields; the diagnostic goes to error reporting (`reportRevisionToast`).
     expect(capture).toHaveBeenCalledWith('revision_save_failed', { code: undefined });

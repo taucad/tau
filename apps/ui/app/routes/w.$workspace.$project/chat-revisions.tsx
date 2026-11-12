@@ -54,10 +54,11 @@ import type { ConflictMaterialization } from '#routes/w.$workspace.$project/revi
 import { RevisionSyncRegion } from '#routes/w.$workspace.$project/revision-sync-region.js';
 import {
   needsDecision,
-  revisionName,
   revisionTitle,
   selectStripVerbs,
   useRevisionFacts,
+  versionOf,
+  versionPhrase,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { StripVerb } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { useRevisions, useRevisionsOnLine, useWithRestoreTargets } from '#hooks/use-revisions.js';
@@ -110,13 +111,13 @@ export function ChatRevisions({
     <FloatingPanel isOpen={isExpanded} side='right' onOpenChange={setIsExpanded}>
       <FloatingPanelContent>
         <FloatingPanelContentHeader>
-          <FloatingPanelContentTitle>Revisions</FloatingPanelContentTitle>
+          <FloatingPanelContentTitle>History</FloatingPanelContentTitle>
           <FloatingPanelContentHeaderActions>
             <FloatingPanelClose
-              label='Close Revisions'
+              label='Close History'
               icon={XIcon}
               tooltipContent={(isOpen) => (
-                <div className='flex items-center gap-2'>{isOpen ? 'Close' : 'Open'} Revisions</div>
+                <div className='flex items-center gap-2'>{isOpen ? 'Close' : 'Open'} History</div>
               )}
             />
           </FloatingPanelContentHeaderActions>
@@ -146,7 +147,7 @@ function OrientationStrip({
   readonly onOpenSync: () => void;
 }): React.JSX.Element {
   const { workspace = '' } = useParams();
-  const { line, revisions, branchFacts } = useRevisions();
+  const { line } = useRevisions();
   const { where, facts, head, status } = useRevisionFacts();
   const role = useProjectRole();
   const commands = useRevisionCommands();
@@ -173,11 +174,11 @@ function OrientationStrip({
   });
   /* A29: the chooser is already open below, so Back up would repeat it. */
   const primary = verbs.primary === 'Back up' && isSyncOpen ? undefined : verbs.primary;
-  const headName = revisionName(head?.n);
-  const tip = where.branch === undefined ? undefined : branchFacts?.get(where.branch)?.revisionNumber;
+  /* M11: an entry has no number; a version shows beside the branch only while the files are exactly at it. */
+  const headVersion = head === undefined || where.isDirty ? undefined : versionOf(head);
   const act = (verb: StripVerb): void => {
     switch (verb) {
-      case 'Save revision': {
+      case 'Save': {
         void saveRevision();
         break;
       }
@@ -216,7 +217,7 @@ function OrientationStrip({
         key={verb}
         verb={verb}
         icon={verb === 'Undo restore' || verb === 'Undo' ? Undo2 : verb === 'Back up' ? CloudUpload : undefined}
-        variant={isPrimary && (verb === 'Save revision' || facts.mark === 'attention') ? 'default' : 'outline'}
+        variant={isPrimary && (verb === 'Save' || facts.mark === 'attention') ? 'default' : 'outline'}
         disabled={isBusy}
         onClick={() => {
           act(verb);
@@ -258,7 +259,7 @@ function OrientationStrip({
           setAnonymousRevisions(workspace, isChecked);
         }}
       >
-        Anonymous revisions
+        Hide my name in history
       </DropdownMenuSwitchItem>,
     );
   }
@@ -273,8 +274,8 @@ function OrientationStrip({
           ) : (
             <>
               <span className='text-sm font-medium break-all'>{line.name}</span>
-              {headName === undefined ? null : (
-                <span className='font-mono text-sm text-muted-foreground'>{headName}</span>
+              {headVersion === undefined ? null : (
+                <span className='text-sm text-muted-foreground'>{versionPhrase(headVersion)}</span>
               )}
             </>
           )}
@@ -287,9 +288,9 @@ function OrientationStrip({
                 New branch
               </Button>
             }
-            label='Name for the new branch'
+            label='Branch name'
             placeholder='enclosure-v2'
-            note={`Starts from ${headName ?? 'this revision'}. ${where.branch ?? 'This branch'} stays as it is.`}
+            note={`Starts from where you are now. ${where.branch ?? 'This branch'} stays as it is.`}
             saveLabel='Create branch'
             isBusy={(status?.branchVerb.busy ?? false) || (status?.branchVerb.asking ?? false)}
             align='end'
@@ -315,7 +316,7 @@ function OrientationStrip({
         <div data-slot='strip-status-line' className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
           <p
             role='status'
-            aria-label='Revision status'
+            aria-label='History status'
             aria-busy={facts.mark === 'running' || facts.sentence === 'Loading history…' ? true : undefined}
             className='flex flex-auto items-start gap-1.5 text-xs'
           >
@@ -343,10 +344,8 @@ function OrientationStrip({
                 <dd className='font-mono break-all'>{head?.revisionId ?? '—'}</dd>
               </>
             ) : null}
-            <dt className='text-muted-foreground'>Branch tip</dt>
-            <dd>
-              {where.branch === undefined ? '—' : `${where.branch} → ${revisionName(tip ?? revisions[0]?.n) ?? '—'}`}
-            </dd>
+            <dt className='text-muted-foreground'>Branch</dt>
+            <dd>{where.branch ?? '—'}</dd>
             <dt className='text-muted-foreground'>This device</dt>
             <dd>{isDesktopTarget() ? 'Workbench (desktop app)' : 'Workbench (browser)'}</dd>
           </dl>
@@ -858,7 +857,7 @@ function HistoryList(): React.JSX.Element {
         }
       }}
     >
-      <ol aria-label='Revision history' className={timelineList}>
+      <ol aria-label='History entries' className={timelineList}>
         {items}
         {firstHidden === undefined ? null : (
           <li className={timelineRow}>
@@ -1013,8 +1012,8 @@ function RevisionAlerts(): React.JSX.Element | undefined {
           />
           <span className='min-w-0 flex-1'>
             {outcome.kind === 'conflicted'
-              ? `${needsDecision}: two versions changed the same files.`
-              : `Nothing was saved for this change. ${describeRevisionFailure('turn', outcome.code).description}`}
+              ? `${needsDecision}: both branches changed the same files.`
+              : `Nothing was saved for that request. ${describeRevisionFailure('turn', outcome.code).description}`}
           </span>
           <Button
             size='xs'
@@ -1145,17 +1144,14 @@ export function RevisionsPanelBody(): React.JSX.Element {
           </RevisionRegion>
         ) : null}
 
-        <RevisionRegion
-          id='revision-history-heading'
-          title={currentBranch === undefined ? 'History' : `History · ${currentBranch}`}
-        >
+        <RevisionRegion id='revision-history-heading' title='History'>
           {isHistoryLoading && revisions.length === 0 ? (
             <HistoryLoading />
           ) : revisions.length === 0 ? (
             <PanelEmptyState
               icon={History}
-              title='No revisions yet'
-              description='Save a revision or send a request and it will appear here.'
+              title='No history yet'
+              description='Tau saves each change you or the agent make.'
               className='[container-type:inline-size] m-0 h-auto min-h-40 w-full'
             />
           ) : (

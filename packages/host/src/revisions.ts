@@ -1927,7 +1927,7 @@ export type RevisionSaveOutcome =
   | Readonly<{
       status: 'saved';
       revisionId: string;
-      /** Where the files are now, in the pane's words: `main · Rev 3`. */
+      /** Where the files are now, in the pane's words: `main`. */
       line: string;
       /**
        * How the push that followed ended; `noRemote` when this project backs up

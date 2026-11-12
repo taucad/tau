@@ -1168,7 +1168,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                       "get_parameters",
                       "apply_parameter_operation",
                       "screenshot",
-                      "revisions",
+                      "history",
                       "update_todos",
                       "ask_questions",
                       "install_packages",

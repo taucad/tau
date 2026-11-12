@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { toast } from '@taucad/ui/components/sonner';
 import {
   AlertDialog,
@@ -15,7 +15,14 @@ import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-co
 import { revisionWarningCodes } from '#lib/revision-failure-reporting.js';
 import type { RevisionFailureSubject } from '@taucad/ui-core/lib/revision-failure-copy';
 import type { BranchOperation } from '@taucad/revisions';
-import { needsDecision, revisionName } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import { useRevisions } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '#hooks/use-revisions.js';
+import {
+  entryReference,
+  needsDecision,
+  restoredSentence,
+  undidSentence,
+} from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { useHeldSaveToast } from '#routes/w.$workspace.$project/held-save-toast.js';
 
 /** What the question above a waiting branch verb asks. Document words only (A18, I12). */
@@ -39,7 +46,7 @@ const branchVerbAction: Readonly<Record<BranchOperation, string>> = {
 const branchSettledCopy: Readonly<Record<BranchOperation, (branch: string) => string>> = {
   switch: (branch) => `Switched to ${branch}`,
   merge: (branch) => `Merged ${branch}`,
-  discard: (branch) => `Discarded ${branch}`,
+  discard: (branch) => `Closed ${branch}`,
   create: (branch) => `Created ${branch}`,
   rename: (branch) => `Renamed to ${branch}`,
 };
@@ -75,6 +82,12 @@ export function RevisionRestore(): React.JSX.Element {
   const analytics = useAnalytics();
   const raiseHeldSave = useHeldSaveToast();
   const restore = status?.restore;
+  const { revisions } = useRevisions();
+  /* A toast names an entry by its title or version, never by its number (M11): the loaded line answers which one. */
+  const entryAt = (n: number | undefined): RevisionCard | undefined =>
+    n === undefined ? undefined : revisions.find((revision) => revision.n === n);
+  const entryAtRef = useRef(entryAt);
+  entryAtRef.current = entryAt;
 
   useEffect(() => {
     if (client === undefined) {
@@ -89,7 +102,7 @@ export function RevisionRestore(): React.JSX.Element {
          * words (P4, Rule 1); the diagnostic — `Buffer is not defined`, a port
          * sentence naming a checkout — goes where someone can act on it, which
          * is not a toast (E5). */
-        const copy = describeRevisionFailure(entry.subject, entry.code, { revisionNumber: entry.revisionNumber });
+        const copy = describeRevisionFailure(entry.subject, entry.code);
         // Outcome fields only: the diagnostic goes to error reporting with these tags (SB4, `reportRevisionToast`).
         analytics.capture(revisionFailureEvent[entry.subject], {
           code: entry.code,
@@ -130,7 +143,7 @@ export function RevisionRestore(): React.JSX.Element {
        * forbids (A25, I12; review R3). */
       if (entry.type === 'refused') {
         analytics.capture('revision_branch_refused', { branch: entry.branch });
-        toast.error(`Could not move to ${entry.branch}`, { description: entry.reason });
+        toast.error(`Couldn’t switch to ${entry.branch}`, { description: entry.reason });
         return;
       }
       /* A branch verb settles out of sight of the row that started it — the row
@@ -154,33 +167,26 @@ export function RevisionRestore(): React.JSX.Element {
         analytics.capture('revision_merge_conflicted', { pathCount: entry.paths.length });
         /* HQ1, HQ2: the one sentence, naming the line the decision lands on. */
         toast.warning(`${needsDecision} on ${entry.into}`, {
-          description: `${String(entry.paths.length)} ${entry.paths.length === 1 ? 'file changed' : 'files changed'} on both lines. ${entry.into} is untouched until you choose.`,
+          description: `${String(entry.paths.length)} ${entry.paths.length === 1 ? 'file changed' : 'files changed'} on both branches. ${entry.into} is unchanged until you choose.`,
         });
         return;
       }
       /* D15: an undo row names what it undid, as a restore row names its source. */
       if (entry.type === 'undone') {
         analytics.capture('revision_undone', { revision: entry.revisionNumber });
-        toast.success(
-          entry.revisionNumber === undefined
-            ? 'Undid an earlier revision'
-            : `Undid Rev ${String(entry.revisionNumber)}`,
-        );
+        toast.success(undidSentence(entryAtRef.current(entry.revisionNumber)));
         return;
       }
       analytics.capture('revision_restored', { revision: entry.revisionNumber });
-      /* A target off the line has no `Rev N` of its own, and none is invented (A9). */
-      toast.success(
-        entry.revisionNumber === undefined
-          ? 'Restored an earlier revision'
-          : `Restored Rev ${String(entry.revisionNumber)}`,
-        { action: { label: 'Undo restore', onClick: commands.undo } },
-      );
+      /* A target off the line has no title this page can read, and none is invented (A9). */
+      toast.success(restoredSentence(entryAtRef.current(entry.revisionNumber)), {
+        action: { label: 'Undo', onClick: commands.undo },
+      });
     });
   }, [analytics, client, commands, raiseHeldSave]);
 
   const deleteCount = restore?.removedPathCount ?? 0;
-  const restoreTarget = revisionName(restore?.revisionNumber);
+  const restoreTarget = entryReference(entryAt(restore?.revisionNumber));
   const branchVerb = status?.branchVerb;
   return (
     <>
@@ -195,11 +201,11 @@ export function RevisionRestore(): React.JSX.Element {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {restoreTarget === undefined ? 'Restore this revision?' : `Restore ${restoreTarget}?`}
+              {restoreTarget === undefined ? 'Restore this point?' : `Restore ${restoreTarget}?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {/* D1: a restore is a new revision on the line, so the dialog says nothing is lost. */}
-              {`Your files go back to ${restoreTarget ?? 'this revision'} as a new revision, so nothing in History is lost. `}
+              {/* D1: a restore is a new entry on the line, so the dialog says nothing is lost. */}
+              {`Your files go back to ${restoreTarget ?? 'this point'} as a new entry, so nothing in History is lost. `}
               {deleteCount > 0
                 ? `${String(deleteCount)} ${deleteCount === 1 ? 'file' : 'files'} added since will be removed. `
                 : ''}

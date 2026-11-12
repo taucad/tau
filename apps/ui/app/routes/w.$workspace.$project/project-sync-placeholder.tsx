@@ -165,13 +165,13 @@ function ProjectFilesPlaceholder({ state }: { readonly state: ProjectAvailabilit
   const isFailure = state === 'failed' || state === 'offline' || state === 'account';
   const [title, description] =
     state === 'failed' && (reason === 'forbidden' || reason === 'notFound')
-      ? ['Project unavailable', 'Your access may have changed. Open Revisions to review the connection.']
+      ? ['Project unavailable', 'Your access may have changed. Open History to review the backup.']
       : state === 'failed' && reason === 'unauthorized'
         ? ['Sign in to continue', 'Your connection needs authorization before this project can download.']
         : state === 'failed' && reason === 'quota'
           ? [
               'Storage needs attention',
-              'The download could not finish because a storage limit was reached. Open Revisions for details.',
+              'The download could not finish because a storage limit was reached. Open History for details.',
             ]
           : messages[state];
   return (
@@ -194,7 +194,7 @@ function ProjectFilesPlaceholder({ state }: { readonly state: ProjectAvailabilit
       </div>
       {isFailure && needsDetails ? (
         <Button asChild variant='outline' size='sm'>
-          <Link to={detailsUrl}>Open Revisions</Link>
+          <Link to={detailsUrl}>Open History</Link>
         </Button>
       ) : isFailure ? (
         <Button variant='outline' size='sm' onClick={retry}>

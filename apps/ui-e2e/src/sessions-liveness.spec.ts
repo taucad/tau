@@ -64,7 +64,7 @@ const seedProject = async (): Promise<string> => {
   /* URL arrival alone used to pass even when the sole slug resolver rendered
    * Project Not Found. This surface requires the project revision client, so
    * it proves that creation has reached a resolved project route. */
-  await target.expectVisible(selectors.getByRole('button', { name: /^Open Revisions\./u }), 120_000);
+  await target.expectVisible(selectors.getByRole('button', { name: /^Open History\./u }), 120_000);
   return target.currentUrl();
 };
 
@@ -150,7 +150,7 @@ const waitForCurrentProjectToSettle = async (path: string): Promise<void> => {
    * action renders once the revision projection has arrived, which a reopened
    * project delivers well after its route settles. */
   const openRevisions = selectors.getByRole('button', {
-    name: /^Open Revisions\./u,
+    name: /^Open History\./u,
   });
   await target.expectVisible(openRevisions, 120_000);
   await target.click(openRevisions);
@@ -167,7 +167,7 @@ const waitForCurrentProjectToSettle = async (path: string): Promise<void> => {
    * (I24: a dirty checkout is never policy-closable), so save one the way a
    * person does — `Mod+S` is the checkout's own save cut. The Revisions pane
    * owns that fact; the sidebar no longer repeats it (sidebar v2 D4). */
-  if (await target.isVisible(selectors.getByText(/^(Not saved yet|Modified since )/u))) {
+  if (await target.isVisible(selectors.getByText(/^(Nothing saved yet|Unsaved changes)/u))) {
     const saveShortcut = await target.evaluate(() => {
       const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform;
       return /mac/i.test(platform ?? navigator.userAgent) ? 'Meta+s' : 'Control+s';
@@ -476,7 +476,7 @@ describe('a closed project keeps the app shell and reopens from its notice (W2, 
     await waitForKernelCount(0);
 
     await target.click(selectors.getByRole('button', { name: 'Reopen project' }));
-    await target.expectVisible(selectors.getByRole('button', { name: /^Open Revisions\./u }), 120_000);
+    await target.expectVisible(selectors.getByRole('button', { name: /^Open History\./u }), 120_000);
     await waitForKernelCount(1);
     await expect.poll(async () => projectRowDescription(path), { timeout: 120_000 }).toMatch(liveAndIdle);
   }, 900_000);

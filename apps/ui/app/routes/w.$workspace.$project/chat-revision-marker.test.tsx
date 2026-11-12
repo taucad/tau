@@ -317,11 +317,11 @@ describe('ChatRevisionMarker', () => {
         await view.writeFile('main.ts', 'after');
         await vi.waitFor(async () => {
           await refresh();
-          expect(screen.getByRole('status').textContent).toBe('Starting from Rev 2');
+          expect(screen.getByRole('status').textContent).toBe('Working…');
         });
         mounted.unmount();
         const restored = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-        expect(screen.getByRole('status').textContent).toBe('Starting from Rev 2');
+        expect(screen.getByRole('status').textContent).toBe('Working…');
         restored.unmount();
         finish.resolve();
       } finally {
@@ -348,14 +348,14 @@ describe('ChatRevisionMarker', () => {
     refreshRevisionStatus();
     expect(container.firstChild).toBeNull();
     setLog(changed());
-    expect(screen.getByRole('status').textContent).toBe('Starting from Rev 4');
+    expect(screen.getByRole('status').textContent).toBe('Working…');
 
     revisionStatusHarness.status = { ...revisionStatusHarness.status, dirty: false, headRevisionId: 'rev-5' };
     setLog([...changed(), lifecycleRow(4, 'completed')]);
-    expect(screen.getByRole('status').textContent).toBe('Saving revision');
+    expect(screen.getByRole('status').textContent).toBe('Saving…');
     setRevisions({ revisions: [revision()] });
     setLog([...changed(), lifecycleRow(4, 'completed'), settlementRow(5, { revisionId: 'rev-5' })]);
-    expect(screen.getByRole('status').textContent).toBe('Rev 5 saved');
+    expect(screen.getByRole('status').textContent).toBe('Saved');
   });
 
   it('should keep a no-change request hidden through completion and settlement', () => {
@@ -407,28 +407,28 @@ describe('ChatRevisionMarker', () => {
 
     /* The live region holds the lifecycle only; the file count arrives after
        the diff and must not be a second announcement (C46). */
-    expect(screen.getByRole('status').textContent).toBe('Rev 5 saved');
-    expect(screen.getByLabelText('Turn revision').textContent).toContain('Rev 5 saved · 2 files');
+    expect(screen.getByRole('status').textContent).toBe('Saved');
+    expect(screen.getByLabelText('Changes from this request').textContent).toContain('Saved · 2 files');
     /* The whole header is the disclosure; no separate Details button (R11). */
-    const toggle = screen.getByRole('button', { name: 'Rev 5 saved · 2 files · revision details' });
+    const toggle = screen.getByRole('button', { name: 'Saved · 2 files · details' });
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByText('Files · 2')).toBeNull();
     expect(screen.queryByRole('button', { name: /^(Details|View changes)$/ })).toBeNull();
 
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    /* Rounds 14 and 18: History's actions row — View revision, then More and Details. */
+    /* Rounds 14 and 18: History's actions row — View, then More and Details. */
     const actions = document.querySelector<HTMLElement>('[data-slot="marker-actions"]')!;
-    fireEvent.click(within(actions).getByRole('button', { name: 'View revision' }));
+    fireEvent.click(within(actions).getByRole('button', { name: 'View' }));
     expect(requestRevisionReveal).toHaveBeenCalledWith('p', 'rev-5');
     expect(openPanel).toHaveBeenCalledWith('revisions');
-    expect(within(actions).getByRole('button', { name: 'More actions for Rev 5' })).not.toBeNull();
+    expect(within(actions).getByRole('button', { name: 'More' })).not.toBeNull();
     fireEvent.click(within(actions).getByRole('button', { name: 'Details' }));
-    const details = document.querySelector('dl[aria-label="Details for Rev 5"]');
+    const details = document.querySelector('dl[aria-label^="Details for "]');
     /* B5: the id is a diagnostic, behind Tau's debug setting. */
     expect(details?.textContent).not.toContain('rev-5');
     expect(details?.textContent).toContain('main');
-    /* Restore is History's; the chat reaches it by View revision. */
+    /* Restore is History's; the chat reaches it by View. */
     expect(screen.queryByRole('button', { name: /Restore/u })).toBeNull();
   });
 
@@ -437,12 +437,12 @@ describe('ChatRevisionMarker', () => {
     setLog(saved());
     setRevisions({ revisions: [revision()], byTurnId: new Map([['u1', revision()]]), headRevisionId: 'rev-9' });
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    await user.click(screen.getByRole('button', { name: /revision details$/u }));
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 5' }));
+    await user.click(screen.getByRole('button', { name: / · details$/u }));
+    await user.click(screen.getByRole('button', { name: 'More' }));
 
-    expect(screen.getByRole('menuitem', { name: 'Name version…' })).not.toBeNull();
-    expect(screen.getByRole('menuitem', { name: 'New branch from Rev 5…' })).not.toBeNull();
-    expect(screen.getByRole('menuitem', { name: 'Copy revision id' })).not.toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Create version…' })).not.toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'New branch from here…' })).not.toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Copy ID' })).not.toBeNull();
   });
 
   it('should draw the trigger’s glyph family, a failed turn in the alert purple (HQ5)', () => {
@@ -471,7 +471,7 @@ describe('ChatRevisionMarker', () => {
     setLog(saved());
     setRevisions({ revisions: [revision()], byTurnId: new Map([['u1', revision()]]), headRevisionId: 'rev-5' });
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    fireEvent.click(screen.getByRole('button', { name: /revision details$/u }));
+    fireEvent.click(screen.getByRole('button', { name: / · details$/u }));
     expect(screen.getByText('Backing up to Tau Cloud…')).not.toBeNull();
   });
 
@@ -479,7 +479,7 @@ describe('ChatRevisionMarker', () => {
     setLog(saved());
     setRevisions({ revisions: [revision()], byTurnId: new Map([['u1', revision()]]) });
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn={false} />);
-    fireEvent.click(screen.getByRole('button', { name: 'View revision' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
     /* Keyed by project: one document can hold two panes (C47). */
     expect(requestRevisionReveal).toHaveBeenCalledWith('p', 'rev-5');
     expect(openPanel).toHaveBeenCalledWith('revisions');
@@ -490,7 +490,7 @@ describe('ChatRevisionMarker', () => {
     setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
     const status = screen.getByRole('status');
-    expect(status.textContent).toBe('Starting from Rev 4');
+    expect(status.textContent).toBe('Working…');
     expect(status.getAttribute('aria-busy')).toBe('true');
   });
 
@@ -504,7 +504,7 @@ describe('ChatRevisionMarker', () => {
         : new Map(),
     );
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    expect(screen.getByRole('status').textContent).toBe('Starting from Rev 4');
+    expect(screen.getByRole('status').textContent).toBe('Working…');
     expect(vi.mocked(useRevisionCards)).toHaveBeenCalledWith(['rev-4']);
   });
 
@@ -529,7 +529,7 @@ describe('ChatRevisionMarker', () => {
     ]);
     setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
     const { rerender } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    expect(screen.getByRole('status').textContent).toBe('Starting from Rev 4 · Waiting for you');
+    expect(screen.getByRole('status').textContent).toBe('Waiting for you');
 
     setRun('reconnecting');
     /* A replay after the reconnect has not reached the interrupt yet. */
@@ -538,7 +538,7 @@ describe('ChatRevisionMarker', () => {
       logRow(4, { type: 'interrupt.recorded', interruptId: 'i1', phase: 'requested', reason: 'approval' }),
     ]);
     rerender(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    expect(screen.getByRole('status').textContent).toBe('Starting from Rev 4 · Waiting for you');
+    expect(screen.getByRole('status').textContent).toBe('Waiting for you');
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
@@ -547,11 +547,11 @@ describe('ChatRevisionMarker', () => {
     setRevisions({ revisions: [revision()] });
     setLog([...changed(), lifecycleRow(4, 'completed')]);
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    expect(screen.getByRole('status').textContent).toBe('Saving revision');
+    expect(screen.getByRole('status').textContent).toBe('Saving…');
     expect(screen.queryByText(/Finishing/u)).toBeNull();
 
     setLog([...changed(), lifecycleRow(4, 'completed'), settlementRow(5, { revisionId: 'rev-5' })]);
-    expect(screen.getByRole('status').textContent).toBe('Rev 5 saved');
+    expect(screen.getByRole('status').textContent).toBe('Saved');
   });
 
   /* PV-A20, V5 B2: a Stop after the agent changed files settles with its revision. */
@@ -559,7 +559,7 @@ describe('ChatRevisionMarker', () => {
     setRevisions({ revisions: [revision()] });
     setLog([...changed(), lifecycleRow(4, 'cancelled'), settlementRow(5, { revisionId: 'rev-5' })]);
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    expect(screen.getByRole('status').textContent).toBe('Rev 5 saved · Work interrupted');
+    expect(screen.getByRole('status').textContent).toBe('Saved · stopped early');
   });
 
   it('should hide a never-run attempt’s base before and after the card arrives', () => {
@@ -586,7 +586,7 @@ describe('ChatRevisionMarker', () => {
     setLog(changed());
     setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
     const mounted = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    expect(screen.getByRole('status').textContent).toBe('Starting from Rev 4');
+    expect(screen.getByRole('status').textContent).toBe('Working…');
     mounted.unmount();
     const retry = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
     expect(screen.getByRole('status')).not.toBeNull();
@@ -609,9 +609,9 @@ describe('ChatRevisionMarker', () => {
     chatState.persistedError = { category: 'generic', title: 'Error', message: 'Network error', code: 'ERR' };
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
 
-    expect(screen.getByRole('status').textContent).toBe('Save not confirmed');
-    fireEvent.click(screen.getByRole('button', { name: /revision details$/ }));
-    expect(screen.getByText(/Rev 4 is the last confirmed revision/)).not.toBeNull();
+    expect(screen.getByRole('status').textContent).toBe('Couldn’t confirm the save');
+    fireEvent.click(screen.getByRole('button', { name: / · details$/ }));
+    expect(screen.getByText('Tau couldn’t reach your files to confirm this save.')).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(continueChat).toHaveBeenCalledOnce();
   });
@@ -623,7 +623,7 @@ describe('ChatRevisionMarker', () => {
     chatState.attachmentStatus = 'attached';
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
 
-    expect(screen.queryByText('Save not confirmed')).toBeNull();
+    expect(screen.queryByText('Couldn’t confirm the save')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 });

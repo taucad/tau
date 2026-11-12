@@ -239,7 +239,13 @@ describe('ProjectCommandPaletteItems', () => {
       expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(true);
     });
     const undo = registeredItems.find((item) => item.id === 'undo-restore');
-    expect(undo?.group).toBe('Revisions');
+    expect(undo?.group).toBe('History');
+    /* C8, M11: no palette item calls a save a revision or numbers one; History's are named as the copy table says. */
+    for (const item of registeredItems) {
+      expect(`${item.label} ${item.group ?? ''}`).not.toMatch(/\bRev \d|\brevisions?\b/iu);
+    }
+    expect(registeredItems.find((item) => item.id === 'save-revision')?.label).toBe('Save');
+    expect(registeredItems.find((item) => item.id === 'revision-history')?.label).toBe('Open history');
     undo?.action?.();
     expect(revisionStatusHarness.commands.undo).toHaveBeenCalledOnce();
 
@@ -284,7 +290,7 @@ describe('ProjectCommandPaletteItems', () => {
       expect(registeredItems.find((item) => item.id === 'undo-operation')?.visible).toBe(true);
     });
     const undo = registeredItems.find((item) => item.id === 'undo-operation');
-    expect(undo).toMatchObject({ label: 'Undo', group: 'Revisions' });
+    expect(undo).toMatchObject({ label: 'Undo', group: 'History' });
     undo?.action?.();
     expect(revisionStatusHarness.commands.undoOperation).toHaveBeenCalledOnce();
 
@@ -387,7 +393,7 @@ describe('ProjectCommandPaletteItems', () => {
     const { rerender } = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
     const revisionIds = ['change-backup', 'disconnect-remote', 'sync-now', 'save-revision', 'revision-history'];
     for (const id of revisionIds) {
-      expect(registeredItems.find((item) => item.id === id)?.group).toBe('Revisions');
+      expect(registeredItems.find((item) => item.id === id)?.group).toBe('History');
     }
     expect(registeredItems.find((item) => item.id === 'change-backup')?.visible).toBe(false);
     expect(registeredItems.find((item) => item.id === 'disconnect-remote')?.visible).toBe(false);

@@ -37,7 +37,7 @@ import { prepareServeUi } from '#serve-ui.js';
 import type { ServeUi } from '#serve-ui.js';
 import { stageUiEnvironment } from '#ui-environment.js';
 import { resolveZooAuthToken, cliZooProxyUrl } from '#zoo-proxy.js';
-import { requireGitToolchain, tokenRevisionActor } from '#commands/revisions.js';
+import { requireGitToolchain, tokenRevisionActor } from '#commands/history.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 import { cliRuntimeTelemetry } from '#runtime-telemetry.js';
 import { loadCloudHostObserver } from '#cloud-host-observer.js';

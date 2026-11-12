@@ -58,7 +58,7 @@ export function NavUser(): React.JSX.Element {
   const isWebsiteHere = !isDesktopTarget() && website === pageOrigin();
   const isOnboardingEnabled = useFeature('onboarding');
   const helpItems = [
-    /* Setup and its explainer (onboarding E3), behind `onboarding`. */
+    /* Setup and its explainer, behind `onboarding`. */
     ...(isOnboardingEnabled
       ? [
           <DropdownMenuItem key='set-up-tau' asChild>

@@ -1,5 +1,5 @@
 /**
- * When setup opens by itself (onboarding blueprint, Finding 3, E1): at most once per device, never for someone who
+ * When setup opens by itself: at most once per device, never for someone who
  * was already using Tau there, and never in the way of a destination the person chose. Pure: the home hook passes in
  * what it read, and nothing here makes a request.
  */
@@ -28,7 +28,7 @@ export type SetupOfferInput = Readonly<{
 }>;
 
 /**
- * Whether home should open setup now. True only when every line of Finding 3 holds:
+ * Whether home should open setup now. True only when all of these hold:
  *
  * 1. `onboarding` and `onboardingAutoOpen` are on;
  * 2. the location is exactly `/` with no query;
@@ -60,7 +60,7 @@ export const shouldOfferSetup = (input: SetupOfferInput): boolean => {
 };
 
 /**
- * The invite on home (E2): shown with `onboarding` on, on a device with no setup record whose invite was not
+ * The invite on home: shown with `onboarding` on, on a device with no setup record whose invite was not
  * dismissed.
  *
  * @param input - The flag, the onboarding section and whether the invite was dismissed here.

@@ -5,8 +5,8 @@ import * as target from '#support/external-target.js';
 /**
  * Put the chat in focus on a new branch of its own, the way a person does it.
  *
- * The composer offers no branch (C3): the Revisions pane makes the branch, and
- * its row's *Use in this chat* places the chat there.
+ * The composer offers no branch (C3): the History header's branch chip makes
+ * the branch, and its row's *Use in this chat* places the chat there.
  *
  * @param name - The new branch's name.
  * @returns Nothing.
@@ -15,30 +15,34 @@ export const placeChatOnNewBranch = async (name: string): Promise<void> => {
   const openRevisions = selectors.getByRole('button', { name: /^Open History\./u });
   await target.expectVisible(openRevisions, 60_000);
   await target.click(openRevisions);
+  /* The History header's branch chip is the branch menu, and New branch… is its last item (C2, 59f8f356a8). It is
+   * offered once the files have an entry to start from; a project still without one is saved first. */
   const whereYouAre = selectors.getByCss('[aria-label="Where you are"]');
-  const newBranch = whereYouAre.getByRole('button', { name: 'New branch' });
+  const chip = whereYouAre.getByRole('button', { name: /^Branch: .+\. Switch branch$/u });
+  const newBranch = selectors.getByRole('menuitem', { name: 'New branch…' });
   const save = whereYouAre.getByRole('button', { name: 'Save' });
-  let ready: 'branch' | 'unsaved' | undefined;
+  await target.expectVisible(chip, 60_000);
+  const switchBranch = selectors.getByRole('menu').getByText('Switch branch', { exact: true });
   await expect
     .poll(
       async () => {
         if (await target.isVisible(newBranch)) {
-          ready = 'branch';
-        } else if (await target.isVisible(save)) {
-          const stripText = await target.textContent(whereYouAre);
-          if (stripText?.includes('Nothing saved yet')) {
-            ready = 'unsaved';
-          }
+          return true;
         }
-        return ready;
+        if (await target.isVisible(switchBranch)) {
+          // The menu is open without New branch…: nothing is saved to branch from yet.
+          await target.keyboardPress('Escape');
+          if (await target.isVisible(save)) {
+            await target.click(save);
+          }
+          return false;
+        }
+        await target.click(chip);
+        return false;
       },
-      { timeout: 60_000 },
+      { timeout: 60_000, interval: 1000 },
     )
-    .toBeDefined();
-  if (ready === 'unsaved') {
-    await target.click(save);
-  }
-  await target.expectVisible(newBranch, 60_000);
+    .toBe(true);
   await target.click(newBranch);
   await target.fill(selectors.getByLabelText('Branch name'), name);
   await target.click(selectors.getByRole('button', { name: 'Create branch' }));

@@ -170,6 +170,11 @@ export const emptyQuestionsFile = (): QuestionsFile => ({ version: 2, asks: [] }
 export const emptyAnswersFile = (): AnswersFile => ({ version: 2, answers: {} });
 
 const parseYaml = <T>(text: string, schema: z.ZodType<T>, name: string): T | undefined => {
+  /* A record being created is observed empty before its first write lands. It holds nothing to restore, so it reads
+   * as no record rather than a refused one: refusing it emptied every ask for that instant and remounted each card. */
+  if (text.trim() === '') {
+    return undefined;
+  }
   let document: unknown;
   try {
     document = load(text);
@@ -193,7 +198,7 @@ const parseYaml = <T>(text: string, schema: z.ZodType<T>, name: string): T | und
 };
 
 /**
- * Read `questions.yaml` text; missing text reads as no asks; invalid records are refused.
+ * Read `questions.yaml` text; missing or empty text reads as no asks; invalid records are refused.
  *
  * @param text - The file's text, or `undefined` when it does not exist.
  * @returns The record.
@@ -203,7 +208,7 @@ export const parseQuestionsFile = (text: string | undefined): QuestionsFile =>
   (text === undefined ? undefined : parseYaml(text, questionsFileSchema, 'questions.yaml')) ?? emptyQuestionsFile();
 
 /**
- * Read `answers.yaml` text; missing text reads as no answers; invalid records are refused.
+ * Read `answers.yaml` text; missing or empty text reads as no answers; invalid records are refused.
  *
  * @param text - The file's text, or `undefined` when it does not exist.
  * @returns The record.

@@ -12,6 +12,8 @@ export type SetupFinishProps = Readonly<{
   viewer: ViewerPreferences;
   device: DeviceRecord;
   isTourWanted: boolean;
+  /** `tour.ended` is set: the summary says the tour was taken instead of what the switch holds. */
+  hasTakenTour: boolean;
   isDesktop: boolean;
   isViewerControlsEnabled: boolean;
   onStartBuilding: () => void;
@@ -23,7 +25,7 @@ export type SetupFinishProps = Readonly<{
 }>;
 
 /**
- * The screen after Finish (S7): a summary of three lines (two, and no Settings → Viewer link, while `viewerControls`
+ * The screen after Finish: a summary of three lines (two, and no Settings → Viewer link, while `viewerControls`
  * is off), Start building, and on the desktop Open a folder.
  *
  * @param properties - What to summarise and the leaving actions.
@@ -35,6 +37,7 @@ export function SetupFinish({
   viewer,
   device,
   isTourWanted,
+  hasTakenTour,
   isDesktop,
   isViewerControlsEnabled,
   onStartBuilding,
@@ -49,7 +52,7 @@ export function SetupFinish({
   const lines = [
     summaryMakesText(goals),
     ...(isViewerControlsEnabled ? [summaryViewerText(viewerSummary(viewer, profile, device))] : []),
-    isTourWanted ? setupFinishCopy.tourOn : setupFinishCopy.tourOff,
+    hasTakenTour ? setupFinishCopy.tourTaken : isTourWanted ? setupFinishCopy.tourOn : setupFinishCopy.tourOff,
   ];
   return (
     <div className='mx-auto flex w-full max-w-xl flex-col gap-5 py-6'>
@@ -62,7 +65,9 @@ export function SetupFinish({
       <ul className='flex flex-col gap-2 rounded-xl border bg-card p-4 text-sm' data-testid='setup-summary'>
         {lines.map((line) => (
           <li key={line} className='flex items-start gap-2'>
-            <Check className='mt-0.5 size-4 shrink-0 text-muted-foreground' aria-hidden='true' />
+            <span className='flex h-lh shrink-0 items-center'>
+              <Check className='size-4 text-muted-foreground' aria-hidden='true' />
+            </span>
             <span>{line}</span>
           </li>
         ))}

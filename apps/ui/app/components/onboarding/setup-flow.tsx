@@ -32,6 +32,9 @@ const viewerSettingsSection = settingsSectionSchema.safeParse('viewer');
 /** Where setup is: one of its steps, or the screen after Finish. */
 type Stage = SetupStepId | 'done';
 
+/** The record sections setup writes; the device keeps or refuses each on its own. */
+type RecordSection = 'profile' | 'viewer' | 'device' | 'onboarding';
+
 /**
  * The header: the step bars, the step count and Skip. After Finish it shows only the title.
  *
@@ -97,7 +100,7 @@ export type SetupFlowProps = Readonly<{
 }>;
 
 /**
- * Setup at `/welcome` (Finding 2): three questions and one explainer, each optional, each showing what its answer
+ * Setup at `/welcome`: three questions and one explainer, each optional, each showing what its answer
  * changes, with Skip one press away. Every answer is written to the device record when it is given, so setup is an
  * editor for the record: opened again, it shows what is stored.
  *
@@ -117,7 +120,8 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
 
   const [stage, setStage] = useState<Stage>(initialStep ?? 'goals');
   const [announcement, setAnnouncement] = useState('');
-  const [isStorageRefused, setIsStorageRefused] = useState(false);
+  /* Per section: a later write that the device keeps clears only its own section's warning. */
+  const [refusedSections, setRefusedSections] = useState<ReadonlySet<RecordSection>>(() => new Set());
   const [isTourWanted, setIsTourWanted] = useState(onboarding.tour.wanted ?? true);
   const heading = useRef<HTMLHeadingElement>(null);
   const shownStage = useRef<Stage>(stage);
@@ -148,28 +152,44 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
     device: deviceRecordStore.read(),
   });
 
+  /** Note whether the device kept a write to one section. */
+  const noteWrite = (section: RecordSection, result: SectionWriteResult): void => {
+    setRefusedSections((refused) => {
+      if ((result !== 'saved') === refused.has(section)) {
+        return refused;
+      }
+      const next = new Set(refused);
+      if (result === 'saved') {
+        next.delete(section);
+      } else {
+        next.add(section);
+      }
+      return next;
+    });
+  };
+
   /** Write one answer, then announce the rows it changed and say whether the device kept it. */
-  const answer = (write: () => SectionWriteResult): void => {
+  const answer = (section: RecordSection, write: () => SectionWriteResult): void => {
     const result = write();
     const after = answerRows({ ...readRecord(), kernels, isViewerControlsEnabled });
     setAnnouncement(announceChangedRows(rows, after));
-    setIsStorageRefused(result !== 'saved');
+    noteWrite(section, result);
   };
 
   const answers = {
     goals: (goals: GoalId[]) => {
-      answer(() => writeProfile({ goals }));
+      answer('profile', () => writeProfile({ goals }));
       telemetry.profileChanged(readRecord().profile);
     },
     tool: (tool: ToolId) => {
-      answer(() => writeProfile({ tool }));
+      answer('profile', () => writeProfile({ tool }));
       telemetry.profileChanged(readRecord().profile);
     },
     languages: (languages: LanguageId[]) => {
-      answer(() => writeProfile({ languages }));
+      answer('profile', () => writeProfile({ languages }));
     },
     preset: (preset: MousePresetId) => {
-      answer(() => writeViewer({ controls: { preset } }));
+      answer('viewer', () => writeViewer({ controls: { preset } }));
       telemetry.presetSelected(preset, profile);
     },
     gizmo: (choice: GizmoChoiceId) => {
@@ -178,7 +198,7 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
       } else {
         telemetry.gizmoSelected(choice, profile);
       }
-      answer(() =>
+      answer('viewer', () =>
         choice === 'none'
           ? writeViewer({ viewDefaults: { 'display.gizmo': false } })
           : writeViewer({
@@ -191,7 +211,7 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
     },
     trackpad: (isTrackpad: boolean) => {
       const inputDevice = isTrackpad ? 'trackpad' : 'mouse';
-      answer(() => writeDevice({ inputDevice }));
+      answer('device', () => writeDevice({ inputDevice }));
       telemetry.inputDeviceChanged(inputDevice);
     },
   };
@@ -207,7 +227,7 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
     }
     const result = writeOnboarding({ setupStatus: 'completed', wanted: isTourWanted });
     telemetry.completed({ steps, record: readRecord(), isTourWanted });
-    setIsStorageRefused(result !== 'saved');
+    noteWrite('onboarding', result);
     goTo('done');
   };
 
@@ -221,6 +241,7 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
 
   const isDone = current === 'done';
   const hasPanel = current === 'goals' || current === 'background';
+  const isStorageRefused = refusedSections.size > 0;
   const storageLine = isStorageRefused ? setupStorageCopy.refused : current === 'goals' ? setupStorageCopy.saved : '';
 
   return (
@@ -236,6 +257,7 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
               viewer={viewer}
               device={device}
               isTourWanted={isTourWanted}
+              hasTakenTour={hasTakenTour(onboarding)}
               isDesktop={isDesktop}
               isViewerControlsEnabled={isViewerControlsEnabled}
               onStartBuilding={() => {

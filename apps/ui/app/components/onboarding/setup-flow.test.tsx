@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import type { LanguageId } from '@taucad/preferences';
@@ -35,7 +35,7 @@ const renderSetup = (path = '/welcome'): ReturnType<typeof createMemoryRouter> =
 
 const continueButton = (): HTMLElement => screen.getByRole('button', { name: 'Continue' });
 
-describe('setup (S1, S2, S3)', () => {
+describe('setup', () => {
   beforeEach(() => {
     globalThis.localStorage.clear();
     flags.onboarding = true;
@@ -44,12 +44,12 @@ describe('setup (S1, S2, S3)', () => {
     kernels.host = 'browser';
   });
 
-  it('shows four steps with viewerControls on and three with it off (S1)', () => {
+  it('shows four steps with viewerControls on and three with it off', () => {
     renderSetup();
     expect(screen.getByText('1 of 4')).toBeInTheDocument();
   });
 
-  it('leaves the viewer step out while viewerControls is off (S1)', async () => {
+  it('leaves the viewer step out while viewerControls is off', async () => {
     flags.viewerControls = false;
     const user = userEvent.setup();
     renderSetup();
@@ -59,13 +59,13 @@ describe('setup (S1, S2, S3)', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Design, verify, build' })).toBeInTheDocument();
   });
 
-  it('redirects home with onboarding off (S1)', async () => {
+  it('redirects home with onboarding off', async () => {
     flags.onboarding = false;
     renderSetup();
     expect(await screen.findByText('Home')).toBeInTheDocument();
   });
 
-  it('has Skip in the header of every step; it records skipped and goes home (S1)', async () => {
+  it('has Skip in the header of every step; it records skipped and goes home', async () => {
     const user = userEvent.setup();
     const router = renderSetup();
     const skipInHeader = (): HTMLElement =>
@@ -83,7 +83,7 @@ describe('setup (S1, S2, S3)', () => {
     expect(personRecordStores.onboarding.read().setup?.status).toBe('skipped');
   });
 
-  it('continues with nothing chosen on every step, and Back keeps every answer (S1)', async () => {
+  it('continues with nothing chosen on every step, and Back keeps every answer', async () => {
     const user = userEvent.setup();
     renderSetup();
     await user.click(screen.getByRole('checkbox', { name: /Mechanical parts/ }));
@@ -99,7 +99,7 @@ describe('setup (S1, S2, S3)', () => {
     expect(screen.getByRole('checkbox', { name: /Mechanical parts/ })).toBeChecked();
   });
 
-  it('moves focus to the new step heading after a step change (S1)', async () => {
+  it('moves focus to the new step heading after a step change', async () => {
     const user = userEvent.setup();
     renderSetup();
     await user.click(continueButton());
@@ -111,7 +111,14 @@ describe('setup (S1, S2, S3)', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Design, verify, build' })).toBeInTheDocument();
   });
 
-  it('keeps "Just exploring" exclusive and stores the checked set (S2)', async () => {
+  it('opens step 4 when How Tau works is chosen while setup is already open', async () => {
+    const router = renderSetup('/welcome?entry=help');
+    expect(screen.getByRole('heading', { level: 1, name: 'What do you want to make?' })).toBeInTheDocument();
+    await act(async () => router.navigate('/welcome?entry=help&step=how'));
+    expect(screen.getByRole('heading', { level: 1, name: 'Design, verify, build' })).toBeInTheDocument();
+  });
+
+  it('keeps "Just exploring" exclusive and stores the checked set', async () => {
     const user = userEvent.setup();
     renderSetup();
     await user.click(screen.getByRole('checkbox', { name: /3D printing/ }));
@@ -125,7 +132,7 @@ describe('setup (S1, S2, S3)', () => {
     expect(screen.getByRole('checkbox', { name: /Just exploring/ })).not.toBeChecked();
   });
 
-  it('updates the Agent and Home rows at once and announces only the rows that changed (S2)', async () => {
+  it('updates the Agent and Home rows at once and announces only the rows that changed', async () => {
     const user = userEvent.setup();
     renderSetup();
     await user.click(screen.getByRole('checkbox', { name: /3D printing/ }));
@@ -145,7 +152,7 @@ describe('setup (S1, S2, S3)', () => {
     expect(announcement.textContent).not.toContain('Home:');
   });
 
-  it('shows the storage sentence under the rows and the device line on step 1 on both hosts (S2)', () => {
+  it('shows the storage sentence under the rows and the device line on step 1 on both hosts', () => {
     renderSetup();
     expect(screen.getByTestId('setup-answers-panel')).toHaveTextContent(
       'What the agent is told is saved with your chats in the project',
@@ -153,7 +160,7 @@ describe('setup (S1, S2, S3)', () => {
     expect(screen.getByTestId('setup-storage-status')).toHaveTextContent('Your choices are saved on this device.');
   });
 
-  it('lists twelve tools and five languages with "I\'d rather not write code" exclusive (S3)', async () => {
+  it('lists twelve tools and five languages with "I\'d rather not write code" exclusive', async () => {
     const user = userEvent.setup();
     renderSetup();
     await user.click(continueButton());
@@ -169,7 +176,7 @@ describe('setup (S1, S2, S3)', () => {
     expect(personRecordStores.profile.read().languages).toEqual(['openscad']);
   });
 
-  it("changes the Viewer row to the tool's suggestion unless a preset was chosen (S3)", async () => {
+  it("changes the Viewer row to the tool's suggestion unless a preset was chosen", async () => {
     const user = userEvent.setup();
     renderSetup();
     await user.click(continueButton());
@@ -183,7 +190,7 @@ describe('setup (S1, S2, S3)', () => {
     expect(screen.getByTestId('setup-answers-row-viewer')).toHaveTextContent('Tau default, cube gizmo');
   });
 
-  it('shows the host line for a language with no kernel in the browser, and none on the desktop (S3, DT2)', async () => {
+  it('shows the host line for a language with no kernel in the browser, and none on the desktop', async () => {
     const user = userEvent.setup();
     renderSetup();
     await user.click(continueButton());
@@ -196,7 +203,7 @@ describe('setup (S1, S2, S3)', () => {
     expect(screen.getByTestId('setup-answers-row-agent')).not.toHaveTextContent('kernel is available');
   });
 
-  it('shows no host line on the desktop for a language the desktop set has a kernel for (DT2)', async () => {
+  it('shows no host line on the desktop for a language the desktop set has a kernel for', async () => {
     kernels.host = 'desktop';
     const saved = kernels.onHost;
     kernels.onHost = kernels.onDesktop;

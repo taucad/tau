@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { findSsrFilesWithForbiddenDreiCoreImport } from '#scripts/check-ssr-bundle-budget.mjs';
+import {
+  findSsrFilesWithForbiddenDreiCoreImport,
+  findWelcomeChunksWithThree,
+  staticChunkFiles,
+} from '#scripts/check-ssr-bundle-budget.mjs';
 
 let serverDirectory: string | undefined;
 
@@ -34,5 +38,61 @@ describe('findSsrFilesWithForbiddenDreiCoreImport', () => {
     );
 
     expect(findSsrFilesWithForbiddenDreiCoreImport(serverDirectory)).toEqual([offenderFilePath]);
+  });
+});
+
+describe('findWelcomeChunksWithThree', () => {
+  const manifest = {
+    'node_modules/@react-router/dev/dist/config/defaults/entry.client.tsx': {
+      file: 'assets/entry.client-a.js',
+      imports: ['_react-b.js'],
+    },
+    'app/root.tsx': { file: 'assets/root-c.js', imports: ['_react-b.js', '_ui-d.js'] },
+    'app/routes/welcome/route.tsx': { file: 'assets/route-e.js', imports: ['_ui-d.js'] },
+    'app/routes/_index/route.tsx': { file: 'assets/route-f.js', imports: ['_three-g.js'] },
+    'app/components/onboarding/setup-live-preview.tsx': {
+      file: 'assets/setup-live-preview-h.js',
+      imports: ['_three-g.js'],
+    },
+    '_react-b.js': { file: 'assets/react-b.js' },
+    '_ui-d.js': { file: 'assets/ui-d.js' },
+    '_three-g.js': { file: 'assets/three-g.js' },
+  };
+  const chunks: Record<string, string> = {
+    'assets/three-g.js': 'const REVISION="170";window.__THREE__=REVISION;',
+  };
+  const read = (file: string): string => chunks[file] ?? 'export {};';
+
+  it('should follow only static imports from the entry, root and /welcome', () => {
+    expect(
+      staticChunkFiles(manifest, [
+        'node_modules/@react-router/dev/dist/config/defaults/entry.client.tsx',
+        'app/root.tsx',
+        'app/routes/welcome/route.tsx',
+      ]),
+    ).toEqual([
+      'assets/entry.client-a.js',
+      'assets/react-b.js',
+      'assets/root-c.js',
+      'assets/route-e.js',
+      'assets/ui-d.js',
+    ]);
+  });
+
+  it('should pass while three.js is reached only by a dynamic import', () => {
+    expect(findWelcomeChunksWithThree(manifest, read)).toEqual([]);
+  });
+
+  it('should report a chunk of /welcome that holds three.js', () => {
+    const imported = {
+      ...manifest,
+      'app/routes/welcome/route.tsx': { file: 'assets/route-e.js', imports: ['_ui-d.js', '_three-g.js'] },
+    };
+    expect(findWelcomeChunksWithThree(imported, read)).toEqual(['assets/three-g.js']);
+  });
+
+  it('should refuse a manifest without the /welcome route', () => {
+    const { 'app/routes/welcome/route.tsx': _welcome, ...rest } = manifest;
+    expect(() => findWelcomeChunksWithThree(rest, read)).toThrow(/no app\/routes\/welcome\/route entry/u);
   });
 });

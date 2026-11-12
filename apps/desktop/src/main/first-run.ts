@@ -11,7 +11,7 @@ export type FirstRunInput = Readonly<{
 }>;
 
 /**
- * Whether this launch is the install's first run (onboarding blueprint, Finding 3 line 4 and DT1): no window-state file
+ * Whether this launch is the install's first run: no window-state file
  * on disk, and no `tau://` link or file in the launch. The file is written whenever a window closes, so any install
  * that has been used has one; it is tested with `existsSync`, never with the fitted read, which also returns nothing
  * when the file does not parse or the saved frame fits no connected display. An upgraded install therefore never

@@ -43,6 +43,7 @@ import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-s
 import { selectStripVerbs, useRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { requestBranchControl } from '#routes/w.$workspace.$project/revision-pane-requests.js';
+import { listedBranchesOf } from '#routes/w.$workspace.$project/history-lanes.js';
 import { requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { isTerminalSurfaceOffered } from '#components/terminal/terminal-availability.js';
 import { isDesktopTarget } from '#lib/build-target.js';
@@ -135,6 +136,8 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
     }
     openPanel('revisions');
   }, [headRevisionId, openPanel, projectId]);
+  /* D3: a conflict line is a decision, never a branch to switch to. */
+  const branchCount = listedBranchesOf(revisionStatus).length;
   const handleSwitchBranch = useCallback(() => {
     requestBranchControl(projectId, 'switch-branch');
     openPanel('revisions');
@@ -319,7 +322,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
         group: 'History',
         icon: <GitBranch />,
         action: handleSwitchBranch,
-        visible: isLineKnown && revisionStatus.branches.length > 1,
+        visible: isLineKnown && branchCount > 1,
       },
       {
         id: 'new-branch',
@@ -508,7 +511,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       handleCreateVersion,
       handleSwitchBranch,
       handleNewBranch,
-      revisionStatus?.branches.length,
+      branchCount,
     ],
   );
 

@@ -941,6 +941,17 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
         headers['content-length'] = String(bytes.byteLength);
         await route.fulfill({ status: response.status(), headers, body: bytes });
         const sourceBytes = await readFile(createRequire(import.meta.url).resolve('geospec-engine/wasm-binary'));
+        /* The engine the product pins: `geospec-engine` at the workspace catalog pin, as `apps/ui` resolves it
+         * (5db230f608). The spec held this identity in env vars no lane ever set, so it could not pass anywhere;
+         * they stay an override for a lane that pins another product. */
+        const pinnedBytes =
+          process.env['TAU_E2E_GEOSPEC_WASM_SHA256'] === undefined
+            ? await readFile(
+                createRequire(resolve(import.meta.dirname, '../../../ui/package.json')).resolve(
+                  'geospec-engine/wasm-binary',
+                ),
+              )
+            : undefined;
         return {
           url: response.url(),
           status: response.status(),
@@ -948,11 +959,16 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
           sha256: createHash('sha256').update(bytes).digest('hex'),
           sourceSha256: createHash('sha256').update(sourceBytes).digest('hex'),
           sourceByteLength: sourceBytes.byteLength,
-          expectedSha256: process.env['TAU_E2E_GEOSPEC_WASM_SHA256'],
+          expectedSha256:
+            pinnedBytes === undefined
+              ? process.env['TAU_E2E_GEOSPEC_WASM_SHA256']
+              : createHash('sha256').update(pinnedBytes).digest('hex'),
           expectedByteLength:
-            process.env['TAU_E2E_GEOSPEC_WASM_BYTES'] === undefined
-              ? undefined
-              : Number(process.env['TAU_E2E_GEOSPEC_WASM_BYTES']),
+            pinnedBytes === undefined
+              ? process.env['TAU_E2E_GEOSPEC_WASM_BYTES'] === undefined
+                ? undefined
+                : Number(process.env['TAU_E2E_GEOSPEC_WASM_BYTES'])
+              : pinnedBytes.byteLength,
         };
       } catch (error) {
         session.pageErrors.push(
@@ -1228,6 +1244,25 @@ export const uiReadPostHogSummary: BrowserCommand<
     ),
   };
 };
+
+/** One captured PostHog event with the properties it carried, as the fixture decoded them. */
+export type PostHogCapturedEvent = Readonly<{ event: string; properties: Readonly<Record<string, unknown>> }>;
+
+/**
+ * The captured events named in `names`, in capture order, each with its decoded `properties`. A spec uses it to
+ * assert an event's exact properties, where the summary only says whether a string appeared.
+ */
+export const uiReadPostHogEvents: BrowserCommand<[names: readonly string[]], readonly PostHogCapturedEvent[]> = (
+  commandContext,
+  names,
+) =>
+  sessionFor(commandContext)
+    .posthogEvents.filter(({ event }) => names.includes(event))
+    .map(({ event, decoded }) => {
+      const [line = '{}'] = decoded.split('\n');
+      const parsed = JSON.parse(line) as { readonly properties?: Readonly<Record<string, unknown>> };
+      return { event, properties: parsed.properties ?? {} };
+    });
 
 /** Release a response parked mid-stream; omit `turn` for the newest one. */
 export const uiReleaseAgentHostGatewayFixture: BrowserCommand<[turn?: string]> = (commandContext, turn) => {
@@ -3421,6 +3456,7 @@ export const uiBrowserCommands = {
   uiReadAgentHostApiRequests,
   uiReadLinkedGithubFixture,
   uiReadPostHogSummary,
+  uiReadPostHogEvents,
   uiReadAgentHostGatewayState,
   uiReleaseAgentHostGatewayRequest,
   uiWaitForAgentHostGatewayGate,

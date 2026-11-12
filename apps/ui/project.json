@@ -280,7 +280,7 @@
       "outputs": ["{projectRoot}/build"],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "node ../../tools/build-lock.mjs build -- sh -c \"'react-router build && node scripts/compress-static-assets.mts'\"",
+        "command": "node ../../tools/build-lock.mjs build -- sh -c \"'react-router build && node scripts/check-ssr-bundle-budget.mts --client && node scripts/compress-static-assets.mts'\"",
         "env": {
           "NODE_OPTIONS": "--max-old-space-size=8192",
           "TAU_API_URL": "http://localhost:4000",

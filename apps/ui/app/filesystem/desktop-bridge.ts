@@ -41,7 +41,7 @@ type DesktopShell = {
   readonly relayTag: string;
   readonly nodeFs: { readonly homeRoot: string };
   readonly runtimeKernelIds?: readonly string[];
-  /** Main found no window-state file and no launch link or file: the first launch after install (DT1). */
+  /** Main found no window-state file and no launch link or file: the first launch after install. */
   readonly firstRun?: boolean;
   readonly externalAgents?: () => Promise<unknown>;
   readonly compute?: DesktopBridge['compute'];
@@ -249,7 +249,7 @@ export type DesktopBridge = {
   /** Exact AP242 measurement in the desktop services utility. */
   readonly exactMeasurement: { connect(): Promise<MessagePort> };
   readonly runtimeKernelIds: readonly string[];
-  /** The first launch after install, with nothing to open (DT1). */
+  /** The first launch after install, with nothing to open. */
   readonly firstRun: boolean;
   readonly nodeFs: {
     /**

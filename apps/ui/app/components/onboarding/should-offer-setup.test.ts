@@ -22,7 +22,7 @@ const newAccount: SetupOfferInput = {
   now,
 };
 
-describe('shouldOfferSetup (Finding 3, E1)', () => {
+describe('shouldOfferSetup', () => {
   it('opens for a new account on plain home', () => {
     expect(shouldOfferSetup(newAccount)).toBe(true);
   });
@@ -33,8 +33,8 @@ describe('shouldOfferSetup (Finding 3, E1)', () => {
 
   it.each<[string, Partial<SetupOfferInput>]>([
     ['onboarding off (line 1)', { isOnboardingEnabled: false }],
-    ['onboardingAutoOpen off (line 1, FL3)', { isAutoOpenEnabled: false }],
-    ['auto-open on but onboarding off (FL3)', { isOnboardingEnabled: false, isAutoOpenEnabled: true }],
+    ['onboardingAutoOpen off', { isAutoOpenEnabled: false }],
+    ['auto-open on but onboarding off', { isOnboardingEnabled: false, isAutoOpenEnabled: true }],
     ['a settings deep link (line 2)', { location: { pathname: '/', search: '?settings=billing' } }],
     ['a Checkout return (line 2)', { location: { pathname: '/', search: '?settings=billing&payment_action=x' } }],
     ['home still carrying ?app (line 2)', { location: { pathname: '/', search: '?app' } }],
@@ -58,7 +58,7 @@ describe('shouldOfferSetup (Finding 3, E1)', () => {
   });
 });
 
-describe('shouldShowSetupInvite (E2)', () => {
+describe('shouldShowSetupInvite', () => {
   it('shows with onboarding on on a device with no setup record', () => {
     expect(
       shouldShowSetupInvite({ isOnboardingEnabled: true, onboarding: emptyOnboardingState, isDismissed: false }),

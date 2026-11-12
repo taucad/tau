@@ -48,7 +48,7 @@ describe('desktop home surface', () => {
     expect(screen.getByRole('link', { name: 'View all' })).toHaveAttribute('href', '/community');
   });
 
-  it.each([true, false])('should offer setup with the desktop first run %s (DT1)', (isFirstRun) => {
+  it.each([true, false])('should offer setup with the desktop first run %s', (isFirstRun) => {
     firstRun.value = isFirstRun;
     render(<DesktopHome />, { wrapper: MemoryRouter });
 

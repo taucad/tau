@@ -39,7 +39,7 @@ describe('RootCommandPaletteItems', () => {
     expect(registered.some((item) => item.id.startsWith('recent-project-'))).toBe(false);
   });
 
-  /* Onboarding E3: the palette lists Set up Tau only with onboarding on. */
+  /* The palette lists Set up Tau only with onboarding on. */
   it.each([
     { isEnabled: true, visible: true },
     { isEnabled: false, visible: false },

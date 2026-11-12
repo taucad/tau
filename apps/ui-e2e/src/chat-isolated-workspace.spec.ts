@@ -19,6 +19,28 @@ import { readProjectStorageState, readProjectTree } from '#support/project-stora
 const prompt = 'Create a cube with a centered cylindrical cutout and verify it.';
 const composer = '[aria-label="Ask Tau to build anything..."]';
 const currentRevision = () => selectors.getByText('Current', { exact: true });
+/* History lists the project's first version as its V1 · Start entry (1c9fd4ee34), and the Current pill marks where the
+ * files are (f8129b5ff4): before a run publishes anything, Current is on V1 · Start. */
+const historyEntries = () => selectors.getByCss('[data-revision-row]');
+const startEntry = () => selectors.getByCss('[data-revision-row][aria-label="V1 · Start"]');
+/* History is a pane a person opens. The request's chat marker opens it at that request's entry (C5, 68a5a2ce10). */
+const showRequestInHistory = async (): Promise<void> => {
+  if (!(await target.isVisible(selectors.getByCss('[aria-label="History entries"]')))) {
+    await target.click(
+      selectors.getByRole('group', { name: 'Changes from this request' }).getByRole('button', { name: 'View' }),
+    );
+  }
+};
+const showHistory = async (): Promise<void> => {
+  if (!(await target.isVisible(selectors.getByCss('[aria-label="History entries"]')))) {
+    await target.click(selectors.getByRole('button', { name: /^Open History\./u }));
+  }
+};
+const expectCurrentAtStart = async (): Promise<void> => {
+  await showHistory();
+  await target.expectCount(historyEntries(), 1, 30_000);
+  await target.expectCount(startEntry().getByText('Current', { exact: true }), 1, 30_000);
+};
 const filesPane = () => selectors.getByRole('region', { name: /^Files for /u }).first();
 const fileTreeItem = (path: string) =>
   filesPane().getByCss(`[data-testid="file-tree-item"][data-file-tree-path="${path}"]`);
@@ -36,7 +58,8 @@ const readActiveEditorText = async (): Promise<string> => {
 };
 const ensureFilesPane = async (): Promise<void> => {
   if (!(await target.isVisible(filesPane()))) {
-    await target.click(selectors.getByRole('button', { name: /Search/u }));
+    // The sidebar's Search, not a transcript row such as "Searched **/*.geospec.ts".
+    await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
     const search = selectors.getByPlaceholder('Search projects, chats, and actions…');
     await target.fill(search, 'Open files');
     await target.click(selectors.getByText('Open files', { exact: true }));
@@ -139,13 +162,19 @@ const expectWorkspaceSuccess = async (): Promise<void> => {
   // naming the turn it stopped on, not as an opaque text-visibility timeout.
   await expect.poll(gatewayRequestCount, { timeout: 180_000 }).toBe(cubeCylinderCutoutScript.length);
   await target.expectVisible(selectors.getByText(cubeCylinderSuccessSentence, { exact: true }), 60_000);
+  // One published entry, and Current is on it rather than on V1 · Start.
+  await showRequestInHistory();
+  await target.expectCount(historyEntries(), 2, 30_000);
   await target.expectCount(currentRevision(), 1, 30_000);
+  await target.expectCount(startEntry().getByText('Current', { exact: true }), 0);
   await target.expectCount(selectors.getByText(/ROOT_UNAVAILABLE/u), 0);
   await target.expectCount(selectors.getByText('File not found', { exact: true }), 0);
   await target.expectCount(selectors.getByRole('status', { name: 'Waiting for geometry' }), 0, 60_000);
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
 
-  await target.click(selectors.getByRole('button', { name: /Explored .*render.*test/u }).last());
+  /* The activity disclosure names each tool family it holds ("Read files, …, rendered models, ran tests, …"); the
+   * "Explored …" summary went with the unified reasoning and activity disclosure (456f3875b6). */
+  await target.click(selectors.getByRole('button', { name: /rendered models.*ran tests/u }).last());
   await target.click(selectors.getByRole('button', { name: 'Tested 1 requirement' }).last());
   const geospecResult = selectors.getByCss('[data-target-file]').last();
   await target.expectCount(geospecResult, 1);
@@ -157,7 +186,9 @@ const expectWorkspaceSuccess = async (): Promise<void> => {
 };
 
 const openAndAssertGeoSpec = async (): Promise<void> => {
-  const file = selectors.getByText('main.geospec.ts', { exact: true }).last();
+  // History, open at the request's entry, also lists main.geospec.ts among its changed files: open it from the tree.
+  await ensureFilesPane();
+  const file = fileTreeItem('main.geospec.ts');
   await target.expectVisible(file, 30_000);
   await target.click(file);
   await target.expectVisible(selectors.getByCss('.dv-tab[aria-label="main.geospec.ts"]'), 30_000);
@@ -195,16 +226,19 @@ test('discards the isolated workspace when the production chat run is cancelled'
    * the default path. */
   await placeChatOnNewBranch('isolated-run');
   await submitPrompt();
-  await target.expectVisible(selectors.getByText('main.geospec.ts', { exact: true }).first(), 60_000);
+  // The transcript's write row reads "Created main.geospec.ts +N"; the file's name alone is already in the tree.
+  await target.expectVisible(selectors.getByText(/^Created main\.geospec\.ts\b/u).first(), 60_000);
   await target.click(stopButton());
   await target.expectCount(stopButton(), 0, 60_000);
-  await target.expectCount(currentRevision(), 0);
-  expect(await readActiveEditorText()).toBe(baselineSource);
+  // Nothing was published: History still holds only V1 · Start, and the files are still there.
+  await expectCurrentAtStart();
+  // History, opened to place the branch, shares the editor's group: the source is read by opening it again.
+  expect(await openAndReadSource()).toBe(baselineSource);
   await target.expectCount(fileTreeItem('main.geospec.ts'), baselineGeoSpecCount);
 
   await target.reload();
   await waitForComposer();
-  await target.expectCount(currentRevision(), 0);
+  await expectCurrentAtStart();
   expect(await openAndReadSource()).toBe(baselineSource);
   await target.expectCount(fileTreeItem('main.geospec.ts'), baselineGeoSpecCount);
   await target.expectCount(selectors.getByText(cubeCylinderSuccessSentence, { exact: true }), 0);

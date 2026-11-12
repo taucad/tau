@@ -11,7 +11,7 @@ import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
 import { createControlsAdapter } from '#graphics/three/adapters/controls-adapter.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { GraphicsCameraRef } from '#machines/graphics.machine.js';
-import { resolveCameraControlProps } from '#graphics/three/controls/tau-camera-controls.jsx';
+import { resolveCameraControlProps } from '#graphics/three/controls/camera-controls-feel.js';
 import { asCameraActor } from '#services/graphics-camera-registry.js';
 
 /*

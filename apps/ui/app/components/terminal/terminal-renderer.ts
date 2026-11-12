@@ -1,7 +1,8 @@
 /**
  * The Terminal pane's renderer (blueprint D18 as amended 2026-10-24T05:39Z): AurigaX `@aurigax-ai/ghostty-web`
  * 0.3.6 behind one small adapter. The pane loads this module lazily, so nothing here reaches a page without a
- * Terminal. Tau carries no patch to AurigaX; every shim below is in how Tau uses it, ported from the S3 harness's
+ * Terminal. Fixes inside AurigaX live in `tools/pnpm/patches/@aurigax-ai__ghostty-web@0.3.6.patch`; every shim below is
+ * in how Tau uses it, ported from the S3 harness's
  * `createAurigaxView` (Q3/5 W6 handoff, adapter obligations 1–8).
  *
  * Output is terminal data (I9). It is parsed by the WASM engine and drawn to a canvas; the live region and the

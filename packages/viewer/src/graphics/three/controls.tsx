@@ -1,14 +1,11 @@
 import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
 import React, { useLayoutEffect, useMemo, useState } from 'react';
-import { useFrame, useThree } from '@react-three/fiber';
+import { useThree } from '@react-three/fiber';
 import CameraControlsImpl from 'camera-controls';
 import { selectCameraProjection } from '@taucad/camera/machine';
 import { createSectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
-import {
-  resolveCameraControlProps,
-  shouldUpdateTauCameraControlsFrame,
-} from '#graphics/three/controls/tau-camera-controls.jsx';
-import { useViewportGizmoInteractionLock } from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
+import { resolveCameraControlProps } from '#graphics/three/controls/camera-controls-feel.js';
+import type { CameraControlsFeel } from '#graphics/three/controls/camera-controls-feel.js';
 import { ViewportGizmoCube } from '#graphics/three/controls/viewport-gizmo-cube.jsx';
 import { SectionPlanePickerContext } from '#graphics/three/controls/viewport-gizmo-render-loop.jsx';
 import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
@@ -24,21 +21,13 @@ const SectionHandles = React.lazy(async () => {
   return { default: module.SectionHandles };
 });
 
-type CameraControlsFeel = ReturnType<typeof resolveCameraControlProps>;
-
 /**
- * The view's `camera-controls` instance as an R3F primitive: it applies the control feel as props and steps the
- * controls each frame. The controls adapter owns the instance, its DOM connection and its only listener (charter I9),
- * and installs it as R3F's `controls`; this renders nothing until it does.
+ * The view's `camera-controls` instance as an R3F primitive: it applies the control feel as props. The controls adapter
+ * owns the instance, its DOM connection, its only listener (charter I9) and its per-frame step, and installs it as R3F's
+ * `controls`; this renders nothing until it does.
  */
 function ViewerCameraControls({ feel }: { readonly feel: CameraControlsFeel }): React.JSX.Element | undefined {
   const controls = useThree((state) => state.controls);
-  const interactionLock = useViewportGizmoInteractionLock();
-  useFrame((_state, delta) => {
-    if (controls instanceof CameraControlsImpl && shouldUpdateTauCameraControlsFrame({ controls, interactionLock })) {
-      controls.update(delta);
-    }
-  }, -1);
   return controls instanceof CameraControlsImpl ? <primitive object={controls} {...feel} /> : undefined;
 }
 

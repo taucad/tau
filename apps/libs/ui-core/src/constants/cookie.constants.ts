@@ -101,6 +101,8 @@ export const cookieName = {
   telemetry: 'telemetry',
   // Whether the desktop app sends product analytics: `false` once turned off in Data controls, otherwise on.
   desktopAnalytics: 'desktop-analytics',
+  // When this device first ran Tau, and which baseline onboarding events it has reported (telemetry marker, BD5).
+  firstSeen: 'first-seen',
 
   /* Docs */
   // Whether the docs sidebar is open.

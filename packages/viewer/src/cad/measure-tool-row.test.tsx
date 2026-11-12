@@ -91,25 +91,27 @@ describe('MeasureOptions', () => {
       activeId: 'edge:a',
       hasMore: true,
     });
+    const emitted: Array<{ type: string; append?: boolean }> = [];
+    actor.on('measureCatalogRequested', (event) => emitted.push(event));
+    actor.on('measureCandidateCommitRequested', (event) => emitted.push(event));
     const user = userEvent.setup();
     renderRow(actor);
     await user.click(screen.getByRole('button', { name: /^Targets:/ }));
+    emitted.length = 0;
     await user.click(screen.getByRole('button', { name: 'Load more targets' }));
-    expect(actor.getSnapshot().context).toMatchObject({
-      measureCatalogRequest: 1,
-      measureCatalogAppend: true,
-    });
+    expect(emitted).toEqual([{ type: 'measureCatalogRequested', append: true }]);
     await user.selectOptions(screen.getByRole('combobox', { name: 'Measurement mode' }), 'point');
     expect(actor.getSnapshot().context.measureMode).toBe('point');
     await user.selectOptions(screen.getByRole('combobox', { name: 'Measurement mode' }), 'auto');
     await user.selectOptions(screen.getByRole('combobox', { name: 'Choose target' }), 'circle:b');
     await user.click(screen.getByRole('button', { name: 'Lock target' }));
+    emitted.length = 0;
     await user.click(screen.getByRole('button', { name: 'Use target' }));
     expect(actor.getSnapshot().context).toMatchObject({
       measureChosenCandidateId: 'circle:b',
       measureLockedTargetId: 'circle:b',
-      measureCommitRequest: 1,
     });
+    expect(emitted).toEqual([{ type: 'measureCandidateCommitRequested' }]);
   });
   it('should prompt for a feature or two points at zero, with nothing to list or clear', () => {
     renderRow(startMeasuring());

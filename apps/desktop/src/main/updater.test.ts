@@ -236,6 +236,24 @@ describe('startDesktopUpdater', () => {
     );
   });
 
+  it('keeps an offer on the card while a later check reads the feed', async () => {
+    const phases: string[] = [];
+    const updater = startDesktopUpdater(
+      options({
+        platform: 'linux',
+        arch: 'x64',
+        fetchJson: async () => feed('0.3.0', 'desktop@0.3.0', 'linux'),
+        onState: (snapshot) => {
+          phases.push(snapshot.phase);
+        },
+      }),
+    );
+    await updater.check();
+    expect(phases).toEqual(['checking', 'available']);
+    await updater.check();
+    expect(phases).toEqual(['checking', 'available', 'available']);
+  });
+
   it('logs a feed failure and keeps running', async () => {
     const log = vi.fn();
     const updater = startDesktopUpdater(
@@ -508,8 +526,11 @@ describe('quiet update snapshots', () => {
     autoUpdater.listeners.get('update-downloaded')?.();
     const ready = updater.snapshot();
     expect(ready).toMatchObject({ phase: 'ready', requestId: 0, version: '0.3.0' });
+    /* The feed still names the pending release: the check reads it and publishes nothing. */
+    onState.mockClear();
     await updater.check();
     expect(updater.snapshot()).toEqual(ready);
+    expect(onState).not.toHaveBeenCalled();
     await updater.check(true);
     expect(updater.snapshot()).toMatchObject({ phase: 'ready', requestId: 1 });
     expect(autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
@@ -555,6 +576,232 @@ describe('quiet update snapshots', () => {
     await vi.waitFor(() => {
       expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
     });
+  });
+});
+
+describe('a newer release replaces a pending one (macOS)', () => {
+  const moving = (...versions: string[]) => {
+    const state = { version: versions[0] ?? '0.3.0' };
+    const fetchJson = vi.fn<(url: string) => Promise<unknown>>(async () => feed(state.version));
+    return { state, fetchJson };
+  };
+  const pinnedFeed = (version: string) => ({
+    url: `https://downloads.tau.new/releases/desktop%40${version}/desktop-update-darwin-arm64.json`,
+    serverType: 'json',
+  });
+
+  it('should download a newer release over a downloaded one without reopening the card or restarting', async () => {
+    const autoUpdater = squirrel();
+    const { state, fetchJson } = moving('0.3.0');
+    const retry = vi.fn();
+    const updater = startDesktopUpdater(options({ autoUpdater, fetchJson, retry }));
+    await updater.check();
+    autoUpdater.listeners.get('update-downloaded')?.();
+    expect(updater.snapshot()).toMatchObject({ phase: 'ready', version: '0.3.0' });
+
+    state.version = '0.4.0';
+    expect(await updater.check()).toMatchObject({ version: '0.4.0', tag: 'desktop@0.4.0' });
+    expect(updater.snapshot()).toMatchObject({ phase: 'downloading', version: '0.4.0', requestId: 0 });
+    expect(updater.snapshot().releasePage).toContain('desktop%400.4.0');
+    expect(autoUpdater.setFeedURL).toHaveBeenLastCalledWith(pinnedFeed('0.4.0'));
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(2);
+
+    autoUpdater.listeners.get('update-downloaded')?.();
+    expect(updater.snapshot()).toMatchObject({ phase: 'ready', version: '0.4.0', requestId: 0 });
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+    expect(retry).not.toHaveBeenCalled();
+    await updater.install();
+    expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
+  });
+
+  it('should hold a restart asked during the replacement and restart into the newer release', async () => {
+    const autoUpdater = squirrel();
+    const { state, fetchJson } = moving('0.3.0');
+    const updater = startDesktopUpdater(options({ autoUpdater, fetchJson }));
+    await updater.check();
+    autoUpdater.listeners.get('update-downloaded')?.();
+    state.version = '0.4.0';
+    await updater.check();
+
+    /* The staged 0.3.0 is gone once Squirrel starts again, so Restart now cannot install it. */
+    await updater.install();
+    expect(updater.snapshot()).toMatchObject({ phase: 'downloading', version: '0.4.0', installWhenReady: true });
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+
+    autoUpdater.listeners.get('update-downloaded')?.();
+    await vi.waitFor(() => {
+      expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
+    });
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(2);
+  });
+
+  it('should answer a check asked during a download when it finishes, before a held restart', async () => {
+    const autoUpdater = squirrel();
+    const { state, fetchJson } = moving('0.3.0');
+    const updater = startDesktopUpdater(options({ autoUpdater, fetchJson }));
+    await updater.check();
+    await updater.install();
+    expect(updater.snapshot()).toMatchObject({ phase: 'downloading', installWhenReady: true });
+
+    /* Squirrel runs one download at a time: nothing native happens until it reports. */
+    state.version = '0.4.0';
+    await updater.check();
+    expect(fetchJson).toHaveBeenCalledOnce();
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+
+    autoUpdater.listeners.get('update-downloaded')?.();
+    await vi.waitFor(() => {
+      expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(2);
+    });
+    expect(autoUpdater.setFeedURL).toHaveBeenLastCalledWith(pinnedFeed('0.4.0'));
+    expect(updater.snapshot()).toMatchObject({ phase: 'downloading', version: '0.4.0', installWhenReady: true });
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+
+    autoUpdater.listeners.get('update-downloaded')?.();
+    await vi.waitFor(() => {
+      expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
+    });
+  });
+
+  it('should restart into the downloaded release when the check asked during its download finds nothing newer', async () => {
+    const autoUpdater = squirrel();
+    const { fetchJson } = moving('0.3.0');
+    const updater = startDesktopUpdater(options({ autoUpdater, fetchJson }));
+    await updater.check();
+    await updater.install();
+    await updater.check();
+    autoUpdater.listeners.get('update-downloaded')?.();
+    await vi.waitFor(() => {
+      expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
+    });
+    expect(fetchJson).toHaveBeenCalledTimes(2);
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+  });
+
+  it('should keep the pending release when the feed fails, repeats it, or names an older one', async () => {
+    const autoUpdater = squirrel();
+    const { state, fetchJson } = moving('0.4.0');
+    const retry = vi.fn();
+    const onState = vi.fn();
+    const log = vi.fn();
+    const updater = startDesktopUpdater(options({ autoUpdater, fetchJson, retry, onState, log }));
+    await updater.check();
+    autoUpdater.listeners.get('update-downloaded')?.();
+    const ready = updater.snapshot();
+    onState.mockClear();
+
+    /* Never a downgrade: 0.3.0 is newer than the running 0.2.0 but older than the pending 0.4.0. */
+    for (const version of ['0.4.0', '0.3.0', '0.2.0']) {
+      state.version = version;
+      // oxlint-disable-next-line no-await-in-loop -- Checks are serialized; each feed answer is read in turn.
+      expect(await updater.check()).toMatchObject({ version: '0.4.0' });
+    }
+    fetchJson.mockRejectedValueOnce(new Error('net::ERR_INTERNET_DISCONNECTED'));
+    expect(await updater.check()).toMatchObject({ version: '0.4.0' });
+    fetchJson.mockResolvedValueOnce({ currentRelease: '0.5.0', releases: [] });
+    expect(await updater.check()).toMatchObject({ version: '0.4.0' });
+
+    expect(updater.snapshot()).toEqual(ready);
+    expect(onState).not.toHaveBeenCalled();
+    expect(retry).not.toHaveBeenCalled();
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+    expect(log).not.toHaveBeenCalledWith('warn', 'updater.error', expect.anything());
+    expect(log).toHaveBeenCalledWith('info', 'updater.supersede-check-failed', {
+      message: 'net::ERR_INTERNET_DISCONNECTED',
+    });
+  });
+
+  it.each([
+    ['a candidate probe', { candidateTag: 'desktop@0.3.0' }],
+    [
+      'a route qualification',
+      { expectedUpdate: { tag: 'desktop@0.3.0', version: '0.3.0', sourceCommit: 'c'.repeat(40) } },
+    ],
+  ] as const)('should never replace the release pinned by %s', async (_case, pin) => {
+    const autoUpdater = squirrel();
+    const { state, fetchJson } = moving('0.3.0');
+    const updater = startDesktopUpdater(options({ autoUpdater, fetchJson, ...pin }));
+    await updater.check();
+    state.version = '0.4.0';
+    await updater.check();
+    autoUpdater.listeners.get('update-downloaded')?.();
+    await updater.check();
+    expect(updater.snapshot()).toMatchObject({ phase: 'ready', version: '0.3.0' });
+    expect(fetchJson).toHaveBeenCalledOnce();
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+  });
+
+  it('should never replace an update while Tau saves or restarts into it', async () => {
+    const autoUpdater = squirrel();
+    const { state, fetchJson } = moving('0.3.0');
+    const saving = Promise.withResolvers<boolean>();
+    const updater = startDesktopUpdater(
+      options({ autoUpdater, fetchJson, prepareToRestart: vi.fn(async () => saving.promise) }),
+    );
+    await updater.check();
+    autoUpdater.listeners.get('update-downloaded')?.();
+
+    /* A check already reading the feed when the restart starts must not act on its answer. */
+    const answer = Promise.withResolvers<unknown>();
+    fetchJson.mockImplementationOnce(async () => answer.promise);
+    const reading = updater.check();
+    const installation = updater.install();
+    expect(updater.snapshot().phase).toBe('saving');
+    answer.resolve(feed('0.4.0'));
+    await reading;
+
+    state.version = '0.4.0';
+    await updater.check();
+    expect(fetchJson).toHaveBeenCalledTimes(2);
+
+    saving.resolve(true);
+    await installation;
+    expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
+    await updater.check();
+    await updater.install();
+    expect(fetchJson).toHaveBeenCalledTimes(2);
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+    expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
+    expect(updater.snapshot()).toMatchObject({ phase: 'restarting', version: '0.3.0' });
+  });
+
+  it('should replace an update again after a restart the save review blocked', async () => {
+    const autoUpdater = squirrel();
+    const { state, fetchJson } = moving('0.3.0');
+    const updater = startDesktopUpdater(
+      options({ autoUpdater, fetchJson, prepareToRestart: vi.fn(async () => false) }),
+    );
+    await updater.check();
+    autoUpdater.listeners.get('update-downloaded')?.();
+    await updater.install();
+    expect(updater.snapshot().phase).toBe('restart-blocked');
+    state.version = '0.4.0';
+    await updater.check();
+    expect(updater.snapshot()).toMatchObject({ phase: 'downloading', version: '0.4.0' });
+  });
+
+  it('should treat a failed replacement as a failed update: nothing is left to install', async () => {
+    const autoUpdater = squirrel();
+    const { state, fetchJson } = moving('0.3.0');
+    const retry = vi.fn();
+    const updater = startDesktopUpdater(options({ autoUpdater, fetchJson, retry }));
+    await updater.check();
+    autoUpdater.listeners.get('update-downloaded')?.();
+    state.version = '0.4.0';
+    await updater.check();
+    await updater.install();
+
+    autoUpdater.listeners.get('error')?.(new Error('download interrupted'));
+    expect(updater.snapshot()).toMatchObject({ phase: 'error' });
+    expect(updater.snapshot().installWhenReady).toBeUndefined();
+    expect(retry).toHaveBeenCalledOnce();
+
+    /* The retry is an ordinary background download of the newest release, and only waits. */
+    await updater.check();
+    expect(autoUpdater.setFeedURL).toHaveBeenLastCalledWith(pinnedFeed('0.4.0'));
+    autoUpdater.listeners.get('update-downloaded')?.();
+    expect(updater.snapshot()).toMatchObject({ phase: 'ready', version: '0.4.0' });
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
   });
 });
 

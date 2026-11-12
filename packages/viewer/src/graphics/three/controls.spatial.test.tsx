@@ -2,7 +2,6 @@ import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RenderFrame } from '@taucad/spatial';
 import { Controls } from '#graphics/three/controls.jsx';
-import type * as TauCameraControlsModule from '#graphics/three/controls/tau-camera-controls.jsx';
 
 const mocks = vi.hoisted(() => {
   const renderFrame: RenderFrame = {
@@ -13,7 +12,6 @@ const mocks = vi.hoisted(() => {
   return {
     context: { isSectionViewActive: true, isMeasureActive: false, measurements: [] },
     renderFrame,
-    cameraControlProperties: undefined as Record<string, unknown> | undefined,
     handlesPicker: undefined as unknown,
     cubePicker: undefined as unknown,
     frames: [] as Array<{ callback: (state: unknown, delta: number) => void; priority: number | undefined }>,
@@ -34,14 +32,6 @@ vi.mock('#hooks/use-graphics.jsx', () => ({
   useGraphicsSelector: (selector: (state: { context: typeof mocks.context }) => unknown) =>
     selector({ context: mocks.context }),
   useRenderFrame: () => mocks.renderFrame,
-}));
-
-vi.mock('#graphics/three/controls/tau-camera-controls.jsx', async (importOriginal) => ({
-  ...(await importOriginal<typeof TauCameraControlsModule>()),
-  TauCameraControls: (properties: Record<string, unknown>) => {
-    mocks.cameraControlProperties = properties;
-    return null;
-  },
 }));
 
 vi.mock('#graphics/three/controls/viewport-gizmo-cube.jsx', async () => {
@@ -72,23 +62,17 @@ const renderControls = (enableGizmo = false): ReturnType<typeof render> =>
 describe('Controls', () => {
   beforeEach(() => {
     mocks.context.isSectionViewActive = true;
-    mocks.cameraControlProperties = undefined;
     mocks.handlesPicker = undefined;
     mocks.cubePicker = undefined;
     mocks.frames.length = 0;
   });
 
-  /* The controls adapter creates the controls and presents the camera on them before anything listens, so there is no
-   * initial target to hand them; this component only gives the adapter's controls their feel and their frame update. */
-  it('should update the controls before the scene draws and render nothing before the adapter attaches', () => {
+  /* The controls adapter creates the controls, presents the camera on them and steps them each frame; this component
+   * only gives the adapter's controls their feel. */
+  it('should step no controls from React and render nothing before the adapter attaches', () => {
     const view = renderControls();
 
-    expect(mocks.frames.map(({ priority }) => priority)).toContain(-1);
-    expect(() => {
-      for (const { callback } of mocks.frames) {
-        callback({}, 1 / 60);
-      }
-    }).not.toThrow();
+    expect(mocks.frames).toEqual([]);
     expect(view.container.querySelector('primitive')).toBeNull();
   });
 

@@ -21,7 +21,45 @@
     "test:e2e": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "Every ui:build consumer here builds it as its first command, under the env fixture below, instead of through dependsOn: a dependency task inherits only the caller's environment, so it could not carry the fixture. The fixture is the non-secret local URLs ci.yml sets workflow-wide plus the self-host TAU_CLOUD_ENABLED, so a clean checkout builds with no untracked apps/ui/.env; the tier's own server sets its runtime origins. ui:build declares each of these as an env input, so the self-host and the cloud (desktop-e2e, test:e2e:live) variants never share a cache entry, and building immediately before the specs means the variant in apps/ui/build is always this target's own (desktop-e2e:test:e2e, which writes the cloud variant there, runs with parallelism false)."
+        "description": "Every ui:build consumer here builds it as its first command, under the env fixture below, instead of through dependsOn: a dependency task inherits only the caller's environment, so it could not carry the fixture. The fixture is the non-secret local URLs ci.yml sets workflow-wide plus the self-host TAU_CLOUD_ENABLED, so a clean checkout builds with no untracked apps/ui/.env; the tier's own server sets its runtime origins. ui:build declares each of these as an env input, so the self-host and the cloud (desktop-e2e, test:e2e:live) variants never share a cache entry, and building immediately before the specs means the variant in apps/ui/build is always this target's own (desktop-e2e:test:e2e, which writes the cloud variant there, runs with parallelism false). FL4: each configuration runs the suite with every target opened in one named flag state (TAU_E2E_FLAG_STATE, src/support/flag-state.ts); it repeats the whole env fixture because a configuration's env replaces the options' env, and the flag state is not a ui:build input because the page seeds it at runtime, so all four share one build."
+      },
+      "configurations": {
+        "all-off": {
+          "env": {
+            "TAU_CLOUD_ENABLED": "false",
+            "TAU_API_URL": "http://localhost:4000",
+            "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+            "TAU_FRONTEND_URL": "http://localhost:3000",
+            "TAU_E2E_FLAG_STATE": "all-off"
+          }
+        },
+        "viewer-controls": {
+          "env": {
+            "TAU_CLOUD_ENABLED": "false",
+            "TAU_API_URL": "http://localhost:4000",
+            "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+            "TAU_FRONTEND_URL": "http://localhost:3000",
+            "TAU_E2E_FLAG_STATE": "viewer-controls"
+          }
+        },
+        "all-on": {
+          "env": {
+            "TAU_CLOUD_ENABLED": "false",
+            "TAU_API_URL": "http://localhost:4000",
+            "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+            "TAU_FRONTEND_URL": "http://localhost:3000",
+            "TAU_E2E_FLAG_STATE": "all-on"
+          }
+        },
+        "viewer-controls-onboarding": {
+          "env": {
+            "TAU_CLOUD_ENABLED": "false",
+            "TAU_API_URL": "http://localhost:4000",
+            "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+            "TAU_FRONTEND_URL": "http://localhost:3000",
+            "TAU_E2E_FLAG_STATE": "viewer-controls-onboarding"
+          }
+        }
       },
       "options": {
         "cwd": "{workspaceRoot}",

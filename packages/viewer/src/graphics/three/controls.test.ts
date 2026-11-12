@@ -1,6 +1,6 @@
 import CameraControlsImpl from 'camera-controls';
 import { describe, expect, it } from 'vitest';
-import { resolveCameraControlMouseButtons } from '#graphics/three/controls/tau-camera-controls.jsx';
+import { resolveCameraControlMouseButtons } from '#graphics/three/controls/camera-controls-feel.js';
 
 describe('resolveCameraControlMouseButtons', () => {
   it('should use zoom rather than unsupported dolly input for the orthographic endpoint', () => {

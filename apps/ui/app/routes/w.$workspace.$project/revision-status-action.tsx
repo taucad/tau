@@ -8,6 +8,7 @@ import { useRevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { revisionAccessibleName, useRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import { useIsHistoryPaneShown } from '#routes/w.$workspace.$project/revision-pane-requests.js';
 
 /** The focused chat's other branch, and the verb that moves the workbench onto it. @public */
 export type FollowChat = Readonly<{
@@ -72,6 +73,9 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
   const { where, facts, status } = useRevisionFacts();
   const { branch } = where;
   const { openPanel } = useProjectWorkspace();
+  const { projectId } = useProject();
+  /* Pressed while History is on screen, so the chip says the pane it opens is the one showing (C2). */
+  const isPaneShown = useIsHistoryPaneShown(projectId);
   const switchTo = useFollowChat(status, branch);
 
   /* Before the root answers there is nothing to be on; an *unborn* branch is a
@@ -99,6 +103,7 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
       <PaneButton
         data-slot='revision-trigger'
         size='label'
+        aria-pressed={isPaneShown}
         className='max-w-full'
         aria-label={revisionAccessibleName(where, facts.sentence)}
         tooltip={`${label} · ${facts.sentence}`}

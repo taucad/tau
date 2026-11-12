@@ -1,17 +1,7 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { KeyboardEvent } from 'react';
-import {
-  ChevronDown,
-  CircleAlert,
-  EllipsisVertical,
-  GitBranch,
-  History,
-  Plus,
-  Undo2,
-  XIcon,
-  CloudUpload,
-} from 'lucide-react';
-import { Link, useLocation, useParams } from 'react-router';
+import { ChevronDown, CircleAlert, CircleDashed, GitBranch, History, Plus, Undo2, XIcon } from 'lucide-react';
+import { Link, useLocation } from 'react-router';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
@@ -19,7 +9,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSwitchItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { Skeleton } from '@taucad/ui/components/skeleton';
@@ -35,7 +28,7 @@ import {
 } from '#components/ui/floating-panel.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
-import { ActionButton, DetailsToggle, disclosureMotion } from '@taucad/ui/components/actions';
+import { ActionButton, disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
 import { RevisionRegion } from '#components/revisions/revision-region.js';
 import {
@@ -53,6 +46,7 @@ import { ConflictDecision, RevisionBranches } from '#routes/w.$workspace.$projec
 import type { ConflictMaterialization } from '#routes/w.$workspace.$project/revision-branches.js';
 import { RevisionSyncRegion } from '#routes/w.$workspace.$project/revision-sync-region.js';
 import {
+  agentWorkingSentence,
   needsDecision,
   revisionTitle,
   selectStripVerbs,
@@ -61,6 +55,14 @@ import {
   versionPhrase,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { StripVerb } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import type { RevisionStatusProjection } from '@taucad/revisions';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { selectRunPhase } from '#machines/chat-projection.logic.js';
+import {
+  consumeBranchControl,
+  useBranchControlRequest,
+  useReportHistoryPaneShown,
+} from '#routes/w.$workspace.$project/revision-pane-requests.js';
 import { useRevisions, useRevisionsOnLine, useWithRestoreTargets } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
@@ -71,19 +73,17 @@ import {
   useRevisionStatus,
 } from '#hooks/use-revision-status.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
-import { setAnonymousRevisions, useAnonymousRevisions, useRevisionSessionUser } from '#lib/revision-actor.js';
+import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
 import { projectChatIdFromSearch } from '#utils/project-url.utils.js';
 import { useProject } from '#hooks/use-project.js';
-import { useFeature } from '#flags/use-feature.js';
 import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { isDesktopTarget } from '#lib/build-target.js';
 import { toast } from '@taucad/ui/components/sonner';
 
 /** Sync settings live in tau.json, which Tau refuses to write while it needs repair (R4). */
@@ -107,6 +107,9 @@ export function ChatRevisions({
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }): React.JSX.Element {
+  const { projectId } = useProject();
+  /* The toolbar chip reads as pressed while History is on screen (C2). */
+  useReportHistoryPaneShown(projectId, isExpanded);
   return (
     <FloatingPanel isOpen={isExpanded} side='right' onOpenChange={setIsExpanded}>
       <FloatingPanelContent>
@@ -130,23 +133,77 @@ export function ChatRevisions({
   );
 }
 
+/** The run phases in which the agent's turn holds its files. */
+const workingPhases: ReadonlySet<string> = new Set(['admitted', 'running', 'paused']);
+
 /**
- * The pinned strip (canvas rounds 4, 14, 17, 18): where you are, with New
- * branch and More pinned to that line, then the one status sentence — the
- * header's, word for word (RA11) — ending in its verbs and Details, which wrap
- * together. The identity line never repeats the sentence.
+ * Whether an agent's turn is running on the files this pane shows (C2).
  *
- * @param props - Whether Sync's chooser is open, and how to open it.
- * @returns The strip.
+ * Read from each observed chat's projection, the same store History's
+ * finalized turns are read from: a chat placed on this checkout, or an
+ * unplaced one on the live checkout, whose current run has not settled.
+ *
+ * @param status - The revision status projection.
+ * @returns True while such a turn runs.
  */
-function OrientationStrip({
-  isSyncOpen,
-  onOpenSync,
-}: {
-  readonly isSyncOpen: boolean;
-  readonly onOpenSync: () => void;
-}): React.JSX.Element {
-  const { workspace = '' } = useParams();
+const useAgentWorkingHere = (status: RevisionStatusProjection | undefined): boolean => {
+  const { projectId } = useProject();
+  const store = useChatSessionStore();
+  const { chats } = useChatRecords(projectId);
+  const checkoutId = status?.checkoutId;
+  const liveCheckoutId = status?.liveCheckoutId ?? status?.checkoutId;
+  const subscribe = useCallback(
+    (listener: () => void): (() => void) => {
+      let unsubscribes: Array<() => void> = [];
+      const bind = (): void => {
+        for (const unsubscribe of unsubscribes) {
+          unsubscribe();
+        }
+        unsubscribes = store.observedChatIdsOf(projectId).map((chatId) => store.subscribeProjection(chatId, listener));
+      };
+      const unsubscribeMembership = store.subscribeMembership(() => {
+        bind();
+        listener();
+      });
+      bind();
+      return () => {
+        unsubscribeMembership();
+        for (const unsubscribe of unsubscribes) {
+          unsubscribe();
+        }
+      };
+    },
+    [projectId, store],
+  );
+  const working = useSyncExternalStore(
+    subscribe,
+    () =>
+      store
+        .observedChatIdsOf(projectId)
+        .filter((chatId) => {
+          const projection = store.getProjection(chatId);
+          return projection !== undefined && workingPhases.has(selectRunPhase(projection));
+        })
+        .join('|'),
+    () => '',
+  );
+  if (working === '' || checkoutId === undefined) {
+    return false;
+  }
+  return working
+    .split('|')
+    .some((chatId) => (chats.find((chat) => chat.id === chatId)?.checkoutId ?? liveCheckoutId) === checkoutId);
+};
+
+/**
+ * Where you are (C2, canvas `pane-header-states`): the branch chip, which is
+ * the branch menu; the version, only while the files are exactly at one; one
+ * status sentence; at most two verbs. No number, no ⋮, no Details.
+ *
+ * @returns The header.
+ */
+function WhereYouAre(): React.JSX.Element {
+  const { projectId } = useProject();
   const { line } = useRevisions();
   const { where, facts, head, status } = useRevisionFacts();
   const role = useProjectRole();
@@ -155,31 +212,42 @@ function OrientationStrip({
   const saveRevision = useSaveRevisionRequest();
   const { requestUpgrade, canUpgradePlan } = useCommercialFeatures();
   const { signIn } = useAuthLinks();
-  const isAnonymous = useAnonymousRevisions(workspace);
-  /* The id the files are at is a diagnostic: it renders only with Tau's debug setting on (B5). */
-  const isDebug = useFeature('tauDebug');
+  const isAgentWorking = useAgentWorkingHere(status);
   const isUnknown = line.kind === 'unknown';
   const canWrite = role !== 'read' && role !== 'revoked';
   /* No head, no branch point; and nothing is offered over a line nobody has located yet (HQ7). */
   const canBranch = head !== undefined && canWrite && !isUnknown;
-  /* M1: the restore machine's own undo target, never a restore row this device did not mint. */
-  const verbs = selectStripVerbs({
-    status,
-    where,
-    undoable: status?.restore.undoable === true,
-    canUndo: status?.restore.canUndo === true,
-    canWrite,
-    /* D17: the plan is the owner's, and only a plan with a larger one to buy. */
-    canUpgrade: canUpgradePlan && role !== 'write',
-  });
-  /* A29: the chooser is already open below, so Back up would repeat it. */
-  const primary = verbs.primary === 'Back up' && isSyncOpen ? undefined : verbs.primary;
-  /* M11: an entry has no number; a version shows beside the branch only while the files are exactly at it. */
-  const headVersion = head === undefined || where.isDirty ? undefined : versionOf(head);
+  /* The agent's turn outranks unsaved changes, which are its own; a failure or a decision still outranks the turn. */
+  const isAgentSentence = isAgentWorking && facts.mark !== 'failed' && facts.mark !== 'attention';
+  const verbs = isAgentSentence
+    ? { primary: undefined, secondary: [] }
+    : selectStripVerbs({
+        status,
+        where,
+        undoable: status?.restore.undoable === true,
+        canUndo: status?.restore.canUndo === true,
+        canWrite,
+        /* D17: the plan is the owner's, and only a plan with a larger one to buy. */
+        canUpgrade: canUpgradePlan && role !== 'write',
+      });
+  const sentence = isAgentSentence ? agentWorkingSentence : facts.sentence;
+  const StatusIcon = isAgentSentence ? CircleDashed : facts.icon;
+  const tone = isAgentSentence ? '' : facts.tone;
+  /* M11: an entry has no number; a version shows only while the files are exactly at it, and nothing waits. */
+  const headVersion =
+    head === undefined || where.isDirty || isAgentWorking || facts.mark !== 'none' ? undefined : versionOf(head);
   const act = (verb: StripVerb): void => {
     switch (verb) {
-      case 'Save': {
+      case 'Save':
+      case 'Try again': {
         void saveRevision();
+        break;
+      }
+      case 'Discard': {
+        /* A restore of the entry the files are at, which saves the changes first, so a discard can be undone (I11). */
+        if (head !== undefined) {
+          restore(head.revisionId);
+        }
         break;
       }
       case 'Undo restore': {
@@ -188,14 +256,6 @@ function OrientationStrip({
       }
       case 'Undo': {
         commands.undoOperation();
-        break;
-      }
-      case 'Back up': {
-        onOpenSync();
-        break;
-      }
-      case 'Sync now': {
-        commands.syncNow();
         break;
       }
       case 'Upgrade': {
@@ -216,8 +276,9 @@ function OrientationStrip({
       <ActionButton
         key={verb}
         verb={verb}
-        icon={verb === 'Undo restore' || verb === 'Undo' ? Undo2 : verb === 'Back up' ? CloudUpload : undefined}
-        variant={isPrimary && (verb === 'Save' || facts.mark === 'attention') ? 'default' : 'outline'}
+        icon={verb === 'Undo restore' || verb === 'Undo' ? Undo2 : undefined}
+        variant={isPrimary ? 'default' : verb === 'Discard' ? 'ghost' : 'outline'}
+        className={verb === 'Discard' ? 'text-foreground' : undefined}
         disabled={isBusy}
         onClick={() => {
           act(verb);
@@ -225,133 +286,174 @@ function OrientationStrip({
       />
     );
 
-  const menuItems: React.JSX.Element[] = [];
-  if (where.isDirty && head !== undefined && canWrite) {
-    menuItems.push(
-      <DropdownMenuItem
-        key='discard'
-        disabled={isBusy}
-        onSelect={() => {
-          /* A restore of the head, which saves the changes first, so even a discard can be undone (D1). */
-          restore(head.revisionId);
-        }}
-      >
-        <Undo2 aria-hidden />
-        Discard changes
-      </DropdownMenuItem>,
-    );
-  }
-  /* One home per verb: Back up is here only while it is not the strip's button (round 16). */
-  if (canWrite && head !== undefined && status?.remote.kind === 'none' && !isSyncOpen && primary !== 'Back up') {
-    menuItems.push(
-      <DropdownMenuItem key='backup' onSelect={onOpenSync}>
-        <CloudUpload aria-hidden />
-        Back up…
-      </DropdownMenuItem>,
-    );
-  }
-  if (canWrite && !isUnknown && workspace !== '') {
-    menuItems.push(
-      <DropdownMenuSwitchItem
-        key='anonymous'
-        isChecked={isAnonymous}
-        onIsCheckedChange={(isChecked) => {
-          setAnonymousRevisions(workspace, isChecked);
-        }}
-      >
-        Hide my name in history
-      </DropdownMenuSwitchItem>,
-    );
-  }
-
   return (
     <section aria-label='Where you are' className='flex shrink-0 flex-col gap-1 border-b bg-sidebar px-3 py-1.5'>
-      <div className='flex min-w-0 items-center gap-2'>
-        <GitBranch aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
-        <span className='flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2'>
-          {isUnknown ? (
-            <Skeleton aria-hidden className='h-4 w-20 self-center' />
-          ) : (
-            <>
-              <span className='text-sm font-medium break-all'>{line.name}</span>
-              {headVersion === undefined ? null : (
-                <span className='text-sm text-muted-foreground'>{versionPhrase(headVersion)}</span>
-              )}
-            </>
-          )}
-        </span>
-        {canBranch ? (
-          <NamePopover
-            trigger={
-              <Button size='xs' variant='ghost' className='shrink-0 gap-1 text-muted-foreground'>
-                <Plus aria-hidden className='size-3' />
-                New branch
-              </Button>
-            }
-            label='Branch name'
-            placeholder='enclosure-v2'
-            note={`Starts from where you are now. ${where.branch ?? 'This branch'} stays as it is.`}
-            saveLabel='Create branch'
-            isBusy={status?.branchVerb.busy ?? false}
-            align='end'
-            onSave={(name) => {
-              // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- the toast channel owns this refusal; only the loose rejection is ours
-              void commands.createBranch(name).catch(() => undefined);
-            }}
-          />
-        ) : null}
-        {/* Details left this menu for the status line, so a person with nothing to change has no More (round 14). */}
-        {menuItems.length === 0 ? null : (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size='icon-xs' variant='ghost' aria-label='More' className='shrink-0'>
-                <EllipsisVertical aria-hidden />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align='end'>{menuItems}</DropdownMenuContent>
-          </DropdownMenu>
+      <div data-slot='where-line' className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
+        {isUnknown ? (
+          <Skeleton aria-hidden className='h-6 w-24 rounded-full' />
+        ) : (
+          <BranchChip projectId={projectId} branch={line.name} isBranchable={canBranch} />
+        )}
+        {headVersion === undefined ? null : (
+          <span data-slot='at-version' className='min-w-0 text-xs text-muted-foreground'>
+            {versionPhrase(headVersion)}
+          </span>
+        )}
+        {verbs.primary === undefined && verbs.secondary.length === 0 ? null : (
+          <span data-slot='where-verbs' className='ml-auto flex items-center gap-2'>
+            {verbs.secondary.map((verb) => renderVerb(verb, false))}
+            {verbs.primary === undefined ? null : renderVerb(verbs.primary, true)}
+          </span>
         )}
       </div>
-      <Collapsible className='flex flex-col'>
-        <div data-slot='strip-status-line' className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
-          <p
-            role='status'
-            aria-label='History status'
-            aria-busy={facts.mark === 'running' || facts.sentence === 'Loading history…' ? true : undefined}
-            className='flex flex-auto items-start gap-1.5 text-xs'
-          >
-            <facts.icon
-              aria-hidden
-              data-slot='status-glyph'
-              className={cn('mt-px size-3.5 shrink-0', facts.tone === '' ? 'text-muted-foreground' : facts.tone)}
-            />
-            <span className='min-w-0'>{facts.sentence}</span>
-          </p>
-          <div data-slot='strip-actions' className='ml-auto flex flex-wrap items-center justify-end gap-2'>
-            {verbs.secondary.map((verb) => renderVerb(verb, false))}
-            {primary === undefined ? null : renderVerb(primary, true)}
-            <DetailsToggle />
-          </div>
-        </div>
-        <CollapsibleContent className={disclosureMotion}>
-          <dl
-            aria-label='Details of where you are'
-            className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 pt-1 pr-1 pl-5 text-xs'
-          >
-            {isDebug ? (
-              <>
-                <dt className='text-muted-foreground'>Head</dt>
-                <dd className='font-mono break-all'>{head?.revisionId ?? '—'}</dd>
-              </>
-            ) : null}
-            <dt className='text-muted-foreground'>Branch</dt>
-            <dd>{where.branch ?? '—'}</dd>
-            <dt className='text-muted-foreground'>This device</dt>
-            <dd>{isDesktopTarget() ? 'Workbench (desktop app)' : 'Workbench (browser)'}</dd>
-          </dl>
-        </CollapsibleContent>
-      </Collapsible>
+      <p
+        role='status'
+        aria-label='History status'
+        aria-busy={facts.mark === 'running' || sentence === 'Loading history…' ? true : undefined}
+        className='flex items-start gap-1.5 text-xs'
+      >
+        <StatusIcon
+          aria-hidden
+          data-slot='status-glyph'
+          className={cn('mt-px size-3.5 shrink-0', tone === '' ? 'text-muted-foreground' : tone)}
+        />
+        <span className='min-w-0'>{sentence}</span>
+      </p>
     </section>
+  );
+}
+
+/**
+ * The branch chip, which is the branch menu (C2, D3): every branch to switch
+ * to, then New branch…, whose form opens under the chip. A conflict line is a
+ * decision in flight, never a place to switch to (D14).
+ *
+ * @param props - The project, the branch the files are on, and whether a branch can start here.
+ * @returns The chip.
+ */
+function BranchChip({
+  projectId,
+  branch,
+  isBranchable,
+}: {
+  readonly projectId: string;
+  readonly branch: string;
+  readonly isBranchable: boolean;
+}): React.JSX.Element {
+  const status = useRevisionStatus();
+  const { branchFacts } = useRevisions();
+  const commands = useRevisionCommands();
+  const request = useBranchControlRequest(projectId);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isNaming, setIsNaming] = useState(false);
+  const chipRef = useRef<HTMLButtonElement>(null);
+  /* New branch… opens its form once the menu has closed, so the menu's focus trap does not take focus back. */
+  const willName = useRef(false);
+  const conflictLines = new Set(
+    (status?.conflicts ?? [])
+      .filter((conflict) => conflict.branch !== undefined && conflict.branch !== conflict.into)
+      .map((conflict) => conflict.branch),
+  );
+  const branches = (status?.branches ?? []).filter((entry) => !conflictLines.has(entry.name));
+  const isBusy = status?.branchVerb.busy ?? false;
+  /* A palette item asked for the menu or the form: open it here, once. */
+  useEffect(() => {
+    if (request === undefined) {
+      return;
+    }
+    consumeBranchControl(projectId);
+    if (request === 'new-branch' && isBranchable) {
+      // oxlint-disable-next-line react/set-state-in-effect -- the palette's request is an external event this header answers once.
+      setIsNaming(true);
+    } else if (request === 'switch-branch') {
+      setIsMenuOpen(true);
+    }
+  }, [request, projectId, isBranchable]);
+
+  return (
+    <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+      <NamePopover
+        anchor={
+          <DropdownMenuTrigger asChild>
+            <Button
+              ref={chipRef}
+              variant='outline'
+              size='xs'
+              data-slot='branch-chip'
+              aria-label={`Branch: ${branch}. Switch branch`}
+              className='max-w-full min-w-0 rounded-full pr-1.5 pl-2 text-sm'
+            >
+              <GitBranch aria-hidden className='size-3.5 text-muted-foreground' />
+              <span className='truncate'>{branch}</span>
+              <ChevronDown aria-hidden className='size-3 text-muted-foreground' />
+            </Button>
+          </DropdownMenuTrigger>
+        }
+        isOpen={isNaming}
+        returnFocus={chipRef}
+        onOpenChange={setIsNaming}
+        label='Branch name'
+        placeholder='enclosure-v2'
+        note={`Starts from where you are now. ${branch} stays as it is.`}
+        saveLabel='Create branch'
+        isBusy={isBusy}
+        onSave={(name) => {
+          // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- the toast channel owns this refusal; only the loose rejection is ours
+          void commands.createBranch(name).catch(() => undefined);
+        }}
+      />
+      <DropdownMenuContent
+        align='start'
+        className='max-w-[calc(100vw-2rem)] min-w-56'
+        onCloseAutoFocus={(event) => {
+          if (willName.current) {
+            willName.current = false;
+            event.preventDefault();
+            setIsNaming(true);
+          }
+        }}
+      >
+        <DropdownMenuLabel>Switch branch</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={branch}
+          onValueChange={(name) => {
+            if (name !== branch) {
+              commands.switchTo(name);
+            }
+          }}
+        >
+          {branches.map((entry) => {
+            const fact = branchFacts?.get(entry.name);
+            const counts = [
+              fact !== undefined && fact.ahead > 0 ? `${String(fact.ahead)} ahead` : '',
+              fact !== undefined && fact.behind > 0 ? `${String(fact.behind)} behind` : '',
+            ].filter(Boolean);
+            return (
+              <DropdownMenuRadioItem key={entry.name} value={entry.name} disabled={isBusy}>
+                <span className='min-w-0 flex-1 truncate'>{entry.name}</span>
+                {counts.length === 0 ? null : (
+                  <span className='text-xs text-muted-foreground tabular-nums'>{counts.join(', ')}</span>
+                )}
+              </DropdownMenuRadioItem>
+            );
+          })}
+        </DropdownMenuRadioGroup>
+        {isBranchable ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              disabled={isBusy}
+              onSelect={() => {
+                willName.current = true;
+              }}
+            >
+              <Plus aria-hidden />
+              New branch…
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -1051,8 +1153,6 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const projectRole = useProjectRole();
   const isSignedOut = useRevisionSessionUser() === undefined;
   const { chats } = useChatRecords(projectId);
-  /* A29: *Sync* appears when a remote exists, or when the person opens it. */
-  const [isConnectOpen, setIsConnectOpen] = useState(false);
   /* N4: the plan, read once here — the region itself stays presentational. */
   const { canSyncFiles, storageLimitBytes, canUpgradePlan, requestUpgrade } = useCommercialFeatures();
   const { signIn } = useAuthLinks();
@@ -1062,7 +1162,6 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const activeChatId = projectChatIdFromSearch(useLocation().search);
   const authority = useOptionalChatWorkspaceAuthority();
   const branches = status?.branches ?? [];
-  const isSyncOpen = status !== undefined && (status.remote.kind !== 'none' || isConnectOpen);
   const conflicts = status?.conflicts ?? [];
   const conflictTexts = useConflictTexts();
   const currentBranch = line.kind === 'unknown' ? undefined : line.name;
@@ -1072,12 +1171,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
 
   return (
     <div data-slot='revisions-panel-body' className='@container flex size-full min-h-0 flex-col bg-sidebar'>
-      <OrientationStrip
-        isSyncOpen={isSyncOpen && status.remote.kind === 'none'}
-        onOpenSync={() => {
-          setIsConnectOpen(true);
-        }}
-      />
+      <WhereYouAre />
       {/* A stable, thin scrollbar gutter, so a row that opens never shifts the pane sideways; the cards sit 8 px
           from both sides (round 11). No `min-h-0` on the regions: this column owns the scroll (C36). */}
       <div
@@ -1157,8 +1251,8 @@ export function RevisionsPanelBody(): React.JSX.Element {
         </RevisionRegion>
       </div>
 
-      {/* A29/D26: *Sync* appears once a remote does, or once the person asks to back up. */}
-      {isSyncOpen ? (
+      {/* The pane's last line: where the backup is, and for a project on this device only, Back up (C2, C4). */}
+      {status === undefined ? null : (
         <RevisionSyncRegion
           remote={status.remote}
           sync={status.sync}
@@ -1183,7 +1277,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
           /* Sync pushes every branch; an unborn one is not on GitHub yet (D92). */
           branch={line.kind === 'branch' ? line.name : undefined}
         />
-      ) : null}
+      )}
     </div>
   );
 }

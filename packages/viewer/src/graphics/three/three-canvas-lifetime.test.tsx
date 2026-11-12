@@ -45,7 +45,6 @@ const cameraRig = {
   activeCamera: perspectiveCamera,
   perspectiveCamera,
   orthographicCamera,
-  setClipPlanes: vi.fn(),
 };
 /** The graphics actor the canvas attaches to; each test starts a fresh one and records what reaches it. */
 const graphics = vi.hoisted(

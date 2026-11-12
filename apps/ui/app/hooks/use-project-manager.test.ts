@@ -3514,6 +3514,23 @@ describe('useProjectManager.createProject', () => {
     expect(phaseOrder.indexOf('name')).toBeLessThan(phaseOrder.indexOf('pending'));
   });
 
+  it('creates an entry-less project under Auto: no main, no model file, and a first chat on Auto (D3)', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () =>
+      result.current.createProject({
+        kernel: 'auto',
+        initialMessage: { content: 'a gyroid heat exchanger core', attachments: [] },
+        location: { kind: 'home' },
+      }),
+    );
+
+    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
+    expect(prepared?.manifest.assets.main).toBeUndefined();
+    expect(Object.keys(prepared?.files ?? {}).filter((path) => !path.startsWith('.tau/'))).toEqual([]);
+    expect(prepared?.chat).toMatchObject({ kernelPreference: 'auto', activeKernel: undefined });
+  });
+
   describe('Home draft attachment promotion', () => {
     const chatAttachments = `/projects/${fakeProject.id}/.tau/chats/cht_create/attachments`;
 

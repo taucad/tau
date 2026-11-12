@@ -135,6 +135,8 @@ export type KernelPillFace = Readonly<{
   label: string;
   /** A manual pick that differs from the project's owner kernel. */
   isMismatch: boolean;
+  /** Auto is running the owner kernel: the glyph is the kernel's and keeps a small Auto mark (D2). */
+  isAutoRunning: boolean;
   /** What clicking the pill does, for its tooltip. */
   hint: string;
 }>;
@@ -155,6 +157,7 @@ export const kernelPillFace = (input: Readonly<{ preference: KernelPreference; o
         text: `Auto · ${name}`,
         label: `Kernel: Auto, running ${name}`,
         isMismatch: false,
+        isAutoRunning: true,
         hint: `Auto is using ${name}, the kernel this project’s model is written in. Click to pick a kernel for this chat.`,
       };
     }
@@ -163,6 +166,7 @@ export const kernelPillFace = (input: Readonly<{ preference: KernelPreference; o
       text: 'Auto',
       label: 'Kernel: Auto',
       isMismatch: false,
+      isAutoRunning: false,
       hint: 'Auto: the agent picks a kernel from your request. Click to choose one yourself.',
     };
   }
@@ -175,6 +179,7 @@ export const kernelPillFace = (input: Readonly<{ preference: KernelPreference; o
       ? `Kernel: ${name}, chosen for this chat; the project’s model is ${nameOf(owner)}`
       : `Kernel: ${name}`,
     isMismatch,
+    isAutoRunning: false,
     hint: `New models in this chat are written in ${name}. Click to switch, or choose Auto.`,
   };
 };

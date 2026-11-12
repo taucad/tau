@@ -21,6 +21,19 @@ export function KernelPillContent({ face }: { readonly face: KernelPillFace }): 
     <>
       {face.glyph === 'auto' ? (
         <AutoKernelGlyph className={kernelPillStyles.icon} />
+      ) : face.isAutoRunning ? (
+        /* Auto running a kernel keeps a small Auto mark on the kernel's glyph, so a collapsed pill never reads as a
+         * manual pick of the same kernel (D2). */
+        <span className='relative inline-flex shrink-0'>
+          <SvgIcon id={face.glyph} aria-hidden className={cn(kernelPillStyles.icon, 'grayscale')} />
+          <span
+            aria-hidden
+            data-slot='kernel-auto-mark'
+            className='absolute -right-1 -bottom-1 inline-flex size-2.5 items-center justify-center rounded-full bg-background'
+          >
+            <Route className='size-2' />
+          </span>
+        </span>
       ) : (
         <SvgIcon id={face.glyph} aria-hidden className={cn(kernelPillStyles.icon, 'grayscale')} />
       )}

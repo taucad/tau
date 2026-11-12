@@ -55,6 +55,7 @@ describe('setup telemetry (M1, M2)', () => {
     );
     await user.click(screen.getByRole('radio', { name: 'Axes' }));
     await user.click(screen.getByRole('radio', { name: 'None' }));
+    await user.click(screen.getByRole('switch', { name: /trackpad/i }));
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await user.click(screen.getByRole('button', { name: 'Finish' }));
 
@@ -67,6 +68,13 @@ describe('setup telemetry (M1, M2)', () => {
     expect(events('viewer_preset_selected')).toEqual([{ preset: 'right-orbit', suggested: false, source: 'setup' }]);
     expect(events('viewer_gizmo_selected')).toEqual([{ style: 'axes', suggested: false, source: 'setup' }]);
     expect(events('viewer_default_changed')).toEqual([{ level: 'person', field: 'display.gizmo' }]);
+    expect(events('$set')).toEqual(
+      expect.arrayContaining([
+        { $set: { mouse_preset: 'right-orbit' } },
+        { $set: { gizmo_style: 'axes' } },
+        { $set: { input_device: 'trackpad' } },
+      ]),
+    );
     const [completed] = events('onboarding_setup_completed') as Array<Record<string, unknown>>;
     expect(Object.keys(completed ?? {}).toSorted()).toEqual(['duration_ms', 'steps_answered', 'tour_wanted']);
     expect(completed).toEqual(expect.objectContaining({ steps_answered: 2, tour_wanted: true }));

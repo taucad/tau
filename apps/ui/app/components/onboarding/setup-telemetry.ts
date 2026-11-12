@@ -14,12 +14,14 @@ import type {
 } from '@taucad/preferences';
 import { suggestedGizmo, suggestedPreset } from '@taucad/preferences';
 import { useAnalytics } from '#hooks/use-analytics.js';
+import { setViewerPersonProperties } from '#components/settings/viewer/viewer-person-properties.js';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
 import type { SetupEntry } from '#telemetry/onboarding-telemetry.js';
 import type { SetupStepId } from '#components/onboarding/setup-copy.js';
 import { isStepAnswered } from '#components/onboarding/setup-model.js';
 
-/** The person properties setup sets, by name in analytics. The viewer's three come from Settings → Viewer's module. */
+/** The person properties setup sets, by name in analytics. The viewer's three (mouse_preset, gizmo_style,
+ * input_device) go through Settings → Viewer's `setViewerPersonProperties`. */
 export const setupPersonPropertyNames = {
   goals: 'goals',
   tool: 'tool',
@@ -39,6 +41,7 @@ export type SetupTelemetry = Readonly<{
   presetSelected: (preset: MousePresetId, profile: PersonProfile) => void;
   gizmoSelected: (style: GizmoStyleId, profile: PersonProfile) => void;
   gizmoHidden: () => void;
+  inputDeviceChanged: (inputDevice: 'mouse' | 'trackpad') => void;
   profileChanged: (profile: PersonProfile) => void;
 }>;
 
@@ -50,7 +53,8 @@ export type SetupTelemetry = Readonly<{
  */
 export const useSetupTelemetry = (entry: SetupEntry): SetupTelemetry => {
   const telemetry = useOnboardingTelemetry();
-  const { capture } = useAnalytics();
+  const analytics = useAnalytics();
+  const { capture } = analytics;
   const [openedAt] = useState(() => performance.now());
   const isOpenedReported = useRef(false);
 
@@ -93,12 +97,17 @@ export const useSetupTelemetry = (entry: SetupEntry): SetupTelemetry => {
           suggested: preset === suggestedPreset(profile.tool),
           source: 'setup',
         });
+        setViewerPersonProperties(analytics, { mousePreset: preset });
       },
       gizmoSelected: (style, profile) => {
         telemetry.viewerGizmoSelected({ style, suggested: style === suggestedGizmo(profile.tool), source: 'setup' });
+        setViewerPersonProperties(analytics, { gizmoStyle: style });
       },
       gizmoHidden: () => {
         telemetry.viewerDefaultChanged({ level: 'person', field: 'display.gizmo' });
+      },
+      inputDeviceChanged: (inputDevice) => {
+        setViewerPersonProperties(analytics, { inputDevice });
       },
       profileChanged: (profile) => {
         setPerson({
@@ -107,7 +116,7 @@ export const useSetupTelemetry = (entry: SetupEntry): SetupTelemetry => {
         });
       },
     }),
-    [openedAt, setPerson, telemetry],
+    [analytics, openedAt, setPerson, telemetry],
   );
 };
 

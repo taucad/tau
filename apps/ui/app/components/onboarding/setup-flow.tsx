@@ -190,7 +190,9 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
       );
     },
     trackpad: (isTrackpad: boolean) => {
-      answer(() => writeDevice({ inputDevice: isTrackpad ? 'trackpad' : 'mouse' }));
+      const inputDevice = isTrackpad ? 'trackpad' : 'mouse';
+      answer(() => writeDevice({ inputDevice }));
+      telemetry.inputDeviceChanged(inputDevice);
     },
   };
 

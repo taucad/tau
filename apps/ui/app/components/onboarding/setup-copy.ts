@@ -5,6 +5,7 @@
  */
 import type { GizmoStyleId, GoalId, LanguageId, MousePresetId, ToolId } from '@taucad/preferences';
 import type { CameraGesture } from '@taucad/viewer/graphics/three/controls/camera-presets';
+import { gizmoStyleCopy, mousePresetCopy } from '#components/settings/viewer/viewer-settings-copy.js';
 
 /** The setup steps, in order. `viewer` is left out while `viewerControls` is off. */
 export const setupStepIds = ['goals', 'background', 'viewer', 'how'] as const;
@@ -193,25 +194,25 @@ export const homeRowExample: Readonly<Record<Exclude<GoalId, 'exploring'>, strin
  */
 export const homeRowText = (example: string): string => `Suggests “${example}”`;
 
-/** Step 3's mouse presets: a name by mapping and the products the camera research documents for it. */
+/** Step 3's mouse presets: Settings → Viewer's name, and the products the camera research documents for it. */
 export const presetCopy: Readonly<Record<MousePresetId, Readonly<{ name: string; familiar: string }>>> = {
-  tau: { name: 'Tau default', familiar: 'Familiar from OpenSCAD and Bambu Studio' },
-  'right-orbit': { name: 'Right-drag orbit', familiar: 'Familiar from Onshape and Tinkercad' },
-  'middle-ctrl': { name: 'Middle-drag orbit, Ctrl pan', familiar: 'Familiar from SolidWorks' },
-  'middle-shift': { name: 'Middle-drag orbit, Shift pan', familiar: 'Familiar from Blender and Creo' },
-  'shift-middle': { name: 'Middle-drag pan, Shift orbit', familiar: 'Familiar from Fusion and Inventor' },
-  alt: { name: 'Alt-drag navigation', familiar: 'Familiar from Maya, Unity and Unreal' },
+  tau: { name: mousePresetCopy.tau.name, familiar: 'Familiar from OpenSCAD and Bambu Studio' },
+  'right-orbit': { name: mousePresetCopy['right-orbit'].name, familiar: 'Familiar from Onshape and Tinkercad' },
+  'middle-ctrl': { name: mousePresetCopy['middle-ctrl'].name, familiar: 'Familiar from SolidWorks' },
+  'middle-shift': { name: mousePresetCopy['middle-shift'].name, familiar: 'Familiar from Blender and Creo' },
+  'shift-middle': { name: mousePresetCopy['shift-middle'].name, familiar: 'Familiar from Fusion and Inventor' },
+  alt: { name: mousePresetCopy.alt.name, familiar: 'Familiar from Maya, Unity and Unreal' },
 };
 
 /** The gizmo choices: the four styles and None, which hides the gizmo. */
 export type GizmoChoiceId = GizmoStyleId | 'none';
 
-/** Step 3's gizmo choices, in order. */
+/** Step 3's gizmo choices, in order: Settings → Viewer's names and hints, and None. */
 export const gizmoCopy: Readonly<Record<GizmoChoiceId, Readonly<{ name: string; rowName: string; hint: string }>>> = {
-  cube: { name: 'Cube', rowName: 'cube', hint: 'Rounded view cube with labelled faces' },
-  'classic-cube': { name: 'Classic cube', rowName: 'classic cube', hint: 'Sharp view cube' },
-  'axis-balls': { name: 'Axis balls', rowName: 'axis balls', hint: 'One ball per axis direction' },
-  axes: { name: 'Axes', rowName: 'axes', hint: 'A small X, Y, Z triad. It shows orientation and takes no click' },
+  cube: { ...gizmoStyleCopy.cube, rowName: 'cube' },
+  'classic-cube': { ...gizmoStyleCopy['classic-cube'], rowName: 'classic cube' },
+  'axis-balls': { ...gizmoStyleCopy['axis-balls'], rowName: 'axis balls' },
+  axes: { ...gizmoStyleCopy.axes, rowName: 'axes' },
   none: { name: 'None', rowName: 'no', hint: 'Hide the gizmo' },
 };
 

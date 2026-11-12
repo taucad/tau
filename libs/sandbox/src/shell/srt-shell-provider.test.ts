@@ -117,6 +117,22 @@ describe('createSandboxShellProvider admission', () => {
     });
   });
 
+  it('should admit GIT_CONFIG_NOSYSTEM=1 past the environment floor and refuse any other GIT_CONFIG name', async () => {
+    const provider = createSandboxShellProvider({ supervisor });
+    const injected = await provider.launch(
+      launchOf({
+        arguments: ['-c', 'true'],
+        environment: { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_COUNT: '1' },
+      }),
+    );
+
+    expect(injected).toStrictEqual({
+      status: 'unsupported',
+      requirement: 'environment',
+      message: 'the shell may not receive GIT_CONFIG_COUNT.',
+    });
+  });
+
   it('should refuse Zsh startup files on a pipe launch or any shell but the macOS Terminal Zsh', async () => {
     const provider = createSandboxShellProvider({ supervisor });
     const pipes = await provider.launch(

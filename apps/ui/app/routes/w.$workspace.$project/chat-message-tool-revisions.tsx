@@ -16,24 +16,17 @@ import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { useProject } from '#hooks/use-project.js';
 import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
+import type { RevisionWhoEntry } from '#lib/revision-actor.js';
 
 /**
  * Who made a revision, from the same resolver History reads: never a model id or an account id (HQ4).
  *
- * @param props - The row's id, recorded actor and source.
+ * @param props - The row's id, typed who and source.
  * @returns The who line, or nothing when the row shows none (Q2).
  */
-function ActorName({
-  revisionId,
-  actor,
-  source,
-}: {
-  readonly revisionId: string;
-  readonly actor: string;
-  readonly source: string;
-}): React.JSX.Element | undefined {
-  const who = useRevisionWhoContext(useProject({ enableNoContext: true })?.projectId);
-  const { line } = revisionWho({ revisionId, actor, source }, who);
+function ActorName({ revisionId, who, source }: RevisionWhoEntry): React.JSX.Element | undefined {
+  const context = useRevisionWhoContext(useProject({ enableNoContext: true })?.projectId);
+  const { line } = revisionWho({ revisionId, who, source }, context);
   return line === '' ? undefined : <span className='shrink-0 text-xs text-muted-foreground/70'>{line}</span>;
 }
 
@@ -104,7 +97,7 @@ const revisionRows = (output: RevisionsOutput): ReactNode => {
                   {revision.summary}
                   {revision.conflicted ? ' · Needs your decision' : ''}
                 </span>
-                <ActorName revisionId={revision.revisionId} actor={revision.actor} source={revision.source} />
+                <ActorName revisionId={revision.revisionId} who={revision.who} source={revision.source} />
               </span>
             </ChatToolCardListItem>
           ))

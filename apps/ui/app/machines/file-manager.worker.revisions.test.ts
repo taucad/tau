@@ -1015,7 +1015,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(after).toHaveLength(before.length + 2);
     expect(after[0]?.summary).toMatch(/^Restored Rev \d+$/u);
     expect(after[1]?.summary).toBe('Saved changes (restore)');
-    expect(after.slice(0, 2).map((row) => row.trigger)).toEqual(['restore', 'restore']);
+    expect(after.slice(0, 2).map((row) => row.capture)).toEqual(['restore', 'restore']);
     expect(after[0]?.source).toBe('restore');
     expect(after[1]?.source).toBe('user');
     await settle(10);
@@ -1608,7 +1608,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     /* The hidden save cut nothing: the log is the turn's result over its base cut, and the base cut is the
      * person's (blueprint A5), so the agent's write is never read as theirs. */
     const rows = await root.log();
-    expect(rows.map((row) => [row.source, row.trigger, row.turnId])).toEqual([
+    expect(rows.map((row) => [row.source, row.capture, row.turnId])).toEqual([
       ['agent', 'turn', 'turn-1'],
       ['user', 'turn', 'turn-1'],
     ]);
@@ -1805,7 +1805,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
 
     const after = await root.log({ branch: 'side' });
     expect(after).toHaveLength(before.length + 1);
-    expect(after[0]).toMatchObject({ trigger: 'close' });
+    expect(after[0]).toMatchObject({ capture: 'close' });
   });
 
   it('should register the project on Tau Cloud when its advertisement answers 404 (P54, W18 DEF-1, D11)', async () => {

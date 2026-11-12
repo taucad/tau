@@ -21,7 +21,7 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { createCameraView } from '@taucad/camera';
 import type { CameraBounds } from '@taucad/camera';
 import { cameraMachine } from '@taucad/camera/machine';
-import type { CameraMachineEmitted } from '@taucad/camera/machine';
+import type { CameraMachineEmitted, CameraMachineEvent } from '@taucad/camera/machine';
 import { resolveMetersPerRenderUnit } from '@taucad/spatial';
 import type {
   CameraOwnedSettings,
@@ -519,6 +519,20 @@ export type GraphicsEvent =
   | { type: 'setHoveredMeasurement'; payload: string | undefined }
   | { type: 'setMeasurementName'; id: string; name: string }
   | { type: 'toggleMeasurementPinned'; id: string }
+  // Viewer shortcuts
+  /**
+   * A viewer shortcut the bar's keyboard adapter heard. Graphics decides what it does from its own state, emits
+   * `viewerShortcutApplied` with the outcome, and handles nothing when the key does nothing here, so
+   * `snapshot.can(event)` says whether the viewer claims the key. `camera` is the camera child's view at the press;
+   * `cutId` is the cut of the focused chip, which Delete and Backspace prefer to the selected cut.
+   */
+  | {
+      type: 'viewerShortcutPressed';
+      shortcut: ViewerShortcut;
+      pressId: string;
+      camera: ViewerShortcutCamera;
+      cutId?: string;
+    }
   // Controls adapter events, forwarded to the camera
   | { type: 'interactionStarted' }
   /** Sent once per gesture, on its first movement. */
@@ -724,6 +738,7 @@ export const graphicsEventTypes = [
   'setHoveredMeasurement',
   'setMeasurementName',
   'toggleMeasurementPinned',
+  'viewerShortcutPressed',
   'interactionStarted',
   'interactionMoved',
   'interactionEnded',
@@ -777,7 +792,50 @@ export type GraphicsEmitted =
   | { type: 'gridUpdated'; sizes: GridSizes }
   /** Fit view, for a viewer with no camera: the SVG pan-zoom resets on it. The 3D camera fits through framing. */
   | { type: 'viewFitRequested' }
-  | { type: 'geometryRadiusCalculated'; radius: number };
+  | { type: 'geometryRadiusCalculated'; radius: number }
+  /** What the shortcut of `pressId` did, for the bar that heard it to announce. */
+  | { type: 'viewerShortcutApplied'; pressId: string; outcome: ViewerShortcutOutcome };
+
+/**
+ * A viewer shortcut: F fits the view, S and M toggle Section and Measure, G the grid, P the projection, Escape steps
+ * back, and Delete or Backspace removes a cut.
+ *
+ * @public
+ */
+export type ViewerShortcut = 'fitView' | 'section' | 'measure' | 'grid' | 'projection' | 'escape' | 'removeCut';
+
+/**
+ * What a viewer shortcut did.
+ *
+ * @public
+ */
+export type ViewerShortcutOutcome =
+  | 'fitted'
+  | 'noModelToFit'
+  | 'sectionOn'
+  | 'sectionOff'
+  | 'sectionNeedsModel'
+  | 'measureOn'
+  | 'measureOff'
+  | 'measureNeedsModel'
+  | 'gridShown'
+  | 'gridHidden'
+  | 'perspective'
+  | 'orthographic'
+  | 'pointCancelled'
+  | 'cutRemoved';
+
+/**
+ * The camera child's view at a shortcut press: Section cuts away the side `direction` faces, and P switches between
+ * orthographic (a field of view of 0) and the last perspective angle.
+ *
+ * @public
+ */
+export type ViewerShortcutCamera = Readonly<{
+  direction: SectionVector;
+  requestedVerticalFieldOfView: number;
+  lastPerspectiveVerticalFieldOfView: number;
+}>;
 
 /**
  * Create-only seed. The durable half is exactly the keys this machine owns (Law 1), so a new
@@ -903,6 +961,111 @@ const graphicsActors = {
 };
 
 type GraphicsEnqueue = EnqueueObject<GraphicsEvent, GraphicsEmitted, SystemRegistry, typeof graphicsActors>;
+
+type ViewerShortcutDecision = Readonly<{
+  outcome: ViewerShortcutOutcome;
+  /** Raised on graphics, so the shortcut takes the same transition as its control. */
+  event?: GraphicsEvent;
+  camera?: Extract<CameraMachineEvent, { type: 'setVerticalFieldOfView' }>;
+}>;
+
+type ViewerShortcutPressedEvent = Extract<GraphicsEvent, { type: 'viewerShortcutPressed' }>;
+
+const sectionOffDecision: ViewerShortcutDecision = {
+  outcome: 'sectionOff',
+  event: { type: 'setSectionViewActive', payload: false },
+};
+const measureOffDecision: ViewerShortcutDecision = {
+  outcome: 'measureOff',
+  event: { type: 'setMeasureActive', payload: false },
+};
+
+/** S and M: turn the tool off, or on when there is a model to cut or measure. */
+const decideToolToggle = (
+  context: GraphicsContext,
+  tool: 'section' | 'measure',
+  camera: ViewerShortcutCamera,
+): ViewerShortcutDecision => {
+  const hasModel = context.geometryRadius > 0;
+  if (tool === 'section') {
+    if (context.isSectionViewActive) {
+      return sectionOffDecision;
+    }
+    return hasModel
+      ? {
+          outcome: 'sectionOn',
+          event: { type: 'setSectionViewActive', payload: true, viewDirection: camera.direction },
+        }
+      : { outcome: 'sectionNeedsModel' };
+  }
+  if (context.isMeasureActive) {
+    return measureOffDecision;
+  }
+  return hasModel
+    ? { outcome: 'measureOn', event: { type: 'setMeasureActive', payload: true } }
+    : { outcome: 'measureNeedsModel' };
+};
+
+/** Escape steps back: a half-placed point, then Measure, then Section. */
+const decideEscape = (context: GraphicsContext): ViewerShortcutDecision | undefined => {
+  if (context.currentMeasurementStart) {
+    return { outcome: 'pointCancelled', event: { type: 'cancelCurrentMeasurement' } };
+  }
+  if (context.isMeasureActive) {
+    return measureOffDecision;
+  }
+  return context.isSectionViewActive ? sectionOffDecision : undefined;
+};
+
+/** Delete and Backspace remove the focused chip's cut, else the selected one, while Section is on. */
+const decideRemoveCut = (context: GraphicsContext, cutId: string | undefined): ViewerShortcutDecision | undefined => {
+  const id = cutId ?? context.selectedSectionCutId;
+  return id !== undefined && context.isSectionViewActive && context.sectionCuts.some((cut) => cut.id === id)
+    ? { outcome: 'cutRemoved', event: { type: 'removeSectionCut', payload: id } }
+    : undefined;
+};
+
+/** What a shortcut does in `context`, or nothing: S, M and P do nothing for 2D geometry. */
+const decideViewerShortcut = (
+  context: GraphicsContext,
+  { shortcut, camera, cutId }: ViewerShortcutPressedEvent,
+): ViewerShortcutDecision | undefined => {
+  const is2d = context.artifact?.mimeType === 'image/svg+xml';
+  switch (shortcut) {
+    case 'fitView': {
+      return context.geometryRadius > 0 || is2d
+        ? { outcome: 'fitted', event: { type: 'fitView' } }
+        : { outcome: 'noModelToFit' };
+    }
+    case 'grid': {
+      const isShown = !context.enableGrid;
+      return { outcome: isShown ? 'gridShown' : 'gridHidden', event: { type: 'setGridVisibility', payload: isShown } };
+    }
+    case 'section':
+    case 'measure': {
+      return is2d ? undefined : decideToolToggle(context, shortcut, camera);
+    }
+    case 'projection': {
+      if (is2d) {
+        return undefined;
+      }
+      const isOrthographic = camera.requestedVerticalFieldOfView === 0;
+      return {
+        outcome: isOrthographic ? 'perspective' : 'orthographic',
+        camera: {
+          type: 'setVerticalFieldOfView',
+          verticalFieldOfView: isOrthographic ? camera.lastPerspectiveVerticalFieldOfView : 0,
+        },
+      };
+    }
+    case 'escape': {
+      return decideEscape(context);
+    }
+    case 'removeCut': {
+      return decideRemoveCut(context, cutId);
+    }
+  }
+};
 
 /** Whether the person is holding a camera gesture (pointer down on the controls). */
 const selectGestureHeld = (cameraRef: GraphicsCameraRef): boolean =>
@@ -1280,6 +1443,22 @@ const graphicsMachineDefinition = setup({
               },
             },
           };
+        },
+
+        // Viewer shortcuts: graphics decides, and a key that does nothing here is left unhandled.
+        viewerShortcutPressed: ({ context, event }, enq) => {
+          const decision = decideViewerShortcut(context, event);
+          if (!decision) {
+            return undefined;
+          }
+          if (decision.event) {
+            enq.raise(decision.event);
+          }
+          if (decision.camera) {
+            enq.sendTo(context.cameraRef, decision.camera);
+          }
+          enq.emit({ type: 'viewerShortcutApplied', pressId: event.pressId, outcome: decision.outcome });
+          return {};
         },
 
         // Camera events
@@ -2245,6 +2424,9 @@ export const graphicsIgnoredEvents: ReadonlyArray<readonly [state: string, event
   ['operational.measure.on.selected', 'startMeasurement'],
   ['operational.measure.on.selecting', 'completeMeasurement'],
   ['operational.measure.on.selecting', 'cancelCurrentMeasurement'],
+  // A shortcut that does nothing in the current context is left unhandled, so `can` says whether the bar claims the
+  // key: Escape with nothing on, Delete or Backspace with no known cut, and S, M or P on 2D geometry, in any state.
+  ['*', 'viewerShortcutPressed'],
 ];
 
 /** The graphics machine's state value: the operational backend, section and measure regions. @public */

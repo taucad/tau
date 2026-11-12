@@ -1812,7 +1812,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
           expect(entry?.provenance.source).toBe('import');
           expect(Object.keys(entry?.provenance ?? {}).toSorted()).toStrictEqual(['createdAt', 'source']);
           const [row] = await readRevisionLog(reader, { from: revisionId(upstream), limit: 1 });
-          expect(row).toMatchObject({ source: 'import', authorName: 'Octo Dev' });
+          expect(row).toMatchObject({ source: 'import', who: { kind: 'unrecorded', authorName: 'Octo Dev' } });
           /* A commit Tau recorded carries no git author name: its trailer names who made it. */
           const [recorded] = await reader.log({ heads: [head] });
           expect(recorded?.authorName).toBeUndefined();

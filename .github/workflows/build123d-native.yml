@@ -13,6 +13,8 @@ on:
       - 'packages/core/geometry/**'
       - 'packages/kinematics/**'
       - 'packages/core/native-process/**'
+      # The OS sandbox the CAD workers launch in, bundled into native-process-core.
+      - 'libs/sandbox/**'
       - 'packages/runtime/src/preparation/**'
       - 'apps/desktop/resources/python/manifest.json'
       - 'apps/desktop/scripts/prepare-build123d-python.mts'

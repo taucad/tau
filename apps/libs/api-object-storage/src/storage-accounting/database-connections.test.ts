@@ -13,6 +13,7 @@ describe('databaseConnectionFigures (W14 OB3, N48–N49)', () => {
     [
       { applicationName: 'tau-api', state: 'active', connections: 3 },
       { applicationName: 'tau-api', state: 'idle', connections: 7 },
+      { applicationName: 'tau-api-background', state: 'idle', connections: 1 },
       {
         applicationName: 'tau-mirror',
         state: 'idle in transaction',
@@ -42,6 +43,7 @@ describe('databaseConnectionFigures (W14 OB3, N48–N49)', () => {
   it('should map each application_name Tau sets to its process, and any other to `other`', () => {
     expect(value('api', 'active')).toBe(3);
     expect(value('api', 'idle')).toBe(7);
+    expect(value('api-background', 'idle')).toBe(1);
     expect(value('other', 'active')).toBe(2);
     expect(JSON.stringify(figures)).not.toContain('psql');
     expect(JSON.stringify(figures)).not.toContain('tau-boundary');
@@ -53,7 +55,7 @@ describe('databaseConnectionFigures (W14 OB3, N48–N49)', () => {
   });
 
   it('should export every application and state, zero when absent', () => {
-    expect(figures.databaseConnections).toHaveLength(24);
+    expect(figures.databaseConnections).toHaveLength(28);
     expect(value('release', 'active')).toBe(0);
   });
 

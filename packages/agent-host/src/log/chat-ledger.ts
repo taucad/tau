@@ -605,6 +605,17 @@ const createFold = (ledger: ChatLedger) => {
             },
           ];
         }
+        /* The provider's own report of replayed blocks it left out for a changed prefix. The replay rule leaves such
+         * a block out first, so each one is a change no cause explained. */
+        const refused = message.role === 'assistant' ? message.metadata?.reasoningDroppedByProvider : undefined;
+        if (refused !== undefined && refused > 0) {
+          const entry = entryOf(event.runId);
+          const provider = message.metadata?.provider;
+          entry.prefixBreaks = [
+            ...(entry.prefixBreaks ?? []),
+            { cause: 'unsanctioned', ...(provider === undefined ? {} : { provider }), dropped: refused },
+          ];
+        }
         if (
           message.role === 'assistant' &&
           binding?.['kind'] === 'billing-invocation' &&

@@ -15,9 +15,8 @@
   "packages/viewer/src/graphics/three/use-geometry-bounds.ts": 1,
   "packages/viewer/src/graphics/three/utils/gizmo.utils.ts": 1,
   "packages/viewer/src/hooks/use-graphics.tsx": 1,
-  "packages/viewer/src/hooks/use-viewer-shortcuts.ts": 8,
   "packages/viewer/src/machines/graphics.machine.ts": 1,
-  "packages/viewer/src/model-viewer.tsx": 2,
+  "packages/viewer/src/model-viewer.tsx": 1,
   "packages/viewer/src/parameters/use-field-edits.ts": 1,
   "packages/viewer/src/services/graphics-camera-registry.ts": 1
 }

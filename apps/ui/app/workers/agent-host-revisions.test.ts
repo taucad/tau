@@ -13,7 +13,7 @@ const row = (revisionNumber: number, revisionId: string): RevisionRow => ({
   revisionNumber,
   revisionId,
   changeId: `change-${revisionId}`,
-  actor: 'person',
+  who: { kind: 'recorded', identity: { kind: 'user', id: 'person' } },
   source: 'user',
   createdAt: 0,
   summary: revisionId,

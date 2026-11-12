@@ -13,6 +13,7 @@ import {
   fetchOrder,
   firstFailedJob,
   jobWaits,
+  landedFromCompare,
   quantile,
   renderMarkdown,
   reportWindow,
@@ -261,11 +262,48 @@ describe('ci queue health', () => {
       expect(result.criticalPathWaitShareP90).toBeCloseTo(468 / 733, 5);
     });
 
-    it('should count what the cancelled runs had already spent', () => {
+    it('should count what the cancelled runs had already spent, unchecked runs as waste', () => {
       const result = cancelledWaste([...evidence, { run: run({ conclusion: 'cancelled' }) }]);
       expect(result.runs).toBe(2);
       expect(result.jobs).toBe(18);
       expect(result.runnerMinutes).toBe(75.8);
+      expect(result.landed).toEqual({ runs: 0, runnerMinutes: 0 });
+      expect(result.unchecked).toBe(2);
+    });
+
+    it('should count a cancelled run whose commit landed apart from the waste (F14)', () => {
+      const landed = cancelledWaste([{ ...cancelled, landed: true }]);
+      const dead = cancelledWaste([{ ...cancelled, landed: false }]);
+      expect(landed.runs).toBe(0);
+      expect(landed.jobs).toBe(0);
+      expect(landed.runnerMinutes).toBe(0);
+      expect(landed.landed.runs).toBe(1);
+      expect(landed.landed.runnerMinutes).toBe(dead.runnerMinutes);
+      expect(dead.runs).toBe(1);
+      expect(dead.runnerMinutes).toBeGreaterThan(0);
+      expect(dead.landed).toEqual({ runs: 0, runnerMinutes: 0 });
+      expect(dead.unchecked).toBe(0);
+    });
+
+    it('should ignore the landing of a run that was not cancelled', () => {
+      const result = cancelledWaste([{ ...success, landed: true }]);
+      expect(result).toEqual({
+        runs: 0,
+        jobs: 0,
+        runnerMinutes: 0,
+        landed: { runs: 0, runnerMinutes: 0 },
+        unchecked: 0,
+      });
+    });
+
+    it.each([
+      ['identical', true],
+      ['ahead', true],
+      ['behind', false],
+      ['diverged', false],
+      [undefined, false],
+    ])('should read compare status %s as landed=%s', (status, expected) => {
+      expect(landedFromCompare(status)).toBe(expected);
     });
   });
 
@@ -325,6 +363,9 @@ describe('ci queue health', () => {
         '| Affected (lint) | 1 | app/components/chat/chat-composer-static-bar.tsx (typescript(no-unnecessary-boolean-literal-compare)) (1) | [1](https://github.com/taucad/tau/actions/runs/42482090801/job/128736767386) |',
       );
       expect(markdown).toContain('> Partial: jobs were fetched for 3 of 4 finished runs');
+      expect(markdown).toContain(
+        '0 cancelled runs had landed (0 runner minutes, not waste). The other 2 had dispatched 18 jobs and used 75.8 runner minutes (2 not checked for landing).',
+      );
       expect(markdown).toContain('| Plan affected lanes | 2 |');
       expect(markdown).not.toContain('had no failed job');
     });
@@ -348,6 +389,13 @@ describe('ci queue health', () => {
       expect(quiet).toContain('2 failed runs had no failed job to attribute.');
       expect(quiet).toContain(String.raw`| a \| b | 1 | 1 s | 1 s | 50 % |`);
       expect(quiet).not.toContain('Partial');
+      const landed = renderMarkdown({
+        ...report,
+        cancelled: { runs: 1, jobs: 3, runnerMinutes: 4.5, landed: { runs: 2, runnerMinutes: 60 }, unchecked: 0 },
+      });
+      expect(landed).toContain(
+        '2 cancelled runs had landed (60 runner minutes, not waste). The other 1 had dispatched 3 jobs and used 4.5 runner minutes. ',
+      );
       const unnamed = renderMarkdown({
         ...report,
         failures: {

@@ -20,7 +20,8 @@
 
 import type { RevisionId } from '#algorithms/index.js';
 import { revisionId } from '#algorithms/index.js';
-import type { RevisionProvenance } from '#revision-authority.js';
+import type { RevisionIdentity, RevisionProvenance } from '#revision-authority.js';
+import { revisionCommitMessage } from '#revision-headers.js';
 import type { RevisionDiffEntry, RevisionLogEntry, RevisionPort } from '#revision-port.js';
 import { numberVersions } from '#version-numbers.js';
 import { generatedSetupPaths } from '#workspace-config.js';
@@ -29,6 +30,26 @@ import type { StartReading } from '#start-version.js';
 
 /** One named version on a row: its name and its number, `V<n>` (B6). @public */
 export type RevisionVersion = Readonly<{ name: string; number: number }>;
+
+/**
+ * Who made one revision, as the store holds it (blueprint B2).
+ *
+ * `recorded`: a commit Tau wrote, with the typed identity its trailer names.
+ * `unrecorded`: a commit Tau did not write (an import's upstream history, plain
+ * Git), with the git author name it carries, as GitHub shows it (B3). Nothing
+ * stands in for an identity a commit lacks (I1, I7), and neither arm is a name
+ * to print: who a row shows is decided by the reader, from Tau Cloud's push
+ * record first (I2).
+ *
+ * @public
+ */
+export type RevisionRowWho =
+  | Readonly<{ kind: 'recorded'; identity: RevisionIdentity }>
+  | Readonly<{
+      kind: 'unrecorded';
+      /** The commit's git author name; absent when the commit names none. */
+      authorName?: string;
+    }>;
 
 /** One revision as a person reads it. @public */
 export type RevisionRow = Readonly<{
@@ -42,10 +63,8 @@ export type RevisionRow = Readonly<{
    * a row; every port read carries it.
    */
   treeId?: string;
-  /** Who made it: the model id for an agent turn, the user's actor otherwise. */
-  actor: string;
-  /** The git author of a commit Tau did not record (B3), which History names. */
-  authorName?: string;
+  /** Who made it, as the store holds it; never a display name on its own (I2). */
+  who: RevisionRowWho;
   source: RevisionProvenance['source'];
   /** Milliseconds since the Unix epoch. */
   createdAt: number;
@@ -70,20 +89,26 @@ export type RevisionRow = Readonly<{
    */
   versions?: readonly RevisionVersion[];
   /**
-   * What asked for this revision (S30), when the store recorded it.
+   * What asked for this revision (S30), as the trailer's `capture` names it (B1).
    *
    * History folds consecutive `idle`, `hidden` and `close` rows into one
-   * *n autosaves* row (A20), and only the trigger can tell an autosave from a
-   * `save` the person asked for. Read from the trailer's `capture` (B1), and
-   * `undefined` for a commit Tau did not record.
+   * *n autosaves* row (A20), and only the capture can tell an autosave from a
+   * `save` the person asked for. Absent on a commit Tau did not record.
    */
-  trigger?: RevisionProvenance['capture'];
+  capture?: RevisionProvenance['capture'];
+  /**
+   * The `Tau-Metadata` trailer this revision carries, for diagnostics behind
+   * Tau's debug setting only (B5). Absent on a commit Tau did not record.
+   * Rebuilt from the parsed trailer by the one canonical writer, which is the
+   * only shape a version 2 reader admits.
+   */
+  trailer?: string;
   /**
    * The revision a restore brought back (D1), by id.
    *
    * Present only on the revision a restore minted: the cut that recorded the
-   * checkout before the restore carries the same `restore` trigger and none, so
-   * this, never the trigger, is what names a *Restored* row (A9).
+   * checkout before the restore carries the same `restore` capture and none, so
+   * this, never the capture, is what names a *Restored* row (A9).
    */
   restoredFrom?: string;
   /**
@@ -299,6 +324,37 @@ const numbersOn = async (
   return numbers;
 };
 
+/**
+ * Who made one entry, what asked for it and the trailer it records (B2, B3).
+ *
+ * @param entry - One log entry.
+ * @returns A recorded entry's identity, capture and trailer; an unrecorded one's git author.
+ */
+const whoOf = (
+  entry: RevisionLogEntry,
+): Readonly<{ who: RevisionRowWho; capture?: RevisionProvenance['capture']; trailer?: string }> => {
+  const { actor, capture, via } = entry.provenance;
+  if (actor === undefined || capture === undefined || via === undefined) {
+    return {
+      who: Object.freeze({
+        kind: 'unrecorded',
+        ...(entry.authorName === undefined || entry.authorName === '' ? {} : { authorName: entry.authorName }),
+      }),
+    };
+  }
+  const message = revisionCommitMessage({
+    parents: entry.parents,
+    provenance: { ...entry.provenance, actor, capture, via },
+    summary: entry.summary,
+  });
+  return {
+    who: Object.freeze({ kind: 'recorded', identity: actor }),
+    capture,
+    /* The trailer block: everything after the title line the writer puts first. */
+    trailer: message.slice(message.indexOf('\n\n') + 2).trimEnd(),
+  };
+};
+
 const rowOf = (
   entry: RevisionLogEntry,
   revisionNumber: number | undefined,
@@ -309,9 +365,7 @@ const rowOf = (
     revisionId: entry.id,
     changeId: entry.changeId,
     treeId: entry.treeId,
-    /* B2 types this row's who; until then a commit Tau did not record reads as `unknown`, as before B1. */
-    actor: entry.provenance.actor?.id ?? 'unknown',
-    ...(entry.authorName === undefined ? {} : { authorName: entry.authorName }),
+    ...whoOf(entry),
     /* A5: a turn's base holds the person's bytes, never the agent's. */
     source: entry.provenance.turnCut === 'base' ? 'user' : entry.provenance.source,
     createdAt: entry.provenance.createdAt,
@@ -322,7 +376,6 @@ const rowOf = (
     ...(versions.length === 0
       ? {}
       : { versions: Object.freeze(versions.toSorted((left, right) => left.number - right.number)) }),
-    trigger: entry.provenance.capture,
     ...(entry.provenance.restoredFrom === undefined ? {} : { restoredFrom: entry.provenance.restoredFrom }),
     ...(entry.provenance.turnCut === undefined ? {} : { turnCut: entry.provenance.turnCut }),
     ...(entry.parents[0] === undefined ? {} : { parent: entry.parents[0] }),

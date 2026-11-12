@@ -983,7 +983,7 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('legacy LFS key relocat
     await moduleRef.close();
   }, 60_000);
 
-  it('should refuse a paused relocation after deletion without copying or removing bytes', async () => {
+  it('should take back its unlocked copy when the project is deleted before the legacy delete', async () => {
     const ownerId = `user-w4l-${randomBytes(6).toString('hex')}`;
     const projectId = `proj-${randomBytes(6).toString('hex')}`;
     owners.push(ownerId);
@@ -991,10 +991,16 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('legacy LFS key relocat
     await database.insert(project).values({ id: projectId, ownerId, name: 'relocation' });
     const object = pointerFor('relocation race');
     const legacy = { namespace: 'blobs', key: gitLfsObjectKey(projectId, object.oid), tier: 'private' } as const;
+    const tenant = {
+      namespace: 'tenants',
+      key: tenantLfsObjectKey(ownerId, projectId, object.oid),
+      tier: 'private',
+    } as const;
     await driver.putBlob({ ...legacy, body: object.body, contentType: 'application/octet-stream' });
     await database
       .insert(projectGitLfsObject)
       .values({ projectId, oid: object.oid, sizeBytes: object.size, finalizedAt: new Date() });
+    // The copy runs unlocked; the pause holds the locked verify-and-delete step.
     const paused = Object.assign(mock<Database>(), { select: database.select.bind(database) });
     const entered = Promise.withResolvers<void>();
     const resume = Promise.withResolvers<void>();
@@ -1003,32 +1009,66 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('legacy LFS key relocat
       await resume.promise;
       return database.transaction(run);
     });
-    const put = vi.spyOn(driver, 'putBlob');
     const remove = vi.spyOn(driver, 'deleteBlob');
     const operation = relocateLegacyLfsObjects({ database: paused, storage: driver }, { ownerId, projectId });
     const rejected = expect(operation).rejects.toBeInstanceOf(GoneException);
     try {
       await entered.promise;
+      expect(await driver.headBlob(tenant)).toMatchObject({ size: object.size });
       await requestProjectDeletion({ database, projectId, userId: ownerId, enabled: true });
       resume.resolve();
       await rejected;
-      expect(put).not.toHaveBeenCalled();
-      expect(remove).not.toHaveBeenCalled();
+      expect(remove.mock.calls.map(([args]) => args.key)).toStrictEqual([tenant.key]);
       expect(await driver.headBlob(legacy)).toMatchObject({ size: object.size });
-      expect(
-        await driver.headBlob({
-          namespace: 'tenants',
-          key: tenantLfsObjectKey(ownerId, projectId, object.oid),
-          tier: 'private',
-        }),
-      ).toBeUndefined();
+      expect(await driver.headBlob(tenant)).toBeUndefined();
     } finally {
       resume.resolve();
       await operation.catch(() => undefined);
-      put.mockRestore();
       remove.mockRestore();
     }
   });
+
+  it('should keep the legacy key when an earlier run left a same-sized tenant copy with other bytes', async () => {
+    const ownerId = `user-w4l-${randomBytes(6).toString('hex')}`;
+    const projectId = `proj-${randomBytes(6).toString('hex')}`;
+    owners.push(ownerId);
+    await database.insert(user).values({ id: ownerId, name: 'W4b', email: `${ownerId}@tau.test` });
+    await database.insert(project).values({ id: projectId, ownerId, name: 'relocation' });
+    await database.insert(projectGit).values({ projectId });
+    const object = pointerFor('same-sized wrong copy');
+    await driver.putBlob({
+      namespace: 'blobs',
+      key: gitLfsObjectKey(projectId, object.oid),
+      body: object.body,
+      contentType: 'application/octet-stream',
+      tier: 'private',
+    });
+    // Same length, other bytes, and no stored checksum: only hashing the bytes can tell.
+    await driver.putBlob({
+      namespace: 'tenants',
+      key: tenantLfsObjectKey(ownerId, projectId, object.oid),
+      body: new Uint8Array(object.size).fill(0x78),
+      contentType: 'application/octet-stream',
+      tier: 'private',
+    });
+    await database.insert(projectGitLfsObject).values({
+      projectId,
+      oid: object.oid,
+      sizeBytes: object.size,
+      finalizedAt: new Date(),
+    });
+
+    await expect(relocateLegacyLfsObjects({ database, storage: driver }, { ownerId, projectId })).rejects.toThrow(
+      /already at the tenant key with (other bytes|another stored SHA-256)/u,
+    );
+
+    const legacy = await driver.headBlob({
+      namespace: 'blobs',
+      key: gitLfsObjectKey(projectId, object.oid),
+      tier: 'private',
+    });
+    expect(legacy?.size).toBe(object.size);
+  }, 120_000);
 
   it('should keep the legacy key when an earlier run left a wrong-sized tenant copy', async () => {
     const ownerId = `user-w4l-${randomBytes(6).toString('hex')}`;

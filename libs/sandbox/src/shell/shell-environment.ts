@@ -85,6 +85,14 @@ const refusedPrefixes: readonly string[] = [
   'TAU_',
 ];
 
+/**
+ * Exact name and value pairs a refused prefix would catch but that only take a source away. `GIT_CONFIG_NOSYSTEM=1`
+ * stops git reading the machine's system config (Xcode's bundles a credential helper), so the host's read-only git view
+ * holds only its own config. Every other `GIT_CONFIG*` name, and this one with any other value, stays refused: those
+ * inject settings (`GIT_CONFIG_COUNT`, `GIT_CONFIG_PARAMETERS`) or point at another file (`GIT_CONFIG_GLOBAL`).
+ */
+const admittedExactly: ReadonlyMap<string, string> = new Map([['GIT_CONFIG_NOSYSTEM', '1']]);
+
 /** Any name that reads as a secret. A false positive costs a renamed variable; a false negative leaks one. */
 const credentialPattern = /token|secret|passw(?:or)?d|credential|api_?key|private_?key|auth|cookie|session/iu;
 
@@ -106,7 +114,7 @@ export const refusedShellEnvironment = (environment: Readonly<Record<string, str
         !namePattern.test(name) ||
         value.includes('\0') ||
         refusedNames.has(upper) ||
-        refusedPrefixes.some((prefix) => upper.startsWith(prefix)) ||
+        (refusedPrefixes.some((prefix) => upper.startsWith(prefix)) && admittedExactly.get(name) !== value) ||
         credentialPattern.test(name)
       );
     })

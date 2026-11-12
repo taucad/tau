@@ -154,7 +154,7 @@ export {
 } from '#revision-conflict.js';
 export type { ConflictPerspective, RevisionConflictTerms } from '#revision-conflict.js';
 export { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';
-export type { RevisionLogRequest, RevisionPlace, RevisionRow } from '#revision-verbs.js';
+export type { RevisionLogRequest, RevisionPlace, RevisionRow, RevisionRowWho } from '#revision-verbs.js';
 export { numberVersions } from '#version-numbers.js';
 export {
   parseStartRecord,

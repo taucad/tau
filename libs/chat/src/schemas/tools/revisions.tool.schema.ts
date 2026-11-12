@@ -32,6 +32,36 @@ export const revisionsInputSchema = z.object({
   path: z.string().optional().describe('conflict only. One conflicted file; defaults to all of them.'),
 });
 
+const revisionPersonSchema = z.object({
+  kind: z.literal('user'),
+  id: z.string(),
+  name: z.string().optional(),
+  email: z.string().optional(),
+  anonymous: z.boolean().optional(),
+});
+
+/**
+ * Who made one revision, as the store holds it (blueprint B2): the identity a
+ * commit Tau wrote records, or the git author of one it did not. Never a name
+ * to print as is; the pane resolves who a row shows.
+ *
+ * @public
+ */
+export const revisionWhoSchema = z
+  .discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('recorded'),
+      identity: z.discriminatedUnion('kind', [
+        revisionPersonSchema,
+        z.object({ kind: z.literal('agent'), id: z.string(), runId: z.string(), onBehalfOf: revisionPersonSchema }),
+      ]),
+    }),
+    z.object({ kind: z.literal('unrecorded'), authorName: z.string().optional() }),
+  ])
+  .describe(
+    'Who made it: the identity Tau recorded (a person, or an agent run for a person), or a commit’s git author.',
+  );
+
 /** One revision, as the history pane and the chat card show it. @public */
 export const revisionRowSchema = z.object({
   revisionNumber: z
@@ -41,7 +71,7 @@ export const revisionRowSchema = z.object({
     .optional()
     .describe('Position on this branch — the "Rev 12" a person sees. Absent for a revision merged in from elsewhere.'),
   revisionId: z.string(),
-  actor: z.string().describe('Who made it: a model id for an agent turn, a person otherwise.'),
+  who: revisionWhoSchema,
   source: z.string().describe('What made it: user, agent, restore, merge or import.'),
   createdAt: z.number().describe('Milliseconds since the Unix epoch.'),
   summary: z.string(),

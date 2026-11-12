@@ -174,6 +174,27 @@ const samples: Samples = {
   setHoveredMeasurement: [{ type: 'setHoveredMeasurement', payload: undefined }],
   setMeasurementName: [{ type: 'setMeasurementName', id: 'missing', name: 'n' }],
   toggleMeasurementPinned: [{ type: 'toggleMeasurementPinned', id: 'missing' }],
+  viewerShortcutPressed: [
+    {
+      type: 'viewerShortcutPressed',
+      shortcut: 'grid',
+      pressId: 'bar:1',
+      camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+    },
+    {
+      type: 'viewerShortcutPressed',
+      shortcut: 'escape',
+      pressId: 'bar:2',
+      camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+    },
+    {
+      type: 'viewerShortcutPressed',
+      shortcut: 'removeCut',
+      pressId: 'bar:3',
+      cutId: 'missing',
+      camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+    },
+  ],
   interactionStarted: [{ type: 'interactionStarted' }],
   interactionMoved: [{ type: 'interactionMoved' }],
   interactionEnded: [{ type: 'interactionEnded' }],
@@ -338,6 +359,23 @@ describe('graphics machine totality baseline', () => {
 
   it('should answer every sampled event in every reachable state except the declared baseline', () => {
     expect(unansweredEvents(machine, { ...options, ignore: graphicsIgnoredEvents })).toEqual([]);
+  });
+
+  it('should claim F and G in every reachable state, which the blanket shortcut pair cannot check', () => {
+    const alwaysClaimed = (['fitView', 'grid'] as const).map(
+      (shortcut): GraphicsEvent => ({
+        type: 'viewerShortcutPressed',
+        shortcut,
+        pressId: 'bar:always',
+        camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+      }),
+    );
+    const unclaimed = getShortestPaths(machine, options).flatMap(({ state: snapshot }) =>
+      alwaysClaimed
+        .filter((event) => !snapshot.can(event))
+        .map((event) => `${dotted(snapshot.value)}: ${(event as { shortcut: string }).shortcut}`),
+    );
+    expect(unclaimed).toEqual([]);
   });
 
   it('should declare no baseline pair that the machine now answers', () => {

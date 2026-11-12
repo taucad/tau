@@ -122,6 +122,11 @@ export function SetupFlow({ initialStep, onReplayTour, onOpenFolder }: SetupFlow
   const index = current === 'done' ? steps.length : steps.indexOf(current);
 
   useEffect(() => {
+    /* Opening setup counts as offered, so home stops inviting; a later Skip or Finish only rises from it. */
+    writeOnboarding({ setupStatus: 'offered' });
+  }, [writeOnboarding]);
+
+  useEffect(() => {
     /* Move focus to the new step's heading so a screen-reader user hears where they are; not on first paint. */
     if (shownStage.current !== current) {
       shownStage.current = current;

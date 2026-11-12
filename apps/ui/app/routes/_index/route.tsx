@@ -5,6 +5,8 @@ import { PageContent } from '#components/layout/page-content.js';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
 import { BuiltWithTau } from '#routes/_index/built-with-tau.js';
 import { HomepageChatHero } from '#routes/_index/homepage-chat-hero.js';
+import { SetupInvite } from '#components/onboarding/setup-invite.js';
+import { useSetupOffer } from '#components/onboarding/use-setup-offer.js';
 import type { Handle } from '#types/matches.types.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { setEntryPreference } from '@taucad/ui-core/lib/entry-preference';
@@ -22,9 +24,11 @@ export const handle: Handle = {
 /** Session-neutral app home; the marketing site (`apps/www`) is served by the edge before this app. */
 export default function WebHome(): React.JSX.Element {
   useAppEntryParameter();
+  useSetupOffer({ isDesktopFirstRun: false });
   return (
     <div className='pb-10'>
       <HomepageChatHero />
+      <SetupInvite />
       <ProjectLibrary
         headingLevel={2}
         emptyContent={

@@ -5,6 +5,9 @@ import { describe, expect, it, vi } from 'vitest';
 import DesktopHome, { handle } from '#routes/_index/home-surface.desktop.js';
 import { galleryProjects } from '#constants/project-examples.js';
 
+// Setup's auto-open reads the session; its own tests cover it (`use-setup-offer.test.tsx`).
+vi.mock('#components/onboarding/use-setup-offer.js', () => ({ useSetupOffer: () => undefined }));
+
 vi.mock('#routes/_index/homepage-chat-hero.js', () => ({ HomepageChatHero: () => <div>desktop hero</div> }));
 vi.mock('#components/project-library/project-library.js', () => ({ ProjectLibrary: () => <div>project library</div> }));
 vi.mock('#components/project-grid.js', () => ({

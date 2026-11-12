@@ -166,13 +166,6 @@ export const readViewportGizmoPose = ({
   };
 };
 
-/**
- * The cube's `ViewportGizmo` options for a style and an up axis.
- *
- * @param options - The cube's style, up axis, placement container and size.
- * @returns The options to build or regenerate the cube with.
- * @public
- */
 type Disposable = { dispose: () => void };
 type PaintedMaterial = Disposable & { map?: Disposable };
 
@@ -208,11 +201,21 @@ export const disposeViewportGizmoChildren = (gizmo: Object3D): void => {
       for (const entry of materials) {
         disposeMaterial(entry);
       }
-      geometry?.dispose();
+      // Every `THREE.Sprite` shares one geometry, so a label's is not the cube's to dispose.
+      if (!(node as Object3D & { isSprite?: boolean }).isSprite) {
+        geometry?.dispose();
+      }
     });
   }
 };
 
+/**
+ * The cube's `ViewportGizmo` options for a style and an up axis.
+ *
+ * @param options - The cube's style, up axis, placement container and size.
+ * @returns The options to build or regenerate the cube with.
+ * @public
+ */
 export const viewportGizmoOptions = ({
   style,
   upDirection,

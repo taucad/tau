@@ -3,6 +3,8 @@ import * as React from 'react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { XIcon } from 'lucide-react';
 import { cn } from '#utils/cn.js';
+import { Button } from '#components/button.js';
+import { headingVariants } from '#components/heading.variants.js';
 import { useFullscreenElement } from '#hooks/use-fullscreen-element.js';
 
 /**
@@ -138,12 +140,11 @@ function DialogContent({
         {...properties}
       >
         {children}
-        <DialogPrimitive.Close
-          data-slot='dialog-close'
-          className="absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus-visible:focus-outline disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
-        >
-          <XIcon />
-          <span className='sr-only'>Close</span>
+        <DialogPrimitive.Close asChild data-slot='dialog-close'>
+          <Button variant='ghost' size='icon-sm' className='absolute top-2.5 right-2.5 text-muted-foreground'>
+            <XIcon />
+            <span className='sr-only'>Close</span>
+          </Button>
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>
     </DialogPortal>
@@ -213,7 +214,7 @@ function DialogTitle({
   return (
     <DialogPrimitive.Title
       data-slot='dialog-title'
-      className={cn('text-lg leading-none font-semibold', className)}
+      className={cn(headingVariants({ variant: 'title' }), 'leading-none', className)}
       {...properties}
     />
   );

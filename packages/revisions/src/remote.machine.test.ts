@@ -52,8 +52,9 @@
  * | 42 | `probing --cancel--> connected` | **R2**: cancelling the probe keeps the old remote and records no refusal |
  * | 43 | `reconnectRequired --connect(other)--> probing → reconnectRequired` | **R2**: and a remote waiting on its credential stays waiting, unannounced |
  * | 44 | `connected --connect(same)--> choosing` | **R2**: a re-grant or access change of the recorded remote is not probed |
+ * | 45 | `connected --sessionChanged--> connected.reading` | **audit R6**: the stored figure is dropped and re-read under the new session; every other state ignores the change |
  *
- * With rows 25–27 every transition in the machine has a row (W12 review R6).
+ * With rows 25–27 and 45 every transition in the machine has a row (W12 review R6, audit R6).
  */
 
 import { createActor, createAsyncLogic, setup } from 'xstate';
@@ -926,6 +927,7 @@ describe('remoteMachine', () => {
       { type: 'disconnect' },
       { type: 'cancel' },
       { type: 'quotaRefused', paths: ['big.stl'], used: 3, quota: 2 },
+      { type: 'sessionChanged' },
     ];
     const options = {
       input: { projectId: 'p1' },
@@ -1064,6 +1066,28 @@ describe('remoteMachine', () => {
       phase: 'connected',
       storage: { used: 2, quota: 1024 },
     });
+    actor.stop();
+  });
+
+  it('reads the stored figure again under a new session, dropping the last one (audit R6)', async () => {
+    let count = 0;
+    const { actor } = start({
+      readRemote: reads(tauRemote),
+      readStorage: createAsyncLogic({
+        run: async (): Promise<RemoteStorage | undefined> => {
+          count += 1;
+          return count === 1 ? { used: 1, quota: 1024 } : undefined;
+        },
+      }),
+    });
+    await settle();
+    expect(selectRemoteFacet(actor.getSnapshot()).storage).toStrictEqual({ used: 1, quota: 1024 });
+
+    actor.send({ type: 'sessionChanged' });
+    await settle();
+
+    expect(count).toBe(2);
+    expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({ phase: 'connected', storage: undefined });
     actor.stop();
   });
 

@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useCallback, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Folder, Files, FolderOpen } from 'lucide-react';
@@ -181,7 +182,9 @@ export function UploadCard({
       />
 
       <div className='space-y-1'>
-        <h2 className='text-base font-medium'>Local files</h2>
+        <Heading level={2} variant='item'>
+          Local files
+        </Heading>
         <p className='text-sm text-muted-foreground'>Open a folder, source files or a ZIP archive.</p>
       </div>
       <div

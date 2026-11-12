@@ -44,7 +44,7 @@ export function ZooUpgradeBanner({ message, onRetry }: ZooUpgradeBannerPropertie
       )}
       <Button size='sm' variant='ghost' onClick={onRetry}>
         <RefreshCw aria-hidden className='size-3.5' />
-        Retry
+        Try again
       </Button>
     </section>
   );

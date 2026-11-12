@@ -278,6 +278,20 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
   readonly watchWorkspace?: boolean | undefined;
 };
 
+/** One file as a revision holds it. @public */
+export type RevisionFileRead = Readonly<{ path: string; text: string | undefined; bytes: number }>;
+
+const fatalUtf8 = new TextDecoder('utf-8', { fatal: true });
+
+/** A file's text, or none when it is not UTF-8. */
+const textOf = (bytes: Uint8Array<ArrayBuffer>): string | undefined => {
+  try {
+    return fatalUtf8.decode(bytes);
+  } catch {
+    return undefined;
+  }
+};
+
 /** One project's running revision actor tree. @public */
 export type ProjectRevisions = {
   /** Browser-safe projection and verb seam served over the existing host channel. */
@@ -299,6 +313,12 @@ export type ProjectRevisions = {
     describe(): Promise<RevisionPlace>;
     /** Both sides of a conflicted revision as text; absent `revision` reads the one waiting on this branch. */
     conflict(revision: string | undefined): Promise<RevisionConflictRead | undefined>;
+    /**
+     * The named files as a revision holds them, never as the live checkout does (agent observability, LW6): each
+     * one's UTF-8 text, or none when it is not text, and its size. A path the revision does not hold is left out, and
+     * a revision the store cannot read answers none.
+     */
+    files(revision: string, paths: readonly string[]): Promise<readonly RevisionFileRead[]>;
   }>;
   /**
    * The trusted host's exact revision execution holds (I7): a contained command holds its execution on the attempt's
@@ -1611,6 +1631,11 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       case 'syncNow':
         actor.send({ type: 'syncNow' });
         break;
+      /* Audit R6: the page's signed-in person changed; the remote is read afresh under the new session. */
+      case 'sessionChanged':
+        actor.send({ type: 'remote', event: { type: 'sessionChanged' } });
+        actor.send({ type: 'sync', event: { type: 'sessionChanged' } });
+        break;
       /* XD3, rounds 18 and 19: another device's run has been quiet here a while; pulls show whether it stayed quiet.
        * Round 27: through the placement's pull, so the page hears where this device cannot pull the chat at all. */
       case 'pullRemote': {
@@ -1775,6 +1800,20 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         const id =
           revision ?? conflicts.find((conflict) => line.kind === 'branch' && conflict.into === line.name)?.revisionId;
         return id === undefined ? undefined : tree.readConflict(id);
+      },
+      files: async (revision: string, paths: readonly string[]) => {
+        let held: Awaited<ReturnType<RevisionPort['readTree']>>;
+        try {
+          held = await port.readTree(revisionId(revision));
+        } catch {
+          return [];
+        }
+        return held === undefined
+          ? []
+          : paths.flatMap((path): RevisionFileRead[] => {
+              const bytes = held.get(path);
+              return bytes === undefined ? [] : [{ path, text: textOf(bytes), bytes: bytes.byteLength }];
+            });
       },
     }),
     changed: (checkoutId, paths) => {

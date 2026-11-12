@@ -18,6 +18,7 @@ import { EditorSaveConflictError } from '@taucad/fs-client/file-content-service'
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import type * as HandleStoreModule from '#filesystem/handle-store.js';
+import type * as DesktopBridgeModule from '#filesystem/desktop-bridge.js';
 
 /** The registry these rows share, composed as the app's root composes its own (MC-R4). */
 const sessionsActor = createSessionsActor().start();
@@ -91,8 +92,16 @@ const chatSessionStore = {
   getChatHostSettings: async (chatId: string) => storedHostSettings.get(chatId),
   cancelProjectedRun,
 };
+const noteBrowserRunRated = vi.fn(async (_rating: unknown) => undefined);
+/** The desktop shell's bridge, when a row stands in for the desktop app; otherwise the web build's none. */
+let desktopShellBridge: unknown;
+vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof DesktopBridgeModule>();
+  return { ...actual, desktopBridge: () => desktopShellBridge ?? actual.desktopBridge() };
+});
 vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof AgentHostClientModule>()),
+  noteBrowserRunRated,
   createBrowserAgentHostClient: (options: unknown) => {
     browserClientOptions.push(options);
     return { close: async () => undefined };
@@ -446,6 +455,8 @@ beforeEach(() => {
   connectRemote.mockClear();
   revisionStatus.mockReset();
   publishProjectHostConnector.mockClear();
+  noteBrowserRunRated.mockReset();
+  desktopShellBridge = undefined;
   connectorReleases.length = 0;
   browserClientOptions.length = 0;
   retainBrowserAgentHostProject.mockClear();
@@ -594,6 +605,26 @@ describe('project route session identity', () => {
     });
     expect(sessionsActor.getSnapshot().context.refs[projectA]).toBe(session);
   });
+  /* LW8: in the desktop app a rating also reaches the desktop host, whichever host ran the run; each reports its own. */
+  it('sends a rating to the browser host and the desktop host, and loses neither to the other’s failure', async () => {
+    fileManagerReady = true;
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const desktopRated = vi.fn(async (_rating: unknown) => undefined);
+    desktopShellBridge = { agentHost: { rated: desktopRated } };
+    renderRouteProvider();
+    await screen.findAllByTestId('project-session');
+    const extras = publishProjectHostConnector.mock.calls[0]?.[2] as unknown as {
+      rated: (rating: Readonly<Record<string, unknown>>) => Promise<void>;
+    };
+    const rating = { chatId: 'chat-1', runId: 'run-1', value: 'positive', at: 1 } as const;
+    noteBrowserRunRated.mockRejectedValueOnce(new Error('no browser host'));
+
+    await extras.rated(rating);
+
+    expect(noteBrowserRunRated).toHaveBeenCalledExactlyOnceWith({ projectId: projectA, ...rating });
+    expect(desktopRated).toHaveBeenCalledExactlyOnceWith({ projectId: projectA, ...rating });
+  });
+
   it('retains one project connector when focus moves to another live project', async () => {
     fileManagerReady = true;
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));

@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useDesktopScheme } from '#hooks/use-desktop-scheme.js';
 import { useFeature } from '#flags/use-feature.js';
 import { MachinesDisabled } from '#components/machines/machines-disabled.js';
@@ -46,7 +47,9 @@ const MachineRow = memo(function MachineRow({
       >
         <Printer aria-hidden className='size-5 shrink-0' />
         <div className='min-w-0 flex-1'>
-          <h2 className='text-sm font-medium wrap-break-word'>{entry.name}</h2>
+          <Heading level={2} variant='label' className='wrap-break-word'>
+            {entry.name}
+          </Heading>
           <p className='text-xs text-muted-foreground'>{entry.descriptor.model}</p>
         </div>
         <span className='flex items-center gap-2 text-xs'>

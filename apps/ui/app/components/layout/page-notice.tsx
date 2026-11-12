@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import type { ReactNode } from 'react';
 import { CircleAlert } from 'lucide-react';
 
@@ -14,10 +15,10 @@ export function PageNotice({
 }): React.JSX.Element {
   return (
     <section role='alert' aria-label={title} className='grid gap-4 border-y py-6 md:grid-cols-[12rem_minmax(0,1fr)]'>
-      <h2 className='flex items-center gap-2 self-start text-sm font-medium'>
+      <Heading level={2} variant='label' className='flex items-center gap-2 self-start'>
         <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
         {title}
-      </h2>
+      </Heading>
       <div className='max-w-xl min-w-0 space-y-4'>
         <p className='text-sm'>{message}</p>
         <details className='text-xs text-muted-foreground'>

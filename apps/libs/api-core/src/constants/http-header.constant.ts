@@ -74,6 +74,19 @@ export const httpHeader = {
   xTauTurnStep: 'x-tau-turn-step',
   xTauTurnGap: 'x-tau-turn-gap',
   /**
+   * Observability labels the agent host asserts about every gateway step it
+   * makes (LW17): where the host runs, its build, its project's kernel and the
+   * model it asked for. Checked against closed vocabularies, `unknown` when
+   * outside them, carried only into the API's provider fact and never into the
+   * request digest, admission, price or routing (`readHostLabels` in
+   * `llm-gateway.headers.ts`). Listed here so CORS admits them before any
+   * client sends them (server before client).
+   */
+  xTauHostKind: 'x-tau-host-kind',
+  xTauHostBuild: 'x-tau-host-build',
+  xTauKernel: 'x-tau-kernel',
+  xTauModel: 'x-tau-model',
+  /**
    * The Zoo-scoped token a desktop kernel utility or `tau serve` child presents
    * on the `/v1/kernels/zoo` upgrade instead of the session
    * (`#api/kernels/zoo-token.service.ts`). A live credential: logs redact it.

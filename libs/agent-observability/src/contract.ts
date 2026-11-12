@@ -14,6 +14,7 @@ const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const instant = z.number().int().nonnegative().max(8_640_000_000_000_000);
 const completeness = z.enum(['complete', 'redacted', 'omitted', 'truncated', 'missing', 'unsupported', 'pending']);
 const outcome = z.enum(['completed', 'cancelled', 'failed', 'abandoned', 'unknown']);
+const checkResult = z.enum(['passed', 'failed', 'inconclusive', 'unsupported', 'not-run']);
 const toolClass = z.enum(['read', 'write', 'execute', 'geometry', 'verification', 'export', 'other']);
 const coverage = z.strictObject({
   events: completeness,
@@ -110,13 +111,33 @@ const summary = z.discriminatedUnion('kind', [
       })
       .nullable(),
     purpose: z.enum(['generation', 'compaction', 'helper']),
+    /*
+     * Which kind of model call this was, as the API declared it: a host run's call (nested under the run's root), a
+     * helper endpoint's or another direct call (each its own trace). Optional so an older API's fact still admits.
+     */
+    callKind: z.enum(['run', 'helper', 'direct']).optional(),
     stop: z.enum(['stop', 'length', 'toolUse', 'error', 'aborted', 'pending', 'deferred']),
     usage,
+    /**
+     * The host labels the caller asserted with the call (LW17), each `unknown` outside its vocabulary. Absent on a call
+     * that sent none, such as a helper or direct call, and on every fact written before them.
+     */
+    labels: z
+      .strictObject({ host: id.optional(), build: id.optional(), kernel: id.optional(), model: id.optional() })
+      .optional(),
   }),
   z.strictObject({
     kind: z.literal('tool'),
     call: id,
     dispatch: id,
+    /*
+     * A first-party tool's name, or `external-tool` for any other (LQ5): only Tau's own tool names leave the device.
+     * Optional so an older host's fact still admits; the API maps a name outside its vocabulary as `external-tool`.
+     */
+    name: z
+      .string()
+      .regex(/^[a-z][a-z\d_-]{0,63}$/u)
+      .optional(),
     toolClass,
     toolVersion: digest.nullable(),
     schemaVersion: digest.nullable(),
@@ -137,7 +158,7 @@ const summary = z.discriminatedUnion('kind', [
     kind: z.literal('cad'),
     sourceRevision: digest,
     requirement: id,
-    result: z.enum(['passed', 'failed', 'inconclusive', 'unsupported', 'not-run']),
+    result: checkResult,
     exportRequested: z.boolean(),
     artifact: digest.nullable(),
   }),
@@ -153,6 +174,27 @@ const summary = z.discriminatedUnion('kind', [
        */
       failureClass: z.strictObject({ owner: id, retry: id }).optional(),
       code: id.optional(),
+      /*
+       * What the run did, as counts, digests and closed labels, so an evaluator of the root alone can judge it (LW6):
+       * the revisions it started from and ended at, the files it changed, its checks, how many turns came before it in
+       * the chat, its model and tool calls, and the host, kernel and model it ran on. Optional so an older host's
+       * outcome still admits.
+       */
+      turn: z
+        .strictObject({
+          startRevision: digest.nullable(),
+          finalRevision: digest.nullable(),
+          filesChanged: count,
+          checksPassed: count,
+          checksFailed: count,
+          priorTurns: count,
+          modelCalls: count,
+          toolCalls: count,
+          host: z.enum(['browser', 'desktop', 'cloud', 'cli']).nullable(),
+          kernel: id.nullable(),
+          model: id.nullable(),
+        })
+        .optional(),
     })
     .refine(
       (value) => value.success === 'unknown' || value.assessment !== null,
@@ -198,26 +240,76 @@ const feedback = z.discriminatedUnion('kind', [
     evidence: id,
   }),
 ]);
-const block = z.discriminatedUnion('kind', [
+/** Bounds of one content section: messages, parts in a message, and model parameters. @public */
+export const contentLimits = Object.freeze({ messages: 32, parts: 32, parameters: 16 });
+/** Text kept from a part, with its byte accounting and what the redactors did to it. */
+const retained = {
+  text: z.string().max(evidenceLimits.text),
+  originalBytes: count,
+  /* The part cap is in UTF-8 bytes; the byte-accounting refinement holds this to the text's encoded length. */
+  retainedBytes: count.max(evidenceLimits.text),
+  redaction: z.enum(['none', 'redacted', 'truncated']),
+} as const;
+const toolName = z.string().regex(/^[\w.:-]{1,128}$/u);
+const mime = z.string().regex(/^[\w.+-]{1,64}\/[\w.+-]{1,64}$/u);
+/* A project-relative path: no control characters, bounded. */
+// oxlint-disable-next-line no-control-regex -- the range is what the path refuses.
+const sourcePath = z.string().regex(/^[^\u0000-\u001F]{1,256}$/u);
+/**
+ * One part of a recorded message. Text, readable thinking, a tool call's arguments and a tool result keep redacted,
+ * bounded text; an image or a file is only its type and size (and a digest when it is at most 1 MiB). No signature or
+ * encrypted reasoning has a part.
+ */
+const part = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('text'), ...retained }),
+  z.strictObject({ kind: z.literal('thinking'), ...retained }),
+  z.strictObject({ kind: z.literal('tool-call'), call: id, name: toolName, ...retained }),
   z.strictObject({
-    kind: z.literal('text'),
-    role: z.enum(['system', 'developer', 'user', 'assistant', 'tool']),
-    format: z.enum(['text', 'json']),
-    text: z.string().max(evidenceLimits.text),
-    source: digest,
-    originalBytes: count,
-    retainedBytes: count,
-    redaction: z.enum(['none', 'redacted', 'truncated']),
+    kind: z.literal('tool-result'),
+    call: id,
+    error: z.boolean(),
+    /* The whole result's digest when its text was not kept. */
+    digest: digest.nullable(),
+    ...retained,
   }),
-  z.strictObject({
-    kind: z.literal('media'),
-    artifact: id,
-    digest,
-    mime: z.enum(['image/png', 'image/jpeg', 'image/webp', 'text/plain', 'application/json']),
-    bytes: count,
-    source: digest,
-  }),
+  z.strictObject({ kind: z.literal('media'), mime, bytes: count, digest: digest.nullable() }),
+  /* A model file as the run left it, read at the run's final revision; past the design cap only its size and digest. */
+  z.strictObject({ kind: z.literal('source'), path: sourcePath, digest: digest.nullable(), ...retained }),
+  /* One line per CAD check the run settled. */
+  z.strictObject({ kind: z.literal('check'), result: checkResult, ...retained }),
 ]);
+const message = z.strictObject({
+  role: z.enum(['system', 'developer', 'user', 'assistant', 'tool']),
+  parts: z.array(part).max(contentLimits.parts),
+});
+/** What one call recorded on one side: its messages, and how many parts the bounds left out. */
+const section = z.strictObject({ messages: z.array(message).max(contentLimits.messages), omitted: count });
+/** The content of one operation: the fact it describes, what was new in it, and what it produced (LQ4(b)). */
+const content = z.strictObject({
+  plane: z.literal('content'),
+  fact: summary,
+  input: section.nullable(),
+  output: section.nullable(),
+  /** What the call was given but did not write: the earlier history, the system prompt and the tool definitions. */
+  context: z
+    .strictObject({
+      historyMessages: count,
+      history: digest.nullable(),
+      system: digest.nullable(),
+      tools: digest.nullable(),
+    })
+    .nullable(),
+  /** Allowlisted request parameters, flattened one level (`thinking.budget_tokens`). */
+  parameters: z
+    .record(
+      z.string().regex(/^[a-z_]{1,32}(?:\.[a-z_]{1,32})?$/u),
+      z.union([z.string().max(64), z.number(), z.boolean()]),
+    )
+    .refine((value) => Object.keys(value).length <= contentLimits.parameters, 'Too many parameters'),
+});
+type ContentPart = z.infer<typeof part>;
+const retainedParts = (sections: ReadonlyArray<z.infer<typeof section> | undefined>): ContentPart[] =>
+  sections.flatMap((item) => item?.messages.flatMap((entry) => entry.parts) ?? []);
 /** Strict host/API wire schema. Parsed client claims are still untrusted. @public */
 export const evidenceSchema = z
   .strictObject({
@@ -260,16 +352,11 @@ export const evidenceSchema = z
     payload: z.discriminatedUnion('plane', [
       z.strictObject({ plane: z.literal('summary'), fact: summary }),
       z.strictObject({ plane: z.literal('feedback'), fact: feedback }),
-      z.strictObject({
-        plane: z.literal('content'),
-        family: semantic.shape.kind,
-        stage: z.enum(['admitted', 'post-transform', 'provider-serialized', 'result']),
-        blocks: z.array(block).max(evidenceLimits.blocks),
-      }),
+      content,
     ]),
   })
   .superRefine((value, context) => {
-    const family = value.payload.plane === 'content' ? value.payload.family : value.payload.fact.kind;
+    const family = value.payload.fact.kind;
     if (family !== value.semantic.kind) {
       context.addIssue({ code: 'custom', message: 'Semantic family mismatch' });
     }
@@ -283,14 +370,10 @@ export const evidenceSchema = z
       context.addIssue({ code: 'custom', message: 'Duplicate lineage' });
     }
     if (value.payload.plane === 'content') {
-      for (const item of value.payload.blocks) {
-        if (!value.lineage.some((source) => source.digest === item.source)) {
-          context.addIssue({ code: 'custom', message: 'Unbound content source' });
-        }
+      for (const item of retainedParts([value.payload.input ?? undefined, value.payload.output ?? undefined])) {
         if (
-          item.kind === 'text' &&
+          item.kind !== 'media' &&
           (new TextEncoder().encode(item.text).byteLength !== item.retainedBytes ||
-            item.retainedBytes > evidenceLimits.text ||
             (item.redaction === 'none' && item.originalBytes !== item.retainedBytes))
         ) {
           context.addIssue({ code: 'custom', message: 'Invalid content byte accounting' });

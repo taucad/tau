@@ -9,7 +9,7 @@ const selectionGuidanceRows = kernelConfigurations
 
 export const createModelSkillMarkdown = `---
 name: create-model
-description: Selects a Tau CAD kernel and activates its authoring skill. Use when creating a model without a pinned kernel.
+description: Selects a Tau kernel and activates its authoring skill. Use when creating a model without a pinned kernel.
 source: system
 version: 1.0.0
 when_to_use: Use when creating a CAD model without a pinned kernel or when kernel choice is ambiguous.

@@ -1710,6 +1710,16 @@
       }
     },
     {
+      // UI Policy §3 (docs/policy/ui-policy.md): the heading scale owns size, weight, line height and
+      // tracking on headings and title slots. Every app library renders headings, so the scope is wider
+      // than the Page Composition gates below.
+      "files": ["apps/ui/app/**/*.tsx", "apps/libs/*/src/**/*.tsx", "packages/ui/src/**/*.tsx"],
+      "excludeFiles": ["**/*.{test,spec}.tsx", "apps/ui/app/routes/?__e2e?.*/**"],
+      "rules": {
+        "tau-lint/no-raw-heading-type": "error"
+      }
+    },
+    {
       // Page Composition Policy gates (docs/policy/page-composition-policy.md, Enforcement).
       // Product page components only: tests and `[__e2e]` fixture routes author no product copy.
       // Autofixable rules are errors; judgment rules warn for one release, then become errors.
@@ -1727,7 +1737,6 @@
         "tau-lint/no-arbitrary-pixel-size": "error",
         "tau-lint/no-accent-hover": "warn",
         "tau-lint/no-button-size-override": "warn",
-        "tau-lint/no-raw-page-heading": "warn",
         // The jsx-a11y subset that fits Tau's patterns (Page Composition Policy Rules 7 and 13).
         // Left off: prefer-tag-over-role (codified role="status"), anchor-is-valid (Link `to`),
         // no-autofocus (UX Policy inline editors), control-has-associated-label and

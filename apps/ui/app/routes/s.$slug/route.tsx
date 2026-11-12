@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { SharedProjectPassword } from '#components/share/shared-project-password.js';
 import { useEffect, useMemo, useState } from 'react';
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router';
@@ -289,7 +290,9 @@ export const PortableShareSurface = (): React.JSX.Element => {
     return (
       <main className='flex min-h-dvh items-center justify-center bg-background p-6'>
         <div className='max-w-md rounded-xl border bg-card p-6 text-center'>
-          <h1 className='text-lg font-semibold'>GitHub Gist unpublished</h1>
+          <Heading level={1} variant='title'>
+            GitHub Gist unpublished
+          </Heading>
           <p className='mt-2 text-sm text-muted-foreground'>
             This Tau share and its GitHub Gist link no longer resolve.
           </p>
@@ -302,7 +305,9 @@ export const PortableShareSurface = (): React.JSX.Element => {
     return (
       <main className='flex min-h-dvh items-center justify-center bg-background p-6'>
         <div className='max-w-md rounded-xl border bg-card p-6 text-center'>
-          <h1 className='text-lg font-semibold'>Unable to open this shared project</h1>
+          <Heading level={1} variant='title'>
+            Unable to open this shared project
+          </Heading>
           <p className='mt-2 text-sm text-muted-foreground'>
             {error ?? 'The project manifest or entry file is invalid.'}
           </p>

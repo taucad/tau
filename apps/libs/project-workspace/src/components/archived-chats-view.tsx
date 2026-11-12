@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArchiveRestore, Trash2 } from 'lucide-react';
 import type { ChatRecord } from '@taucad/chat/schemas';
@@ -75,7 +76,9 @@ export function ArchivedChatsView({
           <ArrowLeft aria-hidden /> Back
         </Button>
         <div className='mt-3 flex flex-wrap items-center justify-between gap-2'>
-          <h2 className='text-lg font-semibold'>Archived chats</h2>
+          <Heading level={2} variant='title'>
+            Archived chats
+          </Heading>
           <Button
             variant='destructive'
             size='xs'
@@ -131,7 +134,9 @@ export function ArchivedChatsView({
           return (
             <li key={chat.id} className='flex min-w-0 flex-col gap-2 py-3 @sm:flex-row @sm:items-center'>
               <div className='min-w-0 flex-1'>
-                <h3 className='text-sm font-medium [overflow-wrap:anywhere] break-words'>{chat.name}</h3>
+                <Heading level={3} variant='label' className='[overflow-wrap:anywhere] break-words'>
+                  {chat.name}
+                </Heading>
                 <time dateTime={timestamp.toISOString()} className='text-xs text-muted-foreground'>
                   {timestamp.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
                 </time>

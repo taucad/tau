@@ -1,5 +1,6 @@
 'use client';
 
+import { Heading } from '@taucad/ui/components/heading';
 import { useAuth, useChangeEmail, useSession } from '@better-auth-ui/react';
 import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
@@ -51,7 +52,9 @@ export function ChangeEmail({ className }: ChangeEmailProps): React.JSX.Element 
 
   return (
     <div>
-      <h2 className='mb-3 text-sm font-semibold'>{localization.settings.changeEmail}</h2>
+      <Heading level={2} variant='label' className='mb-3'>
+        {localization.settings.changeEmail}
+      </Heading>
 
       <form onSubmit={handleSubmit}>
         <Card className={cn(className)}>

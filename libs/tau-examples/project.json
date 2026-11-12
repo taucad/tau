@@ -122,12 +122,13 @@
     "test:viewer-parity": {
       "command": "vitest run --config vitest.viewer-parity.config.ts",
       "metadata": {
-        "description": "Viewer parity gate (Tau Brain research/nanoraster-viewer-parity-charter.md, W6, D2): nanoraster against the references viewer:capture:viewer-parity writes, every fixture under 1%. Both builds are the installed nanoraster package, 0.9.0 or later."
+        "description": "Viewer parity gate (Tau Brain research/nanoraster-viewer-parity-charter.md, W6, D2): nanoraster against the references viewer:capture:viewer-parity writes, every fixture under 1%. Both builds are the installed nanoraster package, 0.9.0 or later. ci.yml's plan selects the viewer-parity.yml lane by this target: its inputs are this project, its dependencies (the viewer, the image plugin, types, agent-tools, runtime-testing) and the workflow, so a change to any of them makes this project affected."
       },
       "options": {
         "cwd": "{projectRoot}"
       },
-      "cache": false
+      "cache": false,
+      "inputs": ["default", "^default", "{workspaceRoot}/.github/workflows/viewer-parity.yml"]
     }
   }
 }

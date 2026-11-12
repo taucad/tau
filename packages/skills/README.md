@@ -5,7 +5,7 @@
 [![license](https://img.shields.io/npm/l/@taucad/skills.svg)](./LICENSE)
 [![provenance](https://img.shields.io/badge/provenance-npm-blue.svg)](https://docs.npmjs.com/generating-provenance-statements)
 
-Tau CAD agent skill bundles for replicad, JSCAD, Manifold, OpenCascade, build123d, PicoGK, OpenSCAD, KCL and GeoSpec.
+Tau agent skill bundles for replicad, JSCAD, Manifold, OpenCascade, build123d, PicoGK, OpenSCAD, KCL and GeoSpec.
 
 ## Why this package?
 

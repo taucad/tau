@@ -10,6 +10,7 @@
  *   and stop. A project change ends it unconditionally and opens a fresh session for the new project.
  */
 
+import { Heading } from '@taucad/ui/components/heading';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { SquareTerminal } from 'lucide-react';
 import { terminalAccessSchema, terminalLimits } from '@taucad/types/desktop-terminal';
@@ -120,9 +121,9 @@ function TerminalAccessDecision({
       data-request-id={request.requestId}
       className='flex flex-col gap-2 border-b bg-card p-3 text-sm'
     >
-      <h4 id={titleId} className='font-medium'>
+      <Heading level={4} variant='label' id={titleId}>
         Allow this Terminal more access?
-      </h4>
+      </Heading>
       <dl className='grid grid-cols-[auto_1fr] gap-x-3 gap-y-1'>
         {rows.map((row) => (
           <div key={row.label} className='contents'>
@@ -643,7 +644,13 @@ export function TerminalPane({
             />
           ) : null}
           <div className='relative min-h-0 flex-1'>
-            <div ref={hostRef} data-slot='terminal' className='absolute inset-0 overflow-hidden bg-background p-1' />
+            {/* The editor's surface fills the pane; the grid sits at the 12px text inset of the editor's breadcrumbs and
+             * the notice above, and the part of a cell left over at the right and bottom is the same surface. */}
+            <div
+              ref={hostRef}
+              data-slot='terminal'
+              className='absolute inset-0 overflow-hidden bg-background px-3 py-2'
+            />
             {state.phase === 'running' && findTerm !== undefined ? (
               <Input
                 ref={actionInputRef}

@@ -1378,7 +1378,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "(sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=~\"retry|present\"}[1h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"absent\"}[1h])) > 0) or (sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"recheck\"}[2h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"absent\"}[2h])) > 0)",
+            "expr": "sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"retry\"}[2h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"accepted\"}[2h])) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "erasure_stuck"
@@ -1390,7 +1390,7 @@
       "for": "2h",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
-        "summary": "For 2 h Langfuse trace deletions have been retried, read back as still present, or read back with no answer (recheck: a 410 legacy-API refusal, another non-ok answer or a timeout), with none confirmed absent. Erasure of a deleted account or project is owed within a day; check Langfuse availability, the v2 observations read and the deletion API's answer codes in the lifecycle log."
+        "summary": "For 2 h Langfuse trace deletions have been retried (a 429, a 5xx, a timeout or an unreachable host) with none accepted. An accepted delete is the erasure and Tau does not read it back; erasure of a deleted account is owed within a day, so check Langfuse availability and the deletion API's answer codes in the lifecycle log."
       },
       "labels": {
         "severity": "warning",
@@ -1425,6 +1425,40 @@
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
         "summary": "Langfuse rejected a send, or a backlog payload could not be opened or parsed. The evidence is dropped, never retried; the row's bounded reason says which."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "agent-observability"
+      }
+    },
+    {
+      "uid": "agent-evidence-langfuse-units",
+      "title": "P1: Langfuse Units at 70% of Hobby Plan",
+      "condition": "langfuse_units",
+      "data": [
+        {
+          "refId": "langfuse_units",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 2678400,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app) (increase(tau_agent_evidence_langfuse_units_total{app=~\".*\",service_name=\"tau-api\"}[31d])) >= 35000",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "langfuse_units"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "15m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
+        "summary": "Tau wrote 35,000 Langfuse units in the last 31 days, 70% of the Hobby plan's 50k a month (a unit is a trace, an observation or a score; ruling 13). Bound to this environment's API, as every hosted rule is, while staging and production share the organisation's 50k: add the other environment's figure from the Langfuse units panel. Respond in order: pause staging delivery (TAU_OBSERVABILITY_DELIVERY_ENABLED), build sampling (LW13), or reopen the plan. The counter misses units Langfuse features or other projects create, and increase() cannot see a new process's first sample."
       },
       "labels": {
         "severity": "warning",

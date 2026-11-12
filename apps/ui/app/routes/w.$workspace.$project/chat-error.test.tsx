@@ -517,7 +517,7 @@ describe('ChatError', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
-  it('should name a refused request and offer a model switch ahead of Resume', () => {
+  it('should name a request Tau could not send and offer a model switch ahead of Resume', () => {
     projected({
       category: errorCategory.toolError,
       title: 'Processing Error',
@@ -528,7 +528,8 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('The model refused this request')).toBeInTheDocument();
+    expect(screen.getByText('Tau could not send this request')).toBeInTheDocument();
+    expect(screen.queryByText('The model refused this request')).not.toBeInTheDocument();
     expect(screen.queryByText('Processing error')).not.toBeInTheDocument();
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Switch model', 'Resume']);
   });
@@ -633,7 +634,7 @@ describe('ChatError', () => {
     ).toBeInTheDocument();
     expect(card).not.toHaveTextContent(gatewaySentence);
     expect(card).not.toHaveTextContent('Everything up to here is saved.');
-    expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:support@tau.new');
+    expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:help@tau.new');
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Debug details']);
 
     await user.click(screen.getByRole('button', { name: 'Debug details' }));
@@ -1220,7 +1221,9 @@ describe('ChatError', () => {
     });
 
     expect(
-      screen.getByText('Tau paused this turn: 13 more credits needed for openai-gpt-6-astra.'),
+      screen.getByText(
+        'This turn needs 13 more credits on openai-gpt-6-astra. Add credits or switch to a cheaper model, then resume.',
+      ),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
   });
@@ -1248,7 +1251,7 @@ describe('ChatError', () => {
       ),
     });
 
-    expect(screen.getByText('13 more credits needed for openai-gpt-6-astra.')).toBeInTheDocument();
+    expect(screen.getByText('This turn needs 13 more credits on openai-gpt-6-astra.')).toBeInTheDocument();
     expect(screen.queryByText(/Tau paused this turn/iu)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
   });
@@ -1288,7 +1291,7 @@ describe('ChatError', () => {
     for (const [first, second] of snapshots) {
       expect(Object.is(first, second)).toBe(true);
     }
-    expect(screen.getByText('Credit limit reached')).toBeInTheDocument();
+    expect(screen.getByText('You’re out of credits')).toBeInTheDocument();
   });
 
   /* The funded boundary's own 402 copy is credit-denominated and reaches the
@@ -1312,7 +1315,7 @@ describe('ChatError', () => {
       ),
     });
 
-    expect(screen.getByText('Credit limit reached')).toBeInTheDocument();
+    expect(screen.getByText('You’re out of credits')).toBeInTheDocument();
     expect(screen.getByText(creditMessage)).toBeInTheDocument();
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
     expect(screen.queryByText('Processing error')).not.toBeInTheDocument();

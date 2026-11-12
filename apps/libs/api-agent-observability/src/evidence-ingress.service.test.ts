@@ -12,6 +12,7 @@ import { admitEvidence } from '#evidence-admission.js';
 import type { EvidenceAdmissionInput, EvidenceReceipt } from '#evidence-admission.js';
 import { evidenceConcurrencyPerPrincipal, EvidenceIngressService } from '#evidence-ingress.service.js';
 import { openEvidence } from '#evidence-seal.js';
+import { projectRun } from '@taucad/agent-observability/projection';
 import { encodeEvidence, evidenceFixture, privateMarker } from '#testing/evidence.fixture.js';
 
 vi.mock(import('#evidence-admission.js'), async (original) => ({
@@ -177,6 +178,59 @@ describe('EvidenceIngressService', () => {
     expect(admitted).not.toHaveBeenCalled();
   });
 
+  it.each<{ allowed: readonly TelemetryPurpose[]; admit: boolean }>([
+    { allowed: ['summary', 'content'], admit: true },
+    /* The capture mode off, or an account outside its allowlist: content is refused whatever summaries say (LI12). */
+    { allowed: ['summary'], admit: false },
+  ])('admits a host’s root and tool content under the content purpose alone: $allowed', async ({ allowed, admit }) => {
+    const { evidence } = await projectRun(
+      {
+        chatId: 'chat-1',
+        runId: 'run-1',
+        termination: 'completed',
+        tools: [
+          {
+            call: 'call-1',
+            toolName: 'edit_file',
+            outcome: 'completed',
+            input: { chatId: 'chat-1', leaderEpoch: 'epoch-a', sequence: 1 },
+            output: { chatId: 'chat-1', leaderEpoch: 'epoch-a', sequence: 2 },
+            startedAt: Date.now() - 2000,
+            settledAt: Date.now() - 1000,
+            arguments: { targetFile: 'main.ts' },
+            result: privateMarker,
+          },
+        ],
+        intervals: [],
+        ending: { source: { chatId: 'chat-1', leaderEpoch: 'epoch-a', sequence: 3 }, at: Date.now() },
+        content: { prompt: privateMarker, reply: privateMarker, changedPaths: [] },
+      },
+      {
+        principal: 'user-a',
+        project: 'project-a',
+        policyEpoch: 'epoch-a',
+        protection: 'free',
+        uploader: 'device-a',
+        ownsEpoch: () => true,
+        grantedAt: 0,
+        hostBuild: undefined,
+        content: { since: 0 },
+      },
+    );
+    expect(evidence.map((item) => item.payload.plane)).toEqual(['content', 'content']);
+    const { service } = createService({ allowed });
+
+    for (const item of evidence) {
+      // oxlint-disable-next-line no-await-in-loop -- one admission at a time, in row order
+      await service.admit('user-a', encodeEvidence(item));
+    }
+
+    expect(admitted.mock.calls.map(([input]) => input.allowed)).toEqual([
+      { replay: admit, admit },
+      { replay: admit, admit },
+    ]);
+  });
+
   it('admits a cloud host’s own project under its owner’s grant', async () => {
     const { service, purposes } = createService();
 
@@ -196,6 +250,21 @@ describe('EvidenceIngressService', () => {
       status: 503,
       body: { code: 'EVIDENCE_UNAVAILABLE' },
     });
+  });
+
+  it('answers a superseded re-projection as a replay of the earlier receipt and counts it superseded', async () => {
+    admitted.mockResolvedValue({ kind: 'receipt', receipt: { ...receipt, duplicate: true }, superseded: true });
+    const { service, metrics } = createService();
+
+    await expect(service.admit('user-a', encodeEvidence(await evidenceFixture()))).resolves.toEqual({
+      ...receipt,
+      duplicate: true,
+    });
+    expect(metrics.agentEvidenceAdmissions.add).toHaveBeenCalledExactlyOnceWith(
+      1,
+      expect.objectContaining({ outcome: 'superseded' }),
+    );
+    expect(metrics.agentEvidenceSuperseded.add).toHaveBeenCalledExactlyOnceWith(1, { reason: 'reprojected' });
   });
 
   it('tells a withdrawn purpose from a stale epoch, and answers replay with the purpose alone', async () => {

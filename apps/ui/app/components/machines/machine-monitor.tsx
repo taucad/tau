@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import { Activity, Bot, History, Info, OctagonAlert, Play, TriangleAlert } from 'lucide-react';
@@ -282,7 +283,9 @@ function TemperatureGroup({
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <div className='flex min-w-0 items-center gap-2'>
-        <h3 className='min-w-0 flex-1 truncate text-xs font-medium'>Temperatures</h3>
+        <Heading level={3} variant='overline' className='min-w-0 flex-1 truncate'>
+          Temperatures
+        </Heading>
         {isStale ? <StaleBadge /> : null}
       </div>
       <dl className='grid grid-cols-3 gap-x-3 gap-y-1'>
@@ -339,9 +342,9 @@ function OtherReadings({
       {observations.map(({ componentId, group, readings }) => (
         <div key={`${componentId}:${group}`} className='flex min-w-0 flex-col gap-1'>
           <div className='flex min-w-0 items-center gap-2'>
-            <h3 className='min-w-0 flex-1 truncate text-xs font-medium'>
+            <Heading level={3} variant='overline' className='min-w-0 flex-1 truncate'>
               {components.find((component) => component.id === componentId)?.label ?? componentId}
-            </h3>
+            </Heading>
             {isObservationStale({ entry, componentId, group, now }) ? <StaleBadge /> : null}
           </div>
           <dl className='flex flex-col gap-1'>
@@ -389,7 +392,9 @@ function Position({
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <div className='flex items-center justify-between gap-2 text-xs'>
-        <h3 className='font-medium'>{title}</h3>
+        <Heading level={3} variant='overline'>
+          {title}
+        </Heading>
         <span className='flex items-center gap-2'>
           {isObservationStale({ entry, componentId: motionId, group: positionGroup, now }) ? <StaleBadge /> : null}
           <Badge

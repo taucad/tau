@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Tau CAD agent skill bundles, aggregated for any agent host
+Tau agent skill bundles, aggregated for any agent host
 
 - Nx project: `skills`
 - Project root: `packages/skills`

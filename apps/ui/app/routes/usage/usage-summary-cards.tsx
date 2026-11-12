@@ -45,7 +45,7 @@ export function UsageSummaryCards({ snapshot, balance }: UsageSummaryCardsProps)
         {monthly !== undefined || !isResolved || tier !== 'free' ? (
           <Card>
             <CardHeader>
-              <CardTitle className='text-sm font-medium'>Plan limits</CardTitle>
+              <CardTitle variant='label'>Plan limits</CardTitle>
             </CardHeader>
             <CardContent>
               <MonthlyCreditsMeter
@@ -58,14 +58,14 @@ export function UsageSummaryCards({ snapshot, balance }: UsageSummaryCardsProps)
         ) : undefined}
         <Card>
           <CardHeader>
-            <CardTitle className='text-sm font-medium'>Purchased credits</CardTitle>
+            <CardTitle variant='label'>Purchased credits</CardTitle>
           </CardHeader>
           <CardContent>
             {purchased === undefined ? (
               <p className='text-sm text-muted-foreground'>Balance unavailable</p>
             ) : (
               <>
-                <div className='text-2xl font-bold tabular-nums' data-testid='purchased-balance'>
+                <div className='text-2xl font-semibold tabular-nums' data-testid='purchased-balance'>
                   {formatCredits(purchased)} available
                 </div>
                 <p className='text-xs text-muted-foreground'>Used after monthly credits · Never expire</p>
@@ -96,13 +96,13 @@ export function UsageSummaryCards({ snapshot, balance }: UsageSummaryCardsProps)
       <div className='grid gap-4 md:grid-cols-3'>
         <Card>
           <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-            <CardTitle className='text-sm font-medium'>Credits used</CardTitle>
+            <CardTitle variant='label'>Credits used</CardTitle>
             <Coins className='size-4 text-muted-foreground' />
           </CardHeader>
           <CardContent>
             {totals ? (
               <>
-                <div className='text-2xl font-bold' data-testid='credits-used'>
+                <div className='text-2xl font-semibold' data-testid='credits-used'>
                   {formatCredits(BigInt(totals.netUsedCreditAtoms))} used
                 </div>
                 <p className='text-xs text-muted-foreground'>
@@ -116,7 +116,7 @@ export function UsageSummaryCards({ snapshot, balance }: UsageSummaryCardsProps)
         </Card>
         <Card>
           <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-            <CardTitle className='text-sm font-medium'>Reserved</CardTitle>
+            <CardTitle variant='label'>Reserved</CardTitle>
             <Lock className='size-4 text-muted-foreground' />
           </CardHeader>
           <CardContent>
@@ -140,11 +140,11 @@ export function UsageSummaryCards({ snapshot, balance }: UsageSummaryCardsProps)
         </Card>
         <Card>
           <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-            <CardTitle className='text-sm font-medium'>Models used</CardTitle>
+            <CardTitle variant='label'>Models used</CardTitle>
             <Bot className='size-4 text-muted-foreground' />
           </CardHeader>
           <CardContent>
-            <div className='text-2xl font-bold'>{models.length}</div>
+            <div className='text-2xl font-semibold'>{models.length}</div>
             <p className='text-xs text-muted-foreground'>
               {snapshot.models?.complete === false ? 'First page of this range' : 'In the selected range'}
             </p>

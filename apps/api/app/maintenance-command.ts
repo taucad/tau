@@ -31,9 +31,10 @@ import type { ScheduledMaintenanceCommand } from '@taucad/api-git-mirror/mainten
 import { holdInStandby } from '@taucad/api-git-mirror/maintenance/standby';
 import {
   inventoryLfsIntegrity,
-  lfsIntegrityPages,
+  lfsIntegrityExclusions,
   parseLfsIntegrityConcurrency,
 } from '@taucad/api-git-mirror/maintenance/lfs-integrity';
+import { activeLfsReservationPages } from '@taucad/api-git-mirror/maintenance/lfs-reservation-scope';
 import { applicationNameOf } from '@taucad/api-database/application-name';
 
 /**
@@ -118,15 +119,19 @@ const usage = `Usage: revisions-maintenance <command>
       candidates and hydrates nothing.
 
   lfs-integrity [--concurrency <n>]
-      Read-only inventory for go-live STO-17: HEAD every LFS reservation of an
-      active project in this account at its tenant key with ChecksumMode
-      ENABLED and count tenant.equal (stored SHA-256 is the oid),
-      tenant.absent, tenant.composite and tenant.different, plus legacy (only
-      the pre-D24 key) and missing. Each different object prints one
-      revisions_maintenance.lfs_integrity_different line (ids, key and digest
-      only); progress every 5000 objects; one revisions_maintenance.lfs_integrity
-      summary. --concurrency HEADs in flight, 1-32, default 8. Exits 1 when any
-      object differs, a HEAD failed or the run was stopped. Never scheduled.
+      Read-only inventory of stored LFS checksums. Scope: the reservation rows
+      of active projects in this account; no bucket listing, so bytes with no
+      row are not seen. HEADs each at its tenant key with ChecksumMode ENABLED
+      and counts tenant.equal (stored SHA-256 is the oid), tenant.absent,
+      tenant.composite and tenant.different, plus legacy (only the pre-D24
+      key), unfinalized (no bytes, upload never finished) and missing (no
+      bytes for a finalized reservation). Each different, size-mismatched or
+      failed object prints its own revisions_maintenance.lfs_integrity_*
+      line (ids, key and digest only); progress every 5000 objects; one
+      revisions_maintenance.lfs_integrity summary, which also counts the rows
+      left out (skippedOtherAccount, deletedProjectRows). --concurrency HEADs
+      in flight, 1-32, default 8. Exits 1 when any object differs or has the
+      wrong size, a HEAD failed or the run was stopped. Never scheduled.
 
   collect-blobs [--confirm] [--dry-run]
       Delete publication blobs whose reference count is zero, in one bounded batch.
@@ -640,10 +645,14 @@ async function main(): Promise<void> {
         process.once('SIGINT', stopInventory);
         try {
           const summary = await inventoryLfsIntegrity(
-            { pages: lfsIntegrityPages(database, { accountId: driver.account.id }), storage: driver },
+            {
+              pages: activeLfsReservationPages(database, { accountId: driver.account.id }),
+              storage: driver,
+              exclusions: async () => lfsIntegrityExclusions(database, { accountId: driver.account.id }),
+            },
             { concurrency, report: writeLine, signal: stop.signal },
           );
-          if (summary.tenant.different > 0 || summary.errors > 0 || summary.interrupted) {
+          if (summary.tenant.different > 0 || summary.sizeMismatch > 0 || summary.errors > 0 || summary.interrupted) {
             process.exitCode = 1;
           }
         } finally {

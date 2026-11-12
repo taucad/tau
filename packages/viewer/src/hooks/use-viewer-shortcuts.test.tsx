@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useRef } from 'react';
+import { StrictMode, useRef } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +18,7 @@ afterEach(() => {
   for (const actor of actors.splice(0)) {
     actor.stop();
   }
+  announced.clear();
   vi.restoreAllMocks();
 });
 
@@ -43,10 +44,16 @@ function FieldOfView({ label }: Readonly<{ label: string }>): React.JSX.Element 
   return <output aria-label={`${label} field of view`}>{fieldOfView}</output>;
 }
 
+/** What each viewer's bar announced, by viewer label. */
+const announced = new Map<string, string[]>();
+const announcementsOf = (label: string): string[] => announced.get(label) ?? [];
+
 /** A viewer frame with a bar holding a button and a text field, as the bar mounts the shortcuts. */
 function Viewer({ label }: Readonly<{ label: string }>): React.JSX.Element {
   const barRef = useRef<HTMLDivElement>(null);
-  useViewerShortcuts(barRef, () => undefined);
+  useViewerShortcuts(barRef, (phrase) => {
+    announced.set(label, [...announcementsOf(label), phrase]);
+  });
   return (
     <section data-viewer-frame aria-label={label}>
       <FieldOfView label={label} />
@@ -116,8 +123,12 @@ const focus = (element: HTMLElement): void => {
   });
 };
 
+/** The shortcuts the bar's keyboard adapter sent to graphics, in order. */
+const pressedShortcuts = (send: ReturnType<typeof recordSends>): string[] =>
+  send.mock.calls.flatMap(([event]) => (event.type === 'viewerShortcutPressed' ? [event.shortcut] : []));
+
 const fitViewCount = (send: ReturnType<typeof recordSends>): number =>
-  send.mock.calls.filter(([event]) => event.type === 'fitView').length;
+  pressedShortcuts(send).filter((shortcut) => shortcut === 'fitView').length;
 
 describe('useViewerShortcuts', () => {
   describe('targeting', () => {
@@ -308,20 +319,89 @@ describe('useViewerShortcuts', () => {
 
       await user.keyboard('fg');
 
-      expect(send.mock.calls.map(([event]) => event.type)).toEqual(['fitView', 'setGridVisibility']);
+      expect(pressedShortcuts(send)).toEqual(['fitView', 'grid']);
+      expect(announcementsOf('Viewer')).toEqual(['Fitted to view', expect.stringMatching(/^Grid (shown|hidden)$/)]);
     });
   });
   it('should keep empty viewport shortcuts without starting model tools', async () => {
     const actor = startGraphics();
     actor.send({ type: 'sceneRadiusUpdated', radius: 0, centerMeters: [0, 0, 0] });
-    const send = recordSends(actor);
+    const emitted: string[] = [];
+    actor.on('viewFitRequested', () => {
+      emitted.push('viewFitRequested');
+    });
     renderViewers(['Viewer', actor]);
     hoverViewer('Viewer');
+    const isGridShown = actor.getSnapshot().context.enableGrid;
+
     await userEvent.keyboard('fsm');
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fitView' }));
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setSectionViewActive' }));
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setMeasureActive' }));
+
+    expect(emitted).toEqual([]);
+    expect(actor.getSnapshot().context).toMatchObject({ isSectionViewActive: false, isMeasureActive: false });
+    expect(announcementsOf('Viewer')).toEqual([
+      'No model to fit',
+      'A model is required for section view',
+      'A model is required for measurement',
+    ]);
+
     await userEvent.keyboard('g');
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'setGridVisibility' }));
+
+    expect(actor.getSnapshot().context.enableGrid).toBe(!isGridShown);
+  });
+
+  it('should send each key to graphics as its shortcut and announce what graphics did', async () => {
+    const actor = startGraphics();
+    const send = recordSends(actor);
+    const user = userEvent.setup();
+    renderViewers(['Viewer', actor]);
+    hoverViewer('Viewer');
+
+    await user.keyboard('fsmgp{Escape}{Escape}');
+
+    expect(pressedShortcuts(send)).toEqual(['fitView', 'section', 'measure', 'grid', 'projection', 'escape', 'escape']);
+    expect(announcementsOf('Viewer')).toEqual([
+      'Fitted to view',
+      'Section on',
+      'Measure on',
+      expect.stringMatching(/^Grid (shown|hidden)$/),
+      'Orthographic',
+      'Measure off',
+      'Section off',
+    ]);
+  });
+
+  it('should act and announce once per key under StrictMode', async () => {
+    const actor = startGraphics();
+    const send = recordSends(actor);
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <KeyboardProvider>
+          <GraphicsProvider graphicsRef={actor}>
+            <Viewer label='Viewer' />
+          </GraphicsProvider>
+        </KeyboardProvider>
+      </StrictMode>,
+    );
+    hoverViewer('Viewer');
+    const isGridShown = actor.getSnapshot().context.enableGrid;
+
+    await user.keyboard('g');
+
+    expect(pressedShortcuts(send)).toEqual(['grid']);
+    expect(actor.getSnapshot().context.enableGrid).toBe(!isGridShown);
+    expect(announcementsOf('Viewer')).toHaveLength(1);
+  });
+
+  it('should announce only in the bar that heard the key when two bars show one graphics actor', async () => {
+    const actor = startGraphics();
+    const user = userEvent.setup();
+    renderViewers(['Left', actor], ['Right', actor]);
+    hoverViewer('Right');
+
+    await user.keyboard('g');
+
+    expect(announcementsOf('Right')).toHaveLength(1);
+    expect(announcementsOf('Left')).toEqual([]);
   });
 });

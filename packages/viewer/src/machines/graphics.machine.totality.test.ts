@@ -168,6 +168,14 @@ const samples: Samples = {
   setHoveredMeasurement: [{ type: 'setHoveredMeasurement', payload: undefined }],
   setMeasurementName: [{ type: 'setMeasurementName', id: 'missing', name: 'n' }],
   toggleMeasurementPinned: [{ type: 'toggleMeasurementPinned', id: 'missing' }],
+  viewerShortcutPressed: [
+    {
+      type: 'viewerShortcutPressed',
+      shortcut: 'grid',
+      pressId: 'bar:1',
+      camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+    },
+  ],
   interactionStarted: [{ type: 'interactionStarted' }],
   interactionMoved: [{ type: 'interactionMoved' }],
   interactionEnded: [{ type: 'interactionEnded' }],

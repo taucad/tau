@@ -117,12 +117,12 @@ vi.mock('#machines/model-interaction.machine.js', () => ({
 
 vi.mock('#graphics/three/use-section-view.js', () => ({
   resolveSectionViewRaycastClip: () => undefined,
-  useSectionViewFlags: () => mocks.sectionView,
 }));
 
-vi.mock('#graphics/three/react/kinematics-viewer.js', () => ({
-  useKinematicsViewer: () => () => undefined,
-}));
+vi.mock('#graphics/three/react/kinematics-viewer.js', () => {
+  const viewer = { attachScene: () => undefined, onPointerDown: () => undefined };
+  return { useKinematicsViewer: () => viewer };
+});
 
 const { GltfMesh: RealGltfMesh } = await import('#graphics/three/react/gltf-mesh.jsx');
 const { deriveModelInteractionUnitId } = await import('#machines/model-interaction.machine.js');

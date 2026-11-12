@@ -36,6 +36,7 @@
 import { createCallbackLogic, setup, types } from 'xstate';
 import type { ActorRefFrom, CallbackActorLogic, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import { eventSchemas } from '#machines/machine-schemas.js';
+import { describeFault } from '#machines/machine-fault.js';
 
 /**
  * How long a press on the view cube may hold the lock without turning the camera, in milliseconds (handoff report R7:
@@ -143,6 +144,8 @@ export type ViewportGizmoAdapterLogic = CallbackActorLogic<
  */
 // oxlint-disable-next-line typescript/consistent-type-definitions -- an interface, so declarations reference it by name
 export interface ViewportGizmoGestureContext {
+  /** The first defect this actor caught at its root (MC-R12), the likeliest cause of any after it; it keeps its state and answers every event. */
+  fault?: string;
   environment: ViewportGizmoEnvironment;
   upDirection: ViewportGizmoUpAxis;
 }
@@ -230,6 +233,9 @@ const viewportGizmoGestureMachineDefinition = setup({
   },
 }).createMachine({
   id: 'viewportGizmoGesture',
+  // A defect (an effect that threw, a failed child, a send to no child) is recorded, never fatal (MC-R12). The first
+  // is kept: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }) => ({ context: { fault: context.fault ?? describeFault(event.error) } }),
   context: ({ input }) => ({
     environment: input.environment ?? viewportGizmoDefaultEnvironment,
     upDirection: input.upDirection ?? 'z',

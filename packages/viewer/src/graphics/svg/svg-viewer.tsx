@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import DOMPurify from 'dompurify';
-import type { ReactNode, RefCallback, RefObject } from 'react';
-import type { PanzoomObject } from '@panzoom/panzoom';
+import type { ReactNode, RefCallback } from 'react';
 import type { KnownArtifact } from '@taucad/runtime';
-// @ts-expect-error - no types available for the ESM build.
-import panzoom from '@panzoom/panzoom/dist/panzoom.es.js';
 import { SvgGrid } from '#graphics/svg/svg-grid.jsx';
-import { usePanzoomReset } from '#graphics/svg/use-panzoom-reset.jsx';
+import { createSvgViewAdapter } from '#graphics/svg/svg-view-adapter.js';
+import type { SvgViewLayout, SvgViewTransform } from '#graphics/svg/svg-view-adapter.js';
 import { axesColors } from '#constants/axes-colors.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 
@@ -37,19 +35,6 @@ type ParsedSvgResult =
       error: Error;
     };
 
-type SvgTransform = {
-  scale: number;
-  x: number;
-  y: number;
-};
-
-const maxScale = 10_000;
-const minScale = 1e-5;
-/** Zoom per wheel pixel; a trackpad pinch arrives as a `ctrlKey` wheel with small deltas, so it zooms faster. */
-const wheelZoomRate = 0.002;
-const pinchZoomRate = 0.01;
-/** Pixels per wheel line, for wheels that report lines (`deltaMode` 1). */
-const wheelLinePixels = 16;
 const metersPerMillimeter = 0.001;
 const initialViewBoxMargin = 0.1;
 const fallbackViewBox: Viewbox = { xMin: -10, yMin: -10, xMax: 10, yMax: 10, width: 20, height: 20 };
@@ -220,6 +205,19 @@ const adaptViewBoxToClientRect = (viewBox: Viewbox, clientRect: DOMRect | undefi
   });
 };
 
+/** The part of the drawing a transform and viewport show, as a viewBox. */
+const resolveVisibleViewBox = (viewBox: Viewbox, { transform, clientRect }: SvgViewLayout): Viewbox => {
+  const fitted = adaptViewBoxToClientRect(viewBox, clientRect);
+  const scale = transform.scale || 1;
+  const unitsPerPixel = clientRect && clientRect.height > 0 ? fitted.height / clientRect.height : 1;
+  return createViewBox({
+    xMin: fitted.xMin - transform.x * unitsPerPixel,
+    yMin: fitted.yMin - transform.y * unitsPerPixel,
+    width: fitted.width / scale,
+    height: fitted.height / scale,
+  });
+};
+
 type SvgAxesProps = {
   readonly viewBox: Viewbox;
 };
@@ -260,8 +258,6 @@ type SvgWindowProps = {
   readonly enableGrid: boolean;
   readonly enableAxes: boolean;
   readonly defaultColor?: string;
-  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref API requires null
-  readonly svgRef: RefObject<SVGSVGElement | null>;
 };
 
 function SvgWindow({
@@ -271,118 +267,55 @@ function SvgWindow({
   enableGrid,
   enableAxes,
   defaultColor,
-  svgRef,
 }: SvgWindowProps): ReactNode {
-  const canvasRef = useRef<HTMLDivElement>(null);
-  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- required by usePanzoomReset API.
-  const panzoomRef = useRef<PanzoomObject | null>(null);
   const graphicsActor = useGraphics();
   const gridSizes = useGraphicsSelector((state) => state.context.gridSizes);
-  const [clientRect, setClientRect] = useState<DOMRect | undefined>(undefined);
-  const [transform, setTransform] = useState<SvgTransform>({ scale: 1, x: 0, y: 0 });
+  const viewId = useId();
+  const [layout, setLayout] = useState<SvgViewLayout>({ transform: { scale: 1, x: 0, y: 0 }, clientRect: undefined });
+  /** The transform the last adapter reported, so the adapter for a new drawing resumes the person's pan and zoom. */
+  const lastTransformRef = useRef<SvgViewTransform | undefined>(undefined);
+  const { transform, clientRect } = layout;
   const fittedViewBox = useMemo(() => adaptViewBoxToClientRect(viewBox, clientRect), [clientRect, viewBox]);
+
+  /*
+   * Graphics runs the view's panzoom, listeners and resize observer as a callback actor (charter D4): the `<svg>` ref
+   * callback only hands the element over and takes it back. A new drawing or unit is a new adapter, which resumes the
+   * transform the previous one left and reports the new visible span to graphics for the grid.
+   */
+  const attachView = useCallback<RefCallback<SVGSVGElement>>(
+    (svg) => {
+      const container = svg?.parentElement;
+      if (!svg || !container) {
+        graphicsActor.send({ type: 'svgViewDetached', viewId });
+        return;
+      }
+      graphicsActor.send({
+        type: 'svgViewAttached',
+        viewId,
+        adapter: createSvgViewAdapter({
+          svg,
+          container,
+          verticalSpan: (next) => resolveVisibleViewBox(viewBox, next).height * metersPerUnit,
+          ...(lastTransformRef.current === undefined ? {} : { initialTransform: lastTransformRef.current }),
+          onLayout: (next) => {
+            lastTransformRef.current = next.transform;
+            setLayout(next);
+          },
+        }),
+      });
+    },
+    [graphicsActor, metersPerUnit, viewBox, viewId],
+  );
 
   // Panzoom's model for an SVG child is `screen = scale * (fitted + pan)` in CSS pixels from the viewport's corner.
   // The view is that model written as a viewBox, so the drawing, the axes and the grid share one mapping.
   const scale = transform.scale || 1;
   const unitsPerPixel = clientRect && clientRect.height > 0 ? fittedViewBox.height / clientRect.height : 1;
   const pixelsPerUnit = scale / unitsPerPixel;
-  const visibleViewBox = createViewBox({
-    xMin: fittedViewBox.xMin - transform.x * unitsPerPixel,
-    yMin: fittedViewBox.yMin - transform.y * unitsPerPixel,
-    width: fittedViewBox.width / scale,
-    height: fittedViewBox.height / scale,
-  });
-  const verticalSpan = visibleViewBox.height * metersPerUnit;
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      return;
-    }
-
-    const updateRect = (): void => {
-      setClientRect(canvas.getBoundingClientRect());
-    };
-
-    updateRect();
-    const resizeObserver = new ResizeObserver(updateRect);
-    resizeObserver.observe(canvas);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, []);
-
-  useEffect(() => {
-    graphicsActor.send({ type: 'cameraViewChanged', verticalSpan });
-  }, [graphicsActor, verticalSpan]);
-
-  usePanzoomReset({ panzoomRef, containerRef: canvasRef });
-
-  useEffect(() => {
-    const svg = svgRef.current;
-    const contentGroup = svg?.querySelector<SVGGElement>('#panzoom-root');
-    if (!svg || !contentGroup) {
-      return;
-    }
-
-    // Panzoom owns the gesture math (drag, pinch, zoom about a point); the viewBox above applies its result.
-    // oxlint-disable-next-line @typescript-eslint/no-unsafe-call -- Panzoom ESM build has no published types.
-    const instance = panzoom(contentGroup, {
-      maxScale,
-      minScale,
-      canvas: true,
-      cursor: 'grab',
-      noBind: true,
-      // Keep the press from starting a text selection or a native image drag, and let it reach the pane.
-      handleStartEvent(event: Event): void {
-        event.preventDefault();
-      },
-      setTransform(_element: SVGElement, next: SvgTransform): void {
-        setTransform({ scale: next.scale, x: next.x, y: next.y });
-      },
-    }) as PanzoomObject;
-    panzoomRef.current = instance;
-
-    const handleDown = (event: PointerEvent): void => {
-      // The primary or middle mouse button, any touch or pen.
-      if (event.pointerType === 'mouse' && event.button > 1) {
-        return;
-      }
-      // Capture keeps the drag alive outside the viewport and delivers the release wherever it happens.
-      svg.setPointerCapture(event.pointerId);
-      instance.handleDown(event);
-    };
-    const handleWheel = (event: WheelEvent): void => {
-      event.preventDefault();
-      const delta = (event.deltaY || event.deltaX) * (event.deltaMode === 1 ? wheelLinePixels : 1);
-      const rate = event.ctrlKey ? pinchZoomRate : wheelZoomRate;
-      instance.zoomToPoint(instance.getScale() * Math.exp(-delta * rate), event);
-    };
-
-    svg.addEventListener('pointerdown', handleDown);
-    svg.addEventListener('pointermove', instance.handleMove);
-    svg.addEventListener('pointerup', instance.handleUp);
-    svg.addEventListener('pointercancel', instance.handleUp);
-    svg.addEventListener('wheel', handleWheel, { passive: false });
-
-    return () => {
-      svg.removeEventListener('pointerdown', handleDown);
-      svg.removeEventListener('pointermove', instance.handleMove);
-      svg.removeEventListener('pointerup', instance.handleUp);
-      svg.removeEventListener('pointercancel', instance.handleUp);
-      svg.removeEventListener('wheel', handleWheel);
-      instance.destroy();
-      panzoomRef.current = null;
-    };
-  }, [svgRef]);
+  const visibleViewBox = resolveVisibleViewBox(viewBox, layout);
 
   return (
-    <div
-      ref={canvasRef}
-      style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', touchAction: 'none' }}
-    >
+    <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', touchAction: 'none' }}>
       {enableGrid && clientRect && clientRect.width > 0 && clientRect.height > 0 ? (
         <SvgGrid
           width={clientRect.width}
@@ -394,7 +327,7 @@ function SvgWindow({
         />
       ) : null}
       <svg
-        ref={svgRef}
+        ref={attachView}
         role='img'
         aria-label='SVG view'
         viewBox={stringifyViewBox(visibleViewBox)}
@@ -434,7 +367,6 @@ type SvgViewerProps = {
  * @public
  */
 export function SvgViewer({ artifact, enableGrid = true, enableAxes = true, defaultColor }: SvgViewerProps): ReactNode {
-  const svgRef = useRef<SVGSVGElement>(null);
   const [shadowRoot, setShadowRoot] = useState<ShadowRoot>();
   const attachHost = useCallback<RefCallback<HTMLDivElement>>((host) => {
     if (host) {
@@ -468,7 +400,6 @@ export function SvgViewer({ artifact, enableGrid = true, enableAxes = true, defa
               enableGrid={enableGrid}
               enableAxes={enableAxes}
               defaultColor={defaultColor}
-              svgRef={svgRef}
             />,
             shadowRoot,
           )

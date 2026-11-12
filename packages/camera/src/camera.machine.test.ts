@@ -49,6 +49,25 @@ const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
 
 describe('cameraMachine', () => {
+  it('should record a failed driver at its root and keep its pose and its answers (MC-R12)', () => {
+    const actor = createActor(
+      cameraMachine.provide({
+        actors: {
+          cameraDriver: createCallbackLogic<CameraDriverEvent, CameraDriverInput>(() => {
+            throw new Error('driver failed');
+          }),
+        },
+      }),
+      { input: { initialView } },
+    ).start();
+    expect(actor.getSnapshot().status).toBe('active');
+    expect(actor.getSnapshot().context.fault).toContain('driver failed');
+    const { revision } = actor.getSnapshot().context;
+    actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 30 });
+    expect(actor.getSnapshot().context.revision).toBe(revision + 1);
+    actor.stop();
+  });
+
   it('exports exactly one machine value and starts headlessly', () => {
     const actor = createCameraActor().start();
 

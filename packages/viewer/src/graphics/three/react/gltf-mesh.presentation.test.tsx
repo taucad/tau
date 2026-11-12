@@ -23,6 +23,7 @@ import { awaitGeometryPresentation } from '#graphics/three/utils/geometry-presen
 import { clearRendererSpans, markGeometryReceipt, rendererSpans } from '#lib/renderer-telemetry.js';
 import * as gltfEdges from '#graphics/three/materials/gltf-edges.js';
 import * as gltfMatcap from '#graphics/three/materials/gltf-matcap.js';
+import * as matcapMaterial from '#graphics/three/materials/matcap-material.js';
 import * as surfaceBatches from '#graphics/three/utils/gltf-surface-batches.js';
 import type { GltfPresentationTelemetry } from '#machines/graphics.machine.js';
 import type { GeometryComponentManifest } from '@taucad/types';
@@ -113,12 +114,12 @@ vi.mock('#machines/model-interaction.machine.js', () => ({
 
 vi.mock('#graphics/three/use-section-view.js', () => ({
   resolveSectionViewRaycastClip: () => undefined,
-  useSectionViewFlags: () => mocks.sectionView,
 }));
 
-vi.mock('#graphics/three/react/kinematics-viewer.js', () => ({
-  useKinematicsViewer: () => () => undefined,
-}));
+vi.mock('#graphics/three/react/kinematics-viewer.js', () => {
+  const viewer = { attachScene: () => undefined, onPointerDown: () => undefined };
+  return { useKinematicsViewer: () => viewer };
+});
 
 const { GltfMesh: RealGltfMesh } = await import('#graphics/three/react/gltf-mesh.jsx');
 const { deriveModelInteractionUnitId } = await import('#machines/model-interaction.machine.js');
@@ -840,6 +841,7 @@ describe('GltfMesh presentation protocol', () => {
       const before = trace().length;
 
       mocks.sectionView = { isActive: true };
+      harness.armSection();
       view.rerender(<GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
       await waitFor(() => {
         expect(trace(before)).toContain('gltfAnalysisReady 1:a');
@@ -884,6 +886,7 @@ describe('GltfMesh presentation protocol', () => {
       );
       await waitForCommits(['a']);
       mocks.sectionView = { isActive: true };
+      harness.armSection();
       view.rerender(<GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
       await waitFor(() => {
         expect(analyze).toHaveBeenCalledOnce();
@@ -1210,6 +1213,7 @@ describe('GltfMesh presentation protocol', () => {
       );
       await waitForCommits(['a']);
       mocks.sectionView = { isActive: true };
+      harness.armSection();
       view.rerender(<GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
       await act(async () => undefined);
       mocks.invalidate.mockClear();
@@ -1368,6 +1372,33 @@ describe('GltfMesh presentation protocol', () => {
       await waitForCommits(['b']);
 
       expect(trace()).not.toContain('gltfDisplayReady 1:a display-ready');
+    });
+  });
+
+  describe('matcap load', () => {
+    it('should draw again when the matcap lands on a committed matcap scene, and stop listening with the host', async () => {
+      let landed: (() => void) | undefined;
+      const unsubscribe = vi.fn();
+      vi.spyOn(matcapMaterial, 'onMatcapLoaded').mockImplementation((listener) => {
+        landed = listener;
+        return unsubscribe;
+      });
+      const source = buildGlb();
+      const view = render(<GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap />);
+      await waitForCommits(['a']);
+
+      mocks.invalidate.mockClear();
+      landed?.();
+      expect(mocks.invalidate).toHaveBeenCalledOnce();
+
+      view.rerender(<GltfMesh gltfFile={source} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+      mocks.invalidate.mockClear();
+      landed?.();
+      expect(mocks.invalidate).not.toHaveBeenCalled();
+
+      expect(unsubscribe).not.toHaveBeenCalled();
+      view.unmount();
+      expect(unsubscribe).toHaveBeenCalledOnce();
     });
   });
 

@@ -5,7 +5,11 @@ import { clearRendererSpans, onViewerEvent, rendererSpans } from '#lib/renderer-
 import type { ViewerTelemetryEvent } from '#lib/viewer-events.js';
 import type { GeometryComponentBounds, GeometryComponentManifest } from '@taucad/types';
 import type { Mechanism } from '@taucad/kinematics';
-import type { GltfPresentationTelemetry, GraphicsEvent } from '#machines/graphics.machine.js';
+import type {
+  GltfPresentationTelemetry,
+  GraphicsEvent,
+  KinematicsSceneAdapterLogic,
+} from '#machines/graphics.machine.js';
 import { graphicsMachine, selectComponentFocus } from '#machines/graphics.machine.js';
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type {
@@ -851,6 +855,218 @@ describe('graphics presentation actor (G11b)', () => {
     } finally {
       actor.stop();
       shared.stop();
+    }
+  });
+});
+
+describe('graphics kinematics and section analysis (G12)', () => {
+  const mechanism: Mechanism = {
+    schemaVersion: 1,
+    units: { length: 'm', angle: 'rad' },
+    root: 'base',
+    links: { base: { components: ['component:base'] }, arm: { components: ['component:arm'] } },
+    joints: { hinge: { type: 'revolute', parent: 'base', child: 'arm', origin: [0, 0, 0], axis: [0, 0, 1] } },
+  };
+  const rigged: GeometryComponentManifest = { ...manifest, mechanism };
+
+  /** A graphics actor that logs each event its kinematics child takes, by type and unit. */
+  const createLoggedActor = () => {
+    const kinematicsEvents: string[] = [];
+    const actor = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+      {
+        input: {},
+        inspect: (inspection) => {
+          if (
+            inspection.type === '@xstate.transition' &&
+            'id' in inspection.actorRef &&
+            inspection.actorRef.id === 'kinematics'
+          ) {
+            const { type, unitId } = inspection.event as { type: string; unitId?: string };
+            kinematicsEvents.push(unitId === undefined ? type : `${type} ${unitId}`);
+          }
+        },
+      },
+    );
+    actor.start();
+    return { actor, kinematicsEvents, mechanismOf: (unitId: string) => unitState(actor, unitId).mechanism };
+  };
+  const unitState = (actor: ReturnType<typeof createGraphicsActor>, unitId: string) =>
+    actor.getSnapshot().context.kinematicsRef.getSnapshot().context.unitsById[unitId] ?? { mechanism: undefined };
+  const commit = (
+    [revision, key, unitId]: readonly [revision: number, key: string, unitId: string],
+    presented: GeometryComponentManifest,
+  ): GraphicsEvent => ({
+    type: 'gltfPresentationCommitted',
+    revision,
+    key,
+    unitId,
+    manifest: presented,
+  });
+
+  it('should load the committed unit mechanism, keep its pose over a repeat commit, and clear the unit it replaces', () => {
+    const { actor, kinematicsEvents, mechanismOf } = createLoggedActor();
+    try {
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      actor.send(commit([1, 'a', 'unit:a'], rigged));
+      expect(mechanismOf('unit:a')).toBe(mechanism);
+      const kinematics = actor.getSnapshot().context.kinematicsRef;
+      kinematics.send({ type: 'setCoordinate', unitId: 'unit:a', id: 'hinge', value: 0.5 });
+
+      // React attaches the same scene again: the pose stays.
+      actor.send(commit([1, 'a', 'unit:a'], rigged));
+      expect(kinematics.getSnapshot().context.unitsById['unit:a']?.coordinates).toEqual({ hinge: 0.5 });
+
+      // A new revision of the same unit (an edit) keeps the mechanism until its commit, which parses a new one and
+      // reloads it with the pose kept.
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a2' });
+      expect(mechanismOf('unit:a')).toBe(mechanism);
+      const edited: Mechanism = { ...mechanism };
+      actor.send(commit([2, 'a2', 'unit:a'], { ...rigged, mechanism: edited }));
+      expect(mechanismOf('unit:a')).toBe(edited);
+      expect(kinematics.getSnapshot().context.unitsById['unit:a']?.coordinates).toEqual({ hinge: 0.5 });
+
+      // Another unit replaces it: the previous unit is cleared, the next loaded.
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'b' });
+      actor.send(commit([3, 'b', 'unit:b'], rigged));
+      expect(mechanismOf('unit:a')).toBeUndefined();
+      expect(mechanismOf('unit:b')).toBe(mechanism);
+
+      // A commit whose manifest drops the mechanism clears it.
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'b2' });
+      actor.send(commit([4, 'b2', 'unit:b'], manifest));
+      expect(mechanismOf('unit:b')).toBeUndefined();
+      expect(kinematicsEvents.filter((event) => !event.startsWith('setCoordinate') && !event.startsWith('@'))).toEqual([
+        'loadMechanism unit:a',
+        'loadMechanism unit:a',
+        'loadMechanism unit:a',
+        'clearMechanism unit:a',
+        'loadMechanism unit:b',
+        'clearMechanism unit:b',
+      ]);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should ignore a stale commit, and clear the mechanism when the artifact clears or becomes a drawing', () => {
+    const { actor, mechanismOf } = createLoggedActor();
+    try {
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'b' });
+      actor.send(commit([1, 'a', 'unit:a'], rigged));
+      expect(mechanismOf('unit:a')).toBeUndefined();
+
+      actor.send(commit([2, 'b', 'unit:b'], rigged));
+      actor.send({ type: 'clearArtifact' });
+      expect(mechanismOf('unit:b')).toBeUndefined();
+
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'c' });
+      actor.send(commit([4, 'c', 'unit:c'], rigged));
+      actor.send({
+        type: 'updateArtifact',
+        artifact: { mimeType: 'image/svg+xml', content: '<svg />' },
+        hash: 'd',
+      });
+      expect(mechanismOf('unit:c')).toBeUndefined();
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should end a gesture when the mesh leaves, and keep the mechanism for the mesh that mounts next', () => {
+    const { actor, kinematicsEvents, mechanismOf } = createLoggedActor();
+    try {
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      actor.send(commit([1, 'a', 'unit:a'], rigged));
+      actor.send({ type: 'presentationHostAttached', hostId: 'h', host: createCallbackLogic(() => undefined) });
+      const kinematics = actor.getSnapshot().context.kinematicsRef;
+      const adapterLog: string[] = [];
+      kinematics.send({ type: 'setDragEnabled', unitId: 'unit:a', enabled: true });
+      kinematics.send({
+        type: 'pressPart',
+        unitId: 'unit:a',
+        componentId: 'component:arm',
+        pointerId: 1,
+        clientX: 0,
+        clientY: 0,
+        point: [1, 0, 0],
+        adapter: createCallbackLogic(() => () => {
+          adapterLog.push('stopped');
+        }),
+      });
+      kinematics.send({ type: 'movePointer', pointerId: 1, clientX: 40, clientY: 0, buttons: 1, target: [0, 1, 0] });
+      expect(kinematics.getSnapshot().hasTag('dragging')).toBe(true);
+
+      actor.send({ type: 'presentationHostDetached', hostId: 'h' });
+      expect(kinematicsEvents.at(-1)).toBe('interruptGesture');
+      expect(kinematics.getSnapshot().value).toBe('idle');
+      expect(kinematics.getSnapshot().context.gesture).toBeUndefined();
+      expect(adapterLog).toEqual(['stopped']);
+      expect(mechanismOf('unit:a')).toBe(mechanism);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should run one scene adapter with its kinematics child, replace it for a new scene and ignore a stale detach', () => {
+    const actor = createGraphicsActor();
+    const log: string[] = [];
+    const adapter = (name: string): KinematicsSceneAdapterLogic =>
+      createCallbackLogic(({ input }) => {
+        log.push(`${name} started ${input.kinematics === actor.getSnapshot().context.kinematicsRef}`);
+        return () => {
+          log.push(`${name} stopped`);
+        };
+      });
+    actor.start();
+    try {
+      actor.send({ type: 'kinematicsSceneAttached', sceneId: 'one', adapter: adapter('one') });
+      actor.send({ type: 'kinematicsSceneAttached', sceneId: 'one', adapter: adapter('again') });
+      actor.send({ type: 'kinematicsSceneAttached', sceneId: 'two', adapter: adapter('two') });
+      actor.send({ type: 'kinematicsSceneDetached', sceneId: 'one' });
+      expect(log).toEqual(['one started true', 'one stopped', 'two started true']);
+      actor.send({ type: 'kinematicsSceneDetached', sceneId: 'two' });
+      expect(actor.getSnapshot().context.kinematicsScene).toBeUndefined();
+      actor.send({ type: 'kinematicsSceneAttached', sceneId: 'three', adapter: adapter('three') });
+    } finally {
+      actor.stop();
+    }
+    expect(log).toEqual([
+      'one started true',
+      'one stopped',
+      'two started true',
+      'two stopped',
+      'three started true',
+      'three stopped',
+    ]);
+  });
+
+  it('should ask the host to analyse when a section is armed, and when a scene commits under an armed section', () => {
+    const actor = createGraphicsActor();
+    const log: string[] = [];
+    const host = createCallbackLogic<PresentationHostCommand, undefined>(({ receive }) => {
+      receive((command) => {
+        log.push(command.type);
+      });
+    });
+    actor.start();
+    try {
+      actor.send({ type: 'presentationHostAttached', hostId: 'h', host });
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      actor.send(commit([1, 'a', 'unit:a'], manifest));
+      expect(log).toEqual(['prepare']);
+
+      actor.send({ type: 'sceneRadiusUpdated', radius: 0.1, centerMeters: [0, 0, 0] });
+      actor.send({ type: 'setSectionViewActive', payload: true });
+      expect(log).toEqual(['prepare', 'analyse']);
+
+      // A scene prepared while the section was armed is analysed once it is presented.
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'b' });
+      actor.send(commit([2, 'b', 'unit:b'], manifest));
+      expect(log).toEqual(['prepare', 'analyse', 'prepare', 'analyse']);
+    } finally {
+      actor.stop();
     }
   });
 });

@@ -5,25 +5,30 @@ import type { Actor, EventFrom, SnapshotFrom } from 'xstate';
 import { BoxGeometry, Group, Mesh, Vector3 } from 'three';
 import type { Object3D } from 'three';
 import type { Mechanism } from '@taucad/kinematics';
-import type { GeometryComponentManifest } from '@taucad/types';
 import { useKinematicsViewer } from '#graphics/three/react/kinematics-viewer.js';
 import { setModelComponentOwner } from '#graphics/three/utils/model-component-owner.js';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { getKinematicsUnitState, kinematicsMachine } from '#machines/kinematics.machine.js';
 
-const hooks = vi.hoisted(() => ({
-  kinematics: undefined as Actor<typeof kinematicsMachine> | undefined,
-  invalidate: vi.fn(),
-  frame: undefined as (() => void) | undefined,
-}));
+// Graphics, as far as the scene's ref callback reaches it: it runs the attached adapter with its kinematics child.
+const hooks = vi.hoisted(() => {
+  const state = {
+    kinematics: undefined as Actor<typeof kinematicsMachine> | undefined,
+    invalidate: vi.fn(),
+    frame: undefined as (() => void) | undefined,
+    adapter: undefined as { sceneId: string; actor: { stop: () => void } } | undefined,
+    graphics: {
+      getSnapshot: () => ({ context: { modelPointerClickSuppressionReasons: [] } }),
+      send: vi.fn(),
+    },
+  };
+  return state;
+});
 
 vi.mock('#hooks/use-graphics.jsx', async () => {
   const { useSelector } = await import('@xstate/react');
   return {
-    useGraphics: () => ({
-      getSnapshot: () => ({ context: { modelPointerClickSuppressionReasons: [] } }),
-      send: vi.fn(),
-    }),
+    useGraphics: () => hooks.graphics,
     useKinematicsRef: () => hooks.kinematics,
     useKinematicsSelector: <T>(selector: (snapshot: SnapshotFrom<typeof kinematicsMachine>) => T) =>
       useSelector(hooks.kinematics!, selector),
@@ -50,24 +55,7 @@ const mechanism: Mechanism = {
   joints: { hinge: { type: 'revolute', parent: 'base', child: 'arm', origin: [0, 0, 0], axis: [0, 0, 1] } },
 };
 
-const createManifest = (presented?: Mechanism): GeometryComponentManifest => ({
-  schemaVersion: 1,
-  rootId: 'component:root',
-  nodeOrder: [],
-  nodesById: {},
-  capabilities: {
-    canHide: true,
-    canIsolate: true,
-    canFocus: true,
-    canAdjustOpacity: true,
-    hasDrawings: false,
-    hasPreciseTopology: false,
-    exports: [],
-  },
-  mechanism: presented,
-});
-
-type ViewerProps = { manifest: GeometryComponentManifest | undefined };
+type ViewerProps = { scene: Object3D };
 
 const worldPosition = (object: Object3D): number[] =>
   new Vector3()
@@ -100,18 +88,26 @@ describe('useKinematicsViewer', () => {
     clock.mockRestore();
   };
 
-  const renderViewer = (manifest: GeometryComponentManifest | undefined = createManifest(mechanism)) => {
-    const initialProps: ViewerProps = { manifest };
-    return renderHook(
-      (props: ViewerProps) =>
-        useKinematicsViewer({
-          unitId,
-          scene,
-          manifest: props.manifest,
-          getPickableMeshes: () => [],
-        }),
+  /** Renders the viewer for a unit whose mechanism graphics loaded, and attaches its scene as React would. */
+  const renderViewer = (presented: Mechanism = mechanism) => {
+    kinematics.send({ type: 'loadMechanism', unitId, mechanism: presented });
+    const initialProps: ViewerProps = { scene };
+    const view = renderHook(
+      (props: ViewerProps) => useKinematicsViewer({ unitId, scene: props.scene, getPickableMeshes: () => [] }),
       { initialProps, wrapper: KeyboardProvider },
     );
+    act(() => {
+      view.result.current.attachScene(scene);
+    });
+    return {
+      ...view,
+      unmount: () => {
+        act(() => {
+          view.result.current.attachScene(null);
+        });
+        view.unmount();
+      },
+    };
   };
 
   beforeEach(() => {
@@ -126,41 +122,69 @@ describe('useKinematicsViewer', () => {
 
     kinematics = createActor(kinematicsMachine, { input: {} }).start();
     hooks.kinematics = kinematics;
+    hooks.adapter = undefined;
+    hooks.graphics.send.mockReset();
+    hooks.graphics.send.mockImplementation(
+      (event: { type: string; sceneId: string; adapter?: Parameters<typeof createActor>[0] }) => {
+        if (event.type === 'kinematicsSceneAttached' && hooks.adapter?.sceneId !== event.sceneId) {
+          hooks.adapter?.actor.stop();
+          const actor = createActor(event.adapter!, { input: { kinematics } });
+          actor.start();
+          hooks.adapter = { sceneId: event.sceneId, actor };
+        } else if (event.type === 'kinematicsSceneDetached' && hooks.adapter?.sceneId === event.sceneId) {
+          hooks.adapter.actor.stop();
+          hooks.adapter = undefined;
+        }
+      },
+    );
     hooks.invalidate.mockClear();
     hooks.frame = undefined;
   });
 
   afterEach(() => {
     cleanup();
+    hooks.adapter?.actor.stop();
     kinematics.stop();
     Reflect.deleteProperty(document, 'visibilityState');
     document.body.replaceChildren();
   });
 
-  describe('mechanism', () => {
-    it('should load each presented mechanism and clear it when a presentation drops it', () => {
-      const { rerender } = renderViewer(createManifest(mechanism));
-      expect(unit().mechanism).toBe(mechanism);
+  describe('scene attach', () => {
+    it('should hand graphics one adapter for the scene, and take it back when React detaches the scene', () => {
+      const { result, rerender, unmount } = renderViewer();
+      const attached = hooks.graphics.send.mock.calls.map(([event]) => (event as { type: string }).type);
+      expect(attached).toEqual(['kinematicsSceneAttached']);
 
-      const rebuilt: Mechanism = { ...mechanism };
-      rerender({ manifest: createManifest(rebuilt) });
-      expect(unit().mechanism).toBe(rebuilt);
+      // A re-render keeps the callback, so React does not detach and re-attach the scene.
+      const attach = result.current.attachScene;
+      rerender({ scene });
+      expect(result.current.attachScene).toBe(attach);
 
-      // No manifest yet (a presentation still loading) leaves the loaded mechanism alone.
-      rerender({ manifest: undefined });
-      expect(unit().mechanism).toBe(rebuilt);
-
-      rerender({ manifest: createManifest() });
-      expect(unit().mechanism).toBeUndefined();
-    });
-
-    it('should clear the mechanism when the viewer unmounts', () => {
-      const { unmount } = renderViewer();
-      expect(unit().mechanism).toBe(mechanism);
+      // An earlier presentation's scene reaching this callback is not this scene.
+      act(() => {
+        attach(new Group());
+      });
+      expect(hooks.graphics.send).toHaveBeenCalledTimes(1);
 
       unmount();
+      expect(hooks.graphics.send).toHaveBeenLastCalledWith({
+        type: 'kinematicsSceneDetached',
+        sceneId: (hooks.graphics.send.mock.calls[0]![0] as { sceneId: string }).sceneId,
+      });
+      expect(hooks.adapter).toBeUndefined();
+      // The mechanism and its coordinates are graphics' to clear, never the scene's.
+      expect(unit().mechanism).toBe(mechanism);
+    });
 
-      expect(unit().mechanism).toBeUndefined();
+    it('should hand graphics a new adapter for a new scene', () => {
+      const { result, rerender } = renderViewer();
+      const first = hooks.adapter?.sceneId;
+      const next = new Group();
+      rerender({ scene: next });
+      act(() => {
+        result.current.attachScene(next);
+      });
+      expect(hooks.adapter?.sceneId).not.toBe(first);
     });
   });
 
@@ -207,7 +231,7 @@ describe('useKinematicsViewer', () => {
           },
         ],
       };
-      renderViewer(createManifest(animated));
+      renderViewer(animated);
       hooks.invalidate.mockClear();
       const before = arm.matrix.clone();
       send({ type: 'play', unitId });

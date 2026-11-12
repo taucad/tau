@@ -4,6 +4,7 @@ import type {
   CallbackActorLogic,
   AnyActor,
   EnqueueObject,
+  EventObject,
   MetaObject,
   SnapshotFrom,
   StateMachine,
@@ -74,6 +75,7 @@ import { defaultFramingStage } from '#graphics/three/framing-stage.js';
 import type { CanvasRef, CanvasSurfaceKind } from '#machines/canvas.machine.js';
 import type { webglContextMachine } from '#machines/webgl-context.machine.js';
 import type { MeasurementAnchor, MeasurementRecord, MeasurementOperation } from '#constants/measurement.types.js';
+import { describeFault } from '#machines/machine-fault.js';
 
 /**
  * Actor reference for the model interaction machine that a graphics actor drives.
@@ -107,6 +109,29 @@ export type ControlsAdapterLogic = CallbackActorLogic<
   unknown,
   { type: 'interactionStarted' } | { type: 'interactionMoved' } | { type: 'interactionEnded' }
 >;
+
+/**
+ * The SVG view's DOM adapter, which its `<svg>` ref callback hands graphics in `svgViewAttached`: a callback actor whose
+ * closure holds the panzoom instance, its listeners and the viewport's resize observer (charter D4). It sends back each
+ * new visible span, and fits the drawing on `fit`.
+ *
+ * @public
+ */
+export type SvgViewAdapterLogic = CallbackActorLogic<
+  { type: 'fit' },
+  unknown,
+  { type: 'cameraViewChanged'; verticalSpan: number }
+>;
+
+/**
+ * A presented glTF scene's kinematics adapter, which the scene's ref callback hands graphics in
+ * `kinematicsSceneAttached`: a callback actor whose closure holds the scene's pose composer, the playback demand-frame
+ * source and the page visibility listener (charter D4). Graphics spawns it with its kinematics child, which it
+ * subscribes to; it sends nothing back.
+ *
+ * @public
+ */
+export type KinematicsSceneAdapterLogic = CallbackActorLogic<EventObject, Readonly<{ kinematics: KinematicsRef }>>;
 
 /**
  * The record fields a view's framing applies once after its entry's first frame, as `entryChanged` carries them.
@@ -277,6 +302,8 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
  */
 // oxlint-disable-next-line typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference it by name, where an alias is expanded into every transition of the machine (TS7056)
 export interface GraphicsContext {
+  /** The first defect this actor caught at its root (MC-R12), the likeliest cause of any after it; it keeps its state and answers every event. */
+  fault?: string;
   /** Session-scoped (E4): human-selected display units; lengths remain stored physically in metres. */
   displayUnits: {
     length: {
@@ -396,6 +423,15 @@ export interface GraphicsContext {
    * stops with its canvas, so a canvas remount replaces it and never runs two.
    */
   controlsAdapter: Readonly<{ canvasId: string; ref: AnyActor }> | undefined;
+  /** The mounted SVG view's adapter, while a 2D drawing is shown. */
+  svgView: Readonly<{ viewId: string; ref: AnyActor }> | undefined;
+  /** The presented glTF scene's kinematics adapter, while the scene is attached. */
+  kinematicsScene: Readonly<{ sceneId: string; ref: AnyActor }> | undefined;
+  /**
+   * The unit whose mechanism graphics loaded into its kinematics child at a commit: a commit of another unit, a
+   * cleared artifact or a 2D artifact clears it there.
+   */
+  kinematicsUnitId: string | undefined;
   /**
    * Whether a canvas has presented the camera at least once. It stays set after the canvas detaches (a hidden tab), since
    * the camera keeps its pose.
@@ -517,6 +553,14 @@ export type GraphicsEvent =
    * re-delivery for the running adapter's surface changes nothing.
    */
   | { type: 'controlsAttached'; canvasId: string; adapter: ControlsAdapterLogic }
+  /** A mounted SVG view hands graphics its adapter; it replaces any other. */
+  | { type: 'svgViewAttached'; viewId: string; adapter: SvgViewAdapterLogic }
+  /** The SVG view left, or its drawing changed. A stale id is ignored. */
+  | { type: 'svgViewDetached'; viewId: string }
+  /** A presented glTF scene hands graphics its kinematics adapter; it replaces any other. */
+  | { type: 'kinematicsSceneAttached'; sceneId: string; adapter: KinematicsSceneAdapterLogic }
+  /** The scene left, or another presentation replaced it. A stale id is ignored. */
+  | { type: 'kinematicsSceneDetached'; sceneId: string }
   /**
    * Section handles mounted around a surface: graphics starts their section input with this DOM adapter, replacing the
    * one it ran. A re-delivery for the running input changes nothing.
@@ -795,6 +839,10 @@ export const graphicsEventTypes = [
   'controlsAttached',
   'sectionInputAttached',
   'sectionInputDetached',
+  'svgViewAttached',
+  'svgViewDetached',
+  'kinematicsSceneAttached',
+  'kinematicsSceneDetached',
   'viewportGizmoAttached',
   'viewportGizmoDetached',
   'viewerEnvironmentChanged',
@@ -1264,6 +1312,36 @@ const emitPresentedUnitChange = (
 const gltfRequestMatches = (context: GraphicsContext, event: Readonly<{ revision: number; key: string }>): boolean =>
   event.revision === context.gltfPresentation.requestedRevision && event.key === context.gltfPresentation.requestedKey;
 
+/**
+ * Loads a committed unit's mechanism into kinematics, or clears it when the manifest has none, and clears the unit
+ * loaded before when another one is presented. `loadMechanism` keeps the coordinates of a mechanism it already holds,
+ * so a repeated commit changes nothing.
+ *
+ * @returns The unit whose mechanism is now loaded.
+ */
+const loadCommittedMechanism = (
+  context: GraphicsContext,
+  enq: GraphicsEnqueue,
+  { unitId, manifest }: Readonly<{ unitId: string; manifest: GeometryComponentManifest }>,
+): string | undefined => {
+  if (context.kinematicsUnitId !== undefined && context.kinematicsUnitId !== unitId) {
+    enq.sendTo(context.kinematicsRef, { type: 'clearMechanism', unitId: context.kinematicsUnitId });
+  }
+  const { mechanism } = manifest;
+  enq.sendTo(
+    context.kinematicsRef,
+    mechanism ? { type: 'loadMechanism', unitId, mechanism } : { type: 'clearMechanism', unitId },
+  );
+  return mechanism ? unitId : undefined;
+};
+
+/** Clears the loaded mechanism when the view stops showing a glTF unit (a cleared or 2D artifact). */
+const clearLoadedMechanism = (context: GraphicsContext, enq: GraphicsEnqueue): void => {
+  if (context.kinematicsUnitId !== undefined) {
+    enq.sendTo(context.kinematicsRef, { type: 'clearMechanism', unitId: context.kinematicsUnitId });
+  }
+};
+
 const beginMeasureHoverSuppression = (context: GraphicsContext, enq: GraphicsEnqueue): GraphicsPatch => {
   if (!context.viewerHoverSuppressionReasons.includes('measureTool')) {
     clearViewerHover(context, enq, 'viewer');
@@ -1499,6 +1577,9 @@ const graphicsMachineDefinition = setup({
   },
 }).createMachine({
   id: 'graphics',
+  // A defect (an effect that threw, a failed child, a send to no child) is recorded, never fatal (MC-R12). The first
+  // is kept: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }) => ({ context: { fault: context.fault ?? describeFault(event.error) } }),
 
   invoke: [{ src: 'watchWebGpuCanvasLoss', id: 'watchWebGpuCanvasLossInvocation' }],
 
@@ -1610,6 +1691,9 @@ const graphicsMachineDefinition = setup({
       viewportGizmo: undefined,
       viewerEnvironment: undefined,
       controlsAdapter: undefined,
+      svgView: undefined,
+      kinematicsScene: undefined,
+      kinematicsUnitId: undefined,
       cameraPresented: false,
 
       // Shapes
@@ -1635,6 +1719,12 @@ const graphicsMachineDefinition = setup({
     }
     if (context.sectionInput) {
       enq.stop(context.sectionInput.ref);
+    }
+    if (context.svgView) {
+      enq.stop(context.svgView.ref);
+    }
+    if (context.kinematicsScene) {
+      enq.stop(context.kinematicsScene.ref);
     }
     if (context.viewportGizmo) {
       enq.stop(context.viewportGizmo.ref);
@@ -1740,6 +1830,9 @@ const graphicsMachineDefinition = setup({
         fitView: ({ context }, enq) => {
           // Fit view zooms and recentres the camera on the latest measurement; it never turns it (framing).
           enq.sendTo(context.framingRef, { type: 'fitRequested' });
+          if (context.svgView) {
+            enq.sendTo(context.svgView.ref, { type: 'fit' });
+          }
           enq.emit({ type: 'viewFitRequested' });
           return {};
         },
@@ -1891,6 +1984,45 @@ const graphicsMachineDefinition = setup({
           const ref = enq.spawn(event.adapter, { id: `controls:${event.canvasId}` });
           return { context: { controlsAdapter: { canvasId: event.canvasId, ref }, cameraPresented: true } };
         },
+        svgViewAttached: ({ context, event }, enq) => {
+          if (context.svgView?.viewId === event.viewId) {
+            // Idempotent re-delivery: this view's adapter is already running.
+            return {};
+          }
+          if (context.svgView) {
+            enq.stop(context.svgView.ref);
+          }
+          const ref = enq.spawn(event.adapter, { id: `svgView:${event.viewId}` });
+          return { context: { svgView: { viewId: event.viewId, ref } } };
+        },
+        svgViewDetached: ({ context, event }, enq) => {
+          if (context.svgView?.viewId !== event.viewId) {
+            // Stale: a newer view already took the slot.
+            return {};
+          }
+          enq.stop(context.svgView.ref);
+          return { context: { svgView: undefined } };
+        },
+        kinematicsSceneAttached: ({ context, event }, enq) => {
+          if (context.kinematicsScene?.sceneId === event.sceneId) {
+            return {};
+          }
+          if (context.kinematicsScene) {
+            enq.stop(context.kinematicsScene.ref);
+          }
+          const ref = enq.spawn(event.adapter, {
+            id: `kinematicsScene:${event.sceneId}`,
+            input: { kinematics: context.kinematicsRef },
+          });
+          return { context: { kinematicsScene: { sceneId: event.sceneId, ref } } };
+        },
+        kinematicsSceneDetached: ({ context, event }, enq) => {
+          if (context.kinematicsScene?.sceneId !== event.sceneId) {
+            return {};
+          }
+          enq.stop(context.kinematicsScene.ref);
+          return { context: { kinematicsScene: undefined } };
+        },
         sectionInputAttached: ({ context, event }, enq) => {
           if (context.sectionInput?.inputId === event.inputId) {
             // Idempotent re-delivery: these handles' input is already running.
@@ -2032,9 +2164,11 @@ const graphicsMachineDefinition = setup({
           }
           const revision = context.gltfPresentation.requestedRevision + 1;
           enq.sendTo(context.presentationRef, { type: 'clear' });
+          clearLoadedMechanism(context, enq);
           emitPresentedUnitChange(context, enq, { unitId: undefined, mediaType: undefined });
           return {
             context: {
+              kinematicsUnitId: undefined,
               artifact: undefined,
               artifactKey: '',
               artifactSourceFile: undefined,
@@ -2087,8 +2221,13 @@ const graphicsMachineDefinition = setup({
                 }
               : { type: 'clear' },
           );
+          const isGltf = event.artifact.mimeType === 'model/gltf-binary';
+          if (!isGltf) {
+            clearLoadedMechanism(context, enq);
+          }
           return {
             context: {
+              kinematicsUnitId: isGltf ? context.kinematicsUnitId : undefined,
               artifact: event.artifact,
               artifactKey: event.hash,
               artifactSourceFile: event.sourceFile,
@@ -2125,6 +2264,9 @@ const graphicsMachineDefinition = setup({
         },
         presentationHostDetached: ({ context, event }, enq) => {
           enq.sendTo(context.presentationRef, { type: 'hostDetached', hostId: event.hostId });
+          // A gesture on the mesh ends with it, as when the release may never arrive; the mechanism and its pose stay
+          // for the mesh that mounts next.
+          enq.sendTo(context.kinematicsRef, { type: 'interruptGesture' });
           return {};
         },
         componentFocusObserved: ({ context, event }, enq) => {
@@ -2174,14 +2316,22 @@ const graphicsMachineDefinition = setup({
           const isRepeat = phase === 'presented' && presentedRevision === event.revision && presentedKey === event.key;
           // React may attach the same presentation's scene again (StrictMode, a Suspense reveal); it commits once. A
           // scene prepared again at the same revision has left `presented` first, so its commit still lands.
-          if (!gltfRequestMatches(context, event) || isRepeat) {
+          if (!gltfRequestMatches(context, event)) {
             return {};
+          }
+          const kinematicsUnitId = loadCommittedMechanism(context, enq, event);
+          if (isRepeat) {
+            return kinematicsUnitId === context.kinematicsUnitId ? {} : { context: { kinematicsUnitId } };
           }
           enq.sendTo(context.presentationRef, {
             type: 'gltfPresentationCommitted',
             revision: event.revision,
             key: event.key,
           });
+          // A section armed while this scene was prepared analyses it now that it is presented.
+          if (context.isSectionViewActive) {
+            enq.sendTo(context.presentationRef, { type: 'analyse' });
+          }
           forwardToModelInteraction(context, enq, {
             type: 'loadManifest',
             unitId: event.unitId,
@@ -2200,6 +2350,7 @@ const graphicsMachineDefinition = setup({
           );
           return {
             context: {
+              kinematicsUnitId,
               gltfPresentation,
               modelInteractionUnitId: event.unitId,
               pickableMeshesVersion: context.pickableMeshesVersion + 1,
@@ -2649,6 +2800,10 @@ const graphicsMachineDefinition = setup({
              * `sectionSettled`.
              */
             on: {
+              // A section armed after the scene was presented analyses it now (D27: topology only for an armed tool).
+              entry: ({ context }, enq) => {
+                enq.sendTo(context.presentationRef, { type: 'analyse' });
+              },
               initial: 'settled',
               states: {
                 settled: {

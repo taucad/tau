@@ -45,3 +45,30 @@ it('should repaint current consumers once the shared matcap loads and release re
     vi.doUnmock('three');
   }
 });
+
+it('should hear the matcap load without starting it, then repaint once whoever needs the texture loads it', async () => {
+  vi.resetModules();
+  let loaded: (() => void) | undefined;
+  const load = vi.fn((_url: string, onLoad: () => void) => {
+    loaded = onLoad;
+    return new Texture();
+  });
+  vi.doMock('three', async (original) => ({
+    ...(await original<typeof Three>()),
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Match Three's exported constructor.
+    TextureLoader: class {
+      public load = load;
+    },
+  }));
+  try {
+    const { matcapMaterial, onMatcapLoaded } = await import('#graphics/three/materials/matcap-material.js');
+    const listener = vi.fn();
+    onMatcapLoaded(listener);
+    expect(load).not.toHaveBeenCalled();
+    matcapMaterial();
+    loaded?.();
+    expect(listener).toHaveBeenCalledOnce();
+  } finally {
+    vi.doUnmock('three');
+  }
+});

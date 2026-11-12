@@ -21,7 +21,8 @@
     "camera.setRenderFrame#0": "Unmodelled",
     "camera.setUpDirection#0": "Changed",
     "camera.setVerticalFieldOfView#0": "Changed",
-    "camera.setViewport#0": "Changed"
+    "camera.setViewport#0": "Changed",
+    "camera.xstate.error.*#0": "Unmodelled"
   },
   "alphabet": [
     "adoptPersistedPose",
@@ -39,7 +40,7 @@
     "setViewport"
   ],
   "specs": {
-    "CameraAuthority.tla": "352b8d34ae0dca1e5156e6a8b0a7f96a755b78a9270aaf73bd1b45e20e90187b"
+    "CameraAuthority.tla": "a337caaa12bea9e6392e50d6faabd435b4b7d0716d95a1df801b73ab3cb0311f"
   },
   "tables": {
     "CameraAuthority.export.cfg": "c6c84e03505b8bda410364bafe73cff1d8a7ea900dd93386df605a83375596da",

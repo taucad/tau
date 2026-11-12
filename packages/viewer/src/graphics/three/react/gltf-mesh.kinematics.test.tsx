@@ -13,9 +13,13 @@ import { tauCadTopologyExtension } from '@taucad/types/constants';
 import { getModelComponentId } from '#graphics/three/utils/model-component-owner.js';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { getKinematicsUnitState, kinematicsMachine } from '#machines/kinematics.machine.js';
+import type { KinematicsSceneAdapterLogic } from '#machines/graphics.machine.js';
+import type { Mechanism } from '@taucad/kinematics';
 
 // The in-place and camera suites replace `useKinematicsViewer`; this one keeps it real, so the GltfMesh
-// wiring (unit id, presented scene and manifest) reaches the kinematics actor and the pose composer.
+// wiring (unit id, presented scene and manifest) reaches the kinematics actor and the pose composer. The mocked graphics
+// does what graphics does with them: a commit loads the unit's mechanism, and the scene's adapter runs with the
+// kinematics child as its input.
 const mocks = vi.hoisted(() => {
   const sceneBounds = { min: [-20, -10, -5], max: [20, 10, 5] };
   return {
@@ -29,7 +33,35 @@ const mocks = vi.hoisted(() => {
       orthographicCamera: { name: 'orthographic', coordinateSystem: undefined, updateProjectionMatrix: vi.fn() },
     },
     graphicsActor: {
-      send: vi.fn(),
+      send: vi.fn((event: { type: string } & Record<string, unknown>) => {
+        const kinematics = mocks.kinematics!;
+        switch (event.type) {
+          case 'gltfPresentationCommitted': {
+            const { mechanism } = event['manifest'] as { mechanism?: unknown };
+            const unitId = event['unitId'] as string;
+            kinematics.send(
+              mechanism === undefined
+                ? { type: 'clearMechanism', unitId }
+                : { type: 'loadMechanism', unitId, mechanism: mechanism as Mechanism },
+            );
+            break;
+          }
+          case 'kinematicsSceneAttached': {
+            mocks.sceneAdapter?.stop();
+            mocks.sceneAdapter = createActor(event['adapter'] as KinematicsSceneAdapterLogic, {
+              input: { kinematics },
+            });
+            mocks.sceneAdapter.start();
+            break;
+          }
+          case 'kinematicsSceneDetached': {
+            mocks.sceneAdapter?.stop();
+            mocks.sceneAdapter = undefined;
+            break;
+          }
+          default:
+        }
+      }),
       getSnapshot: () => ({
         context: {
           modelPointerClickSuppressionReasons: [],
@@ -42,6 +74,7 @@ const mocks = vi.hoisted(() => {
     gl: Object.create(null) as { compileAsync?: ReturnType<typeof vi.fn>; coordinateSystem?: number },
     invalidate: vi.fn(),
     kinematics: undefined as Actor<typeof kinematicsMachine> | undefined,
+    sceneAdapter: undefined as { start: () => void; stop: () => void } | undefined,
     rootScene: { name: 'viewport-lighting-scene' },
     modelUnit: {
       focusedComponentId: undefined as string | undefined,
@@ -103,7 +136,6 @@ vi.mock('#machines/model-interaction.machine.js', () => ({
 
 vi.mock('#graphics/three/use-section-view.js', () => ({
   resolveSectionViewRaycastClip: () => undefined,
-  useSectionViewFlags: () => mocks.sectionView,
 }));
 
 const { GltfMesh: RealGltfMesh } = await import('#graphics/three/react/gltf-mesh.jsx');
@@ -191,7 +223,7 @@ describe('GltfMesh kinematics wiring', () => {
     mocks.invalidate.mockClear();
   });
 
-  it('should load the presented mechanism, pose the presented scene, and restore and clear it on unmount', async () => {
+  it('should load the presented mechanism, pose the presented scene, and restore the scene on unmount', async () => {
     const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
     const view = render(
       <GltfMesh gltfFile={buildHingedGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
@@ -213,7 +245,9 @@ describe('GltfMesh kinematics wiring', () => {
 
     view.unmount();
 
-    expect(unit().mechanism).toBeUndefined();
+    // The adapter left with the scene and put it back as built; graphics keeps the mechanism and its pose (G12, D14).
+    expect(mocks.sceneAdapter).toBeUndefined();
     expect(rounded(lid.matrix)).toEqual(rounded(new Matrix4()));
+    expect(unit().coordinates).toEqual({ hinge: Math.PI / 2 });
   });
 });

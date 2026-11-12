@@ -94,10 +94,22 @@ function useValue() { return actor.getSnapshot(); }
 const Row = memo(function (props) { return actor.getSnapshot(); });
 const Field = React.forwardRef((props, ref) => actor.getSnapshot());
 function Panel2() { const selectFromPanel = selectValue(actor); }
+const Card = function render() { return actor.getSnapshot().context.label; };
+const useLabel = function readLabel() { return actor.getSnapshot(); };
+const format = function Formatter() { return actor.getSnapshot(); };
 `,
         'fixture.ts',
       ),
-    ).toEqual(['1 getSnapshot', '4 getSnapshot', '5 getSnapshot', '6 getSnapshot', '7 getSnapshot']);
+    ).toEqual([
+      '1 getSnapshot',
+      '4 getSnapshot',
+      '5 getSnapshot',
+      '6 getSnapshot',
+      '7 getSnapshot',
+      '9 getSnapshot',
+      '10 getSnapshot',
+      '11 getSnapshot',
+    ]);
   });
 
   it('should classify reads by where they run', () => {

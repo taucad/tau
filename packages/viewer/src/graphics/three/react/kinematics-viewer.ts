@@ -1,19 +1,19 @@
 /**
- * Kinematics in the Three viewer: loads the presented model's mechanism into the kinematics actor, keeps
- * the scene posed from it, drives playback ticks while playing and visible, owns drag-to-IK and, under the
- * `tauDebug` flag, exposes `window.__TAU_KINEMATICS_TEST__` for end-to-end assertions.
+ * Kinematics in the Three viewer: hands graphics the presented scene's pose adapter, drives playback ticks while
+ * playing and visible, owns drag-to-IK and, under the `tauDebug` flag, exposes `window.__TAU_KINEMATICS_TEST__` for
+ * end-to-end assertions. Graphics loads the presented unit's mechanism into its kinematics child.
  */
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Box3, Matrix4, Vector3 } from 'three';
 import type { Mesh, Object3D } from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { RootState, ThreeEvent } from '@react-three/fiber';
-import type { GeometryComponentManifest } from '@taucad/types';
-import { useKinematicsPoseComposer } from '#graphics/three/react/kinematics-pose-composer.js';
+import { createCallbackLogic } from 'xstate';
+import { createKinematicsPoseComposer } from '#graphics/three/react/kinematics-pose-composer.js';
 import { useKinematicsDragControls } from '#graphics/three/react/kinematics-drag-controls-adapter.js';
 import { getModelComponentId } from '#graphics/three/utils/model-component-owner.js';
-import { useKinematicsRef } from '#hooks/use-graphics.jsx';
-import type { KinematicsRef } from '#machines/graphics.machine.js';
+import { useGraphics, useKinematicsRef } from '#hooks/use-graphics.jsx';
+import type { KinematicsRef, KinematicsSceneAdapterLogic } from '#machines/graphics.machine.js';
 import { getKinematicsUnitState } from '#machines/kinematics.machine.js';
 import type { KinematicsUnitState } from '#machines/kinematics.machine.js';
 import { useViewerFeature } from '#environment/viewer-environment.jsx';
@@ -123,45 +123,72 @@ function useKinematicsTestBridge(unitId: string, scene: Object3D | undefined): v
   }, [get, isTauDebugEnabled, kinematicsRef, scene, unitId]);
 }
 
+/** The playback clock's last frame time, which the scene adapter forgets when playback starts, stops or resumes. */
+type PlaybackClock = { current: number | undefined };
+
 /** Advances playback from the render loop, only while playing and while the document is visible. */
-function useKinematicsPlaybackClock(unitId: string): void {
+function useKinematicsPlaybackClock(unitId: string, clock: PlaybackClock): void {
   const kinematicsRef = useKinematicsRef();
   const invalidate = useThree((state) => state.invalidate);
-  const lastFrameAtRef = useRef<number | undefined>(undefined);
 
   useFrame(() => {
     const playback = selectUnitPlayback(kinematicsRef, unitId);
     if (playback.status !== 'playing' || document.visibilityState === 'hidden') {
-      lastFrameAtRef.current = undefined;
+      clock.current = undefined;
       return;
     }
     const now = performance.now();
-    const lastFrameAt = lastFrameAtRef.current;
-    lastFrameAtRef.current = now;
+    const lastFrameAt = clock.current;
+    clock.current = now;
     if (lastFrameAt !== undefined) {
       kinematicsRef.send({ type: 'tick', unitId, elapsed: Math.min(now - lastFrameAt, maxTickMilliseconds) / 1000 });
     }
     // Demand rendering: request the next frame only while the clip runs.
     invalidate();
   });
+}
 
-  // Playback is a demand-frame source even when its first pose equals the current pose.
-  useEffect(() => {
+/** What a presented scene's kinematics adapter works on. */
+export type KinematicsSceneHost = Readonly<{
+  scene: Object3D;
+  unitId: string;
+  invalidate: () => void;
+  clock: PlaybackClock;
+}>;
+
+/**
+ * A presented scene's kinematics adapter, which graphics spawns with its kinematics child (charter D4). It keeps the
+ * scene posed from each kinematics snapshot, so a playback or drag frame costs one matrix pass and one `invalidate()`
+ * and never a React render. Playback is a demand-frame source even when its first pose equals the current pose, so a
+ * start, and a return to a visible page while playing, request a frame. It returns the scene to its as-built pose
+ * when it stops.
+ *
+ * @param host - The scene, its unit, the canvas's `invalidate` and the playback clock.
+ * @returns Logic graphics spawns when the scene's ref callback hands it over.
+ * @public
+ */
+export function createKinematicsSceneAdapter(host: KinematicsSceneHost): KinematicsSceneAdapterLogic {
+  return createCallbackLogic(({ input }: { input: Readonly<{ kinematics: KinematicsRef }> }) => {
+    const { scene, unitId, invalidate, clock } = host;
+    const composer = createKinematicsPoseComposer(scene);
     let wasPlaying = false;
-    const changed = (): void => {
-      const playing = getKinematicsUnitState(kinematicsRef.getSnapshot().context, unitId).playback.status === 'playing';
+    const sync = (): void => {
+      const unit = getKinematicsUnitState(input.kinematics.getSnapshot().context, unitId);
+      let changed = composer.update(unit);
+      const playing = unit.playback.status === 'playing';
       if (playing !== wasPlaying) {
-        lastFrameAtRef.current = undefined;
+        clock.current = undefined;
         wasPlaying = playing;
-        if (playing && document.visibilityState !== 'hidden') {
-          invalidate();
-        }
+        changed ||= playing && document.visibilityState !== 'hidden';
+      }
+      if (changed) {
+        invalidate();
       }
     };
-    const subscription = kinematicsRef.subscribe(changed);
-    changed();
+    sync();
+    const subscription = input.kinematics.subscribe(sync);
     const resume = (): void => {
-      lastFrameAtRef.current = undefined;
+      clock.current = undefined;
       if (wasPlaying && document.visibilityState !== 'hidden') {
         invalidate();
       }
@@ -170,47 +197,74 @@ function useKinematicsPlaybackClock(unitId: string): void {
     return () => {
       subscription.unsubscribe();
       document.removeEventListener('visibilitychange', resume);
+      composer.reset();
+      invalidate();
     };
-  }, [invalidate, kinematicsRef, unitId]);
+  });
+}
+
+let nextKinematicsSceneId = 0;
+
+/**
+ * The presented scene's ref callback, which hands graphics the scene's kinematics adapter while the scene is attached
+ * and takes it back when it leaves. It only sends attach and detach, the sanctioned way to hand a host to an actor; a
+ * call with another scene (R3F re-sets a rebuilt primitive's earlier refs) is ignored.
+ *
+ * @public
+ */
+export function createKinematicsSceneAttach(
+  graphicsActor: Readonly<{ send: ReturnType<typeof useGraphics>['send'] }>,
+  scene: Readonly<{ sceneId: string; object: Object3D; adapter: KinematicsSceneAdapterLogic }> | undefined,
+): (object: unknown) => void {
+  return (object) => {
+    // Another Three object is an earlier presentation's scene; a host node that is not one (a DOM test host) is ours.
+    if (
+      !scene ||
+      (typeof object === 'object' && object !== null && 'isObject3D' in object && object !== scene.object)
+    ) {
+      return;
+    }
+    graphicsActor.send(
+      object
+        ? { type: 'kinematicsSceneAttached', sceneId: scene.sceneId, adapter: scene.adapter }
+        : { type: 'kinematicsSceneDetached', sceneId: scene.sceneId },
+    );
+  };
 }
 
 type KinematicsViewerOptions = Readonly<{
   unitId: string;
   scene: Object3D | undefined;
-  manifest: GeometryComponentManifest | undefined;
   getPickableMeshes: () => readonly Mesh[];
 }>;
 
 /**
- * Wires one presented glTF unit to its kinematics actor and returns the primary pointer-down handler
- * that starts drag-to-IK.
+ * Wires one presented glTF unit to its kinematics actor. Graphics loads the unit's mechanism when the presentation
+ * commits; this returns the scene's ref callback, which hands graphics the scene's pose adapter, and the primary
+ * pointer-down handler that starts drag-to-IK.
  */
-export function useKinematicsViewer({
-  unitId,
-  scene,
-  manifest,
-  getPickableMeshes,
-}: KinematicsViewerOptions): (event: ThreeEvent<PointerEvent>) => void {
-  const kinematicsRef = useKinematicsRef();
-  const mechanism = manifest?.mechanism;
+export function useKinematicsViewer({ unitId, scene, getPickableMeshes }: KinematicsViewerOptions): Readonly<{
+  attachScene: (object: unknown) => void;
+  onPointerDown: (event: ThreeEvent<PointerEvent>) => void;
+}> {
+  const graphicsActor = useGraphics();
+  const invalidate = useThree((state) => state.invalidate);
+  const [clock] = useState<PlaybackClock>(() => ({ current: undefined }));
 
-  // Load alongside `loadManifest`: every presentation carries (or drops) its mechanism.
-  useLayoutEffect(() => {
-    if (!manifest) {
-      return;
+  const attachScene = useMemo(() => {
+    if (!scene) {
+      return createKinematicsSceneAttach(graphicsActor, undefined);
     }
-    kinematicsRef.send(mechanism ? { type: 'loadMechanism', unitId, mechanism } : { type: 'clearMechanism', unitId });
-  }, [kinematicsRef, manifest, mechanism, unitId]);
+    nextKinematicsSceneId += 1;
+    return createKinematicsSceneAttach(graphicsActor, {
+      sceneId: `kinematics-scene-${nextKinematicsSceneId}`,
+      object: scene,
+      adapter: createKinematicsSceneAdapter({ scene, unitId, invalidate, clock }),
+    });
+  }, [clock, graphicsActor, invalidate, scene, unitId]);
 
-  useEffect(
-    () => () => {
-      kinematicsRef.send({ type: 'clearMechanism', unitId });
-    },
-    [kinematicsRef, unitId],
-  );
-
-  useKinematicsPoseComposer(unitId, scene);
-  useKinematicsPlaybackClock(unitId);
+  useKinematicsPlaybackClock(unitId, clock);
   useKinematicsTestBridge(unitId, scene);
-  return useKinematicsDragControls({ unitId, scene, getPickableMeshes });
+  const onPointerDown = useKinematicsDragControls({ unitId, scene, getPickableMeshes });
+  return { attachScene, onPointerDown };
 }

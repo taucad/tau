@@ -234,18 +234,69 @@ type MeasurePointerCoordinates = MeasurePointerAt;
 
 type GraphicsActorRef = ReturnType<typeof useGraphics>;
 
+/** The measure session's facts, and the section clip a pick honours, as the tool's host functions read them. */
+type MeasureToolGraphicsContext = Pick<
+  GraphicsContext,
+  | 'isMeasureActive'
+  | 'measureMessage'
+  | 'measureActiveCandidateId'
+  | 'measureCandidates'
+  | 'measurePreviewDistance'
+  | 'currentMeasurementAnchor'
+  | 'measureChosenCandidateId'
+  | 'measureLockedTargetId'
+  | 'measureFilter'
+  | 'measureMode'
+  | 'hoveredMeasurementId'
+  | 'isSectionViewActive'
+  | 'committedSectionCuts'
+>;
+
 /**
- * The graphics context, read where the tool's host functions run: in the measure session's adapters, from a pointer
- * event, a frame or a report, never while rendering.
+ * The measure session's facts and the section clip, read where the tool's host functions run: in the measure
+ * session's adapters, from a pointer event, a frame or a report, never while rendering.
  */
-const selectGraphicsContext = (graphics: GraphicsActorRef): GraphicsContext => graphics.getSnapshot().context;
+const selectGraphicsContext = (graphics: GraphicsActorRef): MeasureToolGraphicsContext => {
+  const {
+    isMeasureActive,
+    measureMessage,
+    measureActiveCandidateId,
+    measureCandidates,
+    measurePreviewDistance,
+    currentMeasurementAnchor,
+    measureChosenCandidateId,
+    measureLockedTargetId,
+    measureFilter,
+    measureMode,
+    hoveredMeasurementId,
+    isSectionViewActive,
+    committedSectionCuts,
+  } = graphics.getSnapshot().context;
+  return {
+    isMeasureActive,
+    measureMessage,
+    measureActiveCandidateId,
+    measureCandidates,
+    measurePreviewDistance,
+    currentMeasurementAnchor,
+    measureChosenCandidateId,
+    measureLockedTargetId,
+    measureFilter,
+    measureMode,
+    hoveredMeasurementId,
+    isSectionViewActive,
+    committedSectionCuts,
+  };
+};
 
-/** The kinematic pose revision, read where the host functions run. */
-const selectPoseRevision = (kinematics: KinematicsRef): number => kinematics.getSnapshot().context.revision;
+/** The kinematic pose revision graphics folds from its kinematics child, read where the host functions run. */
+const selectPoseRevision = (graphics: GraphicsActorRef): number => graphics.getSnapshot().context.poseRevision;
 
-/** The kinematics context, read where a commit runs. */
-const selectKinematicsContext = (kinematics: KinematicsRef): ReturnType<KinematicsRef['getSnapshot']>['context'] =>
-  kinematics.getSnapshot().context;
+/** Whether a unit stands as built (every joint coordinate zero), read where a commit runs. */
+const selectUnitAsBuilt = (kinematics: KinematicsRef, unitId: string): boolean =>
+  Object.values(getKinematicsUnitState(kinematics.getSnapshot().context, unitId).coordinates).every(
+    (value) => value === 0,
+  );
 
 /** The status a target list shows while it waits on a feature graph. */
 const catalogPreparingMessage = 'Preparing measurement features…';
@@ -468,7 +519,7 @@ export function MeasureTool(): React.JSX.Element {
   const geometryKeyRef = useRef(geometryKey);
   const pickableMeshesVersionRef = useRef(pickableMeshesVersion);
   const modelDisplayRevisionRef = useRef(modelDisplayRevision);
-  const kinematicsActorRef = useRef(kinematicsRef);
+  const graphicsActorRef = useRef(graphicsActor);
   useLayoutEffect(() => {
     adaptersRef.current = adapters;
     currentStartRef.current = currentStart;
@@ -479,14 +530,14 @@ export function MeasureTool(): React.JSX.Element {
     geometryKeyRef.current = geometryKey;
     pickableMeshesVersionRef.current = pickableMeshesVersion;
     modelDisplayRevisionRef.current = modelDisplayRevision;
-    kinematicsActorRef.current = kinematicsRef;
+    graphicsActorRef.current = graphicsActor;
   }, [
     adapters,
     camera,
     currentStart,
     explicitCandidateId,
     geometryKey,
-    kinematicsRef,
+    graphicsActor,
     lockedTargetId,
     modelDisplayRevision,
     pickableMeshesVersion,
@@ -494,7 +545,7 @@ export function MeasureTool(): React.JSX.Element {
   ]);
 
   const getCachedMeshes = useCallback((): THREE.Mesh[] => {
-    const poseRevision = selectPoseRevision(kinematicsActorRef.current);
+    const poseRevision = selectPoseRevision(graphicsActorRef.current);
     const currentKey = `${geometryKeyRef.current}:${pickableMeshesVersionRef.current}:${modelDisplayRevisionRef.current}:${poseRevision}:${cameraRef.current.layers.mask}`;
     if (currentKey === cachedMeshKeyRef.current) {
       return cachedMeshesRef.current;
@@ -835,7 +886,7 @@ export function MeasureTool(): React.JSX.Element {
               : 'Calculated from the rendered mesh; source deviation bound unknown.',
         anchors: [first ?? anchor, second],
         geometryKey,
-        poseRevision: selectPoseRevision(kinematicsRef),
+        poseRevision: selectPoseRevision(graphicsActor),
         status: 'current',
       });
       if (!currentStartRef.current) {
@@ -921,7 +972,7 @@ export function MeasureTool(): React.JSX.Element {
         first?.feature.kind === 'body' &&
         source?.target.feature.kind === 'body'
       ) {
-        const pose = selectPoseRevision(kinematicsRef);
+        const pose = selectPoseRevision(graphicsActor);
         const componentA = (
           selectedTargetRef.current?.mesh.userData['measurementFeatures'] as { componentId?: string } | undefined
         )?.componentId;
@@ -946,11 +997,7 @@ export function MeasureTool(): React.JSX.Element {
           const graph = getCachedMeshMeasurementFeatures(selected.mesh as THREE.Mesh);
           return count === 1 && graph?.features.filter((feature) => feature.kind === 'body').length === 1;
         };
-        const asBuilt = modelInteractionUnitId
-          ? Object.values(
-              getKinematicsUnitState(selectKinematicsContext(kinematicsRef), modelInteractionUnitId).coordinates,
-            ).every((value) => value === 0)
-          : false;
+        const asBuilt = modelInteractionUnitId ? selectUnitAsBuilt(kinematicsRef, modelInteractionUnitId) : false;
         const id = generatePrefixedId(idPrefix.measurement);
         const record: MeasurementRecord = {
           ...createRecord(0, 'minimum-distance', 'cad', currentStartRef.current, pointMeters, firstAnchor, anchor),

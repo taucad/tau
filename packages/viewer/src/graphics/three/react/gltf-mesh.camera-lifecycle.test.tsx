@@ -167,12 +167,17 @@ vi.mock('#machines/model-interaction.machine.js', () => ({
 
 vi.mock('#graphics/three/use-section-view.js', () => ({
   resolveSectionViewRaycastClip: () => mocks.raycastClipState,
-  useSectionViewFlags: () => mocks.sectionView,
 }));
 
-vi.mock('#graphics/three/react/kinematics-viewer.js', () => ({
-  useKinematicsViewer: () => mocks.kinematicsPointerDown,
-}));
+vi.mock('#graphics/three/react/kinematics-viewer.js', () => {
+  const viewer = {
+    attachScene: () => undefined,
+    onPointerDown: (event: unknown): void => {
+      mocks.kinematicsPointerDown(event);
+    },
+  };
+  return { useKinematicsViewer: () => viewer };
+});
 
 vi.mock('#graphics/metadata/gltf-component-manifest.js', () => ({
   gltfPrimitiveOccurrenceKey: ({
@@ -548,6 +553,7 @@ describe('GltfMesh camera lifecycle', () => {
     mocks.frameCallback?.();
     expect(analyze).not.toHaveBeenCalled();
     mocks.sectionView = { isActive: true };
+    harness.armSection();
     view.rerender(
       <GltfMesh gltfFile={content} geometryHash='deferred' presentationRevision={1} enableMatcap={false} />,
     );

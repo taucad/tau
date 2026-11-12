@@ -428,7 +428,7 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
    *
    * The reconciliation rule, the only one, per kind (frame, policy), keeps at most one rig value in flight to the
    * followed actor (the rig's own, or a given one while connected). The rig sends that actor the mirror (at start or
-   * connect, after a setter, after a snapshot) only while the actor runs (started, neither stopped nor errored), nothing
+   * connect, after a setter, after a snapshot) only while the actor runs (started and not stopped), nothing
    * of that kind is in flight and the actor's last snapshot does not already carry it, so a later snapshot always
    * carries the sent value, even when the actor answers it as a duplicate. While a value is in flight, a snapshot that
    * carries it confirms it (the rig then sends the mirror if it has moved on) and one that differs is stale and is

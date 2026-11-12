@@ -116,6 +116,8 @@ type CameraMachineContext = Readonly<{
   lastChange: CameraChange;
   renderFrame: CameraRenderFrame;
   clipPolicy?: CameraClipPolicy;
+  /** The first defect the camera caught at its root (MC-R12); the camera keeps its pose and answers every event. */
+  fault?: string;
 }>;
 
 /** Immutable state sent to a provided camera driver. @public */
@@ -221,7 +223,7 @@ const renderFrameForView = (renderFrame: CameraRenderFrame, frameId: string): Ca
     );
   }
   const metersPerRenderUnit = assertPositive(renderFrame.metersPerRenderUnit, 'renderFrame.metersPerRenderUnit');
-  assertPositive(1 / metersPerRenderUnit, 'the reciprocal of renderFrame.metersPerRenderUnit');
+  assertPositive(1 / metersPerRenderUnit, '1 / renderFrame.metersPerRenderUnit');
   return {
     anchorFrameId: renderFrame.anchorFrameId,
     originMeters: vector(renderFrame.originMeters, 'renderFrame.originMeters'),
@@ -416,10 +418,10 @@ const adoptionPatch = (context: CameraMachineContext, adoption: CameraAdoption):
     throw new RangeError('requestId must not be empty.');
   }
   if (given(pose) && given(orientation)) {
-    throw new RangeError('An adoption carries a pose or an orientation, not both.');
+    throw new RangeError('An adoption carries a pose or orientation, not both.');
   }
   if (![pose, orientation, verticalFieldOfView, upDirection].some((field) => given(field))) {
-    throw new RangeError('An adoption carries at least one camera field.');
+    throw new RangeError('An adoption carries a camera field.');
   }
   if (given(margin)) {
     assertMargin(margin);
@@ -575,6 +577,13 @@ const cameraMachineDefinition = setup({
 }).createMachine({
   id: 'camera',
   version: '2',
+  // A defect is recorded and the camera stays as it was: the spec models no fault (MC-R12, MC-R27). The first is
+  // kept: the root cause matters more than the defects it sets off.
+  onError: refines('Unmodelled', ({ context, event }) => ({
+    context: {
+      fault: context.fault ?? String((event.error as { message?: unknown } | undefined)?.message ?? event.error),
+    },
+  })),
   context: ({ input }) => {
     const view = createCameraView(input.initialView);
     const pixelBudget = assertPositive(input.pixelBudget ?? 0.25, 'pixelBudget');

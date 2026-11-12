@@ -41,6 +41,7 @@ import type { Actor, ActorOptions, ActorRef, EnqueueObject, SnapshotFrom, Snapsh
 import type { CameraBounds } from '@taucad/camera';
 import type { CameraMachineEmitted, CameraMachineEvent, CameraOrientation, CameraPose } from '@taucad/camera/machine';
 import { eventSchemas } from '#machines/machine-schemas.js';
+import { describeFault } from '#machines/machine-fault.js';
 
 /**
  * The camera a framing actor drives: any actor that accepts the camera's public events.
@@ -123,6 +124,8 @@ export type FramingEvent =
 
 /** What every state holds. */
 type FramingContext = Readonly<{
+  /** The first defect this actor caught at its root (MC-R12), the likeliest cause of any after it; it keeps its state and answers every event. */
+  fault?: string;
   camera: FramingCameraRef;
   identity: string | undefined;
   orientation: CameraOrientation;
@@ -212,6 +215,9 @@ const framingMachineDefinition = setup({
   },
 }).createMachine({
   id: 'framing',
+  // A defect (an effect that threw, a failed child, a send to no child) is recorded, never fatal (MC-R12). The first
+  // is kept: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }) => ({ context: { fault: context.fault ?? describeFault(event.error) } }),
   version: '1',
   context: ({ input }): AwaitingContext => ({
     camera: input.camera,

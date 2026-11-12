@@ -1,6 +1,7 @@
 import { setup, types } from 'xstate';
 
 import { eventSchemas } from '#machines/machine-schemas.js';
+import { describeFault } from '#machines/machine-fault.js';
 
 /**
  * Conservative limit that leaves headroom for gizmo renderers, screenshot
@@ -75,6 +76,8 @@ export const resolveViewerSurfaceByteBudget = (device: WebglContextDevice): numb
 
 // Type definitions
 type WebglContextMachineContext = {
+  /** The first defect this actor caught at its root (MC-R12), the likeliest cause of any after it; it keeps its state and answers every event. */
+  fault?: string;
   /** Live viewer contexts, WebGL and WebGPU alike. */
   count: number;
   limit: number;
@@ -130,6 +133,9 @@ export const webglContextMachine = setup({
   },
 }).createMachine({
   id: 'webglContext',
+  // A defect (an effect that threw, a failed child, a send to no child) is recorded, never fatal (MC-R12). The first
+  // is kept: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }) => ({ context: { fault: context.fault ?? describeFault(event.error) } }),
   context: ({ input }) => ({
     count: 0,
     limit: input?.limit ?? maxWebglContexts,

@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "tag": "desktop-staging@0.1.0-staging.889",
+  "channel": "staging",
+  "version": "1.8.89",
+  "sourceCommit": "0f54f34f1254b6429cf7bdaab605bf366c571263",
+  "artifacts": [
+    {
+      "target": "linux-x64",
+      "kind": "linux-tar",
+      "name": "Tau-linux-x64.tar.gz",
+      "format": "tar.gz",
+      "roles": ["archive"],
+      "sha256": "5ca1db2ee5f70eef77a307faa745540aa3d5b8a0e175b6e6201762f734fb8c72",
+      "sha512": "KaJobd7gJsoEOpEZhDzxaqL58XY0ghfnLpmMeoUw9pIroKgDQ0t65tjw5mrBrE26mBWytyXIXwRoQGvoQlPGDg==",
+      "size": 321219174
+    },
+    {
+      "target": "linux-x64",
+      "kind": "linux-deb-runtime",
+      "name": "tau-staging-runtime-1.8.89_1.8.89_amd64.deb",
+      "format": "deb",
+      "roles": ["runtime", "repository"],
+      "sha256": "91c15f95bafb092948b7ee2510c0eced05376d12d33c9bc66300fcc2a05c3e53",
+      "sha512": "Vl6jYLa1wOoyH/RMLi5qfL7RGPj4WyoIXpoEhVib3GsiZ62rjpnWOqHEL6ate9BtZUE5cB4007uL8tbX0SKh3g==",
+      "size": 241958008
+    },
+    {
+      "target": "linux-x64",
+      "kind": "linux-deb-selector",
+      "name": "tau-staging_1.8.89_amd64.deb",
+      "format": "deb",
+      "roles": ["installer", "repository"],
+      "sha256": "9c0a3533345842b3e669c066b5ca1148389f6d1e0ed65a7a4bfaca379d7f9239",
+      "sha512": "vN/fGVKW4u4Zig/SXmY09U28ngJo6PzHoA1OyeNCSnLBolFvh3W9rZMyQe8ZSgXn3xjp5YwIjRKHyVCRHcFccA==",
+      "size": 83170
+    },
+    {
+      "target": "linux-x64",
+      "kind": "linux-appimage-deb-runtime",
+      "name": "tau-staging-appimage-runtime-1.8.89_1.8.89_amd64.deb",
+      "format": "deb",
+      "roles": ["runtime", "repository"],
+      "sha256": "12fc1721e3bc7ca549e36ea54c4abfecf243ae56962e75428d166b70b4f57b76",
+      "sha512": "15HIzrY4OmDPrAwx8tPHqBJ33IRNKxZ0V/M+DEOMDlpPL74KjDTyNu3P+bwN8AD9Fc9lbCtp3PLQhk+kAVQctg==",
+      "size": 322371874
+    },
+    {
+      "target": "linux-x64",
+      "kind": "linux-appimage-deb-selector",
+      "name": "tau-staging-appimage_1.8.89_amd64.deb",
+      "format": "deb",
+      "roles": ["installer", "repository"],
+      "sha256": "90c3f574292bab096e2f26d370ff1006fd11f07ae04b452103d52c5c86d16c48",
+      "sha512": "KrtKGgJdO7nFNoftJZaLs7jpgHxA1AbFZaoIuV4cpd1xWuTYEyezwelJtLqGVBIN0Fgjl1nkR672OVhJ5Ua4KQ==",
+      "size": 83254
+    },
+    {
+      "target": "linux-x64",
+      "kind": "linux-appimage",
+      "name": "Tau-linux-x64.AppImage",
+      "format": "AppImage",
+      "roles": ["installer", "update"],
+      "sha256": "840fe3b8a459200cf14480345f8ac3b59b049402a7a1e9a56095d2630ad086aa",
+      "sha512": "w78miBTB2si4hFdfo44yZQAdh8iVVxF5cyJau2LuUD42hCkKBXjSI+3g7EE7CD8zfE5FbEciFXpMvRdVigBKlA==",
+      "size": 324344896
+    }
+  ]
+}

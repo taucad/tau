@@ -373,9 +373,17 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     }),
 
     logger: {
-      // Configured to use NestJS logger
+      // Configured to use NestJS logger. An error goes in as pino's `err` object, so the serializer and
+      // redaction keep its code and message; after a placeholder-free message pino drops extra arguments,
+      // which hid every pooler refusal behind a bare INTERNAL_SERVER_ERROR (database connection audit R1).
       log(level, message, ...args: unknown[]) {
-        logger[loggerFromLogLevel[level]](redactEmailAddresses(message), ...args);
+        const error = args.find((argument): argument is Error => argument instanceof Error);
+        const text = redactEmailAddresses(message);
+        if (error === undefined) {
+          logger[loggerFromLogLevel[level]](text);
+        } else {
+          logger[loggerFromLogLevel[level]]({ err: error }, text);
+        }
       },
     },
 

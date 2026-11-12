@@ -91,6 +91,12 @@ export const maintenanceEnvironmentSchema = environmentSchemaBase
 export type MaintenanceEnvironment = z.infer<typeof maintenanceEnvironmentSchema>;
 
 /**
+ * The maintenance worker's PostgreSQL pool cap: one connection per lane. In the API app it shares the
+ * API's pooler login, so `connection-budget.test.ts` counts it against `DATABASE_POOLER_POOL_SIZE`.
+ */
+export const maintenanceDatabasePoolMax = 2;
+
+/**
  * Parses the maintenance command's configuration, naming the failing fields
  * and never their values.
  *

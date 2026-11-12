@@ -173,7 +173,18 @@ const r2Actions = [
 const r2Windows = ['hour', 'month'] as const;
 
 /** `tau.db.application`: the PostgreSQL `application_name` of a connection, mapped to Tau's processes. */
-const databaseApplications = ['api', 'billing-operations', 'maintenance', 'mirror', 'release', 'other'] as const;
+const databaseApplications = [
+  'api',
+  'api-background',
+  'billing-operations',
+  'maintenance',
+  'mirror',
+  'release',
+  'other',
+] as const;
+
+/** `tau.db.pool`: the API's client-side PostgreSQL pools, request traffic and the background loops. */
+const databasePools = ['request', 'background'] as const;
 
 /** `tau.storage.accounting.task`: the accounting scheduler's periodic tasks. */
 const accountingTasks = ['usage', 'r2_analytics', 'db', 'hot_projects', 'route'] as const;
@@ -1909,6 +1920,44 @@ export const TauMetrics = {
     name: 'tau.db.connection_budget',
     unit: '{connection}',
     description: 'Client connections the database admits: max_connections less the superuser reserve',
+    attributes: z.object({}),
+  }),
+
+  databaseClientConnections: defineUpDownCounter({
+    name: 'tau.db.client.connections',
+    unit: '{connection}',
+    description:
+      'PostgreSQL connections this process holds open, by client pool. Each process reports only its own sockets, so sum across instances',
+    attributes: z.object({
+      'tau.db.pool': z.enum(databasePools),
+    }),
+  }),
+
+  databaseClientConnects: defineCounter({
+    name: 'tau.db.client.connects',
+    unit: '{connection}',
+    description: 'PostgreSQL connections this process opened, by client pool and whether the TCP connect succeeded',
+    attributes: z.object({
+      'tau.db.pool': z.enum(databasePools),
+      outcome: z.enum(['ok', 'error']),
+    }),
+  }),
+
+  databaseClientRefusals: defineCounter({
+    name: 'tau.db.client.refusals',
+    unit: '{query}',
+    description:
+      'Queries that failed because the database or its session pooler refused a connection (53300, Supavisor EMAXCONN), by client pool',
+    attributes: z.object({
+      'tau.db.pool': z.enum(databasePools),
+    }),
+  }),
+
+  databasePoolerCapacity: defineGauge({
+    name: 'tau.db.pooler.capacity',
+    unit: '{connection}',
+    description:
+      'Client connections the session pooler admits for the API login (DATABASE_POOLER_POOL_SIZE); every instance reports the same value',
     attributes: z.object({}),
   }),
 

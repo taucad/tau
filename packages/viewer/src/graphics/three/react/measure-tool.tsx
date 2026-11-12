@@ -1072,7 +1072,8 @@ export function MeasureTool(): React.JSX.Element {
     (key: string, isActive: boolean): void => {
       const previous = catalogSourceRef.current;
       if (previous === key) {
-        // A session rebuilt around a new surface reports the source it starts on: the list taken from it still holds.
+        // A session rebuilt around a new surface reports the source it starts on, which changed nothing here. (Its first
+        // presented frame still drops the list, as a new camera does.)
         return;
       }
       catalogSourceRef.current = key;

@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, isNull, or } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, or, sql } from 'drizzle-orm';
 import type { Database } from '@taucad/api-database/owner-lock';
 import { project, projectDeletion, projectGitLfsObject } from '@taucad/api-database/schema';
 
@@ -14,6 +14,8 @@ export type LfsReservation = {
   readonly projectId: string;
   readonly oid: string;
   readonly size: number;
+  /** Whether the upload finished (`finalized_at` set); an unfinalized reservation may hold no bytes yet. */
+  readonly finalized: boolean;
 };
 
 /** A worker bound: the default and the largest accepted value. */
@@ -64,6 +66,7 @@ export async function* activeLfsReservationPages(
         projectId: projectGitLfsObject.projectId,
         oid: projectGitLfsObject.oid,
         size: projectGitLfsObject.sizeBytes,
+        finalized: sql<boolean>`${projectGitLfsObject.finalizedAt} is not null`,
       })
       .from(projectGitLfsObject)
       .innerJoin(project, eq(project.id, projectGitLfsObject.projectId))

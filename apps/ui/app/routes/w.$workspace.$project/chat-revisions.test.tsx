@@ -1219,7 +1219,7 @@ describe('Revisions pane vocabulary and History', () => {
     ['deciding a merge', { attention: 1, conflicts: [conflicted] }, 'Needs your decision on main'],
     ['before the line is known', { line: { kind: 'unknown' } as const, headRevisionId: undefined }, 'Loading history…'],
   ] as const)(
-    'says one sentence %s, identical in the header’s name, its card and the strip (RA11)',
+    'says one sentence %s, identical in the header’s name, its tooltip and the strip (RA11)',
     async (_, over, sentence) => {
       const user = userEvent.setup();
       revisionStatusHarness.rows = [row({ revisionId: 'rev-4', revisionNumber: 4 })];
@@ -1242,12 +1242,7 @@ describe('Revisions pane vocabulary and History', () => {
       expect(trigger.getAttribute('aria-label')).toContain(sentence.replaceAll(' · ', ', ').replace(/…$/u, ''));
       await user.tab();
       expect(trigger).toHaveFocus();
-      const card = await waitFor(() => {
-        const found = document.querySelector('[data-slot="revision-card"]');
-        expect(found).not.toBeNull();
-        return found!;
-      });
-      expect(card).toHaveTextContent(sentence);
+      expect(await screen.findByRole('tooltip')).toHaveTextContent(sentence);
     },
   );
 

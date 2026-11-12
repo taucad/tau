@@ -72,6 +72,11 @@ export const staticAuthConfig = {
     updateAge: 60 * 60 * 24, // 24 hours
   },
   account: accountOptions,
+  // Password-reset tokens live in the `verification` identifier; hashing it means a database read
+  // never yields a working reset link. Other identifiers keep their plugins' own storage.
+  verification: {
+    storeIdentifier: { default: 'plain', overrides: { 'reset-password:': 'hashed' } },
+  },
   rateLimit: {
     enabled: true,
     window: 10,

@@ -1,4 +1,4 @@
-import type { Message, ToolResultMessage, UserMessage } from '@earendil-works/pi-ai';
+import type { Message, ToolResultMessage } from '@earendil-works/pi-ai';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { util as zodUtility } from 'zod';
 import type {
@@ -101,32 +101,6 @@ ${Object.entries(memory)
 </memory_guidelines>
 </system-reminder>`;
 
-/** Inject Tau's skills catalogue and AGENTS.md memory onto pi's string/message seams. @public */
-export const createClientContextMiddleware =
-  (context?: ClientContext): ModelCallMiddleware =>
-  async (request, next) => {
-    if (!context) {
-      return next(request);
-    }
-    const skills = context.skills ?? [];
-    const memory = context.memory ?? {};
-    const memoryMessage: UserMessage | undefined =
-      Object.keys(memory).length === 0
-        ? undefined
-        : { role: 'user', content: [{ type: 'text', text: memoryPrompt(memory) }], timestamp: 0 };
-    return next({
-      ...request,
-      context: {
-        ...request.context,
-        systemPrompt:
-          skills.length === 0
-            ? request.context.systemPrompt
-            : `${request.context.systemPrompt ?? ''}\n\n${skillsPrompt(skills)}`,
-        messages: memoryMessage ? [memoryMessage, ...request.context.messages] : request.context.messages,
-      },
-    });
-  };
-
 /** One previously activated skill retained by the host. @public */
 export type RecentSkill = {
   readonly skillName: string;
@@ -141,17 +115,6 @@ export type RecentSkill = {
 export type RecentSkillsPort = {
   load(chatId: string): Promise<readonly RecentSkill[]>;
   remove?(chatId: string, skillName: string): Promise<void>;
-};
-
-const isRecentSkillsMessage = (message: AgentMessage): boolean => {
-  if (message.role !== 'user') {
-    return false;
-  }
-  const text =
-    typeof message.content === 'string'
-      ? message.content
-      : message.content.map((block) => (block.type === 'text' ? block.text : '')).join('');
-  return text.startsWith('<recently_used_skills>');
 };
 
 const formatRecentSkills = (skills: readonly RecentSkill[], includeContent: boolean): string =>
@@ -176,13 +139,6 @@ ${skills
   })
   .join('\n')}
 </recently_used_skills>`;
-
-type RecentSkillsMiddlewareOptions = {
-  readonly chatId: string;
-  readonly store?: RecentSkillsPort | undefined;
-  readonly currentSkills?: readonly ClientSkill[] | undefined;
-  readonly includeContent: () => boolean;
-};
 
 const resolveRecentSkills = async (options: {
   readonly chatId: string;
@@ -391,32 +347,6 @@ export const createTurnContextSnapshot = async (options: {
     ].filter((message): message is UserProviderMessage => message !== undefined),
   };
 };
-
-/** Reconcile and inject recently activated skills without persisting an ephemeral provider view. @public */
-export const createRecentSkillsMiddleware =
-  (options: RecentSkillsMiddlewareOptions): ModelCallMiddleware =>
-  async (request, next) => {
-    const skills = await resolveRecentSkills({
-      chatId: options.chatId,
-      store: options.store,
-      currentSkills: options.currentSkills,
-    });
-    if (skills.length === 0) {
-      return next(request);
-    }
-    const recent: UserMessage = {
-      role: 'user',
-      content: [{ type: 'text', text: formatRecentSkills(skills, options.includeContent()) }],
-      timestamp: 0,
-    };
-    return next({
-      ...request,
-      context: {
-        ...request.context,
-        messages: [recent, ...request.context.messages.filter((message) => !isRecentSkillsMessage(message))],
-      },
-    });
-  };
 
 const toolJson = (message: ToolResultMessage): unknown => {
   const details = message.details as HostToolExecutionDetails | undefined;

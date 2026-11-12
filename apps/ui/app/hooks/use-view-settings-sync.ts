@@ -64,12 +64,6 @@ const selectFramingActor = (
 const isAwaitingFirstFrame = (graphicsRef: ActorRefFrom<typeof graphicsMachine>, entryPath: string): boolean =>
   !selectFramed(graphicsRef) || selectFramingIdentity(graphicsRef) !== entryPath;
 
-/** The camera's last change: which source made the pose it holds now. */
-const selectLastCameraChange = (
-  camera: NonNullable<ReturnType<typeof useGraphicsCamera>>,
-): ReturnType<NonNullable<ReturnType<typeof useGraphicsCamera>>['getSnapshot']>['context']['lastChange'] =>
-  camera.getSnapshot().context.lastChange;
-
 /** The camera's pose now. */
 const selectCameraView = (
   camera: NonNullable<ReturnType<typeof useGraphicsCamera>>,
@@ -80,7 +74,7 @@ const selectCameraView = (
 const selectCameraInputIdle = (camera: NonNullable<ReturnType<typeof useGraphicsCamera>>): boolean =>
   camera.getSnapshot().matches({ input: 'idle' });
 
-/* The changes a first frame makes: the frame itself and the record's pose applied over it. */
+/* The changes no person makes: the first frame, the record's pose applied over it, and bounds and viewport updates. */
 const firstFrameSources: ReadonlySet<string> = new Set(['framing', 'persisted', 'bounds', 'viewport']);
 
 /** A record's camera, as the pose framing applies after the entry's first frame. */
@@ -457,10 +451,7 @@ export function useViewSettingsSync({
         if (!firstFrameEntryRef.current || firstFrameEntryRef.current.identity !== framedEntry) {
           firstFrameEntryRef.current = { identity: framedEntry };
           const personChanged = personChangedEntryRef.current?.identity === framedEntry;
-          firstFrameReceiptRef.current =
-            !personChanged && firstFrameSources.has(selectLastCameraChange(session.rig.actorRef).source)
-              ? { view: next, consumed: false }
-              : undefined;
+          firstFrameReceiptRef.current = personChanged ? undefined : { view: next, consumed: false };
         }
         const firstFrameView = firstFrameReceiptRef.current?.view;
         if (includePose && firstFrameView && !cameraViewEqual(firstFrameView, next) && firstFrameReceiptRef.current) {
@@ -603,14 +594,18 @@ export function useViewSettingsSync({
     /* The camera actor also emits when its input state changes (dragging, settling, idle); only a new revision is
      * a view change. */
     let cameraRevision = session?.rig.actorRef.getSnapshot().context.revision;
+    /* The pose at the last view change: a field of view or up change that leaves it is no person pose. */
+    let cameraPose = session ? selectCameraView(session.rig.actorRef) : undefined;
     const cameraSubscription = session?.rig.actorRef.subscribe(({ context }) => {
       if (context.revision === cameraRevision) {
         return;
       }
       cameraRevision = context.revision;
+      const posed = cameraPose === undefined || !cameraViewEqual(cameraPose, context.view);
+      cameraPose = context.view;
       if (!selectFramed(graphicsRef)) {
         personChangedEntryRef.current = undefined;
-      } else if (!firstFrameSources.has(context.lastChange.source)) {
+      } else if (posed && !firstFrameSources.has(context.lastChange.source)) {
         personChangedEntryRef.current = { identity: selectFramingIdentity(graphicsRef) };
       }
       lastCameraEmissionRef.current = Date.now();

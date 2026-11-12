@@ -968,6 +968,18 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       expect(poseWrites(harness.writeRecord)).toEqual([]);
     });
 
+    it('should never write the first automatic frame after a field of view change inside its settle window', () => {
+      const harness = mountFramed(initial());
+      advance(settle * 4);
+      harness.frame(4, smallBounds);
+      act(() => {
+        harness.rig.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 30 });
+      });
+      expect(harness.rig.getSnapshot().context.lastChange.source).toBe('fov');
+      advance(settle * 4);
+      expect(poseWrites(harness.writeRecord)).toEqual([]);
+    });
+
     it('should save a first drag that a viewport change follows inside the first settle window', () => {
       const harness = mountFramed(initial());
       advance(settle * 4);

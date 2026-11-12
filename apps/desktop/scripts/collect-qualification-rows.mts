@@ -103,21 +103,21 @@ export const collectQualificationRows = (
   if (manifest.sourceCommit !== request.sourceCommit || manifest.channel !== request.channel) {
     throw new Error('Final candidate differs from workflow source/channel');
   }
-  if (request.scope !== 'all' && manifest.channel !== 'staging') {
-    throw new Error('Platform-scoped evidence is staging qualification only');
+  // D-H5: production evidence is per platform, so only the Mac and Linux platform scopes produce it; Windows stays
+  // staging qualification-only.
+  if (request.scope === 'windows' && manifest.channel !== 'staging') {
+    throw new Error('Windows evidence is staging qualification only');
   }
-  if (
-    request.kind === 'vm' &&
-    (!['macos', 'windows', 'linux'].includes(request.scope) || manifest.channel !== 'staging')
-  ) {
-    throw new Error('Clean-host receipts come only from a Mac-, Windows- or Linux-scoped staging producer');
+  if (request.kind === 'vm' && !['macos', 'windows', 'linux'].includes(request.scope)) {
+    throw new Error('Clean-host receipts come only from a Mac-, Windows- or Linux-scoped producer');
   }
   if (request.scope === 'windows' && request.kind !== 'vm') {
     throw new Error('Windows scope requires consumer VM evidence');
   }
-  if (request.scope === 'macos') {
-    // The final candidate must be exactly the Mac-only candidate that publication will later admit.
-    desktopCandidateRoutes(manifest, 'macos');
+  if (request.scope === 'macos' || (request.scope === 'linux' && manifest.channel === 'production')) {
+    // The final candidate must be exactly the platform candidate that publication will later admit. Staging Linux
+    // progress may still be read from the Linux rows of a full candidate.
+    desktopCandidateRoutes(manifest, request.scope);
   }
   const selectedRows = scopeRows(request.scope);
   const expected = selectedRows.map(([id]) => id).sort();

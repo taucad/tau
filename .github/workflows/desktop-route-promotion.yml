@@ -12,9 +12,9 @@ on:
         options: [promote-routes, renew-routes]
         required: true
       scope:
-        description: All qualified routes, or an Apple silicon-only staging ZIP/DMG catalog (promotion only)
+        description: All qualified routes, or one platform's catalog (Apple silicon ZIP/DMG, or Linux APT/AppImage) on either channel (D-H5, promotion only)
         type: choice
-        options: [all, macos]
+        options: [all, macos, linux]
         default: all
       tag:
         description: Exact candidate tag (promotion only)
@@ -44,7 +44,7 @@ jobs:
   # `release-desktop-staging.yml` for a full candidate (`intel`) of the same commit and stops: the
   # operator promotes that tag once its installer candidate and qualification runs are green. A
   # production tag (`desktop@*`) always packages both. Only the `all` scope asks for Intel, so a
-  # per-platform scope (`macos` today, and a `linux` scope once publication has one) never does.
+  # per-platform scope (`macos` or `linux`) never does.
   candidate:
     name: Require a full candidate
     if: github.ref == 'refs/heads/main'

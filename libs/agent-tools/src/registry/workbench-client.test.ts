@@ -28,4 +28,13 @@ describe('createRuntimeWorkbenchClient', () => {
     expect(await client.isModelFile('notes.md')).toBe(false);
     expect(connect).toHaveBeenCalledTimes(2);
   });
+
+  it('passes the device port through on a host with a person and offers none without one (BD7)', async () => {
+    const markViewFieldsSet = vi.fn();
+    await createRuntimeWorkbenchClient(undefined, { markViewFieldsSet }).markViewFieldsSet?.('v-1', {
+      'display.grid': true,
+    });
+    expect(markViewFieldsSet).toHaveBeenCalledExactlyOnceWith('v-1', { 'display.grid': true });
+    expect(createRuntimeWorkbenchClient()).not.toHaveProperty('markViewFieldsSet');
+  });
 });

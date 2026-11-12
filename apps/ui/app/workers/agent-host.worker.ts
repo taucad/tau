@@ -104,6 +104,7 @@ const visibility: ResidentWorkerContext['visibility'] = {
 let tabId: string | undefined;
 let requestRebridge: ResidentWorkerContext['requestRebridge'];
 let forwardTelemetry: ResidentWorkerContext['forwardTelemetry'];
+let forwardViewFieldsSet: ResidentWorkerContext['viewFieldsSet'];
 
 const requireTab = (): string => {
   if (tabId === undefined) {
@@ -122,6 +123,7 @@ const hosts = createProjectHosts<BrowserProjectHost>(async (args) => {
     visibility,
     requestRebridge,
     forwardTelemetry: (entry) => forwardTelemetry?.(entry),
+    viewFieldsSet: (set) => forwardViewFieldsSet?.(set),
   });
 });
 
@@ -213,5 +215,8 @@ workerScope.addEventListener('message', (event) => {
   };
   forwardTelemetry = (entry) => {
     served.notify('telemetry', { entry });
+  };
+  forwardViewFieldsSet = (set) => {
+    served.notify('viewFieldsSet', set);
   };
 });

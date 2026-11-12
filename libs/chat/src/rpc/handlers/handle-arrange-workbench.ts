@@ -14,7 +14,7 @@ import type {
   ArrangeWorkbenchErrorCode,
 } from '#schemas/tools/arrange-workbench.tool.schema.js';
 import type { RpcResult } from '#schemas/rpc.schema.js';
-import type { RpcFileSystem, RpcWorkbenchClient } from '#rpc/rpc-dependencies.js';
+import type { RpcFileSystem, RpcWorkbenchClient, ViewFieldsSet } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
 // oxlint-disable eslint/no-await-in-loop -- Ordered checked writes and conflict retries require sequential I/O.
 
@@ -23,6 +23,25 @@ type Result = RpcResult<'arrange_workbench'>;
 type Group = { kind: 'group'; size?: number; tabs: WorkbenchTab[]; active?: number };
 type Node = Group | { kind: 'split'; size?: number; direction: 'row' | 'column'; children: Node[] };
 type Write = { path: string; text?: string; previous?: string };
+type ViewInput = NonNullable<ArrangeWorkbenchInput['views']>[number];
+
+/* The inheritable leaves a view patch names, with the values written: these are set in that view (V8). */
+const namedViewFields = (patch: ViewInput, record: WorkbenchView): ViewFieldsSet => {
+  const fields: { -readonly [Leaf in keyof ViewFieldsSet]: ViewFieldsSet[Leaf] } = {};
+  if (patch.fieldOfView !== undefined) {
+    fields.fieldOfView = record.fieldOfView;
+  }
+  if (patch.upDirection !== undefined) {
+    fields.upDirection = record.upDirection;
+  }
+  for (const leaf of Object.keys(patch.display ?? {}) as Array<keyof WorkbenchView['display']>) {
+    fields[`display.${leaf}`] = record.display[leaf];
+  }
+  if (patch.grid !== undefined) {
+    fields['grid.unit'] = record.grid.unit;
+  }
+  return fields;
+};
 const encoder = new TextEncoder();
 const failure = (errorCode: ArrangeWorkbenchErrorCode, message: string): Failure => ({
   success: false,
@@ -237,6 +256,7 @@ export async function handleArrangeWorkbench(
       }
       const inputViews = new Set<string>();
       const viewWrites = new Map<string, string>();
+      const viewFieldsSet = new Map<string, ViewFieldsSet>();
       for (const [index, patch] of (input.views ?? []).entries()) {
         if (inputViews.has(patch.id)) {
           return failure('VALIDATION_ERROR', `views[${index}].id: duplicate view id ${patch.id}. Nothing was written.`);
@@ -284,6 +304,7 @@ export async function handleArrangeWorkbench(
         }
         viewRecords.set(patch.id, parsed.data);
         viewWrites.set(patch.id, workbenchRecords.view.serialize(parsed.data));
+        viewFieldsSet.set(patch.id, namedViewFields(patch, parsed.data));
         if (
           !tabs(viewer).some((tab) => tab.kind === 'view' && tab.view === patch.id) &&
           !input.close?.some((tab) => tab.kind === 'view' && tab.view === patch.id)
@@ -423,6 +444,16 @@ export async function handleArrangeWorkbench(
         });
       }
       if (!conflict) {
+        /* Only for views this call wrote, and only once their records are on disk: a refused call sets nothing. */
+        for (const [id, fields] of viewFieldsSet) {
+          if (currentViewIds.has(id) && Object.keys(fields).length > 0) {
+            try {
+              await workbench?.markViewFieldsSet?.(id, fields);
+            } catch {
+              // The record is written; a device that cannot keep the list still shows the value.
+            }
+          }
+        }
         return {
           success: true,
           status: 'written',

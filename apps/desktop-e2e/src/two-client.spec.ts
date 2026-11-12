@@ -48,6 +48,7 @@ import { startGitHttpBackend } from '#support/two-client/git-http-backend.js';
 import type { GitHttpBackendFixture } from '#support/two-client/git-http-backend.js';
 import {
   basicAuthorization,
+  commitAsTauSave,
   forgetSeededProjects,
   leaveProjectStorageHeadroom,
   launchTauCloudDesktop,
@@ -1121,14 +1122,17 @@ describe('a project on the browser client', () => {
       const remoteUrl = `${desktopE2EApiUrl}/v1/git/${projectId}.git`;
       const cloned = await runGit(['-c', authorization, 'clone', '--quiet', remoteUrl, '.'], peer);
       expect(cloned.code, cloned.stderr).toBe(0);
-      const configuredName = await runGit(['config', 'user.name', `${tag} peer`], peer);
-      expect(configuredName.code, configuredName.stderr).toBe(0);
-      const configuredEmail = await runGit(['config', 'user.email', 'w18-peer@tau.invalid'], peer);
-      expect(configuredEmail.code, configuredEmail.stderr).toBe(0);
       await writeFile(join(peer, 'main.scad'), peerVersion, 'utf8');
       const staged = await runGit(['add', 'main.scad'], peer);
       expect(staged.code, staged.stderr).toBe(0);
-      const committed = await runGit(['commit', '--quiet', '-m', `${tag} peer divergence`], peer);
+      /* The peer is another of the owner's devices, so it records its save as Tau
+       * does: Tau Cloud refuses an unrecorded commit on a project not linked to
+       * GitHub (665276e5f3). */
+      const committed = await commitAsTauSave(
+        async (...args) => runGit(args, peer),
+        required(owner, 'The account was not seeded.').userId,
+        `${tag} peer divergence`,
+      );
       expect(committed.code, committed.stderr).toBe(0);
       const pushed = await runGit(['-c', authorization, 'push', '--quiet', 'origin', 'HEAD:refs/heads/main'], peer);
       expect(pushed.code, pushed.stderr).toBe(0);

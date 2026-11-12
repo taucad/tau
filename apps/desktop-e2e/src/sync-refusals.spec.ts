@@ -25,6 +25,7 @@ import type { GitRefusal } from '#support/two-client/git-faults.js';
 import {
   addProjectCollaborator,
   basicAuthorization,
+  commitAsTauSave,
   forgetSeededProjects,
   projectLfsBytes,
   launchTauCloudDesktop,
@@ -35,6 +36,8 @@ import {
   setProjectLfsBytes,
   spendProjectStorage,
   tauCloudOwnerIds,
+  tauNoreplyAddress,
+  tauRecordedMessage,
 } from '#support/two-client/tau-cloud.js';
 import type { StorageUsage, TauCloudOwnerIds } from '#support/two-client/tau-cloud.js';
 import { startUiServer } from '#support/two-client/ui-server.js';
@@ -376,7 +379,7 @@ describe('a Pro owner whose pushes are refused', () => {
  * act on, and the name `conflicts` is kept for those lines. */
 describe('a Pro owner and a decision that travels (D14)', () => {
   it('should refuse a conflicted revision pushed to main, in words, and admit it on a conflict line', async () => {
-    const { client, bearer } = required(pro);
+    const { client, bearer, owner } = required(pro);
     const projectId = await connectAndBackUp(client, 'W6 Conflicted Push');
     const peer = await mkdtemp(join(tmpdir(), 'tau-w6-conflicted-push-'));
     try {
@@ -390,16 +393,17 @@ describe('a Pro owner and a decision that travels (D14)', () => {
       expect(cloned.code, cloned.stderr).toBe(0);
       const head = await output('rev-parse', 'HEAD');
       const tree = await output('rev-parse', 'HEAD^{tree}');
-      /* A commit object as Tau writes a conflicted revision: its terms in `jj:trees`. */
+      /* A commit object as Tau writes a conflicted revision: its terms in `jj:trees`,
+       * and the owner's own Tau record, without which Tau Cloud refuses it for its
+       * authorship (665276e5f3) before D14 can. */
       const body = [
         `tree ${tree}`,
         `parent ${head}`,
-        'author W6 <w6@tau.invalid> 1790000000 +0000',
-        'committer W6 <w6@tau.invalid> 1790000000 +0000',
+        `author ${owner.userId} <${tauNoreplyAddress(owner.userId)}> 1790000000 +0000`,
+        'committer Tau <noreply@tau.new> 1790000000 +0000',
         `jj:trees ${tree} ${tree} ${tree}`,
         '',
-        'Needs your decision',
-        '',
+        tauRecordedMessage(owner.userId, 'Needs your decision', [head]),
       ].join('\n');
       const file = join(peer, '.git', 'conflicted-commit');
       await writeFile(file, body, 'utf8');
@@ -462,7 +466,11 @@ describe('a free-tier owner (W8)', () => {
     // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- Playwright's locator method keeps rendered line breaks.
     client.page.getByRole('region', { name: 'Sync' }).filter({ visible: true }).first().innerText();
 
-  /** A stock-git clone of the project as the owner, for pushes a client would not make. */
+  /**
+   * A stock-git clone of the project as the owner, for pushes a client would not
+   * make. Its commits go through `commitAsTauSave`, so they carry the owner's Tau
+   * record as another of the owner's devices would (665276e5f3).
+   */
   const clonePeer = async (projectId: string, label: string): Promise<Readonly<{ directory: string; git: GitIn }>> => {
     const directory = await mkdtemp(join(tmpdir(), `tau-w8-${label}-`));
     const authorization = `http.extraHeader=Authorization: ${basicAuthorization(required(free).bearer)}`;
@@ -586,7 +594,7 @@ describe('a free-tier owner (W8)', () => {
     try {
       await writeFile(join(peer.directory, 'big.scad'), `// ${incompressible(384 * 1024)}\n`, 'utf8');
       await peer.git('add', 'big.scad');
-      await peer.git('commit', '--quiet', '-m', 'Over the allowance');
+      await commitAsTauSave(peer.git, required(free).owner.userId, 'Over the allowance');
       const pushed = await peer.git('push', 'origin', 'HEAD:main');
       expect(pushed.code, 'D17: the hook must refuse the pack').not.toBe(0);
       expect(pushed.stderr).toContain('Tau: storage quota exceeded');
@@ -705,7 +713,7 @@ describe('a free-tier owner (W8)', () => {
       for (let push = 1; push <= 12 && after === undefined; push += 1) {
         await writeFile(join(peer.directory, `pack-${String(push)}.scad`), `// ${incompressible(4096)}\n`, 'utf8');
         await peer.git('add', '.');
-        await peer.git('commit', '--quiet', '-m', `Pack ${String(push)}`);
+        await commitAsTauSave(peer.git, required(free).owner.userId, `Pack ${String(push)}`);
         const pushed = await peer.git('push', 'origin', 'HEAD:main');
         expect(pushed.code, pushed.stderr).toBe(0);
         if (push >= 5) {

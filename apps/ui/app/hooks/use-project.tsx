@@ -516,9 +516,9 @@ export function ProjectProvider({
   );
   const providedMachine =
     provide === undefined
-      ? projectMachine.provide({
-          actors: profile === 'editor' ? { ...projectActors, viewRecord: viewRecordSession } : projectActors,
-        })
+      ? profile === 'editor'
+        ? projectMachine.provide({ actors: { ...projectActors, viewRecord: viewRecordSession } })
+        : projectMachine.provide({ actors: projectActors })
       : projectMachine.provide({ actors: provide.actors });
   const actorRef = useActorRef(providedMachine, {
     input: {

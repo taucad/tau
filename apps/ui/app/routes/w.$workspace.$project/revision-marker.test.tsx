@@ -577,11 +577,7 @@ describe('RevisionMenu', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Create version…' }));
     await user.type(await screen.findByRole('textbox', { name: 'Version name' }), 'Ready for print');
     await user.click(screen.getByRole('button', { name: 'Create version' }));
-    /*
-     * The form hands the name to the tag verb as typed, spaces included, and
-     * both legs then refuse it as a ref name (`refs/tags/Ready for print`):
-     * the open tag-name question in the C3 report.
-     */
+    /* The name goes to the tag verb as typed, spaces included: the ref is the number (B6). */
     expect(revisionStatusHarness.commands.tag).toHaveBeenCalledWith({ name: 'Ready for print', revisionId: 'rev-2' });
   });
 
@@ -590,8 +586,15 @@ describe('RevisionMenu', () => {
     expect(nextVersionNumber([card({ start: 'created' })])).toBe(2);
   });
 
-  it('renames a version, which keeps its number, and offers no way to remove it (Q13)', async () => {
+  it('renames a version at its own number, removing nothing and asking nothing, and offers no way to remove it (Q13)', async () => {
     const user = userEvent.setup();
+    /* A Tau Cloud owner: the rename used to take the old name off the server through a removal dialog. */
+    revisionStatusHarness.role = 'owner';
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+    };
+    const fetching = vi.spyOn(globalThis, 'fetch');
     renderMenu(card({ tags: ['Fit check'], versions: [{ name: 'Fit check', number: 3 }] }));
     await user.click(screen.getByRole('button', { name: 'More' }));
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
@@ -605,10 +608,14 @@ describe('RevisionMenu', () => {
     await user.clear(field);
     await user.type(field, 'Fit check 2');
     await user.click(screen.getByRole('button', { name: 'Rename' }));
-    expect(revisionStatusHarness.commands.tag).toHaveBeenCalledWith({ name: 'Fit check 2', revisionId: 'rev-2' });
-    await waitFor(() => {
-      expect(revisionStatusHarness.commands.deleteTag).toHaveBeenCalledWith('Fit check');
+    expect(revisionStatusHarness.commands.tag).toHaveBeenCalledExactlyOnceWith({
+      name: 'Fit check 2',
+      revisionId: 'rev-2',
+      number: 3,
     });
+    expect(fetching).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    fetching.mockRestore();
   });
 
   it('starts a new branch from the entry (round 16)', async () => {

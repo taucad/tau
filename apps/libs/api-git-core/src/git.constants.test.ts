@@ -1061,19 +1061,20 @@ describe('pre-receive version-number check (B6)', () => {
     git('init', '--quiet', '--initial-branch=main', '.');
     git('commit', '--quiet', '--allow-empty', '-m', 'base');
     const base = git('rev-parse', 'HEAD');
-    /** One annotated version tag on the base commit, recording `record` as its `Tau-Tag` trailer. */
-    const tag = async (name: string, record: Readonly<Record<string, unknown>> | undefined): Promise<string> => {
+    /** One annotated version tag on the base commit named `name`, by a tagger at `seconds`. */
+    const tag = async (ref: string, name: string, seconds = 1_790_000_000): Promise<string> => {
       const file = path.join(fixture, '.git', `tag-${String(Math.random()).slice(2)}`);
       await writeFile(
         file,
         [
           `object ${base}`,
           'type commit',
-          `tag ${name}`,
-          `tagger Someone <${pusher}@users.noreply.tau.new> 1790000000 +0000`,
+          `tag ${ref}`,
+          `tagger Someone <${pusher}@users.noreply.tau.new> ${String(seconds)} +0000`,
           '',
           name,
-          ...(record === undefined ? [] : ['', `Tau-Tag: ${JSON.stringify({ version: 1, ...record })}`]),
+          '',
+          `Tau-Tag: ${JSON.stringify({ version: 2, name })}`,
           '',
         ].join('\n'),
         'utf8',
@@ -1108,69 +1109,59 @@ describe('pre-receive version-number check (B6)', () => {
     return { git, tag, push, dispose: async () => rm(fixture, { recursive: true, force: true }) };
   };
 
-  it('refuses a version whose number another version holds, behind the marker the client matches', async () => {
+  it('refuses a new version at a number Tau Cloud holds, behind the marker the client matches', async () => {
     const repository = await versionRepository();
     onTestFinished(repository.dispose);
-    repository.git('update-ref', 'refs/tags/Hinge', await repository.tag('Hinge', { number: 4 }));
-    const outcome = await repository.push([`${none} ${await repository.tag('Lid', { number: 4 })} refs/tags/Lid`]);
+    repository.git('update-ref', 'refs/tags/v4', await repository.tag('v4', 'Hinge'));
+    const outcome = await repository.push([
+      `${none} ${await repository.tag('v4', 'Lid fit', 1_790_000_100)} refs/tags/v4`,
+    ]);
     expect(outcome.code).toBe(1);
-    expect(outcome.stderr).toContain(`${versionNumberTakenMarker} — refs/tags/Lid names V4`);
+    expect(outcome.stderr).toContain(`${versionNumberTakenMarker} — refs/tags/v4 names V4`);
     expect(outcome.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
     expect(outcome.stderr).toContain('Tau: nothing was written.');
   });
 
-  it('refuses V1, which the Start entry holds, and two new versions with one number in one push', async () => {
+  it('refuses V1, which the Start entry holds', async () => {
     const repository = await versionRepository();
     onTestFinished(repository.dispose);
-    const start = await repository.push([`${none} ${await repository.tag('First', { number: 1 })} refs/tags/First`]);
+    const start = await repository.push([`${none} ${await repository.tag('v1', 'First')} refs/tags/v1`]);
     expect(start.code).toBe(1);
     expect(start.stderr).toContain('names V1');
-    const twice = await repository.push([
-      `${none} ${await repository.tag('A', { number: 5 })} refs/tags/A`,
-      `${none} ${await repository.tag('B', { number: 5 })} refs/tags/B`,
-    ]);
-    expect(twice.code).toBe(1);
-    expect(twice.stderr.match(/version number taken/gu)).toHaveLength(2);
   });
 
-  it('passes a free number, a tag written before numbers, and a tag Tau did not write', async () => {
+  it('passes a free number named with spaces, and a tag that is not a version', async () => {
     const repository = await versionRepository();
     onTestFinished(repository.dispose);
-    repository.git('update-ref', 'refs/tags/Hinge', await repository.tag('Hinge', { number: 4 }));
+    repository.git('update-ref', 'refs/tags/v4', await repository.tag('v4', 'Hinge'));
     const outcome = await repository.push([
-      `${none} ${await repository.tag('Lid', { number: 5, note: 'Lid fit' })} refs/tags/Lid`,
-      `${none} ${await repository.tag('Older', { note: 'Before numbers' })} refs/tags/Older`,
-      `${none} ${await repository.tag('v1.0.0', undefined)} refs/tags/v1.0.0`,
+      `${none} ${await repository.tag('v5', 'Ready for print')} refs/tags/v5`,
+      `${none} ${await repository.tag('v1.0.0', 'v1.0.0')} refs/tags/v1.0.0`,
     ]);
     expect(outcome.code, outcome.stderr).toBe(0);
   });
 
-  it('keeps a backed-up number: a moved version keeps it, and changing or dropping it is refused', async () => {
+  it('passes a rename at the same number, and refuses another version taking that number', async () => {
     const repository = await versionRepository();
     onTestFinished(repository.dispose);
-    const held = await repository.tag('Hinge', { number: 4 });
-    repository.git('update-ref', 'refs/tags/Hinge', held);
-    const moved = await repository.tag('Hinge', { number: 4, note: 'Moved' });
-    const kept = await repository.push([`${held} ${moved} refs/tags/Hinge`]);
-    expect(kept.code, kept.stderr).toBe(0);
-    for (const record of [{ number: 6 }, {}]) {
-      // oxlint-disable-next-line no-await-in-loop -- two hook runs, each read alone.
-      const changed = await repository.push([`${held} ${await repository.tag('Hinge', record)} refs/tags/Hinge`]);
-      expect(changed.code).toBe(1);
-      expect(changed.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_CHANGED);
-    }
+    const held = await repository.tag('v4', 'Hinge');
+    repository.git('update-ref', 'refs/tags/v4', held);
+    const renamed = await repository.push([`${held} ${await repository.tag('v4', 'Hinge pin, final')} refs/tags/v4`]);
+    expect(renamed.code, renamed.stderr).toBe(0);
+    /* Another device's version: made at another time, so not this one renamed. */
+    const replaced = await repository.push([
+      `${held} ${await repository.tag('v4', 'Lid fit', 1_790_000_100)} refs/tags/v4`,
+    ]);
+    expect(replaced.code).toBe(1);
+    expect(replaced.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
   });
 
-  it('refuses a number it cannot read, and fails closed without a Node to read it with', async () => {
+  it('fails closed without a Node to read the tags with', async () => {
     const repository = await versionRepository();
     onTestFinished(repository.dispose);
-    const odd = await repository.tag('Odd', { number: 2.5 });
-    const unreadable = await repository.push([`${none} ${odd} refs/tags/Odd`]);
-    expect(unreadable.code).toBe(1);
-    expect(unreadable.stderr).toContain(authorshipRefusals.GIT_PUSH_RECORD_UNREADABLE);
-    const lid = await repository.tag('Lid', { number: 5 });
+    const lid = await repository.tag('v5', 'Lid');
     // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment name
-    const noNode = await repository.push([`${none} ${lid} refs/tags/Lid`], { TAU_GIT_NODE: '' });
+    const noNode = await repository.push([`${none} ${lid} refs/tags/v5`], { TAU_GIT_NODE: '' });
     expect(noNode.code).toBe(1);
     expect(noNode.stderr).toContain(authorshipRefusals.GIT_PUSH_RECORD_UNREADABLE);
   });

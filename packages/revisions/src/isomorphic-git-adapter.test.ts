@@ -377,7 +377,7 @@ describe('isomorphic-git tag ref locking', () => {
     let delayTagWrite = false;
     const filesystem = Object.assign(Object.create(storage) as FileSystemProvider, {
       writeFile: async (path: string, data: Uint8Array<ArrayBuffer>): Promise<void> => {
-        if (delayTagWrite && path.endsWith('refs/tags/v1')) {
+        if (delayTagWrite && path.endsWith('refs/tags/v2')) {
           delayTagWrite = false;
           materializationReached.resolve();
           await releaseMaterialization.promise;
@@ -401,23 +401,24 @@ describe('isomorphic-git tag ref locking', () => {
       provenance,
       summary: { generated: 'Second' },
     });
-    await materializer.tag({ name: 'v1', revisionId: firstRevision, note: 'Local move', createdAt: 100 });
-    await materializer.tag({
-      name: 'v1',
-      revisionId: revisionId(second.commitId),
-      note: 'Fetched version',
-      createdAt: 200,
-    });
-    const previousTag = await materializer.readRef('refs/tags/v1');
+    await materializer.tag({ name: 'Base', revisionId: firstRevision, note: 'Local move', createdAt: 100 });
+    await materializer.tag({ number: 2, name: 'Fetched name', revisionId: firstRevision });
+    const previousTag = await materializer.readRef('refs/tags/v2');
 
     delayTagWrite = true;
     const materializing = materializer.updateRef({
-      name: 'refs/tags/v1',
+      name: 'refs/tags/v2',
       expectedHead: previousTag,
       head: revisionId(second.commitId),
     });
     await materializationReached.promise;
-    const moving = mover.tag({ name: 'v1', revisionId: firstRevision, note: 'Local move', createdAt: 100 });
+    const moving = mover.tag({
+      number: 2,
+      name: 'Local rename',
+      revisionId: firstRevision,
+      note: 'Local move',
+      createdAt: 100,
+    });
     const beforeRelease = await Promise.race([
       moving.then(() => 'moved'),
       new Promise<'waiting'>((resolve) => {
@@ -431,10 +432,10 @@ describe('isomorphic-git tag ref locking', () => {
 
     expect(beforeRelease).toBe('waiting');
     expect(await mover.listTags()).toEqual([
-      expect.objectContaining({ name: 'v1', revisionId: firstRevision, note: 'Local move' }),
+      expect.objectContaining({ number: 2, name: 'Local rename', revisionId: firstRevision, note: 'Local move' }),
     ]);
-    expect(new Set(requestedLocks.filter((name) => name.endsWith('refs/tags/v1')))).toEqual(
-      new Set([`tau:revision-ref:${storage.id}:.git:refs/tags/v1`]),
+    expect(new Set(requestedLocks.filter((name) => name.endsWith('refs/tags/v2')))).toEqual(
+      new Set([`tau:revision-ref:${storage.id}:.git:refs/tags/v2`]),
     );
   });
 });

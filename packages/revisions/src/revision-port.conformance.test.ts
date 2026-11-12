@@ -389,13 +389,14 @@ const conformance = (adapter: Adapter): void => {
     }, 180_000);
 
     /**
-     * S31: a named version is an annotated tag, on both engines.
+     * S31, B6: a version is an annotated tag at `refs/tags/v<number>`, on both engines.
      *
-     * The note and the actor ride the tag's own message, so a clone shows the
-     * name with `git tag -n` and Tau reads the rest; the revision the name
-     * points at is untouched, which is what makes renaming safe.
+     * The name is free text in the tag's message and trailer, never the ref,
+     * so a name with spaces is written where neither engine would take it as
+     * a ref name. A rename rewrites the tag at the same ref and keeps the
+     * number, the entry, the time and who made it.
      */
-    it('round-trips a named version as an annotated tag', async () => {
+    it('round-trips a version named with spaces, and renames it at the same ref', async () => {
       const actor = {
         kind: 'user',
         id: 'user-lane',
@@ -403,7 +404,7 @@ const conformance = (adapter: Adapter): void => {
         email: 'lane@example.com',
       } as const;
       const created = await port.tag({
-        name: 'v1.0',
+        name: 'Ready for print',
         revisionId: child,
         note: 'First cut of the bracket',
         actor,
@@ -411,30 +412,40 @@ const conformance = (adapter: Adapter): void => {
       });
 
       expect(created).toStrictEqual({
-        name: 'v1.0',
+        /* The first version after Start is V2 (B6). */
+        number: 2,
+        name: 'Ready for print',
         revisionId: child,
         note: 'First cut of the bracket',
         actor,
         createdAt,
-        /* The first version after Start is V2 (B6). */
-        number: 2,
       });
       expect(await port.listTags()).toStrictEqual([created]);
+      const before = await port.listRefs('refs/tags');
+      expect(before.map((ref) => ref.name)).toStrictEqual(['refs/tags/v2']);
 
-      /* Re-pointing is the same operation as creating (*Rename* is a create
-       * plus a delete), and the named revision itself never changes. */
-      const moved = await port.tag({ name: 'v1.0', revisionId: base, note: 'Moved', actor, createdAt });
-      const afterMove = await port.listTags();
-      expect(afterMove[0]).toStrictEqual(moved);
-      /* A moved version keeps its number. */
-      expect(moved.number).toBe(2);
+      const renamed = await port.tag({ number: 2, name: 'Final fit', revisionId: child });
+      expect(renamed).toStrictEqual({ ...created, name: 'Final fit' });
+      expect(await port.listTags()).toStrictEqual([renamed]);
+      const after = await port.listRefs('refs/tags');
+      expect(after.map((ref) => ref.name)).toStrictEqual(['refs/tags/v2']);
+      expect(after[0]?.head).not.toBe(before[0]?.head);
       const named = await port.readRevision(child);
       expect(named?.id).toBe(child);
 
-      await port.deleteTag('v1.0');
+      /* A version never moves to another entry (Q13). */
+      await expect(port.tag({ number: 2, name: 'Moved', revisionId: base })).rejects.toMatchObject({
+        code: 'UNSUPPORTED_OPERATION',
+      });
+      /* The next version takes the next number. */
+      const next = await port.tag({ name: 'Ready for print', revisionId: base, createdAt });
+      expect(next.number).toBe(3);
+
+      /* Renumbering's own primitive: the tag for one number goes, twice is the outcome asked for. */
+      await port.deleteTag(3);
+      await port.deleteTag(2);
       expect(await port.listTags()).toStrictEqual([]);
-      /* Removing a name twice is the outcome the caller asked for. */
-      await expect(port.deleteTag('v1.0')).resolves.toBeUndefined();
+      await expect(port.deleteTag(2)).resolves.toBeUndefined();
     }, 180_000);
 
     /**
@@ -1456,7 +1467,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
         });
         head = revisionId(receipt.commitId);
         await port.updateRef({ name: 'main', expectedHead: undefined, head });
-        await port.tag({ name: 'v1', revisionId: head, note: 'First version' });
+        await port.tag({ name: 'First version', revisionId: head, note: 'First version' });
         await port.setRemote({ name: 'tau', url: fixture.url });
       }, 180_000);
 
@@ -1489,7 +1500,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
           refs: [
             { name: 'refs/tau/chats/refused' },
             { name: 'refs/tau/chats/kept' },
-            { name: 'refs/tags/v1' },
+            { name: 'refs/tags/v2' },
             { name: 'refs/heads/main' },
           ],
         });
@@ -1497,7 +1508,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
         expect(result.refs.map((entry) => [entry.name, entry.status])).toStrictEqual([
           ['refs/tau/chats/refused', 'rejected'],
           ['refs/tau/chats/kept', 'updated'],
-          ['refs/tags/v1', 'updated'],
+          ['refs/tags/v2', 'updated'],
           ['refs/heads/main', 'updated'],
         ]);
         /* One receive-pack for all four (EQ8): the per-ref report is the
@@ -1540,8 +1551,8 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
 
           expect(fetched.refs.find((entry) => entry.name === 'refs/remotes/tau/main')?.head).toBe(head);
           expect(fetched.refs.find((entry) => entry.name === 'refs/remotes/tau/tau/chats/kept')?.head).toBe(head);
-          expect(fetched.refs.find((entry) => entry.name === 'refs/remotes/tau/tags/v1')?.head).toBeDefined();
-          expect(await reader.readRef('refs/tags/v1')).toBeDefined();
+          expect(fetched.refs.find((entry) => entry.name === 'refs/remotes/tau/tags/v2')?.head).toBeDefined();
+          expect(await reader.readRef('refs/tags/v2')).toBeDefined();
           // A fetch is not a merge: the local branch is still unborn (A22).
           expect(await reader.readRef('main')).toBeUndefined();
           const fetchedRecord = await reader.readRevision(head);
@@ -1596,7 +1607,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
             const reader = second.withTransport();
             await reader.init({ author });
             await reader.setRemote({ name: 'tau', url: fixture.url });
-            const wanted = ['refs/heads/main', 'refs/tau/chats/kept', 'refs/tags/v1'];
+            const wanted = ['refs/heads/main', 'refs/tau/chats/kept', 'refs/tags/v2'];
             const first = fixture.trail().length;
 
             const fetched = await reader.fetch({ remote: 'tau', refs: wanted });
@@ -1607,7 +1618,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
             expect(fetched.refs.map((entry) => entry.name)).toStrictEqual([
               'refs/remotes/tau/main',
               'refs/remotes/tau/tau/chats/kept',
-              'refs/remotes/tau/tags/v1',
+              'refs/remotes/tau/tags/v2',
             ]);
             expect(record?.summary.generated).toBe('Base revision');
             expect(requests(first, again)).toStrictEqual(['GET info/refs', 'POST git-upload-pack']);
@@ -1650,6 +1661,27 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
 
         expect(held.refs[0]?.status).toBe('updated');
         expect(await fixture.git(['rev-parse', 'refs/heads/main'])).toBe(moved);
+      }, 180_000);
+
+      /* B6: a rename rewrites the version's tag at the same ref, so it reaches
+       * the remote as an update of `refs/tags/v2` under the lease on what the
+       * remote holds there; without the lease it is a tag that already exists. */
+      it('pushes a renamed version to the same ref under its lease, never unleased', async () => {
+        await port.push({ remote: 'tau', refs: [{ name: 'refs/tags/v2' }] });
+        const pushed = await fixture.git(['rev-parse', 'refs/tags/v2']);
+        await port.tag({ number: 2, name: 'Ready for print', revisionId: head });
+
+        const unleased = await port.push({ remote: 'tau', refs: [{ name: 'refs/tags/v2' }] });
+        expect(unleased.refs[0]?.status).toBe('rejected');
+        expect(await fixture.git(['rev-parse', 'refs/tags/v2'])).toBe(pushed);
+
+        const leased = await port.push({
+          remote: 'tau',
+          refs: [{ name: 'refs/tags/v2', expected: revisionId(pushed) }],
+        });
+        expect(leased.refs[0]?.status).toBe('updated');
+        expect(await fixture.git(['rev-parse', 'refs/tags/v2^{commit}'])).toBe(head);
+        expect(await fixture.git(['cat-file', 'tag', 'refs/tags/v2'])).toContain('"name":"Ready for print"');
       }, 180_000);
 
       /* E4 (D10, EQ8): git's floor is one advertisement and one `receive-pack`

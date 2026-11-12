@@ -1036,56 +1036,58 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
   }, 120_000);
 
   /**
-   * B6 (Q6, I6; Revisions Policy rule 19): a version's number, in its tag's
-   * `Tau-Tag` trailer, is held by one version on Tau Cloud. A second version
-   * with that number is refused behind the marker the client renumbers on, and
-   * a backed-up version's number never changes.
+   * B6 (Q6, I6; Revisions Policy rule 19): a version is `refs/tags/v<number>`,
+   * held by one version on Tau Cloud, and its name is free text in the tag. A
+   * second version at that number is refused behind the marker the client
+   * renumbers on; a rename at the same number is backed up.
    */
-  it('refuses a version whose number another version holds, and a change to a backed-up number', async () => {
+  it('backs up a version named with spaces, refuses another at its number, and backs up its rename', async () => {
     const clone = path.join(workspace, 'version-numbers');
     await gitOk(['clone', remoteFor(callers.writer.token), clone], workspace);
-    /** One annotated version tag on the clone's head, recording `number`. */
-    const version = async (name: string, number: number): Promise<void> => {
-      await gitOk(
+    /** One annotated version tag on the clone's head, named `name`, made at `date`. */
+    const version = async (number: number, name: string, date: string): Promise<void> => {
+      const outcome = await runGit(
         [
           'tag',
           '--force',
           '-a',
-          name,
+          `v${String(number)}`,
           '-m',
           name,
           '-m',
-          `Tau-Tag: ${JSON.stringify({ version: 1, note: name, number })}`,
+          `Tau-Tag: ${JSON.stringify({ version: 2, name })}`,
         ],
         clone,
+        { GIT_COMMITTER_DATE: date },
       );
+      expect(outcome.code, outcome.stderr).toBe(0);
     };
-    const push = async (name: string) => runGit(['push', '--force', 'origin', `refs/tags/${name}`], clone);
+    const push = async (number: number) => runGit(['push', '--force', 'origin', `refs/tags/v${String(number)}`], clone);
+    const madeAt = '2026-11-12T10:00:00Z';
 
-    await version('b6-hinge', 4);
-    const first = await push('b6-hinge');
+    await version(4, 'Ready for print', madeAt);
+    const first = await push(4);
     expect(first.code, first.stderr).toBe(0);
 
-    await version('b6-lid', 4);
-    const taken = await push('b6-lid');
+    /* Another device's version at the same number. */
+    await version(4, 'Lid fit', '2026-11-12T10:05:00Z');
+    const taken = await push(4);
     expect(taken.code).not.toBe(0);
-    expect(taken.stderr).toContain(`${versionNumberTakenMarker} — refs/tags/b6-lid names V4`);
+    expect(taken.stderr).toContain(`${versionNumberTakenMarker} — refs/tags/v4 names V4`);
     expect(taken.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
-    expect(await advertised()).not.toContain('refs/tags/b6-lid');
 
     /* The device's renumbered version: the next free number is backed up. */
-    await version('b6-lid', 5);
-    const renumbered = await push('b6-lid');
+    await version(5, 'Lid fit', '2026-11-12T10:05:00Z');
+    const renumbered = await push(5);
     expect(renumbered.code, renumbered.stderr).toBe(0);
 
-    /* A backed-up number never changes. */
-    await version('b6-hinge', 6);
-    const changed = await push('b6-hinge');
-    expect(changed.code).not.toBe(0);
-    expect(changed.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_CHANGED);
+    /* A rename keeps the entry and when it was made: the same ref takes the new name. */
+    await version(4, 'Ready for print, final', madeAt);
+    const renamed = await push(4);
+    expect(renamed.code, renamed.stderr).toBe(0);
     const advertisement = await advertised();
-    expect(advertisement).toContain('refs/tags/b6-hinge');
-    expect(advertisement).toContain('refs/tags/b6-lid');
+    expect(advertisement).toContain('refs/tags/v4');
+    expect(advertisement).toContain('refs/tags/v5');
   }, 120_000);
 
   /** Ruling P55: an account with no relation to the project is told it does not exist. */

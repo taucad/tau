@@ -1,5 +1,5 @@
 /**
- * Two devices that each name a version offline end with two numbers (blueprint
+ * Two devices that each make a version offline end with two numbers (blueprint
  * B6) — both legs, over a real wire.
  *
  * The witness is `git http-backend` (`#test/git-http-backend.js`) with a
@@ -52,31 +52,26 @@ const temporaryRoot = async (label: string): Promise<string> => {
 };
 
 /*
- * Tau Cloud's rule, in a test's words: a pushed version tag whose number
- * another tag holds after the push is refused behind the marker the client
- * matches. A Node hook, so the trailer is read through `JSON.parse` as the
- * server reads it.
+ * Tau Cloud's rule, in a test's words: a version is `refs/tags/v<n>`, and a
+ * push that creates a number the remote already holds, or replaces its tag
+ * with another version's (another entry or creation time), is refused behind
+ * the marker the client matches. A rename keeps both, so it passes.
  */
 const versionNumberHook = `#!${process.execPath}
 'use strict';
 const { execFileSync } = require('node:child_process');
 const git = (args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+const zero = /^0+$/;
 const pushed = require('node:fs').readFileSync(0, 'utf8').split('\\n').filter(Boolean).map((line) => line.split(' '));
-const held = new Map(git(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/tags/']).split('\\n').filter(Boolean).map((line) => line.split(' ')));
-for (const [, now, ref] of pushed) {
-  if (ref.startsWith('refs/tags/')) held.set(ref, now);
-}
-const numberOf = (oid) => {
-  if (git(['cat-file', '-t', oid]) !== 'tag') return undefined;
-  const line = git(['cat-file', 'tag', oid]).split('\\n').findLast((candidate) => candidate.startsWith('Tau-Tag: '));
-  return line === undefined ? undefined : JSON.parse(line.slice('Tau-Tag: '.length)).number;
-};
-const numbers = new Map([...held].map(([ref, oid]) => [ref, numberOf(oid)]));
+const held = new Set(git(['for-each-ref', '--format=%(refname)', 'refs/tags/']).split('\\n').filter(Boolean));
+const identity = (oid) => git(['cat-file', '-p', oid]).split('\\n\\n')[0].split('\\n').filter((line) => line.startsWith('object ') || line.startsWith('tagger ')).join('\\n');
 let refused = false;
-for (const [, , ref] of pushed) {
-  const number = numbers.get(ref);
-  if (number !== undefined && [...numbers].some(([other, held]) => other !== ref && held === number)) {
-    process.stderr.write(${JSON.stringify(versionNumberTakenMarker)} + ' — ' + ref + ' names V' + number + ': another version already holds its number.\\n');
+for (const [old, now, ref] of pushed) {
+  const match = /^refs\\/tags\\/v([1-9][0-9]*)$/.exec(ref);
+  if (match === null || zero.test(now)) continue;
+  const taken = match[1] === '1' || (zero.test(old) ? held.has(ref) : identity(old) !== identity(now));
+  if (taken) {
+    process.stderr.write(${JSON.stringify(versionNumberTakenMarker)} + ' — ' + ref + ' names V' + match[1] + ': another version already holds its number.\\n');
     refused = true;
   }
 }
@@ -176,7 +171,7 @@ const device = async (leg: Leg, label: string, remoteUrl: string) => {
 };
 
 describe.runIf(gitToolchainOnPath).each(legs)('version numbers across two devices — $name', (leg) => {
-  it('gives two versions named offline on two devices two numbers, and the device that moved says so once', async () => {
+  it('gives two versions made offline on two devices two numbers, says so once on the device that moved, and backs up a rename at the same number', async () => {
     const remoteRoot = await temporaryRoot('remote');
     const remote = await startGitHttpBackend({ root: remoteRoot });
     const hook = join(remote.repositoryPath, 'hooks', 'pre-receive');
@@ -198,9 +193,14 @@ describe.runIf(gitToolchainOnPath).each(legs)('version numbers across two device
       const two = await device(leg, 'b', remote.url);
       await two.sync(undefined);
       expect(await two.port.readRef(mainRef)).toBe(head);
-      const hinge = await one.port.tag({ name: 'hinge', revisionId: revisionId(head), note: 'Hinge', createdAt: 1000 });
+      const hinge = await one.port.tag({
+        name: 'Hinge pin',
+        revisionId: revisionId(head),
+        note: 'Hinge',
+        createdAt: 1000,
+      });
       const lid = await two.port.tag({
-        name: 'lid-fit',
+        name: 'Lid fit',
         revisionId: revisionId(head),
         note: 'Lid fit',
         createdAt: 2000,
@@ -214,22 +214,32 @@ describe.runIf(gitToolchainOnPath).each(legs)('version numbers across two device
       /* B's V2 is refused as taken: it becomes V3, is backed up, and B says so once. */
       await two.sync(head);
       expect(two.said).toStrictEqual([
-        { type: 'versionsRenumbered', renumbered: [{ name: 'lid-fit', from: 2, to: 3 }] },
+        { type: 'versionsRenumbered', renumbered: [{ name: 'Lid fit', from: 2, to: 3 }] },
       ]);
-      expect(await two.numbers()).toStrictEqual({ hinge: 2, 'lid-fit': 3 });
+      expect(await two.numbers()).toStrictEqual({ 'Hinge pin': 2, 'Lid fit': 3 });
 
       /* A's next sync brings B's version with its new number; nothing A backed up moved. */
       await one.sync(undefined);
-      expect(await one.numbers()).toStrictEqual({ hinge: 2, 'lid-fit': 3 });
+      expect(await one.numbers()).toStrictEqual({ 'Hinge pin': 2, 'Lid fit': 3 });
       expect(one.said).toStrictEqual([]);
 
       /* Another sync on B says nothing more: the number stays where its backup put it. */
       await two.sync(head);
       expect(two.said).toHaveLength(1);
-      expect(await two.numbers()).toStrictEqual({ hinge: 2, 'lid-fit': 3 });
+      expect(await two.numbers()).toStrictEqual({ 'Hinge pin': 2, 'Lid fit': 3 });
       expect(await remote.git(['for-each-ref', '--format=%(refname)', 'refs/tags/'])).toBe(
-        'refs/tags/hinge\nrefs/tags/lid-fit',
+        'refs/tags/v2\nrefs/tags/v3',
       );
+
+      /* A renames its backed-up V2: the tag is rewritten at the same ref, backed up as an
+       * update the remote accepts, and B reads the new name under the same number. */
+      await one.port.tag({ number: 2, name: 'Hinge pin, final', revisionId: revisionId(head) });
+      await one.sync(head);
+      expect(one.said).toStrictEqual([]);
+      expect(await remote.git(['cat-file', 'tag', 'refs/tags/v2'])).toContain('"name":"Hinge pin, final"');
+      await two.sync(undefined);
+      expect(await two.numbers()).toStrictEqual({ 'Hinge pin, final': 2, 'Lid fit': 3 });
+      expect(two.said).toHaveLength(1);
     } finally {
       await remote.close();
     }

@@ -1452,17 +1452,23 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         const record = await port.readRevision(revisionId(to));
         return revisionJson(await readRevisionDiff(port, optionalText(request, 'from') ?? record?.parents[0], to));
       }
-      case 'tag':
+      /* A new version, or with `number` a rename of that version at its own ref (B6). */
+      case 'tag': {
+        const number = request['number'];
+        if (number !== undefined && (typeof number !== 'number' || !Number.isSafeInteger(number))) {
+          throw Object.assign(new Error('Revision request number must be a whole number.'), {
+            code: 'INVALID_REVISION_REQUEST',
+          });
+        }
         return revisionJson(
           await port.tag({
             name: text('name'),
             revisionId: revisionId(text('revisionId')),
             ...(optionalText(request, 'note') === undefined ? {} : { note: optionalText(request, 'note') }),
+            ...(number === undefined ? {} : { number }),
           }),
         );
-      case 'deleteTag':
-        await port.deleteTag(text('name'));
-        return null;
+      }
       case 'compare': {
         const requestedRevision = text('revisionId');
         const path = text('path');
@@ -1970,10 +1976,8 @@ export type ProjectRevisionVerbs = {
   switchTo(branch: string): Promise<RevisionSwitchOutcome>;
   /** Remove one branch's linked checkout, refusing while it holds unsaved work. */
   discard(branch: string): Promise<RevisionDiscardOutcome>;
-  /** Name or re-point one immutable revision. */
+  /** Make a version of one revision, or rename the version `number` names (B6). */
   tag(input: Omit<CreateRevisionTagInput, 'revisionId'> & { readonly revisionId: string }): Promise<RevisionTag>;
-  /** Remove one revision name. */
-  deleteTag(name: string): Promise<void>;
   /**
    * Record the live files as a revision and back it up: the pane's *Save* (C16).
    *
@@ -2118,9 +2122,9 @@ export const openProjectRevisions = async (
       await authority.admitMutation();
       return nativePort.tag(input);
     },
-    deleteTag: async (name) => {
+    deleteTag: async (number) => {
       await authority.admitMutation();
-      await nativePort.deleteTag(name);
+      await nativePort.deleteTag(number);
     },
   };
   let tree: ReturnType<typeof createProjectRevisionsActor> | undefined;
@@ -2510,7 +2514,6 @@ export const openProjectRevisions = async (
     switchTo,
     discard,
     tag: async (input) => port.tag({ ...input, revisionId: revisionId(input.revisionId) }),
-    deleteTag: async (name) => port.deleteTag(name),
     save,
     publish,
     openFromRemote,

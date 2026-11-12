@@ -146,7 +146,7 @@ import { restoreMachine } from '#restore.machine.js';
 import { readRevisionLog } from '#revision-verbs.js';
 import type { RevisionRow } from '#revision-verbs.js';
 import { isVersionNumberRefusal } from '#refusal-markers.js';
-import { renumberUnpushedVersions } from '#version-numbers.js';
+import { renumberUnpushedVersions, versionNumberOfTag } from '#version-numbers.js';
 import { syncMachine } from '#sync.machine.js';
 import {
   generatedGitattributesContent,
@@ -182,7 +182,7 @@ import type {
   RestoreFailureCode,
 } from '#restore.machine.js';
 import type { RevisionIdentity, RevisionProvenance } from '#revision-authority.js';
-import { RevisionPortError } from '#revision-port.js';
+import { RevisionPortError, versionTagRef } from '#revision-port.js';
 import { parseStartRecord, startRecordPath, startSummary, startTrigger } from '#start-version.js';
 import type {
   Checkout,
@@ -198,6 +198,7 @@ import type {
   RevisionRemoteAddress,
   RevisionReceipt,
   RevisionRecord,
+  RevisionRef,
   RevisionTag,
   UpdateRevisionRefInput,
   UpdateRevisionRefResult,
@@ -5595,9 +5596,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     },
 
     publish: {
-      /* The names a project already has, the revision about to get one, and the
-       * lease for the push — all three read locally, so opening the dialog
-       * costs no round trip. */
+      /* The versions a project already has, the revision about to get one, and
+       * the leases for the push, the tag's by its `v<number>` name. */
       listVersions: fromAuthorityPromise<PublishVersionsActorOutput, Readonly<{ projectId: string; branch: string }>>(
         async ({ input }) => {
           await ensureStore();
@@ -5628,6 +5628,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           name: input.name,
           revisionId: revisionId(input.revisionId),
           ...(input.note === undefined ? {} : { note: input.note }),
+          ...(input.number === undefined ? {} : { number: input.number }),
           actor: options.identity.resolve({ runId: undefined, trigger: 'save' }),
         });
       }),
@@ -5759,9 +5760,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         /* First: they answer once every queued log commit has landed. */
         const own = await devicesOrNone();
         const current = await devicesOrNone(opsLog.currentDevices);
-        const [heads, tags, chats, evidence, logs] = await Promise.all([
+        const trackedTags = remoteTrackingRef(input.remote, 'refs/tags');
+        const [heads, tags, trackedTagReferences, chats, evidence, logs] = await Promise.all([
           port.listRefs('refs/heads'),
           port.listRefs('refs/tags'),
+          port.listRefs(trackedTags),
           syncChats ? port.listRefs(chatRefPrefix) : Promise.resolve([]),
           syncLargeExports ? port.listRefs('refs/tau/evidence') : Promise.resolve([]),
           port.listRefs(opsRefPrefix),
@@ -5812,7 +5815,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             results.push({ name, status: 'rejected', head: local, reason: 'leaseLost' });
           }
         }
-        const offeredHistory = history.filter((name) => !unintegrated.has(name));
+        let offeredHistory = history.filter((name) => !unintegrated.has(name));
         let renumbered: readonly VersionRenumbering[] = [];
 
         if (offeredHistory.length > 0) {
@@ -5820,13 +5823,26 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           try {
             /* The one push a `pagehide` re-send may carry (D28, S41, review 2
              * R3): the host's recorder is armed for exactly this call. */
+            /* B6: a version tag is leased on what this host last fetched of it, or
+             * "must not exist" when it never saw one. A rename rewrites the tag at
+             * the same ref, so it is offered under the remote's own tag; a number
+             * another device took since is refused rather than overwritten. */
+            const leasesOf = (tracked: readonly RevisionRef[]): Readonly<Record<string, string>> =>
+              Object.fromEntries(
+                tracked.map((entry) => [`refs/tags/${entry.name.slice(trackedTags.length + 1)}`, String(entry.head)]),
+              );
+            let leasedTags = leasesOf(trackedTagReferences);
             const offerHistory = async (pushSession: RevisionPushSession): Promise<RevisionPushResult> =>
               port.push({
                 remote: input.remote,
                 repositoryUrl: input.repositoryUrl,
                 signal,
                 atomic: true,
-                refs: offeredHistory.map((name) => offerOf(name, input.leases)),
+                refs: offeredHistory.map((name) =>
+                  versionNumberOfTag(name) === undefined
+                    ? offerOf(name, input.leases)
+                    : { name, expected: leasedTags[name] === undefined ? undefined : revisionId(leasedTags[name]) },
+                ),
                 session: pushSession,
               });
             // An explicit GitHub gesture must never arm a pagehide resend.
@@ -5848,13 +5864,21 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             });
             if (
               taken !== undefined ||
-              pushed?.refs.some((entry) => entry.status === 'rejected' && isVersionNumberRefusal(entry.reason)) === true
+              pushed?.refs.some(
+                (entry) =>
+                  entry.status === 'rejected' &&
+                  (isVersionNumberRefusal(entry.reason) ||
+                    (entry.reason === 'leaseLost' && versionNumberOfTag(entry.name) !== undefined)),
+              ) === true
             ) {
               renumbered = await renumberUnpushedVersions(port, { remote: input.remote, signal });
               if (renumbered.length > 0) {
                 for (const tag of await port.listRefs('refs/tags')) {
                   localHeads.set(tag.name, String(tag.head));
                 }
+                leasedTags = leasesOf(await port.listRefs(trackedTags));
+                /* A moved version is at a ref the first offer did not name. */
+                offeredHistory = [...offeredHistory, ...renumbered.map((step) => versionTagRef(step.to))];
                 pushed = await offerHistory({});
               } else if (pushed === undefined) {
                 throw taken;

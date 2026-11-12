@@ -28,7 +28,7 @@
  * | 16 | `tagging` names the revision the dialog read, never a new one | W6-a2: `tagging` never cuts |
  * | 17 | `confirm` while `choosingVersion.reading` is in flight | *Publish* is one gesture: the panel's button and `tau publish <name>` confirm without waiting |
  * | 18 | `pushing --pushSettled(failed\|queued\|conflicted)--> error` | **P39**: a settlement that names this push but did not reach the remote never publishes |
- * | 19 | the push offers `refs/tags/<name>` with the remote's own value as its lease | **P38**: a re-publish moves the name under a lease, never a force |
+ * | 19 | the push offers `refs/tags/v<number>` with the remote's own value as its lease | **P38**: a re-publish of a version, renamed or not, goes under a lease, never a force (B6) |
  */
 
 import { createActor, createCallbackLogic, createAsyncLogic } from 'xstate';
@@ -55,8 +55,10 @@ import { createFakeParent } from '@taucad/xstate-testing/fakes';
 import { guardActors } from '@taucad/xstate-testing/inspect';
 import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
-const tagV1: RevisionTag = {
-  name: 'v1',
+/* V2, on the older revision; the remote holds its tag object `tag-v2` (B6). */
+const tagV2: RevisionTag = {
+  number: 2,
+  name: 'Ready for print',
   revisionId: revisionId('rev-1'),
   note: undefined,
   actor: undefined,
@@ -64,7 +66,7 @@ const tagV1: RevisionTag = {
 };
 
 const draft: PublishDraft = {
-  tag: 'v2',
+  tag: 'Lid fit',
   projectName: 'bracket',
   entryPath: 'main.ts',
   visibility: 'public',
@@ -96,11 +98,11 @@ const versions = (output: PublishVersionsActorOutput): PublishActors['listVersio
   createAsyncLogic({ run: async () => output });
 
 const head: PublishVersionsActorOutput = {
-  tags: [tagV1],
+  tags: [tagV2],
   revisionId: 'rev-2',
   expected: 'rev-1',
-  /* The remote holds `v1` at the revision the local tag names (P38). */
-  remoteTags: { v1: 'rev-1' },
+  /* The remote holds V2's tag as this host last saw it (P38). */
+  remoteTags: { v2: 'tag-v2' },
 };
 
 type Started = Readonly<{
@@ -131,11 +133,12 @@ const startPushing = (overrides: Partial<PublishActors> = {}): Started =>
       context: {
         projectId: 'p1',
         branch: 'main',
-        tags: [tagV1],
+        tags: [tagV2],
         revisionId: 'rev-2',
         expected: 'rev-1',
-        remoteTags: { v1: 'rev-1' },
+        remoteTags: { v2: 'tag-v2' },
         tag: undefined,
+        version: 3,
         requestId: 'pub-1',
         draft,
         pushId: 'push-1',
@@ -165,6 +168,7 @@ const start = (
   const actors: PublishActors = {
     listVersions: versions(head),
     createTag: record<RevisionTag, PublishTagActorInput>('createTag', (input) => ({
+      number: input.number ?? 3,
       name: input.name,
       revisionId: revisionId(input.revisionId),
       note: input.note,
@@ -234,7 +238,7 @@ describe('publishMachine', () => {
     expect(actor.getSnapshot().matches({ choosingVersion: 'ready' })).toBe(true);
     expect(selectPublishFacet(actor.getSnapshot())).toStrictEqual({
       phase: 'choosingVersion',
-      tags: [tagV1],
+      tags: [tagV2],
       publicationId: undefined,
       shareUrl: undefined,
       error: undefined,
@@ -276,14 +280,17 @@ describe('publishMachine', () => {
 
     expect(actor.getSnapshot().matches('success')).toBe(true);
     expect(calls.map((call) => call.name)).toStrictEqual(['createTag', 'push', 'createPublication']);
-    expect(calls[1]?.input).toStrictEqual({ branch: 'main', tag: 'v2', expected: 'rev-1', expectedTag: undefined });
-    expect(calls[2]?.input).toMatchObject({ projectId: 'p1', tag: 'v2', revisionId: 'rev-2', visibility: 'public' });
+    /* A new version, V3: the name is free text and the ref is its number (B6). */
+    expect(calls[0]?.input).toStrictEqual({ name: 'Lid fit', revisionId: 'rev-2' });
+    expect(calls[1]?.input).toStrictEqual({ branch: 'main', tag: 'v3', expected: 'rev-1', expectedTag: undefined });
+    expect(calls[2]?.input).toMatchObject({ projectId: 'p1', tag: 'v3', revisionId: 'rev-2', visibility: 'public' });
+    expect(calls[2]?.input).not.toHaveProperty('version');
     expect(emitted).toContainEqual({
       type: 'published',
       requestId: 'pub-1',
       publicationId: 'pub_1',
       url: 'https://tau.new/p/pub_1',
-      tag: 'v2',
+      tag: 'v3',
     });
     expect(selectPublishFacet(actor.getSnapshot()).shareUrl).toBe('https://tau.new/p/pub_1');
     actor.stop();
@@ -298,17 +305,17 @@ describe('publishMachine', () => {
     await settle();
 
     expect(actor.getSnapshot().matches('success')).toBe(true);
-    expect(calls[0]?.input).toStrictEqual({ name: 'v2', revisionId: 'rev-1' });
+    expect(calls[0]?.input).toStrictEqual({ name: 'Lid fit', revisionId: 'rev-1' });
     /* The branch still travels under its own lease: an older revision is already in its history. */
-    expect(calls[1]?.input).toStrictEqual({ branch: 'main', tag: 'v2', expected: 'rev-1', expectedTag: undefined });
-    expect(calls[2]?.input).toMatchObject({ tag: 'v2', revisionId: 'rev-1' });
+    expect(calls[1]?.input).toStrictEqual({ branch: 'main', tag: 'v3', expected: 'rev-1', expectedTag: undefined });
+    expect(calls[2]?.input).toMatchObject({ tag: 'v3', revisionId: 'rev-1' });
 
     /* A later publish without one names the head, not the revision the last dialog was opened on. */
     actor.send({ type: 'publish', requestId: 'publish-2' });
     await settle();
-    actor.send({ type: 'confirm', draft: { ...draft, tag: 'v3' } });
+    actor.send({ type: 'confirm', draft: { ...draft, tag: 'Hinge' } });
     await settle();
-    expect(calls[3]?.input).toStrictEqual({ name: 'v3', revisionId: 'rev-2' });
+    expect(calls[3]?.input).toStrictEqual({ name: 'Hinge', revisionId: 'rev-2' });
     actor.stop();
   });
 
@@ -371,7 +378,7 @@ describe('publishMachine', () => {
   it('7: fails at once when it has no root to push for it', async () => {
     const actors: PublishActors = {
       listVersions: versions(head),
-      createTag: createAsyncLogic({ run: async ({ input }) => ({ ...tagV1, name: input.name }) }),
+      createTag: createAsyncLogic({ run: async ({ input }) => ({ ...tagV2, name: input.name }) }),
       push: createAsyncLogic<PublishPushActorOutput, PublishPushActorInput>({
         run: async () => ({ pushId: 'push-1', remote: 'tau' }),
       }),
@@ -461,29 +468,47 @@ describe('publishMachine', () => {
     actor.stop();
   });
 
-  it('19: offers the name under the lease the remote advertised, never a force (P38)', async () => {
+  it('19: publishes a version again under the lease the remote advertised, never a force (P38)', async () => {
     const { actor, calls } = start();
 
-    actor.send({ type: 'publish', requestId: 'pub-1' });
+    actor.send({ type: 'publish', requestId: 'pub-1', revisionId: 'rev-1' });
     await settle();
-    actor.send({ type: 'confirm', draft: { ...draft, tag: 'v1' } });
+    actor.send({ type: 'confirm', draft: { ...draft, tag: 'Ready for print' } });
     await settle();
 
+    /* The version on this revision with this name is published as it is: no new number. */
+    expect(calls[0]?.input).toStrictEqual({ name: 'Ready for print', revisionId: 'rev-1', number: 2 });
     const push = calls.find((call) => call.name === 'push');
-    expect(push?.input).toMatchObject({ tag: 'v1', expected: 'rev-1', expectedTag: 'rev-1' });
+    expect(push?.input).toMatchObject({ tag: 'v2', expected: 'rev-1', expectedTag: 'tag-v2' });
     actor.stop();
   });
 
-  it('19: leases "must not exist" for a name the remote does not hold (P38)', async () => {
+  it('19: renames the version the person picked, at its own ref (B6)', async () => {
+    const { actor, calls } = start();
+
+    actor.send({ type: 'publish', requestId: 'pub-1', revisionId: 'rev-1' });
+    await settle();
+    actor.send({ type: 'confirm', draft: { ...draft, tag: 'Final fit', version: 2 } });
+    await settle();
+
+    expect(calls[0]?.input).toStrictEqual({ name: 'Final fit', revisionId: 'rev-1', number: 2 });
+    expect(calls.find((call) => call.name === 'push')?.input).toMatchObject({ tag: 'v2', expectedTag: 'tag-v2' });
+    expect(calls.find((call) => call.name === 'createPublication')?.input).toMatchObject({ tag: 'v2' });
+    actor.stop();
+  });
+
+  it('19: makes a new version when the name is on another revision, and leases "must not exist" (P38)', async () => {
     const { actor, calls } = start();
 
     actor.send({ type: 'publish', requestId: 'pub-1' });
     await settle();
-    actor.send({ type: 'confirm', draft: { ...draft, tag: 'v2' } });
+    actor.send({ type: 'confirm', draft: { ...draft, tag: 'Ready for print' } });
     await settle();
 
+    /* V2 names rev-1; a version never moves, so the head gets V3 (Q13). */
+    expect(calls[0]?.input).toStrictEqual({ name: 'Ready for print', revisionId: 'rev-2' });
     const push = calls.find((call) => call.name === 'push');
-    expect(push?.input).toMatchObject({ tag: 'v2' });
+    expect(push?.input).toMatchObject({ tag: 'v3' });
     expect((push?.input as { expectedTag?: string } | undefined)?.expectedTag).toBeUndefined();
     actor.stop();
   });
@@ -626,7 +651,7 @@ describe('publishMachine', () => {
 
     expect(calls[0]).toStrictEqual({
       name: 'createTag',
-      input: { name: 'v2', revisionId: 'rev-2', note: 'first release' },
+      input: { name: 'Lid fit', revisionId: 'rev-2', note: 'first release' },
     });
     actor.stop();
   });
@@ -655,7 +680,7 @@ describe('publishMachine', () => {
         ...publicEvents,
         { type: `xstate.done.actor.${readInvoke}`, output: head },
         { type: `xstate.error.actor.${readInvoke}`, error: new Error('graph unreadable') },
-        { type: `xstate.done.actor.${tagInvoke}`, output: { ...tagV1, name: 'v2', revisionId: revisionId('rev-2') } },
+        { type: `xstate.done.actor.${tagInvoke}`, output: { ...tagV2, name: 'v2', revisionId: revisionId('rev-2') } },
         { type: `xstate.done.actor.${pushInvoke}`, output: { pushId: 'push-1', remote: 'tau' } },
         {
           type: `xstate.done.actor.${publishInvoke}`,

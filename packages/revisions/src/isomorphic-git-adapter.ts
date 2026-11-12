@@ -55,7 +55,7 @@ import {
 } from '#revision-headers.js';
 import type { RevisionTrailer } from '#revision-headers.js';
 import { walkRevisionLog } from '#revision-log-order.js';
-import { numberVersions, versionNumberFor } from '#version-numbers.js';
+import { versionNumberOfTag, versionTagWrite } from '#version-numbers.js';
 import {
   pktEncoder,
   pktLine,
@@ -74,7 +74,7 @@ import type { CatalogueFamily, ColdOpenOptions, ColdOpenReport } from '#object-s
 import type { GitFiles, ObjectStore } from '#object-store/object-store.js';
 import { readTreeEntries, writeTreeObject } from '#object-store/tree-codec.js';
 import type { TreeCodecEntry } from '#object-store/tree-codec.js';
-import { RevisionPortError } from '#revision-port.js';
+import { RevisionPortError, versionTagName, versionTagRef } from '#revision-port.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import { ignoredAmong, ignoredUntrackedPaths } from '#git-ignore.js';
 import type { IgnoreWalkFiles } from '#git-ignore.js';
@@ -100,6 +100,7 @@ import type {
   AddCheckoutInput,
   Checkout,
   CreateRevisionTagInput,
+  ListRevisionTagsInput,
   InitRevisionStoreInput,
   RevisionConflict,
   RevisionDiffEntry,
@@ -1351,49 +1352,49 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * @returns The object id, or `undefined`.
    */
   /**
-   * One named version, or `undefined` when the ref is gone or not annotated.
+   * One version, or `undefined` when the ref is gone or is not a version.
    *
-   * A lightweight tag is a valid git tag this store did not write; it is still
-   * a name for a revision, so it is reported with an empty note and no actor
-   * rather than hidden.
+   * A version is an annotated tag at `refs/tags/v<n>` (B6). Its name comes
+   * from the tag's trailer, or the message's first line for a tag Tau did not
+   * write, never from the ref; a lightweight tag has no message to name it and
+   * is not a version.
    *
-   * @param name - The tag name, without `refs/tags/`.
-   * @returns The named version.
+   * @param ref - The full ref, under `refs/tags/` or a remote's `tags/`.
+   * @param number - The number its name says.
+   * @returns The version.
    */
-  const readTagRef = async (name: string): Promise<RevisionTag | undefined> => {
-    const oid = await tryResolve(`${tagRefPrefix}/${name}`);
-    if (oid === undefined) {
-      return undefined;
-    }
-    const raw = await readRaw(oid, 'tag');
+  const readTagRef = async (ref: string, number: number): Promise<RevisionTag | undefined> => {
+    const oid = await tryResolve(ref);
+    const raw = oid === undefined ? undefined : await readRaw(oid, 'tag');
     if (raw === undefined) {
-      /* Lightweight: the ref points straight at the commit, which is a valid
-       * git tag this store did not write. Still a name for a revision. */
-      return Object.freeze({
-        name,
-        revisionId: revisionId(oid),
-        note: undefined,
-        actor: undefined,
-        createdAt: 0,
-      });
+      return undefined;
     }
     const decoded = decodeTag(raw);
     const trailer = parseRevisionTagMessage(decoded.message);
-    return Object.freeze({
-      name,
-      revisionId: revisionId(decoded.object),
-      note: trailer.note,
-      actor: trailer.actor,
-      createdAt: decoded.tagger.seconds * 1000,
-      ...(trailer.number === undefined ? {} : { number: trailer.number }),
-    });
+    return trailer.name === undefined
+      ? undefined
+      : Object.freeze({
+          number,
+          name: trailer.name,
+          revisionId: revisionId(decoded.object),
+          note: trailer.note,
+          actor: trailer.actor,
+          createdAt: decoded.tagger.seconds * 1000,
+        });
   };
 
-  /* Every named version, by name, each with the number it reads as (B6). */
-  const listTags = async (): Promise<readonly RevisionTag[]> => {
-    const names = await listRefs({ fs, gitdir, filepath: tagRefPrefix });
-    const tags = await Promise.all(names.toSorted().map(async (name) => readTagRef(name)));
-    return numberVersions(tags.filter((entry) => entry !== undefined));
+  /* Every version, lowest number first (B6): this store's, or a remote's as last fetched. */
+  const listTags = async (input?: ListRevisionTagsInput): Promise<readonly RevisionTag[]> => {
+    const prefix = input?.remote === undefined ? tagRefPrefix : remoteTrackingRef(input.remote, tagRefPrefix);
+    const names = await listRefs({ fs, gitdir, filepath: prefix });
+    const numbered = names.flatMap((name) => {
+      const number = versionNumberOfTag(name);
+      return number === undefined ? [] : [[name, number] as const];
+    });
+    const tags = await Promise.all(numbered.map(async ([name, number]) => readTagRef(`${prefix}/${name}`, number)));
+    return Object.freeze(
+      tags.filter((entry) => entry !== undefined).toSorted((left, right) => left.number - right.number),
+    );
   };
 
   const tryResolve = async (ref: string): Promise<string | undefined> => {
@@ -2132,41 +2133,30 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       if (named === undefined) {
         throw new RevisionPortError('UNKNOWN_REVISION', 'The revision this name would point at is not in the store.');
       }
-      const createdAt = input.createdAt ?? Date.now();
-      const number = input.number ?? versionNumberFor(await listTags(), input.name);
+      const version = versionTagWrite(await listTags(), input, Date.now());
       const object = encodeTag({
         objectFormat,
-        object: input.revisionId,
-        tag: input.name,
-        tagger: taggerSignature(input.actor, createdAt),
-        message: revisionTagMessage({
-          name: input.name,
-          note: input.note,
-          actor: input.actor,
-          number,
-        }),
+        object: version.revisionId,
+        tag: versionTagName(version.number),
+        tagger: taggerSignature(version.actor, version.createdAt),
+        message: revisionTagMessage(version),
       });
       /* The bytes `encodeTag` hashed, stored as they are: one encoder for both legs. */
       const [oid = object.id] = await objects.writeLoose([{ type: 'tag', data: object.body, oid: object.id }]);
-      await withRefLock(`${filesystem.id}:${gitdir}:${tagRefPrefix}/${input.name}`, async () =>
-        writeRef({ fs, gitdir, ref: `${tagRefPrefix}/${input.name}`, value: oid, force: true }),
+      const ref = versionTagRef(version.number);
+      await withRefLock(`${filesystem.id}:${gitdir}:${ref}`, async () =>
+        writeRef({ fs, gitdir, ref, value: oid, force: true }),
       );
-      return Object.freeze({
-        name: input.name,
-        revisionId: input.revisionId,
-        note: input.note,
-        actor: input.actor,
-        createdAt,
-        number,
-      });
+      return Object.freeze({ ...version, createdAt: Math.floor(version.createdAt / 1000) * 1000 });
     },
 
     listTags,
 
-    deleteTag: async (name: string): Promise<void> => {
-      await withRefLock(`${filesystem.id}:${gitdir}:${tagRefPrefix}/${name}`, async () => {
+    deleteTag: async (number: number): Promise<void> => {
+      const ref = versionTagRef(number);
+      await withRefLock(`${filesystem.id}:${gitdir}:${ref}`, async () => {
         try {
-          await deleteRef({ fs, gitdir, ref: `${tagRefPrefix}/${name}` });
+          await deleteRef({ fs, gitdir, ref });
         } catch (error) {
           if (!isNotFound(error)) {
             throw error;

@@ -640,7 +640,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
         summary: 'Device A',
       });
       const namedVersion = await one.port.tag({
-        name: 'v1',
+        name: 'Device A version',
         revisionId: revisionId(head),
         note: 'Device A named version',
         createdAt: 1_756_742_400_000,
@@ -657,7 +657,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       first.stop();
       /* The remote now holds both sets: branch + named version, and the chat's own ref. */
       expect(await remote.git(['rev-parse', mainRef])).toBe(head);
-      expect(await remote.git(['rev-parse', 'refs/tags/v1^{}'])).toBe(head);
+      expect(await remote.git(['rev-parse', 'refs/tags/v2^{}'])).toBe(head);
       expect(await remote.git(['rev-parse', chatRef])).not.toBe('');
 
       const projectedChats: string[][] = [];

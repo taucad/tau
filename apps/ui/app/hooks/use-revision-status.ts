@@ -397,9 +397,6 @@ export const createHostRevisionClient = (input: {
         ...(from === undefined ? {} : { from }),
       })) as unknown as readonly RevisionDiffEntry[],
     tag: async (tagInput) => (await ask({ command: 'tag', ...tagInput })) as unknown as RevisionTag | undefined,
-    deleteTag: async (name) => {
-      await ask({ command: 'deleteTag', name });
-    },
     compare: async (revisionId, path, options) =>
       (await ask({
         command: 'compare',
@@ -1284,9 +1281,6 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       const result = await ask({ command: 'tag', ...input });
       return result.kind === 'tag' ? result.tag : undefined;
     },
-    deleteTag: async (name) => {
-      await ask({ command: 'deleteTag', name });
-    },
     compare: async (revisionId, path, options) => {
       const result = await ask({
         command: 'compare',
@@ -1707,10 +1701,10 @@ export type RevisionCommands = Readonly<{
    * costs a tree hash and records nothing.
    */
   saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<void>;
-  /** Name one revision, or re-point an existing name (S31). */
-  tag: (input: Readonly<{ name: string; revisionId: string; note?: string }>) => Promise<RevisionTag | undefined>;
-  /** Remove one name (S31). */
-  deleteTag: (name: string) => Promise<void>;
+  /** Make a version of one revision, or with `number` rename that version at its own ref (S31, B6). */
+  tag: (
+    input: Readonly<{ name: string; revisionId: string; note?: string; number?: number }>,
+  ) => Promise<RevisionTag | undefined>;
   /**
    * Open the Publish dialog on this project's own names (S32, W8).
    *
@@ -1925,7 +1919,6 @@ export const useRevisionCommands = (): RevisionCommands => {
       },
       saveRevision: async (trigger?: 'save' | 'hidden' | 'close') => client?.saveRevision(trigger),
       tag: async (input) => client?.tag(input),
-      deleteTag: async (name) => client?.deleteTag(name),
       publishProject: (tag?: string, revisionId?: string) => {
         /* The origin rides the command itself: it is how the worker names this
          * project's Tau Cloud repository and reaches the publications route

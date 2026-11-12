@@ -2,135 +2,160 @@
  * Version numbers: V1, V2, … once per project, across every branch (blueprint
  * B6, Q6, Q13, I6).
  *
- * A version's number lives in its own tag (`Tau-Tag` trailer, `number`); there
- * is no counter, so the next number is the highest known plus one. V1 is the
- * Start entry (A6, `start-version.ts`), which has no tag, so a tag's number is
- * 2 or more. A tag written before numbers records none and is numbered when
- * read, V2 onward in the order the tags were created, around any number
- * another tag already records; that is reader logic, not a migration (I7).
+ * A version is an annotated tag at `refs/tags/v<number>`: the ref is the
+ * number, and the free-text name ("Ready for print") lives in the tag's
+ * message and its `Tau-Tag` trailer, so any name is a valid version name and
+ * a rename rewrites the tag at the same ref. There is no counter: the next
+ * number is the highest known plus one. V1 is the Start entry (A6,
+ * `start-version.ts`), which has no tag, so a version tag's number is 2 or
+ * more. A tag under any other ref is not a version (I7: no reader for the
+ * name-based tags written before this).
  *
- * A number is provisional until its version is backed up. Tau Cloud refuses a
- * tag whose number another version holds (`GIT_PUSH_VERSION_NUMBER_TAKEN`,
- * Revisions Policy rule 19); the device then gives its own version that is
- * not backed up the next free number and pushes again
- * ({@link renumberUnpushedVersions}). Only that device has seen the
- * provisional number, so nothing anyone else saw changes, and a backed-up
- * number never changes. Versions cannot be removed (Q13), so no number is ever
- * retired.
+ * A version is identified by the entry it names and when it was created
+ * ({@link isSameVersion}); a rename keeps both. A number is provisional until
+ * its version is backed up. Tau Cloud refuses a version tag whose number
+ * another version holds (`GIT_PUSH_VERSION_NUMBER_TAKEN`, Revisions Policy
+ * rule 19); the device then moves its own version that is not backed up to the
+ * next free number and pushes again ({@link renumberUnpushedVersions}). Only
+ * that device has seen the provisional number, so nothing anyone else saw
+ * changes, and a backed-up number never changes. Versions cannot be removed
+ * (Q13), so no number is ever retired.
  */
 
-import type { RemoteRef, RevisionPort, RevisionTag } from '#revision-port.js';
+import { RevisionPortError, versionTagName } from '#revision-port.js';
+import type { RevisionActor } from '#revision-authority.js';
+import type { CreateRevisionTagInput, RemoteRef, RevisionPort, RevisionTag } from '#revision-port.js';
 import type { VersionRenumbering } from '#sync.types.js';
 
 /** The Start entry's number: every project's first entry is V1 (A6, Q8). @public */
 export const startVersionNumber = 1;
 
-/** What numbering reads of one tag. @public */
-export type VersionNumberSource = Readonly<{ name: string; createdAt: number; number?: number }>;
-
 const tagRefPrefix = 'refs/tags/';
-
-/* Creation order, ties by name in code-unit order so every host agrees. */
-const byCreation = (left: VersionNumberSource, right: VersionNumberSource): number =>
-  left.createdAt - right.createdAt || (left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+const versionTagPattern = /^v([1-9]\d*)$/u;
 
 /**
- * Give every tag the number it reads as.
+ * The number a tag name or ref names as a version, if it names one.
  *
- * A tag that records a number keeps it. A tag that records none (written
- * before numbers, or not by Tau) takes, in creation order, the lowest number
- * from V2 that no recorded tag holds: three such tags read V2, V3 and V4.
- *
- * @param tags - The store's tags as the port read them.
- * @returns The same tags, each with its `number`, in the same order.
+ * @param name - A tag name (`v3`) or a full ref (`refs/tags/v3`).
+ * @returns The number, or `undefined` for a tag that is not a version (any other name, or `v1`, which Start holds).
  * @public
- * @example <caption>Two tags written before numbers, read in creation order</caption>
- * ```typescript
- * import { numberVersions } from '@taucad/revisions';
- *
- * numberVersions([
- *   { name: 'Lid', createdAt: 2 },
- *   { name: 'Base', createdAt: 1 },
- * ]).map((tag) => tag.number); // [3, 2]
- * ```
  */
-export const numberVersions = <Tag extends VersionNumberSource>(
-  tags: readonly Tag[],
-): ReadonlyArray<Tag & Readonly<{ number: number }>> => {
-  const held = new Set(tags.flatMap((tag) => (tag.number === undefined ? [] : [tag.number])));
-  const read = new Map<string, number>();
-  let next = startVersionNumber + 1;
-  for (const tag of tags.filter((candidate) => candidate.number === undefined).toSorted(byCreation)) {
-    while (held.has(next)) {
-      next += 1;
-    }
-    read.set(tag.name, next);
-    next += 1;
-  }
-  return Object.freeze(
-    tags.map((tag) =>
-      tag.number === undefined
-        ? Object.freeze({ ...tag, number: read.get(tag.name) ?? startVersionNumber + 1 })
-        : (tag as Tag & Readonly<{ number: number }>),
-    ),
-  );
+export const versionNumberOfTag = (name: string): number | undefined => {
+  const match = versionTagPattern.exec(name.startsWith(tagRefPrefix) ? name.slice(tagRefPrefix.length) : name);
+  const number = match === null ? undefined : Number(match[1]);
+  return number === undefined || !Number.isSafeInteger(number) || number <= startVersionNumber ? undefined : number;
 };
 
 /**
  * The number the next new version takes: the highest known plus one.
  *
- * @param tags - The store's tags, each with the number it reads as.
+ * @param tags - The versions this store knows.
  * @returns At least 2, because V1 is Start.
  * @public
  */
-export const nextVersionNumber = (tags: ReadonlyArray<Readonly<{ number?: number }>>): number =>
-  Math.max(startVersionNumber, ...tags.flatMap((tag) => (tag.number === undefined ? [] : [tag.number]))) + 1;
+export const nextVersionNumber = (tags: ReadonlyArray<Readonly<{ number: number }>>): number =>
+  Math.max(startVersionNumber, ...tags.map((tag) => tag.number)) + 1;
 
 /**
- * The number a tag written under `name` records: the one that name already
- * has, so moving a version keeps its number, or the next one.
+ * Whether two tags are the same version: the same entry, created at the same
+ * time. A rename rewrites the tag but keeps both; two devices that each made
+ * a version offline differ in at least one.
  *
- * @param tags - The store's tags, each with the number it reads as.
- * @param name - The tag's name.
- * @returns The number to write into its trailer.
+ * @param left - One version.
+ * @param right - The other.
+ * @returns True when they are one version.
  * @public
  */
-export const versionNumberFor = (
-  tags: ReadonlyArray<Readonly<{ name: string; number?: number }>>,
-  name: string,
-): number => tags.find((tag) => tag.name === name)?.number ?? nextVersionNumber(tags);
+export const isSameVersion = (
+  left: Readonly<Pick<RevisionTag, 'revisionId' | 'createdAt'>>,
+  right: Readonly<Pick<RevisionTag, 'revisionId' | 'createdAt'>>,
+): boolean => left.revisionId === right.revisionId && left.createdAt === right.createdAt;
+
+/** What a port writes for one {@link CreateRevisionTagInput}. @public */
+export type VersionTagWrite = Readonly<{
+  number: number;
+  name: string;
+  revisionId: RevisionTag['revisionId'];
+  note: string | undefined;
+  actor: RevisionActor | undefined;
+  createdAt: number;
+}>;
+
+/**
+ * What one `tag` call writes, decided the same way on both engines.
+ *
+ * With no number it is a new version and takes the next one. A number that
+ * already names a version is a rename: the version keeps the entry it names,
+ * when it was created and who created it, takes the new name, and keeps its
+ * note unless a new one is given. Any other number is written as given, which
+ * is how a renumbered version moves.
+ *
+ * @param tags - The versions this store holds.
+ * @param input - The call's input.
+ * @param now - The store's clock, for a new version.
+ * @returns The tag to write.
+ * @throws RevisionPortError `UNSUPPORTED_OPERATION` when a rename names another entry: a version never moves.
+ * @public
+ */
+export const versionTagWrite = (
+  tags: readonly RevisionTag[],
+  input: CreateRevisionTagInput,
+  now: number,
+): VersionTagWrite => {
+  const existing = input.number === undefined ? undefined : tags.find((tag) => tag.number === input.number);
+  if (existing === undefined) {
+    return Object.freeze({
+      number: input.number ?? nextVersionNumber(tags),
+      name: input.name,
+      revisionId: input.revisionId,
+      note: input.note,
+      actor: input.actor,
+      createdAt: input.createdAt ?? now,
+    });
+  }
+  if (existing.revisionId !== input.revisionId) {
+    throw new RevisionPortError(
+      'UNSUPPORTED_OPERATION',
+      `${versionTagName(existing.number)} names another entry: a version keeps the entry it was made on.`,
+    );
+  }
+  return Object.freeze({
+    number: existing.number,
+    name: input.name,
+    revisionId: existing.revisionId,
+    note: input.note ?? existing.note,
+    actor: existing.actor,
+    createdAt: existing.createdAt,
+  });
+};
 
 /**
  * Which of this device's versions must move before they can be backed up.
  *
- * A version the remote already holds keeps its number. Each other version, in
- * creation order, keeps its number while no earlier one holds it and
- * otherwise takes the highest known plus one.
+ * A version the remote holds under the same number keeps it. Each other
+ * version, in creation order, keeps its number while the remote does not hold
+ * that number, and otherwise takes the highest number either side knows plus
+ * one.
  *
- * @param tags - The store's tags, each with the number it reads as.
- * @param backedUp - The names the remote holds.
+ * @param local - This store's versions.
+ * @param remote - The remote's versions, as last fetched.
  * @returns One step per version that moves, in creation order.
  * @public
  */
 export const planVersionRenumbering = (
-  tags: readonly VersionNumberSource[],
-  backedUp: ReadonlySet<string>,
+  local: readonly RevisionTag[],
+  remote: readonly RevisionTag[],
 ): readonly VersionRenumbering[] => {
-  const claimed = new Set(
-    tags.flatMap((tag) => (backedUp.has(tag.name) && tag.number !== undefined ? [tag.number] : [])),
-  );
-  let next = nextVersionNumber(tags);
+  const held = new Map(remote.map((tag) => [tag.number, tag] as const));
+  let next = nextVersionNumber([...local, ...remote]);
   const steps: VersionRenumbering[] = [];
-  for (const tag of tags.filter((candidate) => !backedUp.has(candidate.name)).toSorted(byCreation)) {
-    if (tag.number === undefined) {
-      continue;
-    }
-    if (!claimed.has(tag.number)) {
-      claimed.add(tag.number);
+  const byCreation = local.toSorted((left, right) => left.createdAt - right.createdAt || left.number - right.number);
+  for (const tag of byCreation) {
+    const holder = held.get(tag.number);
+    if (holder === undefined || isSameVersion(tag, holder)) {
       continue;
     }
     steps.push(Object.freeze({ name: tag.name, from: tag.number, to: next }));
-    claimed.add(next);
     next += 1;
   }
   return Object.freeze(steps);
@@ -140,9 +165,11 @@ export const planVersionRenumbering = (
  * Give this device's versions that are not backed up a number no backed-up
  * version holds, after the remote refused one as taken.
  *
- * Reads the remote's tags once, fetches them (so the other device's version
- * arrives here too and the next number counts it), and re-writes each moving
- * tag with its new number on the same revision, note, actor and time.
+ * Reads the remote's tags once and fetches them, so the other device's
+ * version arrives here too and the next number counts it. Each moving version
+ * is written at its new number with the same entry, name, note, actor and
+ * time, and its old number is given back to the version the remote holds
+ * there by fetching it again.
  *
  * @param port - The store.
  * @param input - The remote that refused, and the push's signal.
@@ -153,23 +180,20 @@ export const renumberUnpushedVersions = async (
   port: RevisionPort,
   input: Readonly<{ remote: string; signal?: AbortSignal }>,
 ): Promise<readonly VersionRenumbering[]> => {
-  const advertised = await port.listRemoteRefs(
-    input.remote,
-    input.signal === undefined ? {} : { signal: input.signal },
-  );
-  const remoteTags: readonly RemoteRef[] = advertised.filter((ref) => ref.name.startsWith(tagRefPrefix));
-  if (remoteTags.length > 0) {
-    await port.fetch({
-      remote: input.remote,
-      refs: remoteTags.map((ref) => ref.name),
-      advertised,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
+  const signal = input.signal === undefined ? {} : { signal: input.signal };
+  const advertised = await port.listRemoteRefs(input.remote, signal);
+  const remoteTags: readonly RemoteRef[] = advertised.filter((ref) => versionNumberOfTag(ref.name) !== undefined);
+  if (remoteTags.length === 0) {
+    return Object.freeze([]);
   }
-  const tags: readonly RevisionTag[] = await port.listTags();
-  const steps = planVersionRenumbering(tags, new Set(remoteTags.map((ref) => ref.name.slice(tagRefPrefix.length))));
+  const fetchRemoteTags = async (): Promise<void> => {
+    await port.fetch({ remote: input.remote, refs: remoteTags.map((ref) => ref.name), advertised, ...signal });
+  };
+  await fetchRemoteTags();
+  const local = await port.listTags();
+  const steps = planVersionRenumbering(local, await port.listTags({ remote: input.remote }));
   for (const step of steps) {
-    const tag = tags.find((candidate) => candidate.name === step.name);
+    const tag = local.find((candidate) => candidate.number === step.from);
     if (tag === undefined) {
       continue;
     }
@@ -183,6 +207,11 @@ export const renumberUnpushedVersions = async (
       ...(tag.note === undefined ? {} : { note: tag.note }),
       ...(tag.actor === undefined ? {} : { actor: tag.actor }),
     });
+    // oxlint-disable-next-line no-await-in-loop -- the old number goes before the next version takes a new one.
+    await port.deleteTag(step.from);
+  }
+  if (steps.length > 0) {
+    await fetchRemoteTags();
   }
   return steps;
 };

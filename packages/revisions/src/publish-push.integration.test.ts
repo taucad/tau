@@ -4,11 +4,12 @@
  * Two sentences this file makes demonstrable rather than asserted, both against
  * real `git` and never against a Tau stub:
  *
- * - **P38** — a published name may be *moved*. The publish push carries the
- *   tag's lease (`--force-with-lease` on `refs/tags/<name>`, from the last
- *   advertisement), so re-publishing a name this host last saw succeeds, and a
- *   name somebody else moved is refused as `leaseLost` with the history set
- *   refused alongside it. Never `git tag -f`, never a plain `--force`: the
+ * - **P38** — a published version may be *renamed* (B6). Its ref is
+ *   `refs/tags/v<number>`, so a rename rewrites the tag there, and the publish
+ *   push carries the tag's lease (`--force-with-lease` on that ref, from the
+ *   last advertisement): re-publishing a version this host last saw succeeds,
+ *   and one somebody else changed is refused as `leaseLost` with the history
+ *   set refused alongside it. Never `git tag -f`, never a plain `--force`: the
  *   witness is a stock bare repository whose refs stay exactly where the third
  *   party put them.
  * - **P40** — every native leg to a Tau API remote authenticates with the Tau
@@ -84,7 +85,7 @@ const commit = async (
  *
  * @param port - The store under test.
  * @param remote - The remote's name.
- * @param tag - The version name being published.
+ * @param tag - The version's tag being published, `v<number>`.
  * @returns Each offered ref's status, in the order offered.
  */
 const publishPush = async (
@@ -102,7 +103,7 @@ const publishPush = async (
   return result.refs.map((entry) => [entry.name, entry.status, entry.reason] as const);
 };
 
-describe.runIf(gitToolchainOnPath)('P38 — publishing a name again carries its lease', () => {
+describe.runIf(gitToolchainOnPath)('P38 — publishing a version again carries its lease', () => {
   let root: string;
   let repositoryPath: string;
   let bare: string;
@@ -136,32 +137,35 @@ describe.runIf(gitToolchainOnPath)('P38 — publishing a name again carries its 
     return stdout.trim();
   };
 
-  it('publishes a name, then republishes the same name onto a new revision', async () => {
+  it('publishes a version named with spaces, then republishes it renamed at the same ref', async () => {
     const first = await commit(port, undefined, { 'part.ts': 'export const a = 1;\n' });
-    await port.tag({ name: 'v1', revisionId: first, note: 'First' });
+    const created = await port.tag({ name: 'Ready for print', revisionId: first, note: 'First' });
+    expect(created.number).toBe(2);
 
-    expect(await publishPush(port, 'origin', 'v1')).toStrictEqual([
+    expect(await publishPush(port, 'origin', 'v2')).toStrictEqual([
       ['refs/heads/main', 'updated', undefined],
-      ['refs/tags/v1', 'updated', undefined],
+      ['refs/tags/v2', 'updated', undefined],
     ]);
-    const firstTagObject = await remoteRef('refs/tags/v1');
+    const firstTagObject = await remoteRef('refs/tags/v2');
     expect(firstTagObject).not.toBe('');
 
-    /* The same *name*, a new revision: this is the move P38 allows. */
+    /* The same number, a new name: the rename B6 allows, on the entry it always named. */
     const second = await commit(port, first, { 'part.ts': 'export const a = 2;\n' });
-    await port.tag({ name: 'v1', revisionId: second, note: 'First, again' });
+    await port.tag({ number: 2, name: 'Final fit', revisionId: first });
 
-    expect(await publishPush(port, 'origin', 'v1')).toStrictEqual([
+    expect(await publishPush(port, 'origin', 'v2')).toStrictEqual([
       ['refs/heads/main', 'updated', undefined],
-      ['refs/tags/v1', 'updated', undefined],
+      ['refs/tags/v2', 'updated', undefined],
     ]);
     expect(await remoteRef('refs/heads/main')).toBe(second);
-    expect(await remoteRef('refs/tags/v1')).not.toBe(firstTagObject);
+    expect(await remoteRef('refs/tags/v2')).not.toBe(firstTagObject);
+    const { stdout } = await runGit('git', ['--git-dir', bare, 'rev-parse', 'refs/tags/v2^{commit}']);
+    expect(stdout.trim()).toBe(first);
   }, 120_000);
 
-  it('refuses a name somebody else moved, and leaves main where it was', async () => {
+  it('refuses a version somebody else changed, and leaves main where it was', async () => {
     const before = await remoteRef('refs/heads/main');
-    const held = await remoteRef('refs/tags/v1');
+    const held = await remoteRef('refs/tags/v2');
 
     /* Somebody else, in the remote, between this host's last fetch and its
      * push: a third tag object the client has never seen. */
@@ -183,28 +187,29 @@ describe.runIf(gitToolchainOnPath)('P38 — publishing a name again carries its 
     ]);
     const { stdout } = await runGit('git', ['--git-dir', bare, 'rev-parse', 'refs/tags/scratch']);
     const theirs = stdout.trim();
-    await runGit('git', ['--git-dir', bare, 'update-ref', 'refs/tags/v1', theirs]);
+    await runGit('git', ['--git-dir', bare, 'update-ref', 'refs/tags/v2', theirs]);
 
-    const mine = await commit(port, revisionId(before), { 'part.ts': 'export const a = 3;\n' });
-    await port.tag({ name: 'v1', revisionId: mine, note: 'Mine' });
+    const [named] = await port.listTags();
+    await commit(port, revisionId(before), { 'part.ts': 'export const a = 3;\n' });
+    await port.tag({ number: 2, name: 'Mine', revisionId: named!.revisionId });
 
     /* The client still leases the value it last saw — `held`, not `theirs`. */
     const result = await port.push({
       remote: 'origin',
       refs: [
         { name: 'refs/heads/main', expected: revisionId(before) },
-        { name: 'refs/tags/v1', expected: revisionId(held) },
+        { name: 'refs/tags/v2', expected: revisionId(held) },
       ],
       atomic: true,
     });
 
-    expect(result.refs.find((entry) => entry.name === 'refs/tags/v1')).toMatchObject({
+    expect(result.refs.find((entry) => entry.name === 'refs/tags/v2')).toMatchObject({
       status: 'rejected',
       reason: 'leaseLost',
     });
     /* Atomic: the history set is refused with it, and the remote is untouched. */
     expect(await remoteRef('refs/heads/main')).toBe(before);
-    expect(await remoteRef('refs/tags/v1')).toBe(theirs);
+    expect(await remoteRef('refs/tags/v2')).toBe(theirs);
   }, 120_000);
 });
 
@@ -230,7 +235,7 @@ describe.runIf(gitToolchainOnPath)('P40 — a native push to a Tau remote carrie
     await port.init({ author });
     await port.setRemote({ name: 'origin', url: remote.url });
     head = await commit(port, undefined, { 'part.ts': 'export const a = 1;\n' });
-    await port.tag({ name: 'v1', revisionId: head, note: 'First' });
+    await port.tag({ name: 'First', revisionId: head, note: 'First' });
   }, 180_000);
 
   afterAll(async () => {
@@ -258,7 +263,7 @@ describe.runIf(gitToolchainOnPath)('P40 — a native push to a Tau remote carrie
       remote: 'origin',
       refs: [
         { name: 'refs/heads/main', expected: undefined },
-        { name: 'refs/tags/v1', expected: undefined },
+        { name: 'refs/tags/v2', expected: undefined },
       ],
       atomic: true,
     });

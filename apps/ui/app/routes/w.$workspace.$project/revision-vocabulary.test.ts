@@ -195,6 +195,20 @@ describe('the copy table', () => {
       expect(start === undefined ? undefined : versionPhrase(start)).toBe('V1 · Start');
     });
 
+    it('labels the Start entry V1 · Start from its number, even when a version named “v1” sits on it (B6)', () => {
+      /* A version's ref is `refs/tags/v<n>` and its name is free text: neither is ever read as the label. */
+      const start = card({
+        revisionId: 's',
+        start: 'created',
+        tags: ['v1'],
+        versions: [{ number: 2, name: 'v1' }],
+      });
+      const version = versionOf(start);
+      expect(version === undefined ? undefined : versionPhrase(version)).toBe('V1 · Start');
+      expect(revisionTitle(start, [start])).toBe('Start');
+      expect(entryReference(start)).toBe('V1');
+    });
+
     it('refers to an entry by its version, its autosave time or its title, never by a number', () => {
       expect(entryReference(card({ revisionId: 'v', n: 12, versions: [{ number: 2, name: 'Fit check' }] }))).toBe('V2');
       expect(entryReference(card({ revisionId: 'a', n: 12, capture: 'idle' }))).toBe(

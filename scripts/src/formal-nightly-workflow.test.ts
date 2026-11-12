@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 /*
  * The formal nightly runs one job per project with a `formal:nightly` target, each with its own
  * 120-minute budget (CI throughput review, Q-4): one serial job of every project ran out of its 60
- * minutes on each scheduled run of 2026-11-07 to 2026-11-11, and `agent-host` alone needs about 90. The project list comes from Nx, so a new
+ * minutes on each scheduled run of 2026-11-07 to 2026-11-11, and `agent-host` alone took 55 on its own job. The project list comes from Nx, so a new
  * owner's target joins the matrix without a workflow edit, and an empty list fails rather than passes.
  */
 

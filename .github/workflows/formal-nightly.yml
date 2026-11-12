@@ -26,8 +26,8 @@ env:
 jobs:
   # One job per project with a `formal:nightly` target, each with its own budget: a single serial job
   # ran out of its 60 minutes on every scheduled run of 2026-11-07 to 2026-11-11 (CI throughput review,
-  # Q-4). The first split run (43156977022) finished six projects in 2 to 9 minutes; `agent-host` alone
-  # needs about 90 (its 74 Lean mutants take about 24 s each), so each job has 120. The per-project
+  # Q-4). On split run 43164083769 six projects took 2 to 9 minutes and `agent-host` alone took 55, so
+  # each job has 120 for headroom over a single 60-minute budget. The per-project
   # durations size the queue lane and the release-gate matrix (RG-1) that follow.
   projects:
     name: List the formal nightly projects

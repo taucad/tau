@@ -394,6 +394,14 @@ const moduleBoundaryOptions = {
       onlyDependOnLibsWithTags: ['layer:util', ...unlayeredTargetTypes],
     },
     ...apiLibraryConstraints,
+    /*
+     * The shell split's libraries (shell split blueprint, graph pinning): the sandbox imports no workspace
+     * project, the service only the sandbox and shared packages, the Terminal concern only the service and
+     * shared packages. `scope:shared` admits `host`, so scripts/src/shell-split-graph.test.ts pins the exact edges.
+     */
+    { sourceTag: 'shell:sandbox', onlyDependOnLibsWithTags: [] },
+    { sourceTag: 'shell:service', onlyDependOnLibsWithTags: ['shell:sandbox', 'scope:shared'] },
+    { sourceTag: 'shell:terminal', onlyDependOnLibsWithTags: ['shell:service', 'scope:shared'] },
   ],
 };
 

@@ -21,6 +21,12 @@ name: Shell conformance
 # longer run on every `main` push or on every pull request that touches a shell path. The nightly watchdog
 # alerts the operator when a nightly is red or missing. `release-desktop-staging.yml` calls the rows on
 # the commit it is about to tag, so no desktop candidate exists without five green rows on its own commit.
+#
+# Tiers (shell split blueprint PR 4): the nightly, a dispatch, the label and the candidate gate pass no
+# `tier` and run the `full` tier, every row and target. The merge queue calls the `semantics` tier from
+# `ci.yml` with the affected `tag:ci:shell` projects: the Linux guests skip the Electron build, its transfer
+# and the application tier, and each row runs only the listed projects' targets. `tier` and `projects` are
+# `workflow_call` inputs only, so every run of this workflow the promotion lookup can find is a full run.
 on:
   workflow_dispatch:
   workflow_call:
@@ -29,6 +35,14 @@ on:
         description: Commit the rows check out (a desktop candidate's commit)
         type: string
         required: true
+      tier:
+        description: '`full` (every row and target, the default) or `semantics` (no Electron build or application tier)'
+        type: string
+        required: false
+      projects:
+        description: JSON array of the projects whose shell targets run (default all seven)
+        type: string
+        required: false
   schedule:
     - cron: '17 2 * * *'
   pull_request:
@@ -49,8 +63,40 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # One normalization of the inputs: they are empty on `schedule`, `pull_request` and a dispatch, so every
+  # guard below reads these outputs, never `inputs.*`, and `fromJSON('')` is never evaluated.
+  select:
+    name: Select the shell rows
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'shell-conformance') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'shell-conformance') &&
+      github.triggering_actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tier: ${{ steps.select.outputs.tier }}
+      projects: ${{ steps.select.outputs.projects }}
+    steps:
+      - name: Normalize the tier and the projects
+        id: select
+        env:
+          TIER: ${{ inputs.tier || 'full' }}
+          PROJECTS: ${{ inputs.projects || '["sandbox","native-process-core","shell-service","host","desktop-terminal","desktop","desktop-e2e"]' }}
+        run: |
+          set -euo pipefail
+          case "$TIER" in full|semantics) ;; *) echo "::error::unknown shell tier: $TIER"; exit 1 ;; esac
+          jq -e '
+            ["sandbox","native-process-core","shell-service","host","desktop-terminal","desktop","desktop-e2e"] as $known
+            | type == "array" and length > 0 and all(.[]; type == "string" and (. as $name | $known | index([$name]) != null))
+          ' <<< "$PROJECTS" > /dev/null || { echo "::error::projects must be a non-empty JSON array of shell projects: $PROJECTS"; exit 1; }
+          projects=$(jq -c . <<< "$PROJECTS")
+          echo "Shell tier $TIER, projects $projects"
+          { echo "tier=$TIER"; echo "projects=$projects"; } >> "$GITHUB_OUTPUT"
+
   linux:
     name: Shell conformance on ${{ matrix.row }} (stock ${{ matrix.distro }} guest)
+    needs: select
     if: >-
       github.event_name != 'pull_request' ||
       (contains(github.event.pull_request.labels.*.name, 'shell-conformance') &&
@@ -81,7 +127,9 @@ jobs:
           save-pnpm-store: 'false'
 
       # The renderer can peak above the guest's 8 GiB. Transfer this exact build; never rebuild inside the guest.
+      # The semantics tier has no application tier, so it builds and transfers nothing.
       - name: Build the production Electron application
+        if: needs.select.outputs.tier == 'full'
         timeout-minutes: 25
         run: pnpm nx build desktop --parallel=1
 
@@ -89,6 +137,8 @@ jobs:
         timeout-minutes: 85
         env:
           TAU_VM_DISTRO: ${{ matrix.distro }}
+          TAU_SHELL_TIER: ${{ needs.select.outputs.tier }}
+          TAU_SHELL_PROJECTS: ${{ needs.select.outputs.projects }}
         # The receipts bind `GITHUB_SHA`; a caller's `ref` checks out another commit, so pass the one the rows test.
         run: GITHUB_SHA="$(git rev-parse HEAD)" timeout --signal=TERM --kill-after=120s 80m bash libs/sandbox/scripts/shell-conformance-vm.sh
 
@@ -101,13 +151,21 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  # A row with no listed macOS target (a queue run that selected only `native-process-core`, whose rows are
+  # Linux-only) is skipped rather than run with an empty receipt directory.
   macos:
     name: Shell conformance on ${{ matrix.row }} (${{ matrix.runner }})
+    needs: select
     if: >-
-      github.event_name != 'pull_request' ||
+      (github.event_name != 'pull_request' ||
       (contains(github.event.pull_request.labels.*.name, 'shell-conformance') &&
       (github.event.action != 'labeled' || github.event.label.name == 'shell-conformance') &&
-      github.triggering_actor != 'dependabot[bot]')
+      github.triggering_actor != 'dependabot[bot]')) &&
+      (contains(fromJSON(needs.select.outputs.projects), 'sandbox') ||
+      contains(fromJSON(needs.select.outputs.projects), 'shell-service') ||
+      contains(fromJSON(needs.select.outputs.projects), 'host') ||
+      contains(fromJSON(needs.select.outputs.projects), 'desktop') ||
+      contains(fromJSON(needs.select.outputs.projects), 'desktop-terminal'))
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -146,13 +204,14 @@ jobs:
           echo "$helpers" | xargs ls -l
 
       - name: Run the conformance target
+        if: contains(fromJSON(needs.select.outputs.projects), 'sandbox')
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/receipt.json
         run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run sandbox:test:shell-conformance --skip-nx-cache
 
       - name: Run the shell service conformance target
-        if: success() || failure()
+        if: (success() || failure()) && contains(fromJSON(needs.select.outputs.projects), 'shell-service')
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/service-receipt.json
@@ -160,7 +219,7 @@ jobs:
 
       # The service rows that run through a real Tau agent host and the host's tool registry (H08-H10).
       - name: Run the host shell conformance target
-        if: success() || failure()
+        if: (success() || failure()) && contains(fromJSON(needs.select.outputs.projects), 'host')
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/host-receipt.json
@@ -168,7 +227,7 @@ jobs:
 
       # The W7 application and adversarial qualification rows: the agent host over the real provider (T, E and S rows).
       - name: Run the shell qualification target
-        if: success() || failure()
+        if: (success() || failure()) && contains(fromJSON(needs.select.outputs.projects), 'host')
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/qualification-receipt.json
@@ -176,7 +235,7 @@ jobs:
 
       # The desktop Terminal rows (W5): probe, refusal and PTY rows, on macOS with the shipped own-pty Seatbelt rule.
       - name: Run the desktop terminal conformance target
-        if: success() || failure()
+        if: (success() || failure()) && contains(fromJSON(needs.select.outputs.projects), 'desktop')
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/terminal-receipt.json
@@ -184,7 +243,7 @@ jobs:
 
       # The Terminal concern's own rows (shell split PR 3): the same probe, refusal and PTY rows over a port into the concern.
       - name: Run the Terminal concern conformance target
-        if: success() || failure()
+        if: (success() || failure()) && contains(fromJSON(needs.select.outputs.projects), 'desktop-terminal')
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/terminal-concern-receipt.json

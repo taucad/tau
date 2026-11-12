@@ -38,6 +38,7 @@ type Job = {
   readonly with?: Record<string, string>;
   readonly env?: Record<string, string>;
   readonly name?: string;
+  readonly permissions?: Record<string, string>;
   readonly strategy?: { readonly matrix?: Record<string, unknown> };
 };
 type Workflow = {
@@ -159,6 +160,7 @@ describe('ci.yml affected-only lanes', () => {
       'native-linux': { targets: ['test:native-linux'], pr: 'queue' },
       'viewer-parity': { targets: ['test:viewer-parity'], pr: 'queue' },
       desktop: { tags: ['ci:desktop'] },
+      shell: { tags: ['ci:shell'], pr: 'queue' },
     });
   });
 
@@ -218,6 +220,7 @@ describe('ci.yml affected-only lanes', () => {
       'formal',
       'api',
       'billing-e2e',
+      'shell',
     ]);
     const check = gate?.steps?.[0]?.run ?? '';
     expect(check).toContain('test "$PLAN_RESULT" = success');
@@ -284,7 +287,7 @@ describe('ci.yml affected-only lanes', () => {
   it('should skip every lane on a reused queue verdict by one rule, naming no lane', () => {
     // The plan reads only the verdict's run id: no per-lane conclusions of the queue run.
     expect(planStep?.env?.['REUSED']).toBe(expression('steps.queue.outputs.run-id'));
-    expect(Object.keys(planStep?.env ?? {}).sort()).toEqual(['LANE_SELECTORS', 'REUSED']);
+    expect(Object.keys(planStep?.env ?? {}).sort()).toEqual(['LANE_SELECTORS', 'REUSED', 'SHELL_LANE_PATHS']);
     const reused = planScript.slice(planScript.indexOf('if [ -n "$REUSED" ]; then'));
     const block = reused.slice(0, reused.indexOf('\nfi\n'));
     // Every lane's selection is emptied at once, before any flag is read from it.
@@ -546,6 +549,202 @@ describe('ci.yml desktop lane', () => {
   });
 });
 
+describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
+  type ShellWorkflow = {
+    readonly on: {
+      readonly workflow_dispatch?: { readonly inputs?: Record<string, unknown> };
+      readonly workflow_call?: {
+        readonly inputs?: Record<string, { readonly type?: string; readonly required?: boolean }>;
+      };
+    };
+    readonly concurrency?: { readonly group?: string };
+    readonly jobs: Record<string, Job>;
+  };
+  const shellText = read('.github/workflows/shell-conformance.yml');
+  const shellWorkflow = load(shellText) as ShellWorkflow;
+  const allProjects = [
+    'sandbox',
+    'native-process-core',
+    'shell-service',
+    'host',
+    'desktop-terminal',
+    'desktop',
+    'desktop-e2e',
+  ];
+  const queueProjects = ['desktop-terminal', 'host', 'native-process-core', 'sandbox', 'shell-service'];
+  const guard = (project: string): string => `contains(fromJSON(needs.select.outputs.projects), '${project}')`;
+  const lane = ci.jobs['shell'];
+  const condition =
+    "!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.shell == 'true' && github.event_name == 'merge_group'";
+
+  it('should plan the shell lane from tag:ci:shell, in the merge queue only', () => {
+    expect(laneSelectors['shell']).toEqual({ tags: ['ci:shell'], pr: 'queue' });
+    expect(affectedPlanOutputs()).toContain('shell');
+    expect(planScript).toContain('shell=$(flag shell)');
+    expect(planScript).toContain(`shell_projects=$(jq -c '.shell' <<< "$lanes")`);
+    expect(planScript).toContain('echo "shell-projects=$shell_projects"');
+    expect(ci.jobs['plan']?.outputs?.['shell-projects']).toBe(expression('steps.plan.outputs.shell-projects'));
+  });
+
+  it('should tag exactly the five queue projects ci:shell', { timeout: 60_000 }, async () => {
+    const { createProjectGraphAsync, readCachedProjectGraph } = await import('@nx/devkit');
+    const graph = await (async () => {
+      try {
+        return readCachedProjectGraph();
+      } catch {
+        return createProjectGraphAsync();
+      }
+    })();
+    const tagged = Object.values(graph.nodes)
+      .filter(({ data }) => (data.tags ?? []).includes('ci:shell'))
+      .map(({ name }) => name)
+      .toSorted();
+    expect(tagged).toEqual(queueProjects);
+  });
+
+  it('should select the lane on exactly the four fixture and workflow paths the graph does not see', () => {
+    const paths = JSON.parse(planStep?.env?.['SHELL_LANE_PATHS'] ?? '[]') as string[];
+    expect(paths).toEqual([
+      '.github/workflows/shell-conformance.yml',
+      'apps/desktop/scripts/hosted-linux-bwrap-fixture.mts',
+      'apps/desktop/scripts/linux-apt-package.mts',
+      'apps/desktop/scripts/runtime-stage.mts',
+    ]);
+    for (const path of paths) {
+      expect(() => read(path), path).not.toThrow();
+    }
+    // The check reads the plan's own diff, before the reuse and pull-request rules, and adds the sandbox rows.
+    const check = planScript.indexOf(['git diff --name-only --no-renames "$NX_BASE" "$', '{NX_HEAD:-HEAD}"'].join(''));
+    expect(check).toBeGreaterThan(planScript.indexOf('lanes=$(jq -c --argjson affected'));
+    expect(check).toBeLessThan(planScript.indexOf('selected=$lanes'));
+    expect(planScript).toContain(`lanes=$(jq -c '.shell |= (. + ["sandbox"] | unique)' <<< "$lanes")`);
+    // Not target inputs: those would mark the sandbox and every dependent affected in the ordinary lanes.
+    const sandbox = JSON.parse(read('libs/sandbox/project.json')) as {
+      readonly targets: Record<string, { readonly inputs?: readonly unknown[] }>;
+    };
+    for (const [target, configuration] of Object.entries(sandbox.targets)) {
+      expect(JSON.stringify(configuration.inputs ?? []), target).not.toMatch(
+        /apps\/desktop\/scripts|shell-conformance\.yml/u,
+      );
+    }
+  });
+
+  it('should call the semantics tier with the planned projects on the queue commit', () => {
+    expect(lane?.uses).toBe('./.github/workflows/shell-conformance.yml');
+    expect(lane?.needs).toEqual(['plan']);
+    expect(lane?.with).toEqual({
+      ref: expression('github.sha'),
+      tier: 'semantics',
+      projects: expression('needs.plan.outputs.shell-projects'),
+    });
+    expect(lane?.permissions).toEqual({ contents: 'read' });
+  });
+
+  it('should restrict the reusable call to the merge queue and never widen it', () => {
+    expect(lane?.if).toBe(expression(condition));
+    // A reusable-workflow call may narrow to `merge_group`; no other event, branch or `||` clause may run it.
+    expect(lane?.uses).toBeDefined();
+    const rest = condition.replace(" && github.event_name == 'merge_group'", '');
+    expect(rest).not.toMatch(/\|\||\bgithub\.(?:ref|ref_name|event_name|base_ref|head_ref)\b/u);
+    for (const [name, definition] of Object.entries(ci.jobs)) {
+      if ((definition.if ?? '').includes("github.event_name == 'merge_group'")) {
+        expect(definition.uses, name).toBeDefined();
+      }
+    }
+  });
+
+  it('should require the shell lane in the required check when the queue planned it', () => {
+    const gate = ci.jobs['affected'];
+    expect(gate?.needs).toContain('shell');
+    const step = gate?.steps?.[0];
+    expect(step?.env?.['SHELL_REQUIRED']).toBe(expression('needs.plan.outputs.shell'));
+    expect(step?.env?.['SHELL_RESULT']).toBe(expression('needs.shell.result'));
+    expect(step?.env?.['EVENT']).toBe(expression('github.event_name'));
+    const check = step?.run ?? '';
+    const rule =
+      'if [ "$SHELL_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$SHELL_RESULT" = success; fi';
+    expect(check).toContain(rule);
+    expect(check.indexOf(rule)).toBeGreaterThan(check.indexOf('if [ -n "$REUSED" ]; then'));
+  });
+
+  it('should take tier and projects as workflow_call inputs only', () => {
+    const inputs = shellWorkflow.on.workflow_call?.inputs ?? {};
+    expect(Object.keys(inputs).toSorted()).toEqual(['projects', 'ref', 'tier']);
+    expect(inputs['tier']).toMatchObject({ type: 'string', required: false });
+    expect(inputs['projects']).toMatchObject({ type: 'string', required: false });
+    // A dispatch declares neither, so every run the promotion lookup can find is a full run.
+    expect('workflow_dispatch' in shellWorkflow.on).toBe(true);
+    expect(shellWorkflow.on.workflow_dispatch?.inputs?.['tier']).toBeUndefined();
+    expect(shellWorkflow.on.workflow_dispatch?.inputs?.['projects']).toBeUndefined();
+    // A call keeps the candidate group, so a queue call never cancels a candidate call.
+    expect(shellWorkflow.concurrency?.group).toContain("inputs.ref && format('candidate-{0}', inputs.ref)");
+  });
+
+  it('should normalize the empty inputs once, in the select job', () => {
+    const { select } = shellWorkflow.jobs;
+    expect(select?.outputs).toEqual({
+      tier: expression('steps.select.outputs.tier'),
+      projects: expression('steps.select.outputs.projects'),
+    });
+    const step = select?.steps?.find((candidate) => candidate.id === 'select');
+    expect(step?.env?.['TIER']).toBe(expression("inputs.tier || 'full'"));
+    expect(step?.env?.['PROJECTS']).toBe(expression(`inputs.projects || '${JSON.stringify(allProjects)}'`));
+    for (const name of ['linux', 'macos']) {
+      expect(shellWorkflow.jobs[name]?.needs, name).toBe('select');
+    }
+  });
+
+  it('should guard every nx run step by its project and read no input directly', () => {
+    let guarded = 0;
+    for (const [name, definition] of Object.entries(shellWorkflow.jobs)) {
+      expect(definition.if ?? '', name).not.toMatch(/\binputs\./u);
+      for (const step of definition.steps ?? []) {
+        if (name !== 'select') {
+          const reads = JSON.stringify({ if: step.if, env: step.env, run: step.run, with: step.with });
+          expect(reads, `${name}: ${step.name}`).not.toMatch(/\binputs\.(?:projects|tier)\b/u);
+        }
+        for (const [, project] of (step.run ?? '').matchAll(/\bnx\s+run\s+([\w-]+):/gu)) {
+          expect(step.if ?? '', `${name}: ${step.name}`).toContain(guard(project ?? ''));
+          guarded += 1;
+        }
+      }
+    }
+    // Six macOS steps: the sandbox, the service, the host's two targets and the two Terminal targets.
+    expect(guarded).toBe(6);
+    expect(shellText).not.toMatch(/fromJSON\(inputs\./u);
+  });
+
+  it('should build and transfer the Electron application in the full tier only', () => {
+    const steps = shellWorkflow.jobs['linux']?.steps ?? [];
+    const build = steps.find((step) => /\bnx build desktop\b/u.test(step.run ?? ''));
+    expect(build?.if).toBe("needs.select.outputs.tier == 'full'");
+    const guest = steps.find((step) => (step.run ?? '').includes('shell-conformance-vm.sh'));
+    expect(guest?.env?.['TAU_SHELL_TIER']).toBe(expression('needs.select.outputs.tier'));
+    expect(guest?.env?.['TAU_SHELL_PROJECTS']).toBe(expression('needs.select.outputs.projects'));
+    expect(read('libs/sandbox/scripts/shell-conformance-vm.sh')).toContain(
+      'if [[ "$tier" == full ]]; then\n  (cd "$REPO_ROOT" && test -s apps/desktop/dist/main/index.js',
+    );
+  });
+
+  it('should run each guest target only when its project is listed', () => {
+    let current: string | undefined;
+    const runs: string[] = [];
+    for (const line of read('libs/sandbox/scripts/shell-conformance-guest.sh').split('\n')) {
+      const opened = /^if (?:\[\[ "\$tier" == full \]\] && )?listed ([\w-]+); then$/u.exec(line);
+      if (opened) {
+        current = opened[1];
+      } else if (line === 'fi') {
+        current = undefined;
+      }
+      for (const [, project] of line.matchAll(/\brun ([\w-]+):[\w:-]+ --skip-nx-cache/gu)) {
+        expect(current, line).toBe(project);
+        runs.push(project ?? '');
+      }
+    }
+    expect(runs.toSorted()).toEqual([...allProjects, 'host'].toSorted());
+  });
+});
+
 describe('staging.yml skipped-lane rule', () => {
   const check = staging.jobs['ci']?.steps?.find((step) => step.id === 'check');
   const script = check?.run ?? '';
@@ -726,8 +925,10 @@ describe('queue-verdict action', () => {
     for (const name of names) {
       expect(source, name).not.toContain(name);
     }
+    // A composite step's `shell: bash` is the step's interpreter, not the shell lane.
+    const steps = source.replaceAll(/^\s+shell: bash$/gmu, '');
     for (const key of Object.keys(laneSelectors)) {
-      expect(source, key).not.toMatch(new RegExp(`["'\\s{,]${key}["':]`, 'u'));
+      expect(steps, key).not.toMatch(new RegExp(`["'\\s{,]${key}["':]`, 'u'));
     }
   });
 
@@ -815,6 +1016,8 @@ describe('plan lane selection', () => {
       tags: ['ci:native-hosts'],
       targets: ['test:scenarios', 'test-geospec', 'test:native-linux'],
     },
+    sandbox: { root: 'libs/sandbox', type: 'lib', tags: ['ci:shell'], targets: ['test:shell-conformance'] },
+    host: { root: 'packages/host', type: 'lib', tags: ['ci:shell'], targets: ['test:shell-conformance'] },
   };
   const everything = Object.keys(nodes).filter((name) => name !== 'workspace');
 
@@ -869,7 +1072,8 @@ describe('plan lane selection', () => {
         ].join('\n'),
         { mode: 0o700 },
       );
-      // `git merge-base <base> <head>` answers the base; `git diff --name-only … <base> <head>` the PR's files.
+      // `git merge-base <base> <head>` answers the base; `git diff --name-only … <base> <head>` the PR's files,
+      // and the same diff without the merge base the files the shell lane's path check reads.
       writeFileSync(
         join(directory, 'git'),
         [
@@ -877,7 +1081,10 @@ describe('plan lane selection', () => {
           'set -euo pipefail',
           'case "$1" in',
           '  merge-base) [ "$2 $3" = "base-sha head-sha" ] && echo merge-base-sha ;;',
-          '  diff) [ "$*" = "diff --name-only --no-renames --relative merge-base-sha head-sha" ] && cat "$FIXTURES/files" ;;',
+          '  diff) case "$*" in',
+          '    "diff --name-only --no-renames --relative merge-base-sha head-sha" | "diff --name-only --no-renames base-sha head-sha") cat "$FIXTURES/files" ;;',
+          '    *) echo "unexpected git $*" >&2; exit 1 ;;',
+          '  esac ;;',
           '  *) echo "unexpected git $*" >&2; exit 1 ;;',
           'esac',
           '',
@@ -899,6 +1106,7 @@ describe('plan lane selection', () => {
           ['NX_HEAD', 'head-sha'],
           ['REUSED', ''],
           ['LANE_SELECTORS', selectors],
+          ['SHELL_LANE_PATHS', planStep?.env?.['SHELL_LANE_PATHS'] ?? '[]'],
         ]),
       });
       const outputs = Object.fromEntries(
@@ -964,6 +1172,42 @@ describe('plan lane selection', () => {
     expect(sibling.stdout).toContain('Pull request (touched) api: ["api-e2e"]');
     const own = plan('pull_request', { affected: ['api'], files: ['apps/api/app/main.ts'] });
     expect(own.stdout).toContain('Pull request (touched) api: ["api"]');
+  });
+
+  it('should run the affected shell projects in the merge queue and none on a pull request', () => {
+    const queue = plan('merge_group', { affected: ['host'], files: ['packages/host/src/acp/server.ts'] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.outputs['shell']).toBe('true');
+    expect(queue.outputs['shell-projects']).toBe('["host"]');
+    const pullRequest = plan('pull_request', { affected: ['host'], files: ['packages/host/src/acp/server.ts'] });
+    expect(pullRequest.status, pullRequest.stderr).toBe(0);
+    expect(pullRequest.outputs['shell']).toBe('false');
+    expect(pullRequest.outputs['shell-projects']).toBe('[]');
+    const unrelated = plan('merge_group', { affected: ['api'], files: ['apps/api/app/main.ts'] });
+    expect(unrelated.status, unrelated.stderr).toBe(0);
+    expect(unrelated.outputs['shell']).toBe('false');
+  });
+
+  it.each([
+    '.github/workflows/shell-conformance.yml',
+    'apps/desktop/scripts/hosted-linux-bwrap-fixture.mts',
+    'apps/desktop/scripts/linux-apt-package.mts',
+    'apps/desktop/scripts/runtime-stage.mts',
+  ])('should select the sandbox rows in the merge queue when %s changes', (file) => {
+    const queue = plan('merge_group', { affected: ['host'], files: [file] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.outputs['shell']).toBe('true');
+    expect(queue.outputs['shell-projects']).toBe('["host","sandbox"]');
+    // The pull-request rule still leaves the lane to the queue.
+    const pullRequest = plan('pull_request', { affected: [], files: [file] });
+    expect(pullRequest.status, pullRequest.stderr).toBe(0);
+    expect(pullRequest.outputs['shell']).toBe('false');
+  });
+
+  it('should not select the shell lane for a file beside the fixture paths', () => {
+    const queue = plan('merge_group', { affected: [], files: ['apps/desktop/scripts/hosted-linux-vm.sh'] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.outputs['shell']).toBe('false');
   });
 
   it('should fail the plan on a pull-request rule it does not know', () => {

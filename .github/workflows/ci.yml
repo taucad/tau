@@ -55,7 +55,8 @@ jobs:
   # `staging.yml` (the `ci-plan` artifact). The seven `affected-lane` jobs do not wait
   # for it: they run their own `nx affected` and read the queue verdict themselves.
   # Every selector here is a tag, a target name or a project type — no job in this
-  # workflow may name a project.
+  # workflow may name a project, except the shell lane's path check below, which names
+  # `sandbox`, the project whose rows those paths feed (shell split blueprint rows 15, 17).
   plan:
     name: Plan affected lanes
     # A draft pull request runs no CI (the runner pool is the queue's bottleneck,
@@ -82,6 +83,8 @@ jobs:
       viewer-parity: ${{ steps.plan.outputs.viewer-parity }}
       desktop: ${{ steps.plan.outputs.desktop }}
       desktop-projects: ${{ steps.plan.outputs.desktop-projects }}
+      shell: ${{ steps.plan.outputs.shell }}
+      shell-projects: ${{ steps.plan.outputs.shell-projects }}
       reused: ${{ steps.queue.outputs.run-id }}
       affected-base: ${{ steps.queue.outputs.affected-base }}
     steps:
@@ -135,6 +138,11 @@ jobs:
           # host). No job here runs it: the packaged suite runs on every staging candidate instead
           # (operator decision D-DS1 (b), `desktop-packaged.yml`), so the lane is informational and
           # `lanes.json` records it for the observed desktop lane rate.
+          # Shell lane: a `tag:ci:shell` project (the sandbox, native-process-core, the shell service, the
+          # host and the Terminal concern), in the merge queue only; `shell-projects` names the rows' projects.
+          # SHELL_LANE_PATHS select it too (with `sandbox`): the fixture producers and the workflow the graph
+          # does not see, checked here rather than as target `inputs`, which would mark `sandbox` and every
+          # project that depends on it affected in the ordinary lanes (shell split blueprint rows 15, 17).
           # `pr` is a lane's pull-request rule; without it a pull request runs the lane as the queue does.
           # "queue": the lane runs in the merge queue only. "touched": a pull request runs the lane only
           # for the selected projects that own a file of its own diff (Nx's file-to-project map: the
@@ -152,7 +160,13 @@ jobs:
              "native-hosts": {"tags": ["ci:native-hosts"], "pr": "queue"},
              "native-linux": {"targets": ["test:native-linux"], "pr": "queue"},
              "viewer-parity": {"targets": ["test:viewer-parity"], "pr": "queue"},
-             "desktop": {"tags": ["ci:desktop"]}}
+             "desktop": {"tags": ["ci:desktop"]},
+             "shell": {"tags": ["ci:shell"], "pr": "queue"}}
+          SHELL_LANE_PATHS: >-
+            [".github/workflows/shell-conformance.yml",
+             "apps/desktop/scripts/hosted-linux-bwrap-fixture.mts",
+             "apps/desktop/scripts/linux-apt-package.mts",
+             "apps/desktop/scripts/runtime-stage.mts"]
         run: |
           # `pipefail` so a failing `nx` call fails the step instead of leaving an empty
           # output behind `tail`. `tail -1` keeps the JSON array and drops Nx's log lines.
@@ -174,6 +188,16 @@ jobs:
                   | select(all($selector.tags[]?; . as $tag | $nodes[$name].data.tags // [] | index([$tag]) != null))
                   | select(all($selector.targets[]?; . as $target | $nodes[$name].data.targets // {} | has($target)))
                   | $name] | sort)' "$RUNNER_TEMP/graph.json")
+          # The shell lane's path check: a change to a fixture producer or to the shell workflow selects the
+          # sandbox rows, whose guests install those fixtures (the reuse and pull-request rules below still apply).
+          shell_paths=$(git diff --name-only --no-renames "$NX_BASE" "${NX_HEAD:-HEAD}" \
+            | jq -cRn --argjson paths "$SHELL_LANE_PATHS" '[inputs | select(. as $file | $paths | index([$file]) != null)]')
+          if [ "$shell_paths" != '[]' ]; then
+            jq -e '.graph.nodes.sandbox.data.tags // [] | index(["ci:shell"]) != null' "$RUNNER_TEMP/graph.json" > /dev/null \
+              || { echo "::error::the shell lane path check names sandbox, which is not a tag:ci:shell project"; exit 1; }
+            lanes=$(jq -c '.shell |= (. + ["sandbox"] | unique)' <<< "$lanes")
+            echo "Shell lane paths changed: $shell_paths"
+          fi
           jq -r 'to_entries[] | "Affected \(.key): \(.value | tojson)"' <<< "$lanes"
           # What `nx affected` selected, for `lanes.json` below.
           selected=$lanes
@@ -221,6 +245,8 @@ jobs:
           viewer_parity=$(flag viewer-parity)
           desktop=$(flag desktop)
           desktop_projects=$(jq -c '.desktop' <<< "$lanes")
+          shell=$(flag shell)
+          shell_projects=$(jq -c '.shell' <<< "$lanes")
           # A push to `main` runs the native host rows from `native-hosts.yml`'s own push trigger:
           # every Linux row, and the Intel row when affected since its last successful push run.
           if [ "$GITHUB_EVENT_NAME" = push ]; then
@@ -245,6 +271,8 @@ jobs:
             echo "viewer-parity=$viewer_parity"
             echo "desktop=$desktop"
             echo "desktop-projects=$desktop_projects"
+            echo "shell=$shell"
+            echo "shell-projects=$shell_projects"
           } >> "$GITHUB_OUTPUT"
           # `staging.yml` reads which service lanes `nx affected` selected (`api`, `billing-e2e`,
           # keyed by their job), before the reuse and pull-request rules above, and the merge-queue
@@ -651,18 +679,49 @@ jobs:
       contents: 'read'
     uses: ./.github/workflows/viewer-parity.yml
 
+  # The shell conformance rows (`shell-conformance.yml`, semantics tier), in the merge queue only,
+  # when the plan finds a `tag:ci:shell` project affected or a shell lane path changed: the affected
+  # projects' targets on the three stock Linux guests and the two macOS rows, with no Electron build
+  # or application tier. A pull request keeps the `shell-conformance` label for early signal; a push
+  # to `main` reuses the queue verdict, and the desktop candidate gate runs the full tier fresh.
+  # The required check waits for it (shell split blueprint PR 4).
+  shell:
+    name: Shell conformance
+    needs: [plan]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.shell == 'true' && github.event_name == 'merge_group' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/shell-conformance.yml
+    with:
+      ref: ${{ github.sha }}
+      tier: semantics
+      projects: ${{ needs.plan.outputs.shell-projects }}
+
   # The required check. It passes only when the plan and every affected lane passed, and every
   # lane the plan selects too when this run needed it (browser, GeoSpec example contracts, CLI
-  # end-to-end, native hosts, viewer parity, formal, API tests, billing contracts): a skip of a
-  # lane the plan selected fails it. It waits for every lane, so a merge-queue run whose gate
-  # passed proves every lane it selected, which is the one proof `queue-verdict` reuses on the
-  # push (Brain ci-audit 2026-11-12, F1). API tests are a required check of their own as well,
-  # so the queue already waited for them; in the ten latest queue runs that ran formal and
-  # billing contracts (2026-11-12), both finished before the gate or before API tests.
+  # end-to-end, native hosts, viewer parity, formal, API tests, billing contracts, and the shell
+  # rows in the merge queue): a skip of a lane the plan selected fails it. It waits for every
+  # lane, so a merge-queue run whose gate passed proves every lane it selected, which is the one
+  # proof `queue-verdict` reuses on the push (Brain ci-audit 2026-11-12, F1). API tests are a
+  # required check of their own as well, so the queue already waited for them; in the ten latest
+  # queue runs that ran formal and billing contracts (2026-11-12), both finished before the gate
+  # or before API tests.
   affected:
     name: Run affected tasks
     needs:
-      [plan, affected-lane, browser, geospec-examples, cli-e2e, native-hosts, viewer-parity, formal, api, billing-e2e]
+      [
+        plan,
+        affected-lane,
+        browser,
+        geospec-examples,
+        cli-e2e,
+        native-hosts,
+        viewer-parity,
+        formal,
+        api,
+        billing-e2e,
+        shell,
+      ]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -686,6 +745,9 @@ jobs:
           API_RESULT: ${{ needs.api.result }}
           BILLING_REQUIRED: ${{ needs.plan.outputs.billing }}
           BILLING_RESULT: ${{ needs.billing-e2e.result }}
+          SHELL_REQUIRED: ${{ needs.plan.outputs.shell }}
+          SHELL_RESULT: ${{ needs.shell.result }}
+          EVENT: ${{ github.event_name }}
           REUSED: ${{ needs.plan.outputs.reused }}
           DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
         run: |
@@ -707,6 +769,7 @@ jobs:
           if [ "$FORMAL_REQUIRED" = true ]; then test "$FORMAL_RESULT" = success; fi
           if [ "$API_REQUIRED" = true ]; then test "$API_RESULT" = success; fi
           if [ "$BILLING_REQUIRED" = true ]; then test "$BILLING_RESULT" = success; fi
+          if [ "$SHELL_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$SHELL_RESULT" = success; fi
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
   # of every affected project with a `formal` target. A known counterexample is an

@@ -86,19 +86,23 @@ describe('missingTools', () => {
 
     const code = missingTools(
       context,
-      { tools: locateTools(context), needed: ['java', 'tlc'], target: 'agent-host:formal' },
+      { tools: locateTools(context), needed: ['java', 'tlc'], target: 'agent-host:formal:tla' },
       (line) => lines.push(line),
     );
 
     expect(code).toBe(0);
-    expect(lines).toEqual(['SKIPPED agent-host:formal: java, tlc not found; run pnpm nx run formal:setup']);
+    expect(lines).toEqual(['SKIPPED agent-host:formal:tla: java, tlc not found; run pnpm nx run formal:setup']);
   });
 
   it('should exit 1 without Java when CI is set', () => {
     const context: FormalContext = { root: temporaryRoot(), env: { PATH: '', CI: 'true' } };
 
     expect(
-      missingTools(context, { tools: locateTools(context), needed: ['java'], target: 'host:formal' }, () => undefined),
+      missingTools(
+        context,
+        { tools: locateTools(context), needed: ['java'], target: 'host:formal:tla' },
+        () => undefined,
+      ),
     ).toBe(1);
   });
 });

@@ -26,7 +26,7 @@ pnpm nx lint api-billing
 pnpm nx test api-billing --watch=false
 pnpm nx typecheck api-billing
 pnpm nx run api-billing:test:billing-foundation
-pnpm nx run api-billing:formal
+pnpm nx run api-billing:formal:tla
 ```
 
 ## Local maintenance

@@ -176,7 +176,7 @@ Regenerate the graph, the suite and the manifest with `node tools/formal/src/cli
 ## Running
 
 ```bash
-pnpm nx run ui:formal
+pnpm nx run ui:formal:tla
 ```
 
 The whole `apps/ui` run takes about 160 seconds on four workers. Most of it is record-sync: `target-lost-reply` (about 75 seconds), `today-slots-ForeignStaysForeign`, the two liveness configurations and `target-eager` (about 25 seconds each).

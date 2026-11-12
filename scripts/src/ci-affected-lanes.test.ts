@@ -153,7 +153,7 @@ describe('ci.yml affected-only lanes', () => {
       billing: { targets: ['test:billing-foundation'], pr: 'queue' },
       'cli-e2e': { targets: ['test:scenarios'], pr: 'queue' },
       size: { targets: ['size'] },
-      formal: { targets: ['formal'], pr: 'queue' },
+      formal: { targets: ['formal:tla'], pr: 'queue' },
       'geospec-examples': { targets: ['test-geospec'], pr: 'queue' },
       browser: { tags: ['ci:browser'], targets: ['verify-browser'], pr: 'queue' },
       'native-hosts': { tags: ['ci:native-hosts'], pr: 'queue' },
@@ -1008,7 +1008,7 @@ describe('plan lane selection', () => {
       root: 'apps/ui',
       type: 'app',
       tags: ['ci:browser', 'ci:desktop'],
-      targets: ['verify-browser', 'size', 'test:viewer-parity', 'formal'],
+      targets: ['verify-browser', 'size', 'test:viewer-parity', 'formal:tla'],
     },
     cli: {
       root: 'packages/cli',

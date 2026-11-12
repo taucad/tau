@@ -295,7 +295,7 @@ const checkLeanProject = (
 /** `formal check --tier pr|nightly|lean <projectRoot>`: SANY, every config and log case of the tier, against `expected.json`. */
 export const checkProject = async (context: FormalContext, options: CheckOptions): Promise<number> => {
   const log = options.log ?? ((line: string) => process.stdout.write(`${line}\n`));
-  const target = `${path.relative(context.root, options.projectRoot)}:formal${options.tier === 'pr' ? '' : `:${options.tier}`}`;
+  const target = `${path.relative(context.root, options.projectRoot)}:formal:${options.tier === 'pr' ? 'tla' : options.tier}`;
   if (options.tier === 'lean') {
     return checkLeanProject(context, options, { log, target });
   }

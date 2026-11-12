@@ -8,4 +8,4 @@ The NestJS server library behind Tau Cloud billing. `BillingModule` and its serv
 
 - `pnpm nx test api-billing` runs the unit suites.
 - `pnpm nx run api-billing:test:billing-foundation` runs the database and Stripe adapter contracts on a disposable PostgreSQL 17 it owns. CI runs it in the `Billing contracts` job when this project or one it depends on is affected.
-- `pnpm nx run api-billing:formal` checks the `GatewayInvocation` models in `specs/`.
+- `pnpm nx run api-billing:formal:tla` checks the `GatewayInvocation` models in `specs/`.

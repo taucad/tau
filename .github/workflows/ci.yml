@@ -154,7 +154,7 @@ jobs:
              "billing": {"targets": ["test:billing-foundation"], "pr": "queue"},
              "cli-e2e": {"targets": ["test:scenarios"], "pr": "queue"},
              "size": {"targets": ["size"]},
-             "formal": {"targets": ["formal"], "pr": "queue"},
+             "formal": {"targets": ["formal:tla"], "pr": "queue"},
              "geospec-examples": {"targets": ["test-geospec"], "pr": "queue"},
              "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"], "pr": "queue"},
              "native-hosts": {"tags": ["ci:native-hosts"], "pr": "queue"},
@@ -772,7 +772,7 @@ jobs:
           if [ "$SHELL_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$SHELL_RESULT" = success; fi
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
-  # of every affected project with a `formal` target. A known counterexample is an
+  # of every affected project with a `formal:tla` or `formal:lean` target. A known counterexample is an
   # expected verdict and never turns this red; a changed verdict, a stale generated
   # file, a missing tool or a watchdog does. Toolchains come from setup-formal,
   # pinned by sha256 in tools/formal/toolchain.lock, never from `pnpm install`.
@@ -822,9 +822,9 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          pnpm nx affected -t formal formal:lean --graph="$RUNNER_TEMP/formal-graph.json" > /dev/null
+          pnpm nx affected -t formal:tla formal:lean --graph="$RUNNER_TEMP/formal-graph.json" > /dev/null
           projects=$(jq -c '
-            [.tasks.tasks[] | select(.target.target | IN("formal", "formal:lean")) | .target.project]
+            [.tasks.tasks[] | select(.target.target | IN("formal:tla", "formal:lean")) | .target.project]
             | unique' "$RUNNER_TEMP/formal-graph.json")
           shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "$SHARD" --shards 2 \
             --durations scripts/src/formal-shard-durations.json)
@@ -833,7 +833,7 @@ jobs:
             exit 0
           fi
           echo "Shard projects: $shard"
-          pnpm nx run-many -t formal formal:lean --projects "$shard" --parallel=1
+          pnpm nx run-many -t formal:tla formal:lean --projects "$shard" --parallel=1
 
       - name: Check workspace root hygiene
         if: always()

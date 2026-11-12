@@ -398,3 +398,54 @@ describe('agent turn context', () => {
     expect(clientMetricEntrySchema.safeParse(turn({ toolCalls: rows(cap + 1) })).success).toBe(false);
   });
 });
+
+/* Automatic kernel selection (blueprint D10): kernel ids, small enums and counts; nothing else is accepted. */
+describe('kernel selection entries', () => {
+  const resolved = (detail: Record<string, unknown>) => ({
+    name: IngestEntryName.KERNEL_AUTO_RESOLVED,
+    duration: 0,
+    detail: { hostProfile: 'web', agentId: 'tau', hadOwner: false, rubricVersion: 1, ...detail },
+  });
+
+  it('should accept Auto resolved with and without a bound kernel, and a Tau model id', () => {
+    expect(clientMetricEntrySchema.safeParse(resolved({})).success).toBe(true);
+    expect(
+      clientMetricEntrySchema.safeParse(resolved({ kernel: 'replicad', model: 'anthropic/claude-sonnet-5-5' })).success,
+    ).toBe(true);
+  });
+
+  it('should refuse a field outside the allowlist, an unknown kernel or a model that is not an id', () => {
+    expect(clientMetricEntrySchema.safeParse(resolved({ prompt: 'a bracket' })).success).toBe(false);
+    expect(clientMetricEntrySchema.safeParse(resolved({ kernel: 'freecad' })).success).toBe(false);
+    expect(clientMetricEntrySchema.safeParse(resolved({ model: 'make me a vase' })).success).toBe(false);
+    expect(clientMetricEntrySchema.safeParse(resolved({ hostProfile: 'plugin' })).success).toBe(false);
+  });
+
+  it('should accept an override and clamp its turn count', () => {
+    const parsed = clientMetricEntrySchema.parse({
+      name: IngestEntryName.KERNEL_OVERRIDE,
+      duration: 0,
+      detail: { hostProfile: 'desktop', resolved: 'openscad', manual: 'replicad', turnsSince: 5000, rubricVersion: 1 },
+    });
+    expect(parsed.detail).toMatchObject({ turnsSince: 1000 });
+  });
+
+  it('should accept the three first outcomes and refuse any other', () => {
+    for (const outcome of ['ready', 'failed', 'none']) {
+      expect(
+        clientMetricEntrySchema.safeParse({
+          name: IngestEntryName.KERNEL_FIRST_OUTCOME,
+          duration: 0,
+          detail: { hostProfile: 'web', outcome, turnsToFirstRender: 1, rubricVersion: 1 },
+        }).success,
+      ).toBe(true);
+    }
+    expect(
+      clientMetricEntrySchema.safeParse({
+        name: IngestEntryName.KERNEL_FIRST_OUTCOME,
+        duration: 0,
+        detail: { hostProfile: 'web', outcome: 'partial', turnsToFirstRender: 1, rubricVersion: 1 },
+      }).success,
+    ).toBe(false);
+  });
+});

@@ -69,6 +69,7 @@ import { useModels } from '#hooks/use-models.js';
 import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
+import { reportKernelOverride } from '#chat-clients/_internal/kernel-selection-telemetry.js';
 import { withTauExecutionModel } from '@taucad/chat-ui/utils/chat-execution';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
@@ -749,6 +750,7 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
   const { kernel: cookieKernel, setKernel: setCookieKernel } = useKernel();
   const isAutoEnabled = useFeature('autoKernel');
   const owner = useProjectKernelOwner();
+  const store = useChatSessionStore();
   const knownKernel = isKernelId(chatActiveKernel) ? chatActiveKernel : undefined;
   /* With the flag on the row's preference decides, under the legacy-row rule; Auto runs the owner when there is one. */
   const preference: KernelPreference | undefined = isAutoEnabled
@@ -775,12 +777,21 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
   const setActivePreference = useCallback(
     (next: KernelPreference) => {
       if (next !== 'auto') {
+        /* Override after Auto (blueprint D10): which kernel Auto had bound, which one the person picked. */
+        if (preference === 'auto') {
+          const runs = store.getProjection(session.chatId)?.ledger.runs;
+          reportKernelOverride({
+            resolved: ownerKernel,
+            manual: next,
+            turnsSince: runs === undefined ? 0 : Object.keys(runs).length,
+          });
+        }
         setActiveKernel(next);
       } else if (isAutoEnabled) {
         session.persistenceActorRef.send({ type: 'setKernelPreference', preference: 'auto' });
       }
     },
-    [session.persistenceActorRef, setActiveKernel, isAutoEnabled],
+    [session.persistenceActorRef, session.chatId, setActiveKernel, isAutoEnabled, preference, ownerKernel, store],
   );
   return useMemo<ActiveChatKernel>(
     () => ({

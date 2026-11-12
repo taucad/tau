@@ -139,10 +139,7 @@ export type KernelRoutingSummary = {
 export const stratumOf = (testCase: KernelRoutingCase): 'R' | 'N' =>
   testCase.acceptable.includes('replicad') ? 'R' : 'N';
 
-const count = (
-  grades: readonly KernelRoutingGrade[],
-  threshold?: { readonly rate?: number; readonly atLeast?: number; readonly maxFailures?: number },
-): KernelRoutingMetric => {
+const count = (grades: readonly KernelRoutingGrade[], threshold?: Threshold): KernelRoutingMetric => {
   const passed = grades.filter(({ pass }) => pass).length;
   const total = grades.length;
   if (threshold?.maxFailures !== undefined) {
@@ -153,16 +150,56 @@ const count = (
   return required === undefined ? { passed, total } : { passed, total, required, met: passed >= required };
 };
 
+type Threshold = { readonly rate?: number; readonly atLeast?: number; readonly maxFailures?: number };
+
+/** The thresholds a summary is checked against. */
+export type KernelRoutingThresholds = Readonly<{
+  stratumR: Threshold;
+  stratumN: Threshold;
+  computationalEngineering: Threshold;
+  entitlement: Threshold;
+  migration: Threshold;
+  mustAsk: Threshold;
+  obedience: Threshold;
+  /** The most routing cases that may ask, or undefined where asks are reported only. */
+  clearCaseAsks?: number;
+}>;
+
+/** Appendix E's development thresholds, for one run of the development set. */
+export const kernelRoutingDevelopmentThresholds: KernelRoutingThresholds = {
+  stratumR: { rate: 0.95 },
+  stratumN: { rate: 0.85 },
+  computationalEngineering: { atLeast: 6 },
+  entitlement: { maxFailures: 0 },
+  migration: { maxFailures: 0 },
+  mustAsk: { atLeast: 5 },
+  obedience: { atLeast: 4 },
+};
+
+/** D9's gate, for the held-out set: 19 of 20 in R, 17 of 20 in N, 6 of 7 voxel, no trap, 8 asks, 9 obeyed, 4 asks. */
+export const kernelRoutingGateThresholds: KernelRoutingThresholds = {
+  stratumR: { atLeast: 19 },
+  stratumN: { atLeast: 17 },
+  computationalEngineering: { atLeast: 6 },
+  entitlement: { maxFailures: 0 },
+  migration: { maxFailures: 0 },
+  mustAsk: { atLeast: 8 },
+  obedience: { atLeast: 9 },
+  clearCaseAsks: 4,
+};
+
 /**
- * Summarize a development run against the Appendix E thresholds (one run per case).
+ * Summarize a run against the Appendix E thresholds (one observation per case).
  *
  * @param cases - The cases the run covered.
  * @param observations - One observation per case.
+ * @param thresholds - The development thresholds unless the gate's are given.
  * @returns The D9 figures and whether every threshold the run covered is met.
  */
 export const summarizeKernelRoutingRun = (
   cases: readonly KernelRoutingCase[],
   observations: readonly KernelRoutingObservation[],
+  thresholds: KernelRoutingThresholds = kernelRoutingDevelopmentThresholds,
 ): KernelRoutingSummary => {
   const byId = new Map(observations.map((observation) => [observation.caseId, observation]));
   const graded = cases.map((testCase) => {
@@ -214,31 +251,31 @@ export const summarizeKernelRoutingRun = (
   const metrics = {
     stratumR: count(
       where(({ testCase }) => testCase.kind === 'routing' && stratumOf(testCase) === 'R'),
-      { rate: 0.95 },
+      thresholds.stratumR,
     ),
     stratumN: count(
       where(({ testCase }) => testCase.kind === 'routing' && stratumOf(testCase) === 'N'),
-      { rate: 0.85 },
+      thresholds.stratumN,
     ),
     computationalEngineering: count(
       where(({ testCase }) => testCase.kind === 'routing' && testCase.family === 'U8'),
-      { atLeast: 6 },
+      thresholds.computationalEngineering,
     ),
     entitlement: count(
       where(({ testCase }) => testCase.forbidden !== undefined),
-      { maxFailures: 0 },
+      thresholds.entitlement,
     ),
     migration: count(
       where(({ testCase }) => testCase.kind === 'existing'),
-      { maxFailures: 0 },
+      thresholds.migration,
     ),
     mustAsk: count(
       where(({ testCase }) => testCase.kind === 'must-ask'),
-      { atLeast: 5 },
+      thresholds.mustAsk,
     ),
     obedience: count(
       where(({ testCase }) => testCase.kind === 'obedience'),
-      { atLeast: 4 },
+      thresholds.obedience,
     ),
   };
   const covered = [
@@ -250,10 +287,16 @@ export const summarizeKernelRoutingRun = (
     metrics.mustAsk,
     metrics.obedience,
   ].filter(({ total }) => total > 0);
-  const clearCaseAsks = {
-    passed: routing.filter(({ observation }) => observation.asked).length,
-    total: routing.length,
-  };
+  const asks = routing.filter(({ observation }) => observation.asked).length;
+  const clearCaseAsks: KernelRoutingMetric =
+    thresholds.clearCaseAsks === undefined || routing.length === 0
+      ? { passed: asks, total: routing.length }
+      : {
+          passed: asks,
+          total: routing.length,
+          maxFailures: thresholds.clearCaseAsks,
+          met: asks <= thresholds.clearCaseAsks,
+        };
 
   return {
     ...metrics,
@@ -262,8 +305,40 @@ export const summarizeKernelRoutingRun = (
     expectedMixRate: weight === 0 ? 0 : weighted / weight,
     heuristics,
     broadZoneSpread,
-    allThresholdsMet: covered.every(({ met }) => met !== false),
+    allThresholdsMet: [...covered, clearCaseAsks].every(({ met }) => met !== false),
   };
+};
+
+/**
+ * Summarize a gate run, which repeats each case (D9: three repeats, a case passing when at least two do). Each case is
+ * represented by an observation whose grade agrees with the majority, so a case counts once in every metric.
+ *
+ * @param cases - The cases the run covered.
+ * @param repeats - Every observation of each case, by case id.
+ * @param thresholds - The gate's thresholds unless others are given.
+ * @returns The D9 figures over the majority grades, and each case's pass count.
+ */
+export const summarizeKernelRoutingGate = (
+  cases: readonly KernelRoutingCase[],
+  repeats: ReadonlyMap<string, readonly KernelRoutingObservation[]>,
+  thresholds: KernelRoutingThresholds = kernelRoutingGateThresholds,
+): KernelRoutingSummary & { readonly passCounts: Readonly<Record<string, string>> } => {
+  const passCounts: Record<string, string> = {};
+  const representatives = cases.map((testCase) => {
+    const observations = repeats.get(testCase.id) ?? [];
+    if (observations.length === 0) {
+      throw new Error(`No observation for case ${testCase.id}.`);
+    }
+    const graded = observations.map((observation) => ({
+      observation,
+      pass: gradeKernelRoutingCase(testCase, observation).pass,
+    }));
+    const passes = graded.filter(({ pass }) => pass).length;
+    passCounts[testCase.id] = `${passes}/${observations.length}`;
+    const majority = passes * 2 > observations.length;
+    return (graded.find(({ pass }) => pass === majority) ?? graded[0]!).observation;
+  });
+  return { ...summarizeKernelRoutingRun(cases, representatives, thresholds), passCounts };
 };
 
 /**

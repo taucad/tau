@@ -157,4 +157,14 @@ describe.each([
     await user.keyboard('{Enter}');
     expect(onSelect).toHaveBeenCalledWith('JSCAD');
   });
+
+  it('should put the best match first, so Enter picks it over a looser match in an earlier group', async () => {
+    const { user, onSelect, focusSearch } = await open();
+    focusSearch();
+    /* "openscad" also matches OpenCascade loosely; the exact name must lead. */
+    await user.keyboard('openscad');
+    expect(options()[0]).toBe('OpenSCAD');
+    await user.keyboard('{Enter}');
+    expect(onSelect).toHaveBeenCalledWith('OpenSCAD');
+  });
 });

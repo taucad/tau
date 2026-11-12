@@ -10,7 +10,13 @@
  */
 
 import { onTestFinished, vi } from 'vitest';
-import type { RevisionDiffEntry, RevisionLogRequest, RevisionRow, RevisionStatusProjection } from '@taucad/revisions';
+import type {
+  RevisionDiffEntry,
+  RevisionGraph,
+  RevisionLogRequest,
+  RevisionRow,
+  RevisionStatusProjection,
+} from '@taucad/revisions';
 import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
 import type { BranchCreated, RevisionToast, WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
@@ -76,6 +82,8 @@ export const revisionStatusHarness = {
   connected: true,
   rows: [] as readonly RevisionRow[],
   rowsByBranch: new Map<string, readonly RevisionRow[]>(),
+  /** What a graph read answers (D2); every branch's rows on `main` when absent. */
+  graph: undefined as RevisionGraph | undefined,
   diff: [] as readonly RevisionDiffEntry[],
   /** Every revision a surface asked for a diff of, in order (C52). */
   diffRequests: [] as string[],
@@ -130,6 +138,7 @@ export const revisionStatusHarness = {
     this.connected = true;
     this.rows = [];
     this.rowsByBranch.clear();
+    this.graph = undefined;
     this.diff = [];
     this.diffRequests.length = 0;
     this.comparisonRequests.length = 0;
@@ -229,6 +238,13 @@ export const revisionStatusMock = (): Record<string, unknown> => {
         (request?.branch === undefined ? undefined : revisionStatusHarness.rowsByBranch.get(request.branch)) ??
         revisionStatusHarness.rows;
       return request?.limit === undefined ? rows : rows.slice(0, request.limit);
+    },
+    graph: async (request?: Readonly<{ limit?: number }>): Promise<RevisionGraph> => {
+      const graph = revisionStatusHarness.graph ?? {
+        branches: [],
+        rows: revisionStatusHarness.rows.map((row) => ({ ...row, line: 'main', branch: 'main' })),
+      };
+      return request?.limit === undefined ? graph : { ...graph, rows: graph.rows.slice(0, request.limit) };
     },
     /* Each scripted history is one line, newest first: a revision's history is its list from it down. */
     divergence: async (head: string, base: string) => {

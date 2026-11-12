@@ -696,6 +696,15 @@ for (const row of ports) {
       await expect(
         held.revisions.channel.request({ command: 'divergence', head, base: parent }),
       ).resolves.toMatchObject({ result: { ahead: 1, behind: 0 } });
+      /* History's lanes: every branch in one walk, each row naming its line (D2). */
+      await expect(held.revisions.channel.request({ command: 'graph', limit: 8 })).resolves.toMatchObject({
+        result: {
+          branches: [{ name: 'main', head }],
+          rows: expect.arrayContaining([
+            expect.objectContaining({ revisionId: head, line: 'main', branch: 'main' }),
+          ]) as unknown,
+        },
+      });
       await expect(held.revisions.channel.request({ command: 'open' })).resolves.toMatchObject({
         status: { projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA' },
       });

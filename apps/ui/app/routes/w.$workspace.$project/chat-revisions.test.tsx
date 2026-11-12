@@ -191,6 +191,37 @@ describe('Revisions pane', () => {
     expect(groups[1]).toMatchObject({ kind: 'autosaves', revisions: [{ revisionId: 'a' }, { revisionId: 'b' }] });
   });
 
+  it('should never fold autosaves of two lines together, nor across the backup boundary (D2, D4)', () => {
+    const card = (revisionId: string): RevisionCard => ({
+      revisionId,
+      n: undefined,
+      createdAt: 1,
+      summary: '',
+      actor: '',
+      turnId: undefined,
+      conflicted: false,
+      tags: [],
+      capture: 'hidden',
+    });
+    const autosaves = [card('a'), card('b'), card('c'), card('d')];
+    const lineOf = new Map([
+      ['a', 'main'],
+      ['b', 'side'],
+      ['c', 'side'],
+      ['d', 'side'],
+    ]);
+
+    const groups = groupRevisionHistory(autosaves, undefined, { backedUpTo: 'd', lineOf });
+
+    /* `a` stands alone on main, `b` and `c` fold on side, and `d`, the backed-up entry, starts its own group. */
+    expect(
+      groups.map((group) =>
+        group.kind === 'revision' ? [group.revision.revisionId] : group.revisions.map((entry) => entry.revisionId),
+      ),
+    ).toStrictEqual([['a'], ['b', 'c'], ['d']]);
+    expect(groups.map((group) => group.kind)).toStrictEqual(['revision', 'autosaves', 'revision']);
+  });
+
   it('merges consecutive setup entries into one line, the head among them, and never marks one Current (A4)', () => {
     const card = (revisionId: string, parent: string | undefined, isSetup: boolean): RevisionCard => ({
       revisionId,
@@ -1225,6 +1256,73 @@ describe('History over a long line (B2)', () => {
 
     expect(revisionStatusHarness.commands.undoOperation).toHaveBeenCalledOnce();
     expect(screen.queryByRole('button', { name: 'Undo restore' })).not.toBeInTheDocument();
+  });
+});
+
+describe('History lanes past the first page (D2)', () => {
+  it('should keep reading the graph while it shows one lane, so a branch that forks further down gets its lane', async () => {
+    const user = userEvent.setup();
+    /* 70 entries on main, a minute apart; `old-fix` forks from the fifth and is older than main's newest 50. */
+    const mainRows = Array.from({ length: 70 }, (_, index) => {
+      const n = 70 - index;
+      return row({
+        revisionId: `rev-${String(n)}`,
+        createdAt: 1_788_220_800_000 + n * 60_000,
+        summary: `Change ${String(n)}`,
+        ...(n === 1 ? {} : { parent: `rev-${String(n - 1)}` }),
+      });
+    });
+    const fix = row({
+      revisionId: 'fix-1',
+      createdAt: 1_788_220_800_000 + 5 * 60_000 + 30_000,
+      summary: 'Patch the lid',
+      parent: 'rev-5',
+    });
+    const all = [...mainRows, fix].toSorted((left, right) => right.createdAt - left.createdAt);
+    revisionStatusHarness.rows = mainRows;
+    revisionStatusHarness.graph = {
+      branches: [
+        { name: 'main', head: 'rev-70' },
+        { name: 'old-fix', head: 'fix-1' },
+      ],
+      rows: all.map((entry) => {
+        const line = entry.revisionId === 'fix-1' ? 'old-fix' : 'main';
+        return { ...entry, line, branch: line };
+      }),
+    };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-70',
+      branches: revisionStatusHarness.graph.branches.map((branch) => ({
+        ...branch,
+        checkoutId: branch.name,
+        checkoutRoot: `/checkouts/${branch.name}`,
+        leaseChatIds: [],
+      })),
+    };
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <MemoryRouter>
+            <RevisionsPanelBody />
+          </MemoryRouter>
+        </TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    await user.click(await screen.findByRole('radio', { name: 'All branches' }));
+    /* The first graph page holds main alone: one lane, drawn as the branch's own list. */
+    expect(container.querySelector('[data-row="chip"]')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Show older' }));
+    await user.click(screen.getByRole('button', { name: 'Show older' }));
+
+    await waitFor(() => {
+      expect(container.querySelector<HTMLElement>('[data-slot="history-graph-frame"]')?.dataset['lanes']).toBe(
+        'main,old-fix',
+      );
+    });
   });
 });
 

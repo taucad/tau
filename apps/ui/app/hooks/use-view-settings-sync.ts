@@ -12,7 +12,7 @@ import { areSectionCutsEqual } from '@taucad/viewer/graphics/section-cuts';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
-import { useViewCameraSession } from '@taucad/viewer/hooks/use-graphics';
+import { useGraphicsCamera } from '@taucad/viewer/hooks/use-graphics';
 import { lengthUnits, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import {
@@ -99,7 +99,7 @@ export function useViewSettingsSync({
   const adoptedPoseRef = useRef<PersistedCameraView | undefined>(undefined);
   const firstFrameReceiptRef = useRef<{ view: PersistedCameraView; consumed: boolean } | undefined>(undefined);
   const appliedRecordRef = useRef<WorkbenchView | undefined>(undefined);
-  const appliedSessionRef = useRef<ReturnType<typeof useViewCameraSession>>(undefined);
+  const appliedSessionRef = useRef<ReturnType<typeof useGraphicsCamera>>(undefined);
   const lastCameraEmissionRef = useRef(0);
   const lastSectionEmissionRef = useRef(0);
   const cameraAdoptionPendingRef = useRef(false);
@@ -119,9 +119,11 @@ export function useViewSettingsSync({
   const enablePostProcessing = useSelector(graphicsRef, (s) => s.context.enablePostProcessing);
   const gridUnit = useSelector(graphicsRef, (s) => s.context.displayUnits.length.symbol);
   const upDirection = useSelector(graphicsRef, (s) => s.context.upDirection);
-  /* The camera's owner is the session, not this hook's host: a view with no mounted canvas has no
-   * live camera, and its persisted pose is left alone rather than overwritten from a default rig. */
-  const session = useViewCameraSession(graphicsRef);
+  /* The camera's owner is the graphics actor, not this hook's host. It exists before any canvas mounts, so a pose is
+   * persisted only once a canvas has framed the view (`framing.initialized`), never from the seeded default. */
+  const camera = useGraphicsCamera(graphicsRef);
+  const framing = useSelector(graphicsRef, (s) => s.context.cameraFraming);
+  const session = useMemo(() => (camera ? { rig: { actorRef: camera }, framing } : undefined), [camera, framing]);
   const cameraFovAngle = useSelector(session?.rig.actorRef, (s) => s?.context.view.requestedVerticalFieldOfView);
   /* A viewer that is not rendering glTF has no pose to persist, so it clears the stale one. */
   const artifactMimeType = useSelector(graphicsRef, (s) => s.context.artifact?.mimeType);
@@ -154,8 +156,8 @@ export function useViewSettingsSync({
       }
     };
     const cameraRecord = activeCameraRecord(record);
-    const previous = appliedSessionRef.current === session ? appliedRecordRef.current : undefined;
-    appliedSessionRef.current = session;
+    const previous = appliedSessionRef.current === camera ? appliedRecordRef.current : undefined;
+    appliedSessionRef.current = camera;
     appliedRecordRef.current = cameraRecord;
     let sectionTimer: ReturnType<typeof setTimeout> | undefined;
     const { context } = graphicsRef.getSnapshot();
@@ -294,12 +296,13 @@ export function useViewSettingsSync({
       }
       const current = actor.getSnapshot().context.view;
       if (latest.camera.kind === 'pose') {
-        actor.send({ type: 'setView', ...latest.camera });
+        actor.send({ type: 'poseObserved', source: 'input', ...latest.camera });
         adoptedPoseRef.current = latest.camera;
       } else {
         const orientation = viewCameraOrientation(latest)!;
         actor.send({
-          type: 'setView',
+          type: 'poseObserved',
+          source: 'input',
           target: current.target,
           ...orientation,
           verticalSpan: current.verticalSpan,
@@ -517,7 +520,14 @@ export function useViewSettingsSync({
         persistRef.current(includePose);
       }, poseSettle);
     };
-    const cameraSubscription = session?.rig.actorRef.subscribe(() => {
+    /* The camera actor also emits when its input state changes (dragging, settling, idle); only a new revision is
+     * a view change. */
+    let cameraRevision = session?.rig.actorRef.getSnapshot().context.revision;
+    const cameraSubscription = session?.rig.actorRef.subscribe(({ context }) => {
+      if (context.revision === cameraRevision) {
+        return;
+      }
+      cameraRevision = context.revision;
       lastCameraEmissionRef.current = Date.now();
       restartSettle(true);
     });

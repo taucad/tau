@@ -12,13 +12,18 @@ import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
 import type { ViewRecordPatch } from '#workbench-records/view-store.js';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { cadMachine } from '#machines/cad.machine.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type { KernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { editorMachine } from '#machines/editor.machine.js';
-import { getViewCameraSession } from '@taucad/viewer/services/graphics-camera-registry';
 import { useCameraFraming } from '@taucad/viewer/graphics/three/use-camera-framing';
 import { Box3, Vector3 } from 'three';
+
+/** The view's camera and its framing record, as the graphics actor holds them. */
+const getViewCameraSession = (graphicsRef: ActorRefFrom<typeof graphicsMachine>) => {
+  const { cameraRef, cameraFraming } = graphicsRef.getSnapshot().context;
+  return { rig: { actorRef: cameraRef }, framing: cameraFraming };
+};
 
 const getCanvasState = () => ({ size: { width: 800, height: 600 } });
 
@@ -142,7 +147,7 @@ describe('view record owner synchronization', () => {
       </GraphicsProvider>
     );
     const view = render(draw(0));
-    const session = getViewCameraSession(graphicsRef)!;
+    const session = getViewCameraSession(graphicsRef);
     await waitFor(() => {
       expect(session.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
     });
@@ -191,7 +196,7 @@ describe('view record owner synchronization', () => {
         </GraphicsProvider>
       );
       const view = render(draw(0));
-      const session = getViewCameraSession(graphicsRef)!;
+      const session = getViewCameraSession(graphicsRef);
       await waitFor(() => {
         expect(session.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
       });
@@ -224,7 +229,8 @@ describe('view record owner synchronization', () => {
       writeRecord.mockClear();
       act(() =>
         session.rig.actorRef.send({
-          type: 'setView',
+          type: 'poseObserved',
+          source: 'input',
           target: [1, 2, 3],
           direction: [1, 0, 0],
           up: [0, 0, 1],
@@ -241,7 +247,8 @@ describe('view record owner synchronization', () => {
       writeRecord.mockClear();
       act(() =>
         session.rig.actorRef.send({
-          type: 'setView',
+          type: 'poseObserved',
+          source: 'input',
           target: firstFrame.target,
           direction: firstFrame.direction,
           up: firstFrame.up,
@@ -279,14 +286,15 @@ describe('view record owner synchronization', () => {
       </GraphicsProvider>
     );
     const { rerender, unmount } = render(draw(base));
-    const rig = getViewCameraSession(graphicsRef)!.rig.actorRef;
+    const rig = getViewCameraSession(graphicsRef).rig.actorRef;
     await waitFor(() => {
       expect(onRecordApplied).toHaveBeenCalledWith(base);
     });
     onRecordApplied.mockClear();
     act(() =>
       rig.send({
-        type: 'setView',
+        type: 'poseObserved',
+        source: 'input',
         target: [0, 0, 0],
         direction: [1, 0, 0],
         up: [0, 0, 1],
@@ -345,7 +353,7 @@ describe('view record owner synchronization', () => {
       expect(context.isSectionViewActive).toBe(true);
       expect(context.sectionCuts).toMatchObject([{ kind: 'plane', plane: 'xz', offset: 2 }]);
       expect(context.measurements).toMatchObject([{ id: 'm1', isPinned: true }]);
-      expect(getViewCameraSession(graphicsRef)?.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
+      expect(getViewCameraSession(graphicsRef).rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
     });
     graphicsRef.stop();
   });
@@ -394,7 +402,7 @@ describe('view record owner synchronization', () => {
       </GraphicsProvider>,
     );
     await waitFor(() =>
-      expect(getViewCameraSession(graphicsRef)?.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]),
+      expect(getViewCameraSession(graphicsRef).rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]),
     );
     await new Promise((resolve) => {
       setTimeout(resolve, 300);
@@ -417,11 +425,12 @@ describe('view record owner synchronization', () => {
       </GraphicsProvider>
     );
     const { rerender, unmount } = render(renderHarness(front));
-    const rig = getViewCameraSession(graphicsRef)!.rig.actorRef;
+    const rig = getViewCameraSession(graphicsRef).rig.actorRef;
     await waitFor(() => expect(rig.getSnapshot().context.view.direction).toEqual([0, -1, 0]));
     act(() =>
       rig.send({
-        type: 'setView',
+        type: 'poseObserved',
+        source: 'input',
         target: [0, 0, 0],
         direction: [1, 0, 0],
         up: [0, 0, 1],
@@ -455,13 +464,14 @@ describe('view record owner synchronization', () => {
       </GraphicsProvider>
     );
     const { rerender, unmount } = render(draw(record));
-    const session = getViewCameraSession(graphicsRef)!;
+    const session = getViewCameraSession(graphicsRef);
     const rig = session.rig.actorRef;
     session.framing.initialized = true;
     await waitFor(() => expect(rig.getSnapshot().context.view.direction[1]).toBeLessThan(-0.6));
     act(() =>
       rig.send({
-        type: 'setView',
+        type: 'poseObserved',
+        source: 'input',
         target: [0, 0, 0],
         direction: [1, 0, 0],
         up: [0, 0, 1],
@@ -478,7 +488,8 @@ describe('view record owner synchronization', () => {
     )![0];
     act(() =>
       rig.send({
-        type: 'setView',
+        type: 'poseObserved',
+        source: 'input',
         target: [0, 0, 0],
         direction: [1, 0, 0],
         up: [0, 0, 1],
@@ -504,13 +515,14 @@ describe('view record owner synchronization', () => {
         <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={record} writeRecord={writeRecord} />
       </GraphicsProvider>,
     );
-    const session = getViewCameraSession(graphicsRef)!;
+    const session = getViewCameraSession(graphicsRef);
     const rig = session.rig.actorRef;
     session.framing.initialized = true;
     await waitFor(() => expect(rig.getSnapshot().context.view.direction[1]).toBeLessThan(-0.6));
     act(() => {
       rig.send({
-        type: 'setView',
+        type: 'poseObserved',
+        source: 'input',
         target: [1, 2, 3],
         direction: [1, 0, 0],
         up: [0, 0, 1],
@@ -549,7 +561,7 @@ describe('view record owner synchronization', () => {
       </GraphicsProvider>
     );
     const { rerender, unmount } = render(draw(base));
-    const rig = getViewCameraSession(graphicsRef)!.rig.actorRef;
+    const rig = getViewCameraSession(graphicsRef).rig.actorRef;
     const cut = {
       kind: 'plane',
       plane: 'xz',
@@ -615,10 +627,11 @@ describe('view record owner synchronization', () => {
       </GraphicsProvider>
     );
     const { rerender, unmount } = render(draw(base));
-    const rig = getViewCameraSession(graphicsRef)!.rig.actorRef;
+    const rig = getViewCameraSession(graphicsRef).rig.actorRef;
     act(() => {
       rig.send({
-        type: 'setView',
+        type: 'poseObserved',
+        source: 'input',
         target: [0, 0, 0],
         direction: [1, 0, 0],
         up: [0, 0, 1],
@@ -671,11 +684,12 @@ describe('view record owner synchronization', () => {
       </GraphicsProvider>
     );
     const { rerender, unmount } = render(draw(initialRecord));
-    const rig = getViewCameraSession(graphicsRef)!.rig.actorRef;
+    const rig = getViewCameraSession(graphicsRef).rig.actorRef;
     await waitFor(() => expect(rig.getSnapshot().context.view.direction[1]).toBeLessThan(-0.6));
     act(() =>
       rig.send({
-        type: 'setView',
+        type: 'poseObserved',
+        source: 'input',
         target: [0, 0, 0],
         direction: [1, 0, 0],
         up: [0, 0, 1],
@@ -710,7 +724,7 @@ describe('view record owner synchronization', () => {
       </GraphicsProvider>
     );
     const pane = render(draw(base));
-    const session = getViewCameraSession(graphicsRef)!;
+    const session = getViewCameraSession(graphicsRef);
     const rig = session.rig.actorRef;
     await waitFor(() => expect(rig.getSnapshot().context.view.direction).toEqual([0, -1, 0]));
 
@@ -720,7 +734,8 @@ describe('view record owner synchronization', () => {
     writeRecord.mockClear();
     act(() =>
       rig.send({
-        type: 'setView',
+        type: 'poseObserved',
+        source: 'input',
         target: [1, 2, 3],
         direction: [0, 1, 0],
         up: [0, 0, 1],
@@ -801,7 +816,7 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       view.unmount();
       graphicsRef.stop();
     });
-    const session = getViewCameraSession(graphicsRef)!;
+    const session = getViewCameraSession(graphicsRef);
     return {
       graphicsRef,
       writeRecord,
@@ -821,7 +836,7 @@ describe('useViewSettingsSync settle-window characterisation', () => {
     harness.writeRecord.mockClear();
     const drag = (step: number) => {
       act(() => {
-        harness.rig.send({ type: 'setView', ...pose([1, 0, 0], 4 + step / 10) });
+        harness.rig.send({ type: 'poseObserved', source: 'input', ...pose([1, 0, 0], 4 + step / 10) });
       });
     };
     drag(0);
@@ -877,7 +892,7 @@ describe('useViewSettingsSync settle-window characterisation', () => {
     harness.session.framing.initialized = true;
     advance(settle * 4);
     act(() => {
-      harness.rig.send({ type: 'setView', ...pose([1, 0, 0], 4) });
+      harness.rig.send({ type: 'poseObserved', source: 'input', ...pose([1, 0, 0], 4) });
     });
     advance(settle);
     const echoed = harness.writeRecord.mock.calls.findLast(
@@ -885,7 +900,7 @@ describe('useViewSettingsSync settle-window characterisation', () => {
     )?.[0];
     expect(echoed).toBeDefined();
     act(() => {
-      harness.rig.send({ type: 'setView', ...pose([1, 0, 0], 2) });
+      harness.rig.send({ type: 'poseObserved', source: 'input', ...pose([1, 0, 0], 2) });
     });
     harness.rerender(echoed!, { camera: echoed!.camera });
     for (let elapsed = 0; elapsed < settle * 4; elapsed += 50) {
@@ -900,7 +915,7 @@ describe('useViewSettingsSync settle-window characterisation', () => {
     harness.session.framing.initialized = true;
     advance(settle * 4);
     act(() => {
-      harness.rig.send({ type: 'setView', ...pose([1, 0, 0], 4) });
+      harness.rig.send({ type: 'poseObserved', source: 'input', ...pose([1, 0, 0], 4) });
     });
     harness.rerender({ ...base, grid: { unit: 'in' } });
     expect(harness.graphicsRef.getSnapshot().context.displayUnits.length.symbol).toBe('in');
@@ -934,7 +949,7 @@ describe('useViewSettingsSync settle-window characterisation', () => {
         view.unmount();
         graphicsRef.stop();
       });
-      const session = getViewCameraSession(graphicsRef)!;
+      const session = getViewCameraSession(graphicsRef);
       return {
         graphicsRef,
         writeRecord,
@@ -975,7 +990,7 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       harness.frame(4, smallBounds);
       advance(settle * 4);
       act(() => {
-        harness.rig.send({ type: 'setView', ...pose([1, 0, 0], 40) });
+        harness.rig.send({ type: 'poseObserved', source: 'input', ...pose([1, 0, 0], 40) });
       });
       advance(settle * 4);
       harness.writeRecord.mockClear();

@@ -6,7 +6,7 @@ import { isKernelId } from '@taucad/types/constants';
 import { Loader } from '@taucad/ui/components/loader';
 import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
+import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { projectUrl } from '#utils/project-url.utils.js';
 
 export const loader = async (): Promise<Response> => {
@@ -41,10 +41,14 @@ const ExampleFixtureDebugRoute = (): React.JSX.Element => {
         if (!fixture) {
           throw new Error(`Unknown example fixture: ${locator ?? ''}`);
         }
+        const entryPath = fixture.manifest.assets.main?.entryPath;
+        if (entryPath === undefined) {
+          throw new Error(`Example fixture ${fixture.locator} declares no main entry.`);
+        }
         const files = Object.fromEntries(
           await Promise.all(
             fixture.assets
-              .filter(({ path }) => path !== 'tau.json' && path !== fixture.manifest.assets.main.thumbnail)
+              .filter(({ path }) => path !== 'tau.json' && path !== fixture.manifest.assets.main?.thumbnail)
               .map(async ({ path, load }) => [path, { content: await load() }] as const),
           ),
         );
@@ -53,7 +57,7 @@ const ExampleFixtureDebugRoute = (): React.JSX.Element => {
             name: fixture.manifest.name,
             description: fixture.manifest.description,
             tags: fixture.manifest.tags,
-            assets: { main: { entryPath: fixture.manifest.assets.main.entryPath } },
+            assets: { main: { entryPath } },
           },
           activeKernel: isKernelId(fixture.kernel) ? fixture.kernel : 'replicad',
           location: homeProjectCreationLocation,

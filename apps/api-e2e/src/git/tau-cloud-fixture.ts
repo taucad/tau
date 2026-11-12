@@ -232,6 +232,10 @@ export const seedProPlan = async (owner: TauCloudOwner): Promise<void> => {
  * `tau-hosted-remote.spec.ts` keeps that gap failing by name; every other case
  * seeds the row here so the server itself is what is under test.
  *
+ * The row says the project is linked to GitHub (`origin = 'github'`): the tier
+ * pushes commits stock git writes, which carry no Tau record, and the push's
+ * authorship check admits those only on a linked project (B4).
+ *
  * @param owner - The project's owner.
  * @param projectId - The repository id, which is the project id.
  * @returns Nothing.
@@ -239,7 +243,7 @@ export const seedProPlan = async (owner: TauCloudOwner): Promise<void> => {
 export const registerProject = async (owner: TauCloudOwner, projectId: string): Promise<void> => {
   await psql(
     `INSERT INTO project (id, owner_id, name, origin) ` +
-      `VALUES ('${projectId}', '${owner.userId}', 'Git server E2E', 'local-mirror') ON CONFLICT (id) DO NOTHING;`,
+      `VALUES ('${projectId}', '${owner.userId}', 'Git server E2E', 'github') ON CONFLICT (id) DO NOTHING;`,
   );
 };
 

@@ -2,18 +2,7 @@ import { Plane, Vector2, Vector3 } from 'three';
 import type { Camera, Raycaster } from 'three';
 import { setRaycasterFromCamera } from '#graphics/three/utils/raycaster-from-camera.js';
 
-/** CSS pixels a press on a movable part must travel before it becomes a kinematic drag. */
-export const kinematicsDragThresholdPx = 4;
-
 export type KinematicsPointerPoint = Readonly<{ clientX: number; clientY: number }>;
-
-/** Whether a press has travelled far enough to become a drag rather than a click. */
-export function hasExceededKinematicsDragThreshold(
-  start: KinematicsPointerPoint,
-  point: KinematicsPointerPoint,
-): boolean {
-  return Math.hypot(point.clientX - start.clientX, point.clientY - start.clientY) >= kinematicsDragThresholdPx;
-}
 
 const cameraDirection = new Vector3();
 

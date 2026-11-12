@@ -34,6 +34,7 @@ const open = (workspaceRoot: string, authorization: string | undefined): Project
     checkouts: { projectId, root: () => new NodeFsProvider(workspaceRoot) },
   });
   const revisions = createProjectRevisions({
+    via: 'desktop',
     workspaceRoot,
     projectId,
     port,

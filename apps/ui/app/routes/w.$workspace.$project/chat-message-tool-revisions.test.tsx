@@ -107,7 +107,7 @@ const revision = (
 ): NonNullable<RevisionsOutput['revisions']>[number] => ({
   revisionNumber: 2,
   revisionId: '96b7f7e20408020c0b6bdde67ddb99cec27aa0c1',
-  actor: 'ada',
+  who: { kind: 'recorded', identity: { kind: 'user', id: 'ada' } },
   source: 'user',
   createdAt: 1_789_225_647_000,
   summary: 'Thickened the bracket',
@@ -155,8 +155,24 @@ describe('ChatMessageToolRevisions', () => {
           {
             where: 'main · Rev 2',
             revisions: [
-              revision({ actor: 'claude-opus-4', source: 'agent' }),
-              revision({ revisionNumber: 1, revisionId: '7cbef6c', actor: 'user_2abc', source: 'user' }),
+              revision({
+                who: {
+                  kind: 'recorded',
+                  identity: {
+                    kind: 'agent',
+                    id: 'claude-opus-4',
+                    runId: 'run-1',
+                    onBehalfOf: { kind: 'user', id: 'user_2abc' },
+                  },
+                },
+                source: 'agent',
+              }),
+              revision({
+                revisionNumber: 1,
+                revisionId: '7cbef6c',
+                who: { kind: 'recorded', identity: { kind: 'user', id: 'user_2abc' } },
+                source: 'user',
+              }),
             ],
           },
         )}
@@ -178,9 +194,19 @@ describe('ChatMessageToolRevisions', () => {
           {
             where: 'main · Rev 5',
             revisions: [
-              revision({ revisionNumber: 5, revisionId: 'r5', actor: 'anon:3fa9c1', summary: 'Hidden' }),
+              revision({
+                revisionNumber: 5,
+                revisionId: 'r5',
+                who: { kind: 'recorded', identity: { kind: 'user', id: 'anon:3fa9c1', anonymous: true } },
+                summary: 'Hidden',
+              }),
               ...fallbacks.map((actor, index) =>
-                revision({ revisionNumber: 4 - index, revisionId: `r${String(4 - index)}`, actor, summary: 'Saved' }),
+                revision({
+                  revisionNumber: 4 - index,
+                  revisionId: `r${String(4 - index)}`,
+                  who: { kind: 'recorded', identity: { kind: 'user', id: actor } },
+                  summary: 'Saved',
+                }),
               ),
             ],
           },

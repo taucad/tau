@@ -247,6 +247,8 @@ const config: KnipConfig = {
         '@agentclientprotocol/codex-acp',
         '@anthropic-ai/sandbox-runtime',
         'nanoraster',
+        // The `shell-supervisor` input of electron.vite.config.ts is the sandbox's supervisor entry, by path.
+        '@taucad/sandbox',
       ],
     },
     'apps/react-e2e/apps/electron': {
@@ -386,8 +388,9 @@ const config: KnipConfig = {
       // `runtime-child-render.integration.test.ts` spawns it by path; the `qualify-x1c` target runs the script
       // from the workspace root.
       entry: ['src/fixtures/render-child-probe.ts', 'scripts/qualify-x1c.mts'],
-      // `pose_model` in the bundled `@taucad/agent-tools` imports it at runtime.
-      ignoreDependencies: ['@taucad/kinematics'],
+      // `pose_model` in the bundled `@taucad/agent-tools` imports it at runtime. The shell qualification fixtures
+      // resolve `@taucad/sandbox/shell` with `createRequire` to reach the sandbox's fixture files on disk.
+      ignoreDependencies: ['@taucad/kinematics', '@taucad/sandbox'],
     },
     'packages/plugins/bambu': {
       // Replicad model sources that `render-plates` exports through the Tau CLI.

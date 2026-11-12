@@ -18,10 +18,11 @@
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { RevisionDiffEntry, RevisionLine, RevisionRow } from '@taucad/revisions';
+import type { RevisionDiffEntry, RevisionLine, RevisionRow, StartReading } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
 import type { RevisionWhoContext } from '#lib/revision-actor.js';
+import { holdRevisionGraph, refreshPushRecords } from '#lib/revision-pushes.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
 import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
@@ -50,14 +51,25 @@ export type RevisionCard = {
   readonly turnId: string | undefined;
   readonly conflicted: boolean;
   readonly tags?: readonly string[];
-  readonly trigger: RevisionRow['trigger'];
+  /** What asked for it, as the trailer's `capture` names it; absent on a commit Tau did not record. */
+  readonly capture: RevisionRow['capture'];
+  /** The trailer Tau recorded, shown only behind Tau's debug setting (B5); absent on a commit Tau did not record. */
+  readonly trailer?: string;
   /**
    * The revision a restore brought back (D1): present only on the row a restore
    * minted, which is how History names a *Restored* row (A9).
    */
   readonly restoredFrom?: string;
+  /** A turn's base cut, the person's own edits saved before the agent started (A5): it reads and folds as an autosave. */
+  readonly turnCut?: RevisionRow['turnCut'];
   /** The revision this one follows, its first parent by id; absent on a branch's first revision. */
   readonly parent?: string;
+  /** A merge's other parents, the sides it brought in, by id; absent on an ordinary revision. */
+  readonly otherParents?: readonly string[];
+  /** An automatic entry that changed only Tau's own setup files (A4): one compact line in History. */
+  readonly isSetup?: true;
+  /** How this entry reads as the Start version, V1, when it is one (A6). */
+  readonly start?: StartReading;
   /**
    * Paths the settling host attested, for a card whose revision is not in this
    * page's graph. Otherwise the diff is asked of the graph on demand.
@@ -156,11 +168,15 @@ const headLog = (head: string | undefined, rows: readonly RevisionRow[], wanted:
  * @returns The headline every revision surface shows.
  */
 const titleOf = (row: RevisionRow): string => {
+  /* A5: a turn's base cut is the person's own edits, saved before the agent started. */
+  if (row.turnCut === 'base' && row.summary === `Agent turn ${row.turnId ?? ''}`) {
+    return 'Autosave';
+  }
   if (row.turnId !== undefined && row.summary === `Agent turn ${row.turnId}`) {
     return 'Agent change';
   }
-  if (row.trigger !== undefined && row.summary === `Saved changes (${row.trigger})`) {
-    return row.trigger === 'save' ? 'Saved changes' : 'Autosave';
+  if (row.capture !== undefined && row.summary === `Saved changes (${row.capture})`) {
+    return row.capture === 'save' ? 'Saved changes' : 'Autosave';
   }
   return row.summary;
 };
@@ -178,10 +194,59 @@ const cardOf = (row: RevisionRow, who: RevisionWhoContext): RevisionCard => {
     turnId: row.turnId,
     conflicted: row.conflicted,
     tags: row.tags,
-    trigger: row.trigger,
+    capture: row.capture,
+    ...(row.trailer === undefined ? {} : { trailer: row.trailer }),
+    ...(row.turnCut === undefined ? {} : { turnCut: row.turnCut }),
     ...(row.restoredFrom === undefined ? {} : { restoredFrom: row.restoredFrom }),
     ...(row.parent === undefined ? {} : { parent: row.parent }),
+    ...(row.otherParents === undefined ? {} : { otherParents: row.otherParents }),
+    ...(row.isSetup === true ? { isSetup: true } : {}),
+    ...(row.start === undefined ? {} : { start: row.start }),
   };
+};
+
+/**
+ * Hand the rows a surface read to the push join, so the who-resolver can
+ * name the account that backed each one up (A3).
+ *
+ * @param projectId - The project the rows belong to.
+ * @param rows - The rows read, as a list or by id; each one's parents are every parent it names.
+ */
+const useHeldGraph = (projectId: string, rows: Readonly<{ values: () => Iterable<RevisionRow> }> | undefined): void => {
+  useEffect(() => {
+    if (rows === undefined) {
+      return;
+    }
+    holdRevisionGraph(
+      projectId,
+      [...rows.values()].map((row) => ({
+        revisionId: row.revisionId,
+        parents: [...(row.parent === undefined ? [] : [row.parent]), ...(row.otherParents ?? [])],
+      })),
+    );
+  }, [projectId, rows]);
+};
+
+/**
+ * Read Tau Cloud's push records at the page's own refresh points (A3): when
+ * a connected Tau Cloud project opens signed in, and each time its backup
+ * settles on a new head. A local-only or GitHub-backed project, or a
+ * signed-out page, reads nothing. Each read asks only for what follows the
+ * records held (`after=`).
+ *
+ * @param input - The project, the signed-in account and the status that names the refresh points.
+ */
+const usePushRecordRefresh = (
+  input: Readonly<{ projectId: string; accountId: string | undefined; status: ReturnType<typeof useRevisionStatus> }>,
+): void => {
+  const { projectId, accountId, status } = input;
+  const isTauCloud = status?.remote.kind === 'tau' && status.remote.phase === 'connected';
+  const backedUpAt = status?.sync.state === 'backedUp' ? `backedUp:${status.headRevisionId ?? ''}` : undefined;
+  useEffect(() => {
+    if (isTauCloud && accountId !== undefined) {
+      refreshPushRecords({ projectId, accountId, token: backedUpAt });
+    }
+  }, [accountId, backedUpAt, isTauCloud, projectId]);
 };
 
 /**
@@ -290,7 +355,7 @@ const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] 
                           turnId: event.turnId,
                           conflicted: false,
                           tags: [],
-                          trigger: 'turn',
+                          capture: 'turn',
                           changedPaths: event.changedPaths,
                           ...(event.treeId === undefined ? {} : { treeId: event.treeId }),
                         },
@@ -363,6 +428,7 @@ export function useRevisions(): RevisionsView {
   const headRevisionId = status?.headRevisionId;
   /* Subscribed, not read once: a sign-in mid-session relabels every card. */
   const who = useRevisionWhoContext(projectId);
+  usePushRecordRefresh({ projectId, accountId: who.session?.id, status });
   const finalized = useHostFinalizedTurns(projectId);
   const queryClient = useQueryClient();
   const logKey = useMemo(() => ['revision-log', projectId, branch ?? ''] as const, [branch, projectId]);
@@ -475,6 +541,8 @@ export function useRevisions(): RevisionsView {
     projectId,
     useMemo(() => others.map((entry) => entry.head), [others]),
   );
+  useHeldGraph(projectId, rows);
+  useHeldGraph(projectId, otherHeads);
   /*
    * `combine` is not an optimisation here, it is the difference between this
    * hook having a memo and not (rule 20's log cost, C51).
@@ -580,6 +648,7 @@ export function useRevisionCards(ids: readonly string[]): ReadonlyMap<string, Re
   const client = useRevisionClient();
   const who = useRevisionWhoContext(projectId);
   const rows = useRevisionRows(client, projectId, ids);
+  useHeldGraph(projectId, rows);
   return useMemo(() => new Map([...rows].map(([id, row]) => [id, cardOf(row, who)] as const)), [rows, who]);
 }
 

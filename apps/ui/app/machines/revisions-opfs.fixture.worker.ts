@@ -13,7 +13,7 @@ import {
   generatedGitattributesContent,
   generatedGitattributesPath,
 } from '@taucad/revisions';
-import type { RevisionPort } from '@taucad/revisions';
+import type { RevisionPort, RevisionProvenance } from '@taucad/revisions';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
 import { createRevisionActors } from '@taucad/revisions/revision-effects';
 import type { RevisionFileSystem } from '@taucad/revisions/revision-effects';
@@ -48,6 +48,12 @@ export type PointerTreeApplied = Readonly<{
 const temporarySibling = /\.tau-(?:staged|backup)\./u;
 
 const encoder = new TextEncoder();
+/* Who the fixture's revisions are by (B1): a capture always names a person. */
+const fixtureIdentity = {
+  actor: { kind: 'user', id: 'usr_fixture', name: 'Fixture' },
+  capture: 'save',
+  via: 'browser',
+} as const satisfies Pick<RevisionProvenance, 'actor' | 'capture' | 'via'>;
 const provider = new OPFSProvider();
 const ready = provider.initialize();
 
@@ -130,7 +136,7 @@ const applyPointerTree = async (
       [generatedGitattributesPath, encoder.encode(generatedGitattributesContent(undefined))],
       ...paths.map((path, index) => [path, encoder.encode(pointerSized(index))] as const),
     ]),
-    provenance: { source: 'user', actorId: 'cold-open', createdAt: Date.UTC(2026, 10, 4) },
+    provenance: { source: 'user', ...fixtureIdentity, createdAt: Date.UTC(2026, 10, 4) },
     summary: { generated: 'pointer tree' },
   });
   await port.updateRef({ name: 'stored', expectedHead: undefined, head: revisionId(receipt.commitId) });
@@ -143,6 +149,7 @@ const applyPointerTree = async (
   };
   const actors = createRevisionActors({
     port,
+    identity: { via: 'browser', resolve: () => fixtureIdentity.actor },
     projectId: 'cold-open',
     filesystem: async () => surfaces[surface],
   });
@@ -176,7 +183,7 @@ const handle = async (request: OpfsRequest): Promise<unknown> => {
       const receipt = await portOf(request.directory).writeRevision({
         parents: request.parent === undefined ? [] : [revisionId(request.parent)],
         tree: new ImmutableRevisionTree([['a.txt', encoder.encode(request.content)]]),
-        provenance: { source: 'user', actorId: 'rm-a22', createdAt: Date.UTC(2026, 8, 26) },
+        provenance: { source: 'user', ...fixtureIdentity, createdAt: Date.UTC(2026, 8, 26) },
         summary: { generated: request.content },
       });
       return receipt.commitId;

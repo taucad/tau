@@ -47,8 +47,10 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { EmitterPort, ImportSourceGrant } from '@taucad/filesystem/backend/node';
 import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import type { DesktopShell } from '#tau/services-host-shell.js';
-import { desktopChatObserver } from '#tau/services-host-evidence.js';
+import type { HostEvidence } from '@taucad/agent-observability/host-evidence';
+import { desktopChatObserver, desktopHostBuild } from '#tau/services-host-evidence.js';
 import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
+import type { GatewayHostLabels } from '@taucad/agent-host/wire';
 import {
   acpModelProbeTimeout,
   completeMachineBinding,
@@ -110,6 +112,17 @@ import type { PermissionAnswerFrame } from '#shared/permission-channels.js';
  * greppable from both halves rather than living only as two defaults.
  */
 const agentSessionKey = 'tau-agent';
+
+/**
+ * The host labels every gateway call from this utility carries (LW17): the desktop host and its stamped build. The
+ * transport adds each call's model; the run's kernel is not known to the host, so none is sent.
+ *
+ * @returns The labels for the gateway transport.
+ */
+const desktopHostLabels = (): GatewayHostLabels => {
+  const build = desktopHostBuild();
+  return build === undefined ? { kind: 'desktop' } : { kind: 'desktop', build };
+};
 
 /**
  * How long a connection waits for main's `agentHost` frame. Milliseconds.
@@ -557,6 +570,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * dispatches into is per root and one desktop app opens many projects: the
    * route belongs to the root's actor, and each host it opens mounts its own. */
   const mcpEndpoints = new Map<string, HostMcpEndpoint>();
+  /** Each open project host's agent-observability evidence, by the renderer's project id, for the ratings main relays. */
+  const chatEvidence = new Map<string, HostEvidence>();
   let mcpServer: Server | undefined;
   let mcpOrigin = '';
 
@@ -1064,6 +1079,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     }
     /* The live root lands objects from its own repository's store, which the native port fills (W11.3). */
     largeObjectStores.set(resolve(workspaceRoot), join(workspaceRoot, '.git', 'lfs', 'objects'));
+    const { evidenceDirectory } = options;
     return {
       workspaceRoot,
       /* The renderer's project id is the project's `tau.json` id: every slice
@@ -1097,6 +1113,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         : { prepareKernel: nativeKernels.prepare, preparableKernels: nativeKernels.preparable }),
       apiBaseUrl: config.tauApiUrl,
       syncTelemetryPlacement: 'desktop',
+      /* B1: every revision this host records names the desktop app as its leg. */
+      via: 'desktop',
       tauCredential: () => {
         const token = authToken;
         return token === undefined ? undefined : { apiBaseUrl: config.tauApiUrl, authorization: `Bearer ${token}` };
@@ -1113,6 +1131,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         auth: () => authToken,
         /* The funded build names the account an attempt charges (GI-Q6); the self-host transport ignores it. */
         principal: () => sessionPrincipal,
+        /* LW17: the host and build the desktop's own evidence reports, so one run reads one release. */
+        hostLabels: desktopHostLabels(),
       }),
       /* The desktop rides the signed-in session (RH-R13), naming its account so a resume refuses another's
        * attempt (GI-Q6). Read per admission: main re-sends both on every sign-in, refresh and sign-out. */
@@ -1122,16 +1142,29 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       },
       ...(turnPlacement === undefined ? {} : { turnPlacement }),
       /* T11: summaries of the chats this host leads, only under the server's current grant for this account. */
-      ...(options.evidenceDirectory === undefined
+      ...(evidenceDirectory === undefined
         ? {}
         : {
-            observeChats: desktopChatObserver({
-              directory: options.evidenceDirectory,
-              apiBaseUrl: config.tauApiUrl,
-              projectId,
-              principal: () => sessionPrincipal,
-              token: () => authToken,
-            }),
+            observeChats: (read) => {
+              const evidence = desktopChatObserver({
+                directory: evidenceDirectory,
+                apiBaseUrl: config.tauApiUrl,
+                projectId,
+                principal: () => sessionPrincipal,
+                token: () => authToken,
+              })(read);
+              /* The project's open host is the one a rating from the renderer reaches (LW8). */
+              chatEvidence.set(projectId, evidence);
+              return {
+                onChatQuiescent: evidence.onChatQuiescent,
+                close: () => {
+                  if (chatEvidence.get(projectId) === evidence) {
+                    chatEvidence.delete(projectId);
+                  }
+                  evidence.close();
+                },
+              };
+            },
           }),
       ...(shell === undefined
         ? {}
@@ -1529,6 +1562,22 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             machineBindingCompleted?.(requestId, { error: message, ...(code === undefined ? {} : { code }) });
           }
         })();
+        return;
+      }
+      case 'agent-host-rated': {
+        /* The account rated a run in the desktop app (LW8). Only the open host of that project holds the run's rows;
+         * it reports the rating once the run has ended, under the feedback grant, and drops anything else. */
+        const { projectId: ratedProject, chatId, runId, value, at } = frame;
+        if (
+          typeof ratedProject !== 'string' ||
+          typeof chatId !== 'string' ||
+          typeof runId !== 'string' ||
+          (value !== 'positive' && value !== 'negative') ||
+          typeof at !== 'number'
+        ) {
+          return;
+        }
+        chatEvidence.get(ratedProject)?.onRated({ chatId, runId, value, at });
         return;
       }
       case 'agent-host-release': {

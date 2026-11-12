@@ -1,0 +1,131 @@
+# The packaged desktop suite as a candidate gate (desktop split blueprint DS-3, operator decision D-DS1 (b)):
+# `release-desktop-staging.yml` calls this after the shell gate on the commit it is about to tag, and tags a
+# candidate only when it is green, so a packaged regression is found before the candidate exists instead of
+# overnight and never sits on the merge queue's path. `workflow_dispatch` runs it on any commit.
+#
+# It runs the same target and specs as `e2e-nightly.yml`'s `desktop-packaged` job, on the same runner and with
+# the same host services, so deleting that job later (DS-4) loses no coverage: every project with a
+# `test:e2e:packaged` target, which packages the ad-hoc signed darwin-arm64 app from this commit
+# (`desktop:package-macos`) and runs every packaged spec against it.
+#
+# Why not the release-build archive and `test:e2e:desktop:completed-artifact`, as the blueprint first proposed:
+# - the archive does not exist yet: `release-build.yml` packages it from the tag's push, and this gate runs before
+#   the tag;
+# - a release package is locked (`environmentOverrides: false`) and ignores `TAU_API_URL`, `TAU_FRONTEND_URL` and
+#   every `TAU_E2E_*` switch, so no suite can point it at the run's own API;
+# - the completed-artifact harness starts its services with Docker Compose and refuses host services
+#   (`tauDatabaseCommand`), and hosted `macos-26` runners have no Docker.
+#
+# GitHub's macOS runners have no Docker, so PostgreSQL, Redis and MinIO run as host processes
+# (start-macos-services.sh), and TAU_E2E_SERVICES=host tells ensure-services.sh to migrate only and the account
+# helpers to reach PostgreSQL with the host's psql.
+name: Packaged desktop gate
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to package and test (a desktop candidate's commit)
+        type: string
+        required: true
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN:
+        description: Read token of the Nx remote cache; without it every build dependency runs
+        required: false
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit to package and test; defaults to the head of main'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+# Keyed by commit and never `github.workflow`, which in a called workflow is the caller's name and would cancel
+# the call; a second request for the same commit waits for the first.
+concurrency:
+  group: desktop-packaged-${{ inputs.ref || github.ref }}
+  cancel-in-progress: false
+
+env:
+  pnpm_config_verify_deps_before_run: warn
+  NX_NO_CLOUD: 'true'
+  # Nx remote cache, provisioned by tau-cloud `tau-ci-cache`, read only: this workflow has no environment and no
+  # `id-token: write`, so it cannot write. The server is set only when a token is present (Nx fails on a tokenless
+  # 403).
+  NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
+  NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
+  TAU_API_URL: http://localhost:4000
+  TAU_WEBSOCKET_URL: ws://localhost:4001
+  TAU_FRONTEND_URL: http://localhost:3000
+
+jobs:
+  packaged:
+    name: Packaged desktop end-to-end (darwin-arm64)
+    runs-on: macos-26
+    timeout-minutes: 180
+    env:
+      GEOSPEC_WORKERS: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref || 'main' }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+          save-pnpm-store: 'false'
+
+      # The build123d desktop producer installs its wheels with uv.
+      - name: Install uv
+        run: |
+          command -v uv || pipx install uv
+          uv --version
+
+      - name: Record package source identity
+        run: echo "TAU_DESKTOP_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Prepare API env file
+        run: cp apps/api/.env.example apps/api/.env
+
+      - name: Start PostgreSQL, Redis and MinIO on the host
+        run: apps/desktop-e2e/scripts/start-macos-services.sh
+
+      - name: Run the packaged desktop suite
+        id: packaged
+        timeout-minutes: 150
+        env:
+          TAU_E2E_SERVICES: host
+        run: |
+          set -o pipefail
+          pnpm nx run-many -t test:e2e:packaged --parallel=1 --outputStyle=stream \
+            | tee "$RUNNER_TEMP/desktop-packaged.log"
+
+      - name: Summarise the packaged suite
+        if: always()
+        env:
+          OUTCOME: ${{ steps.packaged.outcome }}
+        run: |
+          counts=$(sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/desktop-packaged.log" 2>/dev/null \
+            | grep -E '^desktop-e2e: +Tests ' | tail -1 | sed -E 's/^desktop-e2e: +Tests +//')
+          echo "- Packaged desktop gate (darwin-arm64, macos-26, test:e2e:packaged) on \`$TAU_DESKTOP_SOURCE_SHA\`: ${OUTCOME}${counts:+, ${counts}}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check workspace root hygiene
+        if: always()
+        run: pnpm nx run scripts:validate-workspace-root
+
+      - name: Upload the packaged desktop diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-packaged-gate-diagnostics
+          path: |
+            out/test-results/desktop-e2e
+            ${{ runner.temp }}/desktop-e2e-services/*.log
+          if-no-files-found: ignore
+          retention-days: 7

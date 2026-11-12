@@ -210,6 +210,8 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     }),
     magicLink({
       expiresIn: tokenLifetimeSeconds.magicLink,
+      // The `verification` row holds a hash, so a database read never yields a usable sign-in link.
+      storeToken: 'hashed',
       // `context` is optional on this callback, so the device row is best-effort and omits itself.
       async sendMagicLink({ email, url, token }, context) {
         await emailService.sendMagicLink({
@@ -227,7 +229,8 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     oneTimeToken({ storeToken: 'hashed' }),
     cliDeviceAuthorization(configService.get('TAU_FRONTEND_URL', { infer: true })),
     // `bearer()` stays LAST (see auth.ts).
-    bearer(),
+    // Only signed session tokens (`token.signature`): a session row alone never authenticates.
+    bearer({ requireSignature: true }),
   ];
 
   // Validation: Ensure plugin arrays are in sync
@@ -370,9 +373,17 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     }),
 
     logger: {
-      // Configured to use NestJS logger
+      // Configured to use NestJS logger. An error goes in as pino's `err` object, so the serializer and
+      // redaction keep its code and message; after a placeholder-free message pino drops extra arguments,
+      // which hid every pooler refusal behind a bare INTERNAL_SERVER_ERROR (database connection audit R1).
       log(level, message, ...args: unknown[]) {
-        logger[loggerFromLogLevel[level]](redactEmailAddresses(message), ...args);
+        const error = args.find((argument): argument is Error => argument instanceof Error);
+        const text = redactEmailAddresses(message);
+        if (error === undefined) {
+          logger[loggerFromLogLevel[level]](text);
+        } else {
+          logger[loggerFromLogLevel[level]]({ err: error }, text);
+        }
       },
     },
 

@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import { parseProjectManifestBytes, serializeProjectManifest } from '@taucad/types';
-import { convertLegacyProjectManifestBytes } from '@taucad/project-core';
+import { convertLegacyProjectManifestBytes, mainEntryPath } from '@taucad/project-core';
 import {
   assertDistinctPaths,
   createShareArchive,
@@ -235,7 +235,10 @@ export const normalizeRepositoryArchive = async (
   if (!manifest) {
     return failInvalid('The repository project manifest is invalid.');
   }
-  const { entryPath } = manifest.assets.main;
+  const entryPath = mainEntryPath(manifest);
+  if (entryPath === undefined) {
+    return failInvalid('The repository project has no model file yet.');
+  }
   if (!files.some(({ path }) => path === entryPath)) {
     failInvalid('The repository project entry file does not exist.');
   }

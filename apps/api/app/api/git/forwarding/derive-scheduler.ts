@@ -133,7 +133,7 @@ export class DeriveScheduler implements OnApplicationBootstrap, OnModuleDestroy 
         return 0;
       }
       const now = Date.now();
-      const candidates = await this.databaseService.database
+      const candidates = await this.databaseService.background
         .select({ projectId: projectGit.projectId, ownerId: project.ownerId })
         .from(projectGit)
         .innerJoin(project, eq(project.id, projectGit.projectId))

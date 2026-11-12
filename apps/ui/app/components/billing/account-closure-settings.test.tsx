@@ -70,8 +70,8 @@ describe('AccountClosureSettings', () => {
     const dialog = await screen.findByRole('alertdialog');
     const button = within(dialog).getByRole('button', { name: 'Close account' });
     expect(button).toBeDisabled();
-    const checkbox = within(dialog).getByRole('checkbox', { name: 'I want to close my account.' });
-    await userEvent.click(within(dialog).getByText('I want to close my account.'));
+    const checkbox = within(dialog).getByRole('checkbox', { name: 'I understand I’ll lose my remaining credits.' });
+    await userEvent.click(within(dialog).getByText('I understand I’ll lose my remaining credits.'));
     expect(checkbox).toBeChecked();
     expect(button).toBeEnabled();
     await userEvent.keyboard('[Space]');
@@ -81,7 +81,7 @@ describe('AccountClosureSettings', () => {
     await userEvent.keyboard('[Space]');
     await userEvent.click(button);
     expect(deleteUser).not.toHaveBeenCalled();
-    const refresh = await screen.findByRole('button', { name: 'Refresh closure status' });
+    const refresh = await screen.findByRole('button', { name: 'Check again' });
     expect(refresh).toBeEnabled();
     await userEvent.click(refresh);
     expect(getClosure).toHaveBeenCalledOnce();
@@ -92,10 +92,12 @@ describe('AccountClosureSettings', () => {
     const review = vi.fn();
     renderClosure(binding, review);
     await prepareClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent('Finish or cancel your pending payment first.');
-    expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'You have a credit purchase you haven’t finished. Finish or cancel it, then close your account.',
+    );
+    expect(screen.queryByRole('link', { name: 'Email help@tau.new' })).not.toBeInTheDocument();
     // The sentence names an action and the control reaches it; the notice has done its job once the dialog is open.
-    await userEvent.click(screen.getByRole('button', { name: 'Open Add credits' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Go to purchase' }));
     expect(review).toHaveBeenCalledOnce();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -104,26 +106,32 @@ describe('AccountClosureSettings', () => {
     refuseFor({ state: 'prepared', purpose: 'manual_topup' });
     renderClosure();
     await prepareClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent('Discard or finish your pending top-up quote first.');
-    expect(screen.getByRole('button', { name: 'Open Add credits' })).toBeEnabled();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'You have a credit purchase you haven’t finished. Finish or cancel it, then close your account.',
+    );
+    expect(screen.getByRole('button', { name: 'Go to purchase' })).toBeEnabled();
   });
 
   it('should send a paused saved-card payment back to Checkout through the dialog', async () => {
     refuseFor({ state: 'attention_required', attention: { action: 'continue_hosted' } });
     renderClosure();
     await prepareClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent('Finish your pending payment in Checkout first.');
-    expect(screen.getByRole('button', { name: 'Open Add credits' })).toBeEnabled();
-    expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'You have a payment to finish first. Finish it, then close your account.',
+    );
+    expect(screen.getByRole('button', { name: 'Go to purchase' })).toBeEnabled();
+    expect(screen.queryByRole('link', { name: 'Email help@tau.new' })).not.toBeInTheDocument();
   });
 
   it('should tell the owner to wait for an automatic reload and offer nothing to click', async () => {
     refuseFor({ state: 'prepared', purpose: 'automatic_topup' });
     renderClosure();
     await prepareClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent('An automatic reload is in progress.');
-    expect(screen.queryByRole('button', { name: 'Open Add credits' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Auto-reload is buying credits right now. Try again in a few minutes.',
+    );
+    expect(screen.queryByRole('button', { name: 'Go to purchase' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Email help@tau.new' })).not.toBeInTheDocument();
   });
 
   it('should point a held payment at support instead of asking for an action the customer cannot take', async () => {
@@ -131,18 +139,20 @@ describe('AccountClosureSettings', () => {
     renderClosure();
     await prepareClosure();
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'A payment needs attention before this account can close.',
+      'A payment needs to be sorted out before you can close your account. Email help@tau.new for help.',
     );
-    expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:support@tau.new');
-    expect(screen.queryByRole('button', { name: 'Open Add credits' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Email help@tau.new' })).toHaveAttribute('href', 'mailto:help@tau.new');
+    expect(screen.queryByRole('button', { name: 'Go to purchase' })).not.toBeInTheDocument();
   });
 
   it('should tell the customer to wait for a payment that is still being processed', async () => {
     refuseFor({ state: 'processing' });
     renderClosure();
     await prepareClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent('A payment is still being processed.');
-    expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'A payment is still processing. Wait a minute, then try again.',
+    );
+    expect(screen.queryByRole('link', { name: 'Email help@tau.new' })).not.toBeInTheDocument();
   });
 
   it('should hold closure for received funds whose credits have not landed and offer support', async () => {
@@ -150,32 +160,34 @@ describe('AccountClosureSettings', () => {
     renderClosure();
     await prepareClosure();
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Your payment was received and its credits are still being added.',
+      'We’re still adding credits from your last payment. Try again in a few minutes, or email help@tau.new if this doesn’t clear.',
     );
-    expect(screen.getByRole('link', { name: 'Contact support' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Email help@tau.new' })).toBeInTheDocument();
     // Nothing the customer can finish here, so no control that pretends otherwise.
-    expect(screen.queryByRole('button', { name: 'Open Add credits' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Go to purchase' })).not.toBeInTheDocument();
   });
 
   it('should ask for a plain retry when the refusal raced a payment that just finished', async () => {
     refuseFor({ state: 'fulfilled' });
     renderClosure();
     await prepareClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent('That payment is no longer pending. Try again.');
-    expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('That payment is done. Try again.');
+    expect(screen.queryByRole('link', { name: 'Email help@tau.new' })).not.toBeInTheDocument();
   });
 
   it('should say when the closure status could not be checked and still offer to prepare', async () => {
     current.mockRejectedValue(new Error('offline'));
     renderClosure();
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not check account closure status.');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Couldn’t check whether your account is closing. Reload the page to try again.',
+    );
     expect(screen.getByRole('button', { name: 'Close account' })).toBeInTheDocument();
   });
 
   it('invokes Better Auth only for a deletion-ready closure', async () => {
     current.mockResolvedValue({ state: 'ready_for_auth_deletion', closureId: 'closure-a' });
     renderClosure();
-    await userEvent.click(await screen.findByRole('button', { name: 'Delete my account' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete account' }));
     expect(deleteUser).toHaveBeenCalledOnce();
   });
 
@@ -191,7 +203,70 @@ describe('AccountClosureSettings', () => {
     const rendered = renderClosure();
     rendered.rerenderBinding({ ...binding, ownerId: 'user-b' });
     resolveBody({ state: 'ready_for_auth_deletion', closureId: 'closure-a' });
-    expect(await screen.findByText(/lets you delete your account/i)).toBeInTheDocument();
-    expect(screen.queryByText(/closure status/i)).toBeNull();
+    expect(await screen.findByText('Cancel your plan now and permanently delete your account.')).toBeInTheDocument();
+    expect(screen.queryByText(/your plan is canceled/i)).toBeNull();
+  });
+
+  it.each([
+    {
+      state: 'closing',
+      title: 'Closing your account',
+      description: 'We’re canceling your plan. This can take a minute.',
+      action: 'Check again',
+    },
+    {
+      state: 'cancellation_pending',
+      title: 'Closing your account',
+      description: 'We’re canceling your plan. This can take a minute.',
+      action: 'Check again',
+    },
+    {
+      state: 'ready_for_auth_deletion',
+      title: 'Your plan is canceled',
+      description: 'One step left. Deleting your account is permanent.',
+      action: 'Delete account',
+    },
+    {
+      state: 'attention',
+      title: 'We couldn’t close your account',
+      description: 'Something needs fixing on our side. Email us and we’ll finish it for you.',
+      action: 'Check again',
+    },
+  ])('says where a $state closure stands in plain words, never the wire state', async (row) => {
+    const { state, title, description, action } = row;
+    current.mockResolvedValue({ state, closureId: 'closure-a' });
+    renderClosure();
+    expect(await screen.findByRole('group', { name: title })).toHaveAccessibleDescription(description);
+    expect(screen.getByRole('button', { name: action })).toBeEnabled();
+    expect(screen.queryByText(/closure status|ready for auth deletion|cancellation pending/iu)).toBeNull();
+  });
+
+  it('says a closed account is closed and offers nothing more to do', async () => {
+    current.mockResolvedValue({ state: 'closed', closureId: 'closure-a' });
+    renderClosure();
+    const row = await screen.findByRole('group', { name: 'Your account is closed' });
+    expect(within(row).queryByRole('button')).toBeNull();
+  });
+
+  it('puts the consequence first and each alternative on its own line with its icon on the first line', async () => {
+    renderClosure();
+    await userEvent.click(screen.getByRole('button', { name: 'Close account' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveAccessibleDescription(
+      'Your plan ends now and you lose any credits you have left. This can’t be undone.',
+    );
+    const alternatives = within(dialog).getAllByRole('listitem');
+    expect(alternatives.map((item) => item.textContent)).toStrictEqual([
+      'To keep your plan until the end of the billing period, cancel the plan in Billing instead.',
+      'If you bought credits in the last 14 days and want a refund, email help@tau.new before you close.',
+    ]);
+    for (const item of alternatives) {
+      // The icon box is one line tall and centres the icon, so it sits on the first line's centre whatever the text wraps to.
+      const iconBox = item.querySelector('[data-slot=first-line-icon]');
+      expect(iconBox).toHaveClass('h-lh', 'items-center');
+      expect(iconBox?.querySelector('svg')).not.toBeNull();
+      expect(iconBox?.parentElement).toHaveClass('items-start');
+    }
+    expect(dialog).not.toHaveTextContent(/cancelled|forfeited|top-up/iu);
   });
 });

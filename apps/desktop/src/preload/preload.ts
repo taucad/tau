@@ -42,6 +42,7 @@ import {
   openDirectoryChannel,
   directoryGrantChannels,
   revealPathChannel,
+  agentHostRatingChannel,
   agentHostSessionChannels,
   externalAgentsChannel,
   hostHandOffChannel,
@@ -204,6 +205,10 @@ contextBridge.exposeInMainWorld('tau', {
     },
     release: async (workspaceRoot: string, projectId: string, attachmentId: string): Promise<void> => {
       await ipcRenderer.invoke(agentHostSessionChannels.release, { workspaceRoot, projectId, attachmentId });
+    },
+    /* LW8: the account rated a run; main checks it and relays it to the project host that ran it. */
+    rated: async (rating: Readonly<Record<string, unknown>>): Promise<void> => {
+      await ipcRenderer.invoke(agentHostRatingChannel, rating);
     },
   },
   permissions: permissionBridge(ipcRenderer),

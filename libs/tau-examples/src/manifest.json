@@ -875,6 +875,19 @@
     "kind": "model",
     "geometry": "3d",
     "kernel": "picovoxel",
+    "name": "stylised-character",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "lib/sdf.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
     "name": "torus-knot-round-trip",
     "mainFile": "main.ts",
     "files": [

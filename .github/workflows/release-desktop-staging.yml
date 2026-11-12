@@ -1,8 +1,9 @@
 # Staging desktop candidates. Each green `ci.yml` push run on `main` that affects `desktop` or
-# its renderer, `ui`, creates a candidate that release-build.yml packages for Apple silicon only; the nightly
-# schedule (and a dispatch that asks for it) creates one that also packages Intel, so the x64
-# archive and its OTA replacement are still exercised once a day while `main` pushes cost one
-# macOS packaging job each. The tag records which: an annotated tag whose message carries a
+# its renderer, `ui`, creates a candidate that release-build.yml packages for Apple silicon only; a
+# dispatch that asks for it (`intel`, which `desktop-route-promotion.yml` sets when it is asked to
+# promote an Apple silicon-only candidate) creates one that also packages Intel. Intel is built where
+# it ships, at promotion and on demand, not on a schedule (operator decision D-DS3, Brain
+# research/desktop-split-blueprint.md). The tag records which: an annotated tag whose message carries a
 # `Mac architectures: arm64 x64` line is a full candidate, a lightweight tag is arm64 only.
 # Staging is not notarized unless a dispatch sets `notarize`, which adds a `Notarize: true` line;
 # per-push candidates run many times a day and stay off Apple's notary service.
@@ -14,16 +15,19 @@
 # candidate. When that release build ends, this workflow wakes again and releases the
 # newest `main` commit with green CI, if the desktop changed since the last candidate.
 # The commits in between never get a candidate of their own: on 2026-11-07 every push
-# packaged one and desktop staging took a quarter of the macOS runner time. The nightly
-# and a dispatch always create theirs.
+# packaged one and desktop staging took a quarter of the macOS runner time. A dispatch
+# always creates its own, from the commit it names or the newest green one.
 name: Release desktop to staging
 run-name: Release desktop to staging
 
 on:
-  schedule:
-    - cron: '17 3 * * *'
   workflow_dispatch:
     inputs:
+      sha:
+        description: 'Commit on main with green CI to release; defaults to the newest one'
+        type: string
+        required: false
+        default: ''
       intel:
         description: 'Also package and qualify the Intel (x64) archive'
         type: boolean
@@ -41,8 +45,11 @@ on:
 
 permissions: {}
 
+# Automatic runs share one group, so the newest pending one replaces an older pending one. A dispatch has a
+# group of its own: it goes ahead regardless of the candidate in flight, and an automatic run started
+# while it waits (a candidate cut now holds the group through both gates) must not cancel it.
 concurrency:
-  group: release-desktop-staging
+  group: release-desktop-staging${{ github.event_name == 'workflow_dispatch' && format('-dispatch-{0}', github.run_id) || '' }}
   cancel-in-progress: false
 
 jobs:
@@ -50,7 +57,7 @@ jobs:
     name: Select the staging desktop candidate
     if: >-
       github.ref == 'refs/heads/main' &&
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' ||
        (github.event.workflow_run.path == '.github/workflows/ci.yml' &&
         github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.event == 'push' &&
@@ -70,7 +77,7 @@ jobs:
       intel: ${{ steps.selected.outputs.intel }}
       notarize: ${{ steps.selected.outputs.notarize }}
     steps:
-      # Automatic candidates only: the nightly and a dispatch go ahead regardless.
+      # Automatic candidates only: a dispatch goes ahead regardless.
       - name: Wait for the candidate in flight
         id: inflight
         if: github.event_name == 'workflow_run'
@@ -96,6 +103,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           # A finished release build hands over to the newest green commit, not its own.
           TRIGGER_SHA: ${{ github.event.workflow_run.path == '.github/workflows/ci.yml' && github.event.workflow_run.head_sha || '' }}
+          # A dispatch may name its commit (the promotion gate asks for a full candidate of the one it promotes).
+          DISPATCH_SHA: ${{ inputs.sha || '' }}
           STAGING_SUPPORT_SHA: ef81d9124c75b29e7115da226b3c616e0df2d43a
         run: |
           set -euo pipefail
@@ -103,6 +112,18 @@ jobs:
           # old creation time), so walk main's history newest first and ask
           # each commit whether its CI push run succeeded.
           sha=$TRIGGER_SHA
+          if [ -n "$DISPATCH_SHA" ]; then
+            if ! [[ "$DISPATCH_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::The dispatched commit must be a full 40-character sha, not $DISPATCH_SHA."
+              exit 1
+            fi
+            green=$(gh api "repos/${GH_REPO}/actions/workflows/ci.yml/runs?head_sha=${DISPATCH_SHA}&branch=main&event=push" --jq 'any(.workflow_runs[]; .conclusion == "success")')
+            if [ "$green" != true ]; then
+              echo "::error::$DISPATCH_SHA has no successful ci.yml push run on main."
+              exit 1
+            fi
+            sha=$DISPATCH_SHA
+          fi
           if [ -z "$sha" ]; then
           for candidate in $(gh api "repos/${GH_REPO}/commits?sha=main&per_page=50" --jq '.[].sha'); do
             green=$(gh api "repos/${GH_REPO}/actions/workflows/ci.yml/runs?head_sha=${candidate}&branch=main&event=push" --jq 'any(.workflow_runs[]; .conclusion == "success")')
@@ -154,28 +175,15 @@ jobs:
           DISPATCH_NOTARIZE: ${{ inputs.notarize }}
         run: |
           set -euo pipefail
+          # Intel only when a dispatch asks for it (D-DS3): automatic candidates are Apple silicon only.
           intel=false
-          if [ "$EVENT" = schedule ] || { [ "$EVENT" = workflow_dispatch ] && [ "$DISPATCH_INTEL" = true ]; }; then intel=true; fi
+          if [ "$EVENT" = workflow_dispatch ] && [ "$DISPATCH_INTEL" = true ]; then intel=true; fi
           echo "intel=$intel" >> "$GITHUB_OUTPUT"
           notarize=false
           if [ "$EVENT" = workflow_dispatch ] && [ "$DISPATCH_NOTARIZE" = true ]; then notarize=true; fi
           echo "notarize=$notarize" >> "$GITHUB_OUTPUT"
           releases=$(gh release list --limit 100 --json tagName --jq '.[] | select(.tagName | startswith("desktop-staging@")) | .tagName')
           previous=$(head -n 1 <<< "$releases")
-          # The nightly compares with the newest full candidate, so it skips only when Intel already
-          # shipped this desktop.
-          if [ "$EVENT" = schedule ]; then
-            previous=''
-            for tag in $(head -n 30 <<< "$releases"); do
-              object=$(gh api "repos/${GH_REPO}/git/ref/tags/${tag}" --jq '.object | "\(.type) \(.sha)"')
-              [ "${object%% *}" = tag ] || continue
-              message=$(gh api "repos/${GH_REPO}/git/tags/${object#* }" --jq .message)
-              if grep -qx 'Mac architectures: arm64 x64' <<< "$message"; then
-                previous=$tag
-                break
-              fi
-            done
-          fi
           if [ "$EVENT" != workflow_dispatch ] && [ -n "$previous" ]; then
             base=$(git rev-parse "$previous^{commit}")
             if [ "$base" = "$TARGET" ] || ! git merge-base --is-ancestor "$base" "$TARGET"; then
@@ -198,7 +206,7 @@ jobs:
   # Operator decision D3 (2026-11-08, Brain research/ci-throughput-review.md): the five shell
   # conformance rows pass on the candidate's own commit before its tag exists, so release-build.yml,
   # the installer candidates and route qualification only ever see a commit with green rows. A red
-  # row means no candidate this time; the next green commit, the nightly or a dispatch tries again.
+  # row means no candidate this time; the next green commit or a dispatch tries again.
   shell:
     name: Shell gate
     needs: [prerelease]
@@ -209,10 +217,27 @@ jobs:
     with:
       ref: ${{ needs.prerelease.outputs.sha }}
 
-  tag:
-    name: Tag the staging desktop candidate
+  # Operator decision D-DS1 (b) (desktop split blueprint DS-3): the packaged desktop suite passes on the
+  # candidate's own commit after the shell gate and before the tag exists, so a packaged regression is
+  # found hours after it merged, never on the merge queue's path. A red suite means no candidate this
+  # time, as a red shell row does. It runs only after a green shell gate, so a red row spends no hour
+  # of macOS packaging.
+  packaged:
+    name: Packaged desktop gate
     needs: [prerelease, shell]
     if: needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/desktop-packaged.yml
+    with:
+      ref: ${{ needs.prerelease.outputs.sha }}
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
+
+  tag:
+    name: Tag the staging desktop candidate
+    needs: [prerelease, shell, packaged]
+    if: needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -263,6 +288,7 @@ jobs:
           It signs in to and works against https://taucad.dev, never production, and follows its isolated staging update feed. macOS is ${signing}. The channel feed advances only after a native OTA acceptance test.
 
           Shell conformance gate: run ${RUN_ID}
+          Packaged desktop gate: run ${RUN_ID}
           NOTES
           sed -i 's/^          //' "$RUNNER_TEMP/notes.md"
           # A draft, because a published release is immutable (go-live DEL-20):

@@ -1,6 +1,7 @@
 import type { BetterAuthPlugin } from 'better-auth';
 import { deviceAuthorization } from 'better-auth/plugins';
 import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
+import { makeSignature } from 'better-auth/crypto';
 import { z } from 'zod';
 
 /** The pending-state predicate makes approval and denial mutually exclusive across tabs. */
@@ -77,6 +78,27 @@ export const cliDeviceAuthorization = (frontendUrl: string): BetterAuthPlugin =>
                 where: [{ field: 'id', operator: 'in', value: expired.map((row) => row.id) }],
               });
             }
+          }),
+        },
+      ],
+      after: [
+        {
+          // The device grant returns the raw session token; `bearer({ requireSignature: true })` accepts
+          // only the signed `token.signature` form, the same value `set-auth-token` carries. A raw row
+          // read from the database is therefore never a credential on its own.
+          matcher: (context) => context.path === '/device/token',
+          handler: createAuthMiddleware(async (context) => {
+            const returned: unknown = context.context.returned;
+            if (typeof returned !== 'object' || returned === null || returned instanceof Response) {
+              return;
+            }
+            const { access_token: accessToken } = returned as { access_token?: unknown };
+            if (typeof accessToken !== 'string' || accessToken.includes('.')) {
+              return;
+            }
+            const signature = await makeSignature(accessToken, context.context.secret);
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- RFC 8628 response field.
+            return context.json({ ...returned, access_token: `${accessToken}.${signature}` });
           }),
         },
       ],

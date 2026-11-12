@@ -28,6 +28,7 @@ import {
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import type { GitHttpBackendFixture, GitHttpBackendOptions } from '#test/git-http-backend.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { recordedBy } from '#test/identity.js';
 
 /* Tau's block, so a cut adds a line for each file over the threshold (D16). */
 const tauAttributes = [generatedGitattributesPath, generatedGitattributesContent(undefined)] as const;
@@ -43,7 +44,7 @@ const mint = async (port: RevisionPort, tree: ImmutableRevisionTree, parent?: Re
   const receipt = await port.writeRevision({
     parents: parent === undefined ? [] : [parent],
     tree,
-    provenance: { source: 'user', actorId: 'test', createdAt: 1 },
+    provenance: { source: 'user', ...recordedBy('test'), createdAt: 1 },
     summary: { generated: 'Large file' },
   });
   return revisionId(receipt.commitId);

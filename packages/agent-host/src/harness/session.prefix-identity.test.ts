@@ -32,7 +32,14 @@ import type { CapturedBody, ScriptedReply, SentRequest } from '#harness/prefix-i
 import { createSessionRecord } from '#harness/session-record.js';
 import { attachTurnContexts, createAgentSession } from '#harness/session.js';
 import { failureMarkerClearance } from '#host/run-history.js';
-import type { AgentLogEvent, ProviderMessage, TurnContextSnapshot, UserProviderMessage } from '#log/event-types.js';
+import type {
+  AgentLogEvent,
+  AgentToolChoice,
+  ProviderMessage,
+  TurnContextSnapshot,
+  UserProviderMessage,
+} from '#log/event-types.js';
+import { chatStateMessage } from '#log/event-types.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { createCachedSystemPromptBlocks, createGatewayModelTransport } from '#transport/gateway-model-transport.js';
 import { readPrefixStamp } from '#log/prefix-stamp.js';
@@ -90,25 +97,38 @@ type Turn = Readonly<{
   /** The summary compaction writes; the placeholder when absent. */
   summarize?: string | undefined;
   effort?: 'medium' | 'high' | undefined;
+  /** The catalog says the model reads its effort from the transcript and takes the binding control (U14, WP5). */
+  transcriptEffort?: boolean | undefined;
   /** What `read_file` answers with; a long body gives tool-result clearing something to free. */
   fileBody?: string | undefined;
   /** The composing build's release label. */
   release?: string | undefined;
   /** A seeded regression: what a harness defect does to the request on its way to the transport. */
   tamper?: ((request: ModelStreamRequest) => ModelStreamRequest) | undefined;
+  /** How the turn may use the tools it was granted: the mask a call is refused by. */
+  toolChoice?: AgentToolChoice | undefined;
+  /** The client's state note: what differs from the chat's defaults this turn, or that nothing does. */
+  state?: Readonly<{ text: string; default?: true }> | undefined;
 }>;
 
-const contextMessagesOf = (turn: Turn): UserProviderMessage[] | undefined =>
-  turn.snapshot === undefined
-    ? undefined
-    : [
-        {
-          id: `tau:snapshot-context:${turn.runId}`,
-          role: 'user',
-          content: turn.snapshot,
-          metadata: { tauInternal: { kind: 'snapshot-context', anchorId: 'chat-t1', pruning: 'replace-by-id' } },
-        },
-      ];
+const contextMessagesOf = (turn: Turn): UserProviderMessage[] | undefined => {
+  const snapshot: UserProviderMessage[] =
+    turn.snapshot === undefined
+      ? []
+      : [
+          {
+            id: `tau:snapshot-context:${turn.runId}`,
+            role: 'user',
+            content: turn.snapshot,
+            metadata: { tauInternal: { kind: 'snapshot-context', anchorId: 'chat-t1', pruning: 'replace-by-id' } },
+          },
+        ];
+  const state =
+    turn.state === undefined
+      ? []
+      : [chatStateMessage({ text: turn.state.text, isDefault: turn.state.default === true })];
+  return snapshot.length + state.length === 0 ? undefined : [...snapshot, ...state];
+};
 
 type ChatRun = Readonly<{
   turns: readonly CapturedBody[][];
@@ -213,7 +233,14 @@ const runChat = async (turns: readonly Turn[]): Promise<ChatRun> => {
         contextWindow: turn.contextWindow ?? 200_000,
         maxTokens: 8192,
         providerKind: 'anthropic',
-        ...(turn.effort === undefined ? {} : { reasoning: { effort: turn.effort } }),
+        ...(turn.effort === undefined
+          ? {}
+          : {
+              reasoning: {
+                effort: turn.effort,
+                ...(turn.transcriptEffort ? ({ effortInTranscript: true, replayBinding: 'drop' } as const) : {}),
+              },
+            }),
       },
       modelTransport: transport,
       toolRegistry: {
@@ -223,6 +250,7 @@ const runChat = async (turns: readonly Turn[]): Promise<ChatRun> => {
       eventLog: log,
       ...(turn.summarize === undefined ? {} : { summarize: async () => turn.summarize! }),
       contextMessages: contextMessagesOf(turn),
+      ...(turn.toolChoice === undefined ? {} : { toolChoice: turn.toolChoice }),
       clientContext: turn.clientContext,
       recentSkills: { load: async () => turn.recent ?? [] },
       createId: nextId,
@@ -585,8 +613,8 @@ describe('P2 native reasoning is replayed only under the prefix that minted it',
   });
 
   it.each([
-    ['the tool set changes', { tools: fixtureTools.slice(0, 2) }],
-    ['the mode changes', { staticPrompt: `${staticPrompt}\n\n<plan_mode>plan</plan_mode>` }],
+    ['the declared tool list changes', { tools: fixtureTools.slice(0, 2) }],
+    ['the system prompt changes', { staticPrompt: `${staticPrompt}\n\n<plan_mode>plan</plan_mode>` }],
   ] as const)('should leave out all earlier reasoning when %s, then replay what is minted after', async (_, change) => {
     const run = await runChat([turnOne, { ...turnTwo, ...change, replies: [readFile, done] }]);
     expect(replayed(run)).toEqual([[], ['sig-1'], [], ['sig-3']]);
@@ -663,6 +691,98 @@ describe('P2 native reasoning is replayed only under the prefix that minted it',
       (reply) => /"thinkingSignature":"(sig-\d+)"/u.exec(JSON.stringify(reply))?.[1],
     );
     expect(kept).toEqual(['sig-1', 'sig-2', 'sig-3', 'sig-4']);
+  });
+});
+
+describe('chat settings that leave the prefix alone (U10)', () => {
+  const replayed = (run: ChatRun): string[][] => run.sent.map((request) => replayedSignatures(request.body));
+  const plan = { text: '<system-reminder>\nPlan mode is on.\n</system-reminder>' } as const;
+  const defaults = {
+    text: '<system-reminder>\nThe chat is back to its defaults.\n</system-reminder>',
+    default: true,
+  } as const;
+  const occurrences = (body: CapturedBody, text: string): number =>
+    JSON.stringify(body['messages']).split(text).length - 1;
+
+  it.each([
+    ['every tool is turned off', 'none'],
+    ['the tool the model calls is masked', ['screenshot']],
+  ] as const)('should declare the same tools, refuse the call and keep every block when %s', async (_, toolChoice) => {
+    const run = await runChat([turnOne, { ...turnTwo, toolChoice, replies: [readFile, done] }]);
+    const tools = run.sent.map((request) => JSON.stringify(request.body['tools']));
+    expect(new Set(tools).size).toBe(1);
+    expect(JSON.parse(tools[0]!)).toHaveLength(fixtureTools.length);
+    expect(run.breaks.flat()).toEqual([undefined, undefined, undefined, undefined]);
+    expect(replayed(run)).toEqual([[], ['sig-1'], ['sig-1', 'sig-2'], ['sig-1', 'sig-2', 'sig-3']]);
+    /* The masked call reached no tool: the model was told it is off, and the run went on. */
+    const refusal = JSON.stringify(run.sent.at(-1)!.body['messages']);
+    expect(refusal).toContain('TOOL_DISABLED');
+    expect(refusal).toContain('read_file is turned off for this chat');
+  });
+
+  it('should still run a tool the mask leaves on', async () => {
+    const run = await runChat([turnOne, { ...turnTwo, toolChoice: ['read_file'], replies: [readFile, done] }]);
+    expect(JSON.stringify(run.sent.at(-1)!.body['messages'])).not.toContain('TOOL_DISABLED');
+  });
+
+  it('should say a settings change once, in the turn it changed, and keep the prefix on every turn', async () => {
+    const run = await runChat([
+      turnOne,
+      { ...turnTwo, state: plan },
+      /* The workspace changes on each later turn, so each turn's context is sent and only the rule keeps the note out. */
+      {
+        ...turnTwo,
+        runId: 'run-3',
+        userText: 'Thicker',
+        state: plan,
+        snapshot: snapshotText('lib.scad', ['lib.scad']),
+      },
+      { ...turnTwo, runId: 'run-4', userText: 'Build it', state: defaults },
+      {
+        ...turnTwo,
+        runId: 'run-5',
+        userText: 'Chamfer it',
+        state: defaults,
+        snapshot: snapshotText('lib.scad', ['lib.scad']),
+      },
+    ]);
+    expect(run.breaks.flat().every((cause) => cause === undefined)).toBe(true);
+    expect(replayed(run).at(-1)).toEqual(['sig-1', 'sig-2', 'sig-3', 'sig-4', 'sig-5']);
+    for (const from of [0, 1, 2, 3]) {
+      const verdict = turnBoundary(run, from);
+      expect(verdict.identicalThroughHistory, `turn ${String(from + 2)}: ${JSON.stringify(verdict.divergence)}`).toBe(
+        true,
+      );
+    }
+    const last = run.sent.at(-1)!.body;
+    expect(occurrences(last, 'Plan mode is on.')).toBe(1);
+    expect(occurrences(last, 'back to its defaults')).toBe(1);
+    /* The note closes its turn's context: it is the last thing before the person's message. */
+    const said = JSON.stringify(run.turns[1]![0]!['messages']);
+    expect(said.indexOf('Plan mode is on.')).toBeGreaterThan(said.indexOf('active_file'));
+    expect(said.indexOf('Plan mode is on.')).toBeLessThan(said.indexOf('Make it M8'));
+  });
+
+  it('should say nothing in a chat that never leaves its defaults', async () => {
+    const run = await runChat([
+      { ...turnOne, state: defaults },
+      { ...turnTwo, state: defaults },
+    ]);
+    expect(occurrences(run.sent.at(-1)!.body, 'back to its defaults')).toBe(0);
+  });
+
+  it('should restate a setting that is not the default after a summary replaced the turn that said it', async () => {
+    const window = { contextWindow: 8192, summarize: 'Earlier work.', state: plan } as const;
+    const run = await runChat([
+      { ...turnOne, ...window },
+      { ...turnTwo, ...window },
+      { ...turnTwo, ...window, runId: 'run-3', userText: 'Thicker', replies: [{ ...done, inputTokens: 7000 }] },
+      { ...turnTwo, ...window, runId: 'run-4', userText: 'Chamfer it' },
+    ]);
+    expect(run.breaks.flat().filter((cause) => cause !== undefined)).toEqual(['compaction']);
+    const afterSummary = run.sent.at(-1)!.body;
+    expect(JSON.stringify(afterSummary['messages'])).toContain('Earlier work.');
+    expect(occurrences(afterSummary, 'Plan mode is on.')).toBeGreaterThan(0);
   });
 });
 
@@ -746,6 +866,36 @@ describe('P1 typed prefix breaks on the durable log', () => {
       [undefined, undefined],
       [cause, undefined],
     ]);
+  });
+
+  it('should record no break when the effort changes on a model that reads it from the transcript (U14)', async () => {
+    const run = await runChat([
+      { ...turnOne, effort: 'high', transcriptEffort: true },
+      { ...turnTwo, effort: 'medium', transcriptEffort: true, replies: [readFile, done] },
+      { ...turnTwo, effort: 'high', transcriptEffort: true, runId: 'run-3', userText: 'Thicker' },
+    ]);
+
+    /* `runChat` holds the chat to the prefix contract: no request field moved and every request only appended. */
+    expect(run.breaks).toEqual([[undefined, undefined], [undefined, undefined], [undefined]]);
+    const last = run.turns[2]![0]!;
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Anthropic's wire uses snake_case.
+    expect(last).toMatchObject({ output_config: { effort: 'high' } });
+    /* Each reply's level sits in front of it, and the level in force closes the request. */
+    const levels = (last['messages'] as Array<{ role: string; output_config?: { effort: string } }>)
+      .filter((message) => message.role === 'system')
+      .map((message) => message.output_config?.effort);
+    expect(levels).toEqual(['high', 'high', 'medium', 'medium', 'high']);
+    expect(replayedSignatures(last)).toEqual(['sig-1', 'sig-2', 'sig-3', 'sig-4']);
+  });
+
+  it('should record one settings break on the turn a chat starts carrying its effort in the transcript', async () => {
+    const run = await runChat([
+      { ...turnOne, effort: 'medium' },
+      { ...turnTwo, effort: 'medium', transcriptEffort: true, replies: [readFile, done] },
+      { ...turnTwo, effort: 'high', transcriptEffort: true, runId: 'run-3', userText: 'Thicker' },
+    ]);
+
+    expect(run.breaks).toEqual([[undefined, undefined], ['settings', undefined], [undefined]]);
   });
 
   it('should record a definitions break when the prompt text changes under another release', async () => {

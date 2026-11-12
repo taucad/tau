@@ -10,18 +10,22 @@
  * `pending` list and is sent if it resolves to on in this tab; on `denied` it is settled and dropped
  * at once. It leaves the marker only once handed over or dropped, so a kill loop still reports its
  * first kill (G17). Nothing about reporting is shown in any state.
+ *
+ * On desktop the renderer's native minidump is the one crash report (decision D13): main restores
+ * this page's kill context on it, so a detected kill there is counted and settled but not sent.
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useLiveProjectIds } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
+import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import { busyKillPhases, getDocumentMemoryKillSignal, killBusyHeartbeatMilliseconds } from '#lib/memory-kill-signal.js';
-import { setLiveCountsReader } from '#lib/memory-sampler.js';
+import { setLiveCountsReader } from '@taucad/ui-core/lib/memory-sampler';
 import { installKillWorkReaders } from '#lib/kill-work-context.js';
 import { killMemory } from '#lib/kill-memory.js';
 import type { KillMemory } from '#lib/kill-memory.js';
 import { readRouteId } from '#lib/sentry-context.lib.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 import { reportDetectedKill } from '#lib/tab-kill-reporting.js';
 import type { DetectedMemoryKill, MemoryKillSignal } from '#lib/memory-kill-signal.js';
 import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
@@ -55,12 +59,15 @@ export function MemoryKillReporter({
   chatCount,
   consent = pageConsent,
   memory = killMemory,
+  sendsReport = !isDesktopTarget(),
 }: {
   readonly signal: MemoryKillSignal | undefined;
   readonly liveProjectCount: number;
   readonly chatCount: number;
   readonly consent?: KillReportConsent;
   readonly memory?: KillMemory;
+  /** Whether a kill goes to the error tracker; off on desktop, where the minidump reports it (D13). */
+  readonly sendsReport?: boolean;
 }): undefined {
   const waiting = useRef<DetectedMemoryKill[] | undefined>(undefined);
 
@@ -101,7 +108,7 @@ export function MemoryKillReporter({
           }
           // Each kill in turn; one whose report does not land stays pending for the next load (G17).
           // eslint-disable-next-line no-await-in-loop -- the reports share one delivery path.
-          if (await reportDetectedKill(kill)) {
+          if (!sendsReport || (await reportDetectedKill(kill))) {
             signal.settleKill(kill.id);
             // Counted once, as it leaves the marker: a kill still pending is counted when it is delivered.
             consent.count(kill);
@@ -118,7 +125,7 @@ export function MemoryKillReporter({
     // async-iife: bootstrap -- reporting the previous page's kills never blocks this page's render.
     void process();
     return unsubscribe;
-  }, [consent, memory, signal]);
+  }, [consent, memory, sendsReport, signal]);
 
   // SB2's kernel heap and renderer readers, which nothing registered before (crash capture, Finding 2).
   useEffect(() => installKillWorkReaders(), []);

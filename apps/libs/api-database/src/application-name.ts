@@ -7,6 +7,8 @@ import process from 'node:process';
  */
 export const databaseApplicationNames = {
   api: 'tau-api',
+  /* The API's background pool (database connection audit R3): pollers and gauges, apart from request traffic. */
+  'api-background': 'tau-api-background',
   'billing-operations': 'tau-billing-operations',
   maintenance: 'tau-maintenance',
   mirror: 'tau-mirror',

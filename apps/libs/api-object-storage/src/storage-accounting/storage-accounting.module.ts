@@ -25,7 +25,7 @@ import { StorageAccountingScheduler, redisSnapshotStore } from '#storage-account
       ): StorageAccountingScheduler {
         const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
         const tasks = accountingTasks({
-          database: database.database,
+          database: database.background,
           /* Plans resolve in SQL as `BillingService` projects them, never through Stripe. */
           plans: {
             tauCloudEnabled: config.get('TAU_CLOUD_ENABLED', { infer: true }),

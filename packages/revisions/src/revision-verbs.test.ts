@@ -20,9 +20,11 @@ import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { RevisionId } from '#algorithms/index.js';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
-import type { RevisionPort } from '#revision-port.js';
+import type { RevisionLogEntry, RevisionPort } from '#revision-port.js';
 import { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { recordedBy } from '#test/identity.js';
+import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 
 /* Every commit object the browser leg reads goes through `readObject`. */
 const objectReads = vi.hoisted(() => ({ count: 0 }));
@@ -62,7 +64,7 @@ const record = async (
   const receipt = await port.writeRevision({
     parents: options.parents,
     tree: new ImmutableRevisionTree([['part.ts', options.content]]),
-    provenance: { source: 'user', actorId: options.actorId, createdAt },
+    provenance: { source: 'user', ...recordedBy(options.actorId), createdAt },
     summary: { generated: options.summary },
   });
   return revisionId(receipt.commitId);
@@ -78,9 +80,9 @@ describe('revision verbs', () => {
     await port.updateRef({ name: 'main', expectedHead: first, head: second });
 
     const rows = await readRevisionLog(port);
-    expect(rows.map((row) => [row.revisionNumber, row.summary, row.actor])).toStrictEqual([
-      [2, 'Second', 'grace'],
-      [1, 'First', 'ada'],
+    expect(rows.map((row) => [row.revisionNumber, row.summary, row.who])).toStrictEqual([
+      [2, 'Second', { kind: 'recorded', identity: { kind: 'user', id: 'grace' } }],
+      [1, 'First', { kind: 'recorded', identity: { kind: 'user', id: 'ada' } }],
     ]);
 
     const place = await readRevisionPlace(port);
@@ -91,27 +93,121 @@ describe('revision verbs', () => {
   });
 
   /* W6-a2 R3: History folds consecutive autosaves into one row (A20), and the
-   * trigger is the only thing that tells one from a save a person asked for. */
+   * capture is the only thing that tells one from a save a person asked for. */
   it('carries what asked for each revision onto its row', async () => {
     const port = await openPort();
     await port.setHead('main');
     const saved = await port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['part.ts', 'one']]),
-      provenance: { source: 'user', actorId: 'ada', trigger: 'save', createdAt },
+      provenance: { source: 'user', ...recordedBy('ada'), capture: 'save', createdAt },
       summary: { generated: 'Saved' },
     });
     const savedId = revisionId(saved.commitId);
     const idle = await port.writeRevision({
       parents: [savedId],
       tree: new ImmutableRevisionTree([['part.ts', 'two']]),
-      provenance: { source: 'user', actorId: 'ada', trigger: 'idle', createdAt },
+      provenance: { source: 'user', ...recordedBy('ada'), capture: 'idle', createdAt },
       summary: { generated: 'Autosaved' },
     });
     await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(idle.commitId) });
 
     const rows = await readRevisionLog(port);
-    expect(rows.map((row) => row.trigger)).toStrictEqual(['idle', 'save']);
+    expect(rows.map((row) => row.capture)).toStrictEqual(['idle', 'save']);
+
+    /* B5 through B2: the row's trailer is the trailer block the commit carries, byte for byte. */
+    const root = roots.at(-1) ?? '';
+    const { readCommit } = await vi.importActual<typeof isomorphicGit>('isomorphic-git');
+    const { commit } = await readCommit({ fs: await import('node:fs'), dir: root, oid: savedId });
+    expect(rows[1]?.trailer).toBe(commit.message.slice(commit.message.indexOf('\n\n') + 2).trimEnd());
+  });
+
+  /* A5, fixture B4: a turn's base cut is the person's, read from the trailer an earlier build wrote. */
+  it('reads a turn base cut as the person’s and leaves the result the agent’s', async () => {
+    const port = await openPort();
+    await port.setHead('main');
+    const turn = { runId: 'run-1', attempt: 1, turnId: 'u1', capture: 'turn', via: 'browser', createdAt } as const;
+    const ada = { kind: 'user', id: 'ada' } as const;
+    const base = await port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['part.ts', 'mine']]),
+      /* What a build before A5 recorded: source `agent`, the person as actor. */
+      provenance: { ...turn, source: 'agent', actor: ada, turnCut: 'base' },
+      summary: { generated: 'Agent turn u1' },
+    });
+    const baseId = revisionId(base.commitId);
+    const result = await port.writeRevision({
+      parents: [baseId],
+      tree: new ImmutableRevisionTree([['part.ts', 'agent']]),
+      provenance: {
+        ...turn,
+        source: 'agent',
+        actor: { kind: 'agent', id: 'agent', runId: 'run-1', onBehalfOf: ada },
+        turnCut: 'result',
+      },
+      summary: { generated: 'Agent turn u1' },
+    });
+    const saved = await port.writeRevision({
+      parents: [revisionId(result.commitId)],
+      tree: new ImmutableRevisionTree([['part.ts', 'later']]),
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt },
+      summary: { generated: 'Saved' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(saved.commitId) });
+
+    const rows = await readRevisionLog(port);
+    const agent = { kind: 'agent', id: 'agent', runId: 'run-1', onBehalfOf: ada };
+    expect(rows.map((row) => [row.source, row.who, row.turnCut, row.turnId])).toStrictEqual([
+      ['user', { kind: 'recorded', identity: ada }, undefined, undefined],
+      ['agent', { kind: 'recorded', identity: agent }, 'result', 'u1'],
+      ['user', { kind: 'recorded', identity: ada }, 'base', 'u1'],
+    ]);
+    expect(rows.map((row) => Object.hasOwn(row, 'turnCut'))).toStrictEqual([false, true, true]);
+  });
+
+  /* B2: a row's who is typed, the trailer rides with it for diagnostics, and a commit Tau did not write names its git author. */
+  it('carries a typed who and the trailer, and a git author for a commit Tau did not record', async () => {
+    const ada = { kind: 'user', id: 'ada', anonymous: true } as const;
+    const entries: readonly RevisionLogEntry[] = [
+      {
+        id: revisionId('2'.repeat(40)),
+        changeId: 'change-2',
+        parents: [revisionId('1'.repeat(40))],
+        treeId: 'b'.repeat(40),
+        summary: { generated: 'Saved' },
+        provenance: { source: 'user', actor: ada, capture: 'save', via: 'desktop', createdAt },
+        conflicted: false,
+      },
+      {
+        id: revisionId('1'.repeat(40)),
+        changeId: 'change-1',
+        parents: [],
+        treeId: 'c'.repeat(40),
+        summary: { generated: 'Initial commit' },
+        provenance: { source: 'import', createdAt },
+        authorName: 'octo-dev',
+        conflicted: false,
+      },
+    ];
+    const port: Partial<RevisionPort> = {
+      readHead: async () => ({ branch: 'main', head: revisionId('2'.repeat(40)) }),
+      log: async () => entries,
+      listTags: async () => [],
+      firstParentChanges: async (ids) => new Map(ids.map((id) => [id, ['part.ts']] as const)),
+    };
+
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log read asks only these four methods.
+    const [saved, imported] = await readRevisionLog(port as RevisionPort);
+
+    expect(saved?.who).toStrictEqual({ kind: 'recorded', identity: ada });
+    expect(saved?.capture).toBe('save');
+    expect(saved?.trailer?.split('\n')).toStrictEqual([
+      `Tau-Metadata: {"version":2,"parents":["${'1'.repeat(40)}"],"provenance":{"source":"user","actor":{"kind":"user","id":"ada","anonymous":true},"capture":"save","via":"desktop","createdAt":${String(createdAt)}},"summary":{"generated":"Saved"}}`,
+      'Tau-Actor: user ada',
+      'Tau-Trigger: save',
+    ]);
+    expect(imported?.who).toStrictEqual({ kind: 'unrecorded', authorName: 'octo-dev' });
+    expect(imported?.trailer).toBeUndefined();
   });
 
   /* A9: only the revision a restore minted names what it restored; the cut before it does not. */
@@ -122,13 +218,13 @@ describe('revision verbs', () => {
     const before = await port.writeRevision({
       parents: [first],
       tree: new ImmutableRevisionTree([['part.ts', 'late']]),
-      provenance: { source: 'user', actorId: 'ada', trigger: 'restore', createdAt },
+      provenance: { source: 'user', ...recordedBy('ada'), capture: 'restore', createdAt },
       summary: { generated: 'Saved changes (restore)' },
     });
     const restored = await port.writeRevision({
       parents: [revisionId(before.commitId)],
       tree: new ImmutableRevisionTree([['part.ts', 'one']]),
-      provenance: { source: 'restore', actorId: 'ada', trigger: 'restore', restoredFrom: first, createdAt },
+      provenance: { source: 'restore', ...recordedBy('ada'), capture: 'restore', restoredFrom: first, createdAt },
       summary: { generated: 'Restored Rev 1' },
     });
     await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(restored.commitId) });
@@ -236,6 +332,11 @@ describe('revision verbs', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.source).toBe('import');
     expect(rows[0]?.createdAt).toBeGreaterThan(Date.UTC(2020, 0, 1));
+    /* B2: no capture, no trailer, and no identity stood in for the one it lacks. */
+    expect(rows[0]?.who.kind).toBe('unrecorded');
+    expect(
+      rows[0] === undefined ? [] : [Object.hasOwn(rows[0], 'capture'), Object.hasOwn(rows[0], 'trailer')],
+    ).toStrictEqual([false, false]);
   });
 
   it('answers a project that has no revisions yet without inventing one', async () => {
@@ -259,7 +360,7 @@ describe('revision verbs', () => {
       const receipt = await port.writeRevision({
         parents: head === undefined ? [] : [head],
         tree: new ImmutableRevisionTree([['part.ts', `export const part = ${String(index)};\n`]]),
-        provenance: { source: 'user', actorId, createdAt: createdAt + index * 1000 },
+        provenance: { source: 'user', ...recordedBy(actorId), createdAt: createdAt + index * 1000 },
         summary: { generated: `Rev ${String(index + 1)}` },
       });
       // oxlint-disable-next-line no-await-in-loop -- the ref follows each revision.
@@ -283,7 +384,7 @@ describe('revision verbs', () => {
     const receipt = await port.writeRevision({
       parents: [head],
       tree: new ImmutableRevisionTree([['part.ts', 'export const part = "minted";\n']]),
-      provenance: { source: 'user', actorId: 'e6-page', createdAt: createdAt + 200_000 },
+      provenance: { source: 'user', ...recordedBy('e6-page'), createdAt: createdAt + 200_000 },
       summary: { generated: 'Minted' },
     });
     await port.updateRef({ name: 'main', expectedHead: head, head: revisionId(receipt.commitId) });
@@ -320,5 +421,89 @@ describe('revision verbs', () => {
 
     expect(page.map((row) => row.revisionNumber)).toEqual([30, 29, 28, 27, 26]);
     expect(page).toEqual(whole.slice(0, 5));
+  });
+});
+
+/* A4: a page longer than the setup-verdict cache still flags every setup entry it holds. */
+describe('setup entries on a long page', () => {
+  it('flags every setup entry of a page longer than the verdict cache', async () => {
+    const length = 4100;
+    const idOf = (index: number): RevisionId => revisionId(index.toString(16).padStart(40, '0'));
+    const entries: RevisionLogEntry[] = Array.from({ length }, (_, offset) => {
+      const index = length - offset;
+      return {
+        id: idOf(index),
+        changeId: `change-${String(index)}`,
+        parents: index === 1 ? [] : [idOf(index - 1)],
+        treeId: 'a'.repeat(40),
+        summary: { generated: 'Saved changes (idle)' },
+        provenance: { source: 'user', ...recordedBy('ada'), capture: 'idle', createdAt },
+        conflicted: false,
+      };
+    });
+    const head = idOf(length);
+    const port: Partial<RevisionPort> = {
+      readHead: async () => ({ branch: 'main', head }),
+      log: async () => entries,
+      listTags: async () => [],
+      firstParentChanges: async (ids) => new Map(ids.map((id) => [id, [generatedIgnorePath]] as const)),
+    };
+
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log read asks only these four methods.
+    const rows = await readRevisionLog(port as RevisionPort);
+
+    expect(rows).toHaveLength(length);
+    /* Every entry but the root, which has no first parent to change against. */
+    expect(rows.filter((row) => row.isSetup === true)).toHaveLength(length - 1);
+  });
+
+  /* A6 beside A4: the Start entry records Tau's setup files, yet it is V1 and never folds into the setup line. */
+  it('reads the Start entry as V1, never as setup, though it changed only the setup files', async () => {
+    const idOf = (index: number): RevisionId => revisionId(index.toString(16).padStart(40, '0'));
+    const entries: RevisionLogEntry[] = [
+      {
+        id: idOf(3),
+        changeId: 'change-3',
+        parents: [idOf(2)],
+        treeId: 'a'.repeat(40),
+        summary: { generated: 'Saved changes (idle)' },
+        provenance: { source: 'user', ...recordedBy('ada'), capture: 'idle', createdAt },
+        conflicted: false,
+      },
+      {
+        id: idOf(2),
+        changeId: 'change-2',
+        parents: [idOf(1)],
+        treeId: 'b'.repeat(40),
+        summary: { generated: 'Start' },
+        provenance: { source: 'user', ...recordedBy('ada'), capture: 'create', createdAt },
+        conflicted: false,
+      },
+      {
+        id: idOf(1),
+        changeId: 'change-1',
+        parents: [],
+        treeId: 'c'.repeat(40),
+        summary: { generated: 'Initial commit' },
+        /* A commit Tau did not write: no actor, capture or leg (B1). */
+        provenance: { source: 'import', createdAt },
+        conflicted: false,
+      },
+    ];
+    const port: Partial<RevisionPort> = {
+      readHead: async () => ({ branch: 'main', head: idOf(3) }),
+      log: async () => entries,
+      listTags: async () => [],
+      firstParentChanges: async (ids) =>
+        new Map(ids.map((id) => [id, [generatedIgnorePath, generatedGitattributesPath]] as const)),
+    };
+
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log read asks only these four methods.
+    const rows = await readRevisionLog(port as RevisionPort);
+    const byId = new Map(rows.map((row) => [row.revisionId, row]));
+
+    expect(byId.get(idOf(2))?.start).toBe('created');
+    expect(byId.get(idOf(2))?.isSetup).toBeUndefined();
+    expect(byId.get(idOf(3))?.isSetup).toBe(true);
   });
 });

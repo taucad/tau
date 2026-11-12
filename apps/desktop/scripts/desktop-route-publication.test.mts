@@ -591,7 +591,7 @@ const mixedReceipts = [
 assert.equal(qualifyDesktopRoutes(mixed, mixedReceipts, { ...macTrust, ...trust }).routes.length, 2);
 rejectMac(mixedReceipts, { candidate: mixed, trust: { ...macTrust, ...trust } });
 rejectMac(mixedReceipts, { trust: { ...macTrust, ...trust } });
-// Production keeps the deliberate all-five-route rule; a Mac-only production candidate never parses or qualifies.
+// A staging-tagged Mac candidate relabelled as production never parses or qualifies (per-platform production below).
 assert.throws(() =>
   qualifyDesktopScopedRoutes(
     { ...macManifest, tag: productionTag, ...productionIdentity },
@@ -732,3 +732,132 @@ assert.throws(() =>
 );
 assert.deepEqual(catalog.routes[0]!.qualification, { ci: true, vm: true, trust: 'release' });
 console.log('Mac-only scope, CI/VM receipt, clean-host pending, architecture and catalog retention checks passed');
+
+// D-H5 per-platform promotion: production publishes every route of the promoted platform scope, each with complete CI
+// and VM release receipts from that platform's own candidate. The platform candidates here are the complete production
+// candidate's own Apple silicon and Linux artifacts, with their own receipts.
+type ProductionProof = (typeof productionReceipts)[number];
+const platformCandidate = (target: string) =>
+  parseDesktopArtifactManifest({
+    ...production,
+    artifacts: production.artifacts.filter((artifact) => artifact.target === target),
+  });
+const linuxProduction = platformCandidate('linux-x64');
+const linuxProductionReceipts = productionReceipts.filter((proof) => proof.target === 'linux-x64');
+const macProduction = platformCandidate('darwin-arm64');
+const macProductionReceipts = productionReceipts.filter((proof) => proof.target === 'darwin-arm64');
+assert.deepEqual(
+  qualifyDesktopScopedRoutes(linuxProduction, linuxProductionReceipts, {
+    trust: productionTrust,
+    scope: 'linux',
+  }).routes.map(({ route, target, cleanHost }) => `${target}/${route}:${cleanHost}`),
+  ['linux-x64/linux-apt:passed', 'linux-x64/linux-appimage:passed'],
+);
+assert.deepEqual(
+  qualifyDesktopScopedRoutes(macProduction, macProductionReceipts, {
+    trust: productionTrust,
+    scope: 'macos',
+  }).routes.map(({ route, target, cleanHost }) => `${target}/${route}:${cleanHost}`),
+  ['darwin-arm64/macos-zip:passed'],
+);
+const linuxCatalog = createDesktopInstallerCatalog({
+  manifest: linuxProduction,
+  receipts: linuxProductionReceipts,
+  trust: productionTrust,
+  approval: {
+    ...approval,
+    tag: productionTag,
+    channel: 'production',
+    version: linuxProduction.version,
+    manifestSha256: desktopManifestDigest(linuxProduction),
+  },
+  scope: 'linux',
+});
+assert.deepEqual(
+  linuxCatalog.routes.map(({ route, qualification }) => [route, qualification]),
+  [
+    ['linux-apt', { ci: true, vm: true, trust: 'release' }],
+    ['linux-appimage', { ci: true, vm: true, trust: 'release' }],
+  ],
+);
+const rejectPlatform = (
+  candidate: unknown,
+  proofs: readonly unknown[],
+  refusal: { scope: 'all' | 'linux' | 'macos'; pattern?: RegExp },
+): void => {
+  assert.throws(
+    () => qualifyDesktopScopedRoutes(candidate, proofs, { trust: productionTrust, scope: refusal.scope }),
+    refusal.pattern ?? /./u,
+  );
+};
+// A platform candidate is not the all-platform production candidate: `all` still needs all five routes.
+rejectPlatform(linuxProduction, linuxProductionReceipts, { scope: 'all', pattern: /all five in production/u });
+rejectPlatform(macProduction, macProductionReceipts, { scope: 'all', pattern: /all five in production/u });
+// Every route's CI and VM receipt stays individually required in production; clean-host is never pending there.
+for (const index of linuxProductionReceipts.keys()) {
+  rejectPlatform(
+    linuxProduction,
+    linuxProductionReceipts.filter((_, other) => other !== index),
+    { scope: 'linux' },
+  );
+}
+for (const index of macProductionReceipts.keys()) {
+  rejectPlatform(
+    macProduction,
+    macProductionReceipts.filter((_, other) => other !== index),
+    { scope: 'macos' },
+  );
+}
+rejectPlatform(
+  macProduction,
+  macProductionReceipts.filter((proof) => proof.environment.kind === 'ci'),
+  { scope: 'macos', pattern: /vm receipt/u },
+);
+rejectPlatform(linuxProduction, [...linuxProductionReceipts, linuxProductionReceipts[0]], { scope: 'linux' });
+// Signer, digest, source and tag binding are unchanged for a platform scope.
+for (const change of [
+  (proof: ProductionProof) => ({ ...proof, trust: { kind: 'release', identity: 'other-signer' } }),
+  (proof: ProductionProof) => ({ ...proof, trust: { kind: 'test', identity: proof.trust.identity } }),
+  (proof: ProductionProof) => ({ ...proof, sourceCommit: 'f'.repeat(40) }),
+  (proof: ProductionProof) => ({
+    ...proof,
+    artifacts: proof.artifacts.map((item) => ({ ...item, sha256: 'e'.repeat(64) })),
+  }),
+]) {
+  for (const index of linuxProductionReceipts.keys()) {
+    rejectPlatform(
+      linuxProduction,
+      linuxProductionReceipts.map((proof, other) => (other === index ? change(proof) : proof)),
+      { scope: 'linux' },
+    );
+  }
+}
+assert.throws(() =>
+  qualifyDesktopScopedRoutes(linuxProduction, linuxProductionReceipts, {
+    trust: { ...productionTrust, 'linux-appimage': '' },
+    scope: 'linux',
+  }),
+);
+// A platform scope admits only its own platform: another platform's receipt or artifact is refused, not ignored.
+rejectPlatform(linuxProduction, [...linuxProductionReceipts, ...macProductionReceipts], { scope: 'linux' });
+rejectPlatform(macProduction, [...macProductionReceipts, ...linuxProductionReceipts], { scope: 'macos' });
+rejectPlatform(production, productionReceipts, { scope: 'linux', pattern: /Linux-only publication requires exactly/u });
+rejectPlatform(production, productionReceipts, {
+  scope: 'macos',
+  pattern: /Mac-only publication requires exactly production ZIP/u,
+});
+rejectPlatform(linuxProduction, linuxProductionReceipts, { scope: 'macos' });
+rejectPlatform(macProduction, macProductionReceipts, { scope: 'linux' });
+// Both Linux routes are the Linux platform: a candidate with only one of them is not promotable under `linux`.
+const aptOnly = parseDesktopArtifactManifest({
+  ...linuxProduction,
+  artifacts: linuxProduction.artifacts.filter((artifact) => !artifact.kind.startsWith('linux-appimage')),
+});
+rejectPlatform(
+  aptOnly,
+  linuxProductionReceipts.filter((proof) => proof.route === 'linux-apt'),
+  { scope: 'linux', pattern: /Linux-only publication requires exactly/u },
+);
+// Intel stays out of the Mac scope in production too: an Intel-only production candidate never parses.
+assert.throws(() => platformCandidate('darwin-x64'), /every supported target or one complete platform/u);
+console.log('Per-platform production promotion (D-H5) checks passed');

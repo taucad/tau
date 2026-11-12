@@ -1,5 +1,112 @@
 # Changelog
 
+## 0.8.0 (2026-11-11)
+
+### Features
+
+- feat(api-agent-observability): Count Langfuse units and alert at 70% of Hobby's allowance (LW24) (#1806) (f56bc5601)
+- feat(ui): Redesign billing screens, copy and shared components (#1786) (91ffe6243)
+- feat(api-llm-gateway): Carry host, build, kernel and model labels into the provider fact (Langfuse LW17) (#1798) (a5440ce14)
+- feat(revisions): Read and write a turn's base cut as the person's (#1767) (dbabc0025)
+- feat(viewer): Add the framing actor that frames a view's geometry through its camera (G5a) (#1804) (63fc283be)
+- feat(ui): Build recordSync and make the view store its shim (#1772) (a6a17d752)
+- feat(host): Give the agent's shell read-only git through a branch view (#1799) (8dde02b3e)
+- feat(api-agent-observability): Langfuse v5 mapping, one trace and root per run, and trust Langfuse's delete (LW1, LW2) (#1800) (87c6fc46e)
+- feat(desktop): Report the build id and ratings like the browser host (Langfuse LW8) (#1801) (fa6ab384d)
+- feat(viewer): Move the section handles' pointer input into a gesture machine (#1796) (8806431a8)
+- feat(api-email): Send each kind of email from its purpose's sender (#1797) (897a2c3b4)
+- feat(viewer): Move the kinematics drag gesture into the kinematics actor (#1793) (4d2f46b3e)
+- feat(tscircuit): Give the 3D board a soft lacquer solder mask (#1795) (bddd8f330)
+- feat(ui): Lead an empty Home with community builds and give headings one owner (#1703) (314cd5924)
+- feat(camera): Give the camera actor input states, provenance and atomic events (G3) (#1761) (5b14f8f52)
+- feat(agent-host): Keep the request prefix across a chat's settings (#1782) (560c9ffc9)
+- feat(ui): Name who backed up each entry from Tau Cloud's push records (#1771) (222992c28)
+- feat(ui): Show update prompts only in the sidebar (#1745) (b2d3188f2)
+- feat(viewer): Move the renderer lifecycle into a canvas actor (#1746) (5b3ef73ec)
+
+### Fixes
+
+- fix(api-billing): Name the expected output field and record refusals before admission (#1792) (2584fb51f)
+- fix(ui): Accept website events behind the staging router (#1787) (079c7e2c7)
+- fix(agent-tools): Run the GeoSpec harness test on a valid BRep in the test shards (#1779) (aa1fb2edf)
+- fix(filesystem): Serialize native watcher subscribe and unsubscribe (#1776) (008728315)
+- fix(ui): Keep the composer still while a project opens on desktop (#1769) (d07c2a93c)
+- fix(ui): Build the content security policy per environment (#1774) (0e923d1d6)
+- fix(revisions): give every checkout its fill word, so a new project's viewer leaves "Downloading model files" (#1742) (d8581a532)
+
+### Other changes
+
+- ci(root): Run the desktop renderer payload check whenever ui is affected (#1777) (9b1c72804)
+- ci(root): Select native hosts and viewer parity in the CI plan, merge queue only (#1773) (0dbd19d92)
+- chore(root): Apply the brand policy to names, one-liners and avatars (#1760) (ca9355b24)
+- refactor(revisions): Make revision identity changes events on the open client (#1707) (20abec4ff)
+- ci(root): Restore the affected lanes' pinned downloads from a digest-keyed cache (#1775) (e9ff3a687)
+- refactor(ui): Cut the ui-core app library from the app's lib, utils and constants (UI wave E, first slice) (#1686) (ead76cc3d)
+- chore(picogk): Pin the PicoGK browser host to manifest 313d375b1617 (#1731) (c46169f1a)
+
+## 0.7.0 (2026-11-10)
+
+### Features
+
+- feat(ui): Ask undecided visitors for analytics, link Sentry to PostHog and count website pages (#1726) (253deae24)
+- feat(telemetry): Count each prompt-prefix break with what it cost in cache (#1741) (4ad7fd01e)
+- feat(api): Turn on Free-tier cloud sync and remove its flag (#1744) (182df355d)
+- feat(agent-host): Replay native reasoning only under the prefix that minted it (#1737) (51d463248)
+- feat(camera): Add the CameraAuthority TLA+ spec and its formal target (#1709) (57c5e68ca)
+- feat(api-llm-gateway): Refuse a rejected reasoning replay with its own code (#1721) (ae04dcbb0)
+- feat(ui): Remove the crash prompt and send tab kills only with telemetry consent (#1722) (da907c051)
+- feat(viewer): Export the graphics machine's totality baseline (#1708) (260358f0c)
+- feat(agent-host): Stamp each reply with its request prefix and count typed breaks (#1716) (85bad0f83)
+- feat(ui): Load PicoGK by digest from each environment's dependency mirror (#1676) (8f31a0772)
+- feat(api): Report R2 usage per bucket role and add the R2 buckets dashboard (#1689) (1f0ce143a)
+- feat(agent-host): Send each model step's turn step and gap as gateway headers (#1675) (cd28b4d93)
+- feat(root): Add the nx:census project size and affected-rate report (#1655) (57a276cba)
+- feat(agent-host): Ask Anthropic for a one-hour prompt cache and key OpenAI and xAI caches by chat (#1643) (bbcde6478)
+- feat(nx): Add the shell tag, pin the shell import surface, and adopt the package rule (#1644) (a973dfa77)
+
+### Fixes
+
+- fix(revisions): stop a model download ending in "Couldn't download model files" (#1724) (a41bcb503)
+- fix(agent-host): Store the reply as the provider wrote it and normalize math at render (#1736) (4b53bf3f3)
+- fix(tscircuit): Give the 3D board a matte solder mask (#1712) (dc97df044)
+- fix(api-email): Fix email rendering across clients and the sign-up verification flow (#1701) (8f9053c81)
+- fix(ui): Keep Home still on phones and keep keys typed while it loads (#1313) (9fea7fcb3)
+- fix(ui): Re-theme the open Terminal when the app theme changes (#1695) (248858425)
+- fix(desktop): Keep the dead page's context on a desktop renderer minidump (D13) (#1691) (2d502adcf)
+- fix(desktop, ui): Upload desktop renderer source maps and trace 5% of production page loads (#1637) (5c5385875)
+- fix(agent-host, ui): Restore the LangChain plane's interrupt reminder, recent skills, read dedup, result offloading and outage resume (R2–R6) (#1634) (723bf4c3f)
+
+### Performance
+
+- perf(ui): Mount a live project's workspace without a Suspense fallback (#1727) (4ebf6843d)
+- perf(ui): Time the project-open windows that carry no span (#1628) (1c295eccc)
+- perf(ui): Discover every route on boot so phone taps never wait on /\_\_manifest (#1630) (49aff8275)
+
+### Other changes
+
+- test(ui): Add the RecordSync TLA+ spec for own-write attribution (#1719) (dd5ea47e9)
+- refactor(ui): Move chat auto-resume and the pull heartbeat into the chat machine (audit R5) (#1718) (c6df9e450)
+- refactor(ui): Own the desktop payload check and cut the desktop -> ui edge (#1672) (9c07beb12)
+- test(native-process-core): Qualify the macOS Terminal own-pty rule in shell conformance (#1690) (645be1a1e)
+- ci(nx): Take the workflow files out of sharedGlobals and hash the environment tests read (#1715) (7e04defbb)
+- test(ui-e2e): Characterise the two-drag orbit snap-back (G0.1) (#1714) (ed90dfd1f)
+- ci(desktop): Cut a staging candidate when desktop or its renderer is affected (#1671) (3d776f30f)
+- test(camera): Add the camera machine totality baseline (#1705) (4060083f6)
+- refactor(api-llm-gateway): Run self-host helpers on the provider wires and remove LangChain (#1606) (6259bfe1a)
+- chore(picogk): Pin the PicoGK browser host to manifest 313d375b1617 (#1698) (9c56d753e)
+- refactor(api): Extract api-projects, api-agent-observability and api-chat, and run the API lane on affected projects (#1685) (564371eb3)
+- ci(root): Mirror release layers to each channel's dependency bucket (#1684) (7dbb767c4)
+- refactor(ui): Cut the chat-ui app library from the chat domain (UI wave B) (#1678) (9ff51774b)
+- refactor(api): Extract api-git-core and api-git-mirror libraries (#1682) (9c9f1c241)
+- refactor(runtime): Rename runtime payloads to dependency files (#1673) (007c14ee7)
+- refactor(ui): Cut the project-workspace app library from the project route (UI wave C, first slice) (#1677) (2e8541bda)
+- refactor(api): Extract api-testing and api-object-storage libraries (#1666) (00d83be02)
+- ci(cli-e2e): Run the CLI end-to-end suites in their own gated lane (#1670) (1f8e6d7e2)
+- refactor(ui): Cut the ui-kit app library from components/ui and icons (UI wave A) (#1665) (b4b0d1d47)
+- test(telemetry): Stop Grafana and OTel bootstrap edits from selecting telemetry and the native rows (#1662) (569643b0a)
+- refactor(host): Move the X1C qualifier from bambu to host:qualify-x1c (#1651) (8d6c13f46)
+- build(tau-examples): Depend on viewer and image so a viewer change selects test:viewer-parity (#1650) (d2a934605)
+
 ## 0.6.0 (2026-11-09)
 
 ### Features

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@taucad/ui/components/button';
 import type { SettingsSection } from '#hooks/use-settings-dialog.js';
+import { SettingsPageSkeleton } from '#components/settings/settings-item.js';
 import type { SettingsContent } from '#components/settings/settings-content.js';
 
 const loadSettingsContent = async (): Promise<{ SettingsContent: typeof SettingsContent }> =>
@@ -52,8 +53,7 @@ export function DeferredSettingsContent({ section }: { readonly section: Setting
     );
   }
   return (
-    <div role='status' aria-label='Loading settings' aria-busy='true'>
-      Loading settings…
-    </div>
+    // The controls' code is still arriving: draw the page's shape, not a line of text.
+    <SettingsPageSkeleton label='Loading settings' />
   );
 }

@@ -9,7 +9,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type CameraControlsImpl from 'camera-controls';
 import type { ToolpathProgram } from '@taucad/slicer/toolpath';
 import { createTauR3fGlProp } from '@taucad/viewer/graphics/three/canvas-three-gl';
-import { readGraphicsBackendQueryOverride } from '#utils/graphics-backend-override.js';
+import { readGraphicsBackendQueryOverride } from '@taucad/ui-core/utils/graphics-backend-override';
 import {
   resolveCameraControlProps,
   TauCameraControls,

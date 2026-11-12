@@ -26,7 +26,7 @@ export function PageNotFound(): React.JSX.Element {
               <MapPin className='size-6 text-muted-foreground' />
             </div>
           </div>
-          <p className='mb-2 text-6xl font-bold text-muted-foreground'>404</p>
+          <p className='mb-2 text-6xl font-semibold text-muted-foreground'>404</p>
           <PageHeader title={pageNotFoundTitle} className='justify-center' />
         </div>
 

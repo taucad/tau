@@ -1,6 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { defineConfig } from 'electron-vite';
 import { electronRuntimeConfig } from '@taucad/runtime/electron/vite';
+// oxlint-disable-next-line no-restricted-imports -- The build config runs before the package's `#` imports resolve.
+import { desktopHostBuildOf } from './src/shared/desktop-host-build.js';
 
 const cloudValue = process.env['TAU_CLOUD_ENABLED'];
 if (cloudValue !== undefined && cloudValue !== 'true' && cloudValue !== 'false') {
@@ -16,6 +19,16 @@ const define = {
   tauSentryRelease: JSON.stringify(process.env['SENTRY_RELEASE'] ?? ''),
   /* The release workflow passes the PostHog project key; without one the renderer's analytics stay inert. */
   tauPostHogClientKey: JSON.stringify(process.env['POSTHOG_CLIENT_KEY'] ?? ''),
+  /* LW8: agent observability's build id, the commit of the tree built; the release workflow checks out its tag. */
+  tauDesktopHostBuild: JSON.stringify(
+    desktopHostBuildOf(() =>
+      execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: import.meta.dirname,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }),
+    ),
+  ),
 } as const;
 
 const bundledWorkspaceDependencies = [
@@ -47,6 +60,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/replicad',
   '@taucad/rpc',
   '@taucad/runtime',
+  '@taucad/sandbox',
   '@taucad/skills',
   '@taucad/slicer',
   '@taucad/smlib',
@@ -114,10 +128,7 @@ export default defineConfig(
             'geometry-host': resolve(import.meta.dirname, 'src/tau/geometry-host.entry.ts'),
             'compute-store.worker': resolve(import.meta.dirname, 'src/main/compute-store.worker.ts'),
             /* One per shell launch, started by the shell provider beside `services-host.js` (desktop shell W4). */
-            'shell-supervisor': resolve(
-              import.meta.dirname,
-              '../../packages/core/native-process/src/shell/srt-supervisor.ts',
-            ),
+            'shell-supervisor': resolve(import.meta.dirname, '../../libs/sandbox/src/shell/srt-supervisor.ts'),
           },
         },
       },

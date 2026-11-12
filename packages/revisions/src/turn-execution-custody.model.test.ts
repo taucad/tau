@@ -14,6 +14,7 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createProjectRevisionsActor, createRevisionActors } from '#revision-effects.js';
 import { createTurnPlacementPort } from '#turn-placement.js';
 import type { RevisionActors } from '#revision-effects.js';
+import { recordedBy, testIdentity } from '#test/identity.js';
 
 const roots: string[] = [];
 const owners: RevisionActors[] = [];
@@ -36,7 +37,12 @@ const fixture = async () => {
   await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
   await filesystem.writeFile(path, JSON.stringify({ ...key, checkoutId: 'live', startedAt: 1 }));
   const open = () => {
-    const owner = createRevisionActors({ port, projectId: root, filesystem: async () => filesystem });
+    const owner = createRevisionActors({
+      identity: testIdentity,
+      port,
+      projectId: root,
+      filesystem: async () => filesystem,
+    });
     owners.push(owner);
     return owner;
   };
@@ -106,7 +112,7 @@ describe('TurnExecutionCustody checkout discard projection', () => {
     const receipt = await port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['part.ts', 'one\n']]),
-      provenance: { source: 'user', actorId: 'ada', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: 1 },
       summary: { generated: 'First' },
     });
     const head = revisionId(receipt.commitId);
@@ -115,6 +121,7 @@ describe('TurnExecutionCustody checkout discard projection', () => {
     const checkoutId = added?.id ?? '';
     await filesystem.writeFile(path, JSON.stringify({ ...key, checkoutId, startedAt: 1 }));
     const owner = createRevisionActors({
+      identity: testIdentity,
       port,
       projectId: 'project-1',
       filesystem: async (place) => (place.kind === 'live' ? filesystem : sideFilesystem),
@@ -168,7 +175,12 @@ describe('TurnExecutionCustody close racing an in-flight hold', () => {
       },
     });
     const port = createIsomorphicGitRevisionPort({ filesystem });
-    const owner = createRevisionActors({ port, projectId: 'race', filesystem: async () => gated });
+    const owner = createRevisionActors({
+      identity: testIdentity,
+      port,
+      projectId: 'race',
+      filesystem: async () => gated,
+    });
     owners.push(owner);
     // A first hold and release teaches this root the run, so the close below answers from memory.
     expect(await owner.turns.executions.hold({ key, executionId: 'zero' })).toEqual({ status: 'applied' });
@@ -202,7 +214,12 @@ describe('TurnExecutionCustody completion admission projection', () => {
       checkouts: { projectId: 'project-1', root: () => filesystem },
     });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
-    const revisions = createProjectRevisionsActor({ port, projectId: 'project-1', filesystem: () => filesystem });
+    const revisions = createProjectRevisionsActor({
+      identity: testIdentity,
+      port,
+      projectId: 'project-1',
+      filesystem: () => filesystem,
+    });
     revisions.actor.start();
     const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
     try {

@@ -7,7 +7,7 @@ import { PanelLeft } from 'lucide-react';
 import { useLocation } from 'react-router';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { RequestPlatformProvider, usePlatform } from '@taucad/ui/hooks/use-platform';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useShellRequestHints, writeSidebarOpenCookie } from '#lib/shell-request-hints.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';

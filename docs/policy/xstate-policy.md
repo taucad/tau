@@ -240,11 +240,11 @@ Keep each machine in its owning `.machine.ts` file, with its context, event, inp
 
 ### Use `setup({ schemas })` for all machine definitions
 
-Declare types through `schemas`. `types<T>()` is a type-only schema for context, input, output, tags and children; events and emitted events are a map from event type to payload schema, built from the event union with `eventSchemas<TUnion>()` (`#lib/xstate.lib.js` in the UI, `machine-schemas.ts` in each package):
+Declare types through `schemas`. `types<T>()` is a type-only schema for context, input, output, tags and children; events and emitted events are a map from event type to payload schema, built from the event union with `eventSchemas<TUnion>()` (`@taucad/ui-core/lib/xstate.lib` in the UI, `machine-schemas.ts` in each package):
 
 ```typescript
 import { setup, types } from 'xstate';
-import { eventSchemas } from '#lib/xstate.lib.js';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 
 export const myMachine = setup({
   schemas: {
@@ -436,7 +436,7 @@ The only exception is callback logic, which does not emit `onDone`/`onError`.
 
 ### Actor identity
 
-`id` and `sessionId` live on the runtime half of an actor. Read them from a ref with `actorIdOf(ref)` / `actorSessionIdOf(ref)` (`#lib/xstate.lib.js`), including the `self` a state-level transition receives (typed `AnyActorRef`, K-14).
+`id` and `sessionId` live on the runtime half of an actor. Read them from a ref with `actorIdOf(ref)` / `actorSessionIdOf(ref)` (`@taucad/ui-core/lib/xstate.lib`), including the `self` a state-level transition receives (typed `AnyActorRef`, K-14).
 
 ---
 
@@ -444,14 +444,14 @@ The only exception is callback logic, which does not emit `onDone`/`onError`.
 
 ### `fromSafeAsync` is retired
 
-The substrate does not use `fromSafeAsync` (MC-R10); its one-shot I/O is `createAsyncLogic`, read in `onDone`. `fromSafeAsync` (from `#lib/xstate.lib.js`) stays only for app machines outside the substrate until each migrates (A7). It delivers its result to the parent as an **event** (which must carry a `type`), and a stopped invocation never delivers. The notes below apply to those remaining machines.
+The substrate does not use `fromSafeAsync` (MC-R10); its one-shot I/O is `createAsyncLogic`, read in `onDone`. `fromSafeAsync` (from `@taucad/ui-core/lib/xstate.lib`) stays only for app machines outside the substrate until each migrates (A7). It delivers its result to the parent as an **event** (which must carry a `type`), and a stopped invocation never delivers. The notes below apply to those remaining machines.
 
 #### Generic parameters — `fromSafeAsync<TReturn, TInput>`
 
 Specify both generics to type the input and return value:
 
 ```typescript
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 
 type LoadedEvent = { type: 'dataLoaded'; data: Data };
 type LoadInput = { id: string };
@@ -487,7 +487,7 @@ const sideEffect = fromSafeAsync(async () => {
 v6 `provide()` infers its argument rather than typing it from the machine (K-12), so an inline logic loses its slot's input and output types. Check the provided map against the machine's own actor map:
 
 ```typescript
-import type { MachineActors } from '#lib/xstate.lib.js';
+import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 
 const machine = myMachine.provide({
   actors: {
@@ -578,7 +578,7 @@ function MyComponent(): React.JSX.Element {
 
 ### Actor lifecycle under `@xstate/react` 7
 
-The effect cleanup queues `actor.stop()` in a microtask; an effect re-run for the same actor cancels it (RB1-1). So a Strict Mode double-mount never stops the actor, and a real unmount stops it one microtask later. A mount that finds its actor stopped replaces it with a fresh `createActor(machine, options)` — never a restart or a rehydrated snapshot. Tests reproduce these two paths with `strictModeRemount` and `unmountAndRemount` from `#lib/xstate-test.utils.js`; fake actors handed to `useSelector` must accept an observer (`toSnapshotCallback`).
+The effect cleanup queues `actor.stop()` in a microtask; an effect re-run for the same actor cancels it (RB1-1). So a Strict Mode double-mount never stops the actor, and a real unmount stops it one microtask later. A mount that finds its actor stopped replaces it with a fresh `createActor(machine, options)` — never a restart or a rehydrated snapshot. Tests reproduce these two paths with `strictModeRemount` and `unmountAndRemount` from `@taucad/ui-core/lib/xstate-test.utils`; fake actors handed to `useSelector` must accept an observer (`toSnapshotCallback`).
 
 ### Input is read once at initialization
 

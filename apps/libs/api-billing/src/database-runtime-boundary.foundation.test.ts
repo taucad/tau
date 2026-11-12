@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   assertSchemaCompatibility,
   installApiRuntimeRole,
+  installDataApiLockdown,
   readAppliedMigrations,
   readMigrationHead,
   runMigrationJob,
@@ -186,6 +187,44 @@ describe('database runtime boundary', () => {
         WHERE n.nspname = 'billing' AND c.relkind = 'r'`;
 
       expect(privileges).toEqual({ schema: false, tables: 0 });
+    }
+  });
+
+  it('should withdraw every Supabase Data API grant from Tau-owned schemas, including future tables', async () => {
+    const created = await owner<Array<{ rolname: string }>>`
+      SELECT r.name AS rolname FROM unnest(ARRAY['anon', 'authenticated']) AS r(name)
+      WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = r.name)`;
+    for (const { rolname } of created) {
+      // oxlint-disable-next-line no-await-in-loop -- at most two roles, created in order
+      await owner.unsafe(`CREATE ROLE ${rolname} NOLOGIN`);
+    }
+    const table = `data_api_probe_${run}`;
+    try {
+      // Supabase's defaults: schema usage, every table privilege, and default privileges for new tables.
+      await owner.unsafe(`GRANT USAGE ON SCHEMA public TO anon, authenticated`);
+      await owner.unsafe(`GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated`);
+      await owner.unsafe(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated`);
+
+      await installDataApiLockdown(owner);
+      await owner.unsafe(`CREATE TABLE public.${table} (id int)`);
+
+      const [privileges] = await owner<Array<{ usage: number; tables: number }>>`
+        SELECT
+          count(*) FILTER (WHERE has_schema_privilege(r.name, n.nspname, 'USAGE'))::int AS usage,
+          (SELECT count(*)::int FROM pg_class c JOIN pg_namespace cn ON cn.oid = c.relnamespace, unnest(ARRAY['anon', 'authenticated']) AS g(name)
+            WHERE cn.nspname IN ('public', 'billing', 'drizzle') AND c.relkind IN ('r', 'v', 'm', 'p')
+              AND has_table_privilege(g.name, c.oid, 'SELECT, INSERT, UPDATE, DELETE')) AS tables
+        FROM pg_namespace n, unnest(ARRAY['anon', 'authenticated']) AS r(name)
+        -- public usage reaches every role through PUBLIC on PostgreSQL 15+; its tables are what matter.
+        WHERE n.nspname IN ('billing', 'drizzle')`;
+
+      expect(privileges).toEqual({ usage: 0, tables: 0 });
+    } finally {
+      await owner.unsafe(`DROP TABLE IF EXISTS public.${table}`);
+      for (const { rolname } of created) {
+        // oxlint-disable-next-line no-await-in-loop -- drop only the roles this case created
+        await owner.unsafe(`DROP OWNED BY ${rolname}; DROP ROLE ${rolname}`);
+      }
     }
   });
 

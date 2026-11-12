@@ -142,6 +142,13 @@ describe('ProjectsController', () => {
     expect(inserted).toEqual([{ id: projectId, ownerId, name: 'Untitled project', origin: 'local-mirror' }]);
   });
 
+  it('should record a project linked to GitHub with its origin, and keep the origin of an existing row (B4)', async () => {
+    await controller.register(projectId, { name: 'Linked', origin: 'github' }, ownerId);
+    expect(inserted).toEqual([{ id: projectId, ownerId, name: 'Linked', origin: 'github' }]);
+    await controller.register(projectId, { origin: 'local-mirror' }, ownerId);
+    expect(inserted).toHaveLength(1);
+  });
+
   it('should reject an unentitled caller before writing or spending registration budget', async () => {
     entitlements.getEntitlements.mockResolvedValue({
       canSyncFiles: false,

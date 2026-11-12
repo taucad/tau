@@ -61,6 +61,7 @@ import type { ConflictRecord, RevisionPort, RevisionPushSession } from '#revisio
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
+import { recordedBy, testIdentity, testPerson } from '#test/identity.js';
 
 /** Exercise the two owned effects when this fixture inspects optional records directly. */
 const fetchRecords = async (actors: RevisionActors) => {
@@ -136,17 +137,17 @@ type Device = Readonly<{
 }>;
 
 /**
- * The record device (R1, EQ10(a)) a device's unattributed form names its
- * segments and conflict lines by, once it has minted one.
+ * The record device (R1, EQ10(a)) a device's person form names its segments
+ * and conflict lines by, once it has minted one (B1: every host has a person).
  *
  * @param of - The device.
- * @returns Its `host` form's record device id.
+ * @returns Its person form's record device id.
  */
 const recordDeviceOf = async (of: Device): Promise<string> => {
   const stored = JSON.parse(await of.filesystem.readFile('.git/ops-devices.json', 'utf8')) as {
     devices: Record<string, string>;
   };
-  const device = stored.devices['host'];
+  const device = stored.devices[testPerson.id];
   if (device === undefined) {
     throw new Error('This device has not minted a record device yet.');
   }
@@ -207,6 +208,7 @@ const device = async (
     await port.setRemote({ name: 'tau', url: remoteUrl });
   }
   const actors = createRevisionActors({
+    identity: testIdentity,
     port,
     projectId,
     filesystem: () => input.wrapFilesystem?.(filesystem) ?? filesystem,
@@ -286,7 +288,7 @@ const record = async (
   const receipt = await device_.port.writeRevision({
     parents: parent === undefined ? [] : [revisionId(parent)],
     tree: projectTree(files),
-    provenance: { source: 'user', actorId: 'actor-w13', createdAt: Date.UTC(2026, 8, 13, 9, 0, 0) },
+    provenance: { source: 'user', ...recordedBy('actor-w13'), createdAt: Date.UTC(2026, 8, 13, 9, 0, 0) },
     summary: { generated: summary },
   });
   await device_.port.updateRef({
@@ -302,19 +304,22 @@ const record = async (
 
 /**
  * The store's own generated files: a checkout is clean only against a tree that
- * carries them, as every real revision does.
+ * carries them, as every real revision does. Opening writes no attributes file
+ * (A4), so a device holds only the ones it has.
  *
  * @param device_ - The device whose files hold them.
- * @returns Each generated path and its text.
+ * @returns Each generated path the device holds, and its text.
  */
-const generatedFilesOf = async (device_: Device): Promise<Record<string, string>> =>
-  Object.fromEntries(
-    await Promise.all(
-      [generatedGitattributesPath, generatedIgnorePath].map(
-        async (path) => [path, new TextDecoder().decode(await device_.filesystem.readFile(path))] as const,
-      ),
+const generatedFilesOf = async (device_: Device): Promise<Record<string, string>> => {
+  const held = await Promise.all(
+    [generatedGitattributesPath, generatedIgnorePath].map(async (path) =>
+      (await device_.filesystem.exists(path))
+        ? [[path, new TextDecoder().decode(await device_.filesystem.readFile(path))] as const]
+        : [],
     ),
   );
+  return Object.fromEntries(held.flat());
+};
 
 const queueOf = async (device_: Device): Promise<SyncQueueRecord> => {
   const stored = await readFile(join(device_.root, syncQueuePath), 'utf8');
@@ -921,7 +926,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       const feature = await one.port.writeRevision({
         parents: [revisionId(main)],
         tree: projectTree({ 'main.ts': 'feature\n', 'feature.ts': 'export const feature = true;\n' }),
-        provenance: { source: 'user', actorId: 'actor-w13', createdAt: Date.UTC(2026, 8, 13, 10) },
+        provenance: { source: 'user', ...recordedBy('actor-w13'), createdAt: Date.UTC(2026, 8, 13, 10) },
         summary: { generated: 'Feature' },
       });
       await one.port.updateRef({
@@ -1394,7 +1399,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
         const receipt = await device_.port.writeRevision({
           parents: parent === undefined ? [] : [revisionId(parent)],
           tree,
-          provenance: { source: 'user', actorId: summary, createdAt: Date.UTC(2026, 8, 26) },
+          provenance: { source: 'user', ...recordedBy(summary), createdAt: Date.UTC(2026, 8, 26) },
           summary: { generated: summary },
         });
         await device_.port.updateRef({
@@ -1492,7 +1497,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       const receipt = await device_.port.writeRevision({
         parents: parent === undefined ? [] : [revisionId(parent)],
         tree,
-        provenance: { source: 'user', actorId: summary, createdAt: Date.UTC(2026, 8, 26) },
+        provenance: { source: 'user', ...recordedBy(summary), createdAt: Date.UTC(2026, 8, 26) },
         summary: { generated: summary },
       });
       await device_.port.updateRef({
@@ -1947,7 +1952,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
         const theirs = await two.port.writeRevision({
           parents: [revisionId(shared)],
           tree: projectTree({ ...generated, 'part.scad': 'b\n' }),
-          provenance: { source: 'user', actorId: 'actor-w13', createdAt: Date.UTC(2026, 8, 25) },
+          provenance: { source: 'user', ...recordedBy('actor-w13'), createdAt: Date.UTC(2026, 8, 25) },
           summary: { generated: 'Feature, elsewhere' },
         });
         await two.port.updateRef({
@@ -2163,7 +2168,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
         parents: [],
         tree: new ImmutableRevisionTree([[chatSegmentPath('device-a-empty-chat'), new Uint8Array()]]),
         largeObjects: false,
-        provenance: { source: 'user', actorId: 'tau-host', createdAt: Date.UTC(2026, 8, 25, 11, 51, 43) },
+        provenance: { source: 'user', ...recordedBy('tau-host'), createdAt: Date.UTC(2026, 8, 25, 11, 51, 43) },
         summary: { generated: `Chat ${emptyChatId}` },
       });
       await one.port.updateRef({ name: emptyChatRef, expectedHead: undefined, head: revisionId(empty.commitId) });

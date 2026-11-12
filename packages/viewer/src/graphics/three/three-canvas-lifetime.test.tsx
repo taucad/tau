@@ -1,4 +1,5 @@
-import type { GraphicsEvent } from '#machines/graphics.machine.js';
+import { createActor, createAsyncLogic } from 'xstate';
+import { graphicsMachine } from '#machines/graphics.machine.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, cleanup } from '@testing-library/react';
 import { Canvas, createRoot, _roots, flushSync as flushThreeSync } from '@react-three/fiber';
@@ -46,10 +47,18 @@ const cameraRig = {
   orthographicCamera,
   setClipPlanes: vi.fn(),
 };
-const graphicsRef = { send: vi.fn<(event: GraphicsEvent) => void>() };
+/** The graphics actor the canvas attaches to; each test starts a fresh one and records what reaches it. */
+const graphics = vi.hoisted(
+  (): {
+    current: ReturnType<typeof createActor<typeof graphicsMachine>> | undefined;
+    sent: string[];
+  } => ({ current: undefined, sent: [] }),
+);
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useCameraRig: () => cameraRig,
-  useGraphics: () => graphicsRef,
+  useCameraConnectorRef: () => adapters.connectorRef,
+  useCameraConsumersRef: () => adapters.consumersRef,
+  useGraphics: () => graphics.current,
 }));
 vi.mock('#graphics/three/scene.jsx', () => ({
   Scene: ({ children }: { readonly children: ReactNode }): ReactNode => children,
@@ -70,9 +79,26 @@ vi.mock('#graphics/three/react/model-emphasis-overlay.jsx', () => ({
 vi.mock('#graphics/three/render-fps-overlay.jsx', () => ({
   RenderFpsOverlay: () => null,
 }));
-vi.mock('#graphics/three/actor-bridge.jsx', () => ({
-  ActorBridge: () => null,
+/** The controls adapters graphics ran for this file's canvases: a stand-in that records its start and stop. */
+const adapters = vi.hoisted(() => ({
+  started: 0,
+  stopped: 0,
+  // Stable, as the provider's are: a new ref each render would re-bind the surface every commit.
+  connectorRef: { current: undefined },
+  consumersRef: { current: new Set<never>() },
 }));
+vi.mock('#graphics/three/adapters/controls-adapter.js', async () => {
+  const { createCallbackLogic } = await import('xstate');
+  return {
+    createControlsAdapter: () =>
+      createCallbackLogic(() => {
+        adapters.started++;
+        return () => {
+          adapters.stopped++;
+        };
+      }),
+  };
+});
 vi.mock('#graphics/three/react/axes-helper.jsx', () => ({
   AxesHelper: () => null,
 }));
@@ -109,7 +135,18 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
   };
 
   beforeEach(() => {
-    graphicsRef.send.mockClear();
+    graphics.sent = [];
+    graphics.current = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+      {
+        input: {},
+        inspect(event) {
+          if (event.type === '@xstate.transition' && event.event.type.startsWith('canvas')) {
+            graphics.sent.push(event.event.type);
+          }
+        },
+      },
+    ).start();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       frameId += 1;
@@ -512,8 +549,9 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
       expect.soft(disposeCalls[0]).toHaveBeenCalledOnce();
       expect.soft(perspectiveCamera.coordinateSystem).toBe(WebGLCoordinateSystem);
       expect(root.store.getState().internal.active).toBe(false);
-      // No renderer status from the retired canvas: only its mount declaration, withdrawn at removal.
-      expect(graphicsRef.send.mock.calls.map(([event]) => event.type)).toEqual(['canvasMounted', 'canvasUnmounted']);
+      // No renderer status from the retired canvas: only its surface's attach, withdrawn at removal.
+      expect(graphics.sent).toEqual(['canvasAttached', 'canvasDetached']);
+      expect(graphics.current?.getSnapshot().context.canvas).toBeUndefined();
     },
   );
 });

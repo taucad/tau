@@ -14,10 +14,10 @@ import { useProject } from '#hooks/use-project.js';
 import { ChatOptionsMeta } from '#routes/w.$workspace.$project/chat-options-meta.js';
 import { downloadBlob } from '@taucad/utils/file';
 import { serializeTranscript } from '#utils/chat.utils.js';
-import { toSnakeCase } from '#utils/string.utils.js';
+import { toSnakeCase } from '@taucad/ui-core/utils/string.utils';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
-import { searchParameterName } from '#constants/search-parameter.constants.js';
-import { flagParameter } from '#utils/search-parameter.codecs.js';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
+import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 
 /**
  * The active chat's transcript export, shared by the chat menu and the phone chat switcher.

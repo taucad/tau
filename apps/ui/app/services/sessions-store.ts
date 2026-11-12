@@ -22,7 +22,7 @@ import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic, EventObject } from 'xstate';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import { liveProjectBudgetFor, sessionsMachine } from '#machines/sessions.machine.js';
-import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
+import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import type { SessionsMachineContext, SessionsProjectStatus } from '#machines/sessions.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import type { ProjectSessionActorRef, ProjectSessionRegion } from '#machines/project-session.machine.js';

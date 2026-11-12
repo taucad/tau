@@ -46,6 +46,7 @@ import { tauRevisionPolicy } from '#workspace-config.js';
 import { createProjectRevisionsActor, createRevisionActors } from '#revision-effects.js';
 import type { RevisionFileSystem } from '#revision-effects.js';
 import { createActor } from 'xstate';
+import { recordedBy, testIdentity } from '#test/identity.js';
 
 const argument = (name: string, fallback: string): string => {
   const hit = process.argv.find((value) => value.startsWith(`--${name}=`));
@@ -149,7 +150,7 @@ const measureMint = async (): Promise<Record<string, number>> => {
   const filesystem = await fixture(await createMemoryProvider());
   const port = createIsomorphicGitRevisionPort({ filesystem: await createMemoryProvider() });
   await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
-  const provenance = { source: 'user', actorId: 'gate-bench', createdAt: Date.now() } as const;
+  const provenance = { source: 'user', ...recordedBy('gate-bench'), createdAt: Date.now() } as const;
   const mint = async (tree: ImmutableRevisionTree, parent: string | undefined): Promise<string> => {
     const written = await port.writeRevision({
       parents: parent === undefined ? [] : [revisionId(parent)],
@@ -195,6 +196,7 @@ const measureSave = async (variant: string): Promise<Record<string, number>> => 
       : createNativeGitRevisionPort({ repositoryPath: root });
   await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
   const { actor } = createProjectRevisionsActor({
+    identity: testIdentity,
     port,
     projectId: 'gate-bench',
     // oxlint-disable-next-line typescript/consistent-type-assertions -- the in-memory provider is the checkout the worker's rooted view wraps.
@@ -275,6 +277,7 @@ const measureNativeParts = async (): Promise<Record<string, number>> => {
   const port = createNativeGitRevisionPort({ repositoryPath: root });
   await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
   const actors = createRevisionActors({
+    identity: testIdentity,
     port,
     projectId: 'gate-bench',
     // oxlint-disable-next-line typescript/consistent-type-assertions -- the provider is the live checkout.
@@ -328,6 +331,7 @@ const measurePlan = async (): Promise<Record<string, number>> => {
   const port = createIsomorphicGitRevisionPort({ filesystem });
   await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
   const actors = createRevisionActors({
+    identity: testIdentity,
     port,
     projectId: 'gate-bench',
     // oxlint-disable-next-line typescript/consistent-type-assertions -- the provider is the live checkout.

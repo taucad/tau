@@ -134,6 +134,38 @@ describe('admittedReasoning', () => {
     expect(admittedReasoning(gptMini, 'low')).toBeUndefined();
   });
 
+  it('should admit the transcript effort and the binding control only for a row whose catalog entry declares them', () => {
+    const declares = (reasoning: NonNullable<Model['support']>['reasoning']): Model => ({
+      ...fable,
+      support: { reasoning },
+    });
+    const { levels } = fable.support!.reasoning!;
+
+    expect(admittedReasoning(declares({ levels, effortInTranscript: true, replayBinding: true }), 'low')).toEqual({
+      effort: 'low',
+      display: 'summarized',
+      effortInTranscript: true,
+      replayBinding: 'drop',
+    });
+    expect(admittedReasoning(declares({ levels, replayBinding: true }), undefined)).toEqual({
+      effort: 'high',
+      display: 'summarized',
+      replayBinding: 'drop',
+    });
+    /* A catalog served by an API that predates either control declares neither, and the turn sends neither. */
+    expect(admittedReasoning(fable, 'low')).toEqual({ effort: 'low', display: 'summarized' });
+    expect(
+      admittedReasoning(
+        { ...gpt, support: { reasoning: { levels: ['low', 'high'], effortInTranscript: true } } },
+        'low',
+      ),
+    ).toEqual({
+      effort: 'low',
+      summary: 'auto',
+      effortInTranscript: true,
+    });
+  });
+
   it('should never admit a level the model refuses', () => {
     expect(admittedReasoning(gemini, 'xhigh')).toEqual({ effort: 'high' });
     // Morph's default is carried as before, but a chosen level cannot reach it.

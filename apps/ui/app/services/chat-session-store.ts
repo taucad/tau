@@ -44,9 +44,9 @@ import { idPrefix } from '@taucad/types/constants';
 import { chatRecordsPath } from '@taucad/revisions';
 import { getErrno } from '@taucad/utils/error';
 import { sendHostCommand } from '#chat-clients/_internal/host-command.js';
-import { isUnownedChatObservation } from '#lib/chat-observation-guard.js';
-import type { MachineActors } from '#lib/xstate.lib.js';
-import { waitUnlessGone } from '#lib/xstate.lib.js';
+import { isUnownedChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
+import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
+import { waitUnlessGone } from '@taucad/ui-core/lib/xstate.lib';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type {
@@ -97,7 +97,7 @@ import {
   recordModelPendingAutoResume,
   recordProviderUnavailableAutoResume,
   recordRateLimitAutoResume,
-} from '#utils/run-auto-resume.js';
+} from '@taucad/ui-core/utils/run-auto-resume';
 import {
   chatProjectionLogic,
   selectAttentionRow,
@@ -1116,7 +1116,7 @@ export class ChatSessionStore {
    */
   public async getChatHostSettings(
     chatId: string,
-  ): Promise<Pick<ChatEntity, 'activeExecution' | 'activeKernel'> | undefined> {
+  ): Promise<Pick<ChatEntity, 'activeExecution' | 'activeKernel' | 'kernelPreference'> | undefined> {
     const session = this.#sessions.get(chatId);
     const projectId = session?.projectId ?? this.#observed.get(chatId)?.projectId;
     const chat = await this.#deps.getChat(chatId, projectId);
@@ -1129,7 +1129,11 @@ export class ChatSessionStore {
       live?.activeChatId === chatId && !live.isLoadingChat && live.loadError === undefined
         ? chatPlacementOf(live.activeExecution)
         : await this.#storedPlacement(chat.resourceId, chatId);
-    return { activeExecution: withChatPlacement(chat.activeExecution, placement), activeKernel: chat.activeKernel };
+    return {
+      activeExecution: withChatPlacement(chat.activeExecution, placement),
+      activeKernel: chat.activeKernel,
+      kernelPreference: chat.kernelPreference,
+    };
   }
 
   /**
@@ -4332,6 +4336,11 @@ export class ChatSessionStore {
           persistActiveKernelActor: createAsyncLogic({
             run: async ({ input }) => {
               await depsRef().patchChat(input.chatId, 'activeKernel', input.activeKernel);
+            },
+          }),
+          persistKernelPreferenceActor: createAsyncLogic({
+            run: async ({ input }) => {
+              await depsRef().patchChat(input.chatId, 'kernelPreference', input.kernelPreference);
             },
           }),
         } satisfies Partial<MachineActors<typeof chatPersistenceMachine>>,

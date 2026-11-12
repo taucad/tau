@@ -3,5 +3,30 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "libs/chat",
   "projectType": "library",
-  "tags": ["scope:shared", "type:lib"]
+  "tags": ["scope:shared", "type:lib"],
+  "targets": {
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/packages/agent-plugin/skills/tau/SKILL.md",
+        "{workspaceRoot}/apps/www/content/agent/llms.md"
+      ]
+    },
+    "generate-kernel-routing": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Write the kernel routing card into the plugin tau skill and the digest into llms.md, then format both."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "commands": [
+          "node libs/chat/scripts/generate-kernel-routing.ts",
+          "oxfmt packages/agent-plugin/skills/tau/SKILL.md apps/www/content/agent/llms.md libs/chat/src/prompts/kernel-routing-digest.ts"
+        ],
+        "parallel": false
+      }
+    }
+  }
 }

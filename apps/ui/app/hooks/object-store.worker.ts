@@ -6,7 +6,7 @@ import type { Chat } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import type { AppUiPreferences } from '#types/storage.types.js';
-import type { EditorState, EditorStateInput, OpenFile } from '#types/editor.types.js';
+import type { EditorState, EditorStateInput, OpenFile } from '@taucad/ui-core/types/editor.types';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
 import type {
   PendingCreateProjectOperation,
@@ -14,8 +14,8 @@ import type {
   PendingProjectOperation,
   PendingProjectStorage,
 } from '#types/pending-project-operation.types.js';
-import { defaultPanelState } from '#constants/editor.constants.js';
-import { mergePanelState } from '#utils/panel-state.utils.js';
+import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
+import { mergePanelState } from '@taucad/ui-core/utils/panel-state.utils';
 import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { seedInitialWorkbenchFiles } from '#workbench-records/initial-files.js';
 
@@ -158,7 +158,7 @@ const objectStoreWorker = {
           ? options.files
           : seedInitialWorkbenchFiles(
               options.files,
-              options.deferInitialView ? undefined : project.assets.main.entryPath,
+              options.deferInitialView ? undefined : project.assets.main?.entryPath,
             ),
       ...(options.staging === undefined ? {} : { staging: options.staging }),
       ...(options.manifestBytes === undefined ? {} : { manifestBytes: options.manifestBytes }),
@@ -230,7 +230,7 @@ const objectStoreWorker = {
       sourceProjectId: options.sourceProjectId,
       manifest: newProject,
       library: { projectId: options.targetProjectId, lastActivityAt: timestamp },
-      files: seedInitialWorkbenchFiles(options.files, newProject.assets.main.entryPath),
+      files: seedInitialWorkbenchFiles(options.files, newProject.assets.main?.entryPath),
       chats: clonedChats,
       editorState,
     };

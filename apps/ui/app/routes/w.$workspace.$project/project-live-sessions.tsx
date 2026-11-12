@@ -24,9 +24,11 @@ import { HomeFileManagerProvider, useFileManager } from '#hooks/use-file-manager
 import { useModels } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
-import { isKernelId } from '@taucad/types/constants';
+import { isKernelId, isKernelPreference } from '@taucad/types/constants';
+import type { KernelId } from '@taucad/types/constants';
+import { useFeature } from '#flags/use-feature.js';
 import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
 import { RevisionConflictChat } from '#routes/w.$workspace.$project/revision-conflict-chat.js';
 import { RevisionRestore } from '#routes/w.$workspace.$project/revision-restore.js';
@@ -46,9 +48,10 @@ import {
 } from '#services/agent-host-client.js';
 import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-agent-host-client';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
+import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { dialExecutionHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
-import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import { useComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 import { ENV } from '#environment.config.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
@@ -80,7 +83,7 @@ import {
 } from '#hooks/use-revision-status.js';
 import type { RevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import { closeProjectRuntime, selectProjectKernelRefusal } from '#machines/project.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
@@ -152,6 +155,28 @@ export async function flushProjectSessionPersistence({
 const noFlushRegistration = (): void => undefined;
 
 /**
+ * The concrete kernel a live session runs. A stored preference rides the flag; a row without one keeps its concrete
+ * kernel, which behaves as Auto with that owner would, since this connector carries no snapshot facts to route on
+ * (blueprint D2).
+ */
+const liveSessionKernel = ({
+  stored,
+  isAutoEnabled,
+  fallback,
+}: Readonly<{
+  stored: Readonly<{ activeKernel?: string; kernelPreference?: string }> | undefined;
+  isAutoEnabled: boolean;
+  fallback: KernelId;
+}>): KernelId => {
+  const preference = stored?.kernelPreference;
+  if (isAutoEnabled && isKernelPreference(preference) && preference !== 'auto' && isKernelAvailable(preference)) {
+    return preference;
+  }
+  const legacy = stored?.activeKernel;
+  return legacy !== undefined && isKernelId(legacy) && isKernelAvailable(legacy) ? legacy : fallback;
+};
+
+/**
  * The session's half of a project subtree (S44).
  *
  * The registry decides *whether* a project is live; this reports whether its
@@ -169,13 +194,14 @@ function ProjectSessionBinding({
   const { fileManagerRef, workerChangeChannel, workspace } = useFileManager();
   const { defaultExecution, resolveModel } = useModels();
   const { kernel: defaultKernel } = useKernel();
+  const isAutoEnabled = useFeature('autoKernel');
   const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
   const computeMode = useComputeReuseMode();
   const browserHostRelease = useRef<{ projectId: string; release: () => void } | undefined>(undefined);
-  const choices = useRef({ defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel });
+  const choices = useRef({ defaultExecution, defaultKernel, isAutoEnabled, testingEnabled, computeMode, resolveModel });
   useEffect(() => {
-    choices.current = { defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel };
-  }, [defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel]);
+    choices.current = { defaultExecution, defaultKernel, isAutoEnabled, testingEnabled, computeMode, resolveModel };
+  }, [defaultExecution, defaultKernel, isAutoEnabled, testingEnabled, computeMode, resolveModel]);
   const { parameterService, projectRef, editorRef, flushWorkbenchRecordProducers, retryManifestObservation } =
     useProject();
   const client = useRevisionClientLifecycle();
@@ -225,6 +251,7 @@ function ProjectSessionBinding({
       const {
         defaultExecution: fallback,
         defaultKernel: kernelFallback,
+        isAutoEnabled: autoEnabled,
         testingEnabled: tests,
         computeMode: reuse,
         resolveModel: resolve,
@@ -240,10 +267,7 @@ function ProjectSessionBinding({
       if (execution.kind !== 'tau') {
         throw new Error(`Chat ${chatId} has no readable host placement.`);
       }
-      const kernel =
-        stored?.activeKernel !== undefined && isKernelId(stored.activeKernel) && isKernelAvailable(stored.activeKernel)
-          ? stored.activeKernel
-          : kernelFallback;
+      const kernel = liveSessionKernel({ stored, isAutoEnabled: autoEnabled, fallback: kernelFallback });
       const config = await getProjectFileSystemConfig(projectId);
       if (config === undefined) {
         throw new Error(`Project ${projectId} has no filesystem configuration.`);
@@ -337,15 +361,22 @@ function ProjectSessionBinding({
         }
       },
       /*
-       * Every rating goes to the browser host, which reports one only for a run it observed in its own rows: the
-       * chat's current execution may have changed since the rated run ended, and a daemon's run is never reported.
+       * Every rating goes to the browser host and, in the desktop app, to the desktop host (LW8). Each reports one
+       * only for a run it observed in its own rows: the chat's current execution may have changed since the rated run
+       * ended, and a paired daemon's run is never reported.
        */
       rated: async (rating) => {
-        try {
-          await noteBrowserRunRated({ projectId, ...rating });
-        } catch {
-          /* A lost rating is only a missing feedback fact. */
-        }
+        const note = async (deliver: () => Promise<void> | undefined): Promise<void> => {
+          try {
+            await deliver();
+          } catch {
+            /* A lost rating is only a missing feedback fact. */
+          }
+        };
+        await Promise.all([
+          note(async () => noteBrowserRunRated({ projectId, ...rating })),
+          note(async () => desktopBridge()?.agentHost.rated({ projectId, ...rating })),
+        ]);
       },
     });
     return () => {

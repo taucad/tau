@@ -163,7 +163,7 @@ beforeEach(() => {
       revisionId: 'rev-12',
       revisionNumber: 12,
       changeId: 'change-rev-12',
-      actor: 'You',
+      who: { kind: 'recorded', identity: { kind: 'user', id: 'You' } },
       source: 'user',
       createdAt: 1_788_220_800_000,
       summary: 'Thicker base',

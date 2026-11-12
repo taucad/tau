@@ -364,8 +364,8 @@ const ChatViewerContent = memo(function ({
   const savedCamera = viewRecord?.selectedKernelView
     ? viewRecord.kernelViews?.find((view) => view.id === viewRecord.selectedKernelView)?.camera
     : viewRecord?.camera;
-  /* Create-only seed for this view's camera session, built when the viewer mounts its canvas. The
-   * canvas-less branches mount no provider, so a directory or a missing file builds no camera (R8). */
+  /* The entry this view frames: a new identity re-arms the framing record with the persisted pose. The camera itself
+   * is the graphics actor's child, seeded once when the project spawned the view. */
   const cameraSeed: ViewCameraSeed = {
     identity: entryPath,
     camera: {

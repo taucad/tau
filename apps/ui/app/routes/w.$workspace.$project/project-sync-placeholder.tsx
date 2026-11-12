@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import { CloudOff, CircleAlert } from 'lucide-react';
 import type { LargeObjectsFacet } from '@taucad/revisions';
@@ -7,7 +8,7 @@ import { Progress } from '@taucad/ui/components/progress';
 import { useLargeObjects, useProjectAvailability } from '#hooks/use-project-availability.js';
 import type { ModelAvailability, ProjectAvailability } from '#hooks/use-project-availability.js';
 import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
-import { formatBytes } from '#lib/format-bytes.js';
+import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 
 const messages = {
   connecting: ['Connecting to Tau Cloud', 'Opening this project on this device.'],
@@ -82,8 +83,59 @@ function ModelFilesPlaceholder({ hasFailed: failed }: { readonly hasFailed: bool
   );
 }
 
+/** How long a check of the model's files may run before the viewer offers a way out. Milliseconds. */
+export const modelCheckPatienceMilliseconds = 10_000;
+
+/**
+ * The viewer's wait while no download runs: the files are being checked, which
+ * is quick. It never says "Downloading", and a check that outlasts its bound
+ * offers Try again, which checks the files again (T5).
+ */
+function ModelCheckPlaceholder(): React.JSX.Element {
+  const client = useRevisionClient();
+  const [isSlow, setIsSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsSlow(true);
+    }, modelCheckPatienceMilliseconds);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, []);
+  return (
+    <div
+      className='flex size-full flex-col items-center justify-center gap-4 p-6 text-center'
+      role='region'
+      aria-label='Preparing model'
+      aria-busy='true'
+    >
+      <Loader className='size-8 motion-reduce:animate-none' />
+      <div className='w-full max-w-64 space-y-2'>
+        <p className='text-sm font-medium'>Preparing model</p>
+        <p className='text-xs text-muted-foreground'>
+          {isSlow ? 'This is taking longer than it should.' : 'Checking your model files.'}
+        </p>
+      </div>
+      {isSlow ? (
+        <Button
+          variant='outline'
+          size='sm'
+          onClick={() => {
+            client?.send({ command: 'retryLargeObjects' });
+          }}
+        >
+          Try again
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 /** One calm first-open treatment, shared by every unavailable file surface. */
 export function ProjectSyncPlaceholder({ state }: { readonly state: ModelAvailability }): React.JSX.Element {
+  if (state === 'filesChecking') {
+    return <ModelCheckPlaceholder />;
+  }
   if (state === 'files' || state === 'filesFailed') {
     return <ModelFilesPlaceholder hasFailed={state === 'filesFailed'} />;
   }

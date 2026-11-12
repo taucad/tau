@@ -115,7 +115,16 @@ export async function handleReadRevisions(
       success: true,
       where,
       ...(branch === undefined ? {} : { branch }),
-      revisions: [...rows],
+      /* The row the schema names and no more: a host's row also carries ids and the trailer, for its own pane (B2). */
+      revisions: rows.map((row) => ({
+        ...(row.revisionNumber === undefined ? {} : { revisionNumber: row.revisionNumber }),
+        revisionId: row.revisionId,
+        who: row.who,
+        source: row.source,
+        createdAt: row.createdAt,
+        summary: row.summary,
+        conflicted: row.conflicted,
+      })),
     };
   }
 

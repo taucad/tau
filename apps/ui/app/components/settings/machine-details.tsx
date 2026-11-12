@@ -16,6 +16,7 @@
  * @module
  */
 
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { getDefaultFormState } from '@rjsf/utils';
 import type { RJSFSchema } from '@rjsf/utils';
@@ -661,9 +662,16 @@ export function ConfigurationFields({
   }, [compiled, omit, titles]);
   if (view === undefined) {
     return (
-      <p role='status' aria-busy='true' className='text-xs text-muted-foreground'>
-        Preparing the declared fields…
-      </p>
+      <div role='status' aria-busy='true' className='flex flex-col gap-3'>
+        <span className='sr-only'>Preparing the declared fields…</span>
+        {Array.from({ length: 3 }, (_, index) => (
+          // The shape of a declared field: its label, then its input.
+          <div key={index} aria-hidden='true' className='flex flex-col gap-1.5'>
+            <Skeleton className='h-3 w-24' />
+            <Skeleton className='h-8 w-full' />
+          </div>
+        ))}
+      </div>
     );
   }
   if (view.status === 'unavailable') {

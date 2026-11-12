@@ -21,7 +21,7 @@ import type {
 import { loadKclStdlib } from '#lib/kcl-language/kcl-stdlib.js';
 import type { KclStdlib, KclStdlibEntry } from '#lib/kcl-language/kcl-stdlib.js';
 import type { KclSymbolService } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
-import { decodeTextFile } from '#utils/filesystem.utils.js';
+import { decodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 
 /** A source file with the exact text a result's offsets refer to. */
 export type KclSource = Readonly<{ uri: string; version: number; text: string }>;

@@ -1,22 +1,22 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createActor, createAsyncLogic, setup, types } from 'xstate';
 import type { Actor, ActorRefFrom } from 'xstate';
+import type { CameraOwnedSettings } from '#graphics/graphics-settings.js';
 import {
-  acquireViewCameraSession,
   getGraphicsCameraState,
-  hasGraphicsCameraRig,
+  latchViewCameraFraming,
+  selectGraphicsCamera,
+  selectGraphicsCameraFraming,
 } from '#services/graphics-camera-registry.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { eventSchemas } from '#machines/machine-schemas.js';
 
 const actors: Array<Actor<typeof graphicsMachine>> = [];
 
-const createGraphicsActor = (): Actor<typeof graphicsMachine> => {
+const createGraphicsActor = (camera?: Partial<CameraOwnedSettings>): Actor<typeof graphicsMachine> => {
   const actor = createActor(
     graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
-    {
-      input: {},
-    },
+    { input: { camera } },
   );
   actor.start();
   actors.push(actor);
@@ -32,74 +32,69 @@ const cameraView = {
   perspectiveZoom: 1,
 } as const;
 
-describe('ViewCameraSession ownership', () => {
+describe('the view camera as a graphics child', () => {
   afterEach(() => {
     for (const actor of actors.splice(0)) {
       actor.stop();
     }
   });
 
-  it('should build the camera once per graphics actor and ignore every later seed', () => {
-    const graphicsRef = createGraphicsActor();
+  it('should seed the camera once, from the graphics input, and arm its pose for the first framing', () => {
+    const graphicsRef = createGraphicsActor({ cameraFovAngle: 42, cameraView });
+    const snapshot = graphicsRef.getSnapshot();
+    const camera = selectGraphicsCamera(snapshot);
 
-    const session = acquireViewCameraSession(graphicsRef, {
-      identity: 'part.ts',
-      camera: { cameraFovAngle: 42, cameraView },
-    });
-    const second = acquireViewCameraSession(graphicsRef, {
-      identity: 'part.ts',
-      camera: { cameraFovAngle: 12, cameraView: { ...cameraView, verticalSpan: 99 } },
-    });
-
-    expect(second).toBe(session);
-    expect(session.rig.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(42);
-    expect(session.rig.actorRef.getSnapshot().context.view).toMatchObject(cameraView);
-    expect(session.framing.pendingView).toEqual(cameraView);
+    expect(camera.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(42);
+    expect(camera.getSnapshot().context.view).toMatchObject(cameraView);
+    expect(selectGraphicsCameraFraming(snapshot).pendingView).toEqual(cameraView);
+    expect(getGraphicsCameraState(graphicsRef)?.target).toEqual(cameraView.target);
   });
 
   it('should keep a consumed framing record until the entry identity changes', () => {
-    const graphicsRef = createGraphicsActor();
-    const session = acquireViewCameraSession(graphicsRef, { identity: 'part.ts', camera: { cameraView } });
-    session.framing.initialized = true;
+    const graphicsRef = createGraphicsActor({ cameraView });
+    const framing = selectGraphicsCameraFraming(graphicsRef.getSnapshot());
+    latchViewCameraFraming(framing, { identity: 'part.ts', camera: { cameraView } });
+    framing.initialized = true;
 
-    acquireViewCameraSession(graphicsRef, { identity: 'part.ts', camera: { cameraView } });
+    latchViewCameraFraming(framing, { identity: 'part.ts', camera: { cameraView } });
 
-    expect(session.framing.initialized).toBe(true);
+    expect(framing.initialized).toBe(true);
   });
 
   it('should re-latch framing on a new entry identity while the live field of view survives', () => {
-    const graphicsRef = createGraphicsActor();
-    const session = acquireViewCameraSession(graphicsRef, {
-      identity: 'part.ts',
-      camera: { cameraFovAngle: 42, cameraView },
-    });
-    session.framing.initialized = true;
-    session.framing.preserveOrientationOnFirstFrame = true;
-    session.framing.firstFrameView = cameraView;
-    session.rig.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 33 });
+    const graphicsRef = createGraphicsActor({ cameraFovAngle: 42, cameraView });
+    const snapshot = graphicsRef.getSnapshot();
+    const framing = selectGraphicsCameraFraming(snapshot);
+    const camera = selectGraphicsCamera(snapshot);
+    latchViewCameraFraming(framing, { identity: 'part.ts', camera: { cameraView } });
+    framing.initialized = true;
+    framing.preserveOrientationOnFirstFrame = true;
+    framing.firstFrameView = cameraView;
+    camera.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 33 });
 
-    acquireViewCameraSession(graphicsRef, { identity: 'bracket.ts', camera: {} });
+    latchViewCameraFraming(framing, { identity: 'bracket.ts', camera: {} });
 
-    expect(session.framing).toEqual({
+    expect(framing).toEqual({
       identity: 'bracket.ts',
       pendingView: undefined,
       preserveOrientationOnFirstFrame: false,
       firstFrameView: undefined,
       initialized: false,
     });
-    expect(session.rig.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(33);
+    expect(camera.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(33);
   });
 
   /* A viewer panel can render before its entry path is known, and that is not a file switch: the
    * live pose stays and the persisted one is not re-armed behind it. */
   it('should ignore a re-latch that names no entry', () => {
-    const graphicsRef = createGraphicsActor();
-    const session = acquireViewCameraSession(graphicsRef, { identity: 'part.ts', camera: { cameraView } });
-    session.framing.initialized = true;
+    const graphicsRef = createGraphicsActor({ cameraView });
+    const framing = selectGraphicsCameraFraming(graphicsRef.getSnapshot());
+    latchViewCameraFraming(framing, { identity: 'part.ts', camera: { cameraView } });
+    framing.initialized = true;
 
-    acquireViewCameraSession(graphicsRef, { identity: undefined, camera: {} });
+    latchViewCameraFraming(framing, { identity: undefined, camera: {} });
 
-    expect(session.framing).toEqual({
+    expect(framing).toEqual({
       identity: 'part.ts',
       pendingView: cameraView,
       preserveOrientationOnFirstFrame: false,
@@ -108,22 +103,20 @@ describe('ViewCameraSession ownership', () => {
     });
   });
 
-  it('should release the session when its graphics actor completes', () => {
+  it('should stop the camera with its graphics actor', () => {
     const graphicsRef = createGraphicsActor();
-    const session = acquireViewCameraSession(graphicsRef, { identity: 'part.ts', camera: {} });
-    expect(hasGraphicsCameraRig(graphicsRef)).toBe(true);
-    expect(getGraphicsCameraState(graphicsRef)).toBeDefined();
+    const camera = selectGraphicsCamera(graphicsRef.getSnapshot());
+    expect(camera.getSnapshot().status).toBe('active');
 
     graphicsRef.stop();
 
-    expect(hasGraphicsCameraRig(graphicsRef)).toBe(false);
-    expect(getGraphicsCameraState(graphicsRef)).toBeUndefined();
-    expect(session.rig.actorRef.getSnapshot().status).toBe('stopped');
+    expect(camera.getSnapshot().status).toBe('stopped');
+    expect(getGraphicsCameraState(undefined)).toBeUndefined();
   });
 
   /* A project stops its views with `stopChild`, not by stopping a root actor, so the release rule is
    * pinned on the path production takes. */
-  it('should release the session of a graphics actor stopped as a spawned child', () => {
+  it('should stop the camera of a graphics actor stopped as a spawned child', () => {
     const parentMachine = setup({
       schemas: {
         context: types<{ child: ActorRefFrom<typeof graphicsMachine> }>(),
@@ -143,14 +136,12 @@ describe('ViewCameraSession ownership', () => {
     });
     const parent = createActor(parentMachine);
     parent.start();
-    const graphicsRef = parent.getSnapshot().context.child;
-    const session = acquireViewCameraSession(graphicsRef, { identity: 'part.ts', camera: {} });
-    expect(hasGraphicsCameraRig(graphicsRef)).toBe(true);
+    const camera = selectGraphicsCamera(parent.getSnapshot().context.child.getSnapshot());
+    expect(camera.getSnapshot().status).toBe('active');
 
     parent.send({ type: 'destroyView' });
 
-    expect(hasGraphicsCameraRig(graphicsRef)).toBe(false);
-    expect(session.rig.actorRef.getSnapshot().status).toBe('stopped');
+    expect(camera.getSnapshot().status).toBe('stopped');
     parent.stop();
   });
 });

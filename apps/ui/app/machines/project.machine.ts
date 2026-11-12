@@ -16,7 +16,7 @@ import { isBrowser } from '#constants/browser.constants.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { GraphicsOwnedSettings, GraphicsViewSettings } from '@taucad/viewer/graphics/graphics-settings';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
-import { actorIdOf, eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { actorIdOf, eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { cadMachine, closeCadRuntime, disposeCadRuntime } from '#machines/cad.machine.js';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { logMachine } from '#machines/logs.machine.js';
@@ -344,6 +344,8 @@ const createViewGraphics = ({ context, event }: ProjectArgs<'createViewGraphics'
     id: `graphics-view-${context.projectId}-${event.viewId}`,
     input: {
       ...graphicsSeed,
+      // The view's camera is the graphics actor's child: it is seeded here, once, and lives as long as the view.
+      camera: { cameraFovAngle: settings.cameraFovAngle, cameraView: settings.cameraView },
       modelInteractionRef: context.modelInteractionRef,
     },
   });
@@ -677,7 +679,8 @@ export const projectMachine = setup({
               isManifestWritable(context)
                 ? {
                     context: withProject(context, (project) => {
-                      project.assets.main.entryPath = event.path;
+                      // An entry-less project adopts its first main here (blueprint D3).
+                      project.assets.main = { ...project.assets.main, entryPath: event.path };
                     }),
                   }
                 : undefined,
@@ -836,9 +839,11 @@ export const projectMachine = setup({
                   // If the main file was renamed, persist its entry pointer.
                   // Recency is stamped separately by `projectFileActivity`, so this
                   // mechanical metadata rewrite does not decide project activity itself.
-                  ...(matches(context.project?.assets.main.entryPath ?? '')
+                  ...(matches(context.project?.assets.main?.entryPath ?? '')
                     ? withProject(context, (project) => {
-                        project.assets.main.entryPath = rewrite(project.assets.main.entryPath);
+                        if (project.assets.main) {
+                          project.assets.main.entryPath = rewrite(project.assets.main.entryPath);
+                        }
                       })
                     : {}),
                 },

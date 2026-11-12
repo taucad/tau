@@ -52,25 +52,30 @@ import {
 } from '@taucad/ui/components/alert-dialog';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
-import { isFunction } from '#utils/function.utils.js';
+import { isFunction } from '@taucad/ui-core/utils/function.utils';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { formatRelativeTime } from '#utils/date.utils.js';
+import { formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
 import { Loader } from '@taucad/ui/components/loader';
-import { cookieName } from '#constants/cookie.constants.js';
-import { searchParameterName } from '#constants/search-parameter.constants.js';
-import { flagParameter, stringParameter, enumParameter } from '#utils/search-parameter.codecs.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
+import { flagParameter, stringParameter, enumParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import type { InlineTextEditorHandle } from '#components/inline-text-editor.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
-import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
+import {
+  ProjectCard,
+  ProjectCardCadPreview,
+  ProjectCardMedia,
+  projectCardVerticalFieldOfView,
+} from '#components/project-card.js';
 import { projectGridClassName } from '#components/project-grid-layout.js';
 import { PageContent } from '#components/layout/page-content.js';
-import { PageHeader, usePhoneTopBar } from '#components/layout/page-header.js';
+import { PageHeader, SectionHeader, usePhoneTopBar } from '#components/layout/page-header.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
@@ -207,7 +212,14 @@ function useRememberedLibraryCount(isShowingDeleted: boolean): number | undefine
   return isShowingDeleted ? undefined : rememberedShape?.count;
 }
 
-export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1 | 2 }): React.JSX.Element {
+export function ProjectLibrary({
+  headingLevel = 1,
+  emptyContent,
+}: {
+  readonly headingLevel?: 1 | 2;
+  /** Replaces the whole section while the library has nothing to show or say. */
+  readonly emptyContent?: ReactNode;
+}): React.ReactNode {
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.projectViewMode, 'grid');
   /*
    * D1: the Trash is a place, not a menu tick. `/projects?trash=1` is what the
@@ -515,15 +527,31 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
     </DropdownMenu>
   );
 
+  const rows = toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted });
+  const isCatalogUnavailable = !showDeleted && auth === 'authed' && (cloudPending || isCloudFailed);
+  /* A host with its own empty content (Home) shows it in place of an empty section. The section stays
+     whenever it has something to say: the Trash, a failure, a repair, or Tau Cloud still listing. An
+     unknown count counts as empty, so a first visit does not paint cards that then vanish. */
+  const hasNotice = Boolean(listingError) || workspaceBindingRepairs.length + conflicts.length + recoveries.length > 0;
+  if (
+    emptyContent !== undefined &&
+    rows.length === 0 &&
+    !showDeleted &&
+    !isCatalogUnavailable &&
+    !hasNotice &&
+    (!isLoading || (rememberedCount ?? 0) === 0)
+  ) {
+    return emptyContent;
+  }
+
   return (
     <PageContent className='flex flex-col gap-4 pb-4'>
-      <PageHeader
-        title='Projects'
-        headingLevel={headingLevel}
-        className='mb-0'
-        // Only the page that owns `/projects` defers to the phone top bar; an embedded library keeps it.
-        action={headingLevel === 1 ? <NewProjectLink isDeferredToPhoneBar /> : undefined}
-      />
+      {/* Only the page that owns `/projects` titles the page and defers to the phone top bar; an embedded library is a section. */}
+      {headingLevel === 1 ? (
+        <PageHeader title='Projects' className='mb-0' action={<NewProjectLink isDeferredToPhoneBar />} />
+      ) : (
+        <SectionHeader level={headingLevel} title='Projects' className='mb-0' />
+      )}
 
       {workspaceBindingRepairs.length > 0 && (
         <div role='group' className='mb-6 space-y-2' aria-label='Workspace link repair'>
@@ -711,8 +739,8 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
         </div>
       ) : (
         <UnifiedProjectList
-          rows={toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted })}
-          isCatalogUnavailable={!showDeleted && auth === 'authed' && (cloudPending || isCloudFailed)}
+          rows={rows}
+          isCatalogUnavailable={isCatalogUnavailable}
           controls={viewControls}
           isShowingDeleted={showDeleted}
           onShowDeletedChange={handleToggleDeleted}
@@ -1052,7 +1080,7 @@ export function ProjectLibraryCard({
   const thumbnail = useProjectThumbnail(project.id);
   const thumbnailSource = thumbnail.url;
 
-  const mainFile = project.assets.main.entryPath;
+  const mainFile = project.assets.main?.entryPath;
   const location = projectLocationDescriptor(
     project.locator.backend === 'webaccess'
       ? { kind: 'workspace', workspaceName: project.workspaceName }
@@ -1108,10 +1136,14 @@ export function ProjectLibraryCard({
         isPreviewVisible={showPreview}
         onPreviewVisibilityChange={setShowPreview}
       >
-        {showPreview ? (
+        {showPreview && mainFile !== undefined ? (
           <SharedWorkerGate>
             <HomeFileManagerProvider key={project.id} projectId={project.id} rootDirectory={`/projects/${project.id}`}>
-              <CadPreviewProvider projectId={project.id} mainFile={mainFile}>
+              <CadPreviewProvider
+                projectId={project.id}
+                mainFile={mainFile}
+                initialVerticalFieldOfView={projectCardVerticalFieldOfView}
+              >
                 <ProjectCardCadPreview />
               </CadPreviewProvider>
             </HomeFileManagerProvider>

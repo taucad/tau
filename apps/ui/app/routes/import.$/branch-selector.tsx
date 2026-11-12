@@ -2,7 +2,7 @@ import { useId, useMemo } from 'react';
 import { GitBranch, ChevronDown } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
-import { groupItemsByTimeHorizon } from '#utils/temporal.utils.js';
+import { groupItemsByTimeHorizon } from '@taucad/ui-core/utils/temporal.utils';
 
 type Branch = {
   name: string;

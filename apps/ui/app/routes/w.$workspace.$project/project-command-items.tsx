@@ -26,7 +26,7 @@ import type { UIMatch } from 'react-router';
 import { useProject, useMainGraphics } from '#hooks/use-project.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { downloadBlob } from '@taucad/utils/file';
-import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
+import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import { randomUuid } from '@taucad/utils/id';
 import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
@@ -45,7 +45,6 @@ import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/f
 import { useFeature } from '#flags/use-feature.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, omittedSectionCutsNotice } from '#services/headless-capture.js';
-import { useGraphicsCameraRigQuery } from '@taucad/viewer/hooks/use-graphics';
 import { getGraphicsCameraState } from '@taucad/viewer/services/graphics-camera-registry';
 
 export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): React.JSX.Element | undefined {
@@ -68,8 +67,8 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
   const artifactMimeType = useSelector(mainCadRef, (state) =>
     state?.context.rendering?.success ? state.context.rendering.artifact.mimeType : undefined,
   );
-  const hasCameraRig = useGraphicsCameraRigQuery();
-  const cameraReady = hasCameraRig(mainGraphicsRef);
+  /* The camera is presented once a canvas has attached its controls; before that its pose is the unframed seed. */
+  const cameraReady = useSelector(mainGraphicsRef, (state) => state?.context.cameraPresented) === true;
   const canCapturePng = Boolean(
     artifactMimeType === 'image/svg+xml' || (artifactMimeType === 'model/gltf-binary' && cameraReady),
   );

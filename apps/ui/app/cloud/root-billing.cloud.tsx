@@ -4,14 +4,15 @@ import { useSession } from '@better-auth-ui/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { BillingSessionProvider, useBillingSession } from '@taucad/billing/hooks/billing-session';
-import { formatCredits } from '#utils/credits.utils.js';
+import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
+import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import { AuthConfigProvider } from '#providers/auth-provider.js';
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { ENV } from '#environment.config.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
-import { stringParameter } from '#utils/search-parameter.codecs.js';
+import { stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import {
   cancelPaymentAction,
   followPaymentRedirect,
@@ -74,7 +75,7 @@ const paymentActionParameter = stringParameter();
 const billingReturnParameter = stringParameter();
 // Stripe tells billing about a portal change by webhook, so the plan is re-read a few times after the return.
 const portalRefreshDelaysMilliseconds = [2000, 5000, 10_000, 20_000];
-const billingUpdatedMessage = 'Billing updated.';
+const billingUpdatedMessage = 'Subscription updated.';
 const paymentActionIdPattern = /^[A-Za-z0-9._:-]{1,128}$/u;
 
 /** Whether billing has yet to hear how the payment ended, which settles the action without the customer. */
@@ -169,31 +170,33 @@ export const useCloudPaymentActionReturn = (): void => {
           if (!action.receipt) {
             return undefined;
           }
-          const added = `${formatCredits(BigInt(action.receipt.grantedCreditAtoms))} added to your ${action.purpose === 'subscription_checkout' ? 'monthly' : 'purchased'} credits.`;
+          const granted = BigInt(action.receipt.grantedCreditAtoms);
           // A paid Pro subscription settles here with its first credits; billing never reports it as completed.
-          return toast.success(action.purpose === 'subscription_checkout' ? `Tau Pro is active. ${added}` : added);
+          return toast.success(
+            action.purpose === 'subscription_checkout'
+              ? `You’re on Tau Pro. ${formatCreditAtomsDisplay(granted)} monthly credits added.`
+              : `${formatCredits(granted)} added to your balance.`,
+          );
         }
         case 'completed': {
           // Only a card setup completes; every purchase settles as fulfilled, with its receipt.
-          return action.purpose === 'reload_setup' ? toast.success('Automatic reload is on.') : undefined;
+          return action.purpose === 'reload_setup' ? toast.success('Auto-reload is on.') : undefined;
         }
         case 'funds_received': {
-          return toast('Payment received. Credits are still being added.');
+          return toast('Payment received. Your credits will show up in a moment.');
         }
         case 'processing': {
           // A finished card setup reads processing until billing confirms the card.
           return toast(
-            action.purpose === 'reload_setup'
-              ? 'Confirming your card for automatic reload.'
-              : 'Payment is still processing.',
+            action.purpose === 'reload_setup' ? 'Confirming your card for auto-reload…' : 'Processing your payment…',
           );
         }
         case 'redirect_required': {
           if (action.purpose === 'reload_setup') {
             // Recovery read the Session as still open: the customer left the card setup before finishing it.
-            return toast.warning('Card setup for automatic reload was not finished.', {
+            return toast.warning('You didn’t finish setting up auto-reload.', {
               action: {
-                label: 'Continue setup',
+                label: 'Continue to payment',
                 onClick: () => {
                   if (active && binding.financialSession.isCurrent()) {
                     followPaymentRedirect(action);
@@ -203,10 +206,9 @@ export const useCloudPaymentActionReturn = (): void => {
             });
           }
           // The customer came back without paying, which is their choice: offer both ways on, not a warning.
-          // eslint-disable-next-line tau-lint/no-engineering-vocabulary-in-copy -- Stripe Checkout is the payment product's own name, not a revision checkout.
-          return toast('Checkout was not finished.', {
+          return toast('You didn’t finish paying. You haven’t been charged.', {
             action: {
-              label: 'Resume Checkout',
+              label: 'Continue to payment',
               onClick: () => {
                 if (active && binding.financialSession.isCurrent()) {
                   followPaymentRedirect(action);
@@ -214,16 +216,16 @@ export const useCloudPaymentActionReturn = (): void => {
               },
             },
             cancel: {
-              label: 'Cancel payment',
+              label: 'Cancel purchase',
               onClick: async () => {
                 if (!active || !binding.financialSession.isCurrent()) {
                   return;
                 }
                 try {
                   await cancelPaymentAction({ ...binding, subjectId: action.subjectId }, action.actionId);
-                  toast('Payment canceled.');
+                  toast('Purchase canceled.');
                 } catch {
-                  toast.warning('Could not cancel the payment. Open Add credits to try again.');
+                  toast.warning('Couldn’t cancel the purchase. Open Add credits to try again.');
                 }
                 void queryClient.invalidateQueries({ queryKey: ['billing'] });
               },
@@ -233,14 +235,14 @@ export const useCloudPaymentActionReturn = (): void => {
         case 'attention_required': {
           if (isAwaitingOutcome(action)) {
             // Billing has yet to hear how the payment ended; the re-check below warns only if it never does.
-            return toast('Payment is still processing.');
+            return toast('Processing your payment…');
           }
           if (action.attention?.action !== 'continue_hosted') {
-            return toast.warning('Your payment needs attention. Reopen billing to continue.');
+            return toast.warning('There’s a problem with your payment. Open Billing to see what to do.');
           }
-          return toast.warning('Your payment needs attention.', {
+          return toast.warning('Your bank needs you to confirm this payment.', {
             action: {
-              label: 'Continue in Checkout',
+              label: 'Continue to payment',
               onClick: async () => {
                 if (!active || !binding.financialSession.isCurrent()) {
                   return;
@@ -262,8 +264,8 @@ export const useCloudPaymentActionReturn = (): void => {
           // A card setup moves no money, so it is left or refused rather than unpaid.
           return toast.warning(
             action.purpose === 'reload_setup'
-              ? 'Card setup for automatic reload was not completed.'
-              : 'Payment was not completed.',
+              ? 'Auto-reload wasn’t turned on.'
+              : 'Payment failed. You weren’t charged.',
           );
         }
         default: {
@@ -282,10 +284,10 @@ export const useCloudPaymentActionReturn = (): void => {
       }
       if (isSetupConfirming) {
         // The card setup finished in Checkout; billing has yet to confirm the card, and needs nothing from the customer.
-        toast.warning('Automatic reload is still confirming your card. Check back in a few minutes.');
+        toast.warning('We’re still confirming your card for auto-reload. Check back in a few minutes.');
       } else {
         // Billing is still waiting on Stripe; nothing here needs the customer, so the toast says so.
-        toast.warning('Billing has not confirmed your payment yet. Check back in a few minutes.');
+        toast.warning('Your payment is taking longer than usual. Check back in a few minutes.');
       }
     };
     const inspectReturn = async (): Promise<void> => {
@@ -349,8 +351,8 @@ export const useCloudPaymentActionReturn = (): void => {
           clearReturnedActionRef.current('');
           toast.warning(
             isNotFound(error)
-              ? 'This payment belongs to a different account. Sign in to that account to see it.'
-              : 'Could not check the returned payment.',
+              ? 'This payment was made from a different account. Sign in to that account to see it.'
+              : 'Couldn’t check your payment. Open Billing to see your balance.',
           );
         }
       }

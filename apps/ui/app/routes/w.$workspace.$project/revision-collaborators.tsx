@@ -6,15 +6,16 @@
  * this panel renders **is** the invitation: if an owner closes the region
  * without copying it, the only way back is to invite the address again.
  *
- * Its own file because the Sync region is already the one module three lanes
- * edit, and because everything here is network-bound while the region is
- * deliberately presentational.
+ * It renders in the Share panel (C4, Q5): sharing is not history, so the
+ * History pane keeps one line, "Shared with 2 people", read from the same
+ * listing through {@link useSharedCount}.
  */
 
+import { Heading } from '@taucad/ui/components/heading';
 import { useEffect, useRef, useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Trash2 } from 'lucide-react';
+import { AlertTriangle, UserMinus } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
@@ -26,6 +27,7 @@ import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { shareOrigin } from '#lib/share-origin.js';
 import { recordApiRequestId } from '#lib/api-request-id.js';
+import { useProjectRole, useRevisionStatus } from '#hooks/use-revision-status.js';
 
 /** One row of `GET /v1/projects/:id/collaborators`. Never a token. */
 type CollaboratorEntry = Readonly<{
@@ -66,7 +68,46 @@ const inviteFailureMessage = (status: number, code: string | undefined): string 
   if (status === 404) {
     return 'This project is not on Tau Cloud yet. Connect the backup first.';
   }
-  return 'The invitation could not be created. Try again.';
+  return 'Couldn’t create the invite. Try again.';
+};
+
+const collaboratorsEndpoint = (projectId: string): string =>
+  `${ENV.TAU_API_URL.replace(/\/$/u, '')}/v1/projects/${encodeURIComponent(projectId)}/collaborators`;
+
+const collaboratorsKey = (projectId: string): readonly string[] => ['project-collaborators', projectId];
+
+const listCollaborators = async (projectId: string): Promise<readonly CollaboratorEntry[]> => {
+  const response = await fetch(collaboratorsEndpoint(projectId), {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    /* F4: a listing nobody could read is not an empty one. Answering `[]`
+       told an owner "nobody else has access" while a collaborator with a
+       live membership was sitting behind a 500. */
+    throw recordApiRequestId(new Error('The list of people with access could not be loaded.'), response);
+  }
+  const body: unknown = await response.json();
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the owner-only route's own DTO, narrowed by the array check.
+  return Array.isArray(body) ? (body as readonly CollaboratorEntry[]) : [];
+};
+
+/**
+ * How many people the project is shared with, for the History pane's backup
+ * line (C4). The owner's listing alone, so it is read only where the owner
+ * sees it; anyone else has no count, and the line says nothing.
+ *
+ * @param projectId - The Tau Cloud project, when there is one.
+ * @param isEnabled - Whether this viewer may read the listing.
+ * @returns The number of people invited or accepted, or `undefined` while unknown.
+ */
+export const useSharedCount = (projectId: string | undefined, isEnabled: boolean): number | undefined => {
+  const { data } = useQuery({
+    queryKey: collaboratorsKey(projectId ?? ''),
+    enabled: isEnabled && projectId !== undefined,
+    queryFn: async () => listCollaborators(projectId ?? ''),
+  });
+  return data?.filter((person) => person.status !== 'revoked').length;
 };
 
 /** Reads as a date rather than as a timestamp; an invalid one says nothing at all. */
@@ -85,7 +126,7 @@ export type RevisionCollaboratorsProps = {
 /**
  * Who else may work on this project, and how one more is invited.
  *
- * Mounted by the Sync region for the owner alone. A collaborator never sees it:
+ * Mounted in the Share panel for the owner alone, by {@link ProjectPeopleWithAccess}. A collaborator never sees it:
  * the routes behind it all need `owner`, and offering a control that is always
  * refused is worse than not offering it.
  *
@@ -93,7 +134,7 @@ export type RevisionCollaboratorsProps = {
  * @returns The invite form, the one-time link it issues, and the people list.
  */
 export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps): React.JSX.Element {
-  const endpoint = `${ENV.TAU_API_URL.replace(/\/$/u, '')}/v1/projects/${encodeURIComponent(projectId)}/collaborators`;
+  const endpoint = collaboratorsEndpoint(projectId);
   const queryClient = useQueryClient();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'read' | 'write'>('write');
@@ -105,23 +146,12 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
     isLoading,
     isError,
   } = useQuery({
-    queryKey: ['project-collaborators', projectId],
-    async queryFn(): Promise<readonly CollaboratorEntry[]> {
-      const response = await fetch(endpoint, { credentials: 'include', headers: { Accept: 'application/json' } });
-      if (!response.ok) {
-        /* F4: a listing nobody could read is not an empty one. Answering `[]`
-           told an owner "nobody else has access" while a collaborator with a
-           live membership was sitting behind a 500. */
-        throw recordApiRequestId(new Error('The list of people with access could not be loaded.'), response);
-      }
-      const body: unknown = await response.json();
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the owner-only route's own DTO, narrowed by the array check.
-      return Array.isArray(body) ? (body as readonly CollaboratorEntry[]) : [];
-    },
+    queryKey: collaboratorsKey(projectId),
+    queryFn: async () => listCollaborators(projectId),
   });
 
   const refreshPeople = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: ['project-collaborators', projectId] });
+    await queryClient.invalidateQueries({ queryKey: collaboratorsKey(projectId) });
   };
 
   const invite = useMutation({
@@ -195,7 +225,7 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
         headers: { Accept: 'application/json' },
       });
       if (!response.ok) {
-        throw recordApiRequestId(new Error(`Access for ${address} could not be revoked. Try again.`), response);
+        throw recordApiRequestId(new Error(`Couldn’t remove access for ${address}. Try again.`), response);
       }
     },
     async onSuccess() {
@@ -236,14 +266,10 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
   }, [issued]);
 
   return (
-    <div className='flex flex-col gap-3 rounded-md border bg-card p-3'>
-      <h4
-        ref={headingRef}
-        tabIndex={-1}
-        className='text-xs font-medium text-muted-foreground focus-visible:focus-outline'
-      >
+    <div className='flex flex-col gap-3'>
+      <Heading level={3} variant='label' ref={headingRef} tabIndex={-1} className='focus-visible:focus-outline'>
         People with access
-      </h4>
+      </Heading>
 
       <div className='flex flex-col gap-2'>
         <Label htmlFor='collaborator-email' className='text-sm font-normal'>
@@ -255,7 +281,7 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
             type='email'
             inputMode='email'
             autoComplete='email'
-            className='min-w-48 flex-1'
+            className='min-w-40 flex-1'
             placeholder='teammate@example.com'
             value={email}
             disabled={busy}
@@ -270,7 +296,7 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
               setRole(value === 'read' ? 'read' : 'write');
             }}
           >
-            <SelectTrigger className='w-32' aria-label='Invitation role'>
+            <SelectTrigger className='w-28' aria-label='Invitation role'>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -278,17 +304,18 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
               <SelectItem value='read'>Can view</SelectItem>
             </SelectContent>
           </Select>
-          <Button
-            size='sm'
-            disabled={typed === '' || busy}
-            onClick={() => {
-              invite.mutate();
-            }}
-          >
-            {invite.isPending ? <Loader className='size-4' /> : undefined}
-            <span>Create invitation</span>
-          </Button>
         </div>
+        <Button
+          size='sm'
+          className='self-end'
+          disabled={typed === '' || busy}
+          onClick={() => {
+            invite.mutate();
+          }}
+        >
+          {invite.isPending ? <Loader className='size-4' /> : undefined}
+          <span>Create invite link</span>
+        </Button>
       </div>
 
       {/*
@@ -344,47 +371,52 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
       )}
 
       {isLoading || isError || people.length > 0 ? (
-        <ul aria-label='People with access' className='flex list-none flex-col gap-1'>
+        <ul aria-label='People with access' className='flex list-none flex-col rounded-md border'>
           {people.map((person) => (
-            <li key={person.email} className='flex items-center gap-2'>
-              <span className='min-w-0 flex-1 truncate text-sm'>{person.email}</span>
-              {person.status === 'revoked' ? (
-                <Badge variant='secondary'>{roleLabel(person.role)}</Badge>
-              ) : (
-                <Select
-                  size='sm'
-                  value={person.role}
-                  disabled={busy}
-                  onValueChange={(value) => {
-                    changeRole.mutate({ email: person.email, role: value === 'read' ? 'read' : 'write' });
-                  }}
-                >
-                  <SelectTrigger className='w-28' aria-label={`Role for ${person.email}`}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value='write'>Can edit</SelectItem>
-                    <SelectItem value='read'>Can view</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-              <span className='text-xs text-muted-foreground'>{statusLabel(person.status)}</span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size='icon'
-                    variant='ghost'
-                    disabled={busy || person.status === 'revoked'}
-                    aria-label={`Revoke ${person.email}`}
-                    onClick={() => {
-                      revoke.mutate(person.email);
+            <li key={person.email} className='flex flex-col gap-1 border-b px-3 py-2 last:border-b-0'>
+              <div className='flex min-w-0 items-center gap-2'>
+                <span className='min-w-0 flex-1 truncate text-sm'>{person.email}</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size='icon-xs'
+                      variant='ghost'
+                      className='-mr-1 shrink-0'
+                      disabled={busy || person.status === 'revoked'}
+                      aria-label={`Remove access for ${person.email}`}
+                      onClick={() => {
+                        revoke.mutate(person.email);
+                      }}
+                    >
+                      <UserMinus aria-hidden />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side='left'>Remove access</TooltipContent>
+                </Tooltip>
+              </div>
+              <div className='flex items-center gap-2'>
+                {person.status === 'revoked' ? (
+                  <Badge variant='secondary'>{roleLabel(person.role)}</Badge>
+                ) : (
+                  <Select
+                    size='sm'
+                    value={person.role}
+                    disabled={busy}
+                    onValueChange={(value) => {
+                      changeRole.mutate({ email: person.email, role: value === 'read' ? 'read' : 'write' });
                     }}
                   >
-                    <Trash2 className='size-4' aria-hidden />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side='left'>Revoke access</TooltipContent>
-              </Tooltip>
+                    <SelectTrigger className='w-28' aria-label={`Role for ${person.email}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value='write'>Can edit</SelectItem>
+                      <SelectItem value='read'>Can view</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+                <span className='text-xs text-muted-foreground'>{statusLabel(person.status)}</span>
+              </div>
             </li>
           ))}
         </ul>
@@ -392,5 +424,33 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
         <p className='text-xs text-muted-foreground'>Nobody else has access to this project.</p>
       )}
     </div>
+  );
+}
+
+/**
+ * *People with access* in the Share panel (C4, Q5).
+ *
+ * The owner alone: every route behind the list needs `owner`, so a
+ * collaborator would only meet a refusal. Tau Cloud alone, too (N4) — a
+ * GitHub-backed project has an owner but no cloud project to invite anybody
+ * to, and a project with no backup has neither.
+ *
+ * @param props - The project being shared.
+ * @returns The section, or nothing for anyone who cannot invite.
+ */
+export function ProjectPeopleWithAccess({ projectId }: RevisionCollaboratorsProps): React.JSX.Element | undefined {
+  const status = useRevisionStatus();
+  const role = useProjectRole();
+  if (role !== 'owner' || status?.remote.kind !== 'tau' || status.remote.phase !== 'connected') {
+    return undefined;
+  }
+  return (
+    <section
+      aria-label='People with access'
+      data-slot='share-people'
+      className='max-h-[50%] shrink-0 overflow-y-auto border-t border-border bg-background p-4'
+    >
+      <RevisionCollaborators projectId={projectId} />
+    </section>
   );
 }

@@ -42,7 +42,7 @@ import { peekRevisionClient } from '#services/revision-client-registry.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSidebarState } from '@taucad/chat-ui/types/chat-sidebar.types';
-import { actorSessionIdOf } from '#lib/xstate.lib.js';
+import { actorSessionIdOf } from '@taucad/ui-core/lib/xstate.lib';
 import { isQuestionTool } from '@taucad/chat-ui/utils/question-tool';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import {

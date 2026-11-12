@@ -27,7 +27,7 @@ Rules 15 to 17 govern the meshes kernels hand the viewer, captures and exports: 
 
 ### 1. Resolve the backend once
 
-Resolve interactive viewers through `resolveViewerGraphicsBackend` in `apps/ui/app/utils/graphics-backend-override.ts`: the `webGpu` feature flag prefers WebGPU when an adapter is available, otherwise WebGL. Keep persisted per-view preferences normalized to WebGL; the application flag owns the user-facing preference. The internal `?graphicsBackend=` override takes precedence for manual and e2e evidence.
+Resolve interactive viewers through `resolveViewerGraphicsBackend` in `apps/libs/ui-core/src/utils/graphics-backend-override.ts`: the `webGpu` feature flag prefers WebGPU when an adapter is available, otherwise WebGL. Keep persisted per-view preferences normalized to WebGL; the application flag owns the user-facing preference. The internal `?graphicsBackend=` override takes precedence for manual and e2e evidence.
 
 If WebGPU initialization fails, mount the node WebGL2 pipeline on a fresh canvas. Do not mistake Three's node renderer with its WebGL2 backend for native WebGPU, and do not route arbitrary scene or shader errors through an initialization fallback. Dispose a partially allocated owned device; never call Three's normal renderer disposal before initialization completes.
 
@@ -117,7 +117,7 @@ Coalesce high-frequency pointer work through `createRafCoalescer`, with the late
 
 ### 11. Model gesture state explicitly
 
-Send measurement and overlay pointer events to their owning XState machine. Use `graphics.machine`'s `cameraInteracting`, driven by OrbitControls `start` and `end`, to discard camera drags. Do not infer orbiting from camera position or quaternion deltas.
+Send measurement and overlay pointer events to their owning XState machine. Use the view camera's `input.dragging` state, entered only by a pose the person made while the controls adapter's gesture is held, to discard camera drags. Do not infer orbiting from camera position or quaternion deltas.
 
 ### 12. Validate behavior, not only graph shape
 

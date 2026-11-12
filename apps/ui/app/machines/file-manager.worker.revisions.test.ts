@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIsomorphicGitRevisionPort, lfsObjectPath, lfsPointerFor, RevisionPortError } from '@taucad/revisions';
-import type { RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
+import type { Remote, RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
 import { revisionId } from '@taucad/revisions/algorithms';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import type { RootedFileSystem } from '@taucad/filesystem';
@@ -190,6 +190,8 @@ const harness = (
         frames.push(data);
       });
       channel.port2.start();
+      /* The page names who its revisions are by before anything else (B1): a capture with no person is refused. */
+      channel.port2.postMessage({ command: 'setActor', actor: { kind: 'user', id: 'usr_page', name: 'Page Person' } });
       const client: Client = {
         port: channel.port2,
         frames,
@@ -557,6 +559,32 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect([...leases].sort()).toEqual(['run-1.json', 'run-2.json']);
   });
 
+  it('should answer a session change once the root has taken it, and pull the remote again (audit R6)', async () => {
+    const listRemoteReferences = vi.fn(async () => []);
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      listRemotes: async () => [{ name: 'tau', url: 'https://remote.test/project.git', kind: 'tau' }],
+      listRemoteRefs: listRemoteReferences,
+    }));
+    const alpha = await fixture.open('alpha');
+    await vi.waitFor(() => {
+      expect(listRemoteReferences).toHaveBeenCalled();
+    });
+    await vi.waitFor(() => {
+      expect(alpha.frames.findLast((frame) => frame.type === 'status')?.status.sync.state).not.toBe('opening');
+    });
+    const reads = listRemoteReferences.mock.calls.length;
+
+    alpha.send({ command: 'sessionChanged', id: 5 });
+
+    await vi.waitFor(() => {
+      expect(alpha.frames).toContainEqual({ type: 'result', id: 5, result: { kind: 'sessionChanged' } });
+    });
+    await vi.waitFor(() => {
+      expect(listRemoteReferences.mock.calls.length).toBeGreaterThan(reads);
+    });
+  });
+
   it('should give a branch its own checkout, route and files (AC22)', async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
@@ -834,112 +862,120 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
    * large-object placeholder (a reload mid-download) is picked up again, its
    * progress rides the projection, and the viewer's *Try again* reaches the fill.
    */
-  it('should publish a checkout’s large-object placeholders and retry their fill on the page’s word', async () => {
-    const fixture = harness(['alpha']);
-    const project = fixture.service.createRootedFileSystem('/projects/alpha');
-    const part = 'solid part\n';
-    await project.writeFile('main.scad', 'import("models/part.step");');
-    await project.writeFile('models/part.step', part);
-    const first = await fixture.open('alpha');
-    const root = await fixture.root('alpha');
-    const session = await root.placementSession();
-    await place(session, turnKey(1));
-    await project.writeFile('main.scad', 'import("models/part.step"); // v2');
-    await finish(session, turnKey(1));
-    await turnFinalized(first, 'turn-1');
-    first.send({ command: 'close' });
-    await vi.waitFor(
-      () => {
-        expect(fixture.registry.openProjectIds()).toEqual([]);
-      },
-      { timeout: 10_000 },
-    );
+  it.each([
+    { word: 'retryLargeObjects', id: undefined },
+    /* Audit R6: a session change retries a fill that failed under the last session. */
+    { word: 'sessionChanged', id: 74 },
+  ] as const)(
+    'should publish a checkout’s large-object placeholders and retry their fill on $word',
+    async ({ word, id }) => {
+      const fixture = harness(['alpha']);
+      const project = fixture.service.createRootedFileSystem('/projects/alpha');
+      const part = 'solid part\n';
+      await project.writeFile('main.scad', 'import("models/part.step");');
+      await project.writeFile('models/part.step', part);
+      const first = await fixture.open('alpha');
+      const root = await fixture.root('alpha');
+      const session = await root.placementSession();
+      await place(session, turnKey(1));
+      await project.writeFile('main.scad', 'import("models/part.step"); // v2');
+      await finish(session, turnKey(1));
+      await turnFinalized(first, 'turn-1');
+      first.send({ command: 'close' });
+      await vi.waitFor(
+        () => {
+          expect(fixture.registry.openProjectIds()).toEqual([]);
+        },
+        { timeout: 10_000 },
+      );
 
-    /* As a reload mid-download leaves it: the pointer on disk, the object not in the store. */
-    const { pointer, bytes } = lfsPointerFor(new TextEncoder().encode(part));
-    const objectFile = `.git/${lfsObjectPath(pointer.oid)}`;
-    await project.writeFile('models/part.step', bytes);
-    await project.unlink(objectFile);
+      /* As a reload mid-download leaves it: the pointer on disk, the object not in the store. */
+      const { pointer, bytes } = lfsPointerFor(new TextEncoder().encode(part));
+      const objectFile = `.git/${lfsObjectPath(pointer.oid)}`;
+      await project.writeFile('models/part.step', bytes);
+      await project.unlink(objectFile);
 
-    const second = await fixture.open('alpha');
-    /* Slice (a): the worker's own wiring, so the authority reads a pending entry through the revisions. */
-    fixture.service.setPendingObjectSource(createPendingObjectSource(fixture.registry.roots));
-    /* The first capture of the session picks the placeholder up; with no remote, the transfer fails. */
-    fixture.announce('alpha', ['main.scad']);
-    await vi.waitFor(
-      () => {
-        const status = second.frames.findLast((frame) => frame.type === 'status');
-        expect(status?.type === 'status' ? status.status.largeObjects : undefined).toMatchObject({
-          phase: 'failed',
-          paths: ['models/part.step'],
-          totalObjects: 1,
-          totalBytes: part.length,
-        });
-      },
-      { timeout: 10_000 },
-    );
-    /* D10: every authored file is here, the large object is not. */
-    expect(second.frames.findLast((frame) => frame.type === 'status')?.status.readiness).toBe('materialized');
-    /* D9: the page reads it as pending, never as its pointer, and a materialize that cannot fetch says so. */
-    second.send({ command: 'readContent', id: 71, path: 'models/part.step' });
-    second.send({ command: 'materialize', id: 72, paths: ['models/part.step'] });
-    await vi.waitFor(() => {
-      expect(second.frames.filter((frame) => 'id' in frame && (frame.id === 71 || frame.id === 72))).toHaveLength(2);
-    });
-    expect(second.frames.find((frame) => 'id' in frame && frame.id === 71)).toMatchObject({
-      type: 'result',
-      result: { kind: 'content', content: { outcome: 'pending', size: part.length, reason: 'not-fetched' } },
-    });
-    expect(second.frames.find((frame) => 'id' in frame && frame.id === 72)).toMatchObject({
-      type: 'error',
-      code: 'PENDING',
-    });
-    /* W4 review 7: a comparison against the checkout reads through a placeholder too, never its pointer text. */
-    const head = second.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
-    await project.writeFile('models/copy.step', bytes);
-    second.send({ command: 'compare', id: 73, revisionId: head!, path: 'models/copy.step', against: 'checkout' });
-    await vi.waitFor(() => {
-      expect(second.frames.find((frame) => 'id' in frame && frame.id === 73)).toMatchObject({
+      const second = await fixture.open('alpha');
+      /* Slice (a): the worker's own wiring, so the authority reads a pending entry through the revisions. */
+      fixture.service.setPendingObjectSource(createPendingObjectSource(fixture.registry.roots));
+      /* The first capture of the session picks the placeholder up; with no remote, the transfer fails. */
+      fixture.announce('alpha', ['main.scad']);
+      await vi.waitFor(
+        () => {
+          const status = second.frames.findLast((frame) => frame.type === 'status');
+          expect(status?.type === 'status' ? status.status.largeObjects : undefined).toMatchObject({
+            phase: 'failed',
+            paths: ['models/part.step'],
+            totalObjects: 1,
+            totalBytes: part.length,
+          });
+        },
+        { timeout: 10_000 },
+      );
+      /* D10: every authored file is here, the large object is not. */
+      expect(second.frames.findLast((frame) => frame.type === 'status')?.status.readiness).toBe('materialized');
+      /* D9: the page reads it as pending, never as its pointer, and a materialize that cannot fetch says so. */
+      second.send({ command: 'readContent', id: 71, path: 'models/part.step' });
+      second.send({ command: 'materialize', id: 72, paths: ['models/part.step'] });
+      await vi.waitFor(() => {
+        expect(second.frames.filter((frame) => 'id' in frame && (frame.id === 71 || frame.id === 72))).toHaveLength(2);
+      });
+      expect(second.frames.find((frame) => 'id' in frame && frame.id === 71)).toMatchObject({
+        type: 'result',
+        result: { kind: 'content', content: { outcome: 'pending', size: part.length, reason: 'not-fetched' } },
+      });
+      expect(second.frames.find((frame) => 'id' in frame && frame.id === 72)).toMatchObject({
         type: 'error',
         code: 'PENDING',
       });
-    });
-    /* Slice (a): the disk keeps the pointer, and the authority's read never answers it: with no way to fetch the object it refuses. */
-    const raw = fixture.service.createRootedFileSystem('/projects/alpha', undefined, { placeholders: 'raw' });
-    expect(await raw.readFile('models/part.step')).toStrictEqual(bytes);
-    await expect(project.readFile('models/part.step')).rejects.toMatchObject({ code: 'PENDING' });
-    await project.unlink('models/copy.step');
-    /* A placeholder is the object it stands for: a diff against the checkout neither fetches it nor lists it changed. */
-    const reopened = await fixture.root('alpha');
-    const pendingDiff = await reopened.diff(head!, undefined, { against: 'checkout' });
-    expect(pendingDiff.map(({ path }) => path)).not.toContain('models/part.step');
+      /* W4 review 7: a comparison against the checkout reads through a placeholder too, never its pointer text. */
+      const head = second.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+      await project.writeFile('models/copy.step', bytes);
+      second.send({ command: 'compare', id: 73, revisionId: head!, path: 'models/copy.step', against: 'checkout' });
+      await vi.waitFor(() => {
+        expect(second.frames.find((frame) => 'id' in frame && frame.id === 73)).toMatchObject({
+          type: 'error',
+          code: 'PENDING',
+        });
+      });
+      /* Slice (a): the disk keeps the pointer, and the authority's read never answers it: with no way to fetch the object it refuses. */
+      const raw = fixture.service.createRootedFileSystem('/projects/alpha', undefined, { placeholders: 'raw' });
+      expect(await raw.readFile('models/part.step')).toStrictEqual(bytes);
+      await expect(project.readFile('models/part.step')).rejects.toMatchObject({ code: 'PENDING' });
+      await project.unlink('models/copy.step');
+      /* A placeholder is the object it stands for: a diff against the checkout neither fetches it nor lists it changed. */
+      const reopened = await fixture.root('alpha');
+      const pendingDiff = await reopened.diff(head!, undefined, { against: 'checkout' });
+      expect(pendingDiff.map(({ path }) => path)).not.toContain('models/part.step');
 
-    await project.writeFile(objectFile, part);
-    /* Its object on the device and the pointer still on disk: the same file, still unchanged. */
-    const landedDiff = await reopened.diff(head!, undefined, { against: 'checkout' });
-    expect(landedDiff.map(({ path }) => path)).not.toContain('models/part.step');
-    /* Once the object is on the device the authority reads through to it, before any fill has written the file. */
-    expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
-    expect(await raw.readFile('models/part.step')).toStrictEqual(bytes);
-    const framesBeforeFill = second.frames.length;
-    second.send({ command: 'retryLargeObjects' });
-    await vi.waitFor(
-      () => {
-        const status = second.frames.findLast((frame) => frame.type === 'status');
-        expect(status?.type === 'status' && status.status.largeObjects === undefined).toBe(true);
-      },
-      { timeout: 10_000 },
-    );
-    expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
-    expect(second.frames.findLast((frame) => frame.type === 'status')?.status.readiness).toBe('filled');
-    /* The fill's flush wrote the file without holding the page's file tree. */
-    expect(
-      second.frames
-        .slice(framesBeforeFill)
-        .flatMap((frame) => (frame.type === 'status' ? [frame.status.applyingRoots] : []))
-        .filter((roots) => roots !== undefined),
-    ).toEqual([]);
-  }, 30_000);
+      await project.writeFile(objectFile, part);
+      /* Its object on the device and the pointer still on disk: the same file, still unchanged. */
+      const landedDiff = await reopened.diff(head!, undefined, { against: 'checkout' });
+      expect(landedDiff.map(({ path }) => path)).not.toContain('models/part.step');
+      /* Once the object is on the device the authority reads through to it, before any fill has written the file. */
+      expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
+      expect(await raw.readFile('models/part.step')).toStrictEqual(bytes);
+      const framesBeforeFill = second.frames.length;
+      second.send(id === undefined ? { command: word } : { command: word, id });
+      await vi.waitFor(
+        () => {
+          const status = second.frames.findLast((frame) => frame.type === 'status');
+          expect(status?.type === 'status' && status.status.largeObjects === undefined).toBe(true);
+        },
+        { timeout: 10_000 },
+      );
+      expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
+      expect(second.frames.findLast((frame) => frame.type === 'status')?.status.readiness).toBe('filled');
+      /* The fill's flush wrote the file without holding the page's file tree. */
+      expect(
+        second.frames
+          .slice(framesBeforeFill)
+          .flatMap((frame) => (frame.type === 'status' ? [frame.status.applyingRoots] : []))
+          .filter((roots) => roots !== undefined),
+      ).toEqual([]);
+    },
+    30_000,
+  );
 
   it('should restore a recorded revision through the port commands', async () => {
     const fixture = harness(['alpha']);
@@ -979,7 +1015,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(after).toHaveLength(before.length + 2);
     expect(after[0]?.summary).toMatch(/^Restored Rev \d+$/u);
     expect(after[1]?.summary).toBe('Saved changes (restore)');
-    expect(after.slice(0, 2).map((row) => row.trigger)).toEqual(['restore', 'restore']);
+    expect(after.slice(0, 2).map((row) => row.capture)).toEqual(['restore', 'restore']);
     expect(after[0]?.source).toBe('restore');
     expect(after[1]?.source).toBe('user');
     await settle(10);
@@ -1569,9 +1605,13 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await finish(session, turnKey(1));
     await turnFinalized(alpha, 'turn-1');
 
+    /* The hidden save cut nothing: the log is the turn's result over its base cut, and the base cut is the
+     * person's (blueprint A5), so the agent's write is never read as theirs. */
     const rows = await root.log();
-    expect(rows.map((row) => row.source)).not.toContain('user');
-    expect(rows[0]?.turnId).toBe('turn-1');
+    expect(rows.map((row) => [row.source, row.capture, row.turnId])).toEqual([
+      ['agent', 'turn', 'turn-1'],
+      ['user', 'turn', 'turn-1'],
+    ]);
   });
 
   /*
@@ -1765,7 +1805,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
 
     const after = await root.log({ branch: 'side' });
     expect(after).toHaveLength(before.length + 1);
-    expect(after[0]).toMatchObject({ trigger: 'close' });
+    expect(after[0]).toMatchObject({ capture: 'close' });
   });
 
   it('should register the project on Tau Cloud when its advertisement answers 404 (P54, W18 DEF-1, D11)', async () => {
@@ -1825,6 +1865,54 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       ]);
       /* The first advertisement came before the PUT, and the next after it. */
       expect(advertisements.slice(0, 2)).toEqual([requests.indexOf(puts[0]!), requests.indexOf(puts[0]!) + 1]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  /* B4c: a GitHub linked import configures its GitHub remote; registering that project names it GitHub-linked. */
+  it('should register a GitHub-linked project with the GitHub origin (B4c)', async () => {
+    const bodies: Array<BodyInit | undefined> = [];
+    let registered = false;
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      listRemotes: async (): Promise<readonly Remote[]> => [
+        ...(await port.listRemotes()),
+        {
+          name: 'github-3',
+          url: 'https://github.com/octo/design.git',
+          kind: 'git',
+          provider: 'github',
+          repositoryId: '3',
+          fetchOnly: false,
+        },
+      ],
+      listRemoteRefs: async () => {
+        if (!registered) {
+          throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+        }
+        return [];
+      },
+    }));
+    await fixture.service
+      .createRootedFileSystem('/projects/alpha')
+      .writeFile('tau.json', JSON.stringify({ name: 'Alpha project' }));
+    const alpha = await fixture.open('alpha');
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        registered = true;
+        bodies.push(init.body ?? undefined);
+      }
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof globalThis.fetch;
+
+    try {
+      alpha.send({ command: 'remoteCredential', apiBaseUrl: 'https://api.test' });
+      alpha.send({ command: 'connectRemote', kind: 'tau' });
+      await alpha.settle();
+
+      expect(bodies).toEqual([JSON.stringify({ name: 'Alpha project', origin: 'github' })]);
     } finally {
       globalThis.fetch = original;
     }
@@ -2264,4 +2352,91 @@ describe('the revision long poll follows focus (RV-W5b F12)', () => {
     streams.get('prj_c')!.tail();
     expect(pulls).toEqual(['prj_a', 'prj_c']);
   });
+});
+
+/*
+ * A new project, or a newly selected checkout, settles at `filled` when it holds
+ * no large object: no facet, and no further capture, edit or reload needed.
+ * Red today (Brain research/new-project-viewer-stuck-downloading-blueprint.md,
+ * L1 and L2): readiness stays `materialized`, and the viewer shows "Downloading
+ * model files" for a download that does not exist.
+ */
+describe('readiness settles without a large-object download', () => {
+  const seed = async (fixture: Harness) => {
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('tau.json', '{"name":"x","assets":{"main":{"entryPath":"main.ts"}}}');
+    await project.writeFile('main.ts', 'a');
+    return project;
+  };
+
+  /* A checkout the fill has answered for, on a head: the root restarted over an existing revision. */
+  const openOnHead = async (fixture: Harness, project: Awaited<ReturnType<typeof seed>>) => {
+    const first = await fixture.open('alpha');
+    const before = await fixture.root('alpha');
+    const placement = await before.placementSession();
+    await place(placement, turnKey(1));
+    await project.writeFile('main.ts', 'b');
+    await finish(placement, turnKey(1));
+    await turnFinalized(first, 'turn-1');
+    await settle(20);
+    first.send({ command: 'close' });
+    await settle(20);
+    const alpha = await fixture.open('alpha');
+    await settle(30);
+    return { alpha, root: await fixture.root('alpha') };
+  };
+
+  it('reaches filled after the first revision of a new project is saved (S1)', async () => {
+    const fixture = harness(['alpha']);
+    await seed(fixture);
+    await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    await settle(20);
+    fixture.announce('alpha', ['main.ts']);
+    await settle(20);
+    await root.saveRevision('save');
+    await settle(40);
+    expect(root.status().headRevisionId).toBeDefined();
+    expect(root.status().largeObjects).toBeUndefined();
+    expect(root.status().readiness).toBe('filled');
+  }, 30_000);
+
+  it('reaches filled when the first turn of a new project mints its base revision (S2)', async () => {
+    const fixture = harness(['alpha']);
+    const project = await seed(fixture);
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await settle(20);
+    await place(session, turnKey(1));
+    await settle(20);
+    expect(root.status().headRevisionId).toBeDefined();
+    expect(root.status().largeObjects).toBeUndefined();
+    expect(root.status().readiness).toBe('filled');
+    await project.writeFile('main.ts', 'b');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    await settle(40);
+    expect(root.status().readiness).toBe('filled');
+  }, 30_000);
+
+  it('reaches filled on a linked checkout selected after it is created (S5)', async () => {
+    const fixture = harness(['alpha']);
+    const project = await seed(fixture);
+    const { alpha, root } = await openOnHead(fixture, project);
+    expect(root.status().readiness).toBe('filled');
+    const linked = await branchOff(alpha, root, 'side');
+    alpha.send({ command: 'switch', branch: 'side' });
+    await settle(30);
+    expect(root.status().checkoutId).toBe(linked.checkoutId);
+    expect(root.status().largeObjects).toBeUndefined();
+    expect(root.status().readiness).toBe('filled');
+  }, 30_000);
+
+  it('reaches filled when the root starts on an existing revision (S3, control)', async () => {
+    const fixture = harness(['alpha']);
+    const project = await seed(fixture);
+    const { root } = await openOnHead(fixture, project);
+    expect(root.status().readiness).toBe('filled');
+  }, 30_000);
 });

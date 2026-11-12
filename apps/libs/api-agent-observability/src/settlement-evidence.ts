@@ -1,13 +1,22 @@
 import type { Evidence } from '@taucad/agent-observability/contract';
-import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '@taucad/agent-observability/identity';
+import {
+  canonicalEvidence,
+  contractId,
+  evidenceDigest,
+  evidenceKeys,
+  sha256Hex,
+} from '@taucad/agent-observability/identity';
 import type { ObservedSettlement } from '@taucad/api-billing';
 import type { SourceProtection } from '#evidence-admission.js';
 import { evidenceRetentionMilliseconds } from '#evidence-admission.js';
 import type { AttemptAuthority } from '#model-invocation-evidence.js';
 import { apiVersions, executionOfAttempt } from '#model-invocation-evidence.js';
 
-/** Bumped whenever the facts written for the same settlement change. */
-export const apiSettlementMapper = 'api-settlement-v2';
+/**
+ * Bumped whenever the facts written for the same settlement change. v3 names the settled call as the semantic id, so
+ * delivery joins a settlement and its generation by key (LW4).
+ */
+export const apiSettlementMapper = 'api-settlement-v3';
 
 type FinancialFact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'] & { kind: 'financial' };
 
@@ -27,7 +36,7 @@ export const creditsOfAtoms = (atoms: bigint): number => Number(atoms) / atomsPe
  * The API-reported financial fact of one settled funded operation (blueprint
  * T07). It carries what the ledger charged and what the supplier is estimated
  * to have cost, never request or output text, and joins the provider attempt
- * through the same run and operation ids. The ledger stays the financial
+ * through the same call and operation ids. The ledger stays the financial
  * truth: an unpriced supplier cost stays null, never zero, and this fact is a
  * copy for analysis, not a record anything settles against.
  *
@@ -70,7 +79,8 @@ export const settlementEvidence = async (
   const evidence: Evidence = {
     version: 1,
     source: { kind: 'invocation', invocation: ledger, digest: sourceDigest },
-    semantic: { kind: 'financial', id: ledger },
+    /* The call it settled, as the provider attempt names it, so the two facts find each other (LW4). */
+    semantic: { kind: 'financial', id: invocation },
     projection: { version: apiSettlementMapper, redactor: 'summary-only', digest: '0'.repeat(64) },
     delivery: { uploader: 'api', attempt: 'api-1', cursor: { view: 'own', origin: 'api', position: ledger } },
     scope: { principal, project: authority.project, policyEpoch: authority.policyEpoch, destination: 'langfuse' },
@@ -102,4 +112,43 @@ export const settlementEvidence = async (
     payload: { plane: 'summary', fact },
   };
   return { ...evidence, projection: { ...evidence.projection, digest: await evidenceDigest(evidence) } };
+};
+
+/**
+ * The semantic key of the generation a settlement settled: the provider attempt of the same call in the same project.
+ *
+ * @param settlement - A settlement's evidence.
+ * @returns The key its generation's receipts are admitted under.
+ */
+export const settledGenerationKey = (settlement: Evidence): string =>
+  canonicalEvidence([settlement.scope.project, 'provider', settlement.semantic.id]);
+
+/**
+ * The semantic key of the settlement a generation's call would have: the financial fact of the same call.
+ *
+ * @param generation - A provider attempt's evidence.
+ * @returns The key its settlement's receipt is admitted under.
+ */
+export const generationSettlementKey = (generation: Evidence): string =>
+  canonicalEvidence([generation.scope.project, 'financial', generation.semantic.id]);
+
+/**
+ * Whether a settlement settled this generation: the same account and call by key, and the same funded operation, which
+ * the provider fact names as `billing` and the settlement as `attempt` (rule 8).
+ *
+ * @param settlement - A settlement's evidence.
+ * @param generation - A provider attempt's evidence.
+ * @returns True when the settlement's values belong on the generation.
+ */
+export const settles = (settlement: Evidence, generation: Evidence): boolean => {
+  const settled = settlement.payload.fact;
+  const call = generation.payload.fact;
+  return (
+    settled.kind === 'financial' &&
+    call.kind === 'provider' &&
+    call.billing !== null &&
+    call.billing === settled.attempt &&
+    settlement.scope.principal === generation.scope.principal &&
+    settledGenerationKey(settlement) === evidenceKeys(generation).semantic
+  );
 };

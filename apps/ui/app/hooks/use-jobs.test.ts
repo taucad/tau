@@ -7,8 +7,8 @@ import {
   requestJobCancellation,
   useJobs,
 } from '#hooks/use-jobs.js';
-import { createJobProjection } from '#lib/jobs-projection.js';
-import type { DurableJobRead, JobArtifact, JobProjection, JobSnapshot } from '#lib/jobs-projection.js';
+import { createJobProjection } from '@taucad/ui-core/lib/jobs-projection';
+import type { DurableJobRead, JobArtifact, JobProjection, JobSnapshot } from '@taucad/ui-core/lib/jobs-projection';
 
 const mocks = vi.hoisted(() => ({ projectId: 'project-1' }));
 

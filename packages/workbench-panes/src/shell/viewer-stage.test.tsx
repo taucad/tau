@@ -1,3 +1,5 @@
+import { createCallbackLogic } from 'xstate';
+import type { CanvasHostCommand } from '@taucad/viewer/machines/canvas.machine';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
@@ -110,28 +112,42 @@ describe('ViewerStage', () => {
       // The stub canvas draws no frames, so nothing is awaited until a Three canvas declares itself.
       expect(region).not.toHaveAttribute('aria-busy');
 
+      const canvasOf = () => graphicsRef.getSnapshot().context.canvas?.ref;
+      const hostCanvas = (): void => {
+        canvasOf()?.send({
+          type: 'hostCreated',
+          backend: 'webgpu',
+          surface: { width: 800, height: 600, pixelRatio: 1 },
+          domElement: document.createElement('canvas'),
+          host: createCallbackLogic<CanvasHostCommand, undefined>(() => undefined),
+        });
+      };
       act(() => {
-        graphicsRef.send({ type: 'canvasMounted', canvasId: 'stage' });
+        graphicsRef.send({ type: 'canvasAttached', canvasId: 'stage', kind: 'canvas' });
       });
       expect(region).toHaveAttribute('aria-busy', 'true');
-      act(() => {
-        graphicsRef.send({ type: 'rendererInitialized', payload: { canvasId: 'stage', backend: 'webgpu' } });
-      });
+      act(hostCanvas);
       expect(region).toHaveAttribute('aria-busy', 'true');
       act(() => {
-        graphicsRef.send({ type: 'rendererPresented', canvasId: 'stage' });
+        canvasOf()?.send({ type: 'framePresented' });
       });
       expect(region).not.toHaveAttribute('aria-busy');
 
       // A replacement canvas (a backend switch or a retry) is busy again until it presents.
       act(() => {
-        graphicsRef.send({ type: 'canvasMounted', canvasId: 'replacement' });
-        graphicsRef.send({ type: 'canvasUnmounted', canvasId: 'stage' });
+        graphicsRef.send({ type: 'canvasAttached', canvasId: 'replacement', kind: 'canvas' });
+        graphicsRef.send({ type: 'canvasDetached', canvasId: 'stage' });
       });
       expect(region).toHaveAttribute('aria-busy', 'true');
-      // A canvas that goes away (its context-lost fallback, or a closed unit) leaves nothing to wait for.
+      // A canvas that loses its context shows a fallback that draws nothing, and a canvas that goes away leaves
+      // nothing to wait for.
       act(() => {
-        graphicsRef.send({ type: 'canvasUnmounted', canvasId: 'replacement' });
+        hostCanvas();
+        canvasOf()?.send({ type: 'contextLost' });
+      });
+      expect(region).not.toHaveAttribute('aria-busy');
+      act(() => {
+        graphicsRef.send({ type: 'canvasDetached', canvasId: 'replacement' });
       });
       expect(region).not.toHaveAttribute('aria-busy');
     });
@@ -162,7 +178,7 @@ describe('ViewerStage', () => {
       const region = screen.getByRole('application', { name: 'CAD canvas' });
       expect(await screen.findByTestId('svg-viewer-host')).toBeInTheDocument();
       expect(region).not.toHaveAttribute('aria-busy');
-      expect(graphicsRef.getSnapshot().context.canvasPresentation).toBeUndefined();
+      expect(graphicsRef.getSnapshot().context.canvas).toBeUndefined();
     });
 
     it('should not report busy when the host draws no canvas', () => {

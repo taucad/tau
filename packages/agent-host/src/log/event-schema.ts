@@ -61,6 +61,8 @@ const metadataSchema = z
     model: z.string().optional(),
     responseModel: z.string().optional(),
     responseId: z.string().optional(),
+    reasoningLevel: z.string().optional(),
+    reasoningDroppedByProvider: z.number().nonnegative().optional(),
     reasoningSummary: z.string().optional(),
     diagnostics: z.array(jsonValueSchema).optional(),
     usage: usageSchema.optional(),
@@ -195,6 +197,8 @@ export const modelReasoningConfigSchema = z.strictObject({
   summary: z.enum(['auto', 'concise', 'detailed']).optional(),
   display: z.enum(['summarized', 'omitted']).optional(),
   budgetTokens: z.number().int().positive().optional(),
+  effortInTranscript: z.boolean().optional(),
+  replayBinding: z.enum(['drop', 'refuse']).optional(),
 });
 const turnContextSchema = z.strictObject({
   version: z.literal(1),

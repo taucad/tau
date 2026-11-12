@@ -1,4 +1,4 @@
-import type { Message, ToolResultMessage, UserMessage } from '@earendil-works/pi-ai';
+import type { Message, ToolResultMessage } from '@earendil-works/pi-ai';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { util as zodUtility } from 'zod';
 import type {
@@ -9,6 +9,7 @@ import type {
   TurnModelConfig,
   UserProviderMessage,
 } from '#log/event-types.js';
+import { isChatStateMessage } from '#log/event-types.js';
 import type { ModelCallMiddleware } from '#harness/model-call-middleware.js';
 import { toJsonValue } from '#harness/session-record.js';
 import type { HostToolExecutionDetails } from '#harness/tools.js';
@@ -100,32 +101,6 @@ ${Object.entries(memory)
 </memory_guidelines>
 </system-reminder>`;
 
-/** Inject Tau's skills catalogue and AGENTS.md memory onto pi's string/message seams. @public */
-export const createClientContextMiddleware =
-  (context?: ClientContext): ModelCallMiddleware =>
-  async (request, next) => {
-    if (!context) {
-      return next(request);
-    }
-    const skills = context.skills ?? [];
-    const memory = context.memory ?? {};
-    const memoryMessage: UserMessage | undefined =
-      Object.keys(memory).length === 0
-        ? undefined
-        : { role: 'user', content: [{ type: 'text', text: memoryPrompt(memory) }], timestamp: 0 };
-    return next({
-      ...request,
-      context: {
-        ...request.context,
-        systemPrompt:
-          skills.length === 0
-            ? request.context.systemPrompt
-            : `${request.context.systemPrompt ?? ''}\n\n${skillsPrompt(skills)}`,
-        messages: memoryMessage ? [memoryMessage, ...request.context.messages] : request.context.messages,
-      },
-    });
-  };
-
 /** One previously activated skill retained by the host. @public */
 export type RecentSkill = {
   readonly skillName: string;
@@ -140,17 +115,6 @@ export type RecentSkill = {
 export type RecentSkillsPort = {
   load(chatId: string): Promise<readonly RecentSkill[]>;
   remove?(chatId: string, skillName: string): Promise<void>;
-};
-
-const isRecentSkillsMessage = (message: AgentMessage): boolean => {
-  if (message.role !== 'user') {
-    return false;
-  }
-  const text =
-    typeof message.content === 'string'
-      ? message.content
-      : message.content.map((block) => (block.type === 'text' ? block.text : '')).join('');
-  return text.startsWith('<recently_used_skills>');
 };
 
 const formatRecentSkills = (skills: readonly RecentSkill[], includeContent: boolean): string =>
@@ -175,13 +139,6 @@ ${skills
   })
   .join('\n')}
 </recently_used_skills>`;
-
-type RecentSkillsMiddlewareOptions = {
-  readonly chatId: string;
-  readonly store?: RecentSkillsPort | undefined;
-  readonly currentSkills?: readonly ClientSkill[] | undefined;
-  readonly includeContent: () => boolean;
-};
 
 const resolveRecentSkills = async (options: {
   readonly chatId: string;
@@ -282,6 +239,11 @@ const historyCarriesCatalog = (
  * else in the pinned block, rides as a note in this turn's context messages instead, so a change is noted once: the
  * turns after it add no note, and the history keeps the one note where it was.
  *
+ * The client's state note (`chatStateMessage`) follows the same rule: it joins the turn's context only when its text
+ * differs from the newest state note the history carries, and a note that says "defaults" is left out of a chat that
+ * carries none. After a summary the history may no longer hold it, so the post-compaction context restates every
+ * note that is not the default, and a return to the defaults this turn announces.
+ *
  * @internal
  */
 export const createTurnContextSnapshot = async (options: {
@@ -302,6 +264,8 @@ export const createTurnContextSnapshot = async (options: {
    * turn's context noted a catalog change the history still holds.
    */
   readonly carriedSkillsNote?: string | undefined;
+  /** The newest state note the chat's request history carries before this turn (`carriedStateNote`). */
+  readonly carriedStateNote?: string | undefined;
 }): Promise<TurnContextSnapshot> => {
   const skills = options.clientContext?.skills ?? [];
   const memory = options.clientContext?.memory ?? {};
@@ -341,6 +305,15 @@ export const createTurnContextSnapshot = async (options: {
         });
   const initialRecent = recentMessage(false);
   const postCompactionRecent = recentMessage(true);
+  const stateNote = options.contextMessages?.find((message) => isChatStateMessage(message));
+  const contextMessages = options.contextMessages?.filter((message) => !isChatStateMessage(message)) ?? [];
+  const stateIsDefault = stateNote?.metadata?.tauInternal?.['default'] === true;
+  const stateChange =
+    stateNote === undefined ||
+    stateNote.content === options.carriedStateNote ||
+    (stateIsDefault && options.carriedStateNote === undefined)
+      ? undefined
+      : stateNote;
   const systemPromptBlocks = options.systemPromptBlocks
     ? [
         ...options.systemPromptBlocks.slice(0, -1),
@@ -362,43 +335,18 @@ export const createTurnContextSnapshot = async (options: {
     ...(options.toolChoice ? { toolChoice: options.toolChoice } : {}),
     ...(options.allowedTools ? { allowedTools: options.allowedTools } : {}),
     ...(options.snapshot === undefined ? {} : { snapshot: options.snapshot }),
-    initialMessages: [initialRecent, memoryMessage, skillsNote, ...(options.contextMessages ?? [])].filter(
+    initialMessages: [initialRecent, memoryMessage, skillsNote, ...contextMessages, stateChange].filter(
       (message): message is UserProviderMessage => message !== undefined,
     ),
     postCompactionMessages: [
       postCompactionRecent,
       memoryMessage,
       skillsNote,
-      ...(options.contextMessages ?? []),
+      ...contextMessages,
+      stateChange ?? (stateIsDefault ? undefined : stateNote),
     ].filter((message): message is UserProviderMessage => message !== undefined),
   };
 };
-
-/** Reconcile and inject recently activated skills without persisting an ephemeral provider view. @public */
-export const createRecentSkillsMiddleware =
-  (options: RecentSkillsMiddlewareOptions): ModelCallMiddleware =>
-  async (request, next) => {
-    const skills = await resolveRecentSkills({
-      chatId: options.chatId,
-      store: options.store,
-      currentSkills: options.currentSkills,
-    });
-    if (skills.length === 0) {
-      return next(request);
-    }
-    const recent: UserMessage = {
-      role: 'user',
-      content: [{ type: 'text', text: formatRecentSkills(skills, options.includeContent()) }],
-      timestamp: 0,
-    };
-    return next({
-      ...request,
-      context: {
-        ...request.context,
-        messages: [recent, ...request.context.messages.filter((message) => !isRecentSkillsMessage(message))],
-      },
-    });
-  };
 
 const toolJson = (message: ToolResultMessage): unknown => {
   const details = message.details as HostToolExecutionDetails | undefined;

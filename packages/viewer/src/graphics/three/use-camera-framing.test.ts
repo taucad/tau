@@ -83,7 +83,7 @@ describe('useCameraFraming portable camera events', () => {
       }),
     );
 
-    const setView = send.mock.calls.find(([event]) => event.type === 'setView')?.[0] as {
+    const setView = send.mock.calls.find(([event]) => event.type === 'poseObserved')?.[0] as {
       direction: [number, number, number];
       up: [number, number, number];
     };
@@ -107,11 +107,11 @@ describe('useCameraFraming portable camera events', () => {
 
     const frameIndex = send.mock.calls.findIndex(([event]) => event.type === 'frame');
     const restoreIndex = send.mock.calls.findIndex(
-      ([event]) => event.type === 'setView' && event.target === cameraView.target,
+      ([event]) => event.type === 'poseObserved' && event.target === cameraView.target,
     );
     expect(frameIndex).toBeGreaterThan(-1);
     expect(restoreIndex).toBeGreaterThan(frameIndex);
-    expect(send.mock.calls[restoreIndex]?.[0]).toEqual({ type: 'setView', ...cameraView });
+    expect(send.mock.calls[restoreIndex]?.[0]).toEqual({ type: 'poseObserved', source: 'input', ...cameraView });
   });
 
   it('preserves the view-owned camera when the canvas framing hook remounts', () => {
@@ -152,14 +152,14 @@ describe('useCameraFraming portable camera events', () => {
     hook.rerender({ radius: 4.5 });
 
     expect(send).toHaveBeenCalledWith({ type: 'frame', margin: 0.1 });
-    expect(send).toHaveBeenLastCalledWith({ type: 'setView', ...cameraView });
+    expect(send).toHaveBeenLastCalledWith({ type: 'poseObserved', source: 'input', ...cameraView });
     expect(framing.initialized).toBe(true);
 
     send.mockClear();
     hook.rerender({ radius: 9 });
 
     expect(send).toHaveBeenCalledWith({ type: 'frame', margin: 0.1 });
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setView', target: cameraView.target }));
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'poseObserved', target: cameraView.target }));
   });
 
   it('should preserve the placed camera throughout repeated pane resizing', () => {
@@ -180,7 +180,8 @@ describe('useCameraFraming portable camera events', () => {
     const bounds = new Box3(new Vector3(-1, -1, -1), new Vector3(1, 1, 1));
     const hook = renderHook(() => useCameraFraming({ geometryRadius: 2, geometryBounds: bounds }));
     liveRig.actorRef.send({
-      type: 'setView',
+      type: 'poseObserved',
+      source: 'input',
       target: [4, 5, 6],
       direction: [0, 1, 0],
       up: [0, 0, 1],
@@ -215,7 +216,7 @@ describe('useCameraFraming portable camera events', () => {
     expect(send.mock.calls[0]).toEqual([
       { type: 'setViewport', viewport: { width: 1400, height: 500, pixelRatio: 2 } },
     ]);
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setView' }));
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'poseObserved' }));
     expect(send).not.toHaveBeenCalledWith({ type: 'reset' });
     expect(send).toHaveBeenLastCalledWith({ type: 'frame', margin: 0.1 });
     hook.unmount();

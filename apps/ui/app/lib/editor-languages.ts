@@ -1,5 +1,5 @@
 import type { HighlightLanguage } from '@taucad/grammars';
-import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
+import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-language-resolution';
 
 /** Canonical editor language identifiers; metadata never imports an editor runtime. */
 export type EditorLanguage = HighlightLanguage | 'typescriptreact' | 'javascriptreact';

@@ -1,3 +1,4 @@
+import { isPersonsMessage } from '#log/event-types.js';
 import type {
   AgentLogEvent,
   CompactionTrace,
@@ -19,9 +20,12 @@ import type { EventLogBatch } from '#log/event-log-appender.js';
  * on every device and every replay.
  *
  * It is a pure fold over rows. It is never on the execution path, writes
- * nothing, and holds nothing between calls. It carries identities, names,
- * counts and times only, never message content, so its output is safe for
- * every purpose that admits summaries. The one exception is a `test_model`
+ * nothing, and holds nothing between calls. By default it carries identities,
+ * names, counts and times only, never message content, so its output is safe
+ * for every purpose that admits summaries. Asked for content (LW6), it also
+ * carries this turn's message, the final reply, each tool's arguments and
+ * result and the changed paths, which the delivery projection writes only
+ * under the content grant. The one exception is a `test_model`
  * call's check (T12), whose revision and requirement keys name files so the
  * delivery projection can write a digest of what was checked; it never writes
  * the keys themselves. Destination envelopes, scope and
@@ -65,6 +69,26 @@ export type ObservedToolCall = Readonly<{
   modelCall: string | undefined;
   /** A settled `test_model` call's check, when its output records one. */
   check?: ObservedCheck | undefined;
+  /** The call's arguments as its input row recorded them; only when content was asked for. */
+  arguments?: JsonValue | undefined;
+  /** The call's first committed result; only when content was asked for and its output landed. */
+  result?: JsonValue | undefined;
+}>;
+
+/** What a run's rows say in words, read only when content was asked for (LW6). @public */
+export type ObservedContent = Readonly<{
+  /** This turn's message from the person: never a Tau-internal user message, nor an earlier turn's. */
+  prompt: JsonValue | undefined;
+  /** The run's last assistant message that has text: its reply. */
+  reply: JsonValue | undefined;
+  /** The paths the run's revision changed. */
+  changedPaths: readonly string[];
+}>;
+
+/** How a chat's rows are read. @public */
+export type ObserveTurnsOptions = Readonly<{
+  /** Also read what the rows say in words: off by default, so a summary reader never holds content. */
+  content?: boolean | undefined;
 }>;
 
 /** One gateway invocation the run prepared, and what the gateway answered for it. @public */
@@ -119,6 +143,14 @@ export type TurnObservation = Readonly<{
         failure?: Readonly<{ code: string; wrapped: string | undefined }> | undefined;
       }>
     | undefined;
+  /** The revision the run's turn wrote, when it wrote one. */
+  finalRevision?: string | undefined;
+  /** How many files that revision changed. */
+  filesChanged?: number;
+  /** How many Tau runs of the chat came before this one in its rows. */
+  priorTurns?: number;
+  /** The run's message, reply and changed paths; only when content was asked for. */
+  content?: ObservedContent | undefined;
   /** Newest time any fact landed. A heartbeat is not a fact, so it never moves this. */
   lastFactAt: number;
   /** Every row the observation was built from, once each, in log order. */
@@ -250,6 +282,12 @@ type RunDraft = {
   openApprovals: Map<string, number>;
   lastFactAt: number;
   sources: ObservedSource[];
+  finalRevision: string | undefined;
+  changedPaths: readonly string[];
+  prompt: JsonValue | undefined;
+  reply: JsonValue | undefined;
+  /** Each tool call's arguments and first result, by call id; filled only when content was asked for. */
+  toolContent: Map<string, { arguments: JsonValue; result?: JsonValue }>;
 };
 
 const draftFor = (runs: Map<string, RunDraft>, chatId: string, runId: string): RunDraft => {
@@ -272,6 +310,11 @@ const draftFor = (runs: Map<string, RunDraft>, chatId: string, runId: string): R
       openApprovals: new Map(),
       lastFactAt: 0,
       sources: [],
+      finalRevision: undefined,
+      changedPaths: [],
+      prompt: undefined,
+      reply: undefined,
+      toolContent: new Map(),
     };
     runs.set(runId, draft);
   }
@@ -298,9 +341,51 @@ const transformationOf = ({
   source,
 });
 
+const hasText = (value: JsonValue): boolean =>
+  (typeof value === 'string' && value.length > 0) ||
+  (Array.isArray(value) &&
+    (value as readonly JsonValue[]).some(
+      (block) => isObject(block) && block['type'] === 'text' && typeof block['text'] === 'string',
+    ));
+
+/** What one appended message says in words: the person's message, a reply, a tool's arguments or its first result. */
+const readContent = (draft: RunDraft, message: ProviderMessage): void => {
+  switch (message.role) {
+    case 'user': {
+      if (isPersonsMessage(message)) {
+        draft.prompt ??= message.content;
+      }
+      break;
+    }
+    case 'assistant': {
+      if (hasText(message.content)) {
+        draft.reply = message.content;
+      }
+      break;
+    }
+    case 'tool-input': {
+      if (!draft.toolContent.has(message.toolCallId)) {
+        draft.toolContent.set(message.toolCallId, { arguments: message.content });
+      }
+      break;
+    }
+    case 'tool-output': {
+      const held = draft.toolContent.get(message.toolCallId);
+      if (held !== undefined && !('result' in held)) {
+        held.result = message.content;
+      }
+      break;
+    }
+  }
+};
+
 /* eslint-disable complexity -- One exhaustive switch over the committed vocabulary reads better than a dispatch table. */
-const fold = (draft: RunDraft, event: AgentLogEvent, fact: Readonly<{ at: number; source: ObservedSource }>): void => {
-  const { at, source } = fact;
+const fold = (
+  draft: RunDraft,
+  event: AgentLogEvent,
+  fact: Readonly<{ at: number; source: ObservedSource; content: boolean }>,
+): void => {
+  const { at, source, content } = fact;
   switch (event.type) {
     case 'run.lifecycle': {
       const attempt = event.attempt ?? 1;
@@ -322,11 +407,17 @@ const fold = (draft: RunDraft, event: AgentLogEvent, fact: Readonly<{ at: number
     case 'turn.history-projection-committed': {
       draft.turnId ??= event.message.id;
       draft.external ||= isExternalAgentTurn(event.message);
+      if (content && isPersonsMessage(event.message)) {
+        draft.prompt ??= event.message.content;
+      }
       break;
     }
     case 'message.appended': {
       const { message } = event;
       draft.external ||= isExternalAgentTurn(message);
+      if (content) {
+        readContent(draft, message);
+      }
       if (message.role === 'tool-input' && !draft.tools.has(message.toolCallId)) {
         draft.tools.set(message.toolCallId, {
           call: message.toolCallId,
@@ -421,6 +512,8 @@ const fold = (draft: RunDraft, event: AgentLogEvent, fact: Readonly<{ at: number
     case 'turn.finalized': {
       draft.turnId ??= event.turnId;
       draft.revision = event.revisionId === undefined ? 'unchanged' : 'written';
+      draft.finalRevision = event.revisionId;
+      draft.changedPaths = event.changedPaths;
       break;
     }
     case 'turn.conflicted': {
@@ -438,7 +531,7 @@ const fold = (draft: RunDraft, event: AgentLogEvent, fact: Readonly<{ at: number
 };
 /* eslint-enable complexity -- End the exhaustive fold. */
 
-const settle = (draft: RunDraft): TurnObservation => {
+const settle = (draft: RunDraft, priorTurns: number, content: boolean): TurnObservation => {
   const attempts = [...draft.terminal.keys()].toSorted((left, right) => left - right);
   const last = attempts.at(-1);
   const open: ObservedInterval[] = [...draft.openApprovals.values()].map((start) => ({
@@ -458,7 +551,12 @@ const settle = (draft: RunDraft): TurnObservation => {
     termination: ending?.outcome ?? 'unknown',
     revision: draft.revision,
     invocations: [...draft.invocations.values()],
-    tools: [...draft.tools.values()],
+    tools: [...draft.tools.values()].map((tool) => {
+      const held = content ? draft.toolContent.get(tool.call) : undefined;
+      return held === undefined
+        ? tool
+        : { ...tool, arguments: held.arguments, ...('result' in held ? { result: held.result } : {}) };
+    }),
     transformations: draft.transformations,
     intervals,
     ending:
@@ -469,6 +567,10 @@ const settle = (draft: RunDraft): TurnObservation => {
             at: ending.at,
             ...(ending.failure === undefined ? {} : { failure: ending.failure }),
           },
+    ...(draft.finalRevision === undefined ? {} : { finalRevision: draft.finalRevision }),
+    filesChanged: draft.changedPaths.length,
+    priorTurns,
+    ...(content ? { content: { prompt: draft.prompt, reply: draft.reply, changedPaths: draft.changedPaths } } : {}),
     lastFactAt: draft.lastFactAt,
     sources: draft.sources,
   };
@@ -485,12 +587,22 @@ const settle = (draft: RunDraft): TurnObservation => {
  *   `unknown`, as is a tool call with no committed output.
  * - An external agent's run is left out entirely (ACP exclusion).
  *
+ * - Content is read only when asked for: the person's message (never a
+ *   Tau-internal one), the last assistant message with text, each tool's
+ *   arguments and first result, and the changed paths.
+ *
  * @param chatId - The chat the rows belong to.
  * @param rows - The chat's rows in log order.
+ * @param options - Whether to read content as well.
  * @returns One observation per Tau run, in the order each run first appears.
  * @public
  */
-export const observeTurns = (chatId: string, rows: readonly AgentLogEvent[]): TurnObservation[] => {
+export const observeTurns = (
+  chatId: string,
+  rows: readonly AgentLogEvent[],
+  options: ObserveTurnsOptions = {},
+): TurnObservation[] => {
+  const content = options.content === true;
   const seen = new Set<string>();
   const runs = new Map<string, RunDraft>();
   for (const event of rows) {
@@ -506,9 +618,9 @@ export const observeTurns = (chatId: string, rows: readonly AgentLogEvent[]): Tu
     if (Number.isFinite(at)) {
       draft.lastFactAt = Math.max(draft.lastFactAt, at);
     }
-    fold(draft, event, { at: Number.isFinite(at) ? at : draft.lastFactAt, source });
+    fold(draft, event, { at: Number.isFinite(at) ? at : draft.lastFactAt, source, content });
   }
-  return [...runs.values()].filter((draft) => !draft.external).map((draft) => settle(draft));
+  return [...runs.values()].filter((draft) => !draft.external).map((draft, index) => settle(draft, index, content));
 };
 
 /** A chat's own turns, and which leader epochs this device held while writing them. @public */
@@ -535,10 +647,15 @@ const ownPageBytes = 4 * 1024 * 1024;
  *
  * @param read - The host's own-row read.
  * @param chatId - The chat.
+ * @param options - Whether to read content as well.
  * @returns Its turns and the epochs this device led.
  * @public
  */
-export const observeOwnTurns = async (read: OwnRowsRead, chatId: string): Promise<OwnTurns> => {
+export const observeOwnTurns = async (
+  read: OwnRowsRead,
+  chatId: string,
+  options: ObserveTurnsOptions = {},
+): Promise<OwnTurns> => {
   const rows: AgentLogEvent[] = [];
   let cursor = 0;
   for (;;) {
@@ -551,5 +668,5 @@ export const observeOwnTurns = async (read: OwnRowsRead, chatId: string): Promis
     cursor = batch.nextCursor;
   }
   const epochs = new Set(rows.map((row) => row.leaderEpoch));
-  return { runs: observeTurns(chatId, rows), ownsEpoch: (leaderEpoch) => epochs.has(leaderEpoch) };
+  return { runs: observeTurns(chatId, rows, options), ownsEpoch: (leaderEpoch) => epochs.has(leaderEpoch) };
 };

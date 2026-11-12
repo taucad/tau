@@ -49,6 +49,7 @@ import type { QualifiedAdmissionInput, TerminalEvidence } from '#credit-ledger.t
 import { MetricsService } from '@taucad/api-observability/metrics';
 import type { llmAdmissionOutcomes } from '@taucad/telemetry';
 import { gatewayProviderLabel, inlineImageBytesOf, recordTurnStepCache } from '#turn-step-telemetry.js';
+import { billableModelRouteIds, supplierIdentityForRoute } from '#billable-model-qualification.js';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import type { ObservedSettlement } from '#observed-settlement.js';
 
@@ -151,6 +152,8 @@ const streamErrorType = (reason: string | undefined): string =>
       : reason === 'authorized_exhausted' || reason === 'malformed_response' || reason === 'service_restart'
         ? reason
         : 'incomplete';
+const fundedRouteIds = new Set<string>(billableModelRouteIds);
+
 const genAiAttributes = (
   qualification: QualifiedBillableInvocation,
 ): Record<'gen_ai.request.model' | 'gen_ai.provider.name' | 'tau.surface', string> => ({
@@ -214,17 +217,23 @@ export class BillableModelInvocationService {
         operationId: existing.id,
       };
     }
-    const resolved = this.resolver.resolve({
-      environment: intent.environment,
-      surface: intent.surface,
-      attempt: intent.attempt,
-      providerWire: intent.providerWire,
-      body: intent.body,
-      priceHeaders: intent.priceHeaders,
-      activity: intent.activity,
-      ...(intent.projectHint === undefined ? {} : { projectHint: intent.projectHint }),
-      ...(intent.chatHint === undefined ? {} : { chatHint: intent.chatHint }),
-    });
+    let resolved: QualifiedBillableInvocation;
+    try {
+      resolved = this.resolver.resolve({
+        environment: intent.environment,
+        surface: intent.surface,
+        attempt: intent.attempt,
+        providerWire: intent.providerWire,
+        body: intent.body,
+        priceHeaders: intent.priceHeaders,
+        activity: intent.activity,
+        ...(intent.projectHint === undefined ? {} : { projectHint: intent.projectHint }),
+        ...(intent.chatHint === undefined ? {} : { chatHint: intent.chatHint }),
+      });
+    } catch (error) {
+      this.recordUnqualified(intent, startedAt, error);
+      throw error;
+    }
     this.metrics?.llmGatewayInlineImageBytes.record(inlineImageBytes, {
       'gen_ai.provider.name': gatewayProviderLabel(resolved.providerId),
     });
@@ -817,6 +826,33 @@ export class BillableModelInvocationService {
   }
 
   /**
+   * Records a call the resolver refused before admission, which has no qualification to label it.
+   * Only a funded route's own provider and model become labels; any other requested id is `other`,
+   * so a caller cannot widen the series. A funded route refused here is logged, because the host
+   * builds that request and a refusal of it is usually a Tau contract fault.
+   */
+  private recordUnqualified(intent: BillableInvocationIntent, startedAt: number, error: unknown): void {
+    const requested: unknown =
+      typeof intent.body === 'object' && intent.body !== null ? Reflect.get(intent.body, 'model') : undefined;
+    const routeId = typeof requested === 'string' && fundedRouteIds.has(requested) ? requested : undefined;
+    const identity = routeId === undefined ? undefined : supplierIdentityForRoute(routeId);
+    const providerId = gatewayProviderLabel(identity?.providerId ?? 'other');
+    const refused = error instanceof LlmGatewayError;
+    this.recordAdmission(intent, { providerId, surface: intent.surface }, startedAt, refused ? 'refused' : 'error');
+    this.metrics?.genAiOperationDuration.record((performance.now() - startedAt) / 1000, {
+      ...(identity === undefined ? {} : { 'gen_ai.request.model': identity.modelId }),
+      'gen_ai.provider.name': providerId,
+      'tau.surface': intent.surface,
+      'error.type': refused ? 'refused' : 'internal',
+    });
+    if (routeId !== undefined) {
+      this.logger.warn(
+        `Funded route ${routeId} refused before admission: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
    * Records how long one funded call spent in admission, once, on whichever exit it took: the
    * supplier request (`dispatched`) or the answer given instead. An idempotent repeat of an attempt
    * the ledger already holds returns before qualification and is not admission work, so it is not
@@ -825,7 +861,7 @@ export class BillableModelInvocationService {
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- one admission exit
   private recordAdmission(
     intent: BillableInvocationIntent,
-    qualification: QualifiedBillableInvocation,
+    qualification: Pick<QualifiedBillableInvocation, 'providerId' | 'surface'>,
     startedAt: number,
     outcome: AdmissionOutcome,
   ): void {

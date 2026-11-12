@@ -36,6 +36,11 @@
       "import": "./src/prompts/index.ts",
       "default": "./src/prompts/index.ts"
     },
+    "./prompts/kernel-routing-digest": {
+      "types": "./src/prompts/kernel-routing-digest.ts",
+      "import": "./src/prompts/kernel-routing-digest.ts",
+      "default": "./src/prompts/kernel-routing-digest.ts"
+    },
     "./rpc": {
       "types": "./src/rpc/index.ts",
       "import": "./src/rpc/index.ts",

@@ -139,7 +139,8 @@ try {
 const fs = require('node:fs');
 const responses = JSON.parse(fs.readFileSync(process.env.TEST_API_RESPONSES, 'utf8'));
 const path = process.argv[3];
-if (path.endsWith('/zip')) process.stdout.write(fs.readFileSync(process.env.TEST_RECEIPT_ARCHIVE));
+const archives = JSON.parse(process.env.TEST_RECEIPT_ARCHIVES || '{}');
+if (path.endsWith('/zip')) process.stdout.write(fs.readFileSync(archives[path] || process.env.TEST_RECEIPT_ARCHIVE));
 else { if (!(path in responses)) throw new Error('Unexpected API path ' + path); console.log(JSON.stringify(responses[path])); }
 `,
   );
@@ -169,11 +170,12 @@ else { if (!(path in responses)) throw new Error('Unexpected API path ' + path);
   };
   saveApi();
   const candidate = admitInstallerCandidate({ runId: '789', workflowCommit: harness, scope: 'macos' });
-  const binding = createQualificationBinding({ manifest, candidate, runId: 123, workflowCommit: harness });
+  const binding = createQualificationBinding({ manifest, candidate, kind: 'ci', runId: 123, workflowCommit: harness });
   const verify = (input: unknown, changes = {}) => {
     verifyQualificationBinding(input, {
       manifest,
       candidate,
+      kind: 'ci',
       runId: 123,
       workflowCommit: harness,
       publicationCommit: publication,
@@ -211,12 +213,15 @@ else { if (!(path in responses)) throw new Error('Unexpected API path ' + path);
     });
   }
   for (const head of [source, divergent]) {
-    assert.throws(() => createQualificationBinding({ manifest, candidate, runId: 123, workflowCommit: head }));
+    assert.throws(() =>
+      createQualificationBinding({ manifest, candidate, kind: 'ci', runId: 123, workflowCommit: head }),
+    );
   }
   assert.throws(() =>
     createQualificationBinding({
       manifest: { ...manifest, sourceCommit: harness },
       candidate,
+      kind: 'ci',
       runId: 123,
       workflowCommit: harness,
     }),
@@ -263,6 +268,131 @@ else { if (!(path in responses)) throw new Error('Unexpected API path ' + path);
     return fetchDesktopQualifiedReceipts(manifest, directory, { ci: '123', scope: 'macos' });
   };
   assert.deepEqual(await fetchReceipts(), receipts);
+  // Clean-host (vm) rows bind the same way: notarized C is built from the newest green ancestor, so its source S is an
+  // ancestor of the vm dispatch H rather than its tip, and only the authenticated vm-kind sidecar admits that.
+  const vmRows = rows.map((row) => ({
+    ...row,
+    receipts: row.receipts.map((receipt) => ({
+      ...receipt,
+      suite: 'clean-host-route-a-b-c-v1',
+      logs: 'https://github.com/taucad/tau/actions/runs/124',
+      environment: {
+        ...receipt.environment,
+        kind: 'vm',
+        host: {
+          platform: 'darwin',
+          runner: 'local-mac-1',
+          productVersion: '26.5.2',
+          nativeArch: receipt.environment.arch,
+          translated: false,
+          sip: 'enabled',
+          gatekeeper: 'enabled',
+          quarantine: {
+            downloaded: '0083;6720a1b2;Chromium;4D3F1C2B-0000-4000-8000-000000000001',
+            installed: '0083;6720a1b2;Chromium;4D3F1C2B-0000-4000-8000-000000000001',
+          },
+          assessment: 'Notarized Developer ID',
+          staple: 'validated-offline',
+          installedPath: '/Applications/Tau.app',
+          launch: 'open',
+        },
+      },
+    })),
+  }));
+  const { receipts: vmReceipts } = collectQualificationRows({
+    scope: 'macos',
+    kind: 'vm',
+    candidate: manifest,
+    sourceCommit: source,
+    channel: 'staging',
+    runId: '124',
+    trustIdentities: { 'macos-zip': 'TEAM123456', 'macos-dmg': 'TEAM123456' },
+    rows: vmRows,
+  });
+  const vmBinding = createQualificationBinding({
+    manifest,
+    candidate,
+    kind: 'vm',
+    runId: 124,
+    workflowCommit: harness,
+  });
+  const verifyVm = (input: unknown, changes = {}) => {
+    verifyQualificationBinding(input, {
+      manifest,
+      candidate,
+      kind: 'vm',
+      runId: 124,
+      workflowCommit: harness,
+      publicationCommit: publication,
+      ...changes,
+    });
+  };
+  verifyVm(vmBinding);
+  // A CI sidecar never stands in for clean-host evidence, nor a clean-host sidecar for CI.
+  assert.throws(() => {
+    verifyVm({ ...binding, runId: 124 });
+  }, /binding differs/u);
+  assert.throws(() => {
+    verify({ ...vmBinding, runId: 123 });
+  }, /binding differs/u);
+  for (const change of [{ runId: 123 }, { workflowCommit: source }, { sourceCommit: harness }, { kind: 'ci' }]) {
+    assert.throws(() => {
+      verifyVm({ ...vmBinding, ...change });
+    });
+  }
+  for (const head of [source, divergent]) {
+    assert.throws(() =>
+      createQualificationBinding({ manifest, candidate, kind: 'vm', runId: 124, workflowCommit: head }),
+    );
+  }
+  const fetchWithVm = async (bindingInput: unknown = vmBinding, receiptInput: unknown = vmReceipts) => {
+    const directory = join(root, `vm-attempt-${attempt++}`);
+    mkdirSync(directory);
+    writeFileSync(join(directory, 'route-receipts.json'), JSON.stringify(receiptInput));
+    const files = ['route-receipts.json'];
+    if (bindingInput !== null) {
+      writeFileSync(join(directory, 'qualification-binding.json'), JSON.stringify(bindingInput));
+      files.push('qualification-binding.json');
+    }
+    const archive = join(directory, 'receipts.zip');
+    execFileSync('zip', ['-q', archive, ...files], { cwd: directory });
+    const routes = api as Record<string, unknown>;
+    routes['repos/taucad/tau/actions/runs/124'] = {
+      ...qualificationRun,
+      id: 124,
+      path: '.github/workflows/desktop-route-vm-acceptance.yml',
+    };
+    routes['repos/taucad/tau/actions/runs/124/artifacts?per_page=100'] = {
+      artifacts: [
+        {
+          id: 654,
+          name: 'desktop-macos-vm-receipts',
+          expired: false,
+          digest: `sha256:${createHash('sha256').update(readFileSync(archive)).digest('hex')}`,
+          workflow_run: { id: 124, head_sha: harness },
+        },
+      ],
+    };
+    saveApi();
+    process.env['TEST_RECEIPT_ARCHIVES'] = JSON.stringify({ 'repos/taucad/tau/actions/artifacts/654/zip': archive });
+    const publishDirectory = join(root, `vm-publish-${attempt++}`);
+    mkdirSync(publishDirectory);
+    try {
+      return await fetchDesktopQualifiedReceipts(manifest, publishDirectory, { ci: '123', vm: '124', scope: 'macos' });
+    } finally {
+      delete process.env['TEST_RECEIPT_ARCHIVES'];
+    }
+  };
+  // The CI archive written by the last fetchReceipts() stays the default archive for artifact 456.
+  await fetchReceipts();
+  assert.deepEqual(await fetchWithVm(), [...receipts, ...vmReceipts]);
+  await assert.rejects(fetchWithVm(null), /archive members/u);
+  await assert.rejects(fetchWithVm({ ...binding, runId: 124 }), /binding differs/u);
+  await assert.rejects(fetchWithVm({ ...vmBinding, candidate: { ...candidate, artifactId: 999 } }), /binding differs/u);
+  await assert.rejects(fetchWithVm(vmBinding, receipts), /Receipt kind differs/u);
+  delete (api as Record<string, unknown>)['repos/taucad/tau/actions/runs/124'];
+  delete (api as Record<string, unknown>)['repos/taucad/tau/actions/runs/124/artifacts?per_page=100'];
+  saveApi();
   // An Intel Mac receipt smuggled into the authenticated archive never joins the Apple silicon receipt set.
   await assert.rejects(
     fetchReceipts(binding, [
@@ -330,12 +460,13 @@ else { if (!(path in responses)) throw new Error('Unexpected API path ' + path);
   const equalBinding = createQualificationBinding({
     manifest,
     candidate: equalCandidate,
+    kind: 'ci',
     runId: 123,
     workflowCommit: source,
   });
   assert.deepEqual(await fetchReceipts(equalBinding), receipts);
   console.log(
-    'PASS collector-to-publisher S<K<H<P binding, authenticated ZIP/API substitutions and equal-source fail-closed',
+    'PASS collector-to-publisher S<K<H<P CI and clean-host bindings, authenticated ZIP/API substitutions and equal-source fail-closed',
   );
 } finally {
   process.chdir(previousDirectory);

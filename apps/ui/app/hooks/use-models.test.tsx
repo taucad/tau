@@ -7,7 +7,7 @@ import type { AcpAgentExecution, TauAgentExecution } from '@taucad/chat';
 import { useModels } from '#hooks/use-models.js';
 import type { Model } from '#hooks/use-models.js';
 import { store } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { metaConfig } from '#constants/meta.constants.js';
 import { redeemLoopbackHandOff, resetLoopbackAgentHosts } from '#lib/agent-host-placement.js';
 

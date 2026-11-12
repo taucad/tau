@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PurposeAuthorityInput, RecordedPurposeDecision } from '#telemetry-purposes/purpose-authority.js';
-import { purposeEpoch, resolvePurposeAuthority } from '#telemetry-purposes/purpose-authority.js';
+import { contentCapturePermits, purposeEpoch, resolvePurposeAuthority } from '#telemetry-purposes/purpose-authority.js';
 import type { PurposeRefusal } from '#telemetry-purposes/telemetry-purpose.schema.js';
 import type { TelemetryPurpose } from '@taucad/api-database/schema/telemetry-purpose.types';
 import { telemetryPurposes } from '@taucad/api-database/schema/telemetry-purpose.types';
@@ -21,6 +21,8 @@ const authority = (overrides: Partial<PurposeAuthorityInput> = {}): PurposeAutho
   decisions: [],
   tier: 'free',
   tierAssured: true,
+  /* The capture mode permits the account unless a test says otherwise; its own tests below leave it out. */
+  contentCapture: true,
   ...overrides,
 });
 
@@ -220,6 +222,61 @@ describe('resolvePurposeAuthority', () => {
     it('allows the account’s grants for its own single-source project', () => {
       expect(allowed(authority({ decisions: granted, project }))).toEqual([...telemetryPurposes]);
     });
+  });
+});
+
+describe('content capture mode', () => {
+  const granted = telemetryPurposes.map((purpose) => decided(purpose, true));
+
+  it('refuses content when the mode does not permit the account, whatever the account granted', () => {
+    const { contentCapture: _permitted, ...unset } = authority({ decisions: granted });
+
+    for (const input of [unset, { ...unset, contentCapture: false }]) {
+      expect(refusalOf(input, 'content')).toBe('capture-off');
+      expect(allowed(input)).toEqual(telemetryPurposes.filter((purpose) => purpose !== 'content'));
+    }
+  });
+
+  it('refuses the free plan default for content while the mode is off', () => {
+    const { contentCapture: _permitted, ...unset } = authority({ improvementDefault: true });
+
+    expect(refusalOf(unset, 'content')).toBe('capture-off');
+    expect(allowed(unset)).toEqual(['summary', 'reuse', 'training']);
+  });
+
+  it('keeps the account’s own refusals and the project fence ahead of the mode', () => {
+    const input = authority({ decisions: granted, contentCapture: false });
+
+    expect(refusalOf({ ...input, noticeVersion: undefined }, 'content')).toBe('notice-unapproved');
+    expect(
+      refusalOf({ ...input, project: { fenced: true, ownedByPrincipal: true, mixedSource: false } }, 'content'),
+    ).toBe('project-fenced');
+  });
+
+  it('still needs the account’s permission when the mode permits it', () => {
+    expect(refusalOf(authority({ decisions: [decided('content', false)] }), 'content')).toBe('withdrawn');
+    expect(refusalOf(authority(), 'content')).toBe('no-decision');
+    expect(allowed(authority({ decisions: [decided('content', true)] }))).toEqual(['content']);
+  });
+});
+
+describe('contentCapturePermits', () => {
+  it('denies every account by default and while the mode is off', () => {
+    expect(contentCapturePermits({ mode: undefined, accounts: ['staff-a'] }, 'staff-a')).toBe(false);
+    expect(contentCapturePermits({ mode: 'off', accounts: ['staff-a'] }, 'staff-a')).toBe(false);
+  });
+
+  it('permits only listed accounts under the allowlist', () => {
+    const allowlist = { mode: 'allowlist', accounts: ['staff-a', 'staff-b'] } as const;
+
+    expect(contentCapturePermits(allowlist, 'staff-a')).toBe(true);
+    expect(contentCapturePermits(allowlist, 'staff-b')).toBe(true);
+    expect(contentCapturePermits(allowlist, 'customer-a')).toBe(false);
+    expect(contentCapturePermits({ mode: 'allowlist', accounts: [] }, 'staff-a')).toBe(false);
+  });
+
+  it('permits every account when on', () => {
+    expect(contentCapturePermits({ mode: 'on', accounts: [] }, 'customer-a')).toBe(true);
   });
 });
 

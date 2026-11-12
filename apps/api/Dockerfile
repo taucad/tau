@@ -38,7 +38,10 @@
 #     missing-module error before `nx build api` can even start. Full install
 #     is required; the cold-cache cost is ~70s (network-bound, same as filtered).
 
-ARG NODE_VERSION=24.19.0
+# The Node CI runs Nx under (`.github/actions/setup-nx` `node-version`). `nx.json` hashes
+# `node --version` into every task, so any other version here misses every remote cache
+# entry CI wrote (`scripts/src/nx-cache-inputs.test.ts` keeps the two equal).
+ARG NODE_VERSION=24.20.0
 ARG PNPM_VERSION=10.30.3
 # Pinned (charter W8): see the runtime-base stage.
 ARG GIT_VERSION=1:2.39.5-0+deb12u3

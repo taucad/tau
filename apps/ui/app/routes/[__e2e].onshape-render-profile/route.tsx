@@ -512,7 +512,8 @@ function CalibrationProbe({
         verticalFieldOfView: cameraSettings.fov,
       });
       rig.actorRef.send({
-        type: 'setView',
+        type: 'poseObserved',
+        source: 'input',
         target,
         direction: views[cameraSettings.view],
         up: cameraSettings.view === 'top' ? [0, 1, 0] : cameraSettings.view === 'bottom' ? [0, -1, 0] : [0, 0, 1],
@@ -543,10 +544,14 @@ function CalibrationProbe({
       advanceBenchmarkPlayback(kinematicsRef, current.playbackMeasurements, Math.min(current.frame, 329));
       if (benchmarkKind === 'orbit' || benchmarkKind === 'combined') {
         const angle = (Math.min(current.frame, 329) * Math.PI) / 150;
-        const { view } = rig.actorRef.getSnapshot().context;
+        const { target, up, verticalSpan, perspectiveZoom } = rig.actorRef.getSnapshot().context.view;
         rig.actorRef.send({
-          ...view,
-          type: 'setView',
+          type: 'poseObserved',
+          source: 'input',
+          target,
+          up,
+          verticalSpan,
+          perspectiveZoom,
           direction: [Math.cos(angle), Math.sin(angle), 0.65],
         });
       } else if (
@@ -825,7 +830,7 @@ const CalibrationCanvas = memo(function CalibrationCanvas({
     }
   }, [geometry, graphicsRef]);
   return (
-    <GraphicsProvider graphicsRef={graphicsRef} initialVerticalFieldOfView={0}>
+    <GraphicsProvider graphicsRef={graphicsRef}>
       <ThreeProvider
         graphicsBackend={backend}
         upDirection='z'
@@ -905,6 +910,8 @@ export function RenderingProfile(): React.JSX.Element {
       enableMatcap: false,
       upDirection: 'z',
       graphicsBackend: 'webgl',
+      // The profile opens orthographic; each run sets its own field of view.
+      camera: { cameraFovAngle: 0 },
     },
   });
   const backend = useSelector(graphicsRef, (snapshot) => snapshot.context.resolvedGraphicsBackend);

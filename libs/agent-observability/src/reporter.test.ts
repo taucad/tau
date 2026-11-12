@@ -90,7 +90,8 @@ describe('summaryGrantOf', () => {
   it('should grant only a project-scoped answer that allows summaries', () => {
     const subject = { principal: 'user-a', project: 'project-a' };
 
-    expect(summaryGrantOf(answer(true), subject)).toEqual(grant());
+    /* The same answer says whether content is allowed too: the summary grant carries it (LW6). */
+    expect(summaryGrantOf(answer(true), subject)).toEqual(grant({ content: {} }));
     expect(summaryGrantOf(answer(false), subject)).toBeUndefined();
     expect(summaryGrantOf({ ...answer(true), projectId: undefined }, subject)).toBeUndefined();
     expect(summaryGrantOf(answer(true, 'project-b'), subject)).toBeUndefined();
@@ -118,6 +119,83 @@ describe('summaryGrantOf', () => {
     expect(purposeGrantOf(since(at, at), subject, 'summary')).toEqual(grant());
     expect(purposeGrantOf(since(-1, at), { ...subject, receivedAt: at }, 'summary')).toEqual(grant());
     expect(purposeGrantOf(since(Number.NaN, at), { ...subject, receivedAt: at }, 'summary')).toEqual(grant());
+  });
+});
+
+describe('the content grant (LW6)', () => {
+  const subject = { principal: 'user-a', project: 'project-a', receivedAt: at + 100_000 };
+  const answer = (content: boolean | undefined, allowedSince?: number) => ({
+    epoch: 'policy-1',
+    projectId: 'project-a',
+    answeredAt: at + 10_000,
+    purposes: [
+      { purpose: 'summary', allowed: true },
+      ...(content === undefined ? [] : [{ purpose: 'content', allowed: content, allowedSince }]),
+    ],
+  });
+
+  it('should carry content on the summary grant only when the same answer allows it, dated on the host clock', () => {
+    expect(summaryGrantOf(answer(undefined), subject)?.content).toBeUndefined();
+    expect(summaryGrantOf(answer(false), subject)?.content).toBeUndefined();
+    expect(purposeGrantOf(answer(true, at), subject, 'summary')?.content).toEqual({ allowedSince: at + 90_000 });
+    /* The feedback grant never carries content. */
+    expect(
+      purposeGrantOf(
+        {
+          ...answer(true),
+          purposes: [
+            { purpose: 'feedback', allowed: true },
+            { purpose: 'content', allowed: true },
+          ],
+        },
+        subject,
+        'feedback',
+      )?.content,
+    ).toBeUndefined();
+  });
+
+  const toolRun = (index: number): ProjectedRun => ({
+    ...run(index),
+    tools: [
+      {
+        call: `call-${index}`,
+        toolName: 'edit_file',
+        outcome: 'completed',
+        input: { chatId: 'chat-1', leaderEpoch: 'epoch-a', sequence: 100 + index },
+        output: { chatId: 'chat-1', leaderEpoch: 'epoch-a', sequence: 200 + index },
+        startedAt: at + 500,
+        settledAt: at + 600,
+        arguments: { targetFile: 'main.ts' },
+        result: 'SYNTHETIC_RESULT',
+      },
+    ],
+    content: { prompt: 'SYNTHETIC_PROMPT', reply: 'SYNTHETIC_REPLY', changedPaths: [] },
+  });
+
+  it('should project content from when content was allowed, and only summaries once it is not', async () => {
+    const { reporter, sent } = setup([
+      grant({ allowedSince: at, content: { allowedSince: at } }),
+      grant({ allowedSince: at }),
+    ]);
+
+    await reporter.report([toolRun(1)], () => true);
+    expect(sent.map((evidence) => evidence.payload.plane)).toEqual(['content', 'content']);
+    expect(JSON.stringify(sent)).toContain('SYNTHETIC_PROMPT');
+
+    await reporter.report([toolRun(2)], () => true);
+    expect(sent.slice(2).map((evidence) => evidence.payload.plane)).toEqual(['summary', 'summary']);
+    expect(JSON.stringify(sent.slice(2))).not.toContain('SYNTHETIC');
+  });
+
+  it('should project only summaries for facts before content was allowed', async () => {
+    const { reporter, sent, advance } = setup([grant({ allowedSince: at, content: { allowedSince: at + 800 } })]);
+    advance(2000);
+
+    await reporter.report([toolRun(1)], () => true);
+    expect(sent.map((evidence) => [evidence.semantic.kind, evidence.payload.plane])).toEqual([
+      ['tool', 'summary'],
+      ['outcome', 'content'],
+    ]);
   });
 });
 

@@ -8,6 +8,7 @@ import { mock } from 'vitest-mock-extended';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
 import {
+  agentHostRatingChannel,
   directoryGrantChannels,
   hostHandOffChannel,
   openDirectoryChannel,
@@ -187,6 +188,21 @@ describe('desktop preload generated image bridge', () => {
       generatedImageIpcChannel,
       '/Users/tester/.codex/generated_images/run-1/top.png',
     );
+  });
+});
+
+describe('desktop preload agent-host rating', () => {
+  /* LW8: a rating made in the desktop app goes to main, which relays it to the services utility's project host. */
+  it('should send the account’s rating of a run to main on its own channel', async () => {
+    vi.mocked(ipcRenderer.invoke).mockReset().mockResolvedValue(undefined);
+    const tau = state.exposed.get('tau') as {
+      readonly agentHost: { rated(rating: Readonly<Record<string, unknown>>): Promise<void> };
+    };
+    const rating = { projectId: 'proj_a', chatId: 'chat-1', runId: 'run-1', value: 'negative', at: 1 };
+
+    await tau.agentHost.rated(rating);
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledExactlyOnceWith(agentHostRatingChannel, rating);
   });
 });
 

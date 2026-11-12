@@ -93,6 +93,33 @@ export type GatewayTurnLabels = Readonly<{
 }>;
 
 /**
+ * `x-tau-host-kind`: where the agent host that made a gateway step runs. apps/api reads it, with `x-tau-host-build`,
+ * `x-tau-kernel` and `x-tau-model`, as an observability label only (`readHostLabels`), never for admission, price or
+ * the request digest, and turns a value it does not know into `unknown`.
+ *
+ * @public
+ */
+export const gatewayHostKinds = ['browser', 'desktop', 'daemon', 'cloud'] as const;
+
+/** One {@link gatewayHostKinds} value. @public */
+export type GatewayHostKind = (typeof gatewayHostKinds)[number];
+
+/**
+ * The labels one composition puts on every gateway step it makes, as `x-tau-host-kind`, `x-tau-host-build` and
+ * `x-tau-kernel`; the transport adds `x-tau-model` from each request's model. Client-asserted labels (LR13), sent as
+ * headers and never in the request body.
+ *
+ * @public
+ */
+export type GatewayHostLabels = Readonly<{
+  kind: GatewayHostKind;
+  /** The host build's release label, such as its short commit. Absent when the composition cannot read it. */
+  build?: string | undefined;
+  /** The kernel id of the project the host serves. Absent when the composition has none. */
+  kernel?: string | undefined;
+}>;
+
+/**
  * The host's reader-side projection of the gateway's attempt lookup, `GET v1/billing/attempts/:surface/:attemptKey`.
  * `z.looseObject` keeps fields this build does not read (D16) without reshaping them, so the receipt can grow.
  * `voided: true` on `not_found` means the gateway voided the key before answering (GI-R3); a bare `not_found` comes

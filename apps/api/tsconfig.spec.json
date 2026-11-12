@@ -5,10 +5,7 @@
     "target": "ESNext",
     "outDir": "./out-tsc/spec",
     "erasableSyntaxOnly": false, // Incompatible with NestJS dependency injection.
-    "types": ["node", "vitest/importMeta", "vite-plugin-node", "vitest"],
-    "paths": {
-      "libcascade": ["../libs/api-extractor/src/generated/opencascade/modules/libcascade/index.d.ts"]
-    }
+    "types": ["node", "vitest/importMeta", "vite-plugin-node", "vitest"]
   },
   "include": [
     "vite.config.ts",

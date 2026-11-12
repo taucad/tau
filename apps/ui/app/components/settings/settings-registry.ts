@@ -219,7 +219,63 @@ const settingsCatalog = [
     label: 'Viewer',
     icon: Rotate3D,
     group: 'Workspace',
-    entries: [],
+    entries: [
+      /* View defaults: one entry per inheritable leaf the person can set (no up axis). */
+      {
+        id: 'viewer-projection',
+        label: 'Projection',
+        description: 'Perspective shows depth, orthographic keeps parallel edges parallel',
+        keywords: ['field of view', 'fov', 'orthographic', 'perspective', 'camera', 'view defaults'],
+      },
+      {
+        id: 'viewer-surfaces',
+        label: 'Surfaces',
+        description: 'Show the faces of every model',
+        keywords: ['faces', 'view defaults'],
+      },
+      {
+        id: 'viewer-edges',
+        label: 'Edges',
+        description: 'Outline the edges of every face',
+        keywords: ['lines', 'outline', 'view defaults'],
+      },
+      {
+        id: 'viewer-show-gizmo',
+        label: 'Show gizmo',
+        description: 'The orientation control in the corner of a view',
+        keywords: ['view cube', 'hide gizmo', 'none', 'view defaults'],
+      },
+      {
+        id: 'viewer-grid',
+        label: 'Grid',
+        description: 'A ground grid with a scale label',
+        keywords: ['ground', 'floor', 'view defaults'],
+      },
+      {
+        id: 'viewer-axes',
+        label: 'Axes',
+        description: 'The X, Y and Z axes at the origin',
+        keywords: ['origin', 'x y z', 'view defaults'],
+      },
+      {
+        id: 'viewer-matcap',
+        label: 'Matcap',
+        description: 'Shade surfaces with a studio material',
+        keywords: ['material', 'shading', 'lighting', 'view defaults'],
+      },
+      {
+        id: 'viewer-post-processing',
+        label: 'Post-processing',
+        description: 'Soften shadows and smooth edges on screen',
+        keywords: ['ambient occlusion', 'anti-aliasing', 'effects', 'view defaults'],
+      },
+      {
+        id: 'viewer-grid-unit',
+        label: 'Grid unit',
+        description: 'The length unit the grid shows',
+        keywords: ['millimetre', 'inch', 'units', 'metric', 'imperial', 'view defaults'],
+      },
+    ],
   },
   {
     id: 'compute',

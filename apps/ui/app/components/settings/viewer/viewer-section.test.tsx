@@ -76,12 +76,22 @@ describe('Settings → Viewer behind viewerControls (V1)', () => {
     expect(availableSettingsSections(() => false).some(({ id }) => id === 'viewer')).toBe(false);
     expect(availableSettingsSections(() => true).some(({ id }) => id === 'viewer')).toBe(true);
     expect(searchSettings('viewer')).toEqual([]);
+    expect(searchSettings('grid unit')).toEqual([]);
+    const on = searchSettings('grid unit', availableSettingsSections(() => true));
+    expect(on.map(({ section }) => section.id)).toEqual(['viewer']);
+    expect(on[0]?.entries.map(({ id }) => id)).toEqual(['viewer-grid-unit']);
 
     const user = userEvent.setup();
     const off = render(<Surface url='/?settings=general' />);
     await user.type(screen.getByRole('searchbox', { name: 'Search settings' }), 'viewer');
     expect(screen.getByRole('status')).toHaveTextContent('No settings found');
     off.unmount();
+
+    flags.viewerControls = true;
+    render(<Surface url='/?settings=general' />);
+    await user.type(screen.getByRole('searchbox', { name: 'Search settings' }), 'orthographic');
+    expect(screen.getByRole('status')).toHaveTextContent('1 setting found');
+    expect(screen.getByRole('button', { name: 'Projection' })).toBeInTheDocument();
   });
 });
 
@@ -97,7 +107,7 @@ describe('SettingsRow at 320 px (V12)', () => {
     const group = screen.getByRole('group', { name: 'Mouse controls' });
     const line = group.firstElementChild!;
     const [text, control] = [...line.children];
-    // jsdom has no layout: the classes are the contract that wraps the control and keeps the page from scrolling.
+    // The test DOM has no layout: the classes are the contract that wraps the control and keeps the page from scrolling.
     expect(line).toHaveClass('flex-wrap');
     expect(text).toHaveClass('min-w-0', 'flex-1', 'basis-48');
     expect(control).toHaveClass('min-w-0', 'max-w-full');

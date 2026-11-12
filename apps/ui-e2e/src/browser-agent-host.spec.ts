@@ -891,7 +891,10 @@ describe('durable log reattach after a reload', () => {
     await expect
       .poll(durableFailureReason, { timeout: 120_000 })
       .toBe('The host executing this run is gone. Resume the turn to continue it.');
-    await target.expectVisible(selectors.getByText('The host executing this run is gone', { exact: false }), 60_000);
+    /* The card names the pause and promises the saved turn; the host's diagnostic sentence stays out of the copy
+     * (deb4672073). */
+    await target.expectVisible(selectors.getByText('Chat paused', { exact: true }), 60_000);
+    await target.expectVisible(selectors.getByText('Everything up to here is saved.', { exact: true }), 60_000);
     expect(await readGatewayRequestCount()).toBe(1);
     await assertNoApiRunCalls();
     const firstSettlement = await waitForAbandonedSettlement('home');

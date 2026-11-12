@@ -318,9 +318,7 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
           ) : (
             <Button
               onClick={() => {
-                if (current !== 'done') {
-                  telemetry.stepCompleted(current, readRecord());
-                }
+                telemetry.stepCompleted(current, readRecord());
                 goTo(steps[index + 1] ?? 'done');
               }}
             >

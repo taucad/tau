@@ -117,7 +117,7 @@ vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({
 const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
   revisionNumber: undefined,
   changeId: `change-${over.revisionId}`,
-  who: { kind: 'recorded', identity: { kind: 'user', id: 'You' } },
+  who: { kind: 'recorded', identity: { kind: 'user', id: 'usr_test' } },
   source: 'user',
   createdAt: 1_788_220_800_000,
   summary: 'Thicker base',
@@ -1294,8 +1294,14 @@ describe('Revisions pane vocabulary and History', () => {
     const openEverything = async (): Promise<HTMLElement> => {
       const user = userEvent.setup();
       revisionStatusHarness.rows = [
-        row({ revisionId: oid('a'), revisionNumber: 2, treeId: oid('b'), parent: oid('c'), trigger: 'save' }),
-        row({ revisionId: oid('c'), revisionNumber: 1, treeId: oid('d'), trigger: 'save', actor: 'anon:3fa9c1d2' }),
+        row({ revisionId: oid('a'), revisionNumber: 2, treeId: oid('b'), parent: oid('c'), capture: 'save' }),
+        row({
+          revisionId: oid('c'),
+          revisionNumber: 1,
+          treeId: oid('d'),
+          capture: 'save',
+          who: { kind: 'recorded', identity: { kind: 'user', id: 'anon:3fa9c1d2', anonymous: true } },
+        }),
       ];
       revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: oid('a') };
       renderPane();

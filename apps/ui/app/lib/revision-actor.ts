@@ -507,9 +507,10 @@ export const revisionWho = (entry: RevisionWhoEntry, context: RevisionWhoContext
   if (isAnonymous) {
     return { line: anonymous, isYou: false, isAgent: false };
   }
-  const { session } = context;
-  if (session !== undefined && person?.id === session.id) {
-    return account(session.id, session.name ?? '');
+  /* Made on this device by whoever is signed in here: the recorded person is the session's account. */
+  const mine = context.session === undefined || person?.id !== context.session.id ? undefined : context.session;
+  if (mine !== undefined) {
+    return account(mine.id, mine.name ?? '');
   }
   if (entry.who.kind === 'unrecorded' && entry.who.authorName !== undefined && entry.who.authorName !== '') {
     return { line: entry.who.authorName, isYou: false, isAgent: false };

@@ -60,7 +60,10 @@ vi.mock('#hooks/chat-session-store-provider.js', () => {
 const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
   revisionNumber: undefined,
   changeId: `change-${over.revisionId}`,
-  who: { kind: 'recorded', identity: { kind: 'user', id: 'tau-browser-agent-host' } },
+  who: {
+    kind: 'recorded',
+    identity: { kind: 'agent', id: 'agent', runId: 'run-1', onBehalfOf: { kind: 'user', id: 'usr_other' } },
+  },
   source: 'agent',
   createdAt: 1_788_220_800_000,
   summary: 'Agent turn u1',

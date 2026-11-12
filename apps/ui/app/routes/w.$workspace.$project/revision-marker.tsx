@@ -480,6 +480,15 @@ export function RevisionDetails({
             <dd className='min-w-0'>{value}</dd>
           </div>
         ))}
+        {/* The trailer the entry records (B2, B5), under its label and across the pane: a diagnostic, debug only. */}
+        {isDebug && revision.trailer !== undefined ? (
+          <div className='col-span-2 flex min-w-0 flex-col gap-0.5'>
+            <dt className='text-muted-foreground'>Recorded trailer</dt>
+            <dd className='min-w-0'>
+              <code className='block font-mono break-all whitespace-pre-wrap'>{revision.trailer}</code>
+            </dd>
+          </div>
+        ) : null}
       </dl>
     </CollapsibleContent>
   );

@@ -329,12 +329,12 @@ describe('RevisionRow', () => {
   it('names no stored id in Details with the debug setting off (B5)', async () => {
     const user = userEvent.setup();
     const [id, tree, parent] = ['a', 'b', 'c'].map((digit) => digit.repeat(40));
-    renderRow({ revision: card({ revisionId: id, treeId: tree, parent }) });
+    renderRow({ revision: card({ revisionId: id, treeId: tree, parent, trailer: 'Tau-Metadata: {"version":2}' }) });
     await openRow(user);
     await user.click(screen.getByRole('button', { name: 'Details' }));
     const details = document.querySelector('dl[aria-label="Details for Rev 2"]');
     expect(details).toHaveTextContent('Agent turn');
-    expect(details).not.toHaveTextContent(/Revision|Tree|Parent/u);
+    expect(details).not.toHaveTextContent(/Revision|Tree|Parent|Recorded trailer|Tau-Metadata/u);
     expect(document.body.textContent).not.toMatch(/[\da-f]{40}/u);
   });
 
@@ -373,6 +373,25 @@ describe('RevisionRow', () => {
       expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(
         new RegExp(`Tree\\s*${'a'.repeat(40)}`, 'u'),
       );
+    });
+
+    /* B2 closes B5: the trailer the entry records, verbatim, behind the debug setting. */
+    it('shows the recorded trailer in Details', async () => {
+      const user = userEvent.setup();
+      const trailer = 'Tau-Metadata: {"version":2}\nTau-Actor: user ada\nTau-Trigger: turn';
+      renderRow({ revision: card({ trailer }) });
+      await openRow(user);
+      await user.click(screen.getByRole('button', { name: 'Details' }));
+      const recorded = screen.getByText('Recorded trailer').nextElementSibling?.querySelector('code');
+      expect(recorded?.textContent).toBe(trailer);
+    });
+
+    it('shows no recorded trailer on an entry Tau did not record', async () => {
+      const user = userEvent.setup();
+      renderRow();
+      await openRow(user);
+      await user.click(screen.getByRole('button', { name: 'Details' }));
+      expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).not.toHaveTextContent('Recorded trailer');
     });
 
     it('says a branch’s first revision follows none', async () => {

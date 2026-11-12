@@ -324,7 +324,12 @@ const numbersOn = async (
   return numbers;
 };
 
-/** A commit Tau recorded carries its identity, capture, leg and trailer; any other its git author (B2, B3). */
+/**
+ * Who made one entry, what asked for it and the trailer it records (B2, B3).
+ *
+ * @param entry - One log entry.
+ * @returns A recorded entry's identity, capture and trailer; an unrecorded one's git author.
+ */
 const whoOf = (
   entry: RevisionLogEntry,
 ): Readonly<{ who: RevisionRowWho; capture?: RevisionProvenance['capture']; trailer?: string }> => {

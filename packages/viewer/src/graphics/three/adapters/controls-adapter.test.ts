@@ -531,11 +531,20 @@ describe('controls adapter', () => {
     harness.attach();
     const controls = harness.controls();
     const polar = controls.polarAngle;
-    const release = harness.lock.begin();
+    // A view cube whose gesture holds the lock, as it does while it turns the camera.
+    let report: ((event: ViewportGizmoAdapterEvent) => void) | undefined;
+    const adapter: ViewportGizmoAdapterLogic = createCallbackLogic(({ sendBack }) => {
+      report = sendBack;
+      return undefined;
+    });
+    harness.graphics.send({ type: 'viewportGizmoAttached', gizmoId: 'cube', adapter });
+    report?.({ type: 'gizmoPressed' });
+    report?.({ type: 'gizmoTurned' });
+    expect(selectGraphicsViewportGizmoLocked(harness.graphics.getSnapshot())).toBe(true);
     harness.graphics.send(step);
     controls.update(0);
     expect(controls.polarAngle).toBeCloseTo(polar, 9);
-    release();
+    report?.({ type: 'gizmoReleased' });
   });
 
   it('stops stepping the controls when its canvas leaves', () => {

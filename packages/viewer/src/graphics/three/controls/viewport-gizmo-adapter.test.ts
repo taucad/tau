@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Color, Raycaster, Scene, Vector3 } from 'three';
-import type { Camera, EventDispatcher } from 'three';
+import type { Camera, EventDispatcher, Object3D } from 'three';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor, InspectionEvent } from 'xstate';
 import type { RootState } from '@react-three/fiber';
@@ -19,6 +19,12 @@ import {
   viewportGizmoRenderPriority,
 } from '#graphics/three/controls/viewport-gizmo-adapter.js';
 import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
+import {
+  applyViewportGizmoNodeMaterials,
+  applyViewportGizmoSurface,
+} from '#graphics/three/controls/viewport-gizmo-cube-surface.js';
+import type { GizmoStyleId } from '#graphics/three/controls/viewport-gizmo-styles.js';
+import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import { subscribeViewerLoadTiming } from '#lib/viewer-load-timing.js';
 import type { ViewerLoadSpan } from '#lib/viewer-load-timing.js';
 import { graphicsMachine, selectGraphicsViewportGizmoLocked } from '#machines/graphics.machine.js';
@@ -30,6 +36,7 @@ type CameraUpdateHandler = (camera: ThreeCamera, snapshot: CameraDriverSnapshot)
 
 type GizmoOptions = Readonly<{
   up: 'x' | 'y' | 'z';
+  type: string;
   placement: string;
   font: { family: string };
   right: { color: number; labelColor: number };
@@ -50,6 +57,8 @@ type FakeGizmoShape = EventDispatcher<Record<string, Record<string, unknown>>> &
   readonly domUpdate: ReturnType<typeof vi.fn>;
   readonly scale: { multiplyScalar: ReturnType<typeof vi.fn> };
   readonly _viewport: number[];
+  readonly children: Object3D[];
+  readonly _domElement: HTMLElement;
 };
 
 vi.mock('three-viewport-gizmo', async () => {
@@ -67,9 +76,12 @@ vi.mock('three-viewport-gizmo', async () => {
 
     public readonly add = vi.fn();
 
-    public readonly children: unknown[] = [];
+    public children: Object3D[] = [new three.Object3D(), new three.Object3D()];
 
     public readonly remove = vi.fn();
+
+    // oxlint-disable-next-line @typescript-eslint/naming-convention -- `three-viewport-gizmo`'s private pointer surface.
+    public _domElement = document.createElement('div');
 
     public readonly dispose = vi.fn();
 
@@ -92,6 +104,9 @@ vi.mock('three-viewport-gizmo', async () => {
     }
 
     public set(options: GizmoOptions): this {
+      // `set` regenerates the cube's children and its pointer surface.
+      this.children = [new three.Object3D(), new three.Object3D()];
+      this._domElement = document.createElement('div');
       this.options = options;
       this.sets.push(options);
       return this;
@@ -105,6 +120,7 @@ vi.mock('#graphics/three/controls/viewport-gizmo-cube-axes.js', () => ({
 }));
 vi.mock('#graphics/three/controls/viewport-gizmo-cube-surface.js', () => ({
   applyViewportGizmoSurface: vi.fn(),
+  applyViewportGizmoNodeMaterials: vi.fn(),
 }));
 
 const cameraView = {
@@ -149,7 +165,13 @@ type Harness = Readonly<{
   consumers: Set<CameraUpdateHandler>;
   /** The frame callbacks subscribed on the stub root, with their priorities, in subscription order. */
   frames: () => Array<{ ref: { current: (state: RootState, delta: number) => void }; priority: number }>;
-  attachCube: (options?: Readonly<{ planePicker?: SectionPlanePicker; backend?: 'webgl' | 'webgpu' }>) => void;
+  attachCube: (
+    options?: Readonly<{
+      planePicker?: SectionPlanePicker;
+      backend?: ResolvedGraphicsBackend;
+      gizmoStyle?: GizmoStyleId;
+    }>,
+  ) => void;
   gizmo: () => FakeGizmoShape;
   locked: () => boolean;
   /** The events graphics took, in order. */
@@ -163,6 +185,7 @@ afterEach(() => {
     actor.stop();
   }
   gizmos.length = 0;
+  vi.clearAllMocks();
 });
 
 const createHarness = (): Harness => {
@@ -234,7 +257,7 @@ const createHarness = (): Harness => {
           [ReturnType<Harness['frames']>[number]['ref'], number]
         >
       ).map(([ref, priority]) => ({ ref, priority })),
-    attachCube({ planePicker, backend = 'webgl' } = {}) {
+    attachCube({ planePicker, backend = 'webgl', gizmoStyle } = {}) {
       graphics.send({
         type: 'viewportGizmoAttached',
         gizmoId: 'cube',
@@ -246,6 +269,7 @@ const createHarness = (): Harness => {
           consumersRef: { current: consumers },
           graphics,
           planePicker,
+          gizmoStyle,
         }),
       });
     },
@@ -446,6 +470,43 @@ describe('view cube adapter', () => {
     } finally {
       unsubscribe();
     }
+  });
+
+  it.each([
+    { gizmoStyle: undefined, type: 'rounded-cube', surface: 'tau', triad: true, scale: 0.7 },
+    { gizmoStyle: 'cube', type: 'rounded-cube', surface: 'tau', triad: true, scale: 0.7 },
+    { gizmoStyle: 'classic-cube', type: 'cube', surface: 'library', triad: true, scale: 0.7 },
+    { gizmoStyle: 'axis-balls', type: 'sphere', surface: 'library', triad: false, scale: 1 },
+  ] as const)(
+    'should draw the $gizmoStyle style as a $type gizmo, and keep it across a repaint',
+    ({ gizmoStyle, type, surface, triad, scale }) => {
+      const harness = createHarness();
+      harness.attachCube({ gizmoStyle });
+      const gizmo = harness.gizmo();
+      harness.graphics.send({ type: 'viewerEnvironmentChanged', environment: dark });
+
+      expect([gizmo.options.type, gizmo.sets.map((options) => options.type)]).toEqual([type, [type]]);
+      expect(gizmo.scale.multiplyScalar.mock.calls).toEqual([[scale]]);
+      expect(
+        vi.mocked(surface === 'tau' ? applyViewportGizmoSurface : applyViewportGizmoNodeMaterials),
+      ).toHaveBeenCalledTimes(2);
+      expect(gizmo.add).toHaveBeenCalledTimes(triad ? 2 : 0);
+      expect(gizmo.children.every((child) => child.visible)).toBe(true);
+      expect(gizmo._domElement.style.pointerEvents).toBe('');
+    },
+  );
+
+  it('should draw the Axes style as the triad alone, taking no click, after a repaint too (G4)', () => {
+    const harness = createHarness();
+    harness.attachCube({ gizmoStyle: 'axes' });
+    const gizmo = harness.gizmo();
+    const hidden = (): boolean =>
+      gizmo.children.every((child) => !child.visible) && gizmo._domElement.style.pointerEvents === 'none';
+    expect([hidden(), gizmo.add.mock.calls.length]).toEqual([true, 1]);
+
+    harness.graphics.send({ type: 'viewerEnvironmentChanged', environment: dark });
+
+    expect([hidden(), gizmo.add.mock.calls.length]).toEqual([true, 2]);
   });
 
   it('should repaint with stronger faces and legible labels in high-contrast dark mode', () => {

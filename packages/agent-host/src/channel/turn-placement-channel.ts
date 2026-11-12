@@ -111,7 +111,7 @@ const keySchema = z.strictObject({ chatId: text, turnId: text, runId: text, atte
 const attemptSchema = z.strictObject({ requestId: text, key: keySchema });
 /** Each verb's request, parsed strictly by the server (SC-R4). */
 const requests = {
-  admit: attemptSchema.extend({ checkoutId: text.optional() }),
+  admit: attemptSchema.extend({ checkoutId: text.optional(), request: text.optional() }),
   complete: attemptSchema.extend({ cut: z.boolean() }),
   abandon: attemptSchema,
   reconcile: z.strictObject({ requestId: text, chatId: text.optional() }),

@@ -1,4 +1,4 @@
-import { createAsyncLogic, setup, types, waitFor } from 'xstate';
+import { createAsyncLogic, createCallbackLogic, setup, types, waitFor } from 'xstate';
 import type {
   ActorFromLogic,
   ActorRefFrom,
@@ -49,6 +49,11 @@ export type ProjectContext = {
   stage: Record<string, Uint8Array<ArrayBuffer>> | undefined;
   /** Per-viewer-panel graphics machines, keyed by Dockview panel ID */
   viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
+  /**
+   * Each view's record session, beside its graphics actor (charter G6b): the view record's store and the view's
+   * `viewRecordBinding`. The host provides the `viewRecord` logic with the project's file ports; the default does nothing.
+   */
+  viewRecordSessions: Map<string, AnyActorRef>;
   /** Project-scoped model appearance shared by every viewer of the same geometry unit. */
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
@@ -109,6 +114,15 @@ const writeProjectActor = fromSafeAsync<void, { project: Project; repair?: boole
   );
 });
 
+/** Input of a view's record session (the `viewRecord` actor). */
+export type ViewRecordSessionActorInput = Readonly<{ viewId: string; graphics: ActorRefFrom<typeof graphicsMachine> }>;
+
+/**
+ * A view's record session. The default keeps nothing: a project with no record files (a test, the converter) has no
+ * view record. `ProjectProvider` provides the session over its file ports (`view-record-session.ts`).
+ */
+const viewRecord = createCallbackLogic<{ type: 'never' }, ViewRecordSessionActorInput>(() => undefined);
+
 const projectActors = {
   loadProjectActor,
   writeProjectActor,
@@ -128,6 +142,7 @@ const projectActors = {
     },
   }),
   graphics: graphicsMachine,
+  viewRecord,
   modelInteraction: modelInteractionMachine,
   cad: cadMachine,
   logs: logMachine,
@@ -350,9 +365,17 @@ const createViewGraphics = ({ context, event }: ProjectArgs<'createViewGraphics'
     },
   });
 
+  // The view's record session lives as long as its graphics actor: the record follows the owners, not a pane.
+  const session = enq.spawn('viewRecord', {
+    id: `view-record-${context.projectId}-${event.viewId}`,
+    input: { viewId: event.viewId, graphics: gfx },
+  });
+
   const viewGraphics = new Map(context.viewGraphics);
   viewGraphics.set(event.viewId, gfx);
-  return { context: { viewGraphics } };
+  const viewRecordSessions = new Map(context.viewRecordSessions);
+  viewRecordSessions.set(event.viewId, session);
+  return { context: { viewGraphics, viewRecordSessions } };
 };
 
 /** The project owns the shared manifest until its last presented GLB pane leaves. */
@@ -380,6 +403,11 @@ const destroyViewGraphics = ({ context, event }: ProjectArgs<'destroyViewGraphic
   if (!gfx) {
     return {};
   }
+  // The session stops first: its last flush reads the owners it wrote from.
+  const session = context.viewRecordSessions.get(event.viewId);
+  if (session) {
+    enq.stop(session);
+  }
   enq.stop(gfx);
   const unitId = gfx.getSnapshot().context.modelInteractionUnitId;
   if (unitId) {
@@ -387,7 +415,9 @@ const destroyViewGraphics = ({ context, event }: ProjectArgs<'destroyViewGraphic
   }
   const viewGraphics = new Map(context.viewGraphics);
   viewGraphics.delete(event.viewId);
-  return { context: { viewGraphics } };
+  const viewRecordSessions = new Map(context.viewRecordSessions);
+  viewRecordSessions.delete(event.viewId);
+  return { context: { viewGraphics, viewRecordSessions } };
 };
 
 /** Drop the units a deletion matched and a main pointer into them. */
@@ -499,6 +529,7 @@ export const projectMachine = setup({
       fileSystemRoot,
       stage,
       viewGraphics,
+      viewRecordSessions: new Map(),
       modelInteractionRef,
       geometryUnits,
       viewerGeometryDemand: new Map(),
@@ -558,6 +589,9 @@ export const projectMachine = setup({
         disposeCadRuntime(child.getSnapshot().context);
       });
       enq.stop(child);
+    }
+    for (const session of context.viewRecordSessions.values()) {
+      enq.stop(session);
     }
     for (const gfx of context.viewGraphics.values()) {
       enq.stop(gfx);

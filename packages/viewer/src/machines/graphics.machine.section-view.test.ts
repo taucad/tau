@@ -3,7 +3,8 @@ import type { SnapshotFrom } from 'xstate';
 import { describe, expect, it } from 'vitest';
 import { maxSectionCuts } from '#graphics/section-cuts.js';
 import type { GraphicsInput } from '#machines/graphics.machine.js';
-import { graphicsMachine } from '#machines/graphics.machine.js';
+import { graphicsMachine, sectionSettleDelay } from '#machines/graphics.machine.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
 
 const createGraphicsActor = (input: GraphicsInput) =>
   createActor(graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }), {
@@ -368,6 +369,68 @@ describe('graphics machine section view steps', () => {
       expect(published.every((snapshot) => snapshot === marked)).toBe(true);
     } finally {
       subscription.unsubscribe();
+      actor.stop();
+    }
+  });
+});
+
+describe('graphics machine section quiet gate (charter G6)', () => {
+  const startGate = () => {
+    const clock = new StepClock();
+    const actor = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+      { input: {}, clock },
+    );
+    const heard: string[] = [];
+    actor.on('sectionEdited', () => heard.push('edited'));
+    actor.on('sectionSettled', () => heard.push('settled'));
+    actor.start();
+    actor.send({ type: 'sceneRadiusUpdated', radius: 0.1, centerMeters: [1, 2, 3] });
+    actor.send({ type: 'setSectionViewActive', payload: true });
+    const cutId = actor.getSnapshot().context.sectionCuts[0]!.id;
+    heard.length = 0;
+    return { actor, clock, heard, cutId };
+  };
+
+  it('should settle a cut edit sectionSettleDelay after the last change, restarting on each step', () => {
+    const { actor, clock, heard, cutId } = startGate();
+    try {
+      actor.send({ type: 'updateSectionCut', payload: { id: cutId, patch: { offset: 2.5 } } });
+      expect(actor.getSnapshot().matches({ operational: { section: { on: 'editing' } } })).toBe(true);
+      clock.increment(sectionSettleDelay - 1);
+      actor.send({ type: 'updateSectionCut', payload: { id: cutId, patch: { offset: 2.6 } } });
+      clock.increment(sectionSettleDelay - 1);
+      expect(heard).toEqual(['edited', 'edited']);
+      clock.increment(1);
+      expect(heard).toEqual(['edited', 'edited', 'settled']);
+      expect(actor.getSnapshot().matches({ operational: { section: { on: 'settled' } } })).toBe(true);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should settle at once when the section turns on or off', () => {
+    const { actor, heard } = startGate();
+    try {
+      actor.send({ type: 'setSectionViewActive', payload: false });
+      expect(heard).toEqual(['settled']);
+      actor.send({ type: 'setSectionViewActive', payload: true });
+      expect(heard).toEqual(['settled', 'settled']);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should not enter editing for an adopted section', () => {
+    const { actor, heard } = startGate();
+    try {
+      actor.send({
+        type: 'adoptSectionView',
+        section: { active: true, cuts: [{ kind: 'plane', plane: 'xy', offset: 1, isFlipped: false }] },
+      });
+      expect(heard).not.toContain('edited');
+      expect(actor.getSnapshot().matches({ operational: { section: { on: 'settled' } } })).toBe(true);
+    } finally {
       actor.stop();
     }
   });

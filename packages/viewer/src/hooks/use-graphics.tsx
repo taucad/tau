@@ -64,9 +64,10 @@ const selectViewFramingIdentity = (graphicsRef: GraphicsActorRef): string | unde
  * while the project loads), and that is not a file switch: a seed with no identity changes nothing, so the persisted
  * pose is not re-armed over the live one. The same identity again is a re-delivery and sends nothing.
  *
- * ponytail: sent while the provider renders, where the framing record was latched, until the view's binding (G6b)
- * names the entry from its record. No component renders from the framing actor (its selectors are read when
- * needed), so the send re-renders none.
+ * This is the only sender of the view's entry identity (charter G6b): the view's record binding follows framing's
+ * identity and never names an entry, because the record's read can land after the entry's geometry is measured. It is
+ * sent while the provider renders, where the framing record was latched. No component renders from the framing actor
+ * (its selectors are read when needed), so the send re-renders none.
  */
 const deliverSeedEntry = (graphicsRef: GraphicsActorRef, seed: ViewCameraSeed | undefined): void => {
   const identity = seed?.identity;

@@ -1025,7 +1025,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     /* The head a turn minted carries only its generated title and no version,
      * so the restore names no entry: an earlier point, never a number (A9, M11). */
     const restored = before.find((row) => row.revisionId === head);
-    expect(restored).toMatchObject({ summary: 'Agent turn turn-1', tags: [] });
+    expect(restored).toMatchObject({ summary: 'Agent change', tags: [] });
     expect(restored?.versions ?? []).toEqual([]);
     expect(restored?.start).toBeUndefined();
     expect(after[0]?.summary).toBe('Restored an earlier point');

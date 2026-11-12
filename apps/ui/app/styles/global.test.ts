@@ -268,6 +268,45 @@ describe('global focus ring token', () => {
   });
 });
 
+describe('branch lane tokens', () => {
+  const branchTokens = ['--branch-1', '--branch-2', '--branch-3', '--branch-4'] as const;
+
+  it('should alias the chart palette by slot, blue and green first and purple left out', () => {
+    expect(branchTokens.map((name) => lightTokens[name])).toEqual([
+      'var(--chart-1)',
+      'var(--chart-4)',
+      'var(--chart-5)',
+      'var(--chart-3)',
+    ]);
+  });
+
+  it.each([
+    ['light', lightTokens],
+    ['dark', darkTokens],
+    ['black', blackTokens],
+    ['high contrast', highContrastTokens],
+    ['preferred light', contrastLightTokens],
+    ['preferred dark', contrastDarkTokens],
+    ['preferred black', contrastBlackTokens],
+  ])('should keep every lane at 3:1 on the pane in %s mode', (_mode, tokens) => {
+    /* The History pane is `bg-background` under a `bg-sidebar/50` content fill: both ends of that blend. */
+    for (const surface of ['--background', '--sidebar-background'] as const) {
+      for (const name of branchTokens) {
+        expect(
+          wcagContrast(parseToken(name, tokens), parseToken(surface, tokens)),
+          `${name} on ${surface}`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it('should map the lane tokens into Tailwind', () => {
+    for (const name of branchTokens) {
+      expect(tokenStyles).toContain(`--color-${name.slice(2)}: var(${name});`);
+    }
+  });
+});
+
 describe('running viewer tool glyph token', () => {
   it.each([
     ['light', lightTokens],

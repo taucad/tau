@@ -61,8 +61,10 @@
     "./graphics/section-cuts": "./src/graphics/section-cuts.ts",
     "./graphics/three/canvas-three-gl": "./src/graphics/three/canvas-three-gl.ts",
     "./graphics/three/controls/camera-controls-feel": "./src/graphics/three/controls/camera-controls-feel.ts",
+    "./graphics/three/controls/camera-presets": "./src/graphics/three/controls/camera-presets.ts",
     "./graphics/three/controls/camera-wheel-router": "./src/graphics/three/controls/camera-wheel-router.ts",
     "./graphics/three/controls/section-handles": "./src/graphics/three/controls/section-handles.ts",
+    "./graphics/three/controls/viewport-gizmo-styles": "./src/graphics/three/controls/viewport-gizmo-styles.ts",
     "./graphics/three/gltf-world": "./src/graphics/three/gltf-world.ts",
     "./graphics/three/materials/infinite-grid-material": "./src/graphics/three/materials/infinite-grid-material.ts",
     "./graphics/three/materials/infinite-grid-material.node": "./src/graphics/three/materials/infinite-grid-material.node.ts",
@@ -257,6 +259,11 @@
         "import": "./dist/graphics/three/controls/camera-controls-feel.mjs",
         "default": "./dist/graphics/three/controls/camera-controls-feel.mjs"
       },
+      "./graphics/three/controls/camera-presets": {
+        "types": "./dist/graphics/three/controls/camera-presets.d.mts",
+        "import": "./dist/graphics/three/controls/camera-presets.mjs",
+        "default": "./dist/graphics/three/controls/camera-presets.mjs"
+      },
       "./graphics/three/controls/camera-wheel-router": {
         "types": "./dist/graphics/three/controls/camera-wheel-router.d.mts",
         "import": "./dist/graphics/three/controls/camera-wheel-router.mjs",
@@ -266,6 +273,11 @@
         "types": "./dist/graphics/three/controls/section-handles.d.mts",
         "import": "./dist/graphics/three/controls/section-handles.mjs",
         "default": "./dist/graphics/three/controls/section-handles.mjs"
+      },
+      "./graphics/three/controls/viewport-gizmo-styles": {
+        "types": "./dist/graphics/three/controls/viewport-gizmo-styles.d.mts",
+        "import": "./dist/graphics/three/controls/viewport-gizmo-styles.mjs",
+        "default": "./dist/graphics/three/controls/viewport-gizmo-styles.mjs"
       },
       "./graphics/three/gltf-world": {
         "types": "./dist/graphics/three/gltf-world.d.mts",

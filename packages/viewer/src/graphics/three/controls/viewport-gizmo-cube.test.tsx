@@ -125,4 +125,16 @@ describe('ViewportGizmoCube', () => {
     expect(graphics.getSnapshot().context.viewportGizmo).toBeUndefined();
     expect(mocks.consumersRef.current.size).toBe(0);
   });
+
+  it('should hand graphics a new adapter for a style change, and the style it draws (G5)', () => {
+    const mounted = render(<ViewportGizmoCube planePicker={pickerStub} gizmoStyle='cube' />);
+    mounted.rerender(<ViewportGizmoCube planePicker={pickerStub} gizmoStyle='axis-balls' />);
+
+    expect(mocks.hosts).toEqual([
+      expect.objectContaining({ gizmoStyle: 'cube' }),
+      expect.objectContaining({ gizmoStyle: 'axis-balls' }),
+    ]);
+    expect([mocks.starts, mocks.stops]).toEqual([2, 1]);
+    expect(mocks.consumersRef.current.size).toBe(1);
+  });
 });

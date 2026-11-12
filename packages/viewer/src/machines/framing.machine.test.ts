@@ -334,7 +334,7 @@ describe('framing machine', () => {
     it('should apply the latest record that loads before the first frame of the same entry', () => {
       const scripted = scriptCamera();
       const framing = startFraming({ camera: scripted.camera });
-      // The view knew its entry before the record loaded (use-view-settings-sync re-arms the pending pose today).
+      // The view knew its entry before the record loaded (the view's binding re-arms the pending pose).
       framing.send({ type: 'entryChanged', identity: 'file-a', pendingPose: pending('late') });
 
       framing.send(measured('a', box(1), 2));

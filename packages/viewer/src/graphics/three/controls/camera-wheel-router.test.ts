@@ -17,8 +17,11 @@ import {
 import {
   attachCameraWheelRouter,
   resolvePinchRatio,
+  resolvePressedButton,
   resolveWheelAction,
+  resolveWheelZoomScale,
   shouldRerouteWheel,
+  toCameraControlsAction,
 } from '#graphics/three/controls/camera-wheel-router.js';
 import type { CameraWheelAction } from '#graphics/three/controls/camera-wheel-router.js';
 
@@ -251,5 +254,102 @@ describe('attachCameraWheelRouter', () => {
     expect(controls.distance).toBeCloseTo(10, 9);
     expect(camera.zoom).toBeGreaterThan(1);
     controls.dispose();
+  });
+});
+
+describe('resolvePressedButton', () => {
+  const keys = { shiftKey: false, ctrlKey: false, altKey: false, metaKey: false };
+
+  it.each([
+    { platform: 'mac', button: 0, ctrlKey: true, metaKey: false, pressed: 'right', ctrl: false },
+    { platform: 'mac', button: 0, ctrlKey: true, metaKey: true, pressed: 'right', ctrl: true },
+    { platform: 'mac', button: 0, ctrlKey: false, metaKey: true, pressed: 'left', ctrl: true },
+    { platform: 'other', button: 0, ctrlKey: true, metaKey: false, pressed: 'left', ctrl: true },
+    { platform: 'other', button: 2, ctrlKey: true, metaKey: false, pressed: 'right', ctrl: true },
+    { platform: 'other', button: 1, ctrlKey: false, metaKey: false, pressed: 'middle', ctrl: false },
+  ] as const)(
+    'on $platform, button $button with ctrl $ctrlKey and meta $metaKey is $pressed with ctrl $ctrl (C14)',
+    ({ platform, button, ctrlKey, metaKey, pressed, ctrl }) => {
+      expect(resolvePressedButton({ ...keys, button, ctrlKey, metaKey, platform })).toEqual({
+        button: pressed,
+        modifiers: { shift: false, ctrl, alt: false },
+      });
+    },
+  );
+
+  it('binds no back or forward button', () => {
+    expect(resolvePressedButton({ ...keys, button: 3, platform: 'other' })).toBeUndefined();
+  });
+});
+
+describe('toCameraControlsAction', () => {
+  it.each([
+    { gesture: 'orbit', perspective: true, action: CameraControlsImpl.ACTION.ROTATE },
+    { gesture: 'pan', perspective: false, action: CameraControlsImpl.ACTION.TRUCK },
+    { gesture: 'zoom', perspective: true, action: CameraControlsImpl.ACTION.DOLLY },
+    { gesture: 'zoom', perspective: false, action: CameraControlsImpl.ACTION.ZOOM },
+    { gesture: 'none', perspective: true, action: CameraControlsImpl.ACTION.NONE },
+  ] as const)('$gesture (perspective $perspective)', ({ gesture, perspective, action }) => {
+    expect(toCameraControlsAction(gesture, perspective)).toBe(action);
+  });
+});
+
+describe('resolveWheelZoomScale', () => {
+  const step = { deltaMode: 0, ctrlKey: false, dollySpeed: 1, invertZoom: false } as const;
+
+  it('moves away for a positive delta and closer for a negative one', () => {
+    expect(resolveWheelZoomScale({ ...step, deltaY: 40, platform: 'other' })).toBeGreaterThan(1);
+    expect(resolveWheelZoomScale({ ...step, deltaY: -40, platform: 'other' })).toBeLessThan(1);
+  });
+
+  it('reverses with invert zoom (C12)', () => {
+    const scale = resolveWheelZoomScale({ ...step, deltaY: 40, platform: 'mac' });
+    expect(resolveWheelZoomScale({ ...step, deltaY: 40, platform: 'mac', invertZoom: true })).toBeCloseTo(
+      1 / scale,
+      12,
+    );
+  });
+
+  it('matches camera-controls for a pinch and for a line-mode wheel', () => {
+    expect(resolveWheelZoomScale({ ...step, deltaY: 30, ctrlKey: true, platform: 'other' })).toBeCloseTo(
+      0.95 ** -1,
+      12,
+    );
+    expect(resolveWheelZoomScale({ ...step, deltaY: 3, deltaMode: 1, platform: 'other' })).toBeCloseTo(0.95 ** -1, 12);
+  });
+});
+
+/** Jsdom has no `PointerEvent`: a mouse event that carries the pointer fields the router and `camera-controls` read. */
+const mousePointer = (type: string, init: MouseEventInit): MouseEvent => {
+  const event = new MouseEvent(type, { bubbles: true, ...init });
+  Object.defineProperties(event, { pointerType: { value: 'mouse' }, pointerId: { value: 1 } });
+  return event;
+};
+
+describe('the routed press on macOS', () => {
+  it('treats Ctrl + click as the secondary click: a Tau default pan, not an orbit (C14)', () => {
+    const camera = new PerspectiveCamera(45, 1);
+    camera.position.set(0, 0, 10);
+    const element = document.createElement('div');
+    document.body.append(element);
+    const controls = new CameraControlsImpl(camera);
+    controls.connect(element);
+    const detach = attachCameraWheelRouter({
+      controls,
+      element,
+      platform: 'mac',
+      getRouting: () => ({ cameraInput: { preset: 'tau' }, enablePan: true, enableZoom: true }),
+    });
+    cleanups.push(() => {
+      detach();
+      controls.dispose();
+      element.remove();
+    });
+    element.dispatchEvent(mousePointer('pointerdown', { button: 0, buttons: 1, ctrlKey: true }));
+    expect(controls.mouseButtons.left).toBe(CameraControlsImpl.ACTION.TRUCK);
+
+    element.dispatchEvent(mousePointer('pointerup', { button: 0 }));
+    element.dispatchEvent(mousePointer('pointerdown', { button: 0, buttons: 1 }));
+    expect(controls.mouseButtons.left).toBe(CameraControlsImpl.ACTION.ROTATE);
   });
 });

@@ -83,12 +83,16 @@ export type TurnMachineInput = Readonly<{
   parentRef?: AnyActorRef;
   /** A lease record a restarted root adopts: the actor finds its revisions before it serves a verb (RM-R14). */
   adopt?: Pick<TurnLease, 'checkoutId' | 'headRevisionId'>;
+  /** The person's request, which titles the result cut (Q9). */
+  request?: string;
 }>;
 
 /** Serializable state owned by turnMachine; `lease` is per-state context while the record exists (MC-R26). @public */
 export type TurnMachineContext = Readonly<{
   key: TurnAttemptKey;
   checkoutId: string | undefined;
+  /** The person's request, carried on the result cut (Q9). */
+  request: string | undefined;
   branch: string | undefined;
   /** What the attempt builds on: the head placement found, or the base it minted. */
   baseRevisionId: string | undefined;
@@ -315,7 +319,11 @@ const askCut = (context: TurnMachineContext, enq: TurnEnqueue, turnCut: TurnCut)
     requestId: cutIdOf(context, turnCut, context.cutSequence),
     trigger: 'turn',
     checkoutId: context.checkoutId,
-    turn: { key: context.key, turnCut },
+    turn: {
+      key: context.key,
+      turnCut,
+      ...(turnCut === 'result' && context.request !== undefined ? { request: context.request } : {}),
+    },
     leaseIds: context.leaseIds,
   });
   return { cutSequence: context.cutSequence + 1 };
@@ -569,6 +577,7 @@ const turnMachineDefinition = setup({
   context: ({ input }) => ({
     key: input.key,
     checkoutId: input.checkoutId ?? input.adopt?.checkoutId,
+    request: input.request,
     branch: undefined,
     baseRevisionId: undefined,
     mintedBaseRevisionId: undefined,

@@ -42,7 +42,15 @@ import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import { createViewportGizmoCubeAxes } from '#graphics/three/controls/viewport-gizmo-cube-axes.js';
 import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
 import type { ViewportGizmoStyle } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
-import { applyViewportGizmoSurface } from '#graphics/three/controls/viewport-gizmo-cube-surface.js';
+import {
+  applyViewportGizmoNodeMaterials,
+  applyViewportGizmoSurface,
+} from '#graphics/three/controls/viewport-gizmo-cube-surface.js';
+import {
+  hideViewportGizmoTargets,
+  resolveViewportGizmoStyleConfig,
+} from '#graphics/three/controls/viewport-gizmo-styles.js';
+import type { GizmoStyleId, ViewportGizmoStyleConfig } from '#graphics/three/controls/viewport-gizmo-styles.js';
 import {
   bindViewportGizmoInvalidationEvents,
   readGizmoViewport,
@@ -114,6 +122,8 @@ export type ViewportGizmoHost = Readonly<{
   graphics: GraphicsActorRef;
   /** The section plane picker the cube draws beside it, styled as the cube is. Absent when it has none. */
   planePicker?: SectionPlanePicker;
+  /** The cube's style; the rounded cube when omitted. A new style is a new adapter. */
+  gizmoStyle?: GizmoStyleId;
 }>;
 
 /** The camera's presented pose, read once per reported turn. */
@@ -222,40 +232,26 @@ export const viewportGizmoOptions = ({
   container,
   placeTopRight,
   size,
+  styleConfig,
 }: Readonly<{
   style: ViewportGizmoStyle;
   upDirection: ViewportGizmoAppearance['upDirection'];
   container: HTMLElement;
   placeTopRight: boolean;
   size: number;
-}>): GizmoOptions => {
-  const faceConfig = {
-    color: style.face,
-    labelColor: style.label,
-    hover: { color: style.hover, labelColor: style.hoverLabel },
-  };
-  return {
-    type: 'rounded-cube',
-    up: upDirection,
-    placement: placeTopRight ? 'top-right' : 'bottom-right',
-    size,
-    font: { weight: 500, family: style.font },
-    radius: viewportGizmoMetrics.radius,
-    offset: { bottom: 0, right: 0 },
-    className,
-    resolution: viewportGizmoMetrics.textureSize,
-    container,
-    background: { enabled: false },
-    corners: faceConfig,
-    edges: faceConfig,
-    right: faceConfig,
-    top: faceConfig,
-    front: faceConfig,
-    back: faceConfig,
-    left: faceConfig,
-    bottom: faceConfig,
-  };
-};
+  styleConfig: ViewportGizmoStyleConfig;
+}>): GizmoOptions => ({
+  up: upDirection,
+  placement: placeTopRight ? 'top-right' : 'bottom-right',
+  size,
+  font: { weight: 500, family: style.font },
+  offset: { bottom: 0, right: 0 },
+  className,
+  resolution: viewportGizmoMetrics.textureSize,
+  container,
+  background: { enabled: false },
+  ...styleConfig.options,
+});
 
 /**
  * Creates a view cube's DOM adapter, the callback logic its gesture runs while the cube is mounted.
@@ -267,7 +263,7 @@ export const viewportGizmoOptions = ({
 export const createViewportGizmoAdapter = (host: ViewportGizmoHost): ViewportGizmoAdapterLogic =>
   createCallbackLogic<ViewportGizmoCommand, ViewportGizmoAppearance, ViewportGizmoAdapterEvent>(
     ({ input, sendBack, receive }) => {
-      const { store, container, size, backend, rig, consumersRef, graphics, planePicker } = host;
+      const { store, container, size, backend, rig, consumersRef, graphics, planePicker, gizmoStyle = 'cube' } = host;
       const { gl } = store.getState();
       const containerElement = resolveGizmoContainer(container, gl.domElement);
       if (!containerElement) {
@@ -286,6 +282,8 @@ export const createViewportGizmoAdapter = (host: ViewportGizmoHost): ViewportGiz
 
       const readStyle = (): ViewportGizmoStyle =>
         readViewportGizmoStyle({ container: containerElement, ...appearance.environment });
+      const resolveStyle = (style: ViewportGizmoStyle): ViewportGizmoStyleConfig =>
+        resolveViewportGizmoStyleConfig({ gizmoStyle, colors: style, radius: viewportGizmoMetrics.radius });
       const options = (style: ViewportGizmoStyle): GizmoOptions =>
         viewportGizmoOptions({
           style,
@@ -293,11 +291,13 @@ export const createViewportGizmoAdapter = (host: ViewportGizmoHost): ViewportGiz
           container: containerElement,
           placeTopRight: container !== undefined,
           size,
+          styleConfig: resolveStyle(style),
         });
 
       let style = readStyle();
       const gizmo = new ViewportGizmo(rig.activeCamera, gl, options(style));
-      gizmo.scale.multiplyScalar(0.7);
+      // `set` keeps the scale, so the style's scale is applied once.
+      gizmo.scale.multiplyScalar(resolveStyle(style).scale);
 
       /*
        * Pipeline pre-warm (Policy Rule 13): on WebGPU the cube's surface and axes need pipelines, so the first draw would
@@ -326,25 +326,38 @@ export const createViewportGizmoAdapter = (host: ViewportGizmoHost): ViewportGiz
         })();
       };
 
-      /* Paints what `ViewportGizmo` does not: the surface, the axes, the field of view and the plane picker. */
+      /*
+       * Paints what `ViewportGizmo` does not: the style's surface and click targets, the axes, the field of view and the
+       * plane picker. `set` rebuilds the children and the pointer surface, so each repaint applies them again.
+       */
       const decorate = (): void => {
-        applyViewportGizmoSurface(gizmo, style, backend);
-        gizmo.add(
-          createViewportGizmoCubeAxes({
-            axesSize: 2.1,
-            rendererSize: size,
-            xAxisColor: style.axes.x,
-            yAxisColor: style.axes.y,
-            zAxisColor: style.axes.z,
-            xLabelColor: style.axes.x,
-            yLabelColor: style.axes.y,
-            zLabelColor: style.axes.z,
-            lineWidth: 1.5,
-            lineOpacity: 1,
-            fontFamily: style.font,
-            renderingBackend: backend,
-          }),
-        );
+        const styleConfig = resolveStyle(style);
+        if (styleConfig.surface === 'tau') {
+          applyViewportGizmoSurface(gizmo, style, backend);
+        } else {
+          applyViewportGizmoNodeMaterials(gizmo, backend);
+        }
+        if (!styleConfig.clickable) {
+          hideViewportGizmoTargets(gizmo);
+        }
+        if (styleConfig.triad) {
+          gizmo.add(
+            createViewportGizmoCubeAxes({
+              axesSize: 2.1,
+              rendererSize: size,
+              xAxisColor: style.axes.x,
+              yAxisColor: style.axes.y,
+              zAxisColor: style.axes.z,
+              xLabelColor: style.axes.x,
+              yLabelColor: style.axes.y,
+              zLabelColor: style.axes.z,
+              lineWidth: 1.5,
+              lineOpacity: 1,
+              fontFamily: style.font,
+              renderingBackend: backend,
+            }),
+          );
+        }
         syncGizmoFov(gizmo, selectCameraDriver(rig).view.requestedVerticalFieldOfView);
         planePicker?.setStyle(style);
         warmUp();

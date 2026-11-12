@@ -662,6 +662,28 @@ export const carriedAfterRow = (
     : carried.filter((entry) => entry !== spent && !(settles && entry.runId === row.runId));
 };
 
+/**
+ * The text of a person's request, for the title of the History entry its turn records (Q9): the message's text
+ * blocks, joined, trimmed. Placement shortens it; `undefined` when the message holds no text (an image alone).
+ */
+const requestTextOf = (message: UserProviderMessage | undefined): string | undefined => {
+  const { content } = message ?? {};
+  const blocks = typeof content === 'string' ? [content] : Array.isArray(content) ? content : [];
+  const text = blocks
+    .map((block) =>
+      typeof block === 'string'
+        ? block
+        : typeof block === 'object' && block !== null && !Array.isArray(block) && block['type'] === 'text'
+          ? typeof block['text'] === 'string'
+            ? block['text']
+            : ''
+          : '',
+    )
+    .join('')
+    .trim();
+  return text.length === 0 ? undefined : text;
+};
+
 type AdmissionRecord = Readonly<{
   kind: ChatRunKind;
   trigger: RunTrigger;
@@ -2504,6 +2526,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           };
         }
       }
+      const request = requestTextOf(start.message);
       const base = {
         trigger: start.trigger,
         turnId: start.message.id,
@@ -2556,6 +2579,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           } as AdmissionRecord),
           start: [{ type: 'message.appended', message: marked }],
           ...(start.checkoutId === undefined ? {} : { checkoutId: start.checkoutId }),
+          ...(request === undefined ? {} : { request }),
         };
       }
       const model = config.model ?? options.model;
@@ -2597,6 +2621,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         intent: intent({ kind: 'tau', ...base, selection: turnModelOf(model), context }),
         start: told === undefined ? [] : [{ type: 'message.appended', message: told }],
         ...(start.checkoutId === undefined ? {} : { checkoutId: start.checkoutId }),
+        ...(request === undefined ? {} : { request }),
       };
     },
     prepareResume: async ({ chatId, commandId, runId, payload }) => {
@@ -2619,13 +2644,28 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         }
       }
       const selection = resume.selection === undefined ? {} : { selection: resume.selection };
+      /* The next attempt's result is titled by the request the run was admitted with (Q9). */
+      const admitted = requestTextOf(admittedRowOf(events, runId)?.admission?.message);
+      const request = admitted === undefined ? {} : { request: admitted };
       const running = { type: 'run.lifecycle', state: 'running', ...selection } as unknown as LogRowBody;
       if (entry?.kind === 'external' || externalTurnOf(events) !== undefined) {
-        return { kind: 'external', turnId: entry?.turnId ?? runId, mode: 'continue', intent: [running, ...settled] };
+        return {
+          kind: 'external',
+          turnId: entry?.turnId ?? runId,
+          mode: 'continue',
+          intent: [running, ...settled],
+          ...request,
+        };
       }
       if (entry?.committed !== true && admittedRowOf(events, runId)?.admission !== undefined) {
         /* The turn never committed: the journaled admission is replayed (RA-R3). */
-        return { kind: 'tau', turnId: entry?.turnId ?? runId, mode: 'start', intent: [running, ...settled] };
+        return {
+          kind: 'tau',
+          turnId: entry?.turnId ?? runId,
+          mode: 'start',
+          intent: [running, ...settled],
+          ...request,
+        };
       }
       const recovery: LogRowBody[] = [...settled];
       let history = await log.messages();
@@ -2686,6 +2726,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
             : 'continue',
         /* `running` first, so the command's cursor is the reopening row (ChatRunSlot.tla resume; W7.r1). */
         intent: [running, ...recovery],
+        ...request,
       };
     },
     startDriver: ({ key, kind, mode, leaderEpoch, report, grant }) => {

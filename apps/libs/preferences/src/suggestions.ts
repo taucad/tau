@@ -1,3 +1,4 @@
+import { toolIds } from '#person-profile.js';
 import type { PersonProfile, ToolId } from '#person-profile.js';
 import type { GizmoStyleId, MousePresetId, ViewerPreferences } from '#viewer-preferences.js';
 
@@ -94,3 +95,22 @@ export const effectivePreset = (viewer: ViewerPreferences, profile: PersonProfil
  */
 export const effectiveGizmoStyle = (viewer: ViewerPreferences, profile: PersonProfile): GizmoStyleId =>
   viewer.gizmo.style ?? suggestedGizmo(profile.tool);
+
+/**
+ * The products a preset is familiar from, for its "Familiar from …" line: every product a tool answer suggesting that
+ * preset may name ({@link toolSuggestions}), in answer order. Empty when no answer names a product for it.
+ *
+ * @param preset - The mouse preset.
+ * @returns The product names.
+ *
+ * @example <caption>Familiar from Blender and Creo</caption>
+ * ```typescript
+ * import { familiarProducts } from '@taucad/preferences';
+ *
+ * console.log(familiarProducts('middle-shift')); // ['Blender', 'Creo']
+ * ```
+ *
+ * @public
+ */
+export const familiarProducts = (preset: MousePresetId): readonly string[] =>
+  toolIds.flatMap((tool) => (toolSuggestions[tool].preset === preset ? toolSuggestions[tool].names : []));

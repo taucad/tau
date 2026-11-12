@@ -3,6 +3,7 @@ import {
   effectiveGizmoStyle,
   effectivePreset,
   emptyPersonProfile,
+  familiarProducts,
   emptyViewerPreferences,
   suggestedGizmo,
   suggestedPreset,
@@ -65,5 +66,16 @@ describe('effective preset and gizmo style', () => {
     };
     expect(effectivePreset(chosen, blender)).toBe('tau');
     expect(effectiveGizmoStyle(chosen, blender)).toBe('axes');
+  });
+});
+
+describe('familiarProducts', () => {
+  it('lists, per preset, the products its answers may name (camera research R13)', () => {
+    expect(familiarProducts('tau')).toEqual(['OpenSCAD']);
+    expect(familiarProducts('right-orbit')).toEqual(['Tinkercad', 'Onshape']);
+    expect(familiarProducts('middle-ctrl')).toEqual(['SolidWorks']);
+    expect(familiarProducts('middle-shift')).toEqual(['Blender', 'Creo']);
+    expect(familiarProducts('shift-middle')).toEqual(['Fusion', 'Inventor']);
+    expect(familiarProducts('alt')).toEqual(['Maya', 'Unity', 'Unreal']);
   });
 });

@@ -42,6 +42,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/build123d',
   '@taucad/carvera',
   '@taucad/converter',
+  '@taucad/desktop-terminal',
   '@taucad/esbuild',
   '@taucad/events',
   '@taucad/filesystem',

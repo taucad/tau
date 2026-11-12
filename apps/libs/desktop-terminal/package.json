@@ -1,0 +1,43 @@
+{
+  "name": "@taucad/desktop-terminal",
+  "version": "0.1.0-beta.0",
+  "description": "The desktop Terminal's services-host concern: one PTY session per pane port over the shell service, bundled into the desktop app",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/desktop-terminal"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/desktop-terminal#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "cad",
+    "shell",
+    "terminal",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/shell-service": "workspace:*",
+    "@taucad/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@taucad/sandbox": "workspace:*"
+  }
+}

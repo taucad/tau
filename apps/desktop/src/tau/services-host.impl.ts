@@ -90,13 +90,13 @@ import { packageVersion } from '@taucad/runtime/metadata';
 import { electronUtilityMainTransport } from '@taucad/runtime/electron/renderer';
 import { serveElectronFileSystemBridgePort } from '@taucad/runtime/electron/utility';
 import { systemSkillBundles } from '@taucad/skills/resources';
+import { createTerminalConcern } from '@taucad/desktop-terminal';
+import type { TerminalConcernOptions } from '@taucad/desktop-terminal';
 
 import { canonicalPath } from '#main/project-roots.js';
 import { createGeometryRunnerClient } from '#tau/geometry-runner-client.js';
 import { agentRuntimeIdleMilliseconds, retireIdleClients } from '#tau/idle-runtime-clients.js';
 import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
-import { createTerminalConcern } from '#tau/services-host.terminal.js';
-import type { TerminalConcernOptions } from '#tau/services-host.terminal.js';
 import { createPermissionHost } from '#tau/permission-host.js';
 import { createPermissionStore, permissionModeOfRun, recordShellCall } from '#tau/permission-store.js';
 import type { PermissionStore } from '#tau/permission-store.js';

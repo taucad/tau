@@ -1251,15 +1251,25 @@ jobs:
         run: pnpm nx run-many -t test:billing-foundation
 
   # The CLI's end-to-end suites (`apps/cli-e2e`): the built binary, `tau serve`, `tau mcp` and
-  # `tau agent` as real child processes against real kernels, 10 to 14 minutes. Their own lane,
-  # out of the test shards, where they were the floor of one shard: it runs when the plan finds
-  # a project with a `test:scenarios` target affected, and `Run affected tasks` requires it then.
+  # `tau agent` as real child processes against real kernels, 13 to 14 minutes on one runner.
+  # Their own lane, out of the test shards, where they were the floor of one shard: it runs when
+  # the plan finds a project with a `test:scenarios` target affected, and `Run affected tasks`
+  # requires it then, every shard (the matrix result is success only when each shard is).
+  # `TAU_CI_SHARD` names the shard; a `test:scenarios` target lists it among its inputs, so each
+  # shard caches apart, and takes its share of the suites from it (its Vitest config deals the
+  # files by measured seconds and splits the long fixture sweep).
   cli-e2e:
-    name: CLI end-to-end
+    name: CLI end-to-end (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     needs: [plan]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.cli-e2e == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    env:
+      TAU_CI_SHARD: ${{ matrix.shard }}/2
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

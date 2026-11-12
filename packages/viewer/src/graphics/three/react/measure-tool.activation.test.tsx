@@ -9,7 +9,8 @@ import type { Actor } from 'xstate';
 import { GraphicsProvider, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { GraphicsCameraRef } from '#machines/graphics.machine.js';
-import { MeasureTool, restingPointerOver } from '#graphics/three/react/measure-tool.jsx';
+import { MeasureTool } from '#graphics/three/react/measure-tool.jsx';
+import { restingPointerOver } from '#graphics/three/react/measure-tool.adapter.js';
 import { hasSceneTag, sceneTag } from '#graphics/three/utils/scene-tags.js';
 import {
   getCachedMeshMeasurementFeatures,

@@ -37,7 +37,7 @@ import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
 
 import type { RevisionTag } from '#revision-port.js';
-import type { SyncPushOutcome } from '#sync.types.js';
+import type { SyncPushOutcome, VersionRenumbering } from '#sync.types.js';
 import type {
   PublishPublicationActorInput,
   PublishPublicationActorOutput,
@@ -79,6 +79,8 @@ export type PublishMachineContext = Readonly<{
   remoteTags: Readonly<Record<string, string>>;
   /** Pre-filled name, when a caller opened the dialog on one. */
   tag: string | undefined;
+  /** The version `tagging` made or renamed, whose tag `pushing` and `publishing` name (B6). */
+  version: number | undefined;
   /** The id the running `publish` was asked under; its answer echoes it (RM-R1). */
   requestId: string | undefined;
   draft: PublishDraft | undefined;
@@ -103,10 +105,13 @@ export type PublishMachineEvent =
   | Readonly<{ type: 'confirm'; draft: PublishDraft }>
   | Readonly<{ type: 'cancel' }>
   | Readonly<{ type: 'pushSettled'; pushId: string; outcome: SyncPushOutcome }>
+  /* The push moved versions that were not backed up to new numbers (B6). */
+  | Readonly<{ type: 'versionsRenumbered'; renumbered: readonly VersionRenumbering[] }>
   | Readonly<{ type: 'reset' }>;
 
 /** Facts publishMachine emits for a host that holds only the root. @public */
 export type PublishMachineEmitted =
+  /* `tag` is the published version's tag, `v<number>` (B6). */
   | Readonly<{ type: 'published'; requestId: string; publicationId: string; url: string; tag: string }>
   | Readonly<{ type: 'toast.info'; message: string }>
   /* `code` names a refusal the page phrases; the other refusals are still sentences (a Rule 1 gap the guide records). */
@@ -120,30 +125,35 @@ export type PublishVersionsActorOutput = Readonly<{
   /** The remote's last-advertised branch head, used as the push lease (P18). */
   expected: string | undefined;
   /**
-   * What the remote last advertised for each name it holds (P38).
+   * What the remote last advertised for each version tag it holds, by tag
+   * name (`v<number>`, P38).
    *
-   * A name this project publishes again is offered with its own lease, so a
-   * name somebody else moved is rejected as `leaseLost` rather than forced.
-   * A name the remote does not hold is absent, which is the "must not exist"
+   * A version this project publishes again is offered with its own lease, so
+   * a tag somebody else changed is rejected as `leaseLost` rather than forced.
+   * A tag the remote does not hold is absent, which is the "must not exist"
    * lease a first publish needs.
    */
   remoteTags: Readonly<Record<string, string>>;
 }>;
 
-/** What `createTag` is asked to name. @public */
-export type PublishTagActorInput = Readonly<{ name: string; revisionId: string; note?: string }>;
+/**
+ * What `createTag` is asked to name: a new version, or with `number` the
+ * existing version on this revision, renamed to `name` (B6). @public
+ */
+export type PublishTagActorInput = Readonly<{ name: string; revisionId: string; note?: string; number?: number }>;
 
 /** What `push` is asked to offer: the history set, tag included. @public */
 export type PublishPushActorInput = Readonly<{
   branch: string;
+  /** The version's tag name, `v<number>`. */
   tag: string;
   /** The lease on the branch (P18); `undefined` means the ref must not exist. */
   expected: string | undefined;
   /**
    * The lease on `refs/tags/<tag>` (P18, P38).
    *
-   * The revision the remote last advertised for this name, or `undefined` for a
-   * name it does not hold. Never a force: a name moved under this publish is a
+   * The object the remote last advertised for this tag, or `undefined` for a
+   * tag it does not hold. Never a force: a name moved under this publish is a
    * refusal the person is told about, and `atomic` takes the branch down with
    * it so the remote never holds half of what was offered.
    */
@@ -169,6 +179,7 @@ type PublishEnqueue = EnqueueObject<PublishMachineEvent, PublishMachineEmitted>;
  * the last publish would be applied to this one's read (row 11). */
 const startPublish = (event: Extract<PublishMachineEvent, { type: 'publish' }>): Partial<PublishMachineContext> => ({
   tag: event.tag,
+  version: undefined,
   requestId: event.requestId,
   revisionId: event.revisionId,
   draft: undefined,
@@ -187,6 +198,33 @@ const failWith = (
   enq.emit({ type: 'toast.error', requestId: context.requestId ?? '', message: error });
   return { error };
 };
+
+/*
+ * The version a draft publishes as it is: the one it names by number, or else
+ * one with its name, on the revision being published. A version never moves
+ * to another revision (Q13), so a name on another revision makes a new one.
+ */
+const existingVersion = (context: PublishMachineContext): RevisionTag | undefined =>
+  context.tags.find(
+    (tag) =>
+      tag.revisionId === context.revisionId &&
+      (context.draft?.version === undefined ? tag.name === context.draft?.tag : tag.number === context.draft.version),
+  );
+
+/*
+ * The version a republish names by number (B6): it publishes that version's
+ * own entry under its stored name, whatever the branch head or the
+ * publication's title is now, so a republish never renames a version.
+ */
+const republished = (draft: PublishDraft | undefined, tags: readonly RevisionTag[]): RevisionTag | undefined =>
+  draft?.version === undefined ? undefined : tags.find((tag) => tag.number === draft.version);
+
+const notOnThisDevice = 'That version is not on this device yet. Sync this project, then publish it again.';
+
+/* The tag `pushing` and `publishing` name once `tagging` has made it: `v<number>`,
+ * as `versionTagName` spells it (a machine imports no value from the port). */
+const versionTagOf = (context: PublishMachineContext): string =>
+  context.version === undefined ? '' : `v${context.version}`;
 
 const noRevisionsYet = 'This project has no history yet, so there is nothing to publish.';
 
@@ -219,6 +257,7 @@ const publishMachineDefinition = setup({
     expected: undefined,
     remoteTags: {},
     tag: undefined,
+    version: undefined,
     requestId: undefined,
     draft: undefined,
     pushId: undefined,
@@ -244,6 +283,7 @@ const publishMachineDefinition = setup({
     cancel: () => ({}),
     reset: () => ({}),
     pushSettled: () => ({}),
+    versionsRenumbered: () => ({}),
   },
   states: {
     idle: {
@@ -280,12 +320,16 @@ const publishMachineDefinition = setup({
                   context: { tags: event.output.tags, ...failWith(context, enq, noRevisionsYet) },
                 };
               }
+              const version = republished(context.draft, event.output.tags);
               const read = {
                 tags: event.output.tags,
-                revisionId: context.revisionId ?? event.output.revisionId,
+                revisionId: version?.revisionId ?? context.revisionId ?? event.output.revisionId,
                 expected: event.output.expected,
                 remoteTags: event.output.remoteTags,
               };
+              if (context.draft?.version !== undefined && version === undefined) {
+                return { target: '#publish.error', context: { ...read, ...failWith(context, enq, notOnThisDevice) } };
+              }
               /* A name was confirmed while the read was in flight. */
               return context.draft === undefined
                 ? { target: 'ready', context: read }
@@ -303,10 +347,19 @@ const publishMachineDefinition = setup({
         },
         ready: {
           on: {
-            confirm: ({ context, event }, enq) =>
-              context.revisionId === undefined
-                ? { target: '#publish.error', context: failWith(context, enq, noRevisionsYet) }
-                : { target: '#publish.tagging', context: { draft: event.draft } },
+            confirm: ({ context, event }, enq) => {
+              if (context.revisionId === undefined) {
+                return { target: '#publish.error', context: failWith(context, enq, noRevisionsYet) };
+              }
+              const version = republished(event.draft, context.tags);
+              if (event.draft.version !== undefined && version === undefined) {
+                return { target: '#publish.error', context: failWith(context, enq, notOnThisDevice) };
+              }
+              return {
+                target: '#publish.tagging',
+                context: { draft: event.draft, revisionId: version?.revisionId ?? context.revisionId },
+              };
+            },
           },
         },
       },
@@ -326,12 +379,17 @@ const publishMachineDefinition = setup({
       tags: ['busy'],
       invoke: {
         src: 'createTag',
-        input: ({ context }) => ({
-          name: context.draft?.tag ?? '',
-          revisionId: context.revisionId ?? '',
-          ...(context.draft?.note === undefined ? {} : { note: context.draft.note }),
-        }),
-        onDone: { target: 'pushing' },
+        input: ({ context }) => {
+          const existing = existingVersion(context);
+          return {
+            /* A republish keeps the version's stored name; only a new publish names it. */
+            name: republished(context.draft, context.tags)?.name ?? context.draft?.tag ?? '',
+            revisionId: context.revisionId ?? '',
+            ...(context.draft?.note === undefined ? {} : { note: context.draft.note }),
+            ...(existing === undefined ? {} : { number: existing.number }),
+          };
+        },
+        onDone: ({ event }) => ({ target: 'pushing', context: { version: event.output.number } }),
         onError: ({ context, event }, enq) => ({
           target: 'error',
           context: failWith(context, enq, reason(event.error)),
@@ -353,11 +411,11 @@ const publishMachineDefinition = setup({
         src: 'push',
         input: ({ context }) => ({
           branch: context.branch,
-          tag: context.draft?.tag ?? '',
+          tag: versionTagOf(context),
           expected: context.expected,
-          /* Absent for a name the remote does not hold, which is the lease that
+          /* Absent for a tag the remote does not hold, which is the lease that
              says "this ref must not exist" (P18, P38). */
-          expectedTag: context.remoteTags[context.draft?.tag ?? ''],
+          expectedTag: context.remoteTags[versionTagOf(context)],
         }),
         /*
          * Not a transition: the push is settled when the settlement that names
@@ -414,6 +472,13 @@ const publishMachineDefinition = setup({
             ),
           };
         },
+        /* The version this publish made moved before its first backup: the
+           row and the `published` event name the number it was backed up at. */
+        versionsRenumbered: ({ context, event }) => ({
+          context: {
+            version: event.renumbered.find((step) => step.from === context.version)?.to ?? context.version,
+          },
+        }),
         cancel: { target: 'idle' },
       },
     },
@@ -427,27 +492,29 @@ const publishMachineDefinition = setup({
       tags: ['busy'],
       invoke: {
         src: 'createPublication',
-        input: ({ context }) => ({
+        input: ({ context }) => {
           /* The draft is set before `tagging` is entered and `publishing` is
            * only reachable through it; the fallback keeps the type honest. */
-          ...(context.draft ??
-            ({
-              tag: '',
-              projectName: '',
-              entryPath: '',
-              visibility: 'private',
-              title: '',
-            } satisfies PublishDraft)),
-          projectId: context.projectId,
-          revisionId: context.revisionId ?? '',
-        }),
+          const {
+            tag: _name,
+            version: _version,
+            ...draft
+          } = context.draft ??
+          ({ tag: '', projectName: '', entryPath: '', visibility: 'private', title: '' } satisfies PublishDraft);
+          return {
+            ...draft,
+            projectId: context.projectId,
+            tag: versionTagOf(context),
+            revisionId: context.revisionId ?? '',
+          };
+        },
         onDone: ({ context, event }, enq) => {
           enq.emit({
             type: 'published',
             requestId: context.requestId ?? '',
             publicationId: event.output.publicationId,
             url: event.output.url,
-            tag: context.draft?.tag ?? '',
+            tag: versionTagOf(context),
           });
           return {
             target: 'success',
@@ -491,7 +558,7 @@ export interface PublishMachine extends PublishMachineDefinition {}
  * Headless publication of one project's named version.
  *
  * @public
- * @example <caption>Publish the head of `main` as `v1`</caption>
+ * @example <caption>Publish the head of `main` as a new version named Ready for print</caption>
  * ```typescript
  * import { createActor } from 'xstate';
  * import { publishMachine } from '@taucad/revisions/publish-machine';
@@ -503,7 +570,7 @@ export interface PublishMachine extends PublishMachineDefinition {}
  * actor.send({ type: 'publish', requestId: 'publish-1' });
  * actor.send({
  *   type: 'confirm',
- *   draft: { tag: 'v1', projectName: 'bracket', entryPath: 'main.ts', visibility: 'public', title: 'Bracket' },
+ *   draft: { tag: 'Ready for print', projectName: 'bracket', entryPath: 'main.ts', visibility: 'public', title: 'Bracket' },
  * });
  * ```
  */

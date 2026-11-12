@@ -594,6 +594,54 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     });
   });
 
+  it('should push a version rename by itself, with no revision after it (B6, R9)', async () => {
+    const offers: string[][] = [];
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      listRemotes: async () => [{ name: 'tau', url: 'https://remote.test/project.git', kind: 'tau' }],
+      listRemoteRefs: async () => [],
+      fetch: async () => ({ refs: [] }),
+      push: async (input) => {
+        offers.push(input.refs.map((ref) => ref.name));
+        const held = [...(await port.listRefs('refs/heads')), ...(await port.listRefs('refs/tags'))];
+        return {
+          refs: input.refs.map((ref) => ({
+            name: ref.name,
+            status: 'updated',
+            head: held.find((entry) => entry.name === ref.name)?.head,
+          })),
+        };
+      },
+    }));
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.ts', 'first');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    root.send({ command: 'saveRevision' });
+    await vi.waitFor(() => {
+      expect(alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId).toBeDefined();
+    });
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')!.status.headRevisionId!;
+    const made = await root.tag({ name: 'Ready for print', revisionId: head });
+    await vi.waitFor(
+      () => {
+        expect(offers.some((names) => names.includes('refs/tags/v2'))).toBe(true);
+      },
+      { timeout: 15_000 },
+    );
+
+    /* The rename writes the same ref, and on its own is enough to offer it again. */
+    const offered = offers.length;
+    await root.tag({ name: 'Lid fit', revisionId: head, number: made.number });
+    await vi.waitFor(
+      () => {
+        expect(offers.slice(offered).some((names) => names.includes('refs/tags/v2'))).toBe(true);
+      },
+      { timeout: 15_000 },
+    );
+    await root.release();
+  });
+
   it('should give a branch its own checkout, route and files (AC22)', async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');

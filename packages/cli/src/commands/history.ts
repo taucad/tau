@@ -346,20 +346,12 @@ const readVersions = async (
     return [];
   }
   const tags = await createProjectRevisionPort({ workspaceRoot, projectId }).listTags();
-  return tags
-    .flatMap((tag) =>
-      tag.number === undefined
-        ? []
-        : [
-            {
-              number: tag.number,
-              name: tag.name,
-              revisionId: String(tag.revisionId),
-              ...(tag.note === undefined ? {} : { note: tag.note }),
-            },
-          ],
-    )
-    .toSorted((left, right) => left.number - right.number);
+  return tags.map((tag) => ({
+    number: tag.number,
+    name: tag.name,
+    revisionId: String(tag.revisionId),
+    ...(tag.note === undefined ? {} : { note: tag.note }),
+  }));
 };
 
 const versionCreateCommand = defineCommand({
@@ -393,7 +385,7 @@ const versionCreateCommand = defineCommand({
         revisionId,
         ...(args.note === undefined ? {} : { note: args.note }),
       });
-      const label = tag.number === undefined ? tag.name : `V${String(tag.number)} · ${tag.name}`;
+      const label = `V${String(tag.number)} · ${tag.name}`;
       await (args.json
         ? emit({ kind: 'version', ok: true, version: tag })
         : writeStdout(`Created ${label} at ${shortId(revisionId)}.\n`));
@@ -429,27 +421,28 @@ const versionRenameCommand = defineCommand({
   meta: { name: 'rename', description: 'Rename a version; it keeps its number' },
   args: {
     ...projectArguments,
-    name: { type: 'positional', description: 'The version’s current name', required: true },
+    version: {
+      type: 'positional',
+      description: 'The version: its number, such as V3, or its current name',
+      required: true,
+    },
     to: { type: 'positional', description: 'Its new name', required: true },
   },
   async run({ args }) {
     const { revisions, workspaceRoot } = await open(args.project);
     try {
       const versions = await readVersions(workspaceRoot);
-      const version = versions.find((candidate) => candidate.name === args.name);
+      const number = /^[Vv]?([1-9]\d*)$/u.exec(args.version)?.[1];
+      const version =
+        versions.find((candidate) => number !== undefined && candidate.number === Number(number)) ??
+        versions.find((candidate) => candidate.name === args.version);
       if (version === undefined) {
-        throw cliError('NO_VERSION', `This project has no version named ${args.name}.`, exitCodes.refused);
+        throw cliError('NO_VERSION', `This project has no version ${args.version}.`, exitCodes.refused);
       }
-      /* A version is permanent (Q13): a rename keeps its number and the entry it names. */
-      const tag = await revisions.tag({
-        name: args.to,
-        revisionId: version.revisionId,
-        number: version.number,
-        ...(version.note === undefined ? {} : { note: version.note }),
-      });
-      await revisions.deleteTag(args.name);
+      /* A version is permanent (Q13): a rename rewrites its tag at the same ref, keeping its number and entry. */
+      const tag = await revisions.tag({ name: args.to, revisionId: version.revisionId, number: version.number });
       await (args.json
-        ? emit({ kind: 'version', ok: true, version: tag, renamedFrom: args.name })
+        ? emit({ kind: 'version', ok: true, version: tag, renamedFrom: version.name })
         : writeStdout(`Renamed V${String(version.number)} to ${args.to}.\n`));
     } finally {
       await revisions.close();

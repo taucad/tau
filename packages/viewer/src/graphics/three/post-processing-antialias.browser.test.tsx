@@ -1980,6 +1980,11 @@ it.each(
       return undefined;
     };
     try {
+      actor.send({
+        type: 'updateArtifact',
+        artifact: { mimeType: 'model/gltf-binary', content: bytes },
+        hash: 'fixture',
+      });
       render(
         <KeyboardProvider>
           <div style={{ width: 2560, height: 1440 }}>
@@ -1991,7 +1996,7 @@ it.each(
                 onRetry={() => undefined}
               >
                 <ambientLight intensity={2} />
-                <GltfMesh gltfFile={bytes} enableLines enableSurfaces enableMatcap={false} />
+                <GltfMesh enableLines enableSurfaces enableMatcap={false} />
                 <Probe />
               </ThreeCanvasInstance>
             </GraphicsProvider>
@@ -2228,6 +2233,11 @@ it.each((['webgpu', 'node-webgl2'] as const).flatMap((execution) => [0, 35].map(
       return captureRendererOutput(state!.gl);
     };
     try {
+      actor.send({
+        type: 'updateArtifact',
+        artifact: { mimeType: 'model/gltf-binary', content: bytes },
+        hash: 'fixture',
+      });
       render(
         <KeyboardProvider>
           <div style={{ width: 2560, height: 1440 }}>
@@ -2239,7 +2249,7 @@ it.each((['webgpu', 'node-webgl2'] as const).flatMap((execution) => [0, 35].map(
                 onRetry={() => undefined}
               >
                 <ambientLight intensity={2} />
-                <GltfMesh gltfFile={bytes} enableLines enableSurfaces enableMatcap={false} />
+                <GltfMesh enableLines enableSurfaces enableMatcap={false} />
                 <SceneOverlay overlayActive>
                   <group
                     visible={false}
@@ -2367,6 +2377,11 @@ it.each(['webgpu', 'node-webgl2'] as const)(
       return cropped;
     };
     try {
+      actor.send({
+        type: 'updateArtifact',
+        artifact: { mimeType: 'model/gltf-binary', content: bytes },
+        hash: 'fixture',
+      });
       render(
         <KeyboardProvider>
           <div style={{ width: 2560, height: 1440 }}>
@@ -2378,7 +2393,7 @@ it.each(['webgpu', 'node-webgl2'] as const)(
                 onRetry={() => undefined}
               >
                 <ambientLight intensity={2} />
-                <GltfMesh gltfFile={bytes} enableLines={false} enableSurfaces enableMatcap={false} />
+                <GltfMesh enableLines={false} enableSurfaces enableMatcap={false} />
                 <Probe />
               </ThreeCanvasInstance>
             </GraphicsProvider>
@@ -2611,6 +2626,16 @@ it.each([
       return captureRendererOutput(state!.gl);
     };
     try {
+      actor.send({
+        type: 'updateArtifact',
+        artifact: { mimeType: 'model/gltf-binary', content: bytes },
+        hash: 'fixture',
+      });
+      sibling.send({
+        type: 'updateArtifact',
+        artifact: { mimeType: 'model/gltf-binary', content: bytes },
+        hash: 'fixture',
+      });
       render(
         <KeyboardProvider>
           <div data-testid='history-root' style={{ width: 381, height: 1047 }}>
@@ -2625,7 +2650,7 @@ it.each([
                 postProcessingSettings={{ aoEnabled, toneMapping: 'neutral' }}
                 onRetry={() => undefined}
               >
-                <GltfMesh gltfFile={bytes} enableLines enableSurfaces enableMatcap={false} />
+                <GltfMesh enableLines enableSurfaces enableMatcap={false} />
                 <Probe />
               </ThreeCanvasInstance>
             </GraphicsProvider>
@@ -2640,7 +2665,7 @@ it.each([
                 postProcessingSettings={{ aoEnabled, toneMapping: 'neutral' }}
                 onRetry={() => undefined}
               >
-                <GltfMesh gltfFile={bytes} enableLines enableSurfaces enableMatcap={false} />
+                <GltfMesh enableLines enableSurfaces enableMatcap={false} />
               </ThreeCanvasInstance>
             </GraphicsProvider>
           </div>

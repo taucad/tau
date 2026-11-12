@@ -248,8 +248,8 @@ export type WorkerRevisionCommand =
    *
    * `saveRevision` is a cut with no turn: the page asks its checkout to record
    * what is on disk, and the I5 gate decides whether anything is minted.
-   * `tag`/`deleteTag` are port verbs with no lifecycle of their own — a name is
-   * a ref, not a state machine — so they ride the same correlated channel the
+   * `tag` is a port verb with no lifecycle of its own — a version is a ref,
+   * not a state machine — so they ride the same correlated channel the
    * graph reads do rather than becoming machine events with nothing to hold.
    */
   | Readonly<{ command: 'saveRevision'; trigger?: 'save' | 'hidden' | 'close' }>
@@ -282,8 +282,7 @@ export type WorkerRevisionCommand =
    * silent drop.
    */
   | Readonly<{ command: 'flushKeepalive' }>
-  | Readonly<{ command: 'tag'; name: string; revisionId: string; note?: string }>
-  | Readonly<{ command: 'deleteTag'; name: string }>
+  | Readonly<{ command: 'tag'; name: string; revisionId: string; note?: string; number?: number }>
   | Readonly<{ command: 'log'; branch?: string; limit?: number; from?: string }>
   /** Every branch's history in one walk, for History's lanes (D2). */
   | Readonly<{ command: 'graph'; branches?: readonly string[]; limit?: number }>
@@ -560,10 +559,8 @@ export type WorkerProjectRevisions = Readonly<{
   ) => Promise<Uint8Array<ArrayBuffer> | undefined>;
   /** One content-change event on a checkout, already filtered to versioned paths. */
   changed: (checkoutId: string, paths: readonly string[]) => void;
-  /** Name one revision, or re-point an existing name (S31). */
-  tag: (input: Readonly<{ name: string; revisionId: string; note?: string }>) => Promise<RevisionTag>;
-  /** Remove one name. The revision it named stays. */
-  deleteTag: (name: string) => Promise<void>;
+  /** Make a version of one revision, or with `number` rename that version at its own ref (S31, B6). */
+  tag: (input: Readonly<{ name: string; revisionId: string; note?: string; number?: number }>) => Promise<RevisionTag>;
   /** One branch's history, newest first, with its first-parent `Rev N` (I3). */
   log: (request?: RevisionLogRequest) => Promise<readonly RevisionRow[]>;
   /** Every branch's history in one walk, each row naming the line it is drawn on (D2). */
@@ -1862,7 +1859,6 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         /* Questions, not events: they are answered on a correlated frame and
          * never reach the tree (see `answerOf`). */
         case 'tag':
-        case 'deleteTag':
         case 'log':
         case 'graph':
         case 'divergence':
@@ -1886,14 +1882,19 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }
     },
     changed,
-    tag: async (input) =>
-      options.port.tag({
+    tag: async (input) => {
+      const written = await options.port.tag({
         name: input.name,
         revisionId: revisionId(input.revisionId),
         ...(input.note === undefined ? {} : { note: input.note }),
+        ...(input.number === undefined ? {} : { number: input.number }),
         ...(person === undefined ? {} : { actor: person }),
-      }),
-    deleteTag: async (name) => options.port.deleteTag(name),
+      });
+      /* A new version or a rename is owed to the remote like any record: the
+       * next push carries its tag, even when no revision is made after it (B6). */
+      actor.send({ type: 'sync', event: { type: 'recordsChanged' } });
+      return written;
+    },
     log: async (request) => readRevisionLog(options.port, request),
     graph: async (request) => readRevisionGraph(options.port, request),
     divergence: async (head, base) => options.port.divergence({ head: revisionId(head), base: revisionId(base) }),
@@ -2103,7 +2104,7 @@ export type WorkerRevisionResult =
   | Readonly<{ kind: 'materialized' }>
   | Readonly<{ kind: 'geoSpecCandidates'; candidates: ReadonlyArray<Uint8Array<ArrayBuffer>> }>
   | Readonly<{ kind: 'geoSpecCandidatePublication'; status: 'updated' | 'upToDate' | 'rejected' }>
-  /** `tag` answers with the named version; `deleteTag` answers with nothing. */
+  /** `tag` answers with the version it wrote. */
   | Readonly<{ kind: 'tag'; tag: RevisionTag | undefined }>
   /**
    * The project's root has been released (W19).
@@ -2329,9 +2330,6 @@ const answerOf = (
     case 'tag': {
       const { command: _verb, id: _id, ...input } = request;
       return tree.tag(input).then((tag) => ({ kind: 'tag', tag }) as const);
-    }
-    case 'deleteTag': {
-      return tree.deleteTag(request.name).then(() => ({ kind: 'tag', tag: undefined }) as const);
     }
     case 'compare': {
       return tree

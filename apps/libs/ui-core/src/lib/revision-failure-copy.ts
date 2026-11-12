@@ -17,8 +17,9 @@
 /**
  * The three verbs whose refusals reach the tree's one error channel, the turn,
  * which announces its own (`turn.failed`), the backup, whose terminal refusal
- * the Sync line says, and removing a version name or another device's
- * decision, which the Hosted Remote's audited verb answers (D24, D14).
+ * the Sync line says, and removing another device's decision, which the
+ * Hosted Remote's audited verb answers (D24, D14). A version is never removed
+ * (Q13), so there is no removal of a version name to phrase.
  */
 export type RevisionFailureSubject =
   | 'restore'
@@ -27,7 +28,6 @@ export type RevisionFailureSubject =
   | 'connection'
   | 'turn'
   | 'backup'
-  | 'removeName'
   | 'removeConflictLine';
 
 /** What Tau Cloud's own budgets answer (D22, I11): one sentence each, each saying when to try again. */
@@ -161,15 +161,6 @@ export const revisionFailureCopy: Readonly<
         'REMOTE_DAMAGED',
         'Tau has to repair this project’s copy on Tau Cloud before it can back it up again. Nothing on this device is lost.',
       ],
-    ]),
-  },
-  removeName: {
-    title: 'That name was not removed',
-    fallback: 'Tau Cloud could not remove that name. Try again.',
-    codes: new Map([
-      ...hostedRemoteCopy,
-      ['GIT_REF_REMOVAL_OWNER_ONLY', 'Only the project’s owner can remove a version name.'],
-      ['GIT_REF_NOT_REMOVABLE', 'Only a version name can be removed.'],
     ]),
   },
   removeConflictLine: {

@@ -434,25 +434,34 @@ describe.runIf(gitToolchainOnPath)('historyCommand', () => {
     }
   }, 60_000);
 
-  it('creates a version where the files are, lists it by its number and renames it keeping that number', async () => {
+  it('creates a version named with spaces, lists it by its number and renames it keeping that number', async () => {
     await seed();
     const version = await importVersionCommand();
 
-    await runCommand(version, { rawArgs: ['create', 'ready-for-print', '--project', project] });
-    expect(stdout.join('')).toMatch(/^Created V2 · ready-for-print at [\da-f]{7}\.\n$/u);
+    await runCommand(version, { rawArgs: ['create', 'Ready for print', '--project', project] });
+    expect(stdout.join('')).toMatch(/^Created V2 · Ready for print at [\da-f]{7}\.\n$/u);
     stdout.length = 0;
 
-    await runCommand(version, { rawArgs: ['rename', 'ready-for-print', 'fit-check', '--project', project] });
-    expect(stdout.join('')).toBe('Renamed V2 to fit-check.\n');
+    await runCommand(version, { rawArgs: ['rename', 'V2', 'Fit check', '--project', project] });
+    expect(stdout.join('')).toBe('Renamed V2 to Fit check.\n');
+    stdout.length = 0;
+
+    /* By its current name too. */
+    await runCommand(version, { rawArgs: ['rename', 'Fit check', 'Fit check, final', '--project', project] });
+    expect(stdout.join('')).toBe('Renamed V2 to Fit check, final.\n');
     stdout.length = 0;
 
     await runCommand(version, { rawArgs: ['list', '--project', project] });
-    expect(stdout.join('')).toMatch(/^V2 {4}[\da-f]{7} {2}fit-check\n$/u);
+    expect(stdout.join('')).toMatch(/^V2 {4}[\da-f]{7} {2}Fit check, final\n$/u);
     stdout.length = 0;
 
     /* The history row a version names leads with its number. */
     await runCommand(await importCommand(), { rawArgs: ['log', '--limit', '1', '--project', project] });
-    expect(stdout.join('')).toMatch(/^V2 {4}[\da-f]{7} {2}\S+ \S+ {2}main {2}ada {2}fit-check\n$/u);
+    expect(stdout.join('')).toMatch(/^V2 {4}[\da-f]{7} {2}\S+ \S+ {2}main {2}ada {2}Fit check, final\n$/u);
+
+    /* The ref is the number, so git itself sees one tag, `v2`. */
+    const tags = await execute('git', ['tag', '--list'], { cwd: project });
+    expect(tags.stdout).toBe('v2\n');
   }, 60_000);
 
   it('offers no way to remove a version: versions are permanent (Q13)', async () => {

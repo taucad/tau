@@ -46,13 +46,14 @@ import {
 } from '#revision-headers.js';
 import type { RevisionTrailer } from '#revision-headers.js';
 import { walkRevisionLog } from '#revision-log-order.js';
-import { RevisionPortError } from '#revision-port.js';
-import { numberVersions, versionNumberFor } from '#version-numbers.js';
+import { RevisionPortError, versionTagName, versionTagRef } from '#revision-port.js';
+import { versionNumberOfTag, versionTagWrite } from '#version-numbers.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import type {
   AddCheckoutInput,
   Checkout,
   CreateRevisionTagInput,
+  ListRevisionTagsInput,
   InitRevisionStoreInput,
   RevisionConflict,
   RevisionDiffEntry,
@@ -210,6 +211,10 @@ const commitWalkSlack = 32;
 const refusedFileLimit = 10;
 const branchRefPrefix = 'refs/heads';
 const tagRefPrefix = 'refs/tags';
+
+/* How many times one `tag` call chooses its number again after another writer claimed the ref first (B6). */
+const tagWriteAttempts = 8;
+
 const symbolicRefPrefix = 'ref: ';
 const stagingRefPrefix = 'refs/tau/transactions/port';
 const initialBranch = 'main';
@@ -1443,52 +1448,74 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   const refOf = (name: string): string => (name.startsWith('refs/') ? name : `${branchRefPrefix}/${name}`);
 
   /**
-   * One named version, or `undefined` when the ref is gone.
+   * One version, or `undefined` when the ref is gone or is not a version.
    *
-   * A lightweight tag — a valid git tag this store did not write — is still a
-   * name for a revision, so it is reported with no note and no actor rather
-   * than hidden.
+   * A version is an annotated tag at `refs/tags/v<n>` with a valid `Tau-Tag`
+   * record (B6, I7). Its id and name come from that record, never from the
+   * ref; any other tag there is not a version, though it holds its number.
    *
-   * @param name - The tag name, without `refs/tags/`.
-   * @returns The named version.
+   * @param oid - The object its ref holds, unpeeled.
+   * @param number - The number its ref says.
+   * @returns The version.
    */
-  const readTagRef = async (name: string): Promise<RevisionTag | undefined> => {
-    const ref = `${tagRefPrefix}/${name}`;
+  const readTagObject = async (oid: string, number: number): Promise<RevisionTag | undefined> => {
     /* `resolve` peels (`^{commit}`), which is right everywhere else and wrong
-     * here: the tag object itself is what carries the note and the actor. */
-    const oid = await text(['for-each-ref', '--format=%(objectname)', ref]);
-    if (oid === '') {
+     * here: the tag object itself is what carries the name, note and actor. */
+    if ((await text(['cat-file', '-t', oid])) !== 'tag') {
       return undefined;
-    }
-    const kind = await text(['cat-file', '-t', oid]);
-    if (kind !== 'tag') {
-      return Object.freeze({ name, revisionId: revisionId(oid), note: undefined, actor: undefined, createdAt: 0 });
     }
     const decoded = decodeTag(await output(['cat-file', 'tag', oid]));
     const trailer = parseRevisionTagMessage(decoded.message);
-    return Object.freeze({
-      name,
-      revisionId: revisionId(decoded.object),
-      note: trailer.note,
-      actor: trailer.actor,
-      createdAt: decoded.tagger.seconds * 1000,
-      ...(trailer.number === undefined ? {} : { number: trailer.number }),
-    });
+    return trailer === undefined
+      ? undefined
+      : Object.freeze({
+          id: trailer.id,
+          number,
+          name: trailer.name,
+          revisionId: revisionId(decoded.object),
+          note: trailer.note,
+          actor: trailer.actor,
+          createdAt: decoded.tagger.seconds * 1000,
+        });
   };
 
-  /* Every named version, by name, each with the number it reads as (B6). */
-  const listTags = async (): Promise<readonly RevisionTag[]> => {
-    const records = await text(['for-each-ref', '--format=%(refname)%00%(objectname)', `${tagRefPrefix}/`]);
-    const names = records
+  /* Every `refs/tags/v<n>` under one prefix, version or not, with its number and unpeeled object. */
+  const numberedTagReferences = async (
+    prefix: string,
+  ): Promise<ReadonlyArray<Readonly<{ oid: string; number: number }>>> => {
+    const records = await text(['for-each-ref', '--format=%(refname)%00%(objectname)', `${prefix}/`]);
+    return records
       .split('\n')
       .filter((line) => line !== '')
-      .map((line) => line.split('\0')[0] ?? '')
-      .map((ref) => ref.slice(tagRefPrefix.length + 1))
-      .filter((name) => name !== '')
-      .toSorted();
-    const tags = await Promise.all(names.map(async (name) => readTagRef(name)));
-    return numberVersions(tags.filter((entry) => entry !== undefined));
+      .flatMap((line) => {
+        const [ref = '', oid = ''] = line.split('\0');
+        const number = versionNumberOfTag(ref.slice(prefix.length + 1));
+        return number === undefined ? [] : [{ oid, number }];
+      });
   };
+
+  const tagsOf = async (
+    numbered: ReadonlyArray<Readonly<{ oid: string; number: number }>>,
+  ): Promise<readonly RevisionTag[]> => {
+    const tags = await Promise.all(numbered.map(async (entry) => readTagObject(entry.oid, entry.number)));
+    return Object.freeze(
+      tags.filter((entry) => entry !== undefined).toSorted((left, right) => left.number - right.number),
+    );
+  };
+
+  /* Whether two tag objects are the same version: both versions, with one id (B6). */
+  const sameVersionObjects = async (left: string, right: string): Promise<boolean> => {
+    const [one, other] = await Promise.all([readTagObject(left, 2), readTagObject(right, 2)]);
+    return one !== undefined && one.id === other?.id;
+  };
+
+  /* Every version, lowest number first (B6): this store's, or a remote's as last fetched. */
+  const listTags = async (input?: ListRevisionTagsInput): Promise<readonly RevisionTag[]> =>
+    tagsOf(
+      await numberedTagReferences(
+        input?.remote === undefined ? tagRefPrefix : remoteTrackingRef(input.remote, tagRefPrefix),
+      ),
+    );
 
   const resolve = async (ref: string): Promise<string | undefined> => {
     const result = await run(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
@@ -2340,42 +2367,59 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       if (named === undefined) {
         throw new RevisionPortError('UNKNOWN_REVISION', 'The revision this name would point at is not in the store.');
       }
-      const createdAt = input.createdAt ?? Date.now();
-      const number = input.number ?? versionNumberFor(await listTags(), input.name);
-      const object = encodeTag({
-        objectFormat: await format(),
-        object: input.revisionId,
-        tag: input.name,
-        tagger: taggerSignature(input.actor, createdAt),
-        message: revisionTagMessage({ name: input.name, note: input.note, actor: input.actor, number }),
-      });
-      const written = await run(['hash-object', '-t', 'tag', '-w', '--stdin'], { input: [object.body] });
-      if (written.exitCode !== 0) {
-        throw new RevisionPortError('ENGINE_FAILED', 'Native Git refused the named version tag object.');
-      }
-      const oid = textDecoder.decode(written.stdout).trim();
-      const updated = await run(['update-ref', `${tagRefPrefix}/${input.name}`, oid]);
-      if (updated.exitCode !== 0) {
-        throw new RevisionPortError('ENGINE_FAILED', `Native Git refused the tag ref ${input.name}.`);
-      }
-      return Object.freeze({
-        name: input.name,
-        revisionId: input.revisionId,
-        note: input.note,
-        actor: input.actor,
-        createdAt,
-        number,
+      /*
+       * Choosing the number and claiming its ref are one step (B6):
+       * `update-ref` writes the ref only while it still holds what the choice
+       * read — the zero id for a new number — so of two writers that chose
+       * the same number one wins and the other chooses again. Calls on this
+       * port also queue behind each other, so only another process ever makes
+       * one choose again.
+       */
+      return refQueue.queueFor(`${repositoryPath}:refs/tags/v*`, async () => {
+        const zero = await zeroObjectId();
+        for (let attempt = 0; attempt < tagWriteAttempts; attempt += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- each attempt reads what the last one lost to.
+          const numbered = await numberedTagReferences(tagRefPrefix);
+          const version = versionTagWrite({
+            // oxlint-disable-next-line no-await-in-loop -- as above.
+            tags: await tagsOf(numbered),
+            held: numbered.map((entry) => entry.number),
+            input,
+            now: Date.now(),
+          });
+          const chosen = numbered.find((entry) => entry.number === version.number)?.oid ?? zero;
+          const object = encodeTag({
+            // oxlint-disable-next-line no-await-in-loop -- read once per attempt, cached by the port.
+            objectFormat: await format(),
+            object: version.revisionId,
+            tag: versionTagName(version.number),
+            tagger: taggerSignature(version.actor, version.createdAt),
+            message: revisionTagMessage(version),
+          });
+          // oxlint-disable-next-line no-await-in-loop -- one object per attempt.
+          const written = await run(['hash-object', '-t', 'tag', '-w', '--stdin'], { input: [object.body] });
+          if (written.exitCode !== 0) {
+            throw new RevisionPortError('ENGINE_FAILED', 'Native Git refused the version tag object.');
+          }
+          const oid = textDecoder.decode(written.stdout).trim();
+          // oxlint-disable-next-line no-await-in-loop -- one guarded ref write per attempt.
+          const updated = await run(['update-ref', versionTagRef(version.number), oid, chosen]);
+          if (updated.exitCode === 0) {
+            return Object.freeze({ ...version, createdAt: Math.floor(version.createdAt / 1000) * 1000 });
+          }
+        }
+        throw new RevisionPortError('ENGINE_FAILED', 'Another writer kept changing the version tags; try again.');
       });
     },
 
     listTags,
 
-    deleteTag: async (name: string): Promise<void> => {
-      const removed = await run(['update-ref', '-d', `${tagRefPrefix}/${name}`]);
-      /* Exit 1 is "no such ref": removing a name that is already gone is the
+    deleteTag: async (number: number): Promise<void> => {
+      const removed = await run(['update-ref', '-d', versionTagRef(number)]);
+      /* Exit 1 is "no such ref": removing a tag that is already gone is the
        * outcome the caller asked for. */
       if (removed.exitCode !== 0 && removed.exitCode !== 1) {
-        throw new RevisionPortError('ENGINE_FAILED', `Native Git refused to remove the tag ${name}.`);
+        throw new RevisionPortError('ENGINE_FAILED', `Native Git refused to remove the tag ${versionTagName(number)}.`);
       }
     },
 
@@ -2672,7 +2716,20 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       await Promise.all(
         previousTags.map(async ({ local, tracked, localHead, remoteHead }) => {
           const fetchedHead = await rawRef(tracked);
-          if (fetchedHead === undefined || (localHead !== undefined && localHead !== remoteHead)) {
+          if (fetchedHead === undefined || fetchedHead === localHead) {
+            return;
+          }
+          /* A local rename is kept for its leased push, unless the remote renamed
+           * the same version too: then the remote's name wins (B6, rule 19). */
+          if (
+            localHead !== undefined &&
+            localHead !== remoteHead &&
+            !(
+              remoteHead !== undefined &&
+              fetchedHead !== remoteHead &&
+              (await sameVersionObjects(localHead, fetchedHead))
+            )
+          ) {
             return;
           }
           const updated = await run(['update-ref', local, fetchedHead, localHead ?? (await zeroObjectId())]);

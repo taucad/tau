@@ -2067,6 +2067,10 @@ const syncMachineDefinition = setup({
           /* B6: the push that moved this device's versions says so, once. */
           if ((event.output.renumbered ?? []).length > 0) {
             enq.emit({ type: 'versionsRenumbered', renumbered: event.output.renumbered ?? [] });
+            /* Before the settlement, so a publish waiting on it names the version's final number. */
+            if (context.parentRef !== undefined) {
+              enq.sendTo(context.parentRef, { type: 'versionsRenumbered', renumbered: event.output.renumbered ?? [] });
+            }
           }
           /* F9: bytes reached the remote, so its stored figure is stale. */
           if (event.output.refs.some((entry) => entry.status === 'updated') && context.parentRef !== undefined) {

@@ -201,11 +201,11 @@ describe('a restore whose files are back but not recorded (W0 N1, M1)', () => {
 describe('what the Hosted Remote answers (W2a, W9)', () => {
   it.each([
     ['backup', 'REMOTE_DAMAGED', /has to repair this project’s copy on Tau Cloud.*Nothing on this device is lost/u],
-    ['removeName', 'GIT_RATE_LIMITED', /Wait a minute, then try again/u],
-    ['removeName', 'GIT_LEASE_OWNER_BUSY', /Try again in a moment/u],
-    ['removeName', 'GIT_HYDRATE_BUDGET_EXHAUSTED', /Try again tomorrow/u],
+    ['removeConflictLine', 'GIT_RATE_LIMITED', /Wait a minute, then try again/u],
+    ['removeConflictLine', 'GIT_LEASE_OWNER_BUSY', /Try again in a moment/u],
+    ['removeConflictLine', 'GIT_HYDRATE_BUDGET_EXHAUSTED', /Try again tomorrow/u],
     ['backup', 'GIT_RATE_LIMITED', /Wait a minute, then try again/u],
-    ['removeName', 'GIT_REF_REMOVAL_OWNER_ONLY', /Only the project’s owner/u],
+    ['removeConflictLine', 'GIT_REF_REMOVAL_OWNER_ONLY', /Only the project’s owner/u],
   ] as const)('phrases %s refused with %s', (subject, code, sentence) => {
     const { description } = describeRevisionFailure(subject, code);
     expect(description).toMatch(sentence);

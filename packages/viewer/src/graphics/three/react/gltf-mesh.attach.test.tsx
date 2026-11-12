@@ -12,7 +12,9 @@ import { createRoot, extend } from '@react-three/fiber';
 import type { ReconcilerRoot } from '@react-three/fiber';
 import { mock } from 'vitest-mock-extended';
 import type { GeometryComponentManifest } from '@taucad/types';
-import { createPresentationAttach } from '#graphics/three/react/gltf-mesh.jsx';
+import { createCallbackLogic } from 'xstate';
+import { createPresentationAttach, createPresentationHostAttach } from '#graphics/three/react/gltf-mesh.jsx';
+import type { PresentationHostCommand } from '#machines/presentation.machine.js';
 
 const manifest = mock<GeometryComponentManifest>();
 
@@ -28,10 +30,7 @@ const presentationOf = (revision: number, key: string, scene = new Group()): Pre
 
 const roots: Array<ReconcilerRoot<HTMLCanvasElement>> = [];
 
-async function mountPrimitive(): Promise<{
-  readonly show: (presentation: Presentation) => Promise<void>;
-  readonly commits: Array<{ key: string; revision: number; attached: boolean }>;
-}> {
+async function createTestRoot(): Promise<ReconcilerRoot<HTMLCanvasElement>> {
   const canvas = document.createElement('canvas');
   const root = createRoot(canvas);
   roots.push(root);
@@ -47,6 +46,14 @@ async function mountPrimitive(): Promise<{
       size: { height: 600, left: 0, top: 0, width: 800 },
     });
   });
+  return root;
+}
+
+async function mountPrimitive(): Promise<{
+  readonly show: (presentation: Presentation) => Promise<void>;
+  readonly commits: Array<{ key: string; revision: number; attached: boolean }>;
+}> {
+  const root = await createTestRoot();
   const commits: Array<{ key: string; revision: number; attached: boolean }> = [];
   let shown: Presentation | undefined;
   const graphicsActor = {
@@ -102,6 +109,38 @@ describe('createPresentationAttach under R3F (G11b)', () => {
     expect(commits).toEqual([
       { key: 'a', revision: 1, attached: true },
       { key: 'a', revision: 2, attached: true },
+    ]);
+  });
+});
+
+describe('createPresentationHostAttach under R3F (G11b)', () => {
+  const hostOf = (hostId: string) => ({
+    hostId,
+    logic: createCallbackLogic<PresentationHostCommand, undefined>(() => undefined),
+  });
+
+  it('should hand the host over when the group mounts, take it back when it leaves, and swap a replaced host', async () => {
+    const root = await createTestRoot();
+    const sent: string[] = [];
+    const graphicsActor = {
+      send: vi.fn((event: { type: string; hostId?: string }) => {
+        sent.push(`${event.type} ${event.hostId}`);
+      }),
+    };
+    const show = async (host: ReturnType<typeof hostOf> | undefined): Promise<void> => {
+      await act(async () => {
+        root.render(host ? <group ref={createPresentationHostAttach(graphicsActor, host)} /> : null);
+      });
+    };
+    await show(hostOf('one'));
+    await show(hostOf('two'));
+    await show(undefined);
+
+    expect(sent).toEqual([
+      'presentationHostAttached one',
+      'presentationHostDetached one',
+      'presentationHostAttached two',
+      'presentationHostDetached two',
     ]);
   });
 });

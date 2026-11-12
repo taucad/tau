@@ -36,7 +36,7 @@ import type { ResolutionMachineEvent } from '#resolution.machine.js';
 import { restoreMachine, selectRestoreBusy } from '#restore.machine.js';
 import { selectRemoteHeads, selectSyncFacet, syncMachine } from '#sync.machine.js';
 import type { SyncMachineEvent } from '#sync.machine.js';
-import type { SyncFacet, SyncPushOutcome } from '#sync.types.js';
+import type { SyncFacet, SyncPushOutcome, VersionRenumbering } from '#sync.types.js';
 import type { CheckoutRecord, ConflictRecord, RevisionPortErrorCode } from '#revision-port.js';
 import { turnMachine } from '#turn.machine.js';
 import type { TurnFailureCode, TurnOutcome, TurnSettlement } from '#turn.machine.js';
@@ -265,6 +265,8 @@ export type ProjectRevisionsMachineEvent =
    */
   | Readonly<{ type: 'syncNow'; pushId?: string; remote?: string }>
   | Readonly<{ type: 'pushSettled'; pushId: string; outcome: SyncPushOutcome }>
+  /* A push moved versions to new numbers (B6): the publish dialog names the final one. */
+  | Readonly<{ type: 'versionsRenumbered'; renumbered: readonly VersionRenumbering[] }>
   /* The conflict card's verbs, addressed to one conflicted revision's child (S33). */
   | (Readonly<{ type: 'resolution'; revisionId: string }> & Readonly<{ event: ResolutionMachineEvent }>)
   /* A known conflict line may now hold another undecided revision. */
@@ -1538,6 +1540,13 @@ const projectRevisionsMachineDefinition = setup({
             pushId: event.pushId,
             outcome: event.outcome,
           });
+          return {};
+        },
+        versionsRenumbered: (
+          { event }: RootArgs<'versionsRenumbered'>,
+          enq: ProjectRevisionsEnqueue,
+        ): RootTransition => {
+          enq.sendTo('publish', { type: 'versionsRenumbered', renumbered: event.renumbered });
           return {};
         },
         /* The registry's two verbs, which `branch` asks for through here rather than opening a second writer (P3). */

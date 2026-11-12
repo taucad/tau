@@ -811,7 +811,6 @@ const CalibrationCanvas = memo(function CalibrationCanvas({
   readonly capture: { sequence: number; name: string };
   readonly onReport: (report: Record<string, unknown>) => void;
 }): React.JSX.Element {
-  const requested = useSelector(graphicsRef, (snapshot) => snapshot.context.gltfPresentation.requestedRevision);
   const backend = useSelector(graphicsRef, (snapshot) => snapshot.context.resolvedGraphicsBackend);
   const stageOptions = useMemo(() => ({ lighting }), [lighting]);
   const metadata = useMemo(
@@ -843,14 +842,7 @@ const CalibrationCanvas = memo(function CalibrationCanvas({
         postProcessingSettings={post}
       >
         {geometry.format === 'gltf' ? (
-          <GltfMesh
-            gltfFile={geometry.content}
-            geometryHash={geometry.hash}
-            presentationRevision={requested}
-            enableLines={edges}
-            enableMatcap={matcap}
-            enableSurfaces
-          />
+          <GltfMesh geometryHash={geometry.hash} enableLines={edges} enableMatcap={matcap} enableSurfaces />
         ) : null}
         <CalibrationProbe
           key={fixture.id}

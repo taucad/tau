@@ -23,7 +23,6 @@ import { revisionId } from '#algorithms/index.js';
 import type { RevisionIdentity, RevisionProvenance } from '#revision-authority.js';
 import { revisionCommitMessage } from '#revision-headers.js';
 import type { RevisionDiffEntry, RevisionLogEntry, RevisionPort } from '#revision-port.js';
-import { numberVersions } from '#version-numbers.js';
 import { generatedSetupPaths } from '#workspace-config.js';
 import { startReadingOf } from '#start-version.js';
 import type { StartReading } from '#start-version.js';
@@ -499,7 +498,7 @@ export const rowsOf = async (
 ): Promise<readonly RevisionRow[]> => {
   /* One `listTags` for the whole page, not one per row; each tag arrives numbered (B6). */
   const named = new Map<string, RevisionVersion[]>();
-  for (const tag of numberVersions(await port.listTags())) {
+  for (const tag of await port.listTags()) {
     named.set(tag.revisionId, [
       ...(named.get(tag.revisionId) ?? []),
       Object.freeze({ name: tag.name, number: tag.number }),

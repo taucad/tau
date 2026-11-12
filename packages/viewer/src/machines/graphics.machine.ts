@@ -23,7 +23,8 @@ import type { CameraBounds } from '@taucad/camera';
 import { cameraMachine } from '@taucad/camera/machine';
 import type { CameraMachineEmitted, CameraMachineEvent } from '@taucad/camera/machine';
 import type { CameraNavigationStep } from '#graphics/three/controls/camera-navigation.js';
-import { resolveMetersPerRenderUnit } from '@taucad/spatial';
+import { resolveCoordinateTransform, resolveMetersPerRenderUnit } from '@taucad/spatial';
+import { canonicalGltfWorld, tauWorld } from '#graphics/world-conventions.js';
 import type {
   CameraOwnedSettings,
   GraphicsBackendPreference,
@@ -47,7 +48,11 @@ import type { SectionAxis, SectionCut, SectionCutPatch, SectionPlane, SectionVec
 import { recordRendererSpan } from '#lib/renderer-telemetry.js';
 import { viewerFirstFrame } from '#lib/viewer-events.js';
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
-import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
+import type {
+  ModelInteractionContext,
+  ModelInteractionSource,
+  ViewerHoverSuppressionReason,
+} from '#machines/model-interaction.machine.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
 import { canvasMachine } from '#machines/canvas.machine.js';
 import { framingMachine } from '#machines/framing.machine.js';
@@ -63,6 +68,8 @@ import type {
   ViewportGizmoGestureRef,
 } from '#machines/viewport-gizmo-gesture.machine.js';
 import type { SectionInputAdapterLogic } from '#machines/section-input.machine.js';
+import { presentationMachine } from '#machines/presentation.machine.js';
+import type { PresentationHostLogic, PresentationRef } from '#machines/presentation.machine.js';
 import { defaultFramingStage } from '#graphics/three/framing-stage.js';
 import type { CanvasRef, CanvasSurfaceKind } from '#machines/canvas.machine.js';
 import type { webglContextMachine } from '#machines/webgl-context.machine.js';
@@ -123,6 +130,13 @@ export type GraphicsFramingRef = ActorRefFrom<typeof framingMachine>;
  * @public
  */
 export type GraphicsSectionInputRef = ActorRefFrom<typeof sectionInputMachine>;
+
+/**
+ * Each model unit's focused component, by unit id: a unit with no focus has no entry.
+ *
+ * @public
+ */
+export type ComponentFocus = Readonly<Record<string, string>>;
 
 /**
  * A reason for ignoring pointer clicks on the model, such as an active measure tool.
@@ -249,10 +263,15 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
  *   `committedSectionCuts` (what the caps last committed),
  *   `hoveredMeasurementId`, `measureSnapDistance`, every
  *   suppression and interaction flag, `pickableMeshesVersion`, `geometry`, `geometryKey` and
- *   `gltfPresentation`; and `poseRevision`, folded from the kinematics child.
+ *   `gltfPresentation`; `presentationRef`, `framedFocusComponentId` and `presentedManifest`, the manifest of the
+ *   scene this view last committed; `poseRevision`, folded from the kinematics
+ *   child; and `componentFocus`, folded from the model interaction.
  *
- * No field here stores a copy of a value another actor owns, except `poseRevision`: the stamp a measurement takes,
- * folded from each snapshot of the kinematics child so a completion never reads that child's snapshot; the camera's field of view and pose
+ * No field here stores a copy of a value another actor owns, except two folds: `poseRevision`, the stamp a measurement
+ * takes, folded from each snapshot of the kinematics child so a completion never reads that child's snapshot; and
+ * `componentFocus`, each unit's focused component, folded from each snapshot of a model interaction graphics owns, or
+ * sent by the host that owns a shared one, so a commit can frame a focus that predates it without reading that
+ * snapshot. The camera's field of view and pose
  * belong to the view's camera session, and the render timeout to the entry's CAD actor.
  * @public
  */
@@ -385,6 +404,20 @@ export interface GraphicsContext {
   /** The view's framing actor, beside its camera: it frames the entry's first geometry and refits on a large change. */
   framingRef: GraphicsFramingRef;
   /**
+   * The view's GLB presentation: the request its renderer's host prepares and how far that request got, for as long as
+   * the view lives. What the view shows is `gltfPresentation`.
+   */
+  presentationRef: PresentationRef;
+  /** The component focus last framed, so focusing it again, or a new presentation of it, keeps the camera. */
+  framedFocusComponentId: string | undefined;
+  /** Each model unit's focused component, folded from the model interaction (see the context notes). */
+  componentFocus: ComponentFocus;
+  /**
+   * The manifest of the presented GLB, kept from its commit: a focus frames this view on this view's own geometry,
+   * whichever view loaded the unit's manifest into a shared model interaction last.
+   */
+  presentedManifest: GeometryComponentManifest | undefined;
+  /**
    * The presentation key the camera's render frame is anchored for. A measurement of a new key re-anchors the frame on
    * its geometry; a re-measured key (a settled pose, a remount) keeps it.
    */
@@ -411,7 +444,11 @@ export interface GraphicsContext {
   artifactKey: string;
   /** Source identity travels with the artifact through the renderer handoff. */
   artifactSourceFile?: string;
-  /** Requested-versus-presented GLTF identity and bounded renderer handoff measurements. */
+  /**
+   * What the view shows: the requested and the presented GLB identity, and a phase that keeps `presented` after a
+   * replacement fails, or while the presented request's renderer is gone. The request's own progress is
+   * `presentationRef`'s state.
+   */
   gltfPresentation: GltfPresentationProjection;
 }
 
@@ -606,6 +643,16 @@ export type GraphicsEvent =
       sourceFile?: string;
     }
   | { type: 'clearArtifact' }
+  /** A mounted GltfMesh's host, which prepares each GLB request; it replaces any other. */
+  | { type: 'presentationHostAttached'; hostId: string; host: PresentationHostLogic }
+  /** The GltfMesh left. A stale id is ignored. */
+  | { type: 'presentationHostDetached'; hostId: string }
+  /**
+   * The focused component of each model unit ({@link selectComponentFocus}): graphics folds it from a model interaction
+   * it owns, and a host that shares one model interaction across views sends it to each view when it changes. A focus
+   * on the presented unit frames the camera on that component.
+   */
+  | { type: 'componentFocusObserved'; focus: ComponentFocus }
   | { type: 'gltfPreparationStarted'; revision: number; key: string }
   | {
       type: 'gltfDisplayReady';
@@ -805,6 +852,9 @@ export const graphicsEventTypes = [
   'clearModelPointerClickGuard',
   'updateArtifact',
   'clearArtifact',
+  'presentationHostAttached',
+  'presentationHostDetached',
+  'componentFocusObserved',
   'gltfPreparationStarted',
   'gltfDisplayReady',
   'gltfAnalysisReady',
@@ -1038,6 +1088,7 @@ const graphicsActors = {
   canvas: canvasMachine,
   camera: cameraMachine,
   framing: framingMachine,
+  presentation: presentationMachine,
 };
 
 type GraphicsEnqueue = EnqueueObject<GraphicsEvent, GraphicsEmitted, SystemRegistry, typeof graphicsActors>;
@@ -1315,6 +1366,92 @@ const webGpuOffContext = ({ context }: { context: GraphicsContext }): GraphicsPa
 /** The frame every view's camera is placed in; the render frame anchors on it. */
 const cameraFrameId = 'tau:root';
 
+/** The transform from glTF's Y-up world to Tau's Z-up world, column-major, as GltfMesh's asset group applies it. */
+const canonicalGltfToTau = resolveCoordinateTransform({ source: canonicalGltfWorld, target: tauWorld }).matrix;
+
+/** Bounds in glTF world space, as a manifest records them, moved into Tau world space. */
+const toTauBounds = ({ min, max }: CameraBounds): CameraBounds => {
+  const low: [number, number, number] = [Infinity, Infinity, Infinity];
+  const high: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (const x of [min[0], max[0]]) {
+    for (const y of [min[1], max[1]]) {
+      for (const z of [min[2], max[2]]) {
+        for (let axis = 0; axis < 3; axis += 1) {
+          const value =
+            canonicalGltfToTau[axis]! * x +
+            canonicalGltfToTau[axis + 4]! * y +
+            canonicalGltfToTau[axis + 8]! * z +
+            canonicalGltfToTau[axis + 12]!;
+          low[axis] = Math.min(low[axis]!, value);
+          high[axis] = Math.max(high[axis]!, value);
+        }
+      }
+    }
+  }
+  return { min: low, max: high };
+};
+
+/**
+ * Each model unit's focused component, from a model-interaction snapshot, for `componentFocusObserved`.
+ *
+ * @param context - The model interaction's context.
+ * @returns The focus of every unit that has one.
+ * @public
+ */
+export const selectComponentFocus = (context: ModelInteractionContext): ComponentFocus => {
+  const focus: Record<string, string> = {};
+  for (const [unitId, unit] of Object.entries(context.unitsById)) {
+    if (unit.focusedComponentId) {
+      focus[unitId] = unit.focusedComponentId;
+    }
+  }
+  return focus;
+};
+
+/**
+ * Whether two folds of the component focus name the same component for every unit.
+ *
+ * @param previous - The focus folded before.
+ * @param next - The focus now.
+ * @returns Whether they are the same.
+ * @public
+ */
+export const sameComponentFocus = (previous: ComponentFocus, next: ComponentFocus): boolean => {
+  const units = Object.keys(next);
+  return units.length === Object.keys(previous).length && units.every((unitId) => previous[unitId] === next[unitId]);
+};
+
+/**
+ * Frames the camera on the presented unit's focused component, once per focus: one change, with the source `focus`,
+ * that keeps the scene bounds (D20). A cleared focus leaves the camera where it is.
+ *
+ * @param context - Graphics' context, as it is after the transition.
+ * @param enq - The transition's enqueue.
+ * @returns The component focus now framed, for `framedFocusComponentId`.
+ */
+const frameComponentFocus = (context: GraphicsContext, enq: GraphicsEnqueue): string | undefined => {
+  const componentId = context.modelInteractionUnitId
+    ? context.componentFocus[context.modelInteractionUnitId]
+    : undefined;
+  if (!componentId) {
+    return undefined;
+  }
+  const isPresented =
+    context.artifact?.mimeType === 'model/gltf-binary' && context.gltfPresentation.presentedKey !== undefined;
+  // This view's own geometry: the presented manifest, not the one a shared model interaction holds for the unit.
+  const bounds = context.presentedManifest?.nodesById[componentId]?.bounds;
+  if (componentId === context.framedFocusComponentId || !bounds || !isPresented) {
+    return context.framedFocusComponentId;
+  }
+  enq.sendTo(context.cameraRef, {
+    type: 'frameBounds',
+    bounds: toTauBounds({ min: [...bounds.min], max: [...bounds.max] }),
+    margin: 0.1,
+    source: 'focus',
+  });
+  return componentId;
+};
+
 /** The centre of measured bounds, in metres. */
 const boundsCenter = ({ min, max }: CameraBounds): [number, number, number] => [
   (min[0] + max[0]) / 2,
@@ -1467,6 +1604,10 @@ const graphicsMachineDefinition = setup({
         },
       }),
       renderFrameKey: undefined,
+      presentationRef: spawn(actors.presentation, { id: 'presentation' }),
+      framedFocusComponentId: undefined,
+      componentFocus: {},
+      presentedManifest: undefined,
       sectionInput: undefined,
       viewportGizmo: undefined,
       viewerEnvironment: undefined,
@@ -1501,6 +1642,7 @@ const graphicsMachineDefinition = setup({
       enq.stop(context.viewportGizmo.ref);
     }
     enq.stop(context.framingRef);
+    enq.stop(context.presentationRef);
     enq.stop(context.cameraRef);
   },
   initial: 'operational',
@@ -1521,6 +1663,17 @@ const graphicsMachineDefinition = setup({
           context.kinematicsRef,
           (snapshot): GraphicsEvent => ({ type: 'poseRevisionObserved', revision: snapshot.context.revision }),
         );
+        // A component focus on the presented unit frames the camera on that component (D20). Graphics folds the focus
+        // from a model interaction it owns (MC-R11); a host that shares one sends `componentFocusObserved` itself.
+        if (context.ownsModelInteractionRef) {
+          enq.subscribeTo(
+            context.modelInteractionRef,
+            (snapshot): GraphicsEvent => ({
+              type: 'componentFocusObserved',
+              focus: selectComponentFocus(snapshot.context),
+            }),
+          );
+        }
         if (context.isSectionViewActive) {
           enq.raise({ type: 'setSectionViewActive', payload: true });
         }
@@ -1880,6 +2033,7 @@ const graphicsMachineDefinition = setup({
             });
           }
           const revision = context.gltfPresentation.requestedRevision + 1;
+          enq.sendTo(context.presentationRef, { type: 'clear' });
           emitPresentedUnitChange(context, enq, { unitId: undefined, mediaType: undefined });
           return {
             context: {
@@ -1888,6 +2042,7 @@ const graphicsMachineDefinition = setup({
               artifactSourceFile: undefined,
               gltfPresentation: { requestedRevision: revision, presentedRevision: revision, phase: 'idle' },
               modelInteractionUnitId: undefined,
+              presentedManifest: undefined,
               pickableMeshesVersion: context.pickableMeshesVersion + 1,
               geometryRadius: 0,
               geometryCenter: [0, 0, 0] as [number, number, number],
@@ -1919,6 +2074,21 @@ const graphicsMachineDefinition = setup({
             unitId: modelInteractionUnitId,
             mediaType: event.artifact.mimeType,
           });
+          enq.sendTo(
+            context.presentationRef,
+            event.artifact.mimeType === 'model/gltf-binary'
+              ? {
+                  type: 'present',
+                  request: {
+                    revision: requestedRevision,
+                    key: event.hash,
+                    unitId: deriveModelInteractionUnitId({ sourceFile: event.sourceFile, geometryHash: event.hash }),
+                    sourceFile: event.sourceFile,
+                    bytes: event.artifact.content,
+                  },
+                }
+              : { type: 'clear' },
+          );
           return {
             context: {
               artifact: event.artifact,
@@ -1941,12 +2111,31 @@ const graphicsMachineDefinition = setup({
                       'idle',
                     ),
               modelInteractionUnitId,
+              presentedManifest:
+                event.artifact.mimeType === 'model/gltf-binary' ? context.presentedManifest : undefined,
               pickableMeshesVersion:
                 event.artifact.mimeType === 'model/gltf-binary'
                   ? context.pickableMeshesVersion
                   : context.pickableMeshesVersion + 1,
               cadUnits: { length: { symbol: event.artifact.units?.length ?? 'mm' } },
             },
+          };
+        },
+        presentationHostAttached: ({ context, event }, enq) => {
+          enq.sendTo(context.presentationRef, { type: 'hostAttached', hostId: event.hostId, host: event.host });
+          return {};
+        },
+        presentationHostDetached: ({ context, event }, enq) => {
+          enq.sendTo(context.presentationRef, { type: 'hostDetached', hostId: event.hostId });
+          return {};
+        },
+        componentFocusObserved: ({ context, event }, enq) => {
+          if (sameComponentFocus(context.componentFocus, event.focus)) {
+            return {};
+          }
+          const next = { ...context, componentFocus: event.focus };
+          return {
+            context: { componentFocus: event.focus, framedFocusComponentId: frameComponentFocus(next, enq) },
           };
         },
         gltfPreparationStarted: {
@@ -1956,22 +2145,31 @@ const graphicsMachineDefinition = setup({
               : context.gltfPresentation,
           }),
         },
-        gltfDisplayReady: {
-          context: ({ context, event }) => ({
-            gltfPresentation: gltfRequestMatches(context, event)
-              ? withGltfPresentationPhase(
-                  context.gltfPresentation,
-                  event.barrier === 'analysis-ready' ? 'awaiting-analysis' : 'preparing',
-                )
-              : context.gltfPresentation,
-          }),
+        gltfDisplayReady: ({ context, event }, enq) => {
+          enq.sendTo(context.presentationRef, event);
+          return {
+            context: {
+              gltfPresentation: gltfRequestMatches(context, event)
+                ? withGltfPresentationPhase(
+                    context.gltfPresentation,
+                    event.barrier === 'analysis-ready' ? 'awaiting-analysis' : 'preparing',
+                  )
+                : context.gltfPresentation,
+            },
+          };
         },
-        gltfAnalysisReady: {
-          context: ({ context, event }) => ({
-            gltfPresentation: gltfRequestMatches(context, event)
-              ? withGltfPresentationPhase(context.gltfPresentation, 'preparing')
-              : context.gltfPresentation,
-          }),
+        gltfAnalysisReady: ({ context, event }, enq) => {
+          enq.sendTo(context.presentationRef, event);
+          return {
+            context: {
+              // Only a scene held at the section barrier resumes: a late section arm analyses the presented scene,
+              // which stays presented.
+              gltfPresentation:
+                gltfRequestMatches(context, event) && context.gltfPresentation.phase === 'awaiting-analysis'
+                  ? withGltfPresentationPhase(context.gltfPresentation, 'preparing')
+                  : context.gltfPresentation,
+            },
+          };
         },
         gltfPresentationCommitted: ({ context, event }, enq) => {
           const { presentedRevision, presentedKey, phase } = context.gltfPresentation;
@@ -1981,6 +2179,11 @@ const graphicsMachineDefinition = setup({
           if (!gltfRequestMatches(context, event) || isRepeat) {
             return {};
           }
+          enq.sendTo(context.presentationRef, {
+            type: 'gltfPresentationCommitted',
+            revision: event.revision,
+            key: event.key,
+          });
           forwardToModelInteraction(context, enq, {
             type: 'loadManifest',
             unitId: event.unitId,
@@ -1988,26 +2191,37 @@ const graphicsMachineDefinition = setup({
             source: 'viewer',
           });
           emitPresentedUnitChange(context, enq, { unitId: event.unitId, mediaType: context.artifact?.mimeType });
+          const gltfPresentation = withGltfPresentationPhase(
+            { ...context.gltfPresentation, presentedRevision: event.revision, presentedKey: event.key },
+            'presented',
+          );
+          // A focus that predates the commit (another view of the unit set it) frames this view once it shows the unit.
+          const framedFocusComponentId = frameComponentFocus(
+            { ...context, gltfPresentation, modelInteractionUnitId: event.unitId, presentedManifest: event.manifest },
+            enq,
+          );
           return {
             context: {
-              gltfPresentation: withGltfPresentationPhase(
-                { ...context.gltfPresentation, presentedRevision: event.revision, presentedKey: event.key },
-                'presented',
-              ),
+              gltfPresentation,
               modelInteractionUnitId: event.unitId,
               pickableMeshesVersion: context.pickableMeshesVersion + 1,
+              presentedManifest: event.manifest,
+              framedFocusComponentId,
             },
           };
         },
-        gltfPresentationFailed: {
-          context: ({ context, event }) => ({
-            gltfPresentation: gltfRequestMatches(context, event)
-              ? withGltfPresentationPhase(
-                  context.gltfPresentation,
-                  context.gltfPresentation.presentedKey === undefined ? 'failed' : 'presented',
-                )
-              : context.gltfPresentation,
-          }),
+        gltfPresentationFailed: ({ context, event }, enq) => {
+          enq.sendTo(context.presentationRef, event);
+          return {
+            context: {
+              gltfPresentation: gltfRequestMatches(context, event)
+                ? withGltfPresentationPhase(
+                    context.gltfPresentation,
+                    context.gltfPresentation.presentedKey === undefined ? 'failed' : 'presented',
+                  )
+                : context.gltfPresentation,
+            },
+          };
         },
         /* D21: the presented frame joins the worker spans that produced it, under the renderer's own
          * producer identity. The durations ride as attributes rather than as invented child spans —

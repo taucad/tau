@@ -40,7 +40,9 @@ it('should publish a named graph revision through the CLI and serve its bytes to
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'tau-publish-e2e-'));
   const projectId = gitE2EProjectId();
   const project = join(temporaryRoot, projectId);
-  const tag = 'v9-e2e';
+  /* B6: the version's name is free text; its tag is its number, and the project's first version is V2. */
+  const versionName = 'Ready for print';
+  const tag = 'v2';
   const entryPath = 'model.scad';
   const entryBytes = 'difference() { cube(12); sphere(7); }\n';
 
@@ -91,7 +93,7 @@ it('should publish a named graph revision through the CLI and serve its bytes to
         oxcRegister,
         cliEntry,
         'publish',
-        tag,
+        versionName,
         '--project',
         project,
         '--entry',

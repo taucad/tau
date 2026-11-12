@@ -52,7 +52,11 @@ const mocks = vi.hoisted(() => ({
       displayUnits: { length: { metersPerUnit: 1, symbol: 'm' } },
       hoveredMeasurementId: undefined,
       isMeasureActive: true,
-      cameraRef: { getSnapshot: () => ({ matches: () => false }) },
+      cameraRef: { getSnapshot: () => ({ matches: () => false }), subscribe: () => ({ unsubscribe: () => undefined }) },
+      modelInteractionRef: {
+        getSnapshot: () => ({ context: { displayRevision: 0 } }),
+        subscribe: () => ({ unsubscribe: () => undefined }),
+      },
     },
   },
 }));
@@ -66,10 +70,27 @@ vi.mock('#graphics/three/utils/measurement-features-worker-client.js', async (im
   };
 });
 
+/** Who follows the mocked graphics actor: the measure session's follower. */
+const graphicsListeners = new Set<(snapshot: typeof mocks.graphicsSnapshot) => void>();
+
 const graphicsActorMock = {
   send: mocks.send,
   getSnapshot: () => mocks.graphicsSnapshot,
-  subscribe: () => ({ unsubscribe: vi.fn() }),
+  subscribe: (listener: (snapshot: typeof mocks.graphicsSnapshot) => void) => {
+    graphicsListeners.add(listener);
+    return {
+      unsubscribe: () => {
+        graphicsListeners.delete(listener);
+      },
+    };
+  },
+};
+
+/** Tells the mocked graphics actor's followers that its snapshot changed, as a real actor does on every change. */
+const notifyGraphics = (): void => {
+  for (const listener of graphicsListeners) {
+    listener(mocks.graphicsSnapshot);
+  }
 };
 
 vi.mock('#hooks/use-graphics.jsx', () => ({
@@ -217,13 +238,17 @@ describe('MeasureTool', () => {
     expect(mocks.send).toHaveBeenCalledWith({ type: 'setMeasureMessage' });
 
     mocks.graphicsSnapshot.context.isMeasureActive = false;
-    act(renderTool);
+    act(() => {
+      notifyGraphics();
+      renderTool();
+    });
     mocks.send.mockClear();
     camera.position.x += 1;
     camera.updateMatrixWorld();
     advance(63);
     expect(mocks.send).not.toHaveBeenCalledWith({ type: 'setMeasureMessage' });
     mocks.graphicsSnapshot.context.isMeasureActive = true;
+    act(notifyGraphics);
   });
 
   it('should hide edge-on labels and their pointer targets until the arrow is readable again', () => {

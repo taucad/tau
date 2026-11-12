@@ -6,6 +6,7 @@ import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import {
   gatewayFixtureModelName,
+  gatewayFixtureScadSource,
   gatewayFixtureSupplierModelId,
   startGatewayFixture,
 } from '#support/gateway-fixture.js';
@@ -84,7 +85,18 @@ test('runs a turn in the services utility through the real Tau gateway', async (
   const creditsBefore = await tauCreditBalanceAtoms(token);
   /* Before the launch: the API learned the stub's fixed origin at boot, and the
    * utility's first turn dispatches itself as soon as the project's chat loads. */
-  fixture = await startGatewayFixture();
+  /* Scripted **per turn**: the turn under test must write bytes the seed did
+   * not. A byte-identical rewrite settles as `turn.finalized` with no changed
+   * paths and leaves the file untouched (`GatewayFixtureScript.toolCalls`), so
+   * the `writtenAfter` wait below could never see it. */
+  fixture = await startGatewayFixture({
+    toolCalls: (turn) => [
+      {
+        name: 'create_file',
+        input: { targetFile: 'main.scad', content: `${gatewayFixtureScadSource}// turn ${String(turn)}\n` },
+      },
+    ],
+  });
   session = await launchDesktopApp({ token });
   const { page } = session;
   await fixture.routeThrough(page);

@@ -143,6 +143,11 @@ Avoid:
 
 The self-host helper (`project_name`, `commit_name` with Tau Cloud off) maps the row's `configuration` in `helper-wire.ts`, but asks for the least reasoning each wire accepts, so a short name fits its 64-token ceiling: OpenAI gets `reasoning.effort: 'none'`; xAI and Moonshot get the row's lowest level; Vertex gets the row's lowest level as `extra_body.google.thinking_config.thinking_level`; Together Kimi and GLM get `reasoning.enabled: false`; Anthropic gets no `thinking` and no `output_config`. The row's `temperature` is forwarded where set, except on Moonshot Kimi, which fixes its own. A new reasoning control a helper must forward is a codec change there, with a `helper-wire.test.ts` case.
 
+Two more facts live in the row's `support.reasoning` and are true per model, not per provider. Declare each only after the live row for it passes on this model id; `modelReasoning` (`apps/ui/app/utils/model-reasoning.ts`) forwards what the row declares and the transport sends nothing for a row that declares neither:
+
+- `effortInTranscript`: the provider reads the reasoning level from the transcript (Anthropic's empty `system` message with `output_config`, OpenAI's `configuration_update` item), so an effort change keeps the prompt cache. A model that lacks it refuses the request with a 400 or 422.
+- `replayBinding`: the provider takes `thinking.block_binding` (Anthropic). Tau asks it to drop and report a replayed block whose prefix changed in production, and to refuse it in live suites.
+
 ## Vertex Wire Facts
 
 A Vertex row goes through Tau's OpenAI-compatible route, not Gemini's native `generateContent`. Facts a model author must know:
@@ -219,6 +224,16 @@ One pass cannot show a row that a model refuses part of the time. Validate a new
 ```bash
 TAU_LIVE_REPEATS=9 pnpm nx run api:test:live -- provider-matrix -t <model-id>
 ```
+
+A model that returns native reasoning (thinking blocks, reasoning items or thought signatures) must also pass the replay rows: they edit the prefix under signed reasoning and fail unless the reply's log holds that reasoning before the edit. Add the model id to `replayModelIds` in `provider-switch.live.test.ts`, and to `boundModelIds` in `reasoning-binding.live.test.ts` when the row declares `replayBinding`. Add it to the matching effort row, in the transcript or on the request:
+
+```bash
+pnpm nx run api:test:live --skip-nx-cache -- provider-switch -t "live reasoning replay"
+pnpm nx run api:test:live --skip-nx-cache -- reasoning-binding
+pnpm nx run api:test:live --skip-nx-cache -- provider-switch -t "live effort change"
+```
+
+A replay row that passes with no thinking in the log proves nothing; the rows assert it, so do not relax that assertion to get a model through. Rules: [Cross-Provider Content Contract Policy](../../../docs/policy/cross-provider-content-contract.md), Rule 9.
 
 Live prompts call the value a scripted tool result hands back a _marker_. `createLiveSession` refuses a prompt that asks for a "token": Grok 4.7 refuses "reply with the exact token … and nothing else" as a jailbreak and completes the run with no tool call (`docs/research/grok-4-7-live-suite-refusal-blueprint.md`). A failing tool row reports the model's own answer; read it before suspecting the wire.
 

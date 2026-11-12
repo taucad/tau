@@ -28,6 +28,7 @@ import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-o
 import { consumeRevisionReveal, requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import type { EditorDocument } from '#lib/editor-document.js';
+import type * as UseFeatureModule from '#flags/use-feature.js';
 
 const projectSnapshot = { context: { project: { syncChats: true } } };
 const projectRef = {
@@ -39,6 +40,16 @@ const editorRef = {
   subscribe: () => ({ unsubscribe: () => undefined }),
 };
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', projectRef, editorRef }) }));
+/* Tau's debug setting, off unless a row turns it on (B5). */
+const flags = vi.hoisted(() => ({ tauDebug: false }));
+vi.mock('#flags/use-feature.js', async (importOriginal) => {
+  const original = await importOriginal<typeof UseFeatureModule>();
+  return {
+    ...original,
+    useFeature: (flag: Parameters<typeof original.useFeature>[0]) =>
+      flag === 'tauDebug' ? flags.tauDebug : original.useFeature(flag),
+  };
+});
 const openPanel = vi.fn();
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel }),
@@ -1262,9 +1273,59 @@ describe('Revisions pane vocabulary and History', () => {
     const strip = await screen.findByRole('region', { name: 'Where you are' });
     await user.click(within(strip).getByRole('button', { name: 'Details' }));
     const details = within(strip).getByLabelText('Details of where you are');
-    expect(details).toHaveTextContent(/Headrev-4/u);
     expect(details).toHaveTextContent(`This device${device}`);
     vi.unstubAllEnvs();
+  });
+
+  /*
+   * B5: with Tau's debug setting off, no 40-character id renders anywhere in
+   * the pane, with every row and both Details open; with it on, the ids the
+   * entry is stored under are there.
+   */
+  describe('stored ids (B5)', () => {
+    const oid = (digit: string): string => digit.repeat(40);
+    const openEverything = async (): Promise<HTMLElement> => {
+      const user = userEvent.setup();
+      revisionStatusHarness.rows = [
+        row({ revisionId: oid('a'), revisionNumber: 2, treeId: oid('b'), parent: oid('c'), trigger: 'save' }),
+        row({ revisionId: oid('c'), revisionNumber: 1, treeId: oid('d'), trigger: 'save', actor: 'anon:3fa9c1d2' }),
+      ];
+      revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: oid('a') };
+      renderPane();
+      const strip = await screen.findByRole('region', { name: 'Where you are' });
+      await user.click(within(strip).getByRole('button', { name: 'Details' }));
+      for (const name of ['Rev 2 · Thicker base', 'Rev 1 · Thicker base']) {
+        const entry = screen.getByRole('button', { name });
+        // oxlint-disable-next-line no-await-in-loop -- one row opens at a time, as a person opens them.
+        await user.click(entry);
+        // oxlint-disable-next-line no-await-in-loop -- ditto.
+        await user.click(await within(entry.closest('li')!).findByRole('button', { name: 'Details' }));
+      }
+      return document.body;
+    };
+
+    it('renders no 40-character id with the debug setting off', async () => {
+      const pane = await openEverything();
+      expect(screen.getByLabelText('Details of where you are')).not.toHaveTextContent('Head');
+      expect(pane.textContent).not.toMatch(/[\da-f]{40}/u);
+      /* The pseudonym reads Anonymous; its hash is a diagnostic too. */
+      expect(pane.textContent).toContain('Anonymous');
+      expect(pane.textContent).not.toContain('3fa9c1d2');
+    });
+
+    it('renders the stored ids with the debug setting on', async () => {
+      flags.tauDebug = true;
+      onTestFinished(() => {
+        flags.tauDebug = false;
+      });
+      const pane = await openEverything();
+      expect(screen.getByLabelText('Details of where you are')).toHaveTextContent(`Head${oid('a')}`);
+      expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(
+        `Revision${oid('a')}Tree${oid('b')}Parent${oid('c')}`,
+      );
+      expect(pane.textContent).toContain(oid('d'));
+      expect(pane.textContent).toContain('Anonymous · 3fa9c1d2');
+    });
   });
 
   it('names the line History shows, and says why an empty one is empty', async () => {

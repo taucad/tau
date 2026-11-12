@@ -442,6 +442,18 @@ const settingsCatalog = [
         keywords: ['editor', 'context'],
       },
       { id: 'open-tabs', label: 'Open tabs', description: 'Include every open editor tab', keywords: ['context'] },
+      {
+        id: 'use-setup-answers',
+        label: 'Use my setup answers',
+        description: 'Tau tells the agent what you make and the code you read',
+        keywords: ['onboarding', 'goals', 'languages', 'privacy', 'context', 'person'],
+      },
+      {
+        id: 'setup-answers',
+        label: 'Setup answers',
+        description: 'What you told setup: what you make, the tool you know and the code you read',
+        keywords: ['onboarding', 'welcome', 'goals', 'tool', 'languages', 'edit', 'clear'],
+      },
       { id: 'testing-tools', label: 'Testing tools', description: 'Let the agent run and edit tests' },
       {
         id: 'default-permissions',
@@ -557,6 +569,12 @@ export const settingsSections: readonly SettingsSectionDefinition[] = platformSe
  */
 const flaggedSections: Readonly<Partial<Record<SettingsSection, FeatureFlagName>>> = { viewer: 'viewerControls' };
 
+/** Entries inside an ungated section that exist only while a runtime flag is on, filtered the same way. */
+const flaggedEntries: ReadonlyMap<string, FeatureFlagName> = new Map<SettingId, FeatureFlagName>([
+  ['use-setup-answers', 'onboarding'],
+  ['setup-answers', 'onboarding'],
+]);
+
 /**
  * The sections this deployment shows for the given runtime flags.
  *
@@ -566,10 +584,13 @@ const flaggedSections: Readonly<Partial<Record<SettingsSection, FeatureFlagName>
 export function availableSettingsSections(
   isOn: (flag: FeatureFlagName) => boolean,
 ): readonly SettingsSectionDefinition[] {
-  return settingsSections.filter((section) => {
-    const flag = flaggedSections[section.id];
-    return flag === undefined || isOn(flag);
-  });
+  const isShown = (flag: FeatureFlagName | undefined): boolean => flag === undefined || isOn(flag);
+  return settingsSections
+    .filter((section) => isShown(flaggedSections[section.id]))
+    .map((section) => {
+      const entries = section.entries.filter((entry) => isShown(flaggedEntries.get(entry.id)));
+      return entries.length === section.entries.length ? section : { ...section, entries };
+    });
 }
 
 /**
@@ -579,10 +600,11 @@ export function availableSettingsSections(
  */
 export function useSettingsSections(): readonly SettingsSectionDefinition[] {
   const viewerControls = useFeature('viewerControls');
-  return useMemo(
-    () => availableSettingsSections((flag) => flag === 'viewerControls' && viewerControls),
-    [viewerControls],
-  );
+  const onboarding = useFeature('onboarding');
+  return useMemo(() => {
+    const flags: Readonly<Partial<Record<FeatureFlagName, boolean>>> = { viewerControls, onboarding };
+    return availableSettingsSections((flag) => flags[flag] === true);
+  }, [viewerControls, onboarding]);
 }
 
 function normalizeSearch(value: string): string {

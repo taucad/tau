@@ -31,7 +31,7 @@ import type { ChatMode } from '@taucad/chat/constants';
 import { getCadSystemPrompt, getChatStateNote } from '@taucad/chat/prompts';
 import type { KernelOwner, KernelRoutingProfile } from '@taucad/chat/prompts';
 import { getProviderFacingToolGrant } from '@taucad/chat/schemas';
-import type { ToolSelection } from '@taucad/chat';
+import type { AgentPerson, ToolSelection } from '@taucad/chat';
 import type { KernelPreference } from '@taucad/types/constants';
 import { authInstanceKey } from '@taucad/api-auth';
 import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
@@ -215,13 +215,16 @@ export const liveCompletionCeiling = (modelId: string): number =>
  * The real CAD system prompt a browser turn carries.
  *
  * @param options - Kernel preference, the project's owner and the host's kernels, chat mode, chat identity and the
- * model row the prompt describes. Auto with no owner renders the routing card for `kernelProfile`.
+ * model row the prompt describes. Auto with no owner renders the routing card for `kernelProfile`; `person` adds the
+ * `<person>` block after it.
  * @returns The static and dynamic sections joined the way the browser joins them.
  */
 export const liveCadSystemPrompt = (options: {
   readonly kernel?: KernelPreference;
   readonly kernelOwner?: KernelOwner;
   readonly kernelProfile?: KernelRoutingProfile;
+  /** What the person told setup, rendered as the `<person>` block a browser turn carries when the switch is on. */
+  readonly person?: AgentPerson;
   readonly mode?: ChatMode | undefined;
   readonly chatId: string;
   readonly modelId: string;
@@ -240,6 +243,7 @@ export const liveCadSystemPrompt = (options: {
       supportsImageInput: entry.support?.modalities?.input.includes('image') ?? false,
       ...(options.kernelOwner === undefined ? {} : { kernelOwner: options.kernelOwner }),
       ...(options.kernelProfile === undefined ? {} : { kernelProfile: options.kernelProfile }),
+      ...(options.person === undefined ? {} : { person: options.person }),
     },
   );
   return [prompt.static, prompt.dynamic].join('\n\n');

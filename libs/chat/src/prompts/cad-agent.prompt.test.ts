@@ -3,6 +3,9 @@ import { kernelProviders } from '@taucad/types/constants';
 import { describe, expect, it } from 'vitest';
 import { getCadSystemPrompt, getChatStateNote } from '#prompts/cad-agent.prompt.js';
 import { kernelChoiceCondition, renderKernelGuidance } from '#prompts/kernel-routing.js';
+import type { KernelGuidanceInput } from '#prompts/kernel-routing.js';
+import { renderPersonBlock } from '#prompts/person-block.js';
+import type { AgentPerson } from '#schemas/agent-config.schema.js';
 import type { ResolvedSection } from '#prompts/prompt-section-registry.js';
 import { toolDescriptions } from '#constants/tool-description.constants.js';
 import { toolName } from '#constants/tool.constants.js';
@@ -31,6 +34,7 @@ const sectionMaxBytes = new Map([
   ['workbench', 800],
   ['plan_mode', 1800],
   ['kernel_skill', 500],
+  ['person', 400],
   ['transcript_path', 500],
   ['environment', 600],
   ['dynamic_behavior', 1400],
@@ -328,5 +332,58 @@ describe('kernel_skill states (automatic kernel selection D2)', () => {
 
     expect(text).toContain('none available here');
     expect(text).not.toContain('| Replicad |');
+  });
+});
+
+describe('the person block', () => {
+  const profile = { available: ['openscad', 'replicad'] } as const;
+  const person: AgentPerson = { makes: ['mechanical', 'electronics'], reads: ['python'] };
+  /** The four kernel_skill states: Auto with no entry, Auto over an entry, a manual pick (no entry or its own), and a
+   * manual pick over another kernel's entry. */
+  const kernelStates: ReadonlyArray<Pick<KernelGuidanceInput, 'preference' | 'owner'>> = [
+    { preference: 'auto' },
+    { preference: 'auto', owner: { kernel: 'openscad', entryPath: 'main.scad' } },
+    { preference: 'replicad' },
+    { preference: 'replicad', owner: { kernel: 'openscad', entryPath: 'main.scad' } },
+  ];
+  const render = (state: (typeof kernelStates)[number], withPerson?: AgentPerson) =>
+    getCadSystemPrompt(state.preference, 'agent', true, {
+      chatId: 'person-block',
+      modelId: 'person-block-model',
+      kernelProfile: profile,
+      ...(state.owner === undefined ? {} : { kernelOwner: state.owner }),
+      ...(withPerson === undefined ? {} : { person: withPerson }),
+    });
+
+  it.each(kernelStates)(
+    'should keep Block 1 byte-identical with and without a person ($preference, owner $owner.kernel)',
+    (state) => {
+      expect(render(state, person).static).toBe(render(state).static);
+    },
+  );
+
+  it.each(kernelStates)(
+    'should place the block right after the kernel guidance ($preference, owner $owner.kernel)',
+    (state) => {
+      const sections: string[] = [];
+      getCadSystemPrompt(state.preference, 'agent', true, {
+        kernelProfile: profile,
+        ...(state.owner === undefined ? {} : { kernelOwner: state.owner }),
+        person,
+        onSectionResolved: ({ name }) => sections.push(name),
+      });
+      const guidance = renderKernelGuidance({ ...state, profile });
+      const { dynamic } = render(state, person);
+
+      expect(sections.indexOf('person')).toBe(sections.indexOf('kernel_skill') + 1);
+      expect(dynamic).toContain(`${guidance}\n\n${renderPersonBlock(person)}\n\nYour conversation log:`);
+    },
+  );
+
+  it('should leave the whole prompt unchanged when there is nothing to say', () => {
+    const state = kernelStates[0]!;
+
+    expect(render(state, { makes: [], reads: [] })).toEqual(render(state));
+    expect(render(state).dynamic).not.toContain('<person>');
   });
 });

@@ -2,8 +2,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CadAgentConfigInput, CadAgentExecution } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
-import { agentHostClientConfig, agentHostConfig, dialExecutionHost } from '#chat-clients/_internal/turn-body.js';
-import { buildSnapshotKernel, renderKernelGuidance } from '@taucad/chat/prompts';
+import {
+  agentHostClientConfig,
+  agentHostConfig,
+  dialExecutionHost,
+  hostAdmission,
+} from '#chat-clients/_internal/turn-body.js';
+import { buildSnapshotKernel, renderKernelGuidance, renderPersonBlock } from '@taucad/chat/prompts';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { AgentHostPlacementError, daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { createAgentHostClient } from '#services/agent-host-client.js';
@@ -174,5 +179,42 @@ describe('the kernel text an admission freezes (automatic kernel selection D2)',
 
   it("should keep a manual pick's pin sentence", () => {
     expect(systemPrompt(agent('replicad'))).toContain('This project uses Replicad; activate the cad-replicad skill.');
+  });
+});
+
+describe('the person block in an admission', () => {
+  const person = { makes: ['electronics'], reads: ['python'] } satisfies NonNullable<CadAgentConfigInput['person']>;
+  const tau: CadAgentConfigInput = {
+    profile: 'cad',
+    execution: { kind: 'tau', model: 'anthropic-claude-sonnet-5.5' },
+    kernel: 'replicad',
+    mode: 'agent',
+    toolChoice: 'auto',
+    testingEnabled: true,
+  };
+  const resolvedModel = { model: undefined } as unknown as ResolvedModel;
+  const tauPrompt = (agent: CadAgentConfigInput): string =>
+    agentHostClientConfig({ agent, chatId: 'chat-person', resolvedModel }).systemPrompt;
+
+  it("should carry the block in Tau's own agent's system prompt", () => {
+    expect(tauPrompt({ ...tau, person })).toContain(renderPersonBlock(person));
+  });
+
+  it('should carry no block when the config has no person', () => {
+    expect(tauPrompt(tau)).not.toContain('<person>');
+  });
+
+  it("should never put the block in an external agent's context", () => {
+    const admit = hostAdmission({
+      agent: { ...tau, execution: { kind: 'acp', hostId: 'origin', agentId: 'codex' }, person },
+      chatId: 'chat-person',
+      resolveModel: () => resolvedModel,
+      trigger: { trigger: 'submit' },
+    });
+    const admission = admit?.('run-1');
+
+    expect(admission !== undefined && 'context' in admission).toBe(true);
+    expect(JSON.stringify(admission)).not.toContain('<person>');
+    expect(JSON.stringify(admission)).not.toContain('Makes:');
   });
 });

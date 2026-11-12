@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
   agentConfigSchema,
+  agentPersonSchema,
   cadAgentExecutionSchema,
   cadAgentConfigSchema,
   commitNameAgentConfigSchema,
@@ -223,6 +224,26 @@ describe('agentConfigSchema', () => {
       });
 
       expect(result.contextPayload?.memory).toEqual(memory);
+    });
+  });
+
+  describe('person', () => {
+    it('should leave person undefined when omitted', () => {
+      expect(cadAgentConfigSchema.parse(validCadAgent).person).toBeUndefined();
+    });
+
+    it('should accept the closed goals and languages', () => {
+      const person = { makes: ['mechanical', 'electronics'], reads: ['python'] };
+
+      expect(cadAgentConfigSchema.parse({ ...validCadAgent, person }).person).toEqual(person);
+    });
+
+    it('should refuse "Just exploring", which is never sent', () => {
+      expect(agentPersonSchema.safeParse({ makes: ['exploring'], reads: [] }).success).toBe(false);
+    });
+
+    it('should refuse the tool answer and any other field', () => {
+      expect(agentPersonSchema.safeParse({ makes: [], reads: [], tool: 'fusion' }).success).toBe(false);
     });
   });
 

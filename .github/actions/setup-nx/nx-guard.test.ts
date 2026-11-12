@@ -393,6 +393,7 @@ void test('should store an entry through the relay, read it back and print the t
     assert.deepEqual(run.tally, {
       hits: 1,
       misses: 1,
+      memoised: 0,
       stored: 1,
       multipart: 0,
       present: 0,
@@ -459,6 +460,107 @@ void test('should treat an unreachable upstream as faults, not a failed command'
   assert.equal(run.code, 0);
   assert.deepEqual(statuses(run), [403, 404]);
   assert.equal(run.tally.faults, 2);
+});
+
+void test('should answer a repeat GET of a missed hash locally, and count it apart from upstream misses', async () => {
+  const upstream = await startUpstream();
+  try {
+    const run = await runGuard({
+      server: upstream.url,
+      plan: [{ get: 'b2' }, { get: 'b2' }, { get: 'c3' }, { get: 'b2' }, { get: 'c3' }],
+    });
+    assert.equal(run.code, 0);
+    assert.deepEqual(statuses(run), [404, 404, 404, 404, 404]);
+    assert.equal(upstream.counts.gets, 2);
+    assert.equal(run.tally.misses, 2);
+    assert.equal(run.tally.memoised, 3);
+    assert.equal(run.tally.hits, 0);
+    assert.match(run.timing ?? '', /^GET 2 requests, /);
+  } finally {
+    await upstream.close();
+  }
+});
+
+void test('should forget a remembered miss once this relay stores the entry', async () => {
+  const upstream = await startUpstream();
+  try {
+    const run = await runGuard({
+      server: upstream.url,
+      plan: [{ get: 'a1' }, { get: 'a1' }, { put: 'a1', bytes: 300 }, { get: 'a1' }],
+    });
+    assert.deepEqual(statuses(run), [404, 404, 200, 200]);
+    assert.equal(run.runs[0]?.results[3]?.bytes, 300);
+    assert.equal(upstream.counts.gets, 2);
+    assert.deepEqual([run.tally.misses, run.tally.memoised, run.tally.hits], [1, 1, 1]);
+  } finally {
+    await upstream.close();
+  }
+});
+
+void test('should forget a remembered miss when a background upload of the entry lands', async () => {
+  const upstream = await startUpstream({
+    putDelayMilliseconds: (hash) => (hash === 'b2' ? 200 : 0),
+  });
+  try {
+    const run = await runGuard({
+      server: upstream.url,
+      plan: [{ put: 'a1', bytes: 10 }, { get: 'b2' }, { put: 'b2', bytes: 20 }, { sleep: 500 }, { get: 'b2' }],
+    });
+    assert.deepEqual(statuses(run), [200, 404, 200, 200]);
+    assert.equal(run.runs[0]?.results[3]?.bytes, 20);
+    assert.equal(run.tally.behind, 1);
+    assert.equal(run.tally.memoised, 0);
+    assert.equal(upstream.counts.gets, 2);
+  } finally {
+    await upstream.close();
+  }
+});
+
+void test('should keep a remembered miss when the upstream refuses the write', async () => {
+  const upstream = await startUpstream();
+  try {
+    const run = await runGuard({
+      server: upstream.url,
+      token: readToken,
+      plan: [{ get: 'a1' }, { put: 'a1', bytes: 10 }, { get: 'a1' }],
+    });
+    assert.deepEqual(statuses(run), [404, 403, 404]);
+    assert.equal(upstream.counts.gets, 1);
+    assert.equal(run.tally.memoised, 1);
+    assert.equal(run.tally.refused, 1);
+  } finally {
+    await upstream.close();
+  }
+});
+
+void test('should not remember a hit or a fault as a miss', async () => {
+  let failed = 0;
+  const upstream = await startUpstream({
+    override: (method, path) => {
+      if (method === 'GET' && path.endsWith('/c3')) {
+        failed += 1;
+        return 500;
+      }
+      return undefined;
+    },
+  });
+  upstream.store.set(
+    'a1',
+    Uint8Array.from({ length: 40 }, (_, index) => index % 251),
+  );
+  try {
+    const run = await runGuard({
+      server: upstream.url,
+      plan: [{ get: 'a1' }, { get: 'a1' }, { get: 'c3' }, { get: 'c3' }],
+    });
+    assert.deepEqual(statuses(run), [200, 200, 404, 404]);
+    assert.equal(run.runs[0]?.results[1]?.bytes, 40);
+    assert.equal(upstream.counts.gets, 2);
+    assert.equal(failed, 2);
+    assert.deepEqual([run.tally.hits, run.tally.misses, run.tally.memoised, run.tally.faults], [2, 0, 0, 2]);
+  } finally {
+    await upstream.close();
+  }
 });
 
 void test('should stop uploading after the first refused write', async () => {

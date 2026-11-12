@@ -155,3 +155,31 @@ test.each(
     );
   },
 );
+
+/*
+ * AKS-9 (automatic kernel selection): with the `autoKernel` flag on, Home's composer carries the Auto kernel pill in
+ * place of the kernel chips. A refresh of Home holds the same steady load at 1x and 4x CPU on both viewports.
+ */
+test.each((['wide', 'phone'] as const).flatMap((viewport) => [1, 4].map((rate) => ({ viewport, rate }))))(
+  'should refresh Home with Auto on in its final shape on a $viewport viewport at $rate x CPU',
+  async ({ viewport, rate }) => {
+    await target.setViewport(viewports.wide);
+    await target.installModelCatalogFixture(catalogLatency);
+    await target.startModelCatalogApi();
+    await installHomeLoadRecorder();
+    const label = `auto-${viewport}-cpu${rate}x`;
+    await target.navigate('/');
+    await target.evaluate((key) => {
+      localStorage.setItem(key, JSON.stringify({ autoKernel: true }));
+    }, 'tau:flags');
+    await target.setViewport(viewports[viewport]);
+    /* A warm visit with the flag on, so the page remembers the Auto composer before the measured refresh. */
+    await target.navigate('/');
+    await waitForSettledHome([], 1);
+    await target.emulateCpuThrottling(rate);
+    expectSteadyLoad(
+      `${label} reload`,
+      await measure(async () => target.reload(), { label: `${label}-reload`, projects: [], rate }),
+    );
+  },
+);

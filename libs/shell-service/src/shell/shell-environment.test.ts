@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their platform names. */
-import { refusedShellEnvironment } from '@taucad/native-process-core/shell';
+import { refusedShellEnvironment } from '@taucad/sandbox/shell/environment';
 import { describe, expect, it } from 'vitest';
 import { shellEnvironment } from '#shell/shell-environment.js';
 

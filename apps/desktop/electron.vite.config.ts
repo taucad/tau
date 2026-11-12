@@ -61,6 +61,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/rpc',
   '@taucad/runtime',
   '@taucad/sandbox',
+  '@taucad/shell-service',
   '@taucad/skills',
   '@taucad/slicer',
   '@taucad/smlib',

@@ -2089,6 +2089,9 @@ importers:
       '@taucad/sandbox':
         specifier: workspace:*
         version: link:../../libs/sandbox
+      '@taucad/shell-service':
+        specifier: workspace:*
+        version: link:../../libs/shell-service
       '@taucad/skills':
         specifier: workspace:*
         version: link:../../packages/skills
@@ -5015,6 +5018,18 @@ importers:
         specifier: 'catalog:'
         version: 1.1.0
 
+  libs/shell-service:
+    dependencies:
+      '@taucad/agent-host':
+        specifier: workspace:*
+        version: link:../../packages/agent-host
+      '@taucad/filesystem':
+        specifier: workspace:*
+        version: link:../../packages/filesystem
+      '@taucad/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
+
   libs/tau-examples:
     dependencies:
       '@taucad/build123d':
@@ -5788,6 +5803,9 @@ importers:
       '@taucad/sandbox':
         specifier: workspace:*
         version: link:../../libs/sandbox
+      '@taucad/shell-service':
+        specifier: workspace:*
+        version: link:../../libs/shell-service
       '@taucad/telemetry':
         specifier: workspace:*
         version: link:../../libs/telemetry

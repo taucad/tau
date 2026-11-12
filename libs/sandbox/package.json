@@ -35,6 +35,10 @@
     ".": "./src/index.ts",
     "./shell": "./src/shell.ts",
     "./shell/srt-supervisor": "./src/shell/srt-supervisor.ts",
+    "./shell/baseline": "./src/shell/shell-baseline.ts",
+    "./shell/environment": "./src/shell/shell-environment.ts",
+    "./shell/identity": "./src/shell/shell-identity.ts",
+    "./shell/provider": "./src/shell/shell-provider.ts",
     "./package.json": "./package.json"
   },
   "imports": {

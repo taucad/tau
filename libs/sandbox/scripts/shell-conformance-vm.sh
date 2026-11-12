@@ -160,6 +160,7 @@ ssh "${ssh_options[@]}" tau@127.0.0.1 \
   < "$REPO_ROOT/libs/sandbox/scripts/shell-conformance-guest.sh" | tee "$output/guest.txt" || status=$?
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-conformance-receipt.json' > "$output/receipt.json" || true
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-service-conformance-receipt.json' > "$output/service-receipt.json" || true
+ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/host-shell-conformance-receipt.json' > "$output/host-receipt.json" || true
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/terminal-conformance-receipt.json' > "$output/terminal-receipt.json" || true
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-qualification-receipt.json' > "$output/qualification-receipt.json" || true
 printf '%s\n' "$status" > "$output/exit-code.txt"

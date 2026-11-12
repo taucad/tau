@@ -11,13 +11,8 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createFakeShellProvider } from '@taucad/native-process-core/shell';
-import type {
-  FakeShellOptions,
-  FakeShellScript,
-  ShellExecutable,
-  ShellLaunch,
-} from '@taucad/native-process-core/shell';
+import { createFakeShellProvider } from '@taucad/sandbox/shell';
+import type { FakeShellOptions, FakeShellScript, ShellExecutable, ShellLaunch } from '@taucad/sandbox/shell';
 
 import { createShellService, probeHostShell } from '#shell/shell-service.js';
 import type { ShellCheckout, ShellExecutionHolds, ShellProjectExecutions } from '#shell/shell-service.js';

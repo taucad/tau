@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { parseRevisionCommitMessage, revisionCommitMessage } from '#revision-headers.js';
 import { parseStartRecord, serializeStartRecord, startReadingOf, startSummary, startTrigger } from '#start-version.js';
 import type { StartOrigin } from '#start-version.js';
+import { recordedBy } from '#test/identity.js';
 
 const origins: readonly StartOrigin[] = ['created', 'github', 'folder', 'zip'];
 
@@ -26,15 +27,15 @@ describe('the Start version (A6)', () => {
       parents: [],
       provenance: {
         source: origin === 'created' ? 'user' : 'import',
-        actorId: 'ada',
-        trigger: startTrigger(origin),
+        ...recordedBy('ada'),
+        capture: startTrigger(origin),
         createdAt: Date.UTC(2026, 10, 10),
       },
       summary: { generated: startSummary(origin) },
     });
     const trailer = parseRevisionCommitMessage(message);
 
-    expect(trailer?.provenance.trigger).toBe(startTrigger(origin));
+    expect(trailer?.provenance.capture).toBe(startTrigger(origin));
     expect(message.split('\n')).toContain(`Tau-Trigger: ${startTrigger(origin)}`);
     expect(trailer && startReadingOf(trailer)).toBe(origin);
   });
@@ -43,7 +44,7 @@ describe('the Start version (A6)', () => {
     expect(
       startReadingOf({
         parents: [],
-        provenance: { source: 'user', trigger: 'turn' },
+        provenance: { source: 'user', capture: 'turn' },
         summary: { generated: 'Agent turn t1' },
       }),
     ).toBe('created');
@@ -56,7 +57,7 @@ describe('the Start version (A6)', () => {
     expect(
       startReadingOf({
         parents: ['a'],
-        provenance: { source: 'user', trigger: 'save' },
+        provenance: { source: 'user', capture: 'save' },
         summary: { generated: 'Saved changes (save)' },
       }),
     ).toBeUndefined();
@@ -66,14 +67,14 @@ describe('the Start version (A6)', () => {
     expect(
       startReadingOf({
         parents: ['upstream'],
-        provenance: { source: 'import', trigger: 'import' },
+        provenance: { source: 'import', capture: 'import' },
         summary: { generated: 'Imported from GitHub' },
       }),
     ).toBe('github');
     expect(
       startReadingOf({
         parents: [],
-        provenance: { source: 'import', trigger: 'import' },
+        provenance: { source: 'import', capture: 'import' },
         summary: { generated: 'Brought in by hand' },
       }),
     ).toBe('imported');

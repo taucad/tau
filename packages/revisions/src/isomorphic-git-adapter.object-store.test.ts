@@ -27,6 +27,7 @@ import { createProjectRevisionsActor } from '#revision-effects.js';
 import type { RevisionFileSystem } from '#revision-effects.js';
 import type { Checkout } from '#revision-port.js';
 import { createSyncQueue } from '#sync-queue.js';
+import { recordedBy, testIdentity } from '#test/identity.js';
 
 /* Every library object reader and writer, recorded: none may be reached. */
 const libraryObjectCalls = vi.hoisted((): string[] => []);
@@ -56,7 +57,7 @@ vi.mock('isomorphic-git', async (importOriginal) => {
 
 const encoder = new TextEncoder();
 const author = { name: 'Tau', email: 'noreply@tau.new' };
-const provenance = { source: 'user', actorId: 'object-store-test', createdAt: 1_756_742_400_000 } as const;
+const provenance = { source: 'user', ...recordedBy('object-store-test'), createdAt: 1_756_742_400_000 } as const;
 const tree = (): ImmutableRevisionTree =>
   new ImmutableRevisionTree([
     ['main.scad', encoder.encode('cube(1);\n')],
@@ -227,7 +228,7 @@ describe('reading revisions through the object store (W2)', () => {
     expect(queued.entries).toHaveLength(2);
 
     /* The operation log: its ref, and the record devices minted, then rewritten by a retirement. */
-    const ops = createOpsLog({ port, recordsFileSystem: records, now: () => 2, actorId: 'tau-host' });
+    const ops = createOpsLog({ port, recordsFileSystem: records, now: () => 2, identity: testIdentity });
     await ops.append(undefined, {
       v: 1,
       ref: 'refs/heads/main',
@@ -244,6 +245,7 @@ describe('reading revisions through the object store (W2)', () => {
     /* The removed checkouts: a branch opened, discarded (recorded) and opened again (forgotten). */
     await port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(first.commitId) });
     const revisions = createProjectRevisionsActor({
+      identity: testIdentity,
       port,
       projectId: 'project-1',
       filesystem: async (checkout: Checkout): Promise<RevisionFileSystem> =>

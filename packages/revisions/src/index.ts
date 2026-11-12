@@ -20,12 +20,16 @@ export { coveredByIgnoreListing } from '#git-ignore.js';
 export { revisionBranchName } from '#revision-authority.js';
 export type {
   BranchHeadUpdateResult,
+  RecordedProvenance,
   Revision,
   RevisionActor,
   RevisionBranchName,
+  RevisionCaptureIdentity,
+  RevisionIdentity,
   RevisionProvenance,
   RevisionSummary,
   RevisionUserActor,
+  RevisionVia,
 } from '#revision-authority.js';
 export { decodeCommit, decodeTag, encodeCommit, encodeTag, GitObjectError } from '#git-objects.js';
 export type { DecodedCommit, GitSignature } from '#git-objects.js';
@@ -151,6 +155,7 @@ export {
 export type { ConflictPerspective, RevisionConflictTerms } from '#revision-conflict.js';
 export { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';
 export type { RevisionLogRequest, RevisionPlace, RevisionRow } from '#revision-verbs.js';
+export { numberVersions } from '#version-numbers.js';
 export {
   parseStartRecord,
   serializeStartRecord,
@@ -165,6 +170,7 @@ export {
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
+  generatedSetupPaths,
   isTrackedLargeObjectPath,
   largeObjectThresholdBytes,
 } from '#workspace-config.js';
@@ -177,6 +183,7 @@ export type {
   SyncQueueEntry,
   SyncQueueRecord,
   SyncRefOutcome,
+  VersionRenumbering,
 } from '#sync.types.js';
 export type {
   RemoteFacet,

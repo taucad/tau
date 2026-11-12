@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { captureRevisionTree } from '#algorithms/revision-capture.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { revisionTreeId } from '#git-tree-id.js';
+import { recordedBy } from '#test/identity.js';
 
 const providers: MemoryProvider[] = [];
 
@@ -23,7 +24,7 @@ afterEach(() => {
   }
 });
 
-const provenance = { source: 'user', actorId: 'mint-count-test', createdAt: 1_756_742_400_000 } as const;
+const provenance = { source: 'user', ...recordedBy('mint-count-test'), createdAt: 1_756_742_400_000 } as const;
 const moduleText = (index: number, revision: number): string =>
   `export const value${String(index)} = ${String(revision)};\n`;
 

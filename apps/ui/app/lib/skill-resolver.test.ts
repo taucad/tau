@@ -257,7 +257,7 @@ describe('createSkillResolver over the composed user view', () => {
 
     expect(overlayRead).not.toHaveBeenCalled();
     expect(readFile.mock.calls.map(([path]) => path)).toStrictEqual(['.agents/plugins/installed.json']);
-    expect(systemSkillsCatalog).toHaveLength(16);
+    expect(systemSkillsCatalog).toHaveLength(15);
     expect(listing).toHaveLength(systemSkillsCatalog.length);
     for (const skill of listing) {
       expect(skill.source).toBe('system');

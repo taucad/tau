@@ -9,6 +9,7 @@ import { evidenceFixture, privateMarker, toolFact } from '#testing/evidence.fixt
 import {
   exportableEvidence,
   langfuseObservation,
+  langfuseScores,
   observationGroup,
   observationMapperVersion,
   otlpBody,
@@ -20,7 +21,9 @@ import {
 import type { LangfuseObservation, OtlpSpan } from '#langfuse-observation.js';
 import { providerAttemptEvidence, providerContentEvidence } from '#model-invocation-evidence.js';
 import type { ObservedAttempt } from '#model-invocation-evidence.js';
-import { settlementEvidence } from '#settlement-evidence.js';
+import type { ObservedSettlement } from '@taucad/api-billing';
+import { evidenceKeys } from '@taucad/agent-observability/identity';
+import { generationSettlementKey, settledGenerationKey, settlementEvidence, settles } from '#settlement-evidence.js';
 
 const pseudonym = pseudonymKey(Uint8Array.from(randomBytes(32)));
 const context = { environment: 'staging', protection: 'pro' } as const;
@@ -78,6 +81,43 @@ const attempt = (change: Partial<ObservedAttempt> = {}): ObservedAttempt => ({
 const authority = { policyEpoch: 'epoch-a', protection: 'pro' } as const;
 const generation = async (change: Partial<ObservedAttempt> = {}): Promise<Evidence> =>
   providerAttemptEvidence(attempt(change), authority);
+
+type FinancialFact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'] & { kind: 'financial' };
+/** The ledger's settlement of the call {@link attempt} makes, as the recorder admits it. */
+const settlement = async (
+  receipt: Partial<Pick<ObservedSettlement['receipt'], 'chargedAtoms' | 'supplierCostPicoUsd'>> = {},
+): Promise<Evidence> =>
+  settlementEvidence(
+    {
+      operation: {
+        id: 'op-1',
+        accountId: 'account-1',
+        environment: 'staging',
+        attemptKey: 'run-1:1:0',
+        projectHint: 'project-a',
+        chatHint: 'chat-1',
+        admittedAt: new Date(at),
+        activationId: 'activation-1',
+      },
+      receipt: {
+        terminalRevision: 1n,
+        chargedAtoms: 1500n,
+        supplierCostPicoUsd: null,
+        resolvedAt: new Date(at + 1),
+        ...receipt,
+      },
+      normalization: undefined,
+    },
+    'user-a',
+    { ...authority, project: 'project-a' },
+  );
+const factOf = (evidence: Evidence): FinancialFact => {
+  const { fact } = evidence.payload;
+  if (fact.kind !== 'financial') {
+    throw new Error(`${fact.kind} is not a settlement`);
+  }
+  return fact;
+};
 
 const row = (sequence: number) => ({ chatId: 'chat-1', leaderEpoch: 'epoch-a', sequence });
 const hostRun = (change: Partial<ProjectedRun> = {}): ProjectedRun => ({
@@ -416,37 +456,138 @@ describe('langfuseObservation v5: one trace per run, one root, ids from the fact
     expect(releaseLabel('tau-api-staging:deployment-01KSYNTHETIC')).toBe('tau-api-staging:deployment-01KSYNTHETIC');
   });
 
-  it('should keep a settlement a tau.financial span under its run root until it moves onto the generation', async () => {
-    const settlement = await settlementEvidence(
-      {
-        operation: {
-          id: 'op-1',
-          accountId: 'account-1',
-          environment: 'staging',
-          attemptKey: 'run-1:1:0',
-          projectHint: 'project-a',
-          chatHint: 'chat-1',
-          admittedAt: new Date(at),
-          activationId: 'activation-1',
-        },
-        receipt: { terminalRevision: 1n, chargedAtoms: 1500n, supplierCostPicoUsd: null, resolvedAt: new Date(at + 1) },
-        normalization: undefined,
-      },
-      'user-a',
-      { ...authority, project: 'project-a' },
-    );
-    const span = only(settlement);
+  it('should map a settlement to no object and carry its four values on the generation it settled (LW4)', async () => {
+    const charged = await settlement({ chargedAtoms: 1_500_000n, supplierCostPicoUsd: 750_000_000_000n });
+    const call = await generation();
+    const fact = factOf(charged);
+    const span = only(call);
+    const settled = langfuseObservation(call, { ...context, settlement: fact }, pseudonym)!;
 
-    expect(evidenceSchema.safeParse(settlement).success).toBe(true);
-    expect(span.name).toBe('tau.financial');
-    expect(span.parentSpanId).toBe(runRootSpanId('staging', 'user-a', 'run-1'));
-    expect(metadata(span, 'fact.kind')).toBe('financial');
-    expect(metadata(span, 'fact.ledger')).toMatch(/^[a-f\d]{32}$/u);
-    expect(metadata(span, 'fact.credits')).toBeDefined();
+    expect(evidenceSchema.safeParse(charged).success).toBe(true);
+    expect(langfuseObservation(charged, context, pseudonym)).toBeUndefined();
+    expect(settled.identity).toEqual(map(call).identity);
+    expect(settled.spans).toHaveLength(1);
+    const [carried] = settled.spans;
+    expect(carried!.name).toBe('call-model');
+    expect(metadata(carried!, 'supplier_cost_usd')).toBe(0.75);
+    expect(metadata(carried!, 'credits')).toBe(1.5);
+    expect(metadata(carried!, 'tariff')).toBe(observationGroup('staging', 'user-a', fact.tariff));
+    expect(metadata(carried!, 'ledger')).toBe(observationGroup('staging', 'user-a', fact.ledger));
+    /* Langfuse's own cost stays derived from usage, with its breakdown: no cost total is sent (LD6). */
+    expect(attribute(carried!, 'langfuse.observation.cost_details')).toBeUndefined();
+    expect(attribute(carried!, 'langfuse.observation.usage_details')).toBe(
+      attribute(span, 'langfuse.observation.usage_details'),
+    );
+    expect(carried!.attributes.some((item) => item.key.includes('.fact.'))).toBe(false);
+    for (const key of ['supplier_cost_usd', 'credits', 'tariff', 'ledger']) {
+      expect(metadata(span, key)).toBeUndefined();
+    }
+  });
+
+  it('should leave an unpriced supplier cost out of a settled generation, never as zero', async () => {
+    const fact = factOf(await settlement({ chargedAtoms: 2_000_000n, supplierCostPicoUsd: null }));
+    const [carried] = langfuseObservation(await generation(), { ...context, settlement: fact }, pseudonym)!.spans;
+
+    expect(metadata(carried!, 'credits')).toBe(2);
+    expect(metadata(carried!, 'supplier_cost_usd')).toBeUndefined();
+  });
+
+  it('should name the call it settled, so delivery can join a generation and its settlement either way', async () => {
+    const call = await generation();
+    const charged = await settlement();
+
+    expect(settledGenerationKey(charged)).toBe(evidenceKeys(call).semantic);
+    expect(generationSettlementKey(call)).toBe(evidenceKeys(charged).semantic);
+    expect(settles(charged, call)).toBe(true);
+    expect(settles(charged, await generation({ operation: 'op-2' }))).toBe(false);
+    expect(settles(charged, await generation({ attemptKey: 'run-1:1:1' }))).toBe(false);
   });
 
   it('should keep content out of the body of a summary observation', async () => {
     expect(otlpBody(map(await generation()).spans)).not.toContain(privateMarker);
+  });
+});
+
+describe('langfuseObservation v5: host labels on every row (LW17, LI10)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const traceMetadata = (span: OtlpSpan, key: string): unknown => attribute(span, `langfuse.trace.metadata.${key}`);
+  const browserRun = async (): Promise<OtlpSpan> => {
+    const { evidence } = await projectRun(
+      hostRun({ invocations: [{ purpose: 'generation', modelId: 'anthropic-claude-test' }] }),
+      { ...hostContext, host: 'browser' },
+    );
+    return only(evidence.find((item) => item.semantic.kind === 'outcome')!);
+  };
+
+  it('should give a host fact and an API fact of one run the same tags and release', async () => {
+    vi.stubEnv('FLY_IMAGE_REF', 'registry.fly.io/tau-api-staging:0123456789abcdef0123456789abcdef01234567');
+    const root = await browserRun();
+    const call = only(
+      await generation({ labels: { host: 'browser', build: 'f61685bf3496', model: 'anthropic-claude-test' } }),
+    );
+
+    expect(attribute(root, 'langfuse.trace.tags')).toEqual(['plan:pro', 'host:browser', 'model:anthropic-claude-test']);
+    expect(attribute(call, 'langfuse.trace.tags')).toEqual(attribute(root, 'langfuse.trace.tags'));
+    expect(attribute(root, 'langfuse.release')).toBe('f61685bf3496');
+    expect(attribute(call, 'langfuse.release')).toBe('f61685bf3496');
+    for (const span of [root, call]) {
+      expect(traceMetadata(span, 'host')).toBe('browser');
+      expect(traceMetadata(span, 'model')).toBe('anthropic-claude-test');
+      expect(traceMetadata(span, 'kernel')).toBeUndefined();
+    }
+    /* The root keeps its own observation metadata from LW6, once. */
+    expect(root.attributes.filter((item) => item.key === 'langfuse.observation.metadata.host')).toHaveLength(1);
+  });
+
+  it('should tag the kernel and take the release from a full commit the host sent', async () => {
+    const call = only(
+      await generation({
+        labels: {
+          host: 'desktop',
+          build: 'f61685bf3496c0ffee0123456789abcdef012345',
+          kernel: 'replicad',
+          model: 'anthropic-claude-test',
+        },
+      }),
+    );
+
+    expect(attribute(call, 'langfuse.trace.tags')).toEqual([
+      'plan:pro',
+      'host:desktop',
+      'kernel:replicad',
+      'model:anthropic-claude-test',
+    ]);
+    expect(traceMetadata(call, 'kernel')).toBe('replicad');
+    expect(attribute(call, 'langfuse.release')).toBe('f61685bf3496');
+  });
+
+  it('should tag a label the gateway could not place as unknown, and an unknown build as an unknown release', async () => {
+    const call = only(await generation({ labels: { host: 'unknown', build: 'unknown' } }));
+
+    expect(attribute(call, 'langfuse.trace.tags')).toEqual(['plan:pro', 'host:unknown']);
+    expect(attribute(call, 'langfuse.release')).toBe('unknown');
+  });
+
+  it('should keep the API build and only the plan tag on a call that sent no labels', async () => {
+    vi.stubEnv('FLY_IMAGE_REF', 'registry.fly.io/tau-api-staging:0123456789abcdef0123456789abcdef01234567');
+    const helper = only(await generation({ surface: 'project_name', attemptKey: 'name-1', activity: 'title' }));
+
+    expect(attribute(helper, 'langfuse.trace.tags')).toEqual(['plan:pro']);
+    expect(attribute(helper, 'langfuse.release')).toBe('0123456789ab');
+    for (const key of ['host', 'kernel', 'model']) {
+      expect(traceMetadata(helper, key)).toBeUndefined();
+    }
+  });
+
+  it('should name a CLI host as the gateway names it, so a host fact and an API fact read the same', async () => {
+    const { evidence } = await projectRun(hostRun(), { ...hostContext, host: 'cli' });
+    const root = only(evidence.find((item) => item.semantic.kind === 'outcome')!);
+
+    expect(attribute(root, 'langfuse.trace.tags')).toEqual(['plan:pro', 'host:daemon']);
+    expect(traceMetadata(root, 'host')).toBe('daemon');
   });
 });
 
@@ -602,6 +743,114 @@ describe('langfuseObservation v5: generation content (LW3)', () => {
     expect(JSON.stringify(input)).toContain('not kept: 90000 bytes');
     expect(JSON.stringify(input)).not.toContain('f'.repeat(64));
     expect(metadata(langfuseObservation(big, withIdentity, pseudonym)!.spans[0]!, 'input_omitted_parts')).toBe('2');
+  });
+});
+
+describe('langfuseScores (LW7): ratings and outcomes as scores on the run root', () => {
+  const rated = async (value: 'positive' | 'negative'): Promise<Evidence> => {
+    const { evidence } = await projectRun(hostRun({ rating: { value, at: at + 45_000 } }), {
+      ...hostContext,
+      plane: 'feedback',
+    });
+    return evidence[0]!;
+  };
+  const checked = (result: 'passed' | 'failed'): ProjectedRun['tools'] => [
+    {
+      call: 'call-1',
+      toolName: 'test_model',
+      outcome: 'completed',
+      input: row(3),
+      output: row(4),
+      startedAt: at + 1000,
+      settledAt: at + 3000,
+      check: { result, revision: ['file-a'], requirements: ['requirement-a'] },
+    },
+  ];
+
+  it('should map a rating to no observation and one user-rating score on the run root', async () => {
+    const negative = await rated('negative');
+    const positive = await rated('positive');
+    const root = map(await outcomeOf(hostRun()));
+
+    expect(negative.payload.plane).toBe('feedback');
+    expect(langfuseObservation(negative, context, pseudonym)).toBeUndefined();
+    const scores = langfuseScores(negative, context);
+    expect(scores).toEqual([
+      {
+        id: expect.stringMatching(/^[a-f\d]{32}$/u) as unknown,
+        traceId: root.identity.traceId,
+        observationId: root.identity.spanId,
+        name: 'user-rating',
+        value: 0,
+        dataType: 'BOOLEAN',
+        timestamp: new Date(at + 45_000).toISOString(),
+        environment: 'staging',
+      },
+    ]);
+    expect(langfuseScores(positive, context)).toMatchObject([{ name: 'user-rating', value: 1 }]);
+    /* The id is the source fact's and the name's: the same rating always names the same score. */
+    expect(langfuseScores(negative, context)).toEqual(scores);
+    expect(JSON.stringify(scores)).not.toContain('user-a');
+  });
+
+  it('should write run-termination and task-success from an outcome, beside its root, ids from the fact', async () => {
+    const outcome = await outcomeOf(hostRun({ tools: checked('passed') }));
+    const root = map(outcome);
+    const scores = langfuseScores(outcome, context);
+    const on = { traceId: root.identity.traceId, observationId: root.identity.spanId, environment: 'staging' };
+    const timestamp = new Date(at + 30_000).toISOString();
+
+    expect(scores).toEqual([
+      {
+        ...on,
+        id: expect.any(String) as unknown,
+        name: 'run-termination',
+        value: 'completed',
+        dataType: 'CATEGORICAL',
+        timestamp,
+      },
+      { ...on, id: expect.any(String) as unknown, name: 'task-success', value: 1, dataType: 'BOOLEAN', timestamp },
+    ]);
+    expect(new Set(scores.map((score) => score.id)).size).toBe(2);
+    expect(langfuseScores(outcome, context)).toEqual(scores);
+    expect(langfuseScores(await outcomeOf(hostRun({ tools: checked('failed') })), context)).toMatchObject([
+      { name: 'run-termination', value: 'completed' },
+      { name: 'task-success', value: 0 },
+    ]);
+  });
+
+  it('should leave task-success out when the rule cannot decide, and run-termination out for an unknown ending', async () => {
+    expect(langfuseScores(await outcomeOf(hostRun({ termination: 'cancelled' })), context)).toMatchObject([
+      { name: 'run-termination', value: 'cancelled' },
+    ]);
+    expect(langfuseScores(await outcomeOf(hostRun({ termination: 'unknown' })), context)).toEqual([]);
+  });
+
+  it("should write a resumed run's second outcome as a second run-termination on the same root", async () => {
+    const failed = await outcomeOf(
+      hostRun({
+        termination: 'failed',
+        ending: { source: row(8), at: at + 30_000, failure: { code: 'MODEL_ATTEMPT_PENDING', wrapped: undefined } },
+      }),
+    );
+    const resumed = await outcomeOf(hostRun({ ending: { source: row(14), at: at + 90_000 } }));
+    const [first] = langfuseScores(failed, context);
+    const [second] = langfuseScores(resumed, context);
+
+    expect(first).toMatchObject({ name: 'run-termination', value: 'failed' });
+    expect(second).toMatchObject({ name: 'run-termination', value: 'completed' });
+    expect(second?.id).not.toBe(first?.id);
+    expect(second?.observationId).toBe(first?.observationId);
+  });
+
+  it('should write no score for a generation, a tool, a check or a settlement', async () => {
+    const evidence = await projected(hostRun({ tools: checked('passed') }));
+
+    expect(langfuseScores(await generation(), context)).toEqual([]);
+    for (const kind of ['tool', 'cad'] as const) {
+      expect(langfuseScores(evidence.find((item) => item.semantic.kind === kind)!, context)).toEqual([]);
+    }
+    expect(langfuseScores(await evidenceFixture(), context)).toEqual([]);
   });
 });
 

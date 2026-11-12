@@ -29,7 +29,7 @@ import type { LargeObjectsReport } from '#project-revisions.types.js';
 import { selectRevisionStatus } from '#project-revisions.machine.js';
 import type { RestoreMachineEmitted } from '#restore.machine.js';
 import { remoteTrackingRef } from '#remotes.js';
-import type { RevisionActor, RevisionUserActor } from '#revision-authority.js';
+import type { RevisionUserActor } from '#revision-authority.js';
 import { createProjectRevisionsActor, createRevisionActors } from '#revision-effects.js';
 import type { RevisionActorsOptions, RevisionFileSystem } from '#revision-effects.js';
 import type { RevisionPort } from '#revision-port.js';
@@ -38,6 +38,7 @@ import type { SyncPushActorOutput } from '#sync.machine.js';
 import type { SyncQueueRecord } from '#sync.types.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { recordedBy } from '#test/identity.js';
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
 const mainRef = 'refs/heads/main';
@@ -150,7 +151,7 @@ const startTree = async (
     port: target.port,
     projectId: 'project-1',
     filesystem: async () => target.filesystem,
-    actor: () => ada,
+    identity: { via: 'browser', resolve: () => ada },
     ...extra,
   });
   actor.start();
@@ -311,13 +312,13 @@ describe('Undo through the tree (D15)', () => {
   it('row 5: an account and its pseudonym never share a record device', async () => {
     const target = await project('privacy', { 'main.ts': 'export const size = 1;\n' });
     const pseudonym: RevisionUserActor = { kind: 'user', id: 'anon:9c1d', anonymous: true };
-    let current: RevisionActor = ada;
+    let current: RevisionUserActor = ada;
     const actors = createRevisionActors({
       port: target.port,
       projectId: 'project-1',
       filesystem: async () => target.filesystem,
       deviceId: () => 'laptop-7',
-      actor: () => current,
+      identity: { via: 'browser', resolve: () => current },
     });
     await mint(actors, target.port);
     current = pseudonym;
@@ -387,7 +388,7 @@ describe.runIf(gitToolchainOnPath)('the operation log over git http-backend (D15
           ['a.txt', baseTree!.get('a.txt')!],
           ['b.txt', new TextEncoder().encode('bravo 2 from B\n')],
         ]),
-        provenance: { source: 'user', actorId: 'user-bea', createdAt: Date.UTC(2026, 8, 26) },
+        provenance: { source: 'user', ...recordedBy('user-bea'), createdAt: Date.UTC(2026, 8, 26) },
         summary: { generated: 'B edits b.txt' },
       });
       await b.port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(theirs.commitId) });
@@ -435,7 +436,7 @@ describe.runIf(gitToolchainOnPath)('the operation log over git http-backend (D15
       const theirs = await b.port.writeRevision({
         parents: [base],
         tree: new ImmutableRevisionTree([['a.txt', new TextEncoder().encode('alpha 3 from B\n')]]),
-        provenance: { source: 'user', actorId: 'user-bea', createdAt: Date.UTC(2026, 8, 26) },
+        provenance: { source: 'user', ...recordedBy('user-bea'), createdAt: Date.UTC(2026, 8, 26) },
         summary: { generated: 'B edits a.txt' },
       });
       await b.port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(theirs.commitId) });
@@ -468,7 +469,7 @@ describe.runIf(gitToolchainOnPath)('the operation log over git http-backend (D15
         port: target.port,
         projectId: 'project-1',
         filesystem: async () => target.filesystem,
-        actor: () => ada,
+        identity: { via: 'browser', resolve: () => ada },
       } satisfies RevisionActorsOptions;
       const head = await mint(createRevisionActors(options), target.port);
 
@@ -499,7 +500,7 @@ describe.runIf(gitToolchainOnPath)('the operation log over git http-backend (D15
         port: target.port,
         projectId: 'project-1',
         filesystem: async () => target.filesystem,
-        actor: () => ada,
+        identity: { via: 'browser', resolve: () => ada },
       });
       const head = await mint(actors, target.port);
 
@@ -530,7 +531,7 @@ describe.runIf(gitToolchainOnPath)('the operation log over git http-backend (D15
         port: target.port,
         projectId: 'project-1',
         filesystem: async () => target.filesystem,
-        actor: () => ada,
+        identity: { via: 'browser', resolve: () => ada },
       });
       const head = await mint(actors, target.port);
 

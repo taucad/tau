@@ -21,6 +21,7 @@ Across files, use explicit ESM paths such as `./lib/widget.js` and pass `pico` t
 - `voxelSize` is the model, not a mesh setting: PicoVoxel views take no `tessellation` presets. Results report `tessellation` with `voxelSize`, `activeVoxels`, `memoryBytes`, triangles, vertices and elapsed. A fast view that sets no `meshAdaptivity` meshes adaptively at 0.25, so flat regions get fewer, larger triangles and `tessellation` reports `adaptivity`; set `meshAdaptivity` (0 for the uniform mesh) to change it. Exports mesh at 0 unless the export sets `meshAdaptivity`, which needs `lane: 'fast'` (STL only). Tau does not simplify a delivered mesh, so while a view is slow, raise `meshAdaptivity` or coarsen `voxelSize` per call. The grid, exports and GeoSpec subjects stay exact.
 - Prefer voxel booleans, offsets, ShapeKernel and LatticeLibrary over manual triangles. Output is mesh, not BRep.
 - Prefer an `SdfExpression` (`['max', ['abs', 'x'], ['abs', 'y']]`) over a JS `sdf` callback: expressions fill in parallel, callbacks run serially.
+- Stylised characters (mascots, chess pieces, toy creatures) are one blended SDF field: read [characters-reference.md](characters-reference.md) for the smooth-union and ellipsoid helpers.
 - Dispose large intermediates after their last use.
 - The viewer shows a fast preview; exports and GeoSpec checks replay the model exactly, so they can differ by about one voxel. Never request `lane: 'fast'` for manufacturing exports.
 
@@ -431,29 +432,13 @@ declare class Frames implements Spline
 
 FrameType: 'cylindrical' | 'spherical' | 'z' | 'minRotation'
 
-// Lens/washer
-declare class BaseLens extends BaseShape implements MeshBaseShape, SurfaceBaseShape
-  radialSteps: number
-  polarSteps: number
-  heightSteps: number
-  readonly innerRadius: number
-  readonly outerRadius: number
-  upperModulation: SurfaceModulation
-  lowerModulation: SurfaceModulation
-  readonly frame: Frame
-  constructor(frame: Frame, height: number, innerRadius: number, outerRadius: number);
-  // C# `SetHeight` — modulated faces bump radial sampling to 500
-  setHeight(lowerModulation: SurfaceModulation, upperModulation: SurfaceModulation): void;
-  setRadialSteps(steps: number): void;
-  setPolarSteps(steps: number): void;
-  setHeightSteps(steps: number): void;
-  voxConstruct(pk: Pico): Voxels;
-  mshConstruct(pk: Pico): Mesh;
-  protected radiusRatioFromStep(step: number): number;
-  protected phiRatioFromStep(step: number): number;
-  protected heightRatioFromStep(step: number): number;
-  // Surface point (C# `vecGetSurfacePoint`
-  surfacePoint(heightRatio: number, phiRatio: number, radiusRatio: number): Vec3;
+// Implicit genus-2 surface
+declare class ImplicitGenus implements Implicit
+  // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
+  readonly sdf: SdfFunction
+  // The same field as a tape expression for the parallel fill
+  readonly expression: SdfExpression
+  constructor(gap: number);
 ```
 
 ### `picovoxel/numerics`
@@ -479,6 +464,20 @@ vec3: {
   readonly isFinite: (v: Vec3) => boolean
   // … 11 more members in the API reference: unitY, one, lengthSquared, distanceSquared, distance, lerp, stripZ, transformed, mirrored, almostEqual, almostZero
 }
+
+// `Frame` factories and operations (C# `Frame3d` surface
+frame: {
+  // The world coordinate system (C# `frmWorld`)
+  readonly world: Frame
+  // Local point (2D points lie in the frame's XY plane) → world (C# `vecPtToWorld`)
+  readonly ptToWorld: (f: Frame, local: Vec2 | Vec3) => Vec3
+  // World point → local coordinates (C# `vecPtFromWorld`)
+  readonly ptFromWorld: (f: Frame, world: Vec3) => Vec3
+  // … 22 more members in the API reference: fromPos, fromZX, fromMat4, dirToWorld, dirFromWorld, compose, inverse, movedLocal, movedLocalX, movedLocalY, movedLocalZ, movedWorld, movedWorldX, movedWorldY, movedWorldZ, rotatedWorld, repositioned, toMat4, composeWithScale, asRigid, interpolate, equals
+}
+
+// A 2D vector as an immutable tuple (System.Numerics `Vector2` analog)
+Vec2: readonly [number, number]
 ```
 
 ## API reference

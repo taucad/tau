@@ -1116,7 +1116,7 @@ export class ChatSessionStore {
    */
   public async getChatHostSettings(
     chatId: string,
-  ): Promise<Pick<ChatEntity, 'activeExecution' | 'activeKernel'> | undefined> {
+  ): Promise<Pick<ChatEntity, 'activeExecution' | 'activeKernel' | 'kernelPreference'> | undefined> {
     const session = this.#sessions.get(chatId);
     const projectId = session?.projectId ?? this.#observed.get(chatId)?.projectId;
     const chat = await this.#deps.getChat(chatId, projectId);
@@ -1129,7 +1129,11 @@ export class ChatSessionStore {
       live?.activeChatId === chatId && !live.isLoadingChat && live.loadError === undefined
         ? chatPlacementOf(live.activeExecution)
         : await this.#storedPlacement(chat.resourceId, chatId);
-    return { activeExecution: withChatPlacement(chat.activeExecution, placement), activeKernel: chat.activeKernel };
+    return {
+      activeExecution: withChatPlacement(chat.activeExecution, placement),
+      activeKernel: chat.activeKernel,
+      kernelPreference: chat.kernelPreference,
+    };
   }
 
   /**
@@ -4332,6 +4336,11 @@ export class ChatSessionStore {
           persistActiveKernelActor: createAsyncLogic({
             run: async ({ input }) => {
               await depsRef().patchChat(input.chatId, 'activeKernel', input.activeKernel);
+            },
+          }),
+          persistKernelPreferenceActor: createAsyncLogic({
+            run: async ({ input }) => {
+              await depsRef().patchChat(input.chatId, 'kernelPreference', input.kernelPreference);
             },
           }),
         } satisfies Partial<MachineActors<typeof chatPersistenceMachine>>,

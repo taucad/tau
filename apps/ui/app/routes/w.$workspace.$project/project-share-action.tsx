@@ -113,7 +113,11 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
         throw new Error('The project metadata is unavailable.');
       }
       signal?.throwIfAborted();
-      const { entryPath, thumbnail } = project.assets.main;
+      const { main } = project.assets;
+      if (!main) {
+        throw new Error('The project has no model file to share yet.');
+      }
+      const { entryPath, thumbnail } = main;
       const claimId = randomUuid();
       projectRef.send({
         type: 'claimGeometryUnit',
@@ -200,7 +204,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
     [entriesRecord, fileClient, parameterService, project, projectId, projectRef],
   );
 
-  const entryPath = project?.assets.main.entryPath ?? '';
+  const entryPath = project?.assets.main?.entryPath ?? '';
 
   return (
     <ProjectSharePanel

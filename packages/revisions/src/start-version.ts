@@ -4,15 +4,15 @@
  * Tau mints it when it creates the project's store, so History shows V1 · Start
  * before any turn. The creation flows say how the project came to be in one
  * small unversioned record, {@link startRecordPath}; the first open that
- * creates the store reads it, mints the entry with trigger `create` or
+ * creates the store reads it, mints the entry with capture `create` or
  * `import`, and removes it. A GitHub link mints its own at bootstrap.
  *
- * Read side: an entry with trigger `create` or `import` reads as Start, and so
+ * Read side: an entry with capture `create` or `import` reads as Start, and so
  * does the root entry of a project an older build made, which is usually a
  * turn's base cut. No tag is needed (blueprint "What version numbers need").
  */
 
-import type { RevisionProvenance, RevisionSummary } from '#revision-authority.js';
+import type { RecordedProvenance, RevisionSummary } from '#revision-authority.js';
 
 /** How a project came to be, as its creation flow records it. @public */
 export type StartOrigin = 'created' | 'github' | 'folder' | 'zip';
@@ -103,7 +103,7 @@ export const parseStartRecord = (bytes: Uint8Array<ArrayBuffer>): StartOrigin | 
  *
  * An entry Tau minted as Start (`create` or `import`) says so. The root entry
  * of an older project reads as Start too, unless it is a commit Tau did not
- * write (an imported repository's own first commit: `import`, no trigger).
+ * write (an imported repository's own first commit: `import`, no capture).
  *
  * @param entry - The entry's parents, provenance and summary.
  * @returns How it reads, or `undefined` when it is not Start.
@@ -112,18 +112,18 @@ export const parseStartRecord = (bytes: Uint8Array<ArrayBuffer>): StartOrigin | 
 export const startReadingOf = (
   entry: Readonly<{
     parents: readonly string[];
-    provenance: Pick<RevisionProvenance, 'source' | 'trigger'>;
+    provenance: Pick<RecordedProvenance, 'source' | 'capture'>;
     summary: RevisionSummary;
   }>,
 ): StartReading | undefined => {
-  const { trigger, source } = entry.provenance;
-  if (trigger === 'create') {
+  const { capture, source } = entry.provenance;
+  if (capture === 'create') {
     return 'created';
   }
-  if (trigger === 'import') {
+  if (capture === 'import') {
     return origins.find((origin) => startSummaries[origin] === entry.summary.generated) ?? 'imported';
   }
-  if (entry.parents.length > 0 || (source === 'import' && trigger === undefined)) {
+  if (entry.parents.length > 0 || (source === 'import' && capture === undefined)) {
     return undefined;
   }
   return 'created';

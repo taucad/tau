@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(201);
+    expect(metrics).toHaveLength(203);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -703,6 +703,8 @@ describe('TauMetrics', () => {
       TauMetrics.agentEvidenceErasureTraces,
       TauMetrics.agentEvidenceLifecycleRecords,
       TauMetrics.agentEvidencePasses,
+      TauMetrics.agentEvidenceScores,
+      TauMetrics.agentEvidenceSettlements,
       TauMetrics.agentEvidenceLangfuseUnits,
     ];
     expect(
@@ -716,6 +718,8 @@ describe('TauMetrics', () => {
       tau_agent_evidence_erasure_traces_total: 'counter',
       tau_agent_evidence_lifecycle_records_total: 'counter',
       tau_agent_evidence_passes_total: 'counter',
+      tau_agent_evidence_scores_total: 'counter',
+      tau_agent_evidence_settlements_total: 'counter',
       tau_agent_evidence_langfuse_units_total: 'counter',
     });
     for (const metric of series) {
@@ -731,6 +735,27 @@ describe('TauMetrics', () => {
       }).success,
     ).toBe(true);
     expect(TauMetrics.agentEvidenceDeliveries.attributes.safeParse({ outcome: 'http-503' }).success).toBe(false);
+    /* A generation waits for its settlement, which is merged into it or, after it went, settled late (LW4). */
+    expect(TauMetrics.agentEvidenceDeliveries.attributes.safeParse({ outcome: 'held' }).success).toBe(true);
+    for (const reason of ['merged', 'late'] as const) {
+      expect(TauMetrics.agentEvidenceSuperseded.attributes.safeParse({ reason }).success).toBe(true);
+    }
+    for (const outcome of ['merged', 'late', 'unsettled'] as const) {
+      expect(TauMetrics.agentEvidenceSettlements.attributes.safeParse({ outcome }).success).toBe(true);
+    }
+    expect(TauMetrics.agentEvidenceSettlements.attributes.safeParse({ outcome: 'sent' }).success).toBe(false);
+    /* A score write names its score, whether its config was set, and its outcome; never the trace or the config id (LW7). */
+    const score = { 'tau.agent_evidence.score': 'user-rating', 'tau.agent_evidence.score_configured': 'false' };
+    expect(TauMetrics.agentEvidenceScores.attributes.safeParse({ ...score, outcome: 'accepted' }).success).toBe(true);
+    /* A score without a config id is still written, so nothing is held. */
+    expect(TauMetrics.agentEvidenceScores.attributes.safeParse({ ...score, outcome: 'held' }).success).toBe(false);
+    expect(
+      TauMetrics.agentEvidenceScores.attributes.safeParse({
+        ...score,
+        'tau.agent_evidence.score': 'reply-quality',
+        outcome: 'accepted',
+      }).success,
+    ).toBe(false);
   });
 
   /* Langfuse blueprint LW24 (ruling 13): Hobby's 50k units are traces, observations and scores, counted by kind only. */

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
-import { kernelConfigurations } from '@taucad/types/constants';
+import { catalogKernelOfRuntimeKernel, kernelConfigurations } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
-import { bindEntryFirstPass, catalogKernelOf } from '@taucad/chat/prompts';
+import { bindEntryFirstPass } from '@taucad/chat/prompts';
 import type { BindingKernelRow } from '@taucad/chat/prompts';
 import { loadAllFixtures } from '#fixture-loader.js';
 import { workspaceRuntime } from '#scripts/runtime.js';
@@ -26,7 +26,7 @@ describe('bindEntryFirstPass', () => {
   it('should bind every catalog template to its own kernel', async () => {
     const kernels = await rows();
     const bindings = kernelConfigurations
-      .filter(({ id }) => kernels.some((row) => catalogKernelOf(row.id) === id))
+      .filter(({ id }) => kernels.some((row) => catalogKernelOfRuntimeKernel(row.id) === id))
       .map(({ id, mainFile, emptyCode }) => {
         const binding = bindEntryFirstPass({ entryPath: mainFile, source: emptyCode, kernels });
         return { id, bound: binding.kind === 'bound' ? binding.kernel : binding.kind };

@@ -2,6 +2,7 @@ import type { KernelProvider } from '@taucad/runtime';
 import { kernelProviders } from '@taucad/types/constants';
 import { describe, expect, it } from 'vitest';
 import { getCadSystemPrompt, getChatStateNote } from '#prompts/cad-agent.prompt.js';
+import { kernelChoiceCondition, renderKernelGuidance } from '#prompts/kernel-routing.js';
 import type { ResolvedSection } from '#prompts/prompt-section-registry.js';
 import { toolDescriptions } from '#constants/tool-description.constants.js';
 import { toolName } from '#constants/tool.constants.js';
@@ -263,5 +264,69 @@ describe('chat state note', () => {
     const inPrompt = /<plan_mode>[\s\S]*<\/plan_mode>/u.exec(getCadSystemPrompt('replicad', 'plan', true).static)?.[0];
     expect(inPrompt).toBeDefined();
     expect(getChatStateNote({ mode: 'plan', testingEnabled: true, toolChoice: 'auto' }).text).toContain(inPrompt);
+  });
+});
+
+describe('kernel_skill states (automatic kernel selection D2)', () => {
+  const profile = { available: ['openscad', 'replicad'] } as const;
+  /* The kernel_skill section sits between the workbench section and the transcript path in the dynamic block. */
+  const kernelSkill = (prompt: { dynamic: string }): string =>
+    prompt.dynamic
+      .slice(prompt.dynamic.indexOf('</workbench>') + '</workbench>'.length)
+      .split('Your conversation log:')[0]
+      ?.trim() ?? '';
+
+  it('should keep Block 1 byte-identical for Auto and every manual preference', () => {
+    const reference = renderDefaultPrompt('replicad').static;
+    const auto = getCadSystemPrompt('auto', 'agent', true, {
+      chatId: 'prompt-budget-test',
+      modelId: 'prompt-budget-model',
+      contextWindow: 200_000,
+      knowledgeCutoff: '2026-01',
+      supportsImageInput: true,
+      kernelProfile: profile,
+    });
+
+    expect(auto.static).toBe(reference);
+  });
+
+  it("should keep today's pin sentence for a manual pick with no owner or a matching owner", () => {
+    const pin = 'This project uses Replicad; activate the cad-replicad skill.';
+
+    expect(kernelSkill(getCadSystemPrompt('replicad'))).toBe(pin);
+    expect(
+      kernelSkill(
+        getCadSystemPrompt('replicad', 'agent', true, { kernelOwner: { kernel: 'replicad', entryPath: 'main.ts' } }),
+      ),
+    ).toBe(pin);
+  });
+
+  it('should render the routing card under Auto with no entry, and keep the owner under Auto with one', () => {
+    const entryless = getCadSystemPrompt('auto', 'agent', true, { kernelProfile: profile });
+    const owned = getCadSystemPrompt('auto', 'agent', true, {
+      kernelProfile: profile,
+      kernelOwner: { kernel: 'openscad', entryPath: 'main.scad' },
+    });
+
+    expect(kernelSkill(entryless)).toBe(renderKernelGuidance({ preference: 'auto', profile }));
+    expect(kernelSkill(entryless).startsWith(kernelChoiceCondition)).toBe(true);
+    expect(kernelSkill(owned)).toContain('`cad-openscad`');
+    expect(kernelSkill(owned)).not.toContain('### Kernels available here');
+  });
+
+  it('should name both kernels for a manual pick over another owner', () => {
+    const text = kernelSkill(
+      getCadSystemPrompt('replicad', 'agent', true, { kernelOwner: { kernel: 'openscad', entryPath: 'main.scad' } }),
+    );
+
+    expect(text).toContain('The person selected Replicad for this chat');
+    expect(text).toContain('`cad-openscad`');
+  });
+
+  it('should offer no kernel under Auto when admission sent no profile', () => {
+    const text = kernelSkill(getCadSystemPrompt('auto'));
+
+    expect(text).toContain('none available here');
+    expect(text).not.toContain('| Replicad |');
   });
 });

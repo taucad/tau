@@ -110,7 +110,7 @@ import type { AddCheckoutActorOutput, CheckoutsActors, ListCheckoutsActorOutput 
 import { chatProjectionConcurrency, settleBounded } from '#chat-projection-pool.js';
 import { chatIdOfRef, chatRefName, chatRefPrefix, projectChats } from '#chat-ref.js';
 import { LfsQuotaError } from '#lfs-client.js';
-import { cleanLargeObjects, largeObjectBasisOf } from '#lfs.js';
+import { cleanLargeObjects, largeObjectBasisOf, withOwedAttributes } from '#lfs.js';
 import type { LargeObjectBasis } from '#lfs.js';
 import type { ObjectFormat } from '#object-hash.js';
 import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
@@ -144,6 +144,8 @@ import { createSyncQueue } from '#sync-queue.js';
 import { createOpsLog, opsRefName, opsRefPrefix, undoCandidates } from '#ops-ref.js';
 import { restoreMachine } from '#restore.machine.js';
 import { readRevisionLog } from '#revision-verbs.js';
+import { isVersionNumberRefusal } from '#refusal-markers.js';
+import { renumberUnpushedVersions } from '#version-numbers.js';
 import { syncMachine } from '#sync.machine.js';
 import {
   generatedGitattributesContent,
@@ -170,7 +172,7 @@ import type {
   SyncRemoteMovesActorInput,
   SyncWritePendingActorInput,
 } from '#sync.machine.js';
-import type { SyncFacet, SyncQueueEntry, SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
+import type { SyncFacet, SyncQueueEntry, SyncQueueRecord, SyncRefOutcome, VersionRenumbering } from '#sync.types.js';
 import type {
   RestoreActors,
   RestoreApplyPlanActorOutput,
@@ -178,7 +180,7 @@ import type {
   RestoreComputePlanActorOutput,
   RestoreFailureCode,
 } from '#restore.machine.js';
-import type { RevisionActor, RevisionProvenance } from '#revision-authority.js';
+import type { RevisionIdentity, RevisionProvenance } from '#revision-authority.js';
 import { RevisionPortError } from '#revision-port.js';
 import { parseStartRecord, startRecordPath, startSummary, startTrigger } from '#start-version.js';
 import type {
@@ -898,8 +900,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     writeRevision: async (input: WriteRevisionInput): Promise<RevisionReceipt> => {
       const receipt = await options.port.writeRevision(input);
       if (input.parents.length > 1) {
-        const actor = options.actor?.({ runId: undefined, trigger: 'merge' });
-        mintedOperations.set(receipt.commitId, { kind: 'merge', actor, actorId: input.provenance.actorId });
+        mintedOperations.set(receipt.commitId, { kind: 'merge', actor: input.provenance.actor });
       }
       return receipt;
     },
@@ -916,7 +917,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const policy = options.policy ?? tauRevisionPolicy.policy;
   const useFileSystem: UseCheckoutFileSystem =
     options.useFileSystem ?? (async (checkout, operation) => operation(await filesystem(checkout)));
-  const actorId = options.actorId ?? 'tau-host';
   /* One codec for every merge (D12): a recorded conflict re-derives as it was made. */
   const mergeOptions = options.parameters === undefined ? {} : { parameters: options.parameters };
   /* A host that cannot re-send a push remembers none: the identity function. */
@@ -937,7 +937,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return lastReading;
   };
 
-  const cuts = createHandles<{ tree: ImmutableRevisionTree; treeId: string }>('cut');
+  /* `owesAttributes`: the cut supplied Tau's attributes file, whose live copy its mint writes (A4). */
+  const cuts = createHandles<{ tree: ImmutableRevisionTree; treeId: string; owesAttributes?: true }>('cut');
   /**
    * The side chosen for each conflicted path, by conflicted revision.
    *
@@ -1960,16 +1961,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
         }
         const tree = await captureCheckout(place, { bypassMemo: true });
-        const trigger = startTrigger(origin);
-        const actor = options.actor?.({ runId: undefined, trigger });
+        const capture = startTrigger(origin);
         const receipt = await options.port.writeRevision({
           parents: [],
           tree,
           provenance: Object.freeze({
-            source: trigger === 'create' ? 'user' : 'import',
-            actorId: actor?.id ?? actorId,
-            ...(actor === undefined ? {} : { actor }),
-            trigger,
+            source: capture === 'create' ? 'user' : 'import',
+            /* B1: the person who created or brought in the project, never a stand-in. */
+            actor: options.identity.resolve({ runId: undefined, trigger: capture }),
+            capture,
+            via: options.identity.via,
             createdAt: now(),
           }),
           summary: Object.freeze({ generated: startSummary(origin) }),
@@ -2717,7 +2718,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 
   /* The unwrapped store: an ops ref is not a head, and its own writes are not operations. */
-  const opsLog = createOpsLog({ port: options.port, recordsFileSystem, now, actorId });
+  const opsLog = createOpsLog({ port: options.port, recordsFileSystem, now, identity: options.identity });
 
   const {
     chatContext,
@@ -2734,9 +2735,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     recordsFileSystem,
     deviceId: options.deviceId,
     recordDevices: opsLog,
-    actor: options.actor,
+    identity: options.identity,
     onChatsProjected: options.onChatsProjected,
-    actorId,
     now,
   });
 
@@ -2751,7 +2751,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    */
   const mintedOperations = new Map<
     string,
-    Readonly<{ kind: CheckoutCutTrigger; undoes?: string; actor: RevisionActor | undefined; actorId: string }>
+    Readonly<{ kind: CheckoutCutTrigger; undoes?: string; actor: RevisionIdentity }>
   >();
 
   /**
@@ -2985,7 +2985,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (to !== undefined) {
       mintedOperations.delete(to);
     }
-    const actor = minted === undefined ? options.actor?.({ runId: undefined, trigger: 'save' }) : minted.actor;
+    const actor = minted === undefined ? options.identity.resolve({ runId: undefined, trigger: 'save' }) : minted.actor;
     try {
       await opsLog.append(actor, {
         v: 1,
@@ -2994,7 +2994,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         ...(to === undefined ? {} : { to: String(to) }),
         kind: minted?.kind ?? 'move',
         ...(minted?.undoes === undefined ? {} : { undoes: minted.undoes }),
-        actor: minted?.actorId ?? actor?.id ?? actorId,
+        actor: actor.id,
         at: now(),
       });
     } catch (error) {
@@ -3485,7 +3485,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const place = await placeOf(checkoutId);
     const head = await headOf(place);
     const empty = new ImmutableRevisionTree([]);
-    const entries = await opsLog.read(options.actor?.({ runId: undefined, trigger: 'restore' }));
+    const entries = await opsLog.read(options.identity.resolve({ runId: undefined, trigger: 'restore' }));
     const candidates =
       place.branch === undefined || head === undefined
         ? []
@@ -3565,7 +3565,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const runId = turn?.key.runId;
     const heldRunIds = leaseIds.filter((id) => id !== runId).toSorted();
     const actorRunId = turn === undefined ? heldRunIds[0] : turn.turnCut === 'result' ? runId : undefined;
-    const actor = options.actor?.({ runId: actorRunId, trigger });
+    const actor = options.identity.resolve({ runId: actorRunId, trigger });
     return Object.freeze({
       /* Only the restore row is the restore's: the cut before it records the
        * person's own bytes under the same trigger (D1, A9). */
@@ -3577,9 +3577,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               ? 'merge'
               : 'user'
             : 'restore',
-      /* One id, not two: `actorId` *is* the actor's id whenever the host could
-       * resolve one, so nothing has to decide which of the pair to believe. */
-      actorId: actor?.id ?? actorId,
+      /* S37, B1: who, in the shape stock `git log` renders, what asked (S30), and on which leg. */
+      actor,
+      capture: trigger,
+      via: options.identity.via,
       ...(turn === undefined
         ? {}
         : {
@@ -3590,9 +3591,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             turnId: turn.key.turnId,
           }),
       ...(heldRunIds.length === 0 ? {} : { heldRunIds }),
-      /* S37: who, in the shape stock `git log` renders, and what asked (S30). */
-      ...(actor === undefined ? {} : { actor }),
-      trigger,
       ...(restoredFrom === undefined ? {} : { restoredFrom }),
       createdAt: now(),
     });
@@ -3773,7 +3771,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * @returns `conflicts/<into>/<record device>`.
    */
   const ownConflictLine = async (into: string): Promise<string> =>
-    conflictLineOf(into, await opsLog.deviceFor(options.actor?.({ runId: undefined, trigger: 'merge' })));
+    conflictLineOf(into, await opsLog.deviceFor(options.identity.resolve({ runId: undefined, trigger: 'merge' })));
 
   /**
    * The one conflict write (charter D14): sync, a branch merge and an editor all
@@ -4271,22 +4269,39 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const place = await placeOf(input.checkoutId);
         const own = async (): Promise<ImmutableRevisionTree> =>
           captureCheckout(place, { bypassMemo: false, changed: { paths: input.changedPaths } });
-        const tree =
+        const captured =
           options.completeChanges === true && running !== undefined && running.generation === input.generation
             ? await running.tree.catch(own)
             : await own();
-        const treeId = await checkoutTreeId(place.id, tree);
+        const capturedTreeId = await checkoutTreeId(place.id, captured);
+        const head = await headOf(place);
         /* A cut taken before the open pull lands — a close, a hidden tab —
          * follows the same rule as the pull (W13c). Before any fetch, the
          * opener's own manifest is setup too (W13d); a project with no remote
          * has no pull to merge a root into, so its first cut is an ordinary one. */
-        if ((await headOf(place)) === undefined) {
+        if (head === undefined) {
           const arriving = await arrivingTree(place);
-          if (arriving === undefined ? await holdsOnlyUnfetchedScaffold(tree) : holdsNoWorkBeforePull(tree, arriving)) {
-            return { treeId, cutId: '', nothingToSave: true };
+          if (
+            arriving === undefined
+              ? await holdsOnlyUnfetchedScaffold(captured)
+              : holdsNoWorkBeforePull(captured, arriving)
+          ) {
+            return { treeId: capturedTreeId, cutId: '', nothingToSave: true };
           }
         }
-        return { treeId, cutId: cuts.put(input.checkoutId, { tree, treeId }) };
+        /* A4: opening wrote no attributes file (I4), so the cut that records
+         * something supplies the one the tree owes, and `writeRevision` writes
+         * its live copy in the same mint. A cut that records nothing owes
+         * nothing: Tau's own file never makes an entry of its own. */
+        const owed = withOwedAttributes(captured);
+        if (owed === undefined || capturedTreeId === (await treeIdOf(head))) {
+          return {
+            treeId: capturedTreeId,
+            cutId: cuts.put(input.checkoutId, { tree: captured, treeId: capturedTreeId }),
+          };
+        }
+        const treeId = await checkoutTreeId(place.id, owed);
+        return { treeId, cutId: cuts.put(input.checkoutId, { tree: owed, treeId, owesAttributes: true }) };
       }),
 
       /* D4's and I6's comparison: the same memoised capture a cut reads, and
@@ -4355,7 +4370,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           kind: input.trigger,
           ...(undoes === undefined ? {} : { undoes }),
           actor: provenance.actor,
-          actorId: provenance.actorId,
         });
         /* The claim {@link revisionTreeId} makes, checked where it is cheap:
          * a tree id this host computed differently from the engine's would
@@ -4367,6 +4381,24 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             'ENGINE_FAILED',
             `The store recorded tree ${String(recorded)} for a cut computed as ${input.treeId}.`,
           );
+        }
+        /* A4: the attributes file this mint supplied gets its live copy now, as
+         * the store recorded it, so the checkout reads clean against the new
+         * head. A file that appeared since the cut is someone's and is kept.
+         * The revision is already minted, so a failed copy only warns: the next
+         * capture reads the file as removed and records that, never loses it. */
+        if (held.owesAttributes === true) {
+          try {
+            const recordedFiles = await recordedTree(held.tree, input.parents[0]);
+            const attributes = recordedFiles.get(generatedGitattributesPath);
+            await useFileSystem(await placeOf(input.checkoutId), async (rooted) => {
+              if (attributes !== undefined && !(await rooted.exists(generatedGitattributesPath))) {
+                await rooted.writeFile(generatedGitattributesPath, attributes);
+              }
+            });
+          } catch (error) {
+            console.warn('[revisions] the recorded attributes file could not be written to the checkout', error);
+          }
         }
         /* The revision's tree is the one just cut, so the next walk inherits
          * its modes without reading it back from the store. */
@@ -4612,7 +4644,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         if (place.branch === undefined) {
           return false;
         }
-        const entries = await opsLog.read(options.actor?.({ runId: undefined, trigger: 'restore' }));
+        const entries = await opsLog.read(options.identity.resolve({ runId: undefined, trigger: 'restore' }));
         return undoCandidates(entries, `refs/heads/${place.branch}`).length > 0;
       }),
 
@@ -5446,12 +5478,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* W6's tag members, on a revision that already exists. */
       createTag: fromAuthorityPromise<RevisionTag, PublishTagActorInput>(async ({ input }) => {
         await ensureStore();
-        const person = options.actor?.({ runId: undefined, trigger: 'save' });
         return port.tag({
           name: input.name,
           revisionId: revisionId(input.revisionId),
           ...(input.note === undefined ? {} : { note: input.note }),
-          ...(person === undefined ? {} : { actor: person }),
+          actor: options.identity.resolve({ runId: undefined, trigger: 'save' }),
         });
       }),
 
@@ -5636,24 +5667,54 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
         }
         const offeredHistory = history.filter((name) => !unintegrated.has(name));
+        let renumbered: readonly VersionRenumbering[] = [];
 
         if (offeredHistory.length > 0) {
           signal.throwIfAborted();
           try {
             /* The one push a `pagehide` re-send may carry (D28, S41, review 2
              * R3): the host's recorder is armed for exactly this call. */
-            const offerHistory = async (): Promise<RevisionPushResult> =>
+            const offerHistory = async (pushSession: RevisionPushSession): Promise<RevisionPushResult> =>
               port.push({
                 remote: input.remote,
                 repositoryUrl: input.repositoryUrl,
                 signal,
                 atomic: true,
                 refs: offeredHistory.map((name) => offerOf(name, input.leases)),
-                session,
+                session: pushSession,
               });
             // An explicit GitHub gesture must never arm a pagehide resend.
-            const pushed = await (input.explicit === true ? offerHistory() : recordHistoryPush(offerHistory));
-            results.push(...pushed.refs.map((entry) => outcomeOf(entry, localHeads)));
+            const first =
+              input.explicit === true ? offerHistory(session) : recordHistoryPush(async () => offerHistory(session));
+            /* B6: Tau Cloud refused a version whose number another version
+             * holds — per ref on the browser leg, thrown on the native one.
+             * Only this device has seen its provisional number, so its own
+             * versions that are not backed up take the next free numbers and
+             * the history set is offered once more, on a fresh advertisement
+             * because the remote moved. */
+            let taken: unknown;
+            let pushed = await first.catch((error: unknown) => {
+              if (!(error instanceof RevisionPortError && isVersionNumberRefusal(error.message))) {
+                throw error;
+              }
+              taken = error;
+              return undefined;
+            });
+            if (
+              taken !== undefined ||
+              pushed?.refs.some((entry) => entry.status === 'rejected' && isVersionNumberRefusal(entry.reason)) === true
+            ) {
+              renumbered = await renumberUnpushedVersions(port, { remote: input.remote, signal });
+              if (renumbered.length > 0) {
+                for (const tag of await port.listRefs('refs/tags')) {
+                  localHeads.set(tag.name, String(tag.head));
+                }
+                pushed = await offerHistory({});
+              } else if (pushed === undefined) {
+                throw taken;
+              }
+            }
+            results.push(...(pushed?.refs ?? []).map((entry) => outcomeOf(entry, localHeads)));
           } catch (error) {
             /* A refusal of the whole push — a credential, a plan, a missing
              * repository, the network — is the scheduler's to classify (its R5
@@ -5765,6 +5826,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           ...(overQuota === undefined ? {} : { overQuota }),
           ...(quotaMessage === undefined ? {} : { quotaMessage }),
           ...(quotaStorage === undefined ? {} : { quotaStorage }),
+          ...(renumbered.length === 0 ? {} : { renumbered }),
         };
       }),
 

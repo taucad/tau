@@ -51,6 +51,7 @@ import type {
   ProjectReadinessReading,
   ReadOutcome,
   PublishDraft,
+  RevisionCaptureIdentity,
   RevisionDiffEntry,
   RevisionDivergence,
   RevisionLogRequest,
@@ -799,6 +800,21 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   /* The page's latest answer, read per mint so signing in or turning anonymity
    * on changes the next revision and rewrites none of the recorded ones. */
   let person: RevisionUserActor | undefined;
+  /* Who every capture in this document is by (B1, I1), read per mint. There is
+   * no fallback id: the page names the person (`setActor`) before it opens the
+   * project, so a capture with no person is refused rather than recorded under
+   * a stand-in. */
+  const identity: RevisionCaptureIdentity = {
+    via: 'browser',
+    resolve: ({ runId }) => {
+      if (person === undefined) {
+        throw new Error('This page has not named who its revisions are by yet.');
+      }
+      /* A cut a run holds is the agent's: `git log`'s author stays the person
+       * through `onBehalfOf`, while `Tau-Actor` names the model. */
+      return runId === undefined ? person : { kind: 'agent', id: 'agent', runId, onBehalfOf: person };
+    },
+  };
   /* The page's own answer, read per use: a chat ref written under the wrong
    * device id would overwrite another device's log segment (W17). */
   let device: string | undefined;
@@ -884,7 +900,6 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.mintFloor === undefined ? {} : { mintFloor: options.mintFloor }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
-    actorId: projectId,
     /* Only a feed that sees every write lets a cut skip the files it did not name (E1). */
     completeChanges: options.completeChanges === true && options.observe !== undefined,
     deviceId: () => device,
@@ -928,14 +943,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         globalThis.removeEventListener('offline', offline);
       };
     },
-    actor: ({ runId }) => {
-      if (person === undefined) {
-        return undefined;
-      }
-      /* A cut a run holds is the agent's: `git log`'s author stays the person
-       * through `onBehalfOf`, while `Tau-Actor` names the model. */
-      return runId === undefined ? person : { kind: 'agent', id: 'agent', runId, onBehalfOf: person };
-    },
+    identity,
     filesystem: async (checkout) => options.filesystem(checkout.root),
     /* Tau Cloud's repository for this project, from the origin the page named. */
     remoteUrl: (id) => {
@@ -969,7 +977,15 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
          * answers, from the one ladder both hosts read (C6). */
         throw new Error(registerProjectFailureMessage(401));
       }
-      await registerProjectOverHttp(apiBaseUrl, { kind: 'cookie' }, { id, name });
+      /* B4c: a project its linked import tied to a GitHub repository says so, so
+       * the push check admits the commits Tau did not record (B4). */
+      const remotes = await options.port.listRemotes();
+      const linked = remotes.some((remote) => remote.provider === 'github');
+      await registerProjectOverHttp(
+        apiBaseUrl,
+        { kind: 'cookie' },
+        { id, name, ...(linked ? { origin: 'github' } : {}) },
+      );
     },
     publishPublication: async (input) => {
       const apiBaseUrl = options.apiBaseUrl?.();
@@ -1594,6 +1610,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           filesystem: await options.filesystem(`/projects/${projectId}`),
           remote: await candidateRemote(true),
           candidate,
+          identity,
           readConsent: candidateConsent,
           signal: controller.signal,
           abort: () => {

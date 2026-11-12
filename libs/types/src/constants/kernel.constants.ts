@@ -468,6 +468,23 @@ export const kernelPreferences = ['auto', ...kernelProviders] as const satisfies
  */
 export const isKernelPreference = (v: unknown): v is KernelPreference => v === 'auto' || isKernelId(v);
 
+/** Runtime kernel ids that differ from their catalog id. Every other authoring kernel shares its id. */
+const catalogKernelIdByRuntimeKernelId: Readonly<Record<string, KernelId>> = {
+  openrscad: 'openscad',
+  opencascade: 'opencascadejs',
+};
+
+/**
+ * The catalog kernel a runtime kernel authors: the id a binding (`describe`'s `kernelId`) maps to in
+ * {@link kernelConfigurations}. Undefined for an import-only kernel (gltf, brep, assimp) or an unknown id.
+ *
+ * @param runtimeKernelId - A runtime kernel id.
+ * @returns Its catalog id.
+ * @public
+ */
+export const catalogKernelOfRuntimeKernel = (runtimeKernelId: string): KernelId | undefined =>
+  catalogKernelIdByRuntimeKernelId[runtimeKernelId] ?? (isKernelId(runtimeKernelId) ? runtimeKernelId : undefined);
+
 /** @public */
 // oxlint-disable-next-line unicorn/no-array-reduce -- we know the keys are unique
 export const languageFromKernel = kernelConfigurations.reduce(

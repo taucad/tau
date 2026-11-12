@@ -20,6 +20,7 @@ import { lfsObjectPath, lfsPointerFor, readLfsPointer } from '#lfs.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
+import { recordedBy } from '#test/identity.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 const roots: string[] = [];
@@ -89,7 +90,7 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
         ['photo.png', new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])],
         ['scan.stl', image],
       ]),
-      provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 9, 13) },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 9, 13) },
       summary: { generated: 'Adopted' },
     });
 
@@ -128,7 +129,8 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
     expect(descriptor.largeObjects).toBe(true);
     expect(descriptor).not.toHaveProperty('largeObjectRule');
     expect(await readFile(join(root, generatedIgnorePath), 'utf8')).toContain('# BEGIN Tau generated');
-    expect(await readFile(join(root, generatedGitattributesPath), 'utf8')).toContain('# BEGIN Tau generated');
+    /* The attributes file arrives with the first revision that records something (A4), never at open. */
+    expect(await readdir(root)).not.toContain(generatedGitattributesPath);
     expect(await readFile(join(root, '.git', 'info', 'exclude'), 'utf8')).toContain('# BEGIN Tau generated');
   });
 
@@ -173,7 +175,7 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
 
   describe('with its own large-file attributes (D16)', () => {
     const stlAttributes = '*.stl filter=lfs diff=lfs merge=lfs -text\n';
-    const provenance = { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 10, 7) } as const;
+    const provenance = { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 10, 7) } as const;
 
     it('should open it, and leave its attributes, ignore file and config as written', async () => {
       const { project } = await personRepository({ 'models/.gitattributes': stlAttributes });
@@ -253,7 +255,7 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
 
   describe('an entry unchanged from the parent keeps its representation (rule 13)', () => {
     const psdAttributes = '*.psd filter=lfs diff=lfs merge=lfs -text\n';
-    const provenance = { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 10, 8) } as const;
+    const provenance = { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 10, 8) } as const;
     const blobOf = (project: string, rev: string, path: string): string =>
       git(project, ['rev-parse', `${rev}:${path}`]);
 
@@ -404,15 +406,19 @@ describe.runIf(gitToolchainOnPath)('a folder with its own setup files and no rep
     expect(await readFile(join(root, generatedGitattributesPath), 'utf8')).toBe('*.psd filter=lfs\n');
   });
 
-  it("is Tau's in both sessions once init gave it Tau's attributes file", async () => {
+  it("is the person's in both sessions when its own ignore file has no Tau block, and init writes nothing (A4)", async () => {
     const root = await folder({ [generatedIgnorePath]: 'dist/\n' });
+    await mkdir(join(root, 'dist'));
+    await writeFile(join(root, 'dist', 'out.js'), 'built\n');
 
     const first = await sessionOf(root);
     const second = await sessionOf(root);
 
     expect(first).toStrictEqual(second);
-    expect(first.ignored).toStrictEqual([]);
-    expect(await readFile(join(root, generatedGitattributesPath), 'utf8')).toContain('# BEGIN Tau generated');
+    expect(first.ignored).toStrictEqual(['dist/']);
+    expect(first.config).not.toContain('[filter "lfs"]');
+    expect(await readFile(join(root, generatedIgnorePath), 'utf8')).toBe('dist/\n');
+    expect(await readdir(root)).not.toContain(generatedGitattributesPath);
   });
 
   it('configures the LFS filters again on an open whose store lost them', async () => {

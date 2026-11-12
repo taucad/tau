@@ -28,7 +28,7 @@ describe('project-open fixture', () => {
     expect(Object.keys(shallow).filter((path) => path.includes('/'))).toEqual([]);
     expect(Object.keys(deep)).toHaveLength(targetFileCount);
     expect(shallow[projectOpenTargetEntryPath]?.content).toEqual(deep[projectOpenTargetEntryPath]?.content);
-    expect(projectOpenTargetManifest().assets.main.entryPath).toBe(projectOpenTargetEntryPath);
+    expect(projectOpenTargetManifest().assets.main?.entryPath).toBe(projectOpenTargetEntryPath);
     expect(Object.keys(deep).filter((path) => path.startsWith('parts/group-'))).toHaveLength(targetFileCount - 1);
   });
 

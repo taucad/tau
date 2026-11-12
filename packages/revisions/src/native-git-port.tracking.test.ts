@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { recordedBy } from '#test/identity.js';
 
 const roots: string[] = [];
 
@@ -37,7 +38,7 @@ describe.runIf(gitToolchainOnPath)('native push tracking refs', () => {
     const receipt = await port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['chat.json', '{}\n']]),
-      provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 26) },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 8, 26) },
       summary: { generated: 'Chat record' },
       largeObjects: false,
     });
@@ -64,7 +65,7 @@ describe.runIf(gitToolchainOnPath)('native push tracking refs', () => {
       const receipt = await setup.writeRevision({
         parents: parents.map((parent) => revisionId(parent)),
         tree: new ImmutableRevisionTree([['chat.json', body]]),
-        provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 26) },
+        provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 8, 26) },
         summary: { generated: 'Chat record' },
         largeObjects: false,
       });

@@ -32,11 +32,16 @@ type ManifestEntry = {
 
 type ExampleKind = 'model' | 'test-fixture' | 'spec-fixture' | 'reference';
 
+/** A builtin's manifest: every builtin is a model, so its main entry is declared. */
+type BuiltinManifest = ProjectManifest & {
+  readonly assets: { readonly main: NonNullable<ProjectManifest['assets']['main']> };
+};
+
 type BuiltinEntry = {
   readonly locator: string;
   readonly kernel: string;
   readonly name: string;
-  readonly manifest: ProjectManifest;
+  readonly manifest: BuiltinManifest;
   readonly files: readonly string[];
   readonly textFiles: ReadonlySet<string>;
   readonly featuredThumbnail?: string;
@@ -175,8 +180,13 @@ function scanBuiltins(entries: readonly ManifestEntry[]): BuiltinEntry[] {
     if (!existsSync(manifestPath)) {
       continue;
     }
-    const manifest = projectManifestSchema.parse(JSON.parse(readFileSync(manifestPath, 'utf8')));
+    const parsed = projectManifestSchema.parse(JSON.parse(readFileSync(manifestPath, 'utf8')));
     const locator = `${entry.kernel}.${entry.name}`;
+    const { main } = parsed.assets;
+    if (main === undefined) {
+      throw new Error(`Builtin ${locator} declares no main entry in tau.json.`);
+    }
+    const manifest: BuiltinManifest = { ...parsed, assets: { ...parsed.assets, main } };
     if (locators.has(locator)) {
       throw new Error(`Duplicate builtin locator: ${locator}`);
     }

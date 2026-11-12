@@ -61,7 +61,15 @@ export type RevisionUserActor = Readonly<{
   anonymous?: boolean;
 }>;
 
-/** The model that produced a revision, and the person it produced it for. @public */
+/**
+ * The model that produced a revision, and the person it produced it for.
+ *
+ * The shape a named version's tag reads back (S31). A capture never records
+ * it: it records a {@link RevisionAgentIdentity}, whose run and person are
+ * required.
+ *
+ * @public
+ */
 export type RevisionAgentActor = Readonly<{
   kind: 'agent';
   /** The model id. */
@@ -70,13 +78,79 @@ export type RevisionAgentActor = Readonly<{
   onBehalfOf?: RevisionUserActor;
 }>;
 
-/** Who one revision is by (S37). @public */
+/** Who one revision or tag is by (S37). @public */
 export type RevisionActor = RevisionUserActor | RevisionAgentActor;
 
-/** Immutable authorship and run provenance for a revision. @public */
+/**
+ * An agent as a capture records it (blueprint B1, I1): the run holding the cut,
+ * and always the person it ran for, so the commit's author and Tau Cloud's push
+ * check both name a person and never a model.
+ *
+ * @public
+ */
+export type RevisionAgentIdentity = Readonly<{
+  kind: 'agent';
+  /** The model id. */
+  id: string;
+  runId: string;
+  onBehalfOf: RevisionUserActor;
+}>;
+
+/**
+ * Who one capture is by, resolved before the capture is built (blueprint B1, I1).
+ *
+ * There is no fallback: no project id, host id, login name or address stands in
+ * for a person a host could not resolve. A host with no account records its
+ * device pseudonym, a {@link RevisionUserActor} with `anonymous: true`.
+ *
+ * @public
+ */
+export type RevisionIdentity = RevisionUserActor | RevisionAgentIdentity;
+
+/**
+ * Which Tau leg recorded a revision (blueprint B1): the browser, the desktop
+ * app, the `tau` command line, `tau serve`, or a Tau Cloud agent host.
+ *
+ * A diagnostic, never a display fact: who a row shows comes from Tau Cloud's
+ * push record (I2).
+ *
+ * @public
+ */
+export type RevisionVia = 'browser' | 'desktop' | 'cli' | 'serve' | 'cloud';
+
+/**
+ * How a host names who its captures are by (blueprint B1).
+ *
+ * Required wherever a capture is built. `resolve` is asked per capture, because
+ * signing in, signing out and turning anonymity on all change the answer inside
+ * one session, and it answers an identity, never `undefined`.
+ *
+ * @public
+ */
+export type RevisionCaptureIdentity = Readonly<{
+  /** The leg every capture of this host is recorded through. */
+  via: RevisionVia;
+  /**
+   * The identity of one capture. An agent turn is resolved by `runId`, which is
+   * how the model behind a turn reaches the revision at all.
+   */
+  resolve: (input: Readonly<{ runId: string | undefined; trigger: RevisionTrigger }>) => RevisionIdentity;
+}>;
+
+/**
+ * Immutable authorship and run provenance for a revision, as version 2 of the
+ * `Tau-Metadata` trailer records it (blueprint B1).
+ *
+ * @public
+ */
 export type RevisionProvenance = Readonly<{
   source: 'user' | 'agent' | 'merge' | 'restore' | 'import';
-  actorId: string;
+  /** Who it is by. Required, so an unattributed capture does not type-check (I1). */
+  actor: RevisionIdentity;
+  /** What asked for it (S30). */
+  capture: RevisionTrigger;
+  /** Which Tau leg recorded it. */
+  via: RevisionVia;
   /** The admitting run; absent for `save`, `idle` and `close` (RM-R9). */
   runId?: string;
   /** That run's attempt (D10). */
@@ -96,28 +170,30 @@ export type RevisionProvenance = Readonly<{
    */
   turnId?: string;
   /**
-   * Who this revision is by (S37).
-   *
-   * `actorId` stays the stable id every consumer already reads; this carries the
-   * rest of the identity — the name and email stock `git log` shows, the model
-   * behind an agent turn, and the person it ran for. Optional because a store
-   * written before S37, and a caller that has no session to map, still records a
-   * valid revision; the adapters fall back to `actorId` for the git author.
-   */
-  actor?: RevisionActor;
-  /** What asked for this revision (S30). Absent in a store written before S30. */
-  trigger?: RevisionTrigger;
-  /**
    * The revision a restore brought back (D1).
    *
    * Present only on the revision a restore minted; the cut that recorded the
-   * checkout *before* the restore carries the same `restore` trigger and no
-   * `restoredFrom`, so this — never the trigger — is what names a *Restored* row.
+   * checkout *before* the restore carries the same `restore` capture and no
+   * `restoredFrom`, so this — never the capture — is what names a *Restored* row.
    */
   restoredFrom?: string;
   /** Milliseconds since the Unix epoch. */
   createdAt: number;
 }>;
+
+/**
+ * What a stored commit says about itself, as a read returns it (blueprint B1).
+ *
+ * A revision Tau recorded carries its whole {@link RevisionProvenance}. A commit
+ * Tau did not record (an import's upstream history, a commit made with plain
+ * Git, or one whose trailer is not version 2) carries no identity, capture or
+ * leg, and reads as `source: 'import'` at its author time. Nothing stands in for
+ * the identity it lacks.
+ *
+ * @public
+ */
+export type RecordedProvenance = Omit<RevisionProvenance, 'actor' | 'capture' | 'via'> &
+  Partial<Pick<RevisionProvenance, 'actor' | 'capture' | 'via'>>;
 
 /** Generated summary plus an optional user-edited replacement. @public */
 export type RevisionSummary = Readonly<{

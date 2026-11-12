@@ -679,7 +679,8 @@ export const projectMachine = setup({
               isManifestWritable(context)
                 ? {
                     context: withProject(context, (project) => {
-                      project.assets.main.entryPath = event.path;
+                      // An entry-less project adopts its first main here (blueprint D3).
+                      project.assets.main = { ...project.assets.main, entryPath: event.path };
                     }),
                   }
                 : undefined,
@@ -838,9 +839,11 @@ export const projectMachine = setup({
                   // If the main file was renamed, persist its entry pointer.
                   // Recency is stamped separately by `projectFileActivity`, so this
                   // mechanical metadata rewrite does not decide project activity itself.
-                  ...(matches(context.project?.assets.main.entryPath ?? '')
+                  ...(matches(context.project?.assets.main?.entryPath ?? '')
                     ? withProject(context, (project) => {
-                        project.assets.main.entryPath = rewrite(project.assets.main.entryPath);
+                        if (project.assets.main) {
+                          project.assets.main.entryPath = rewrite(project.assets.main.entryPath);
+                        }
                       })
                     : {}),
                 },

@@ -1429,6 +1429,41 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  it('B6: says once that its own versions took new numbers, on the push that moved them', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    const renumbered = [{ name: 'lid-fit', from: 4, to: 5 }];
+    const tag = 'refs/tags/lid-fit';
+
+    harness.actor.send({ type: 'syncNow', pushId: 'push-1' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      output: { ...pushResult({ name: tag, status: 'updated', head: 't5' }), renumbered },
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+
+    harness.actor.send({ type: 'syncNow', pushId: 'push-2' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', { output: pushResult({ name: tag, status: 'upToDate', head: 't5' }) });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.emitted.filter((event) => event['type'] === 'pushSettled')).toHaveLength(2);
+    });
+
+    expect(harness.emitted.filter((event) => event['type'] === 'versionsRenumbered')).toEqual([
+      { type: 'versionsRenumbered', renumbered } satisfies SyncMachineEmitted,
+    ]);
+
+    harness.stop();
+  });
+
   it('row 23b: a first publish carries its new remote into the correlated push', async () => {
     const harness = start({ remote: undefined });
     await vi.waitFor(() => {

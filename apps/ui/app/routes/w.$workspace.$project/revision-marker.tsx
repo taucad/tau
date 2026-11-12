@@ -54,6 +54,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
+import { generatedSetupPaths } from '@taucad/revisions';
 import type { RevisionDiffEntry } from '@taucad/revisions';
 import type { RevisionComparisonNotice } from '@taucad/revisions/algorithms';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
@@ -73,6 +74,7 @@ import {
 import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
 import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-language-resolution';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
+import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionChanges, useRevisionChangesSince, useRevisionFileComparison } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
@@ -103,6 +105,9 @@ const changeLabels: Readonly<Record<RevisionDiffEntry['kind'], string>> = {
 };
 
 const initialFileRows = 3;
+
+/* The files Tau owns as project setup, at the project root (A4). */
+const isSetupPath = (path: string): boolean => generatedSetupPaths.has(path);
 const comparisonNotices: Readonly<Record<RevisionComparisonNotice, string>> = {
   'empty-added': 'Empty file added.',
   'empty-deleted': 'Empty file deleted.',
@@ -260,9 +265,24 @@ function FileList({
   if (changes.length === 0) {
     return null;
   }
+  /* A4: Tau's own setup files last, under a plain label (canvas "An open row"). */
+  const ordered = [
+    ...changes.filter((change) => !isSetupPath(change.path)),
+    ...changes.filter((change) => isSetupPath(change.path)),
+  ];
+  const shown = isExpanded ? ordered : ordered.slice(0, initialFileRows);
+  const firstSetup = shown.findIndex((change) => isSetupPath(change.path));
   return (
     <ul aria-label={label} className='flex flex-col divide-y overflow-hidden rounded-md border bg-background'>
-      {(isExpanded ? changes : changes.slice(0, initialFileRows)).map((change, index) => (
+      {shown.flatMap((change, index) => [
+        ...(index === firstSetup
+          ? [
+              /* A label, not a file: assistive technology counts only the files as items. */
+              <li key='project-setup' role='presentation' className='px-2 py-1 text-xs text-muted-foreground'>
+                Project setup
+              </li>,
+            ]
+          : []),
         <Collapsible
           key={change.path}
           asChild
@@ -303,8 +323,8 @@ function FileList({
               />
             </CollapsibleContent>
           </li>
-        </Collapsible>
-      ))}
+        </Collapsible>,
+      ])}
       {changes.length > initialFileRows ? (
         <li>
           <button
@@ -373,20 +393,15 @@ function CurrentComparison({
 }
 
 /**
- * A revision's exact facts, opened by the Details toggle in the same
- * `Collapsible`. The revision's id lives here and nowhere else a person reads
- * (EQ9); copying it is More's.
+ * The ids an entry is stored under: its own, its tree's and its parent's.
+ * Diagnostics only (B5, M8): they render with Tau's debug setting on and never
+ * otherwise, so a person reads no 40-character id; copying the entry's id is
+ * More's.
  *
- * @param props - The revision and the line it is on.
- * @returns The Details content.
+ * @param revision - The entry.
+ * @returns The Details rows that name its ids.
  */
-export function RevisionDetails({
-  revision,
-  branch,
-}: {
-  readonly revision: RevisionCard;
-  readonly branch: string | undefined;
-}): React.JSX.Element {
+const storedIdRows = (revision: RevisionCard): ReadonlyArray<readonly [string, React.ReactNode]> => {
   /* The first parent the graph named; a branch's first revision follows none. A card
      from elsewhere (a remote settlement) has neither a parent nor a number here. */
   const parent =
@@ -399,7 +414,7 @@ export function RevisionDetails({
         {revision.parent}
       </code>
     );
-  const rows: ReadonlyArray<readonly [string, React.ReactNode]> = [
+  return [
     [
       'Revision',
       <code key='id' className='font-mono break-all'>
@@ -418,6 +433,27 @@ export function RevisionDetails({
           ],
         ] as const)),
     ...(parent === undefined ? [] : ([['Parent', parent]] as const)),
+  ];
+};
+
+/**
+ * A revision's exact facts, opened by the Details toggle in the same
+ * `Collapsible`. The ids it is stored under appear only with Tau's debug
+ * setting on (B5); copying the id is More's.
+ *
+ * @param props - The revision and the line it is on.
+ * @returns The Details content.
+ */
+export function RevisionDetails({
+  revision,
+  branch,
+}: {
+  readonly revision: RevisionCard;
+  readonly branch: string | undefined;
+}): React.JSX.Element {
+  const isDebug = useFeature('tauDebug');
+  const rows: ReadonlyArray<readonly [string, React.ReactNode]> = [
+    ...(isDebug ? storedIdRows(revision) : []),
     ...(branch === undefined ? [] : ([['Branch', branch]] as const)),
     ['Trigger', revisionTriggerLabel(revision.trigger, revision.turnCut)],
     ...(revision.createdAt > 0
@@ -559,7 +595,7 @@ function CopyRevisionId({ revisionId }: { readonly revisionId: string }): React.
       </DropdownMenuItem>
       {isFailed ? (
         <span role='alert' className='sr-only'>
-          Copy failed. Select the id in Details and copy it.
+          Copy failed. Try again.
         </span>
       ) : null}
     </>
@@ -638,7 +674,7 @@ function PublishRevisionDialog({
               commands.confirmPublish({
                 tag,
                 projectName,
-                entryPath: project?.assets.main.entryPath ?? '',
+                entryPath: project?.assets.main?.entryPath ?? '',
                 visibility: 'public',
                 title: projectName,
               });

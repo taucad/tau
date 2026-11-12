@@ -36,7 +36,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileMode, FileSystemProvider, PrivateStore } from '@taucad/filesystem';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
-import type { RevisionProvenance } from '#revision-authority.js';
+import type { RecordedProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
 import type { DecodedCommit } from '#git-objects.js';
 import { encodeGitIndex } from '#git-index.js';
@@ -55,6 +55,7 @@ import {
 } from '#revision-headers.js';
 import type { RevisionTrailer } from '#revision-headers.js';
 import { walkRevisionLog } from '#revision-log-order.js';
+import { numberVersions, versionNumberFor } from '#version-numbers.js';
 import {
   pktEncoder,
   pktLine,
@@ -130,13 +131,7 @@ import type {
   UpdateRevisionRefResult,
   WriteRevisionInput,
 } from '#revision-port.js';
-import {
-  generatedGitattributesContent,
-  generatedGitattributesPath,
-  generatedIgnoreContent,
-  generatedIgnorePath,
-  hasGeneratedBlock,
-} from '#workspace-config.js';
+import { generatedIgnoreContent, generatedIgnorePath } from '#workspace-config.js';
 
 /*
  * `isomorphic-git` reads the Node `Buffer` *global*, and a browser has none:
@@ -538,9 +533,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     const trailer = parseRevisionCommitMessage(commit.message);
     /* A project Tau did not write carries no trailer, and its date is still the
      * one git shows: the commit's own author time. */
-    const unattributed: RevisionProvenance = {
+    const unattributed: RecordedProvenance = {
       source: 'import',
-      actorId: 'unknown',
       createdAt: commit.author.seconds * 1000,
     };
     return Object.freeze({
@@ -550,6 +544,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       treeId: commit.tree,
       summary: trailer?.summary ?? { generated: commit.message.split('\n')[0] ?? '' },
       provenance: trailer?.provenance ?? unattributed,
+      /* B3: a commit Tau did not record reads as its git author, as GitHub shows it. */
+      ...(trailer === undefined ? { authorName: commit.author.name } : {}),
       conflicted: commit.conflictedTrees !== undefined,
     });
   };
@@ -1389,7 +1385,15 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       note: trailer.note,
       actor: trailer.actor,
       createdAt: decoded.tagger.seconds * 1000,
+      ...(trailer.number === undefined ? {} : { number: trailer.number }),
     });
+  };
+
+  /* Every named version, by name, each with the number it reads as (B6). */
+  const listTags = async (): Promise<readonly RevisionTag[]> => {
+    const names = await listRefs({ fs, gitdir, filepath: tagRefPrefix });
+    const tags = await Promise.all(names.toSorted().map(async (name) => readTagRef(name)));
+    return numberVersions(tags.filter((entry) => entry !== undefined));
   };
 
   const tryResolve = async (ref: string): Promise<string | undefined> => {
@@ -1849,35 +1853,19 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * Also the open seam: `revision-effects.ensureStore` calls this once per
      * authority, before the first question is asked of the store, and
      * `isomorphic-git`'s own `init` returns early when the config is already
-     * there. The setup files are created, never merged into (D16), exactly as
-     * the disk leg does (`native-git-port.ts`): a file that exists is the
-     * person's, or already Tau's, and the cut regenerates Tau's own block in
-     * it from the tree (`lfs.ts`), so both legs record one tree (I4/I5).
+     * there. Opening a project writes nothing in the tracked tree (I4): only a
+     * brand-new store gets Tau's ignore file, created, never merged into (D16),
+     * exactly as the disk leg does (`native-git-port.ts`). The attributes file
+     * is never written here: the cut supplies it in the recorded tree and
+     * writes its live copy in the same mint (`revision-effects`, A4).
      */
     init: async (input: InitRevisionStoreInput): Promise<void> => {
       const brandNew = !(await gitFiles.exists(`${gitdir}/config`));
-      if (input.createSetupFiles !== false) {
-        const readText = async (path: string): Promise<string | undefined> =>
-          (await filesystem.exists(path)) ? filesystem.readFile(path, 'utf8') : undefined;
-        const [ignore, attributes] = await Promise.all([
-          readText(generatedIgnorePath),
-          readText(generatedGitattributesPath),
-        ]);
-        /* Both generated files are in the recorded tree, so a leg that wrote
-         * only one of them named a different tree for the same edits
-         * (W22 DEF-W22-1); a brand-new project gets both, versioned (D24). */
-        if (brandNew && ignore === undefined) {
-          await filesystem.writeFile(
-            generatedIgnorePath,
-            generatedIgnoreContent(undefined, input.additionalIgnores ?? []),
-          );
-        }
-        /* A project an older build created carries Tau's ignore block and no
-         * attributes file (DEF-W22-1); the file it gets here is what keeps its
-         * large files pointers once the cut reads the rule from the tree. */
-        if (attributes === undefined && (brandNew || hasGeneratedBlock(ignore))) {
-          await filesystem.writeFile(generatedGitattributesPath, generatedGitattributesContent(undefined));
-        }
+      if (brandNew && input.createSetupFiles !== false && !(await filesystem.exists(generatedIgnorePath))) {
+        await filesystem.writeFile(
+          generatedIgnorePath,
+          generatedIgnoreContent(undefined, input.additionalIgnores ?? []),
+        );
       }
       // Only now: the repository is created after the file that decides what a
       // snapshot may ever contain already exists.
@@ -2145,6 +2133,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         throw new RevisionPortError('UNKNOWN_REVISION', 'The revision this name would point at is not in the store.');
       }
       const createdAt = input.createdAt ?? Date.now();
+      const number = input.number ?? versionNumberFor(await listTags(), input.name);
       const object = encodeTag({
         objectFormat,
         object: input.revisionId,
@@ -2154,6 +2143,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           name: input.name,
           note: input.note,
           actor: input.actor,
+          number,
         }),
       });
       /* The bytes `encodeTag` hashed, stored as they are: one encoder for both legs. */
@@ -2167,14 +2157,11 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         note: input.note,
         actor: input.actor,
         createdAt,
+        number,
       });
     },
 
-    listTags: async (): Promise<readonly RevisionTag[]> => {
-      const names = await listRefs({ fs, gitdir, filepath: tagRefPrefix });
-      const tags = await Promise.all(names.toSorted().map(async (name) => readTagRef(name)));
-      return Object.freeze(tags.filter((entry) => entry !== undefined));
-    },
+    listTags,
 
     deleteTag: async (name: string): Promise<void> => {
       await withRefLock(`${filesystem.id}:${gitdir}:${tagRefPrefix}/${name}`, async () => {

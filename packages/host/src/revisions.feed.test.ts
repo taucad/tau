@@ -13,7 +13,13 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
+import {
+  createIsomorphicGitRevisionPort,
+  generatedGitattributesContent,
+  generatedGitattributesPath,
+  generatedIgnoreContent,
+  generatedIgnorePath,
+} from '@taucad/revisions';
 import { revisionId } from '@taucad/revisions/algorithms';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
@@ -55,6 +61,9 @@ const open = async () => {
     // oxlint-disable-next-line no-await-in-loop -- fixture files, written in order.
     await writeFile(join(workspaceRoot, `f${String(index)}.txt`), `file ${String(index)}\n`);
   }
+  /* A current project carries both setup files; opening writes neither (A4), so the first save records them as they are. */
+  await writeFile(join(workspaceRoot, generatedIgnorePath), generatedIgnoreContent(undefined));
+  await writeFile(join(workspaceRoot, generatedGitattributesPath), generatedGitattributesContent(undefined));
   const reads: string[] = [];
   const disk = new NodeFsProvider(workspaceRoot);
   const counted = Object.assign(Object.create(disk) as NodeFsProvider, {
@@ -72,6 +81,7 @@ const open = async () => {
     checkouts: { projectId: 'project-feed', root: () => new NodeFsProvider(workspaceRoot) },
   });
   const revisions = createProjectRevisions({
+    via: 'desktop',
     workspaceRoot,
     projectId: 'project-feed',
     port,

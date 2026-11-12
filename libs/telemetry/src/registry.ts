@@ -206,7 +206,8 @@ const agentEvidenceAdmissionOutcomes = [
  * visibility is not yet proven; `confirmed` was read back; `gap` was never visible and is not resent;
  * `key_unavailable` is held for a payload key this deployment no longer has; `abandoned` is a lease a
  * stopped worker left, returned for another pass; `superseded` names a Langfuse object another receipt
- * already writes, or none.
+ * already writes, or none; `held` is a generation waiting for its call's settlement, or a settlement
+ * waiting for its generation (Langfuse blueprint LW4, rule 8).
  */
 const agentEvidenceDeliveryOutcomes = [
   'acknowledged',
@@ -221,6 +222,7 @@ const agentEvidenceDeliveryOutcomes = [
   'expired',
   'abandoned',
   'superseded',
+  'held',
   'lease_lost',
 ] as const;
 
@@ -238,9 +240,26 @@ const agentEvidenceBacklogStates = [
 /**
  * `reason` a receipt was settled without writing to Langfuse (LD12): `reprojected` at admission, a new
  * projection of a source already delivered or on its way; `object`, a second receipt for a Langfuse
- * object another receipt writes; `no_object`, a fact that maps to no Langfuse object.
+ * object another receipt writes; `no_object`, a fact that maps to no Langfuse object; `merged`, a
+ * settlement whose values its generation carries; `late`, a settlement whose generation went without it.
  */
-const agentEvidenceSupersededReasons = ['reprojected', 'object', 'no_object'] as const;
+const agentEvidenceSupersededReasons = ['reprojected', 'object', 'no_object', 'merged', 'late'] as const;
+
+/**
+ * `outcome` of one ledger settlement against its generation (Langfuse blueprint LW4): `merged` into the
+ * generation's one send; `late`, admitted after its generation went, so written nowhere; `unsettled`, a
+ * funded generation sent without its settlement once its hold ran out.
+ */
+const agentEvidenceSettlementOutcomes = ['merged', 'late', 'unsettled'] as const;
+
+/** `tau.agent_evidence.score`: the Langfuse score one agent-evidence write carried (Langfuse blueprint LW7). */
+const agentEvidenceScoreNames = ['user-rating', 'run-termination', 'task-success'] as const;
+
+/**
+ * `outcome` of one Langfuse score write, settled by its answer alone (nothing reads a score back): `not_sent` never
+ * reached Langfuse and is retried with its receipt.
+ */
+const agentEvidenceScoreOutcomes = ['accepted', 'rejected', 'uncertain', 'not_sent'] as const;
 
 /**
  * `kind` of one Langfuse billable unit (Langfuse blueprint LW24, ruling 13): Langfuse counts traces, observations and
@@ -2040,6 +2059,29 @@ export const TauMetrics = {
     attributes: z.object({
       'tau.worker': z.enum(['delivery', 'lifecycle']),
       outcome: z.enum(['ok', 'error']),
+    }),
+  }),
+
+  agentEvidenceScores: defineCounter({
+    name: 'tau.agent_evidence.scores',
+    unit: '{score}',
+    description:
+      'Langfuse score writes for agent ratings and outcomes, by score, whether it named a score config, and outcome',
+    attributes: z.object({
+      'tau.agent_evidence.score': z.enum(agentEvidenceScoreNames),
+      /* `false`: the deployment names no config id for the score, so it was written without one. */
+      'tau.agent_evidence.score_configured': z.enum(['true', 'false']),
+      outcome: z.enum(agentEvidenceScoreOutcomes),
+    }),
+  }),
+
+  agentEvidenceSettlements: defineCounter({
+    name: 'tau.agent_evidence.settlements',
+    unit: '{settlement}',
+    description:
+      'Ledger settlements carried on their generation (merged), settled after it went (late), or generations sent without theirs (unsettled)',
+    attributes: z.object({
+      outcome: z.enum(agentEvidenceSettlementOutcomes),
     }),
   }),
 

@@ -2,10 +2,11 @@
 import { createHash, createHmac, hkdfSync } from 'node:crypto';
 import type { Evidence } from '@taucad/agent-observability/contract';
 import { evidenceKeys } from '@taucad/agent-observability/identity';
-import { reportedToolName } from '@taucad/agent-observability/projection';
+import { ratingScale, reportedToolName } from '@taucad/agent-observability/projection';
 import { phaseDurations } from '@taucad/agent-observability/scorecard';
 import { redactPersonal } from '@taucad/agent-observability/content-redaction';
 import type { PersonalIdentity } from '@taucad/agent-observability/content-redaction';
+import type { LangfuseScoreName } from '@taucad/api-core';
 import type { SourceProtection } from '#evidence-admission.js';
 
 /** One OTLP attribute value in the JSON encoding Langfuse's v4 endpoint accepts. */
@@ -41,6 +42,8 @@ export type ObservationContext = Readonly<{
   protection: SourceProtection;
   /** The account's registered email and full name, for the export redaction pass over content (LQ13). */
   identity?: PersonalIdentity | undefined;
+  /** For a generation, the ledger's settlement of its call, when delivery holds it (LW4, rule 8). */
+  settlement?: SettlementFact | undefined;
 }>;
 
 /**
@@ -62,32 +65,8 @@ export const observationMapperVersion = 'langfuse-v5';
 /** The name of a run's root observation, and of every span's trace in a run. */
 export const runRootName = 'run-cad-agent';
 
-/** A settlement's span name, the same under v4.3 and v5 until LW4 moves its values onto the generation. */
-export const settlementObservationName = 'tau.financial';
-
-/** The mapper versions whose settlement spans a reader accepts: the same facts under the same names (LR5). */
-export const settlementMappers: ReadonlySet<string> = new Set(['langfuse-v4.3', observationMapperVersion]);
-
-/**
- * Fact fields that name a Tau record (a run, message, call, attempt or ledger
- * entry) rather than a vocabulary value. They reach the vendor only as the
- * trace's keyed digest, which still joins one field to another.
- */
-const referenceFields: ReadonlySet<string> = new Set([
-  'assessment',
-  'attempt',
-  'billing',
-  'call',
-  'dispatch',
-  'evidence',
-  'invocation',
-  'ledger',
-  'logicalCall',
-  'message',
-  'modelAttempt',
-  'modelCall',
-  'response',
-]);
+/** The span names of a generation: a run's call, a context compaction and a helper or direct call. */
+export const generationNames: ReadonlySet<string> = new Set(['call-model', 'compact-context', 'call-helper-model']);
 
 const sha256 = (...parts: readonly string[]): string =>
   createHash('sha256').update(JSON.stringify(parts)).digest('hex');
@@ -114,6 +93,10 @@ export const runRootSpanId = (environment: string, principal: string, run: strin
  */
 export const receiptSpanId = (environment: string, receipt: string): string =>
   sha256('tau-span', environment, receipt).slice(0, 16);
+
+/* A trace's id: one per (environment, principal, run), or per helper or direct call. */
+const traceIdOf = (environment: string, principal: string, key: string): string =>
+  sha256('tau-trace', environment, principal, key).slice(0, 32);
 
 /**
  * The keyed group a contract id reaches the vendor as: the same id under the same principal always joins, and no
@@ -154,19 +137,7 @@ export const accountPseudonym = (environment: string, principal: string, pseudon
 
 const stringAttribute = (key: string, value: string): OtlpAttribute => ({ key, value: { stringValue: value } });
 const intAttribute = (key: string, value: number): OtlpAttribute => ({ key, value: { intValue: String(value) } });
-const scalar = (key: string, value: unknown): OtlpAttribute | undefined => {
-  if (typeof value === 'string') {
-    return stringAttribute(key, value);
-  }
-  if (typeof value === 'boolean') {
-    return { key, value: { boolValue: value } };
-  }
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return Number.isInteger(value) ? intAttribute(key, value) : { key, value: { doubleValue: value } };
-  }
-  return undefined;
-};
-
+const doubleAttribute = (key: string, value: number): OtlpAttribute => ({ key, value: { doubleValue: value } });
 const tagsAttribute = (key: string, values: readonly string[]): OtlpAttribute => ({
   key,
   value: { arrayValue: { values: values.map((value) => ({ stringValue: value })) } },
@@ -183,6 +154,8 @@ type Section = NonNullable<MaybeSection>;
 type Part = Section['messages'][number]['parts'][number];
 type ProviderFact = SummaryFact & { kind: 'provider' };
 type CallKind = NonNullable<ProviderFact['callKind']>;
+/** A ledger settlement's fact, whose values ride on the generation it settled (LW4). */
+export type SettlementFact = SummaryFact & { kind: 'financial' };
 
 /**
  * What kind of model call a fact belongs to. Every fact but a model call is a run's. A provider fact names its kind;
@@ -222,8 +195,45 @@ export const releaseLabel = (build: Evidence['versions']['apiBuild']): string =>
   return commitDigits.exec(build)?.[0].slice(0, 12) ?? build;
 };
 
-const releaseOf = ({ versions }: Evidence): string =>
-  releaseLabel((versions.hostBuild === unreadBuild ? null : versions.hostBuild) ?? versions.apiBuild);
+type OutcomeTurn = (SummaryFact & { kind: 'outcome' })['turn'];
+
+/** The labels a fact carries about the host that ran its turn (LW17): host kind, host build, kernel and model. */
+type HostLabels = Readonly<{ host?: string; build?: string; kernel?: string; model?: string }>;
+
+/* The turn's host kinds, as the gateway names them: the root's `cli` is the gateway's `daemon`. */
+const turnHost = (host: NonNullable<OutcomeTurn>['host']): string | undefined =>
+  host === 'cli' ? 'daemon' : (host ?? undefined);
+
+/**
+ * The host labels one fact carries (LW17): a model call's as the host sent them with the call and the gateway admitted
+ * them, a run's outcome's as the host recorded its turn. A helper or direct call, a tool and every other fact carry
+ * none.
+ */
+const hostLabelsOf = (evidence: Evidence): HostLabels => {
+  const fact = evidence.payload.plane === 'feedback' ? undefined : evidence.payload.fact;
+  if (fact?.kind === 'provider') {
+    return fact.labels ?? {};
+  }
+  if (fact?.kind === 'outcome' && fact.turn !== undefined) {
+    const host = turnHost(fact.turn.host);
+    return {
+      ...(host === undefined ? {} : { host }),
+      ...(fact.turn.kernel === null ? {} : { kernel: fact.turn.kernel }),
+      ...(fact.turn.model === null ? {} : { model: fact.turn.model }),
+    };
+  }
+  return {};
+};
+
+/* The labels that are trace tags and trace metadata, in tag order. */
+const traceLabels = ['host', 'kernel', 'model'] as const;
+
+/*
+ * A host fact's release is its host build; a model call's is the build its host sent with it (LW17), so one run reads
+ * one release, and the API's build only for a call that sent none, such as a helper or direct call.
+ */
+const releaseOf = ({ versions }: Evidence, labels: HostLabels): string =>
+  releaseLabel(labels.build ?? (versions.hostBuild === unreadBuild ? null : versions.hostBuild) ?? versions.apiBuild);
 
 /* The phases whose closed time is a provider or tool fact's own span. */
 const timedPhases: Readonly<Partial<Record<Evidence['semantic']['kind'], ReadonlySet<string>>>> = {
@@ -254,26 +264,6 @@ const spanMilliseconds = (evidence: Evidence): number => {
   return total;
 };
 
-/** The closed fact fields, one level deep, with every record reference as its keyed digest. */
-const factAttributes = (fact: Readonly<Record<string, unknown>>, group: (value: string) => string): OtlpAttribute[] =>
-  defined(
-    Object.entries(fact)
-      .flatMap(
-        ([key, value]): Array<readonly [string, unknown]> =>
-          value !== null && typeof value === 'object' && !Array.isArray(value)
-            ? Object.entries(value as Readonly<Record<string, unknown>>).map(
-                ([field, nested]) => [`${key}.${field}`, nested] as const,
-              )
-            : [[key, value]],
-      )
-      .map(([key, value]) =>
-        scalar(
-          metadataKey(`fact.${key}`),
-          referenceFields.has(key) && typeof value === 'string' ? group(value) : value,
-        ),
-      ),
-  );
-
 /** Everything a mapping needs about one receipt that does not depend on its fact. */
 type Mapping = Readonly<{
   evidence: Evidence;
@@ -298,12 +288,17 @@ const mappingOf = (evidence: Evidence, context: ObservationContext, pseudonym: U
   /* An API fact without a chat hint names its own call as its chat; it has none. */
   const chat = fact?.kind === 'provider' && evidence.run === fact.logicalCall ? undefined : group(evidence.run);
   const user = accountPseudonym(environment, principal, pseudonym);
+  const labels = hostLabelsOf(evidence);
+  const traced = traceLabels.flatMap((key) => {
+    const value = labels[key];
+    return value === undefined ? [] : [[key, value] as const];
+  });
   return {
     evidence,
     context,
     group,
     kind,
-    traceId: sha256('tau-trace', environment, principal, traceKey).slice(0, 32),
+    traceId: traceIdOf(environment, principal, traceKey),
     rootId: runRootSpanId(environment, principal, evidence.execution.attempt),
     chat,
     common: (traceName) =>
@@ -312,9 +307,13 @@ const mappingOf = (evidence: Evidence, context: ObservationContext, pseudonym: U
         stringAttribute('langfuse.user.id', user),
         kind === 'run' && chat !== undefined ? stringAttribute('langfuse.session.id', chat) : undefined,
         stringAttribute('langfuse.environment', environment),
-        stringAttribute('langfuse.release', releaseOf(evidence)),
-        tagsAttribute('langfuse.trace.tags', [`plan:${context.protection}`]),
+        stringAttribute('langfuse.release', releaseOf(evidence, labels)),
+        tagsAttribute('langfuse.trace.tags', [
+          `plan:${context.protection}`,
+          ...traced.map(([key, value]) => `${key}:${value}`),
+        ]),
         stringAttribute('langfuse.trace.metadata.protection', context.protection),
+        ...traced.map(([key, value]) => stringAttribute(`langfuse.trace.metadata.${key}`, value)),
         stringAttribute(metadataKey('plane'), evidence.payload.plane),
         stringAttribute(metadataKey('coverage_input'), evidence.coverage.input),
         stringAttribute(metadataKey('coverage_output'), evidence.coverage.output),
@@ -466,6 +465,23 @@ const contentAttributes = (content: ContentPayload, group: (value: string) => st
   ]);
 };
 
+/**
+ * The ledger's values for the call, beside Langfuse's own cost (LW4, LF-08): the supplier cost and the customer charge
+ * in USD, and the tariff and ledger entry as keyed digests. They are metadata, never `cost_details`, whose bare total
+ * would erase Langfuse's per-type breakdown (LD6). An unpriced supplier cost is left out, never sent as zero.
+ */
+const settlementAttributes = ({ context: { settlement }, group }: Mapping): OtlpAttribute[] =>
+  settlement === undefined
+    ? []
+    : defined([
+        settlement.supplierCost === null
+          ? undefined
+          : doubleAttribute(metadataKey('supplier_cost_usd'), settlement.supplierCost),
+        doubleAttribute(metadataKey('credits'), settlement.credits),
+        stringAttribute(metadataKey('tariff'), group(settlement.tariff)),
+        stringAttribute(metadataKey('ledger'), group(settlement.ledger)),
+      ]);
+
 const generationSpan = (mapping: Mapping, fact: ProviderFact, content?: ContentPayload): OtlpSpan => {
   const { evidence, group, kind } = mapping;
   const name = generationName(fact, kind);
@@ -509,6 +525,7 @@ const generationSpan = (mapping: Mapping, fact: ProviderFact, content?: ContentP
       fact.usage.reasoning === null ? undefined : intAttribute(metadataKey('reasoning_tokens'), fact.usage.reasoning),
       kind !== 'run' && mapping.chat !== undefined ? stringAttribute(metadataKey('chat'), mapping.chat) : undefined,
       ...(content === undefined ? [] : contentAttributes(content, group)),
+      ...settlementAttributes(mapping),
       ...(failed === undefined ? [] : level('ERROR', failed)),
     ]),
     status: failed === undefined ? { code: 1 } : { code: 2, message: failed },
@@ -706,30 +723,6 @@ const rootSpans = (mapping: Mapping, fact: OutcomeFact, content?: ContentPayload
 };
 
 /**
- * A fact that becomes a Langfuse object of its own only until its package moves it: a settlement onto its generation
- * (LW4), a rating into a score (LW7). Until then it is a point-in-time span under the run's root that keeps the closed
- * `fact.*` metadata the ledger reconciliation reads.
- */
-const transitionalSpan = (mapping: Mapping, name: string, fact: Readonly<Record<string, unknown>>): OtlpSpan => {
-  const at = nanoseconds(startOf(mapping.evidence));
-  return {
-    traceId: mapping.traceId,
-    spanId: objectId(mapping),
-    parentSpanId: mapping.rootId,
-    name,
-    kind: 1,
-    startTimeUnixNano: at,
-    endTimeUnixNano: at,
-    attributes: [
-      ...mapping.common(runRootName),
-      stringAttribute('langfuse.observation.type', 'span'),
-      ...factAttributes(fact, mapping.group),
-    ],
-    status: { code: 1 },
-  };
-};
-
-/**
  * Run the export pass over one section (LQ13): emails everywhere text is kept, and the account's name only in prose
  * (text, readable thinking and check lines), never in a tool's arguments or result or in design source, where a name
  * match would corrupt code.
@@ -820,8 +813,9 @@ export const exportableEvidence = (
  * fact; a helper or direct call is a trace of its own. Account, chat, run and record ids reach the vendor only as
  * keyed or one-way digests, and no receipt id is sent.
  *
- * A fact that is not an operation (a check, a presentation, an instruction) maps to no object: the caller settles such
- * a receipt `superseded` and sends nothing. A content receipt maps as its fact does; a generation's also carries its
+ * A fact that is not an operation (a check, a presentation, an instruction, a settlement) maps to no object: the caller
+ * settles such a receipt `superseded` and sends nothing. A settlement's values ride on the generation it settled, in
+ * that generation's one send (LW4, rule 8). A content receipt maps as its fact does; a generation's also carries its
  * input, output, parameters and context digests (LW3), a tool's its arguments and result, and a root's this turn's
  * message, reply, design and checks (LW6), each after the export redaction pass.
  *
@@ -839,7 +833,8 @@ export const langfuseObservation = (
   const spans = ((): OtlpSpan[] | undefined => {
     const { payload } = mapping.evidence;
     if (payload.plane === 'feedback') {
-      return payload.fact.kind === 'rating' ? [transitionalSpan(mapping, 'tau.rating', payload.fact)] : undefined;
+      /* A rating is a score on the root (LW7, LI5); no feedback fact is an observation. */
+      return undefined;
     }
     const { fact } = payload;
     switch (fact.kind) {
@@ -852,9 +847,6 @@ export const langfuseObservation = (
       case 'outcome': {
         return rootSpans(mapping, fact, payload.plane === 'content' ? payload : undefined);
       }
-      case 'financial': {
-        return [transitionalSpan(mapping, settlementObservationName, fact)];
-      }
       default: {
         return undefined;
       }
@@ -864,6 +856,72 @@ export const langfuseObservation = (
   return spans === undefined || object === undefined
     ? undefined
     : { identity: { traceId: object.traceId, spanId: object.spanId }, spans };
+};
+
+/**
+ * One Langfuse score, as Tau writes it with `POST /api/public/scores` (LW7): on a run's root observation, with an id
+ * from its source fact and name and the fact's own time, so a repeat of the same write replaces itself (LD5). The
+ * client adds the score config's id from the deployment's setting.
+ */
+export type LangfuseScore = Readonly<{
+  id: string;
+  traceId: string;
+  observationId: string;
+  name: LangfuseScoreName;
+  value: number | string;
+  dataType: 'BOOLEAN' | 'CATEGORICAL';
+  timestamp: string;
+  environment: string;
+}>;
+
+/* The categories of the `run-termination` config; an `unknown` ending is none of them and writes no score. */
+const terminationCategories: ReadonlySet<string> = new Set(['completed', 'cancelled', 'failed', 'abandoned']);
+
+/**
+ * The scores one receipt writes (LW7, LD7): a rating is `user-rating` (1 positive, 0 negative); an outcome is
+ * `run-termination`, one per terminal row so a resumed run has two, and `task-success` when rule `cad-checks-v1`
+ * decided it (1 verified, 0 failed). Each is on its run's root, whether or not this receipt writes that root. Every other
+ * fact writes none. No account, chat or record id is in a score: its trace and observation ids are the run's digests.
+ *
+ * @param evidence - The opened, previously validated evidence, as it may be exported now.
+ * @param context - Server facts about the receipt; only its environment is used.
+ * @returns The scores, in a fixed order, or none.
+ */
+export const langfuseScores = (
+  evidence: Evidence,
+  context: Pick<ObservationContext, 'environment'>,
+): LangfuseScore[] => {
+  const { environment } = context;
+  const { principal } = evidence.scope;
+  const run = evidence.execution.attempt;
+  const { source } = evidenceKeys(evidence);
+  const score = (
+    name: LangfuseScoreName,
+    value: LangfuseScore['value'],
+    dataType: LangfuseScore['dataType'],
+  ): LangfuseScore => ({
+    id: sha256('tau-score', environment, principal, source, name).slice(0, 32),
+    traceId: traceIdOf(environment, principal, run),
+    observationId: runRootSpanId(environment, principal, run),
+    name,
+    value,
+    dataType,
+    timestamp: new Date(startOf(evidence)).toISOString(),
+    environment,
+  });
+  const { fact } = evidence.payload;
+  if (evidence.payload.plane === 'feedback') {
+    return fact.kind === 'rating' && fact.scale === ratingScale
+      ? [score('user-rating', fact.value === 'positive' ? 1 : 0, 'BOOLEAN')]
+      : [];
+  }
+  if (fact.kind !== 'outcome') {
+    return [];
+  }
+  return [
+    ...(terminationCategories.has(fact.termination) ? [score('run-termination', fact.termination, 'CATEGORICAL')] : []),
+    ...(fact.success === 'unknown' ? [] : [score('task-success', fact.success === 'verified' ? 1 : 0, 'BOOLEAN')]),
+  ];
 };
 
 /**

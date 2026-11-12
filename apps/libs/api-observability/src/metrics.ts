@@ -851,6 +851,17 @@ export class MetricsService {
     unit: TauMetrics.agentEvidencePasses.unit,
   });
 
+  public readonly agentEvidenceScores = this.apiMeter.createCounter(TauMetrics.agentEvidenceScores.name, {
+    description: TauMetrics.agentEvidenceScores.description,
+    unit: TauMetrics.agentEvidenceScores.unit,
+  });
+
+  /** Ledger settlements against their generations (LW4): merged, late, or a generation sent unsettled. */
+  public readonly agentEvidenceSettlements = this.apiMeter.createCounter(TauMetrics.agentEvidenceSettlements.name, {
+    description: TauMetrics.agentEvidenceSettlements.description,
+    unit: TauMetrics.agentEvidenceSettlements.unit,
+  });
+
   public readonly agentEvidenceLangfuseUnits = this.apiMeter.createCounter(TauMetrics.agentEvidenceLangfuseUnits.name, {
     description: TauMetrics.agentEvidenceLangfuseUnits.description,
     unit: TauMetrics.agentEvidenceLangfuseUnits.unit,
@@ -874,6 +885,12 @@ export type AgentEvidenceDeliveryOutcome = z.infer<typeof TauMetrics.agentEviden
 
 /** `reason` of one `tau.agent_evidence.superseded_receipts` increment. */
 export type AgentEvidenceSupersededReason = z.infer<typeof TauMetrics.agentEvidenceSuperseded.attributes>['reason'];
+
+/** `outcome` of one `tau.agent_evidence.scores` increment. */
+export type AgentEvidenceScoreOutcome = z.infer<typeof TauMetrics.agentEvidenceScores.attributes>['outcome'];
+
+/** `outcome` of one `tau.agent_evidence.settlements` increment. */
+export type AgentEvidenceSettlementOutcome = z.infer<typeof TauMetrics.agentEvidenceSettlements.attributes>['outcome'];
 
 /** `outcome` of one `tau.agent_evidence.erasure_traces` increment. */
 export type AgentEvidenceErasureOutcome = z.infer<typeof TauMetrics.agentEvidenceErasureTraces.attributes>['outcome'];

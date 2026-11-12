@@ -81,7 +81,12 @@ describe('revision waits answered with the clock frozen (TS-S8)', () => {
 
   it('should answer the close flush once the registry answers with no live checkout (B3)', async () => {
     const { workspaceRoot, port } = await unreadableRegistry();
-    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', port });
+    const revisions = createProjectRevisions({
+      via: 'desktop',
+      workspaceRoot,
+      projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
+      port,
+    });
 
     const outcome = await answerOf(outcomeOf(revisions.release()));
 

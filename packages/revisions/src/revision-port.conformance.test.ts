@@ -21,7 +21,13 @@ import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { RevisionId } from '#algorithms/index.js';
-import type { RevisionProvenance, RevisionSummary } from '#revision-authority.js';
+import type {
+  RevisionIdentity,
+  RevisionProvenance,
+  RevisionSummary,
+  RevisionTrigger,
+  RevisionVia,
+} from '#revision-authority.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import { parseChangeId } from '#git-objects.js';
@@ -36,6 +42,7 @@ import { readRevisionLog } from '#revision-verbs.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesContent, generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
+import { recordedBy } from '#test/identity.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -54,7 +61,7 @@ const gitExitCode = (cwd: string, args: readonly string[]): number => {
 
 const provenance = (source: RevisionProvenance['source'] = 'agent'): RevisionProvenance => ({
   source,
-  actorId: 'actor-lane',
+  ...recordedBy('actor-lane'),
   runId: 'run-lane',
   createdAt,
 });
@@ -323,6 +330,64 @@ const conformance = (adapter: Adapter): void => {
       expect(record?.provenance).toStrictEqual(written);
     }, 180_000);
 
+    /*
+     * B1: every identity kind under every capture, written as a version 2
+     * trailer and read back unchanged by the record read and the graph read,
+     * with the git author the person and never the model.
+     */
+    it('round-trips every identity kind and capture as a version 2 trailer', async () => {
+      const person = { kind: 'user', id: 'usr_lane', name: 'Lane Person' } as const;
+      const anonymous = { kind: 'user', id: 'anon:5e6f7a8b', name: 'Anonymous', anonymous: true } as const;
+      const identities: readonly RevisionIdentity[] = [
+        person,
+        anonymous,
+        { kind: 'agent', id: 'agent', runId: 'run-lane-3', onBehalfOf: person },
+        { kind: 'agent', id: 'agent', runId: 'run-lane-4', onBehalfOf: anonymous },
+      ];
+      const captures: readonly RevisionTrigger[] = [
+        'turn',
+        'save',
+        'idle',
+        'hidden',
+        'close',
+        'merge',
+        'restore',
+        'switch',
+        'create',
+        'import',
+      ];
+      const legs: readonly RevisionVia[] = ['browser', 'desktop', 'cli', 'serve', 'cloud'];
+      const cases = identities.flatMap((actor, actorIndex) =>
+        captures.map(
+          (capture, captureIndex): RevisionProvenance => ({
+            source: actor.kind === 'agent' ? 'agent' : 'user',
+            actor,
+            capture,
+            via: legs[(actorIndex + captureIndex) % legs.length]!,
+            ...(actor.kind === 'agent' ? { runId: actor.runId, attempt: 0, turnCut: 'result' } : {}),
+            createdAt: createdAt + actorIndex * 100 + captureIndex,
+          }),
+        ),
+      );
+      let parent = child;
+      for (const [index, written] of cases.entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- each revision is the next one's parent.
+        const receipt = await port.writeRevision({
+          parents: [parent],
+          tree: tree({ 'a.txt': `identity ${String(index)}\n` }),
+          provenance: written,
+          summary: summary(`Identity ${String(index)}`),
+        });
+        parent = revisionId(receipt.commitId);
+        // oxlint-disable-next-line no-await-in-loop -- read back before the next write.
+        const record = await port.readRevision(parent);
+        expect(record?.provenance).toStrictEqual(written);
+      }
+      /* The graph read the pane uses parses the same trailers, newest first. */
+      const rows = await port.log({ heads: [parent], limit: cases.length });
+      expect(rows.map((row) => row.provenance).toReversed()).toStrictEqual(cases);
+    }, 180_000);
+
     /**
      * S31: a named version is an annotated tag, on both engines.
      *
@@ -351,6 +416,8 @@ const conformance = (adapter: Adapter): void => {
         note: 'First cut of the bracket',
         actor,
         createdAt,
+        /* The first version after Start is V2 (B6). */
+        number: 2,
       });
       expect(await port.listTags()).toStrictEqual([created]);
 
@@ -359,6 +426,8 @@ const conformance = (adapter: Adapter): void => {
       const moved = await port.tag({ name: 'v1.0', revisionId: base, note: 'Moved', actor, createdAt });
       const afterMove = await port.listTags();
       expect(afterMove[0]).toStrictEqual(moved);
+      /* A moved version keeps its number. */
+      expect(moved.number).toBe(2);
       const named = await port.readRevision(child);
       expect(named?.id).toBe(child);
 
@@ -382,7 +451,7 @@ const conformance = (adapter: Adapter): void => {
         provenance: {
           ...provenance('user'),
           actor: { kind: 'user', id: 'user-lane', name: 'Lane Person', email: 'lane@example.com' },
-          trigger: 'save',
+          capture: 'save',
         },
         summary: summary('Attributed revision'),
       });
@@ -395,7 +464,7 @@ const conformance = (adapter: Adapter): void => {
         name: 'Lane Person',
         email: 'lane@example.com',
       });
-      expect(record?.provenance.trigger).toBe('save');
+      expect(record?.provenance.capture).toBe('save');
 
       /* The same fields through the graph read the pane uses. */
       const [row] = await port.log({ heads: [attributed], limit: 1 });
@@ -1711,6 +1780,46 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
         expect(rewind.refs[0]?.reason).toContain('non-fast-forward');
         expect(await fixture.git(['rev-parse', x])).toBe(base);
       }, 180_000);
+
+      /* B3 (O5 inverted): a commit Tau did not write reads as its own git author, with no identity standing in. */
+      it('reads a commit Tau did not record as its git author', async () => {
+        const cwd = fixture.repositoryPath;
+        const env = {
+          ...process.env,
+          ...Object.fromEntries([
+            ['GIT_AUTHOR_NAME', 'Octo Dev'],
+            ['GIT_AUTHOR_EMAIL', 'octo@example.com'],
+            ['GIT_COMMITTER_NAME', 'Octo Dev'],
+            ['GIT_COMMITTER_EMAIL', 'octo@example.com'],
+          ]),
+        };
+        const emptyTree = execFileSync('git', ['mktree'], { cwd, input: '', encoding: 'utf8' }).trim();
+        const upstream = execFileSync('git', ['commit-tree', emptyTree, '-m', 'Upstream change'], {
+          cwd,
+          env,
+          encoding: 'utf8',
+        }).trim();
+        execFileSync('git', ['update-ref', 'refs/heads/upstream', upstream], { cwd, stdio: 'ignore' });
+        const second = await adapter.create();
+        try {
+          const reader = second.withTransport();
+          await reader.init({ author });
+          await reader.setRemote({ name: 'tau', url: fixture.url });
+          await reader.fetch({ remote: 'tau', refs: ['refs/heads/upstream'] });
+
+          const [entry] = await reader.log({ heads: [revisionId(upstream)] });
+          expect(entry?.authorName).toBe('Octo Dev');
+          expect(entry?.provenance.source).toBe('import');
+          expect(Object.keys(entry?.provenance ?? {}).toSorted()).toStrictEqual(['createdAt', 'source']);
+          const [row] = await readRevisionLog(reader, { from: revisionId(upstream), limit: 1 });
+          expect(row).toMatchObject({ source: 'import', authorName: 'Octo Dev' });
+          /* A commit Tau recorded carries no git author name: its trailer names who made it. */
+          const [recorded] = await reader.log({ heads: [head] });
+          expect(recorded?.authorName).toBeUndefined();
+        } finally {
+          await second.dispose();
+        }
+      }, 180_000);
     });
   }
 });
@@ -2708,6 +2817,8 @@ describe.runIf(gitToolchainOnPath)('the live index follows HEAD (R14)', () => {
       const root = await project();
       const port = create(root);
       await port.init({ author });
+      /* Opening writes no attributes file (A4); this working copy carries one, as a save leaves it. */
+      await writeFile(join(root, generatedGitattributesPath), generatedGitattributesContent(undefined));
       const files = {
         '.gitignore': await readFile(join(root, generatedIgnorePath), 'utf8'),
         '.gitattributes': await readFile(join(root, '.gitattributes'), 'utf8'),

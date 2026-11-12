@@ -40,6 +40,12 @@ export type RecordSyncCommands<T> = Readonly<{
   ensure: (seed: T, requestId?: string) => Promise<boolean>;
   /** Replace a refused record whose exact bytes the person reviewed. */
   reset: (next: T, reviewed: RecordBytes | null) => Promise<boolean>;
+  /**
+   * Replace the record shown with `next`, in one checked write on the exact bytes the person reviewed. Answered
+   * `false` when anything is owed, when the file no longer holds `reviewed`, and after a conflict or a failed write,
+   * which it does not retry. `requestId` is the id the write port is asked with.
+   */
+  restore: (next: T, reviewed: RecordBytes | null, requestId?: string) => Promise<boolean>;
   /** Write everything owed now. Resolves `true` once nothing is owed. */
   flush: () => Promise<boolean>;
   /** Stop: no new write starts and every waiting command is answered `false`. */
@@ -179,6 +185,10 @@ export function createRecordSync<T, P>(
         request((requestId) => {
           actor.send({ type: 'reset', requestId, next, reviewed });
         }),
+      restore: async (next, reviewed, requestId) =>
+        request((id) => {
+          actor.send({ type: 'restore', requestId: id, next, reviewed });
+        }, requestId),
       // A closed store whose last write is still on the wire answers the flush when that write does.
       flush: async () =>
         faulted()

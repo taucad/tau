@@ -18,6 +18,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import {
   ChatRevisions,
   RevisionsPanelBody,
+  currentRevisionOf,
   groupRevisionHistory,
 } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
@@ -27,6 +28,7 @@ import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-o
 import { consumeRevisionReveal, requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import type { EditorDocument } from '#lib/editor-document.js';
+import type * as UseFeatureModule from '#flags/use-feature.js';
 
 const projectSnapshot = { context: { project: { syncChats: true } } };
 const projectRef = {
@@ -38,6 +40,16 @@ const editorRef = {
   subscribe: () => ({ unsubscribe: () => undefined }),
 };
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', projectRef, editorRef }) }));
+/* Tau's debug setting, off unless a row turns it on (B5). */
+const flags = vi.hoisted(() => ({ tauDebug: false }));
+vi.mock('#flags/use-feature.js', async (importOriginal) => {
+  const original = await importOriginal<typeof UseFeatureModule>();
+  return {
+    ...original,
+    useFeature: (flag: Parameters<typeof original.useFeature>[0]) =>
+      flag === 'tauDebug' ? flags.tauDebug : original.useFeature(flag),
+  };
+});
 const openPanel = vi.fn();
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel }),
@@ -156,6 +168,36 @@ describe('Revisions pane', () => {
 
     expect(groups.map((group) => group.kind)).toStrictEqual(['revision', 'autosaves', 'revision']);
     expect(groups[1]).toMatchObject({ kind: 'autosaves', revisions: [{ revisionId: 'a' }, { revisionId: 'b' }] });
+  });
+
+  it('merges consecutive setup entries into one line, the head among them, and never marks one Current (A4)', () => {
+    const card = (revisionId: string, parent: string | undefined, isSetup: boolean): RevisionCard => ({
+      revisionId,
+      n: 1,
+      createdAt: 1,
+      summary: '',
+      actor: 'You',
+      turnId: undefined,
+      conflicted: false,
+      tags: [],
+      trigger: isSetup ? 'idle' : 'save',
+      ...(parent === undefined ? {} : { parent }),
+      ...(isSetup ? { isSetup: true } : {}),
+    });
+    const revisions = [
+      card('setup-2', 'setup-1', true),
+      card('setup-1', 'agent', true),
+      card('agent', 'start', false),
+      card('start', undefined, false),
+    ];
+
+    expect(groupRevisionHistory(revisions, 'setup-2').map((group) => group.kind)).toStrictEqual([
+      'setup',
+      'revision',
+      'revision',
+    ]);
+    expect(currentRevisionOf(revisions, 'setup-2')).toBe('agent');
+    expect(currentRevisionOf(revisions, 'agent')).toBe('agent');
   });
 
   it('names its Close after the panel, as its tooltip does (I6)', () => {
@@ -1231,9 +1273,59 @@ describe('Revisions pane vocabulary and History', () => {
     const strip = await screen.findByRole('region', { name: 'Where you are' });
     await user.click(within(strip).getByRole('button', { name: 'Details' }));
     const details = within(strip).getByLabelText('Details of where you are');
-    expect(details).toHaveTextContent(/Headrev-4/u);
     expect(details).toHaveTextContent(`This device${device}`);
     vi.unstubAllEnvs();
+  });
+
+  /*
+   * B5: with Tau's debug setting off, no 40-character id renders anywhere in
+   * the pane, with every row and both Details open; with it on, the ids the
+   * entry is stored under are there.
+   */
+  describe('stored ids (B5)', () => {
+    const oid = (digit: string): string => digit.repeat(40);
+    const openEverything = async (): Promise<HTMLElement> => {
+      const user = userEvent.setup();
+      revisionStatusHarness.rows = [
+        row({ revisionId: oid('a'), revisionNumber: 2, treeId: oid('b'), parent: oid('c'), trigger: 'save' }),
+        row({ revisionId: oid('c'), revisionNumber: 1, treeId: oid('d'), trigger: 'save', actor: 'anon:3fa9c1d2' }),
+      ];
+      revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: oid('a') };
+      renderPane();
+      const strip = await screen.findByRole('region', { name: 'Where you are' });
+      await user.click(within(strip).getByRole('button', { name: 'Details' }));
+      for (const name of ['Rev 2 · Thicker base', 'Rev 1 · Thicker base']) {
+        const entry = screen.getByRole('button', { name });
+        // oxlint-disable-next-line no-await-in-loop -- one row opens at a time, as a person opens them.
+        await user.click(entry);
+        // oxlint-disable-next-line no-await-in-loop -- ditto.
+        await user.click(await within(entry.closest('li')!).findByRole('button', { name: 'Details' }));
+      }
+      return document.body;
+    };
+
+    it('renders no 40-character id with the debug setting off', async () => {
+      const pane = await openEverything();
+      expect(screen.getByLabelText('Details of where you are')).not.toHaveTextContent('Head');
+      expect(pane.textContent).not.toMatch(/[\da-f]{40}/u);
+      /* The pseudonym reads Anonymous; its hash is a diagnostic too. */
+      expect(pane.textContent).toContain('Anonymous');
+      expect(pane.textContent).not.toContain('3fa9c1d2');
+    });
+
+    it('renders the stored ids with the debug setting on', async () => {
+      flags.tauDebug = true;
+      onTestFinished(() => {
+        flags.tauDebug = false;
+      });
+      const pane = await openEverything();
+      expect(screen.getByLabelText('Details of where you are')).toHaveTextContent(`Head${oid('a')}`);
+      expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(
+        `Revision${oid('a')}Tree${oid('b')}Parent${oid('c')}`,
+      );
+      expect(pane.textContent).toContain(oid('d'));
+      expect(pane.textContent).toContain('Anonymous · 3fa9c1d2');
+    });
   });
 
   it('names the line History shows, and says why an empty one is empty', async () => {
@@ -1271,6 +1363,59 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.queryByRole('button', { name: 'Rev 3 · Thicker base' })).not.toBeInTheDocument();
     await user.click(fold);
     expect(screen.getByRole('button', { name: 'Rev 3 · Thicker base' })).toBeInTheDocument();
+  });
+
+  /* A4: the operator's two `idle` autosaves that changed only `.gitignore` are one compact setup line. */
+  it("shows Tau's setup entries as one compact line, and Current on the newest entry that is not setup", async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-4', revisionNumber: 4, trigger: 'idle', isSetup: true }),
+      row({ revisionId: 'rev-3', revisionNumber: 3, trigger: 'idle', isSetup: true }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, trigger: 'save', summary: 'Add vent slots' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, trigger: 'save' }),
+    ].map((entry, index, all) => {
+      const parent = all[index + 1]?.revisionId;
+      return parent === undefined ? entry : { ...entry, parent };
+    });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
+
+    renderPane();
+
+    const line = await screen.findByRole('button', { name: /^Tau updated project setup · 2 changes/u });
+    expect(line).toHaveClass('h-6');
+    expect(line).not.toHaveTextContent('Current');
+    expect(screen.queryByRole('button', { name: /autosaves/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rev 4 · Thicker base' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText('Current')).toHaveLength(1);
+    });
+    expect(screen.getByRole('button', { name: 'Rev 2 · Add vent slots' })).toHaveTextContent('Current');
+
+    await user.click(line);
+    expect(screen.getByRole('button', { name: 'Rev 4 · Thicker base' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rev 3 · Thicker base' })).toBeInTheDocument();
+  });
+
+  it('lists Tau’s setup files last, under a plain Project setup label (A4)', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-2', revisionNumber: 2, trigger: 'save' })];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
+    revisionStatusHarness.diff = [
+      { path: '.gitattributes', kind: 'added' },
+      { path: 'main.scad', kind: 'modified' },
+    ];
+
+    renderPane();
+
+    await user.click(await screen.findByRole('button', { name: 'Rev 2 · Thicker base' }));
+    const files = await screen.findByRole('list', { name: 'Changed files' });
+    /* The label is not a file, so assistive technology counts only the two files as items. */
+    expect(
+      within(files)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toStrictEqual([expect.stringContaining('main.scad'), expect.stringContaining('.gitattributes')]);
+    expect(files.textContent).toMatch(/main\.scad.*Project setup.*\.gitattributes/u);
   });
 
   it('is one Tab stop, on the row you are on, and moves by arrow keys (A1 item 14)', async () => {

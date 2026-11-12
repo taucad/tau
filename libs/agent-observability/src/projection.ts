@@ -452,6 +452,44 @@ const turnMeasures = async (run: ProjectedRun, context: ProjectionContext): Prom
   };
 };
 
+/** The rule that decides a run's `success` from its CAD checks (LW7): deterministic, and it calls no model. @public */
+export const checksAssessor = 'cad-checks-v1';
+
+/* Tool classes that can change a model file; a check that ran before one of them settled did not see the final design. */
+const changingClasses: ReadonlySet<ToolFact['toolClass']> = new Set(['write', 'execute']);
+
+/**
+ * Whether a completed run did its task, by rule `cad-checks-v1` (LW7): `verified` when at least one check at the final
+ * revision decided and none of them failed, `failed` when one of them failed, and `unknown` otherwise, which leaves
+ * the decision to no score at all. A check is at the final revision when no tool that can change a file was still
+ * running or started after it began; only a settled check that names a revision counts, as only it writes a `cad`
+ * fact, and only `passed` and `failed` are decided.
+ */
+const assessedSuccess = (
+  run: ProjectedRun,
+  classOf: (toolName: string) => ToolFact['toolClass'],
+): Pick<OutcomeFact, 'success' | 'assessment'> => {
+  const undecided = { success: 'unknown', assessment: null } as const;
+  if (run.termination !== 'completed') {
+    return undecided;
+  }
+  const changes = run.tools.filter((tool) => changingClasses.has(classOf(tool.toolName)));
+  const results = new Set(
+    run.tools.flatMap((tool) =>
+      tool.check === undefined ||
+      tool.output === undefined ||
+      tool.check.revision.length === 0 ||
+      changes.some((change) => change.settledAt === undefined || change.settledAt > tool.startedAt)
+        ? []
+        : [tool.check.result],
+    ),
+  );
+  if (results.has('failed')) {
+    return { success: 'failed', assessment: checksAssessor };
+  }
+  return results.has('passed') ? { success: 'verified', assessment: checksAssessor } : undecided;
+};
+
 /** One line per settled check, in call order. */
 const checkLines = (run: ProjectedRun): CheckLine[] =>
   run.tools.flatMap((tool) =>
@@ -613,8 +651,7 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
         fact: {
           kind: 'outcome',
           termination: run.termination,
-          success: 'unknown',
-          assessment: null,
+          ...assessedSuccess(run, classOf),
           ...failureFields(run.ending.failure),
           turn: await turnMeasures(run, context),
         },

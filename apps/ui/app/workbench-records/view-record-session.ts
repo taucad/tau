@@ -20,6 +20,7 @@
  * @module
  */
 /* oxlint-disable typescript/no-restricted-types -- Refused record bytes may be absent (null), as the store reports them. */
+import { Topic } from '@taucad/events';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import type { ObservationLease, ObservationWatch } from '@taucad/fs-client/observation-service';
 import type { WatchEvent } from '@taucad/filesystem';
@@ -89,6 +90,9 @@ export type ViewRecordPortsHandle = ViewRecordPorts &
     flush: () => Promise<void>;
   }>;
 
+/** One session's flush, which the close awaits. */
+type ViewRecordFlush = () => Promise<void>;
+
 /**
  * The view record ports of one project.
  *
@@ -100,16 +104,14 @@ export function createViewRecordPorts(
     Pick<ViewRecordPorts, 'setViewRecord' | 'setViewEntryPath' | 'setAppliedWorkbenchRevision'>,
 ): ViewRecordPortsHandle {
   let { host } = input;
-  const replaced = new Set<() => void>();
-  const flushes = new Set<() => Promise<void>>();
+  const replaced = new Topic<void>({ name: 'ViewRecordPorts.hostReplaced' });
+  /* A registry the close awaits, not a fan-out: every live session's flush. */
+  const flushes = new Set<ViewRecordFlush>();
   return {
     projectId: input.projectId,
     root: input.root,
     host: () => host,
-    onHostReplaced: (listener) => {
-      replaced.add(listener);
-      return () => replaced.delete(listener);
-    },
+    onHostReplaced: (listener) => replaced.subscribe(listener),
     setViewRecord: input.setViewRecord,
     setViewEntryPath: input.setViewEntryPath,
     setAppliedWorkbenchRevision: input.setAppliedWorkbenchRevision,
@@ -122,9 +124,7 @@ export function createViewRecordPorts(
         return;
       }
       host = next;
-      for (const listener of replaced) {
-        listener();
-      }
+      replaced.emit(undefined);
     },
     flush: async () => {
       const outcomes = await Promise.allSettled([...flushes].map(async (flush) => flush()));

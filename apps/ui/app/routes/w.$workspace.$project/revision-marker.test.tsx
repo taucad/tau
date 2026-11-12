@@ -17,6 +17,7 @@ import type { RevisionRowProps } from '#routes/w.$workspace.$project/revision-ma
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
+import type * as UseFeatureModule from '#flags/use-feature.js';
 
 /* The project actor as `useSelector` reads it: Publish names the version after the project. */
 const projectSnapshot = { context: { project: { name: 'Bracket', assets: { main: { entryPath: 'main.scad' } } } } };
@@ -25,6 +26,16 @@ const projectRef = {
   getSnapshot: () => projectSnapshot,
 };
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', projectRef }) }));
+/* Tau's debug setting, off unless a row turns it on (B5). */
+const flags = vi.hoisted(() => ({ tauDebug: false }));
+vi.mock('#flags/use-feature.js', async (importOriginal) => {
+  const original = await importOriginal<typeof UseFeatureModule>();
+  return {
+    ...original,
+    useFeature: (flag: Parameters<typeof original.useFeature>[0]) =>
+      flag === 'tauDebug' ? flags.tauDebug : original.useFeature(flag),
+  };
+});
 vi.mock('#hooks/use-revision-status.js', async () => {
   const harness = await import('#hooks/use-revision-status.test-harness.js');
   return harness.revisionStatusMock();
@@ -311,38 +322,68 @@ describe('RevisionRow', () => {
     expect(within(end as HTMLElement).getByRole('button', { name: 'More actions for Rev 2' })).toBeInTheDocument();
     await user.click(within(end as HTMLElement).getByRole('button', { name: 'Details' }));
     const details = document.querySelector('dl[aria-label="Details for Rev 2"]');
-    expect(details).toHaveTextContent('rev-2');
     expect(details).toHaveTextContent('Agent turn');
   });
 
-  /* W1 Details: the revision a row follows, and a first revision that follows none. */
-  it('names the parent it follows in Details, and says a first revision has none', async () => {
+  /* B5: the ids an entry is stored under are diagnostics, behind Tau's debug setting. */
+  it('names no stored id in Details with the debug setting off (B5)', async () => {
     const user = userEvent.setup();
-    renderRow({ revision: card({ parent: 'rev-1' }) });
+    const [id, tree, parent] = ['a', 'b', 'c'].map((digit) => digit.repeat(40));
+    renderRow({ revision: card({ revisionId: id, treeId: tree, parent }) });
     await openRow(user);
     await user.click(screen.getByRole('button', { name: 'Details' }));
-    expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(/Parent\s*rev-1/u);
+    const details = document.querySelector('dl[aria-label="Details for Rev 2"]');
+    expect(details).toHaveTextContent('Agent turn');
+    expect(details).not.toHaveTextContent(/Revision|Tree|Parent/u);
+    expect(document.body.textContent).not.toMatch(/[\da-f]{40}/u);
   });
 
-  /* Canvas DetailsList: the tree the revision carries, from the log row itself. */
-  it('names the tree it carries in Details', async () => {
-    const user = userEvent.setup();
-    renderRow({ revision: card({ treeId: 'a'.repeat(40) }) });
-    await openRow(user);
-    await user.click(screen.getByRole('button', { name: 'Details' }));
-    expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(
-      new RegExp(`Tree\\s*${'a'.repeat(40)}`, 'u'),
-    );
-  });
+  describe('with Tau’s debug setting on', () => {
+    beforeEach(() => {
+      flags.tauDebug = true;
+    });
 
-  it('says a branch’s first revision follows none', async () => {
-    const user = userEvent.setup();
-    renderRow({ revision: card({ revisionId: 'rev-1', n: 1 }) });
-    await openRow(user, 'Rev 1 · Thicker base');
-    await user.click(screen.getByRole('button', { name: 'Details' }));
-    expect(document.querySelector('dl[aria-label="Details for Rev 1"]')).toHaveTextContent(
-      /Parent\s*None \(first revision\)/u,
-    );
+    afterEach(() => {
+      flags.tauDebug = false;
+    });
+
+    it('names the revision it is in Details (B5)', async () => {
+      const user = userEvent.setup();
+      renderRow();
+      await openRow(user);
+      await user.click(screen.getByRole('button', { name: 'Details' }));
+      expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(/Revision\s*rev-2/u);
+    });
+
+    /* W1 Details: the revision a row follows, and a first revision that follows none. */
+    it('names the parent it follows in Details, and says a first revision has none', async () => {
+      const user = userEvent.setup();
+      renderRow({ revision: card({ parent: 'rev-1' }) });
+      await openRow(user);
+      await user.click(screen.getByRole('button', { name: 'Details' }));
+      expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(/Parent\s*rev-1/u);
+    });
+
+    /* Canvas DetailsList: the tree the revision carries, from the log row itself. */
+    it('names the tree it carries in Details', async () => {
+      const user = userEvent.setup();
+      renderRow({ revision: card({ treeId: 'a'.repeat(40) }) });
+      await openRow(user);
+      await user.click(screen.getByRole('button', { name: 'Details' }));
+      expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(
+        new RegExp(`Tree\\s*${'a'.repeat(40)}`, 'u'),
+      );
+    });
+
+    it('says a branch’s first revision follows none', async () => {
+      const user = userEvent.setup();
+      renderRow({ revision: card({ revisionId: 'rev-1', n: 1 }) });
+      await openRow(user, 'Rev 1 · Thicker base');
+      await user.click(screen.getByRole('button', { name: 'Details' }));
+      expect(document.querySelector('dl[aria-label="Details for Rev 1"]')).toHaveTextContent(
+        /Parent\s*None \(first revision\)/u,
+      );
+    });
   });
 
   /* Canvas round 4b: the whole revision against the current files, from the row's More. */

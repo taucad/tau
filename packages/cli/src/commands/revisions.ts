@@ -8,13 +8,18 @@
  *
  * The words are the operator's (A18, I12): branches, revisions and projects.
  * Nothing prints "checkout", "worktree", "lease", "ref" or "HEAD".
+ *
+ * `log --provenance` is the diagnostic (B5): under each row, the ids the entry
+ * is stored under and what its trailer recorded — identity, capture and leg —
+ * read from the log entry, never from the row, and never with an address.
  */
 
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 
 import { authApiOrigin, inspectSession, resolveAuthToken } from '#auth.js';
-import { openProjectRevisions, requireRevisionToolchain } from '@taucad/host';
+import { createProjectRevisionPort, openProjectRevisions, readProjectId, requireRevisionToolchain } from '@taucad/host';
 import type { ProjectRevisionVerbs } from '@taucad/host';
 import { defineCommand } from 'citty';
 
@@ -117,6 +122,168 @@ const rowLine = (row: RevisionRow, branch: string | undefined): string =>
     ].filter((field) => field !== ''),
   ].join('  ');
 
+/** The store a project's entries are read from, as the host opens it. */
+type ProjectPort = ReturnType<typeof createProjectRevisionPort>;
+
+/** What one entry's trailer records about itself (blueprint B1). */
+type RecordedProvenance = NonNullable<Awaited<ReturnType<ProjectPort['readRevision']>>>['provenance'];
+
+/** A recorded person, without the address an older build may have written beside the id (I3). */
+type ProvenancePerson = Readonly<{ kind: 'user'; id: string; name?: string; anonymous?: true }>;
+
+/** One entry's recorded provenance, as `--provenance` prints it and `--json` carries it (B5). */
+type EntryProvenance = Readonly<{
+  revisionId: string;
+  treeId: string;
+  parents: readonly string[];
+  source: RecordedProvenance['source'];
+  /** `undefined` for a commit Tau did not write: nothing stands in for the identity it lacks. */
+  identity:
+    | ProvenancePerson
+    | Readonly<{ kind: 'agent'; id: string; runId: string; onBehalfOf: ProvenancePerson }>
+    | undefined;
+  capture: RecordedProvenance['capture'];
+  via: RecordedProvenance['via'];
+  turnCut: RecordedProvenance['turnCut'];
+}>;
+
+/**
+ * A recorded person as the diagnostics print one: id, name and the anonymity
+ * mark. Never an address: I3 keeps addresses out of commits, and a diagnostic
+ * that echoed one an older build wrote would hand it on.
+ *
+ * @param person - The person a trailer names.
+ * @returns The person, without an address.
+ */
+const personOf = (person: Readonly<{ id: string; name?: string; anonymous?: boolean }>): ProvenancePerson => ({
+  kind: 'user',
+  id: person.id,
+  ...(person.name === undefined || person.anonymous === true ? {} : { name: person.name }),
+  ...(person.anonymous === true ? { anonymous: true } : {}),
+});
+
+/**
+ * The identity a trailer records, in the diagnostics' shape.
+ *
+ * @param actor - The recorded identity, or `undefined` for a commit Tau did not write.
+ * @returns The identity without an address.
+ */
+const identityOf = (actor: RecordedProvenance['actor']): EntryProvenance['identity'] => {
+  if (actor === undefined) {
+    return undefined;
+  }
+  if (actor.kind === 'user') {
+    return personOf(actor);
+  }
+  return { kind: 'agent', id: actor.id, runId: actor.runId, onBehalfOf: personOf(actor.onBehalfOf) };
+};
+
+/**
+ * Read every listed entry's recorded provenance from the store (B5).
+ *
+ * A row is what a person reads; the trailer's identity and leg are diagnostics
+ * no row carries, so they come from the log entry itself. One walk from the
+ * newest row answers most of them; an entry that walk did not reach (a limit
+ * that stopped on a merged side) is read on its own.
+ *
+ * @param workspaceRoot - The project directory, already opened.
+ * @param rows - The rows being printed, newest first.
+ * @returns Each row's provenance, by revision id.
+ */
+const readProvenance = async (
+  workspaceRoot: string,
+  rows: readonly RevisionRow[],
+): Promise<ReadonlyMap<string, EntryProvenance>> => {
+  const [newest] = rows;
+  /* Opening the project established its identity; reading it back creates nothing. */
+  const projectId = await readProjectId({
+    stat: async (path) => stat(join(workspaceRoot, path)),
+    readFile: async (path) => new Uint8Array(await readFile(join(workspaceRoot, path))),
+  });
+  if (newest === undefined || projectId === undefined) {
+    return new Map();
+  }
+  type Id = Parameters<ProjectPort['readRevision']>[0];
+  const port = createProjectRevisionPort({ workspaceRoot, projectId });
+  const records = new Map<
+    string,
+    Readonly<{ treeId: string; parents: readonly string[]; provenance: RecordedProvenance }>
+  >();
+  for (const entry of await port.log({ heads: [newest.revisionId as Id], limit: rows.length })) {
+    records.set(entry.id, entry);
+  }
+  const missed = rows.filter((row) => !records.has(row.revisionId));
+  for (const record of await Promise.all(missed.map(async (row) => port.readRevision(row.revisionId as Id)))) {
+    if (record !== undefined) {
+      records.set(record.id, record);
+    }
+  }
+  const provenance = new Map<string, EntryProvenance>();
+  for (const row of rows) {
+    const record = records.get(row.revisionId);
+    if (record !== undefined) {
+      provenance.set(row.revisionId, {
+        revisionId: row.revisionId,
+        treeId: record.treeId,
+        parents: record.parents,
+        source: record.provenance.source,
+        identity: identityOf(record.provenance.actor),
+        capture: record.provenance.capture,
+        via: record.provenance.via,
+        turnCut: record.provenance.turnCut,
+      });
+    }
+  }
+  return provenance;
+};
+
+/**
+ * A person as one diagnostics line names them: `user usr_ada "Ada"`, `user anon:3fa9c1d2 (anonymous)`.
+ *
+ * @param person - The recorded person.
+ * @returns The printable words.
+ */
+const personWords = (person: ProvenancePerson): string =>
+  [
+    `user ${person.id}`,
+    ...(person.name === undefined ? [] : [JSON.stringify(person.name)]),
+    ...(person.anonymous === true ? ['(anonymous)'] : []),
+  ].join(' ');
+
+const notRecorded = 'not recorded';
+
+/**
+ * The indented lines `--provenance` prints under a row: its ids, then what its trailer records.
+ *
+ * @param provenance - The entry's provenance, or `undefined` when the store did not answer for it.
+ * @returns The lines, each indented under the row.
+ */
+const provenanceLines = (provenance: EntryProvenance | undefined): readonly string[] => {
+  if (provenance === undefined) {
+    return [`  ${notRecorded}`];
+  }
+  const { identity } = provenance;
+  const fields: ReadonlyArray<readonly [string, string]> = [
+    ['id', provenance.revisionId],
+    ['tree', provenance.treeId],
+    ['parent', provenance.parents[0] ?? 'none'],
+    ...(provenance.parents.length > 1 ? ([['merged', provenance.parents.slice(1).join(' ')]] as const) : []),
+    ['source', provenance.source],
+    [
+      'identity',
+      identity === undefined
+        ? notRecorded
+        : identity.kind === 'user'
+          ? personWords(identity)
+          : `agent ${identity.id} run ${identity.runId} for ${personWords(identity.onBehalfOf)}`,
+    ],
+    ['capture', provenance.capture ?? notRecorded],
+    ['via', provenance.via ?? notRecorded],
+    ...(provenance.turnCut === undefined ? [] : ([['turn cut', provenance.turnCut]] as const)),
+  ];
+  return fields.map(([label, value]) => `  ${label.padEnd(9)} ${value}`);
+};
+
 const tagCommand = defineCommand({
   meta: { name: 'tag', description: 'Name a revision, or remove a revision name' },
   args: {
@@ -171,13 +338,19 @@ const logCommand = defineCommand({
       description: 'Most recent revisions to list',
       required: false,
     },
+    provenance: {
+      type: 'boolean',
+      description:
+        'Also print what each entry recorded about itself: its id, tree and parent, and the identity, capture and leg its trailer names (never an address)',
+      required: false,
+    },
   },
   async run({ args }) {
     const limit = args.limit === undefined || args.limit === '' ? undefined : Number(args.limit);
     if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) {
       throw cliError('INVALID_LIMIT', '--limit must be a positive integer', exitCodes.usage);
     }
-    const { revisions } = await open(args.project);
+    const { revisions, workspaceRoot } = await open(args.project);
     try {
       const place = await revisions.describe();
       const branch = args.branch ?? place.branch;
@@ -185,15 +358,30 @@ const logCommand = defineCommand({
         ...(args.branch === undefined ? {} : { branch: args.branch }),
         ...(limit === undefined ? {} : { limit }),
       });
+      const provenance = args.provenance === true ? await readProvenance(workspaceRoot, rows) : undefined;
       if (args.json) {
-        await emit({ kind: 'revisions', ok: true, branch, revisions: rows });
+        await emit({
+          kind: 'revisions',
+          ok: true,
+          branch,
+          revisions:
+            provenance === undefined
+              ? rows
+              : rows.map((row) => ({ ...row, provenance: provenance.get(row.revisionId) ?? null })),
+        });
         return;
       }
       if (rows.length === 0) {
         await writeStdout('No revisions yet.\n');
         return;
       }
-      await writeStdout(`${rows.map((row) => rowLine(row, branch)).join('\n')}\n`);
+      const lines = rows.map((row) =>
+        [
+          rowLine(row, branch),
+          ...(provenance === undefined ? [] : provenanceLines(provenance.get(row.revisionId))),
+        ].join('\n'),
+      );
+      await writeStdout(`${lines.join('\n')}\n`);
     } finally {
       await revisions.close();
     }

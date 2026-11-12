@@ -77,6 +77,7 @@ import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
 import { projectChatIdFromSearch } from '#utils/project-url.utils.js';
 import { useProject } from '#hooks/use-project.js';
+import { useFeature } from '#flags/use-feature.js';
 import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
@@ -154,6 +155,8 @@ function OrientationStrip({
   const { requestUpgrade, canUpgradePlan } = useCommercialFeatures();
   const { signIn } = useAuthLinks();
   const isAnonymous = useAnonymousRevisions(workspace);
+  /* The id the files are at is a diagnostic: it renders only with Tau's debug setting on (B5). */
+  const isDebug = useFeature('tauDebug');
   const isUnknown = line.kind === 'unknown';
   const canWrite = role !== 'read' && role !== 'revoked';
   /* No head, no branch point; and nothing is offered over a line nobody has located yet (HQ7). */
@@ -334,8 +337,12 @@ function OrientationStrip({
             aria-label='Details of where you are'
             className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 pt-1 pr-1 pl-5 text-xs'
           >
-            <dt className='text-muted-foreground'>Head</dt>
-            <dd className='font-mono break-all'>{head?.revisionId ?? '—'}</dd>
+            {isDebug ? (
+              <>
+                <dt className='text-muted-foreground'>Head</dt>
+                <dd className='font-mono break-all'>{head?.revisionId ?? '—'}</dd>
+              </>
+            ) : null}
             <dt className='text-muted-foreground'>Branch tip</dt>
             <dd>
               {where.branch === undefined ? '—' : `${where.branch} → ${revisionName(tip ?? revisions[0]?.n) ?? '—'}`}

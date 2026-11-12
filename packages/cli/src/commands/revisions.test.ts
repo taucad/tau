@@ -265,6 +265,93 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
       accepted = false;
       expect(await savedAuthor()).toMatch(/^anon:[\da-f]{8}@users\.noreply\.tau\.new$/u);
     }, 60_000);
+
+    /*
+     * B5: `log --provenance` prints what each entry's trailer recorded — its
+     * ids, identity, capture and leg — and never an address, whether the
+     * account's, the environment's or the OS login's.
+     */
+    it('prints each entry’s recorded provenance, and no address (B5)', async () => {
+      await savedAuthor();
+      accepted = false;
+      await writeFile(join(project, 'lid.ts'), 'export const lid = 1;\n');
+      await runCommand(await importCommand(), { rawArgs: ['save', '--project', project] });
+      stdout.length = 0;
+
+      await runCommand(await importCommand(), { rawArgs: ['log', '--provenance', '--project', project] });
+      const printed = stdout.join('');
+      for (const forbidden of [accountEmail, environmentEmail, '@users.noreply', `<${userInfo().username}`]) {
+        expect(printed).not.toContain(forbidden);
+      }
+      /* Object ids and the pseudonym's hash differ per run; the shape between them does not. */
+      const oids = new Map<string, string>();
+      const stable = printed
+        .replaceAll(/\b[\da-f]{40}\b/gu, (oid) => {
+          oids.set(oid, oids.get(oid) ?? `<oid ${String(oids.size + 1)}>`);
+          return oids.get(oid)!;
+        })
+        .replaceAll(/anon:[\da-f]{8}/gu, 'anon:<hash>');
+      expect(stable).toMatchInlineSnapshot(`
+        "Rev 4     main  anon:<hash>  Saved changes (save)
+          id        <oid 1>
+          tree      <oid 2>
+          parent    <oid 3>
+          source    user
+          identity  user anon:<hash> (anonymous)
+          capture   save
+          via       cli
+        Rev 3     main  usr_cli_a1  Saved changes (save)
+          id        <oid 3>
+          tree      <oid 4>
+          parent    <oid 5>
+          source    user
+          identity  user usr_cli_a1
+          capture   save
+          via       cli
+        Rev 2     main  unknown  Revision 2
+          id        <oid 5>
+          tree      <oid 6>
+          parent    <oid 7>
+          source    import
+          identity  not recorded
+          capture   not recorded
+          via       not recorded
+        Rev 1     main  unknown  Revision 1
+          id        <oid 7>
+          tree      <oid 8>
+          parent    none
+          source    import
+          identity  not recorded
+          capture   not recorded
+          via       not recorded
+        "
+      `);
+    }, 60_000);
+
+    it('carries the same provenance on each JSON row, without an address (B5)', async () => {
+      await savedAuthor();
+      stdout.length = 0;
+
+      await runCommand(await importCommand(), {
+        rawArgs: ['log', '--provenance', '--json', '--limit', '1', '--project', project],
+      });
+      const printed = stdout.join('');
+      expect(printed).not.toContain(accountEmail);
+      expect(JSON.parse(printed)).toMatchObject({
+        kind: 'revisions',
+        revisions: [
+          {
+            revisionNumber: 3,
+            provenance: {
+              identity: { kind: 'user', id: 'usr_cli_a1' },
+              capture: 'save',
+              via: 'cli',
+              source: 'user',
+            },
+          },
+        ],
+      });
+    }, 60_000);
   });
 
   it('says there is nothing new to save, and mints nothing, when the files are the last revision', async () => {

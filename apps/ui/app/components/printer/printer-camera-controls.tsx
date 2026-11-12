@@ -98,6 +98,7 @@ export function PrinterCameraControls({
 
   useLayoutEffect(() => {
     const previous = get().controls;
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- R3F types its controls slot as three's EventDispatcher; `camera-controls` ships its own dispatcher with the same listener API, so no narrower type or augmentation joins the two.
     set({ controls: controls as unknown as RootState['controls'] });
     return () => {
       set({ controls: previous });

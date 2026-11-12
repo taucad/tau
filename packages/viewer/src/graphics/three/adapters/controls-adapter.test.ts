@@ -60,6 +60,12 @@ type Harness = {
 
 const harnesses: Harness[] = [];
 
+/** The frame callbacks the adapter subscribed on the stub root, each with its priority, in subscription order. */
+const frameSubscriptions = (
+  harness: Harness,
+): Array<{ ref: Parameters<RootState['internal']['subscribe']>[0]; priority: number }> =>
+  vi.mocked(harness.state.internal.subscribe).mock.calls.map(([ref, priority]) => ({ ref, priority }));
+
 const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
   const camera = seed ?? { cameraView };
   const graphicsEvents: string[] = [];
@@ -443,15 +449,13 @@ describe('controls adapter', () => {
   it('steps the controls by the frame delta once per frame, before the frame renders, while they are enabled', () => {
     const harness = createHarness();
     harness.attach();
-    const subscriptions = vi.mocked(harness.state.internal.subscribe).mock.calls as unknown as Array<
-      [{ current: (state: RootState, delta: number) => void }, number]
-    >;
+    const subscriptions = frameSubscriptions(harness);
     // One tick for the canvas, where R3F's own controls step, after the canvas host reports a resize to the camera and
     // before anything renders (positive priorities): the controls never step on a stale viewport.
-    expect(subscriptions.map(([, priority]) => priority)).toEqual([tickPriority]);
+    expect(subscriptions.map(({ priority }) => priority)).toEqual([tickPriority]);
     expect(surfacePriority).toBeLessThan(tickPriority);
     expect(tickPriority).toBeLessThan(0);
-    const [[ticker]] = subscriptions as [[{ current: (state: RootState, delta: number) => void }, number]];
+    const ticker = subscriptions[0]!.ref;
     const update = vi.spyOn(harness.controls(), 'update');
 
     ticker.current(harness.state, 1 / 60);
@@ -468,10 +472,7 @@ describe('controls adapter', () => {
     try {
       const harness = createHarness();
       harness.attach();
-      const subscriptions = vi.mocked(harness.state.internal.subscribe).mock.calls as unknown as Array<
-        [{ current: (state: RootState, delta: number) => void }, number]
-      >;
-      const [[ticker]] = subscriptions as [[{ current: (state: RootState, delta: number) => void }, number]];
+      const ticker = frameSubscriptions(harness)[0]!.ref;
       const controls = harness.controls();
       const { lock } = harness;
       const gizmo = Object.assign(new EventDispatcher<Record<string, Record<string, unknown>>>(), {

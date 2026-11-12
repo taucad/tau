@@ -109,4 +109,36 @@ describe('view exceptions', () => {
     expect(viewExceptions.add('p1', 'v1', 'display.grid')).toBe('newer');
     expect(globalThis.localStorage.getItem(key)).toBe(JSON.stringify({ value: { version: 2, byProject: {} } }));
   });
+
+  it('reads and writes only its own entries for ids that name Object.prototype members', () => {
+    expect(exceptionsForView(emptyViewExceptions, 'constructor', 'toString')).toEqual([]);
+    expect(exceptionsForView(emptyViewExceptions, 'p1', 'constructor')).toEqual([]);
+    expect(
+      mergeViewExceptions(emptyViewExceptions, {
+        kind: 'remove',
+        projectId: 'p1',
+        viewId: 'constructor',
+        leaf: 'display.grid',
+      }),
+    ).toBe(emptyViewExceptions);
+    expect(
+      mergeViewExceptions(emptyViewExceptions, { kind: 'clearView', projectId: 'p1', viewId: 'hasOwnProperty' }),
+    ).toBe(emptyViewExceptions);
+    expect(
+      mergeViewExceptions(emptyViewExceptions, { kind: 'copy', projectId: 'p1', from: 'constructor', to: 'v2' }),
+    ).toBe(emptyViewExceptions);
+    expect(mergeViewExceptions(emptyViewExceptions, { kind: 'dropProject', projectId: 'constructor' })).toBe(
+      emptyViewExceptions,
+    );
+    const added = mergeViewExceptions(emptyViewExceptions, {
+      kind: 'add',
+      projectId: 'constructor',
+      viewId: 'constructor',
+      leaf: 'display.grid',
+    });
+    expect(added.byProject).toEqual({ constructor: { constructor: ['display.grid'] } });
+    expect(exceptionsForView(added, 'constructor', 'constructor')).toEqual(['display.grid']);
+    expect(viewExceptions.add('p1', 'toString', 'display.axes')).toBe('saved');
+    expect(exceptionsForView(viewExceptionsStore.read(), 'p1', 'toString')).toEqual(['display.axes']);
+  });
 });

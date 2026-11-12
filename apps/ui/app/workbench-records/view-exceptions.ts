@@ -45,6 +45,10 @@ export const emptyViewExceptions: ViewExceptions = Object.freeze({ version: 1, b
 
 type Views = Record<string, ViewFieldPath[]>;
 
+/* A record's own entry: a project or view id such as `constructor` never reads `Object.prototype`. */
+const own = <Value>(record: Readonly<Record<string, Value>>, key: string): Value | undefined =>
+  Object.hasOwn(record, key) ? record[key] : undefined;
+
 /* The project's views moved to the end of the key order, so the first key is the project written longest ago. */
 const withProject = (byProject: ViewExceptions['byProject'], projectId: string, views: Views): ViewExceptions => {
   const { [projectId]: _previous, ...others } = byProject;
@@ -70,7 +74,7 @@ const capped = (byProject: ViewExceptions['byProject'], keep: string): ViewExcep
       next = rest;
     }
   }
-  const kept = next[keep];
+  const kept = own(next, keep);
   const excess = countViews(next) - maxExceptionViews;
   if (kept === undefined || excess <= 0) {
     return next;
@@ -92,16 +96,16 @@ const withView = (views: Views, viewId: string, leaves: readonly ViewFieldPath[]
  */
 export const mergeViewExceptions = (stored: ViewExceptions, write: ViewExceptionsWrite): ViewExceptions => {
   const { byProject } = stored;
-  const views: Views = byProject[write.projectId] ?? {};
+  const views: Views = own(byProject, write.projectId) ?? {};
   switch (write.kind) {
     case 'add': {
-      const leaves = views[write.viewId] ?? [];
+      const leaves = own(views, write.viewId) ?? [];
       return leaves.includes(write.leaf)
         ? withProject(byProject, write.projectId, views)
         : withProject(byProject, write.projectId, withView(views, write.viewId, [...leaves, write.leaf]));
     }
     case 'remove': {
-      const leaves = views[write.viewId];
+      const leaves = own(views, write.viewId);
       if (!leaves?.includes(write.leaf)) {
         return stored;
       }
@@ -113,19 +117,19 @@ export const mergeViewExceptions = (stored: ViewExceptions, write: ViewException
       return withProject(byProject, write.projectId, next);
     }
     case 'clearView': {
-      return views[write.viewId] === undefined
+      return own(views, write.viewId) === undefined
         ? stored
         : withProject(byProject, write.projectId, withView(views, write.viewId, []));
     }
     case 'copy': {
-      const leaves = views[write.from];
-      if (leaves === undefined && views[write.to] === undefined) {
+      const leaves = own(views, write.from);
+      if (leaves === undefined && own(views, write.to) === undefined) {
         return stored;
       }
       return withProject(byProject, write.projectId, withView(views, write.to, leaves ?? []));
     }
     case 'dropProject': {
-      if (byProject[write.projectId] === undefined) {
+      if (own(byProject, write.projectId) === undefined) {
         return stored;
       }
       const { [write.projectId]: _dropped, ...rest } = byProject;
@@ -166,7 +170,10 @@ export const exceptionsForView = (
   exceptions: ViewExceptions,
   projectId: string,
   viewId: string,
-): readonly ViewFieldPath[] => exceptions.byProject[projectId]?.[viewId] ?? noLeaves;
+): readonly ViewFieldPath[] => {
+  const views = own(exceptions.byProject, projectId);
+  return (views === undefined ? undefined : own(views, viewId)) ?? noLeaves;
+};
 
 /** Writers over {@link viewExceptionsStore}. Each returns what the section store did. */
 export const viewExceptions = {

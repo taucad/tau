@@ -16,10 +16,12 @@ import {
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 import { useChatSelector } from '#hooks/use-chat.js';
-import { useCookie } from '#hooks/use-cookie.js';
+import { store as cookieStore, useCookie } from '#hooks/use-cookie.js';
+import type * as CookieModule from '#hooks/use-cookie.js';
 import { useChatSnapshot } from '#hooks/use-chat-snapshot.js';
 import { useContextPayload } from '#hooks/use-context-payload.js';
 import { probeBrowserAgentHostCapability } from '#services/agent-host-client.js';
+import { metaConfig } from '#constants/meta.constants.js';
 
 const capabilityHarness = vi.hoisted(() => ({ readError: undefined as Error | undefined, supported: true }));
 const durabilityHarness = vi.hoisted(() => ({ value: 'transactional-rewrite' }) as const);
@@ -41,7 +43,8 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
 vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: vi.fn(),
 }));
-vi.mock('#hooks/use-cookie.js', () => ({
+vi.mock('#hooks/use-cookie.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof CookieModule>()),
   useCookie: vi.fn(),
 }));
 vi.mock('#hooks/use-chat-snapshot.js', () => ({
@@ -138,6 +141,7 @@ const branchExecution = branchExecutionFields as unknown as ChatComposerContextV
 const useChatComposerMock = vi.mocked(useChatComposer);
 const useChatSelectorMock = vi.mocked(useChatSelector);
 const useCookieMock = vi.mocked(useCookie);
+const { useCookie: actualUseCookie } = await vi.importActual<typeof CookieModule>('#hooks/use-cookie.js');
 const useChatSnapshotMock = vi.mocked(useChatSnapshot);
 const useContextPayloadMock = vi.mocked(useContextPayload);
 
@@ -503,12 +507,15 @@ describe('useCadAgentConfig', () => {
 
 describe('the person field', () => {
   const answered: HarnessProfile = { version: 1, goals: ['exploring'], tool: 'fusion', languages: [] };
+  // The real hook over the real device store, holding only the switch: every other preference reads its default.
   const mountSwitch = (isOn: boolean | undefined): void => {
-    useCookieMock.mockImplementation(((name: string, defaultValue: unknown) => [
-      name === cookieName.chatCtxPerson ? (isOn ?? defaultValue) : defaultValue,
-      noop,
-      noop,
-    ]) as unknown as typeof useCookie);
+    const switchKey = `${metaConfig.cookiePrefix}${cookieName.chatCtxPerson}`;
+    if (isOn === undefined) {
+      cookieStore.remove(switchKey);
+    } else {
+      cookieStore.update(switchKey, isOn);
+    }
+    useCookieMock.mockImplementation(actualUseCookie);
   };
 
   it.each([

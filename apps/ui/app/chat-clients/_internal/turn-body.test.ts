@@ -9,6 +9,7 @@ import {
   hostAdmission,
 } from '#chat-clients/_internal/turn-body.js';
 import { buildSnapshotKernel, renderKernelGuidance, renderPersonBlock } from '@taucad/chat/prompts';
+import { unknownIconId } from '@taucad/ui-kit/icons/svg-icon';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { AgentHostPlacementError, daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { createAgentHostClient } from '#services/agent-host-client.js';
@@ -192,7 +193,15 @@ describe('the person block in an admission', () => {
     toolChoice: 'auto',
     testingEnabled: true,
   };
-  const resolvedModel = { model: undefined } as unknown as ResolvedModel;
+  // A model the catalog has no row for, so the prompt is built without one.
+  const resolvedModel: ResolvedModel = {
+    id: 'anthropic-claude-sonnet-5.5',
+    name: 'anthropic-claude-sonnet-5.5',
+    family: unknownIconId,
+    provider: { id: unknownIconId, name: 'Unknown' },
+    isResolved: false,
+    isNamePending: false,
+  };
   const tauPrompt = (agent: CadAgentConfigInput): string =>
     agentHostClientConfig({ agent, chatId: 'chat-person', resolvedModel }).systemPrompt;
 

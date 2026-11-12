@@ -93,6 +93,21 @@ describe('Settings → Agents setup answers', () => {
     expect(within(answersRow()).getByRole('button', { name: 'Clear' })).toBeDisabled();
   });
 
+  it('should alert when this device refuses to store the cleared answers', async () => {
+    personRecordStores.profile.write({ goals: ['art'], tool: 'blender', languages: ['none'] });
+    renderSettings();
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    });
+
+    await userEvent.click(within(answersRow()).getByRole('button', { name: 'Clear' }));
+
+    expect(within(answersRow()).getByRole('alert')).toHaveTextContent(
+      'Tau could not clear your answers on this device.',
+    );
+    setItem.mockRestore();
+  });
+
   it('should show neither the switch nor the row with onboarding off', () => {
     flags.onboarding = false;
     renderSettings();

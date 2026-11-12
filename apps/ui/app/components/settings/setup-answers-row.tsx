@@ -78,7 +78,7 @@ export function SetupAnswersRow(): React.JSX.Element | undefined {
       }
     >
       {isClearRefused ? (
-        <p role='status' className='text-xs text-muted-foreground'>
+        <p role='alert' className='text-xs text-muted-foreground'>
           {setupAnswersCopy.clearRefused}
         </p>
       ) : undefined}

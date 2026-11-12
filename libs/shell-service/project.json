@@ -7,13 +7,24 @@
   "targets": {
     "test:shell-conformance": {
       "executor": "nx:run-commands",
-      "cache": false,
+      "cache": true,
+      "inputs": [
+        "default",
+        "^default",
+        {
+          "runtime": "node scripts/src/shell-evidence.ts fingerprint"
+        }
+      ],
+      "outputs": [
+        "{workspaceRoot}/out/test-results/shell-conformance/*/service-receipt.json",
+        "{workspaceRoot}/out/test-results/shell-conformance/*/service-receipt.verdict.json"
+      ],
       "metadata": {
-        "description": "The shell service's conformance rows (H01-H07), extending the sandbox's provider rows: the real service over the real sandbox provider and the machine's own Bash, positive controls before negatives, negatives judged by bytes outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Never cached: a receipt is only evidence of the run that wrote it."
+        "description": "The shell service's conformance rows (H01-H07), extending the sandbox's provider rows: the real service over the real sandbox provider and the machine's own Bash, positive controls before negatives, negatives judged by bytes outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Cacheable only under the shell environment fingerprint (scripts/src/shell-evidence.ts, CF-1): the hash covers the source closure and the row's OS, kernel, Bash, runner image, sandbox runtime and node-pty, and is a fresh nonce unless the run asked for reuse, so candidate, drift and promotion runs never hit. A hit restores the receipt that first proved the verdict and its verdict record; the workflow's uncached stamp step says so."
       },
       "options": {
         "cwd": "{workspaceRoot}/libs/shell-service",
-        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/shell/shell-service.conformance.test.ts",
+        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/shell/shell-service.conformance.test.ts && node \"$NX_WORKSPACE_ROOT/scripts/src/shell-evidence.ts\" record",
         "env": {
           "TAU_SHELL_CONFORMANCE": "1"
         }

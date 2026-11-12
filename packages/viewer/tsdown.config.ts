@@ -59,6 +59,7 @@ const baseConfig: UserConfig = {
     'src/graphics/three/controls/section-handles.ts',
     'src/graphics/three/controls/tau-camera-controls.tsx',
     'src/graphics/three/controls/viewport-gizmo-interaction-lock.tsx',
+    'src/graphics/three/controls/viewport-gizmo-styles.ts',
     'src/graphics/three/gltf-world.ts',
     'src/graphics/three/materials/infinite-grid-material.ts',
     'src/graphics/three/materials/infinite-grid-material.node.ts',

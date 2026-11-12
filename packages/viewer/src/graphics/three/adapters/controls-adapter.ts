@@ -25,6 +25,7 @@
  * write is stamped with the change's revision so the `update` it causes is an echo the camera ignores.
  */
 import type { RootState } from '@react-three/fiber';
+import type { Mesh } from 'three';
 import CameraControlsImpl from 'camera-controls';
 import {
   Box3,
@@ -48,7 +49,10 @@ import type { RenderFrame } from '@taucad/spatial';
 import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
 import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import { attachCameraWheelRouter } from '#graphics/three/controls/camera-wheel-router.js';
+import type { CameraInputRouting, CameraPivotPicker } from '#graphics/three/controls/camera-wheel-router.js';
 import { retargetCameraControls } from '#graphics/three/controls/tau-camera-controls.jsx';
+import { hasSceneTagInHierarchy, sceneTag } from '#graphics/three/utils/scene-tags.js';
+import { raycastFirstVisibleMeshHit } from '#graphics/three/utils/bvh-raycast.js';
 import { syncControlsLookAt } from '#graphics/three/utils/camera-controls-adapter.js';
 import type { ControlsAdapterLogic } from '#machines/graphics.machine.js';
 
@@ -84,11 +88,61 @@ export type ControlsAdapterDependencies = Readonly<{
   consumersRef: Readonly<{ current: ReadonlySet<CameraUpdateHandler> }>;
   /** The world up axis the scene's objects take, read when the camera's up changes. */
   getUpAxis: () => keyof typeof upAxes;
+  /**
+   * The person's camera input, read at each gesture. Absent, or returning `undefined`, keeps today's bindings and the
+   * pinch fix alone.
+   */
+  getCameraRouting?: () => CameraInputRouting | undefined;
 }>;
 
 const getPixelRatio = (): number => {
   const pixelRatio: unknown = Reflect.get(globalThis, 'devicePixelRatio');
   return Math.min(typeof pixelRatio === 'number' && pixelRatio > 0 ? pixelRatio : 1, 2);
+};
+
+const pivotBlockingSceneTags = new Set([
+  sceneTag.sectionViewHelper,
+  sceneTag.measurementUi,
+  sceneTag.gltfSurfacePresentation,
+]);
+
+/**
+ * Finds the first visible mesh surface under a screen position in an R3F scene: the pivot an orbit about the cursor
+ * turns about.
+ *
+ * @param root - The R3F root whose scene and surface are picked.
+ * @returns The picker, in the scene's render units.
+ * @public
+ */
+export const createScenePivotPicker = (root: RootState): CameraPivotPicker => {
+  const raycaster = new Raycaster();
+  const pointer = new Vector2();
+  return ({ clientX, clientY, camera }) => {
+    const state = root.get();
+    const rect = state.gl.domElement.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      return undefined;
+    }
+    pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    camera.updateMatrixWorld();
+    raycaster.setFromCamera(pointer, camera);
+    const meshes: Mesh[] = [];
+    state.scene.traverse((object) => {
+      if (
+        (object as Partial<Mesh>).isMesh === true &&
+        object.type !== 'LineSegments2' &&
+        !hasSceneTagInHierarchy(object, pivotBlockingSceneTags)
+      ) {
+        meshes.push(object as Mesh);
+      }
+    });
+    // The trees the model's own pick builds; a mesh whose tree is still building is a miss, so the orbit keeps its target.
+    const { hit, pending } = raycastFirstVisibleMeshHit({ raycaster, meshes });
+    if (hit !== undefined && !pending) {
+      return hit.point.clone();
+    }
+    return undefined;
+  };
 };
 
 /** The viewport the camera presents for. */
@@ -201,6 +255,7 @@ export const createControlsAdapter = ({
   connectorRef,
   consumersRef,
   getUpAxis,
+  getCameraRouting,
 }: ControlsAdapterDependencies): ControlsAdapterLogic =>
   createCallbackLogic(({ sendBack }) => {
     installCameraControls();
@@ -342,7 +397,8 @@ export const createControlsAdapter = ({
      * reconnects them when the source changes, so each frame checks for a new one.
      */
     let surface: HTMLElement | undefined;
-    // The wheel router sits on the same surface, in the capture phase, so a trackpad pinch dollies like a wheel (PF1).
+    // The input router sits on the same surface, in the capture phase: a trackpad pinch dollies like a wheel (PF1), and
+    // with a camera input each press and wheel step takes its preset's binding.
     let detachWheelRouter: (() => void) | undefined;
     const followSurface = (state: RootState): void => {
       const next = (state.events.connected as HTMLElement | undefined) ?? gl.domElement;
@@ -353,7 +409,12 @@ export const createControlsAdapter = ({
         }
         surface = next;
         controls.connect(next);
-        detachWheelRouter = attachCameraWheelRouter({ controls, element: next });
+        detachWheelRouter = attachCameraWheelRouter({
+          controls,
+          element: next,
+          getRouting: getCameraRouting,
+          pickPivot: createScenePivotPicker(root),
+        });
       }
     };
 

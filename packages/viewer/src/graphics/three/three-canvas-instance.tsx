@@ -9,6 +9,7 @@ import type { RendererInstance } from '#graphics/three/renderer.js';
 import { RenderFpsOverlay } from '#graphics/three/render-fps-overlay.jsx';
 import { renderLoopObservers } from '#graphics/three/render-loop-observer.js';
 import { createControlsAdapter } from '#graphics/three/adapters/controls-adapter.js';
+import type { CameraInput, CameraInputRouting } from '#graphics/three/controls/camera-wheel-router.js';
 import { createTauR3fGlProp } from '#graphics/three/canvas-three-gl.js';
 import type { TauR3fGlFactory } from '#graphics/three/canvas-three-gl.js';
 import { GraphicsContextLostFallback } from '#graphics/three/graphics-context-lost-fallback.jsx';
@@ -93,6 +94,15 @@ const failureError = (failure: CanvasFailure): Error =>
     ? new WebGpuInitializationError(failure.message)
     : new Error(failure.message);
 
+/** What the input router reads: nothing without a camera input, so today's bindings hold. */
+const toCameraRouting = ({
+  cameraInput,
+  enablePan,
+  enableZoom,
+}: Readonly<{ cameraInput: CameraInput | undefined; enablePan: boolean; enableZoom: boolean }>):
+  | CameraInputRouting
+  | undefined => (cameraInput === undefined ? undefined : { cameraInput, enablePan, enableZoom });
+
 /**
  * One R3F `<Canvas>` mount. Its renderer lifecycle (creating, ready, presented, lost, failed) is the graphics actor's
  * canvas child, attached from the surface element's ref and hosted from R3F's `onCreated`; this component only renders
@@ -118,6 +128,8 @@ export function ThreeCanvasInstance({
   postProcessingSettings,
   zoomSpeed = 2,
   gizmoContainer,
+  cameraInput,
+  gizmoStyle,
   webglContext,
   admittedBytes,
   ...canvasProperties
@@ -139,6 +151,9 @@ export function ThreeCanvasInstance({
   const cameraConsumersRef = useCameraConsumersRef();
   /** The live R3F root, kept so a surface that re-attaches (a Suspense reveal) hosts its new canvas actor on it. */
   const rootRef = useRef<CanvasHostRoot | undefined>(undefined);
+  /** The latest camera input, read by the input router at each gesture so a change applies without a new canvas. */
+  const cameraRoutingRef = useRef<CameraInputRouting | undefined>(undefined);
+  cameraRoutingRef.current = toCameraRouting({ cameraInput, enablePan, enableZoom });
   /** Host callbacks run outside React: they address this mount's canvas actor as graphics holds it now. */
   const sendToCanvas = useCallback(
     (event: CanvasEvent): void => {
@@ -161,6 +176,7 @@ export function ThreeCanvasInstance({
           connectorRef: cameraConnectorRef,
           consumersRef: cameraConsumersRef,
           getUpAxis: () => selectUpDirection(graphicsRef),
+          getCameraRouting: () => cameraRoutingRef.current,
         }),
       });
     },
@@ -331,6 +347,7 @@ export function ThreeCanvasInstance({
             stageOptions={stageOptions}
             zoomSpeed={zoomSpeed}
             gizmoContainer={gizmoContainer}
+            gizmoStyle={gizmoStyle}
           >
             {children}
           </Scene>

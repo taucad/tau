@@ -17,6 +17,8 @@ import { defaultGraphicsSettings } from '#graphics/graphics-settings.js';
 import { cn } from '@taucad/ui/utils/cn';
 import type { StageOptions } from '#graphics/three/stage-options.js';
 import { isEmptyGlb } from '#utils/inspect-glb.js';
+import type { CameraInput } from '#graphics/three/controls/camera-wheel-router.js';
+import type { GizmoStyleId } from '#graphics/three/controls/viewport-gizmo-styles.js';
 
 /**
  * Visual rendering settings for the model viewer.
@@ -129,6 +131,13 @@ export type ModelViewerProps = {
    * on an overlay over the canvas still reaches the model. The canvas's own element when absent.
    */
   readonly eventSource?: React.RefObject<HTMLElement>;
+  /**
+   * How the person navigates: a mouse preset, the input device and the zoom and orbit toggles. Absent keeps today's
+   * bindings.
+   */
+  readonly cameraInput?: CameraInput;
+  /** The view cube's style. Absent: the rounded cube. */
+  readonly gizmoStyle?: GizmoStyleId;
 };
 
 /** The structured reference of the component a secondary press landed on, when its unit's manifest knows it. */
@@ -203,6 +212,8 @@ const ModelViewerCore = memo(function ModelViewerCore({
   onComponentSecondaryPointerCandidate,
   gizmoContainer,
   eventSource,
+  cameraInput,
+  gizmoStyle,
 }: ModelViewerCoreProps): React.JSX.Element {
   const effectiveState: ModelViewerState = viewerState ?? (artifact ? 'ready' : 'loading');
   const knownArtifact = useMemo(() => (artifact ? asKnownArtifact(artifact) : undefined), [artifact]);
@@ -285,6 +296,8 @@ const ModelViewerCore = memo(function ModelViewerCore({
             enableMatcap={graphicsOptions?.enableMatcap}
             enableGizmo={graphicsOptions?.enableGizmo}
             gizmoContainer={gizmoContainer}
+            gizmoStyle={gizmoStyle}
+            cameraInput={cameraInput}
             eventSource={eventSource}
             className={graphicsOptions?.viewerClassName}
             stageOptions={stageOptions}

@@ -23,6 +23,7 @@ import { useViewerEnvironment } from '#environment/viewer-environment.jsx';
 import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
 import { applyViewportGizmoSurface } from '#graphics/three/controls/viewport-gizmo-cube-surface.js';
 import { beginViewerLoadSpan } from '#lib/viewer-load-timing.js';
+import type { GizmoStyleId } from '#graphics/three/controls/viewport-gizmo-styles.js';
 
 type ViewportGizmoCubeProps = {
   readonly size?: number;
@@ -32,6 +33,8 @@ type ViewportGizmoCubeProps = {
    * When provided, the gizmo will be appended to this container instead of the renderer's parent.
    */
   readonly container?: HTMLElement | string;
+  /** The gizmo's style. Absent: the rounded cube. */
+  readonly gizmoStyle?: GizmoStyleId;
 };
 
 const className = 'viewport-gizmo-cube';

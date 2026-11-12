@@ -8,14 +8,14 @@
  * must reproduce these traces, or change one deliberately and say so in its PR (charter D14).
  */
 import { useLayoutEffect } from 'react';
-import type { RenderFrame } from '@taucad/spatial';
+import type { RenderFrame, SpatialMatrix } from '@taucad/spatial';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { writeGlb } from '@taucad/geometry-core';
-import type { GlbMaterial } from '@taucad/geometry-core';
+import type { GlbMaterial, GlbPrimitive } from '@taucad/geometry-core';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import type { Mesh, Object3D } from 'three';
+import type { InstancedMesh, Mesh, Object3D } from 'three';
 import * as sectionTopology from '#graphics/three/utils/section-surface-topology.js';
 import { awaitGeometryPresentation } from '#graphics/three/utils/geometry-presentation-admission.js';
 import { clearRendererSpans, markGeometryReceipt, rendererSpans } from '#lib/renderer-telemetry.js';
@@ -145,6 +145,26 @@ function buildGlb({ lift = 0, indices = [0, 1, 2], name = 'Part' } = {}): Uint8A
           { mode: 1, positions, indices: Uint32Array.from([0, 1, 1, 2]), material: surfaceMaterial },
         ],
       },
+    ],
+  });
+}
+
+/** Two placements of one shared surface mesh, which the viewer draws as one instanced batch. */
+function buildInstancedGlb({ lift = 0 } = {}): Uint8Array<ArrayBuffer> {
+  const primitives: GlbPrimitive[] = [
+    {
+      mode: 4,
+      positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, lift]),
+      normals: Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+      indices: Uint32Array.from([0, 1, 2]),
+      material: surfaceMaterial,
+    },
+  ];
+  const at = (x: number): SpatialMatrix => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, 0, 0, 1];
+  return writeGlb({
+    nodes: [
+      { name: 'Left', primitives, matrix: at(0) },
+      { name: 'Right', primitives, matrix: at(10) },
     ],
   });
 }
@@ -1381,6 +1401,41 @@ describe('GltfMesh presentation protocol', () => {
       await waitForCommits(['a', 'b']);
 
       expect([fatLines.mock.calls.length, batches.mock.calls.length, matcap.mock.calls.length]).toEqual(counts);
+    });
+
+    it('should resync the instanced batch of a shared mesh in place and recompute its bounds', async () => {
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+      const batches = vi.spyOn(surfaceBatches, 'createGltfSurfaceBatches');
+      const view = render(
+        <GltfMesh gltfFile={buildInstancedGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitForCommits(['a']);
+      const gltf = (await parseAsync.mock.results[0]?.value) as Awaited<ReturnType<GLTFLoader['parseAsync']>>;
+      const instanced: InstancedMesh[] = [];
+      gltf.scene.traverse((object) => {
+        if ((object as Partial<InstancedMesh>).isInstancedMesh) {
+          instanced.push(object as InstancedMesh);
+        }
+      });
+      expect(instanced).toHaveLength(1);
+      const [batch] = instanced;
+      const batchCount = batches.mock.calls.length;
+
+      view.rerender(
+        <GltfMesh
+          gltfFile={buildInstancedGlb({ lift: 5 })}
+          geometryHash='b'
+          presentationRevision={2}
+          enableMatcap={false}
+        />,
+      );
+      await waitForCommits(['a', 'b']);
+
+      // The same batch follows the lifted prototype: its box and sphere cover both placements at the new height.
+      expect(parseAsync).toHaveBeenCalledOnce();
+      expect(batches.mock.calls.length).toBe(batchCount);
+      expect(batch!.boundingBox?.max.toArray().map((value) => Math.round(value))).toEqual(expect.arrayContaining([5]));
+      expect(batch!.boundingSphere?.radius).toBeGreaterThan(5);
     });
 
     it('should keep and never free the committed scene across an in-place update, renaming the unit on commit', async () => {

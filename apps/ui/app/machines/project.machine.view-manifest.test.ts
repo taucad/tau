@@ -100,21 +100,37 @@ function presentInView(project: ProjectActor, viewId: string, unitId: string): v
   graphics.send({ type: 'updateArtifact', artifact: gltf(), hash: unitId });
   const { requestedRevision } = graphics.getSnapshot().context.gltfPresentation;
   graphics.send({ type: 'gltfPresentationCommitted', revision: requestedRevision, key: unitId, unitId, manifest });
+  // A selection and a focus on the unit, which reconciliation clears with the manifest.
+  const { modelInteractionRef } = project.getSnapshot().context;
+  modelInteractionRef.send({ type: 'selectComponent', unitId, componentId: 'root' });
+  modelInteractionRef.send({ type: 'focusComponent', unitId, componentId: 'root' });
 }
 
-const manifestOf = (project: ProjectActor, unitId: string): GeometryComponentManifest | undefined =>
-  getModelInteractionUnitState(project.getSnapshot().context.modelInteractionRef.getSnapshot().context, unitId)
-    .manifest;
+/** What the project holds for a unit: its manifest, selection and focus. */
+const heldFor = (project: ProjectActor, unitId: string) => {
+  const unit = getModelInteractionUnitState(
+    project.getSnapshot().context.modelInteractionRef.getSnapshot().context,
+    unitId,
+  );
+  return {
+    manifest: unit.manifest,
+    selectedComponentIds: [...unit.selectedComponentIds],
+    focusedComponentId: unit.focusedComponentId,
+  };
+};
+
+const kept = { manifest, selectedComponentIds: ['root'], focusedComponentId: 'root' };
+const released = { manifest: undefined, selectedComponentIds: [], focusedComponentId: undefined };
 
 describe('project view manifest reconciliation (G11b characterisation)', () => {
   it('should clear the manifest of a unit when the last view presenting it closes', () => {
     const project = createProjectActor().start();
     try {
       presentInView(project, 'v1', 'unit:a');
-      expect(manifestOf(project, 'unit:a')).toBe(manifest);
+      expect(heldFor(project, 'unit:a')).toEqual(kept);
 
       project.send({ type: 'destroyViewGraphics', viewId: 'v1' });
-      expect(manifestOf(project, 'unit:a')).toBeUndefined();
+      expect(heldFor(project, 'unit:a')).toEqual(released);
     } finally {
       project.stop();
     }
@@ -127,7 +143,7 @@ describe('project view manifest reconciliation (G11b characterisation)', () => {
       presentInView(project, 'v2', 'unit:a');
 
       project.send({ type: 'destroyViewGraphics', viewId: 'v1' });
-      expect(manifestOf(project, 'unit:a')).toBe(manifest);
+      expect(heldFor(project, 'unit:a')).toEqual(kept);
     } finally {
       project.stop();
     }
@@ -141,11 +157,11 @@ describe('project view manifest reconciliation (G11b characterisation)', () => {
 
       // Still presented: the request keeps it.
       project.send({ type: 'reconcileViewManifest', unitId: 'unit:a' });
-      expect(manifestOf(project, 'unit:a')).toBe(manifest);
+      expect(heldFor(project, 'unit:a')).toEqual(kept);
 
       graphics.send({ type: 'clearArtifact' });
       project.send({ type: 'reconcileViewManifest', unitId: 'unit:a' });
-      expect(manifestOf(project, 'unit:a')).toBeUndefined();
+      expect(heldFor(project, 'unit:a')).toEqual(released);
     } finally {
       project.stop();
     }
@@ -162,8 +178,8 @@ describe('project view manifest reconciliation (G11b characterisation)', () => {
 
       project.send({ type: 'destroyViewGraphics', viewId: 'v2' });
       project.send({ type: 'reconcileViewManifest', unitId: 'unit:a' });
-      expect(manifestOf(project, 'unit:a')).toBe(manifest);
-      expect(manifestOf(project, 'unit:b')).toBeUndefined();
+      expect(heldFor(project, 'unit:a')).toEqual(kept);
+      expect(heldFor(project, 'unit:b')).toEqual(released);
     } finally {
       project.stop();
     }
@@ -185,7 +201,7 @@ describe('project view manifest reconciliation (G11b characterisation)', () => {
       expect(v2.getSnapshot().context.modelInteractionUnitId).toBe(unitId);
 
       project.send({ type: 'destroyViewGraphics', viewId: 'v1' });
-      expect(manifestOf(project, unitId)).toBeUndefined();
+      expect(heldFor(project, unitId)).toEqual(released);
     } finally {
       project.stop();
     }

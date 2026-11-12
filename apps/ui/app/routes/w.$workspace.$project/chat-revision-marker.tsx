@@ -1,12 +1,9 @@
-import { ChatRevisionSummary } from '@taucad/project-workspace/components/chat-revision-summary';
-import { memo, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
-import { RotateCw } from 'lucide-react';
+import { memo, useCallback, useMemo, useSyncExternalStore } from 'react';
 import { messageRole } from '@taucad/chat/constants';
-import { Collapsible } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
-import { ActionButton, ActionsRow } from '@taucad/ui/components/actions';
-import { RevisionDetails, RevisionMenu } from '#routes/w.$workspace.$project/revision-marker.js';
-import { turnRevisionGlyph } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import { ActionButton } from '@taucad/ui/components/actions';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { entryTime, turnRevisionGlyph } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import {
   deriveTurnRevisionState,
   turnRevisionDetail,
@@ -18,7 +15,6 @@ import { selectVisibleChatError } from '#routes/w.$workspace.$project/chat-error
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useRevisionCards, useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
-import { useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useChatActions, useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import { useProject } from '#hooks/use-project.js';
@@ -67,9 +63,12 @@ function useTurnLog(chatId: string, turnId: string): TurnRevisionLog | undefined
  *
  * @param userMessageId - The user message that anchors the turn.
  * @param isLatestTurn - Whether this is the chat's latest turn.
- * @returns The derived summary state.
+ * @returns The derived state, and when the entry the turn started from was saved, once its card is read.
  */
-function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): TurnRevisionState {
+function useTurnRevisionState(
+  userMessageId: string,
+  isLatestTurn: boolean,
+): Readonly<{ state: TurnRevisionState; lastConfirmedAt: number | undefined }> {
   const { projectId } = useProject();
   const { activeChatId } = useChatContext();
   const log = useTurnLog(activeChatId, userMessageId);
@@ -89,7 +88,7 @@ function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): Tur
         ? { kind: 'first' }
         : { kind: 'revision', n: baseCard?.n };
 
-  return deriveTurnRevisionState({
+  const state = deriveTurnRevisionState({
     log,
     settled,
     recorded: previousResult,
@@ -99,93 +98,33 @@ function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): Tur
     isReconnecting: isLatestTurn && run?.state === 'reconnecting',
     previous: undefined,
   });
-}
-
-function StatusIcon({ state }: { readonly state: TurnRevisionState }): React.JSX.Element {
-  const glyph = turnRevisionGlyph(state);
-  return <glyph.icon aria-hidden data-slot='marker-glyph' className={cn('size-4 shrink-0', glyph.tone)} />;
+  return { state, lastConfirmedAt: base?.kind === 'revision' ? baseCard?.createdAt : undefined };
 }
 
 /**
- * The saved body's one status sentence, only for an exception (round 4): a
- * revision still on its way to its backup, or not there yet. Never the
- * redundant *Saved · Backed up*; round 21: it names where the copy is going, so
- * it reads as the step after saving on this device.
+ * Why a save is not confirmed, and which save is (copy table, M11): the entry
+ * the turn started from, by its time, never by a number.
  *
- * @returns The sentence, or `undefined` when there is nothing to add.
+ * @param state - An unconfirmed turn.
+ * @param lastConfirmedAt - When the turn's starting entry was saved, once its card is read.
+ * @returns The sentence.
  */
-function useBackupException(): string | undefined {
-  const status = useRevisionStatus();
-  if (status === undefined || status.remote.kind === 'none') {
-    return undefined;
-  }
-  const to = status.remote.kind === 'tau' ? 'Tau Cloud' : 'your repository';
-  switch (status.sync.state) {
-    case 'pending': {
-      return `Backing up to ${to}…`;
-    }
-    case 'queued':
-    case 'failed': {
-      return `Not backed up to ${to} yet`;
-    }
-    default: {
-      return undefined;
-    }
-  }
-}
+const unconfirmedSentence = (state: TurnRevisionState, lastConfirmedAt: number | undefined): string => {
+  const time = lastConfirmedAt === undefined ? '' : entryTime(lastConfirmedAt);
+  const detail = turnRevisionDetail(state);
+  return time === '' ? detail : `${detail} Your last confirmed save was at ${time}.`;
+};
 
 /**
- * A saved turn's body: its name, the backup exception, History's actions row —
- * View revision, then the revision's More and Details — so the chat reaches the
- * verbs History does (rounds 14, 18).
+ * One request's line under its user message (blueprint C5): what happened to
+ * the files, and the way to where the detail lives.
  *
- * @param props - The revision and how to open it in Revisions.
- * @returns The body.
- */
-function SavedRevisionDetails({
-  revision,
-  note,
-  onView,
-}: {
-  readonly revision: RevisionCard;
-  /** What the revision holds, when it is not the turn's own work (V5 Q14). */
-  readonly note?: string;
-  readonly onView: () => void;
-}): React.JSX.Element {
-  const { headRevisionId, line } = useRevisions();
-  const exception = useBackupException();
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  const branch = line.kind === 'unknown' ? undefined : line.name;
-  const named = revision.tags?.[0];
-  return (
-    <Collapsible open={isDetailsOpen} className='flex flex-col gap-2 px-3 pt-1 pb-2' onOpenChange={setIsDetailsOpen}>
-      {note === undefined || note === '' ? null : (
-        <p className='text-xs leading-relaxed text-muted-foreground'>{note}</p>
-      )}
-      {named === undefined ? null : <p className='text-sm font-medium wrap-break-word'>{named}</p>}
-      {exception === undefined ? null : (
-        <p data-slot='marker-exception' className='text-xs text-muted-foreground'>
-          {exception}
-        </p>
-      )}
-      <ActionsRow
-        slot='marker-actions'
-        end={<RevisionMenu revision={revision} isCurrent={revision.revisionId === headRevisionId} branch={branch} />}
-      >
-        <ActionButton verb='View' onClick={onView} />
-      </ActionsRow>
-      <RevisionDetails revision={revision} branch={branch} />
-    </Collapsible>
-  );
-}
-
-/**
- * One request's revision summary, directly after its user message.
- *
- * A card attached under the user message whose header is the disclosure.
- * Once files change, pending, saved and unconfirmed work update this line in place; a confirmed no-change request
- * renders nothing. Earlier saved requests link to Revisions instead of
- * expanding in the conversation.
+ * One line, with no menu and no facts. A saved or stopped request's whole line
+ * opens its entry in History, where creating a version, branching and the id
+ * live once. A save that could not be confirmed offers Try again; a conflict
+ * offers Resolve. Working and Saving show only once the turn has changed a
+ * file, and a confirmed no-change request renders nothing. Backup is the
+ * History header's fact, not the chat's.
  */
 export const ChatRevisionMarker = memo(function ({
   userMessageId,
@@ -196,7 +135,7 @@ export const ChatRevisionMarker = memo(function ({
 }): React.JSX.Element | undefined {
   const { projectId } = useProject();
   const isUserMessage = useChatSelector((state) => state.messagesById.get(userMessageId)?.role === messageRole.user);
-  const state = useTurnRevisionState(userMessageId, isLatestTurn);
+  const { state, lastConfirmedAt } = useTurnRevisionState(userMessageId, isLatestTurn);
   const savedRevision = state.kind === 'saved' ? state.revision : undefined;
   const fileCount = useRevisionChanges(savedRevision).length;
   const { continueChat } = useChatActions();
@@ -209,26 +148,26 @@ export const ChatRevisionMarker = memo(function ({
   /*
    * The lifecycle sentence and the file count are announced separately (C46).
    *
-   * The diff resolves a beat after the card, so a live region holding both said
-   * `Rev 5 saved` and then `Rev 5 saved · 2 files` — two announcements for one
-   * transition. `role='status'` now wraps only the lifecycle, which is what
-   * actually transitions; the count is ordinary visible text beside it.
+   * The diff resolves a beat after the line, so a live region holding both said
+   * `Saved` and then `Saved · 2 files`: two announcements for one transition.
+   * `role='status'` wraps only the lifecycle, which is what actually
+   * transitions; the count is ordinary visible text beside it.
    */
   const label = turnRevisionLabel(state, 0);
   const fileSuffix =
     state.kind === 'saved' && !state.isInterrupted && fileCount > 0
       ? ` · ${String(fileCount)} file${fileCount === 1 ? '' : 's'}`
       : undefined;
-  const openRevisions = (revisionId?: string): void => {
+  const openHistory = (revisionId?: string): void => {
     if (revisionId !== undefined) {
       requestRevisionReveal(projectId, revisionId);
     }
     workspace?.openPanel('revisions');
   };
-
-  const status = (
-    <>
-      <StatusIcon state={state} />
+  const glyph = turnRevisionGlyph(state);
+  const line = (
+    <span className='flex min-w-0 flex-1 items-center gap-2 py-1.5'>
+      <glyph.icon aria-hidden data-slot='marker-glyph' className={cn('size-4 shrink-0', glyph.tone)} />
       <span className='min-w-0 flex-1 wrap-break-word'>
         <span
           role='status'
@@ -240,57 +179,61 @@ export const ChatRevisionMarker = memo(function ({
         </span>
         {fileSuffix === undefined ? null : <span>{fileSuffix}</span>}
       </span>
-    </>
+    </span>
   );
 
-  if (savedRevision !== undefined && !isLatestTurn) {
+  if (savedRevision !== undefined) {
+    /* The whole line is View's target: its hit area stretches over the line,
+       so the live region stays outside the button and keeps its own name. */
     return (
-      <div aria-label='Changes from this request' className={cn(cardClassName, 'flex items-center gap-2 pr-1 pl-2')}>
-        <span className='flex min-w-0 flex-1 items-start gap-2 py-1.5 text-xs text-muted-foreground'>{status}</span>
-        <ActionButton
-          verb='View'
-          variant='ghost'
+      <div
+        role='group'
+        aria-label='Changes from this request'
+        className={cn(
+          cardClassName,
+          'relative flex items-center gap-2 pr-3 pl-2 text-xs text-muted-foreground hover:bg-accent/50 has-[button:focus-visible]:focus-outline',
+        )}
+      >
+        {line}
+        <button
+          type='button'
+          className='cursor-action text-xs font-medium text-foreground outline-none after:absolute after:inset-0 after:rounded-b-lg focus-visible:outline-none'
           onClick={() => {
-            openRevisions(savedRevision.revisionId);
+            openHistory(savedRevision.revisionId);
           }}
-        />
+        >
+          View
+        </button>
       </div>
     );
   }
 
-  /* The whole header is the disclosure (R11); Retry stays a separate button
-     because it is an action, not disclosure. */
   return (
-    <ChatRevisionSummary
-      label={`${label}${fileSuffix ?? ''}`}
-      status={status}
-      action={
-        state.kind === 'unconfirmed' ? (
-          <ActionButton verb='Retry' icon={RotateCw} className='mt-0.5 mr-1' onClick={continueChat} />
-        ) : undefined
-      }
+    <div
+      role='group'
+      aria-label='Changes from this request'
+      className={cn(cardClassName, 'flex items-center gap-2 pr-1 pl-2 text-xs text-muted-foreground')}
     >
-      {savedRevision === undefined ? (
-        <div className='flex flex-col items-start gap-2 px-3 pt-1 pb-2'>
-          <p className='text-xs leading-relaxed text-muted-foreground'>{turnRevisionDetail(state)}</p>
-          {state.kind === 'conflicted' ? (
-            <ActionButton
-              verb='Resolve'
-              onClick={() => {
-                openRevisions();
-              }}
-            />
-          ) : null}
-        </div>
-      ) : (
-        <SavedRevisionDetails
-          revision={savedRevision}
-          note={turnRevisionDetail(state)}
-          onView={() => {
-            openRevisions(savedRevision.revisionId);
+      {line}
+      {state.kind === 'unconfirmed' ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <ActionButton verb='Try again' className='mb-1' onClick={continueChat} />
+          </TooltipTrigger>
+          <TooltipContent className='max-w-64 text-pretty'>
+            {unconfirmedSentence(state, lastConfirmedAt)}
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
+      {state.kind === 'conflicted' ? (
+        <ActionButton
+          verb='Resolve'
+          className='mb-1'
+          onClick={() => {
+            openHistory();
           }}
         />
-      )}
-    </ChatRevisionSummary>
+      ) : null}
+    </div>
   );
 });

@@ -33,6 +33,7 @@ import {
   Menu,
   MenuItem,
   net,
+  powerMonitor,
   powerSaveBlocker,
   protocol,
   safeStorage,
@@ -131,6 +132,7 @@ import { parseDesktopInstallation } from '#main/update-identity.js';
 import { z } from 'zod';
 import type { DesktopUpdater, DesktopUpdaterOptions } from '#main/updater.js';
 import { startDesktopUpdater } from '#main/updater.js';
+import { startUpdateTriggers } from '#main/update-triggers.js';
 import type { MoveToApplicationsHost } from '#main/app-location.js';
 import {
   assessAppLocation,
@@ -2465,6 +2467,20 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const updater = platformUpdater ?? startDesktopUpdater(updaterOptions);
 
   updaterReady.resolve(updater);
+  /* A CI probe runs one bounded check of its own; an unpackaged build has no updater to ask. */
+  if (app.isPackaged && otaProbe === undefined && routeQualification === undefined) {
+    startUpdateTriggers({
+      powerMonitor,
+      isOnline: () => net.isOnline(),
+      check: () => {
+        void updater.check();
+      },
+      phase: () => updater.snapshot().phase,
+      log: (level, event, detail) => {
+        log.log(level, event, detail);
+      },
+    });
+  }
   const checkForUpdates = async (): Promise<void> => {
     if (BrowserWindow.getAllWindows().length === 0) {
       await createMainWindow();

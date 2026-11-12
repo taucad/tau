@@ -2,15 +2,18 @@
  * The measure session's DOM adapters: one surface's pointer listeners, and what the session follows under them.
  *
  * The measuring tool builds both around its surface, R3F's root state, the graphics and kinematics actors and its own
- * host functions, and provides them to the measure session as `follower` and `pointer`. They share one closure, so
- * everything a host holds stays here (D4): the surface, the pointer snapshots and their meshes, the waiting presses and
- * their promises, the frame loop and the subscriptions. The session holds only plain facts and answers each report
- * with a command.
+ * host functions, and provides them to the measure session as `follower` and `pointer`, with the two pieces of async
+ * work the session runs, `exact` (an exact CAD distance) and `catalog` (the target list scan). They share one closure,
+ * so everything a host holds stays here (D4): the surface, the pointer snapshots and their meshes, the waiting presses
+ * and their promises, the frame loop, the subscriptions and the abort signals. The session holds only plain facts and
+ * answers each report with a command.
  *
  * @module
  */
 
 import type { RenderFrame } from '@taucad/spatial';
+import type { MeasurementRecord } from '#constants/measurement.types.js';
+import type { ExactOccurrenceDistance } from '#graphics/three/react/exact-measurement.jsx';
 import { fromThreeRenderPoint } from '@taucad/three/spatial';
 import * as THREE from 'three';
 import { createCallbackLogic } from 'xstate';
@@ -21,6 +24,11 @@ import type { graphicsMachine, KinematicsRef } from '#machines/graphics.machine.
 import { selectCameraDragging, selectPresentedGeometryKey } from '#machines/graphics.machine.js';
 import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type {
+  MeasureCatalogLogic,
+  MeasureCatalogRequest,
+  MeasureExactCommand,
+  MeasureExactLogic,
+  MeasureExactRequest,
   MeasurePointerAt,
   MeasureSessionAdapterLogic,
   MeasureSessionCommand,
@@ -45,8 +53,11 @@ type MeasureRoot = Readonly<{
   internal: Readonly<{ subscribe: unknown; lastEvent: Readonly<{ current: unknown }> }>;
 }>;
 
-/** Ahead of every frame callback at the default priority (0), as the section input follows its render frame. */
-const cameraFollowPriority = -1;
+/**
+ * After the camera controls step the camera (priority -1) and ahead of every frame callback at the default priority
+ * (0): between them by number, so the order holds however the controls and this tool mount.
+ */
+const cameraFollowPriority = -0.5;
 
 /**
  * What a pointer snapshot found under the pointer.
@@ -68,6 +79,13 @@ export type MeasurePointerSnapshot = {
 };
 
 /**
+ * What a commit that placed a point did: `exact` is set when its record waits on an exact CAD distance.
+ *
+ * @public
+ */
+export type MeasureCommitOutcome = Readonly<{ exact?: MeasureExactRequest }>;
+
+/**
  * The measuring tool's own work, read live: the adapters call the version the tool rendered last.
  *
  * @public
@@ -75,8 +93,26 @@ export type MeasurePointerSnapshot = {
 export type MeasureToolHost = Readonly<{
   /** Takes the pointer snapshot at `at`, paints its hover and publishes its candidates. */
   snapshot: (at: MeasurePointerAt, coarsePointer: boolean) => MeasurePointerSnapshot;
-  /** Places the snapshot's point: a start, a feature measurement or the second point. */
-  commit: (snapshot: MeasurePointerSnapshot) => void;
+  /**
+   * Places the snapshot's point: a start, a feature measurement or the second point.
+   *
+   * @returns What it did, or nothing when the snapshot has no point to place.
+   */
+  commit: (snapshot: MeasurePointerSnapshot) => MeasureCommitOutcome | undefined;
+  /** Commits the chosen candidate (Use target), as a release on it would. */
+  commitChosen: () => MeasureCommitOutcome | undefined;
+  /** The exact CAD distance query, when the host has one. */
+  measureExact: ExactOccurrenceDistance | undefined;
+  /** Lists the targets in view, a page at a time, until `signal` aborts. */
+  scanCatalog: (request: MeasureCatalogRequest & Readonly<{ signal: AbortSignal }>) => Promise<void>;
+  /** A target list scan was stopped: clear the status it showed while it waited on a feature graph. */
+  catalogStopped: () => void;
+  /** The presented geometry is `geometryKey`: what was measured on another is out of date. */
+  presentGeometry: (geometryKey: string) => void;
+  /** What a target list is taken from is `key` now; `isActive` is whether Measure is on. */
+  followCatalogSource: (key: string, isActive: boolean) => void;
+  /** Measure turned off: drop the candidates and the first target the tool holds. */
+  measureClosed: () => void;
   /** Clears the hover marks; the preview distance is cleared only when the input is given back. */
   clearHover: () => void;
   /** Drops an unlocked chosen candidate as a press goes down, so the press snaps to what is under it. */
@@ -127,6 +163,8 @@ export type MeasureToolAdapterOptions = Readonly<{
 export type MeasureToolAdapters = Readonly<{
   follower: MeasureSessionAdapterLogic;
   pointer: MeasureSessionAdapterLogic;
+  exact: MeasureExactLogic;
+  catalog: MeasureCatalogLogic;
   /** Hovers again from where the pointer rests, on the next frame. Nothing hovers while Measure is off. */
   rehover: () => void;
 }>;
@@ -228,6 +266,15 @@ const selectUnitManifest = (
 const sourceOf = (snapshot: GraphicsSnapshot): string =>
   `${selectPresentedGeometryKey(snapshot)}:${snapshot.context.pickableMeshesVersion}`;
 
+/** What a target list is taken from: a change drops the list (the display revision comes from model interaction). */
+const catalogSourceOf = (snapshot: GraphicsSnapshot, displayRevision: number): string => {
+  const { context } = snapshot;
+  return `${selectPresentedGeometryKey(snapshot)}:${context.pickableMeshesVersion}:${context.isMeasureActive}:${context.measureFilter}:${context.measureMode}:${displayRevision}`;
+};
+
+/** Why an exact query stopped with no answer, as its record then says. */
+const exactViewClosedReason = 'The measuring view closed before the exact query finished.';
+
 /** The settings a hover is taken with: a change hovers again from where the pointer rests. */
 const hoverSettingsOf = ({ context }: GraphicsSnapshot): string =>
   `${context.measureMode}:${context.measureFilter}:${context.measureSnapEnabled}:${context.measureSnapDistance}:${context.measureOperation}`;
@@ -262,12 +309,28 @@ export const createMeasureToolAdapters = ({
     let cuts = first.context.committedSectionCuts;
     let source = sourceOf(first);
     let settings = hoverSettingsOf(first);
+    let geometryKey = selectPresentedGeometryKey(first);
     report({ type: 'measureActiveChanged', active: isActive });
+    // The tool remembers the geometry it last measured on, so only a tool mounting after the geometry changed, not a
+    // session rebuilt around a new surface, marks what it measured before out of date.
+    host.current?.presentGeometry(geometryKey);
 
     // The hover's candidate labels name components from the unit's manifest. Either actor may change first: graphics
     // names the unit, the model interaction actor holds its manifest.
     const { modelInteractionRef } = first.context;
     let manifest = selectUnitManifest(modelInteractionRef, first.context.modelInteractionUnitId);
+    let displayRevision = selectDisplayRevision(modelInteractionRef);
+    let catalogSource = catalogSourceOf(first, displayRevision);
+    host.current?.followCatalogSource(catalogSource, isActive);
+    /** The target list's source moved: the tool drops its list, and the session stops a scan of it. */
+    const followCatalogSource = (snapshot: GraphicsSnapshot): void => {
+      const next = catalogSourceOf(snapshot, displayRevision);
+      if (next !== catalogSource) {
+        catalogSource = next;
+        host.current?.followCatalogSource(next, snapshot.context.isMeasureActive);
+        report({ type: 'catalogSourceChanged' });
+      }
+    };
     const followManifest = (): void => {
       const unitManifest = selectUnitManifest(
         modelInteractionRef,
@@ -283,8 +346,18 @@ export const createMeasureToolAdapters = ({
       const { context } = snapshot;
       if (context.isMeasureActive !== isActive) {
         isActive = context.isMeasureActive;
+        if (!isActive) {
+          host.current?.measureClosed();
+        }
         report({ type: 'measureActiveChanged', active: isActive });
       }
+      const nextGeometryKey = selectPresentedGeometryKey(snapshot);
+      if (nextGeometryKey !== geometryKey) {
+        geometryKey = nextGeometryKey;
+        host.current?.presentGeometry(geometryKey);
+        report({ type: 'geometryChanged' });
+      }
+      followCatalogSource(snapshot);
       if (context.currentMeasurementStart !== start) {
         start = context.currentMeasurementStart;
         // A start placed or cancelled (Escape) while a press waits: the press belonged to the measurement before it.
@@ -331,13 +404,21 @@ export const createMeasureToolAdapters = ({
       report({ type: 'poseChanged', revision });
     });
 
-    let displayRevision = selectDisplayRevision(modelInteractionRef);
     const modelSubscription = modelInteractionRef.subscribe((snapshot) => {
       if (snapshot.context.displayRevision !== displayRevision) {
         ({ displayRevision } = snapshot.context);
+        followCatalogSource(selectGraphics(graphics));
         report({ type: 'sourceChanged' });
       }
       followManifest();
+    });
+
+    // Use target and the target list are asked of graphics, which emits them for the session to do.
+    const commitRequests = graphics.on('measureCandidateCommitRequested', () => {
+      report({ type: 'commitRequested' });
+    });
+    const catalogRequests = graphics.on('measureCatalogRequested', ({ append }) => {
+      report({ type: 'catalogRequested', append });
     });
 
     // The presented camera, followed in the frame it is drawn in: a pose, a resize, a render-frame rebase or a clip
@@ -372,6 +453,8 @@ export const createMeasureToolAdapters = ({
       cameraSubscription.unsubscribe();
       kinematicsSubscription.unsubscribe();
       modelSubscription.unsubscribe();
+      commitRequests.unsubscribe();
+      catalogRequests.unsubscribe();
       unsubscribeFrame();
     };
   });
@@ -395,6 +478,13 @@ export const createMeasureToolAdapters = ({
 
     const take = (at: MeasurePointerAt, coarsePointer: boolean): MeasurePointerSnapshot | undefined =>
       host.current?.snapshot(at, coarsePointer);
+
+    /** A commit that placed a point: the session replaces a running exact query, and starts the one it asks for. */
+    const reportCommit = (outcome: MeasureCommitOutcome | undefined): void => {
+      if (outcome) {
+        sendBack({ type: 'committed', ...(outcome.exact ? { exact: outcome.exact } : {}) });
+      }
+    };
 
     const wait = (press: DeferredMeasurePress): void => {
       waiting = press;
@@ -452,7 +542,7 @@ export const createMeasureToolAdapters = ({
       const point = snapshot.point ? toMeters(current.renderFrame(), snapshot.point) : undefined;
       const start = current.currentStart();
       if (point && (start === undefined || new THREE.Vector3(...start).distanceTo(new THREE.Vector3(...point)) !== 0)) {
-        current.commit(snapshot);
+        reportCommit(current.commit(snapshot));
       }
       sendBack({ type: 'pressSettled', at: press.at });
     };
@@ -472,7 +562,7 @@ export const createMeasureToolAdapters = ({
         graphics.send({ type: 'chooseMeasureCandidate', id: decided.snapshot.target.id });
       }
       if (decision === 'accepted' && decided.point && !decided.isTouch) {
-        host.current?.commit(decided.snapshot);
+        reportCommit(host.current?.commit(decided.snapshot));
       }
     };
 
@@ -531,6 +621,10 @@ export const createMeasureToolAdapters = ({
         }
         case 'candidatesInvalidated': {
           host.current?.invalidateCandidates();
+          return;
+        }
+        case 'commitChosen': {
+          reportCommit(host.current?.commitChosen());
           break;
         }
       }
@@ -697,9 +791,102 @@ export const createMeasureToolAdapters = ({
     };
   });
 
+  const exact = createCallbackLogic<MeasureExactCommand, MeasureExactRequest>(({ input, receive }) => {
+    const controller = new AbortController();
+    let isSettled = false;
+    /** Whether the record is resolved or the query given up, so an answer arriving now changes nothing. */
+    const isOver = (): boolean => isSettled || controller.signal.aborted;
+    const resolve = (patch: Partial<MeasurementRecord>): void => {
+      isSettled = true;
+      graphics.send({ type: 'resolveMeasurementRecord', id: input.id, patch });
+    };
+    receive((message) => {
+      if (isSettled) {
+        return;
+      }
+      if (message.type === 'cancel') {
+        resolve({ status: 'unavailable', unavailableReason: message.reason });
+      } else {
+        isSettled = true;
+      }
+      controller.abort();
+    });
+    // Read when the query starts: an answer taken against other cuts no longer describes what is on screen.
+    const cuts = selectGraphics(graphics).context.committedSectionCuts;
+    const query = host.current?.measureExact;
+    if (!query) {
+      resolve({ status: 'unavailable', unavailableReason: 'No verified CAD occurrence mapping is available.' });
+      return undefined;
+    }
+    // async-iife: bootstrap -- A callback actor cannot await the CAD source's answer.
+    void (async (): Promise<void> => {
+      try {
+        const answer = await query({
+          manifest: input.manifest,
+          presentedGeometryHash: input.geometryKey,
+          occurrenceA: input.occurrenceA,
+          occurrenceB: input.occurrenceB,
+          signal: controller.signal,
+        });
+        if (isOver()) {
+          return;
+        }
+        const current = selectGraphics(graphics);
+        if (
+          selectPresentedGeometryKey(current) !== input.geometryKey ||
+          selectPoseRevision(kinematics) !== input.poseRevision ||
+          current.context.committedSectionCuts !== cuts
+        ) {
+          // Graphics marks the record out of date for each of these.
+          isSettled = true;
+          return;
+        }
+        resolve(
+          answer.status === 'cad-geometry'
+            ? {
+                status: 'current',
+                quality: 'cad',
+                distance: answer.distanceMeters,
+                startPoint: answer.pointAMeters,
+                endPoint: answer.pointBMeters,
+                evidenceDetails:
+                  'AP242 whole-shape minimum; unsigned, no interference classification; numerical tolerance not provided.',
+              }
+            : { status: 'unavailable', unavailableReason: answer.reason },
+        );
+      } catch (error) {
+        if (!isOver()) {
+          resolve({
+            status: 'unavailable',
+            unavailableReason: error instanceof Error ? error.message : 'Exact geometry query failed.',
+          });
+        }
+      }
+    })();
+    return () => {
+      if (!isSettled) {
+        // Stopped with the session: the view closed (or was rebuilt) while the query ran.
+        resolve({ status: 'unavailable', unavailableReason: exactViewClosedReason });
+      }
+      controller.abort();
+    };
+  });
+
+  const catalog = createCallbackLogic<{ type: 'stop' }, MeasureCatalogRequest>(({ input }) => {
+    const controller = new AbortController();
+    // async-iife: bootstrap -- The scan yields between pages of work; the actor's stop aborts it.
+    void host.current?.scanCatalog({ append: input.append, signal: controller.signal });
+    return () => {
+      controller.abort();
+      host.current?.catalogStopped();
+    };
+  });
+
   return {
     follower,
     pointer,
+    exact,
+    catalog,
     rehover: () => {
       if (hoverAt) {
         hovers?.schedule(hoverAt);

@@ -19,6 +19,7 @@ vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
 vi.mock('react-router', () => ({
   useSearchParams: (): [URLSearchParams, () => void] => [new URLSearchParams(), vi.fn()],
   useRouteLoaderData: (): undefined => undefined,
+  useParams: (): Record<string, string> => ({}),
 }));
 vi.mock('@better-auth-ui/react', () => ({ useSession: () => ({ data: undefined, isPending: false }) }));
 vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));

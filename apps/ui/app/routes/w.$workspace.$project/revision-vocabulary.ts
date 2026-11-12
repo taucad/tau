@@ -253,6 +253,35 @@ export const revisionTitle = (revision: RevisionCard, revisions: readonly Revisi
   return restoredSentence(revisions.find((entry) => entry.revisionId === revision.restoredFrom));
 };
 
+/** An agent's entry with no title of its own (Q9). @public */
+export const agentChangeTitle = 'Agent change';
+
+/**
+ * The title of an entry read as a bare row, as the agent's `history` tool
+ * returns it: what {@link revisionTitle} shows for the same entry in History.
+ * A version reads by its name; the engine's own placeholder titles never
+ * reach the page (M6). A turn's placeholder is the agent's change, or, on a
+ * turn's base cut, which the row reports as the person's, an autosave (A5).
+ *
+ * @param entry - The row's title, what made it and its version.
+ * @returns The title.
+ * @public
+ */
+export const entryTitle = (
+  entry: Readonly<{ summary: string; source: string; version?: Readonly<{ name: string }> }>,
+): string => {
+  if (entry.version !== undefined) {
+    return entry.version.name;
+  }
+  if (/^Agent turn \S+$/u.test(entry.summary)) {
+    return entry.source === 'agent' ? agentChangeTitle : 'Autosave';
+  }
+  if (/^Saved changes \(\w+\)$/u.test(entry.summary)) {
+    return entry.summary === 'Saved changes (save)' ? 'Saved changes' : 'Autosave';
+  }
+  return entry.summary;
+};
+
 /**
  * Whether a credential refusal on this remote is GitHub's to fix (D18): a
  * repository picked from a connected account, or a github.com address typed
@@ -655,12 +684,18 @@ export const revisionAccessibleName = (where: RevisionWhere, sentence: string): 
 };
 
 /** The strip's verbs, in the words the palette and the rows use. @public */
-export type StripVerb = 'Save' | 'Undo restore' | 'Undo' | 'Back up' | 'Sync now' | 'Sign in' | 'Upgrade';
+export type StripVerb = 'Discard' | 'Save' | 'Undo restore' | 'Undo' | 'Try again' | 'Sign in' | 'Upgrade';
+
+/** The header's sentence while the agent's turn holds these files (C2). @public */
+export const agentWorkingSentence = 'Agent is working · saves when it finishes';
 
 /**
- * The strip's verbs for this state: at most one primary, and the decisions and
- * recoveries that stay visible beside it. A conflict names no strip verb: its
- * card sits directly below the strip.
+ * The header's verbs for this state: at most two, one of them primary (C2).
+ * A conflict names no verb: its card sits directly below the header. Backing
+ * up is the backup line's, and sync is continuous, so neither *Back up* nor
+ * *Sync now* is a header verb; a save that was not confirmed offers *Try
+ * again*, which saves the files again. Unsaved changes offer *Discard* beside *Save*: it acts at once and
+ * can be undone.
  *
  * @param input - The projection, where the checkout is, and what the viewer may do.
  * @returns The primary verb, when one applies, and the secondary verbs.
@@ -697,20 +732,18 @@ export const selectStripVerbs = ({
   if (status === undefined || !canWrite || hasRevisionConflict(status)) {
     return { primary: undefined, secondary: [] };
   }
-  const secondary: StripVerb[] = where.isDirty ? [] : undoable ? ['Undo restore'] : canUndo ? ['Undo'] : [];
-  if (where.isDirty) {
-    return { primary: 'Save', secondary };
+  if (status.attention - status.conflicts.length > 0) {
+    return { primary: 'Try again', secondary: [] };
   }
+  if (where.isDirty) {
+    /* Discard restores the files to the entry they are at, so with no entry there is nothing to go back to. */
+    return { primary: 'Save', secondary: where.head === undefined ? [] : ['Discard'] };
+  }
+  const secondary: StripVerb[] = undoable ? ['Undo restore'] : canUndo ? ['Undo'] : [];
   if (where.head === undefined) {
     return { primary: undefined, secondary };
   }
   const { sync, remote } = status;
-  if (sync.state === 'noRemote') {
-    return { primary: 'Back up', secondary };
-  }
-  if (sync.state === 'queued') {
-    return { primary: 'Sync now', secondary };
-  }
   if (sync.state === 'failed' && asksTauSignIn(sync, remote, where.isSignedOut)) {
     return { primary: 'Sign in', secondary };
   }

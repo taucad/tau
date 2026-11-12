@@ -23,6 +23,8 @@ import { readKernelLanguages } from '#components/onboarding/setup-kernel-languag
 import { announceChangedRows, answerRows, hasTakenTour, setupSteps } from '#components/onboarding/setup-model.js';
 import { SetupBackgroundStep, SetupGoalsStep } from '#components/onboarding/setup-question-steps.js';
 import { SetupViewerStep } from '#components/onboarding/setup-viewer-step.js';
+import { useSetupTelemetry } from '#components/onboarding/setup-telemetry.js';
+import type { SetupEntry } from '#telemetry/onboarding-telemetry.js';
 
 /** Settings → Viewer, while the dialog has that section. */
 const viewerSettingsSection = settingsSectionSchema.safeParse('viewer');
@@ -84,6 +86,8 @@ function SetupHeader({
 
 /** What the route supplies: the step to open at and the actions that leave setup. */
 export type SetupFlowProps = Readonly<{
+  /** How setup was reached, for `onboarding_setup_opened`. */
+  entry: SetupEntry;
   /** The step to open at, such as `how` from Help → "How Tau works". A step setup does not have opens step 1. */
   initialStep?: SetupStepId;
   /** Start a replay of the tour, from step 4 once the tour has ended. */
@@ -100,7 +104,7 @@ export type SetupFlowProps = Readonly<{
  * @param properties - The starting step and the leaving actions.
  * @returns The setup page.
  */
-export function SetupFlow({ initialStep, onReplayTour, onOpenFolder }: SetupFlowProps): React.JSX.Element {
+export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: SetupFlowProps): React.JSX.Element {
   const navigate = useNavigate();
   const isViewerControlsEnabled = useFeature('viewerControls');
   const isWarehouseEnabled = useFeature('partsWarehouse');
@@ -109,6 +113,7 @@ export function SetupFlow({ initialStep, onReplayTour, onOpenFolder }: SetupFlow
   const { device, writeDevice } = useDeviceRecord();
   const kernels = useMemo(() => readKernelLanguages(), []);
   const isDesktop = isDesktopTarget();
+  const telemetry = useSetupTelemetry(entry);
 
   const [stage, setStage] = useState<Stage>(initialStep ?? 'goals');
   const [announcement, setAnnouncement] = useState('');
@@ -136,16 +141,17 @@ export function SetupFlow({ initialStep, onReplayTour, onOpenFolder }: SetupFlow
 
   const rows = answerRows({ profile, viewer, device, kernels, isViewerControlsEnabled });
 
+  /** The record as the stores hold it now, after a write in this handler. */
+  const readRecord = (): Readonly<{ profile: typeof profile; viewer: typeof viewer; device: typeof device }> => ({
+    profile: personRecordStores.profile.read(),
+    viewer: personRecordStores.viewer.read(),
+    device: deviceRecordStore.read(),
+  });
+
   /** Write one answer, then announce the rows it changed and say whether the device kept it. */
   const answer = (write: () => SectionWriteResult): void => {
     const result = write();
-    const after = answerRows({
-      profile: personRecordStores.profile.read(),
-      viewer: personRecordStores.viewer.read(),
-      device: deviceRecordStore.read(),
-      kernels,
-      isViewerControlsEnabled,
-    });
+    const after = answerRows({ ...readRecord(), kernels, isViewerControlsEnabled });
     setAnnouncement(announceChangedRows(rows, after));
     setIsStorageRefused(result !== 'saved');
   };
@@ -153,17 +159,25 @@ export function SetupFlow({ initialStep, onReplayTour, onOpenFolder }: SetupFlow
   const answers = {
     goals: (goals: GoalId[]) => {
       answer(() => writeProfile({ goals }));
+      telemetry.profileChanged(readRecord().profile);
     },
     tool: (tool: ToolId) => {
       answer(() => writeProfile({ tool }));
+      telemetry.profileChanged(readRecord().profile);
     },
     languages: (languages: LanguageId[]) => {
       answer(() => writeProfile({ languages }));
     },
     preset: (preset: MousePresetId) => {
       answer(() => writeViewer({ controls: { preset } }));
+      telemetry.presetSelected(preset, profile);
     },
     gizmo: (choice: GizmoChoiceId) => {
+      if (choice === 'none') {
+        telemetry.gizmoHidden();
+      } else {
+        telemetry.gizmoSelected(choice, profile);
+      }
       answer(() =>
         choice === 'none'
           ? writeViewer({ viewDefaults: { 'display.gizmo': false } })
@@ -186,12 +200,19 @@ export function SetupFlow({ initialStep, onReplayTour, onOpenFolder }: SetupFlow
   };
 
   const finish = (): void => {
+    if (current !== 'done') {
+      telemetry.stepCompleted(current, readRecord());
+    }
     const result = writeOnboarding({ setupStatus: 'completed', wanted: isTourWanted });
+    telemetry.completed({ steps, record: readRecord(), isTourWanted });
     setIsStorageRefused(result !== 'saved');
     goTo('done');
   };
 
   const skip = (): void => {
+    if (current !== 'done') {
+      telemetry.skipped(current);
+    }
     writeOnboarding({ setupStatus: 'skipped' });
     void navigate('/');
   };
@@ -297,6 +318,9 @@ export function SetupFlow({ initialStep, onReplayTour, onOpenFolder }: SetupFlow
           ) : (
             <Button
               onClick={() => {
+                if (current !== 'done') {
+                  telemetry.stepCompleted(current, readRecord());
+                }
                 goTo(steps[index + 1] ?? 'done');
               }}
             >

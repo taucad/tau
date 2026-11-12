@@ -4,6 +4,7 @@ import { Navigate, useNavigate, useSearchParams } from 'react-router';
 import { toast } from '@taucad/ui/components/sonner';
 import { SetupFlow } from '#components/onboarding/setup-flow.js';
 import { setupChromeCopy, setupFinishCopy, setupStepIds } from '#components/onboarding/setup-copy.js';
+import { parseSetupEntry, setupEntryParameter } from '#components/onboarding/setup-entry.js';
 import type { SetupStepId } from '#components/onboarding/setup-copy.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { useFeature } from '#flags/use-feature.js';
@@ -76,5 +77,11 @@ export default function WelcomeRoute(): React.JSX.Element {
     return <Navigate to='/' replace />;
   }
   const step = searchParameters.get('step') ?? undefined;
-  return <SetupFlow initialStep={isSetupStepId(step) ? step : undefined} onOpenFolder={onOpenFolder} />;
+  return (
+    <SetupFlow
+      entry={parseSetupEntry(searchParameters.get(setupEntryParameter) ?? undefined)}
+      initialStep={isSetupStepId(step) ? step : undefined}
+      onOpenFolder={onOpenFolder}
+    />
+  );
 }

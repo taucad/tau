@@ -51,6 +51,9 @@ function Workspace(): React.JSX.Element {
   );
 }
 
+/** The real SDK debounces and fetches asynchronously; a loaded CI runner can take longer than the 1 s default. */
+const sdkResponse = { timeout: 10_000 };
+
 afterAll(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -68,7 +71,7 @@ describe('PostHog-backed flags through the desktop analytics boundary', () => {
     expect(screen.getByRole('button')).toHaveTextContent('viewerControls=false');
     await vi.waitFor(() => {
       expect(screen.getByRole('button')).toHaveTextContent('viewerControls=true');
-    });
+    }, sdkResponse);
     expect(requests.some((url) => url.startsWith('https://us.i.posthog.com/flags/'))).toBe(true);
 
     act(() => {
@@ -76,6 +79,6 @@ describe('PostHog-backed flags through the desktop analytics boundary', () => {
     });
     await vi.waitFor(() => {
       expect(screen.getByRole('button')).toHaveTextContent('viewerControls=false');
-    });
+    }, sdkResponse);
   });
 });

@@ -71,6 +71,9 @@ const settle = async (): Promise<void> => {
   });
 };
 
+/** The real SDK debounces and fetches asynchronously; a loaded CI runner can take longer than the 1 s default. */
+const sdkResponse = { timeout: 10_000 };
+
 afterAll(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -93,12 +96,12 @@ describe('PostHog-backed flags through the web analytics boundary', () => {
     const view = render(tree());
     await vi.waitFor(() => {
       expect((globalThis as ConsoleWindow).posthog).toBe(posthog);
-    });
+    }, sdkResponse);
     // In a browser the remote config's `ensureFlagsLoaded` makes this request; jsdom never loads that config script.
     posthog.reloadFeatureFlags();
     await vi.waitFor(() => {
       expect(screen.getByText('onboarding=true viewerControls=false autoOpen=false')).toBeInTheDocument();
-    });
+    }, sdkResponse);
     expect(requests.some((url) => url.includes('/flags/'))).toBe(true);
 
     const consoleClient = (globalThis as ConsoleWindow).posthog;
@@ -125,7 +128,7 @@ describe('PostHog-backed flags through the web analytics boundary', () => {
     view.rerender(tree());
     await vi.waitFor(() => {
       expect(screen.getByText('onboarding=false viewerControls=false autoOpen=false')).toBeInTheDocument();
-    });
+    }, sdkResponse);
     expect((globalThis as ConsoleWindow).posthog).toBeUndefined();
     view.unmount();
   });

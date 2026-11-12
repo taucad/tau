@@ -27,8 +27,7 @@ type ChatViewerControlsProps = Readonly<{
 
 /**
  * The project viewer's bar: `@taucad/viewer`'s {@link ViewerControls} with the app's capture and the CAD actor's render
- * timeout. With `viewerControls` on, it adds the single-click camera controls beside the gizmo and the navigation keys
- * (N1, N2).
+ * timeout. With `viewerControls` on, it turns on the navigation keys (N1).
  */
 export function ChatViewerControls({
   shouldEnableCapture = true,
@@ -61,7 +60,6 @@ export function ChatViewerControls({
       leading={leading}
       aboveControls={aboveControls}
       viewFields={viewFields}
-      navigation={isViewerControlsEnabled}
       navigationKeys={isViewerControlsEnabled}
     />
   );

@@ -2,4 +2,4 @@
 viewer: minor
 ---
 
-Single-click camera controls (WCAG 2.5.7). `ViewerControls` takes optional `navigation` and `navigationKeys`. `navigation` adds `NavigationControls` (`@taucad/viewer/cad/navigation-controls`) under the gizmo in the viewer frame's top-right corner: orbit left, right, up and down, a "Pan with the arrows" switch that turns those four into pan, zoom in, zoom out and Fit view, each a named button of at least 24 px that one click operates under every mouse preset. The buttons send the same `navigateCamera` steps as the arrow keys and wait until the canvas has its controls. `navigationKeys` turns on the arrow, plus and minus keys, whose keys then show in the buttons' tooltips. Both are off by default; neither shows for 2D geometry.
+`ViewerControls` takes an optional `navigationKeys`, off by default, which turns on the viewer's navigation keys for the bar's viewer: the arrow keys orbit, Shift with an arrow key pans, and plus and minus zoom, each a `navigateCamera` step under every mouse preset. The viewer adds no on-screen camera buttons; orbit, pan and zoom stay on the mouse and these keys, and Fit view stays in the bar.

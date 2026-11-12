@@ -27,7 +27,7 @@ afterEach(() => {
   mocks.isMobile = false;
 });
 
-function renderBar(mobileAction?: React.ReactNode, navigation?: Readonly<{ navigation?: boolean }>): void {
+function renderBar(mobileAction?: React.ReactNode, navigation?: Readonly<{ navigationKeys?: boolean }>): void {
   actor = createActor(
     graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
     { input: {} },
@@ -76,17 +76,11 @@ describe('ViewerControls host action', () => {
   });
 });
 
-describe('ViewerControls navigation (N2)', () => {
-  it('adds no camera controls unless the host asks for them', () => {
-    renderBar();
+describe('ViewerControls navigation keys', () => {
+  it('adds no camera button group beside the gizmo with the navigation keys on', () => {
+    renderBar(undefined, { navigationKeys: true });
     expect(screen.queryByRole('group', { name: 'Camera' })).toBeNull();
-  });
-
-  it('adds the camera controls, outside the controls line, when the host asks for them', () => {
-    renderBar(undefined, { navigation: true });
-    const camera = screen.getByRole('group', { name: 'Camera' });
-    expect(within(camera).getByRole('button', { name: 'Orbit left' })).toBeTruthy();
-    expect(screen.getByRole('group', { name: 'Viewer controls' }).contains(camera)).toBe(false);
+    expect(screen.getAllByRole('button', { name: 'Fit view' })).toHaveLength(1);
   });
 });
 

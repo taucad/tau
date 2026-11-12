@@ -12,7 +12,7 @@
   "packages/viewer/src/graphics/three/react/section-contour-fill.tsx": 1,
   "packages/viewer/src/graphics/three/three-canvas-instance.tsx": 3,
   "packages/viewer/src/graphics/three/three-context.tsx": 1,
-  "packages/viewer/src/graphics/three/use-geometry-bounds.ts": 2,
+  "packages/viewer/src/graphics/three/use-geometry-bounds.ts": 1,
   "packages/viewer/src/graphics/three/utils/gizmo.utils.ts": 1,
   "packages/viewer/src/hooks/use-graphics.tsx": 1,
   "packages/viewer/src/hooks/use-viewer-shortcuts.ts": 8,

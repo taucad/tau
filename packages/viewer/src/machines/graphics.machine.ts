@@ -2407,6 +2407,8 @@ export const selectGraphicsFraming = (snapshot: GraphicsSnapshot): GraphicsFrami
 /**
  * Whether the view's entry has had its first geometry framed: until then, the camera holds the seeded or default pose,
  * which no person placed and nothing persists.
+ * The value lives in the framing child, so the graphics snapshot does not change with it: read it when it is needed,
+ * never through `useGraphicsSelector` or another snapshot-identity subscription.
  *
  * @param snapshot - The graphics machine snapshot.
  * @returns Whether the framing actor is `framed`.
@@ -2417,6 +2419,8 @@ export const selectGraphicsFramed = (snapshot: GraphicsSnapshot): boolean =>
 
 /**
  * The entry the view frames, once one was named with `entryChanged`.
+ * The value lives in the framing child, so the graphics snapshot does not change with it: read it when it is needed,
+ * never through `useGraphicsSelector` or another snapshot-identity subscription.
  *
  * @param snapshot - The graphics machine snapshot.
  * @returns The entry identity, or `undefined` before the view knows it.

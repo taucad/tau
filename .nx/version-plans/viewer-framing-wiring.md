@@ -10,6 +10,9 @@ Deliberate changes (D14):
 
 - A remounted canvas whose first measurement is a new presentation that moved more than 10 % refits, where the hook only refreshed the bounds.
 - With a pending pose, the first frame no longer faces the configured angles before the pose is applied; the end pose is the pending pose, as before.
-- The record's pose reaches the camera through `adoptPersistedPose` (source `persisted`) before and over the first frame, so the camera is not left settling, and a pose that arrives while the person drags or the camera settles is dropped (D15).
+- The record's pose reaches the camera through `adoptPersistedPose` (source `persisted`) before and over the first frame, so the camera is not left settling; a record that arrives while the person drags or the camera settles waits for the camera to go quiet, as before.
 - Focus frames the component with one `frameBounds{source: 'focus'}` change that keeps the scene bounds; clearing focus sends nothing.
 - A section input stops when its handles unmount, at once, rather than one microtask later.
+- Bounds are measured in the frame callback before each draw, and each committed presentation or settled pose asks the demand-driven canvas for that frame; no React effect sends the measurement.
+- A new entry is first framed on its own committed presentation, never on the geometry still on screen from the entry it replaces. Fit view does nothing while an entry waits for that presentation (a build that fails keeps the previous geometry on screen and the entry unframed).
+- Fit view fits against the viewport the controls adapter last published to the camera and the stage of the last measurement.

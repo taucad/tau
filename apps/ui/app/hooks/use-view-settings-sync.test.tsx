@@ -986,6 +986,27 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       expect(poseWrites(harness.writeRecord).at(-1)).toMatchObject({ direction: [1, 0, 0], verticalSpan: 40 });
     });
 
+    it('should never write the first automatic frame of an entry switched away from and back to', () => {
+      const harness = mountFramed(initial());
+      advance(settle * 4);
+      harness.frame(4, smallBounds);
+      act(() => {
+        harness.rig.send({ type: 'poseObserved', source: 'input', ...pose([1, 0, 0], 40) });
+      });
+      advance(settle * 4);
+      expect(poseWrites(harness.writeRecord).at(-1)).toMatchObject({ verticalSpan: 40 });
+      harness.writeRecord.mockClear();
+      act(() => {
+        harness.graphicsRef.send({ type: 'entryChanged', identity: 'src/other.ts' });
+        harness.graphicsRef.send({ type: 'entryChanged', identity: 'src/main.ts' });
+      });
+      measure(harness.graphicsRef, smallBounds, 'cube-returned');
+      expect(isFramed(harness.graphicsRef)).toBe(true);
+      expect(['framing', 'persisted']).toContain(harness.rig.getSnapshot().context.lastChange.source);
+      advance(settle * 4);
+      expect(poseWrites(harness.writeRecord)).toEqual([]);
+    });
+
     it('today saves an automatic refit after the bounds grow by more than 10 % (G6b flips, D20)', () => {
       const harness = mountFramed(initial());
       advance(settle * 4);

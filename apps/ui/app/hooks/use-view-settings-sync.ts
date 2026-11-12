@@ -9,7 +9,11 @@ import type {
   PinnedMeasurement,
 } from '@taucad/viewer/graphics/graphics-settings';
 import { areSectionCutsEqual } from '@taucad/viewer/graphics/section-cuts';
-import { selectGraphicsFramed, selectGraphicsFramingIdentity } from '@taucad/viewer/machines/graphics.machine';
+import {
+  selectGraphicsFramed,
+  selectGraphicsFraming,
+  selectGraphicsFramingIdentity,
+} from '@taucad/viewer/machines/graphics.machine';
 import type { GraphicsPendingPose, graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 
 import type { cadMachine } from '#machines/cad.machine.js';
@@ -51,6 +55,11 @@ const selectFramed = (graphicsRef: ActorRefFrom<typeof graphicsMachine>): boolea
 const selectFramingIdentity = (graphicsRef: ActorRefFrom<typeof graphicsMachine>): string | undefined =>
   selectGraphicsFramingIdentity(graphicsRef.getSnapshot());
 
+/** The view's framing actor. */
+const selectFramingActor = (
+  graphicsRef: ActorRefFrom<typeof graphicsMachine>,
+): ReturnType<typeof selectGraphicsFraming> => selectGraphicsFraming(graphicsRef.getSnapshot());
+
 /** Whether `entryPath` waits for its first frame: framing frames another entry, or none yet. */
 const isAwaitingFirstFrame = (graphicsRef: ActorRefFrom<typeof graphicsMachine>, entryPath: string): boolean =>
   !selectFramed(graphicsRef) || selectFramingIdentity(graphicsRef) !== entryPath;
@@ -66,6 +75,10 @@ const selectCameraView = (
   camera: NonNullable<ReturnType<typeof useGraphicsCamera>>,
 ): ReturnType<NonNullable<ReturnType<typeof useGraphicsCamera>>['getSnapshot']>['context']['view'] =>
   camera.getSnapshot().context.view;
+
+/** Whether the camera is quiet: no drag holds it and no settle window is open, so a persisted adoption applies. */
+const selectCameraInputIdle = (camera: NonNullable<ReturnType<typeof useGraphicsCamera>>): boolean =>
+  camera.getSnapshot().matches({ input: 'idle' });
 
 /* The changes a first frame makes: the frame itself and the record's pose applied over it. */
 const firstFrameSources: ReadonlySet<string> = new Set(['framing', 'persisted', 'bounds', 'viewport']);
@@ -341,6 +354,11 @@ export function useViewSettingsSync({
         entryPath !== undefined && isAwaitingFirstFrame(graphicsRef, entryPath)
           ? pendingPoseOf(latest, `record:${viewId}`)
           : undefined;
+      if (adoption && !selectCameraInputIdle(actor)) {
+        /* The camera drops an adoption while it drags or settles (D15); the record waits for it to go quiet. */
+        timer = setTimeout(apply, poseSettle);
+        return;
+      }
       if (adoption) {
         /* Shown before the first frame without starting the camera's settle window, which would drop the adoption
          * that frame sends: the same fields, applied in one automatic change. */
@@ -598,6 +616,16 @@ export function useViewSettingsSync({
       lastCameraEmissionRef.current = Date.now();
       restartSettle(true);
     });
+    /* Every first frame takes a new receipt: an entry that waits for geometry forgets the last one, even when it is
+     * the entry framed before (a switch away and back) and no camera change or read happens while it waits. */
+    const framingSubscription = selectFramingActor(graphicsRef).subscribe((framing) => {
+      if (framing.matches('framed')) {
+        return;
+      }
+      firstFrameEntryRef.current = undefined;
+      firstFrameReceiptRef.current = undefined;
+      personChangedEntryRef.current = undefined;
+    });
     /* The graphics actor emits for every event it handles; only a new cut list is a change. An edit that
      * changes no value keeps the list, so comparing references is enough. */
     let { sectionCuts } = graphicsRef.getSnapshot().context;
@@ -612,6 +640,7 @@ export function useViewSettingsSync({
 
     return () => {
       cameraSubscription?.unsubscribe();
+      framingSubscription.unsubscribe();
       sectionSubscription.unsubscribe();
       if (settleTimer === undefined) {
         return;

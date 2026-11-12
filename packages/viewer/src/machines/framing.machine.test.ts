@@ -1,8 +1,8 @@
 /**
  * The framing actor against a scripted camera child, and against a real camera where the pose it leaves matters. The
  * first eight rows are `use-camera-framing.test.ts` re-homed (graphics event-driven state charter, G5); the wiring
- * lane (G5b) deleted that hook, and its up-resolution half lives in `framing-stage.test.ts`. Path table (the shortest path to each state), kept current with
- * `pathTable`:
+ * lane (G5b) deleted that hook, and its up-resolution half lives in `framing-stage.test.ts`. Path table (the
+ * shortest path to each state), kept current with `pathTable`:
  *
  * 1. `awaitingGeometry`: initial
  * 2. `framed`: `geometryBoundsMeasured`

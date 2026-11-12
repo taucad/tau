@@ -13,7 +13,8 @@ import {
   useKinematicsSelector,
   useRenderFrame,
 } from '#hooks/use-graphics.jsx';
-import { selectGraphicsFramingIdentity, selectPresentedGeometryKey } from '#machines/graphics.machine.js';
+import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
+import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { sceneTag } from '#graphics/three/utils/scene-tags.js';
 import { resolveFramingStage } from '#graphics/three/framing-stage.js';
 import type { StageOptions } from '#graphics/three/stage-options.js';
@@ -45,6 +46,10 @@ const isPoseMoving = ({ unitsById }: KinematicsMachineContext): boolean =>
  */
 const selectSettledPoseRevision = ({ context }: SnapshotFrom<typeof kinematicsMachine>): number | undefined =>
   isPoseMoving(context) ? undefined : context.revision;
+
+/** The revision of the presentation on screen, which each committed presentation advances. */
+const selectPresentedRevision = ({ context }: SnapshotFrom<typeof graphicsMachine>): number =>
+  context.gltfPresentation.presentedRevision;
 
 /** The camera's view, which supplies the up a configured orientation keeps and the surface's pixel ratio. */
 const selectCameraView = (rig: ThreeCameraRig): CameraView => rig.actorRef.getSnapshot().context.view;
@@ -86,6 +91,7 @@ export function useGeometryBounds(
   const graphicsActor = useGraphics();
   const cameraRig = useCameraRig();
   const get = useThree((state) => state.get);
+  const invalidate = useThree((state) => state.invalidate);
 
   const [{ geometryRadius, geometryCenter, geometryBounds }, set] = useState<GeometryBoundsResult>({
     geometryRadius: 0,
@@ -105,10 +111,10 @@ export function useGeometryBounds(
   const settledPoseRevision = useKinematicsSelector(selectSettledPoseRevision);
   const lastPoseRevisionRef = useRef(settledPoseRevision);
 
-  // A new entry waits for its first frame; the geometry on screen may keep its key (a failed build, an identical
-  // artifact), so it is measured again for the new entry.
-  const framingIdentity = useGraphicsSelector(selectGraphicsFramingIdentity);
-  const lastFramingIdentityRef = useRef(framingIdentity);
+  // Each committed presentation is measured, so a new entry whose geometry keeps its key (an identical artifact)
+  // still gets its first frame. The geometry still on screen is never measured for an entry it does not belong to.
+  const presentedRevision = useGraphicsSelector(selectPresentedRevision);
+  const lastPresentedRevisionRef = useRef(presentedRevision);
 
   const measureBounds = useCallback(() => {
     if (!innerRef.current) {
@@ -120,8 +126,8 @@ export function useGeometryBounds(
       lastGeometryKeyRef.current = geometryKey;
       boundsStableRef.current = false;
     }
-    if (framingIdentity !== lastFramingIdentityRef.current) {
-      lastFramingIdentityRef.current = framingIdentity;
+    if (presentedRevision !== lastPresentedRevisionRef.current) {
+      lastPresentedRevisionRef.current = presentedRevision;
       boundsStableRef.current = false;
     }
     if (settledPoseRevision !== undefined && settledPoseRevision !== lastPoseRevisionRef.current) {
@@ -209,7 +215,7 @@ export function useGeometryBounds(
     });
   }, [
     cameraRig,
-    framingIdentity,
+    presentedRevision,
     geometryKey,
     get,
     graphicsActor,
@@ -220,9 +226,11 @@ export function useGeometryBounds(
     stageOptions,
   ]);
 
-  // Committed geometry and saved pose are attached before layout effects. Fit the
-  // active camera before its first draw; the frame callback handles settled poses.
-  useLayoutEffect(measureBounds, [measureBounds]);
+  // The frame callback runs before each draw, so committed geometry and a settled pose are measured, and the camera
+  // framed, before the frame that first shows them. The canvas draws on demand, so each one asks for that frame.
+  useLayoutEffect(() => {
+    invalidate();
+  }, [geometryKey, invalidate, presentedRevision, settledPoseRevision]);
   useFrame(measureBounds);
 
   // Sync the real bounding-sphere radius to the graphics machine so other

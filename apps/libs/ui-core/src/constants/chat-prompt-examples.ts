@@ -305,13 +305,14 @@ export const chatExamples: readonly ChatExample[] = [
 ];
 
 /**
- * Three examples at random, as the project chat's empty state shows them while onboarding is off.
+ * Three examples at random, as the project chat's empty state shows them while onboarding is off. That path knows
+ * nothing about the kernel, so only examples with no `needs` are drawn.
  *
  * @param count - How many.
  * @returns The examples.
  * @public
  */
 export const getRandomExamples = (count = 3): ChatExample[] => {
-  const shuffled = [...chatExamples].sort(() => 0.5 - Math.random());
+  const shuffled = chatExamples.filter(({ needs }) => needs === undefined).sort(() => 0.5 - Math.random());
   return shuffled.slice(0, Math.min(count, shuffled.length));
 };

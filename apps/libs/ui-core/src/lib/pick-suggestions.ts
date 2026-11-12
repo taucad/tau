@@ -44,28 +44,37 @@ const isEligible = (example: ChatExample, selection: KernelPreference, entitled:
 };
 
 /**
+ * What {@link pickSuggestions} chooses for.
+ *
+ * @public
+ */
+export type PickSuggestionsOptions = Readonly<{
+  /** The person's stored goals. */
+  goals: readonly SuggestionGoal[];
+  /** The kernel preference: `auto`, or the kernel the person picked. */
+  selection: KernelPreference;
+  /** The kernels this host may run for the person. */
+  entitled: readonly KernelId[];
+  /** Fixes the order; keep one per page load. */
+  seed: string;
+  /** At most how many to return. Defaults to 4. */
+  count?: number;
+}>;
+
+/**
  * Choose the suggestions to show. With goals, every suggestion carries one of them and each goal gets one before any
  * goal gets a second, goals taken in the order given. With no goals, or only "Just exploring", they are `general`
  * examples. The same arguments always give the same suggestions in the same order, so a page that keeps its seed for a
  * load keeps its row.
  *
  * @param examples - The examples to choose from.
- * @param goals - The person's stored goals.
- * @param selection - The kernel preference: `auto`, or the kernel the person picked.
- * @param entitled - The kernels this host may run for the person.
- * @param seed - Fixes the order; keep one per page load.
- * @param count - At most how many to return.
+ * @param options - The goals, kernel selection, entitled kernels, seed and count to choose for.
  * @returns The suggestions, in display order.
  * @public
  */
-// oxlint-disable-next-line max-params -- the five inputs the suggestions depend on, plus the count
 export const pickSuggestions = (
   examples: readonly ChatExample[],
-  goals: readonly SuggestionGoal[],
-  selection: KernelPreference,
-  entitled: readonly KernelId[],
-  seed: string,
-  count = 4,
+  { goals, selection, entitled, seed, count = 4 }: PickSuggestionsOptions,
 ): ChatExample[] => {
   const pool = seededOrder(
     examples.filter((example) => isEligible(example, selection, entitled)),

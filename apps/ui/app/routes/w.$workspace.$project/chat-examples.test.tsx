@@ -178,6 +178,15 @@ describe('ChatExamples with onboarding on', () => {
     expect(screen.queryByText('L-bracket')).not.toBeInTheDocument();
   });
 
+  it('should show no section when no example fits the goals and the picked kernel', () => {
+    harness.goals = ['electronics'];
+    harness.preference = 'openscad';
+    const { container } = render(<ChatExamples />);
+
+    expect(screen.queryByText('Get started with 3D model examples')).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it("should take setup's goals unchanged", () => {
     expectTypeOf<SuggestionGoal>().toEqualTypeOf<GoalId>();
   });

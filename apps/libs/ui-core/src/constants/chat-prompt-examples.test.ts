@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chatExamples, exampleGoals } from '#constants/chat-prompt-examples.js';
+import { chatExamples, exampleGoals, getRandomExamples } from '#constants/chat-prompt-examples.js';
 
 describe('chatExamples', () => {
   it.each(exampleGoals)('should hold at least four %s examples', (goal) => {
@@ -27,5 +27,14 @@ describe('chatExamples', () => {
 
     expect(boards.length).toBeGreaterThanOrEqual(4);
     expect(boards.every(({ needs }) => needs === 'electronics')).toBe(true);
+  });
+});
+
+describe('getRandomExamples', () => {
+  it('should draw only examples with no needs, since it has no kernel to check them against', () => {
+    const drawn = getRandomExamples(chatExamples.length);
+
+    expect(drawn.length).toBe(chatExamples.filter(({ needs }) => needs === undefined).length);
+    expect(drawn.every(({ needs }) => needs === undefined)).toBe(true);
   });
 });

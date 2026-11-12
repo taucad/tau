@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { chatExamples } from '@taucad/ui-core/constants/chat-prompt-examples';
 import type { ChatExample } from '@taucad/ui-core/constants/chat-prompt-examples';
@@ -20,18 +20,8 @@ const suggestionCount = 4;
 /** The row's accessible name. */
 export const homeSuggestionsLabel = 'Suggestions';
 
-/**
- * The suggestions under Home's composer, while onboarding is on. A click fills the composer with the example's prompt
- * and moves focus there; it sends nothing and leaves the kernel selection, and the one this device remembers, alone.
- *
- * @returns The row, or nothing while onboarding is off or nothing fits.
- */
-export function HomeSuggestions(): React.JSX.Element | undefined {
-  const isOnboardingEnabled = useFeature('onboarding');
-  return isOnboardingEnabled ? <HomeSuggestionRow /> : undefined;
-}
-
-function HomeSuggestionRow(): React.JSX.Element | undefined {
+/** The row itself, mounted only while onboarding is on. */
+const HomeSuggestionRow = memo(function (): React.JSX.Element | undefined {
   const { profile } = usePersonRecord();
   const { preference } = useKernel();
   const { available } = useRoutingKernelProfile();
@@ -40,7 +30,14 @@ function HomeSuggestionRow(): React.JSX.Element | undefined {
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
   const suggestions = useMemo(
-    () => pickSuggestions(chatExamples, profile.goals, preference, available, pageLoadSeed, suggestionCount),
+    () =>
+      pickSuggestions(chatExamples, {
+        goals: profile.goals,
+        selection: preference,
+        entitled: available,
+        seed: pageLoadSeed,
+        count: suggestionCount,
+      }),
     [profile.goals, preference, available],
   );
 
@@ -81,4 +78,15 @@ function HomeSuggestionRow(): React.JSX.Element | undefined {
       ))}
     </ul>
   );
+});
+
+/**
+ * The suggestions under Home's composer, while onboarding is on. A click fills the composer with the example's prompt
+ * and moves focus there; it sends nothing and leaves the kernel selection, and the one this device remembers, alone.
+ *
+ * @returns The row, or nothing while onboarding is off or nothing fits.
+ */
+export function HomeSuggestions(): React.JSX.Element | undefined {
+  const isOnboardingEnabled = useFeature('onboarding');
+  return isOnboardingEnabled ? <HomeSuggestionRow /> : undefined;
 }

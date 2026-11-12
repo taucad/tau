@@ -7,13 +7,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveCameraControlProps } from '@taucad/viewer/graphics/three/controls/camera-controls-feel';
 
 type FrameEntry = { callback: (state: unknown, delta: number) => void; priority: number | undefined };
-const root = vi.hoisted((): { state: Record<string, unknown>; frames: FrameEntry[] } => ({ state: {}, frames: [] }));
+const root = vi.hoisted((): { state: unknown; frames: FrameEntry[] } => ({ state: {}, frames: [] }));
 
 vi.mock('@react-three/fiber', async (importOriginal) => {
   const { useEffect } = await import('react');
   return {
     ...(await importOriginal<typeof FiberModule>()),
-    useThree: (select: (state: Record<string, unknown>) => unknown) => select(root.state),
+    useThree: (select: (state: unknown) => unknown) => select(root.state),
     useFrame(callback: (state: unknown, delta: number) => void, priority?: number) {
       useEffect(() => {
         const entry = { callback, priority };
@@ -28,17 +28,29 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
 
 const { PrinterCameraControls } = await import('#components/printer/printer-camera-controls.js');
 
+type StubRoot = {
+  camera: PerspectiveCamera;
+  gl: { domElement: HTMLElement };
+  events: { connected: HTMLElement | undefined };
+  invalidate: () => void;
+  controls: unknown;
+  set: (patch: Partial<StubRoot>) => void;
+  get: () => StubRoot;
+};
+
 const createRoot = () => {
   const domElement = document.createElement('div');
-  const state: Record<string, unknown> = {
+  const state: StubRoot = {
     camera: new PerspectiveCamera(),
     gl: { domElement },
     events: { connected: undefined },
     invalidate: vi.fn(),
     controls: null,
+    set(patch) {
+      Object.assign(state, patch);
+    },
+    get: () => state,
   };
-  state.set = (patch: Record<string, unknown>) => Object.assign(state, patch);
-  state.get = () => state;
   root.state = state;
   return { state, domElement };
 };

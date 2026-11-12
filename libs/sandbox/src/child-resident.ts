@@ -69,6 +69,7 @@ const childrenOf = async (pid: number, sources: LinuxResidentSources): Promise<r
  * @param sources - The `/proc` reader.
  * @returns The tree's process ids, `root` first, at most {@link childResidentPids} of them and at most
  *   {@link childResidentDepth} levels deep; `undefined` when the kernel has no children files (no `CONFIG_PROC_CHILDREN`).
+ * @public
  */
 export const linuxChildrenTree = async (
   root: number,
@@ -108,6 +109,7 @@ export const linuxChildrenTree = async (
  * @param tree - The spawned process and the process group it leads.
  * @param sources - The readers; the real `/proc` by default.
  * @returns The summed bytes, or `undefined` when no process of the tree reported a resident set.
+ * @public
  */
 export const sampleLinuxResident = async (
   tree: Readonly<{ root: number; group: number }>,

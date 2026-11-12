@@ -164,19 +164,14 @@ const headLog = (head: string | undefined, rows: readonly RevisionRow[], wanted:
  * human title from `revision-effects.ts`'s placeholder — but it can
  * *reconstruct* the placeholder from fields the row already carries and refuse
  * to render it. That is an equality check against known values, not a parse of
- * a sentence (I12). The generator itself is `packages/revisions`' to fix.
+ * a sentence (I12). A turn's cuts need none: the generator titles a base cut
+ * "Autosave" (A5) and a result by the person's request, "Agent change"
+ * without one (Q9).
  *
  * @param row - One graph row.
  * @returns The headline every revision surface shows.
  */
 const titleOf = (row: RevisionRow): string => {
-  /* A5: a turn's base cut is the person's own edits, saved before the agent started. */
-  if (row.turnCut === 'base' && row.summary === `Agent turn ${row.turnId ?? ''}`) {
-    return 'Autosave';
-  }
-  if (row.turnId !== undefined && row.summary === `Agent turn ${row.turnId}`) {
-    return 'Agent change';
-  }
   if (row.capture !== undefined && row.summary === `Saved changes (${row.capture})`) {
     return row.capture === 'save' ? 'Saved changes' : 'Autosave';
   }

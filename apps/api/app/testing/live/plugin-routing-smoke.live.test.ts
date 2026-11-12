@@ -153,8 +153,15 @@ const entryOf = async (projectRoot: string, uses: readonly ToolUse[]): Promise<s
 
 const runClaude = async (input: Readonly<{ cwd: string; home: string; prompt: string }>): Promise<string> =>
   new Promise((resolve, reject) => {
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables
-    const env: NodeJS.ProcessEnv = { ...process.env, HOME: input.home, ANTHROPIC_API_KEY: credential, CI: 'true' };
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (typeof value === 'string') {
+        env[key] = value;
+      }
+    }
+    env['HOME'] = input.home;
+    env['ANTHROPIC_API_KEY'] = credential ?? '';
+    env['CI'] = 'true';
     const child = spawn(
       'claude',
       [
@@ -177,7 +184,8 @@ const runClaude = async (input: Readonly<{ cwd: string; home: string; prompt: st
       ],
       {
         cwd: input.cwd,
-        env,
+        // The API augments ProcessEnv with typed values; a child process takes plain strings.
+        env: env as unknown as NodeJS.ProcessEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     );

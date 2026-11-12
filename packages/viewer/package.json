@@ -60,6 +60,7 @@
     "./graphics/metadata/gltf-component-visibility": "./src/graphics/metadata/gltf-component-visibility.ts",
     "./graphics/section-cuts": "./src/graphics/section-cuts.ts",
     "./graphics/three/canvas-three-gl": "./src/graphics/three/canvas-three-gl.ts",
+    "./graphics/three/controls/camera-presets": "./src/graphics/three/controls/camera-presets.ts",
     "./graphics/three/controls/section-handles": "./src/graphics/three/controls/section-handles.ts",
     "./graphics/three/controls/tau-camera-controls": "./src/graphics/three/controls/tau-camera-controls.tsx",
     "./graphics/three/controls/viewport-gizmo-interaction-lock": "./src/graphics/three/controls/viewport-gizmo-interaction-lock.tsx",
@@ -251,6 +252,11 @@
         "types": "./dist/graphics/three/canvas-three-gl.d.mts",
         "import": "./dist/graphics/three/canvas-three-gl.mjs",
         "default": "./dist/graphics/three/canvas-three-gl.mjs"
+      },
+      "./graphics/three/controls/camera-presets": {
+        "types": "./dist/graphics/three/controls/camera-presets.d.mts",
+        "import": "./dist/graphics/three/controls/camera-presets.mjs",
+        "default": "./dist/graphics/three/controls/camera-presets.mjs"
       },
       "./graphics/three/controls/section-handles": {
         "types": "./dist/graphics/three/controls/section-handles.d.mts",

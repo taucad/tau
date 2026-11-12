@@ -90,6 +90,10 @@ const getPixelRatio = (): number => {
   return Math.min(typeof pixelRatio === 'number' && pixelRatio > 0 ? pixelRatio : 1, 2);
 };
 
+/** The viewport the camera presents for. */
+const selectViewport = (camera: ThreeCameraRig['actorRef']): CameraDriverSnapshot['view']['viewport'] =>
+  camera.getSnapshot().context.view.viewport;
+
 let installed = false;
 const installCameraControls = (): void => {
   if (installed) {
@@ -357,7 +361,7 @@ export const createControlsAdapter = ({
           return;
         }
         const pixelRatio = getPixelRatio();
-        const { viewport } = camera.getSnapshot().context.view;
+        const viewport = selectViewport(camera);
         if (viewport.width !== width || viewport.height !== height || viewport.pixelRatio !== pixelRatio) {
           camera.send({ type: 'setViewport', viewport: { width, height, pixelRatio } });
         }

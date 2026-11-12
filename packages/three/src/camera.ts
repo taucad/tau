@@ -385,6 +385,10 @@ const sameClipPlanes = (
   left?.presentationPlane?.offsetMeters === right?.presentationPlane?.offsetMeters &&
   left?.presentationPlane?.normal.every((value, index) => value === right?.presentationPlane?.normal[index]) !== false;
 
+/** The driver snapshot a camera actor holds now. */
+const selectActorDriverSnapshot = (actor: Actor<CameraMachine>): CameraDriverSnapshot =>
+  selectCameraDriverSnapshot(actor.getSnapshot());
+
 /**
  * Creates two persistent native endpoint cameras driven by one canonical actor.
  *
@@ -416,7 +420,7 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
   const perspectiveCamera = new PerspectiveCamera();
   const orthographicCamera = new OrthographicCamera();
   const given = options.actorRef;
-  const givenSnapshot = given && selectCameraDriverSnapshot(given.getSnapshot());
+  const givenSnapshot = given && selectActorDriverSnapshot(given);
   const initialView = givenSnapshot?.view ?? createCameraView(options.initialView!);
   /*
    * The mirror: the rig's render frame and clip policy, which the native cameras present with the latest camera
@@ -536,7 +540,7 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
       inspect: options.inspect,
       onRejectedEvent: options.onRejectedEvent,
     });
-  let latest = givenSnapshot ?? selectCameraDriverSnapshot(actorRef.getSnapshot());
+  let latest = givenSnapshot ?? selectActorDriverSnapshot(actorRef);
   present(false);
   let unfollow: (() => void) | undefined;
   // Whether a setter changed each kind while a given actor was not followed: connecting sends it rather than adopt.
@@ -566,7 +570,7 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
     readState() {
       if (given && !unfollow) {
         // Not followed: read the given actor as it is now.
-        latest = selectCameraDriverSnapshot(given.getSnapshot());
+        latest = selectActorDriverSnapshot(given);
         present(false);
       }
       return readThreeCameraState({
@@ -589,7 +593,7 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
       if (given === undefined || unfollow !== undefined || disposed) {
         return () => undefined;
       }
-      const snapshot = selectCameraDriverSnapshot(given.getSnapshot());
+      const snapshot = selectActorDriverSnapshot(given);
       if (!setFrame) {
         ({ renderFrame } = snapshot);
       }

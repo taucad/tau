@@ -862,6 +862,10 @@ const graphicsActors = {
 
 type GraphicsEnqueue = EnqueueObject<GraphicsEvent, GraphicsEmitted, SystemRegistry, typeof graphicsActors>;
 
+/** Whether the person is holding a camera gesture (pointer down on the controls). */
+const selectGestureHeld = (cameraRef: GraphicsCameraRef): boolean =>
+  cameraRef.getSnapshot().matches({ gesture: 'held' });
+
 /**
  * The controls adapter stops with its canvas: a new or detached surface ends the old gesture listener. A gesture it
  * held ends with it, so the camera cannot stay `gesture.held` and hover suppression cannot stick (G3 report).
@@ -1323,7 +1327,7 @@ const graphicsMachineDefinition = setup({
           return { context: { suppressNextModelPointerClick: false } };
         },
         interactionMoved: ({ context }, enq) => {
-          if (!context.cameraRef.getSnapshot().matches({ gesture: 'held' })) {
+          if (!selectGestureHeld(context.cameraRef)) {
             // A move with no held gesture (a stray control event) neither guards a click nor drops the hover.
             return {};
           }
@@ -2275,3 +2279,13 @@ export const graphicsMachine = checkedGraphicsMachineDefinition as unknown as Gr
  */
 export const selectPresentedGeometryKey = (snapshot: GraphicsSnapshot): string =>
   snapshot.context.gltfPresentation.presentedKey ?? snapshot.context.artifactKey;
+
+/**
+ * Whether the person is dragging the view's camera: a pose their held gesture made, read at the moment it is needed.
+ *
+ * @param cameraRef - The view's camera.
+ * @returns Whether the camera is in `input.dragging`.
+ * @public
+ */
+export const selectCameraDragging = (cameraRef: GraphicsCameraRef): boolean =>
+  cameraRef.getSnapshot().matches({ input: 'dragging' });

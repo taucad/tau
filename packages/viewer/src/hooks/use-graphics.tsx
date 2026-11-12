@@ -47,6 +47,14 @@ export const useGraphicsCamera = (graphicsRef: GraphicsActorRef | undefined): Gr
   useSelector(graphicsRef, (snapshot) => snapshot?.context.cameraRef);
 
 /* The per-mount presentation of the view's camera: the native cameras, the publication slots and the render frame. */
+/** The view's camera, read once when a presentation is made. */
+const selectViewCamera = (graphicsRef: GraphicsActorRef): GraphicsCameraRef =>
+  graphicsRef.getSnapshot().context.cameraRef;
+
+/** The view's framing record, a plain-data bridge in graphics context. */
+const selectViewFraming = (graphicsRef: GraphicsActorRef): ViewCameraFraming =>
+  graphicsRef.getSnapshot().context.cameraFraming;
+
 const createViewPresentation = (
   graphicsRef: GraphicsActorRef,
 ): Omit<GraphicsContextValue, 'graphicsRef' | 'framing'> => {
@@ -67,7 +75,7 @@ const createViewPresentation = (
     }
   };
   const rig = createThreeCameraRig({
-    actorRef: asCameraActor(graphicsRef.getSnapshot().context.cameraRef),
+    actorRef: asCameraActor(selectViewCamera(graphicsRef)),
     onUpdate(camera, snapshot) {
       if (snapshot.renderFrame !== renderFrame) {
         changeRenderFrame(snapshot.renderFrame);
@@ -123,7 +131,7 @@ export function GraphicsProvider({
 }): React.JSX.Element {
   'use no memo';
 
-  const framing = graphicsRef.getSnapshot().context.cameraFraming;
+  const framing = selectViewFraming(graphicsRef);
   latchViewCameraFraming(framing, seed ?? {});
   let [presentation, setPresentation] = useState(() => ({ graphicsRef, ...createViewPresentation(graphicsRef) }));
   if (presentation.graphicsRef !== graphicsRef) {

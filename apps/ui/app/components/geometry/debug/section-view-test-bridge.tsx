@@ -48,6 +48,10 @@ import {
   infiniteGridPresentationPlaneByUpDirection,
 } from '@taucad/viewer/graphics/three/utils/infinite-grid-frame';
 
+/** Whether the person is holding a camera gesture. */
+const selectGestureHeld = (cameraRef: GraphicsContext['cameraRef']): boolean =>
+  cameraRef.getSnapshot().matches({ gesture: 'held' });
+
 /**
  * A cut to add: what is left out takes the Add menu's default with no view (a plane through the bounds centre,
  * unflipped; a 90° cutaway from angle zero). A cutaway passes through the bounds centre.
@@ -1150,7 +1154,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         const { context } = graphicsActor.getSnapshot();
         return {
           isMeasureActive: context.isMeasureActive,
-          cameraInteracting: context.cameraRef.getSnapshot().matches({ gesture: 'held' }),
+          cameraInteracting: selectGestureHeld(context.cameraRef),
           measurementUiMeshCount: getSectionViewTestMeasurementUiMeshCount(scene),
           rendererGeometryCount: get().gl.info.memory.geometries,
           snapDistancePx: context.measureSnapDistance,

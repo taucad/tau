@@ -37,6 +37,10 @@ import type { CanvasHostRoot } from '#graphics/three/three-canvas-instance-host.
 import type { CanvasEvent, CanvasFailure, CanvasSnapshot } from '#machines/canvas.machine.js';
 import type { webglContextMachine } from '#machines/webgl-context.machine.js';
 
+/** The world up axis graphics keeps, read when the camera's up changes. */
+const selectUpDirection = (graphicsRef: ReturnType<typeof useGraphics>): 'x' | 'y' | 'z' =>
+  graphicsRef.getSnapshot().context.upDirection;
+
 /**
  * Props for {@link ThreeCanvasInstance}: the Three.js context properties plus a retry callback for context loss.
  *
@@ -156,7 +160,7 @@ export function ThreeCanvasInstance({
           rig: cameraRig,
           connectorRef: cameraConnectorRef,
           consumersRef: cameraConsumersRef,
-          getUpAxis: () => graphicsRef.getSnapshot().context.upDirection,
+          getUpAxis: () => selectUpDirection(graphicsRef),
         }),
       });
     },

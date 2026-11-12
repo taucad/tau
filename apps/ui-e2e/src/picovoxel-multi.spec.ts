@@ -1,9 +1,9 @@
+/* oxlint-disable no-restricted-imports -- the exact-pin helper is the one runtime-e2e hashes with, and `apps/ui-e2e` has no manifest or path mapping to reach `@taucad/tau-examples` through, so its import is relative. */
 import { expect, inject, test } from 'vitest';
 import { page as selectors, server } from 'vitest/browser';
 import { base64ToUint8Array } from 'uint8array-extras';
 import * as target from '#support/external-target.js';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- the pin helper runtime-e2e shares; `apps/ui-e2e` has no manifest or path mapping to reach `@taucad/tau-examples` through
-// oxlint-disable-next-line no-restricted-imports -- as above
+// eslint-disable-next-line @nx/enforce-module-boundaries -- see the file header
 import { exactPinOf } from '../../../libs/tau-examples/src/exact-pin.ts';
 
 /*

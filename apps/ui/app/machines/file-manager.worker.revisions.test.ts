@@ -16,7 +16,8 @@ import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIsomorphicGitRevisionPort, lfsObjectPath, lfsPointerFor, RevisionPortError } from '@taucad/revisions';
 import type { Remote, RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
-import { revisionId } from '@taucad/revisions/algorithms';
+import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
+import type { RevisionTreeInput } from '@taucad/revisions/algorithms';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import type { RootedFileSystem } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
@@ -2485,4 +2486,212 @@ describe('readiness settles without a large-object download', () => {
     const { root } = await openOnHead(fixture, project);
     expect(root.status().readiness).toBe('filled');
   }, 30_000);
+});
+
+/*
+ * INV (Brain research/new-project-viewer-stuck-downloading-blueprint.md, plan step 4): every write generation of the
+ * selected checkout reaches `filled` within a bounded settle, whatever writer created it. One project is driven
+ * through every writer in turn: open, save, turn placement, branch create, switch, restore, pull, merge and reload.
+ * A writer that puts another revision's tree in the checkout must also be seen to open a new generation (readiness
+ * drops below `filled`), so the row cannot pass on a write that never happened.
+ */
+describe('readiness liveness over every writer (INV)', () => {
+  /** The bound one writer's generation has to reach `filled` in. */
+  const settleBound = 10_000;
+
+  it('reaches filled after every writer that creates a write generation', async () => {
+    /* Listed only from the pull on: a project with a remote and no head waits on its first pull at `connected`. */
+    const remote: { listed: boolean; head: string | undefined } = { listed: false, head: undefined };
+    const ports: RevisionPort[] = [];
+    const observed: RevisionStatusProjection[] = [];
+    /* A fetch-only remote whose advertisement the row sets; its fetch lands the tip as the tracking ref. */
+    const origin = {
+      name: 'origin',
+      url: 'https://remote.example.test/alpha.git',
+      kind: 'git',
+      fetchOnly: true,
+    } as const;
+    const fixture = harness(
+      ['alpha'],
+      (port) => {
+        ports.push(port);
+        return {
+          ...port,
+          listRemotes: async () => (remote.listed ? [origin] : []),
+          listRemoteRefs: async () =>
+            remote.head === undefined ? [] : [{ name: 'refs/heads/main', head: revisionId(remote.head) }],
+          fetch: async () => {
+            if (remote.head === undefined) {
+              return;
+            }
+            const tracking = 'refs/remotes/origin/main';
+            const expectedHead = await port.readRef(tracking);
+            await port.updateRef({ name: tracking, expectedHead, head: revisionId(remote.head) });
+          },
+        };
+      },
+      {
+        observeStatus: (_projectId, status) => {
+          observed.push(status);
+        },
+      },
+    );
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('tau.json', '{"name":"x","assets":{"main":{"entryPath":"main.ts"}}}');
+    await project.writeFile('main.ts', 'a');
+
+    /*
+     * Run one writer, then hold the liveness property for the selected checkout: `filled`, with no download, within
+     * the bound. `newTree` writers must also have dropped readiness below `filled` since they began.
+     */
+    let alpha = await fixture.open('alpha');
+    let root = await fixture.root('alpha');
+    const writer = async (label: string, write: () => Promise<void>, newTree = false): Promise<void> => {
+      const from = observed.length;
+      await write();
+      await vi.waitFor(
+        () => {
+          const status = root.status();
+          expect(status?.readiness, label).toBe('filled');
+          expect(status?.largeObjects, label).toBeUndefined();
+        },
+        { timeout: settleBound },
+      );
+      if (newTree) {
+        expect(
+          observed.slice(from).some((status) => status.readiness !== 'filled'),
+          `${label} opened a new generation`,
+        ).toBe(true);
+      }
+    };
+
+    /* Open: a new project, before its first revision (L1). */
+    await writer('open', async () => {
+      await settle(20);
+    });
+
+    await writer('save', async () => {
+      await project.writeFile('main.ts', 'b');
+      fixture.announce('alpha', ['main.ts']);
+      await root.saveRevision('save');
+    });
+    const saved = root.status().headRevisionId;
+    expect(saved).toBeDefined();
+
+    await writer('turn placement', async () => {
+      const session = await root.placementSession();
+      await place(session, turnKey(1));
+      await project.writeFile('main.ts', 'c');
+      await finish(session, turnKey(1));
+      await turnFinalized(alpha, 'turn-1');
+    });
+
+    let side: Readonly<{ checkoutId: string; checkoutRoot: string }> | undefined;
+    await writer('branch create', async () => {
+      side = await branchOff(alpha, root, 'side');
+    });
+
+    await writer('switch', async () => {
+      alpha.send({ command: 'switch', branch: 'side' });
+      await vi.waitFor(() => {
+        expect(root.status().checkoutId).toBe(side?.checkoutId);
+      });
+    });
+
+    /* Work on the branch, so the merge back has a tree to write. */
+    await writer('save on the branch', async () => {
+      const files = fixture.service.createRootedFileSystem(side?.checkoutRoot ?? '');
+      await files.writeFile('side.ts', 'side');
+      fixture.announceAt(side?.checkoutRoot ?? '', ['side.ts']);
+      await root.saveRevision('save');
+    });
+
+    await writer('switch back', async () => {
+      alpha.send({ command: 'switch', branch: 'main' });
+      await vi.waitFor(() => {
+        expect(root.status().checkoutId).toBe('live');
+      });
+    });
+
+    await writer(
+      'merge',
+      async () => {
+        alpha.send({ command: 'mergeBranch', branch: 'side' });
+        await vi.waitFor(
+          async () => {
+            expect(await project.exists('side.ts')).toBe(true);
+          },
+          { timeout: settleBound },
+        );
+      },
+      true,
+    );
+
+    await writer(
+      'restore',
+      async () => {
+        alpha.send({ command: 'restore', revisionId: saved ?? '' });
+        await vi.waitFor(
+          async () => {
+            if (root.status().restore.asking) {
+              alpha.send({ command: 'confirm' });
+            }
+            expect(await project.readFile('main.ts', 'utf8')).toBe('b');
+          },
+          { timeout: settleBound },
+        );
+      },
+      true,
+    );
+
+    await writer(
+      'pull',
+      async () => {
+        remote.listed = true;
+        alpha.send({ command: 'connectRemote', kind: 'git', url: origin.url, fetchOnly: true });
+        await vi.waitFor(() => {
+          expect(root.status().remote.phase).toBe('connected');
+          expect(root.status().sync.pullPhase).toBe('idle');
+        });
+        await settle(20);
+        /* Another device's revision on top of this one's main, as the remote advertises it. */
+        const local = ports.at(-1);
+        const head = (await local?.readRef('main')) ?? revisionId('');
+        const tree = await local?.readTree(head);
+        const pulled = await local?.writeRevision({
+          tree: new ImmutableRevisionTree([
+            ...(tree?.entries() ?? [])
+              .filter((entry) => entry.path !== 'main.ts')
+              .map((entry): RevisionTreeInput => [entry.path, entry.content, entry.mode]),
+            ['main.ts', new TextEncoder().encode('pulled')],
+          ]),
+          parents: [head],
+          provenance: {
+            source: 'user',
+            actor: { kind: 'user', id: 'usr_remote' },
+            capture: 'save',
+            via: 'browser',
+            createdAt: 1,
+          },
+          summary: { generated: 'Remote' },
+        });
+        remote.head = pulled?.commitId;
+        alpha.send({ command: 'syncNow' });
+        await vi.waitFor(
+          async () => {
+            expect(await project.readFile('main.ts', 'utf8')).toBe('pulled');
+          },
+          { timeout: settleBound },
+        );
+      },
+      true,
+    );
+
+    await writer('reload', async () => {
+      alpha.send({ command: 'close' });
+      await settle(20);
+      alpha = await fixture.open('alpha');
+      root = await fixture.root('alpha');
+    });
+  }, 120_000);
 });

@@ -48,7 +48,7 @@ export function GridSizeIndicator(): React.ReactNode {
   const handleUnitChange = useCallback(
     (selectedUnit: string) => {
       if (viewFields) {
-        viewFields.set('grid.unit', selectedUnit);
+        void viewFields.set('grid.unit', selectedUnit);
         return;
       }
       graphicsRef.send({

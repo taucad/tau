@@ -80,6 +80,18 @@ describe('view exceptions', () => {
     expect(views).toBeLessThanOrEqual(maxExceptionViews);
   });
 
+  it(`caps one project holding more than ${maxExceptionViews} views by dropping its views written longest ago`, () => {
+    let value = emptyViewExceptions;
+    for (let view = 0; view <= maxExceptionViews; view++) {
+      value = mergeViewExceptions(value, { kind: 'add', projectId: 'p0', viewId: `v${view}`, leaf: 'display.grid' });
+    }
+    const views = Object.keys(value.byProject['p0'] ?? {});
+    expect(views).toHaveLength(maxExceptionViews);
+    // The first view written went; the one just written stays.
+    expect(views[0]).toBe('v1');
+    expect(views.at(-1)).toBe(`v${maxExceptionViews}`);
+  });
+
   it("merges a stale tab's write into what another tab stored (read-merge-write)", () => {
     const staleTab = createSectionStore(cookieName.viewExceptions, viewExceptionsSection);
     expect(staleTab.read()).toEqual(emptyViewExceptions);

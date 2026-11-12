@@ -6,7 +6,8 @@
  * Stored as one section under `view-exceptions` through the section store, so every write reads what is stored,
  * merges and writes in one step, and two tabs never lose each other's entries. No clock is written: when more than
  * {@link maxExceptionViews} views hold exceptions, whole projects are dropped in key order, and a project's key moves
- * to the end whenever it is written, so the first key is the project written longest ago.
+ * to the end whenever it is written, so the first key is the project written longest ago. When the project just written
+ * alone holds more, its own views are dropped the same way, by key order, and the view just written stays.
  */
 import { useSyncExternalStore } from 'react';
 import { z } from 'zod';
@@ -52,21 +53,29 @@ const withProject = (byProject: ViewExceptions['byProject'], projectId: string, 
   return { version: 1, byProject: capped(next, projectId) };
 };
 
-/* Drops whole projects in key order until at most `maxExceptionViews` views remain. The project just written stays. */
+const countViews = (value: ViewExceptions['byProject']): number =>
+  Object.values(value).reduce((total, views) => total + Object.keys(views).length, 0);
+
+/* Drops whole projects in key order until at most `maxExceptionViews` views remain. The project just written goes
+ * last: when it alone holds more, its views are dropped in key order, and a view's key moves to the end whenever it is
+ * written, so the view just written stays. */
 const capped = (byProject: ViewExceptions['byProject'], keep: string): ViewExceptions['byProject'] => {
-  const count = (value: ViewExceptions['byProject']): number =>
-    Object.values(value).reduce((total, views) => total + Object.keys(views).length, 0);
   let next = byProject;
   for (const projectId of Object.keys(byProject)) {
-    if (count(next) <= maxExceptionViews) {
-      break;
+    if (countViews(next) <= maxExceptionViews) {
+      return next;
     }
     if (projectId !== keep) {
       const { [projectId]: _dropped, ...rest } = next;
       next = rest;
     }
   }
-  return next;
+  const kept = next[keep];
+  const excess = countViews(next) - maxExceptionViews;
+  if (kept === undefined || excess <= 0) {
+    return next;
+  }
+  return { ...next, [keep]: Object.fromEntries(Object.entries(kept).slice(excess)) };
 };
 
 const withView = (views: Views, viewId: string, leaves: readonly ViewFieldPath[]): Views => {

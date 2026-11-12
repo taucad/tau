@@ -47,7 +47,9 @@ describe('editable warehouse projects', () => {
       expect(findWarehousePart(part.locator)).toBe(part);
       const id = part.locator.replace('warehouse.', '');
       const paths = new Set(part.assets.map(({ path }) => path));
-      expect(paths.has(part.manifest.assets.main.entryPath)).toBe(true);
+      // A warehouse part always ships its model, so its manifest names the main entry.
+      expect(part.manifest.assets.main).toBeDefined();
+      expect(paths.has(part.manifest.assets.main?.entryPath ?? '')).toBe(true);
       for (const asset of part.assets) {
         const bytes = await asset.load();
         const expected = await readFile(join(packageRoot, 'parts', id, asset.path));

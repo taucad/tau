@@ -10,12 +10,12 @@
 # checks. PicoGK's upstream engine ships for osx-arm64 and win-x64 only, so its row runs in
 # `native-darwin.yml`.
 #
-# When it runs (CI throughput review, operator decision 2026-11-08): `ci.yml` calls it on a pull
-# request or merge group only when a project tagged `ci:standalone` is affected (`cli` and its
-# dependencies, `ui`, `types`, `scripts`, `tau-examples`, `runtime-e2e`), and on every push to
-# `main`; it also runs nightly on `main`, which catches a toolchain-only break (a Node, pnpm or
-# runner image change outside those projects) within a day. The nightly watchdog alerts on a red
-# nightly.
+# When it runs (CI throughput review, operator decision 2026-11-08; Brain ci-audit 2026-11-12,
+# F2): `ci.yml` calls it on every push to `main`, after the required gate, and never on a pull
+# request or in the merge queue; it also runs nightly on `main`, which catches a toolchain-only
+# break (a Node, pnpm or runner image change) within a day. In the queue it started after the
+# gate, so the queue run was still in progress at merge and was cancelled, and the push could not
+# reuse its verdict. The nightly watchdog alerts on a red nightly.
 #
 # The pypi row asks no third-party origin for a pinned byte it has fetched before (Brain
 # research/ci-flake-classes.md, class 1): Build123d's and SMLibPy's linux-x64 closures (CPython
@@ -23,7 +23,7 @@
 # the Actions cache under a key of the two manifests and the two project locks, and `tau prepare`
 # reads it through `TAU_DEPENDENCY_DIR`; uv's cache and its managed CPython ride in the same
 # entry for the native side. Only a pin change misses, and a passing run on `main` that missed
-# saves the entry, so the merge queue and pull requests restore it from `main`'s scope.
+# saves the entry, so later pushes, the nightly and a dispatch restore it from `main`'s scope.
 name: Standalone projects
 
 on:

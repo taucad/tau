@@ -87,7 +87,7 @@ describe('credential-free billing CI', () => {
     const selectors = JSON.parse(plan?.env?.['LANE_SELECTORS'] ?? '{}') as Record<string, unknown>;
     expect(selectors['billing']).toEqual({ targets: ['test:billing-foundation'] });
     expect(plan?.run).toContain('billing=$(flag billing)');
-    expect(plan?.run).toContain('echo "billing=$run_billing"');
+    expect(plan?.run).toContain('echo "billing=$billing"');
     // Assembled so the source holds no template-like string literal.
     expect(job(path, 'billing-e2e').if).toBe(
       ['$', "{{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.billing == 'true' }}"].join(''),

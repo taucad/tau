@@ -297,7 +297,7 @@ jobs:
           fi
 
   # The affected tasks run as parallel lanes on separate standard runners: lint,
-  # typecheck, build and its checks, and three test shards. One runner running every
+  # typecheck, build, three package-check shards and three test shards. One runner running every
   # task in turn took 1 h 40 min on a full graph (run 37221169741, 2026-10-04); the
   # lanes bring that down to the longest lane. Each lane keeps `--parallel=1`, which
   # its own 16 GB runner still needs (see `Run the lane's tasks`).
@@ -322,7 +322,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lane: [lint, typecheck, build, pkgcheck, test-1, test-2, test-3]
+        lane: [lint, typecheck, build, pkgcheck-1, pkgcheck-2, pkgcheck-3, test-1, test-2, test-3]
     steps:
       # Two commits in a queue run, full history otherwise (see `plan`).
       - name: Checkout
@@ -379,7 +379,7 @@ jobs:
             lint) pnpm nx affected -t lint --graph="$graph" > /dev/null ;;
             typecheck) pnpm nx affected -t typecheck --graph="$graph" > /dev/null ;;
             build) pnpm nx affected -t build size check-desktop-payload --graph="$graph" > /dev/null ;;
-            pkgcheck) pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --graph="$graph" > /dev/null ;;
+            pkgcheck-*) pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --graph="$graph" > /dev/null ;;
             test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
           esac
@@ -439,15 +439,35 @@ jobs:
             lint) pnpm nx affected -t lint --parallel=1 ;;
             typecheck) pnpm nx affected -t typecheck --parallel=1 ;;
             build) pnpm nx affected -t build size check-desktop-payload --parallel=1 ;;
-            pkgcheck)
+            pkgcheck-*)
+              # The three package-check shards deal the affected projects with a package
+              # check by measured uncached `pkgcheck` seconds, with the test shards' dealer
+              # and its own snapshot (scripts/src/pkgcheck-shard-durations.json): on a root
+              # package change about 47 checks of 40 to 330 s ran on one runner for up to
+              # 35 min. As for the test shards, the graph names the projects and every lane
+              # computes the same deal, so the shards partition them.
+              pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --graph="$RUNNER_TEMP/pkgcheck-graph.json" > /dev/null
+              projects=$(jq -c '
+                [.tasks.tasks[] | select(.target.target | IN("pkgcheck", "audit-public-surface", "readme-quickstart")) | .target.project]
+                | unique' "$RUNNER_TEMP/pkgcheck-graph.json")
+              shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "${LANE#pkgcheck-}" --shards 3 \
+                --durations scripts/src/pkgcheck-shard-durations.json)
+              if [ -z "$shard" ]; then
+                echo "No affected package checks in this shard."
+                exit 0
+              fi
+              echo "Shard projects: $shard"
               # publint, attw, madge and the surface checks are light, so they run three at
               # a time once their builds exist. The builds stay serial and land in the local
               # cache, so the checks reuse them.
-              projects=$(pnpm nx show projects --affected --with-target pkgcheck --json | tail -1 | jq -r 'join(",")')
-              if [ -n "$projects" ]; then
-                pnpm nx run-many -t build --projects "$projects" --parallel=1
+              built=$(jq -r --arg shard "$shard" '
+                ($shard | split(",")) as $mine
+                | [.tasks.tasks[] | select(.target.target == "pkgcheck") | .target.project]
+                | unique | map(select(IN($mine[]))) | join(",")' "$RUNNER_TEMP/pkgcheck-graph.json")
+              if [ -n "$built" ]; then
+                pnpm nx run-many -t build --projects "$built" --parallel=1
               fi
-              pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --parallel=3
+              pnpm nx run-many -t pkgcheck audit-public-surface readme-quickstart --projects "$shard" --parallel=3
               ;;
             test-*)
               # GeoSpec suites run here against the published `geospec-engine` prebuild for

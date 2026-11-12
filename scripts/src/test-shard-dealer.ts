@@ -10,6 +10,10 @@
  * This replaced the test-file-count weights, which had turned the shards into a fixed routing table
  * (tau-brain `research/ci-decomposition-blueprint.md` F2 and Part 4; charter W2).
  *
+ * The names are opaque, so other sharded lanes deal with it too, each from its own snapshot through `--durations`:
+ * the `pkgcheck-<n>` lanes deal the affected projects with a package check by measured `pkgcheck` seconds
+ * (`pkgcheck-shard-durations.json`).
+ *
  * Usage: node scripts/src/test-shard-dealer.ts --shard <n> [--shards <count>] [--durations <file>] < projects.json
  * Prints the shard's projects comma-separated (empty when it has none).
  * Exit codes: 0 success; 1 invalid input or duration snapshot; 2 usage.

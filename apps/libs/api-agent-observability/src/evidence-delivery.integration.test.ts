@@ -10,8 +10,9 @@ import { admitEvidence } from '#evidence-admission.js';
 import { deliveryTiming, EvidenceDeliveryService } from '#evidence-delivery.service.js';
 import { leasePending, settleDelivery, sweepBacklog } from '#evidence-delivery.js';
 import { sealEvidence } from '#evidence-seal.js';
+import { scoreAttempts } from '#langfuse-client.js';
 import { receiptSpanId } from '#langfuse-observation.js';
-import { evidenceFixture, privateMarker, providerFact, toolFact } from '#testing/evidence.fixture.js';
+import { evidenceFixture, outcomeFact, privateMarker, providerFact, toolFact } from '#testing/evidence.fixture.js';
 import { canonicalEvidence } from '@taucad/agent-observability/identity';
 import type { Evidence } from '@taucad/agent-observability/contract';
 import type { TelemetryPurposeService } from '#telemetry-purposes/telemetry-purpose.service.js';
@@ -90,7 +91,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
    * instruction (`summary`) maps to none.
    */
   const admitted = async (
-    plane: 'tool' | 'summary' | 'content' | 'generation' = 'tool',
+    plane: 'tool' | 'summary' | 'content' | 'generation' | 'outcome' | 'rating' = 'tool',
     owner?: Readonly<{ userId: string; projectId: string }>,
     { sequence = 7, text }: Readonly<{ sequence?: number; text?: string }> = {},
   ) => {
@@ -98,9 +99,17 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     const evidence = await evidenceFixture({
       principal: userId,
       project: projectId,
-      plane: plane === 'tool' ? 'summary' : plane === 'generation' ? 'content' : plane,
+      plane:
+        plane === 'tool' || plane === 'outcome'
+          ? 'summary'
+          : plane === 'generation'
+            ? 'content'
+            : plane === 'rating'
+              ? 'feedback'
+              : plane,
       sequence,
       ...(plane === 'tool' ? { fact: toolFact(), semantic: 'call-1' } : {}),
+      ...(plane === 'outcome' ? { fact: outcomeFact(), semantic: 'run-1' } : {}),
       ...(plane === 'generation'
         ? { fact: providerFact(), semantic: 'call-1', ...(text === undefined ? {} : { text }) }
         : {}),
@@ -132,10 +141,19 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     return found!;
   };
 
+  /* The three score configs as the operator enters them for this project (LW9). */
+  const scoreConfigs = {
+    'user-rating': 'cfg-rating',
+    'run-termination': 'cfg-termination',
+    'task-success': 'cfg-success',
+  };
   const service = (
     allowed: readonly TelemetryPurpose[] = ['summary', 'content'],
     keyVersion = 1,
-    failingProject?: string,
+    {
+      failingProject,
+      configs = scoreConfigs,
+    }: Readonly<{ failingProject?: string; configs?: Readonly<Record<string, string>> }> = {},
   ) => {
     const config = mock<ConfigService>();
     /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
@@ -148,6 +166,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       LANGFUSE_SECRET_KEY: 'sk-test',
       BILLING_ENVIRONMENT: environment,
       NODE_ENV: 'test',
+      TAU_OBSERVABILITY_SCORE_CONFIG_IDS: configs,
     };
     /* eslint-enable @typescript-eslint/naming-convention -- end of the environment table */
     config.get.mockImplementation((name: string) => values[name]);
@@ -334,7 +353,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     );
     const now = new Date();
 
-    const counts = await service(['summary', 'content'], 1, failing.projectId).drain(now);
+    const counts = await service(['summary', 'content'], 1, { failingProject: failing.projectId }).drain(now);
 
     /* Nothing was sent for the failed row, so it backs off and is sent again; it is not left leased. */
     const failed = await row(failing.receiptId);
@@ -435,6 +454,147 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     expect(await row(receiptId)).toMatchObject({ payload: null });
   });
 
+  /** Every request the vendor stub was sent, by route and in order, with each score post's one score. */
+  const captureScores = (scoreStatus = 202) => {
+    const requests: Array<{ route: 'span' | 'score' | 'read'; score?: Record<string, unknown> }> = [];
+    vendor(async (url, init) => {
+      if (url.pathname === '/api/public/scores') {
+        const [score] = JSON.parse(typeof init?.body === 'string' ? init.body : '[]') as Array<Record<string, unknown>>;
+        requests.push({ route: 'score', score: score! });
+        return json(scoreStatus, {});
+      }
+      requests.push({ route: url.pathname.endsWith('/otel/v1/traces') ? 'span' : 'read' });
+      return json(200, { data: [], meta: {} });
+    });
+    return requests;
+  };
+  const scoresOf = (requests: ReturnType<typeof captureScores>, traceId?: string) =>
+    requests.flatMap((request) =>
+      request.score === undefined || (traceId !== undefined && request.score['traceId'] !== traceId)
+        ? []
+        : [request.score],
+    );
+
+  it('should write a rating as one user-rating score and no span, settled by its answer alone', async () => {
+    const { receiptId } = await admitted('rating');
+    const requests = captureScores();
+
+    await service(['feedback']).drain(new Date());
+
+    const [score] = scoresOf(requests);
+    expect(scoresOf(requests)).toHaveLength(1);
+    expect(score).toMatchObject({ name: 'user-rating', value: 0, dataType: 'BOOLEAN', configId: 'cfg-rating' });
+    expect(JSON.stringify(requests)).not.toContain(receiptId);
+    expect(await row(receiptId)).toMatchObject({ state: 'confirmed', payload: null, objectId: null });
+    expect(metrics.agentEvidenceScores.add).toHaveBeenCalledWith(1, {
+      'tau.agent_evidence.score': 'user-rating',
+      'tau.agent_evidence.score_configured': 'true',
+      outcome: 'accepted',
+    });
+    expect(metrics.agentEvidenceLangfuseUnits.add.mock.calls).toEqual([[1, { kind: 'score' }]]);
+  });
+
+  it("should write an outcome's root once, then its run-termination and task-success scores on that root", async () => {
+    const { receiptId } = await admitted('outcome');
+    const requests = captureScores();
+
+    await service().drain(new Date());
+
+    const { traceId, objectId } = await row(receiptId);
+    const scores = scoresOf(requests, traceId!);
+    expect(scores.map((score) => [score['name'], score['value'], score['configId'], score['observationId']])).toEqual([
+      ['run-termination', 'completed', 'cfg-termination', objectId],
+      ['task-success', 1, 'cfg-success', objectId],
+    ]);
+    expect(requests.findIndex((request) => request.route === 'span')).toBeLessThan(
+      requests.findIndex((request) => request.score?.['traceId'] === traceId),
+    );
+  });
+
+  it("should still write a later outcome's scores when the first outcome already wrote the run's root", async () => {
+    const owner = await account();
+    const first = await admitted('outcome', owner, { sequence: 7 });
+    const resumed = await admitted('outcome', owner, { sequence: 9 });
+    const requests = captureScores();
+
+    await service().drain(new Date());
+
+    const rows = [await row(first.receiptId), await row(resumed.receiptId)];
+    expect(rows.map((item) => item.state).sort()).toEqual(['superseded', 'uncertain']);
+    const traceId = rows.find((item) => item.traceId !== null)!.traceId!;
+    const terminations = scoresOf(requests, traceId).filter((score) => score['name'] === 'run-termination');
+    expect(new Set(terminations.map((score) => score['id'])).size).toBe(2);
+  });
+
+  it('should deliver the root and its scores without configId when no score config id is set', async () => {
+    const { receiptId } = await admitted('outcome');
+    const requests = captureScores();
+
+    await service(['summary'], 1, { configs: {} }).drain(new Date());
+
+    const delivered = await row(receiptId);
+    expect(delivered.state).not.toBe('pending');
+    expect(delivered.payload).toBeNull();
+    expect(requests.some((request) => request.route === 'span')).toBe(true);
+    const scores = scoresOf(requests, delivered.traceId!);
+    expect(scores.map((score) => [score['name'], score['value'], score['dataType']])).toEqual([
+      ['run-termination', 'completed', 'CATEGORICAL'],
+      ['task-success', 1, 'BOOLEAN'],
+    ]);
+    for (const score of scores) {
+      expect(score).not.toHaveProperty('configId');
+      expect(score['observationId']).toBe(delivered.objectId);
+    }
+    expect(metrics.agentEvidenceScores.add).toHaveBeenCalledWith(1, {
+      'tau.agent_evidence.score': 'task-success',
+      'tau.agent_evidence.score_configured': 'false',
+      outcome: 'accepted',
+    });
+  });
+
+  it('should settle a rating whose score Langfuse refused rejected, and never send it again', async () => {
+    const { receiptId } = await admitted('rating');
+    const requests = captureScores(207);
+    const delivery = service(['feedback']);
+    const now = new Date();
+
+    await delivery.drain(now);
+    await delivery.drain(new Date(now.getTime() + deliveryTiming.maxBackoffMilliseconds + 1));
+
+    expect(await row(receiptId)).toMatchObject({ state: 'rejected', reason: 'partial', payload: null });
+    expect(scoresOf(requests)).toHaveLength(1);
+    expect(metrics.agentEvidenceScores.add).toHaveBeenCalledWith(1, {
+      'tau.agent_evidence.score': 'user-rating',
+      'tau.agent_evidence.score_configured': 'true',
+      outcome: 'rejected',
+    });
+  });
+
+  it('should expire a rating whose score stayed uncertain after its bounded repeats, and count it uncertain', async () => {
+    const { receiptId } = await admitted('rating');
+    const requests = captureScores(503);
+
+    await service(['feedback']).drain(new Date());
+
+    expect(await row(receiptId)).toMatchObject({ state: 'expired', reason: 'score-uncertain', payload: null });
+    expect(new Set(scoresOf(requests).map((score) => score['id'])).size).toBe(1);
+    expect(scoresOf(requests)).toHaveLength(scoreAttempts);
+    expect(metrics.agentEvidenceDeliveries.add).toHaveBeenCalledWith(1, { outcome: 'uncertain' });
+  });
+
+  it('should retry a rating whose score write never reached Langfuse', async () => {
+    const { receiptId } = await admitted('rating');
+    vendor(() => {
+      throw new TypeError('fetch failed', { cause: Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }) });
+    });
+
+    await service(['feedback']).drain(new Date());
+
+    const retried = await row(receiptId);
+    expect(retried).toMatchObject({ state: 'pending', reason: 'econnrefused' });
+    expect(retried.payload).not.toBeNull();
+  });
+
   it('should fence a settlement to the lease holder and reconcile a send whose worker died', async () => {
     const { receiptId } = await admitted();
     const now = new Date();
@@ -485,7 +645,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       expect(units()).toEqual([[1, { kind: 'observation' }]]);
     });
 
-    it("should count a trace as well for a span with no parent, a run's root", async () => {
+    it("should count a trace as well for a span with no parent, a run's root, and a score for each accepted score", async () => {
       const owner = await account();
       await admittedFact(owner, outcomeFact, 'outcome-1');
       accepting();
@@ -496,9 +656,10 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
         expect.arrayContaining([
           [1, { kind: 'observation' }],
           [1, { kind: 'trace' }],
+          [1, { kind: 'score' }],
         ]),
       );
-      expect(units()).toHaveLength(2);
+      expect(units()).toHaveLength(3);
     });
 
     it('should count nothing for a receipt that maps to no object or names one another receipt writes', async () => {

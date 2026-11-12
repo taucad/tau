@@ -2,10 +2,11 @@
 import { createHash, createHmac, hkdfSync } from 'node:crypto';
 import type { Evidence } from '@taucad/agent-observability/contract';
 import { evidenceKeys } from '@taucad/agent-observability/identity';
-import { reportedToolName } from '@taucad/agent-observability/projection';
+import { ratingScale, reportedToolName } from '@taucad/agent-observability/projection';
 import { phaseDurations } from '@taucad/agent-observability/scorecard';
 import { redactPersonal } from '@taucad/agent-observability/content-redaction';
 import type { PersonalIdentity } from '@taucad/agent-observability/content-redaction';
+import type { LangfuseScoreName } from '@taucad/api-core';
 import type { SourceProtection } from '#evidence-admission.js';
 
 /** One OTLP attribute value in the JSON encoding Langfuse's v4 endpoint accepts. */
@@ -114,6 +115,10 @@ export const runRootSpanId = (environment: string, principal: string, run: strin
  */
 export const receiptSpanId = (environment: string, receipt: string): string =>
   sha256('tau-span', environment, receipt).slice(0, 16);
+
+/* A trace's id: one per (environment, principal, run), or per helper or direct call. */
+const traceIdOf = (environment: string, principal: string, key: string): string =>
+  sha256('tau-trace', environment, principal, key).slice(0, 32);
 
 /**
  * The keyed group a contract id reaches the vendor as: the same id under the same principal always joins, and no
@@ -303,7 +308,7 @@ const mappingOf = (evidence: Evidence, context: ObservationContext, pseudonym: U
     context,
     group,
     kind,
-    traceId: sha256('tau-trace', environment, principal, traceKey).slice(0, 32),
+    traceId: traceIdOf(environment, principal, traceKey),
     rootId: runRootSpanId(environment, principal, evidence.execution.attempt),
     chat,
     common: (traceName) =>
@@ -706,9 +711,9 @@ const rootSpans = (mapping: Mapping, fact: OutcomeFact, content?: ContentPayload
 };
 
 /**
- * A fact that becomes a Langfuse object of its own only until its package moves it: a settlement onto its generation
- * (LW4), a rating into a score (LW7). Until then it is a point-in-time span under the run's root that keeps the closed
- * `fact.*` metadata the ledger reconciliation reads.
+ * A settlement, which is a Langfuse object of its own only until LW4 moves its values onto its generation. Until then
+ * it is a point-in-time span under the run's root that keeps the closed `fact.*` metadata the ledger reconciliation
+ * reads.
  */
 const transitionalSpan = (mapping: Mapping, name: string, fact: Readonly<Record<string, unknown>>): OtlpSpan => {
   const at = nanoseconds(startOf(mapping.evidence));
@@ -839,7 +844,8 @@ export const langfuseObservation = (
   const spans = ((): OtlpSpan[] | undefined => {
     const { payload } = mapping.evidence;
     if (payload.plane === 'feedback') {
-      return payload.fact.kind === 'rating' ? [transitionalSpan(mapping, 'tau.rating', payload.fact)] : undefined;
+      /* A rating is a score on the root (LW7, LI5); no feedback fact is an observation. */
+      return undefined;
     }
     const { fact } = payload;
     switch (fact.kind) {
@@ -864,6 +870,72 @@ export const langfuseObservation = (
   return spans === undefined || object === undefined
     ? undefined
     : { identity: { traceId: object.traceId, spanId: object.spanId }, spans };
+};
+
+/**
+ * One Langfuse score, as Tau writes it with `POST /api/public/scores` (LW7): on a run's root observation, with an id
+ * from its source fact and name and the fact's own time, so a repeat of the same write replaces itself (LD5). The
+ * client adds the score config's id from the deployment's setting.
+ */
+export type LangfuseScore = Readonly<{
+  id: string;
+  traceId: string;
+  observationId: string;
+  name: LangfuseScoreName;
+  value: number | string;
+  dataType: 'BOOLEAN' | 'CATEGORICAL';
+  timestamp: string;
+  environment: string;
+}>;
+
+/* The categories of the `run-termination` config; an `unknown` ending is none of them and writes no score. */
+const terminationCategories: ReadonlySet<string> = new Set(['completed', 'cancelled', 'failed', 'abandoned']);
+
+/**
+ * The scores one receipt writes (LW7, LD7): a rating is `user-rating` (1 positive, 0 negative); an outcome is
+ * `run-termination`, one per terminal row so a resumed run has two, and `task-success` when rule `cad-checks-v1`
+ * decided it (1 verified, 0 failed). Each is on its run's root, whether or not this receipt writes that root. Every other
+ * fact writes none. No account, chat or record id is in a score: its trace and observation ids are the run's digests.
+ *
+ * @param evidence - The opened, previously validated evidence, as it may be exported now.
+ * @param context - Server facts about the receipt; only its environment is used.
+ * @returns The scores, in a fixed order, or none.
+ */
+export const langfuseScores = (
+  evidence: Evidence,
+  context: Pick<ObservationContext, 'environment'>,
+): LangfuseScore[] => {
+  const { environment } = context;
+  const { principal } = evidence.scope;
+  const run = evidence.execution.attempt;
+  const { source } = evidenceKeys(evidence);
+  const score = (
+    name: LangfuseScoreName,
+    value: LangfuseScore['value'],
+    dataType: LangfuseScore['dataType'],
+  ): LangfuseScore => ({
+    id: sha256('tau-score', environment, principal, source, name).slice(0, 32),
+    traceId: traceIdOf(environment, principal, run),
+    observationId: runRootSpanId(environment, principal, run),
+    name,
+    value,
+    dataType,
+    timestamp: new Date(startOf(evidence)).toISOString(),
+    environment,
+  });
+  const { fact } = evidence.payload;
+  if (evidence.payload.plane === 'feedback') {
+    return fact.kind === 'rating' && fact.scale === ratingScale
+      ? [score('user-rating', fact.value === 'positive' ? 1 : 0, 'BOOLEAN')]
+      : [];
+  }
+  if (fact.kind !== 'outcome') {
+    return [];
+  }
+  return [
+    ...(terminationCategories.has(fact.termination) ? [score('run-termination', fact.termination, 'CATEGORICAL')] : []),
+    ...(fact.success === 'unknown' ? [] : [score('task-success', fact.success === 'verified' ? 1 : 0, 'BOOLEAN')]),
+  ];
 };
 
 /**

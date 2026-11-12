@@ -675,6 +675,43 @@ describe('environmentSchema', () => {
     }
   });
 
+  it.each([
+    [undefined, {}],
+    ['', {}],
+    [
+      'user-rating=cfg-rating, run-termination=cfg_termination,task-success=cfg3',
+      { 'user-rating': 'cfg-rating', 'run-termination': 'cfg_termination', 'task-success': 'cfg3' },
+    ],
+    ['task-success=cfg3', { 'task-success': 'cfg3' }],
+  ])('should parse the Langfuse score config ids %j', (value, expected) => {
+    const result = environmentSchema.safeParse({
+      ...baseEnvironment(),
+      NODE_ENV: 'development',
+      TAU_OBSERVABILITY_SCORE_CONFIG_IDS: value,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.TAU_OBSERVABILITY_SCORE_CONFIG_IDS).toEqual(expected);
+    }
+  });
+
+  it.each(['reply-quality=cfg1', 'user-rating', 'user-rating=not an id', 'user-rating=a,user-rating=b'])(
+    'should refuse the Langfuse score config ids %j',
+    (value) => {
+      const result = environmentSchema.safeParse({
+        ...baseEnvironment(),
+        NODE_ENV: 'development',
+        TAU_OBSERVABILITY_SCORE_CONFIG_IDS: value,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.map((issue) => issue.path[0])).toContain('TAU_OBSERVABILITY_SCORE_CONFIG_IDS');
+      }
+    },
+  );
+
   it('should treat the empty GitHub repository App values of a copied .env.example as unconfigured', () => {
     const result = environmentSchema.safeParse({
       ...baseEnvironment(),

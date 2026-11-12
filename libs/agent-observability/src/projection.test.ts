@@ -120,8 +120,10 @@ describe('projectRun', () => {
         plane: 'summary',
         fact: { kind: 'cad', result: 'passed', exportRequested: false, artifact: null },
       });
-      /* The run's success stays unknown: a passed check decides its requirements, not the task. */
-      expect(projection.evidence[2]?.payload).toMatchObject({ fact: { kind: 'outcome', success: 'unknown' } });
+      /* The run completed and its only check, at the final revision, passed: the rule decides it verified. */
+      expect(projection.evidence[2]?.payload).toMatchObject({
+        fact: { kind: 'outcome', success: 'verified', assessment: 'cad-checks-v1' },
+      });
       for (const text of ['SYNTHETIC_ENTRY', 'SYNTHETIC_PATH', 'SYNTHETIC_SPEC']) {
         expect(JSON.stringify(projection)).not.toContain(text);
       }
@@ -146,6 +148,77 @@ describe('projectRun', () => {
       const projection = await projectRun(checked({ revision: [] }), context());
 
       expect(projection.evidence.map((evidence) => evidence.semantic.kind)).toEqual(['tool', 'outcome']);
+    });
+  });
+
+  describe('the cad-checks-v1 assessor (LW7)', () => {
+    /* A tool call at row `startedAt`, `startedAt` seconds into the run, with its check's result when it ran one. */
+    const tool = (
+      [call, toolName, startedAt]: readonly [call: string, toolName: string, startedAt: number],
+      check?: 'passed' | 'failed' | 'inconclusive',
+    ): ProjectedRun['tools'][number] => ({
+      call,
+      toolName,
+      outcome: 'completed',
+      input: row(startedAt),
+      output: row(startedAt + 1),
+      startedAt: at + startedAt * 1000,
+      settledAt: at + startedAt * 1000 + 500,
+      ...(check === undefined
+        ? {}
+        : { check: { result: check, revision: [`m\u0000m=sha256:${'a'.repeat(64)}`], requirements: [] } }),
+    });
+    const success = async (change: Partial<ProjectedRun>) => {
+      const projection = await projectRun(run(change), context());
+      const outcome = projection.evidence.find((evidence) => evidence.semantic.kind === 'outcome')!;
+      expect(evidenceSchema.safeParse(outcome).success).toBe(true);
+      return outcome.payload.plane === 'summary' && outcome.payload.fact.kind === 'outcome'
+        ? { success: outcome.payload.fact.success, assessment: outcome.payload.fact.assessment }
+        : undefined;
+    };
+    const verified = { success: 'verified', assessment: 'cad-checks-v1' };
+    const failed = { success: 'failed', assessment: 'cad-checks-v1' };
+    const unknown = { success: 'unknown', assessment: null };
+
+    it('decides a completed run whose checks at the final revision all passed verified', async () => {
+      expect(
+        await success({ tools: [tool(['c1', 'edit_file', 3]), tool(['c2', 'test_model', 10], 'passed')] }),
+      ).toEqual(verified);
+    });
+
+    it('decides a completed run failed when a check at the final revision failed', async () => {
+      expect(
+        await success({
+          tools: [tool(['c1', 'test_model', 3], 'passed'), tool(['c2', 'test_model', 10], 'failed')],
+        }),
+      ).toEqual(failed);
+    });
+
+    it('judges only the checks after the last edit, so an earlier failure that was fixed does not count', async () => {
+      expect(
+        await success({
+          tools: [
+            tool(['c1', 'test_model', 3], 'failed'),
+            tool(['c2', 'edit_file', 10]),
+            tool(['c3', 'test_model', 20], 'passed'),
+          ],
+        }),
+      ).toEqual(verified);
+    });
+
+    it('cannot decide a run with no check, no check after its last edit, or no decided check', async () => {
+      expect(await success({ tools: [tool(['c1', 'edit_file', 3])] })).toEqual(unknown);
+      expect(
+        await success({ tools: [tool(['c1', 'test_model', 3], 'passed'), tool(['c2', 'edit_file', 10])] }),
+      ).toEqual(unknown);
+      expect(await success({ tools: [tool(['c1', 'test_model', 3], 'inconclusive')] })).toEqual(unknown);
+    });
+
+    it('decides nothing for a run that did not complete, whatever its checks said', async () => {
+      for (const termination of ['failed', 'cancelled', 'abandoned', 'unknown'] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one termination at a time keeps the failure readable
+        expect(await success({ termination, tools: [tool(['c1', 'test_model', 3], 'passed')] })).toEqual(unknown);
+      }
     });
   });
 

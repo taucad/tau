@@ -1166,12 +1166,12 @@ describe('placement and settlement per attempt (RA-S13)', () => {
     let failing = true;
     const flaky: ModelTransport = {
       funding: { type: 'unfunded' },
-      async *stream(): AsyncGenerator<ModelStreamEvent> {
+      async *stream(request): AsyncGenerator<ModelStreamEvent> {
         if (failing) {
           failing = false;
           throw Object.assign(new Error('Busy.'), { code: 'RATE_LIMITED' });
         }
-        yield* done.stream();
+        yield* done.stream(request);
       },
     };
     const host = createTauAgentHost({

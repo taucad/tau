@@ -41,7 +41,7 @@ import type {
 import { createNodeAttachmentReader } from '@taucad/agent-host/node';
 import { createSkillBundleRegistry } from '@taucad/agent-tools/registry';
 import { tauMcpInstructions } from '@taucad/mcp';
-import { tauMcpKernelDigest } from '@taucad/chat/prompts/kernel-routing-surfaces';
+import { tauMcpKernelDigest } from '@taucad/chat/prompts/kernel-routing-digest';
 import { isRecord } from '@taucad/utils/schema';
 import type { QuestionRecordFileSystem } from '@taucad/chat/rpc';
 

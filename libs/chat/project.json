@@ -23,7 +23,7 @@
         "cwd": "{workspaceRoot}",
         "commands": [
           "node libs/chat/scripts/generate-kernel-routing.ts",
-          "oxfmt packages/agent-plugin/skills/tau/SKILL.md apps/www/content/agent/llms.md"
+          "oxfmt packages/agent-plugin/skills/tau/SKILL.md apps/www/content/agent/llms.md libs/chat/src/prompts/kernel-routing-digest.ts"
         ],
         "parallel": false
       }

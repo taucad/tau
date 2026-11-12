@@ -7,10 +7,11 @@ import {
   normalizeMarkdownTables,
   pluginKernelProfile,
   readGeneratedRegion,
-  tauMcpKernelDigest,
+  renderTauMcpKernelDigest,
   tauMcpKernelProfile,
   writeGeneratedRegion,
 } from '#prompts/kernel-routing-surfaces.js';
+import { tauMcpKernelDigest } from '#prompts/kernel-routing-digest.js';
 
 const root = resolve(import.meta.dirname, '../../../..');
 
@@ -24,6 +25,12 @@ describe('the kernel routing surfaces', () => {
       normalizeMarkdownTables(stored ?? ''),
       `${path} is stale: run pnpm nx run chat:generate-kernel-routing`,
     ).toBe(normalizeMarkdownTables(render()));
+  });
+
+  it('should hold the current tau mcp digest in the generated module', () => {
+    expect(tauMcpKernelDigest, 'kernel-routing-digest.ts is stale: run pnpm nx run chat:generate-kernel-routing').toBe(
+      renderTauMcpKernelDigest(),
+    );
   });
 
   it('should name no default kernel in a generated region', () => {

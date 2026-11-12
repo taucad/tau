@@ -9,7 +9,7 @@ import {
   workbenchTabSchema,
 } from '@taucad/workbench';
 import { fileDigestSchema, refusalReasons } from '#schemas/tools/arrange-workbench.tool.schema.js';
-import { messageStatuses } from '#constants/message.constants.js';
+import { messageStatuses, snapshotKernelUnavailableReason } from '#constants/message.constants.js';
 import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
 import { cadReferencesSchema } from '#references/cad-reference.schema.js';
 import { kernelPreferences, kernelProviders } from '@taucad/types/constants';
@@ -50,9 +50,6 @@ const fileReferenceSchema = z.union([
 
 /** The most files a snapshot's `fileTree` lists (D18). @public */
 export const maxSnapshotFileTreeEntries = 500;
-
-/** The one reason the snapshot gives for a kernel it does not offer: never the account's plan (blueprint D4). @public */
-export const snapshotKernelUnavailableReason = 'not available here';
 
 /**
  * The snapshot's `kernel` object (automatic kernel selection blueprint D4, AKS-7): what an external agent needs to

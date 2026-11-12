@@ -72,7 +72,6 @@ export const CadViewer = memo(
     const { graphicsBackend } = useViewerEnvironment();
     const gpuAvailable = useGraphicsSelector((state) => state.context.webGpuAvailable);
     const isGpuProbeSettled = useGraphicsSelector((state) => !state.hasTag('backend-probing'));
-    const requestedGltfRevision = useGraphicsSelector((state) => state.context.gltfPresentation.requestedRevision);
 
     const graphicsBackendEffective = resolveGraphicsBackendPreference(graphicsBackend, gpuAvailable);
 
@@ -85,10 +84,8 @@ export const CadViewer = memo(
     if (known?.mimeType === 'model/gltf-binary') {
       scene = (
         <GltfMesh
-          gltfFile={known.content}
           sourceFile={sourceFile}
           geometryHash={artifactHash}
-          presentationRevision={requestedGltfRevision}
           enableMatcap={enableMatcap}
           enableSurfaces={enableSurfaces}
           enableLines={enableLines}

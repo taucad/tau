@@ -230,6 +230,17 @@ describe('ModelViewer', () => {
       );
     });
 
+    it('should send the source file, which names the model unit, and an empty hash when none is given (G11b)', () => {
+      render(<ModelViewer artifact={testArtifact} artifactHash={undefined} sourceFile='src/main.ts' />);
+
+      expect(mockSend).toHaveBeenCalledWith({
+        type: 'updateArtifact',
+        artifact: testArtifact,
+        hash: '',
+        sourceFile: 'src/main.ts',
+      });
+    });
+
     it('should not send updateGeometry when geometry is absent', () => {
       render(<ModelViewer artifact={undefined} artifactHash={undefined} />);
 

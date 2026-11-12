@@ -69,6 +69,7 @@
     "./graphics/three/controls/section-handles": "./src/graphics/three/controls/section-handles.ts",
     "./graphics/three/controls/viewport-gizmo-styles": "./src/graphics/three/controls/viewport-gizmo-styles.ts",
     "./graphics/three/gltf-world": "./src/graphics/three/gltf-world.ts",
+    "./graphics/world-conventions": "./src/graphics/world-conventions.ts",
     "./graphics/three/materials/infinite-grid-material": "./src/graphics/three/materials/infinite-grid-material.ts",
     "./graphics/three/materials/infinite-grid-material.node": "./src/graphics/three/materials/infinite-grid-material.node.ts",
     "./graphics/three/post-processing-settings": "./src/graphics/three/post-processing-settings.ts",
@@ -301,6 +302,11 @@
         "types": "./dist/graphics/three/gltf-world.d.mts",
         "import": "./dist/graphics/three/gltf-world.mjs",
         "default": "./dist/graphics/three/gltf-world.mjs"
+      },
+      "./graphics/world-conventions": {
+        "types": "./dist/graphics/world-conventions.d.mts",
+        "import": "./dist/graphics/world-conventions.mjs",
+        "default": "./dist/graphics/world-conventions.mjs"
       },
       "./graphics/three/materials/infinite-grid-material": {
         "types": "./dist/graphics/three/materials/infinite-grid-material.d.mts",

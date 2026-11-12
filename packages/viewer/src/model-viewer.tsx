@@ -225,10 +225,11 @@ const ModelViewerCore = memo(function ModelViewerCore({
   useEffect(() => {
     if (emptyModel || (effectiveState === 'ready' && !error && !knownArtifact)) {
       graphicsRef.send({ type: 'clearArtifact' });
-    } else if (knownArtifact && artifactHash !== undefined) {
-      graphicsRef.send({ type: 'updateArtifact', artifact: knownArtifact, hash: artifactHash });
+    } else if (knownArtifact) {
+      // Graphics presents the GLB it is sent: its source file names the model unit, as the mesh's prop did.
+      graphicsRef.send({ type: 'updateArtifact', artifact: knownArtifact, hash: artifactHash ?? '', sourceFile });
     }
-  }, [knownArtifact, artifactHash, graphicsRef, effectiveState, emptyModel, error]);
+  }, [knownArtifact, artifactHash, graphicsRef, effectiveState, emptyModel, error, sourceFile]);
 
   if (error && !artifact) {
     return (

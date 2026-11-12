@@ -1,12 +1,19 @@
-import { createActor, createAsyncLogic } from 'xstate';
+import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
+import { Box3, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { clearRendererSpans, onViewerEvent, rendererSpans } from '#lib/renderer-telemetry.js';
 import type { ViewerTelemetryEvent } from '#lib/viewer-events.js';
-import type { GeometryComponentManifest } from '@taucad/types';
+import type { GeometryComponentBounds, GeometryComponentManifest } from '@taucad/types';
 import type { Mechanism } from '@taucad/kinematics';
 import type { GltfPresentationTelemetry, GraphicsEvent } from '#machines/graphics.machine.js';
-import { graphicsMachine } from '#machines/graphics.machine.js';
-import { deriveModelInteractionUnitId } from '#machines/model-interaction.machine.js';
+import { graphicsMachine, selectComponentFocus } from '#machines/graphics.machine.js';
+import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
+import type {
+  PresentationHostCommand,
+  PresentationHostLogic,
+  PresentationRequest,
+} from '#machines/presentation.machine.js';
+import { applyCanonicalGltfBounds } from '#graphics/three/gltf-world.js';
 
 const createGraphicsActor = () =>
   createActor(
@@ -309,6 +316,25 @@ describe('graphics presentation seams the presentation actor keeps (G11b)', () =
       actor.stop();
     }
   });
+  it('should hand the model interaction each of two hashless GLBs in turn', () => {
+    const actor = createGraphicsActor();
+    actor.start();
+    try {
+      // The host leaves a hashless request's manifest unhashed, so the second is not taken for the first.
+      const first: GeometryComponentManifest = { ...manifest, geometryHash: undefined };
+      const second: GeometryComponentManifest = { ...manifest, geometryHash: undefined, nodeOrder: ['root', 'part'] };
+      const unitId = deriveModelInteractionUnitId({});
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: '' });
+      actor.send({ type: 'gltfPresentationCommitted', revision: 1, key: '', unitId, manifest: first });
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: '' });
+      actor.send({ type: 'gltfPresentationCommitted', revision: 2, key: '', unitId, manifest: second });
+      const held = actor.getSnapshot().context.modelInteractionRef.getSnapshot().context.unitsById[unitId]?.manifest;
+      expect(held).toBe(second);
+    } finally {
+      actor.stop();
+    }
+  });
+
   it('should keep the unit named when a GLB of a file is replaced by a non-GLB artifact of the same file', () => {
     const actor = createGraphicsActor();
     actor.start();
@@ -487,6 +513,344 @@ describe('graphics presentation events (G11b)', () => {
       ]);
     } finally {
       actor.stop();
+    }
+  });
+});
+
+describe('graphics presentation actor (G11b)', () => {
+  type HostCommand = PresentationHostCommand['type'] | 'stopped';
+
+  /** A host that records what the presentation asks of it, and when it stops. */
+  const recordingHost = (log: string[], name: string): PresentationHostLogic =>
+    createCallbackLogic<PresentationHostCommand, undefined>(({ receive }) => {
+      receive((command) => {
+        log.push(
+          command.type === 'prepare'
+            ? `${name} prepare ${command.request.revision}:${command.request.key} ${command.request.unitId}`
+            : `${name} ${command.type satisfies HostCommand}`,
+        );
+      });
+      return () => {
+        log.push(`${name} ${'stopped' satisfies HostCommand}`);
+      };
+    });
+
+  const presentationState = (actor: ReturnType<typeof createGraphicsActor>): unknown =>
+    actor.getSnapshot().context.presentationRef.getSnapshot().value;
+
+  it('should hand each GLB request to the mounted host, and cancel it when the artifact clears or is not a GLB', () => {
+    const actor = createGraphicsActor();
+    const log: string[] = [];
+    actor.start();
+    try {
+      const first = artifact();
+      // A request made before any host waits for one.
+      actor.send({ type: 'updateArtifact', artifact: first, hash: 'a', sourceFile: 'main.ts' });
+      expect(presentationState(actor)).toBe('idle');
+      actor.send({ type: 'presentationHostAttached', hostId: 'one', host: recordingHost(log, 'one') });
+      expect(presentationState(actor)).toBe('preparing');
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'b', sourceFile: 'main.ts' });
+      actor.send({
+        type: 'updateArtifact',
+        artifact: { mimeType: 'image/svg+xml', content: '<svg/>' },
+        hash: 'svg',
+        sourceFile: 'main.ts',
+      });
+      expect(presentationState(actor)).toBe('idle');
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'c' });
+      actor.send({ type: 'clearArtifact' });
+
+      const unit = (hash: string, sourceFile?: string): string =>
+        deriveModelInteractionUnitId({ sourceFile, geometryHash: hash });
+      expect(log).toEqual([
+        `one prepare 1:a ${unit('a', 'main.ts')}`,
+        `one prepare 2:b ${unit('b', 'main.ts')}`,
+        'one cancel',
+        `one prepare 4:c ${unit('c')}`,
+        'one cancel',
+      ]);
+      expect(presentationState(actor)).toBe('idle');
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should hand the request its bytes, as graphics received them', () => {
+    const actor = createGraphicsActor();
+    const requests: PresentationRequest[] = [];
+    actor.start();
+    try {
+      const glb = artifact();
+      actor.send({
+        type: 'presentationHostAttached',
+        hostId: 'one',
+        host: createCallbackLogic<PresentationHostCommand, undefined>(({ receive }) => {
+          receive((command) => {
+            if (command.type === 'prepare') {
+              requests.push(command.request);
+            }
+          });
+        }),
+      });
+      actor.send({ type: 'updateArtifact', artifact: glb, hash: 'a', sourceFile: 'main.ts' });
+      expect(requests).toEqual([
+        {
+          revision: 1,
+          key: 'a',
+          unitId: deriveModelInteractionUnitId({ sourceFile: 'main.ts', geometryHash: 'a' }),
+          sourceFile: 'main.ts',
+          bytes: glb.content,
+        },
+      ]);
+      expect(requests[0]?.bytes).toBe(glb.content);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should stop a host that leaves, ignore a stale leave, and prepare the request in hand on the next host', () => {
+    const actor = createGraphicsActor();
+    const log: string[] = [];
+    actor.start();
+    try {
+      actor.send({ type: 'presentationHostAttached', hostId: 'one', host: recordingHost(log, 'one') });
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      // A new host replaces the old one, which stops, and prepares the request in hand again.
+      actor.send({ type: 'presentationHostAttached', hostId: 'two', host: recordingHost(log, 'two') });
+      // The old host's leave arrives late: the new host keeps the slot.
+      actor.send({ type: 'presentationHostDetached', hostId: 'one' });
+      expect(presentationState(actor)).toBe('preparing');
+      actor.send({ type: 'presentationHostDetached', hostId: 'two' });
+      expect(presentationState(actor)).toBe('idle');
+      actor.send({ type: 'presentationHostAttached', hostId: 'three', host: recordingHost(log, 'three') });
+
+      const unit = deriveModelInteractionUnitId({ geometryHash: 'a' });
+      expect(log).toEqual([
+        `one prepare 1:a ${unit}`,
+        'one stopped',
+        `two prepare 1:a ${unit}`,
+        'two stopped',
+        `three prepare 1:a ${unit}`,
+      ]);
+    } finally {
+      actor.stop();
+    }
+    // Graphics stops the presentation, and the presentation its host.
+    expect(log.at(-1)).toBe('three stopped');
+  });
+
+  it('should follow the request through the section barrier to presented or failed, by revision and key', () => {
+    const actor = createGraphicsActor();
+    actor.start();
+    try {
+      actor.send({ type: 'presentationHostAttached', hostId: 'one', host: recordingHost([], 'one') });
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      actor.send({ type: 'gltfDisplayReady', revision: 1, key: 'a', barrier: 'analysis-ready' });
+      expect(presentationState(actor)).toBe('awaitingAnalysis');
+      // A stale outcome changes nothing.
+      actor.send({ type: 'gltfAnalysisReady', revision: 1, key: 'stale' });
+      expect(presentationState(actor)).toBe('awaitingAnalysis');
+      actor.send({ type: 'gltfAnalysisReady', revision: 1, key: 'a' });
+      expect(presentationState(actor)).toBe('preparing');
+      actor.send({ type: 'gltfPresentationCommitted', revision: 1, key: 'a', unitId: 'unit:a', manifest });
+      expect(presentationState(actor)).toBe('presented');
+      // A section armed after the commit analyses the presented scene, which stays presented in both.
+      actor.send({ type: 'gltfAnalysisReady', revision: 1, key: 'a' });
+      expect(presentationState(actor)).toBe('presented');
+      expect(actor.getSnapshot().context.gltfPresentation.phase).toBe('presented');
+
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'b' });
+      actor.send({ type: 'gltfDisplayReady', revision: 2, key: 'b', barrier: 'display-ready' });
+      expect(presentationState(actor)).toBe('preparing');
+      actor.send({ type: 'gltfPresentationFailed', revision: 1, key: 'a' });
+      expect(presentationState(actor)).toBe('preparing');
+      actor.send({ type: 'gltfPresentationFailed', revision: 2, key: 'b' });
+      expect(presentationState(actor)).toBe('failed');
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should frame a focused component of the presented unit once, in Tau world space, and again after a clear', () => {
+    const framed: unknown[] = [];
+    const actor = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+      {
+        input: {},
+        inspect: (inspection) => {
+          // The camera's transitions: what the view frames.
+          if (inspection.type === '@xstate.transition' && inspection.event.type === 'frameBounds') {
+            framed.push(inspection.event);
+          }
+        },
+      },
+    );
+    actor.start();
+    try {
+      const bounds: GeometryComponentBounds = { min: [0, 1, 2], max: [1, 2, 4], center: [0.5, 1.5, 3], radius: 1.22 };
+      const focusable: GeometryComponentManifest = {
+        ...manifest,
+        nodeOrder: ['root', 'part', 'bare'],
+        nodesById: {
+          ...manifest.nodesById,
+          part: { ...manifest.nodesById['root']!, id: 'part', kind: 'part', bounds },
+          bare: { ...manifest.nodesById['root']!, id: 'bare', kind: 'part' },
+        },
+      };
+      // Another view of the unit presents other geometry, with the part elsewhere, and focuses it: nothing is presented
+      // here yet, so nothing is framed.
+      const elsewhere: GeometryComponentManifest = {
+        ...focusable,
+        nodesById: {
+          ...focusable.nodesById,
+          part: { ...focusable.nodesById['part']!, bounds: { ...bounds, min: [-5, -5, -5], max: [-4, -4, -4] } },
+        },
+      };
+      actor.send({ type: 'loadModelComponentManifest', unitId: 'unit:a', manifest: elsewhere, source: 'viewer' });
+      actor.send({ type: 'focusModelComponent', unitId: 'unit:a', componentId: 'part' });
+      expect(framed).toEqual([]);
+
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      actor.send({ type: 'gltfPresentationCommitted', revision: 1, key: 'a', unitId: 'unit:a', manifest: focusable });
+      // The commit frames the focus it finds once, at the bounds of the geometry this view presents.
+      const box = applyCanonicalGltfBounds(new Box3(new Vector3(...bounds.min), new Vector3(...bounds.max)));
+      const expected = {
+        type: 'frameBounds',
+        bounds: { min: box.min.toArray(), max: box.max.toArray() },
+        margin: 0.1,
+        source: 'focus',
+      };
+      expect(framed).toEqual([expected]);
+
+      // The same focus again, or a component without bounds, frames nothing.
+      actor.send({ type: 'focusModelComponent', unitId: 'unit:a', componentId: 'part' });
+      actor.send({ type: 'focusModelComponent', unitId: 'unit:a', componentId: 'bare' });
+      expect(framed).toHaveLength(1);
+
+      // A cleared focus leaves the camera, and focusing the part again frames it again.
+      actor.send({ type: 'clearModelComponentFocus', unitId: 'unit:a' });
+      expect(framed).toHaveLength(1);
+      actor.send({ type: 'focusModelComponent', unitId: 'unit:a', componentId: 'part' });
+      expect(framed).toEqual([expected, expected]);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should frame nothing at a commit whose manifest has no node for the focused component', () => {
+    const framed: unknown[] = [];
+    const actor = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+      {
+        input: {},
+        inspect: (inspection) => {
+          if (inspection.type === '@xstate.transition' && inspection.event.type === 'frameBounds') {
+            framed.push(inspection.event);
+          }
+        },
+      },
+    );
+    actor.start();
+    try {
+      const bounds: GeometryComponentBounds = { min: [0, 0, 0], max: [1, 1, 1], center: [0.5, 0.5, 0.5], radius: 0.87 };
+      const withPart: GeometryComponentManifest = {
+        ...manifest,
+        nodeOrder: ['root', 'part'],
+        nodesById: {
+          ...manifest.nodesById,
+          part: { ...manifest.nodesById['root']!, id: 'part', kind: 'part', bounds },
+        },
+      };
+      actor.send({ type: 'loadModelComponentManifest', unitId: 'unit:a', manifest: withPart, source: 'viewer' });
+      actor.send({ type: 'focusModelComponent', unitId: 'unit:a', componentId: 'part' });
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      actor.send({ type: 'gltfPresentationCommitted', revision: 1, key: 'a', unitId: 'unit:a', manifest });
+      expect(framed).toEqual([]);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  const sharedFocusRig = () => {
+    const framed: unknown[] = [];
+    const shared = createActor(modelInteractionMachine, { input: {} }).start();
+    const actor = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+      {
+        input: { modelInteractionRef: shared },
+        inspect: (inspection) => {
+          if (inspection.type === '@xstate.transition' && inspection.event.type === 'frameBounds') {
+            framed.push(inspection.event);
+          }
+        },
+      },
+    );
+    // What the project, which owns the shared model interaction, forwards to each view.
+    const forward = (): void => {
+      actor.send({ type: 'componentFocusObserved', focus: selectComponentFocus(shared.getSnapshot().context) });
+    };
+    return { framed, shared, actor, forward };
+  };
+
+  const partBounds: GeometryComponentBounds = { min: [0, 0, 0], max: [1, 2, 3], center: [0.5, 1, 1.5], radius: 1.87 };
+  const withPart: GeometryComponentManifest = {
+    ...manifest,
+    nodeOrder: ['root', 'part'],
+    nodesById: {
+      ...manifest.nodesById,
+      part: { ...manifest.nodesById['root']!, id: 'part', kind: 'part', bounds: partBounds },
+    },
+  };
+  const framedPart = () => {
+    const box = applyCanonicalGltfBounds(new Box3(new Vector3(...partBounds.min), new Vector3(...partBounds.max)));
+    return {
+      type: 'frameBounds',
+      bounds: { min: box.min.toArray(), max: box.max.toArray() },
+      margin: 0.1,
+      source: 'focus',
+    };
+  };
+
+  it('should frame a focus another view set before this view started, once the host forwards it and the unit commits', () => {
+    const { framed, shared, actor, forward } = sharedFocusRig();
+    // The other view loaded the unit and focused its part before this view's graphics existed.
+    shared.send({ type: 'loadManifest', unitId: 'unit:a', manifest: withPart, source: 'viewer' });
+    shared.send({ type: 'focusComponent', unitId: 'unit:a', componentId: 'part' });
+    actor.start();
+    try {
+      forward();
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      actor.send({ type: 'gltfPresentationCommitted', revision: 1, key: 'a', unitId: 'unit:a', manifest: withPart });
+      expect(framed).toEqual([framedPart()]);
+    } finally {
+      actor.stop();
+      shared.stop();
+    }
+  });
+
+  it('should not observe a model interaction it shares, and frame a later focus at the bounds this view presents', () => {
+    const { framed, shared, actor, forward } = sharedFocusRig();
+    actor.start();
+    try {
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      actor.send({ type: 'gltfPresentationCommitted', revision: 1, key: 'a', unitId: 'unit:a', manifest: withPart });
+      // Another pane of the unit presents other geometry, with the part elsewhere, and its manifest is the shared one.
+      const elsewhere: GeometryComponentManifest = {
+        ...withPart,
+        nodesById: {
+          ...withPart.nodesById,
+          part: { ...withPart.nodesById['part']!, bounds: { ...partBounds, min: [-5, -5, -5], max: [-4, -4, -4] } },
+        },
+      };
+      shared.send({ type: 'loadManifest', unitId: 'unit:a', manifest: elsewhere, source: 'viewer' });
+      shared.send({ type: 'focusComponent', unitId: 'unit:a', componentId: 'part' });
+      // Graphics does not subscribe to an actor it does not own (MC-R11): the host forwards the focus.
+      expect(framed).toEqual([]);
+      forward();
+      expect(framed).toEqual([framedPart()]);
+    } finally {
+      actor.stop();
+      shared.stop();
     }
   });
 });

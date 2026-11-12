@@ -97,6 +97,7 @@ export const cliDeviceAuthorization = (frontendUrl: string): BetterAuthPlugin =>
               return;
             }
             const signature = await makeSignature(accessToken, context.context.secret);
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- RFC 8628 response field.
             return context.json({ ...returned, access_token: `${accessToken}.${signature}` });
           }),
         },

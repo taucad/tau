@@ -598,19 +598,30 @@ describe.runIf(enabled)('shell conformance', () => {
     'a parent that exits or is aborted leaves no background, TERM-resistant or re-parented writer behind',
     async () => {
       const writer = (path: string): string => `while :; do printf b >> ${path}; sleep 0.1; done`;
-      /* A TERM-resistant grandchild under a TERM-resistant child; on Linux also a setsid writer and a double fork
-       * whose intermediate parent exits at once, so the writer is re-parented before the launch settles. The macOS
-       * setsid/double-fork form stays the disclosed C06b residual. */
+      /* A TERM-resistant grandchild under a TERM-resistant child; on Linux also a setsid writer, a double fork
+       * whose intermediate parent exits at once (re-parented before the launch settles), and a writer that is both:
+       * outside the launch's tree and process group, so only the sandbox contains it. The macOS setsid/double-fork
+       * form stays the disclosed C06b residual. */
       const tree = (prefix: string): { paths: string[]; command: string[] } => {
-        const [background, stubborn, detached, doubled] = ['background', 'stubborn', 'detached', 'doubled'].map(
-          (name) => join(work, `${prefix}-${name}`),
-        ) as [string, string, string, string];
+        const [background, stubborn, detached, doubled, escaped] = [
+          'background',
+          'stubborn',
+          'detached',
+          'doubled',
+          'escaped',
+        ].map((name) => join(work, `${prefix}-${name}`)) as [string, string, string, string, string];
         return {
-          paths: [background, stubborn, ...(linux ? [detached, doubled] : [])],
+          paths: [background, stubborn, ...(linux ? [detached, doubled, escaped] : [])],
           command: [
             `( ${writer(background)} ) &`,
             `( trap '' TERM HUP INT; ( trap '' TERM HUP INT; ${writer(stubborn)} ) & wait ) &`,
-            ...(linux ? [`setsid sh -c '${writer(detached)}' &`, `( ( sh -c '${writer(doubled)}' & ) & )`] : []),
+            ...(linux
+              ? [
+                  `setsid sh -c '${writer(detached)}' &`,
+                  `( ( sh -c '${writer(doubled)}' & ) & )`,
+                  `setsid sh -c "( sh -c '${writer(escaped)}' & ) &" &`,
+                ]
+              : []),
           ],
         };
       };
@@ -618,7 +629,9 @@ describe.runIf(enabled)('shell conformance', () => {
         paths.map((path) => (existsSync(path) ? statSync(path).size : 0));
 
       const exited = tree('e10-exit');
-      const result = await run([...exited.command, 'sleep 1', 'exit 0'].join('\n'));
+      // The parent exits only once every writer has written, bounded at 10 s in total, never after a fixed sleep.
+      const firstWrites = `i=0; for p in ${exited.paths.join(' ')}; do while [ ! -s "$p" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; done`;
+      const result = await run([...exited.command, firstWrites, 'exit 0'].join('\n'));
 
       expect(result.exitCode, result.stderr).toBe(0);
       const settled = sizesOf(exited.paths);
@@ -639,9 +652,13 @@ describe.runIf(enabled)('shell conformance', () => {
         // oxlint-disable-next-line no-await-in-loop -- poll until every writer has written once.
         await delay(100);
       }
-      expect(sizesOf(aborted.paths).every((size) => size > 0)).toBe(true);
-      controller.abort();
-      await process_.exited;
+      try {
+        expect(sizesOf(aborted.paths).every((size) => size > 0)).toBe(true);
+      } finally {
+        // A failed positive control still stops the launch.
+        controller.abort();
+        await process_.exited;
+      }
       const stopped = sizesOf(aborted.paths);
       await delay(1500);
       expect(sizesOf(aborted.paths)).toStrictEqual(stopped);

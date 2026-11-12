@@ -6,7 +6,8 @@ import * as target from '#support/external-target.js';
  * Put the chat in focus on a new branch of its own, the way a person does it.
  *
  * The composer offers no branch (C3): the History header's branch chip makes
- * the branch, and its row's *Use in this chat* places the chat there.
+ * the branch, and the ⋮ on the branch's chip in History's lanes places the
+ * chat there with *Run this chat here* (D3, bee2a79e41).
  *
  * @param name - The new branch's name.
  * @returns Nothing.
@@ -46,16 +47,35 @@ export const placeChatOnNewBranch = async (name: string): Promise<void> => {
   await target.click(newBranch);
   await target.fill(selectors.getByLabelText('Branch name'), name);
   await target.click(selectors.getByRole('button', { name: 'Create branch' }));
-  const actions = selectors.getByRole('button', { name: `Actions for ${name}` });
-  await target.expectVisible(actions, 60_000);
-  await target.click(actions);
-  const place = selectors.getByRole('menuitem', { name: `Use ${name} in this chat` });
-  await target.click(place);
-  // The menu closes immediately, before placement settles. Reopen it after its
-  // action is enabled: this option is absent only when chatCheckoutIds places
-  // the focused chat on this branch's checkout.
-  await target.click(actions);
-  await target.expectVisible(selectors.getByRole('menuitem', { name: `Rename ${name}…` }), 60_000);
-  await target.expectCount(place, 0, 60_000);
+  /* D3 (bee2a79e41) moved a branch's verbs onto its chip's ⋮ in History's lanes. Run this chat here is offered once
+   * the new branch's checkout is in the projection and only while it would move the chat in focus, so the menu is
+   * reopened until it is. */
+  const more = selectors.getByRole('button', { name: `More for ${name}` });
+  const runHere = selectors.getByRole('menuitem', { name: 'Run this chat here' });
+  const branchMenu = selectors.getByRole('menu').getByText(name, { exact: true });
+  await target.expectVisible(more, 60_000);
+  await expect
+    .poll(
+      async () => {
+        if (await target.isVisible(runHere)) {
+          return true;
+        }
+        if (await target.isVisible(branchMenu)) {
+          await target.keyboardPress('Escape');
+          return false;
+        }
+        await target.click(more);
+        return false;
+      },
+      { timeout: 60_000, interval: 1000 },
+    )
+    .toBe(true);
+  await target.click(runHere);
+  // The menu closes immediately, before placement settles. Reopen it: Run this
+  // chat here is absent only once the focused chat is placed on this branch's
+  // checkout.
+  await target.click(more);
+  await target.expectVisible(selectors.getByRole('menuitem', { name: /^Rename…/u }), 60_000);
+  await target.expectCount(runHere, 0, 60_000);
   await target.keyboardPress('Escape');
 };

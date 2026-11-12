@@ -3,6 +3,8 @@
 # The guest keeps its shipped AppArmor policy and kernel.apparmor_restrict_unprivileged_userns value; the sandbox
 # reaches user namespaces only through the Tau-scoped bwrap profile the real APT selector installs.
 # Required env: TAU_VM_DISTRO (ubuntu, ubuntu2604 or debian), RUNNER_TEMP (disposable CI directory).
+# Optional env: TAU_SHELL_TIER (full, the default, or semantics: no host-built application is transferred) and
+# TAU_SHELL_PROJECTS (JSON array of the projects whose targets the guest runs; default all seven).
 # Usage: TAU_VM_DISTRO=ubuntu bash libs/sandbox/scripts/shell-conformance-vm.sh
 # Exit codes: 0 every row passed; 1 a row failed or an operation failed; 3 missing host prerequisite.
 set -euo pipefail
@@ -11,6 +13,11 @@ umask 077
 : "${RUNNER_TEMP:?disposable hosted runner required}"
 [[ "${GITHUB_ACTIONS:-}" == true && "$(uname -m)" == x86_64 ]] || exit 3
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+tier="${TAU_SHELL_TIER:-full}"
+[[ "$tier" == full || "$tier" == semantics ]] || { printf 'Unknown shell tier: %s\n' "$tier" >&2; exit 1; }
+# The guest takes the projects as a comma list of shape-checked names.
+all_projects='["sandbox","native-process-core","shell-service","host","desktop-terminal","desktop","desktop-e2e"]'
+projects="$(jq -r 'if type == "array" and length > 0 and all(.[]; type == "string" and test("^[a-z0-9-]+$")) then join(",") else error("projects must be a non-empty JSON array of project names") end' <<< "${TAU_SHELL_PROJECTS:-$all_projects}")"
 # The same dated, checksum-pinned images as apps/desktop/scripts/hosted-linux-vm.sh.
 case "$TAU_VM_DISTRO" in
   ubuntu)
@@ -145,18 +152,21 @@ node_root="$(dirname "$(dirname "$(command -v node)")")"
 tar -C "$node_root" -cf - . | ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/node'
 (cd "$REPO_ROOT" && git ls-files -z | tar --null -T - -cf -) | ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/tau'
 # Bind the exact host build to this source identity and verify every copied byte before any application test.
-(cd "$REPO_ROOT" && test -s apps/desktop/dist/main/index.js && test -s apps/ui/desktop/build/client/index.html && \
-  find apps/desktop/dist apps/ui/desktop/build -type f -print0 | sort -z | xargs -0 sha256sum) \
-  > "$output/application-build.sha256"
-(cd "$REPO_ROOT" && tar -cf - apps/desktop/dist apps/ui/desktop/build) | \
-  ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/tau'
-ssh "${ssh_options[@]}" tau@127.0.0.1 'cat > ~/tau/application-build.sha256' < "$output/application-build.sha256"
+# The semantics tier has no application tier: the runner built nothing, and nothing is transferred.
+if [[ "$tier" == full ]]; then
+  (cd "$REPO_ROOT" && test -s apps/desktop/dist/main/index.js && test -s apps/ui/desktop/build/client/index.html && \
+    find apps/desktop/dist apps/ui/desktop/build -type f -print0 | sort -z | xargs -0 sha256sum) \
+    > "$output/application-build.sha256"
+  (cd "$REPO_ROOT" && tar -cf - apps/desktop/dist apps/ui/desktop/build) | \
+    ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/tau'
+  ssh "${ssh_options[@]}" tau@127.0.0.1 'cat > ~/tau/application-build.sha256' < "$output/application-build.sha256"
+fi
 # Only identity values for the receipt cross into the guest, each constrained to its shape first.
 [[ "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ && "${GITHUB_RUN_ID:-}" =~ ^[0-9]+$ && "${GITHUB_REPOSITORY:-}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
 status=0
-# shellcheck disable=SC2029 # Shape-checked identity values, expanded on the host by design.
+# shellcheck disable=SC2029 # Shape-checked identity, tier and project values, expanded on the host by design.
 ssh "${ssh_options[@]}" tau@127.0.0.1 \
-  "GITHUB_SHA=$GITHUB_SHA GITHUB_RUN_ID=$GITHUB_RUN_ID GITHUB_REPOSITORY=$GITHUB_REPOSITORY GITHUB_SERVER_URL=https://github.com TAU_SHELL_CONFORMANCE_ROW=$row bash -s -- $TAU_VM_DISTRO" \
+  "GITHUB_SHA=$GITHUB_SHA GITHUB_RUN_ID=$GITHUB_RUN_ID GITHUB_REPOSITORY=$GITHUB_REPOSITORY GITHUB_SERVER_URL=https://github.com TAU_SHELL_CONFORMANCE_ROW=$row TAU_SHELL_TIER=$tier TAU_SHELL_PROJECTS=$projects bash -s -- $TAU_VM_DISTRO" \
   < "$REPO_ROOT/libs/sandbox/scripts/shell-conformance-guest.sh" | tee "$output/guest.txt" || status=$?
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-conformance-receipt.json' > "$output/receipt.json" || true
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-service-conformance-receipt.json' > "$output/service-receipt.json" || true

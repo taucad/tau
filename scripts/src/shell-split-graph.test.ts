@@ -355,6 +355,20 @@ describe('shell split graph', () => {
     expect(specifiers(read('apps/desktop/src/tau/services-host.impl.ts'))).toContain('@taucad/desktop-terminal');
   });
 
+  it('lets no shell library depend on the host or the desktop app', async () => {
+    const graph = await projectGraph();
+    const shellProjects = Object.values(graph.nodes)
+      .filter(({ data }) => (data.tags ?? []).some((tag) => tag.startsWith('shell:')))
+      .map(({ name }) => name)
+      .toSorted();
+
+    expect(shellProjects).toEqual(['desktop-terminal', 'sandbox', 'shell-service']);
+    for (const project of shellProjects) {
+      expect(directDependencies(graph, project), project).not.toContain('host');
+      expect(directDependencies(graph, project), project).not.toContain('desktop');
+    }
+  });
+
   it('keeps every shell conformance and qualification target uncached', async () => {
     const graph = await projectGraph();
     const targets = Object.values(graph.nodes).flatMap(({ name, data }) =>

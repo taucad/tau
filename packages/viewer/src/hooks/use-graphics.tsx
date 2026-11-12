@@ -1,4 +1,4 @@
-import { createContext, useContext, useLayoutEffect, useState, useSyncExternalStore } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
@@ -7,6 +7,7 @@ import type { CameraMachineSnapshot } from '@taucad/camera/machine';
 import type { RenderFrame } from '@taucad/spatial';
 import { createThreeCameraRig } from '@taucad/three/camera';
 import type { ThreeCameraRig } from '@taucad/three/camera';
+import { useViewerEnvironment } from '#environment/viewer-environment.jsx';
 import { selectGraphicsFramingIdentity } from '#machines/graphics.machine.js';
 import type { GraphicsCameraRef, graphicsMachine } from '#machines/graphics.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
@@ -49,6 +50,10 @@ export const useGraphicsCamera = (graphicsRef: GraphicsActorRef | undefined): Gr
 /** The view's camera, read once when a presentation is made. */
 const selectViewCamera = (graphicsRef: GraphicsActorRef): GraphicsCameraRef =>
   graphicsRef.getSnapshot().context.cameraRef;
+
+/** The camera's presented snapshot, read when a retained resource joins the consumers. */
+const selectRigDriverSnapshot = (cameraRig: ThreeCameraRig) =>
+  selectCameraDriverSnapshot(cameraRig.actorRef.getSnapshot());
 
 /** The entry the view's framing actor frames now. */
 const selectViewFramingIdentity = (graphicsRef: GraphicsActorRef): string | undefined =>
@@ -159,6 +164,17 @@ export function GraphicsProvider({
     setPresentation(presentation);
   }
 
+  /*
+   * The viewer environment's React-context-to-actor boundary (programme control ruling, 2026-11-12): the theme, the
+   * accent and high contrast reach the viewer only as React context, so this composition root reports them to graphics,
+   * which repaints the view cube in place. It is the graphics scope's single named context-to-actor boundary, beside
+   * the standalone viewer's artifact boundary (inventory C10).
+   */
+  const { colorScheme, isHighContrast, accentColor } = useViewerEnvironment();
+  useEffect(() => {
+    graphicsRef.send({ type: 'viewerEnvironmentChanged', environment: { colorScheme, isHighContrast, accentColor } });
+  }, [accentColor, colorScheme, graphicsRef, isHighContrast]);
+
   return <GraphicsContext.Provider value={presentation}>{children}</GraphicsContext.Provider>;
 }
 
@@ -263,7 +279,7 @@ export function useCameraRetarget(handler: CameraUpdateHandler): void {
   const { cameraConsumersRef, cameraRig } = context;
   useLayoutEffect(() => {
     cameraConsumersRef.current.add(handler);
-    handler(cameraRig.activeCamera, selectCameraDriverSnapshot(cameraRig.actorRef.getSnapshot()));
+    handler(cameraRig.activeCamera, selectRigDriverSnapshot(cameraRig));
     return () => {
       cameraConsumersRef.current.delete(handler);
     };

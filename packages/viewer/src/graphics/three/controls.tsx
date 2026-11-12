@@ -7,7 +7,6 @@ import { createSectionPlanePicker } from '#graphics/three/controls/section-plane
 import { resolveCameraControlProps } from '#graphics/three/controls/camera-controls-feel.js';
 import type { CameraControlsFeel } from '#graphics/three/controls/camera-controls-feel.js';
 import { ViewportGizmoCube } from '#graphics/three/controls/viewport-gizmo-cube.jsx';
-import { SectionPlanePickerContext } from '#graphics/three/controls/viewport-gizmo-render-loop.jsx';
 import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
 import { useCameraSelector, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import type { SecondaryMouseButtonMode } from '#graphics/three/three-viewer-properties.js';
@@ -73,10 +72,14 @@ export const Controls = React.memo(function ({
     (state) => state.context.isMeasureActive || state.context.measurements.some((measurement) => measurement.isPinned),
   );
   const projectionKind = useCameraSelector((state) => selectCameraProjection(state).kind);
-  // The section plane picker draws beside the view cube, from the cube's render loop, while Section is on.
+  /*
+   * The section plane picker: an external Three resource the view cube draws beside it while Section is on, and the
+   * section handles pick from. It lives as long as the view cube on this backend, so Section turning on or off never
+   * restarts the cube's adapter; its draw follows Section in the adapter.
+   */
   const [planePicker, setPlanePicker] = useState<SectionPlanePicker>();
   useLayoutEffect(() => {
-    if (!enableGizmo || !isSectionViewActive) {
+    if (!enableGizmo) {
       // oxlint-disable-next-line react/set-state-in-effect -- Publish the effect-owned external Three resource after disposal.
       setPlanePicker(undefined);
       return undefined;
@@ -87,7 +90,7 @@ export const Controls = React.memo(function ({
     return () => {
       picker.dispose();
     };
-  }, [backend, enableGizmo, isSectionViewActive]);
+  }, [backend, enableGizmo]);
   const controlProps = useMemo(
     () =>
       resolveCameraControlProps({
@@ -107,11 +110,8 @@ export const Controls = React.memo(function ({
         {shouldMountMeasure ? <MeasureTool /> : null}
         {isSectionViewActive ? <SectionHandles planePicker={planePicker} /> : null}
       </React.Suspense>
-      {enableGizmo ? (
-        <SectionPlanePickerContext.Provider value={isSectionViewActive ? planePicker : undefined}>
-          <ViewportGizmoCube container={gizmoContainer} />
-        </SectionPlanePickerContext.Provider>
-      ) : null}
+      {/* The cube mounts with its picker, so its adapter starts once, with everything it draws. */}
+      {enableGizmo && planePicker ? <ViewportGizmoCube container={gizmoContainer} planePicker={planePicker} /> : null}
     </>
   );
 });

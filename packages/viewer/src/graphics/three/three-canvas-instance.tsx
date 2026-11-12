@@ -5,7 +5,7 @@ import { flushSync } from 'react-dom';
 import type { ActorRefFrom } from 'xstate';
 import type { RefCallback } from 'react';
 import type { Group } from 'three';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
 import type { RendererInstance } from '#graphics/three/renderer.js';
 import { RenderFpsOverlay } from '#graphics/three/render-fps-overlay.jsx';
 import { renderLoopObservers } from '#graphics/three/render-loop-observer.js';
@@ -30,10 +30,7 @@ import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 import { viewerRendererCreated } from '#lib/viewer-events.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
 import { canvasHostCreated } from '#graphics/three/three-canvas-instance-host.js';
-import {
-  createViewportGizmoInteractionLock,
-  ViewportGizmoInteractionLockProvider,
-} from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
+import { selectGraphicsViewportGizmoLocked } from '#machines/graphics.machine.js';
 import type { CanvasHostRoot } from '#graphics/three/three-canvas-instance-host.js';
 import type { CanvasEvent, CanvasFailure, CanvasRef, CanvasSnapshot } from '#machines/canvas.machine.js';
 import type { webglContextMachine } from '#machines/webgl-context.machine.js';
@@ -41,6 +38,10 @@ import type { webglContextMachine } from '#machines/webgl-context.machine.js';
 /** The world up axis graphics keeps, read when the camera's up changes. */
 const selectGraphicsUpDirection = (graphicsRef: ReturnType<typeof useGraphics>): 'x' | 'y' | 'z' =>
   graphicsRef.getSnapshot().context.upDirection;
+
+/** Whether the view cube holds the interaction lock: its gesture is in a state tagged `interactionLocked`. */
+const selectViewCubeLocked = (graphicsRef: ReturnType<typeof useGraphics>): boolean =>
+  selectGraphicsViewportGizmoLocked(graphicsRef.getSnapshot());
 
 /** Whether this mount's canvas actor still takes events: a detached one stopped with its surface. */
 const selectCanvasRunning = (canvas: CanvasRef | undefined): canvas is CanvasRef =>
@@ -158,11 +159,6 @@ export function ThreeCanvasInstance({
     },
     [canvasId, graphicsRef],
   );
-  /**
-   * This canvas's view-cube interaction lock: the cube takes it, and the controls adapter does not step while it is
-   * held.
-   */
-  const [interactionLock] = useState(createViewportGizmoInteractionLock);
   /** Hands graphics the controls adapter for this mount's root; graphics stops it with the surface (charter I9, I11). */
   const attachControls = useCallback(
     (held: CanvasHostRoot): void => {
@@ -175,11 +171,12 @@ export function ThreeCanvasInstance({
           connectorRef: cameraConnectorRef,
           consumersRef: cameraConsumersRef,
           getUpAxis: () => selectGraphicsUpDirection(graphicsRef),
-          isInteractionLocked: interactionLock.isActive,
+          // The view cube's gesture holds the lock as a state tag: the controls do not step while it is held.
+          isInteractionLocked: () => selectViewCubeLocked(graphicsRef),
         }),
       });
     },
-    [cameraConnectorRef, cameraConsumersRef, cameraRig, canvasId, graphicsRef, interactionLock],
+    [cameraConnectorRef, cameraConsumersRef, cameraRig, canvasId, graphicsRef],
   );
   const resize = useMemo(
     () => ({
@@ -336,20 +333,18 @@ export function ThreeCanvasInstance({
       {/* Both execution backends consume node materials. Effective API is reported above after init. */}
       <ThreeGraphicsBackendProvider value='webgpu'>
         <OverlayDepthProvider>
-          <ViewportGizmoInteractionLockProvider lock={interactionLock}>
-            <Scene
-              enableGizmo={enableGizmo}
-              enableDamping={enableDamping}
-              enableZoom={enableZoom}
-              enablePan={enablePan}
-              secondaryMouseButtonMode={secondaryMouseButtonMode}
-              stageOptions={stageOptions}
-              zoomSpeed={zoomSpeed}
-              gizmoContainer={gizmoContainer}
-            >
-              {children}
-            </Scene>
-          </ViewportGizmoInteractionLockProvider>
+          <Scene
+            enableGizmo={enableGizmo}
+            enableDamping={enableDamping}
+            enableZoom={enableZoom}
+            enablePan={enablePan}
+            secondaryMouseButtonMode={secondaryMouseButtonMode}
+            stageOptions={stageOptions}
+            zoomSpeed={zoomSpeed}
+            gizmoContainer={gizmoContainer}
+          >
+            {children}
+          </Scene>
           <PostProcessing settings={postProcessingSettings} />
           {isInspectorEnabled ? <WebGpuInspectorOverlay /> : null}
           <ModelEmphasisOverlay />

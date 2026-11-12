@@ -7,7 +7,7 @@ import {
   bindViewportGizmoInvalidationEvents,
   readGizmoViewport,
   renderViewportGizmoFrame,
-} from '#graphics/three/controls/viewport-gizmo-render-loop.jsx';
+} from '#graphics/three/controls/viewport-gizmo-render-loop.js';
 import type { ControlEventListener } from '#graphics/three/utils/camera-controls-adapter.js';
 
 class FakeGizmo {
@@ -35,29 +35,23 @@ class FakeGizmo {
 }
 
 describe('viewport-gizmo-render-loop', () => {
-  it('renders, syncs controls, then invalidates while animating', () => {
+  it('renders, then invalidates while animating, with no tone mapping for the cube', () => {
     const calls: string[] = [];
     const gizmo = new FakeGizmo();
     gizmo.animating = true;
-    gizmo.render.mockImplementation(() => {
-      calls.push('render');
-    });
-    const controlsBinding = {
-      detach: vi.fn(),
-      afterGizmoRender: vi.fn(() => {
-        calls.push('sync');
-      }),
-    };
     const invalidate = vi.fn(() => {
       calls.push('invalidate');
     });
     const renderer = {
       toneMapping: THREE.ACESFilmicToneMapping,
     };
+    gizmo.render.mockImplementation(() => {
+      calls.push(`render:${renderer.toneMapping}`);
+    });
 
-    renderViewportGizmoFrame({ gizmo, renderer, controlsBinding, invalidate });
+    renderViewportGizmoFrame({ gizmo, renderer, invalidate });
 
-    expect(calls).toEqual(['render', 'sync', 'invalidate']);
+    expect(calls).toEqual([`render:${THREE.NoToneMapping}`, 'invalidate']);
     expect(renderer.toneMapping).toBe(THREE.ACESFilmicToneMapping);
   });
 
@@ -68,7 +62,6 @@ describe('viewport-gizmo-render-loop', () => {
     renderViewportGizmoFrame({
       gizmo,
       renderer: { toneMapping: THREE.CineonToneMapping },
-      controlsBinding: { detach: vi.fn(), afterGizmoRender: vi.fn() },
       invalidate,
     });
 

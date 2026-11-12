@@ -117,6 +117,16 @@ const samples: Samples = {
   controlsAttached: [{ type: 'controlsAttached', canvasId: 'c', adapter: createCallbackLogic(() => undefined) }],
   sectionInputAttached: [{ type: 'sectionInputAttached', inputId: 's', adapter: createCallbackLogic(() => undefined) }],
   sectionInputDetached: [{ type: 'sectionInputDetached', inputId: 's' }],
+  viewportGizmoAttached: [
+    { type: 'viewportGizmoAttached', gizmoId: 'g', adapter: createCallbackLogic(() => undefined) },
+  ],
+  viewportGizmoDetached: [{ type: 'viewportGizmoDetached', gizmoId: 'g' }],
+  viewerEnvironmentChanged: [
+    {
+      type: 'viewerEnvironmentChanged',
+      environment: { colorScheme: 'dark', isHighContrast: false, accentColor: '#00987c' },
+    },
+  ],
   entryChanged: [{ type: 'entryChanged', identity: 'part.ts' }],
   geometryBoundsMeasured: [
     { type: 'geometryBoundsMeasured', key: 'k', bounds: { min: [-1, -1, -1], max: [1, 1, 1] }, radius: Math.sqrt(3) },
@@ -407,6 +417,7 @@ describe('graphics machine totality baseline', () => {
       'canvasDetached',
       'controlsAttached',
       'sectionInputDetached',
+      'viewportGizmoDetached',
       'adoptSectionView',
       'updateSectionCut',
       'removeSectionCut',
@@ -416,7 +427,7 @@ describe('graphics machine totality baseline', () => {
       'clearArtifact',
       'gltfPresentationCommitted',
     ];
-    const withSelectSectionCut = [...everywhere.slice(0, 7), 'selectSectionCut', ...everywhere.slice(7)];
+    const withSelectSectionCut = [...everywhere.slice(0, 8), 'selectSectionCut', ...everywhere.slice(8)];
     expect(silent).toEqual([
       {
         state: 'operational.backend.probing | operational.section.off | operational.measure.off',

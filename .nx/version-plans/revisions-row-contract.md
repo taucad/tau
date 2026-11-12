@@ -1,6 +1,6 @@
 ---
 revisions: minor
-cli: patch
+cli: minor
 ---
 
 A History row names who made it by type, not by string (B2). **Breaking:** `RevisionRow.actor` and `RevisionRow.trigger` are gone.

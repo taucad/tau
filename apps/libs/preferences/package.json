@@ -32,10 +32,10 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@taucad/workbench": "workspace:*",
-    "zod": "catalog:"
+    "@taucad/workbench": "workspace:*"
   },
   "devDependencies": {
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
   }
 }

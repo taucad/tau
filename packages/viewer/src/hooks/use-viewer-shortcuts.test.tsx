@@ -41,10 +41,21 @@ const startGraphics = (): GraphicsActor => {
   return actor;
 };
 
-/** Records what the shortcuts send, still delivering it; the actor's `send` is a prototype getter. */
+/**
+ * Records what the shortcuts send, still delivering it; the actor's `send` is a prototype getter. The provider's own
+ * viewer environment report is delivered but not recorded.
+ */
 const recordSends = (actor: GraphicsActor): ReturnType<typeof vi.fn<GraphicsActor['send']>> => {
-  const send = vi.fn<GraphicsActor['send']>(actor.send);
-  Object.defineProperty(actor, 'send', { value: send, configurable: true });
+  const deliver = actor.send;
+  const send = vi.fn<GraphicsActor['send']>(deliver);
+  const value: GraphicsActor['send'] = (event) => {
+    if (event.type === 'viewerEnvironmentChanged') {
+      deliver(event);
+      return;
+    }
+    send(event);
+  };
+  Object.defineProperty(actor, 'send', { value, configurable: true });
   return send;
 };
 

@@ -67,7 +67,6 @@
     "./graphics/three/controls/camera-presets": "./src/graphics/three/controls/camera-presets.ts",
     "./graphics/three/controls/camera-wheel-router": "./src/graphics/three/controls/camera-wheel-router.ts",
     "./graphics/three/controls/section-handles": "./src/graphics/three/controls/section-handles.ts",
-    "./graphics/three/controls/viewport-gizmo-interaction-lock": "./src/graphics/three/controls/viewport-gizmo-interaction-lock.tsx",
     "./graphics/three/controls/viewport-gizmo-styles": "./src/graphics/three/controls/viewport-gizmo-styles.ts",
     "./graphics/three/gltf-world": "./src/graphics/three/gltf-world.ts",
     "./graphics/three/materials/infinite-grid-material": "./src/graphics/three/materials/infinite-grid-material.ts",
@@ -292,11 +291,6 @@
         "types": "./dist/graphics/three/controls/section-handles.d.mts",
         "import": "./dist/graphics/three/controls/section-handles.mjs",
         "default": "./dist/graphics/three/controls/section-handles.mjs"
-      },
-      "./graphics/three/controls/viewport-gizmo-interaction-lock": {
-        "types": "./dist/graphics/three/controls/viewport-gizmo-interaction-lock.d.mts",
-        "import": "./dist/graphics/three/controls/viewport-gizmo-interaction-lock.mjs",
-        "default": "./dist/graphics/three/controls/viewport-gizmo-interaction-lock.mjs"
       },
       "./graphics/three/controls/viewport-gizmo-styles": {
         "types": "./dist/graphics/three/controls/viewport-gizmo-styles.d.mts",

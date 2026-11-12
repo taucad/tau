@@ -23,7 +23,7 @@ describe('getSectionViewTestControlState', () => {
   it('should report CameraControls enabled state and viewport gizmo lock state', () => {
     const state = getSectionViewTestControlState({
       controls: { enabled: false },
-      interactionLock: { activeRef: { current: true } },
+      viewportGizmoLocked: true,
     });
 
     expect(state).toEqual({
@@ -35,7 +35,7 @@ describe('getSectionViewTestControlState', () => {
   it('should default controls to enabled when no controls instance exists', () => {
     const state = getSectionViewTestControlState({
       controls: undefined,
-      interactionLock: { activeRef: { current: false } },
+      viewportGizmoLocked: false,
     });
 
     expect(state).toEqual({

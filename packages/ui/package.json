@@ -54,6 +54,7 @@
     "./components/chart": "./src/components/chart.tsx",
     "./components/checkbox": "./src/components/checkbox.tsx",
     "./components/client-only": "./src/components/client-only.tsx",
+    "./components/coach-mark": "./src/components/coach-mark.tsx",
     "./components/collapsible": "./src/components/collapsible.tsx",
     "./components/combobox-responsive": "./src/components/combobox-responsive.tsx",
     "./components/command": "./src/components/command.tsx",
@@ -206,6 +207,11 @@
         "types": "./dist/components/client-only.d.mts",
         "import": "./dist/components/client-only.mjs",
         "default": "./dist/components/client-only.mjs"
+      },
+      "./components/coach-mark": {
+        "types": "./dist/components/coach-mark.d.mts",
+        "import": "./dist/components/coach-mark.mjs",
+        "default": "./dist/components/coach-mark.mjs"
       },
       "./components/collapsible": {
         "types": "./dist/components/collapsible.d.mts",

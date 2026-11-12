@@ -10,6 +10,7 @@ export * from '#components/card.js';
 export * from '#components/carousel.js';
 export * from '#components/chart.js';
 export * from '#components/checkbox.js';
+export * from '#components/coach-mark.js';
 export * from '#components/collapsible.js';
 export * from '#components/command.js';
 export * from '#components/context-menu.js';

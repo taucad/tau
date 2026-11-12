@@ -5,9 +5,7 @@
  * individual gizmo components only need to declare their configuration differences.
  */
 
-import { useStore } from '@react-three/fiber';
 import type { ViewportGizmo } from 'three-viewport-gizmo';
-import { useLayoutEffect } from 'react';
 import * as THREE from 'three';
 import {
   calculateGizmoFovFromAngle,
@@ -71,40 +69,49 @@ export function resolveGizmoContainer(
 
 // ── Canvas resize sync (shared R3F `gl`) ─────────────────────────────────────
 
-type GizmoRefLike = Readonly<{
-  current: ViewportGizmo | undefined;
+/** The part of an R3F store the resize follower reads: its size and pixel ratio, now and on each change. */
+type GizmoSizeStore = Readonly<{
+  getState: () => GizmoSizeState;
+  subscribe: (listener: (state: GizmoSizeState) => void) => () => void;
+}>;
+
+type GizmoSizeState = Readonly<{
+  size: Readonly<{ width: number; height: number; top: number; left: number }>;
+  viewport: Readonly<{ dpr: number }>;
 }>;
 
 /**
  * Refresh the gizmo's DOM placement and saved viewport synchronously after R3F
- * resizes the renderer. A React effect can run after a demand frame has already
+ * resizes the renderer. A later refresh can run after a demand frame has already
  * restored the gizmo's old viewport, making that stale viewport permanent.
  * In particular, native fullscreen also enters through react-use-measure's
  * window resize listener, outside the Canvas ResizeObserver's React flush.
- * @param gizmoRef - The gizmo owned by this canvas; read at notification time.
+ *
+ * @param options - The canvas's R3F store, subscribed after R3F's own renderer sizing, and the gizmo it places.
+ * @returns Stops following.
  */
-export function useGizmoResizeSync(gizmoRef: GizmoRefLike): void {
-  const store = useStore();
-  useLayoutEffect(() => {
-    let previousSize = store.getState().size;
-    let previousDpr = store.getState().viewport.dpr;
-    return store.subscribe(({ size, viewport }) => {
-      if (
-        size.width === previousSize.width &&
-        size.height === previousSize.height &&
-        size.top === previousSize.top &&
-        size.left === previousSize.left &&
-        viewport.dpr === previousDpr
-      ) {
-        return;
-      }
-      previousSize = size;
-      previousDpr = viewport.dpr;
-      if (size.width > 0 && size.height > 0) {
-        // R3F's renderer-sizing subscription was registered before ours.
-        // domUpdate avoids advancing controls or allocating a new gizmo.
-        gizmoRef.current?.domUpdate();
-      }
-    });
-  }, [gizmoRef, store]);
+export function followGizmoCanvasSize({
+  store,
+  gizmo,
+}: Readonly<{ store: GizmoSizeStore; gizmo: Pick<ViewportGizmo, 'domUpdate'> }>): () => void {
+  let previousSize = store.getState().size;
+  let previousDpr = store.getState().viewport.dpr;
+  return store.subscribe(({ size, viewport }) => {
+    if (
+      size.width === previousSize.width &&
+      size.height === previousSize.height &&
+      size.top === previousSize.top &&
+      size.left === previousSize.left &&
+      viewport.dpr === previousDpr
+    ) {
+      return;
+    }
+    previousSize = size;
+    previousDpr = viewport.dpr;
+    if (size.width > 0 && size.height > 0) {
+      // R3F's renderer-sizing subscription was registered before ours.
+      // domUpdate avoids advancing controls or allocating a new gizmo.
+      gizmo.domUpdate();
+    }
+  });
 }

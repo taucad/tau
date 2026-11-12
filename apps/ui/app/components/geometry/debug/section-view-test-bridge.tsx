@@ -40,8 +40,7 @@ import { getControlsDistance } from '@taucad/viewer/graphics/three/utils/camera-
 import { hasSceneTag, sceneTag } from '@taucad/viewer/graphics/three/utils/scene-tags';
 import { sectionCapStencilDebugUserDataKey } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
 import type { SectionCapStencilDiagnostics } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
-import { useViewportGizmoInteractionLock } from '@taucad/viewer/graphics/three/controls/viewport-gizmo-interaction-lock';
-import type { ViewportGizmoInteractionLock } from '@taucad/viewer/graphics/three/controls/viewport-gizmo-interaction-lock';
+import { selectGraphicsViewportGizmoLocked } from '@taucad/viewer/machines/graphics.machine';
 import { getSceneRenderRoots } from '@taucad/viewer/graphics/three/scene-overlay';
 import {
   infiniteGridFadeEndVisibleSpans,
@@ -410,18 +409,23 @@ export function getRenderedModelComponentSurfacePoints(
 
 export const getSectionViewTestControlState = ({
   controls,
-  interactionLock,
+  viewportGizmoLocked,
 }: {
   readonly controls: unknown;
-  readonly interactionLock: Pick<ViewportGizmoInteractionLock, 'activeRef'>;
+  /** Whether the view cube's gesture holds the interaction lock (its `interactionLocked` tag). */
+  readonly viewportGizmoLocked: boolean;
 }): Pick<SectionViewTestCameraState, 'controlsEnabled' | 'viewportGizmoLockActive'> => {
   const enabled = (controls as { enabled?: unknown } | undefined)?.enabled;
 
   return {
     controlsEnabled: typeof enabled === 'boolean' ? enabled : true,
-    viewportGizmoLockActive: interactionLock.activeRef.current,
+    viewportGizmoLockActive: viewportGizmoLocked,
   };
 };
+
+/** Whether the view's cube holds the interaction lock, read when the bridge reports the camera. */
+const selectViewportGizmoLockActive = (graphicsActor: ReturnType<typeof useGraphics>): boolean =>
+  selectGraphicsViewportGizmoLocked(graphicsActor.getSnapshot());
 
 export const getSectionViewTestMeasurementUiMeshCount = (scene: THREE.Object3D): number => {
   const meshes = new Set<THREE.Object3D>();
@@ -576,7 +580,6 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
   const setRenderFrame = useSetRenderFrame();
   const modelInteractionRef = useModelInteractionRef();
   const get = useThree((state) => state.get);
-  const interactionLock = useViewportGizmoInteractionLock();
   const bridgeRef = React.useRef<SectionViewTestBridgeApi | undefined>(undefined);
   const pendingCaptureRef = React.useRef(false);
   const pendingCameraTransitionRef = React.useRef<
@@ -1067,7 +1070,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         const physicalCamera = cameraRig.readState();
         const controlState = getSectionViewTestControlState({
           controls,
-          interactionLock,
+          viewportGizmoLocked: selectViewportGizmoLockActive(graphicsActor),
         });
         const state: SectionViewTestCameraState = {
           actorStatus: actorSnapshot.status,
@@ -1220,7 +1223,6 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
     cameraRig,
     get,
     graphicsActor,
-    interactionLock,
     isGeometryFramed,
     isTauDebugEnabled,
     modelInteractionRef,

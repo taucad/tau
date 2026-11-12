@@ -4,7 +4,6 @@ import type { SecondaryMouseButtonMode } from '#graphics/three/three-viewer-prop
 import type { GizmoStyleId } from '#graphics/three/controls/viewport-gizmo-styles.js';
 import { Stage } from '#graphics/three/stage.jsx';
 import { Controls } from '#graphics/three/controls.jsx';
-import { ViewportGizmoInteractionLockProvider } from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
 
 type SceneProperties = {
   readonly children: ReactNode;
@@ -32,7 +31,7 @@ export function Scene({
   gizmoStyle,
 }: SceneProperties): React.JSX.Element {
   return (
-    <ViewportGizmoInteractionLockProvider>
+    <>
       <Controls
         enableGizmo={enableGizmo}
         enableDamping={enableDamping}
@@ -44,6 +43,6 @@ export function Scene({
         gizmoStyle={gizmoStyle}
       />
       <Stage stageOptions={stageOptions}>{children}</Stage>
-    </ViewportGizmoInteractionLockProvider>
+    </>
   );
 }

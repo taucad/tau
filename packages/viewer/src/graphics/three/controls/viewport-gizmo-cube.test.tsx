@@ -1,370 +1,140 @@
-import React from 'react';
-import { act, render } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createCameraView } from '@taucad/camera';
-import type { CameraDriverSnapshot } from '@taucad/camera/machine';
+/*
+ * The view cube's mount: it hands graphics the cube's adapter from its group's ref, and nothing else. The adapter's own
+ * behaviour is in `viewport-gizmo-adapter.test.ts`.
+ */
+import { StrictMode } from 'react';
+import { render } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createActor, createAsyncLogic } from 'xstate';
+import type { Actor } from 'xstate';
 import { ViewportGizmoCube } from '#graphics/three/controls/viewport-gizmo-cube.jsx';
-import { SectionPlanePickerContext } from '#graphics/three/controls/viewport-gizmo-render-loop.jsx';
 import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
-import type * as ViewerEnvironmentModule from '#environment/viewer-environment.jsx';
-import { Color } from 'three';
+import type { ViewportGizmoHost } from '#graphics/three/controls/viewport-gizmo-adapter.js';
+import { graphicsMachine } from '#machines/graphics.machine.js';
+import type { CameraUpdateHandler } from '#services/graphics-camera-registry.js';
 
 const mocks = vi.hoisted(() => {
   const perspectiveCamera = { kind: 'perspective' };
   const orthographicCamera = { kind: 'orthographic' };
-  let driverSnapshot: CameraDriverSnapshot;
-  const rig = {
-    activeCamera: perspectiveCamera,
-    perspectiveCamera,
-    orthographicCamera,
-    actorRef: {
-      getSnapshot: () => ({ context: { view: driverSnapshot.view } }),
-    },
-  };
-  const compileAsync = vi.fn(async (_scene: unknown, _camera: unknown) => undefined);
-  const gl = {
-    compileAsync,
-    domElement: undefined as unknown as HTMLCanvasElement,
-  };
-  const controls = { enabled: true };
-  const scene = { isScene: true };
-  const invalidate = vi.fn();
-  const state = { gl, controls, scene, invalidate };
-  const binding = { detach: vi.fn(), setCamera: vi.fn() };
-  const graphicsActor = { send: vi.fn() };
-  const interactionLock = { activeRef: { current: false } };
-  const themeState: { theme: 'light' | 'dark'; isHighContrast: boolean } = { theme: 'light', isHighContrast: false };
-  const graphicsState = { context: { upDirection: 'z' as 'x' | 'y' | 'z' } };
-  const gizmos: Array<{
-    camera: unknown;
-    options: {
-      up: 'x' | 'y' | 'z';
-      type: string;
-      edges: { color: number };
-      right: { color: number; labelColor: number };
-    };
-    children: Array<{ visible: boolean }>;
-    _domElement: HTMLElement;
-    add: ReturnType<typeof vi.fn>;
-    cameraUpdate: ReturnType<typeof vi.fn>;
-    dispose: ReturnType<typeof vi.fn>;
-    update: ReturnType<typeof vi.fn>;
-  }> = [];
-  let retarget:
-    | ((camera: typeof perspectiveCamera | typeof orthographicCamera, snapshot: CameraDriverSnapshot) => void)
-    | undefined;
-  const syncGizmoFov = vi.fn();
-
+  const rig = { activeCamera: perspectiveCamera, perspectiveCamera, orthographicCamera };
+  const store = { getState: () => ({}), subscribe: () => () => undefined };
   return {
-    binding,
-    compileAsync,
-    getDriverSnapshot: () => driverSnapshot,
-    getRetarget: () => retarget,
-    graphicsActor,
-    graphicsState,
-    gizmos,
-    gl,
-    invalidate,
-    interactionLock,
-    orthographicCamera,
-    perspectiveCamera,
     rig,
-    setDriverSnapshot: (snapshot: CameraDriverSnapshot) => {
-      driverSnapshot = snapshot;
-    },
-    setRetarget: (callback: typeof retarget) => {
-      retarget = callback;
-    },
-    state,
-    syncGizmoFov,
-    themeState,
+    store,
+    perspectiveCamera,
+    orthographicCamera,
+    consumersRef: { current: new Set<unknown>() },
+    graphics: undefined as unknown,
+    hosts: [] as unknown[],
+    starts: 0,
+    stops: 0,
   };
-});
-
-const createDriverSnapshot = (requestedVerticalFieldOfView: number, revision: number): CameraDriverSnapshot => ({
-  projection:
-    requestedVerticalFieldOfView === 0
-      ? { kind: 'orthographic' }
-      : { kind: 'perspective', verticalFieldOfView: requestedVerticalFieldOfView },
-  view: createCameraView({
-    frameId: 'test-root',
-    requestedVerticalFieldOfView,
-    perspectiveZoom: 1,
-    target: [0, 0, 0],
-    direction: [1, -1, 0.7],
-    up: [0, 0, 1],
-    verticalSpan: 10,
-    viewport: { width: 800, height: 600, pixelRatio: 1 },
-    bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
-  }),
-  perspectiveVerticalFieldOfView: requestedVerticalFieldOfView === 0 ? 60 : requestedVerticalFieldOfView,
-  revision,
-  lastChange: { source: 'framing', revision },
-  renderFrame: { anchorFrameId: 'test-root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 },
 });
 
 vi.mock('@react-three/fiber', () => ({
-  useThree: (selector: (state: typeof mocks.state) => unknown) => selector(mocks.state),
+  useStore: () => mocks.store,
 }));
-
-vi.mock('three-viewport-gizmo', () => ({
-  ViewportGizmo: class ViewportGizmo {
-    // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly forbids constructor parameter properties.
-    public camera: unknown;
-    public readonly add = vi.fn();
-    public readonly cameraUpdate = vi.fn();
-    public readonly dispose = vi.fn();
-    public readonly update = vi.fn();
-    public readonly scale = { multiplyScalar: vi.fn() };
-    public readonly children = [{ visible: true }, { visible: true }];
-    // oxlint-disable-next-line typescript/naming-convention -- The library's private pointer surface.
-    public readonly _domElement = document.createElement('div');
-
-    // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly forbids constructor parameter properties.
-    public readonly options: {
-      up: 'x' | 'y' | 'z';
-      type: string;
-      edges: { color: number };
-      right: { color: number; labelColor: number };
-    };
-
-    public constructor(
-      camera: unknown,
-      _renderer: unknown,
-      options: {
-        up: 'x' | 'y' | 'z';
-        type: string;
-        edges: { color: number };
-        right: { color: number; labelColor: number };
-      },
-    ) {
-      this.camera = camera;
-      this.options = options;
-      mocks.gizmos.push(this);
-    }
-  },
-}));
-
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useCameraRig: () => mocks.rig,
-  useCameraRetarget: (
-    retarget: (
-      camera: typeof mocks.perspectiveCamera | typeof mocks.orthographicCamera,
-      snapshot: CameraDriverSnapshot,
-    ) => void,
-  ) => {
-    React.useLayoutEffect(() => {
-      mocks.setRetarget(retarget);
-      retarget(mocks.rig.activeCamera, mocks.getDriverSnapshot());
-      return () => {
-        mocks.setRetarget(undefined);
-      };
-    }, [retarget]);
-  },
-  useGraphics: () => mocks.graphicsActor,
-  useGraphicsSelector: (selector: (state: typeof mocks.graphicsState) => unknown) => selector(mocks.graphicsState),
+  useCameraConsumersRef: () => mocks.consumersRef,
+  useGraphics: () => mocks.graphics,
 }));
-
-vi.mock('#environment/viewer-environment.jsx', async (importOriginal) => {
-  const actual = await importOriginal<typeof ViewerEnvironmentModule>();
-  return {
-    ...actual,
-    useViewerEnvironment: () => ({
-      ...actual.defaultViewerEnvironment,
-      colorScheme: mocks.themeState.theme,
-      isHighContrast: mocks.themeState.isHighContrast,
-      // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Fixed mock value, not rendered application styling.
-      accentColor: '#00aaff',
-    }),
-  };
-});
 vi.mock('#graphics/three/three-graphics-backend-context.jsx', () => ({
   useThreeGraphicsBackend: () => 'webgpu',
 }));
-vi.mock('#graphics/three/controls/viewport-gizmo-cube-axes.js', () => ({
-  createViewportGizmoCubeAxes: () => ({ isAxes: true }),
-}));
-vi.mock('#graphics/three/controls/viewport-gizmo-cube-surface.js', () => ({
-  applyViewportGizmoSurface: vi.fn(),
-  applyViewportGizmoNodeMaterials: vi.fn(),
-}));
-vi.mock('#graphics/three/controls/viewport-gizmo-controls-adapter.js', () => ({
-  bindViewportGizmoControls: () => mocks.binding,
-}));
-vi.mock('#graphics/three/controls/viewport-gizmo-interaction-lock.jsx', () => ({
-  useViewportGizmoInteractionLock: () => mocks.interactionLock,
-}));
-vi.mock('#graphics/three/controls/viewport-gizmo-render-loop.jsx', async () => {
-  const { createContext } = await import('react');
+// The adapter, scripted: it records the host it was built around, joins the consumers and counts its starts and stops.
+vi.mock('#graphics/three/controls/viewport-gizmo-adapter.js', async () => {
+  const { createCallbackLogic } = await import('xstate');
   return {
-    bindViewportGizmoInvalidationEvents: () => vi.fn(),
-    SectionPlanePickerContext: createContext<SectionPlanePicker | undefined>(undefined),
-    useViewportGizmoRenderLoop: () => undefined,
+    createViewportGizmoAdapter: (host: ViewportGizmoHost) => {
+      mocks.hosts.push(host);
+      return createCallbackLogic(() => {
+        mocks.starts += 1;
+        const follow = (): void => undefined;
+        host.consumersRef.current.add(follow as unknown as CameraUpdateHandler);
+        return () => {
+          mocks.stops += 1;
+          host.consumersRef.current.delete(follow as unknown as CameraUpdateHandler);
+        };
+      });
+    },
   };
 });
-vi.mock('#graphics/three/utils/gizmo.utils.js', () => ({
-  resolveGizmoContainer: () => document.body,
-  syncGizmoFov: mocks.syncGizmoFov,
-  useGizmoResizeSync: () => undefined,
-}));
 
-/** A section plane picker that only records how the cube styles it. */
-const createPickerStub = (setStyle: SectionPlanePicker['setStyle']): SectionPlanePicker =>
-  ({ setStyle }) as unknown as SectionPlanePicker;
+/** A picker the cube only passes on. */
+const pickerStub = Object.freeze({}) as unknown as SectionPlanePicker;
+let graphics: Actor<typeof graphicsMachine>;
 
-describe('ViewportGizmoCube camera retention', () => {
-  beforeEach(() => {
-    mocks.binding.detach.mockClear();
-    mocks.binding.setCamera.mockClear();
-    mocks.compileAsync.mockClear();
-    mocks.gizmos.length = 0;
-    mocks.gl.domElement = document.createElement('canvas');
-    mocks.invalidate.mockClear();
-    mocks.rig.activeCamera = mocks.perspectiveCamera;
-    mocks.setDriverSnapshot(createDriverSnapshot(60, 0));
-    mocks.setRetarget(undefined);
-    mocks.syncGizmoFov.mockClear();
-    mocks.themeState.theme = 'light';
-    mocks.themeState.isHighContrast = false;
-    mocks.graphicsState.context.upDirection = 'z';
-  });
+beforeEach(() => {
+  graphics = createActor(
+    graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+    { input: {} },
+  ).start();
+  mocks.graphics = graphics;
+  mocks.hosts.length = 0;
+  mocks.starts = 0;
+  mocks.stops = 0;
+  mocks.consumersRef.current.clear();
+});
 
-  it('builds the gizmo around the view up axis and rebuilds when it changes', () => {
-    const mounted = render(<ViewportGizmoCube />);
-    expect(mocks.gizmos[0]!.options.up).toBe('z');
+afterEach(() => {
+  graphics.stop();
+});
 
-    mocks.graphicsState.context.upDirection = 'y';
-    mounted.rerender(<ViewportGizmoCube />);
-    expect(mocks.gizmos).toHaveLength(2);
-    expect(mocks.gizmos[0]!.dispose).toHaveBeenCalledOnce();
-    expect(mocks.gizmos[1]!.options.up).toBe('y');
-  });
+describe('ViewportGizmoCube', () => {
+  it('should hand graphics one adapter built around the canvas, the view and the cube placement', () => {
+    render(<ViewportGizmoCube container='#gizmo' size={80} planePicker={pickerStub} />);
 
-  it('retargets one gizmo and binding without recreation', () => {
-    const mounted = render(<ViewportGizmoCube />);
-    const gizmo = mocks.gizmos[0]!;
-    expect(mocks.gizmos).toHaveLength(1);
-
-    act(() => mocks.getRetarget()?.(mocks.orthographicCamera, createDriverSnapshot(0, 1)));
-    expect(mocks.gizmos).toEqual([gizmo]);
-    expect(gizmo.camera).toBe(mocks.orthographicCamera);
-    expect(mocks.binding.setCamera).toHaveBeenCalledWith(mocks.orthographicCamera);
-    expect(gizmo.cameraUpdate).toHaveBeenCalledOnce();
-
-    mocks.setDriverSnapshot(createDriverSnapshot(0, 1));
-    mounted.rerender(<ViewportGizmoCube />);
-    expect(mocks.gizmos).toEqual([gizmo]);
-  });
-
-  it('synchronizes a same-camera FOV revision before React rerenders', () => {
-    render(<ViewportGizmoCube />);
-    const gizmo = mocks.gizmos[0]!;
-    mocks.binding.setCamera.mockClear();
-    mocks.syncGizmoFov.mockClear();
-    gizmo.cameraUpdate.mockClear();
-
-    act(() => mocks.getRetarget()?.(mocks.perspectiveCamera, createDriverSnapshot(39, 1)));
-
-    expect(mocks.gizmos).toEqual([gizmo]);
-    expect(mocks.binding.setCamera).toHaveBeenCalledWith(mocks.perspectiveCamera);
-    expect(mocks.syncGizmoFov).toHaveBeenCalledWith(gizmo, 39);
-    expect(gizmo.cameraUpdate).toHaveBeenCalledOnce();
-  });
-
-  it('warms the cube and axes for both native camera endpoints', () => {
-    render(<ViewportGizmoCube />);
-    expect(mocks.compileAsync).toHaveBeenCalledTimes(2);
-    expect(mocks.compileAsync.mock.calls.map((call) => call[1])).toEqual([
-      mocks.perspectiveCamera,
-      mocks.orthographicCamera,
+    expect(mocks.starts).toBe(1);
+    expect(mocks.hosts).toEqual([
+      expect.objectContaining({
+        store: mocks.store,
+        rig: mocks.rig,
+        consumersRef: mocks.consumersRef,
+        graphics,
+        container: '#gizmo',
+        size: 80,
+        backend: 'webgpu',
+        planePicker: pickerStub,
+      }),
     ]);
-    expect(mocks.compileAsync.mock.calls.every((call) => call[0] === mocks.gizmos[0])).toBe(true);
+    expect(graphics.getSnapshot().context.viewportGizmo).toBeDefined();
   });
 
-  it('should repaint loaded fonts without reverting a camera retarget', async () => {
-    const loaded = Promise.withResolvers<FontFace[]>();
-    const fonts = { check: () => false, load: vi.fn(async () => loaded.promise) };
-    const previousFonts = document.fonts;
-    Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
-    try {
-      render(<ViewportGizmoCube />);
-      act(() => mocks.getRetarget()?.(mocks.orthographicCamera, createDriverSnapshot(0, 1)));
-      await act(async () => {
-        loaded.resolve([]);
-        await loaded.promise;
-      });
-      expect(mocks.gizmos).toHaveLength(2);
-      expect(mocks.gizmos[0]!.dispose).toHaveBeenCalledOnce();
-      expect(mocks.gizmos[1]!.camera).toBe(mocks.orthographicCamera);
-      expect(fonts.load).toHaveBeenCalledOnce();
-    } finally {
-      Object.defineProperty(document, 'fonts', { configurable: true, value: previousFonts });
-    }
+  it('should keep its adapter across re-renders and a theme change, which reach it as events', () => {
+    const mounted = render(<ViewportGizmoCube planePicker={pickerStub} />);
+    mounted.rerender(<ViewportGizmoCube planePicker={pickerStub} />);
+    graphics.send({
+      type: 'viewerEnvironmentChanged',
+      environment: { colorScheme: 'dark', isHighContrast: true, accentColor: '#00aaff' },
+    });
+
+    expect([mocks.starts, mocks.stops]).toEqual([1, 0]);
   });
 
-  it('should rebuild with stronger faces and legible labels in high-contrast dark mode', () => {
-    mocks.themeState.theme = 'dark';
-    const mounted = render(<ViewportGizmoCube />);
-    const normalFace = mocks.gizmos[0]!.options.right.color;
-    mocks.themeState.isHighContrast = true;
-    mounted.rerender(<ViewportGizmoCube />);
-    const { color, labelColor } = mocks.gizmos[1]!.options.right;
-    const face = new Color(color);
-    const label = new Color(labelColor);
-    const luminance = (value: Color): number => 0.2126 * value.r + 0.7152 * value.g + 0.0722 * value.b;
-    expect(color).not.toBe(normalFace);
-    expect((luminance(label) + 0.05) / (luminance(face) + 0.05)).toBeGreaterThanOrEqual(4.5);
-    expect(mocks.gizmos[0]!.dispose).toHaveBeenCalledOnce();
-  });
-
-  it('should style the section plane picker from its own style, and restyle it with the theme', () => {
-    const setStyle = vi.fn<SectionPlanePicker['setStyle']>();
-    const picker = createPickerStub(setStyle);
-    const withPicker = (): React.JSX.Element => (
-      <SectionPlanePickerContext.Provider value={picker}>
-        <ViewportGizmoCube />
-      </SectionPlanePickerContext.Provider>
+  it('should run one gesture under StrictMode and stop it when the cube leaves', () => {
+    const mounted = render(
+      <StrictMode>
+        <ViewportGizmoCube planePicker={pickerStub} />
+      </StrictMode>,
     );
-    const mounted = render(withPicker());
 
-    expect(setStyle).toHaveBeenCalledOnce();
-    const [style] = setStyle.mock.calls[0]!;
-    expect(style.face).toBe(mocks.gizmos[0]!.options.right.color);
-    expect(Object.keys(style.planeTiles)).toEqual(['x', 'y', 'z']);
-
-    mocks.themeState.theme = 'dark';
-    mounted.rerender(withPicker());
-    expect(setStyle).toHaveBeenCalledTimes(2);
-    expect(setStyle.mock.calls[1]![0].face).not.toBe(style.face);
+    expect(mocks.starts - mocks.stops).toBe(1);
+    mounted.unmount();
+    expect(mocks.starts - mocks.stops).toBe(0);
+    expect(graphics.getSnapshot().context.viewportGizmo).toBeUndefined();
+    expect(mocks.consumersRef.current.size).toBe(0);
   });
 
-  it.each([
-    { gizmoStyle: undefined, type: 'rounded-cube', triad: true },
-    { gizmoStyle: 'cube', type: 'rounded-cube', triad: true },
-    { gizmoStyle: 'classic-cube', type: 'cube', triad: true },
-    { gizmoStyle: 'axis-balls', type: 'sphere', triad: false },
-  ] as const)('draws the $gizmoStyle style as a $type gizmo', ({ gizmoStyle, type, triad }) => {
-    render(<ViewportGizmoCube gizmoStyle={gizmoStyle} />);
-    const gizmo = mocks.gizmos[0]!;
-    expect(gizmo.options.type).toBe(type);
-    expect(gizmo.add).toHaveBeenCalledTimes(triad ? 1 : 0);
-    expect(gizmo.children.every((child) => child.visible)).toBe(true);
-    expect(gizmo._domElement.style.pointerEvents).toBe('');
-  });
+  it('should hand graphics a new adapter for a style change, and the style it draws (G5)', () => {
+    const mounted = render(<ViewportGizmoCube planePicker={pickerStub} gizmoStyle='cube' />);
+    mounted.rerender(<ViewportGizmoCube planePicker={pickerStub} gizmoStyle='axis-balls' />);
 
-  it('applies a style change to the open viewer without a reload (G5)', () => {
-    const mounted = render(<ViewportGizmoCube gizmoStyle='cube' />);
-    mounted.rerender(<ViewportGizmoCube gizmoStyle='axis-balls' />);
-    expect(mocks.gizmos).toHaveLength(2);
-    expect(mocks.gizmos[0]!.dispose).toHaveBeenCalledOnce();
-    expect(mocks.gizmos[1]!.options.type).toBe('sphere');
-  });
-
-  it('draws the Axes style as the triad alone, taking no click (G4)', () => {
-    render(<ViewportGizmoCube gizmoStyle='axes' />);
-    const gizmo = mocks.gizmos[0]!;
-    expect(gizmo.add).toHaveBeenCalledOnce();
-    expect(gizmo.children.every((child) => !child.visible)).toBe(true);
-    expect(gizmo._domElement.style.pointerEvents).toBe('none');
+    expect(mocks.hosts).toEqual([
+      expect.objectContaining({ gizmoStyle: 'cube' }),
+      expect.objectContaining({ gizmoStyle: 'axis-balls' }),
+    ]);
+    expect([mocks.starts, mocks.stops]).toEqual([2, 1]);
+    expect(mocks.consumersRef.current.size).toBe(1);
   });
 });

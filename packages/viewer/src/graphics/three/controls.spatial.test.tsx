@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => {
     renderFrame,
     handlesPicker: undefined as unknown,
     cubePicker: undefined as unknown,
+    cubePickers: new Set<unknown>(),
     frames: [] as Array<{ callback: (state: unknown, delta: number) => void; priority: number | undefined }>,
   };
 });
@@ -34,16 +35,13 @@ vi.mock('#hooks/use-graphics.jsx', () => ({
   useRenderFrame: () => mocks.renderFrame,
 }));
 
-vi.mock('#graphics/three/controls/viewport-gizmo-cube.jsx', async () => {
-  const { useContext } = await import('react');
-  const { SectionPlanePickerContext } = await import('#graphics/three/controls/viewport-gizmo-render-loop.jsx');
-  return {
-    ViewportGizmoCube: () => {
-      mocks.cubePicker = useContext(SectionPlanePickerContext);
-      return null;
-    },
-  };
-});
+vi.mock('#graphics/three/controls/viewport-gizmo-cube.jsx', () => ({
+  ViewportGizmoCube: ({ planePicker }: { readonly planePicker?: unknown }) => {
+    mocks.cubePicker = planePicker;
+    mocks.cubePickers.add(planePicker);
+    return null;
+  },
+}));
 
 vi.mock('#graphics/three/react/measure-tool.jsx', () => ({
   MeasureTool: () => null,
@@ -64,6 +62,7 @@ describe('Controls', () => {
     mocks.context.isSectionViewActive = true;
     mocks.handlesPicker = undefined;
     mocks.cubePicker = undefined;
+    mocks.cubePickers.clear();
     mocks.frames.length = 0;
   });
 
@@ -85,12 +84,22 @@ describe('Controls', () => {
     expect(mocks.cubePicker).toBe(mocks.handlesPicker);
   });
 
-  it('should draw the plane picker beside the view cube only while Section is on', () => {
+  it('should keep one plane picker for the view cube across Section turning off and on', async () => {
     mocks.context.isSectionViewActive = false;
-    renderControls(true);
-
+    const view = renderControls(true);
+    await waitFor(() => {
+      expect(mocks.cubePicker).toBeDefined();
+    });
     expect(mocks.handlesPicker).toBeUndefined();
-    expect(mocks.cubePicker).toBeUndefined();
+
+    // Section turns on: the handles pick from the picker the cube already draws, so the cube is not restarted.
+    mocks.context.isSectionViewActive = true;
+    // A new prop re-renders the memoised controls, as a graphics change does through its selector.
+    view.rerender(<Controls enableGizmo enableDamping={false} enableZoom enablePan zoomSpeed={2} />);
+    await waitFor(() => {
+      expect(mocks.handlesPicker).toBe(mocks.cubePicker);
+    });
+    expect(mocks.cubePickers.size).toBe(1);
   });
 
   it('should give the section handles no plane picker without a view cube', () => {

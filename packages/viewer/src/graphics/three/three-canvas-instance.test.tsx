@@ -29,7 +29,7 @@ import {
   infiniteGridPresentationPlaneByUpDirection,
 } from '#graphics/three/utils/infinite-grid-frame.js';
 import type * as ViewerEnvironmentModule from '#environment/viewer-environment.jsx';
-import type { ViewportGizmoInteractionLock } from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
+import type { ViewportGizmoAdapterEvent, ViewportGizmoAdapterLogic } from '#machines/viewport-gizmo-gesture.machine.js';
 
 /**
  * Dispatches context-loss handlers registered via the latest stub `<Canvas>`
@@ -244,28 +244,14 @@ vi.mock('#environment/viewer-environment.jsx', async (importOriginal) => ({
   useViewerFeature: (key: string) => enabledFeatures.has(key),
 }));
 
-/** The interaction lock the view cube would take inside the scene, read through the scene's own provider. */
-const sceneLock = vi.hoisted((): { current: unknown } => ({ current: undefined }));
-vi.mock('#graphics/three/scene.jsx', async () => {
-  const { ViewportGizmoInteractionLockProvider, useViewportGizmoInteractionLock } =
-    await import('#graphics/three/controls/viewport-gizmo-interaction-lock.jsx');
-  function ViewCubeLockProbe(): undefined {
-    sceneLock.current = useViewportGizmoInteractionLock();
-    return undefined;
-  }
-  return {
-    // Like the real scene, it provides the view cube's lock to its children.
-    Scene: ({ children, enableGizmo }: { readonly children: React.ReactNode; readonly enableGizmo: boolean }) => (
-      <ViewportGizmoInteractionLockProvider>
-        <div>
-          {enableGizmo ? <div role='img' aria-label='View cube' /> : null}
-          <ViewCubeLockProbe />
-          {children}
-        </div>
-      </ViewportGizmoInteractionLockProvider>
-    ),
-  };
-});
+vi.mock('#graphics/three/scene.jsx', () => ({
+  Scene: ({ children, enableGizmo }: { readonly children: React.ReactNode; readonly enableGizmo: boolean }) => (
+    <div>
+      {enableGizmo ? <div role='img' aria-label='View cube' /> : null}
+      {children}
+    </div>
+  ),
+}));
 
 vi.mock('#graphics/three/post-processing.jsx', () => ({
   PostProcessing: () => null,
@@ -688,19 +674,26 @@ describe('ThreeCanvasInstance', () => {
     expect([adapters.started, adapters.stopped]).toEqual([2, 1]);
   });
 
-  it('holds the controls step while the view cube in the scene holds its interaction lock', async () => {
+  it("holds the controls step while the view cube's gesture holds its interaction lock", async () => {
     render(<KeyedThreeCanvas canvasKey='a' />);
 
     await waitFor(() => {
       expect(controlsAdapter()).toBeDefined();
     });
-    const lock = sceneLock.current as ViewportGizmoInteractionLock;
+    // A scripted view cube: graphics runs its gesture, which tags the lock while a press turns the camera.
+    let report: ((event: ViewportGizmoAdapterEvent) => void) | undefined;
+    const adapter: ViewportGizmoAdapterLogic = createCallbackLogic(({ sendBack }) => {
+      report = sendBack;
+      return undefined;
+    });
+    graphicsHolder.current?.send({ type: 'viewportGizmoAttached', gizmoId: 'cube', adapter });
     expect(adapters.isInteractionLocked?.()).toBe(false);
 
-    const release = lock.begin('cube');
+    report?.({ type: 'gizmoPressed' });
+    report?.({ type: 'gizmoTurned' });
 
     expect(adapters.isInteractionLocked?.()).toBe(true);
-    release();
+    report?.({ type: 'gizmoReleased' });
     expect(adapters.isInteractionLocked?.()).toBe(false);
   });
 

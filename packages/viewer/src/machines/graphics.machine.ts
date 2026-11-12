@@ -52,6 +52,15 @@ import { canvasMachine } from '#machines/canvas.machine.js';
 import { framingMachine } from '#machines/framing.machine.js';
 import type { FramingEvent, FramingPendingPose } from '#machines/framing.machine.js';
 import { sectionInputMachine } from '#machines/section-input.machine.js';
+import {
+  selectViewportGizmoInteractionLocked,
+  viewportGizmoGestureMachine,
+} from '#machines/viewport-gizmo-gesture.machine.js';
+import type {
+  ViewportGizmoAdapterLogic,
+  ViewportGizmoEnvironment,
+  ViewportGizmoGestureRef,
+} from '#machines/viewport-gizmo-gesture.machine.js';
 import type { SectionInputAdapterLogic } from '#machines/section-input.machine.js';
 import { defaultFramingStage } from '#graphics/three/framing-stage.js';
 import type { CanvasRef, CanvasSurfaceKind } from '#machines/canvas.machine.js';
@@ -384,6 +393,16 @@ export interface GraphicsContext {
    * and never runs two.
    */
   sectionInput: Readonly<{ inputId: string; ref: GraphicsSectionInputRef }> | undefined;
+  /**
+   * The gesture of the mounted view cube. It stops with the cube, so a remount replaces it and never runs two; while it
+   * holds the interaction lock the canvas's controls do not step.
+   */
+  viewportGizmo: Readonly<{ gizmoId: string; ref: ViewportGizmoGestureRef }> | undefined;
+  /**
+   * The viewer environment the view cube is painted from, as the graphics provider last reported it; `undefined`
+   * until it does.
+   */
+  viewerEnvironment: ViewportGizmoEnvironment | undefined;
 
   // Geometry data from CAD
   artifact: KnownArtifact | undefined;
@@ -461,6 +480,15 @@ export type GraphicsEvent =
   | { type: 'sectionInputAttached'; inputId: string; adapter: SectionInputAdapterLogic }
   /** The section handles left: their section input stops, and gives back whatever it held. */
   | { type: 'sectionInputDetached'; inputId: string }
+  /**
+   * A view cube mounted: graphics starts its gesture with this DOM adapter, replacing the one it ran. A re-delivery
+   * for the running gesture changes nothing.
+   */
+  | { type: 'viewportGizmoAttached'; gizmoId: string; adapter: ViewportGizmoAdapterLogic }
+  /** The view cube left: its gesture stops, gives back the lock it held and disposes the cube. */
+  | { type: 'viewportGizmoDetached'; gizmoId: string }
+  /** The graphics provider reports the viewer environment: the view cube is repainted from it. */
+  | { type: 'viewerEnvironmentChanged'; environment: ViewportGizmoEnvironment }
   // Framing events
   /**
    * The view's entry: a new identity frames its first geometry again, with the record's pose applied after that
@@ -713,6 +741,9 @@ export const graphicsEventTypes = [
   'controlsAttached',
   'sectionInputAttached',
   'sectionInputDetached',
+  'viewportGizmoAttached',
+  'viewportGizmoDetached',
+  'viewerEnvironmentChanged',
   'entryChanged',
   'geometryBoundsMeasured',
   'setSectionViewActive',
@@ -1429,6 +1460,8 @@ const graphicsMachineDefinition = setup({
       }),
       renderFrameKey: undefined,
       sectionInput: undefined,
+      viewportGizmo: undefined,
+      viewerEnvironment: undefined,
       controlsAdapter: undefined,
       cameraPresented: false,
 
@@ -1455,6 +1488,9 @@ const graphicsMachineDefinition = setup({
     }
     if (context.sectionInput) {
       enq.stop(context.sectionInput.ref);
+    }
+    if (context.viewportGizmo) {
+      enq.stop(context.viewportGizmo.ref);
     }
     enq.stop(context.framingRef);
     enq.stop(context.cameraRef);
@@ -1631,6 +1667,10 @@ const graphicsMachineDefinition = setup({
           if (context.canvas) {
             enq.sendTo(context.canvas.ref, { type: 'upDirectionChanged', upDirection: event.payload });
           }
+          // The view cube turns about the view's up axis (handoff report R24: G8 owns only the cube's own up input).
+          if (context.viewportGizmo) {
+            enq.sendTo(context.viewportGizmo.ref, { type: 'upDirectionChanged', upDirection: event.payload });
+          }
           return { context: { upDirection: event.payload } };
         },
         adoptUpDirection: ({ context, event }) =>
@@ -1705,6 +1745,44 @@ const graphicsMachineDefinition = setup({
           }
           enq.stop(context.sectionInput.ref);
           return { context: { sectionInput: undefined } };
+        },
+        viewportGizmoAttached: ({ context, event }, enq) => {
+          if (context.viewportGizmo?.gizmoId === event.gizmoId) {
+            // Idempotent re-delivery: this cube's gesture is already running.
+            return {};
+          }
+          if (context.viewportGizmo) {
+            enq.stop(context.viewportGizmo.ref);
+          }
+          const ref = enq.spawn(viewportGizmoGestureMachine.provide({ actors: { adapter: event.adapter } }), {
+            id: `viewportGizmo:${event.gizmoId}`,
+            input: { environment: context.viewerEnvironment, upDirection: context.upDirection },
+          });
+          return { context: { viewportGizmo: { gizmoId: event.gizmoId, ref } } };
+        },
+        viewportGizmoDetached: ({ context, event }, enq) => {
+          if (context.viewportGizmo?.gizmoId !== event.gizmoId) {
+            // Stale: a newer cube already took the slot.
+            return {};
+          }
+          enq.stop(context.viewportGizmo.ref);
+          return { context: { viewportGizmo: undefined } };
+        },
+        viewerEnvironmentChanged: ({ context, event }, enq) => {
+          const { environment } = event;
+          const previous = context.viewerEnvironment;
+          if (
+            previous?.colorScheme === environment.colorScheme &&
+            previous.isHighContrast === environment.isHighContrast &&
+            previous.accentColor === environment.accentColor
+          ) {
+            // Idempotent re-delivery: the environment is already this one.
+            return {};
+          }
+          if (context.viewportGizmo) {
+            enq.sendTo(context.viewportGizmo.ref, { type: 'applyStyle', environment });
+          }
+          return { context: { viewerEnvironment: environment } };
         },
 
         // Controls adapter events: the camera owns the gesture phase; graphics owns click and hover suppression.
@@ -2752,3 +2830,15 @@ export const selectGraphicsFramed = (snapshot: GraphicsSnapshot): boolean =>
  */
 export const selectGraphicsFramingIdentity = (snapshot: GraphicsSnapshot): string | undefined =>
   snapshot.context.framingRef.getSnapshot().context.identity;
+
+/**
+ * Whether the view's cube holds its canvas's interaction lock: its gesture is in a state tagged `interactionLocked`.
+ * The value lives in the gesture child, so the graphics snapshot does not change with it: read it when it is needed,
+ * never through `useGraphicsSelector` or another snapshot-identity subscription.
+ *
+ * @param snapshot - The graphics machine snapshot.
+ * @returns Whether the lock is held; `false` with no cube mounted.
+ * @public
+ */
+export const selectGraphicsViewportGizmoLocked = (snapshot: GraphicsSnapshot): boolean =>
+  selectViewportGizmoInteractionLocked(snapshot.context.viewportGizmo?.ref);

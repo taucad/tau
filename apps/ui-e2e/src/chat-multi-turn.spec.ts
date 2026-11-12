@@ -32,6 +32,7 @@ import {
   completeFirstTurn,
   continueAction,
   editFirstMessage,
+  expectFinalizedTurns,
   expectLogInvariant,
   expectNoAdmissionRefusal,
   gatewayAsksByTurn,
@@ -86,7 +87,7 @@ const sendWhileLive = async (text: string): Promise<void> => {
 
 test('sends a second plain message after a completed turn', async () => {
   const [chatId] = await openChat(twoTurnScript);
-  await completeFirstTurn();
+  await completeFirstTurn(chatId!);
 
   await sendDraft('Second plain message.');
 
@@ -101,7 +102,7 @@ test('sends a second plain message after a completed turn', async () => {
 
 test('sends an edit of the first message after a completed turn', async () => {
   const [chatId] = await openChat(twoTurnScript);
-  await completeFirstTurn();
+  await completeFirstTurn(chatId!);
 
   await editFirstMessage(' Edited.');
 
@@ -126,10 +127,13 @@ test('sends a new message after stopping a gated turn', async () => {
    * log invariant is only meaningful once its reply has landed. */
   await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
   await expectNoAdmissionRefusal();
-  /* A stopped run never reaches its merge, so the root releases its lease and
-   * records `turn.failed` (`describeTurnRelease`) — the count alone passed a
-   * cancelled run that claimed to have recorded work. */
-  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.failed', 'turn.finalized'] });
+  /* Every completion cuts (RM-R13, `turn.machine.ts`), a stop included, so the
+   * stopped run settles `turn.finalized`; it changed no file, so its settlement
+   * names no revision. A release, not a stop, is what records `turn.failed`. */
+  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.finalized', 'turn.finalized'] });
+  const records = await chatLog(chatId!);
+  const stopped = records.find((record) => record.type === 'turn.finalized');
+  expect(stopped?.revisionId).toBeUndefined();
 });
 
 test('shows the revision of a turn stopped after it changed files', async () => {
@@ -159,7 +163,7 @@ test('shows the revision of a turn stopped after it changed files', async () => 
 
 test('sends a second message after reloading a completed chat', async () => {
   const [chatId] = await openChat(twoTurnScript);
-  await completeFirstTurn();
+  await completeFirstTurn(chatId!);
 
   await target.reload();
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
@@ -180,7 +184,7 @@ test('sends a second message after reloading a completed chat', async () => {
 
 test('sends a third message after two completed turns', async () => {
   const [chatId] = await openChat([reply('Reply one.'), reply('Reply two.'), reply('Reply three.')]);
-  await completeFirstTurn();
+  await completeFirstTurn(chatId!);
 
   await sendDraft('Second plain message.');
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
@@ -208,13 +212,7 @@ test('edits a turn after resuming a refused one', async () => {
   await tryAgain();
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  await target.expectVisible(
-    selectors
-      .getByRole('status', { name: 'Save status' })
-      .filter({ hasText: /^Saved\b/u })
-      .first(),
-    60_000,
-  );
+  await expectFinalizedTurns(chatId!, 1);
 
   await editFirstMessage(' Edited.');
 
@@ -232,7 +230,7 @@ test('edits a turn after resuming a refused one', async () => {
 
 test('edits twice in a row after a completed turn', async () => {
   const [chatId] = await openChat([reply('Reply one.'), reply('Reply two.'), reply('Reply three.')]);
-  await completeFirstTurn();
+  await completeFirstTurn(chatId!);
 
   await editFirstMessage(' Edited.');
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
@@ -254,7 +252,7 @@ test('edits twice in a row after a completed turn', async () => {
 
 test('resumes a refused turn that follows a completed one', async () => {
   const [chatId] = await openChat([reply('Reply one.'), reply('Reply two.')]);
-  await completeFirstTurn();
+  await completeFirstTurn(chatId!);
   await sendRefused('Second plain message.');
 
   await tryAgain();
@@ -293,15 +291,9 @@ test('resumes a refused turn twice', async () => {
 
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(3);
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  /* The third attempt is the one that records a revision, and its settlement
-   * is written with it — the log invariant is only meaningful once it has. */
-  await target.expectVisible(
-    selectors
-      .getByRole('status', { name: 'Save status' })
-      .filter({ hasText: /^Saved\b/u })
-      .first(),
-    60_000,
-  );
+  /* The third attempt is the one that settles, and the log invariant is only
+   * meaningful once it has. */
+  await expectFinalizedTurns(chatId!, 1);
   await expectNoAdmissionRefusal();
   /* One run, three attempts, three settlements. The retry verb used to rewind
    * and mint a fresh run id, which paid for the refused prefix again (W7). */
@@ -335,13 +327,7 @@ test('resumes, edits, then sends a new message', async () => {
   await tryAgain();
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  await target.expectVisible(
-    selectors
-      .getByRole('status', { name: 'Save status' })
-      .filter({ hasText: /^Saved\b/u })
-      .first(),
-    60_000,
-  );
+  await expectFinalizedTurns(chatId!, 1);
 
   await editFirstMessage(' Edited.');
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(3);
@@ -361,7 +347,7 @@ test('resumes, edits, then sends a new message', async () => {
 
 test('alternates turns between two chats of one project', async () => {
   const chatIds = await openChat([reply('Reply one.'), reply('Reply two.'), reply('Reply three.')], '?chats=2');
-  await completeFirstTurn();
+  await completeFirstTurn(chatIds[0]!);
 
   await switchToChat('Second chat');
   await selectModel(pdfModelName);
@@ -489,13 +475,6 @@ test('resumes a refused turn under its own run, rewinding nothing', async () => 
   await tryAgain();
 
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  await target.expectVisible(
-    selectors
-      .getByRole('status', { name: 'Save status' })
-      .filter({ hasText: /^Saved\b/u })
-      .first(),
-    60_000,
-  );
   /* One run, two attempts. *Try again* entered as a `regenerate` before W7: it
    * rewound, minted a fresh run id and paid for the refused prefix again, and
    * the host's record for the old id was orphaned so `drop` could not match it. */
@@ -570,13 +549,6 @@ test('resumes the turn a navigation abandoned, then sends another', async () => 
   await expect.poll(gatewayPendingCount, { timeout: 120_000 }).toBe(2);
   await target.releaseAgentHostGatewayFixture('First plain message.');
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  await target.expectVisible(
-    selectors
-      .getByRole('status', { name: 'Save status' })
-      .filter({ hasText: /^Saved\b/u })
-      .first(),
-    60_000,
-  );
   await expectLogInvariant(chatId!, {
     runs: 1,
     attempts: [2],

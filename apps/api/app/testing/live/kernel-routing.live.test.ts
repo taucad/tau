@@ -7,7 +7,14 @@ import type { BindingKernelRow } from '@taucad/chat/prompts';
 import type { HostRunSnapshot, ToolRegistry } from '@taucad/agent-host';
 import { kernelRoutingDevelopmentCases, kernelRoutingRoutingCases } from '#testing/live/kernel-routing.cases.js';
 import type { KernelRoutingCase } from '#testing/live/kernel-routing.cases.js';
-import { gradeKernelRoutingCase, stratumOf, summarizeKernelRoutingRun } from '#testing/live/kernel-routing.grader.js';
+import {
+  gradeKernelRoutingCase,
+  kernelRoutingDevelopmentThresholds,
+  stratumOf,
+  summarizeKernelRoutingGate,
+  summarizeKernelRoutingRun,
+} from '#testing/live/kernel-routing.grader.js';
+import { selectKernelRoutingCases } from '#testing/live/kernel-routing.heldout.js';
 import type { KernelRoutingObservation } from '#testing/live/kernel-routing.grader.js';
 import {
   buildFixture,
@@ -50,6 +57,9 @@ import { loadWorkspaceKernelRows } from '#testing/live/workspace-modules.js';
  * - `TAU_KR_CASES`: comma-separated case ids to run.
  * - `TAU_KR_CONCURRENCY`: parallel turns (default 4). `TAU_KR_MAX_USD`: stop scheduling past this spend.
  * - `TAU_KR_OUT`: output directory (default `<tmpdir>/tau-kernel-routing-runs/<time>`).
+ * - `KERNEL_ROUTING_SET=heldout`: the in-turn arm runs the held-out set (AKS-3d) instead of the development set. This is
+ *   the AKS-11 gate run, and its summary is checked against D9's gate (`summarizeKernelRoutingGate`).
+ * - `TAU_KR_REPEATS`: runs of each case (default 1; the gate uses 3, a case passing when at least two do).
  */
 
 const gateModel = 'anthropic-claude-sonnet-5.5';
@@ -76,6 +86,10 @@ const onlyCases = new Set(
     .filter(Boolean),
 );
 const concurrency = Math.max(1, Number(process.env['TAU_KR_CONCURRENCY'] ?? '4'));
+const repeats = Math.max(1, Number(process.env['TAU_KR_REPEATS'] ?? '1'));
+/** The in-turn arm's cases: the development set, or the held-out set by name at the gate. */
+const inTurnCases = selectKernelRoutingCases();
+const gateRun = inTurnCases !== kernelRoutingDevelopmentCases;
 const maxUsd = Number(process.env['TAU_KR_MAX_USD'] ?? 'Infinity');
 /** Milliseconds. */
 const caseTimeout = Number(process.env['TAU_KR_CASE_TIMEOUT_MS'] ?? '360000');
@@ -99,7 +113,7 @@ const baseCasesFor = (arm: KernelRoutingArm): readonly KernelRoutingCase[] =>
       ? templateCases
       : arm === 'prompt-only'
         ? promptOnlyCases
-        : kernelRoutingDevelopmentCases;
+        : inTurnCases;
 
 /** An explicit `TAU_KR_CASES` id that no selected arm runs is a typo, not an empty run. */
 const unmatchedCases = [...onlyCases].filter((id) => !arms.some((arm) => baseCasesFor(arm).some((c) => c.id === id)));
@@ -116,6 +130,7 @@ const casesFor = (arm: KernelRoutingArm): readonly KernelRoutingCase[] => {
 type CaseRow = RoutingRunResult & {
   readonly arm: KernelRoutingArm;
   readonly modelId: string;
+  readonly repeat: number;
   readonly pass: boolean;
   readonly reason: string;
   readonly preferredHit?: boolean;
@@ -292,7 +307,10 @@ describe.skipIf(runnable.length === 0)(
           await writeFile(file, '');
           const rows: CaseRow[] = [];
           const skipped: string[] = [];
-          await pool(cases, arm === 'prompt-only' ? concurrency * 2 : concurrency, async (testCase) => {
+          const runs = cases.flatMap((testCase) =>
+            Array.from({ length: repeats }, (_, repeat) => ({ testCase, repeat: repeat + 1 })),
+          );
+          await pool(runs, arm === 'prompt-only' ? concurrency * 2 : concurrency, async ({ testCase, repeat }) => {
             if (spend.usd >= maxUsd) {
               skipped.push(testCase.id);
               return;
@@ -307,6 +325,7 @@ describe.skipIf(runnable.length === 0)(
               ...result,
               arm,
               modelId,
+              repeat,
               pass: grade.pass,
               reason: grade.reason,
               ...(grade.preferredHit === undefined ? {} : { preferredHit: grade.preferredHit }),
@@ -318,7 +337,7 @@ describe.skipIf(runnable.length === 0)(
             rows.push(row);
             await appendFile(file, `${JSON.stringify(row)}\n`);
             console.log(
-              `[kernel-routing] ${arm} ${modelId} ${testCase.id}: ${grade.pass ? 'pass' : 'FAIL'} (${grade.reason}) $${usage.costUsd.toFixed(3)} ${Math.round(row.ms / 1000)}s`,
+              `[kernel-routing] ${arm} ${modelId} ${testCase.id}#${repeat}: ${grade.pass ? 'pass' : 'FAIL'} (${grade.reason}) $${usage.costUsd.toFixed(3)} ${Math.round(row.ms / 1000)}s`,
             );
           });
           const covered = cases.filter(({ id }) =>
@@ -327,13 +346,22 @@ describe.skipIf(runnable.length === 0)(
               (row) => row.observation.caseId === id && (row.state !== 'failed' || row.bindingKind !== undefined),
             ),
           );
+          const graded = rows.filter((row) => row.state !== 'failed' || row.bindingKind !== undefined);
           const observations: KernelRoutingObservation[] = covered.map(
-            ({ id }) => rows.find((row) => row.observation.caseId === id)!.observation,
+            ({ id }) => graded.find((row) => row.observation.caseId === id)!.observation,
+          );
+          const byCase = new Map(
+            covered.map(({ id }) => [
+              id,
+              graded.filter((row) => row.observation.caseId === id).map(({ observation }) => observation),
+            ]),
           );
           const durations = rows.map(({ ms }) => ms).sort((left, right) => left - right);
           const summary = {
             arm,
             modelId,
+            set: gateRun && arm === 'in-turn' ? 'heldout' : 'development',
+            repeats,
             cases: cases.length,
             run: rows.length,
             skipped,
@@ -347,14 +375,18 @@ describe.skipIf(runnable.length === 0)(
                 caseId: observation.caseId,
                 failure,
               })),
-            ...summarizeKernelRoutingRun(covered, observations),
+            ...(gateRun && arm === 'in-turn'
+              ? summarizeKernelRoutingGate(covered, byCase)
+              : repeats > 1
+                ? summarizeKernelRoutingGate(covered, byCase, kernelRoutingDevelopmentThresholds)
+                : summarizeKernelRoutingRun(covered, observations)),
           };
           await writeFile(
             join(outDirectory, `${arm}.${modelId}.summary.json`),
             `${JSON.stringify(summary, undefined, 2)}\n`,
           );
           console.log(`[kernel-routing] summary ${JSON.stringify(summary)}`);
-          expect(rows.length + skipped.length).toBe(cases.length);
+          expect(rows.length + skipped.length).toBe(runs.length);
         });
       }
     }

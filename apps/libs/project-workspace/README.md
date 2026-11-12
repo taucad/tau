@@ -8,8 +8,8 @@ The route modules stay in `apps/ui` because React Router's file routing and `typ
 
 One subpath per module, pinned by `src/exports.test.ts`. Audience: the `w.$workspace.$project` route tree and the project manager in `apps/ui`.
 
-| Subpath                  | Contents                                                                                                                                                                                                         |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `./components/<name>`    | `archived-chats-view`, `chat-editor-binary-warning`, `chat-editor-error-placeholder`, `chat-editor-too-large-warning`, `chat-history-empty`, `chat-pane-skeleton`, `chat-revision-summary`, `scroll-down-button` |
-| `./hooks/use-row-window` | Windowed row rendering for long lists                                                                                                                                                                            |
-| `./utils/<name>`         | File tree targets, drop ingestion and operation results; native image sniffing; kernel trace types; tool file metadata; revision reveal; project-open timer; manifest equivalence                                |
+| Subpath                  | Contents                                                                                                                                                                                |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `./components/<name>`    | `archived-chats-view`, `chat-editor-binary-warning`, `chat-editor-error-placeholder`, `chat-editor-too-large-warning`, `chat-history-empty`, `chat-pane-skeleton`, `scroll-down-button` |
+| `./hooks/use-row-window` | Windowed row rendering for long lists                                                                                                                                                   |
+| `./utils/<name>`         | File tree targets, drop ingestion and operation results; native image sniffing; kernel trace types; tool file metadata; revision reveal; project-open timer; manifest equivalence       |

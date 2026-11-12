@@ -3,6 +3,7 @@ import React from 'react';
 import type { ClassValue } from 'clsx';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
+import { defaultFilter } from 'cmdk';
 import { useIsMobile } from '#hooks/use-mobile.js';
 import {
   Command,
@@ -602,6 +603,7 @@ function ItemList<T>({
       searchPlaceHolder={searchPlaceHolder}
       emptyListMessage={emptyListMessage}
       parentTitle={parentTitle}
+      getKeywords={getKeywords}
       renderItem={(group, item) => {
         const value = getValue(item);
         return (
@@ -648,6 +650,31 @@ function mergeGroups<T>(groups: ReadonlyArray<GroupedItems<T>>, getValue: (item:
 }
 
 /**
+ * Order a search's groups and their items by the best match first, scored as cmdk filters them. cmdk does not reorder
+ * grouped items itself, so without this the first group in layout order takes the highlight and Enter: typing "jscad"
+ * would pick OpenCascade, whose keywords match loosely, over JSCAD. Ties keep layout order.
+ */
+function rankGroups<T>(
+  groups: ReadonlyArray<GroupedItems<T>>,
+  search: string,
+  score: (group: string, item: T) => number,
+): Array<GroupedItems<T>> {
+  if (search === '') {
+    return [...groups];
+  }
+  const ranked = groups.map((group) => {
+    const items = group.items
+      .map((item, index) => ({ item, index, score: score(group.name, item) }))
+      .sort((a, b) => b.score - a.score || a.index - b.index);
+    return { group: { name: group.name, items: items.map(({ item }) => item) }, best: items[0]?.score ?? 0 };
+  });
+  return ranked
+    .map((entry, index) => ({ ...entry, index }))
+    .sort((a, b) => b.best - a.best || a.index - b.index)
+    .map(({ group }) => group);
+}
+
+/**
  * The list with its sub-views: the root's groups and a row per sub-view; a sub-view's Back row and groups; or, while
  * searching, the items of every level. Backspace in an empty search steps back, as Escape does.
  */
@@ -662,9 +689,11 @@ function NestedItemList<T>({
   emptyListMessage,
   renderItem,
   getValue,
+  getKeywords,
   parentTitle,
 }: {
   readonly parentTitle: string;
+  readonly getKeywords: ((item: T) => readonly string[]) | undefined;
   readonly groupedItems: ReadonlyArray<GroupedItems<T>>;
   readonly subViews: ReadonlyArray<ComboBoxSubView<T>>;
   readonly stack: ViewStack<string>;
@@ -687,7 +716,11 @@ function NestedItemList<T>({
     }
   }, [returnedTo, depth]);
   const groups = isSearching
-    ? mergeGroups([...groupedItems, ...subViews.flatMap((subView) => subView.groupedItems)], getValue)
+    ? rankGroups(
+        mergeGroups([...groupedItems, ...subViews.flatMap((subView) => subView.groupedItems)], getValue),
+        search,
+        (group, item) => defaultFilter?.(getValue(item), search, [group, ...(getKeywords?.(item) ?? [])]) ?? 0,
+      )
     : (view?.groupedItems ?? groupedItems).filter((group) => group.items.length > 0);
   const open = (subView: ComboBoxSubView<T>): void => {
     stack.push(subView.id, { returnKey: viewValue(subView.id) });

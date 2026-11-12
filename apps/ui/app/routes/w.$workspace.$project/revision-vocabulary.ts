@@ -253,6 +253,35 @@ export const revisionTitle = (revision: RevisionCard, revisions: readonly Revisi
   return restoredSentence(revisions.find((entry) => entry.revisionId === revision.restoredFrom));
 };
 
+/** An agent's entry with no title of its own (Q9). @public */
+export const agentChangeTitle = 'Agent change';
+
+/**
+ * The title of an entry read as a bare row, as the agent's `history` tool
+ * returns it: what {@link revisionTitle} shows for the same entry in History.
+ * A version reads by its name; the engine's own placeholder titles never
+ * reach the page (M6). A turn's placeholder is the agent's change, or, on a
+ * turn's base cut, which the row reports as the person's, an autosave (A5).
+ *
+ * @param entry - The row's title, what made it and its version.
+ * @returns The title.
+ * @public
+ */
+export const entryTitle = (
+  entry: Readonly<{ summary: string; source: string; version?: Readonly<{ name: string }> }>,
+): string => {
+  if (entry.version !== undefined) {
+    return entry.version.name;
+  }
+  if (/^Agent turn \S+$/u.test(entry.summary)) {
+    return entry.source === 'agent' ? agentChangeTitle : 'Autosave';
+  }
+  if (/^Saved changes \(\w+\)$/u.test(entry.summary)) {
+    return entry.summary === 'Saved changes (save)' ? 'Saved changes' : 'Autosave';
+  }
+  return entry.summary;
+};
+
 /**
  * Whether a credential refusal on this remote is GitHub's to fix (D18): a
  * repository picked from a connected account, or a github.com address typed

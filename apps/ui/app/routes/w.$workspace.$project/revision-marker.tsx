@@ -68,7 +68,6 @@ import type { AffectedPublication } from '#routes/w.$workspace.$project/revision
 import {
   entryReference,
   entryTime,
-  revisionTriggerLabel,
   startFact,
   versionLabel,
   versionOf,
@@ -435,64 +434,6 @@ const storedIdRows = (revision: RevisionCard): ReadonlyArray<readonly [string, R
 };
 
 /**
- * A revision's exact facts, opened by the Details toggle in the same
- * `Collapsible`. The ids it is stored under appear only with Tau's debug
- * setting on (B5); copying the id is More's.
- *
- * @param props - The revision and the line it is on.
- * @returns The Details content.
- */
-export function RevisionDetails({
-  revision,
-  branch,
-}: {
-  readonly revision: RevisionCard;
-  readonly branch: string | undefined;
-}): React.JSX.Element {
-  const isDebug = useFeature('tauDebug');
-  const rows: ReadonlyArray<readonly [string, React.ReactNode]> = [
-    ...(isDebug ? storedIdRows(revision) : []),
-    ...(branch === undefined ? [] : ([['Branch', branch]] as const)),
-    ['Trigger', revisionTriggerLabel(revision.capture, revision.turnCut)],
-    ...(revision.createdAt > 0
-      ? ([
-          [
-            'Recorded',
-            <span key='recorded' className='tabular-nums'>
-              {new Date(revision.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
-            </span>,
-          ],
-        ] as const)
-      : []),
-    ...(revision.actor === '' ? [] : ([['By', revision.actor]] as const)),
-  ];
-  return (
-    <CollapsibleContent className={disclosureMotion}>
-      <dl
-        aria-label={`Details for ${entryReference(revision) ?? 'this entry'}`}
-        className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 px-1 pt-1 text-xs'
-      >
-        {rows.map(([term, value]) => (
-          <div key={term} className='contents'>
-            <dt className='text-muted-foreground'>{term}</dt>
-            <dd className='min-w-0'>{value}</dd>
-          </div>
-        ))}
-        {/* The trailer the entry records (B2, B5), under its label and across the pane: a diagnostic, debug only. */}
-        {isDebug && revision.trailer !== undefined ? (
-          <div className='col-span-2 flex min-w-0 flex-col gap-0.5'>
-            <dt className='text-muted-foreground'>Recorded trailer</dt>
-            <dd className='min-w-0'>
-              <code className='block font-mono break-all whitespace-pre-wrap'>{revision.trailer}</code>
-            </dd>
-          </div>
-        ) : null}
-      </dl>
-    </CollapsibleContent>
-  );
-}
-
-/**
  * The ids and trailer an entry is stored under, under its open row's facts:
  * diagnostics, rendered with Tau's debug setting on and never otherwise (B5).
  *
@@ -617,8 +558,6 @@ export function RevisionMenu({
   nextVersion,
 }: {
   readonly revision: RevisionCard;
-  /** Read by no surface: the menu is the same on every entry. */
-  readonly isCurrent?: boolean;
   readonly branch: string | undefined;
   /** The number a new version takes, from {@link nextVersionNumber}; the form says it where the surface knows it. */
   readonly nextVersion?: number;

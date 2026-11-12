@@ -33,7 +33,6 @@
     "./components/chat-editor-too-large-warning": "./src/components/chat-editor-too-large-warning.tsx",
     "./components/chat-history-empty": "./src/components/chat-history-empty.tsx",
     "./components/chat-pane-skeleton": "./src/components/chat-pane-skeleton.tsx",
-    "./components/chat-revision-summary": "./src/components/chat-revision-summary.tsx",
     "./components/scroll-down-button": "./src/components/scroll-down-button.tsx",
     "./hooks/use-row-window": "./src/hooks/use-row-window.ts",
     "./utils/chat-kernel-types": "./src/utils/chat-kernel-types.ts",

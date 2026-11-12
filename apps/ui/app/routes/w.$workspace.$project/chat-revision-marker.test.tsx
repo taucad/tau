@@ -9,6 +9,7 @@ import { createTurnPlacementPort } from '@taucad/revisions/turn-placement';
 import { createTauAgentHost } from '@taucad/agent-host';
 import { createProviderEventLog } from '@taucad/agent-host/browser';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatRevisionMarker } from '#routes/w.$workspace.$project/chat-revision-marker.js';
 import { useRevisionCards, useRevisionChanges, useRevisions, useTurnRevision } from '#hooks/use-revisions.js';
 import type { RevisionCard, RevisionsView } from '#hooks/use-revisions.js';
@@ -400,7 +401,7 @@ describe('ChatRevisionMarker', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('should keep a saved revision compact until its changes are requested', () => {
+  it('should say a saved request in one line whose View opens the entry in History (C5)', () => {
     setLog(saved());
     setRevisions({ revisions: [revision()], byTurnId: new Map([['u1', revision()]]), headRevisionId: 'rev-9' });
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
@@ -408,42 +409,35 @@ describe('ChatRevisionMarker', () => {
     /* The live region holds the lifecycle only; the file count arrives after
        the diff and must not be a second announcement (C46). */
     expect(screen.getByRole('status').textContent).toBe('Saved');
-    expect(screen.getByLabelText('Changes from this request').textContent).toContain('Saved · 2 files');
-    /* The whole header is the disclosure; no separate Details button (R11). */
-    const toggle = screen.getByRole('button', { name: 'Saved · 2 files · details' });
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.queryByText('Files · 2')).toBeNull();
-    expect(screen.queryByRole('button', { name: /^(Details|View changes)$/ })).toBeNull();
+    const line = screen.getByRole('group', { name: 'Changes from this request' });
+    expect(line.textContent).toBe('Saved · 2 filesView');
+    /* One verb, and it is not a disclosure. */
+    const view = within(line).getByRole('button');
+    expect(view.textContent).toBe('View');
+    expect(view.hasAttribute('aria-expanded')).toBe(false);
 
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    /* Rounds 14 and 18: History's actions row — View, then More and Details. */
-    const actions = document.querySelector<HTMLElement>('[data-slot="marker-actions"]')!;
-    fireEvent.click(within(actions).getByRole('button', { name: 'View' }));
+    fireEvent.click(view);
     expect(requestRevisionReveal).toHaveBeenCalledWith('p', 'rev-5');
     expect(openPanel).toHaveBeenCalledWith('revisions');
-    expect(within(actions).getByRole('button', { name: 'More' })).not.toBeNull();
-    fireEvent.click(within(actions).getByRole('button', { name: 'Details' }));
-    const details = document.querySelector('dl[aria-label^="Details for "]');
-    /* B5: the id is a diagnostic, behind Tau's debug setting. */
-    expect(details?.textContent).not.toContain('rev-5');
-    expect(details?.textContent).toContain('main');
-    /* Restore is History's; the chat reaches it by View. */
-    expect(screen.queryByRole('button', { name: /Restore/u })).toBeNull();
   });
 
-  it('should reach History’s More from the chat: naming and a new branch (round 14)', async () => {
-    const user = userEvent.setup();
-    setLog(saved());
-    setRevisions({ revisions: [revision()], byTurnId: new Map([['u1', revision()]]), headRevisionId: 'rev-9' });
-    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    await user.click(screen.getByRole('button', { name: / · details$/u }));
-    await user.click(screen.getByRole('button', { name: 'More' }));
-
-    expect(screen.getByRole('menuitem', { name: 'Create version…' })).not.toBeNull();
-    expect(screen.getByRole('menuitem', { name: 'New branch from here…' })).not.toBeNull();
-    /* C3: More has these two items; the ID's copy glyph is on History's fact line. */
-    expect(screen.getAllByRole('menuitem')).toHaveLength(2);
+  /* C5 acceptance: History owns the menu and the facts; the chat links to them. */
+  it.each([
+    ['saved', saved],
+    ['working', changed],
+  ] as const)('should render no menu and no definition list while %s', (_name, rows) => {
+    setLog(rows());
+    setRevisions({
+      revisions: [revision(), revision({ revisionId: 'rev-4', n: 4, turnId: undefined })],
+      byTurnId: new Map([['u1', revision()]]),
+      headRevisionId: 'rev-5',
+    });
+    const { container } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    expect(container.firstChild).not.toBeNull();
+    expect(container.querySelector('dl')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'More' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Details' })).toBeNull();
+    expect(container.querySelector('[aria-haspopup="menu"], [aria-expanded]')).toBeNull();
   });
 
   it('should draw the trigger’s glyph family, a failed turn in the alert purple (HQ5)', () => {
@@ -456,14 +450,14 @@ describe('ChatRevisionMarker', () => {
     setLog(changed());
     setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
     chatState.persistedError = { category: 'generic', title: 'Error', message: 'Network error', code: 'ERR' };
-    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />, { wrapper: TooltipProvider });
     const glyph = document.querySelector('[data-slot="marker-glyph"]')?.getAttribute('class') ?? '';
     expect(glyph).toContain('lucide-circle-alert');
     expect(glyph).toContain('text-feature');
     expect(glyph).not.toContain('text-destructive');
   });
 
-  it('should say the saved revision is still on its way to Tau Cloud (round 21)', () => {
+  it('should leave backup to the History header (M8)', () => {
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
       remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
@@ -471,12 +465,11 @@ describe('ChatRevisionMarker', () => {
     };
     setLog(saved());
     setRevisions({ revisions: [revision()], byTurnId: new Map([['u1', revision()]]), headRevisionId: 'rev-5' });
-    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    fireEvent.click(screen.getByRole('button', { name: / · details$/u }));
-    expect(screen.getByText('Backing up to Tau Cloud…')).not.toBeNull();
+    const { container } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    expect(container.textContent).not.toMatch(/Tau Cloud|backed up|Backing up/u);
   });
 
-  it('should link an earlier saved request to its revision in Revisions', () => {
+  it('should link an earlier saved request to its entry in History', () => {
     setLog(saved());
     setRevisions({ revisions: [revision()], byTurnId: new Map([['u1', revision()]]) });
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn={false} />);
@@ -540,7 +533,7 @@ describe('ChatRevisionMarker', () => {
     ]);
     rerender(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
     expect(screen.getByRole('status').textContent).toBe('Waiting for you');
-    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
   });
 
   /* PV-A7, V5 B1: a finished run whose settlement row is late. */
@@ -604,17 +597,41 @@ describe('ChatRevisionMarker', () => {
     expect(retry.container.firstChild).toBeNull();
   });
 
-  it('should offer Retry when a placed request errors without a settlement', () => {
+  it('should offer Try again, naming the last confirmed save by its time, when a placed request errors', async () => {
+    const user = userEvent.setup();
+    const confirmedAt = 1_789_225_647_000;
     setLog(changed());
-    setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
+    setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined, createdAt: confirmedAt })] });
     chatState.persistedError = { category: 'generic', title: 'Error', message: 'Network error', code: 'ERR' };
-    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    render(
+      <TooltipProvider>
+        <ChatRevisionMarker userMessageId='u1' isLatestTurn />
+      </TooltipProvider>,
+    );
 
     expect(screen.getByRole('status').textContent).toBe('Couldn’t confirm the save');
-    fireEvent.click(screen.getByRole('button', { name: / · details$/ }));
-    expect(screen.getByText('Tau couldn’t reach your files to confirm this save.')).not.toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    const tryAgain = screen.getByRole('button', { name: 'Try again' });
+    await user.hover(tryAgain);
+    const time = new Date(confirmedAt).toLocaleTimeString(undefined, { timeStyle: 'short' });
+    const tooltip = await screen.findByRole('tooltip');
+    expect(tooltip.textContent).toBe(
+      `Tau couldn’t reach your files to confirm this save. Your last confirmed save was at ${time}.`,
+    );
+    await user.click(tryAgain);
     expect(continueChat).toHaveBeenCalledOnce();
+  });
+
+  it('should offer Resolve on a conflict, which opens History', () => {
+    setLog([
+      ...changed(),
+      lifecycleRow(4, 'completed'),
+      logRow(5, { type: 'turn.conflicted', turnId: 'u1', runId: 'run_1', chatId: 'chat-1', checkoutId: 'live' }),
+    ]);
+    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    expect(screen.getByRole('status').textContent).toBe('Needs your decision');
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve' }));
+    expect(openPanel).toHaveBeenCalledWith('revisions');
+    expect(requestRevisionReveal).not.toHaveBeenCalled();
   });
 
   it('does not turn a caught-up healthy run into an unconfirmed save because of a legacy error', () => {
@@ -625,6 +642,6 @@ describe('ChatRevisionMarker', () => {
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
 
     expect(screen.queryByText('Couldn’t confirm the save')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
   });
 });

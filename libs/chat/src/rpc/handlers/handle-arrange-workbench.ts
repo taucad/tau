@@ -22,7 +22,7 @@ type Failure = { success: false; errorCode: ArrangeWorkbenchErrorCode; message: 
 type Result = RpcResult<'arrange_workbench'>;
 type Group = { kind: 'group'; size?: number; tabs: WorkbenchTab[]; active?: number };
 type Node = Group | { kind: 'split'; size?: number; direction: 'row' | 'column'; children: Node[] };
-type Write = { path: string; text?: string; previous?: string };
+type Write = { path: string; text?: string; previous?: string; viewId?: string };
 type ViewInput = NonNullable<ArrangeWorkbenchInput['views']>[number];
 
 /* The inheritable leaves a view patch names, with the values written: these are set in that view (V8). */
@@ -404,7 +404,7 @@ export async function handleArrangeWorkbench(
       const writes: Write[] = [];
       for (const [id, text] of viewWrites) {
         if (currentViewIds.has(id)) {
-          writes.push({ path: workbenchPaths.view(id), text, previous: viewTexts.get(id) });
+          writes.push({ path: workbenchPaths.view(id), text, previous: viewTexts.get(id), viewId: id });
         }
       }
       for (const tab of input.close ?? []) {
@@ -442,18 +442,18 @@ export async function handleArrangeWorkbench(
           digest: await digest(write.text),
           previousDigest: await digest(write.previous),
         });
-      }
-      if (!conflict) {
-        /* Only for views this call wrote, and only once their records are on disk: a refused call sets nothing. */
-        for (const [id, fields] of viewFieldsSet) {
-          if (currentViewIds.has(id) && Object.keys(fields).length > 0) {
-            try {
-              await workbench?.markViewFieldsSet?.(id, fields);
-            } catch {
-              // The record is written; a device that cannot keep the list still shows the value.
-            }
+        /* As each view record lands, whatever a later write does: a view write a conflict cuts short still sets its
+         * leaves, and a call refused before any write sets nothing. */
+        const fields = write.viewId === undefined ? undefined : viewFieldsSet.get(write.viewId);
+        if (write.viewId !== undefined && fields !== undefined && Object.keys(fields).length > 0) {
+          try {
+            await workbench?.markViewFieldsSet?.(write.viewId, fields);
+          } catch {
+            // The record is written; a device that cannot keep the list still shows the value.
           }
         }
+      }
+      if (!conflict) {
         return {
           success: true,
           status: 'written',

@@ -140,6 +140,28 @@ describe('handleArrangeWorkbench', () => {
       expect(markViewFieldsSet).not.toHaveBeenCalled();
     });
 
+    it('marks a view whose record landed when a based call then conflicts on the layout', async () => {
+      const state = setUp();
+      const basedOn = digest(state.files.get(workbenchPaths.layout)!);
+      const checkedWrite = state.fs.writeFileChecked.getMockImplementation()!;
+      state.fs.writeFileChecked.mockImplementation(async (input) =>
+        input.path === workbenchPaths.layout
+          ? { status: 'conflict', conflicts: [{ path: workbenchPaths.layout, actual: bytes(layout()) }] }
+          : checkedWrite(input),
+      );
+      const markViewFieldsSet = vi.fn();
+
+      const result = await handleArrangeWorkbench(
+        { views: [{ id: 'front', display: { grid: true } }], basedOn },
+        state.fs,
+        { ...state.workbench, markViewFieldsSet },
+      );
+
+      expect(result).toMatchObject({ success: false, errorCode: 'RECORD_CONFLICT' });
+      expect(record(state.files).display.grid).toBe(true);
+      expect(markViewFieldsSet).toHaveBeenCalledExactlyOnceWith('front', { 'display.grid': true });
+    });
+
     it('writes the value alone where the host has no person (CLI, MCP), and survives a failing port', async () => {
       const state = setUp();
       expect(

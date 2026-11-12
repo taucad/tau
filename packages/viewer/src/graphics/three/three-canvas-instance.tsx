@@ -162,7 +162,10 @@ export function ThreeCanvasInstance({
     },
     [canvasId, graphicsRef],
   );
-  /** This canvas's view-cube interaction lock: the cube takes it, and the controls adapter does not step while it is held. */
+  /**
+   * This canvas's view-cube interaction lock: the cube takes it, and the controls adapter does not step while it is
+   * held.
+   */
   const interactionLock = useMemo(createViewportGizmoInteractionLock, []);
   /** Hands graphics the controls adapter for this mount's root; graphics stops it with the surface (charter I9, I11). */
   const attachControls = useCallback(

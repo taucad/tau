@@ -3,7 +3,7 @@
  *
  * ```text
  * canvas: creating → ready → presented ; lost ; failed
- * context: canvasId, backend, surface
+ * context: canvasId, backend, surface, cameraSurface
  * ```
  *
  * - **creating**: the surface is in the document and R3F is building its renderer. A placeholder surface (the stage
@@ -24,7 +24,8 @@
  * - the surface's size reaches the camera as `setViewport` in the macrostep that reports it (`hostCreated`,
  *   `surfaceResized`), so the frame that resized presents the new viewport;
  * - the camera's clip policy holds the infinite grid's far padding and presentation plane for the grid the canvas's
- *   scene draws (`gridChanged`, reported by the scene's own mount, with the axis the grid lies across), and is cleared when the canvas stops drawing.
+ *   scene draws (`gridChanged`, reported by the scene's own mount, with the axis the grid lies across), and is cleared
+ *   when the canvas stops drawing.
  *
  * Every fact here is ephemeral: it is derived from the mounted surface and never persisted or seeded.
  *
@@ -395,7 +396,8 @@ const canvasMachineDefinition = setup({
     backend: undefined,
     surface: undefined,
     failure: undefined,
-    // A Three canvas presents the camera from the start, with no clip policy until its scene reports a grid. A placeholder draws nothing and presents nothing.
+    // A Three canvas presents the camera from the start, with no clip policy until its scene reports a grid. A
+    // placeholder draws nothing and presents nothing.
     cameraSurface:
       input.kind === 'canvas' && input.camera
         ? spawn(canvasActors.cameraSurface, {

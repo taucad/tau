@@ -310,7 +310,7 @@ const camera = () => graphicsHolder.current!.getSnapshot().context.cameraRef.get
 const controlsAdapter = () => graphicsHolder.current?.getSnapshot().context.controlsAdapter;
 
 /** A canvas under a Suspense boundary that a test suspends (hiding the canvas) and then reveals. */
-const suspendable = () => {
+const suspendable = ({ enableGrid = false }: Readonly<{ enableGrid?: boolean }> = {}) => {
   let release: () => void = () => undefined;
   const pending = new Promise<void>((resolve) => {
     release = resolve;
@@ -324,7 +324,7 @@ const suspendable = () => {
   const tree = (hold: boolean) => (
     <Suspense fallback={null}>
       <Gate hold={hold} />
-      <ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined}>
+      <ThreeCanvasInstance enableGrid={enableGrid} graphicsBackend='webgl' onRetry={() => undefined}>
         {null}
       </ThreeCanvasInstance>
     </Suspense>
@@ -433,7 +433,12 @@ describe('ThreeCanvasInstance', () => {
     });
     expect(canvas()).toBe(ref);
     expect(frameCallbacks.filter(({ priority }) => priority === 6)).toHaveLength(1);
-    // The replayed mount neither stops nor duplicates the controls adapter.
+    // One surface observer reports resizes to the camera, and one camera surface presents them.
+    expect(frameCallbacks.filter(({ priority }) => priority === -2)).toHaveLength(1);
+    expect(Object.keys(ref?.getSnapshot().children ?? {}).filter((id) => id === 'cameraSurface')).toEqual([
+      'cameraSurface',
+    ]);
+    // The replayed mount neither stops nor duplicates the controls adapter, so its one tick per frame.
     expect([adapters.started, adapters.stopped]).toEqual([1, 0]);
     view.unmount();
     expect(canvas()).toBeUndefined();
@@ -911,7 +916,7 @@ describe('ThreeCanvasInstance', () => {
     }
   });
 
-  it('presents the grid clip policy graphics shows on the camera while the canvas is mounted', () => {
+  it('presents the grid clip policy on the camera while the grid is in the scene', () => {
     const grid = (upDirection: 'x' | 'y' | 'z') => ({
       farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
       presentationPlane: infiniteGridPresentationPlaneByUpDirection[upDirection],
@@ -921,31 +926,61 @@ describe('ThreeCanvasInstance', () => {
         {null}
       </ThreeCanvasInstance>,
     );
-    // From the commit that mounts the canvas, before its renderer exists.
     expect(camera().clipPolicy).toEqual(grid('z'));
 
-    // The canvas props do not drive the camera: graphics' grid and world up do.
     rerender(
       <ThreeCanvasInstance className='unchanged-policy' enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
         {null}
       </ThreeCanvasInstance>,
     );
     expect(camera().clipPolicy).toEqual(grid('z'));
+    // The grid lies across graphics' world up, as `Grid` draws it.
     act(() => {
       graphicsHolder.current?.send({ type: 'setUpDirection', payload: 'x' });
     });
     expect(camera().clipPolicy).toEqual(grid('x'));
-    act(() => {
-      graphicsHolder.current?.send({ type: 'setGridVisibility', payload: false });
-    });
+
+    // The grid the canvas draws decides the policy, whatever graphics' own grid setting says.
+    rerender(
+      <ThreeCanvasInstance enableGrid={false} graphicsBackend='webgl' onRetry={() => undefined}>
+        {null}
+      </ThreeCanvasInstance>,
+    );
+    expect(graphicsHolder.current?.getSnapshot().context.enableGrid).toBe(true);
     expect(camera().clipPolicy).toBeUndefined();
-    act(() => {
-      graphicsHolder.current?.send({ type: 'setGridVisibility', payload: true });
-    });
+    rerender(
+      <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
+        {null}
+      </ThreeCanvasInstance>,
+    );
     expect(camera().clipPolicy).toEqual(grid('x'));
 
     unmount();
     expect(camera().clipPolicy).toBeUndefined();
+  });
+
+  it('keeps the grid clip policy when a Suspense boundary hides and reveals the canvas', async () => {
+    const { tree, release, pending } = suspendable({ enableGrid: true });
+    const { rerender, unmount } = render(tree(false));
+    await waitFor(() => {
+      expect(backend()).toBe('webgl');
+    });
+    expect(camera().clipPolicy).toBeDefined();
+    act(() => {
+      rerender(tree(true));
+    });
+    expect(camera().clipPolicy).toBeUndefined();
+    await act(async () => {
+      release();
+      await pending;
+      rerender(tree(false));
+    });
+    expect(canvas()?.getSnapshot().value).toBe('ready');
+    expect(camera().clipPolicy).toEqual({
+      farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
+      presentationPlane: infiniteGridPresentationPlaneByUpDirection.z,
+    });
+    unmount();
   });
 
   it('presents the surface size on the camera from the renderer it creates', async () => {

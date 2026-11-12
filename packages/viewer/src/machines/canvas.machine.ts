@@ -23,8 +23,9 @@
  * surface, through its `cameraSurface` child:
  * - the surface's size reaches the camera as `setViewport` in the macrostep that reports it (`hostCreated`,
  *   `surfaceResized`), so the frame that resized presents the new viewport;
- * - the camera's clip policy holds the infinite grid's far padding and presentation plane while graphics shows the
- *   grid, following graphics' `gridChanged`, and is cleared when the canvas stops drawing.
+ * - the camera's clip policy holds the infinite grid's far padding and presentation plane while the grid is in the
+ *   canvas's scene (`gridShown`, from the scene's own mount), across the world up graphics keeps (`upDirectionChanged`),
+ *   and is cleared when the canvas stops drawing.
  *
  * Every fact here is ephemeral: it is derived from the mounted surface and never persisted or seeded.
  *
@@ -105,7 +106,7 @@ type WebglContextRef = ActorRefFrom<typeof webglContextMachine>;
 export type CanvasCameraRef = ActorRefFrom<typeof cameraMachine>;
 
 /**
- * What graphics shows of the infinite grid: whether it is on, and the world up axis it lies across.
+ * The infinite grid a canvas draws: whether it is in the scene, and the world up axis it lies across.
  *
  * @public
  */
@@ -130,8 +131,8 @@ export type CanvasInput = Readonly<{
   reattached?: boolean;
   /** The view's camera: the canvas presents its viewport and clip policy on it. A canvas without one presents none. */
   camera?: CanvasCameraRef;
-  /** The grid graphics shows when the surface attaches; `gridChanged` follows it. */
-  grid?: CanvasGrid;
+  /** The world up graphics keeps when the surface attaches; `upDirectionChanged` follows it. */
+  upDirection?: CanvasGrid['upDirection'];
 }>;
 
 /**
@@ -157,8 +158,10 @@ export type CanvasEvent =
   | { type: 'rendererFailed'; failure: CanvasFailure }
   | { type: 'framePresented' }
   | { type: 'contextLost' }
-  /** Graphics turned the grid on or off, or changed the world up axis it lies across. */
-  | { type: 'gridChanged'; grid: CanvasGrid };
+  /** The grid entered or left the canvas's scene. */
+  | { type: 'gridShown'; shown: boolean }
+  /** Graphics changed the world up axis, which the grid lies across. */
+  | { type: 'upDirectionChanged'; upDirection: CanvasGrid['upDirection'] };
 
 /**
  * Events the canvas actor emits.
@@ -192,6 +195,8 @@ export interface CanvasContext {
   contextBudget: ContextBudgetRef | undefined;
   loadSpans: LoadSpansRef;
   host: CanvasHostRef | undefined;
+  /** The grid the canvas draws, which decides the camera's clip policy. */
+  grid: CanvasGrid;
   /** Presents this surface's viewport and clip policy on the camera while the canvas can draw. */
   cameraSurface: CameraSurfaceRef | undefined;
 }
@@ -299,10 +304,10 @@ const cameraSurfaceLogic = createCallbackLogic<CameraSurfaceCommand, CameraSurfa
 type CameraSurfaceRef = ActorRefFrom<typeof cameraSurfaceLogic>;
 
 /**
- * The camera clip policy for the grid graphics shows: room past the far plane for the grid's fade, and the grid's plane
+ * The camera clip policy for the grid a canvas draws: room past the far plane for the grid's fade, and the grid's plane
  * kept in front of the near plane. No grid, no policy.
  *
- * @param grid - The grid graphics shows.
+ * @param grid - The grid the canvas draws.
  * @returns The policy, or `undefined` without a grid.
  * @public
  */
@@ -314,7 +319,13 @@ export const resolveGridClipPolicy = (grid: CanvasGrid): CameraClipPolicy | unde
       }
     : undefined;
 
-const noGrid: CanvasGrid = { enabled: false, upDirection: 'z' };
+/** Record a grid change and present its clip policy, while the canvas still presents the camera. */
+const changeGrid = (context: CanvasContext, grid: CanvasGrid, enq: CanvasEnqueue) => {
+  if (context.cameraSurface) {
+    enq.sendTo(context.cameraSurface, { type: 'clipPolicy', clipPolicy: resolveGridClipPolicy(grid) });
+  }
+  return { context: { grid } };
+};
 
 /** The host slot is filled per surface from `hostCreated`; nothing starts it from the registry. */
 const missingHost: CanvasHostLogic = createCallbackLogic<CanvasHostCommand, undefined>(() => {
@@ -399,13 +410,14 @@ const canvasMachineDefinition = setup({
     backend: undefined,
     surface: undefined,
     failure: undefined,
-    // A Three canvas presents the camera from the start: its clip policy holds from the commit that mounts it, as the
-    // grid it pads is drawn. A placeholder draws nothing and presents nothing.
+    // No grid is in the scene until the scene mounts one.
+    grid: { enabled: false, upDirection: input.upDirection ?? 'z' },
+    // A Three canvas presents the camera from the start. A placeholder draws nothing and presents nothing.
     cameraSurface:
       input.kind === 'canvas' && input.camera
         ? spawn(canvasActors.cameraSurface, {
             id: 'cameraSurface',
-            input: { camera: input.camera, clipPolicy: resolveGridClipPolicy(input.grid ?? noGrid) },
+            input: { camera: input.camera, clipPolicy: undefined },
           })
         : undefined,
     // Holds the viewer's place in the context budget for the canvas's whole life, Retry's fallback included.
@@ -520,13 +532,10 @@ const canvasMachineDefinition = setup({
       target: '.failed',
       context: { ...stopDrawing(context, enq), failure: event.failure },
     }),
-    // Only a canvas that still presents the camera changes its policy; a lost or failed one has none to change.
-    gridChanged: ({ context, event }, enq) => {
-      if (context.cameraSurface) {
-        enq.sendTo(context.cameraSurface, { type: 'clipPolicy', clipPolicy: resolveGridClipPolicy(event.grid) });
-      }
-      return {};
-    },
+    // Recorded in every state; only a canvas that still presents the camera changes its policy.
+    gridShown: ({ context, event }, enq) => changeGrid(context, { ...context.grid, enabled: event.shown }, enq),
+    upDirectionChanged: ({ context, event }, enq) =>
+      changeGrid(context, { ...context.grid, upDirection: event.upDirection }, enq),
   },
 });
 
@@ -549,7 +558,8 @@ export const canvasEventTypes = [
   'rendererFailed',
   'framePresented',
   'contextLost',
-  'gridChanged',
+  'gridShown',
+  'upDirectionChanged',
 ] as const satisfies ReadonlyArray<CanvasEvent['type']>;
 
 type CanvasMachineDefinition = typeof canvasMachineDefinition;

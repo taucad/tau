@@ -1260,16 +1260,7 @@ const graphicsMachineDefinition = setup({
           }),
         },
         setGizmoVisibility: { context: ({ event }) => ({ enableGizmo: event.payload }) },
-        setGridVisibility: ({ context, event }, enq) => {
-          // The canvas pads the camera's clip planes for the grid it shows.
-          if (context.canvas && event.payload !== context.enableGrid) {
-            enq.sendTo(context.canvas.ref, {
-              type: 'gridChanged',
-              grid: { enabled: event.payload, upDirection: context.upDirection },
-            });
-          }
-          return { context: { enableGrid: event.payload } };
-        },
+        setGridVisibility: { context: ({ event }) => ({ enableGrid: event.payload }) },
         setAxesVisibility: { context: ({ event }) => ({ enableAxes: event.payload }) },
         setMatcapVisibility: { context: ({ event }) => ({ enableMatcap: event.payload }) },
         setPostProcessingVisibility: { context: ({ event }) => ({ enablePostProcessing: event.payload }) },
@@ -1281,10 +1272,7 @@ const graphicsMachineDefinition = setup({
           enq.sendTo(context.cameraRef, { type: 'setUpDirection', axis: event.payload });
           // The grid turns with the world up, and the canvas's clip policy with it.
           if (context.canvas) {
-            enq.sendTo(context.canvas.ref, {
-              type: 'gridChanged',
-              grid: { enabled: context.enableGrid, upDirection: event.payload },
-            });
+            enq.sendTo(context.canvas.ref, { type: 'upDirectionChanged', upDirection: event.payload });
           }
           return { context: { upDirection: event.payload } };
         },
@@ -1313,7 +1301,7 @@ const graphicsMachineDefinition = setup({
               admittedBytes: event.admittedBytes,
               reattached: event.reattached,
               camera: context.cameraRef,
-              grid: { enabled: context.enableGrid, upDirection: context.upDirection },
+              upDirection: context.upDirection,
             },
           });
           return { context: { canvas: { canvasId: event.canvasId, ref }, ...adapter } };

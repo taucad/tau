@@ -4,6 +4,7 @@ import { useSelector } from '@xstate/react';
 import { flushSync } from 'react-dom';
 import type { ActorRefFrom } from 'xstate';
 import type { RefCallback } from 'react';
+import type { Group } from 'three';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
 import type { RendererInstance } from '#graphics/three/renderer.js';
 import { RenderFpsOverlay } from '#graphics/three/render-fps-overlay.jsx';
@@ -93,8 +94,9 @@ const failureError = (failure: CanvasFailure): Error =>
  * One R3F `<Canvas>` mount. Its renderer lifecycle (creating, ready, presented, lost, failed) is the graphics actor's
  * canvas child, attached from the surface element's ref and hosted from R3F's `onCreated`; this component only renders
  * the canvas, its context-lost fallback or its failure from that actor's state. The canvas actor also presents the
- * view's camera on the surface (its viewport and its grid clip policy) and graphics' controls adapter steps the
- * controls each frame, so nothing here sends, subscribes or times.
+ * view's camera on the surface (its viewport, and its clip policy while the grid is in the
+ * scene) and graphics' controls adapter steps the controls each frame. No effect here sends, subscribes or times: the
+ * surface and the grid report only their own mounts, from their refs.
  * `ThreeProvider` mounts this with `key` = `${graphicsBackend}:${retryCount}`, so each mount is a new canvas actor.
  * @public
  */
@@ -110,7 +112,7 @@ export function ThreeCanvasInstance({
   enablePan = false,
   secondaryMouseButtonMode = 'camera-pan',
   enableDamping = false,
-  // Graphics' world up decides the grid and the camera's clip policy, which the canvas actor presents.
+  // Graphics' world up decides the grid's orientation and its clip plane, which the canvas actor presents.
   upDirection: _upDirection,
   className,
   stageOptions,
@@ -228,6 +230,11 @@ export function ThreeCanvasInstance({
   // its R3F root, live on without a second `onCreated`. The detach records how far the renderer got, and the
   // re-attached surface's new canvas actor resumes from there: lost again, or hosted on the root it already has.
   const detachedPhase = useRef<CanvasSnapshot['value'] | undefined>(undefined);
+  /**
+   * Whether the grid is in the R3F scene. A surface that attaches after the grid mounted (a Suspense reveal re-attaches
+   * the surface but not the scene, which lives on in its own root) tells its new canvas actor.
+   */
+  const isGridShown = useRef(false);
   const attachSurface = useCallback<RefCallback<HTMLDivElement>>(
     (element) => {
       if (!element) {
@@ -247,8 +254,21 @@ export function ThreeCanvasInstance({
         sendToCanvas(canvasHostCreated(held));
         attachControls(held);
       }
+      if (isGridShown.current) {
+        sendToCanvas({ type: 'gridShown', shown: true });
+      }
     },
     [admittedBytes, attachControls, canvasId, graphicsRef, sendToCanvas, webglContext],
+  );
+
+  // The grid's place in the scene: the canvas actor pads the camera's clip planes while the grid is drawn, observed from
+  // the scene's own mount and unmount as the surface's attach is.
+  const presentGrid = useCallback<RefCallback<Group>>(
+    (marker) => {
+      isGridShown.current = marker !== null;
+      sendToCanvas({ type: 'gridShown', shown: isGridShown.current });
+    },
+    [sendToCanvas],
   );
 
   const bindCanvas = useCallback<RefCallback<HTMLCanvasElement>>(
@@ -322,6 +342,7 @@ export function ThreeCanvasInstance({
             {enableAxes ? <AxesHelper /> : null}
             {enableGrid ? <Grid /> : null}
           </SceneOverlay>
+          {enableGrid ? <group ref={presentGrid} name='grid-clip-policy' /> : null}
         </OverlayDepthProvider>
         {showRenderFps && isTauDebugEnabled ? (
           <RenderFpsOverlay hasTopRightGizmo={enableGizmo && Boolean(gizmoContainer)} />

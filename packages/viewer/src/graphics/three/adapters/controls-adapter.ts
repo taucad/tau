@@ -61,10 +61,12 @@ type FrameSubscribe = (
 ) => () => void;
 
 /**
- * The controls step where R3F's controls do (-1): after the canvas reports a resize to the camera (-2), before the
- * frame renders.
+ * The controls step where R3F's controls do (-1): after the canvas host reports a resize to the camera (its
+ * `surfacePriority`, -2), before the frame renders.
+ *
+ * @public
  */
-const tickPriority = -1;
+export const tickPriority = -1;
 
 const upAxes = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] } as const satisfies Record<string, CameraVector>;
 

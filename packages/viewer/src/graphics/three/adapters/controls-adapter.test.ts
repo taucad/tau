@@ -9,7 +9,12 @@ import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import { createThreeCameraRig } from '@taucad/three/camera';
 import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
 import type { CameraOwnedSettings } from '#graphics/graphics-settings.js';
-import { createControlsAdapter, retargetCameraControls } from '#graphics/three/adapters/controls-adapter.js';
+import {
+  createControlsAdapter,
+  retargetCameraControls,
+  tickPriority,
+} from '#graphics/three/adapters/controls-adapter.js';
+import { surfacePriority } from '#graphics/three/three-canvas-instance-host.js';
 import type { RetargetableCameraControls } from '#graphics/three/adapters/controls-adapter.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { GraphicsCameraRef } from '#machines/graphics.machine.js';
@@ -427,8 +432,11 @@ describe('controls adapter', () => {
     const subscriptions = vi.mocked(harness.state.internal.subscribe).mock.calls as unknown as Array<
       [{ current: (state: RootState, delta: number) => void }, number]
     >;
-    // One tick for the canvas: after the canvas reports a resize (-2), where R3F's own controls step (-1).
-    expect(subscriptions.map(([, priority]) => priority)).toEqual([-1]);
+    // One tick for the canvas, where R3F's own controls step, after the canvas host reports a resize to the camera and
+    // before anything renders (positive priorities): the controls never step on a stale viewport.
+    expect(subscriptions.map(([, priority]) => priority)).toEqual([tickPriority]);
+    expect(surfacePriority).toBeLessThan(tickPriority);
+    expect(tickPriority).toBeLessThan(0);
     const [[ticker]] = subscriptions as [[{ current: (state: RootState, delta: number) => void }, number]];
     const update = vi.spyOn(harness.controls(), 'update');
 

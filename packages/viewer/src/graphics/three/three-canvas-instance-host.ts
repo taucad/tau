@@ -28,10 +28,12 @@ type FrameSubscribe = (
 const observerPriority = 6;
 
 /**
- * Before `camera-controls` steps (-1) and before anything renders: a resize reaches the camera, and so its native
- * cameras, in the frame that resized.
+ * Before the controls adapter steps `camera-controls` (its `tickPriority`, -1) and before anything renders: a resize
+ * reaches the camera, and so its native cameras, in the frame that resized.
+ *
+ * @public
  */
-const surfacePriority = -2;
+export const surfacePriority = -2;
 
 /**
  * The R3F root a host adapter is built around, plus the renderer factory's retirement check: a retired factory's

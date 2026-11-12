@@ -53,7 +53,8 @@ const samples: Record<CanvasEvent['type'], readonly CanvasEvent[]> = {
   rendererFailed: [{ type: 'rendererFailed', failure: { kind: 'renderer', message: 'no context' } }],
   framePresented: [{ type: 'framePresented' }],
   contextLost: [{ type: 'contextLost' }],
-  gridChanged: [{ type: 'gridChanged', grid: { enabled: true, upDirection: 'y' } }],
+  gridShown: [{ type: 'gridShown', shown: true }],
+  upDirectionChanged: [{ type: 'upDirectionChanged', upDirection: 'y' }],
 };
 const pathOptions = {
   input: { canvasId: 'c', kind: 'canvas' } satisfies CanvasInput,
@@ -409,7 +410,6 @@ const startCamera = () =>
     },
   }).start();
 
-const gridOn = { enabled: true, upDirection: 'z' } as const;
 const gridPolicy = (upDirection: 'x' | 'y' | 'z') => ({
   farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
   presentationPlane: infiniteGridPresentationPlaneByUpDirection[upDirection],
@@ -480,25 +480,30 @@ describe('canvas camera presentation', () => {
     camera.stop();
   });
 
-  it('should hold the grid clip policy from the start and clear it when the canvas stops', () => {
+  it('should hold the grid clip policy while the grid is in the scene, and clear it when the canvas stops', () => {
     const camera = startCamera();
-    const canvas = startCanvas({ ...defaultInput, camera, grid: gridOn });
+    const canvas = startCanvas({ ...defaultInput, camera });
+    // No grid is in the scene until the scene mounts one.
+    expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
+    canvas.send({ type: 'gridShown', shown: true });
     expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy('z'));
     canvas.stop();
     expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
     camera.stop();
   });
 
-  it('should follow the grid graphics shows: off, on, and across a new world up', () => {
+  it('should follow the grid in and out of the scene and across the world up graphics keeps', () => {
     const camera = startCamera();
-    const canvas = startCanvas({ ...defaultInput, camera, grid: { enabled: false, upDirection: 'z' } });
+    const canvas = startCanvas({ ...defaultInput, camera, upDirection: 'y' });
+    // A new world up with no grid changes no policy.
+    canvas.send({ type: 'upDirectionChanged', upDirection: 'x' });
     expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
-    canvas.send({ type: 'gridChanged', grid: gridOn });
-    expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy('z'));
     canvas.send(hostCreated());
-    canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'x' } });
+    canvas.send({ type: 'gridShown', shown: true });
     expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy('x'));
-    canvas.send({ type: 'gridChanged', grid: { enabled: false, upDirection: 'x' } });
+    canvas.send({ type: 'upDirectionChanged', upDirection: 'z' });
+    expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy('z'));
+    canvas.send({ type: 'gridShown', shown: false });
     expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
     canvas.stop();
     camera.stop();
@@ -507,12 +512,14 @@ describe('canvas camera presentation', () => {
   it('should clear the clip policy and stop presenting when the context is lost or the renderer fails', () => {
     for (const ending of [{ type: 'contextLost' }, samples.rendererFailed[0]!] as const) {
       const camera = startCamera();
-      const canvas = startCanvas({ ...defaultInput, camera, grid: gridOn });
+      const canvas = startCanvas({ ...defaultInput, camera });
       canvas.send(hostCreated());
+      canvas.send({ type: 'gridShown', shown: true });
       canvas.send(ending);
       expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
       const { revision } = camera.getSnapshot().context;
-      canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'y' } });
+      canvas.send({ type: 'upDirectionChanged', upDirection: 'y' });
+      canvas.send({ type: 'gridShown', shown: true });
       canvas.send({ type: 'surfaceResized', surface: { width: 320, height: 240, pixelRatio: 1 } });
       expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
       expect(camera.getSnapshot().context.revision).toBe(revision);
@@ -523,9 +530,9 @@ describe('canvas camera presentation', () => {
 
   it('should present nothing on the camera from a placeholder', () => {
     const camera = startCamera();
-    const placeholder = startCanvas({ canvasId: 'p', kind: 'placeholder', camera, grid: gridOn });
+    const placeholder = startCanvas({ canvasId: 'p', kind: 'placeholder', camera });
     placeholder.send(hostCreated());
-    placeholder.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'y' } });
+    placeholder.send({ type: 'gridShown', shown: true });
     expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
     expect(camera.getSnapshot().context.view.viewport).toEqual({ width: 1280, height: 720, pixelRatio: 1 });
     placeholder.stop();
@@ -534,7 +541,8 @@ describe('canvas camera presentation', () => {
 
   it('should leave the camera alone once graphics has stopped it', () => {
     const camera = startCamera();
-    const canvas = startCanvas({ ...defaultInput, camera, grid: gridOn });
+    const canvas = startCanvas({ ...defaultInput, camera });
+    canvas.send({ type: 'gridShown', shown: true });
     camera.stop();
     expect(() => {
       canvas.stop();

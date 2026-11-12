@@ -357,7 +357,10 @@ export interface GraphicsContext {
   modelInteractionUnitId?: string;
   /** Per-view mechanism pose, keyed by the same unit ids as model interaction. */
   kinematicsRef: KinematicsRef;
-  /** The view's camera. Its pose, render frame and clip policy outlive every canvas and provider mount. */
+  /**
+   * The view's camera. Its pose and render frame outlive every canvas and provider mount; its clip policy is held by
+   * the canvas that draws the grid, and cleared when that canvas stops.
+   */
   cameraRef: GraphicsCameraRef;
   /**
    * The attached canvas's controls adapter: the only listener on its `camera-controls` instance (charter I9). It

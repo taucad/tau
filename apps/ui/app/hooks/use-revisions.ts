@@ -649,11 +649,12 @@ export function useRevisionGraph(): RevisionGraphView | undefined {
   const { data: graph } = useQuery({
     queryKey: ['revision-graph', projectId, heads.join('|'), wanted],
     enabled: isEnabled,
-    queryFn: async () => client!.graph({ limit: wanted }),
+    /* One past the page: whether that one exists is whether there is more, whatever roots the branches have. */
+    queryFn: async () => client!.graph({ limit: wanted + 1 }),
     staleTime: Number.POSITIVE_INFINITY,
     placeholderData: keepPreviousData,
   });
-  const rows = isEnabled ? graph?.rows : undefined;
+  const rows = isEnabled ? graph?.rows.slice(0, wanted) : undefined;
   useHeldGraph(projectId, rows);
   const loadOlder = useCallback(async (): Promise<void> => {
     setWanted((current) => current + revisionPageSize);
@@ -662,12 +663,11 @@ export function useRevisionGraph(): RevisionGraphView | undefined {
     if (graph === undefined || rows === undefined) {
       return undefined;
     }
-    const oldest = rows.at(-1);
     return {
       branches: graph.branches,
       revisions: rows.map((row) => cardOf(row, who)),
       lineOf: new Map(rows.map((row) => [row.revisionId, row.line] as const)),
-      hasOlder: rows.length >= wanted && (oldest?.parent !== undefined || oldest?.otherParents !== undefined),
+      hasOlder: graph.rows.length > wanted,
       loadOlder,
     };
   }, [graph, loadOlder, rows, wanted, who]);

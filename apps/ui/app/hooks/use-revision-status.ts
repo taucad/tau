@@ -91,6 +91,31 @@ class RevisionConnectionError extends Error {
   }
 }
 
+const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Whether the host's answer to a graph read has the graph's shape: every
+ * branch a name and a head, every row an entry id and the line it is on.
+ *
+ * @param value - What the host's `graph` answered.
+ * @returns Whether it is a {@link RevisionGraph}.
+ */
+export const isRevisionGraph = (value: unknown): value is RevisionGraph =>
+  isObject(value) &&
+  Array.isArray(value['branches']) &&
+  value['branches'].every(
+    (branch) => isObject(branch) && typeof branch['name'] === 'string' && typeof branch['head'] === 'string',
+  ) &&
+  Array.isArray(value['rows']) &&
+  value['rows'].every(
+    (row) =>
+      isObject(row) &&
+      typeof row['revisionId'] === 'string' &&
+      typeof row['line'] === 'string' &&
+      typeof row['createdAt'] === 'number',
+  );
+
 /**
  * Read the host's answer to one *New branch* (P4): the checkout the registry made for it.
  *
@@ -388,11 +413,19 @@ export const createHostRevisionClient = (input: {
         ...(request?.limit === undefined ? {} : { limit: request.limit }),
         ...(request?.from === undefined ? {} : { from: request.from }),
       })) as unknown as readonly RevisionRow[],
-    graph: async (request) =>
-      (await ask({
+    graph: async (request) => {
+      const value = await ask({
         command: 'graph',
+        ...(request?.branches === undefined ? {} : { branches: [...request.branches] }),
         ...(request?.limit === undefined ? {} : { limit: request.limit }),
-      })) as unknown as RevisionGraph,
+      });
+      if (!isRevisionGraph(value)) {
+        throw Object.assign(new Error('The host answered a graph read with something else.'), {
+          code: 'INVALID_REVISION_RESPONSE',
+        });
+      }
+      return value;
+    },
     divergence: async (head, base) =>
       (await ask({ command: 'divergence', head, base })) as unknown as RevisionDivergence,
     diff: async (revisionId, from, options) =>
@@ -1269,7 +1302,11 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       return result.kind === 'log' ? result.rows : [];
     },
     graph: async (request) => {
-      const result = await ask({ command: 'graph', ...(request?.limit === undefined ? {} : { limit: request.limit }) });
+      const result = await ask({
+        command: 'graph',
+        ...(request?.branches === undefined ? {} : { branches: request.branches }),
+        ...(request?.limit === undefined ? {} : { limit: request.limit }),
+      });
       if (result.kind !== 'graph') {
         throw Object.assign(new Error('The revision root answered a graph read with something else.'), {
           code: 'INVALID_REVISION_RESPONSE',

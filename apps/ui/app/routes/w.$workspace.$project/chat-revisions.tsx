@@ -1037,8 +1037,24 @@ const useHistorySource = (
     [branch, filter, graph],
   );
   const hasFilter = graph !== undefined && graph.branches.length > 1;
-  if (graph === undefined || lanes?.hasLanes !== true) {
+  const { loadOlder: loadOlderOnBranch } = view;
+  const pageBoth = useCallback(async (): Promise<void> => {
+    await Promise.all([loadOlderOnBranch(), graph?.hasOlder === true ? graph.loadOlder() : undefined]);
+  }, [graph, loadOlderOnBranch]);
+  if (graph === undefined) {
     return { filter, setFilter, hasFilter, lanes: undefined, ...view };
+  }
+  if (lanes?.hasLanes !== true) {
+    /* One lane on this page so far: the branch's own list, but the graph keeps paging, so a fork further down still draws its lanes. */
+    return {
+      filter,
+      setFilter,
+      hasFilter,
+      lanes: undefined,
+      revisions: view.revisions,
+      hasOlder: view.hasOlder || graph.hasOlder,
+      loadOlder: pageBoth,
+    };
   }
   return {
     filter,

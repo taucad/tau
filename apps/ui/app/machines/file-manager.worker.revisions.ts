@@ -286,7 +286,7 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'deleteTag'; name: string }>
   | Readonly<{ command: 'log'; branch?: string; limit?: number; from?: string }>
   /** Every branch's history in one walk, for History's lanes (D2). */
-  | Readonly<{ command: 'graph'; limit?: number }>
+  | Readonly<{ command: 'graph'; branches?: readonly string[]; limit?: number }>
   | Readonly<{ command: 'divergence'; head: string; base: string }>
   | Readonly<{ command: 'diff'; revisionId: string; from?: string; against?: 'checkout' }>
   | Readonly<{ command: 'compare'; revisionId: string; path: string; from?: string; against?: 'checkout' }>
@@ -2310,7 +2310,10 @@ const answerOf = (
     }
     case 'graph': {
       return tree
-        .graph(request.limit === undefined ? {} : { limit: request.limit })
+        .graph({
+          ...(request.branches === undefined ? {} : { branches: request.branches }),
+          ...(request.limit === undefined ? {} : { limit: request.limit }),
+        })
         .then((graph) => ({ kind: 'graph', graph }) as const);
     }
     case 'divergence': {

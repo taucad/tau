@@ -21,8 +21,11 @@ import { lanesScenarios, oneBranchRows } from '#routes/w.$workspace.$project/his
 import type { LanesScenario } from '#routes/w.$workspace.$project/history-lanes.test-harness.js';
 
 vi.hoisted(() => {
-  const host = globalThis as unknown as { window: { ENV?: Record<string, unknown> } };
-  host.window.ENV = { ...host.window.ENV, TAU_API_URL: 'https://api.test', TAU_GIT_REMOTE_ALLOW_PRIVATE: false };
+  globalThis.window.ENV = {
+    ...globalThis.window.ENV,
+    TAU_API_URL: 'https://api.test',
+    TAU_GIT_REMOTE_ALLOW_PRIVATE: false,
+  };
 });
 vi.mock('#cloud/commercial-features.js', async () => {
   const cloud = await import('#cloud/commercial-features.cloud.js');

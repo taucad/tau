@@ -1228,6 +1228,73 @@ describe('History over a long line (B2)', () => {
   });
 });
 
+describe('History lanes past the first page (D2)', () => {
+  it('should keep reading the graph while it shows one lane, so a branch that forks further down gets its lane', async () => {
+    const user = userEvent.setup();
+    /* 70 entries on main, a minute apart; `old-fix` forks from the fifth and is older than main's newest 50. */
+    const mainRows = Array.from({ length: 70 }, (_, index) => {
+      const n = 70 - index;
+      return row({
+        revisionId: `rev-${String(n)}`,
+        createdAt: 1_788_220_800_000 + n * 60_000,
+        summary: `Change ${String(n)}`,
+        ...(n === 1 ? {} : { parent: `rev-${String(n - 1)}` }),
+      });
+    });
+    const fix = row({
+      revisionId: 'fix-1',
+      createdAt: 1_788_220_800_000 + 5 * 60_000 + 30_000,
+      summary: 'Patch the lid',
+      parent: 'rev-5',
+    });
+    const all = [...mainRows, fix].toSorted((left, right) => right.createdAt - left.createdAt);
+    revisionStatusHarness.rows = mainRows;
+    revisionStatusHarness.graph = {
+      branches: [
+        { name: 'main', head: 'rev-70' },
+        { name: 'old-fix', head: 'fix-1' },
+      ],
+      rows: all.map((entry) => {
+        const line = entry.revisionId === 'fix-1' ? 'old-fix' : 'main';
+        return { ...entry, line, branch: line };
+      }),
+    };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-70',
+      branches: revisionStatusHarness.graph.branches.map((branch) => ({
+        ...branch,
+        checkoutId: branch.name,
+        checkoutRoot: `/checkouts/${branch.name}`,
+        leaseChatIds: [],
+      })),
+    };
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <MemoryRouter>
+            <RevisionsPanelBody />
+          </MemoryRouter>
+        </TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    await user.click(await screen.findByRole('radio', { name: 'All branches' }));
+    /* The first graph page holds main alone: one lane, drawn as the branch's own list. */
+    expect(container.querySelector('[data-row="chip"]')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Show older' }));
+    await user.click(screen.getByRole('button', { name: 'Show older' }));
+
+    await waitFor(() => {
+      expect(container.querySelector<HTMLElement>('[data-slot="history-graph-frame"]')?.dataset['lanes']).toBe(
+        'main,old-fix',
+      );
+    });
+  });
+});
+
 describe('Revisions pane vocabulary and History', () => {
   const conflicted = {
     revisionId: 'rev-c',

@@ -1441,7 +1441,21 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             code: 'INVALID_REVISION_REQUEST',
           });
         }
-        return revisionJson(await readRevisionGraph(port, limit === undefined ? {} : { limit }));
+        const branches = request['branches'];
+        if (
+          branches !== undefined &&
+          (!Array.isArray(branches) || !branches.every((name): name is string => typeof name === 'string'))
+        ) {
+          throw Object.assign(new Error('Revision graph branches must be a list of branch names.'), {
+            code: 'INVALID_REVISION_REQUEST',
+          });
+        }
+        return revisionJson(
+          await readRevisionGraph(port, {
+            ...(branches === undefined ? {} : { branches }),
+            ...(limit === undefined ? {} : { limit }),
+          }),
+        );
       }
       case 'divergence':
         return revisionJson(await port.divergence({ head: revisionId(text('head')), base: revisionId(text('base')) }));

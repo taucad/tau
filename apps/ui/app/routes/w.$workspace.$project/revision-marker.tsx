@@ -946,7 +946,9 @@ export function RevisionRow({
   const actor = start !== undefined || revision.actor === '' ? undefined : revision.actor;
   const canRestore = role !== 'revoked';
   const fact = entryFact(revision);
-  const label = name === undefined ? (when === '' ? title : `${title} · ${when}`) : `${name} · ${title}`;
+  const entryLabel = name === undefined ? (when === '' ? title : `${title} · ${when}`) : `${name} · ${title}`;
+  /* A merged branch's row names its branch, as its meta line does (D2). */
+  const label = mergedBranch === undefined ? entryLabel : `${entryLabel} · on ${mergedBranch.name}`;
   /* A version's second line says it is one; the time the right-hand column gives other rows follows where there is room (A6). */
   const versionFact = start === undefined ? 'Version' : startFact(start);
   const TitleIcon =

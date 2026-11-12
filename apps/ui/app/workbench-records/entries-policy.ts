@@ -261,10 +261,19 @@ type Mark = Readonly<{ upTo: number; writes: readonly Write[]; landed?: true }>;
  */
 const marks = new WeakMap<EntriesPatch, readonly Mark[]>();
 
+/** The text of each record read from a file, for a record whose canonical form the file's limit cannot take. */
+const fileText = new WeakMap<WorkbenchEntries, string>();
+
 const serializeEntries = (record: WorkbenchEntries): string => workbenchRecords.entries.serialize(record);
 
-/** The record as the file reads it back, so records compare field for field; `undefined` when it cannot be written. */
-const asRead = (record: WorkbenchEntries): WorkbenchEntries | undefined => {
+/**
+ * The record as the file reads it back, so records compare field for field; `undefined` when it cannot be written. A
+ * record read from the file is already as it reads back, even one whose canonical form is over the limit.
+ */
+const asRead = (record: WorkbenchEntries, from?: EntriesRecord): WorkbenchEntries | undefined => {
+  if (from !== undefined && fileText.has(from)) {
+    return record;
+  }
   try {
     const result = workbenchRecords.entries.read(new TextEncoder().encode(serializeEntries(record)));
     return result.status === 'current' ? result.record : undefined;
@@ -450,6 +459,15 @@ export type DroppedFields = (
 ) => void;
 
 /**
+ * The path changes of a patch not yet on the file `current` holds: those after the longest prefix it has landed, or
+ * every one when none is known to have.
+ */
+export const owedMoves = (patch: EntriesPatch, current: EntriesRecord | undefined): EntryPathChange[] => {
+  const read = current === undefined ? undefined : asRead(withoutMoves(current), current);
+  return patch.slice(landedMark(patch, read)?.upTo ?? 0).flatMap((step) => step.moves);
+};
+
+/**
  * A merge that cannot be written, made writable by leaving out the person's fields path by path, latest first: the
  * path changes and every other field are still written, rather than owing the whole patch with every later change.
  */
@@ -506,9 +524,6 @@ export const coversFields = (carried: EntryFields | undefined, fields: EntryFiel
 export const carriesFields = (entry: Entry | undefined, fields: EntryFields): boolean =>
   entry !== undefined && Object.keys(diffEntry(entry, mergeEntry(entry, fields))).length === 0;
 
-/** The text of each record read from a file, for a record whose canonical form the file's limit cannot take. */
-const fileText = new WeakMap<WorkbenchEntries, string>();
-
 /**
  * The entries record's codec and patch algebra. `onDropped` hears of a person's fields a merge left out because another
  * party's change left the record no room for them.
@@ -557,7 +572,7 @@ export const createEntriesPolicy = (onDropped?: DroppedFields): RecordPolicy<Ent
   combine: (earlier, later) => (earlier === undefined ? later : combinePatches(earlier, later)),
   merge(current, _next, patch) {
     const base: WorkbenchEntries = current === undefined ? { version: 1, entries: {} } : withoutMoves(current);
-    const read = asRead(base);
+    const read = asRead(base, current);
     const found = landedMark(patch, current === undefined ? undefined : read);
     let merged = { ...base, entries: applied(base.entries, patch, { landed: found?.upTo ?? 0, fields: true }) };
     const unwritable = writeError(merged);

@@ -1147,4 +1147,82 @@ describe('workbench entries store over recordSync', () => {
       entries.dispose();
     }
   });
+
+  describe('after a lost reply', () => {
+    const components = (hidden: string[]) => ({ hidden, isolated: [], opacity: [] });
+    /** A store whose first applied write loses its reply, after `then` changes the file. */
+    const losing = (
+      then: (entries: WorkbenchEntries['entries']) => WorkbenchEntries['entries'] = (entries) => entries,
+    ) => {
+      const m = memory();
+      let lost = false;
+      const held = () => {
+        const read = workbenchRecords.entries.read(m.get()!);
+        return read.status === 'current' ? read.record.entries : {};
+      };
+      const write = (entries: WorkbenchEntries['entries']) => {
+        m.setBytes(encoder.encode(workbenchRecords.entries.serialize({ version: 1, entries })));
+      };
+      const entries = createWorkbenchEntriesStore({
+        root: '/root',
+        editDebounce: 60_000,
+        files: {
+          ...m.files,
+          writeFileChecked: async (input) => {
+            const result = await m.files.writeFileChecked(input);
+            if (!lost && result.status === 'applied') {
+              lost = true;
+              write(then(held()));
+              throw Object.assign(new Error('reply lost'), { applicationState: 'potentially-applied' });
+            }
+            return result;
+          },
+        },
+        onChange: () => undefined,
+        onError: () => undefined,
+      });
+      return { m, entries, held, write };
+    };
+
+    it('keeps an entry’s settings through a rename merged onto a compact file over the canonical limit', async () => {
+      const { m, entries, held } = losing();
+      const many = Object.fromEntries(
+        Array.from({ length: 4 }, (_, index) => [
+          `f${index}.ts`,
+          { components: components(Array.from({ length: 1000 }, (_, id) => `c${id}`)) },
+        ]),
+      );
+      const shown = { renderTimeout: 7, components: components(['x']) };
+      m.setBytes(encoder.encode(JSON.stringify({ version: 1, entries: { 'a.ts': shown, ...many } })));
+      try {
+        await entries.read();
+        const shrunk = entries.edit('f0.ts', { components: components([]) });
+        const edited = entries.edit('a.ts', { ...shown, components: components(['y']) });
+        const renamed = entries.changePaths({ type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' });
+        await Promise.all([shrunk, edited, renamed]);
+        await entries.flush();
+        expect(held()['a.ts']).toBeUndefined();
+        expect(held()['b.ts']).toEqual({ renderTimeout: 7, components: components(['y']) });
+      } finally {
+        entries.dispose();
+      }
+    });
+
+    it('takes no new entry at a landed rename’s old path for the renamed entry the person edits', async () => {
+      const { entries, held, write } = losing((landed) => ({ ...landed, 'a.ts': { renderTimeout: 5 } }));
+      write({ 'a.ts': { renderTimeout: 7, components: components(['x']) } });
+      try {
+        await entries.read();
+        await entries.changePaths({ type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' });
+        await entries.read(true);
+        const edited = entries.edit('b.ts', { renderTimeout: 7, components: components(['y']) });
+        write({ ...held(), 'b.ts': { ...held()['b.ts'], renderTimeout: 9 } });
+        await entries.flush();
+        expect(await edited).toBe(true);
+        expect(held()['b.ts']).toEqual({ renderTimeout: 9, components: components(['y']) });
+      } finally {
+        entries.dispose();
+      }
+    });
+  });
 });

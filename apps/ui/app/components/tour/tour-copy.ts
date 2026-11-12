@@ -52,6 +52,18 @@ export const tourStepTitles: Readonly<Record<TourStepId, string>> = {
   build: 'Export and make it',
 };
 
+/**
+ * A tip's title. Tip 1 of a guided tour reached from Home, with the part already being built, has its own.
+ *
+ * @param step - The tip.
+ * @param input - How the tour runs and how the project was reached.
+ * @returns The title.
+ */
+export const tourTipTitle = (step: TourStepId, input: Pick<TourCopyInput, 'mode' | 'arrival'>): string =>
+  step === 'ask' && input.mode === 'guided' && input.arrival === 'prompt'
+    ? 'Tau is building your part'
+    : tourStepTitles[step];
+
 /** What "Ask Tau to check it" puts in the composer. It is never sent for the person. */
 export const tourCheckPrompt = 'Check this part against the sizes I gave';
 
@@ -91,7 +103,7 @@ export const tourTipCopy = (step: TourStepId, input: TourCopyInput): TourTipCopy
         : 'You can pick a kernel yourself from the Auto menu.';
       return fromHome
         ? {
-            title: 'Tau is building your part',
+            title: tourTipTitle('ask', input),
             text: [
               'Tau picked a kernel, the engine that builds the geometry, and is writing the code.',
               'Ask for changes here at any time.',

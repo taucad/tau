@@ -96,6 +96,20 @@ describe('tourMachine', () => {
     expect(unreachedStates(tourMachine, options)).toEqual([]);
   });
 
+  it('shows and reports nothing until the editor first reports what is on screen', () => {
+    const guidedTour = start();
+    const replay = start({ ...guided, replay: true });
+
+    expect([guidedTour.tip(), replay.tip()]).toEqual([undefined, undefined]);
+    expect([...guidedTour.emitted, ...replay.emitted]).toEqual([]);
+
+    guidedTour.facts(emptyProject);
+    replay.facts(emptyProject);
+    expect([guidedTour.tip(), replay.tip()]).toEqual(['ask', 'ask']);
+    expect(guidedTour.emitted.map((event) => event.type)).toEqual(['started', 'shown']);
+    expect(replay.emitted.map((event) => event.type)).toEqual(['started', 'shown']);
+  });
+
   it('declares its one timer', () => {
     expect(tourTimeouts.map((tourTimeout) => tourTimeout.maximum)).toEqual([1000]);
   });
@@ -318,7 +332,9 @@ describe('tourMachine', () => {
     };
 
     it('steps through all five with Next whatever the project holds, and leaves what is stored unchanged', () => {
-      const { actor, tip, emitted } = start({ ...finished, replay: true });
+      const { actor, tip, emitted, facts } = start({ ...finished, replay: true });
+      facts(emptyProject);
+      expect(emitted[0]).toEqual({ type: 'started', mode: 'replay' });
       const visited: Array<TourStepId | undefined> = [tip()];
       for (let step = 0; step < 4; step++) {
         actor.send({ type: 'next' });
@@ -339,7 +355,8 @@ describe('tourMachine', () => {
     });
 
     it('ignores real actions and closes back to a paused guided tour', () => {
-      const { actor, tip } = start({ stored: { seen: ['ask'] }, wanted: true, paused: true });
+      const { actor, tip, facts } = start({ stored: { seen: ['ask'] }, wanted: true, paused: true });
+      facts(emptyProject);
       actor.send({ type: 'replayStarted' });
       actor.send({ type: 'actionDone', step: 'ask' });
       expect(tip()).toBe('ask');

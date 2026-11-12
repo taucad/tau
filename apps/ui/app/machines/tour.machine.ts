@@ -15,6 +15,8 @@
  * 6. A tip never waits on its target being visible (the anchors fall back; that is the host's part).
  * 7. No timeouts. The only timer is Look around's one-second rest, so it does not vanish mid-drag.
  *
+ * Nothing is shown or reported until the host's first report of the facts, which also says how the project was reached.
+ *
  * What is stored about the guided tour only grows (`seen` gains tips, `ended` is set once); the machine emits each
  * addition for the host to write and never reads storage itself. Pausing belongs to the device. A replay, started from
  * Help or the command palette, lives in this actor's memory: it steps through all five tips with Next whatever the
@@ -247,6 +249,9 @@ export const selectTourTip = (snapshot: {
   readonly context: TourMachineContext;
   readonly matches: (state: 'running' | 'replay') => boolean;
 }): TourTip | undefined => {
+  if (snapshot.context.arrival === undefined) {
+    return undefined;
+  }
   if (snapshot.matches('replay')) {
     return tipFor(snapshot.context, 'replay');
   }
@@ -287,6 +292,10 @@ const settleGuided = (
   context: TourMachineContext,
   enq: Emit,
 ): Readonly<{ target?: string; context: Partial<TourMachineContext> }> | undefined => {
+  /* Nothing is shown or reported before the editor's first report of what is on screen. */
+  if (context.arrival === undefined) {
+    return undefined;
+  }
   const { facts } = context;
   let { stored } = context;
   const patch: { -readonly [K in keyof TourMachineContext]?: TourMachineContext[K] } = {};
@@ -333,6 +342,9 @@ const settleReplay = (
   context: TourMachineContext,
   enq: Emit,
 ): Readonly<{ target?: string; context: Partial<TourMachineContext> }> | undefined => {
+  if (context.arrival === undefined) {
+    return undefined;
+  }
   if ((context.replaySeen ?? []).length === tourStepIds.length) {
     enq.emit({ type: 'replayEnded', completed: true, step: undefined });
     return {
@@ -414,6 +426,10 @@ export const tourMachine = setup({
     inactive: {
       always: ({ context }, enq) => {
         if (context.replaySeen !== undefined) {
+          /* A replay starts once the editor has reported what is on screen, so the host hears it begin. */
+          if (context.arrival === undefined) {
+            return undefined;
+          }
           enq.emit({ type: 'started', mode: 'replay' });
           return { target: 'replay' };
         }

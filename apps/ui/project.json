@@ -352,7 +352,8 @@
       }
     },
     "typecheck": {
-      "dependsOn": ["typegen"]
+      "dependsOn": ["typegen"],
+      "inputs": ["default", "^production", "reactEventLayer"]
     },
     "lint": {
       "dependsOn": ["typegen"],
@@ -426,6 +427,9 @@
         "cwd": "{projectRoot}",
         "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'"
       }
+    },
+    "test": {
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
     }
   }
 }

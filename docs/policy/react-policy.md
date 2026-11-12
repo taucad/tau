@@ -341,7 +341,7 @@ useEffect(() => {
 }, [graphicsRef]);
 ```
 
-This rule is checked by the `react-event-layer.policy.node.test.ts` in each project, through `@taucad/oxlint/react-event-layer`. The counter is lexical: it counts an effect whose callback calls `.send`, `.subscribe`, `.on`, `send`, `subscribe` or a timer, and a `getSnapshot()` call written inside a component or hook. A call hidden behind a helper declared elsewhere, of any name, is not seen, so a reviewer checks for one.
+This rule is checked by the `react-event-layer.policy.node.test.ts` in each project, through `@taucad/oxlint/react-event-layer`. The counter is lexical: it counts an effect whose callback calls `.send`, `.subscribe`, `.on`, `send`, `subscribe` or a timer, and a `getSnapshot()` call written inside a component or hook. A call hidden behind a helper declared elsewhere, of any name, is not seen, so a reviewer checks for one. A project that adds the test names the `reactEventLayer` named input in its `test` and `typecheck` inputs in `project.json`, so an edit to the counter reruns only the projects that run it (`scripts/src/nx-cache-inputs.test.ts` checks both).
 
 ## 6. Keys
 

@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest';
 import { kernelRoutingZones } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
 import { kernelRoutingDevelopmentCases, kernelRoutingHosts } from '#testing/live/kernel-routing.cases.js';
-import { staticDefaultBaseline, stratumOf } from '#testing/live/kernel-routing.grader.js';
+import { staticDefaultBaseline, stratumOf, summarizeKernelRoutingGate } from '#testing/live/kernel-routing.grader.js';
+import type { KernelRoutingObservation } from '#testing/live/kernel-routing.grader.js';
+import type { KernelRoutingCase } from '#testing/live/kernel-routing.cases.js';
 import {
   kernelRoutingHeldOutBehaviourCases,
   kernelRoutingHeldOutCases,
@@ -210,7 +212,7 @@ describe('held-out selection', () => {
     expect(() => selectKernelRoutingCases('gate')).toThrow(/KERNEL_ROUTING_SET/u);
   });
 
-  it('should never be imported outside the live eval', () => {
+  it('should never be imported outside the live eval, whose gate run names it', () => {
     const root = resolve(import.meta.dirname, '../../../../..');
     const walk = (directory: string): string[] =>
       readdirSync(directory).flatMap((name) => {
@@ -221,9 +223,85 @@ describe('held-out selection', () => {
         return statSync(path).isDirectory() ? walk(path) : /\.(?:ts|tsx)$/u.test(name) ? [path] : [];
       });
     const sources = [...walk(join(root, 'libs/chat/src')), ...walk(join(root, 'apps/api/app'))].filter(
-      (path) => !path.includes(join('testing', 'live', 'kernel-routing.heldout')),
+      (path) =>
+        !path.includes(join('testing', 'live', 'kernel-routing.heldout')) &&
+        !path.endsWith(join('testing', 'live', 'kernel-routing.live.test.ts')),
     );
     const importers = sources.filter((path) => readFileSync(path, 'utf8').includes('kernel-routing.heldout'));
     expect(importers).toEqual([]);
+  });
+});
+
+/** What a gate repeat that does everything right observes. */
+const ideal = (testCase: KernelRoutingCase): KernelRoutingObservation => {
+  if (testCase.kind === 'must-ask') {
+    return { caseId: testCase.id, asked: true };
+  }
+  if (testCase.fixture.kind === 'existing') {
+    return { caseId: testCase.id, boundKernel: testCase.fixture.owner, asked: false };
+  }
+  const kernel = testCase.preference === 'auto' ? testCase.acceptable[0] : testCase.preference;
+  return { caseId: testCase.id, asked: false, ...(kernel === undefined ? {} : { boundKernel: kernel }) };
+};
+
+const thrice = (observe: (testCase: KernelRoutingCase) => KernelRoutingObservation[]) =>
+  new Map(kernelRoutingHeldOutCases.map((testCase) => [testCase.id, observe(testCase)] as const));
+
+describe('the D9 gate over the held-out set', () => {
+  it('should meet every gate when each case passes in every repeat', () => {
+    const summary = summarizeKernelRoutingGate(
+      kernelRoutingHeldOutCases,
+      thrice((testCase) => [ideal(testCase), ideal(testCase), ideal(testCase)]),
+    );
+    expect(summary.allThresholdsMet).toBe(true);
+    expect(summary.stratumR).toMatchObject({ passed: 20, total: 20, required: 19 });
+    expect(summary.stratumN).toMatchObject({ passed: 20, total: 20, required: 17 });
+    expect(summary.computationalEngineering).toMatchObject({ total: 7, required: 6, met: true });
+    expect(summary.mustAsk).toMatchObject({ total: 10, required: 8 });
+    expect(summary.obedience).toMatchObject({ total: 10, required: 9 });
+    expect(summary.entitlement).toMatchObject({ total: 10, maxFailures: 0 });
+    expect(summary.migration).toMatchObject({ total: 10, maxFailures: 0 });
+    expect(summary.clearCaseAsks).toMatchObject({ passed: 0, total: 40, maxFailures: 4, met: true });
+  });
+
+  it('should count a case as passing on two of three repeats and failing on one', () => {
+    const [first, second] = kernelRoutingHeldOutStratumN;
+    const wrong = (testCase: KernelRoutingCase): KernelRoutingObservation => ({
+      caseId: testCase.id,
+      boundKernel: 'replicad',
+      asked: false,
+    });
+    const summary = summarizeKernelRoutingGate(
+      kernelRoutingHeldOutCases,
+      thrice((testCase) => {
+        if (testCase === first) {
+          return [ideal(testCase), wrong(testCase), ideal(testCase)];
+        }
+        if (testCase === second) {
+          return [wrong(testCase), ideal(testCase), wrong(testCase)];
+        }
+        return [ideal(testCase), ideal(testCase), ideal(testCase)];
+      }),
+    );
+    expect(summary.passCounts[first!.id]).toBe('2/3');
+    expect(summary.passCounts[second!.id]).toBe('1/3');
+    expect(summary.stratumN).toMatchObject({ passed: 19, met: true });
+  });
+
+  it('should fail when more than four clear cases ask', () => {
+    const askers = new Set(kernelRoutingHeldOutRoutingCases.slice(0, 5).map(({ id }) => id));
+    const summary = summarizeKernelRoutingGate(
+      kernelRoutingHeldOutCases,
+      thrice((testCase) => {
+        const observation = askers.has(testCase.id) ? { ...ideal(testCase), asked: true } : ideal(testCase);
+        return [observation, observation, observation];
+      }),
+    );
+    expect(summary.clearCaseAsks).toMatchObject({ passed: 5, met: false });
+    expect(summary.allThresholdsMet).toBe(false);
+  });
+
+  it('should refuse a case with no observation', () => {
+    expect(() => summarizeKernelRoutingGate(kernelRoutingHeldOutCases, new Map())).toThrow(/No observation/u);
   });
 });

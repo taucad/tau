@@ -228,7 +228,9 @@ const show = <Leaf extends ViewerViewFieldPath>(
   leaf: Leaf,
   value: ViewerViewFieldValues[Leaf],
 ): void => {
-  switch (leaf) {
+  // A non-generic copy, so the switch narrows the path to the display leaves.
+  const path: ViewerViewFieldPath = leaf;
+  switch (path) {
     case 'upDirection': {
       graphicsRef.send({ type: 'setUpDirection', payload: value as ViewFieldValues['upDirection'] });
       break;
@@ -242,7 +244,7 @@ const show = <Leaf extends ViewerViewFieldPath>(
       break;
     }
     default: {
-      graphicsRef.send({ type: displayEvents[leaf as keyof typeof displayEvents], payload: value as boolean });
+      graphicsRef.send({ type: displayEvents[path], payload: value as boolean });
     }
   }
 };

@@ -9,6 +9,7 @@ import {
   HttpException,
   HttpStatus,
   Inject,
+  Logger,
   NotFoundException,
   Optional,
   Param,
@@ -82,6 +83,41 @@ export const receivePackOutcome = (report: Uint8Array<ArrayBuffer>): SyncOutcome
   }
   return /[\da-f]{4}ng /u.test(text) ? 'ref_rejected' : 'ok';
 };
+
+/** The most refs one push's log line names; the rest are counted. */
+export const loggedPushRefLimit = 20;
+
+/** The longest ref name or refusal reason a push's log line keeps. */
+const loggedPushTextLength = 160;
+
+/** One ref's answer in a push's report-status: `ok`, or `ng` with git's or the hook's reason. */
+export type ReceivePackRefResult = Readonly<{ ref: string; status: 'ok' | 'ng'; reason?: string }>;
+
+/* Control bytes (side-band markers, NULs) never reach a log line. */
+const printable = (text: string): string =>
+  // oxlint-disable-next-line no-control-regex -- the point is to strip control bytes.
+  text.replaceAll(/[\u0000-\u001F\u007F]/gu, '').slice(0, loggedPushTextLength);
+
+/**
+ * Every ref's answer in a push's report-status (`ok <ref>`, `ng <ref> <reason>`), plain or inside side-band 1, so
+ * a refusal git answers with HTTP 200 is visible in the API's own log. Only ref names and git's reasons: the body
+ * carries no credential, and nothing else of it is read.
+ *
+ * @param report - The receive-pack response body, verbatim.
+ * @returns The answers in the order git gave them; none for a body with no report-status.
+ */
+export const receivePackRefResults = (report: Uint8Array<ArrayBuffer>): readonly ReceivePackRefResult[] =>
+  [
+    ...Buffer.from(report)
+      .toString('latin1')
+      .matchAll(/[\da-f]{4}(ok|ng) (\S+)(?: ([^\n]*))?\n/gu),
+  ].map(([, status, ref = '', reason]) =>
+    Object.freeze({
+      ref: printable(ref),
+      status: status === 'ng' ? 'ng' : 'ok',
+      ...(status === 'ng' && reason !== undefined ? { reason: printable(reason) } : {}),
+    }),
+  );
 
 /**
  * The retryable capacity refusals: a lease this Machine cannot hold yet, an owner at its share, a
@@ -185,6 +221,7 @@ export class GitController {
    * own credential. `git-proxy.controller.ts` already reads the validated
    * config value exactly this way.
    */
+  readonly #logger = new Logger(GitController.name);
   readonly #apiUrl: string;
 
   /**
@@ -359,6 +396,7 @@ export class GitController {
     if (outcome !== undefined) {
       this.recordSync('push', outcome, startedAt);
     }
+    this.logPushRefs(projectId, outcome, receivePackRefResults(output));
     return new StreamableFile(Buffer.from(output), { type: 'application/x-git-receive-pack-result' });
   }
 
@@ -574,6 +612,31 @@ export class GitController {
       }
     });
     return abort.signal;
+  }
+
+  /**
+   * One line per push naming each ref's answer, `warn` when any was refused: git answers a refused ref with HTTP 200,
+   * so the request log alone reads a refused push as a good one.
+   */
+  private logPushRefs(
+    projectId: string,
+    outcome: SyncOutcome | undefined,
+    answers: readonly ReceivePackRefResult[],
+  ): void {
+    if (answers.length === 0) {
+      return;
+    }
+    const fields = {
+      projectId,
+      outcome,
+      refs: answers.slice(0, loggedPushRefLimit),
+      ...(answers.length > loggedPushRefLimit ? { omittedRefs: answers.length - loggedPushRefLimit } : {}),
+    };
+    if (answers.some((answer) => answer.status === 'ng')) {
+      this.#logger.warn(fields, 'A push was refused for some refs');
+    } else {
+      this.#logger.log(fields, 'A push updated its refs');
+    }
   }
 
   /** One sync request's count and latency, recorded once where its answer is decided; the latency says where git ran. */

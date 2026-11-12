@@ -75,7 +75,7 @@ function CommunityProjectCard({
   const [files, setFiles] = useState<ProjectFiles>();
   const filesPromise = useRef<Promise<ProjectFiles> | undefined>(undefined);
 
-  const mainFile = assets.main.entryPath;
+  const mainFile = assets.main?.entryPath;
 
   const ensureFiles = useCallback(async (): Promise<ProjectFiles> => {
     filesPromise.current ??= loadBuiltinProjectFiles({ project });
@@ -119,7 +119,8 @@ function CommunityProjectCard({
           isPreviewVisible={isPreviewVisible}
           onPreviewVisibilityChange={handlePreviewVisibilityChange}
         >
-          {files ? (
+          {/* An entry-less project has no model to preview yet. */}
+          {files && mainFile !== undefined ? (
             <CadPreviewProvider projectId={id} mainFile={mainFile} files={files}>
               <ProjectCardCadPreview />
             </CadPreviewProvider>

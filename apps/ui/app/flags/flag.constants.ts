@@ -95,6 +95,19 @@ export const flagRegistry = {
     label: 'Plugin store',
     description: 'Browse plugins and skills',
   },
+  autoKernel: {
+    showInExperimental: false,
+    schema: z.boolean().default(false),
+    label: 'Automatic kernel',
+    description: 'Let the agent choose the kernel for a new model, and remember Auto as a kernel choice',
+  },
+  zooCloudDispatch: {
+    showInExperimental: false,
+    schema: z.boolean().default(false),
+    label: 'Zoo cloud dispatch',
+    description:
+      "Offer Zoo to automatic kernel routing. Off while Zoo's cloud dispatch is closed; the change that opens dispatch turns it on",
+  },
   tauDebug: {
     showInExperimental: true,
     schema: z.boolean().default(tauDebugDefault),

@@ -142,6 +142,12 @@ test('should fall back to the app origin and print a release line only when give
   const released = agentPage({ origin: 'https://tau.new', release: 'Current release: 0.1.0-beta.7 (npm tag `beta`).' });
   expect(released).toContain('folder.\n\nCurrent release: 0.1.0-beta.7 (npm tag `beta`).\n\n## Install');
 });
+test('should serve the generated kernel digest without its markers', () => {
+  const text = agentPage({ origin: 'https://tau.new' });
+  expect(text).toContain('## Which kernel\n\nIf the project has no model file, choose a kernel before writing one.');
+  expect(text).not.toContain('<!--');
+  expect(text).not.toMatch(/\bDefault: replicad\b/u);
+});
 test('should reject unreviewed prose, unsafe slugs, invalid dates and duplicate articles', () => {
   const article = {
     status: 'published',

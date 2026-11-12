@@ -41,7 +41,6 @@
           "additionalProperties": false
         }
       },
-      "required": ["main"],
       "additionalProperties": false
     },
     "syncChats": {

@@ -1,5 +1,6 @@
 export {
   convertLegacyProjectManifestBytes,
+  mainEntryPath,
   parseProjectManifestBytes,
   projectIdSchema,
   projectManifestMaxBytes,

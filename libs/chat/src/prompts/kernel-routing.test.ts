@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { kernelConfigurations, resolveKernel } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
 import {
+  buildSnapshotKernel,
   groupKernelsByRepresentation,
   kernelChoiceCondition,
   renderKernelGuidance,
@@ -178,5 +179,35 @@ describe('groupKernelsByRepresentation', () => {
 
   it('should drop an empty group', () => {
     expect(groupKernelsByRepresentation(['replicad', 'openscad']).map(({ label }) => label)).toEqual(['BRep', 'Mesh']);
+  });
+});
+
+describe('buildSnapshotKernel', () => {
+  const profile: KernelRoutingProfile = { available: ['openscad', 'replicad'] };
+
+  it('should list every other catalog kernel with the neutral reason and render the entry-less text', () => {
+    const kernel = buildSnapshotKernel({ preference: 'auto', profile });
+
+    expect(kernel.preference).toBe('auto');
+    expect(kernel.owner).toBeUndefined();
+    expect(kernel.available).toEqual(['openscad', 'replicad']);
+    expect(kernel.unavailable.map(({ kernel: id }) => id).toSorted()).toEqual(
+      kernelConfigurations
+        .map(({ id }) => id)
+        .filter((id) => id !== 'openscad' && id !== 'replicad')
+        .toSorted(),
+    );
+    expect(new Set(kernel.unavailable.map(({ reason }) => reason))).toEqual(new Set(['not available here']));
+    expect(kernel.guidance).toBe(renderKernelGuidance({ preference: 'auto', profile }));
+    expect(JSON.stringify(kernel)).not.toMatch(/\b(?:pro|plan|free|enterprise|upgrade|subscription)\b/iu);
+  });
+
+  it('should carry the owner and keep its kernel in the text', () => {
+    const owner = { kernel: 'replicad', entryPath: 'main.ts' } as const;
+    const kernel = buildSnapshotKernel({ preference: 'auto', owner, profile });
+
+    expect(kernel.owner).toEqual(owner);
+    expect(kernel.guidance).toContain('`cad-replicad`');
+    expect(kernel.guidance).not.toContain('### Kernels available here');
   });
 });

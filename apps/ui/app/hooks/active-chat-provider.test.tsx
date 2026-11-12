@@ -47,6 +47,8 @@ const harness = vi.hoisted(() => ({
   selectedModelName: 'Cookie Model',
   setKernel: vi.fn(),
   cookieKernel: 'openscad' as 'openscad' | 'manifold' | 'replicad',
+  isAutoKernelEnabled: false,
+  owner: undefined as { kernel: 'openscad' | 'manifold' | 'replicad'; entryPath: string } | undefined,
   homeFiles: new Map<string, Uint8Array<ArrayBuffer>>(),
   homeReadFile: vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>(),
   homeWriteFile: vi.fn<(path: string, bytes: Uint8Array<ArrayBuffer>) => Promise<void>>(),
@@ -215,9 +217,20 @@ vi.mock('#hooks/use-models.js', () => ({
 vi.mock('#hooks/use-kernel.js', () => ({
   useKernel: () => ({
     kernel: harness.cookieKernel,
+    preference: harness.cookieKernel,
     setKernel: harness.setKernel,
+    setPreference: harness.setKernel,
     selectedKernel: resolveKernel(harness.cookieKernel),
+    newProjectKernel: harness.cookieKernel,
   }),
+}));
+
+vi.mock('#hooks/use-project-kernel-owner.js', () => ({
+  useProjectKernelOwner: () => harness.owner,
+}));
+
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: (name: string) => name === 'autoKernel' && harness.isAutoKernelEnabled,
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => {
@@ -332,6 +345,8 @@ beforeEach(() => {
   harness.selectedModelName = 'Cookie Model';
   harness.setKernel.mockReset();
   harness.cookieKernel = 'openscad';
+  harness.isAutoKernelEnabled = false;
+  harness.owner = undefined;
   harness.homeFiles.clear();
   harness.homeReadFile.mockReset().mockImplementation(async (path: string) => {
     const bytes = harness.homeFiles.get(path);
@@ -1301,6 +1316,65 @@ describe('ActiveChatProvider', () => {
         expect(harness.patchChat).toHaveBeenCalledWith('chat_kernel_dual_write', 'activeKernel', 'manifold');
       });
       expect(harness.setKernel).toHaveBeenCalledWith('manifold');
+    });
+
+    describe('with the autoKernel flag on', () => {
+      beforeEach(() => {
+        harness.isAutoKernelEnabled = true;
+      });
+
+      it('should read a legacy row that matches its owner as Auto, running the owner kernel', async () => {
+        harness.owner = { kernel: 'replicad', entryPath: 'main.ts' };
+        harness.getChat.mockResolvedValue(makeChat({ id: 'chat_legacy_auto', activeKernel: 'replicad' }));
+
+        const { result } = renderHook(() => useChatComposer(), { wrapper: createSessionWrapper('chat_legacy_auto') });
+
+        await waitFor(() => {
+          expect(result.current.kernel.kernelId).toBe('replicad');
+        });
+        expect(result.current.kernel.preference).toBe('auto');
+      });
+
+      it('should keep a legacy row that differs from its owner as that manual pick', async () => {
+        harness.owner = { kernel: 'replicad', entryPath: 'main.ts' };
+        harness.getChat.mockResolvedValue(makeChat({ id: 'chat_legacy_manual', activeKernel: 'manifold' }));
+
+        const { result } = renderHook(() => useChatComposer(), { wrapper: createSessionWrapper('chat_legacy_manual') });
+
+        await waitFor(() => {
+          expect(result.current.kernel.preference).toBe('manifold');
+        });
+        expect(result.current.kernel.kernelId).toBe('manifold');
+      });
+
+      it('should change only the chat on an in-chat pick, leaving the remembered Home selection', async () => {
+        harness.getChat.mockResolvedValue(makeChat({ id: 'chat_pick' }));
+
+        const { result } = renderHook(() => useChatComposer(), { wrapper: createSessionWrapper('chat_pick') });
+
+        await waitFor(() => {
+          expect(result.current.kernel.preference).toBe('auto');
+        });
+
+        act(() => {
+          result.current.kernel.setActivePreference('manifold');
+        });
+
+        await waitFor(() => {
+          expect(harness.patchChat).toHaveBeenCalledWith('chat_pick', 'kernelPreference', 'manifold');
+        });
+        expect(result.current.kernel.preference).toBe('manifold');
+        expect(harness.setKernel).not.toHaveBeenCalled();
+
+        act(() => {
+          result.current.kernel.setActivePreference('auto');
+        });
+
+        await waitFor(() => {
+          expect(harness.patchChat).toHaveBeenCalledWith('chat_pick', 'kernelPreference', 'auto');
+        });
+        expect(harness.setKernel).not.toHaveBeenCalled();
+      });
     });
   });
 

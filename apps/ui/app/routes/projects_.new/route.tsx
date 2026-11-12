@@ -161,7 +161,8 @@ export default function ProjectsNew(): React.JSX.Element {
   const location = useProjectCreationLocation();
   const presentLocationError = useProjectCreationLocationError();
 
-  const { kernel, setKernel: setSelectedKernel } = useKernel();
+  /* No Auto here: there is no prompt to route on, so the remembered kernel when concrete, else replicad (E5). */
+  const { newProjectKernel: kernel, setKernel: setSelectedKernel } = useKernel();
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
 

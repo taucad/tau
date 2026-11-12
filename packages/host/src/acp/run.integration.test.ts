@@ -2798,7 +2798,16 @@ describe('authentication, initialize and prompt content', () => {
         skills: [{ name: 'brep-design', description: 'Design manufacture-ready parts.' }],
         memory: { '.tau/AGENTS.md': 'Keep all dimensions in millimetres.' },
       },
-      snapshot: { files: ['main.scad'] },
+      snapshot: {
+        files: ['main.scad'],
+        kernel: {
+          preference: 'auto',
+          owner: { kernel: 'openscad', entryPath: 'main.scad' },
+          available: ['openscad', 'replicad'],
+          unavailable: [{ kernel: 'zoo', reason: 'not available here' }],
+          guidance: 'This project uses OpenSCAD; activate the cad-openscad skill.',
+        },
+      },
     };
 
     await runTurn(harness, { chatId: 'chat-context', runId: 'run-context-1', text: 'noask', config });
@@ -2809,12 +2818,15 @@ describe('authentication, initialize and prompt content', () => {
     expect(first?.indexOf('noask')).toBeLessThan(first?.indexOf('tau://agent-guidance') ?? -1);
     expect(first).toContain('tau://agent-guidance');
     expect(first).toContain('native skill loader');
+    expect(first).toContain('If the project has no model file, choose a kernel before writing one.');
     expect(first).not.toContain('tau://system-prompt');
     expect(first).not.toContain('The kernel is OpenSCAD.');
     expect(first).toContain('tau://skills');
     expect(first).toContain('tau://memory');
     expect(first).toContain('Keep all dimensions in millimetres.');
     expect(first).toContain('tau://snapshot');
+    /* The snapshot's kernel object (AKS-7) crosses as loose JSON: forwarded as sent, with no reader of its own. */
+    expect(first).toContain(JSON.stringify(config.snapshot.kernel).replaceAll('"', String.raw`\"`));
     /* Stable guidance is session-scoped; current project facts accompany each
      * turn so a native→ACP switch cannot leave the vendor on an old snapshot. */
     expect(second).not.toContain('tau://agent-guidance');

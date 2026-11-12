@@ -158,7 +158,7 @@ const objectStoreWorker = {
           ? options.files
           : seedInitialWorkbenchFiles(
               options.files,
-              options.deferInitialView ? undefined : project.assets.main.entryPath,
+              options.deferInitialView ? undefined : project.assets.main?.entryPath,
             ),
       ...(options.staging === undefined ? {} : { staging: options.staging }),
       ...(options.manifestBytes === undefined ? {} : { manifestBytes: options.manifestBytes }),
@@ -230,7 +230,7 @@ const objectStoreWorker = {
       sourceProjectId: options.sourceProjectId,
       manifest: newProject,
       library: { projectId: options.targetProjectId, lastActivityAt: timestamp },
-      files: seedInitialWorkbenchFiles(options.files, newProject.assets.main.entryPath),
+      files: seedInitialWorkbenchFiles(options.files, newProject.assets.main?.entryPath),
       chats: clonedChats,
       editorState,
     };

@@ -1,4 +1,12 @@
-import { kernelRoutingCopy, kernelRoutingRules, kernelRoutingZones, resolveKernel } from '@taucad/types/constants';
+import {
+  kernelConfigurations,
+  kernelRoutingCopy,
+  kernelRoutingRules,
+  kernelRoutingZones,
+  resolveKernel,
+} from '@taucad/types/constants';
+import { snapshotKernelUnavailableReason } from '#constants/message.constants.js';
+import type { SnapshotKernel } from '#types/message-metadata.types.js';
 import type { KernelId, KernelPreference, KernelRepresentation, KernelRouting } from '@taucad/types/constants';
 
 /*
@@ -210,9 +218,9 @@ export const renderKernelGuidance = ({ preference, owner, profile }: KernelGuida
 };
 
 /**
- * The self-sufficient digest for MCP `initialize` instructions and the `llms.md` "Which kernel" paragraph: the
- * conditional sentence, each narrow rule in one line, and one phrase per available kernel. It points at no table a
- * standalone MCP client cannot reach (D4).
+ * The self-sufficient digest for the ACP `tau://agent-guidance` block and the `llms.md` "Which kernel" paragraph: the
+ * conditional sentence, each narrow rule in one line, and one phrase per available kernel. It points at no table an
+ * ACP client cannot reach (D4).
  *
  * @param profile - The host's available kernels.
  * @returns Plain text lines joined by newlines.
@@ -251,3 +259,22 @@ export const groupKernelsByRepresentation = (kernels: readonly KernelId[]): Kern
       kernels: kernels.filter((id) => resolveKernel(id).representation === representation),
     }))
     .filter(({ kernels: grouped }) => grouped.length > 0);
+
+/**
+ * The snapshot's `kernel` object (D4, AKS-7) for one state: the same preference, owner and profile the per-turn text
+ * renders from, every other catalog kernel with the neutral reason, and that text. It names no plan.
+ *
+ * @param input - Preference, owner and the host's profile.
+ * @returns The object `tau://snapshot` carries.
+ * @public
+ */
+export const buildSnapshotKernel = (input: KernelGuidanceInput): SnapshotKernel => ({
+  preference: input.preference,
+  ...(input.owner === undefined ? {} : { owner: { kernel: input.owner.kernel, entryPath: input.owner.entryPath } }),
+  available: [...input.profile.available],
+  unavailable: kernelConfigurations
+    .map(({ id }) => id)
+    .filter((id) => !input.profile.available.includes(id))
+    .map((kernel) => ({ kernel, reason: snapshotKernelUnavailableReason })),
+  guidance: renderKernelGuidance(input),
+});

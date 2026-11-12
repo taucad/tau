@@ -37,7 +37,13 @@ const placements: { current: readonly AgentHostPlacementTarget[] } = { current: 
 
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({
-    kernel: { kernelId: manifoldKernel.id, kernel: manifoldKernel, setActiveKernel: vi.fn() },
+    kernel: {
+      kernelId: manifoldKernel.id,
+      kernel: manifoldKernel,
+      setActiveKernel: vi.fn(),
+      preference: manifoldKernel.id,
+      setActivePreference: vi.fn(),
+    },
     execution: { execution: execution.current, setActiveExecution },
     contextUsage: undefined,
   }),

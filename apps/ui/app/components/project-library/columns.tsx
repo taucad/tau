@@ -166,7 +166,7 @@ export const createColumns = (
     cell({ row }): ReactNode {
       const { original } = row;
       return isCloudOnly(original) ? undefined : (
-        <div className='font-mono text-xs'>{original.assets.main.entryPath}</div>
+        <div className='font-mono text-xs'>{original.assets.main?.entryPath}</div>
       );
     },
     enableSorting: false,

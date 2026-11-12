@@ -44,7 +44,6 @@
     "./lib/code-language-resolution": "./src/lib/code-language-resolution.ts",
     "./lib/composed-view-client.fixture": "./src/lib/composed-view-client.fixture.ts",
     "./lib/compute-reuse-preference": "./src/lib/compute-reuse-preference.ts",
-    "./lib/create-model-skill": "./src/lib/create-model-skill.ts",
     "./lib/desktop-deep-link": "./src/lib/desktop-deep-link.ts",
     "./lib/device-id": "./src/lib/device-id.ts",
     "./lib/device-memory-class": "./src/lib/device-memory-class.ts",

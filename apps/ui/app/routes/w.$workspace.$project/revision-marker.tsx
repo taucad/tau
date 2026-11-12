@@ -74,6 +74,7 @@ import {
 import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
 import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-language-resolution';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
+import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionChanges, useRevisionChangesSince, useRevisionFileComparison } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
@@ -392,20 +393,15 @@ function CurrentComparison({
 }
 
 /**
- * A revision's exact facts, opened by the Details toggle in the same
- * `Collapsible`. The revision's id lives here and nowhere else a person reads
- * (EQ9); copying it is More's.
+ * The ids an entry is stored under: its own, its tree's and its parent's.
+ * Diagnostics only (B5, M8): they render with Tau's debug setting on and never
+ * otherwise, so a person reads no 40-character id; copying the entry's id is
+ * More's.
  *
- * @param props - The revision and the line it is on.
- * @returns The Details content.
+ * @param revision - The entry.
+ * @returns The Details rows that name its ids.
  */
-export function RevisionDetails({
-  revision,
-  branch,
-}: {
-  readonly revision: RevisionCard;
-  readonly branch: string | undefined;
-}): React.JSX.Element {
+const storedIdRows = (revision: RevisionCard): ReadonlyArray<readonly [string, React.ReactNode]> => {
   /* The first parent the graph named; a branch's first revision follows none. A card
      from elsewhere (a remote settlement) has neither a parent nor a number here. */
   const parent =
@@ -418,7 +414,7 @@ export function RevisionDetails({
         {revision.parent}
       </code>
     );
-  const rows: ReadonlyArray<readonly [string, React.ReactNode]> = [
+  return [
     [
       'Revision',
       <code key='id' className='font-mono break-all'>
@@ -437,6 +433,27 @@ export function RevisionDetails({
           ],
         ] as const)),
     ...(parent === undefined ? [] : ([['Parent', parent]] as const)),
+  ];
+};
+
+/**
+ * A revision's exact facts, opened by the Details toggle in the same
+ * `Collapsible`. The ids it is stored under appear only with Tau's debug
+ * setting on (B5); copying the id is More's.
+ *
+ * @param props - The revision and the line it is on.
+ * @returns The Details content.
+ */
+export function RevisionDetails({
+  revision,
+  branch,
+}: {
+  readonly revision: RevisionCard;
+  readonly branch: string | undefined;
+}): React.JSX.Element {
+  const isDebug = useFeature('tauDebug');
+  const rows: ReadonlyArray<readonly [string, React.ReactNode]> = [
+    ...(isDebug ? storedIdRows(revision) : []),
     ...(branch === undefined ? [] : ([['Branch', branch]] as const)),
     ['Trigger', revisionTriggerLabel(revision.capture, revision.turnCut)],
     ...(revision.createdAt > 0
@@ -578,7 +595,7 @@ function CopyRevisionId({ revisionId }: { readonly revisionId: string }): React.
       </DropdownMenuItem>
       {isFailed ? (
         <span role='alert' className='sr-only'>
-          Copy failed. Select the id in Details and copy it.
+          Copy failed. Try again.
         </span>
       ) : null}
     </>
@@ -657,7 +674,7 @@ function PublishRevisionDialog({
               commands.confirmPublish({
                 tag,
                 projectName,
-                entryPath: project?.assets.main.entryPath ?? '',
+                entryPath: project?.assets.main?.entryPath ?? '',
                 visibility: 'public',
                 title: projectName,
               });

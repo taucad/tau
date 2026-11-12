@@ -127,7 +127,7 @@ index 2f6c1affc504f99bc27deec5dcfc5c32dc7a8f7d..b3fc69a75b141beb024ba01423a83790
      this.theme = { ...DEFAULT_THEME, ...theme };
      this.requestFullRedraw();
 diff --git a/lib/terminal.ts b/lib/terminal.ts
-index 8ec71461583c369e617fb2417f642c0490f60b94..9b2ee5a514e24b4ddc9bccff24fc62da62900442 100644
+index 8ec71461583c369e617fb2417f642c0490f60b94..a230611458bb5796170d7c4aaac7297791b60caa 100644
 --- a/lib/terminal.ts
 +++ b/lib/terminal.ts
 @@ -217,6 +217,10 @@ export class Terminal implements ITerminalCore {
@@ -167,6 +167,28 @@ index 8ec71461583c369e617fb2417f642c0490f60b94..9b2ee5a514e24b4ddc9bccff24fc62da
        fontSize: this.options.fontSize,
        fontFamily: this.options.fontFamily,
        cursorStyle: this.options.cursorStyle,
+@@ -709,10 +725,19 @@ export class Terminal implements ITerminalCore {
+     this.requestFrame();
+   }
+ 
+-  /** Draws a frame now unless paused; forceAll redraws every row. */
++  /**
++   * Draws a frame now unless paused; forceAll redraws every row. Without an opacity the scrollbar keeps its own, so
++   * a resize or font change does not paint a hidden scrollbar over the last columns.
++   */
+   private draw(forceAll: boolean, scrollbarOpacity?: number): void {
+     if (this.paused || !this.renderer || !this.wasmTerm) return;
+-    this.renderer.render(this.wasmTerm, forceAll, this.viewportY, this, scrollbarOpacity);
++    this.renderer.render(
++      this.wasmTerm,
++      forceAll,
++      this.viewportY,
++      this,
++      scrollbarOpacity ?? this.scrollbarOpacity
++    );
+   }
+ 
+   /**
 diff --git a/lib/webgl-instances.ts b/lib/webgl-instances.ts
 index 29c9158d34f22c3dd255cf833126a7fd1c0239a8..675547fe0b159fcb953ef1f51321714770debc90 100644
 --- a/lib/webgl-instances.ts

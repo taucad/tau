@@ -1,7 +1,7 @@
 /**
  * The view-record binding against a real camera on a `StepClock`, with scripted graphics and framing owners that record
  * what the binding sends them. The first eight rows are G0.3's settle-window rows from `use-view-settings-sync.test.tsx`
- * re-homed (graphics event-driven state charter, G6); that file stays until the wiring lane (G6b) deletes the hook. Two
+ * re-homed (graphics event-driven state charter, G6); G6b deleted the hook and its file. Two
  * of them flip deliberately: a foreign pose mid-drag is dropped and the drag's pose saved (D15), and an automatic refit
  * is not saved (D20, D14's named change).
  *
@@ -119,7 +119,6 @@ function mount(options: Readonly<{ record?: WorkbenchView; framed?: boolean }> =
       graphics: graphics as unknown as ViewBindingGraphicsRef,
       camera: camera as unknown as ViewBindingCameraRef,
       framing: framing as unknown as ViewBindingFramingRef,
-      entryPath: 'src/main.ts',
       owners: ownersOf(record),
     },
     edit: async (next) => {
@@ -130,6 +129,8 @@ function mount(options: Readonly<{ record?: WorkbenchView; framed?: boolean }> =
     inspect: guard.inspect,
   });
   binding.start();
+  // The pane named the entry to framing; the binding follows it (G6b).
+  binding.send({ type: 'framingChanged', identity: 'src/main.ts', framed: false, holding: undefined });
   let { revision } = camera.getSnapshot().context;
   camera.subscribe(({ context }) => {
     if (context.revision === revision) {
@@ -216,6 +217,10 @@ const samples: Record<ViewRecordBindingEvent['type'], readonly ViewRecordBinding
   ],
   adoptionApplied: [{ type: 'adoptionApplied', requestId: 'view-binding-1', revision: 2 }],
   adoptionDropped: [{ type: 'adoptionDropped', requestId: 'view-binding-1', reason: 'dragging' }],
+  framingChanged: [
+    { type: 'framingChanged', identity: 'src/main.ts', framed: false, holding: undefined },
+    { type: 'framingChanged', identity: 'src/other.ts', framed: false, holding: undefined },
+  ],
 };
 const scripted = createFakeCallbackActors();
 const pathOptions = {
@@ -223,7 +228,6 @@ const pathOptions = {
     graphics: createActor(scripted.actor('graphics')) as unknown as ViewBindingGraphicsRef,
     camera: createActor(scripted.actor('camera')) as unknown as ViewBindingCameraRef,
     framing: createActor(scripted.actor('framing')) as unknown as ViewBindingFramingRef,
-    entryPath: 'src/main.ts',
     owners: ownersOf(initial()),
   } satisfies ViewRecordBindingInput,
   events: Object.values(samples).flat(),
@@ -707,7 +711,7 @@ describe('view record binding', () => {
       harness.publish(workbenchRecords.view.schema.parse({ ...initial(), fieldOfView: 30, upDirection: 'y' }));
       expect(harness.camera.getSnapshot().context.lastChange.source).toBe('persisted');
       expect(harness.camera.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(30);
-      expect(harness.graphicsSent()).toContainEqual({ type: 'setUpDirection', payload: 'y' });
+      expect(harness.graphicsSent()).toContainEqual({ type: 'adoptUpDirection', payload: 'y' });
       expect(harness.edits).toEqual([]);
     });
 
@@ -752,7 +756,6 @@ describe('view record binding', () => {
           graphics: createActor(scriptedOwners.actor('graphics')).start() as unknown as ViewBindingGraphicsRef,
           camera: createActor(scriptedOwners.actor('camera')).start() as unknown as ViewBindingCameraRef,
           framing: createActor(scriptedOwners.actor('framing')).start() as unknown as ViewBindingFramingRef,
-          entryPath: 'src/main.ts',
           owners: ownersOf(initial()),
         },
         edit: async (next) => {
@@ -800,6 +803,93 @@ describe('view record binding', () => {
       };
       harness.binding.send({ type: 'sectionSettled', section: mine });
       expect(harness.edits.map((next) => next.section)).toEqual([mine]);
+    });
+  });
+
+  describe('entry identity (G6b)', () => {
+    const other = (): WorkbenchView =>
+      workbenchRecords.view.schema.parse({ ...posed(initial(), pose([0, 1, 0], 9)), entryPath: 'src/other.ts' });
+    const framingNames = (
+      harness: ReturnType<typeof mount>,
+      identity: string,
+      state: Readonly<{ framed?: boolean; holding?: string }> = {},
+    ) => {
+      harness.binding.send({
+        type: 'framingChanged',
+        identity,
+        framed: state.framed ?? false,
+        holding: state.holding,
+      });
+    };
+
+    it('should park a record for an entry framing does not name, and never turn the shown entry', () => {
+      const harness = mount();
+      framingNames(harness, 'src/main.ts', { framed: true });
+      const before = harness.view();
+      harness.publish(other());
+      // CodeRabbit (taucad/tau#1857): the camera of the entry on screen keeps its pose.
+      expect(harness.view().direction).toEqual(before.direction);
+      expect(harness.framingSent()).toEqual([]);
+      // Only the mount's own record is acknowledged; the parked one waits.
+      expect(harness.applied.slice(1)).toEqual([]);
+    });
+
+    it('should give a parked record to its entry as the pending pose once framing names it, with no retry window', () => {
+      const harness = mount();
+      framingNames(harness, 'src/main.ts', { framed: true });
+      harness.publish(other());
+      framingNames(harness, 'src/other.ts');
+      expect(harness.binding.getSnapshot().value).toMatchObject({ camera: 'awaitingFrame' });
+      expect(harness.framingSent().at(-1)).toMatchObject({
+        type: 'entryChanged',
+        identity: 'src/other.ts',
+        pendingPose: { pose: { direction: [0, 1, 0], verticalSpan: 9 } },
+      });
+      const { requestId } = harness.framingSent().at(-1)!.pendingPose!;
+      framingNames(harness, 'src/other.ts', { holding: requestId });
+      // The entry is measured at once: framing frames it and applies the pose it holds.
+      harness.send({ type: 'frameGeometry', bounds: box(2), margin: 0.1, source: 'framing' });
+      harness.send({ type: 'adoptPersistedPose', requestId, pose: cameraPose([0, 1, 0], 9) });
+      expect(harness.view()).toMatchObject({ direction: [0, 1, 0], verticalSpan: 9 });
+      expect(harness.applied.slice(1)).toEqual([other()]);
+      expect(harness.poseEdits()).toEqual([]);
+    });
+
+    it('should give the camera a pending pose framing did not hold when it framed, and write nothing', () => {
+      const harness = mount();
+      framingNames(harness, 'src/main.ts', { framed: true });
+      harness.publish(other());
+      framingNames(harness, 'src/other.ts');
+      // The measurement reached framing before the pending pose did: framing framed the entry without it.
+      harness.send({ type: 'frameGeometry', bounds: box(2), margin: 0.1, source: 'framing' });
+      expect(harness.view()).toMatchObject({ direction: [0, 1, 0], verticalSpan: 9 });
+      expect(harness.applied.slice(1)).toEqual([other()]);
+      expect(harness.poseEdits()).toEqual([]);
+    });
+
+    it("should send the record's camera again when framing names the record's entry anew", () => {
+      const saved = posed(initial(), pose([0, 1, 0], 9));
+      const harness = mount({ record: saved });
+      framingNames(harness, 'src/main.ts', { framed: true });
+      framingNames(harness, 'src/other.ts');
+      const sent = harness.framingSent().length;
+      framingNames(harness, 'src/main.ts');
+      expect(harness.framingSent().length).toBe(sent + 1);
+      expect(harness.framingSent().at(-1)).toMatchObject({
+        type: 'entryChanged',
+        identity: 'src/main.ts',
+        pendingPose: { pose: { direction: [0, 1, 0], verticalSpan: 9 } },
+      });
+    });
+
+    it('should not write a pose of an entry the record is not for', () => {
+      const harness = mount();
+      framingNames(harness, 'src/main.ts', { framed: true });
+      harness.publish(workbenchRecords.view.schema.parse({ ...initial(), entryPath: 'src/other.ts' }));
+      harness.drag([1, 0, 0], 4);
+      harness.release();
+      harness.clock.advance(settle * 4);
+      expect(harness.poseEdits()).toEqual([]);
     });
   });
 

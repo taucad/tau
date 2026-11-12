@@ -2,8 +2,7 @@
  * The view-record binding's two pure functions (graphics event-driven state charter G6; D2, D6, D20; I6, I7): what a
  * foreign view record asks the live owners to adopt, and the record the owners' current values make.
  *
- * They are extracted from `useViewSettingsSync` (`#hooks/use-view-settings-sync.ts`), which stays until the wiring lane
- * (G6b) deletes it. Neither reads an actor's snapshot, a clock or React state: the binding machine holds every value
+ * They were extracted from `useViewSettingsSync`, which the wiring lane (G6b) deleted. Neither reads an actor's snapshot, a clock or React state: the binding machine holds every value
  * they read and calls them inside its transitions.
  */
 import type { CameraOrientation, CameraPose, CameraUpAxis } from '@taucad/camera/machine';
@@ -32,7 +31,7 @@ export type ViewGraphicsAdoption = Extract<
     type:
       | (typeof viewDisplayOwners)[number][2]
       | 'setGridUnit'
-      | 'setUpDirection'
+      | 'adoptUpDirection'
       | 'adoptPinnedMeasurements'
       | 'adoptSectionView';
   }
@@ -139,7 +138,7 @@ const graphicsChanges = (
     graphics.push({ type: 'setGridUnit', payload: { unit: next.grid.unit } });
   }
   if (upDirectionChanged(previous, next, patch)) {
-    graphics.push({ type: 'setUpDirection', payload: next.upDirection });
+    graphics.push({ type: 'adoptUpDirection', payload: next.upDirection });
   }
   if (!previous || (patch?.measurements === undefined && !same(previous.measurements, next.measurements))) {
     graphics.push({ type: 'adoptPinnedMeasurements', measurements: next.measurements });

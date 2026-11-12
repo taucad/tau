@@ -1935,7 +1935,7 @@ describe('restore, through the machine that owns it', () => {
   }, 30_000);
 
   /* A Try again pressed while a tree write runs: the write's own fill gives that tree's word, and no second fill runs. */
-  it.fails('starts no second fill when Try again is pressed during a tree write', async () => {
+  it('starts no second fill when Try again is pressed during a tree write', async () => {
     const gate = { armed: false, entered: Promise.withResolvers<void>(), release: Promise.withResolvers<void>() };
     const reports: LargeObjectsReport[] = [];
     const live: { filesystem?: RevisionFileSystem } = {};

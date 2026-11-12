@@ -2169,6 +2169,33 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }, 0);
     resumeTimers.add(timer);
   };
+  /*
+   * Tree writes running on each checkout, and the checkouts a Try again was pressed on meanwhile. The write's own
+   * fill gives its tree's word, so the press waits for the write: it checks again only when the write opened no new
+   * generation, or left the one it opened unanswered.
+   */
+  const runningTreeWrites = new Map<string, number>();
+  const retriesDuringWrite = new Set<string>();
+  const recheckFill = (place: Checkout): void => {
+    failedChecks.delete(place.id);
+    answeredFills.delete(place.id);
+    checkFill(place);
+  };
+  const endTreeWrite = (place: Checkout, generationBefore: number): void => {
+    const remaining = (runningTreeWrites.get(place.id) ?? 1) - 1;
+    if (remaining > 0) {
+      runningTreeWrites.set(place.id, remaining);
+      return;
+    }
+    runningTreeWrites.delete(place.id);
+    if (!retriesDuringWrite.delete(place.id)) {
+      return;
+    }
+    const generation = generationOf(place.id);
+    if (generation === generationBefore || answeredFills.get(place.id) !== generation) {
+      recheckFill(place);
+    }
+  };
   /* A close: no fill starts again, and none is still writing when this resolves. */
   const stopFills = async (): Promise<void> => {
     fillsStopped = true;
@@ -2301,6 +2328,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }
       })();
     };
+    runningTreeWrites.set(place.id, (runningTreeWrites.get(place.id) ?? 0) + 1);
     try {
       const answer = await materializeTree(place, built, { ...materialization, purpose: 'tree' });
       fillSoon(written);
@@ -2315,6 +2343,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         fillSoon(undefined);
       }
       throw error;
+    } finally {
+      endTreeWrite(place, generationBefore);
     }
   };
 
@@ -4271,8 +4301,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       const place = await readPlaceOf(checkoutId);
       /* A checkout a failed write left torn is put back first, then its tree is given the fill's word (L5). */
       await repairTornCheckout(place);
-      answeredFills.delete(place.id);
-      checkFill(place);
+      /* During a tree write, the write's own fill answers; a second fill now would fetch the same objects again. */
+      if (runningTreeWrites.has(place.id)) {
+        retriesDuringWrite.add(place.id);
+        return;
+      }
+      recheckFill(place);
     },
     readEntryClosure: entryClosureOf,
     chatDevice: async () => {

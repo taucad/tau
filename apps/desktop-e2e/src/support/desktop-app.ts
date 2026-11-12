@@ -54,6 +54,9 @@ const execFileAsync = promisify(execFile);
  */
 const childExitGraceMilliseconds = 15_000;
 
+/** How long main may take to answer `app.exit`, and then to exit, before the fixture kills it. */
+const shutdownGraceMilliseconds = 5000;
+
 const isAnyProcessNaming = async (pattern: string): Promise<boolean> => {
   try {
     await execFileAsync('pgrep', ['-f', pattern]);
@@ -864,8 +867,12 @@ export const launchDesktopApp = async (options: {
           app.exit(0);
         })
         .catch(() => undefined),
-      wait(5000),
+      wait(shutdownGraceMilliseconds),
     ]);
+    /* The evaluation settles once main has called `app.exit`, when its shutdown starts rather than ends. A kill there
+     * cuts what Chromium writes on the way out, such as the end of a `--log-net-log` file, so main gets the same bound
+     * to finish exiting before the kill. */
+    await Promise.race([exited, wait(shutdownGraceMilliseconds)]);
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL');
     }

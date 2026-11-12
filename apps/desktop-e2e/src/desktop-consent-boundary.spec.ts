@@ -12,11 +12,24 @@ const expectStartupNetworkClean = async (path: string | undefined): Promise<void
   if (path === undefined) {
     throw new Error('Startup network logging was not enabled.');
   }
-  const source = await readFile(path, 'utf8');
-  const log = JSON.parse(source) as {
-    readonly events?: ReadonlyArray<{ readonly params?: { readonly url?: string } }>;
-  };
-  const urls = (log.events ?? []).flatMap(({ params }) => (params?.url ? [params.url] : []));
+  type NetLog = { readonly events?: ReadonlyArray<{ readonly params?: { readonly url?: string } }> };
+  let log: NetLog | undefined;
+  /* Chromium's network service writes the log and closes its event list as it shuts down, which can end just after
+   * main has exited; until then the file is not yet JSON. */
+  await expect
+    .poll(
+      async () => {
+        try {
+          log = JSON.parse(await readFile(path, 'utf8')) as NetLog;
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { message: 'the startup net log must be complete', timeout: 30_000 },
+    )
+    .toBe(true);
+  const urls = (log?.events ?? []).flatMap(({ params }) => (params?.url ? [params.url] : []));
   expect(urls.length).toBeGreaterThan(0);
   expect(urls.some((url) => /\/api\/ph(?:\/|["?])|posthog\.com/iu.test(url))).toBe(false);
 };

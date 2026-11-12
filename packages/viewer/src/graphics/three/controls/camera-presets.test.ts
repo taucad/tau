@@ -159,7 +159,7 @@ describe('resolveDrag', () => {
         gesture: binding.gesture,
       })),
     );
-    expect(fromData).toEqual(expect.arrayContaining(listedDrags));
+    expect(fromData).toEqual(expect.arrayContaining([...listedDrags]));
     expect(fromData).toHaveLength(listedDrags.length);
   });
 });

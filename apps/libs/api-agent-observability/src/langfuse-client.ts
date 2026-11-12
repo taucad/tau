@@ -1,7 +1,7 @@
 import type { LangfuseScoreName } from '@taucad/api-core';
 import type { LangfuseScore, ObservationIdentity, OtlpSpan } from '#langfuse-observation.js';
 import type { LangfuseObservationRow } from '#langfuse-scorecard.js';
-import { otlpBody, settlementObservationName } from '#langfuse-observation.js';
+import { generationNames, otlpBody } from '#langfuse-observation.js';
 
 /**
  * Where and as whom the API writes to one Langfuse project. Server-side only. `scoreConfigs` names the project's score
@@ -156,15 +156,18 @@ const observationsUrl = (target: LangfuseTarget, query: Readonly<Record<string, 
  * returns request or response bodies: the span carries customer content.
  */
 /*
- * Only Tau's settlements, by the one name v4.3 and v5 share; every other observation is left unread, since the Langfuse
- * dashboards score runs (LQ10) and no interval list is ever read back (LF-31).
+ * Only generations, which carry the ledger's settled values (LW4); every other observation is left unread, since the
+ * Langfuse dashboards score runs (LQ10) and no interval list is ever read back (LF-31). A `tau.financial` span from an
+ * earlier mapper is not read.
  */
 const observationRow = (item: unknown): LangfuseObservationRow[] => {
   const id = field(item, 'id');
   const startTime = field(item, 'startTime');
   const metadata = field(item, 'metadata');
+  const name = field(item, 'name');
   return typeof id === 'string' &&
-    field(item, 'name') === settlementObservationName &&
+    typeof name === 'string' &&
+    generationNames.has(name) &&
     typeof startTime === 'string' &&
     typeof metadata === 'object' &&
     metadata !== null
@@ -316,8 +319,8 @@ export class LangfuseClient {
   }
 
   /**
-   * Read Tau's observations in one environment and window, for the Langfuse
-   * scorecard. Only the `core`, `basic` and `metadata` fields are requested, so no
+   * Read Tau's generations in one environment and window, for the Langfuse
+   * scorecard and the ledger reconciliation. Only the `core`, `basic` and `metadata` fields are requested, so no
    * input or output is ever read back.
    *
    * @param window - The environment, and the start-time bounds.

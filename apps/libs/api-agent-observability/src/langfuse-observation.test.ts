@@ -21,7 +21,9 @@ import {
 import type { LangfuseObservation, OtlpSpan } from '#langfuse-observation.js';
 import { providerAttemptEvidence, providerContentEvidence } from '#model-invocation-evidence.js';
 import type { ObservedAttempt } from '#model-invocation-evidence.js';
-import { settlementEvidence } from '#settlement-evidence.js';
+import type { ObservedSettlement } from '@taucad/api-billing';
+import { evidenceKeys } from '@taucad/agent-observability/identity';
+import { generationSettlementKey, settledGenerationKey, settlementEvidence, settles } from '#settlement-evidence.js';
 
 const pseudonym = pseudonymKey(Uint8Array.from(randomBytes(32)));
 const context = { environment: 'staging', protection: 'pro' } as const;
@@ -79,6 +81,43 @@ const attempt = (change: Partial<ObservedAttempt> = {}): ObservedAttempt => ({
 const authority = { policyEpoch: 'epoch-a', protection: 'pro' } as const;
 const generation = async (change: Partial<ObservedAttempt> = {}): Promise<Evidence> =>
   providerAttemptEvidence(attempt(change), authority);
+
+type FinancialFact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'] & { kind: 'financial' };
+/** The ledger's settlement of the call {@link attempt} makes, as the recorder admits it. */
+const settlement = async (
+  receipt: Partial<Pick<ObservedSettlement['receipt'], 'chargedAtoms' | 'supplierCostPicoUsd'>> = {},
+): Promise<Evidence> =>
+  settlementEvidence(
+    {
+      operation: {
+        id: 'op-1',
+        accountId: 'account-1',
+        environment: 'staging',
+        attemptKey: 'run-1:1:0',
+        projectHint: 'project-a',
+        chatHint: 'chat-1',
+        admittedAt: new Date(at),
+        activationId: 'activation-1',
+      },
+      receipt: {
+        terminalRevision: 1n,
+        chargedAtoms: 1500n,
+        supplierCostPicoUsd: null,
+        resolvedAt: new Date(at + 1),
+        ...receipt,
+      },
+      normalization: undefined,
+    },
+    'user-a',
+    { ...authority, project: 'project-a' },
+  );
+const factOf = (evidence: Evidence): FinancialFact => {
+  const { fact } = evidence.payload;
+  if (fact.kind !== 'financial') {
+    throw new Error(`${fact.kind} is not a settlement`);
+  }
+  return fact;
+};
 
 const row = (sequence: number) => ({ chatId: 'chat-1', leaderEpoch: 'epoch-a', sequence });
 const hostRun = (change: Partial<ProjectedRun> = {}): ProjectedRun => ({
@@ -417,33 +456,51 @@ describe('langfuseObservation v5: one trace per run, one root, ids from the fact
     expect(releaseLabel('tau-api-staging:deployment-01KSYNTHETIC')).toBe('tau-api-staging:deployment-01KSYNTHETIC');
   });
 
-  it('should keep a settlement a tau.financial span under its run root until it moves onto the generation', async () => {
-    const settlement = await settlementEvidence(
-      {
-        operation: {
-          id: 'op-1',
-          accountId: 'account-1',
-          environment: 'staging',
-          attemptKey: 'run-1:1:0',
-          projectHint: 'project-a',
-          chatHint: 'chat-1',
-          admittedAt: new Date(at),
-          activationId: 'activation-1',
-        },
-        receipt: { terminalRevision: 1n, chargedAtoms: 1500n, supplierCostPicoUsd: null, resolvedAt: new Date(at + 1) },
-        normalization: undefined,
-      },
-      'user-a',
-      { ...authority, project: 'project-a' },
-    );
-    const span = only(settlement);
+  it('should map a settlement to no object and carry its four values on the generation it settled (LW4)', async () => {
+    const charged = await settlement({ chargedAtoms: 1_500_000n, supplierCostPicoUsd: 750_000_000_000n });
+    const call = await generation();
+    const fact = factOf(charged);
+    const span = only(call);
+    const settled = langfuseObservation(call, { ...context, settlement: fact }, pseudonym)!;
 
-    expect(evidenceSchema.safeParse(settlement).success).toBe(true);
-    expect(span.name).toBe('tau.financial');
-    expect(span.parentSpanId).toBe(runRootSpanId('staging', 'user-a', 'run-1'));
-    expect(metadata(span, 'fact.kind')).toBe('financial');
-    expect(metadata(span, 'fact.ledger')).toMatch(/^[a-f\d]{32}$/u);
-    expect(metadata(span, 'fact.credits')).toBeDefined();
+    expect(evidenceSchema.safeParse(charged).success).toBe(true);
+    expect(langfuseObservation(charged, context, pseudonym)).toBeUndefined();
+    expect(settled.identity).toEqual(map(call).identity);
+    expect(settled.spans).toHaveLength(1);
+    const [carried] = settled.spans;
+    expect(carried!.name).toBe('call-model');
+    expect(metadata(carried!, 'supplier_cost_usd')).toBe(0.75);
+    expect(metadata(carried!, 'credits')).toBe(1.5);
+    expect(metadata(carried!, 'tariff')).toBe(observationGroup('staging', 'user-a', fact.tariff));
+    expect(metadata(carried!, 'ledger')).toBe(observationGroup('staging', 'user-a', fact.ledger));
+    /* Langfuse's own cost stays derived from usage, with its breakdown: no cost total is sent (LD6). */
+    expect(attribute(carried!, 'langfuse.observation.cost_details')).toBeUndefined();
+    expect(attribute(carried!, 'langfuse.observation.usage_details')).toBe(
+      attribute(span, 'langfuse.observation.usage_details'),
+    );
+    expect(carried!.attributes.some((item) => item.key.includes('.fact.'))).toBe(false);
+    for (const key of ['supplier_cost_usd', 'credits', 'tariff', 'ledger']) {
+      expect(metadata(span, key)).toBeUndefined();
+    }
+  });
+
+  it('should leave an unpriced supplier cost out of a settled generation, never as zero', async () => {
+    const fact = factOf(await settlement({ chargedAtoms: 2_000_000n, supplierCostPicoUsd: null }));
+    const [carried] = langfuseObservation(await generation(), { ...context, settlement: fact }, pseudonym)!.spans;
+
+    expect(metadata(carried!, 'credits')).toBe(2);
+    expect(metadata(carried!, 'supplier_cost_usd')).toBeUndefined();
+  });
+
+  it('should name the call it settled, so delivery can join a generation and its settlement either way', async () => {
+    const call = await generation();
+    const charged = await settlement();
+
+    expect(settledGenerationKey(charged)).toBe(evidenceKeys(call).semantic);
+    expect(generationSettlementKey(call)).toBe(evidenceKeys(charged).semantic);
+    expect(settles(charged, call)).toBe(true);
+    expect(settles(charged, await generation({ operation: 'op-2' }))).toBe(false);
+    expect(settles(charged, await generation({ attemptKey: 'run-1:1:1' }))).toBe(false);
   });
 
   it('should keep content out of the body of a summary observation', async () => {

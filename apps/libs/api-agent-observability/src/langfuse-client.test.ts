@@ -122,29 +122,38 @@ describe('LangfuseClient', () => {
     ).resolves.toBe('unavailable');
   });
 
-  it('should read only settlement observations and their metadata, and call a cut-short read partial', async () => {
+  it('should read only generations and their metadata, and call a cut-short read partial', async () => {
     const window = { environment: 'synthetic', from: new Date(0), to: new Date(1000) };
     const tau = {
       id: 's1',
-      name: 'tau.financial',
+      name: 'call-model',
       startTime: '1970-01-01T00:00:00.000Z',
-      metadata: { 'fact.kind': 'financial' },
+      metadata: { ledger: 'a'.repeat(32), credits: 1 },
     };
-    /* Every other name, Tau's or not, is left unread: the Langfuse dashboards score runs (LQ10). */
-    const others = ['tau.tool', 'tau.outcome', 'call-tool', 'run-cad-agent', 'checkout'].map((name) => ({
-      ...tau,
-      id: name,
-      name,
-    }));
+    /*
+     * Every other name, Tau's or not, is left unread: the Langfuse dashboards score runs (LQ10), and a settlement is on
+     * its generation, so a `tau.financial` span is no longer read (LW4).
+     */
+    const others = ['tau.financial', 'tau.tool', 'tau.outcome', 'call-tool', 'run-cad-agent', 'checkout'].map(
+      (name) => ({ ...tau, id: name, name }),
+    );
     const paged = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json(200, { data: [tau, ...others], meta: { cursor: 'next' } }))
-      .mockResolvedValueOnce(json(200, { data: [{ ...tau, id: 's2' }], meta: {} }));
+      .mockResolvedValueOnce(
+        json(200, {
+          data: [
+            { ...tau, id: 's2', name: 'compact-context' },
+            { ...tau, id: 's3', name: 'call-helper-model' },
+          ],
+          meta: {},
+        }),
+      );
     const client = (fetcher: typeof fetch) => new LangfuseClient(target, 1000, fetcher);
 
     await expect(client(paged).observations(window, 5)).resolves.toEqual({
       kind: 'complete',
-      rows: ['s1', 's2'].map((id) => ({ id, startTime: tau.startTime, metadata: tau.metadata })),
+      rows: ['s1', 's2', 's3'].map((id) => ({ id, startTime: tau.startTime, metadata: tau.metadata })),
     });
     const [first] = paged.mock.calls[0]!;
     expect(first instanceof URL && Object.fromEntries(first.searchParams)).toMatchObject({

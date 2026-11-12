@@ -280,7 +280,7 @@ This rule is checked by `apps/ui/app/dependency-signal.policy.node.test.ts` for 
 
 ### 5.5 Graphics: Effects Never Send, Subscribe or Time
 
-In the graphics scope, a React effect never sends an actor event, subscribes to an actor, store or emitter, or starts a timer (`setTimeout`, `setInterval`, `requestAnimationFrame`). A component never reads an actor snapshot during render or in an effect, apart from the recorded debts below. React renders from selectors and reports what the person did from event handlers. Everything that runs over time is an actor's: its `after` delays, its callback logic and its children (graphics event-driven state charter, D4 and I10).
+In the graphics scope, a React effect never sends an actor event, subscribes to an actor, store or emitter, or starts a timer (`setTimeout`, `setInterval`, `requestAnimationFrame`). A component never reads an actor snapshot during render or in an effect. The debts below are the exceptions found so far. React renders from selectors and reports what the person did from event handlers. Everything that runs over time is an actor's: its `after` delays, its callback logic and its children (graphics event-driven state charter, D4 and I10).
 
 The graphics scope is `packages/viewer`, `packages/camera` and `packages/three`, plus the `apps/ui` rows the charter inventory names: `workbench-records/`, `machines/project.machine.ts`, `view-settings-sync-host.tsx` and `workbench-layout-controller.ts`. The rest of the UI keeps the same rule as a ratchet (D17): each file's count may only go down until its own capability charter moves it.
 
@@ -300,12 +300,15 @@ Three reads during render predate this rule and are recorded debts, because the 
 
 Until G12's second change, the viewer's ceiling manifest also holds effects this rule forbids, which that change retires: `svg-viewer.tsx` and `use-panzoom-reset.tsx` (the panzoom reset and fit), and `kinematics-viewer.ts` and `kinematics-pose-composer.ts` (the mechanism load and clear, the pose subscription and the playback demand frame).
 
-Effects and handlers that subscribe or time through a helper the counter cannot see are recorded debts too:
+Effects and handlers that read, subscribe or time through a helper the counter cannot see are recorded debts too. The counter cannot find these, so this list holds what review found by G12 and is not complete; a reviewer adds any other they find:
 
 - `packages/viewer/src/graphics/three/react/gltf-mesh.tsx` subscribes to matcap loads, and starts a late section arm's analysis, which reports `gltfAnalysisReady`, from effects. G12's second change moves both into the presentation's host.
 - `packages/viewer/src/graphics/three/react/measure-tool.tsx` subscribes to matcap loads from an effect.
 - `packages/viewer/src/parameters/parameters-number.tsx` subscribes to the commit's drafts (`subscribeDrafts`) from an effect.
 - `packages/viewer/src/graphics/three/render-fps-overlay.tsx` starts its render-loop observer's timers from an effect.
+- `packages/viewer/src/hooks/use-graphics.tsx` (`useCameraRetarget`) reads the camera's snapshot and registers a camera consumer from a layout effect; both post-processing paths use it.
+- `packages/viewer/src/graphics/three/post-processing-webgpu.tsx` schedules camera preparation (`scheduleCameraPreparation`: DOM listeners and a re-armed timeout) from a layout effect.
+- `packages/viewer/src/graphics/three/react/use-model-gpu-pick.ts` creates a picker whose landing schedules an animation frame from an effect.
 - `packages/viewer/src/hooks/use-viewer-shortcuts.ts` opens a subscription from a key handler (`watchShortcutWrite`) and keeps it until graphics shows the written value.
 - In `apps/ui`, `view-settings-sync-host.tsx` registers a producer and `workbench-records/record-issues.ts` publishes into a module store from effects.
 

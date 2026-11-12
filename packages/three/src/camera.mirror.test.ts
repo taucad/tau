@@ -382,7 +382,7 @@ describe('createThreeCameraRig mirror', () => {
     rig.dispose();
   });
 
-  it('should not send its own actor a frame after the actor errored', () => {
+  it('should keep its actor answering after a host failure, keeping the first defect as its fault (MC-R12)', () => {
     const rejected: string[] = [];
     let fail = false;
     const rig = createThreeCameraRig({
@@ -409,8 +409,11 @@ describe('createThreeCameraRig mirror', () => {
 
     rig.setRenderFrame(frameAt(4));
 
-    expect(errors).toHaveLength(1);
-    expect(rig.actorRef.getSnapshot().status).toBe('error');
+    expect(errors).toEqual([]);
+    expect(rig.actorRef.getSnapshot().status).toBe('active');
+    // The host failure stopped the driver. The camera's later syncs to it are defects too, but the first one is kept.
+    expect(rig.actorRef.getSnapshot().context.fault).toBe('host failed');
+    expect(rig.actorRef.getSnapshot().context.renderFrame).toEqual(frameAt(4));
     expect(rig.renderFrame).toEqual(frameAt(4));
     expect(rejected).toEqual([]);
     rig.dispose();

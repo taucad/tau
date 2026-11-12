@@ -40,6 +40,7 @@ import {
 import type { Animation, DegreeOfFreedom, Issue, Mechanism, Pose } from '@taucad/kinematics';
 import type { SpatialMatrix, SpatialVector } from '@taucad/spatial';
 import { eventSchemas } from '#machines/machine-schemas.js';
+import { describeFault } from '#machines/machine-fault.js';
 
 /**
  * `play` with this id sweeps every driver between its limits instead of an authored animation.
@@ -243,6 +244,8 @@ export type KinematicsGesture = Readonly<{
  * @public
  */
 export type KinematicsMachineContext = {
+  /** The first defect this actor caught at its root (MC-R12), the likeliest cause of any after it; it keeps its state and answers every event. */
+  fault?: string;
   unitsById: Record<string, KinematicsUnitState>;
   /** Monotonic source of unit revisions, so a cleared and reloaded unit never repeats one. */
   revision: number;
@@ -681,6 +684,9 @@ export const kinematicsMachine = setup({
   },
 }).createMachine({
   id: 'kinematics',
+  // A defect (an effect that threw, a failed child, a send to no child) is recorded, never fatal (MC-R12). The first
+  // is kept: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }) => ({ context: { fault: context.fault ?? describeFault(event.error) } }),
   context: { unitsById: {}, revision: 0, gesture: undefined, dragAdapter: undefined },
   initial: 'idle',
   states: {
@@ -873,7 +879,8 @@ export const kinematicsMachine = setup({
         playback: { ...stoppedPlayback, speed: unit.playback.speed },
       };
       const patch = assignUnit(context, event.unitId, cleared);
-      // The viewer clears a unit as it unmounts it: a press on that unit ends with it and gives the camera back.
+      // Graphics clears a unit when another unit is presented or the artifact clears: a press on that unit ends with
+      // it and gives the camera back.
       return context.gesture?.unitId === event.unitId ? finishGesture(context, patch, enq) : { context: patch };
     },
     setCoordinate: ({ context, event }) => {

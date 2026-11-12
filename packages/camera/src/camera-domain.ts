@@ -128,7 +128,7 @@ export const assertPositive = (value: number, label: string): number => {
 const assertVerticalFieldOfView = (verticalFieldOfView: number): number => {
   assertFinite(verticalFieldOfView, 'verticalFieldOfView');
   if (verticalFieldOfView < 0 || verticalFieldOfView > maximumPerspectiveVerticalFieldOfView) {
-    throw new RangeError(`verticalFieldOfView must be between 0 and ${maximumPerspectiveVerticalFieldOfView} degrees.`);
+    throw new RangeError(`verticalFieldOfView must be 0 to ${maximumPerspectiveVerticalFieldOfView} degrees.`);
   }
   return verticalFieldOfView;
 };
@@ -756,7 +756,7 @@ export const findPerspectiveHandoffVerticalFieldOfView = ({
     }
   }
   if (lower <= 0) {
-    throw new RangeError('The requested pixel budget is below numeric projection precision.');
+    throw new RangeError('pixelBudget is below projection precision.');
   }
   return lower;
 };

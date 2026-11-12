@@ -132,6 +132,12 @@ const samples: Samples = {
   controlsAttached: [{ type: 'controlsAttached', canvasId: 'c', adapter: createCallbackLogic(() => undefined) }],
   sectionInputAttached: [{ type: 'sectionInputAttached', inputId: 's', adapter: createCallbackLogic(() => undefined) }],
   sectionInputDetached: [{ type: 'sectionInputDetached', inputId: 's' }],
+  svgViewAttached: [{ type: 'svgViewAttached', viewId: 'v', adapter: createCallbackLogic(() => undefined) }],
+  svgViewDetached: [{ type: 'svgViewDetached', viewId: 'v' }],
+  kinematicsSceneAttached: [
+    { type: 'kinematicsSceneAttached', sceneId: 's', adapter: createCallbackLogic(() => undefined) },
+  ],
+  kinematicsSceneDetached: [{ type: 'kinematicsSceneDetached', sceneId: 's' }],
   viewportGizmoAttached: [
     { type: 'viewportGizmoAttached', gizmoId: 'g', adapter: createCallbackLogic(() => undefined) },
   ],
@@ -552,6 +558,8 @@ describe('graphics machine totality baseline', () => {
       'canvasDetached',
       'controlsAttached',
       'sectionInputDetached',
+      'svgViewDetached',
+      'kinematicsSceneDetached',
       'viewportGizmoDetached',
       'adoptSectionView',
       'updateSectionCut',
@@ -562,7 +570,7 @@ describe('graphics machine totality baseline', () => {
       'clearArtifact',
       'gltfPresentationCommitted',
     ];
-    const withSelectSectionCut = [...everywhere.slice(0, 8), 'selectSectionCut', ...everywhere.slice(8)];
+    const withSelectSectionCut = [...everywhere.slice(0, 10), 'selectSectionCut', ...everywhere.slice(10)];
     // While the cuts are being edited, adopting the sampled section is a change (it differs from the edited cuts).
     const whileEditing = everywhere.filter((type) => type !== 'adoptSectionView');
     expect(silent).toEqual([

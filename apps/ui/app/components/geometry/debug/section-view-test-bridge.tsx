@@ -1074,10 +1074,11 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         });
         const state: SectionViewTestCameraState = {
           actorStatus: actorSnapshot.status,
+          // The camera keeps a defect its root caught as `fault` and stays active (MC-R12), so either one fails a check.
           actorError:
             actorSnapshot.error instanceof Error
               ? `${actorSnapshot.error.name}: ${actorSnapshot.error.message}`
-              : undefined,
+              : cameraContext.fault,
           projection: camera instanceof THREE.OrthographicCamera ? 'orthographic' : 'perspective',
           requestedFov: cameraView.requestedVerticalFieldOfView,
           requestedPerspectiveZoom: cameraView.perspectiveZoom,

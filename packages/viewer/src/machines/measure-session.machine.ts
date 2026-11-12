@@ -40,6 +40,7 @@ import type { ActorRefFrom, CallbackActorLogic, EnqueueObject, SnapshotFrom, Sys
 import { eventSchemas } from '#machines/machine-schemas.js';
 import { measureInputMachine } from '#machines/measure-input.machine.js';
 import type { MeasureInputEmitted, MeasureInputEvent, MeasureInputRef } from '#machines/measure-input.machine.js';
+import { describeFault } from '#machines/machine-fault.js';
 
 /**
  * Where the pointer is, in client pixels.
@@ -189,6 +190,8 @@ export type MeasureSessionEvent =
  */
 // oxlint-disable-next-line typescript/consistent-type-definitions -- an interface, so declarations reference it by name
 export interface MeasureSessionContext {
+  /** The first defect this actor caught at its root (MC-R12), the likeliest cause of any after it; it keeps its state and answers every event. */
+  fault?: string;
   /** Where the pointer last rested over the surface, or nothing once it left. */
   hover: MeasurePointerAt | undefined;
   /** Moves on whenever a press waiting on its targets no longer applies. */
@@ -392,6 +395,9 @@ const measureSessionMachineDefinition = setup({
   },
 }).createMachine({
   id: 'measureSession',
+  // A defect (an effect that threw, a failed child, a send to no child) is recorded, never fatal (MC-R12). The first
+  // is kept: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }) => ({ context: { fault: context.fault ?? describeFault(event.error) } }),
   context: ({ spawn, actors }) => ({
     hover: undefined,
     pressGeneration: 0,

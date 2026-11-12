@@ -32,6 +32,7 @@ import type { ActorRefFrom, CallbackActorLogic, EnqueueObject, SnapshotFrom, Sys
 import type { SectionCut, SectionPlane } from '#graphics/section-cuts.js';
 import type { SectionHandleTarget } from '#graphics/three/controls/section-handles.js';
 import { eventSchemas } from '#machines/machine-schemas.js';
+import { describeFault } from '#machines/machine-fault.js';
 
 /**
  * CSS pixels a press travels before it drags.
@@ -142,6 +143,8 @@ export type SectionInputEvent =
  */
 // oxlint-disable-next-line typescript/consistent-type-definitions -- an interface, so declarations reference it by name
 export interface SectionInputContext {
+  /** The first defect this actor caught at its root (MC-R12), the likeliest cause of any after it; it keeps its state and answers every event. */
+  fault?: string;
   hovered: SectionHandleTarget | undefined;
   hoveredTile: SectionPlane | undefined;
   press: SectionInputPress | undefined;
@@ -326,6 +329,9 @@ const sectionInputMachineDefinition = setup({
   },
 }).createMachine({
   id: 'sectionInput',
+  // A defect (an effect that threw, a failed child, a send to no child) is recorded, never fatal (MC-R12). The first
+  // is kept: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }) => ({ context: { fault: context.fault ?? describeFault(event.error) } }),
   context: { hovered: undefined, hoveredTile: undefined, press: undefined },
   // Stopping the section input stops its adapter, which gives back whatever it held.
   invoke: { id: 'adapter', src: 'adapter' },

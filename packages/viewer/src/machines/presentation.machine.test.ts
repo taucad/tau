@@ -110,6 +110,20 @@ describe('presentation machine (G11b)', () => {
     expect(actor.getSnapshot().value).toBe('preparing');
     actor.stop();
   });
+
+  it('should hand a late section arm to the host, and keep the request and state it has', () => {
+    const { actor, host, log } = setup();
+    actor.send({ type: 'analyse' });
+    expect(log).toEqual([]);
+    actor.send({ type: 'present', request: request(1, 'a') });
+    actor.send({ type: 'hostAttached', hostId: 'one', host: host('one') });
+    actor.send({ type: 'gltfPresentationCommitted', revision: 1, key: 'a' });
+    actor.send({ type: 'analyse' });
+    expect(log).toEqual(['one prepare a', 'one analyse']);
+    expect(actor.getSnapshot().value).toBe('presented');
+    expect(actor.getSnapshot().context.request?.key).toBe('a');
+    actor.stop();
+  });
 });
 
 describe('presentation machine totality (G11b)', () => {
@@ -117,6 +131,7 @@ describe('presentation machine totality (G11b)', () => {
   const samples: { [T in PresentationEvent['type']]: ReadonlyArray<Extract<PresentationEvent, { type: T }>> } = {
     present: [{ type: 'present', request: request(1, 'a') }],
     clear: [{ type: 'clear' }],
+    analyse: [{ type: 'analyse' }],
     hostAttached: [{ type: 'hostAttached', hostId: 'one', host }],
     hostDetached: [{ type: 'hostDetached', hostId: 'one' }],
     gltfDisplayReady: [

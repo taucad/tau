@@ -90,13 +90,17 @@ function moduleLevelFunctionName(node: ts.Node): string | undefined {
 const reactFunctionNamePattern = /^(?:use[\dA-Z]|[A-Z])/;
 const componentWrappers = new Set(['forwardRef', 'memo']);
 
-/** The name a function is known by: its own, or the variable or property it initializes. */
-function functionName(node: ts.Node): string | undefined {
+/**
+ * The names a function is known by: its own, and the variable or property it initializes. A named function
+ * expression has both (`const Panel = function render() {}` is the component `Panel`).
+ */
+function functionNames(node: ts.Node): string[] {
+  const names: string[] = [];
   if ((ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)) && node.name !== undefined) {
-    return node.name.text;
+    names.push(node.name.text);
   }
   if (ts.isMethodDeclaration(node) && ts.isIdentifier(node.name)) {
-    return node.name.text;
+    names.push(node.name.text);
   }
   const { parent } = node;
   if (
@@ -105,9 +109,9 @@ function functionName(node: ts.Node): string | undefined {
     parent.initializer === node &&
     ts.isIdentifier(parent.name)
   ) {
-    return parent.name.text;
+    names.push(parent.name.text);
   }
-  return undefined;
+  return names;
 }
 
 /** A function passed to `memo(...)`, `forwardRef(...)` or their `React.` forms. */
@@ -131,8 +135,7 @@ function isInsideReactFunction(node: ts.Node): boolean {
     if (!ts.isFunctionLike(current)) {
       continue;
     }
-    const name = functionName(current);
-    if ((name !== undefined && reactFunctionNamePattern.test(name)) || isWrappedComponent(current)) {
+    if (functionNames(current).some((name) => reactFunctionNamePattern.test(name)) || isWrappedComponent(current)) {
       return true;
     }
   }

@@ -64,15 +64,6 @@ export function useLiveSectionCutSet(): SectionCutSet {
   );
 }
 
-/**
- * Whether Section is on, so the model prepares the topology its caps are sliced from: a caller re-renders only when
- * Section turns on or off, not on a cut edit.
- */
-export function useSectionViewFlags(): Readonly<{ isActive: boolean }> {
-  const isActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
-  return { isActive };
-}
-
 /** The cap hatch spacing, in render units, from the zoom-aware grid; the line width is constant on screen. */
 export function useSectionStripes(): Readonly<{ stripeFrequency: number }> {
   const renderFrame = useRenderFrame();

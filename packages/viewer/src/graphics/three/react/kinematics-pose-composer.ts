@@ -21,15 +21,11 @@
  * Only the top-most object owning a linked component is posed; its primitives follow as children. Objects
  * of components outside every link are never touched.
  */
-import { useLayoutEffect } from 'react';
 import { Matrix4 } from 'three';
 import type { Object3D } from 'three';
-import { useThree } from '@react-three/fiber';
 import type { Mechanism, Pose } from '@taucad/kinematics';
 import { getModelComponentId } from '#graphics/three/utils/model-component-owner.js';
 import { syncGltfSurfaceBatchMatrices } from '#graphics/three/utils/gltf-surface-batches.js';
-import { useKinematicsRef } from '#hooks/use-graphics.jsx';
-import { getKinematicsUnitState } from '#machines/kinematics.machine.js';
 
 export type KinematicsPoseUnit = Readonly<{
   mechanism: Mechanism | undefined;
@@ -152,33 +148,4 @@ export function createKinematicsPoseComposer(root: Object3D): KinematicsPoseComp
     },
     reset,
   };
-}
-
-/**
- * Keeps a presented scene posed from the kinematics actor. Subscribes imperatively so a playback or drag
- * frame costs one matrix pass and one `invalidate()`, never a React render.
- */
-export function useKinematicsPoseComposer(unitId: string, scene: Object3D | undefined): void {
-  const kinematicsRef = useKinematicsRef();
-  const invalidate = useThree((state) => state.invalidate);
-
-  useLayoutEffect(() => {
-    if (!scene) {
-      return undefined;
-    }
-
-    const composer = createKinematicsPoseComposer(scene);
-    const sync = (): void => {
-      if (composer.update(getKinematicsUnitState(kinematicsRef.getSnapshot().context, unitId))) {
-        invalidate();
-      }
-    };
-    sync();
-    const subscription = kinematicsRef.subscribe(sync);
-    return () => {
-      subscription.unsubscribe();
-      composer.reset();
-      invalidate();
-    };
-  }, [invalidate, kinematicsRef, scene, unitId]);
 }

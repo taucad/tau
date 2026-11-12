@@ -8,7 +8,7 @@ import {
 } from '#graphics/three/utils/gltf-surface-batches.js';
 import type { GltfSurfaceBatches } from '#graphics/three/utils/gltf-surface-batches.js';
 import { separateGltfNodeChildren } from '#graphics/three/utils/gltf-node-groups.js';
-import { subscribeToMatcapLoad } from '#graphics/three/materials/matcap-material.js';
+import { onMatcapLoaded } from '#graphics/three/materials/matcap-material.js';
 import { geometryReceiptAt, recordRendererSpan } from '#lib/renderer-telemetry.js';
 import { viewerUploadStarted } from '#lib/viewer-events.js';
 import { invalidateSceneTransparency } from '#graphics/three/utils/scene-transparency-revision.js';
@@ -93,7 +93,7 @@ import type {
 } from '#machines/presentation.machine.js';
 import { getKinematicsUnitState } from '#machines/kinematics.machine.js';
 import type { ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
-import { resolveSectionViewRaycastClip, useSectionViewFlags } from '#graphics/three/use-section-view.js';
+import { resolveSectionViewRaycastClip } from '#graphics/three/use-section-view.js';
 import { raycastFirstVisibleMeshHit } from '#graphics/three/utils/bvh-raycast.js';
 import type { RaycastClipState } from '#graphics/three/utils/bvh-raycast.js';
 import { useModelGpuPick } from '#graphics/three/react/use-model-gpu-pick.js';
@@ -1077,8 +1077,11 @@ function startPreparation(options: PresentationHostOptions, request: Presentatio
 
 /**
  * The presentation's host for one renderer: callback logic that prepares each request it is sent, superseding the one
- * in hand, and cancels the request in hand on `cancel` or when it stops. Built at module scope, around the renderer's
- * refs only.
+ * in hand, and cancels the request in hand on `cancel` or when it stops. On `analyse` (a section view armed after the
+ * scene was presented) it starts the presented scene's section analysis, which reports `gltfAnalysisReady` (D27:
+ * section topology is built only for an armed section tool, never after every presentation). While it
+ * runs, a matcap texture that finishes loading redraws the view. Built at module scope, around the renderer's refs
+ * only.
  *
  * @param options - The renderer's refs and the functions its preparation reports through.
  * @returns Logic the presentation spawns when the mesh hands it over.
@@ -1090,13 +1093,28 @@ function createPresentationHostLogic(options: PresentationHostOptions): Presenta
       active.cancel?.();
       active.cancel = undefined;
     };
+    const unsubscribeMatcap = onMatcapLoaded(() => {
+      if (options.materialOptionsRef.current.enableMatcap && options.committedPresentationRef.current) {
+        options.invalidate();
+      }
+    });
     receive((command) => {
+      if (command.type === 'analyse') {
+        const committed = options.committedPresentationRef.current;
+        if (committed?.sectionStatus === 'pending') {
+          void options.ensureSectionAnalysis(committed);
+        }
+        return;
+      }
       cancel();
       if (command.type === 'prepare') {
         active.cancel = startPreparation(options, command.request);
       }
     });
-    return cancel;
+    return () => {
+      cancel();
+      unsubscribeMatcap();
+    };
   });
 }
 
@@ -2103,12 +2121,39 @@ export function createPresentationAttach(
 const selectCameraDragging = (cameraRef: GraphicsCameraRef): boolean =>
   cameraRef.getSnapshot().matches({ input: 'dragging' });
 
+/** The graphics facts a pointer on the model reads: the camera, the hover and click guards, and the section clip. */
+type PointerContext = Pick<
+  GraphicsContext,
+  | 'cameraRef'
+  | 'viewerHoverSuppressionReasons'
+  | 'suppressNextModelPointerClick'
+  | 'modelPointerClickSuppressionReasons'
+  | 'isSectionViewActive'
+  | 'committedSectionCuts'
+>;
+
 /**
  * The graphics state a pointer handler reads when the pointer moves, not when it renders: a selected value would
  * re-render the model on every section drag step and click guard.
  */
-const selectPointerContext = (graphicsActor: ReturnType<typeof useGraphics>): GraphicsContext =>
-  graphicsActor.getSnapshot().context;
+const selectPointerContext = (graphicsActor: ReturnType<typeof useGraphics>): PointerContext => {
+  const {
+    cameraRef,
+    viewerHoverSuppressionReasons,
+    suppressNextModelPointerClick,
+    modelPointerClickSuppressionReasons,
+    isSectionViewActive,
+    committedSectionCuts,
+  } = graphicsActor.getSnapshot().context;
+  return {
+    cameraRef,
+    viewerHoverSuppressionReasons,
+    suppressNextModelPointerClick,
+    modelPointerClickSuppressionReasons,
+    isSectionViewActive,
+    committedSectionCuts,
+  };
+};
 
 /**
  * This component renders a GLTF mesh.
@@ -2145,7 +2190,6 @@ export function GltfMesh({
   const graphicsActor = useGraphics();
   const graphicsBackendThree = useThreeGraphicsBackend();
   const sectionClip = useSectionClip();
-  const sectionView = useSectionViewFlags();
   const renderFrame = useRenderFrame();
   const assetMatrix = useMemo(() => createCanonicalGltfToTauMatrix(), []);
   const [presentation, setPresentation] = useState<PreparedGltfPresentation | undefined>();
@@ -2292,10 +2336,9 @@ export function GltfMesh({
     };
   }, [getModelPickableMeshes, graphicsActor, modelPick, renderFrame, scene]);
 
-  const handleKinematicsPointerDown = useKinematicsViewer({
+  const { attachScene: attachKinematicsScene, onPointerDown: handleKinematicsPointerDown } = useKinematicsViewer({
     unitId,
     scene,
-    manifest: componentManifest,
     getPickableMeshes: getModelPickableMeshes,
   });
 
@@ -2374,14 +2417,6 @@ export function GltfMesh({
     [graphicsActor, presentationHost],
   );
 
-  // I10, not yet met: this effect subscribes through a helper the lexical counter cannot see. Carried to G12.
-  useEffect(() => {
-    if (scene && enableMatcap) {
-      return subscribeToMatcapLoad(invalidate);
-    }
-    return undefined;
-  }, [scene, enableMatcap, invalidate]);
-
   // Theme-aware edge tint without re-parsing the GLTF binary.
   useEffect(() => {
     if (!scene) {
@@ -2392,10 +2427,14 @@ export function GltfMesh({
     invalidate();
   }, [scene, activeEdgeColor, invalidate]);
 
-  const attachPresentation = useMemo(
-    () => createPresentationAttach(graphicsActor, presentation),
-    [graphicsActor, presentation],
-  );
+  // The scene's ref callback commits the presentation, then hands graphics the scene's kinematics adapter.
+  const attachPresentation = useMemo(() => {
+    const commit = createPresentationAttach(graphicsActor, presentation);
+    return (object: unknown): void => {
+      commit(object);
+      attachKinematicsScene(object);
+    };
+  }, [attachKinematicsScene, graphicsActor, presentation]);
 
   useLayoutEffect(() => {
     if (!presentation || !needsMeasurementFeatures) {
@@ -2419,19 +2458,6 @@ export function GltfMesh({
       }
     }
   }, [presentation]);
-
-  /* D27: section topology is built only for an armed section tool. It used to run 50 ms after every
-   * presentation, for every model, whether or not the feature was ever used — 283 ms of main thread at
-   * 100k triangles and 1.7 s at 1M, against a 16 ms pipeline. An active section view still submits
-   * immediately and awaits the same promise before its next swap. */
-  // I10, not yet met: a late section arm starts analysis here, which reports `gltfAnalysisReady` through a helper the
-  // lexical counter cannot see. The blueprint routes it through the presentation's host; carried to G12.
-  useEffect(() => {
-    if (presentation?.sectionStatus !== 'pending' || !sectionView.isActive) {
-      return;
-    }
-    void ensureSectionAnalysis(presentation);
-  }, [ensureSectionAnalysis, presentation, sectionView.isActive]);
 
   useFrame(() => {
     if (!scene && frameProbeRef.current) {

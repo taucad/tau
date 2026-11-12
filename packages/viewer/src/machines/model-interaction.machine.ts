@@ -6,6 +6,7 @@ import type {
   PersistedModelComponentDisplayUnitState,
 } from '#graphics/graphics-settings.js';
 import { omitEmptyComponentDisplayState } from '#graphics/graphics-settings.js';
+import { describeFault } from '#machines/machine-fault.js';
 
 /**
  * The surface that raised a model interaction.
@@ -42,6 +43,8 @@ export type ModelInteractionUnitState = {
  * @public
  */
 export type ModelInteractionContext = {
+  /** The first defect this actor caught at its root (MC-R12), the likeliest cause of any after it; it keeps its state and answers every event. */
+  fault?: string;
   unitsById: Record<string, ModelInteractionUnitState>;
   unitOrder: string[];
   revision: number;
@@ -418,6 +421,9 @@ export const modelInteractionMachine = setup({
   },
 }).createMachine({
   id: 'modelInteraction',
+  // A defect (an effect that threw, a failed child, a send to no child) is recorded, never fatal (MC-R12). The first
+  // is kept: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }) => ({ context: { fault: context.fault ?? describeFault(event.error) } }),
   context: ({ input }) => {
     const hydrated = hydrateUnitsFromComponentDisplay(input.componentDisplay);
     return {

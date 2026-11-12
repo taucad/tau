@@ -1,6 +1,7 @@
 import { setup, types } from 'xstate';
 import type { SnapshotFrom } from 'xstate';
 import { eventSchemas } from '#machines/machine-schemas.js';
+import { describeFault } from '#machines/machine-fault.js';
 
 /** A value one parameter row edits: a number, a string or a boolean. */
 export type ParameterFieldScalar = number | string | boolean;
@@ -19,6 +20,8 @@ export type ParameterFieldScalar = number | string | boolean;
  * The projection moves forward only, so a value outside the trail is newer than everything in it.
  */
 export type ParameterFieldEditContext = Readonly<{
+  /** The first defect this actor caught at its root (MC-R12), the likeliest cause of any after it; it keeps its state and answers every event. */
+  fault?: string;
   /** The authority value the row last rendered. */
   authority: ParameterFieldScalar;
   /** While leading: the value the first edit started from, then every value sent since, oldest first. */
@@ -51,6 +54,9 @@ const parameterFieldEditMachineDefinition = setup({
   },
 }).createMachine({
   id: 'parameter-field-edit',
+  // A defect (an effect that threw, a failed child, a send to no child) is recorded, never fatal (MC-R12). The first
+  // is kept: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }) => ({ context: { fault: context.fault ?? describeFault(event.error) } }),
   context: ({ input }) => ({ authority: input.authority, ...following }),
   initial: 'following',
   states: {

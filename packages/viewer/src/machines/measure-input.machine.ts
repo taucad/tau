@@ -23,6 +23,7 @@
 import { setup, types } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { eventSchemas } from '#machines/machine-schemas.js';
+import { describeFault } from '#machines/machine-fault.js';
 
 /**
  * The held press.
@@ -31,6 +32,8 @@ import { eventSchemas } from '#machines/machine-schemas.js';
  */
 // oxlint-disable-next-line typescript/consistent-type-definitions -- an interface, so declarations reference it by name
 export interface MeasureInputContext {
+  /** The first defect this actor caught at its root (MC-R12), the likeliest cause of any after it; it keeps its state and answers every event. */
+  fault?: string;
   pointerId: number | undefined;
   pointerDownHadTarget: boolean;
   discardGesture: boolean;
@@ -135,6 +138,9 @@ const measureInputMachineDefinition = setup({
   },
 }).createMachine({
   id: 'measureInput',
+  // A defect (an effect that threw, a failed child, a send to no child) is recorded, never fatal (MC-R12). The first
+  // is kept: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }) => ({ context: { fault: context.fault ?? describeFault(event.error) } }),
   context: released,
   initial: 'idle',
   states: {

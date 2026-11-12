@@ -35,6 +35,8 @@ export type GltfMeshPresentationHarness = Readonly<{
   GltfMesh: ComponentType<GltfMeshRequestProperties>;
   /** Sends a request straight to the presentation, as graphics does, with no React render first. */
   present: (request: PresentationRequest) => void;
+  /** Arms the section view after the scene is presented: graphics' section region sends the presentation `analyse`. */
+  armSection: () => void;
   /** A fresh presentation for the next row; call after `cleanup()`. */
   reset: () => void;
 }>;
@@ -106,6 +108,9 @@ export function createGltfMeshPresentationHarness({
     GltfMesh: RequestedGltfMesh,
     present: (request) => {
       state.presentation.send({ type: 'present', request });
+    },
+    armSection: () => {
+      state.presentation.send({ type: 'analyse' });
     },
     reset: () => {
       state.presentation.stop();

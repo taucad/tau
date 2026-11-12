@@ -289,7 +289,7 @@ The graphics scope is `packages/viewer`, `packages/camera` and `packages/three`,
 Three sanctioned shapes stand in for those effects:
 
 - **Hand a host element to an actor with a ref callback.** The ref callback sends an attach event with the element, or an adapter built around it, and a detach event when React passes `null`. It owns no listener, timer or teardown: the actor (callback logic spawned by graphics) owns those. `sectionInputAttached` and `viewportGizmoAttached` are this pattern at its simplest. A renderer root that R3F hands over in `onCreated` goes the same way: the canvas sends `hostCreated` and `controlsAttached` from there. Its surface's ref callback sends them again when a Suspense boundary re-attaches the surface, reading the canvas phase through a `select*` reader and reporting a lost context as `contextLost`.
-- **Read at the moment of an event through a narrow `select*` reader.** A handler, a frame loop or a ref callback that needs an actor's current value calls a module-level `select*` function that takes the actor and returns only what the event needs, such as `selectCameraViewDirection`. It never subscribes, and nothing keeps the value, except that a ref callback may carry what it read at detach to its next attach (the canvas surface's phase). The counter cannot tell a narrow reader from a broad one, so review checks it. Three React readers still return a whole context: `selectGraphicsContext` and `selectKinematicsContext` in `measure-tool.tsx`, and `selectPointerContext` in `gltf-mesh.tsx`. G12's second change narrows them.
+- **Read at the moment of an event through a narrow `select*` reader.** A handler, a frame loop or a ref callback that needs an actor's current value calls a module-level `select*` function that takes the actor and returns only what the event needs, such as `selectCameraViewDirection`. It never subscribes, and nothing keeps the value, except that a ref callback may carry what it read at detach to its next attach (the canvas surface's phase). The counter cannot tell a narrow reader from a broad one, so review checks it.
 - **Report what happened from the handler.** A click, a key or a pointer gesture is sent from its handler, never mirrored into state for an effect to send later.
 
 Three reads during render predate this rule and are recorded debts, because the counter cannot see a read behind a module-level reader:
@@ -298,11 +298,8 @@ Three reads during render predate this rule and are recorded debts, because the 
 - `packages/viewer/src/hooks/use-graphics.tsx` sends the seeded entry's identity as `entryChanged` while the provider renders (`deliverSeedEntry`, charter G6b), where the framing record is latched.
 - `packages/viewer/src/hooks/use-graphics.tsx` builds the view's presentation while the provider renders (`createViewPresentation`, in the `useState` initializer and again for a new graphics actor): it reads the view's camera child (`selectViewCamera`), and the Three camera rig it builds reads the camera's snapshot once.
 
-Until G12's second change, the viewer's ceiling manifest also holds effects this rule forbids, which that change retires: `svg-viewer.tsx` and `use-panzoom-reset.tsx` (the panzoom reset and fit), and `kinematics-viewer.ts` and `kinematics-pose-composer.ts` (the mechanism load and clear, the pose subscription and the playback demand frame).
-
 Effects and handlers that read, subscribe or time through a helper the counter cannot see are recorded debts too. The counter cannot find these, so this list holds what review found by G12 and is not complete; a reviewer adds any other they find:
 
-- `packages/viewer/src/graphics/three/react/gltf-mesh.tsx` subscribes to matcap loads, and starts a late section arm's analysis, which reports `gltfAnalysisReady`, from effects. G12's second change moves both into the presentation's host.
 - `packages/viewer/src/graphics/three/react/measure-tool.tsx` subscribes to matcap loads from an effect.
 - `packages/viewer/src/parameters/parameters-number.tsx` subscribes to the commit's drafts (`subscribeDrafts`) from an effect.
 - `packages/viewer/src/graphics/three/render-fps-overlay.tsx` starts its render-loop observer's timers from an effect.
@@ -312,7 +309,7 @@ Effects and handlers that read, subscribe or time through a helper the counter c
 - `packages/viewer/src/hooks/use-viewer-shortcuts.ts` opens a subscription from a key handler (`watchShortcutWrite`) and keeps it until graphics shows the written value.
 - In `apps/ui`, `view-settings-sync-host.tsx` registers a producer and `workbench-records/record-issues.ts` publishes into a module store from effects.
 
-A boundary where React context or a prop is the only source of a value may send that value as one event from one effect. In a project held at zero it is a named exception, never a ceiling line. Each one names its boundary in a comment and is listed with its reason in its project's `react-event-layer.policy.node.test.ts`. `packages/viewer` is held at zero, with these exceptions, from G12's second change; until then its ceiling manifest lists them beside the debts above:
+A boundary where React context or a prop is the only source of a value may send that value as one event from one effect. In a project held at zero it is a named exception, never a ceiling line. Each one names its boundary in a comment and is listed with its reason in its project's `react-event-layer.policy.node.test.ts`. `packages/viewer` is held at zero with these exceptions, and its ceiling manifest is empty:
 
 | File                                                | Boundary                                                                                                    | Ruling                             |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------- |

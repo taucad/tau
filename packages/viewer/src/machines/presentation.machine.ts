@@ -35,6 +35,7 @@
 import { setup, types } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, CallbackActorLogic, EnqueueObject, SystemRegistry } from 'xstate';
 import { eventSchemas } from '#machines/machine-schemas.js';
+import { describeFault } from '#machines/machine-fault.js';
 
 /**
  * One GLB to present: graphics' request revision and key, the model unit it names and its bytes.
@@ -50,11 +51,16 @@ export type PresentationRequest = Readonly<{
 }>;
 
 /**
- * Commands the presentation sends its host: prepare a request, superseding any other, or drop the one in hand.
+ * Commands the presentation sends its host: prepare a request, superseding any other, drop the one in hand, or
+ * analyse the presented scene's section topology if it has not been (a section view armed after the scene was
+ * presented). `analyse` leaves the request in hand alone.
  *
  * @public
  */
-export type PresentationHostCommand = { type: 'prepare'; request: PresentationRequest } | { type: 'cancel' };
+export type PresentationHostCommand =
+  | { type: 'prepare'; request: PresentationRequest }
+  | { type: 'cancel' }
+  | { type: 'analyse' };
 
 /**
  * A renderer's host: callback logic that prepares each request it is sent and gives everything it holds back when it
@@ -77,6 +83,8 @@ export type PresentationEvent =
   | { type: 'present'; request: PresentationRequest }
   /** The view shows no GLB any more. */
   | { type: 'clear' }
+  /** A section view is armed: the host analyses the presented scene's section topology if it has not. */
+  | { type: 'analyse' }
   /** A mounted renderer's host; it replaces any other. */
   | { type: 'hostAttached'; hostId: string; host: PresentationHostLogic }
   /** The renderer left. A stale id (a newer host already took the slot) is ignored. */
@@ -95,6 +103,7 @@ export type PresentationEvent =
 export const presentationEventTypes = [
   'present',
   'clear',
+  'analyse',
   'hostAttached',
   'hostDetached',
   'gltfDisplayReady',
@@ -109,6 +118,8 @@ export const presentationEventTypes = [
  * @public
  */
 export type PresentationContext = {
+  /** The first defect this actor caught at its root (MC-R12), the likeliest cause of any after it; it keeps its state and answers every event. */
+  fault?: string;
   request: PresentationRequest | undefined;
   host: Readonly<{ hostId: string; ref: AnyActorRef }> | undefined;
 };
@@ -182,6 +193,9 @@ const presentationMachineDefinition = setup({
   },
 }).createMachine({
   id: 'presentation',
+  // A defect (an effect that threw, a failed child, a send to no child) is recorded, never fatal (MC-R12). The first
+  // is kept: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }) => ({ context: { fault: context.fault ?? describeFault(event.error) } }),
   version: '1',
   context: { request: undefined, host: undefined },
   exit: ({ context }, enq) => {
@@ -212,6 +226,13 @@ const presentationMachineDefinition = setup({
   on: {
     present: (args, enq) => present(args, enq),
     clear: (args, enq) => clear(args, enq),
+    // Without a host there is no presented scene to analyse; the next host prepares with the section view in hand.
+    analyse: ({ context }, enq) => {
+      if (context.host) {
+        enq.sendTo(context.host.ref, { type: 'analyse' });
+      }
+      return {};
+    },
     hostAttached: (args, enq) => hostAttached(args, enq),
     hostDetached: (args, enq) => hostDetached(args, enq),
     // Outside `preparing` and `awaitingAnalysis` a readiness report is stale: its request was superseded, cleared or

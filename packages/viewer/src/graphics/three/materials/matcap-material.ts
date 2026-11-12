@@ -31,3 +31,10 @@ export const subscribeToMatcapLoad = (invalidate: () => void): (() => void) => {
   matcapMaterial();
   return loaded ? () => undefined : loadListeners.subscribe(invalidate);
 };
+
+/**
+ * Hears the matcap texture's load without starting it: a host that may present a matcap later draws again when the
+ * pixels arrive, and a viewer with matcap off fetches nothing.
+ */
+export const onMatcapLoaded = (listener: () => void): (() => void) =>
+  loaded ? () => undefined : loadListeners.subscribe(listener);

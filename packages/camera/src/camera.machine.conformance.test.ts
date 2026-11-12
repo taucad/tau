@@ -366,7 +366,7 @@ describe('cameraMachine conforms to CameraAuthority.tla', () => {
 
   it('should name every camera action of the spec, and only actions the spec defines', () => {
     const labelled = cameraActions();
-    // The render frame, the clip policy and the gesture change no spec variable: the spec does not model them (MC-R27).
+    // The render frame, the clip policy, the gesture and a caught defect change no spec variable: the spec does not model them (MC-R27).
     const unmodelled = Object.keys(labelled).filter((key) => labelled[key] === 'Unmodelled');
     const actions = Object.fromEntries(Object.entries(labelled).filter(([, action]) => action !== 'Unmodelled'));
 
@@ -376,6 +376,7 @@ describe('cameraMachine conforms to CameraAuthority.tla', () => {
       'camera.gesture.released.interactionStarted#0',
       'camera.setClipPolicy#0',
       'camera.setRenderFrame#0',
+      'camera.xstate.error.*#0',
     ]);
     expect(new Set(Object.values(actions))).toEqual(
       new Set(['PoseObserved', 'EchoObserved', 'InteractionEnded', 'SettleElapsed', 'Changed', 'Observe']),

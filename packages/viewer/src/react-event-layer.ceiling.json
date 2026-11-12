@@ -1,9 +1,1 @@
-{
-  "packages/viewer/src/graphics/svg/svg-viewer.tsx": 1,
-  "packages/viewer/src/graphics/svg/use-panzoom-reset.tsx": 1,
-  "packages/viewer/src/graphics/three/react/kinematics-pose-composer.ts": 2,
-  "packages/viewer/src/graphics/three/react/kinematics-viewer.ts": 4,
-  "packages/viewer/src/hooks/use-graphics.tsx": 1,
-  "packages/viewer/src/model-viewer.tsx": 1,
-  "packages/viewer/src/parameters/use-field-edits.ts": 1
-}
+{}

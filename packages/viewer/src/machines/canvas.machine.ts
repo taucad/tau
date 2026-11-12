@@ -45,6 +45,7 @@ import type { FinishViewerLoadSpan } from '#lib/viewer-load-timing.js';
 import { eventSchemas } from '#machines/machine-schemas.js';
 import { estimateViewerSurfaceBytes } from '#machines/webgl-context.machine.js';
 import type { webglContextMachine } from '#machines/webgl-context.machine.js';
+import { describeFault } from '#machines/machine-fault.js';
 
 /**
  * The drawing surface's CSS size and drawing-buffer pixel ratio.
@@ -184,6 +185,8 @@ export type CanvasEmitted = {
  */
 // oxlint-disable-next-line typescript/consistent-type-definitions -- an interface, so declarations reference it by name
 export interface CanvasContext {
+  /** The first defect this actor caught at its root (MC-R12), the likeliest cause of any after it; it keeps its state and answers every event. */
+  fault?: string;
   canvasId: string;
   kind: CanvasSurfaceKind;
   /** The backend the renderer started on; set in `ready`. */
@@ -398,6 +401,9 @@ const canvasMachineDefinition = setup({
   },
 }).createMachine({
   id: 'canvas',
+  // A defect (an effect that threw, a failed child, a send to no child) is recorded, never fatal (MC-R12). The first
+  // is kept: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }) => ({ context: { fault: context.fault ?? describeFault(event.error) } }),
   context: ({ input, spawn }) => ({
     canvasId: input.canvasId,
     kind: input.kind,

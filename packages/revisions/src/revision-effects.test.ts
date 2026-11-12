@@ -1308,6 +1308,45 @@ describe('settling a turn', () => {
     });
   }, 30_000);
 
+  /* Q9: a result is titled by the request, one shortened line; a base is an autosave; no request reads "Agent change". */
+  it('titles a turn result by the request’s first line, shortened, and a base as an autosave', async () => {
+    const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const key = { runId: 'run-3', turnId: 'turn-3', chatId: 'chat-3', attempt: 1 };
+    let size = 1;
+    const mint = async (turn: Readonly<{ turnCut: 'base' | 'result'; request?: string }>): Promise<string> => {
+      size += 1;
+      await filesystem.writeFile('main.ts', `export const size = ${String(size)};\n`);
+      const head = await port.readRef('main');
+      const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+        checkoutId: 'live',
+        trigger: 'turn',
+      });
+      const written = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+        checkoutId: 'live',
+        cutId: cut.cutId,
+        treeId: cut.treeId,
+        parents: head === undefined ? [] : [head],
+        trigger: 'turn',
+        turn: { key, ...turn },
+        leaseIds: ['run-3'],
+      });
+      const record = await port.readRevision(revisionId(written.revisionId));
+      return record?.summary.generated ?? '';
+    };
+    const long = 'Add four M3 mounting bosses to the enclosure floor and check the clearance against the board outline';
+
+    await expect(mint({ turnCut: 'base', request: 'Make the lid walls 2.4 mm' })).resolves.toBe('Autosave');
+    await expect(
+      mint({ turnCut: 'result', request: '\n  Make the lid   walls 2.4 mm\nand keep the fillets' }),
+    ).resolves.toBe('Make the lid walls 2.4 mm');
+    await expect(mint({ turnCut: 'result', request: long })).resolves.toBe(
+      'Add four M3 mounting bosses to the enclosure floor and check the…',
+    );
+    await expect(mint({ turnCut: 'result' })).resolves.toBe('Agent change');
+    await expect(mint({ turnCut: 'result', request: '   ' })).resolves.toBe('Agent change');
+  }, 30_000);
+
   it('should answer nothingToSave naming the lease when a save finds a lease another tab wrote', async () => {
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });

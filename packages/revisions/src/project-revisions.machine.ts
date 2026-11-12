@@ -81,7 +81,7 @@ export type ProjectRevisionsMachineInput = Readonly<{
   mintFloor?: number;
 }>;
 
-type Admission = Readonly<{ key: TurnAttemptKey; checkoutId?: string }>;
+type Admission = Readonly<{ key: TurnAttemptKey; checkoutId?: string; request?: string }>;
 
 /* The fields of {@link ProjectRevisionsMachineContext}, named by the interface below. */
 type ProjectRevisionsMachineContextFields = Readonly<{
@@ -158,7 +158,8 @@ export type ProjectRevisionsMachineEvent =
       headTreeId?: string;
     }>
   /* The host's turn verbs, keyed by attempt (D14). */
-  | Readonly<{ type: 'admitTurn'; key: TurnAttemptKey; checkoutId?: string }>
+  /* `request` is the person's request, which titles the attempt's result (Q9). */
+  | Readonly<{ type: 'admitTurn'; key: TurnAttemptKey; checkoutId?: string; request?: string }>
   | Readonly<{ type: 'turnCompleted'; key: TurnAttemptKey }>
   | Readonly<{ type: 'turnAbandoned'; key: TurnAttemptKey }>
   | Readonly<{ type: 'acknowledge'; key: TurnAttemptKey }>
@@ -671,6 +672,7 @@ const spawnTurn = (
       ...(checkoutId === undefined ? {} : { checkoutId }),
       /* The record's own head bounds the search; the find effect reads it when this names none (RM-R14). */
       ...(adopt === undefined ? {} : { adopt: { checkoutId: adopt.id } }),
+      ...(admission.request === undefined ? {} : { request: admission.request }),
       parentRef: self,
     },
   });

@@ -105,7 +105,7 @@ export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
     const add = (key: string, value: number): void => {
       counts[key] = (counts[key] ?? 0) + value;
     };
-    const { database } = this.databaseService;
+    const { background: database } = this.databaseService;
     const retired = this.metrics.agentEvidenceLifecycleRecords;
     try {
       const purged = await expireBacklog(database, now);
@@ -147,7 +147,7 @@ export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
 
   /** Samples the shared backlog by state, every state each pass so a drained one reads zero. */
   private async recordBacklog(): Promise<void> {
-    const { states, heldBytes } = await backlogCounts(this.databaseService.database);
+    const { states, heldBytes } = await backlogCounts(this.databaseService.background);
     for (const state of backlogStates) {
       this.metrics.agentEvidenceBacklogRows.record(states[state] ?? 0, { 'tau.agent_evidence.state': state });
     }
@@ -180,7 +180,7 @@ export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
       this.shutdown.signal,
     );
     const attempts = Math.max(...traces.map((trace) => trace.attempts));
-    const held = await settleErasureTraces(this.databaseService.database, {
+    const held = await settleErasureTraces(this.databaseService.background, {
       traces,
       owner: this.owner,
       now,

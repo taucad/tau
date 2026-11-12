@@ -2261,7 +2261,7 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('derived_generation is 
     ]);
 
     const service = createService(idleStore, { database } as unknown as DatabaseService);
-    const scheduler = new DeriveScheduler({ database } as unknown as DatabaseService, service);
+    const scheduler = new DeriveScheduler({ background: database } as unknown as DatabaseService, service);
     const applied = await scheduler.scan();
     await settledBoth(service);
 

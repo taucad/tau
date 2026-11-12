@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo } from 'react';
 import { useActorRef } from '@xstate/react';
-import type { ActorRefFrom } from 'xstate';
+import type { ActorOptions, ActorRefFrom } from 'xstate';
 import { AlertTriangle } from 'lucide-react';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { Artifact, DocumentStatus } from '@taucad/runtime';
@@ -12,6 +12,7 @@ import { getModelInteractionUnitState } from '#machines/model-interaction.machin
 import { buildGeometryComponentReference } from '#graphics/metadata/geometry-component-reference.js';
 import type { GeometryComponentReference } from '@taucad/types';
 import { graphicsMachine } from '#machines/graphics.machine.js';
+import type { ModelInteractionRef } from '#machines/graphics.machine.js';
 import { defaultGraphicsSettings } from '#graphics/graphics-settings.js';
 import { cn } from '@taucad/ui/utils/cn';
 import type { StageOptions } from '#graphics/three/stage-options.js';
@@ -130,6 +131,16 @@ export type ModelViewerProps = {
   readonly eventSource?: React.RefObject<HTMLElement>;
 };
 
+/** The structured reference of the component a secondary press landed on, when its unit's manifest knows it. */
+function selectComponentReference(
+  modelInteractionRef: ModelInteractionRef,
+  target: ModelComponentSecondaryPointerTarget,
+): GeometryComponentReference | undefined {
+  const { manifest } = getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, target.unitId);
+  const node = manifest?.nodesById[target.componentId];
+  return manifest && node ? buildGeometryComponentReference(manifest, node) : undefined;
+}
+
 type ReferencingCadViewerProps = React.ComponentProps<typeof CadViewer> & {
   readonly onComponentReference?: (reference: GeometryComponentReference) => void;
   readonly onComponentSecondaryPointerCandidate?: (target: ModelComponentSecondaryPointerTarget | undefined) => void;
@@ -148,9 +159,7 @@ function ReferencingCadViewer({
       if (!target || !onComponentReference) {
         return;
       }
-      const { manifest } = getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, target.unitId);
-      const node = manifest?.nodesById[target.componentId];
-      const reference = manifest && node ? buildGeometryComponentReference(manifest, node) : undefined;
+      const reference = selectComponentReference(modelInteractionRef, target);
       if (reference) {
         onComponentReference(reference);
       }
@@ -201,6 +210,7 @@ const ModelViewerCore = memo(function ModelViewerCore({
     () => knownArtifact?.mimeType === 'model/gltf-binary' && isEmptyGlb(knownArtifact.content),
     [knownArtifact],
   );
+  // C10 React-to-actor boundary: artifact props become updateArtifact/clearArtifact on graphics.
   useEffect(() => {
     if (emptyModel || (effectiveState === 'ready' && !error && !knownArtifact)) {
       graphicsRef.send({ type: 'clearArtifact' });
@@ -293,26 +303,35 @@ const ModelViewerCore = memo(function ModelViewerCore({
 });
 
 /**
- * Wrapper that creates an internal `graphicsMachine` when no external
- * `graphicsRef` is provided, then delegates to `ModelViewerCore`.
+ * The standalone viewer's graphics options: the default settings, with the camera child seeded once from
+ * `initialVerticalFieldOfView` through graphics' `camera` input. Graphics spawns the camera, so the tree needs no
+ * wiring beyond starting this one actor.
+ */
+const createStandaloneGraphicsOptions = (
+  initialVerticalFieldOfView: number | undefined,
+): ActorOptions<typeof graphicsMachine> => ({
+  input: {
+    enableSurfaces: defaultGraphicsSettings.enableSurfaces,
+    enableLines: defaultGraphicsSettings.enableLines,
+    enableGizmo: defaultGraphicsSettings.enableGizmo,
+    enableGrid: defaultGraphicsSettings.enableGrid,
+    enableAxes: defaultGraphicsSettings.enableAxes,
+    enableMatcap: defaultGraphicsSettings.enableMatcap,
+    enablePostProcessing: defaultGraphicsSettings.enablePostProcessing,
+    upDirection: defaultGraphicsSettings.upDirection,
+    graphicsBackend: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
+    camera: { cameraFovAngle: initialVerticalFieldOfView },
+  },
+});
+
+/**
+ * Starts the standalone graphics root once per mount, when no external `graphicsRef` is provided, then delegates to
+ * `ModelViewerCore`. `useActorRef` reads the options only at creation and keeps the actor across a StrictMode remount.
  */
 const ModelViewerWithOwnGraphics = memo(function ModelViewerWithOwnGraphics(
   props: Omit<ModelViewerProps, 'graphicsRef'>,
 ): React.JSX.Element {
-  const graphicsRef = useActorRef(graphicsMachine, {
-    input: {
-      enableSurfaces: defaultGraphicsSettings.enableSurfaces,
-      enableLines: defaultGraphicsSettings.enableLines,
-      enableGizmo: defaultGraphicsSettings.enableGizmo,
-      enableGrid: defaultGraphicsSettings.enableGrid,
-      enableAxes: defaultGraphicsSettings.enableAxes,
-      enableMatcap: defaultGraphicsSettings.enableMatcap,
-      enablePostProcessing: defaultGraphicsSettings.enablePostProcessing,
-      upDirection: defaultGraphicsSettings.upDirection,
-      graphicsBackend: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
-      camera: { cameraFovAngle: props.initialVerticalFieldOfView },
-    },
-  });
+  const graphicsRef = useActorRef(graphicsMachine, createStandaloneGraphicsOptions(props.initialVerticalFieldOfView));
 
   return <ModelViewerCore {...props} graphicsRef={graphicsRef} />;
 });

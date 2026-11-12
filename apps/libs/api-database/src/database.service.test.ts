@@ -11,9 +11,8 @@ import { DatabaseService } from '#database.service.js';
 
 const { mockAssertCompatibility, mockExecute, mockEnd, mockPostgres } = vi.hoisted(() => {
   const mockAssertCompatibility = vi.fn().mockResolvedValue(undefined);
-  // The probe issues `SELECT 1`; postgres returns `[{ '?column?': 1 }]` for that
-  // query, so we mirror that wire-format in the canned mock value.
-  const mockExecute = vi.fn().mockResolvedValue([{ '?column?': 1 }]);
+  // The probe reads the session's role and deadlines (database connection audit R1).
+  const mockExecute = vi.fn();
   const mockEnd = vi.fn().mockResolvedValue(undefined);
   const mockPostgres = vi.fn((_url: string, _options: Record<string, unknown>) => ({ end: mockEnd }));
   return { mockAssertCompatibility, mockExecute, mockEnd, mockPostgres };
@@ -41,12 +40,20 @@ describe('DatabaseService', () => {
   const configuration: Record<string, string | number> = {
     DATABASE_URL: 'postgres://test:test@db.example.com:5432/test',
     DATABASE_POOL_MAX: 7,
+    DATABASE_BACKGROUND_POOL_MAX: 1,
+    DATABASE_POOLER_POOL_SIZE: 15,
     DATABASE_CONNECT_TIMEOUT_SECONDS: 11,
     DATABASE_IDLE_TIMEOUT_SECONDS: 22,
     DATABASE_STATEMENT_TIMEOUT_MS: 3300,
     DATABASE_LOCK_TIMEOUT_MS: 4400,
     DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: 5500,
     DATABASE_RUNTIME_ROLE: 'tau_api_runtime',
+  };
+  const session = {
+    current_user: 'tau_api_runtime',
+    statement_timeout: '3300ms',
+    lock_timeout: '4400ms',
+    idle_in_transaction_session_timeout: '5500ms',
   };
   const mockConfigService = {
     get: vi.fn((key: string) => configuration[key]),
@@ -56,7 +63,7 @@ describe('DatabaseService', () => {
     vi.clearAllMocks();
     configuration['DATABASE_URL'] = 'postgres://test:test@db.example.com:5432/test';
     configuration['DATABASE_RUNTIME_ROLE'] = 'tau_api_runtime';
-    mockExecute.mockResolvedValue([{ '?column?': 1 }]);
+    mockExecute.mockResolvedValue([session]);
     mockAssertCompatibility.mockResolvedValue(undefined);
 
     logger = mock<PinoLogger>({
@@ -89,7 +96,8 @@ describe('DatabaseService', () => {
 
       expect(mockExecute).toHaveBeenCalledTimes(1);
       expect(mockAssertCompatibility).toHaveBeenCalledTimes(1);
-      expect(logger.info).toHaveBeenCalledWith('Database connectivity probe succeeded');
+      expect(logger.info).toHaveBeenCalledWith({ session }, 'Database connectivity probe succeeded');
+      expect(logger.warn).not.toHaveBeenCalled();
       expect(logger.info).toHaveBeenCalledWith('Database schema is compatible with this build');
       expect(logger.info).toHaveBeenCalledWith('Database service initialized');
     });
@@ -110,6 +118,36 @@ describe('DatabaseService', () => {
       expect(options['connection']).toMatchObject({
         application_name: 'tau-api',
       });
+    });
+
+    /* Database connection audit R3/R4: pollers and gauges get their own small pool, and each pool counts its sockets. */
+    it('should open a separate background pool with its own cap and name, and count both pools', () => {
+      expect(mockPostgres).toHaveBeenCalledTimes(2);
+      const [request, background] = mockPostgres.mock.calls.map((call) => call[1]);
+      expect(background).toMatchObject({ max: 1, connect_timeout: 11, idle_timeout: 22, prepare: false });
+      expect(background!['connection']).toMatchObject({
+        application_name: 'tau-api-background',
+        statement_timeout: 3300,
+        role: 'tau_api_runtime',
+      });
+      expect(request!['socket']).toBeTypeOf('function');
+      expect(background!['socket']).toBeTypeOf('function');
+      expect(service.background).not.toBe(service.database);
+    });
+
+    it.each([
+      ['the login role', { ...session, current_user: 'postgres' }],
+      ['dropped timeouts', { ...session, statement_timeout: '0', lock_timeout: '0' }],
+    ])('should warn, without failing boot, when the pooler drops %s', async (_label, dropped) => {
+      mockExecute.mockResolvedValueOnce([dropped]);
+
+      await service.onModuleInit();
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        { session: dropped, expectedRole: 'tau_api_runtime', hint: 'startup parameters dropped by pooler' },
+        'Database connection does not carry the configured role or timeouts',
+      );
+      expect(logger.info).toHaveBeenCalledWith('Database service initialized');
     });
 
     it('should omit the role startup parameter when no runtime role is configured', async () => {
@@ -203,10 +241,10 @@ describe('DatabaseService', () => {
   });
 
   describe('onModuleDestroy', () => {
-    it('should close the underlying postgres client and log shutdown', async () => {
+    it('should close both postgres clients and log shutdown', async () => {
       await service.onModuleDestroy();
 
-      expect(mockEnd).toHaveBeenCalledTimes(1);
+      expect(mockEnd).toHaveBeenCalledTimes(2);
       expect(logger.info).toHaveBeenCalledWith('Database connection closed');
     });
   });

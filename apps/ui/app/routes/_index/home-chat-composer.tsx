@@ -3,6 +3,7 @@ import { ChatComposerStaticBar } from '#components/chat/chat-composer-static-bar
 import { NewProjectKernelChips } from '#components/chat/kernel-selector.js';
 import { useNewProjectComposer } from '#components/chat/use-new-project-composer.js';
 import { useKernel } from '#hooks/use-kernel.js';
+import { useFeature } from '#flags/use-feature.js';
 
 /** The marker after Home's composer that first paint waits for (`rel=expect`). */
 export const homeComposerEndId = 'home-composer-end';
@@ -35,6 +36,8 @@ export function HomeChatComposer({
 }): React.JSX.Element {
   const Composer = useNewProjectComposer();
   const { kernel, setKernel } = useKernel();
+  /* With the `autoKernel` flag on the kernel is the bar's pill, beside the location, and the chips leave (D8). */
+  const isAutoEnabled = useFeature('autoKernel');
 
   return (
     <>
@@ -45,7 +48,7 @@ export function HomeChatComposer({
        * browser without `rel=expect` ignores it. */}
       <link rel='expect' href={`#${homeComposerEndId}`} blocking='render' />
       <div className='space-y-4'>
-        <NewProjectKernelChips kernel={kernel} onKernelChange={setKernel} />
+        {isAutoEnabled ? null : <NewProjectKernelChips kernel={kernel} onKernelChange={setKernel} />}
         <ChatEarlyInput
           isHostReady={Composer !== undefined}
           enableAutoFocus={enableAutoFocus}

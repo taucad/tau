@@ -97,6 +97,8 @@ type Turn = Readonly<{
   /** The summary compaction writes; the placeholder when absent. */
   summarize?: string | undefined;
   effort?: 'medium' | 'high' | undefined;
+  /** The catalog says the model reads its effort from the transcript and takes the binding control (U14, WP5). */
+  transcriptEffort?: boolean | undefined;
   /** What `read_file` answers with; a long body gives tool-result clearing something to free. */
   fileBody?: string | undefined;
   /** The composing build's release label. */
@@ -231,7 +233,14 @@ const runChat = async (turns: readonly Turn[]): Promise<ChatRun> => {
         contextWindow: turn.contextWindow ?? 200_000,
         maxTokens: 8192,
         providerKind: 'anthropic',
-        ...(turn.effort === undefined ? {} : { reasoning: { effort: turn.effort } }),
+        ...(turn.effort === undefined
+          ? {}
+          : {
+              reasoning: {
+                effort: turn.effort,
+                ...(turn.transcriptEffort ? ({ effortInTranscript: true, replayBinding: 'drop' } as const) : {}),
+              },
+            }),
       },
       modelTransport: transport,
       toolRegistry: {
@@ -830,6 +839,36 @@ describe('P1 typed prefix breaks on the durable log', () => {
       [undefined, undefined],
       [cause, undefined],
     ]);
+  });
+
+  it('should record no break when the effort changes on a model that reads it from the transcript (U14)', async () => {
+    const run = await runChat([
+      { ...turnOne, effort: 'high', transcriptEffort: true },
+      { ...turnTwo, effort: 'medium', transcriptEffort: true, replies: [readFile, done] },
+      { ...turnTwo, effort: 'high', transcriptEffort: true, runId: 'run-3', userText: 'Thicker' },
+    ]);
+
+    /* `runChat` holds the chat to the prefix contract: no request field moved and every request only appended. */
+    expect(run.breaks).toEqual([[undefined, undefined], [undefined, undefined], [undefined]]);
+    const last = run.turns[2]![0]!;
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Anthropic's wire uses snake_case.
+    expect(last).toMatchObject({ output_config: { effort: 'high' } });
+    /* Each reply's level sits in front of it, and the level in force closes the request. */
+    const levels = (last['messages'] as Array<{ role: string; output_config?: { effort: string } }>)
+      .filter((message) => message.role === 'system')
+      .map((message) => message.output_config?.effort);
+    expect(levels).toEqual(['high', 'high', 'medium', 'medium', 'high']);
+    expect(replayedSignatures(last)).toEqual(['sig-1', 'sig-2', 'sig-3', 'sig-4']);
+  });
+
+  it('should record one settings break on the turn a chat starts carrying its effort in the transcript', async () => {
+    const run = await runChat([
+      { ...turnOne, effort: 'medium' },
+      { ...turnTwo, effort: 'medium', transcriptEffort: true, replies: [readFile, done] },
+      { ...turnTwo, effort: 'high', transcriptEffort: true, runId: 'run-3', userText: 'Thicker' },
+    ]);
+
+    expect(run.breaks).toEqual([[undefined, undefined], ['settings', undefined], [undefined]]);
   });
 
   it('should record a definitions break when the prompt text changes under another release', async () => {

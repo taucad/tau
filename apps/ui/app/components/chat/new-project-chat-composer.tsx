@@ -4,6 +4,7 @@ import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import type { ChatTextareaHandle, ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { NewProjectKernelChips } from '#components/chat/kernel-selector.js';
+import { useFeature } from '#flags/use-feature.js';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
@@ -37,6 +38,8 @@ export function NewProjectChatComposer({
 }: NewProjectChatComposerProperties): React.JSX.Element {
   const navigate = useNavigate();
   const { kernel, setKernel } = useKernel();
+  /* With the `autoKernel` flag on the kernel is the bar's pill (D8), so the chips above the box leave. */
+  const isAutoEnabled = useFeature('autoKernel');
   const projectManager = useProjectManager();
   const location = useProjectCreationLocation();
   const presentLocationError = useProjectCreationLocationError();
@@ -159,14 +162,14 @@ export function NewProjectChatComposer({
       ref={textareaRef}
       enableAutoFocus={enableAutoFocus}
       enableContextActions={false}
-      enableKernelSelector={false}
+      enableKernelSelector={isAutoEnabled}
       creationLocationControl={creationLocationControl}
       isSubmitDisabled={!location.canCreate}
       className={className}
       onSubmit={onSubmit}
     />
   );
-  return enableKernelChips ? (
+  return enableKernelChips && !isAutoEnabled ? (
     <div className='space-y-4'>
       <NewProjectKernelChips kernel={kernel} onKernelChange={setKernel} />
       {textarea}

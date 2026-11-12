@@ -226,7 +226,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       /* eslint-enable @typescript-eslint/naming-convention -- end of the environment table */
       config.get.mockImplementation((name: string) => values[name]);
       return new EvidenceErasureService(
-        { database } as unknown as DatabaseService,
+        { background: database } as unknown as DatabaseService,
         config as unknown as ConstructorParameters<typeof EvidenceErasureService>[1],
         new ShutdownService(),
         metrics,

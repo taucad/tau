@@ -131,6 +131,49 @@ export const isGatewayProviderKind = (providerKind: string | undefined): boolean
 export const isOpenAiResponsesProviderKind = (providerKind: ModelProviderKind | undefined): boolean =>
   providerKind === 'openai' || providerKind === 'xai';
 
+/**
+ * Whether the request's reasoning level rides in the transcript instead of in a request field (ruling U14): the
+ * catalog says the model reads it there, and the wire is one that defines the form. Anthropic reads an empty
+ * `system`-role message carrying `output_config`, OpenAI a `configuration_update` item; pi-ai writes both and holds
+ * the request field still, so a level change appends to the prompt cache instead of rewriting it.
+ *
+ * @param request - The model stream request.
+ * @returns `true` when the codec should carry the level in the transcript.
+ */
+const carriesEffortInTranscript = (request: Pick<ModelStreamRequest, 'providerKind' | 'reasoning'>): boolean =>
+  request.reasoning?.effortInTranscript === true &&
+  request.reasoning.effort !== undefined &&
+  (request.providerKind === 'anthropic' || request.providerKind === 'openai');
+
+const replayBindingBeta = 'thinking-binding-controls-2026-08-01';
+
+/**
+ * The Anthropic body with the binding control the request asks for (WP5): what the provider does with a replayed
+ * thinking block whose prefix changed. The replay rule already leaves such a block out, so `drop` is a second net that
+ * reports what the rule missed, and `refuse` is how a test turns a miss into a failure.
+ *
+ * @param body - The Anthropic request body pi-ai built.
+ * @param binding - The behaviour to ask for.
+ * @returns The body with the control and its beta, or unchanged when the request does not think.
+ */
+const withReplayBinding = (body: Record<string, unknown>, binding: 'drop' | 'refuse'): Record<string, unknown> => {
+  const { thinking } = body;
+  if (!zodUtility.isObject(thinking) || thinking['type'] === 'disabled') {
+    return body;
+  }
+  const betas = Array.isArray(body['betas']) ? (body['betas'] as unknown[]) : [];
+  return {
+    ...body,
+    /* eslint-disable @typescript-eslint/naming-convention -- Anthropic's wire uses snake_case. */
+    thinking: {
+      ...thinking,
+      block_binding: { prefix_mismatch_behavior: binding === 'refuse' ? 'error' : 'drop_block' },
+    },
+    /* eslint-enable @typescript-eslint/naming-convention -- End Anthropic wire keys. */
+    betas: betas.includes(replayBindingBeta) ? betas : [...betas, replayBindingBeta],
+  };
+};
+
 /** Input matching Tau API's static/workspace/dynamic cache layout. @public */
 export type CachedSystemPromptOptions = {
   readonly staticPrompt: string;
@@ -893,7 +936,12 @@ const piModelFor = (options: {
         api: 'anthropic-messages',
         baseUrl: baseUrlFor(options.transport.baseUrl, anthropicGatewayPath),
         ...(options.request.reasoning?.budgetTokens === undefined && options.request.reasoning !== undefined
-          ? { compat: { forceAdaptiveThinking: true } }
+          ? {
+              compat: {
+                forceAdaptiveThinking: true,
+                ...(carriesEffortInTranscript(options.request) ? { supportsMidConvoEffort: true } : {}),
+              },
+            }
           : {}),
       }
     : isOpenAiResponsesProviderKind(options.request.providerKind)
@@ -903,6 +951,7 @@ const piModelFor = (options: {
           // `/chat/completions` or `/responses` to it.
           api: 'openai-responses',
           baseUrl: baseUrlFor(options.transport.baseUrl, openAiGatewayPath),
+          ...(carriesEffortInTranscript(options.request) ? { compat: { supportsMidConvoEffort: true } } : {}),
         }
       : {
           ...common,
@@ -1036,6 +1085,21 @@ const reasoningSetting = (reasoning: ModelReasoningConfig | undefined): string =
   reasoning?.effort ?? (reasoning?.budgetTokens === undefined ? 'none' : `budget:${String(reasoning.budgetTokens)}`);
 
 /**
+ * The request parameters the stamp records beside the prefix. A level carried in the transcript is not one of them:
+ * it is appended like a turn, so changing it breaks nothing. The binding control is, since it sits in a request field.
+ *
+ * @param request - The model stream request.
+ * @returns The settings a later request compares with.
+ */
+const settingsOf = (request: ModelStreamRequest): string =>
+  [
+    carriesEffortInTranscript(request) ? 'transcript' : reasoningSetting(request.reasoning),
+    ...(request.providerKind === 'anthropic' && request.reasoning?.replayBinding !== undefined
+      ? [request.reasoning.replayBinding]
+      : []),
+  ].join('+');
+
+/**
  * Stamp a request's prefix: which rows may replay native reasoning (P2), and the break it suffered (P1).
  *
  * @param input - The request, the pi model and context it is sent as, and the composing build's release label.
@@ -1055,7 +1119,7 @@ const prefixStampFor = (input: {
     tools: fitted.context.tools ?? [],
     messages: fitted.context.messages,
     stamps: fitted.stamps,
-    settings: reasoningSetting(request.reasoning),
+    settings: settingsOf(request),
     release: input.release,
     summary: request.messages.findLast((message) => isCompactionSummaryRow(message))?.id,
     cleared: fitted.context.messages.filter((message) => message.role === 'toolResult' && isClearedToolResult(message))
@@ -1064,10 +1128,35 @@ const prefixStampFor = (input: {
   });
 };
 
+/**
+ * How many replayed thinking blocks the provider itself left out because their prefix had changed. The replay rule
+ * leaves such a block out before it is sent, so any count here is a block the rule missed. Another model's block and
+ * an entry this build does not know are not that, and are not counted.
+ *
+ * @param message - The reply pi-ai assembled.
+ * @returns The count, zero when the provider reported none.
+ */
+const reasoningDroppedByProvider = (message: AssistantMessage): number =>
+  (message.diagnostics ?? [])
+    .filter((diagnostic) => diagnostic.type === 'anthropic_input_transformations')
+    .flatMap((diagnostic) => {
+      const transformations = diagnostic.details?.['transformations'];
+      return Array.isArray(transformations) ? (transformations as unknown[]) : [];
+    })
+    .filter(
+      (entry) =>
+        zodUtility.isObject(entry) &&
+        entry['type'] === 'thinking_dropped' &&
+        entry['reason'] === 'prefix_binding_mismatch',
+    ).length;
+
 const metadataFor = (message: AssistantMessage): JsonObject | undefined => {
+  const dropped = reasoningDroppedByProvider(message);
   const metadata: JsonObject = {
     ...(message.responseId ? { responseId: message.responseId } : {}),
     ...(message.responseModel ? { responseModel: message.responseModel } : {}),
+    ...(message.providerThinkingLevel ? { reasoningLevel: message.providerThinkingLevel } : {}),
+    ...(dropped === 0 ? {} : { reasoningDroppedByProvider: dropped }),
   };
   return Object.keys(metadata).length > 0 ? metadata : undefined;
 };
@@ -1318,10 +1407,15 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
     // then the document rewrite (D21, D25), then the Responses routing key. A
     // refusal here is the caller's request, so it surfaces as INVALID_REQUEST
     // and nothing is fetched.
+    const replayBinding = request.providerKind === 'anthropic' ? request.reasoning?.replayBinding : undefined;
     const onPayload = (payload: unknown): unknown => {
       try {
         const echoed = echo?.(payload);
-        const rewritten = rewrite(echoed ?? payload) ?? echoed;
+        const documented = rewrite(echoed ?? payload) ?? echoed;
+        const rewritten =
+          replayBinding !== undefined && zodUtility.isObject(documented ?? payload)
+            ? withReplayBinding((documented ?? payload) as Record<string, unknown>, replayBinding)
+            : documented;
         if (promptCacheKey === undefined) {
           return rewritten;
         }

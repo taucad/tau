@@ -1,7 +1,8 @@
 /*
- * G11b characterisation: how the project decides that a unit's shared manifest is no longer presented, as it runs
- * today by reading every view's graphics snapshot (`reconcileViewManifest`). The presentation actor (G11b) tells the
- * project which unit each view presents instead (`presentedUnitChanged`); these rows are what it must keep.
+ * How the project decides that a unit's shared manifest is no longer presented (G11b). Each view's graphics reports
+ * the unit it presents and its media type (`presentedUnitChanged`), and the project releases a unit's manifest,
+ * selection and focus once no GLB view presents it. These rows were characterised against the snapshot reads this
+ * replaced; the one change (charter D14) is that a view's own change releases the unit without a request from React.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -129,15 +130,19 @@ const heldFor = (project: ProjectActor, unitId: string) => {
 const kept = { manifest, selectedComponentIds: ['root'], focusedComponentId: 'root' };
 const released = { manifest: undefined, selectedComponentIds: [], focusedComponentId: undefined };
 
-describe('project view manifest reconciliation (G11b characterisation)', () => {
+describe('project view manifest reconciliation (G11b)', () => {
   it('should clear the manifest of a unit when the last view presenting it closes', () => {
     const project = createProjectActor().start();
     try {
       presentInView(project, 'v1', 'unit:a');
       expect(heldFor(project, 'unit:a')).toEqual(kept);
 
+      const listener = project.getSnapshot().context.viewPresentationListeners.get('v1')!;
       project.send({ type: 'destroyViewGraphics', viewId: 'v1' });
       expect(heldFor(project, 'unit:a')).toEqual(released);
+      // The view's listener stops with it, so nothing keeps the stopped graphics actor alive.
+      expect(listener.getSnapshot().status).toBe('stopped');
+      expect(project.getSnapshot().context.viewPresentationListeners.has('v1')).toBe(false);
     } finally {
       project.stop();
     }
@@ -156,19 +161,36 @@ describe('project view manifest reconciliation (G11b characterisation)', () => {
     }
   });
 
-  it('should clear the manifest on request once the view that presented it is cleared', () => {
+  it('should clear the manifest once the view that presented it is cleared', () => {
     const project = createProjectActor().start();
     try {
       presentInView(project, 'v1', 'unit:a');
       const graphics = project.getSnapshot().context.viewGraphics.get('v1')!;
 
-      // Still presented: the request keeps it.
-      project.send({ type: 'reconcileViewManifest', unitId: 'unit:a' });
-      expect(heldFor(project, 'unit:a')).toEqual(kept);
-
       graphics.send({ type: 'clearArtifact' });
-      project.send({ type: 'reconcileViewManifest', unitId: 'unit:a' });
       expect(heldFor(project, 'unit:a')).toEqual(released);
+    } finally {
+      project.stop();
+    }
+  });
+
+  it('should clear the manifest of a unit once its only view commits another unit', () => {
+    const project = createProjectActor().start();
+    try {
+      presentInView(project, 'v1', 'unit:a');
+      const v1 = project.getSnapshot().context.viewGraphics.get('v1')!;
+      v1.send({ type: 'updateArtifact', artifact: gltf(), hash: 'glb-unit:b' });
+      const { requestedRevision } = v1.getSnapshot().context.gltfPresentation;
+      v1.send({
+        type: 'gltfPresentationCommitted',
+        revision: requestedRevision,
+        key: 'glb-unit:b',
+        unitId: 'unit:b',
+        manifest,
+      });
+
+      expect(heldFor(project, 'unit:a')).toEqual(released);
+      expect(heldFor(project, 'unit:b').manifest).toBe(manifest);
     } finally {
       project.stop();
     }
@@ -184,7 +206,6 @@ describe('project view manifest reconciliation (G11b characterisation)', () => {
       v1.send({ type: 'updateArtifact', artifact: gltf(), hash: 'glb-unit:b' });
 
       project.send({ type: 'destroyViewGraphics', viewId: 'v2' });
-      project.send({ type: 'reconcileViewManifest', unitId: 'unit:a' });
       expect(heldFor(project, 'unit:a')).toEqual(kept);
       expect(heldFor(project, 'unit:b')).toEqual(released);
     } finally {
@@ -222,7 +243,6 @@ describe('project view manifest reconciliation (G11b characterisation)', () => {
       const { requestedRevision } = v1.getSnapshot().context.gltfPresentation;
       v1.send({ type: 'gltfPresentationFailed', revision: requestedRevision, key: 'glb-unit:b' });
 
-      project.send({ type: 'reconcileViewManifest', unitId: 'unit:a' });
       expect(heldFor(project, 'unit:a')).toEqual(kept);
     } finally {
       project.stop();

@@ -19,9 +19,13 @@ import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settin
 import { actorIdOf, eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { cadMachine, closeCadRuntime, disposeCadRuntime } from '#machines/cad.machine.js';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import type { GraphicsEmitted } from '@taucad/viewer/machines/graphics.machine';
 import { logMachine } from '#machines/logs.machine.js';
 import { modelInteractionMachine } from '@taucad/viewer/machines/model-interaction.machine';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
+
+/** What a view presents: its unit, and the media type of the artifact it shows. */
+type ViewPresentation = Readonly<{ unitId: string | undefined; mediaType: string | undefined }>;
 
 /**
  * Project Machine Context
@@ -54,6 +58,10 @@ export type ProjectContext = {
    * `viewRecordBinding`. The host provides the `viewRecord` logic with the project's file ports; the default does nothing.
    */
   viewRecordSessions: Map<string, AnyActorRef>;
+  /** What each view presents, as its graphics last reported it: the shared manifest is kept while a GLB view shows it. */
+  viewPresentations: Map<string, ViewPresentation>;
+  /** Each view's `presentedUnitChanged` listener, stopped with its view: a listener outlives its source otherwise. */
+  viewPresentationListeners: Map<string, AnyActor>;
   /** Project-scoped model appearance shared by every viewer of the same geometry unit. */
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
@@ -211,7 +219,8 @@ type ProjectEventInternal =
       settings?: GraphicsViewSettings;
     }
   | { type: 'destroyViewGraphics'; viewId: string }
-  | { type: 'reconcileViewManifest'; unitId: string }
+  /** A view's graphics reported `presentedUnitChanged`. */
+  | { type: 'viewPresentationChanged'; viewId: string; unitId: string | undefined; mediaType: string | undefined }
   // Filesystem participant intents — fired by the
   // `file-operation-participants.ts` adapter on rename/delete events.
   // The participant is the single source of truth; UI components must
@@ -371,31 +380,62 @@ const createViewGraphics = ({ context, event }: ProjectArgs<'createViewGraphics'
     input: { viewId: event.viewId, graphics: gfx },
   });
 
+  const listener = enq.listen(
+    gfx,
+    'presentedUnitChanged',
+    (presented: Extract<GraphicsEmitted, { type: 'presentedUnitChanged' }>): ProjectEvent => ({
+      type: 'viewPresentationChanged',
+      viewId: event.viewId,
+      unitId: presented.unitId,
+      mediaType: presented.mediaType,
+    }),
+  );
+
   const viewGraphics = new Map(context.viewGraphics);
   viewGraphics.set(event.viewId, gfx);
   const viewRecordSessions = new Map(context.viewRecordSessions);
   viewRecordSessions.set(event.viewId, session);
-  return { context: { viewGraphics, viewRecordSessions } };
+  const viewPresentationListeners = new Map(context.viewPresentationListeners);
+  viewPresentationListeners.set(event.viewId, listener);
+  return { context: { viewGraphics, viewRecordSessions, viewPresentationListeners } };
 };
+
+const glbMediaType = 'model/gltf-binary';
 
 /** The project owns the shared manifest until its last presented GLB pane leaves. */
 const reconcileViewManifest = (
   context: ProjectContext,
   enq: ProjectEnqueue,
-  { unitId, excludedViewId }: Readonly<{ unitId: string; excludedViewId?: string }>,
+  { unitId, viewPresentations }: Readonly<{ unitId: string; viewPresentations: ProjectContext['viewPresentations'] }>,
 ): void => {
-  for (const [viewId, graphics] of context.viewGraphics) {
-    if (viewId === excludedViewId) {
-      continue;
-    }
-    const view = graphics.getSnapshot().context;
-    if (view.artifact?.mimeType === 'model/gltf-binary' && view.modelInteractionUnitId === unitId) {
+  for (const view of viewPresentations.values()) {
+    if (view.mediaType === glbMediaType && view.unitId === unitId) {
       return;
     }
   }
   enq.sendTo(context.modelInteractionRef, { type: 'clearManifest', unitId, source: 'viewer' });
   enq.sendTo(context.modelInteractionRef, { type: 'clearSelection', unitId, source: 'viewer' });
   enq.sendTo(context.modelInteractionRef, { type: 'clearFocus', unitId, source: 'viewer' });
+};
+
+/** A view that stops presenting a unit as a GLB, by a new unit or other media, may have been its last. */
+const viewPresentationChanged = (
+  { context, event }: ProjectArgs<'viewPresentationChanged'>,
+  enq: ProjectEnqueue,
+): Readonly<{ context?: Partial<ProjectContext> }> => {
+  if (!context.viewGraphics.has(event.viewId)) {
+    return {};
+  }
+  const previous = context.viewPresentations.get(event.viewId);
+  const viewPresentations = new Map(context.viewPresentations);
+  viewPresentations.set(event.viewId, { unitId: event.unitId, mediaType: event.mediaType });
+  if (
+    previous?.unitId &&
+    (previous.unitId !== event.unitId || (previous.mediaType === glbMediaType && event.mediaType !== glbMediaType))
+  ) {
+    reconcileViewManifest(context, enq, { unitId: previous.unitId, viewPresentations });
+  }
+  return { context: { viewPresentations } };
 };
 
 const destroyViewGraphics = ({ context, event }: ProjectArgs<'destroyViewGraphics'>, enq: ProjectEnqueue) => {
@@ -409,15 +449,23 @@ const destroyViewGraphics = ({ context, event }: ProjectArgs<'destroyViewGraphic
     enq.stop(session);
   }
   enq.stop(gfx);
-  const unitId = gfx.getSnapshot().context.modelInteractionUnitId;
+  const viewPresentationListeners = new Map(context.viewPresentationListeners);
+  const listener = viewPresentationListeners.get(event.viewId);
+  if (listener) {
+    enq.stop(listener);
+    viewPresentationListeners.delete(event.viewId);
+  }
+  const viewPresentations = new Map(context.viewPresentations);
+  const unitId = viewPresentations.get(event.viewId)?.unitId;
+  viewPresentations.delete(event.viewId);
   if (unitId) {
-    reconcileViewManifest(context, enq, { unitId, excludedViewId: event.viewId });
+    reconcileViewManifest(context, enq, { unitId, viewPresentations });
   }
   const viewGraphics = new Map(context.viewGraphics);
   viewGraphics.delete(event.viewId);
   const viewRecordSessions = new Map(context.viewRecordSessions);
   viewRecordSessions.delete(event.viewId);
-  return { context: { viewGraphics, viewRecordSessions } };
+  return { context: { viewGraphics, viewRecordSessions, viewPresentations, viewPresentationListeners } };
 };
 
 /** Drop the units a deletion matched and a main pointer into them. */
@@ -530,6 +578,8 @@ export const projectMachine = setup({
       stage,
       viewGraphics,
       viewRecordSessions: new Map(),
+      viewPresentations: new Map(),
+      viewPresentationListeners: new Map(),
       modelInteractionRef,
       geometryUnits,
       viewerGeometryDemand: new Map(),
@@ -542,6 +592,8 @@ export const projectMachine = setup({
   },
   on: {
     closeRuntime: { target: '.runtimeClosing', context: { error: undefined } },
+    // A view's report is answered in every state, so its record never goes stale while the project runs.
+    viewPresentationChanged,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- XState event name
     'geometryUnit.runtimeClosed': ({ context, event, children }, enq) => {
       const owned = Object.values(children).some((child) => child === event.unit);
@@ -631,10 +683,6 @@ export const projectMachine = setup({
         // are not silently dropped if a useEffect fires before loading starts.
         createViewGraphics,
         destroyViewGraphics,
-        reconcileViewManifest: ({ context, event }, enq) => {
-          reconcileViewManifest(context, enq, { unitId: event.unitId });
-          return {};
-        },
       },
     },
     loading: {
@@ -646,10 +694,6 @@ export const projectMachine = setup({
         // zero dependency on context.project or any loaded data.
         createViewGraphics,
         destroyViewGraphics,
-        reconcileViewManifest: ({ context, event }, enq) => {
-          reconcileViewManifest(context, enq, { unitId: event.unitId });
-          return {};
-        },
         projectRetrieved: {
           context: ({ event }) => ({ project: event.project, manifestIssue: event.issue, isLoading: false }),
         },
@@ -823,10 +867,6 @@ export const projectMachine = setup({
             },
             createViewGraphics,
             destroyViewGraphics,
-            reconcileViewManifest: ({ context, event }, enq) => {
-              reconcileViewManifest(context, enq, { unitId: event.unitId });
-              return {};
-            },
             // ─────────────────────────────────────────────────────────────
             // Filesystem-participant transitions
             //

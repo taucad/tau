@@ -48,7 +48,7 @@ const row = (turnId: string, revisionId: string, parentOrdinal: number): Revisio
   revisionNumber: parentOrdinal,
   revisionId,
   changeId: `change-${turnId}`,
-  actor: 'tau-browser-agent-host',
+  who: { kind: 'recorded', identity: { kind: 'user', id: 'tau-browser-agent-host' } },
   source: 'agent',
   createdAt: 1000 * parentOrdinal,
   summary: `Agent turn ${turnId}`,

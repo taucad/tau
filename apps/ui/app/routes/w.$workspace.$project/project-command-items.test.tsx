@@ -182,7 +182,7 @@ const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Elem
 const revisionRow = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
   revisionNumber: undefined,
   changeId: `change-${over.revisionId}`,
-  actor: 'user-1',
+  who: { kind: 'recorded', identity: { kind: 'user', id: 'user-1' } },
   source: 'user',
   createdAt: 1_788_220_800_000,
   summary: 'Saved changes',
@@ -223,7 +223,7 @@ describe('ProjectCommandPaletteItems', () => {
      while nothing has landed after it — so the palette never sends an undo the machine would refuse. */
   it('offers Undo restore only where the restore machine holds an undo target and nothing landed after it', async () => {
     revisionStatusHarness.rows = [
-      revisionRow({ revisionId: 'rev-3', revisionNumber: 3, trigger: 'restore', restoredFrom: 'rev-1' }),
+      revisionRow({ revisionId: 'rev-3', revisionNumber: 3, capture: 'restore', restoredFrom: 'rev-1' }),
       revisionRow({ revisionId: 'rev-2', revisionNumber: 2 }),
       revisionRow({ revisionId: 'rev-1', revisionNumber: 1 }),
     ];

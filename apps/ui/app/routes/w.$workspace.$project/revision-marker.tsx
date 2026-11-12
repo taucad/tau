@@ -93,7 +93,7 @@ import {
 export const isAutosave = (revision: RevisionCard): boolean =>
   revision.turnCut === 'base' ||
   (revision.turnId === undefined &&
-    (revision.trigger === 'idle' || revision.trigger === 'hidden' || revision.trigger === 'close'));
+    (revision.capture === 'idle' || revision.capture === 'hidden' || revision.capture === 'close'));
 
 /* The file's state is muted at 90%, the lightest step that keeps 4.5:1 on the
    file list in every theme; a hovered row returns it to the full muted colour. */
@@ -438,7 +438,7 @@ export function RevisionDetails({
         ] as const)),
     ...(parent === undefined ? [] : ([['Parent', parent]] as const)),
     ...(branch === undefined ? [] : ([['Branch', branch]] as const)),
-    ['Trigger', revisionTriggerLabel(revision.trigger, revision.turnCut)],
+    ['Trigger', revisionTriggerLabel(revision.capture, revision.turnCut)],
     ...(revision.createdAt > 0
       ? ([
           [
@@ -978,7 +978,7 @@ function RevisionMarkerGlyph({
       </span>
     );
   }
-  /* A9: a Restored row is named by what it restored, never by its trigger. */
+  /* A9: a Restored row is named by what it restored, never by its capture. */
   if (revision.restoredFrom !== undefined) {
     return (
       <span className={timelineMarker}>
@@ -986,7 +986,7 @@ function RevisionMarkerGlyph({
       </span>
     );
   }
-  if (revision.trigger === 'merge') {
+  if (revision.capture === 'merge') {
     return (
       <span className={timelineMarker}>
         <GitMerge aria-label='Merged' className='size-3.5 text-muted-foreground' />

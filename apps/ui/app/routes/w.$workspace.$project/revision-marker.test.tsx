@@ -65,7 +65,7 @@ const card = (over: Partial<RevisionCard> = {}): RevisionCard => ({
   actor: 'Agent',
   turnId: 'u1',
   conflicted: false,
-  trigger: 'turn',
+  capture: 'turn',
   ...over,
 });
 
@@ -263,7 +263,7 @@ describe('RevisionRow', () => {
 
   /* A9, RV-D1: a restore is a new row named by what it restored, never a Rewind. */
   it('names a restore row by its provenance, with the Restored glyph', () => {
-    const restored = card({ revisionId: 'rev-5', n: 5, summary: 'Restore', trigger: 'restore', restoredFrom: 'rev-3' });
+    const restored = card({ revisionId: 'rev-5', n: 5, summary: 'Restore', capture: 'restore', restoredFrom: 'rev-3' });
     const target = card({ revisionId: 'rev-3', n: 3 });
     expect(revisionTitle(restored, [restored, target])).toBe('Restored Rev 3');
     renderRow({ revision: restored, title: 'Restored Rev 3' });
@@ -280,7 +280,7 @@ describe('RevisionRow', () => {
       restore: { ...revisionStatusHarness.status.restore, undoable: true },
     };
     renderRow({
-      revision: card({ restoredFrom: 'rev-1', trigger: 'restore' }),
+      revision: card({ restoredFrom: 'rev-1', capture: 'restore' }),
       title: 'Restored Rev 1',
       isCurrent: true,
     });
@@ -293,7 +293,7 @@ describe('RevisionRow', () => {
   it('offers no Undo restore on a restore row this device’s restore did not mint', async () => {
     const user = userEvent.setup();
     renderRow({
-      revision: card({ restoredFrom: 'rev-1', trigger: 'restore' }),
+      revision: card({ restoredFrom: 'rev-1', capture: 'restore' }),
       title: 'Restored Rev 1',
       isCurrent: true,
     });

@@ -110,7 +110,7 @@ const revision = (over: Partial<RevisionCard> = {}): RevisionCard => ({
   actor: 'tau-browser-agent-host',
   turnId: 'u1',
   conflicted: false,
-  trigger: 'turn',
+  capture: 'turn',
   ...over,
 });
 

@@ -36,7 +36,7 @@ describe('Revision file comparison with the actual line renderer', () => {
             actor: '',
             turnId: undefined,
             conflicted: false,
-            trigger: 'save',
+            capture: 'save',
           }}
           compareAgainst='parent'
         />
@@ -81,7 +81,7 @@ describe('Revision file comparison with the actual line renderer', () => {
               actor: '',
               turnId: undefined,
               conflicted: false,
-              trigger: 'save',
+              capture: 'save',
             }}
             compareAgainst='parent'
           />
@@ -112,7 +112,7 @@ describe('Revision file comparison with the actual line renderer', () => {
             actor: '',
             turnId: undefined,
             conflicted: false,
-            trigger: 'save',
+            capture: 'save',
           }}
           compareAgainst='parent'
         />

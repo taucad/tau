@@ -58,7 +58,7 @@ vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
 const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
   revisionNumber: undefined,
   changeId: `change-${over.revisionId}`,
-  actor: 'You',
+  who: { kind: 'recorded', identity: { kind: 'user', id: 'You' } },
   source: 'user',
   createdAt: 1_788_220_800_000,
   summary: 'Thicker base',
@@ -260,7 +260,7 @@ describe('selectRevisionFacts', () => {
       ...(isYours === undefined ? {} : { isYours }),
       turnId: undefined,
       conflicted: false,
-      trigger: 'turn',
+      capture: 'turn',
     });
 
     it.each([

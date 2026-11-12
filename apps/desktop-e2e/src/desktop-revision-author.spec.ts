@@ -71,13 +71,23 @@ it('authors a desktop save as the signed-in account, with no machine identity in
     await page.waitForURL(/\/w\//u, { timeout: 120_000 });
     const projectRoot = join(session.homeRoot, 'revision-author');
 
+    /* The commit `main` names, or nothing while the store is absent or the line
+     * unborn. A failed `rev-parse` echoes its argument on stdout, so its text
+     * is never a head: compared as one, an unborn line read after a missing
+     * store looked like a new revision, and `git log` then found no `main`. */
+    const head = async (): Promise<string | undefined> => {
+      const outcome = await runGit(['rev-parse', '--verify', '--quiet', 'refs/heads/main^{commit}'], projectRoot);
+      return outcome.code === 0 ? outcome.stdout.trim() : undefined;
+    };
+    /* A6 (1c9fd4ee34): the first open mints *V1 · Start*; the save below is
+     * the person's own revision on top of it, so it starts from that head. */
+    await expect
+      .poll(async () => head(), { message: 'A6: the first open must mint V1 · Start', timeout: 120_000 })
+      .toMatch(/^[0-9a-f]{40,64}$/u);
+    const before = await head();
+
     /* A person's edit, then `Mod+S` (`revision-save-shortcut.tsx`). */
     await writeFile(join(projectRoot, 'notes.txt'), 'Saved by the signed-in person.\n');
-    const head = async (): Promise<string> => {
-      const outcome = await runGit(['rev-parse', 'refs/heads/main'], projectRoot);
-      return outcome.stdout.trim();
-    };
-    const before = await head();
     await expect
       .poll(
         async () => {
@@ -87,7 +97,7 @@ it('authors a desktop save as the signed-in account, with no machine identity in
         },
         { message: 'A1: Mod+S must mint a desktop revision', timeout: 120_000, interval: 2000 },
       )
-      .not.toBe(before);
+      .toSatisfy((after: string | undefined) => after !== undefined && after !== before);
 
     const author = await git(projectRoot, ['log', '-1', '--format=%an|%ae|%cn|%ce', 'refs/heads/main']);
     expect(author).toBe(`${account.name}|${userId}@users.noreply.tau.new|Tau|noreply@tau.new`);

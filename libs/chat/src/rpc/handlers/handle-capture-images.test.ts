@@ -140,6 +140,39 @@ describe('handleCaptureImages', () => {
       );
     });
 
+    it('should draw the view as it resolves with no person: its own leaves, and Tau values for the rest (V9)', async () => {
+      const images = mock<RpcImageClient>();
+      images.captureImages.mockResolvedValue({ success: true, images: [] });
+      const setting = workbenchRecords.view.serialize(
+        workbenchRecords.view.schema.parse({
+          version: 1,
+          entryPath: 'main.ts',
+          fieldOfView: 35,
+          upDirection: 'y',
+          display: { grid: false, postProcessing: true },
+        }),
+      );
+
+      await handleCaptureImages(
+        { mode: 'single', workbenchView: 'setting', includeEdges: false },
+        { images, fileSystem: projectOf({ [workbenchPaths.view('setting')]: setting }) },
+      );
+
+      expect(images.captureImages.mock.calls[0]?.[0].workbenchView).toMatchObject({
+        fieldOfView: 35,
+        upDirection: 'y',
+        display: {
+          surfaces: true,
+          lines: true,
+          gizmo: true,
+          grid: false,
+          axes: true,
+          matcap: false,
+          postProcessing: true,
+        },
+      });
+    });
+
     it('should refuse a missing view naming the saved ones, an invalid record, and another targetFile', async () => {
       const images = mock<RpcImageClient>();
       const project = projectOf({

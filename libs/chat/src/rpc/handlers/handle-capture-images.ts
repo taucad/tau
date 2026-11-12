@@ -1,4 +1,5 @@
-import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
+import { resolveViewSettings, tauViewDefaults, workbenchPaths, workbenchRecords } from '@taucad/workbench';
+import type { WorkbenchView } from '@taucad/workbench';
 
 import type { CaptureImagesRpcInput, CaptureImagesRpcResult } from '#schemas/rpc.schema.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
@@ -32,6 +33,31 @@ const savedViews = async (fileSystem: RpcFileSystem): Promise<string> => {
   } catch {
     return 'unknown';
   }
+};
+
+/**
+ * The view's inheritable leaves as a capture draws them: resolved over Tau's values alone, with no person and no
+ * device exceptions, because no host that captures holds them (onboarding blueprint, V9).
+ *
+ * @param record - The view record.
+ * @returns The field of view, up direction and display the capture uses.
+ */
+const capturedFields = (record: WorkbenchView): Pick<WorkbenchView, 'fieldOfView' | 'upDirection' | 'display'> => {
+  const { values } = resolveViewSettings({ tau: tauViewDefaults, view: record });
+  return {
+    fieldOfView: values.fieldOfView,
+    upDirection: values.upDirection,
+    display: {
+      ...record.display,
+      surfaces: values['display.surfaces'],
+      lines: values['display.lines'],
+      gizmo: values['display.gizmo'],
+      grid: values['display.grid'],
+      axes: values['display.axes'],
+      matcap: values['display.matcap'],
+      postProcessing: values['display.postProcessing'],
+    },
+  };
 };
 
 /**
@@ -98,9 +124,7 @@ const resolveWorkbenchView = async (
     workbenchView: {
       id,
       camera: kernelView?.camera ?? record.camera,
-      fieldOfView: record.fieldOfView,
-      upDirection: record.upDirection,
-      display: record.display,
+      ...capturedFields(record),
       section: record.section,
     },
   };

@@ -10,11 +10,7 @@ import { subscribeFeatureFlags, useFeature } from '#flags/use-feature.js';
 import { personRecordStores } from '#preferences/person-record.store.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import type { ViewResolutionLevels } from '#workbench-records/view-record-binding-changes.js';
-import {
-  exceptionsForView,
-  useViewExceptions,
-  viewExceptionsStore,
-} from '#workbench-records/view-exceptions.js';
+import { exceptionsForView, useViewExceptions, viewExceptionsStore } from '#workbench-records/view-exceptions.js';
 
 /**
  * The levels for one view, read now: for a create-only seed outside React's render.

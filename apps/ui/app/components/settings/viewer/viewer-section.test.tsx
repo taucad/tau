@@ -77,7 +77,10 @@ describe('Settings → Viewer behind viewerControls (V1)', () => {
     expect(availableSettingsSections(() => true).some(({ id }) => id === 'viewer')).toBe(true);
     expect(searchSettings('viewer')).toEqual([]);
     expect(searchSettings('grid unit')).toEqual([]);
-    const on = searchSettings('grid unit', availableSettingsSections(() => true));
+    const on = searchSettings(
+      'grid unit',
+      availableSettingsSections(() => true),
+    );
     expect(on.map(({ section }) => section.id)).toEqual(['viewer']);
     expect(on[0]?.entries.map(({ id }) => id)).toEqual(['viewer-grid-unit']);
 

@@ -55,7 +55,8 @@ export const viewerControlCopy = {
 export const thisDeviceLabel = 'This device';
 
 /** The Alt preset's hazard on Linux (camera research, C14). */
-export const linuxAltNote = 'Some Linux desktops use Alt-drag to move windows. Choose another preset if the view does not move';
+export const linuxAltNote =
+  'Some Linux desktops use Alt-drag to move windows. Choose another preset if the view does not move';
 
 /** The View defaults rows, one per leaf, in the order the group lists them. */
 export const viewDefaultCopy: Readonly<Record<ViewDefaultLeaf, ViewerRowCopy>> = {

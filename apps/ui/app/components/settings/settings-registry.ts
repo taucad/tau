@@ -530,7 +530,10 @@ export function availableSettingsSections(
  */
 export function useSettingsSections(): readonly SettingsSectionDefinition[] {
   const viewerControls = useFeature('viewerControls');
-  return useMemo(() => availableSettingsSections((flag) => flag === 'viewerControls' && viewerControls), [viewerControls]);
+  return useMemo(
+    () => availableSettingsSections((flag) => flag === 'viewerControls' && viewerControls),
+    [viewerControls],
+  );
 }
 
 function normalizeSearch(value: string): string {

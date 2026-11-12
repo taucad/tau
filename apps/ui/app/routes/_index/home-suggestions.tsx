@@ -54,7 +54,7 @@ function HomeSuggestionRow(): React.JSX.Element | undefined {
       /* eslint-disable @typescript-eslint/naming-convention -- analytics wire names. */
       example_id: example.id,
       goal_matched: example.goals.some((goal) => goal !== 'general' && profile.goals.includes(goal)),
-      /* eslint-enable @typescript-eslint/naming-convention */
+      /* eslint-enable @typescript-eslint/naming-convention -- end of analytics wire names. */
     });
     // The composer takes focus for a navigation that asks for it, as the New project shortcut does on Home.
     void navigate(

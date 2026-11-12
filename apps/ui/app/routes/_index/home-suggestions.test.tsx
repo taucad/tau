@@ -51,7 +51,7 @@ const row = (): HTMLElement => screen.getByRole('list', { name: 'Suggestions' })
 const shown = (): readonly string[] =>
   within(row())
     .getAllByRole('button')
-    .map((button) => button.textContent ?? '');
+    .map((button) => button.textContent);
 const exampleOf = (prompt: string) => chatExamples.find((example) => example.prompt === prompt)!;
 
 beforeEach(() => {

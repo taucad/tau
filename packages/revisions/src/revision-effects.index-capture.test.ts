@@ -189,11 +189,19 @@ const fixture = async (
           },
         }
       : {};
+  /* The start's fill check, answered: with no placeholder it reports once, after its capture. */
+  let answered: () => void = () => undefined;
+  const fillChecked = new Promise<void>((resolve) => {
+    answered = resolve;
+  });
   const actors = createRevisionActors({
     identity: testIdentity,
     port,
     projectId: 'project-1',
     filesystem: async () => counted(),
+    onLargeObjects: () => {
+      answered();
+    },
     ...clock,
   });
   /* The same files captured by walking, with no index to ask: what every incremental cut must hash to. */
@@ -208,6 +216,7 @@ const fixture = async (
     port,
     actors,
     walking,
+    fillChecked,
     reads,
     listed,
     overrides,
@@ -571,6 +580,27 @@ describe('a first revision built from recorded blob ids (D12)', () => {
     expect(asked[0]?.measure).toBe(false);
     expect(asked[0]?.paths).toContain('dir1/f1.txt');
     expect(taken.treeId).not.toBe(await walkedTreeId(at.walking));
+    const tree = await at.port.listTree?.(revisionId(written));
+    expect(tree?.find(({ path }) => path === 'dir1/f1.txt')?.oid).toBe(recorded);
+  });
+
+  it("should take the recorded ids after the start's fill check has captured the same files", async () => {
+    const at = await fixture(files(10));
+    const asked: string[][] = [];
+    const recorded = 'f'.repeat(40);
+    at.overrides.facts = async (paths) => {
+      asked.push([...paths]);
+      return new Map(
+        paths.includes('dir1/f1.txt') ? [['dir1/f1.txt', { contentKind: 'text', blobOid: recorded }]] : [],
+      );
+    };
+    /* The check's capture records nothing, so its bytes, held for the cut, have no id yet. */
+    await at.fillChecked;
+
+    const written = await mint(at);
+
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toContain('dir1/f1.txt');
     const tree = await at.port.listTree?.(revisionId(written));
     expect(tree?.find(({ path }) => path === 'dir1/f1.txt')?.oid).toBe(recorded);
   });

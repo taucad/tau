@@ -1803,8 +1803,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       );
     }
     /* A complete feed keeps its own cursor, the paths it names; an index keeps this one. A capture
-     * from the feed leaves the cursor older than `last`, which only names more paths next time. */
-    if ((options.completeChanges === true || cursor !== undefined) && started > memos.lastCapture) {
+     * from the feed leaves the cursor older than `last`, which only names more paths next time.
+     * A fill's check is never `last`: its bytes carry no recorded id, so the next cut walks,
+     * reusing them from the memo, and offers them to an import's record (D12). */
+    if (
+      leavesRecords !== true &&
+      (options.completeChanges === true || cursor !== undefined) &&
+      started > memos.lastCapture
+    ) {
       memos.lastCapture = started;
       memos.last = heldTree(tree);
       memos.ignore =

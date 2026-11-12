@@ -76,7 +76,7 @@ describe('CLI browser-approved sessions', () => {
     expect(body.access_token).not.toBe(browser);
     const [rawToken, signature] = body.access_token.split('.');
     expect(signature).toBeTruthy();
-    expect(store.session).toContainEqual(expect.objectContaining({ token: rawToken }));
+    expect(store['session']).toContainEqual(expect.objectContaining({ token: rawToken }));
     // A session row's raw token is not a credential: only the signed form authenticates.
     expect(await jsonOf(call('get-session', undefined, rawToken))).toBeNull();
     expect(await jsonOf(call('get-session', undefined, body.access_token))).toMatchObject({

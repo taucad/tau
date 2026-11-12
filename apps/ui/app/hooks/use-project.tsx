@@ -1048,7 +1048,7 @@ export function ProjectProvider({
       throw new Error('Main file not found');
     }
 
-    return snapshot.context.project.assets.main?.entryPath;
+    return snapshot.context.project.assets.main.entryPath;
   }, [actorRef]);
 
   const value = useMemo<ProjectContextType>(() => {

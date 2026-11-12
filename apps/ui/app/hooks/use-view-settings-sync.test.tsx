@@ -1045,11 +1045,25 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       });
       measure(graphicsRef, smallBounds, 'cube-other');
       expect(isFramed(graphicsRef)).toBe(true);
+      const camera = graphicsRef.getSnapshot().context.cameraRef;
+      const shown = camera.getSnapshot().context.view;
 
       view.rerender(draw({ ...record, camera: { kind: 'preset', preset: 'front' } }));
       advance(settle * 4);
       expect(isFramed(graphicsRef)).toBe(true);
       expect(selectGraphicsFramingIdentity(graphicsRef.getSnapshot())).toBe('src/other.ts');
+      // The record's camera waits for its own entry rather than turning the one on screen.
+      expect(camera.getSnapshot().context.view.direction).toEqual(shown.direction);
+      expect(poseWrites(writeRecord)).toEqual([]);
+
+      // Once the pane shows the record's entry again, its first frame takes the record's side.
+      act(() => {
+        graphicsRef.send({ type: 'entryChanged', identity: 'src/main.ts' });
+      });
+      measure(graphicsRef, smallBounds, 'cube-main');
+      advance(settle * 4);
+      expect(camera.getSnapshot().context.view.direction).not.toEqual(shown.direction);
+      expect(poseWrites(writeRecord)).toEqual([]);
     });
 
     it('today saves an automatic refit after the bounds grow by more than 10 % (G6b flips, D20)', () => {

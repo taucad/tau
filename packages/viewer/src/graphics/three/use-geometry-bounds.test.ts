@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { createActor } from 'xstate';
 import type { Actor, SnapshotFrom } from 'xstate';
 import type * as XStateReact from '@xstate/react';
+import { mock } from 'vitest-mock-extended';
 import type { Mechanism } from '@taucad/kinematics';
 import { fromThreeRenderBounds } from '@taucad/three/spatial';
 import type { RenderFrame } from '@taucad/spatial';
@@ -60,12 +61,14 @@ vi.mock('#hooks/use-graphics.jsx', async () => {
   return {
     useGraphics: () => ({ send: mocks.send }),
     useGraphicsSelector: <T>(selector: (snapshot: GraphicsSnapshot) => T) =>
-      selector({
-        context: {
-          artifactKey: mocks.geometryKey,
-          gltfPresentation: { presentedKey: mocks.geometryKey, presentedRevision: mocks.presentedRevision },
-        },
-      } as unknown as GraphicsSnapshot),
+      selector(
+        mock<GraphicsSnapshot>({
+          context: {
+            artifactKey: mocks.geometryKey,
+            gltfPresentation: { presentedKey: mocks.geometryKey, presentedRevision: mocks.presentedRevision },
+          },
+        }),
+      ),
     useCameraRig: () => mocks.camera,
     useRenderFrame: () => mocks.renderFrame,
     useKinematicsSelector: <T>(selector: (snapshot: SnapshotFrom<typeof kinematicsMachine>) => T) =>
@@ -76,7 +79,7 @@ vi.mock('#hooks/use-graphics.jsx', async () => {
 /** The measurements the hook reported to the graphics actor. */
 const measurements = () =>
   mocks.send.mock.calls
-    .map(([event]) => event as { type: string; key?: string; bounds?: unknown })
+    .map(([event]) => event as { type: string; key?: string; bounds?: unknown; radius?: number; stage?: unknown })
     .filter((event) => event.type === 'geometryBoundsMeasured');
 
 const createSceneReferences = (x: number) => {
@@ -134,6 +137,19 @@ describe('useGeometryBounds', () => {
     act(() => mocks.frame?.());
     expect(measurements()).toHaveLength(2);
     expect(measurements().at(-1)).toMatchObject({ key: 'geometry-key', bounds: { min: [9, -2, -3], max: [11, 2, 3] } });
+  });
+
+  it('should measure again with a new fit margin, so Fit view uses it', () => {
+    const { innerRef, outerRef } = createSceneReferences(10);
+    const hook = renderHook(({ fitMargin }) => useGeometryBounds(innerRef, outerRef, { fitMargin }), {
+      initialProps: { fitMargin: 0.1 },
+    });
+    act(() => mocks.frame?.());
+
+    hook.rerender({ fitMargin: 0.3 });
+    expect(mocks.invalidate).toHaveBeenCalledTimes(2);
+    act(() => mocks.frame?.());
+    expect(measurements().map(({ stage }) => (stage as { margin: number }).margin)).toEqual([0.1, 0.3]);
   });
 
   it('excludes real edge quads and nested presentation surfaces from physical bounds', () => {
@@ -209,12 +225,13 @@ describe('useGeometryBounds', () => {
     expect(event?.type).toBe('sceneRadiusUpdated');
     expect(event?.radius).toBeCloseTo(Math.sqrt(14), 10);
     expect(event?.centerMeters).toEqual([10, 0, 0]);
-    expect(measurements()).toEqual([
+    const [{ radius, ...measured }] = measurements() as [ReturnType<typeof measurements>[number]];
+    expect(radius).toBeCloseTo(Math.sqrt(14), 10);
+    expect([measured]).toEqual([
       {
         type: 'geometryBoundsMeasured',
         key: 'geometry-key',
         bounds: { min: [9, -2, -3], max: [11, 2, 3] },
-        radius: expect.closeTo(Math.sqrt(14), 10) as unknown as number,
         viewport: { width: 800, height: 600, pixelRatio: 1 },
         stage: {
           orientation: { direction: expect.any(Array) as unknown, up: [0, 0, 1] },

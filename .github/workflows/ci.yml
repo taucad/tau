@@ -488,11 +488,11 @@ jobs:
                 ($shard | split(",")) as $mine
                 | [.tasks.tasks[] | select(.target.target == "pkgcheck") | .target.project]
                 | unique | map(select(IN($mine[]))) | join(",")' "$RUNNER_TEMP/pkgcheck-graph.json")
-              # `build` has no `^build`, so a package built before the libraries it bundles
-              # keeps their specifiers in its declarations, and the local cache hands that
-              # build to its check. The builds its checks depend on run first, and the
-              # shard's own builds skip the remote cache, which may still hold such a build
-              # from before this order: the hash does not see whether a dependency was built.
+              # A `build` without `^build` may run before the libraries its package bundles and
+              # keep their specifiers in its declarations, and the local cache hands that build
+              # to its check. The builds its checks depend on run first, and the shard's own
+              # builds skip the remote cache, which may still hold such a build from before
+              # this order: the hash does not see whether a dependency was built.
               deps=$(jq -r --arg built "$built" '
                 ($built | split(",")) as $mine
                 | [$mine[] as $p | .tasks.dependencies["\($p):pkgcheck"][]? | select(endswith(":build"))

@@ -66,6 +66,12 @@ const mayRefreshPendingPose = (graphicsRef: ActorRefFrom<typeof graphicsMachine>
   return !selectFramed(graphicsRef) && (identity === undefined || identity === entryPath);
 };
 
+/** Whether framing frames, or waits for, an entry other than `entryPath`. */
+const framesAnotherEntry = (graphicsRef: ActorRefFrom<typeof graphicsMachine>, entryPath: string): boolean => {
+  const identity = selectFramingIdentity(graphicsRef);
+  return identity !== undefined && identity !== entryPath;
+};
+
 /** Whether `entryPath` waits for its first frame: framing frames another entry, or none yet. */
 const isAwaitingFirstFrame = (graphicsRef: ActorRefFrom<typeof graphicsMachine>, entryPath: string): boolean =>
   !selectFramed(graphicsRef) || selectFramingIdentity(graphicsRef) !== entryPath;
@@ -350,6 +356,11 @@ export function useViewSettingsSync({
       if (!latest) {
         return;
       }
+      if (entryPath !== undefined && framesAnotherEntry(graphicsRef, entryPath)) {
+        /* The camera shows another entry: the record waits until framing names its own. */
+        timer = setTimeout(apply, poseSettle);
+        return;
+      }
       const current = actor.getSnapshot().context.view;
       const adoption =
         entryPath !== undefined && isAwaitingFirstFrame(graphicsRef, entryPath)
@@ -361,9 +372,8 @@ export function useViewSettingsSync({
         return;
       }
       if (adoption) {
-        /* Shown before the entry's first frame, or over another entry's framed geometry while this one waits for it,
-         * without starting the camera's settle window, which would drop the adoption that frame sends: the same
-         * fields, applied in one automatic change. */
+        /* Shown before the first frame without starting the camera's settle window, which would drop the adoption
+         * that frame sends: the same fields, applied in one automatic change. */
         actor.send({ type: 'adoptPersistedPose', ...adoption, ...(adoption.orientation ? { margin: 0.1 } : {}) });
         adoptedPoseRef.current = latest.camera.kind === 'pose' ? latest.camera : selectCameraView(actor);
       } else if (latest.camera.kind === 'pose') {

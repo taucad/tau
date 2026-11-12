@@ -117,6 +117,10 @@ export function useGeometryBounds(
   const presentedRevision = useGraphicsSelector(selectPresentedRevision);
   const lastPresentedRevisionRef = useRef(presentedRevision);
 
+  // Framing keeps the stage of the last measurement for Fit view, so a new fit margin is measured again.
+  const fitMargin = stageOptions?.fitMargin;
+  const lastFitMarginRef = useRef(fitMargin);
+
   const measureBounds = useCallback(() => {
     if (!innerRef.current) {
       return;
@@ -133,6 +137,10 @@ export function useGeometryBounds(
     }
     if (settledPoseRevision !== undefined && settledPoseRevision !== lastPoseRevisionRef.current) {
       lastPoseRevisionRef.current = settledPoseRevision;
+      boundsStableRef.current = false;
+    }
+    if (fitMargin !== lastFitMarginRef.current) {
+      lastFitMarginRef.current = fitMargin;
       boundsStableRef.current = false;
     }
 
@@ -216,6 +224,7 @@ export function useGeometryBounds(
     });
   }, [
     cameraRig,
+    fitMargin,
     presentedRevision,
     geometryKey,
     get,
@@ -231,7 +240,7 @@ export function useGeometryBounds(
   // framed, before the frame that first shows them. The canvas draws on demand, so each one asks for that frame.
   useLayoutEffect(() => {
     invalidate();
-  }, [geometryKey, invalidate, presentedRevision, settledPoseRevision]);
+  }, [fitMargin, geometryKey, invalidate, presentedRevision, settledPoseRevision]);
   useFrame(measureBounds);
 
   // Sync the real bounding-sphere radius to the graphics machine so other

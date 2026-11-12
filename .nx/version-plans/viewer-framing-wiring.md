@@ -10,9 +10,9 @@ Deliberate changes (D14):
 
 - A remounted canvas whose first measurement is a new presentation that moved more than 10 % refits, where the hook only refreshed the bounds.
 - With a pending pose, the first frame no longer faces the configured angles before the pose is applied; the end pose is the pending pose, as before.
-- The record's pose reaches the camera through `adoptPersistedPose` (source `persisted`) before and over the first frame, so the camera is not left settling; a record that arrives while the person drags or the camera settles waits for the camera to go quiet, as before.
+- The record's pose reaches the camera through `adoptPersistedPose` (source `persisted`) before and over the first frame, so the camera is not left settling; a record that arrives while the person drags or the camera settles waits for the camera to go quiet, as before. A record for an entry other than the one framing names waits until framing names its entry, rather than turning the camera on the entry on screen.
 - Focus frames the component with one `frameBounds{source: 'focus'}` change that keeps the scene bounds; clearing focus sends nothing.
 - A section input stops when its handles unmount, at once, rather than one microtask later.
 - Bounds are measured in the frame callback before each draw, and each committed presentation or settled pose asks the demand-driven canvas for that frame; no React effect sends the measurement.
 - An entry switch alone measures nothing: a new entry is first framed on its own committed presentation, unless a remount or a settled pose re-measures the geometry still on screen first, as before. Fit view does nothing while an entry waits for that presentation (a build that fails keeps the previous geometry on screen and the entry unframed), so the Fit view button is unavailable and the F shortcut reports no model to fit until then.
-- Fit view fits against the viewport the controls adapter last published to the camera and the stage of the last measurement.
+- Fit view fits against the viewport the controls adapter last published to the camera and the stage of the last measurement; a new `fitMargin` on the stage is measured again, so Fit view uses it.

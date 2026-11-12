@@ -39,6 +39,8 @@
     "./components/input-tags": "./src/components/input-tags.tsx",
     "./components/lazy-section": "./src/components/lazy-section.tsx",
     "./components/omni-scroller": "./src/components/omni-scroller.tsx",
+    "./components/payment-method": "./src/components/payment-method.tsx",
+    "./components/plan-cards": "./src/components/plan-cards.tsx",
     "./components/responsive-tabs": "./src/components/responsive-tabs.tsx",
     "./components/spinner": "./src/components/spinner.tsx",
     "./components/viewer-layer": "./src/components/viewer-layer.tsx",

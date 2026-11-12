@@ -9,7 +9,8 @@ import type { RenderLoopCapture } from '@taucad/viewer/graphics/three/render-loo
 import { createRenderFrameTimer } from '@taucad/viewer/graphics/three/render-frame-timing';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { RendererInstance } from '@taucad/viewer/graphics/three/renderer';
-import { perspectiveVerticalSpan } from '@taucad/camera';
+import { perspectiveVerticalSpan, resolveCameraUp } from '@taucad/camera';
+import type { CameraSource } from '@taucad/camera/machine';
 import type { RenderFrame } from '@taucad/spatial';
 import { fromThreeRenderBounds, fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import { useFeature } from '#flags/use-feature.js';
@@ -35,7 +36,7 @@ import {
 } from '@taucad/viewer/hooks/use-graphics';
 import { getModelComponentIdInHierarchy } from '@taucad/viewer/graphics/three/utils/model-component-owner';
 import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
-import { getControlsDistance, resolveCameraUp } from '@taucad/viewer/graphics/three/utils/camera-controls-adapter';
+import { getControlsDistance } from '@taucad/viewer/graphics/three/utils/camera-controls-adapter';
 import { hasSceneTag, sceneTag } from '@taucad/viewer/graphics/three/utils/scene-tags';
 import { sectionCapStencilDebugUserDataKey } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
 import type { SectionCapStencilDiagnostics } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
@@ -46,6 +47,10 @@ import {
   infiniteGridFadeEndVisibleSpans,
   infiniteGridPresentationPlaneByUpDirection,
 } from '@taucad/viewer/graphics/three/utils/infinite-grid-frame';
+
+/** Whether the person is holding a camera gesture. */
+const selectGestureHeld = (cameraRef: GraphicsContext['cameraRef']): boolean =>
+  cameraRef.getSnapshot().matches({ gesture: 'held' });
 
 /**
  * A cut to add: what is left out takes the Add menu's default with no view (a plane through the bounds centre,
@@ -99,6 +104,8 @@ export type SectionViewTestCameraState = Readonly<{
   verticalSpan: number;
   /** The camera actor's view revision; it advances once for every view change the actor applies. */
   revision: number;
+  /** The source of the change that produced `revision` (`input`, `framing`, `persisted` and so on). */
+  lastChangeSource: CameraSource;
   position: readonly [number, number, number];
   quaternion: readonly [number, number, number, number];
   target: readonly [number, number, number];
@@ -185,7 +192,7 @@ export type SectionViewTestCapCompleteness = Readonly<{
 
 export type SectionViewTestMeasureState = Readonly<{
   isMeasureActive: boolean;
-  /** True while camera controls own the pointer; a measure gesture started here is discarded. */
+  /** True while camera controls hold a gesture (`gesture.held`); a measure gesture started here is discarded. */
   cameraInteracting: boolean;
   /** Meshes the measure tool has drawn into the scene: snap indicators, lines and labels. */
   measurementUiMeshCount: number;
@@ -1020,10 +1027,13 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           throw new RangeError('Section view test camera position must differ from its target.');
         }
         const direction = offset.normalize();
-        const up = resolveCameraUp({
-          direction,
-          preferredUp: new THREE.Vector3(...currentView.up),
-        }).applyAxisAngle(direction, nextCamera.rollRadians ?? 0);
+        const up = new THREE.Vector3(
+          ...resolveCameraUp({
+            direction: [direction.x, direction.y, direction.z],
+            preferredUp: currentView.up,
+            defaultUp: [THREE.Object3D.DEFAULT_UP.x, THREE.Object3D.DEFAULT_UP.y, THREE.Object3D.DEFAULT_UP.z],
+          }),
+        ).applyAxisAngle(direction, nextCamera.rollRadians ?? 0);
         const requestedFov = nextCamera.fov ?? currentView.requestedVerticalFieldOfView;
         const verticalSpan =
           requestedFov > 0
@@ -1034,7 +1044,8 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
               })
             : currentView.verticalSpan / (nextCamera.zoom ?? 1);
         cameraRig.actorRef.send({
-          type: 'setView',
+          type: 'poseObserved',
+          source: 'input',
           target: [target.x, target.y, target.z],
           direction: [direction.x, direction.y, direction.z],
           up: [up.x, up.y, up.z],
@@ -1071,6 +1082,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           handoffFov: cameraContext.handoffVerticalFieldOfView,
           verticalSpan: cameraView.verticalSpan,
           revision: cameraContext.revision,
+          lastChangeSource: cameraContext.lastChange.source,
           position: physicalCamera.position,
           quaternion: [camera.quaternion.x, camera.quaternion.y, camera.quaternion.z, camera.quaternion.w],
           target: physicalCamera.target,
@@ -1142,7 +1154,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         const { context } = graphicsActor.getSnapshot();
         return {
           isMeasureActive: context.isMeasureActive,
-          cameraInteracting: context.cameraInteracting,
+          cameraInteracting: selectGestureHeld(context.cameraRef),
           measurementUiMeshCount: getSectionViewTestMeasurementUiMeshCount(scene),
           rendererGeometryCount: get().gl.info.memory.geometries,
           snapDistancePx: context.measureSnapDistance,

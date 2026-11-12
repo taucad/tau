@@ -46,8 +46,10 @@
   "dependencies": {
     "@nestjs/common": "catalog:",
     "@nestjs/config": "^4.0.4",
+    "@opentelemetry/api": "catalog:",
     "@taucad/api-core": "workspace:*",
     "@taucad/billing": "workspace:*",
+    "@taucad/telemetry": "workspace:*",
     "@taucad/types": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "nestjs-pino": "^4.6.1",

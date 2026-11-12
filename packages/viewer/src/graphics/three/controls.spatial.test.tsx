@@ -2,7 +2,6 @@ import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RenderFrame } from '@taucad/spatial';
 import { Controls } from '#graphics/three/controls.jsx';
-import type * as TauCameraControlsModule from '#graphics/three/controls/tau-camera-controls.jsx';
 
 const mocks = vi.hoisted(() => {
   const renderFrame: RenderFrame = {
@@ -13,11 +12,19 @@ const mocks = vi.hoisted(() => {
   return {
     context: { isSectionViewActive: true, isMeasureActive: false, measurements: [] },
     renderFrame,
-    cameraControlProperties: undefined as Record<string, unknown> | undefined,
     handlesPicker: undefined as unknown,
     cubePicker: undefined as unknown,
+    frames: [] as Array<{ callback: (state: unknown, delta: number) => void; priority: number | undefined }>,
   };
 });
+
+vi.mock('@react-three/fiber', () => ({
+  // The canvas's controls adapter has not attached yet: the root holds no controls.
+  useThree: (selector: (state: { controls: undefined }) => unknown) => selector({ controls: undefined }),
+  useFrame: (callback: (state: unknown, delta: number) => void, priority?: number) => {
+    mocks.frames.push({ callback, priority });
+  },
+}));
 
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useCameraRig: () => ({ actorRef: { getSnapshot: () => ({ context: { view: { target: [0, 0, 0] } } }) } }),
@@ -25,14 +32,6 @@ vi.mock('#hooks/use-graphics.jsx', () => ({
   useGraphicsSelector: (selector: (state: { context: typeof mocks.context }) => unknown) =>
     selector({ context: mocks.context }),
   useRenderFrame: () => mocks.renderFrame,
-}));
-
-vi.mock('#graphics/three/controls/tau-camera-controls.jsx', async (importOriginal) => ({
-  ...(await importOriginal<typeof TauCameraControlsModule>()),
-  TauCameraControls: (properties: Record<string, unknown>) => {
-    mocks.cameraControlProperties = properties;
-    return null;
-  },
 }));
 
 vi.mock('#graphics/three/controls/viewport-gizmo-cube.jsx', async () => {
@@ -63,18 +62,18 @@ const renderControls = (enableGizmo = false): ReturnType<typeof render> =>
 describe('Controls', () => {
   beforeEach(() => {
     mocks.context.isSectionViewActive = true;
-    mocks.cameraControlProperties = undefined;
     mocks.handlesPicker = undefined;
     mocks.cubePicker = undefined;
+    mocks.frames.length = 0;
   });
 
-  /* `initialTarget` is a render-unit API that camera-controls writes into the live camera in its own
-   * state initializer, two frames before `ActorBridge` exists. Handing it metres pointed the camera
-   * at a target 1000x away for those frames, which is what a restored view was caught showing. */
-  it('should hand the camera controls their initial target in render units', () => {
-    renderControls();
+  /* The controls adapter creates the controls, presents the camera on them and steps them each frame; this component
+   * only gives the adapter's controls their feel. */
+  it('should step no controls from React and render nothing before the adapter attaches', () => {
+    const view = renderControls();
 
-    expect(mocks.cameraControlProperties?.['initialTarget']).toEqual([-10_000, -20_000, -30_000]);
+    expect(mocks.frames).toEqual([]);
+    expect(view.container.querySelector('primitive')).toBeNull();
   });
 
   it('should hand the section handles the view cube plane picker', async () => {

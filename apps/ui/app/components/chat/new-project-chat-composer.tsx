@@ -4,6 +4,7 @@ import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import type { ChatTextareaHandle, ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { NewProjectKernelChips } from '#components/chat/kernel-selector.js';
+import { useFeature } from '#flags/use-feature.js';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
@@ -36,7 +37,11 @@ export function NewProjectChatComposer({
   enableKernelChips = true,
 }: NewProjectChatComposerProperties): React.JSX.Element {
   const navigate = useNavigate();
-  const { kernel, setKernel } = useKernel();
+  const { kernel, setKernel, preference } = useKernel();
+  /* With the `autoKernel` flag on the kernel is the bar's pill (D8), so the chips above the box leave. */
+  const isAutoEnabled = useFeature('autoKernel');
+  /* Under Auto the project starts entry-less and the agent picks the kernel from the prompt (blueprint D3). */
+  const creationKernel = isAutoEnabled ? preference : kernel;
   const projectManager = useProjectManager();
   const location = useProjectCreationLocation();
   const presentLocationError = useProjectCreationLocationError();
@@ -110,7 +115,7 @@ export function NewProjectChatComposer({
         .context.draftAttachments.map(({ byteLength: _byteLength, ...stored }) => stored);
       try {
         const created = await projectManager.createProject({
-          kernel,
+          kernel: creationKernel,
           /* The chip's value verbatim — not a Tau execution rebuilt from the
            * model. Rebuilding dropped `hostId` (and any `acp` choice),
            * so a project started from a "Tau Host · …" chip ran its first turn
@@ -143,7 +148,7 @@ export function NewProjectChatComposer({
       consumeDraft,
       draftActorRef,
       execution,
-      kernel,
+      creationKernel,
       location,
       navigate,
       presentLocationError,
@@ -159,14 +164,14 @@ export function NewProjectChatComposer({
       ref={textareaRef}
       enableAutoFocus={enableAutoFocus}
       enableContextActions={false}
-      enableKernelSelector={false}
+      enableKernelSelector={isAutoEnabled}
       creationLocationControl={creationLocationControl}
       isSubmitDisabled={!location.canCreate}
       className={className}
       onSubmit={onSubmit}
     />
   );
-  return enableKernelChips ? (
+  return enableKernelChips && !isAutoEnabled ? (
     <div className='space-y-4'>
       <NewProjectKernelChips kernel={kernel} onKernelChange={setKernel} />
       {textarea}

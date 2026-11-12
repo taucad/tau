@@ -79,7 +79,8 @@ const register = async (projectId: string): Promise<void> => {
   const response = await fetch(`${gitE2EApiUrl}/v1/projects/${projectId}`, {
     method: 'PUT',
     headers: { authorization: `Bearer ${owner.token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ name: 'Cloud deletion acceptance' }),
+    /* Stock git commits carry no Tau record: a project linked to GitHub admits them (B4). */
+    body: JSON.stringify({ name: 'Cloud deletion acceptance', origin: 'github' }),
   });
   expect(response.status, await response.text()).toBe(200);
 };
@@ -155,9 +156,9 @@ describe('cloud deletion across built API processes and the built CLI', () => {
     await git(cliCopy, ['config', 'user.name', 'Deletion acceptance']);
     await git(cliCopy, ['config', 'user.email', 'deletion@example.invalid']);
     await writeFile(join(cliCopy, 'notes.txt'), 'Backed up through the actual CLI before deletion.\n');
-    const backedUp = await cli(['revisions', 'save', '--project', cliCopy, '--json']);
+    const backedUp = await cli(['history', 'save', '--project', cliCopy, '--json']);
     expect(backedUp.code, backedUp.stderr).toBe(0);
-    expect(JSON.parse(backedUp.stdout)).toMatchObject({ kind: 'revision-save', status: 'saved', backup: 'backedUp' });
+    expect(JSON.parse(backedUp.stdout)).toMatchObject({ kind: 'history-save', status: 'saved', backup: 'backedUp' });
     const offline = join(artifacts, 'offline-copy');
     await git(artifacts, [...authGit(), 'clone', remote(gitE2ESecondaryApiUrl, projectId), offline]);
     await writeFile(join(cliCopy, 'main.scad'), 'cube(7); // unsaved local work\n');
@@ -213,7 +214,7 @@ describe('cloud deletion across built API processes and the built CLI', () => {
     expect(await snapshot(cliCopy)).toEqual(cliBefore);
     expect(await snapshot(offline)).toEqual(offlineBefore);
     // A deliberate local save still works after cloud deletion, but must not recreate the remote.
-    const localSave = await cli(['revisions', 'save', '--project', cliCopy, '--json']);
+    const localSave = await cli(['history', 'save', '--project', cliCopy, '--json']);
     expect(localSave.code, localSave.stderr).toBe(0);
     const saved = JSON.parse(localSave.stdout) as { status: string; backup?: string; reason?: string };
     expect(saved.status).toBe('saved');

@@ -31,4 +31,11 @@ GraphNext ==
     \/ S!SweepFail /\ Label("SweepFail")
 
 GraphSpec == GraphInit /\ [][GraphNext]_<<S!vars, act>>
+
+\* The attempt's credit row has left pending and no recovery claim is in flight (the nightly
+\* simulation keeps the behaviours that reach this).
+Quiescent ==
+    /\ act # "Init"
+    /\ row["a"].ex /\ row["a"].cust # "pending"
+    /\ claims = {}
 ====

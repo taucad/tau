@@ -21,7 +21,7 @@ const allSheet = (): Locator => selectors.getByRole('dialog', { name: 'All surfa
 const ungatedSurfaces = [
   'Model tree',
   'Kinematics',
-  'Revisions',
+  'History',
   'Agents',
   'Files',
   'Editor',

@@ -21,6 +21,7 @@ import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { revisionTreeId } from '#revision-effects.js';
 import type { RevisionPort } from '#revision-port.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { recordedBy } from '#test/identity.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 const encoder = new TextEncoder();
@@ -110,7 +111,7 @@ const mint = async (port: RevisionPort, tree: ImmutableRevisionTree, parent?: st
   const receipt = await port.writeRevision({
     parents: parent === undefined ? [] : [revisionId(parent)],
     tree,
-    provenance: { source: 'user', actorId: 'mint', createdAt: 1_757_000_000_000 },
+    provenance: { source: 'user', ...recordedBy('mint'), createdAt: 1_757_000_000_000 },
     summary: { generated: 'Mint' },
   });
   return receipt.commitId;

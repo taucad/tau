@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useState } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import { Trash2 } from 'lucide-react';
@@ -120,7 +121,7 @@ export function PublicationAccessPanel({
         <div className='min-w-0'>
           <p className='text-sm font-medium'>General access</p>
           <p className='text-xs text-muted-foreground'>
-            {visibility === 'public' ? 'Anyone with the link can view.' : 'Only you and people with access can view.'}
+            {visibility === 'public' ? 'Anyone with the link can view.' : 'Only you and the people you add can view.'}
           </p>
         </div>
         <Select
@@ -167,7 +168,10 @@ export function PublicationAccessPanel({
 
       <div className='flex flex-col gap-2'>
         <div className='flex items-center justify-between'>
-          <h3 className='text-sm font-medium'>People with access</h3>
+          {/* Who can open this link; the project's own members are People with access, below it (C2). */}
+          <Heading level={3} variant='label'>
+            Who can view this link
+          </Heading>
           {loading ? <Loader className='size-4 text-muted-foreground' /> : null}
         </div>
         {grants.length === 0 && !loading ? (

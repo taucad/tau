@@ -24,7 +24,7 @@ import { defineCommand } from 'citty';
 
 import { authApiOrigin, resolveAuthToken } from '#auth.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
-import { requireGitToolchain } from '#commands/revisions.js';
+import { requireGitToolchain } from '#commands/history.js';
 
 /** What the project's own `tau.json` says a viewer opens with. */
 const readEntryPath = async (workspaceRoot: string): Promise<string> => {

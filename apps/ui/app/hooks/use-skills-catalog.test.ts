@@ -14,7 +14,7 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
-import { withAuthorityDigest } from '#lib/composed-view-client.fixture.js';
+import { withAuthorityDigest } from '@taucad/ui-core/lib/composed-view-client.fixture';
 import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
 
 const mockReadFile = vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>();
@@ -704,13 +704,13 @@ describe('useSkillsCatalog over the composed user view', () => {
 
     const { result } = renderHook(() => useSkillsCatalog());
     await waitFor(() => {
-      expect(result.current).toHaveLength(16);
+      expect(result.current).toHaveLength(15);
     });
 
     expect(overlayRead).not.toHaveBeenCalled();
     expect(resourceReader).not.toHaveBeenCalled();
     expect(mockReadFile.mock.calls.map(([path]) => path)).toStrictEqual(['.agents/plugins/installed.json']);
-    expect(systemSkillsCatalog).toHaveLength(16);
+    expect(systemSkillsCatalog).toHaveLength(15);
     expect(result.current.every((skill) => skill.source === 'system')).toBe(true);
     const fingerprints = new Map(result.current.map((skill) => [skill.name, skill.fingerprint]));
     for (const bundle of systemSkillBundles) {
@@ -758,7 +758,7 @@ describe('useSkillsCatalog over the composed user view', () => {
 
     const { result } = renderHook(() => useSkillsCatalog());
     await waitFor(() => {
-      expect(result.current).toHaveLength(15);
+      expect(result.current).toHaveLength(14);
     });
 
     expect(overlayRead).not.toHaveBeenCalled();

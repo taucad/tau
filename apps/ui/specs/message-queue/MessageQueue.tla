@@ -85,6 +85,13 @@
 \* gesture, which never enters the queue; a gesture ends the wait. Submit, Prepare and delivery unchanged.
 \* Only a viewed chat with a published admission waits; the resumed plan stays in hand until its
 \* failure leaves, or the run returns to failed under it; neither touches the queue.
+\* The machines, the session store and the turn host take their xstate, privacy and observation
+\* helpers from the ui-core library (UI wave E) instead of the app's lib; only imports moved,
+\* and queue paths unchanged.
+\* The session store reads and persists the chat's kernel preference beside its active kernel
+\* (automatic kernel selection M4); queue delivery, persistence and placement are unchanged.
+\* The turn host passes the Auto kernel preference and owner to turn telemetry (automatic kernel
+\* selection AKS-10); admission, delivery and the queue barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

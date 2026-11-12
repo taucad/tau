@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { ChatMessageSurface } from '@taucad/chat-ui/components/chat-message-surface';
 import {
   BookOpen,
@@ -44,7 +45,7 @@ import { ChatMessageText } from '#routes/w.$workspace.$project/chat-message-text
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { formatAbsoluteTime, formatRelativeTime } from '#utils/date.utils.js';
+import { formatAbsoluteTime, formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
 import { cn } from '@taucad/ui/utils/cn';
 import { When } from '@taucad/ui-kit/utils/when';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
@@ -143,7 +144,9 @@ function ChatMessageAcpPlan({
     plan.type === 'file' && ['http:', 'https:'].includes(URL.parse(plan.uri)?.protocol ?? '') ? plan.uri : undefined;
   return (
     <section aria-label='Agent plan' className='rounded-lg border bg-background p-3 text-sm'>
-      <h3 className='font-medium'>Plan</h3>
+      <Heading level={3} variant='label'>
+        Plan
+      </Heading>
       {plan.type === 'items' ? (
         <ul className='mt-2 flex flex-col gap-1.5'>
           {plan.entries.map((entry, index) => (
@@ -517,7 +520,7 @@ function renderAssistantPart(
       return <ChatMessageToolScreenshot key={part.toolCallId} part={part} />;
     }
 
-    case 'tool-revisions': {
+    case 'tool-history': {
       return <ChatMessageToolRevisions key={part.toolCallId} part={part} />;
     }
 

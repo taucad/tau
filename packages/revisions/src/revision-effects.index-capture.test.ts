@@ -24,6 +24,8 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { RevisionPort } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
+import { recordedBy, testIdentity } from '#test/identity.js';
+import { generatedGitattributesContent, generatedGitattributesPath } from '#workspace-config.js';
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
 
@@ -130,6 +132,8 @@ const fixture = async (
   });
   const base: RevisionPort = createIsomorphicGitRevisionPort({ filesystem: portFiles });
   await base.init({ author });
+  /* A current project carries both setup files; opening writes no attributes file (A4). */
+  await rooted.writeFile(generatedGitattributesPath, generatedGitattributesContent(undefined));
   if (backend === 'node') {
     /* What init wrote is as settled as the fixture's own files, and the index is told by its compare. */
     for (const path of ['.gitattributes', '.gitignore']) {
@@ -185,9 +189,24 @@ const fixture = async (
           },
         }
       : {};
-  const actors = createRevisionActors({ port, projectId: 'project-1', filesystem: async () => counted(), ...clock });
+  /* The start's fill check, answered: with no placeholder it reports once, after its capture. */
+  let answered: () => void = () => undefined;
+  const fillChecked = new Promise<void>((resolve) => {
+    answered = resolve;
+  });
+  const actors = createRevisionActors({
+    identity: testIdentity,
+    port,
+    projectId: 'project-1',
+    filesystem: async () => counted(),
+    onLargeObjects: () => {
+      answered();
+    },
+    ...clock,
+  });
   /* The same files captured by walking, with no index to ask: what every incremental cut must hash to. */
   const walking = createRevisionActors({
+    identity: testIdentity,
     port,
     projectId: 'project-1',
     filesystem: async () => Object.assign(Object.create(rooted) as RevisionFileSystem, { changedSince: undefined }),
@@ -197,6 +216,7 @@ const fixture = async (
     port,
     actors,
     walking,
+    fillChecked,
     reads,
     listed,
     overrides,
@@ -238,6 +258,10 @@ const run = async <Output>(logic: unknown, input: unknown): Promise<Output> =>
           reject(asError(snapshot.error));
         }
       },
+      /* A rejected promise actor reports here, not as a `next` snapshot. */
+      error: (failure: unknown) => {
+        reject(asError(failure));
+      },
     });
     running.start();
   });
@@ -273,7 +297,7 @@ const moveHead = async (at: Fixture, entries: ReadonlyArray<readonly [string, st
   const receipt = await at.port.writeRevision({
     parents: head === undefined ? [] : [head],
     tree: new ImmutableRevisionTree(entries),
-    provenance: { source: 'user', actorId: 'actor-1', runId: 'run-1', createdAt: Date.UTC(2026, 10, 7) },
+    provenance: { source: 'user', ...recordedBy('actor-1'), runId: 'run-1', createdAt: Date.UTC(2026, 10, 7) },
     summary: { generated: 'Moved' },
   });
   await at.port.updateRef({ name: 'main', expectedHead: head, head: revisionId(receipt.commitId) });
@@ -394,8 +418,14 @@ describe('a cut driven by a real Project Index (S10)', () => {
     const at = await fixture(files(20));
     await mint(at);
 
+    /* A removal reads the files themselves (A25): unsaved work makes it refuse after that read, removing nothing. */
+    await at.rooted.writeFile('dir3/f3.txt', 'edited\n');
     at.count();
-    await run(at.actors.branch.checkBranch, { projectId: 'project-1', operation: 'switch', branch: 'other' });
+    await expect(run(at.actors.checkouts.removeCheckout, { projectId: 'project-1', id: 'live' })).rejects.toMatchObject(
+      {
+        code: 'CHECKOUT_CONFLICT',
+      },
+    );
     /* Every versioned file, read past the memo: the fixture's twenty and what init wrote. */
     expect(at.walked()).toBe(true);
     expect(at.reads.length).toBe(22);
@@ -403,7 +433,8 @@ describe('a cut driven by a real Project Index (S10)', () => {
     await at.rooted.writeFile('dir1/f1.txt', 'edited\n');
     at.count();
     const { treeId } = await cut(at.actors);
-    expect(at.reads).toEqual(['dir1/f1.txt']);
+    /* Only what differs from the head: the new edit and the one the removal refused on. */
+    expect(at.reads).toEqual(['dir1/f1.txt', 'dir3/f3.txt']);
     expect(at.walked()).toBe(false);
     expect(treeId).toBe(await walkedTreeId(at.walking));
   });
@@ -549,6 +580,27 @@ describe('a first revision built from recorded blob ids (D12)', () => {
     expect(asked[0]?.measure).toBe(false);
     expect(asked[0]?.paths).toContain('dir1/f1.txt');
     expect(taken.treeId).not.toBe(await walkedTreeId(at.walking));
+    const tree = await at.port.listTree?.(revisionId(written));
+    expect(tree?.find(({ path }) => path === 'dir1/f1.txt')?.oid).toBe(recorded);
+  });
+
+  it("should take the recorded ids after the start's fill check has captured the same files", async () => {
+    const at = await fixture(files(10));
+    const asked: string[][] = [];
+    const recorded = 'f'.repeat(40);
+    at.overrides.facts = async (paths) => {
+      asked.push([...paths]);
+      return new Map(
+        paths.includes('dir1/f1.txt') ? [['dir1/f1.txt', { contentKind: 'text', blobOid: recorded }]] : [],
+      );
+    };
+    /* The check's capture records nothing, so its bytes, held for the cut, have no id yet. */
+    await at.fillChecked;
+
+    const written = await mint(at);
+
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toContain('dir1/f1.txt');
     const tree = await at.port.listTree?.(revisionId(written));
     expect(tree?.find(({ path }) => path === 'dir1/f1.txt')?.oid).toBe(recorded);
   });

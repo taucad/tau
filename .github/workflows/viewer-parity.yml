@@ -9,7 +9,10 @@ name: Viewer parity
 #    downloads these same files, so the viewer and nanoraster always draw identical bytes; some exports are not
 #    byte-deterministic between runs (replicad/bottle), so nothing pins their bytes. The cache key is the hash of the
 #    fixtures' example sources, the exporter, the manifest and the lockfile.
-# 1. `viewer` (four shards): the production viewer in headed Chromium under Xvfb on SwiftShader WebGPU. Headless
+# 1. `viewer` (four shards): each shard deals the manifest's fixtures by measured capture seconds
+#    (fixtures/viewer-parity/capture-seconds.json) with the dealer the `ci.yml` test shards use
+#    (scripts/src/test-shard-dealer.ts), heaviest first to the lightest shard, so the shards partition the fixtures and
+#    finish together; a fixture the snapshot does not list weighs its default. The production viewer in headed Chromium under Xvfb on SwiftShader WebGPU. Headless
 #    Chromium loses the SwiftShader WebGPU device on its first present and the viewer falls back to WebGL2; the capture
 #    refuses such a frame. The software-adapter AO gate is the harness's one bypass (I2), named in the test. Each frame
 #    is written twice: with the canvas's own alpha (the coverage) and as the page shows it, the canvas's premultiplied
@@ -23,43 +26,20 @@ name: Viewer parity
 #    Both builds are the nanoraster package the lockfile installs, its Node and its universal entry; the gate refuses
 #    one older than 0.9.0, the release that accepts the viewer-parity options.
 
+# Selection (2026-11-10): `ci.yml` calls this workflow (`workflow_call`) when its plan finds a project with a
+# `test:viewer-parity` target affected (`tau-examples`, whose graph holds the viewer, the image plugin, the render
+# profile, the capture options and the renderer output it compares, and whose target lists this workflow among its
+# inputs), in the merge queue and on a push to `main` the queue did not already prove; never on a pull request. Its
+# required check fails when a job here does. A dispatch runs it directly.
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/viewer-parity.yml'
-      - '.github/actions/setup-nx/**'
-      - 'pnpm-workspace.yaml'
-      - 'packages/viewer/src/**'
-      - 'packages/runtime-testing/src/browser/three-renderer-output*'
-      - 'packages/plugins/image/src/**'
-      - 'libs/types/src/constants/viewer-render-profile*'
-      - 'libs/agent-tools/src/capture/viewer-capture-options*'
-      - 'libs/tau-examples/fixtures/viewer-parity/**'
-      - 'libs/tau-examples/scripts/viewer-parity*'
-      - 'libs/tau-examples/scripts/export-parity-fixtures.mts'
-      - 'libs/tau-examples/vitest.viewer-parity.config.ts'
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/viewer-parity.yml'
-      - 'pnpm-workspace.yaml'
-      - 'packages/viewer/src/**'
-      - 'packages/runtime-testing/src/browser/three-renderer-output*'
-      - 'packages/plugins/image/src/**'
-      - 'libs/types/src/constants/viewer-render-profile*'
-      - 'libs/agent-tools/src/capture/viewer-capture-options*'
-      - 'libs/tau-examples/fixtures/viewer-parity/**'
-      - 'libs/tau-examples/scripts/viewer-parity*'
-      - 'libs/tau-examples/scripts/export-parity-fixtures.mts'
-      - 'libs/tau-examples/vitest.viewer-parity.config.ts'
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: viewer-parity-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+# No concurrency group: called from `ci.yml`, whose own group already holds the run, a group here would let a newer
+# push cancel a `main` run's parity jobs, which `ci.yml` never cancels.
 
 defaults:
   run:
@@ -146,11 +126,23 @@ jobs:
         run: |
           pnpm exec playwright install --with-deps chromium
           sudo apt-get install -y xvfb
+      - name: Deal this shard's fixtures
+        id: deal
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          fixtures=$(jq -c '[.fixtures[].name]' libs/tau-examples/fixtures/viewer-parity/fixtures.json |
+            node scripts/src/test-shard-dealer.ts --shard "$SHARD" --shards 4 \
+              --durations libs/tau-examples/fixtures/viewer-parity/capture-seconds.json)
+          # An empty PARITY_FIXTURES captures every fixture, so a shard the deal leaves empty fails instead.
+          test -n "$fixtures"
+          echo "Shard fixtures: $fixtures"
+          echo "fixtures=$fixtures" >> "$GITHUB_OUTPUT"
       - name: Capture the viewer's frames
         env:
           TAU_E2E_WEBGPU_PROFILE: software
           PARITY_HEADED: '1'
-          PARITY_SHARD: ${{ matrix.shard }}/4
+          PARITY_FIXTURES: ${{ steps.deal.outputs.fixtures }}
         run: xvfb-run -a -s '-screen 0 1280x1024x24' pnpm nx run viewer:capture:viewer-parity
       - name: Upload the viewer references
         if: always()

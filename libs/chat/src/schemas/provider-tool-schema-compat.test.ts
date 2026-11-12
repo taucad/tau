@@ -125,7 +125,7 @@ describe('provider-facing tool schema compatibility', () => {
       toolName.globSearch,
       toolName.webSearch,
       toolName.webBrowser,
-      toolName.revisions,
+      toolName.history,
       toolName.updateTodos,
       toolName.askQuestions,
       toolName.installPackages,

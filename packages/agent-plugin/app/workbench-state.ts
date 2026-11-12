@@ -7,13 +7,14 @@
 import type { ActorRefFrom } from 'xstate';
 import { tauViewerToolName } from '@taucad/mcp/viewer-protocol';
 import type { TauViewerModel, TauViewerViewSettings, TauViewerWorkbenchState } from '@taucad/mcp/viewer-protocol';
-import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import { selectGraphicsFramingIdentity } from '@taucad/viewer/machines/graphics.machine';
+import type { GraphicsPendingPose, graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+
 import type { WorkbenchView } from '@taucad/workbench';
 import {
   createSourceModelInteractionUnitId,
   serializeModelComponentDisplayState,
 } from '@taucad/viewer/machines/model-interaction.machine';
-import { acquireViewCameraSession, getViewCameraSession } from '@taucad/viewer/services/graphics-camera-registry';
 import {
   graphicsSettingsForView,
   viewCameraOrientation,
@@ -22,6 +23,23 @@ import {
 import type { HostBridge } from '#app/host-bridge.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
+
+/** The entry the page's framing frames. */
+const selectFramedEntry = (graphicsRef: GraphicsActorRef): string | undefined =>
+  selectGraphicsFramingIdentity(graphicsRef.getSnapshot());
+
+/** A saved view's camera, as the pose framing applies after the entry's first frame. */
+const pendingPoseOf = (record: WorkbenchView | undefined, entryPath: string): GraphicsPendingPose | undefined => {
+  if (record === undefined) {
+    return undefined;
+  }
+  const requestId = `saved:${entryPath}`;
+  if (record.camera.kind === 'pose') {
+    return { requestId, pose: record.camera };
+  }
+  const orientation = viewCameraOrientation(record);
+  return orientation === undefined ? undefined : { requestId, orientation };
+};
 
 /**
  * The entry a shown model's records are kept under: its source, or the drawn file when it has none.
@@ -64,17 +82,15 @@ export const seedViewer = (
   entryPath: string,
   saved: TauViewerWorkbenchState | undefined,
 ): void => {
-  if (getViewCameraSession(graphicsRef)?.framing.identity === entryPath) {
+  if (selectFramedEntry(graphicsRef) === entryPath) {
     return;
   }
+  const { context } = graphicsRef.getSnapshot();
   const view = saved?.view;
   const record: WorkbenchView | undefined = view === undefined ? undefined : { ...view, version: 1, entryPath };
-  /* A new identity re-arms the first-frame framing, with the saved pose to apply once the model is framed. */
-  const session = acquireViewCameraSession(graphicsRef, {
-    identity: entryPath,
-    camera: { cameraView: record?.camera.kind === 'pose' ? record.camera : undefined },
-  });
-  const { context } = graphicsRef.getSnapshot();
+  /* A new entry is framed again, and the saved pose or side is applied over its first frame. */
+  const pendingPose = pendingPoseOf(record, entryPath);
+  graphicsRef.send({ type: 'entryChanged', identity: entryPath, ...(pendingPose ? { pendingPose } : {}) });
   if (record === undefined) {
     /* Cuts and measurements belong to the geometry they were made on. */
     graphicsRef.send({ type: 'adoptSectionView', section: { active: false, cuts: [] } });
@@ -103,16 +119,7 @@ export const seedViewer = (
     }
     graphicsRef.send({ type: 'adoptSectionView', section: record.section });
     graphicsRef.send({ type: 'adoptPinnedMeasurements', measurements: settings.pinnedMeasurements ?? [] });
-    const rig = session.rig.actorRef;
-    rig.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: record.fieldOfView });
-    const orientation = viewCameraOrientation(record);
-    if (orientation !== undefined) {
-      /* A preset or a look: face the model from that side, and let the first frame fit it without turning. */
-      const current = rig.getSnapshot().context.view;
-      rig.send({ type: 'setView', target: current.target, ...orientation, verticalSpan: current.verticalSpan });
-      // oxlint-disable-next-line react/immutability -- The framing record is session state the first frame consumes.
-      session.framing.preserveOrientationOnFirstFrame = true;
-    }
+    context.cameraRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: record.fieldOfView });
   }
   const components = saved?.components;
   if (components !== undefined) {
@@ -140,14 +147,13 @@ export const seedViewer = (
  * The live view's settings, as the page reports them for the server to keep.
  *
  * @param graphicsRef - The page's graphics actor.
- * @returns The settings, or `undefined` before the camera exists.
+ * @returns The settings, or `undefined` before the page seeds the viewer for an entry.
  */
 export const liveViewSettings = (graphicsRef: GraphicsActorRef): TauViewerViewSettings | undefined => {
-  const session = getViewCameraSession(graphicsRef);
-  return session === undefined
+  const snapshot = graphicsRef.getSnapshot();
+  const { context } = snapshot;
+  /* Seeding names the entry to framing; an SVG model has a view camera but no canvas or controls adapter. */
+  return selectGraphicsFramingIdentity(snapshot) === undefined
     ? undefined
-    : viewSettingsOf(
-        graphicsRef.getSnapshot().context,
-        session.rig.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView,
-      );
+    : viewSettingsOf(context, context.cameraRef.getSnapshot().context.view.requestedVerticalFieldOfView);
 };

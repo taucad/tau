@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(199);
+    expect(metrics).toHaveLength(212);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -83,6 +83,28 @@ describe('TauMetrics', () => {
       tau_storage_accounting_passes_total: { type: 'counter', unit: '{pass}' },
       tau_storage_accounting_last_success: { type: 'gauge', unit: 's' },
     });
+  });
+
+  /* Database connection audit R4: the client-side pool series the pooler panel and alerts read. */
+  it('should declare the client-side pool instruments by the names the pooler rules read', () => {
+    const exported = Object.fromEntries(
+      [
+        TauMetrics.databaseClientConnections,
+        TauMetrics.databaseClientConnects,
+        TauMetrics.databaseClientRefusals,
+        TauMetrics.databasePoolerCapacity,
+      ].map((metric) => [toPrometheusName(metric.name, metric.type), metric.type]),
+    );
+    expect(exported).toEqual({
+      tau_db_client_connections: 'upDownCounter',
+      tau_db_client_connects_total: 'counter',
+      tau_db_client_refusals_total: 'counter',
+      tau_db_pooler_capacity: 'gauge',
+    });
+    expect(TauMetrics.databaseClientConnections.attributes.shape['tau.db.pool'].options).toEqual([
+      'request',
+      'background',
+    ]);
   });
 
   it('should bound the R2 bucket label to roles, so a bucket name never becomes a label value', () => {
@@ -697,22 +719,30 @@ describe('TauMetrics', () => {
     const series = [
       TauMetrics.agentEvidenceAdmissions,
       TauMetrics.agentEvidenceDeliveries,
+      TauMetrics.agentEvidenceSuperseded,
       TauMetrics.agentEvidenceBacklogRows,
       TauMetrics.agentEvidenceBacklogHeldBytes,
       TauMetrics.agentEvidenceErasureTraces,
       TauMetrics.agentEvidenceLifecycleRecords,
       TauMetrics.agentEvidencePasses,
+      TauMetrics.agentEvidenceScores,
+      TauMetrics.agentEvidenceSettlements,
+      TauMetrics.agentEvidenceLangfuseUnits,
     ];
     expect(
       Object.fromEntries(series.map((metric) => [toPrometheusName(metric.name, metric.type), metric.type])),
     ).toEqual({
       tau_agent_evidence_admissions_total: 'counter',
       tau_agent_evidence_deliveries_total: 'counter',
+      tau_agent_evidence_superseded_receipts_total: 'counter',
       tau_agent_evidence_backlog_rows: 'gauge',
       tau_agent_evidence_backlog_held_bytes: 'gauge',
       tau_agent_evidence_erasure_traces_total: 'counter',
       tau_agent_evidence_lifecycle_records_total: 'counter',
       tau_agent_evidence_passes_total: 'counter',
+      tau_agent_evidence_scores_total: 'counter',
+      tau_agent_evidence_settlements_total: 'counter',
+      tau_agent_evidence_langfuse_units_total: 'counter',
     });
     for (const metric of series) {
       for (const label of Object.values(metric.attributes.shape)) {
@@ -727,6 +757,36 @@ describe('TauMetrics', () => {
       }).success,
     ).toBe(true);
     expect(TauMetrics.agentEvidenceDeliveries.attributes.safeParse({ outcome: 'http-503' }).success).toBe(false);
+    /* A generation waits for its settlement, which is merged into it or, after it went, settled late (LW4). */
+    expect(TauMetrics.agentEvidenceDeliveries.attributes.safeParse({ outcome: 'held' }).success).toBe(true);
+    for (const reason of ['merged', 'late'] as const) {
+      expect(TauMetrics.agentEvidenceSuperseded.attributes.safeParse({ reason }).success).toBe(true);
+    }
+    for (const outcome of ['merged', 'late', 'unsettled'] as const) {
+      expect(TauMetrics.agentEvidenceSettlements.attributes.safeParse({ outcome }).success).toBe(true);
+    }
+    expect(TauMetrics.agentEvidenceSettlements.attributes.safeParse({ outcome: 'sent' }).success).toBe(false);
+    /* A score write names its score, whether its config was set, and its outcome; never the trace or the config id (LW7). */
+    const score = { 'tau.agent_evidence.score': 'user-rating', 'tau.agent_evidence.score_configured': 'false' };
+    expect(TauMetrics.agentEvidenceScores.attributes.safeParse({ ...score, outcome: 'accepted' }).success).toBe(true);
+    /* A score without a config id is still written, so nothing is held. */
+    expect(TauMetrics.agentEvidenceScores.attributes.safeParse({ ...score, outcome: 'held' }).success).toBe(false);
+    expect(
+      TauMetrics.agentEvidenceScores.attributes.safeParse({
+        ...score,
+        'tau.agent_evidence.score': 'reply-quality',
+        outcome: 'accepted',
+      }).success,
+    ).toBe(false);
+  });
+
+  /* Langfuse blueprint LW24 (ruling 13): Hobby's 50k units are traces, observations and scores, counted by kind only. */
+  it('should count the Langfuse units Tau writes by kind alone', () => {
+    const units = TauMetrics.agentEvidenceLangfuseUnits;
+
+    expect(units.attributes.shape.kind.options).toEqual(['trace', 'observation', 'score']);
+    expect(Object.keys(units.attributes.shape)).toEqual(['kind']);
+    expect(units.unit).toBe('{unit}');
   });
 
   it('should use lowercase dot-delimited names for all metrics', () => {

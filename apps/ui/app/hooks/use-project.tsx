@@ -3,7 +3,7 @@
 import { recordInteraction } from '#lib/kill-work-context.js';
 import { parameterRecordInputValues } from '@taucad/parameters';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
-import { isMemoryConstrainedDevice, runtimeRecycleHeapBytes } from '#lib/device-memory-class.js';
+import { isMemoryConstrainedDevice, runtimeRecycleHeapBytes } from '@taucad/ui-core/lib/device-memory-class';
 import { usePreviewParameterLifetime } from '#hooks/use-preview-parameter-lifetime.js';
 import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
@@ -16,12 +16,13 @@ import {
   useMemo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
-import { waitFor } from 'xstate';
+import { createCallbackLogic, waitFor } from 'xstate';
 import type { ActorRefFrom, InputFrom } from 'xstate';
 import type { Remote } from 'comlink';
 import { useQueryClient } from '@tanstack/react-query';
@@ -39,12 +40,16 @@ import type { WorkbenchEntries, WorkbenchView } from '@taucad/workbench';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import { fileContentBytes } from '@taucad/fs-client/file-content-service';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
-import type { MachineActors } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
 import { projectMachine } from '#machines/project.machine.js';
-import type { ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
+import type {
+  ProjectLoadInput,
+  ProjectRetrievedEvent,
+  ViewRecordSessionActorInput,
+} from '#machines/project.machine.js';
 import { editorMachine } from '#machines/editor.machine.js';
 import { disposeCadRuntime } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
@@ -57,13 +62,15 @@ import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { Chat } from '@taucad/chat';
 import type { ChatStorage } from '#types/storage.types.js';
 import { localKernelOptions } from '#constants/local-kernel-options.js';
-import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
-import { createParameterSetService } from '#services/parameter-set-service.js';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
+import { useComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
+import { createParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { isNotFound } from '@taucad/chat-ui/db/attachment-store';
 import { toast } from 'sonner';
 import type { EntryPathChange } from '#workbench-records/entries-store.js';
+import { createViewRecordPorts, startViewRecordSession } from '#workbench-records/view-record-session.js';
+import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
 
 type ProjectContextType = {
   manifestObservationError: string | undefined;
@@ -88,10 +95,12 @@ type ProjectContextType = {
   changeEntryPaths: (operation: EntryPathChange) => Promise<boolean>;
   registerWorkbenchRecordProducer: (flush: () => Promise<void>) => () => void;
   flushWorkbenchRecordProducers: () => Promise<void>;
+  /** The ports every view's record session shares (charter G6b): the host flushes them on close. */
+  viewRecordPorts: ViewRecordPortsHandle;
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
-  /** The main entry path from project.assets.main.entryPath. */
+  /** The main entry path from project.assets.main?.entryPath. */
   mainEntryPath: string;
   logRef: ActorRefFrom<typeof logMachine>;
   resolveParameterEntry: (filePath: string, manifest: ParameterManifest) => void;
@@ -498,7 +507,20 @@ export function ProjectProvider({
 
   // D-RT-03: read once, as the actor's input is fixed at creation.
   const [recycleHeapBytes] = useState(() => runtimeRecycleHeapBytes(isMemoryConstrainedDevice()));
-  const actorRef = useActorRef(projectMachine.provide({ actors: provide?.actors ?? projectActors }), {
+  /* Every view's record session runs beside its graphics actor in the project machine, over these ports (G6b). Only the
+   * editor writes view records: a project loaded from its own source (`provide`), an owned preview or a shared
+   * workbench shows the project without saving its views, as before G6b, when the record host was mounted by the
+   * editor's live sessions only. */
+  const viewRecordSession = createCallbackLogic<{ type: 'never' }, ViewRecordSessionActorInput>(({ input: session }) =>
+    startViewRecordSession({ viewId: session.viewId, graphics: session.graphics, ports: viewRecordPorts }),
+  );
+  const providedMachine =
+    provide === undefined
+      ? profile === 'editor'
+        ? projectMachine.provide({ actors: { ...projectActors, viewRecord: viewRecordSession } })
+        : projectMachine.provide({ actors: projectActors })
+      : projectMachine.provide({ actors: provide.actors });
+  const actorRef = useActorRef(providedMachine, {
     input: {
       projectId,
       fileManagerRef: fileManager.fileManagerRef,
@@ -688,6 +710,24 @@ export function ProjectProvider({
       return next;
     });
   }, []);
+  const viewRecordHost = useMemo(
+    () => ({ files: fileManager.parameterFiles, watch: fileManager.watchRecordFile }),
+    [fileManager.parameterFiles, fileManager.watchRecordFile],
+  );
+  const [viewRecordPorts] = useState(() =>
+    createViewRecordPorts({
+      projectId,
+      root: `/projects/${projectId}`,
+      host: viewRecordHost,
+      setViewRecord,
+      setViewEntryPath,
+      setAppliedWorkbenchRevision,
+    }),
+  );
+  /* The filesystem's connections can be replaced (a new worker): each session reopens its store on the new ones. */
+  useLayoutEffect(() => {
+    viewRecordPorts.replaceHost(viewRecordHost);
+  }, [viewRecordHost, viewRecordPorts]);
   const modelInteractionRef = useSelector(actorRef, (state) => state.context.modelInteractionRef);
   const geometryUnits = useSelector(actorRef, (state) => state.context.geometryUnits);
   const mainEntryPath = useSelector(
@@ -1042,9 +1082,9 @@ export function ProjectProvider({
   );
 
   const getMainFilename = useCallback(async () => {
-    const snapshot = await waitFor(actorRef, (state) => Boolean(state.context.project?.assets.main.entryPath));
+    const snapshot = await waitFor(actorRef, (state) => Boolean(state.context.project?.assets.main?.entryPath));
 
-    if (!snapshot.context.project?.assets.main.entryPath) {
+    if (!snapshot.context.project?.assets.main?.entryPath) {
       throw new Error('Main file not found');
     }
 
@@ -1074,6 +1114,7 @@ export function ProjectProvider({
       changeEntryPaths,
       registerWorkbenchRecordProducer,
       flushWorkbenchRecordProducers,
+      viewRecordPorts,
       modelInteractionRef,
       geometryUnits,
       mainEntryPath,
@@ -1114,6 +1155,7 @@ export function ProjectProvider({
     changeEntryPaths,
     registerWorkbenchRecordProducer,
     flushWorkbenchRecordProducers,
+    viewRecordPorts,
     modelInteractionRef,
     geometryUnits,
     mainEntryPath,

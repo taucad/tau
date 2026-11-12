@@ -39,7 +39,7 @@ export const heldSaveCopy = (
       return {
         title,
         description:
-          'Its agent is changing these files in another window. Your edits will be saved with the agent’s revision when it finishes.',
+          'Its agent is changing these files in another window. Your edits will be saved with the agent’s changes when it finishes.',
         canOpen: false,
       };
     }
@@ -47,7 +47,7 @@ export const heldSaveCopy = (
       return {
         title,
         description:
-          'Its agent is changing these files in a background window, so it can’t finish until that window is open again. Your edits will be saved with the agent’s revision.',
+          'Its agent is changing these files in a background window, so it can’t finish until that window is open again. Your edits will be saved with the agent’s changes.',
         canOpen: false,
       };
     }
@@ -55,7 +55,7 @@ export const heldSaveCopy = (
       return {
         title,
         description:
-          'Its agent is changing these files. Your edits will be saved with the agent’s revision when it finishes.',
+          'Its agent is changing these files. Your edits will be saved with the agent’s changes when it finishes.',
         canOpen: true,
       };
     }

@@ -83,7 +83,7 @@ describe('ProjectSyncStatus', () => {
       expect(trigger).toHaveFocus();
     });
     await user.click(trigger);
-    await user.click(screen.getByRole('button', { name: 'Open Revisions' }));
+    await user.click(screen.getByRole('button', { name: 'Open History' }));
     expect(openDetails).toHaveBeenCalledOnce();
   });
 });

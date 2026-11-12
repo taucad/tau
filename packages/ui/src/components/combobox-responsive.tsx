@@ -1,10 +1,19 @@
 import type { ReactNode } from 'react';
 import React from 'react';
 import type { ClassValue } from 'clsx';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
+import { defaultFilter } from 'cmdk';
 import { useIsMobile } from '#hooks/use-mobile.js';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '#components/command.js';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from '#components/command.js';
 import {
   Drawer,
   DrawerAction,
@@ -21,12 +30,39 @@ import {
 } from '#components/drawer.js';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/popover.js';
 import { cn } from '#utils/cn.js';
-import { menuGroupHeadingClass } from '#components/menu.variants.js';
+import {
+  comboboxViewTriggerClass,
+  menuGroupHeadingClass,
+  menuViewBackClass,
+  menuViewTriggerChevronClass,
+} from '#components/menu.variants.js';
+import {
+  stepBackOnEmptySearch,
+  useViewStack,
+  ViewStackBackContent,
+  viewStackEnterClass,
+} from '#components/view-stack.js';
+import type { ViewStack } from '#components/view-stack.js';
 import { Loader } from '#components/loader.js';
 
 type GroupedItems<T> = {
   name: string;
   items: T[];
+};
+
+/**
+ * A row that opens more items in place of the list, under a Back row (UX policy §7). Search stays global: a non-empty
+ * search lists the items of every level.
+ *
+ * @public
+ */
+export type ComboBoxSubView<T> = {
+  readonly id: string;
+  /** The row's content in the parent list. */
+  readonly label: ReactNode;
+  /** The sub-view's name, on its Back row and as the row's accessible text. */
+  readonly title: string;
+  readonly groupedItems: ReadonlyArray<GroupedItems<T>>;
 };
 
 type ComboBoxResponsiveProperties<T> = Omit<
@@ -78,6 +114,11 @@ type ComboBoxResponsiveProperties<T> = Omit<
   readonly shouldCloseOnSelect?: (value: string) => boolean;
   /** Rendered below the command list (outside keyboard navigation). */
   readonly footer?: ReactNode;
+  /** Rows that open sub-views of more items in the same popover or drawer. Not combined with virtualization. */
+  readonly subViews?: ReadonlyArray<ComboBoxSubView<T>>;
+  /** Controlled search text; omit to let the list own it. */
+  readonly search?: string;
+  readonly onSearchChange?: (search: string) => void;
 };
 
 /**
@@ -119,8 +160,12 @@ export function ComboBoxResponsive<T>({
   isNested: isNestedProperty,
   shouldCloseOnSelect,
   footer,
+  subViews,
+  search,
+  onSearchChange,
   ...properties
 }: ComboBoxResponsiveProperties<T>): React.JSX.Element {
+  const stack = useViewStack<string>('root');
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false);
   const isControlled = isOpenProperty !== undefined;
   const open = isControlled ? isOpenProperty : uncontrolledOpen;
@@ -163,6 +208,20 @@ export function ComboBoxResponsive<T>({
     onSelect?.(resolved);
   };
 
+  const { reset } = stack;
+  React.useEffect(() => {
+    if (!open) {
+      reset();
+    }
+  }, [open, reset]);
+
+  /** Escape steps back one sub-view before it closes the list. */
+  const stepBackOnEscape = (event: KeyboardEvent): void => {
+    if (stack.pop()) {
+      event.preventDefault();
+    }
+  };
+
   const handleOpenChange = (isOpen: boolean) => {
     // Pointer dismissal owns the next focus target. Refocusing the composer here
     // races a sibling picker opening from the same click and closes it again.
@@ -195,6 +254,12 @@ export function ComboBoxResponsive<T>({
           onCloseAutoFocus={(event) => {
             drawerProperties?.onCloseAutoFocus?.(event);
             handleCloseAutoFocus(event);
+          }}
+          onEscapeKeyDown={(event) => {
+            stepBackOnEscape(event);
+            if (!event.defaultPrevented) {
+              drawerProperties?.onEscapeKeyDown?.(event);
+            }
           }}
         >
           {isNested ? (
@@ -249,6 +314,11 @@ export function ComboBoxResponsive<T>({
               virtualizationHeight='60dvh'
               isLoadingMore={isLoadingMore}
               onLoadMore={onLoadMore}
+              subViews={subViews}
+              stack={stack}
+              search={search}
+              parentTitle={title}
+              onSearchChange={onSearchChange}
             />
             {footer}
           </DrawerList>
@@ -272,6 +342,12 @@ export function ComboBoxResponsive<T>({
           popoverProperties?.onCloseAutoFocus?.(event);
           handleCloseAutoFocus(event);
         }}
+        onEscapeKeyDown={(event) => {
+          stepBackOnEscape(event);
+          if (!event.defaultPrevented) {
+            popoverProperties?.onEscapeKeyDown?.(event);
+          }
+        }}
       >
         <>
           <ItemList
@@ -291,6 +367,11 @@ export function ComboBoxResponsive<T>({
             virtualizationHeight={virtualizationHeight}
             isLoadingMore={isLoadingMore}
             onLoadMore={onLoadMore}
+            subViews={subViews}
+            stack={stack}
+            search={search}
+            parentTitle={title}
+            onSearchChange={onSearchChange}
           />
           {footer}
         </>
@@ -316,6 +397,11 @@ function ItemList<T>({
   virtualizationHeight = 300,
   isLoadingMore = false,
   onLoadMore,
+  subViews,
+  stack,
+  search: searchProperty,
+  onSearchChange,
+  parentTitle,
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
   readonly onPick: (item: T) => void;
@@ -334,8 +420,21 @@ function ItemList<T>({
   readonly virtualizationHeight?: number | string;
   readonly isLoadingMore?: boolean;
   readonly onLoadMore?: () => void;
+  readonly subViews?: ReadonlyArray<ComboBoxSubView<T>>;
+  readonly stack: ViewStack<string>;
+  readonly search?: string;
+  readonly onSearchChange?: (search: string) => void;
+  /** The list's name, for the Back row's accessible name. */
+  readonly parentTitle: string;
 }) {
-  const [search, setSearch] = React.useState('');
+  const [ownSearch, setOwnSearch] = React.useState('');
+  const search = searchProperty ?? ownSearch;
+  const setSearch = (next: string): void => {
+    if (searchProperty === undefined) {
+      setOwnSearch(next);
+    }
+    onSearchChange?.(next);
+  };
   const lastSearchLoad = React.useRef('');
   const nonEmptyGroups = React.useMemo(() => groupedItems.filter((group) => group.items.length > 0), [groupedItems]);
 
@@ -494,32 +593,195 @@ function ItemList<T>({
   }
 
   return (
-    <Command>
-      {isSearchEnabled ? <CommandInput placeholder={searchPlaceHolder} /> : null}
-      <CommandList>
+    <NestedItemList
+      groupedItems={groupedItems}
+      subViews={subViews ?? []}
+      stack={stack}
+      search={search}
+      setSearch={setSearch}
+      isSearchEnabled={isSearchEnabled}
+      searchPlaceHolder={searchPlaceHolder}
+      emptyListMessage={emptyListMessage}
+      parentTitle={parentTitle}
+      getKeywords={getKeywords}
+      renderItem={(group, item) => {
+        const value = getValue(item);
+        return (
+          <CommandItem
+            key={value}
+            asChild={labelAsChild}
+            value={value}
+            keywords={[group, ...(getKeywords?.(item) ?? [])]}
+            className={cn(labelClassName)}
+            disabled={isDisabled?.(item)}
+            onSelect={() => {
+              onPick(item);
+            }}
+          >
+            {renderLabel(item, selectedItem)}
+          </CommandItem>
+        );
+      }}
+      getValue={getValue}
+    />
+  );
+}
+
+/** The cmdk values of the rows the list adds; item values are the caller's. */
+const viewValue = (id: string): string => `combobox-sub-view:${id}`;
+const backValue = 'combobox-view-back';
+
+/** Merge groups of the same name, keeping first-seen order and dropping repeated items. */
+function mergeGroups<T>(groups: ReadonlyArray<GroupedItems<T>>, getValue: (item: T) => string): Array<GroupedItems<T>> {
+  const seen = new Set<string>();
+  const merged = new Map<string, T[]>();
+  for (const group of groups) {
+    const items = merged.get(group.name) ?? [];
+    merged.set(group.name, items);
+    for (const item of group.items) {
+      const value = getValue(item);
+      if (!seen.has(value)) {
+        seen.add(value);
+        items.push(item);
+      }
+    }
+  }
+  return [...merged].map(([name, items]) => ({ name, items })).filter((group) => group.items.length > 0);
+}
+
+/**
+ * Order a search's groups and their items by the best match first, scored as cmdk filters them. cmdk does not reorder
+ * grouped items itself, so without this the first group in layout order takes the highlight and Enter: typing "jscad"
+ * would pick OpenCascade, whose keywords match loosely, over JSCAD. Ties keep layout order.
+ */
+function rankGroups<T>(
+  groups: ReadonlyArray<GroupedItems<T>>,
+  search: string,
+  score: (group: string, item: T) => number,
+): Array<GroupedItems<T>> {
+  if (search === '') {
+    return [...groups];
+  }
+  const ranked = groups.map((group) => {
+    const items = group.items
+      .map((item, index) => ({ item, index, score: score(group.name, item) }))
+      .sort((a, b) => b.score - a.score || a.index - b.index);
+    return { group: { name: group.name, items: items.map(({ item }) => item) }, best: items[0]?.score ?? 0 };
+  });
+  return ranked
+    .map((entry, index) => ({ ...entry, index }))
+    .sort((a, b) => b.best - a.best || a.index - b.index)
+    .map(({ group }) => group);
+}
+
+/**
+ * The list with its sub-views: the root's groups and a row per sub-view; a sub-view's Back row and groups; or, while
+ * searching, the items of every level. Backspace in an empty search steps back, as Escape does.
+ */
+function NestedItemList<T>({
+  groupedItems,
+  subViews,
+  stack,
+  search,
+  setSearch,
+  isSearchEnabled,
+  searchPlaceHolder,
+  emptyListMessage,
+  renderItem,
+  getValue,
+  getKeywords,
+  parentTitle,
+}: {
+  readonly parentTitle: string;
+  readonly getKeywords: ((item: T) => readonly string[]) | undefined;
+  readonly groupedItems: ReadonlyArray<GroupedItems<T>>;
+  readonly subViews: ReadonlyArray<ComboBoxSubView<T>>;
+  readonly stack: ViewStack<string>;
+  readonly search: string;
+  readonly setSearch: (search: string) => void;
+  readonly isSearchEnabled: boolean;
+  readonly searchPlaceHolder: string;
+  readonly emptyListMessage: ReactNode;
+  readonly renderItem: (group: string, item: T) => React.JSX.Element;
+  readonly getValue: (item: T) => string;
+}): React.JSX.Element {
+  const view = subViews.find(({ id }) => id === stack.view);
+  const isSearching = search !== '' && subViews.length > 0;
+  /* The cmdk list highlights rows itself: a step back highlights the row that opened the view, an open the view's first item. */
+  const [highlighted, setHighlighted] = React.useState<string | undefined>(undefined);
+  const { returnedTo, depth } = stack;
+  React.useEffect(() => {
+    if (returnedTo !== undefined) {
+      setHighlighted(returnedTo);
+    }
+  }, [returnedTo, depth]);
+  const groups = isSearching
+    ? rankGroups(
+        mergeGroups([...groupedItems, ...subViews.flatMap((subView) => subView.groupedItems)], getValue),
+        search,
+        (group, item) => defaultFilter?.(getValue(item), search, [group, ...(getKeywords?.(item) ?? [])]) ?? 0,
+      )
+    : (view?.groupedItems ?? groupedItems).filter((group) => group.items.length > 0);
+  const open = (subView: ComboBoxSubView<T>): void => {
+    stack.push(subView.id, { returnKey: viewValue(subView.id) });
+    const first = subView.groupedItems.find((group) => group.items.length > 0)?.items[0];
+    setHighlighted(first === undefined ? backValue : getValue(first));
+  };
+  return (
+    <Command
+      {...(highlighted === undefined ? {} : { value: highlighted })}
+      onValueChange={setHighlighted}
+      onKeyDown={stepBackOnEmptySearch(search, stack.pop)}
+    >
+      {isSearchEnabled ? (
+        <CommandInput placeholder={searchPlaceHolder} value={search} onValueChange={setSearch} />
+      ) : null}
+      <CommandList key={stack.view} className={viewStackEnterClass(stack.direction)}>
         <CommandEmpty className='mx-2'>{emptyListMessage}</CommandEmpty>
-        {nonEmptyGroups.map((group) => (
+        {view ? (
+          <CommandGroup forceMount>
+            <CommandItem
+              forceMount
+              value={backValue}
+              data-slot='combobox-view-back'
+              aria-label={`Back to ${parentTitle}`}
+              className={menuViewBackClass}
+              onSelect={() => {
+                stack.pop();
+              }}
+            >
+              <ViewStackBackContent title={view.title} />
+            </CommandItem>
+          </CommandGroup>
+        ) : null}
+        {groups.map((group) => (
           <CommandGroup key={group.name} heading={group.name}>
-            {group.items.map((item) => {
-              const value = getValue(item);
-              return (
-                <CommandItem
-                  key={value}
-                  asChild={labelAsChild}
-                  value={value}
-                  keywords={[group.name, ...(getKeywords?.(item) ?? [])]}
-                  className={cn(labelClassName)}
-                  disabled={isDisabled?.(item)}
-                  onSelect={() => {
-                    onPick(item);
-                  }}
-                >
-                  {renderLabel(item, selectedItem)}
-                </CommandItem>
-              );
-            })}
+            {group.items.map((item) => renderItem(group.name, item))}
           </CommandGroup>
         ))}
+        {view !== undefined || isSearching || subViews.length === 0 ? null : (
+          <>
+            <CommandSeparator />
+            <CommandGroup data-slot='combobox-sub-views'>
+              {subViews.map((subView) => (
+                <CommandItem
+                  key={subView.id}
+                  value={viewValue(subView.id)}
+                  keywords={[subView.title]}
+                  data-slot='combobox-sub-view-trigger'
+                  aria-haspopup='true'
+                  className={comboboxViewTriggerClass}
+                  onSelect={() => {
+                    open(subView);
+                  }}
+                >
+                  {subView.label}
+                  <ChevronRight aria-hidden className={menuViewTriggerChevronClass} />
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
       </CommandList>
     </Command>
   );

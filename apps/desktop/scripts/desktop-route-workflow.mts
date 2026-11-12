@@ -8,6 +8,8 @@ import { desktopReleaseIdentity, parseDesktopArtifactManifest } from '#shared/de
 /* oxlint-disable no-restricted-imports -- Adjacent release workflow helpers share one explicit publication boundary. */
 import {
   desktopCandidateRoutes,
+  desktopCatalogLanes,
+  desktopLaneKeys,
   desktopManifestDigest,
   desktopPublicationScopes,
 } from './desktop-route-publication.mjs';
@@ -26,10 +28,11 @@ const main = async (): Promise<void> => {
   // The channel's own gate, checked before identity, downloads or immutable mirroring.
   requireDesktopInstallerPublicationEnabled(channel);
   await requireDesktopPublicationAuthority(channel, operation);
-  // Selects the candidate and receipt artifact names; the Mac-only scope never publishes production.
+  // Selects the candidate and receipt artifact names. A platform scope (D-H5) selects a promotion only: renewal renews
+  // the completed promotion whatever scope promoted it.
   const scope = z.enum(desktopPublicationScopes).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
-  if (scope === 'macos' && (channel !== 'staging' || operation !== 'promote-routes')) {
-    throw new Error('Mac-only publication is a staging promotion only');
+  if (scope !== 'all' && operation !== 'promote-routes') {
+    throw new Error('Platform-scoped publication is a promotion only');
   }
   const root = resolve(z.string().min(1).parse(process.env['DESKTOP_ASSETS_DIR']));
   const base = channel === 'production' ? 'https://downloads.tau.new' : 'https://downloads.taucad.dev';
@@ -53,41 +56,57 @@ const main = async (): Promise<void> => {
     }
     return Buffer.concat(chunks).toString('utf8');
   };
-  let tag: string;
-  if (operation === 'promote-routes') {
-    tag = z.string().min(1).parse(process.env['REQUESTED_TAG']);
-    if (desktopReleaseIdentity(tag).channel !== channel) {
-      throw new Error('Requested candidate channel differs');
-    }
-    execFileSync(
-      process.execPath,
-      ['--import', '@oxc-node/core/register', 'apps/desktop/scripts/fetch-desktop-installer-candidate.mts'],
-      { stdio: 'inherit' },
-    );
-  } else {
+  if (operation === 'renew-routes') {
+    // Renew every lane the published catalog says is promoted, each from its own completed candidate (D-H5); the
+    // publish step renews them one at a time, each in its own directory.
     await mkdir(root, { recursive: false });
-    const completed = z
-      .object({ tag: z.string(), channel: z.literal(channel), manifestSha256: z.string().regex(/^[a-f\d]{64}$/u) })
-      .parse(JSON.parse(await download('latest/installer-completed.json')));
-    tag = completed.tag;
-    if (desktopReleaseIdentity(tag).channel !== channel) {
-      throw new Error('Completed channel differs');
-    }
-    const text = await download(`releases/${encodeURIComponent(tag)}/desktop-artifacts.json`);
-    const manifest = parseDesktopArtifactManifest(JSON.parse(text));
-    if (desktopManifestDigest(manifest) !== completed.manifestSha256) {
-      throw new Error('Completed manifest differs');
-    }
-    await writeFile(resolve(root, 'desktop-artifacts.json'), text);
-    for (const route of ['windows-nsis', 'linux-appimage']) {
-      if (!manifest.artifacts.some((item) => item.kind === route)) {
-        continue;
+    const lanes = desktopCatalogLanes(JSON.parse(await download('latest/installers.json')));
+    const entries: string[] = [];
+    for (const lane of lanes) {
+      const directory = resolve(root, lane);
+      // oxlint-disable-next-line no-await-in-loop -- Each lane restores only its own small completed metadata.
+      await mkdir(directory, { recursive: false });
+      const completed = z
+        .object({ tag: z.string(), channel: z.literal(channel), manifestSha256: z.string().regex(/^[a-f\d]{64}$/u) })
+        // oxlint-disable-next-line no-await-in-loop -- Lanes are renewed in a fixed order.
+        .parse(JSON.parse(await download(desktopLaneKeys(lane).completion)));
+      const { tag } = completed;
+      if (desktopReleaseIdentity(tag).channel !== channel) {
+        throw new Error('Completed channel differs');
       }
-      const name = `desktop-update-${route}-x64.json`;
-      // oxlint-disable-next-line no-await-in-loop -- Restore only immutable small metadata needed to renew this completed candidate.
-      await writeFile(resolve(root, name), await download(`releases/${encodeURIComponent(tag)}/${name}`));
+      // oxlint-disable-next-line no-await-in-loop -- Lanes are renewed in a fixed order.
+      const text = await download(`releases/${encodeURIComponent(tag)}/desktop-artifacts.json`);
+      const manifest = parseDesktopArtifactManifest(JSON.parse(text));
+      if (desktopManifestDigest(manifest) !== completed.manifestSha256 || manifest.tag !== tag) {
+        throw new Error('Completed manifest differs');
+      }
+      // oxlint-disable-next-line no-await-in-loop -- Lanes are renewed in a fixed order.
+      await writeFile(resolve(directory, 'desktop-artifacts.json'), text);
+      for (const route of ['windows-nsis', 'linux-appimage']) {
+        if (!manifest.artifacts.some((item) => item.kind === route)) {
+          continue;
+        }
+        const name = `desktop-update-${route}-x64.json`;
+        // oxlint-disable-next-line no-await-in-loop -- Restore only immutable small metadata needed to renew this completed candidate.
+        await writeFile(resolve(directory, name), await download(`releases/${encodeURIComponent(tag)}/${name}`));
+      }
+      entries.push(`${lane}:${tag}:${manifest.sourceCommit}`);
     }
+    await appendFile(
+      z.string().min(1).parse(process.env['GITHUB_ENV']),
+      `TAU_RENEWAL_LANES=${entries.join(' ')}\nTAU_ROUTE_OPERATION=${operation}\n`,
+    );
+    return;
   }
+  const tag = z.string().min(1).parse(process.env['REQUESTED_TAG']);
+  if (desktopReleaseIdentity(tag).channel !== channel) {
+    throw new Error('Requested candidate channel differs');
+  }
+  execFileSync(
+    process.execPath,
+    ['--import', '@oxc-node/core/register', 'apps/desktop/scripts/fetch-desktop-installer-candidate.mts'],
+    { stdio: 'inherit' },
+  );
   const manifest = parseDesktopArtifactManifest(
     JSON.parse(await readFile(resolve(root, 'desktop-artifacts.json'), 'utf8')),
   );
@@ -96,30 +115,28 @@ const main = async (): Promise<void> => {
   }
   process.env['DESKTOP_RELEASE_TAG'] = tag;
   process.env['TAU_DESKTOP_SOURCE_SHA'] = manifest.sourceCommit;
-  if (operation === 'promote-routes') {
-    const approved = z
-      .string()
-      .regex(/^[a-f\d]{64}$/u)
-      .parse(process.env['APPROVED_DIGEST']);
-    if (desktopManifestDigest(manifest) !== approved) {
-      throw new Error('Operator approved a different manifest');
-    }
-    // Refuse a candidate outside the selected scope before any immutable object is mirrored.
-    desktopCandidateRoutes(manifest, scope);
-    await writeFile(
-      resolve(root, 'promotion-approval.json'),
-      JSON.stringify({
-        schemaVersion: 1,
-        tag,
-        channel,
-        version: manifest.version,
-        sourceCommit: manifest.sourceCommit,
-        manifestSha256: approved,
-        approved: true,
-      }),
-    );
-    await publishDesktopRoutes('mirror-routes');
+  const approved = z
+    .string()
+    .regex(/^[a-f\d]{64}$/u)
+    .parse(process.env['APPROVED_DIGEST']);
+  if (desktopManifestDigest(manifest) !== approved) {
+    throw new Error('Operator approved a different manifest');
   }
+  // Refuse a candidate outside the selected scope before any immutable object is mirrored.
+  desktopCandidateRoutes(manifest, scope);
+  await writeFile(
+    resolve(root, 'promotion-approval.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      tag,
+      channel,
+      version: manifest.version,
+      sourceCommit: manifest.sourceCommit,
+      manifestSha256: approved,
+      approved: true,
+    }),
+  );
+  await publishDesktopRoutes('mirror-routes');
   await appendFile(
     z.string().min(1).parse(process.env['GITHUB_ENV']),
     `DESKTOP_RELEASE_TAG=${tag}\nTAU_DESKTOP_SOURCE_SHA=${manifest.sourceCommit}\nTAU_ROUTE_OPERATION=${operation}\n`,

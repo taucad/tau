@@ -7,6 +7,7 @@ export * from '#constants/filesystem.constants.js';
 export * from '#constants/geometry.constants.js';
 export * from '#constants/id.constants.js';
 export * from '#constants/kernel.constants.js';
+export * from '#constants/kernel-routing.constants.js';
 export * from '#constants/logger.constants.js';
 export * from '#constants/material.constants.js';
 export * from '#constants/machines-feature.constants.js';

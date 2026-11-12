@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * One History row and a revision's More (charter D7; canvas rounds 3–21).
+ * One History row and an entry's More (charter D7; blueprint C3).
  *
  * The row is scripted through the one revision harness, so what is asserted is
  * what a person sees and what the row sends back — never a worker.
@@ -11,20 +11,30 @@ import type { RevisionDiffEntry } from '@taucad/revisions';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import { RevisionMenu, RevisionRow } from '#routes/w.$workspace.$project/revision-marker.js';
+import { RevisionMenu, RevisionRow, nextVersionNumber } from '#routes/w.$workspace.$project/revision-marker.js';
 import { revisionTitle } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionRowProps } from '#routes/w.$workspace.$project/revision-marker.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
+import type * as UseFeatureModule from '#flags/use-feature.js';
 
-/* The project actor as `useSelector` reads it: Publish names the version after the project. */
 const projectSnapshot = { context: { project: { name: 'Bracket', assets: { main: { entryPath: 'main.scad' } } } } };
 const projectRef = {
   subscribe: () => ({ unsubscribe: () => undefined }),
   getSnapshot: () => projectSnapshot,
 };
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', projectRef }) }));
+/* Tau's debug setting, off unless a row turns it on (B5). */
+const flags = vi.hoisted(() => ({ tauDebug: false }));
+vi.mock('#flags/use-feature.js', async (importOriginal) => {
+  const original = await importOriginal<typeof UseFeatureModule>();
+  return {
+    ...original,
+    useFeature: (flag: Parameters<typeof original.useFeature>[0]) =>
+      flag === 'tauDebug' ? flags.tauDebug : original.useFeature(flag),
+  };
+});
 vi.mock('#hooks/use-revision-status.js', async () => {
   const harness = await import('#hooks/use-revision-status.test-harness.js');
   return harness.revisionStatusMock();
@@ -60,17 +70,16 @@ afterEach(() => {
 const card = (over: Partial<RevisionCard> = {}): RevisionCard => ({
   revisionId: 'rev-2',
   n: 2,
-  createdAt: new Date('2026-07-09T14:14:00').getTime(),
+  createdAt: Date.now() - 60_000,
   summary: 'Thicker base',
   actor: 'Agent',
   turnId: 'u1',
   conflicted: false,
-  trigger: 'turn',
+  capture: 'turn',
   ...over,
 });
 
 const onRestore = vi.fn();
-const onUndoRestore = vi.fn();
 
 /** The row, owning its own open state as History does. */
 function Row(props: Partial<RevisionRowProps>): React.JSX.Element {
@@ -82,11 +91,11 @@ function Row(props: Partial<RevisionRowProps>): React.JSX.Element {
         revision={revision}
         title={revisionTitle(revision, [revision])}
         isCurrent={false}
-        isDirty={false}
+        isAtFiles={false}
         branch='main'
+        nextVersion={2}
         isBusy={false}
         onRestore={onRestore}
-        onUndoRestore={onUndoRestore}
         {...props}
         isOpen={isOpen}
         onOpenChange={setIsOpen}
@@ -95,34 +104,44 @@ function Row(props: Partial<RevisionRowProps>): React.JSX.Element {
   );
 }
 
+/* The app's root TooltipProvider, which the ID's copy glyph needs. */
 const renderRow = (props: Partial<RevisionRowProps> = {}): void => {
   render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <Row {...props} />
-    </QueryClientProvider>,
+    <TooltipProvider>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <Row {...props} />
+      </QueryClientProvider>
+    </TooltipProvider>,
   );
 };
 
-const openRow = async (user: ReturnType<typeof userEvent.setup>, name = 'Rev 2 · Thicker base'): Promise<void> => {
+const openRow = async (
+  user: ReturnType<typeof userEvent.setup>,
+  name: string | RegExp = /^Thicker base · /u,
+): Promise<void> => {
   await user.click(screen.getByRole('button', { name }));
 };
 
+const openBlock = (): HTMLElement => document.querySelector<HTMLElement>('[data-slot="open-row"]')!;
+
 describe('RevisionRow', () => {
-  it('is one button at rest, naming the revision by Rev N and its title (canvas round 8)', () => {
+  it('is one button at rest, naming the entry by its title and time, with the time in the right-hand column', () => {
     renderRow();
     const item = screen.getByRole('listitem');
     expect(within(item).getAllByRole('button')).toHaveLength(1);
-    expect(within(item).getByRole('button', { name: 'Rev 2 · Thicker base' })).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    );
+    expect(within(item).getByRole('button', { name: /^Thicker base · /u })).toHaveAttribute('aria-expanded', 'false');
     expect(item).toHaveTextContent('Agent');
+    const when = item.querySelector('[data-slot="row-when"] time');
+    expect(when).not.toBeNull();
+    /* Always shown, at every pane width: the narrow pane keeps title, who and time. */
+    expect(when).not.toHaveClass('hidden');
   });
 
   it('shows no who line where the resolver gives none, nor a raw actor id (Q2, HQ4)', () => {
     renderRow({ revision: card({ actor: '', isYours: true }) });
     const item = screen.getByRole('listitem');
     expect(item).not.toHaveTextContent('You');
+    expect(item.querySelector('[data-slot="row-meta"]')).toBeNull();
     expect(item.textContent).not.toMatch(/user_|anon:|^agent$/u);
   });
 
@@ -131,10 +150,139 @@ describe('RevisionRow', () => {
     expect(screen.getByRole('listitem')).toHaveTextContent('You');
   });
 
-  it('says so instead of inventing a number for a revision off this line', () => {
+  /* A3c: the account that backed the entry up, and the one it was recorded as, are both said; the warning points at the second. */
+  it('puts a warning glyph beside “recorded as” on a mismatch, and never folds the two names', () => {
+    renderRow({ revision: card({ actor: 'Maya Chen · recorded as You', capture: 'save', turnId: undefined }) });
+    const meta = screen.getByRole('listitem').querySelector<HTMLElement>('[data-slot="row-meta"]')!;
+    expect(meta).toHaveTextContent('Maya Chen · recorded as You');
+    const recorded = within(meta).getByText('recorded as You').parentElement!;
+    expect(recorded.querySelector('svg.text-warning')).not.toBeNull();
+    expect(within(meta).getByText('Maya Chen').parentElement!.querySelector('svg')).toBeNull();
+  });
+
+  it('names a row off this line by its title and time, inventing no number', () => {
     renderRow({ revision: card({ n: undefined }) });
-    expect(screen.getByRole('button', { name: 'Revision · Thicker base' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Thicker base · /u })).toBeInTheDocument();
     expect(screen.queryByText(/Rev \d/u)).toBeNull();
+  });
+
+  it('titles an agent row by its request, and says Agent change when the request is not known (Q9)', () => {
+    renderRow({ revision: card({ summary: 'Agent change' }) });
+    expect(screen.getByRole('button', { name: /^Agent change · /u })).toBeInTheDocument();
+  });
+
+  /* Canvas decision 8: Current follows the title's last word; it is not a second line. */
+  it('reads Current after the title, on the entry Current marks', () => {
+    renderRow({ isCurrent: true });
+    const title = screen.getByRole('listitem').querySelector('[data-slot="row-title"]');
+    expect(title?.querySelector('[data-slot="current-pill"]')).toHaveTextContent('Current');
+    expect(screen.getByRole('button', { name: /^Thicker base · /u })).toBeInTheDocument();
+  });
+
+  it('shows a version’s number in the right-hand column and says it is one', () => {
+    renderRow({ revision: card({ tags: ['Fit check'], versions: [{ name: 'Fit check', number: 3 }] }) });
+    const item = screen.getByRole('listitem');
+    expect(item.querySelector('[data-slot="row-when"]')).toHaveTextContent('V3');
+    expect(item.querySelector('[data-slot="row-meta"]')).toHaveTextContent(/^Version/u);
+    expect(screen.getByRole('button', { name: /^V3 · Fit check$/u })).toBeInTheDocument();
+  });
+
+  /* A6: the Start row's time follows its fact where the pane has room for it. */
+  it('keeps the Start row’s time after its fact at 22rem and wider', () => {
+    renderRow({ revision: card({ start: 'created', capture: 'create', actor: '', turnId: undefined }) });
+    const meta = screen.getByRole('listitem').querySelector('[data-slot="row-meta"]')!;
+    expect(meta).toHaveTextContent(/^Version · project created/u);
+    expect(meta.querySelector(String.raw`.\@\[22rem\]\:inline`)).not.toBeNull();
+  });
+
+  /* Blueprint "An open row": the cue is the chevron and the content, never a tint. */
+  it('has no background, closed or open', async () => {
+    const user = userEvent.setup();
+    renderRow();
+    const item = screen.getByRole('listitem');
+    const background = /(^|\s)bg-(?!background)/u;
+    expect(item.className).not.toMatch(background);
+    await openRow(user);
+    expect(item.className).not.toMatch(background);
+    expect(openBlock().className).not.toMatch(background);
+    expect(screen.getByRole('button', { name: /^Thicker base · /u }).className).not.toMatch(/(^|\s)bg-/u);
+  });
+
+  it('opens to at most three visible buttons and one More with two items', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.diff = [];
+    renderRow();
+    await openRow(user);
+    const block = openBlock();
+    const buttons = within(block).getAllByRole('button');
+    expect(buttons.map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual([
+      'Restore “Thicker base”',
+      'Compare',
+      'More',
+      'Copy ID',
+    ]);
+    /* Restore, Compare and the copy glyph; More is the one ⋮. */
+    expect(buttons.filter((button) => button.getAttribute('aria-label') !== 'More')).toHaveLength(3);
+    await user.click(within(block).getByRole('button', { name: 'More' }));
+    const items = within(screen.getByRole('menu')).getAllByRole('menuitem');
+    expect(items.map((item) => item.textContent)).toEqual(['Create version…', 'New branch from here…']);
+    expect(screen.queryByRole('menuitem', { name: /Publish|Remove|Copy/u })).toBeNull();
+  });
+
+  /* Blueprint "One rule for where a button sits": a body aligns by its body, on the content edge. */
+  it('starts Restore on the file list’s edge and ends More on the row’s right edge', async () => {
+    const user = userEvent.setup();
+    renderRow();
+    await openRow(user);
+    const actions = openBlock().querySelector<HTMLElement>('[data-slot="row-actions"]')!;
+    const restore = within(actions).getByRole('button', { name: 'Restore “Thicker base”' });
+    const more = within(actions).getByRole('button', { name: 'More' });
+    /* Outline buttons, so their bodies are the edge: no hanging padding to pull back. */
+    expect(restore.className).toMatch(/\bborder\b/u);
+    expect(more.className).toMatch(/\bborder\b/u);
+    expect(actions.firstElementChild).toBe(restore);
+    expect(actions.lastElementChild).toBe(more.parentElement);
+    expect(more.parentElement).toHaveClass('ml-auto');
+    expect(restore.className).not.toMatch(/(^|\s)-?m[lx]-/u);
+  });
+
+  it('gives one line of facts: who, the date and time, and a short ID whose glyph copies the full one (B5)', async () => {
+    const user = userEvent.setup();
+    const id = 'a'.repeat(40);
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    renderRow({ revision: card({ revisionId: id, actor: '', isYours: true, capture: 'save', turnId: undefined }) });
+    await openRow(user);
+    const facts = openBlock().querySelector<HTMLElement>('[data-slot="row-facts"]')!;
+    expect(facts).toHaveTextContent(/^Saved by you/u);
+    expect(facts).toHaveTextContent(`ID ${'a'.repeat(7)}`);
+    expect(document.body.textContent).not.toMatch(/[\da-f]{40}/u);
+    await user.click(within(facts).getByRole('button', { name: 'Copy ID' }));
+    expect(writeText).toHaveBeenCalledWith(id);
+    expect(screen.queryByRole('button', { name: 'Details' })).toBeNull();
+  });
+
+  /* A5: the base cut's fact moves from Details into the open row's fact line. */
+  it('says a turn’s base cut holds your own edits, in the fact line', async () => {
+    const user = userEvent.setup();
+    renderRow({ revision: card({ summary: 'Autosave', turnCut: 'base', actor: '' }) });
+    await openRow(user, /^Autosave · /u);
+    expect(openBlock().querySelector('[data-slot="row-facts"]')).toHaveTextContent(
+      /^Your edits, saved before the agent started/u,
+    );
+  });
+
+  it.each([
+    [{ capture: 'idle', actor: '', turnId: undefined }, 'Autosave'],
+    [{ capture: 'idle', actor: 'Maya Chen', turnId: undefined }, 'Autosave · Maya Chen'],
+    [{ capture: 'switch', actor: '', isYours: true, turnId: undefined }, 'Saved before switching branch'],
+    [{ capture: 'save', actor: 'Maya Chen', turnId: undefined }, 'Saved by Maya Chen'],
+    [{ capture: 'turn', actor: 'Agent' }, 'Agent'],
+  ] as const)('folds what asked for the entry into who (%o)', async (over, fact) => {
+    const user = userEvent.setup();
+    renderRow({ revision: card(over) });
+    await user.click(screen.getByRole('button', { name: /^(Thicker base|Autosave) · /u }));
+    expect(openBlock().querySelector('[data-slot="row-facts"]')?.firstElementChild).toHaveTextContent(fact);
   });
 
   it('opens to its files, each row opening the shared comparison in its path’s language (S38)', async () => {
@@ -156,7 +304,7 @@ describe('RevisionRow', () => {
     expect(screen.getByTestId('diff')).toHaveTextContent('cube(1);|cube(2);');
   });
 
-  it('should keep dirty history on its parent comparison and offer live comparison explicitly', async () => {
+  it('keeps a dirty current entry on its parent comparison, and offers Compare with the current files', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.comparison = {
       original: 'parent',
@@ -165,16 +313,13 @@ describe('RevisionRow', () => {
       change: 'modified',
       notices: [],
     };
-    renderRow({ isCurrent: true, isDirty: true });
+    renderRow({ isCurrent: true });
     await openRow(user);
-    expect(screen.getByRole('button', { name: 'Compare bracket.scad' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
     expect(await screen.findByTestId('diff')).toHaveTextContent('parent|saved');
     expect(revisionStatusHarness.comparisonRequests).toContain('rev-2:bracket.scad:parent');
-    expect(screen.queryByText('Original bytes')).not.toBeInTheDocument();
-    expect(screen.queryByText('Current bytes')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    expect(screen.getByRole('menuitem', { name: 'Compare with current' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Compare' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Restore “Thicker base”' })).toBeEnabled();
   });
 
   it('should show three files first and toggle the complete file list', async () => {
@@ -195,14 +340,14 @@ describe('RevisionRow', () => {
 
     await user.click(within(files).getByRole('button', { name: 'Show all 5 files' }));
     expect(within(files).getAllByRole('button', { name: /^Compare /u })).toHaveLength(5);
-    expect(within(files).getByRole('button', { name: 'Collapse files' })).toBeInTheDocument();
+    expect(within(files).getByRole('button', { name: 'Show fewer' })).toBeInTheDocument();
 
-    await user.click(within(files).getByRole('button', { name: 'Collapse files' }));
+    await user.click(within(files).getByRole('button', { name: 'Show fewer' }));
     expect(within(files).getAllByRole('button', { name: /^Compare /u })).toHaveLength(3);
     expect(within(files).getByRole('button', { name: 'Show all 5 files' })).toBeInTheDocument();
   });
 
-  it('should use the same three-file preview when comparing with current', async () => {
+  it('should use the same three-file preview when comparing with the current files', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-5' };
     revisionStatusHarness.diff = Array.from(
@@ -214,24 +359,21 @@ describe('RevisionRow', () => {
     );
     renderRow();
     await openRow(user);
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Compare with current' }));
+    await user.click(screen.getByRole('button', { name: 'Compare' }));
 
-    const files = await screen.findByRole('list', { name: 'Changed since Rev 2' });
+    const files = await screen.findByRole('list', { name: 'Changed since “Thicker base”' });
     expect(within(files).getAllByRole('button', { name: /^Compare /u })).toHaveLength(3);
     expect(within(files).getByRole('button', { name: 'Show all 4 files' })).toBeInTheDocument();
   });
 
-  it('tells a failed comparison from an empty file, and retries it', async () => {
+  it('tells a failed comparison from an empty file, and tries again', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.comparisonError = new Error('Tree is unavailable');
     renderRow();
     await openRow(user);
     await user.click(screen.getByRole('button', { name: 'Compare main.geospec.ts' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Could not compare main.geospec.ts. Tree is unavailable',
-    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t compare main.geospec.ts.');
     revisionStatusHarness.comparisonError = undefined;
     revisionStatusHarness.comparison = {
       original: 'a',
@@ -240,113 +382,61 @@ describe('RevisionRow', () => {
       change: 'modified',
       notices: [],
     };
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByTestId('diff')).toHaveTextContent('a|b');
   });
 
-  it('restores a revision it is not on, naming it in the button’s accessible name', async () => {
+  it('restores an entry the files are not at, naming it in the button’s accessible name', async () => {
     const user = userEvent.setup();
     onRestore.mockClear();
     renderRow();
     await openRow(user);
-    await user.click(screen.getByRole('button', { name: 'Restore Rev 2' }));
+    await user.click(screen.getByRole('button', { name: 'Restore “Thicker base”' }));
     expect(onRestore).toHaveBeenCalledWith('rev-2');
   });
 
-  it('offers no Restore on the revision you are on, and reads Current', async () => {
+  /* Executor ruling: Restore and Compare are disabled on the entry the files are at, and say why. */
+  it('disables Restore and Compare on the entry the files are at, and says why', async () => {
     const user = userEvent.setup();
-    renderRow({ isCurrent: true });
-    expect(screen.getByRole('listitem')).toHaveTextContent('Current');
+    renderRow({ isCurrent: true, isAtFiles: true });
     await openRow(user);
-    expect(screen.queryByRole('button', { name: /^Restore/u })).not.toBeInTheDocument();
+    const reason = 'Your files are at this point, so there is nothing to restore or compare.';
+    for (const name of ['Restore “Thicker base”', 'Compare']) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAccessibleDescription(reason);
+    }
   });
 
   /* A9, RV-D1: a restore is a new row named by what it restored, never a Rewind. */
   it('names a restore row by its provenance, with the Restored glyph', () => {
-    const restored = card({ revisionId: 'rev-5', n: 5, summary: 'Restore', trigger: 'restore', restoredFrom: 'rev-3' });
+    const restored = card({ revisionId: 'rev-5', n: 5, summary: 'Restore', capture: 'restore', restoredFrom: 'rev-3' });
     const target = card({ revisionId: 'rev-3', n: 3 });
-    expect(revisionTitle(restored, [restored, target])).toBe('Restored Rev 3');
-    renderRow({ revision: restored, title: 'Restored Rev 3' });
-    expect(screen.getByRole('button', { name: 'Rev 5 · Restored Rev 3' })).toBeInTheDocument();
+    expect(revisionTitle(restored, [restored, target])).toBe('Restored “Thicker base”');
+    renderRow({ revision: restored, title: 'Restored “Thicker base”' });
+    expect(screen.getByRole('button', { name: /^Restored “Thicker base” · /u })).toBeInTheDocument();
     expect(screen.getByLabelText('Restored')).toBeInTheDocument();
     expect(screen.queryByLabelText(/Rewind/u)).toBeNull();
   });
 
-  it('offers Undo restore on the restore row you are on while nothing landed after it (D2)', async () => {
+  /* Copy table: Undo restore lives in the header and the toast, not also on the row. */
+  it('offers no Undo restore on the row', async () => {
     const user = userEvent.setup();
-    onUndoRestore.mockClear();
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
       restore: { ...revisionStatusHarness.status.restore, undoable: true },
     };
     renderRow({
-      revision: card({ restoredFrom: 'rev-1', trigger: 'restore' }),
-      title: 'Restored Rev 1',
+      revision: card({ restoredFrom: 'rev-1', capture: 'restore' }),
+      title: 'Restored “Thicker base”',
       isCurrent: true,
+      isAtFiles: true,
     });
-    await openRow(user, 'Rev 2 · Restored Rev 1');
-    await user.click(screen.getByRole('button', { name: 'Undo restore' }));
-    expect(onUndoRestore).toHaveBeenCalledOnce();
+    await openRow(user, /^Restored “Thicker base” · /u);
+    expect(screen.queryByRole('button', { name: /Undo/u })).toBeNull();
   });
 
-  /* M1: after a reload, or a restore from another device, the machine holds no undo target. */
-  it('offers no Undo restore on a restore row this device’s restore did not mint', async () => {
-    const user = userEvent.setup();
-    renderRow({
-      revision: card({ restoredFrom: 'rev-1', trigger: 'restore' }),
-      title: 'Restored Rev 1',
-      isCurrent: true,
-    });
-    await openRow(user, 'Rev 2 · Restored Rev 1');
-    expect(screen.queryByRole('button', { name: 'Undo restore' })).not.toBeInTheDocument();
-  });
-
-  it('ends its actions with More and Details, which wrap as one pair (rounds 14–18)', async () => {
-    const user = userEvent.setup();
-    renderRow();
-    await openRow(user);
-    const row = document.querySelector('[data-slot="row-actions"]');
-    expect(row).toHaveClass('@container/actions', 'flex-wrap', 'justify-between');
-    const end = row?.querySelector('[data-slot="actions-end"]');
-    expect(within(end as HTMLElement).getByRole('button', { name: 'More actions for Rev 2' })).toBeInTheDocument();
-    await user.click(within(end as HTMLElement).getByRole('button', { name: 'Details' }));
-    const details = document.querySelector('dl[aria-label="Details for Rev 2"]');
-    expect(details).toHaveTextContent('rev-2');
-    expect(details).toHaveTextContent('Agent turn');
-  });
-
-  /* W1 Details: the revision a row follows, and a first revision that follows none. */
-  it('names the parent it follows in Details, and says a first revision has none', async () => {
-    const user = userEvent.setup();
-    renderRow({ revision: card({ parent: 'rev-1' }) });
-    await openRow(user);
-    await user.click(screen.getByRole('button', { name: 'Details' }));
-    expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(/Parent\s*rev-1/u);
-  });
-
-  /* Canvas DetailsList: the tree the revision carries, from the log row itself. */
-  it('names the tree it carries in Details', async () => {
-    const user = userEvent.setup();
-    renderRow({ revision: card({ treeId: 'a'.repeat(40) }) });
-    await openRow(user);
-    await user.click(screen.getByRole('button', { name: 'Details' }));
-    expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(
-      new RegExp(`Tree\\s*${'a'.repeat(40)}`, 'u'),
-    );
-  });
-
-  it('says a branch’s first revision follows none', async () => {
-    const user = userEvent.setup();
-    renderRow({ revision: card({ revisionId: 'rev-1', n: 1 }) });
-    await openRow(user, 'Rev 1 · Thicker base');
-    await user.click(screen.getByRole('button', { name: 'Details' }));
-    expect(document.querySelector('dl[aria-label="Details for Rev 1"]')).toHaveTextContent(
-      /Parent\s*None \(first revision\)/u,
-    );
-  });
-
-  /* Canvas round 4b: the whole revision against the current files, from the row's More. */
-  it('compares the whole revision with the current files from More, and returns to its own changes', async () => {
+  it('compares the whole entry with the current files, and Done returns to its own changes', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-5' };
     revisionStatusHarness.comparison = {
@@ -358,89 +448,125 @@ describe('RevisionRow', () => {
     };
     renderRow();
     await openRow(user);
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Compare with current' }));
+    await user.click(screen.getByRole('button', { name: 'Compare' }));
+    expect(screen.getByRole('button', { name: 'Compare' })).toHaveAttribute('aria-pressed', 'true');
 
-    const since = await screen.findByRole('list', { name: 'Changed since Rev 2' });
+    const since = await screen.findByRole('list', { name: 'Changed since “Thicker base”' });
+    expect(screen.getByText('Comparing with your current files')).toBeInTheDocument();
     expect(revisionStatusHarness.diffRequests).toContain('rev-2..checkout');
     await user.click(within(since).getByRole('button', { name: 'Compare bracket.scad with the current file' }));
     expect(await screen.findByTestId('diff')).toHaveTextContent('cube(1);|cube(5);');
 
-    await user.click(screen.getByRole('button', { name: 'Stop comparing' }));
+    await user.click(screen.getByRole('button', { name: 'Done' }));
     expect(screen.getByRole('list', { name: 'Changed files' })).toBeInTheDocument();
-    expect(screen.queryByRole('list', { name: 'Changed since Rev 2' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Changed since “Thicker base”' })).not.toBeInTheDocument();
   });
 
-  it('says so when nothing changed since the revision', async () => {
+  it('says so when nothing changed since the entry', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-5' };
     renderRow();
     await openRow(user);
     revisionStatusHarness.diff = [];
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Compare with current' }));
-    expect(await screen.findByRole('note')).toHaveTextContent('No changes since Rev 2.');
+    await user.click(screen.getByRole('button', { name: 'Compare' }));
+    expect(await screen.findByRole('note')).toHaveTextContent('No changes since then.');
   });
 
-  it('should offer Compare with current on the current revision', async () => {
+  it('offers a viewer Restore of their own copy, and no More', async () => {
     const user = userEvent.setup();
-    renderRow({ isCurrent: true, isDirty: true });
+    revisionStatusHarness.role = 'read';
+    renderRow();
     await openRow(user);
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    expect(screen.getByRole('menuitem', { name: 'Compare with current' })).toBeInTheDocument();
+    expect(screen.getByText('You can view this project. Restore changes only your copy.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restore “Thicker base”' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'More' })).toBeNull();
+  });
+
+  it('names no stored id with the debug setting off (B5)', async () => {
+    const user = userEvent.setup();
+    const [id, tree, parent] = ['a', 'b', 'c'].map((digit) => digit.repeat(40));
+    renderRow({ revision: card({ revisionId: id, treeId: tree, parent, trailer: 'Tau-Metadata: {"version":2}' }) });
+    await openRow(user);
+    expect(screen.queryByRole('definition')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/[\da-f]{40}|Tau-Metadata/u);
+  });
+
+  describe('with Tau’s debug setting on', () => {
+    beforeEach(() => {
+      flags.tauDebug = true;
+    });
+
+    afterEach(() => {
+      flags.tauDebug = false;
+    });
+
+    it('names the ids it is stored under, and the trailer it records (B5)', async () => {
+      const user = userEvent.setup();
+      const trailer = 'Tau-Metadata: {"version":2}\nTau-Actor: user ada\nTau-Trigger: turn';
+      renderRow({ revision: card({ parent: 'rev-1', treeId: 'a'.repeat(40), trailer }) });
+      await openRow(user);
+      const diagnostics = document.querySelector('dl[aria-label="Diagnostics"]');
+      expect(diagnostics).toHaveTextContent(/ID\s*rev-2/u);
+      expect(diagnostics).toHaveTextContent(/Parent\s*rev-1/u);
+      expect(diagnostics).toHaveTextContent(new RegExp(`Tree\\s*${'a'.repeat(40)}`, 'u'));
+      const recorded = screen.getByText('Recorded trailer').nextElementSibling?.querySelector('code');
+      expect(recorded?.textContent).toBe(trailer);
+    });
+
+    it('says a branch’s first entry follows none', async () => {
+      const user = userEvent.setup();
+      renderRow({ revision: card({ revisionId: 'rev-1', n: 1 }) });
+      await openRow(user);
+      expect(document.querySelector('dl[aria-label="Diagnostics"]')).toHaveTextContent(
+        /Parent\s*None \(first entry\)/u,
+      );
+    });
   });
 
   it('gives every target at least 24 × 24 CSS px', async () => {
     const user = userEvent.setup();
     renderRow({ revision: card({ tags: ['v1'] }) });
-    await openRow(user, 'Rev 2 · v1');
-    await user.click(screen.getByRole('button', { name: 'Details' }));
+    await openRow(user, /^V2 · v1|^v1/u);
     for (const button of screen.getAllByRole('button')) {
       expect(button.className).toMatch(/\b(h-6|size-6|min-h-6|h-8|h-9|size-8)\b/u);
     }
   });
 });
 
-const renderMenu = (revision: RevisionCard = card({ tags: ['v1'] })): void => {
+const renderMenu = (revision: RevisionCard = card({ tags: ['v1'] }), nextVersion = 2): void => {
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <RevisionMenu revision={revision} isCurrent={false} branch='main' />
+      <RevisionMenu revision={revision} branch='main' nextVersion={nextVersion} />
     </QueryClientProvider>,
   );
 };
 
 describe('RevisionMenu', () => {
-  it('keeps the menu open on Copied, so the person sees the answer (round 14)', async () => {
+  it('says which number the version will get, and creates it in the one naming form (B6, round 16)', async () => {
     const user = userEvent.setup();
-    const writeText = vi.fn(async () => undefined);
-    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
-    renderMenu();
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Copy revision id' }));
-
-    expect(writeText).toHaveBeenCalledWith('rev-2');
-    expect(await screen.findByRole('menuitem', { name: 'Copied' })).toBeInTheDocument();
-    expect(screen.getByRole('menu')).toBeInTheDocument();
-  });
-
-  it('names a version in the one naming form, and Cancel or Escape return focus to More (round 16)', async () => {
-    const user = userEvent.setup();
-    renderMenu(card());
-    const more = screen.getByRole('button', { name: 'More actions for Rev 2' });
+    const versions = [
+      card({ revisionId: 'rev-4', tags: ['Fit check'], versions: [{ name: 'Fit check', number: 3 }] }),
+      card({ revisionId: 'rev-3', tags: ['First print'], versions: [{ name: 'First print', number: 2 }] }),
+    ];
+    renderMenu(card(), nextVersionNumber(versions));
+    const more = screen.getByRole('button', { name: 'More' });
     await user.click(more);
-    await user.click(screen.getByRole('menuitem', { name: 'Name version…' }));
-    const field = await screen.findByRole('textbox', { name: 'Name Rev 2' });
+    await user.click(screen.getByRole('menuitem', { name: 'Create version…' }));
+    const field = await screen.findByRole('textbox', { name: 'Version name' });
     await waitFor(() => {
       expect(field).toHaveFocus();
     });
+    expect(
+      await screen.findByText('This will be V4. A version is a fixed point you can return to, compare with and share.'),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => {
       expect(more).toHaveFocus();
     });
 
     await user.click(more);
-    await user.click(screen.getByRole('menuitem', { name: 'Name version…' }));
-    await user.type(await screen.findByRole('textbox', { name: 'Name Rev 2' }), 'Ready for print');
+    await user.click(screen.getByRole('menuitem', { name: 'Create version…' }));
+    await user.type(await screen.findByRole('textbox', { name: 'Version name' }), 'Ready for print');
     await user.keyboard('{Escape}');
     await waitFor(() => {
       expect(more).toHaveFocus();
@@ -448,155 +574,64 @@ describe('RevisionMenu', () => {
     expect(revisionStatusHarness.commands.tag).not.toHaveBeenCalled();
 
     await user.click(more);
-    await user.click(screen.getByRole('menuitem', { name: 'Name version…' }));
-    await user.type(await screen.findByRole('textbox', { name: 'Name Rev 2' }), 'Ready for print');
-    await user.click(screen.getByRole('button', { name: 'Save name' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Create version…' }));
+    await user.type(await screen.findByRole('textbox', { name: 'Version name' }), 'Ready for print');
+    await user.click(screen.getByRole('button', { name: 'Create version' }));
+    /*
+     * The form hands the name to the tag verb as typed, spaces included, and
+     * both legs then refuse it as a ref name (`refs/tags/Ready for print`):
+     * the open tag-name question in the C3 report.
+     */
     expect(revisionStatusHarness.commands.tag).toHaveBeenCalledWith({ name: 'Ready for print', revisionId: 'rev-2' });
   });
 
-  it('starts a new branch from the revision, with Cancel (round 16)', async () => {
+  it('offers V2 first, because V1 is Start', () => {
+    expect(nextVersionNumber([])).toBe(2);
+    expect(nextVersionNumber([card({ start: 'created' })])).toBe(2);
+  });
+
+  it('renames a version, which keeps its number, and offers no way to remove it (Q13)', async () => {
+    const user = userEvent.setup();
+    renderMenu(card({ tags: ['Fit check'], versions: [{ name: 'Fit check', number: 3 }] }));
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'Rename version…',
+      'New branch from here…',
+    ]);
+    await user.click(screen.getByRole('menuitem', { name: 'Rename version…' }));
+    expect(await screen.findByText('V3 keeps its number. A version is permanent.')).toBeInTheDocument();
+    const field = screen.getByRole('textbox', { name: 'Version name' });
+    expect(field).toHaveValue('Fit check');
+    await user.clear(field);
+    await user.type(field, 'Fit check 2');
+    await user.click(screen.getByRole('button', { name: 'Rename' }));
+    expect(revisionStatusHarness.commands.tag).toHaveBeenCalledWith({ name: 'Fit check 2', revisionId: 'rev-2' });
+    await waitFor(() => {
+      expect(revisionStatusHarness.commands.deleteTag).toHaveBeenCalledWith('Fit check');
+    });
+  });
+
+  it('starts a new branch from the entry (round 16)', async () => {
     const user = userEvent.setup();
     renderMenu();
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    await user.click(screen.getByRole('menuitem', { name: 'New branch from Rev 2…' }));
-    expect(await screen.findByText('Starts from Rev 2. main stays as it is.')).toBeInTheDocument();
-    await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'enclosure-v2');
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    await user.click(screen.getByRole('menuitem', { name: 'New branch from here…' }));
+    expect(await screen.findByText('Starts from “Thicker base”. main stays as it is.')).toBeInTheDocument();
+    await user.type(screen.getByRole('textbox', { name: 'Branch name' }), 'enclosure-v2');
     await user.click(screen.getByRole('button', { name: 'Create branch' }));
     expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('enclosure-v2', 'rev-2');
   });
 
-  it('removes a local version name after a named confirmation (L3-F5)', async () => {
-    const user = userEvent.setup();
-    const fetch = vi.fn();
-    vi.stubGlobal('fetch', fetch);
-    renderMenu();
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Remove version name…' }));
-    expect(await screen.findByRole('alertdialog', { name: 'Remove the name “v1” from Rev 2?' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Remove name' }));
-
-    await waitFor(() => {
-      expect(revisionStatusHarness.commands.deleteTag).toHaveBeenCalledWith('v1');
-    });
-    /* No Hosted Remote, so nothing to ask it. */
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('shows the publication a Tau Cloud name backs before removing it, then asks again with its id (D24)', async () => {
+  it('has no Publish on Tau Cloud: Share owns publishing', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.role = 'owner';
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
       remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
     };
-    const fetch = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            code: 'GIT_REF_PUBLISHED',
-            publication: { id: 'pub-1', title: 'Bracket v1', visibility: 'public' },
-          }),
-          { status: 409 },
-        ),
-      )
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ref: 'refs/tags/v1', tip: 'rev-2' }), { status: 200 }));
-    vi.stubGlobal('fetch', fetch);
-    renderMenu();
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Remove version name…' }));
-    await user.click(await screen.findByRole('button', { name: 'Remove name' }));
-
-    expect(await screen.findByText(/“Bracket v1” is published from this name/u)).toBeInTheDocument();
-    expect(revisionStatusHarness.commands.deleteTag).not.toHaveBeenCalled();
-    expect(String(fetch.mock.calls[0]?.[0])).toBe('https://api.test/v1/git/p/refs?name=refs%2Ftags%2Fv1');
-    expect(fetch.mock.calls[0]?.[1]).toMatchObject({ method: 'DELETE', credentials: 'include' });
-
-    await user.click(screen.getByRole('button', { name: 'Remove name' }));
-    await waitFor(() => {
-      expect(revisionStatusHarness.commands.deleteTag).toHaveBeenCalledWith('v1');
-    });
-    expect(String(fetch.mock.calls[1]?.[0])).toBe(
-      'https://api.test/v1/git/p/refs?name=refs%2Ftags%2Fv1&publication=pub-1',
-    );
-  });
-
-  /* W1b: the canvas offers Publish in every row's More; an older revision is named and published by id. */
-  it('publishes an older revision by its id, and shows the link it got', async () => {
-    const user = userEvent.setup();
-    revisionStatusHarness.role = 'owner';
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
-    };
-    /* The app's root TooltipProvider, which the link's CopyButton needs. */
-    const queryClient = new QueryClient();
-    const menu = (): React.JSX.Element => (
-      <TooltipProvider>
-        <QueryClientProvider client={queryClient}>
-          <RevisionMenu revision={card()} isCurrent={false} branch='main' />
-        </QueryClientProvider>
-      </TooltipProvider>
-    );
-    const { rerender } = render(menu());
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Publish as a named version…' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Publish Rev 2' });
-    await user.type(within(dialog).getByLabelText('Version name'), 'first print');
-    await user.click(within(dialog).getByRole('button', { name: 'Publish' }));
-
-    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledWith('first print', 'rev-2');
-    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledWith({
-      tag: 'first print',
-      projectName: 'Bracket',
-      entryPath: 'main.scad',
-      visibility: 'public',
-      title: 'Bracket',
-    });
-
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      publish: { ...revisionStatusHarness.status.publish, phase: 'success', shareUrl: 'https://tau.new/p/pub-1' },
-    };
-    rerender(menu());
-    expect(await within(dialog).findByLabelText('Published link')).toHaveValue('https://tau.new/p/pub-1');
-    await user.click(within(dialog).getByRole('button', { name: 'Done' }));
-    expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalledOnce();
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'More actions for Rev 2' })).toHaveFocus();
-    });
-  });
-
-  it('says why Tau Cloud refused a removal, and removes nothing (I12)', async () => {
-    const user = userEvent.setup();
-    revisionStatusHarness.role = 'owner';
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
-    };
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(JSON.stringify({ code: 'GIT_RATE_LIMITED' }), { status: 429 })),
-    );
-    renderMenu();
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Remove version name…' }));
-    await user.click(await screen.findByRole('button', { name: 'Remove name' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Tau Cloud is getting too many requests');
-    expect(revisionStatusHarness.commands.deleteTag).not.toHaveBeenCalled();
-  });
-
-  it('offers no removal a Tau Cloud collaborator who is not the owner would be refused', async () => {
-    const user = userEvent.setup();
-    revisionStatusHarness.role = 'write';
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
-    };
-    renderMenu();
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    expect(screen.getByRole('menuitem', { name: 'Rename version…' })).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: 'Remove version name…' })).not.toBeInTheDocument();
+    renderMenu(card());
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.getAllByRole('menuitem')).toHaveLength(2);
+    expect(screen.queryByRole('menuitem', { name: /Publish/u })).toBeNull();
   });
 });

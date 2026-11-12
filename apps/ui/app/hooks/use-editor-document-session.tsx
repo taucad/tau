@@ -42,7 +42,7 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
       recordEditorConflict: async (input) => {
         const { worker } = fileManagerRef.getSnapshot().context;
         if (!worker) {
-          throw new Error('Revisions are still starting. Your edit is kept; type again to save it.');
+          throw new Error('History is still starting. Your edit is kept; type again to save it.');
         }
         return getRevisionClient({ projectId, worker }).recordEditorConflict(input);
       },

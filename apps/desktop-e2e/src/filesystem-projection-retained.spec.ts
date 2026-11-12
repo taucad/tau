@@ -1174,7 +1174,14 @@ test.describe.skipIf(process.env['TAU_E2E_REVISIONS_MANUAL'] !== 'true')(
           .toBeGreaterThanOrEqual(before + 3);
         await expectCount(stopButtonOf(page), 0, 120_000);
         expect(failedGatewayToolResults(gateway.gatewayRequests)).toEqual([]);
-        await expectVisible(page.getByRole('button', { name: /^Open Revisions\..*Rev [2-9]/u }), 120_000);
+        /* Two turns, two saves: an entry has no number (M11), so each turn's own marker says *Saved*. */
+        await expectVisible(
+          page
+            .getByRole('status', { name: 'Save status' })
+            .filter({ hasText: /^Saved\b/u })
+            .nth(1),
+          120_000,
+        );
         const root = join(session.homeRoot, slug);
         const hashes = await nativeFixtureFiles(root);
         expect(Object.keys(hashes).some((path) => path.startsWith('.git/'))).toBe(true);

@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
-import type { Api, AssistantMessageEventStream, Context, Model } from '@earendil-works/pi-ai';
+import type { Api, Model } from '@earendil-works/pi-ai';
 import {
-  createClientContextMiddleware,
-  createRecentSkillsMiddleware,
   createTurnContextSnapshot,
   normalizeLatexDelimiters,
   pinnedSkillsBlock,
@@ -13,7 +10,8 @@ import {
 import { toPiToolContent } from '#harness/tools.js';
 import { MessageIdentities, piMessageToProvider, providerMessageToPi } from '#harness/session-record.js';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
-import type { ModelCallRequest } from '#harness/model-call-middleware.js';
+import { chatStateMessage } from '#log/event-types.js';
+import type { UserProviderMessage } from '#log/event-types.js';
 
 const model: Model<Api> = {
   id: 'stub',
@@ -27,7 +25,6 @@ const model: Model<Api> = {
   contextWindow: 8192,
   maxTokens: 1024,
 };
-const request = (context: Context): ModelCallRequest => ({ model, context });
 
 /**
  * What the transport sends for a trimmed history: the session serialises each
@@ -44,7 +41,6 @@ const onTheWire = (messages: readonly AgentMessage[]): AgentMessage[] => {
     return providerMessageToPi(provider, model, identities);
   });
 };
-const dummyStream = (): AssistantMessageEventStream => createAssistantMessageEventStream();
 
 describe('ToolResultTrimmer', () => {
   it('should preserve run qualification and retained evidence references through provider replay', () => {
@@ -223,72 +219,65 @@ describe('normalizeLatexDelimiters', () => {
 });
 
 describe('ClientContext', () => {
-  it('adds the skills catalogue to pi systemPrompt and prepends memory ephemerally', async () => {
-    let seen: Context | undefined;
-    const middleware = createClientContextMiddleware({
-      skills: [{ name: 'brep', description: 'Build native BRep geometry' }],
-      memory: { 'AGENTS.md': 'Use millimetres.' },
-    });
-    await middleware(request({ systemPrompt: 'static', messages: [] }), async ({ context }) => {
-      seen = context;
-      return dummyStream();
+  it('adds the skills catalogue to the system prompt and carries memory as a context message', async () => {
+    const context = await createTurnContextSnapshot({
+      chatId: 'chat-1',
+      systemPrompt: 'static',
+      clientContext: {
+        skills: [{ name: 'brep', description: 'Build native BRep geometry' }],
+        memory: { 'AGENTS.md': 'Use millimetres.' },
+      },
     });
 
-    expect(seen?.systemPrompt).toContain('**brep**');
-    expect(seen?.systemPrompt).toContain('**How to Use Skills (Progressive Disclosure):**');
-    expect(seen?.messages[0]?.role).toBe('user');
-    expect(JSON.stringify(seen?.messages[0]?.content)).toContain('Use millimetres.');
-    expect(JSON.stringify(seen?.messages[0]?.content)).toContain('<memory_guidelines>');
+    expect(context.systemPrompt).toContain('**brep**');
+    expect(context.systemPrompt).toContain('**How to Use Skills (Progressive Disclosure):**');
+    expect(context.initialMessages[0]?.role).toBe('user');
+    expect(JSON.stringify(context.initialMessages)).toContain('Use millimetres.');
+    expect(JSON.stringify(context.initialMessages)).toContain('<memory_guidelines>');
   });
 });
 
 describe('RecentSkills', () => {
   it('evicts stale fingerprints and restores exact current skill content after compaction', async () => {
     const remove = vi.fn(async () => undefined);
-    let seen: Context | undefined;
-    const middleware = createRecentSkillsMiddleware({
+    const context = await createTurnContextSnapshot({
       chatId: 'chat-1',
-      store: {
+      systemPrompt: 'static',
+      recentSkills: {
         load: async () => [
           { skillName: 'fresh', resourceUri: 'skill://fresh', fingerprint: 'a', content: 'fresh body' },
           { skillName: 'stale', resourceUri: 'skill://stale', fingerprint: 'old', content: 'stale body' },
         ],
         remove,
       },
-      currentSkills: [
-        { name: 'fresh', description: 'fresh', fingerprint: 'a' },
-        { name: 'stale', description: 'stale', fingerprint: 'new' },
-      ],
-      includeContent: () => true,
-    });
-    await middleware(request({ messages: [] }), async ({ context }) => {
-      seen = context;
-      return dummyStream();
+      clientContext: {
+        skills: [
+          { name: 'fresh', description: 'fresh', fingerprint: 'a' },
+          { name: 'stale', description: 'stale', fingerprint: 'new' },
+        ],
+      },
     });
 
-    expect(JSON.stringify(seen?.messages)).toContain('fresh body');
-    expect(JSON.stringify(seen?.messages)).not.toContain('stale body');
+    expect(JSON.stringify(context.postCompactionMessages)).toContain('fresh body');
+    expect(JSON.stringify(context.initialMessages)).not.toContain('fresh body');
+    expect(JSON.stringify(context.postCompactionMessages)).not.toContain('stale body');
     expect(remove).toHaveBeenCalledWith('chat-1', 'stale');
   });
 
   it('evicts stored content when the current listing has no comparable fingerprint', async () => {
     const remove = vi.fn(async () => undefined);
-    const middleware = createRecentSkillsMiddleware({
+    const context = await createTurnContextSnapshot({
       chatId: 'chat-1',
-      store: {
+      systemPrompt: 'static',
+      recentSkills: {
         load: async () => [{ skillName: 'unversioned', resourceUri: 'skill://old', content: 'stale body' }],
         remove,
       },
-      currentSkills: [{ name: 'unversioned', description: 'current listing' }],
-      includeContent: () => true,
-    });
-    let seen: Context | undefined;
-    await middleware(request({ messages: [] }), async ({ context }) => {
-      seen = context;
-      return dummyStream();
+      clientContext: { skills: [{ name: 'unversioned', description: 'current listing' }] },
     });
 
-    expect(seen?.messages).toEqual([]);
+    expect(JSON.stringify(context.postCompactionMessages)).not.toContain('stale body');
+    expect(context.postCompactionMessages.some((message) => message.id.startsWith('tau:recent-skills'))).toBe(false);
     expect(remove).toHaveBeenCalledWith('chat-1', 'unversioned');
   });
 });
@@ -392,5 +381,65 @@ describe('TurnContextSnapshot skills pin', () => {
     expect(second.initialMessages.find((message) => message.id === skillsUpdateMessageId)?.content).toContain(
       '**gears**',
     );
+  });
+});
+
+describe('TurnContextSnapshot state note', () => {
+  const workspace: UserProviderMessage = { id: 'tau:snapshot-context:run-1', role: 'user', content: 'workspace' };
+  const plan = chatStateMessage({ text: 'plan mode', isDefault: false });
+  const defaults = chatStateMessage({ text: 'defaults', isDefault: true });
+  const contents = (messages: readonly UserProviderMessage[]): unknown[] => messages.map((message) => message.content);
+
+  it.each([
+    {
+      when: 'a change the history does not carry',
+      note: plan,
+      initial: ['workspace', 'plan mode'],
+      after: ['workspace', 'plan mode'],
+    },
+    {
+      when: 'a note the history already carries',
+      note: plan,
+      carried: 'plan mode',
+      initial: ['workspace'],
+      after: ['workspace', 'plan mode'],
+    },
+    {
+      when: 'a change from another note',
+      note: plan,
+      carried: 'testing off',
+      initial: ['workspace', 'plan mode'],
+      after: ['workspace', 'plan mode'],
+    },
+    {
+      when: 'the defaults in a chat that carries no note',
+      note: defaults,
+      initial: ['workspace'],
+      after: ['workspace'],
+    },
+    {
+      when: 'a return to the defaults',
+      note: defaults,
+      carried: 'plan mode',
+      initial: ['workspace', 'defaults'],
+      after: ['workspace', 'defaults'],
+    },
+    {
+      when: 'the defaults already said',
+      note: defaults,
+      carried: 'defaults',
+      initial: ['workspace'],
+      after: ['workspace'],
+    },
+  ])('should handle $when', async ({ note, carried, initial, after }) => {
+    const context = await createTurnContextSnapshot({
+      chatId: 'chat-1',
+      systemPrompt: 'static',
+      contextMessages: [note, workspace],
+      carriedStateNote: carried,
+    });
+    /* The note closes the block, next to the person's message, wherever the client put it. */
+    expect(contents(context.initialMessages)).toEqual(initial);
+    expect(contents(context.postCompactionMessages)).toEqual(after);
   });
 });

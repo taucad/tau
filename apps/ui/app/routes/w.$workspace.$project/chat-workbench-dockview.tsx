@@ -92,7 +92,7 @@ import { CodeEditor } from '#components/code/code-editor.client.js';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
 import { useFeature } from '#flags/use-feature.js';
 import { fileViewerRouter } from '#routes/w.$workspace.$project/file-viewers/built-in-viewers.js';
-import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '#filesystem/workspace-errors.js';
+import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '@taucad/ui-core/filesystem/workspace-errors';
 import { ParametersPanelBody } from '#routes/w.$workspace.$project/chat-parameters.js';
 import { KinematicsPanelBody } from '#routes/w.$workspace.$project/chat-kinematics.js';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
@@ -101,6 +101,7 @@ import { EditorSymbolPathProvider } from '#routes/w.$workspace.$project/editor-s
 import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
 import { ModelPanelBody } from '#routes/w.$workspace.$project/chat-explorer.js';
 import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
+import { useReportHistoryPaneShown } from '#routes/w.$workspace.$project/revision-pane-requests.js';
 import { AgentsPanelBody } from '#routes/w.$workspace.$project/chat-agents.js';
 import { JobsPanelBody } from '#routes/w.$workspace.$project/chat-jobs.js';
 import { PrintPanelBody } from '#routes/w.$workspace.$project/chat-print.js';
@@ -124,7 +125,7 @@ import type {
 } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { Button } from '@taucad/ui/components/button';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
-import type { OpenFile } from '#types/editor.types.js';
+import type { OpenFile } from '@taucad/ui-core/types/editor.types';
 import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import {
@@ -289,7 +290,10 @@ function ModelWorkbenchPanel(): React.JSX.Element {
   return <ModelPanelBody />;
 }
 
-function RevisionsWorkbenchPanel(): React.JSX.Element {
+function RevisionsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
+  const { projectId } = useProject();
+  /* The toolbar chip reads as pressed while History is on screen (C2). */
+  useReportHistoryPaneShown(projectId, useWorkbenchPanelShown(api));
   return <RevisionsPanelBody />;
 }
 
@@ -2156,8 +2160,8 @@ export const WorkbenchDockview = memo(function ({
     const updateTitle = (): void => {
       const revisionsPanel = api.panels.find((panel) => panel.id === workbenchPanels.revisions.id);
       /* A layout saved while the retired *viewing an older revision* marker
-       * showed (RS5, RA4) still carries it; the tab is always *Revisions*. */
-      revisionsPanel?.api.setTitle('Revisions');
+       * showed (RS5, RA4) still carries it; the tab is always *History* (M11). */
+      revisionsPanel?.api.setTitle('History');
     };
 
     updateTitle();

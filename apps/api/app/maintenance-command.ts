@@ -5,7 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { and, asc, eq, gt, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { getMaintenanceEnvironment } from '#config/maintenance-environment.config.js';
+import { getMaintenanceEnvironment, maintenanceDatabasePoolMax } from '#config/maintenance-environment.config.js';
 import type { MaintenanceEnvironment } from '#config/maintenance-environment.config.js';
 import * as schema from '@taucad/api-database/schema';
 import { project, projectGitLfsObject, storageTombstone } from '@taucad/api-database/schema';
@@ -28,8 +28,21 @@ import { readMaintenanceLiveness, recordMaintenancePass } from '@taucad/api-git-
 import { freezeEverything, parseFreezeSeconds, thawEverything } from '@taucad/api-git-core/routing/global-freeze';
 import { RedisInFlightRegistry } from '@taucad/api-git-core/routing/in-flight';
 import type { ScheduledMaintenanceCommand } from '@taucad/api-git-mirror/maintenance/liveness';
-import { holdInStandby } from '@taucad/api-git-mirror/maintenance/standby';
+import { holdInStandby, retryingCheck } from '@taucad/api-git-mirror/maintenance/standby';
+import {
+  inventoryLfsIntegrity,
+  lfsIntegrityExclusions,
+  parseLfsIntegrityConcurrency,
+} from '@taucad/api-git-mirror/maintenance/lfs-integrity';
+import { relocateLegacyLfsObjects } from '@taucad/api-git-mirror/maintenance/lfs-relocation';
+import {
+  lfsRelocationProjects,
+  parseLfsRelocationConcurrency,
+  relocateLegacyLfsInventory,
+} from '@taucad/api-git-mirror/maintenance/lfs-relocation-run';
+import { activeLfsReservationPages } from '@taucad/api-git-mirror/maintenance/lfs-reservation-scope';
 import { applicationNameOf } from '@taucad/api-database/application-name';
+import { optionValue, optionalOperand as optionalOperandOf, requiredOperand } from '#maintenance-arguments.js';
 
 /**
  * `revisions-maintenance`: the singleton entry for everything that must happen
@@ -112,8 +125,42 @@ const usage = `Usage: revisions-maintenance <command>
       read-only lease per project that has a candidate; --dry-run lists the
       candidates and hydrates nothing.
 
-  collect-blobs [--dry-run]
+  lfs-integrity [--concurrency <n>]
+      Read-only inventory of stored LFS checksums. Scope: the reservation rows
+      of active projects in this account; no bucket listing, so bytes with no
+      row are not seen. HEADs each at its tenant key with ChecksumMode ENABLED
+      and counts tenant.equal (stored SHA-256 is the oid), tenant.absent,
+      tenant.composite and tenant.different, plus legacy (only the pre-D24
+      key), unfinalized (no bytes, upload never finished) and missing (no
+      bytes for a finalized reservation). Each different, size-mismatched or
+      failed object prints its own revisions_maintenance.lfs_integrity_*
+      line (ids, key and digest only); progress every 5000 objects; one
+      revisions_maintenance.lfs_integrity summary, which also counts the rows
+      left out (skippedOtherAccount, deletedProjectRows). --concurrency HEADs
+      in flight, 1-32, default 8. Exits 1 when any object differs or has the
+      wrong size, a HEAD failed or the run was stopped. Never scheduled.
+
+  relocate-lfs [--confirm] [--project <id>] [--after <projectId>] [--concurrency <n>]
+      Move pre-D24 LFS objects from blobs/ to their owner's tenant key. A dry
+      run unless --confirm: every active project in this account with an LFS
+      reservation is surveyed with HEADs only and one
+      revisions_maintenance.lfs_relocation line per project counts its
+      legacyOnly, both, tenantOnly and missing objects. With --confirm each
+      project that still holds a legacy key is relocated: each object is copied
+      and verified unlocked, under a deadline of 10 s plus 2 s per MiB, then
+      rechecked and its legacy key deleted under the owner lock. A tenant copy
+      an earlier run left is trusted only when its stored SHA-256 (or, without
+      one, its bytes) matches the oid. Projects run --concurrency at a time
+      (dry run 1-16, default 4; --confirm exactly 1, since the worker buffers a
+      whole object). Safe to rerun; with --confirm each line's resumeAfter,
+      passed as --after <projectId>, skips the finished prefix (a dry run gives
+      none). A flag given without its value is refused. Ends with one
+      revisions_maintenance.lfs_relocation_summary line; exits 1 when any
+      project failed or the run was stopped. Never scheduled.
+
+  collect-blobs [--confirm] [--dry-run]
       Delete publication blobs whose reference count is zero, in one bounded batch.
+      Above 500 unreferenced blobs the pass deletes nothing unless --confirm.
 
   mark-erasure --owner <id>
       Record a verified erasure request: the owner's tombstone becomes due now.
@@ -148,19 +195,12 @@ TAU_S3_RESTORE_BUCKET, TAU_S3_RESTORE_ACCESS_KEY_ID,
 TAU_S3_RESTORE_SECRET_ACCESS_KEY and the optional TAU_S3_RESTORE_REGION and
 TAU_S3_RESTORE_FORCE_PATH_STYLE for restore, and REDIS_URL for freeze-all.`;
 
-/** `--flag value`, with no positional arguments anywhere in this command. */
-const option = (args: readonly string[], name: string): string | undefined => {
-  const index = args.indexOf(`--${name}`);
-  return index === -1 ? undefined : args[index + 1];
-};
+const option = optionValue;
 
-const required = (args: readonly string[], name: string): string => {
-  const value = option(args, name);
-  if (value === undefined || value === '' || value.startsWith('--')) {
-    throw new Error(`--${name} is required\n\n${usage}`);
-  }
-  return value;
-};
+const required = (args: readonly string[], name: string): string => requiredOperand(args, name, usage);
+
+const optionalOperand = (args: readonly string[], name: string): string | undefined =>
+  optionalOperandOf(args, name, usage);
 
 const environmentValue = (name: string): string => {
   const value = process.env[name];
@@ -256,7 +296,7 @@ async function main(): Promise<void> {
 
   /* eslint-disable @typescript-eslint/naming-convention -- PostgreSQL connection options */
   const client = postgres(environment.DATABASE_URL, {
-    max: 2,
+    max: maintenanceDatabasePoolMax,
     prepare: false,
     connect_timeout: environment.DATABASE_CONNECT_TIMEOUT_SECONDS,
     idle_timeout: environment.DATABASE_IDLE_TIMEOUT_SECONDS,
@@ -334,7 +374,9 @@ async function main(): Promise<void> {
               signal: stop.signal,
               report,
               checks: {
-                database: async () => client`select 1`,
+                /* A release can restart Postgres as this Machine boots: retry a refused
+                   connection briefly so it does not exit and fail the deploy's check. */
+                database: retryingCheck(async () => client`select 1`, { attempts: 3, retryDelay: 2000 }),
                 privateStorage: async () => readMaintenanceLiveness(driver, new Date()),
                 publicStorage: async () => driver.headProbeObject(AbortSignal.timeout(5000)),
               },
@@ -613,9 +655,76 @@ async function main(): Promise<void> {
         });
         break;
       }
+      case 'lfs-integrity': {
+        const concurrency = parseLfsIntegrityConcurrency(optionalOperand(args, 'concurrency'));
+        const stop = new AbortController();
+        const stopInventory = (): void => {
+          stop.abort();
+        };
+        process.once('SIGTERM', stopInventory);
+        process.once('SIGINT', stopInventory);
+        try {
+          const summary = await inventoryLfsIntegrity(
+            {
+              pages: activeLfsReservationPages(database, { accountId: driver.account.id }),
+              storage: driver,
+              exclusions: async () => lfsIntegrityExclusions(database, { accountId: driver.account.id }),
+            },
+            { concurrency, report: writeLine, signal: stop.signal },
+          );
+          if (summary.tenant.different > 0 || summary.sizeMismatch > 0 || summary.errors > 0 || summary.interrupted) {
+            process.exitCode = 1;
+          }
+        } finally {
+          process.removeListener('SIGTERM', stopInventory);
+          process.removeListener('SIGINT', stopInventory);
+        }
+        break;
+      }
+      case 'relocate-lfs': {
+        const confirm = args.includes('--confirm');
+        const concurrency = parseLfsRelocationConcurrency(optionalOperand(args, 'concurrency'), confirm);
+        const after = optionalOperand(args, 'after');
+        const projectId = optionalOperand(args, 'project');
+        const stop = new AbortController();
+        const stopRelocation = (): void => {
+          stop.abort();
+        };
+        process.once('SIGTERM', stopRelocation);
+        process.once('SIGINT', stopRelocation);
+        try {
+          const summary = await relocateLegacyLfsInventory(
+            {
+              projects: lfsRelocationProjects(
+                activeLfsReservationPages(database, {
+                  accountId: driver.account.id,
+                  ...(after === undefined ? {} : { afterProjectId: after }),
+                  ...(projectId === undefined ? {} : { projectId }),
+                }),
+              ),
+              storage: driver,
+              relocate: async (target) => relocateLegacyLfsObjects({ database, storage: driver }, target),
+            },
+            { confirm, concurrency, report: writeLine, signal: stop.signal },
+          );
+          if (summary.failed.length > 0 || summary.interrupted) {
+            process.exitCode = 1;
+          }
+        } finally {
+          process.removeListener('SIGTERM', stopRelocation);
+          process.removeListener('SIGINT', stopRelocation);
+        }
+        break;
+      }
       case 'collect-blobs': {
         const result = await pass('collect-blobs', async () =>
-          collectZeroCountBlobs({ database, driver, report, dryRun: args.includes('--dry-run') }),
+          collectZeroCountBlobs({
+            database,
+            driver,
+            report,
+            confirm: args.includes('--confirm'),
+            dryRun: args.includes('--dry-run'),
+          }),
         );
         console.log(JSON.stringify(result));
         break;

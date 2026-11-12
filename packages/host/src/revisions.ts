@@ -12,7 +12,7 @@
  */
 
 import { waitFor } from 'xstate';
-import type { ActorOptions, AnyActorLogic, SnapshotFrom } from 'xstate';
+import type { ActorOptions, AnyActorLogic } from 'xstate';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, watch as watchDirectory } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
@@ -21,7 +21,7 @@ import { hostname, userInfo } from 'node:os';
 import { join, sep } from 'node:path';
 import { z } from 'zod';
 import { resolveNodeProjectIdentity, openNodeProjectFileSystem } from '#project-identity.js';
-import type { ShellExecutionHolds } from '#shell/shell-service.js';
+import type { ShellExecutionHolds } from '@taucad/shell-service';
 
 import { jsonValueSchema } from '@taucad/agent-host';
 import type { JsonValue } from '@taucad/agent-host';
@@ -68,10 +68,8 @@ import {
   tauRemoteUrl,
   watchRevisionStream,
 } from '@taucad/revisions';
-import { selectBranchNeedsConfirmation } from '@taucad/revisions/branch-machine';
 import type { SyncMachineEmitted } from '@taucad/revisions/sync-machine';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
-import type { branchMachine } from '@taucad/revisions/branch-machine';
 import { isAmbientCut } from '@taucad/revisions/checkout-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
 import { sameRevisionStatus } from '@taucad/revisions/revision-projection';
@@ -81,7 +79,6 @@ import type {
   PublishDraft,
   PublishPublicationActorInput,
   PublishPublicationActorOutput,
-  RevisionActor,
   RevisionDiffEntry,
   RevisionEngineDescriptor,
   RevisionLogRequest,
@@ -91,6 +88,7 @@ import type {
   RevisionStatusProjection,
   RevisionTag,
   RevisionUserActor,
+  RevisionVia,
   SyncPushOutcome,
 } from '@taucad/revisions';
 import { GitToolchainError, createNativeGitRevisionPort, resolveGitToolchain } from '@taucad/revisions/node';
@@ -106,6 +104,7 @@ import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
 import { defaultConfigDirectory } from '#credential-store.js';
 import { actorFor, hostRevisionActor, revisionUserActorSchema } from '#revision-actor.js';
+import type { HostRevisionActorResolver } from '#revision-actor.js';
 
 /**
  * How this host reads and writes `.tau/parameters/**` for the per-key merge (D12).
@@ -248,12 +247,11 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
    */
   readonly checkouts?: Map<string, TurnCheckout> | undefined;
   /**
-   * Actor recorded on this host's revisions.
-   *
-   * W5 replaces it with the turn's real author (the model row, or the external
-   * agent id); until then every host turn is the host itself.
+   * Which Tau leg this host records through (blueprint B1): `desktop` for the
+   * desktop app, `serve` for `tau serve`, `cloud` for a Tau Cloud agent host.
+   * Required: the trailer names it on every capture.
    */
-  readonly actorId?: string | undefined;
+  readonly via: RevisionVia;
   /**
    * The actor recorded on every revision this host mints until a `setActor` request names the session (S37, A26, A1).
    *
@@ -261,9 +259,7 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
    * Tau account passes `hostRevisionActor(account)`. Once a renderer sends `setActor`, its session wins: it is the
    * person signed in on this device, anonymity already applied, so switching it later rewrites nothing.
    */
-  readonly actor?:
-    | ((input: { readonly runId: string | undefined; readonly trigger: string }) => RevisionActor | undefined)
-    | undefined;
+  readonly actor?: HostRevisionActorResolver | undefined;
   /**
    * Observe this workspace's own writes, so the checkout knows it is dirty.
    *
@@ -276,6 +272,20 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
    * never has two counters.
    */
   readonly watchWorkspace?: boolean | undefined;
+};
+
+/** One file as a revision holds it. @public */
+export type RevisionFileRead = Readonly<{ path: string; text: string | undefined; bytes: number }>;
+
+const fatalUtf8 = new TextDecoder('utf-8', { fatal: true });
+
+/** A file's text, or none when it is not UTF-8. */
+const textOf = (bytes: Uint8Array<ArrayBuffer>): string | undefined => {
+  try {
+    return fatalUtf8.decode(bytes);
+  } catch {
+    return undefined;
+  }
 };
 
 /** One project's running revision actor tree. @public */
@@ -299,6 +309,12 @@ export type ProjectRevisions = {
     describe(): Promise<RevisionPlace>;
     /** Both sides of a conflicted revision as text; absent `revision` reads the one waiting on this branch. */
     conflict(revision: string | undefined): Promise<RevisionConflictRead | undefined>;
+    /**
+     * The named files as a revision holds them, never as the live checkout does (agent observability, LW6): each
+     * one's UTF-8 text, or none when it is not text, and its size. A path the revision does not hold is left out, and
+     * a revision the store cannot read answers none.
+     */
+    files(revision: string, paths: readonly string[]): Promise<readonly RevisionFileRead[]>;
   }>;
   /**
    * The trusted host's exact revision execution holds (I7): a contained command holds its execution on the attempt's
@@ -435,7 +451,7 @@ const revisionJson = (value: unknown): JsonValue =>
  * The machine plus the account, which is what "this device" means on disk: two
  * users on one machine hold two checkouts and write two chat segments. Stable
  * across restarts, needs no record of its own, and is never a credential — the
- * browser's equivalent is `apps/ui/app/lib/device-id.ts` and neither mints the
+ * browser's equivalent is `apps/libs/ui-core/src/lib/device-id.ts` and neither mints the
  * other's.
  */
 export const hostDeviceId = `${hostname()}:${userInfo().username}`;
@@ -605,10 +621,12 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
-    ...(options.actorId === undefined ? {} : { actorId: options.actorId }),
-    /* A1: the session the renderer last sent, else the account or pseudonym this host was wired with; never the OS
-     * login name or an environment email, and never the opaque fallback id (I1). */
-    actor: (input) => (session === undefined ? fallbackActor(input) : actorFor(session, input.runId)),
+    /* A1, B1: the session the renderer last sent, else the account or pseudonym this host was wired with; never the
+     * OS login name, an environment email or a fallback id (I1). */
+    identity: {
+      via: options.via,
+      resolve: (input) => (session === undefined ? fallbackActor(input) : actorFor(session, input.runId)),
+    },
     /*
      * Which device this host is (W13, W17).
      *
@@ -852,6 +870,8 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       kind: 'toast',
       value: revisionJson({
         type: 'restored',
+        mode: toast.mode,
+        revisionId: toast.revisionId,
         revisionNumber: toast.revisionNumber,
       }),
     });
@@ -908,6 +928,22 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   /* The remote and resolution children's own sentences (L2-F8). */
   actor.on('childToast', ({ type: _type, ...toast }) => {
     emitChannel({ kind: 'toast', value: revisionJson({ ...toast, type: 'notice' }) });
+  });
+  /* A re-root moves no file, so no branch verb settles it; it is still a
+   * *Switch* a person made, and says so with the branch to go back to (I11). */
+  actor.on('switchResolved', (resolved) => {
+    if (resolved.mode !== 'reroot') {
+      return;
+    }
+    emitChannel({
+      kind: 'toast',
+      value: revisionJson({
+        type: 'branch',
+        operation: 'switch',
+        branch: resolved.branch,
+        ...(resolved.from === undefined ? {} : { from: resolved.from }),
+      }),
+    });
   });
   actor.on('switchRefused', (refusal) => {
     emitChannel({
@@ -1493,8 +1529,6 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         break;
       case 'undo':
       case 'undoOperation':
-      case 'confirm':
-      case 'cancel':
         actor.getSnapshot().children.restore?.send({ type: request.command });
         break;
       case 'switch':
@@ -1571,12 +1605,6 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           event: { type: 'rename', requestId: requestIdOf(request), branch: text('branch'), name: text('name') },
         });
         break;
-      case 'confirmBranch':
-        actor.send({ type: 'branch', event: { type: 'confirm' } });
-        break;
-      case 'cancelBranch':
-        actor.send({ type: 'branch', event: { type: 'cancel' } });
-        break;
       case 'connectRemote': {
         const kind = request['kind'];
         if (kind !== 'none' && kind !== 'tau' && kind !== 'git') {
@@ -1610,6 +1638,11 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         break;
       case 'syncNow':
         actor.send({ type: 'syncNow' });
+        break;
+      /* Audit R6: the page's signed-in person changed; the remote is read afresh under the new session. */
+      case 'sessionChanged':
+        actor.send({ type: 'remote', event: { type: 'sessionChanged' } });
+        actor.send({ type: 'sync', event: { type: 'sessionChanged' } });
         break;
       /* XD3, rounds 18 and 19: another device's run has been quiet here a while; pulls show whether it stayed quiet.
        * Round 27: through the placement's pull, so the page hears where this device cannot pull the chat at all. */
@@ -1776,6 +1809,20 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           revision ?? conflicts.find((conflict) => line.kind === 'branch' && conflict.into === line.name)?.revisionId;
         return id === undefined ? undefined : tree.readConflict(id);
       },
+      files: async (revision: string, paths: readonly string[]) => {
+        let held: Awaited<ReturnType<RevisionPort['readTree']>>;
+        try {
+          held = await port.readTree(revisionId(revision));
+        } catch {
+          return [];
+        }
+        return held === undefined
+          ? []
+          : paths.flatMap((path): RevisionFileRead[] => {
+              const bytes = held.get(path);
+              return bytes === undefined ? [] : [{ path, text: textOf(bytes), bytes: bytes.byteLength }];
+            });
+      },
     }),
     changed: (checkoutId, paths) => {
       /* One increment per content-change event, whatever its path count: the
@@ -1845,8 +1892,6 @@ export const requireRevisionToolchain = async (
 /** What a `switch` did, or why it did not (S13, D10). @public */
 export type RevisionSwitchOutcome =
   | Readonly<{ status: 'switched'; branch: string; line: string }>
-  /** The tree has changes this switch would overwrite; the caller decides. */
-  | Readonly<{ status: 'needs-confirmation'; branch: string; reason: string }>
   | Readonly<{ status: 'refused'; branch: string; reason: string }>;
 
 /** What a `discard` did, or why it did not (S36). @public */
@@ -1888,7 +1933,7 @@ export type RevisionSaveOutcome =
   | Readonly<{
       status: 'saved';
       revisionId: string;
-      /** Where the files are now, in the pane's words: `main · Rev 3`. */
+      /** Where the files are now, in the pane's words: `main`. */
       line: string;
       /**
        * How the push that followed ended; `noRemote` when this project backs up
@@ -1921,8 +1966,8 @@ export type ProjectRevisionVerbs = {
   diff(from: string | undefined, to: string): Promise<readonly RevisionDiffEntry[]>;
   /** Where the live tree is, and every branch this project holds. */
   describe(): Promise<RevisionPlace>;
-  /** Put the live tree on one branch. */
-  switchTo(branch: string, options?: Readonly<{ confirm?: boolean }>): Promise<RevisionSwitchOutcome>;
+  /** Put the live tree on one branch, saving its unsaved work on the branch it leaves first (I11). */
+  switchTo(branch: string): Promise<RevisionSwitchOutcome>;
   /** Remove one branch's linked checkout, refusing while it holds unsaved work. */
   discard(branch: string): Promise<RevisionDiscardOutcome>;
   /** Name or re-point one immutable revision. */
@@ -2094,8 +2139,8 @@ export const openProjectRevisions = async (
         ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
         ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
         parameters: parameterCodec,
-        /* The account the terminal's token belongs to, else this device's pseudonym (A1, AC15). */
-        actor: hostRevisionActor(options.actor),
+        /* The account the terminal's token belongs to, else this device's pseudonym (A1, AC15), through the CLI (B1). */
+        identity: { via: 'cli', resolve: hostRevisionActor(options.actor) },
         ...(remoteUrl === undefined ? {} : { remoteUrl }),
         ...(publishPublication === undefined ? {} : { publishPublication }),
         ...(registerRemoteProject === undefined ? {} : { registerRemoteProject }),
@@ -2125,10 +2170,7 @@ export const openProjectRevisions = async (
     }
   };
 
-  const switchTo = async (
-    branch: string,
-    verb: Readonly<{ confirm?: boolean }> = {},
-  ): Promise<RevisionSwitchOutcome> => {
+  const switchTo = async (branch: string): Promise<RevisionSwitchOutcome> => {
     const { actor } = await started();
     const child = actor.getSnapshot().children.branch;
     if (child === undefined) {
@@ -2140,8 +2182,9 @@ export const openProjectRevisions = async (
     }
     /*
      * One verb, one owner. The root resolves D10 and hands the decision to
-     * `branch.machine`, which owns the lifecycle — its confirmation, its failure
-     * edge, and the single `applySwitch` actor that rewrites the tree. This host
+     * `branch.machine`, which owns the lifecycle — the cut that saves unsaved
+     * work first (I11), its failure edge, and the single `applySwitch` actor
+     * that rewrites the tree. This host
      * used to choreograph the apply itself over the `restore` child, which was a
      * host re-implementing a machine (I20); now it only reports what the machine
      * settled on (W7 review R3).
@@ -2171,34 +2214,12 @@ export const openProjectRevisions = async (
           resolve(Object.freeze({ status: 'refused', branch, reason: event.message }));
         }
       });
-      /* The machine parks in `confirming` when its own check says a person is
-       * needed; an unconfirmed switch cancels rather than waiting. */
-      const watching = child.subscribe((snapshot: SnapshotFrom<typeof branchMachine>) => {
-        if (!selectBranchNeedsConfirmation(snapshot) || snapshot.context.requestId !== requestId) {
-          return;
-        }
-        if (verb.confirm === true) {
-          child.send({ type: 'confirm' });
-          return;
-        }
-        child.send({ type: 'cancel' });
-        resolve(
-          Object.freeze({
-            status: 'needs-confirmation',
-            branch,
-            reason:
-              snapshot.context.question ??
-              'This project has changes that are not in a revision yet, and switching would overwrite them.',
-          }),
-        );
-      });
       actor.send({ type: 'switch', requestId, branch });
       return () => {
         refused.unsubscribe();
         rerooted.unsubscribe();
         settled.unsubscribe();
         failed.unsubscribe();
-        watching.unsubscribe();
       };
     });
     if (outcome.status !== 'switched') {

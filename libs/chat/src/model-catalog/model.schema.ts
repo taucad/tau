@@ -16,6 +16,18 @@ export const modelSupportSchema = z.object({
         .describe(
           'Reasoning levels this model accepts and Tau forwards, ascending; absent means no user-selectable reasoning',
         ),
+      effortInTranscript: z
+        .boolean()
+        .describe(
+          "Whether the provider reads this model's reasoning level from the transcript, so changing the level keeps the prompt cache; a fact per model, absent means the level rides a request field",
+        )
+        .optional(),
+      replayBinding: z
+        .boolean()
+        .describe(
+          'Whether the provider takes the control over a replayed reasoning block whose prefix changed (leave it out and report it, or refuse the request)',
+        )
+        .optional(),
     })
     .describe('User-selectable reasoning support')
     .optional(),

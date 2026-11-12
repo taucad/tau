@@ -74,6 +74,9 @@ const mocks = vi.hoisted(() => {
       send: vi.fn(),
       getSnapshot: () => ({
         context: {
+          cameraRef: {
+            getSnapshot: () => ({ matches: (_state: { gesture?: string; input?: string }): boolean => false }),
+          },
           modelPointerClickSuppressionReasons: [],
           suppressNextModelPointerClick: false,
           viewerHoverSuppressionReasons: [],
@@ -224,6 +227,16 @@ const clipBeyond = (normal: Vector3, point: Vector3): RaycastClipState => {
   };
 };
 
+/** A camera whose gesture is held and whose input is dragging as the readers say. */
+const cameraStub = (
+  held: () => boolean,
+  dragging: () => boolean,
+): { getSnapshot: () => { matches: (state: { gesture?: string; input?: string }) => boolean } } => ({
+  getSnapshot: () => ({
+    matches: (state) => (state.input === 'dragging' ? dragging() : state.gesture === 'held' && held()),
+  }),
+});
+
 const createGltf = (): GLTF =>
   ({
     animations: [],
@@ -332,7 +345,7 @@ describe('GltfMesh camera lifecycle', () => {
     expect(compileAsync).not.toHaveBeenCalled();
   });
 
-  it('frames physical component bounds transiently and restores scene bounds when focus clears', async () => {
+  it('frames physical component bounds as one focus change that keeps the scene bounds, and leaves them when focus clears', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(createGltf());
     mocks.modelUnit = { ...mocks.modelUnit, focusedComponentId: 'root' };
@@ -347,16 +360,12 @@ describe('GltfMesh camera lifecycle', () => {
     );
 
     await waitFor(() => {
-      expect(mocks.cameraRig.actorRef.send).toHaveBeenNthCalledWith(1, {
-        type: 'frame',
+      expect(mocks.cameraRig.actorRef.send).toHaveBeenCalledExactlyOnceWith({
+        type: 'frameBounds',
         bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
         margin: 0.1,
+        source: 'focus',
       });
-      expect(mocks.cameraRig.actorRef.send).toHaveBeenNthCalledWith(2, {
-        type: 'setBounds',
-        bounds: mocks.sceneBounds,
-      });
-      expect(mocks.cameraRig.actorRef.send).toHaveBeenCalledTimes(2);
     });
 
     mocks.modelUnit = { ...mocks.modelUnit, focusedComponentId: undefined };
@@ -364,13 +373,11 @@ describe('GltfMesh camera lifecycle', () => {
       <GltfMesh gltfFile={new Uint8Array([1, 2, 3])} geometryHash='focused-component' enableMatcap={false} />,
     );
 
-    await waitFor(() => {
-      expect(mocks.cameraRig.actorRef.send).toHaveBeenLastCalledWith({
-        type: 'setBounds',
-        bounds: mocks.sceneBounds,
-      });
-      expect(mocks.cameraRig.actorRef.send).toHaveBeenCalledTimes(3);
+    // `frameBounds` never replaced the scene bounds, so clearing focus has nothing to restore.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
     });
+    expect(mocks.cameraRig.actorRef.send).toHaveBeenCalledOnce();
   });
 
   it('keeps the parsed scene mounted when the active camera identity changes', async () => {
@@ -759,7 +766,13 @@ describe('GltfMesh camera lifecycle', () => {
     let cameraInteracting = false;
     let cameraInteractionHadMovement = false;
     vi.spyOn(mocks.graphicsActor, 'getSnapshot').mockImplementation(() => ({
-      context: { ...snapshot.context, cameraInteracting, cameraInteractionHadMovement },
+      context: {
+        ...snapshot.context,
+        cameraRef: cameraStub(
+          () => cameraInteracting,
+          () => cameraInteractionHadMovement,
+        ),
+      },
     }));
     const query = vi.spyOn(bvhRaycast, 'raycastFirstVisibleMeshHit');
     const view = render(<GltfMesh gltfFile={new Uint8Array([1])} enableMatcap={false} />);
@@ -820,7 +833,13 @@ describe('GltfMesh camera lifecycle', () => {
     const snapshot = mocks.graphicsActor.getSnapshot();
     let cameraInteracting = false;
     vi.spyOn(mocks.graphicsActor, 'getSnapshot').mockImplementation(() => ({
-      context: { ...snapshot.context, cameraInteracting, cameraInteractionHadMovement: false },
+      context: {
+        ...snapshot.context,
+        cameraRef: cameraStub(
+          () => cameraInteracting,
+          () => false,
+        ),
+      },
     }));
     const gltf = createGltf();
     const near = new Mesh(new BoxGeometry(), new MeshBasicMaterial());

@@ -1378,7 +1378,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "(sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=~\"retry|present\"}[1h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"absent\"}[1h])) > 0) or (sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"recheck\"}[2h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"absent\"}[2h])) > 0)",
+            "expr": "sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"retry\"}[2h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"accepted\"}[2h])) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "erasure_stuck"
@@ -1390,7 +1390,7 @@
       "for": "2h",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
-        "summary": "For 2 h Langfuse trace deletions have been retried, read back as still present, or read back with no answer (recheck: a 410 legacy-API refusal, another non-ok answer or a timeout), with none confirmed absent. Erasure of a deleted account or project is owed within a day; check Langfuse availability, the v2 observations read and the deletion API's answer codes in the lifecycle log."
+        "summary": "For 2 h Langfuse trace deletions have been retried (a 429, a 5xx, a timeout or an unreachable host) with none accepted. An accepted delete is the erasure and Tau does not read it back; erasure of a deleted account is owed within a day, so check Langfuse availability and the deletion API's answer codes in the lifecycle log."
       },
       "labels": {
         "severity": "warning",
@@ -1425,6 +1425,40 @@
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
         "summary": "Langfuse rejected a send, or a backlog payload could not be opened or parsed. The evidence is dropped, never retried; the row's bounded reason says which."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "agent-observability"
+      }
+    },
+    {
+      "uid": "agent-evidence-langfuse-units",
+      "title": "P1: Langfuse Units at 70% of Hobby Plan",
+      "condition": "langfuse_units",
+      "data": [
+        {
+          "refId": "langfuse_units",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 2678400,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app) (increase(tau_agent_evidence_langfuse_units_total{app=~\".*\",service_name=\"tau-api\"}[31d])) >= 35000",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "langfuse_units"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "15m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
+        "summary": "Tau wrote 35,000 Langfuse units in the last 31 days, 70% of the Hobby plan's 50k a month (a unit is a trace, an observation or a score; ruling 13). Bound to this environment's API, as every hosted rule is, while staging and production share the organisation's 50k: add the other environment's figure from the Langfuse units panel. Respond in order: pause staging delivery (TAU_OBSERVABILITY_DELIVERY_ENABLED), build sampling (LW13), or reopen the plan. The counter misses units Langfuse features or other projects create, and increase() cannot see a new process's first sample."
       },
       "labels": {
         "severity": "warning",
@@ -1582,6 +1616,118 @@
         "severity": "warning",
         "service": "tau-api",
         "component": "lifecycle"
+      }
+    },
+    {
+      "uid": "api-email-send-failed",
+      "title": "P1: Email Send Refused by Resend",
+      "condition": "email_failed_threshold",
+      "data": [
+        {
+          "refId": "email_failed_logs",
+          "queryType": "range",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
+          "datasourceUid": "loki",
+          "model": {
+            "expr": "sum(count_over_time({service_name=\"tau-api\"} | event_provider=\"app\" |= \"Resend failed\" [5m]))",
+            "intervalMs": 15000,
+            "maxDataPoints": 43200,
+            "queryType": "range",
+            "refId": "email_failed_logs"
+          }
+        },
+        {
+          "refId": "email_failed_reduce",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "reduce",
+            "reducer": "last",
+            "expression": "email_failed_logs",
+            "refId": "email_failed_reduce"
+          }
+        },
+        {
+          "refId": "email_failed_threshold",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "threshold",
+            "expression": "email_failed_reduce",
+            "conditions": [
+              {
+                "type": "query",
+                "evaluator": {
+                  "type": "gt",
+                  "params": [0]
+                },
+                "operator": {
+                  "type": "and"
+                }
+              }
+            ],
+            "refId": "email_failed_threshold"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "Error",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/email.md",
+        "summary": "The API logged `Resend failed` in the last 5 min: Resend refused an email (verification, sign-in, reset, invite or billing) and the person did not receive it. Refused sends are not retried. Read the error text on the line: an unverified domain, a revoked key or a rate limit each name themselves. See incident 2026-11-11-prod-email-domain-unverified."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "email"
+      }
+    },
+    {
+      "uid": "db-pooler-clients-high",
+      "title": "P1: Pooler Login at 80% of Its Session Pool",
+      "condition": "db_pooler_clients_high",
+      "data": [
+        {
+          "refId": "db_pooler_clients_high",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "sum(max_over_time(tau_db_client_connections{app=~\".*\",service_name=\"tau-api\",tau_db_pool=~\"request|background\"}[1m])) + 2 >= 12",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "db_pooler_clients_high"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "2m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/postgres-saturation.md",
+        "summary": "API pooled PostgreSQL clients are at 12 of the 15-client session pool for 2 minutes (database connection audit R4). The sum is every API instance's own request and background sockets plus the 2 of revisions-maintenance, which shares the login and exports no metrics. The prod-us login's Supavisor session pool is 15 and the declared budget is 2 × (4 + 1) + 2 = 12 (apps/api/app/config/connection-budget.test.ts); a third Machine or a raised pool cap is the usual cause."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "database"
       }
     }
   ]

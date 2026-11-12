@@ -38,8 +38,8 @@ import { ActionButton } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
-import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-language-resolution';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { RevisionConflictEditor } from '#routes/w.$workspace.$project/revision-conflict-editor.js';
 import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import { needsDecision } from '#routes/w.$workspace.$project/revision-vocabulary.js';
@@ -362,7 +362,7 @@ function BranchMenu({
         label={`New name for ${branch}`}
         placeholder={branch}
         initial={branch}
-        note='Its revisions and the chats on it keep working.'
+        note='Its history and the chats on it keep working.'
         saveLabel='Rename branch'
         onOpenChange={setIsRenaming}
         onSave={(name) => {

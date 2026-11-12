@@ -525,6 +525,7 @@ const main = async (): Promise<void> => {
       'src/desktop-native-payload.spec.ts',
       'src/desktop-first-use-download.spec.ts',
       'src/desktop-community-preview.spec.ts',
+      'src/desktop-shell-packaged.spec.ts',
       'src/filesystem-projection-live.spec.ts',
       'src/filesystem-projection-metadata.spec.ts',
       'src/filesystem-projection-observation.spec.ts',

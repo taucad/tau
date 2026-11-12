@@ -160,13 +160,8 @@ const main = async (): Promise<void> => {
   const tag = required('DESKTOP_RELEASE_TAG');
   const identity = desktopReleaseIdentity(tag);
   const scope = z.enum(['all', 'linux', 'macos']).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
-  if (scope === 'linux' && identity.channel !== 'staging') {
-    throw new Error('Linux-only candidates are staging qualification only');
-  }
-  if (scope === 'macos' && identity.channel !== 'staging') {
-    // Production publication still requires all five routes; a Mac-only production candidate could never be promoted.
-    throw new Error('Mac-only candidates are staging qualification only');
-  }
+  // D-H5: a platform candidate (Linux APT+AppImage, or Apple silicon ZIP+DMG) is admissible on either channel, since
+  // production promotes each platform on its own complete receipts. Its exact shape is still checked after assembly.
   if (operation === 'resolve') {
     if (required('GITHUB_REF') !== 'refs/heads/main') {
       throw new Error('Installer candidate dispatch is main-only');
@@ -277,14 +272,15 @@ const main = async (): Promise<void> => {
     .regex(/^[a-f\d]{40}$/u)
     .parse(required('TAU_DESKTOP_SOURCE_SHA'));
   if (operation === 'admit-scope') {
-    // After assembly, a Mac-only candidate must be exactly the Apple silicon ZIP/DMG pair and nothing else.
+    // After assembly, a platform candidate must be exactly its platform's routes (Apple silicon ZIP/DMG, or Linux
+    // APT/AppImage) and nothing else: the same shape publication will later admit.
     const manifest = parseDesktopArtifactManifest(
       JSON.parse(await readFile(join(resolve(required('DESKTOP_ASSETS_DIR')), 'desktop-artifacts.json'), 'utf8')),
     );
-    if (manifest.tag !== tag || manifest.sourceCommit !== source || scope !== 'macos') {
-      throw new Error('Scoped candidate manifest does not bind the exact Mac-only candidate');
+    if (manifest.tag !== tag || manifest.sourceCommit !== source || scope === 'all') {
+      throw new Error('Scoped candidate manifest does not bind the exact platform candidate');
     }
-    desktopCandidateRoutes(manifest, 'macos');
+    desktopCandidateRoutes(manifest, scope);
     return;
   }
   const root = resolve(required('DESKTOP_CANDIDATE_ARCHIVES'));
@@ -311,7 +307,7 @@ const main = async (): Promise<void> => {
       if (!requiredAsset) {
         throw new Error(
           scope === 'macos'
-            ? 'Mac-only installer candidates require the Apple silicon archive. Rebuild the staging release with notarization enabled; existing staging defaults remain unchanged.'
+            ? 'Mac-only installer candidates require the Apple silicon archive. Rebuild the release with notarization enabled; existing staging defaults remain unchanged.'
             : 'Full installer candidates require all four archives. Rebuild the prior staging release with Intel Mac enabled and notarization enabled; existing staging defaults remain unchanged.',
         );
       }

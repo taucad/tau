@@ -1,13 +1,38 @@
-/* oxlint-disable eslint/max-params -- The queued entry write captures path, next value, patch, and edit sequence. */
-/* oxlint-disable typescript/prefer-optional-chain -- Explicit null checks distinguish missing checked bytes. */
+/**
+ * The entries record's store: a shim over `recordSync` (graphics event-driven state charter D6) that keeps the API
+ * its callers were written against. Every fact about the record (what was read, what is owed, which writes are this
+ * store's own) is in the machine; what is here is the file's two ports and the translation of a person's per-entry
+ * change and path change into the record they ask for.
+ */
 /* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
-/* oxlint-disable eslint/no-await-in-loop -- Checked conflicts must be retried sequentially. */
-/* oxlint-disable promise/prefer-await-to-then -- Per-file write queues must serialize asynchronous callbacks. */
-import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
+import { workbenchPaths } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
-import { createRecordHealth, isPotentiallyApplied } from '#workbench-records/record-health.js';
+import type { ActorOptions, AnyActorLogic } from 'xstate';
+import {
+  authoredFields,
+  createEntriesPolicy,
+  carriesFields,
+  replacingMoves,
+  sameEntries,
+  changedEntry,
+  coversFields,
+  originOf,
+  owedSteps,
+  entriesPolicy,
+  movePaths,
+  withoutMoves,
+} from '#workbench-records/entries-policy.js';
+import type {
+  EntriesPatch,
+  EntriesRecord,
+  EntryFields,
+  EntryPathChange as PathChange,
+} from '#workbench-records/entries-policy.js';
+import { isPotentiallyApplied } from '#workbench-records/record-health.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
+import { createRecordSync } from '#workbench-records/record-sync.js';
+import { createRecordSyncMachine } from '#workbench-records/record-sync.machine.js';
 
 type Entry = WorkbenchEntries['entries'][string];
 type Files = Readonly<{
@@ -19,66 +44,55 @@ type Files = Readonly<{
     preconditions: ReadonlyArray<{ path: string; expected: Uint8Array<ArrayBuffer> | null }>;
   }) => Promise<CheckedFileWriteResult>;
 }>;
-type Components = NonNullable<Entry['components']>;
-type Patch = Readonly<{
-  path: string;
-  fields: Partial<Pick<Entry, 'renderTimeout'>> & { components?: Partial<Components> };
-}>;
-export type EntryRecordPatch = Patch;
-export type EntryPathChange = Readonly<
-  { type: 'rename'; oldPath: string; newPath: string } | { type: 'delete'; path: string }
->;
-type QueuedPathChange = Readonly<{ operation: EntryPathChange; unsaved: ReadonlyMap<string, Patch['fields']> }>;
-const matchesPath = (path: string, prefix: string): boolean => path === prefix || path.startsWith(`${prefix}/`);
-const rewritePath = (path: string, oldPath: string, newPath: string): string =>
-  `${newPath}${path.slice(oldPath.length)}`;
-const withoutTimeout = (entry: Entry | undefined): Entry => {
-  const { renderTimeout: _removed, ...rest } = entry ?? {};
-  return rest;
-};
-const mergeEntry = (existing: Entry | undefined, fields: Patch['fields']): Entry => ({
-  ...(Object.hasOwn(fields, 'renderTimeout') ? withoutTimeout(existing) : existing),
-  ...(fields.renderTimeout === undefined ? {} : { renderTimeout: fields.renderTimeout }),
-  ...(fields.components === undefined
-    ? {}
-    : {
-        components: {
-          hidden: fields.components.hidden ?? existing?.components?.hidden ?? [],
-          isolated: fields.components.isolated ?? existing?.components?.isolated ?? [],
-          opacity: fields.components.opacity ?? existing?.components?.opacity ?? [],
-        },
-      }),
-});
-const applyPathChange = (record: WorkbenchEntries, change: QueuedPathChange): WorkbenchEntries => {
-  const entries = { ...record.entries };
-  const source = change.operation.type === 'rename' ? change.operation.oldPath : change.operation.path;
-  for (const path of new Set([...Object.keys(entries), ...change.unsaved.keys()])) {
-    if (!matchesPath(path, source)) {
-      continue;
-    }
-    const fields = change.unsaved.get(path);
-    const entry = fields ? mergeEntry(entries[path], fields) : entries[path];
-    Reflect.deleteProperty(entries, path);
-    if (change.operation.type === 'rename' && entry) {
-      entries[rewritePath(path, source, change.operation.newPath)] = entry;
-    }
-  }
-  return { ...record, entries };
-};
+
+/** The fields of each entry a person changed, as one own write carried them, keyed by entry path. */
+export type EntryRecordPatch = Readonly<{ fields: Readonly<Record<string, EntryFields>> }>;
+export type EntryPathChange = PathChange;
+
 export type EntriesState = Readonly<{
   record: WorkbenchEntries | undefined;
   bytes: Uint8Array<ArrayBuffer> | null;
   refusal: { code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string } | undefined;
 }>;
-const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
-const sameBytes = (a: Uint8Array<ArrayBuffer> | null, b: Uint8Array<ArrayBuffer> | null): boolean => {
-  if (a === b) {
-    return true;
+
+/**
+ * An edit waiting on its write, with every path its entry has been on while it waited, the last being where it is now:
+ * a write formed before a path change names the entry at its earlier path.
+ */
+type WaitingEdit = { paths: string[]; readonly fields: EntryFields; left: string | undefined; gone: boolean };
+
+const emptyRecord: WorkbenchEntries = { version: 1, entries: {} };
+
+/**
+ * The person's fields an own write carried, by the entry path they are on in the written record, and only where the
+ * written record holds them: a rename onto a path replaces what the person set there before.
+ */
+const entryPatchOf = (
+  patch: EntriesPatch | undefined,
+  record: WorkbenchEntries | undefined,
+): EntryRecordPatch | undefined => {
+  const held = new Map<string, EntryFields>();
+  for (const [path, fields] of Object.entries(patch === undefined ? {} : authoredFields(patch))) {
+    const entry = record?.entries[path];
+    const kept: EntryFields = {};
+    if (Object.hasOwn(fields, 'renderTimeout') && entry?.renderTimeout === fields.renderTimeout) {
+      kept.renderTimeout = fields.renderTimeout;
+    }
+    const components = Object.fromEntries(
+      Object.entries(fields.components ?? {}).filter(
+        ([field, value]) =>
+          JSON.stringify(entry?.components?.[field as keyof NonNullable<Entry['components']>] ?? []) ===
+          JSON.stringify(value),
+      ),
+    );
+    if (Object.keys(components).length > 0) {
+      kept.components = components;
+    }
+    if (Object.keys(kept).length > 0) {
+      held.set(path, kept);
+    }
   }
-  if (!a || !b || a.length !== b.length) {
-    return false;
-  }
-  return a.every((value, i) => value === b[i]);
+  return held.size > 0 ? { fields: Object.fromEntries(held) } : undefined;
 };
 
 /** Checked per-entry settings; a person's timeout and component changes merge independently. */
@@ -91,7 +105,8 @@ export function createWorkbenchEntriesStore(
     onHealth?: (health: RecordHealth) => void;
     /** Milliseconds. */
     editDebounce?: number;
-  }>,
+  }> &
+    Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>,
 ): Readonly<{
   read: (notify?: boolean) => Promise<boolean>;
   /** Fence a pending read as soon as its source changes. */
@@ -108,481 +123,249 @@ export function createWorkbenchEntriesStore(
   health: () => RecordHealth;
   ready: () => boolean;
 }> {
-  const filePath = `${input.root}/${workbenchPaths.entries}`;
-  let state: EntriesState = { record: undefined, bytes: null, refusal: undefined };
-  let observed = false;
-  let generation = 0;
-  let readError = false;
+  const path = `${input.root}/${workbenchPaths.entries}`;
   let disposed = false;
-  const isDisposed = (): boolean => disposed;
-  let pending: Promise<unknown> = Promise.resolve();
-  const intended = new Map<string, Entry>();
-  let editSequence = 0;
-  let settledSequence = 0;
-  const deferred = new Map<string, Patch>();
-  const deferredPathChanges: QueuedPathChange[] = [];
-  let retryTimer: ReturnType<typeof setTimeout> | undefined;
-  let retryDelay = 250;
-  let editTimer: ReturnType<typeof setTimeout> | undefined;
-  const inFlightWriteBytes = new Set<{ bytes: Uint8Array<ArrayBuffer>; patch: EntryRecordPatch | undefined }>();
-  /** A write whose reply was lost: it may be on disk, so the next write reads first and keeps it for attribution. */
-  let unresolved: { bytes: Uint8Array<ArrayBuffer>; patch: EntryRecordPatch | undefined } | undefined;
-  const health = createRecordHealth({
-    onHealth: input.onHealth,
-    readAgain: () => {
-      void read();
-    },
-  });
-  const queuedEdits = new Map<
-    string,
-    { next: Entry; patch: Patch; sequence: number; resolve: Array<(saved: boolean) => void> }
-  >();
-  const combine = (earlier: Patch | undefined, later: Patch): Patch => ({
-    path: later.path,
-    fields: {
-      ...earlier?.fields,
-      ...later.fields,
-      ...((earlier?.fields.components ?? later.fields.components)
-        ? {
-            components: { ...earlier?.fields.components, ...later.fields.components },
+  /**
+   * The edits waiting on the write that carries them, each at the path its entry is on now, with why the last merge of
+   * its fields left them out, if it did. `gone` once its entry is deleted or replaced.
+   */
+  const waiting = new Set<WaitingEdit>();
+  /** Changes refused because the file cannot take them, by entry path: owed to the person, never to the file. */
+  const refused = new Map<string, string>();
+  /** The machine's health, with a refused change counted as one the file does not hold. */
+  const healthOf = (health: RecordHealth): RecordHealth => {
+    const [first] = refused.values();
+    return first === undefined ? health : { ...health, unconfirmed: true, error: health.error ?? first };
+  };
+  const { actor, commands, context, on } = createRecordSync({
+    // Each store's own policy, so a field its merge leaves out is counted as this store's refused change.
+    machine: createRecordSyncMachine(
+      createEntriesPolicy((left, carried, message) => {
+        for (const edit of waiting) {
+          if (edit.paths.some((path) => left.includes(path))) {
+            edit.left = message;
+          } else if (edit.paths.some((path) => coversFields(carried[path], edit.fields))) {
+            // Only a merge that carries this edit's own fields settles it: a later change of the entry may not.
+            edit.left = undefined;
           }
-        : {}),
-    },
-  });
-  const publish = (
-    bytes: Uint8Array<ArrayBuffer> | null,
-    source: 'read' | 'write',
-    notify = false,
-    locallyAuthored?: EntryRecordPatch,
-  ): void => {
-    if (observed && sameBytes(bytes, state.bytes) && !notify) {
-      return;
-    }
-    observed = true;
-    if (bytes === null) {
-      state = { record: undefined, bytes: null, refusal: undefined };
-    } else {
-      const parsed = workbenchRecords.entries.read(bytes);
-      state =
-        parsed.status === 'current'
-          ? { record: parsed.record, bytes, refusal: undefined }
-          : { ...state, bytes, refusal: { code: parsed.code, message: parsed.message } };
-    }
-    input.onChange(state, source, locallyAuthored);
-    if (source === 'read' && !state.refusal && editSequence === settledSequence) {
-      // A deferred change is still owed on its path; every other path follows the file, absent included.
-      for (const path of intended.keys()) {
-        if (!deferred.has(path)) {
-          intended.delete(path);
         }
-      }
-      for (const [path, entry] of Object.entries(state.record?.entries ?? {})) {
-        if (!deferred.has(path)) {
-          intended.set(path, entry);
-        }
-      }
-    }
-  };
-  const read = async (notify = false): Promise<boolean> => {
-    if (isDisposed()) {
-      return false;
-    }
-    const current = ++generation;
-    try {
-      const bytes = (await input.files.exists(filePath)) ? await input.files.readFile(filePath) : null;
-      if (current === generation && !isDisposed()) {
-        const recovered = readError;
-        readError = false;
-        const ownWrite =
-          bytes &&
-          [...inFlightWriteBytes, ...(unresolved ? [unresolved] : [])].find((written) =>
-            sameBytes(written.bytes, bytes),
-          );
-        publish(bytes, ownWrite ? 'write' : 'read', notify || recovered, ownWrite?.patch);
-        health.readSucceeded();
-      }
-      return observed;
-    } catch (error) {
-      if (current === generation && !isDisposed()) {
-        readError = true;
-        input.onError(error);
-        health.readFailed(error);
-      }
-      return false;
-    }
-  };
-  const write = async (
-    patch: Patch | undefined,
-    reset: WorkbenchEntries | undefined,
-    expectedReset: Uint8Array<ArrayBuffer> | null,
-    pathChange?: QueuedPathChange,
-  ): Promise<'saved' | 'retry' | 'blocked'> => {
-    if (isDisposed()) {
-      return 'blocked';
-    }
-    if ((!observed || unresolved) && !(await read())) {
-      return 'retry';
-    }
-    unresolved = undefined;
-    if (state.refusal && (!reset || state.refusal.code === 'NEWER_RECORD')) {
-      return 'blocked';
-    }
-    if (reset && (state.refusal?.code !== 'INVALID_RECORD' || !sameBytes(state.bytes, expectedReset))) {
-      return 'blocked';
-    }
-    if (patch && Object.keys(patch.fields).length === 0) {
-      return 'saved';
-    }
-    for (let attempt = 0; attempt < (reset ? 1 : 3); attempt++) {
-      if (isDisposed()) {
-        return 'blocked';
-      }
-      const current = state.record ?? { version: 1, entries: {} };
-      const existing = current.entries[patch?.path ?? ''];
-      const merged = pathChange
-        ? applyPathChange(current, pathChange)
-        : (reset ?? {
-            ...current,
-            entries: {
-              ...current.entries,
-              [patch!.path]: mergeEntry(existing, patch!.fields),
-            },
-          });
-      if (!reset && same(current, merged)) {
-        return 'saved';
-      }
-      try {
-        const generationAtWrite = generation;
-        const data = workbenchRecords.entries.serialize(merged);
-        const attempted = { bytes: new TextEncoder().encode(data), patch: (reset ?? pathChange) ? undefined : patch };
-        inFlightWriteBytes.add(attempted);
-        let result: CheckedFileWriteResult;
-        health.writeStarted();
+      }),
+    ),
+    editDebounce: input.editDebounce,
+    clock: input.clock,
+    inspect: input.inspect,
+    onRejectedEvent: input.onRejectedEvent,
+    ports: {
+      async read() {
         try {
-          result = await input.files.writeFileChecked({
-            path: filePath,
-            data,
-            preconditions: [{ path: filePath, expected: reset ? expectedReset : state.bytes }],
-          });
+          return { status: 'read', bytes: (await input.files.exists(path)) ? await input.files.readFile(path) : null };
         } catch (error) {
-          if (isPotentiallyApplied(error)) {
-            unresolved = attempted;
-          }
-          throw error;
-        } finally {
-          inFlightWriteBytes.delete(attempted);
-          health.writeSettled();
+          return { status: 'failed', error };
         }
-        if (result.status !== 'conflict') {
-          if (generation === generationAtWrite) {
-            generation++;
-            publish(result.content, 'write', false, attempted.patch);
-          } else {
-            const refresh = ++generation;
-            try {
-              const latest = (await input.files.exists(filePath)) ? await input.files.readFile(filePath) : null;
-              if (refresh === generation) {
-                const ownWrite = sameBytes(latest, result.content);
-                publish(latest, ownWrite ? 'write' : 'read', false, ownWrite ? attempted.patch : undefined);
-              }
-            } catch (error) {
-              input.onError(error);
-            }
-          }
-          return 'saved';
+      },
+      async write({ data, expected }) {
+        try {
+          const result = await input.files.writeFileChecked({ path, data, preconditions: [{ path, expected }] });
+          return result.status === 'conflict' ? { status: 'conflict' } : { status: 'applied', content: result.content };
+        } catch (error) {
+          return { status: 'failed', error, lost: isPotentiallyApplied(error) };
         }
-        if (!(await read())) {
-          return 'retry';
-        }
-        if (reset ?? state.refusal) {
-          return 'blocked';
-        }
-      } catch (error) {
-        input.onError(error);
-        health.writeFailed(error);
-        return 'retry';
-      }
+      },
+    },
+  });
+  function refusalChanged(): void {
+    if (!disposed) {
+      input.onHealth?.(healthOf(context().health));
     }
-    const conflicted = new Error('The entry settings changed while saving. Try again.');
-    input.onError(conflicted);
-    health.writeFailed(conflicted);
-    return 'retry';
+  }
+
+  on('published', ({ snapshot, origin, patch }) => {
+    if (!disposed) {
+      // A published record is parsed from the file's bytes, so it never carries path changes.
+      input.onChange(
+        snapshot,
+        origin === 'own' ? 'write' : 'read',
+        origin === 'own' ? entryPatchOf(patch, snapshot.record) : undefined,
+      );
+    }
+  });
+  on('failed', ({ error }) => {
+    if (!disposed) {
+      input.onError(error);
+    }
+  });
+  on('healthChanged', ({ health }) => {
+    if (!disposed) {
+      input.onHealth?.(healthOf(health));
+    }
+  });
+  actor.start();
+  /** Why the file cannot take a record, if it cannot. */
+  const errorOf = (record: EntriesRecord): unknown => {
+    try {
+      entriesPolicy.serialize(record);
+      return undefined;
+    } catch (error) {
+      // A record the file already holds, even over the canonical limit, asks for nothing to be written.
+      const { published } = context();
+      return published.record && sameEntries(withoutMoves(record), published.record) ? undefined : error;
+    }
   };
-  const settleIntent = (): void => {
-    if (deferred.size === 0 && deferredPathChanges.length === 0 && queuedEdits.size === 0) {
-      health.intentSettled();
-    }
+  /**
+   * Whether the file can take a change to `path`: one it cannot is refused, reported and counted in health until a
+   * later change of that path is taken, rather than owed with every later change of every entry, which would then
+   * never be written.
+   */
+  const refuse = (path: string, error: unknown): false => {
+    refused.set(path, error instanceof Error ? error.message : 'The record cannot take this change.');
+    input.onError(error);
+    refusalChanged();
+    return false;
   };
-  const retry = (): void => {
-    if (isDisposed() || (deferred.size === 0 && deferredPathChanges.length === 0) || retryTimer) {
-      return;
-    }
-    retryTimer = setTimeout(() => {
-      retryTimer = undefined;
-      const pathChange = deferredPathChanges[0];
-      if (pathChange) {
-        const result = pending
-          .then(async () => write(undefined, undefined, null, pathChange))
-          .then((status) => {
-            if (status === 'saved') {
-              deferredPathChanges.shift();
-              retryDelay = 250;
-              settleIntent();
-              retry();
-            } else if (status === 'retry') {
-              retryDelay = Math.min(retryDelay * 2, 8000);
-              retry();
-            }
-          });
-        pending = result;
-        return;
-      }
-      const patch = deferred.values().next().value;
-      if (!patch) {
-        return;
-      }
-      const result = pending
-        .then(async () => (deferred.has(patch.path) ? write(deferred.get(patch.path), undefined, null) : 'saved'))
-        .then((status) => {
-          if (status === 'saved') {
-            deferred.delete(patch.path);
-            retryDelay = 250;
-            settleIntent();
-            retry();
-          } else if (status === 'retry') {
-            retryDelay = Math.min(retryDelay * 2, 8000);
-            retry();
-          }
-        });
-      pending = result;
-    }, retryDelay);
+  const writable = (path: string, record: EntriesRecord): boolean => {
+    const error = errorOf(record);
+    return error === undefined || refuse(path, error);
   };
-  const queueWrite = async (path: string, next: Entry, patch: Patch, sequence: number): Promise<boolean> => {
-    const result = pending
-      .then(async () => {
-        if (deferredPathChanges.length > 0) {
-          return 'retry';
-        }
-        if (!observed && !(await read())) {
-          return 'retry';
-        }
-        return write(combine(deferred.get(path), patch), undefined, null);
-      })
-      .then((status) => {
-        const saved = status === 'saved';
-        settledSequence = sequence;
-        if (saved) {
-          deferred.delete(path);
-          retryDelay = 250;
-          settleIntent();
-        } else {
-          const remaining = combine(deferred.get(path), patch);
-          if (status === 'retry' || Object.keys(remaining.fields).length > 0) {
-            deferred.set(path, remaining);
-          } else {
-            deferred.delete(path);
-          }
-          if (status === 'retry') {
-            retry();
-          }
-        }
-        if (intended.get(path) === next && saved) {
-          intended.set(path, state.record?.entries[path] ?? next);
-        }
-        return saved;
-      });
-    pending = result;
-    return result;
+
+  /** The record the person's next change starts from: what they last asked for, else what the file holds. */
+  const base = (): WorkbenchEntries => {
+    const { origin, intended, published } = context();
+    const record = origin === 'none' ? undefined : (intended ?? published.record);
+    return record ? withoutMoves(record) : emptyRecord;
   };
-  const drainEdits = async (): Promise<void> => {
-    if (editTimer) {
-      clearTimeout(editTimer);
-      editTimer = undefined;
-    }
-    const batch = [...queuedEdits].sort((a, b) => a[1].sequence - b[1].sequence);
-    queuedEdits.clear();
-    for (const [path, queued] of batch) {
-      const saved = await queueWrite(path, queued.next, queued.patch, queued.sequence);
-      for (const resolve of queued.resolve) {
-        resolve(saved);
-      }
-    }
+  /**
+   * The entry as shown, at the path the person's owed path changes put it on: an edit made while its entry's rename is
+   * written was made on the renamed entry, as the file holds it at its old path. A path change already on the file
+   * moves nothing again, and an entry only the person's owed fields make was shown as they asked for it.
+   */
+  const shownAt = (entryPath: string, from: WorkbenchEntries): Entry | undefined => {
+    const { published, deferred, cycle, pending } = context();
+    const steps = [cycle?.patch, deferred, pending?.patch].flatMap((patch) =>
+      patch === undefined ? [] : owedSteps(patch, published.record),
+    );
+    const shownEntries = published.record?.entries ?? {};
+    const origin = originOf(shownEntries, steps, entryPath);
+    return origin === 'made' ? from.entries[entryPath] : origin === undefined ? undefined : shownEntries[origin.path];
   };
   return {
-    read,
+    read: async (notify = false) => commands.read(notify),
     invalidateRead: () => {
-      generation++;
+      commands.invalidate();
     },
-    edit: async (path, next) => {
-      if (isDisposed()) {
+    edit: async (entryPath, next) => {
+      if (disposed) {
         return false;
       }
-      const base = intended.get(path) ?? state.record?.entries[path];
-      const fields: Patch['fields'] = {};
-      if (!same(base?.renderTimeout, next.renderTimeout)) {
-        fields.renderTimeout = next.renderTimeout;
-      }
-      const defaults: Components = { hidden: [], isolated: [], opacity: [] };
-      const before = base?.components ?? defaults;
-      const after = next.components ?? defaults;
-      const components: Partial<Components> = {};
-      for (const field of ['hidden', 'isolated', 'opacity'] as const) {
-        if (!same(before[field], after[field])) {
-          Object.assign(components, { [field]: after[field] });
-        }
-      }
-      if (Object.keys(components).length > 0) {
-        fields.components = components;
-      }
-      intended.set(path, next);
-      const sequence = ++editSequence;
-      const patch = { path, fields };
-      if (!input.editDebounce) {
-        return queueWrite(path, next, patch, sequence);
-      }
-      return new Promise<boolean>((resolve) => {
-        const earlier = queuedEdits.get(path);
-        queuedEdits.set(
-          path,
-          earlier
-            ? { next, patch: combine(earlier.patch, patch), sequence, resolve: [...earlier.resolve, resolve] }
-            : { next, patch, sequence, resolve: [resolve] },
-        );
-        if (editTimer) {
-          clearTimeout(editTimer);
-        }
-        editTimer = setTimeout(() => {
-          void drainEdits();
-        }, input.editDebounce);
+      const from = base();
+      // Only what the person changed: on the entry they were shown, or over their own change the file lacks. A field
+      // another party changed since keeps the file's value. A cycle took what was deferred when it formed.
+      const { deferred, cycle, pending } = context();
+      const owed = authoredFields([...(cycle?.patch ?? []), ...(deferred ?? []), ...(pending?.patch ?? [])]);
+      const { entry, fields } = changedEntry({
+        shown: shownAt(entryPath, from),
+        next,
+        onto: from.entries[entryPath],
+        owed: owed[entryPath],
       });
-    },
-    changePaths: async (operation) => {
-      if (isDisposed()) {
+      const record = { ...from, entries: { ...from.entries, [entryPath]: entry }, set: { [entryPath]: fields } };
+      if (!writable(entryPath, record)) {
         return false;
       }
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-        retryTimer = undefined;
+      if (refused.delete(entryPath)) {
+        refusalChanged();
       }
-      await drainEdits();
-      const source = operation.type === 'rename' ? operation.oldPath : operation.path;
-      const unsaved = new Map<string, Patch['fields']>();
-      for (const [path, patch] of deferred) {
-        if (matchesPath(path, source)) {
-          unsaved.set(path, patch.fields);
+      const waits: WaitingEdit = { paths: [entryPath], fields, left: undefined, gone: false };
+      waiting.add(waits);
+      try {
+        if (!(await commands.edit(record))) {
+          return false;
+        }
+      } finally {
+        waiting.delete(waits);
+      }
+      // The write that carried the change left it out: another party's change left the record no room for it. A
+      // change whose entry the person deleted or replaced since is not owed to them.
+      const shown = context().published.record?.entries;
+      if (
+        waits.left !== undefined &&
+        !waits.gone &&
+        !waits.paths.some((path) => carriesFields(shown?.[path], fields))
+      ) {
+        return refuse(waits.paths.at(-1) ?? entryPath, new RangeError(waits.left));
+      }
+      return true;
+    },
+    changePaths: async (change) => {
+      if (disposed) {
+        return false;
+      }
+      const from = base();
+      const moved = (moves: EntryPathChange[]): EntriesRecord => ({
+        ...from,
+        entries: movePaths(from.entries, moves),
+        moves,
+      });
+      let record = moved([change]);
+      const unnamed = change.type === 'rename' ? errorOf(record) : undefined;
+      // A record over the file's limit is refused below, keeping every setting, as any change the file cannot take.
+      if (unnamed !== undefined && !(unnamed instanceof RangeError) && change.type === 'rename') {
+        // The record cannot name the new path: the settings cannot follow the file, so they go with its old path.
+        input.onError(unnamed);
+        record = moved([{ type: 'delete', path: change.oldPath }]);
+      }
+      if (!writable(change.type === 'rename' ? change.oldPath : change.path, record)) {
+        return false;
+      }
+      // A refused change, and a waiting one, follows its entry, and goes when the entry is deleted or replaced.
+      for (const edit of waiting) {
+        const [moved] = Object.keys(replacingMoves({ [edit.paths.at(-1) ?? '']: true }, record.moves ?? []));
+        if (moved === undefined) {
+          edit.gone = true;
+        } else if (moved !== edit.paths.at(-1)) {
+          edit.paths.push(moved);
         }
       }
-      for (const path of deferred.keys()) {
-        if (matchesPath(path, source)) {
-          deferred.delete(path);
+      const kept = replacingMoves(Object.fromEntries(refused), record.moves ?? []);
+      if (JSON.stringify(kept) !== JSON.stringify(Object.fromEntries(refused))) {
+        refused.clear();
+        for (const [path, message] of Object.entries(kept)) {
+          refused.set(path, message);
         }
+        refusalChanged();
       }
-      for (const [path, entry] of new Map(intended)) {
-        if (!matchesPath(path, source)) {
-          continue;
-        }
-        intended.delete(path);
-        if (operation.type === 'rename') {
-          intended.set(rewritePath(path, source, operation.newPath), entry);
-        }
-      }
-      const change = { operation, unsaved };
-      const result = pending
-        .then(async () => (deferredPathChanges.length > 0 ? 'retry' : write(undefined, undefined, null, change)))
-        .then((status) => {
-          if (status !== 'saved') {
-            deferredPathChanges.push(change);
-            if (status === 'retry') {
-              retry();
-            }
-          }
-          return status === 'saved';
-        });
-      pending = result;
-      return result;
+      const saved = commands.edit(record);
+      // A path change is written at once, with the edits made before it.
+      void commands.flush();
+      return saved;
     },
     reset: async (next, reviewed) => {
-      if (isDisposed() || state.refusal?.code !== 'INVALID_RECORD') {
+      const shown = context().published;
+      if (disposed || shown.refusal?.code !== 'INVALID_RECORD') {
         return false;
       }
-      const bytes = reviewed === undefined ? state.bytes : reviewed;
-      await drainEdits();
-      const sequence = ++editSequence;
-      const result = pending
-        .then(async () => write(undefined, next, bytes))
-        .then((status) => {
-          if (status !== 'saved') {
-            return false;
-          }
-          deferred.clear();
-          deferredPathChanges.length = 0;
-          settledSequence = sequence;
-          settleIntent();
-          if (sequence === editSequence) {
-            intended.clear();
-            for (const [path, entry] of Object.entries(next.entries)) {
-              intended.set(path, entry);
-            }
-          }
-          return true;
-        });
-      pending = result;
-      return result;
+      if (refused.size > 0) {
+        refused.clear();
+        refusalChanged();
+      }
+      return commands.reset(next, reviewed === undefined ? shown.bytes : reviewed);
     },
     flush: async () => {
-      await drainEdits();
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-        retryTimer = undefined;
+      const saved = await commands.flush();
+      if (refused.size === 0) {
+        return saved;
       }
-      await pending;
-      for (const change of deferredPathChanges) {
-        const status = await write(undefined, undefined, null, change);
-        if (status !== 'saved') {
-          if (status === 'retry') {
-            retry();
-          }
-          return false;
-        }
-      }
-      deferredPathChanges.length = 0;
-      if (unresolved && deferred.size === 0 && !(await read())) {
-        retry();
-        return false;
-      }
-      for (const patch of deferred.values()) {
-        const status = await write(patch, undefined, null);
-        if (status !== 'saved') {
-          if (status === 'retry') {
-            retry();
-          }
-          return false;
-        }
-        deferred.delete(patch.path);
-      }
-      retryDelay = 250;
-      settleIntent();
-      return true;
+      // A refused change is never written: the flush that asks reports it unsaved, and then lets it go.
+      refused.clear();
+      refusalChanged();
+      return false;
     },
     dispose: () => {
       disposed = true;
-      generation++;
-      health.dispose();
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-        retryTimer = undefined;
-      }
-      if (editTimer) {
-        clearTimeout(editTimer);
-        editTimer = undefined;
-      }
+      commands.close();
     },
-    snapshot: () => state,
-    health: () => health.health(),
-    retryRead: async () => {
-      health.restartReads();
-      return read(true);
-    },
-    ready: () => observed,
+    snapshot: () => context().published,
+    health: () => healthOf(context().health),
+    retryRead: async () => (disposed ? false : commands.retryRead()),
+    ready: () => context().origin !== 'none',
   };
 }

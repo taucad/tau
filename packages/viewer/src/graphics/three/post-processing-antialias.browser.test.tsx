@@ -29,8 +29,8 @@ import { createActor, createAsyncLogic } from 'xstate';
 import { afterEach, expect, inject, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { SceneOverlay, useOverlayDepthRestorer } from '#graphics/three/scene-overlay.jsx';
-import { GraphicsProvider, useCameraRig, useViewCameraFraming } from '#hooks/use-graphics.jsx';
-import { graphicsMachine } from '#machines/graphics.machine.js';
+import { GraphicsProvider, useCameraRig } from '#hooks/use-graphics.jsx';
+import { graphicsMachine, selectGraphicsFramed } from '#machines/graphics.machine.js';
 import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
 import { isViewportWebGpu } from '#graphics/three/viewport-cad-renderer.js';
 import { resolveSectionPieces } from '#graphics/section-cuts.js';
@@ -219,7 +219,21 @@ it.each(
           }),
         },
       }),
-      { input: { enablePostProcessing: true } },
+      {
+        input: {
+          camera: {
+            cameraView: {
+              frameId: 'tau:root',
+              target: [0, 0, 0],
+              direction: [0, 0, 1],
+              up: [0, 1, 0],
+              verticalSpan: 4,
+              perspectiveZoom: 1,
+            },
+          },
+          enablePostProcessing: true,
+        },
+      },
     ).start();
     // Nearest-filtered diagonal is a shader edge: geometry MSAA alone cannot smooth it.
     const pixels = new Uint8Array(64 * 64 * 4);
@@ -281,21 +295,7 @@ it.each(
     try {
       render(
         <div style={{ width, height }}>
-          <GraphicsProvider
-            graphicsRef={actor}
-            seed={{
-              camera: {
-                cameraView: {
-                  frameId: 'tau:root',
-                  target: [0, 0, 0],
-                  direction: [0, 0, 1],
-                  up: [0, 1, 0],
-                  verticalSpan: 4,
-                  perspectiveZoom: 1,
-                },
-              },
-            }}
-          >
+          <GraphicsProvider graphicsRef={actor}>
             <ThreeCanvasInstance
               graphicsBackend={backend}
               upDirection='y'
@@ -384,7 +384,22 @@ it.each(
         }),
       },
     }),
-    { input: { enablePostProcessing: true } },
+    {
+      input: {
+        camera: {
+          cameraFovAngle: fov,
+          cameraView: {
+            frameId: 'tau:root',
+            target: [0, 0, 0],
+            direction: [0, 0, 1],
+            up: [0, 1, 0],
+            verticalSpan: 4,
+            perspectiveZoom: 1,
+          },
+        },
+        enablePostProcessing: true,
+      },
+    },
   ).start();
   let state: RootState | undefined;
   let pending: Promise<void> | undefined;
@@ -438,22 +453,7 @@ it.each(
   try {
     render(
       <div style={{ width: 384, height: 384 }}>
-        <GraphicsProvider
-          graphicsRef={actor}
-          seed={{
-            camera: {
-              cameraFovAngle: fov,
-              cameraView: {
-                frameId: 'tau:root',
-                target: [0, 0, 0],
-                direction: [0, 0, 1],
-                up: [0, 1, 0],
-                verticalSpan: 4,
-                perspectiveZoom: 1,
-              },
-            },
-          }}
-        >
+        <GraphicsProvider graphicsRef={actor}>
           <ThreeCanvasInstance
             graphicsBackend={backend}
             upDirection='y'
@@ -601,7 +601,22 @@ it.each((['webgl', 'webgpu'] as const).flatMap((backend) => ['front', 'behind'].
           }),
         },
       }),
-      { input: { enablePostProcessing: true } },
+      {
+        input: {
+          camera: {
+            cameraFovAngle: 0,
+            cameraView: {
+              frameId: 'tau:root',
+              target: [0, 0, 0],
+              direction: [0, 0, 1],
+              up: [0, 1, 0],
+              verticalSpan: 4,
+              perspectiveZoom: 1,
+            },
+          },
+          enablePostProcessing: true,
+        },
+      },
     ).start();
     let state: RootState | undefined;
     let pending: Promise<void> | undefined;
@@ -655,22 +670,7 @@ it.each((['webgl', 'webgpu'] as const).flatMap((backend) => ['front', 'behind'].
     try {
       render(
         <div style={{ width: 128, height: 128 }}>
-          <GraphicsProvider
-            graphicsRef={actor}
-            seed={{
-              camera: {
-                cameraFovAngle: 0,
-                cameraView: {
-                  frameId: 'tau:root',
-                  target: [0, 0, 0],
-                  direction: [0, 0, 1],
-                  up: [0, 1, 0],
-                  verticalSpan: 4,
-                  perspectiveZoom: 1,
-                },
-              },
-            }}
-          >
+          <GraphicsProvider graphicsRef={actor}>
             <ThreeCanvasInstance
               graphicsBackend={backend}
               upDirection='y'
@@ -797,7 +797,22 @@ it.each(
             }),
           },
         }),
-        { input: { enablePostProcessing: true } },
+        {
+          input: {
+            camera: {
+              cameraFovAngle: 0,
+              cameraView: {
+                frameId: 'tau:root',
+                target: [0, 0, 0],
+                direction: [0, 0, 1],
+                up: [0, 1, 0],
+                verticalSpan: height,
+                perspectiveZoom: 1,
+              },
+            },
+            enablePostProcessing: true,
+          },
+        },
       ).start();
       const material = createGltfFatLineMaterial({
         backend,
@@ -846,22 +861,7 @@ it.each(
       try {
         render(
           <div style={{ width, height }}>
-            <GraphicsProvider
-              graphicsRef={actor}
-              seed={{
-                camera: {
-                  cameraFovAngle: 0,
-                  cameraView: {
-                    frameId: 'tau:root',
-                    target: [0, 0, 0],
-                    direction: [0, 0, 1],
-                    up: [0, 1, 0],
-                    verticalSpan: height,
-                    perspectiveZoom: 1,
-                  },
-                },
-              }}
-            >
+            <GraphicsProvider graphicsRef={actor}>
               <ThreeCanvasInstance
                 graphicsBackend={backend}
                 upDirection='y'
@@ -1101,7 +1101,22 @@ it.each(
           }),
         },
       }),
-      { input: { enablePostProcessing: true } },
+      {
+        input: {
+          camera: {
+            cameraFovAngle: 0,
+            cameraView: {
+              frameId: 'tau:root',
+              target: [0, 0, 0],
+              direction: [0.4, 0, side],
+              up: [0, 1, 0],
+              verticalSpan: 4,
+              perspectiveZoom: 1,
+            },
+          },
+          enablePostProcessing: true,
+        },
+      },
     ).start();
     const geometry = new BoxGeometry(2, 2, 2);
     const material = new MeshBasicMaterial({
@@ -1259,22 +1274,7 @@ it.each(
     try {
       render(
         <div style={{ width, height }}>
-          <GraphicsProvider
-            graphicsRef={actor}
-            seed={{
-              camera: {
-                cameraFovAngle: 0,
-                cameraView: {
-                  frameId: 'tau:root',
-                  target: [0, 0, 0],
-                  direction: [0.4, 0, side],
-                  up: [0, 1, 0],
-                  verticalSpan: 4,
-                  perspectiveZoom: 1,
-                },
-              },
-            }}
-          >
+          <GraphicsProvider graphicsRef={actor}>
             <ThreeCanvasInstance
               graphicsBackend={backend}
               upDirection='y'
@@ -1433,7 +1433,22 @@ it.each([false, true].flatMap((forceNodeWebGl2) => [256, 2560].map((width) => ({
           probeWebGpu: createAsyncLogic({ run: async () => true }),
         },
       }),
-      { input: { enablePostProcessing: true } },
+      {
+        input: {
+          camera: {
+            cameraFovAngle: 0,
+            cameraView: {
+              frameId: 'tau:root',
+              target: [0, 0, 0],
+              direction: [0, 0, 1],
+              up: [0, 1, 0],
+              verticalSpan: 4,
+              perspectiveZoom: 1,
+            },
+          },
+          enablePostProcessing: true,
+        },
+      },
     ).start();
     let state: RootState | undefined;
     let resources: ReturnType<typeof createModelEmphasisResources> | undefined;
@@ -1504,22 +1519,7 @@ it.each([false, true].flatMap((forceNodeWebGl2) => [256, 2560].map((width) => ({
     try {
       render(
         <div style={{ width, height: width === 2560 ? 1440 : 256 }}>
-          <GraphicsProvider
-            graphicsRef={actor}
-            seed={{
-              camera: {
-                cameraFovAngle: 0,
-                cameraView: {
-                  frameId: 'tau:root',
-                  target: [0, 0, 0],
-                  direction: [0, 0, 1],
-                  up: [0, 1, 0],
-                  verticalSpan: 4,
-                  perspectiveZoom: 1,
-                },
-              },
-            }}
-          >
+          <GraphicsProvider graphicsRef={actor}>
             <ThreeCanvasInstance graphicsBackend='webgpu' upDirection='y' onRetry={() => undefined}>
               <mesh
                 ref={(mesh) => {
@@ -1692,7 +1692,22 @@ it.each(
       graphicsMachine.provide({
         actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) },
       }),
-      { input: { enablePostProcessing: true } },
+      {
+        input: {
+          camera: {
+            cameraFovAngle: 0,
+            cameraView: {
+              frameId: 'tau:root',
+              target: [0, 0, 0],
+              direction: [0.3, 0.2, 1],
+              up: [0, 1, 0],
+              verticalSpan: 4,
+              perspectiveZoom: 1,
+            },
+          },
+          enablePostProcessing: true,
+        },
+      },
     ).start();
     let state: RootState | undefined;
     let rig: ReturnType<typeof useCameraRig> | undefined;
@@ -1743,22 +1758,7 @@ it.each(
     };
     const fixture = (fov: number): ReactNode => (
       <div key={fov} style={{ width: renderWidth, height: renderHeight }}>
-        <GraphicsProvider
-          graphicsRef={actor}
-          seed={{
-            camera: {
-              cameraFovAngle: fov,
-              cameraView: {
-                frameId: 'tau:root',
-                target: [0, 0, 0],
-                direction: [0.3, 0.2, 1],
-                up: [0, 1, 0],
-                verticalSpan: 4,
-                perspectiveZoom: 1,
-              },
-            },
-          }}
-        >
+        <GraphicsProvider graphicsRef={actor}>
           <ThreeCanvasInstance graphicsBackend='webgpu' upDirection='y' onRetry={() => undefined}>
             <ambientLight intensity={2} />
             <mesh position={[0, 0, -0.8]}>
@@ -1952,7 +1952,7 @@ it.each(
       graphicsMachine.provide({
         actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) },
       }),
-      { input: { enablePostProcessing: true } },
+      { input: { enablePostProcessing: true, camera: { cameraFovAngle: 0 } } },
     ).start();
     let state: RootState | undefined;
     let rig: ReturnType<typeof useCameraRig> | undefined;
@@ -1983,7 +1983,7 @@ it.each(
       render(
         <KeyboardProvider>
           <div style={{ width: 2560, height: 1440 }}>
-            <GraphicsProvider graphicsRef={actor} initialVerticalFieldOfView={0}>
+            <GraphicsProvider graphicsRef={actor}>
               <ThreeCanvasInstance
                 graphicsBackend='webgpu'
                 upDirection='z'
@@ -2010,7 +2010,8 @@ it.each(
       );
       rig!.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
       rig!.actorRef.send({
-        type: 'setView',
+        type: 'poseObserved',
+        source: 'input',
         target: [0.00003115460276603699, 0, 0.0059999991208314896],
         direction: [1, -1, 1],
         up: [0, 0, 1],
@@ -2084,19 +2085,8 @@ it.each(['webgpu', 'node-webgl2'] as const)(
         graphicsMachine.provide({
           actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) },
         }),
-        { input: { enablePostProcessing: true } },
-      ).start(),
-    );
-    const states = new Map<number, RootState>();
-    const Probe = ({ index }: { readonly index: number }): undefined => {
-      states.set(index, useThree());
-      return undefined;
-    };
-    const fixture = (index: number, width: number, generation: number): ReactNode => (
-      <div key={generation} style={{ width, height: (width * 2880) / 5120 }}>
-        <GraphicsProvider
-          graphicsRef={actors[index]!}
-          seed={{
+        {
+          input: {
             camera: {
               cameraFovAngle: 35,
               cameraView: {
@@ -2108,8 +2098,19 @@ it.each(['webgpu', 'node-webgl2'] as const)(
                 perspectiveZoom: 1,
               },
             },
-          }}
-        >
+            enablePostProcessing: true,
+          },
+        },
+      ).start(),
+    );
+    const states = new Map<number, RootState>();
+    const Probe = ({ index }: { readonly index: number }): undefined => {
+      states.set(index, useThree());
+      return undefined;
+    };
+    const fixture = (index: number, width: number, generation: number): ReactNode => (
+      <div key={generation} style={{ width, height: (width * 2880) / 5120 }}>
+        <GraphicsProvider graphicsRef={actors[index]!}>
           <ThreeCanvasInstance graphicsBackend='webgpu' upDirection='y' onRetry={() => undefined}>
             <ambientLight intensity={2} />
             <mesh position={[0, 0, -0.7]}>
@@ -2205,7 +2206,7 @@ it.each((['webgpu', 'node-webgl2'] as const).flatMap((execution) => [0, 35].map(
       graphicsMachine.provide({
         actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) },
       }),
-      { input: { enablePostProcessing: true } },
+      { input: { enablePostProcessing: true, camera: { cameraFovAngle: 0 } } },
     ).start();
     let state: RootState | undefined;
     let axes: Group | undefined;
@@ -2230,7 +2231,7 @@ it.each((['webgpu', 'node-webgl2'] as const).flatMap((execution) => [0, 35].map(
       render(
         <KeyboardProvider>
           <div style={{ width: 2560, height: 1440 }}>
-            <GraphicsProvider graphicsRef={actor} initialVerticalFieldOfView={0}>
+            <GraphicsProvider graphicsRef={actor}>
               <ThreeCanvasInstance
                 graphicsBackend='webgpu'
                 upDirection='z'
@@ -2264,7 +2265,8 @@ it.each((['webgpu', 'node-webgl2'] as const).flatMap((execution) => [0, 35].map(
       );
       rig!.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: fov });
       rig!.actorRef.send({
-        type: 'setView',
+        type: 'poseObserved',
+        source: 'input',
         target: [0.00003115460276603699, 0, 0.0059999991208314896],
         direction: [1, 1, 1],
         up: [0, 0, 1],
@@ -2336,15 +2338,13 @@ it.each(['webgpu', 'node-webgl2'] as const)(
       graphicsMachine.provide({
         actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) },
       }),
-      { input: { enablePostProcessing: true } },
+      { input: { enablePostProcessing: true, camera: { cameraFovAngle: 0 } } },
     ).start();
     let state: RootState | undefined;
     let rig: ReturnType<typeof useCameraRig> | undefined;
-    let framing: ReturnType<typeof useViewCameraFraming> | undefined;
     const Probe = (): undefined => {
       state = useThree();
       rig = useCameraRig();
-      framing = useViewCameraFraming();
       return undefined;
     };
     // Crop only empty margins after a complete native 5K render/readback.
@@ -2370,7 +2370,7 @@ it.each(['webgpu', 'node-webgl2'] as const)(
       render(
         <KeyboardProvider>
           <div style={{ width: 2560, height: 1440 }}>
-            <GraphicsProvider graphicsRef={actor} initialVerticalFieldOfView={0}>
+            <GraphicsProvider graphicsRef={actor}>
               <ThreeCanvasInstance
                 graphicsBackend='webgpu'
                 upDirection='z'
@@ -2389,7 +2389,7 @@ it.each(['webgpu', 'node-webgl2'] as const)(
         () => {
           expect(state?.scene.getObjectByName('Internal_Ring_Gear')).toBeDefined();
           expect(referenceMode.surfaceQuality).toBeDefined();
-          expect(framing?.initialized).toBe(true);
+          expect(selectGraphicsFramed(actor.getSnapshot())).toBe(true);
         },
         { timeout: 45_000 },
       );
@@ -2408,7 +2408,8 @@ it.each(['webgpu', 'node-webgl2'] as const)(
       for (const phase of [0, 0.25, 0.5, 0.75, 0]) {
         gear.rotation.z = originalRotation + phase * 0.002;
         rig!.actorRef.send({
-          type: 'setView',
+          type: 'poseObserved',
+          source: 'input',
           target: [0.00003115460276603699 + (phase * 0.22615948766469957) / 2880, 0, 0.0059999991208314896],
           direction: [1, -1, 1],
           up: [0, 0, 1],
@@ -2566,23 +2567,23 @@ it.each([
     });
     const actor = createActor(machine, {
       input: {
+        camera: { cameraFovAngle: 35, cameraView },
         enablePostProcessing: true,
         sectionView: { active: true, cuts: [...cuts] },
       },
     }).start();
     const sibling = createActor(machine, {
       input: {
+        camera: { cameraFovAngle: 35 },
         enablePostProcessing: true,
         sectionView: { active: true, cuts: cuts.slice(0, 1) },
       },
     }).start();
     let state: RootState | undefined;
     let rig: ReturnType<typeof useCameraRig> | undefined;
-    let framing: ReturnType<typeof useViewCameraFraming> | undefined;
     const Probe = (): undefined => {
       state = useThree();
       rig = useCameraRig();
-      framing = useViewCameraFraming();
       return undefined;
     };
     const capture = async (): Promise<Uint8ClampedArray> => {
@@ -2613,7 +2614,7 @@ it.each([
       render(
         <KeyboardProvider>
           <div data-testid='history-root' style={{ width: 381, height: 1047 }}>
-            <GraphicsProvider graphicsRef={actor} seed={{ camera: { cameraView } }} initialVerticalFieldOfView={35}>
+            <GraphicsProvider graphicsRef={actor} seed={{ camera: { cameraView } }}>
               <ThreeCanvasInstance
                 graphicsBackend='webgpu'
                 upDirection='z'
@@ -2630,7 +2631,7 @@ it.each([
             </GraphicsProvider>
           </div>
           <div style={{ width: 2560, height: 1440 }}>
-            <GraphicsProvider graphicsRef={sibling} initialVerticalFieldOfView={35}>
+            <GraphicsProvider graphicsRef={sibling}>
               <ThreeCanvasInstance
                 graphicsBackend='webgpu'
                 upDirection='z'
@@ -2648,7 +2649,7 @@ it.each([
       await vi.waitFor(
         () => {
           expect(state?.scene.getObjectByName('Internal_Ring_Gear')).toBeDefined();
-          expect(framing?.initialized).toBe(true);
+          expect(selectGraphicsFramed(actor.getSnapshot())).toBe(true);
         },
         { timeout: 45_000 },
       );
@@ -2726,7 +2727,7 @@ it.each([
       resetCuts(cuts.slice(0, 1));
       await capture();
       resetCuts(cuts);
-      rig!.actorRef.send({ type: 'setView', ...cameraView });
+      rig!.actorRef.send({ type: 'poseObserved', source: 'input', ...cameraView });
       const after = await capture();
       expect([...state!.camera.matrixWorld.elements, ...state!.camera.projectionMatrix.elements]).toEqual(matrices);
       let changed = 0;

@@ -4,6 +4,7 @@ import {
   isUndecidedFailure,
   runStatusFromCounts,
   summarizeTestModelOutput,
+  testModelLoadedModels,
 } from '#schemas/tools/test-model-summary.js';
 import type { TestModelOutput } from '#schemas/tools/test-model.tool.schema.js';
 
@@ -213,5 +214,30 @@ describe('runStatusFromCounts', () => {
     [{ ...counts, notRun: 1, total: 2 }, { completed: false }, 'inconclusive'],
   ] as const)('should qualify %o (%o) as %s', (input, run, status) => {
     expect(runStatusFromCounts(input, run)).toBe(status);
+  });
+});
+
+describe('testModelLoadedModels', () => {
+  const load = (status: string, evidence: Record<string, unknown>) => ({ loadId: 'l', status, evidence });
+  const output = (loads: unknown[]) => ({
+    lineage: [{ file: 'a.geospec.ts', lineage: { status: 'complete', modules: [], loads } }],
+  });
+
+  it('lists the entries complete loads rendered, project-relative and once each, in load order', () => {
+    expect(
+      testModelLoadedModels(
+        output([
+          load('failed', { sourceRevision: { entry: 'broken.ts', files: {} } }),
+          load('complete', { sourceRevision: { entry: 'parts/vase.scad', files: {} } }),
+          load('complete', { sourceRevision: { entry: 'parts/vase.scad', files: {} } }),
+          load('complete', { sourcePath: 'lid.ts', rootDir: 'parts' }),
+        ]),
+      ),
+    ).toEqual(['parts/vase.scad', 'parts/lid.ts']);
+  });
+
+  it('reads nothing from an output without lineage', () => {
+    expect(testModelLoadedModels({ message: 'no specs' })).toEqual([]);
+    expect(testModelLoadedModels(undefined)).toEqual([]);
   });
 });

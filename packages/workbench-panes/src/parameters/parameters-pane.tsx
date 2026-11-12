@@ -391,7 +391,7 @@ function EntryDropdownMenuItems({ items }: { readonly items: EntryMenuItems }): 
             <Download />
             <span>Quick export</span>
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className='p-0'>{items.quickExport}</DropdownMenuSubContent>
+          <DropdownMenuSubContent>{items.quickExport}</DropdownMenuSubContent>
         </DropdownMenuSub>
       ) : null}
       {group === 'close' ? (

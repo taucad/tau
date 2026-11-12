@@ -52,6 +52,7 @@ export default defineConfig({
       'src/graphics/three/materials/infinite-grid-material.browser.test.ts',
       'src/graphics/three/fxaa.browser.test.ts',
       'src/graphics/three/controls/viewport-gizmo-cube.browser.test.ts',
+      'src/graphics/three/controls/camera-wheel-router.browser.test.ts',
       'src/graphics/three/viewer-resize-continuation.browser.test.tsx',
       'src/graphics/three/shared-quad-camera.browser.test.ts',
       'src/graphics/svg/svg-grid-parity.browser.test.tsx',
@@ -66,7 +67,13 @@ export default defineConfig({
           channel: 'chromium',
           args:
             webGpuProfile === 'software'
-              ? ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader']
+              ? [
+                  '--enable-unsafe-webgpu',
+                  '--use-webgpu-adapter=swiftshader',
+                  '--use-angle=swiftshader',
+                  '--enable-features=Vulkan',
+                  '--use-vulkan=swiftshader',
+                ]
               : ['--enable-unsafe-webgpu'],
         },
       }),

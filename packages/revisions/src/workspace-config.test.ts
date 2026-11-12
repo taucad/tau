@@ -24,6 +24,7 @@ import {
 import { parseRevisionCommitMessage, revisionCommitMessage } from '#revision-headers.js';
 import type { RevisionTrailer } from '#revision-headers.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { recordedBy } from '#test/identity.js';
 
 describe('generated ignore file', () => {
   let ignoreRoot: string;
@@ -251,7 +252,7 @@ describe('generated ignore file', () => {
 describe('provenance trailer', () => {
   const trailer: RevisionTrailer = {
     parents: ['a'.repeat(40)],
-    provenance: { source: 'agent', actorId: 'actor', runId: 'run', createdAt: 1_700_000_000_000 },
+    provenance: { source: 'agent', ...recordedBy('actor'), runId: 'run', createdAt: 1_700_000_000_000 },
     summary: { generated: 'Generated title', edited: 'Edited title' },
   };
 

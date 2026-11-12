@@ -1,13 +1,35 @@
 import type { BillingTier } from '#billing-tier.js';
 import { formatStorageLimit, storageLimitBytesByTier } from '#entitlements.js';
 
+/**
+ * Credits a customer gets for one US dollar of purchased credits. The plan
+ * cards and the Add credits dialog both quote this figure.
+ * @public
+ */
+export const purchasedCreditsPerUsd = 100;
+
+/**
+ * One line of a plan card. `isComingSoon` marks a feature that no plan
+ * includes yet: the card draws it with the coming-soon icon in place of the
+ * tick, and the legend under the cards says what that icon means.
+ * @public
+ */
+export type PlanCatalogFeature = { readonly label: string; readonly isComingSoon: boolean };
+
+const included = (label: string): PlanCatalogFeature => ({ label, isComingSoon: false });
+const comingSoon = (label: string): PlanCatalogFeature => ({ label, isComingSoon: true });
+
 /*
  * The backup line each plan advertises, from the table the Hosted Remote's
- * quota enforces (charter D16). "(Coming Soon)" is the copy's half of the D23
- * launch gate: it comes off when the go-live checklist opens free sync.
+ * quota enforces (charter D16). Enterprise storage is sold as custom, so its
+ * line names no figure.
  */
-const backupFeature = (tier: BillingTier): string =>
-  `Tau Cloud backup and sync — ${formatStorageLimit(storageLimitBytesByTier[tier])} (Coming Soon)`;
+const backupFeature = (tier: BillingTier): PlanCatalogFeature =>
+  included(
+    tier === 'enterprise'
+      ? 'Custom cloud backup and sync'
+      : `${formatStorageLimit(storageLimitBytesByTier[tier])} cloud backup and sync`,
+  );
 
 /**
  * Call-to-action kinds for a plan card (ui-patterns doc Finding 5):
@@ -19,8 +41,8 @@ const backupFeature = (tier: BillingTier): string =>
 export type PlanCatalogCtaKind = 'signup' | 'subscribe' | 'contact-sales';
 
 /**
- * One marketing plan card. The same catalogue feeds the index pricing
- * section and the BillingSettings plan grid — one source of truth.
+ * One marketing plan card. The same catalogue feeds the public pricing page
+ * and the Billing settings plan grid through the one `PlanCards` component.
  * @public
  */
 export type PlanCatalogEntry = {
@@ -31,9 +53,10 @@ export type PlanCatalogEntry = {
   priceMonthly: number | undefined;
   priceLabel: string;
   priceSubLabel: string | undefined;
-  features: string[];
+  /** Included features first, then the ones still in development. */
+  features: readonly PlanCatalogFeature[];
   cta: { label: string; kind: PlanCatalogCtaKind };
-  /** Drives the POPULAR pill. */
+  /** Drives the "Most popular" badge. */
   popular: boolean;
 };
 
@@ -43,54 +66,55 @@ export type PlanCatalogEntry = {
  * on every tier — see docs/research/drop-model-tier-gating.md), and the
  * AD13/AD15 verification + no-train boundary is customer-facing copy. Launch
  * carries no complimentary credit grant or refill countdown (charter D1/D2);
- * only paid plan and purchased credits are advertised.
+ * only paid plan and purchased credits are advertised. Each list opens with
+ * what the plan includes today and ends with what is still in development.
  * @public
  */
-export const tauPlanCatalog: PlanCatalogEntry[] = [
+export const tauPlanCatalog: readonly PlanCatalogEntry[] = [
   {
     id: 'free',
-    name: 'Free Forever',
-    tagline: 'Perfect for trying out Tau',
+    name: 'Free',
+    tagline: 'For trying out Tau',
     priceMonthly: 0,
     priceLabel: '$0',
     priceSubLabel: '/month',
     features: [
-      'Buy credits any time — 100 credits per US$1',
-      'Purchased credits never expire',
-      'All AI models',
-      'All open-source CAD kernels',
-      'Geometry testing — unlimited local validation',
-      'Community support',
-      'Export to all formats',
-      'Public share links',
+      included(`Buy credits any time at ${String(purchasedCreditsPerUsd)} credits per $1`),
+      included('Purchased credits never expire'),
+      included('All AI models'),
+      included('All open-source CAD kernels'),
+      included('Unlimited local geometry testing'),
+      included('Community support'),
+      included('Export to all formats'),
+      included('Public share links'),
+      included('GitHub connection'),
       backupFeature('free'),
-      'GitHub connection',
     ],
-    cta: { label: 'Start Creating Free', kind: 'signup' },
+    cta: { label: 'Start for free', kind: 'signup' },
     popular: false,
   },
   {
     id: 'pro',
-    name: 'Pro Plan',
-    tagline: 'Scale your CAD workflow with more credits',
+    name: 'Pro',
+    tagline: 'More credits for regular CAD work',
     priceMonthly: 20,
     priceLabel: '$20',
-    // Stripe Tax is added at checkout, so the displayed price names it.
-    priceSubLabel: '/month USD, plus applicable tax',
+    // Stripe Tax is added on the payment page, so the displayed price names it.
+    priceSubLabel: '/month plus tax',
     features: [
-      'Everything in Free',
-      '2,000 credits every month',
-      'Unused plan credits roll over, up to 4,000',
-      'Pro kernels (Zoo / KCL, metered)',
-      'Hosted design verification (Coming Soon)',
-      'Private & unlisted share links',
-      'No training on your designs',
+      included('Everything in Free'),
+      included('2,000 credits every month'),
+      included('Unused monthly credits roll over, up to 4,000'),
+      included('Pro kernels (Zoo / KCL, billed in credits)'),
+      included('Private and unlisted share links'),
+      included('No training on your designs'),
       backupFeature('pro'),
-      'Early access to new features',
-      'API CAD Gateway — 30k exports/mo (Coming Soon)',
-      '3D Conversion API — 50k conversions/mo (Coming Soon)',
+      included('Early access to new features'),
+      comingSoon('Hosted design verification'),
+      comingSoon('CAD Gateway API, 30k exports a month'),
+      comingSoon('3D Conversion API, 50k conversions a month'),
     ],
-    cta: { label: 'Subscribe Now', kind: 'subscribe' },
+    cta: { label: 'Upgrade to Pro', kind: 'subscribe' },
     popular: true,
   },
   {
@@ -101,21 +125,21 @@ export const tauPlanCatalog: PlanCatalogEntry[] = [
     priceLabel: 'Custom',
     priceSubLabel: undefined,
     features: [
-      'Everything in Pro',
-      'Custom usage credit allotment',
-      'Signed evidence reports + retention (Coming Soon)',
-      'Verification CI concurrency + org dashboards (Coming Soon)',
-      'Contractual no-train guarantee (DPA)',
+      included('Everything in Pro'),
+      included('Custom monthly credits'),
+      included('Team billing'),
+      included('Contractual no-training guarantee (DPA)'),
       backupFeature('enterprise'),
-      'Custom API CAD Gateway limits',
-      'Custom 3D Conversion API limits',
-      'Enterprise Git (GitLab, Bitbucket, Azure DevOps)',
-      'SSO / SCIM (SAML, OIDC, Okta, Google Workspace)',
-      'Dedicated technical contact',
-      'SLA',
-      'Custom invoicing + PO support',
+      included('Custom CAD Gateway and 3D Conversion API limits'),
+      included('Enterprise Git (GitLab, Bitbucket, Azure DevOps)'),
+      included('SSO and SCIM (SAML, OIDC, Okta, Google Workspace)'),
+      included('Dedicated technical contact'),
+      included('SLA'),
+      included('Invoicing and purchase orders'),
+      comingSoon('Signed evidence reports with retention'),
+      comingSoon('Verification CI and org dashboards'),
     ],
-    cta: { label: 'Contact Us', kind: 'contact-sales' },
+    cta: { label: 'Contact sales', kind: 'contact-sales' },
     popular: false,
   },
 ];

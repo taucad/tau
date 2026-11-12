@@ -138,20 +138,14 @@ const catalogString = (value: unknown, pattern: RegExp): string => {
   return value;
 };
 
-/**
- * Admit a publisher-produced projection only after explicit cutover and complete route qualification.
- * @param options - Opt-in selection and untrusted latest/installers.json document.
- * @returns Qualified installer choices, or undefined while the existing archive catalog remains selected.
- */
-export const createDesktopDownloadCatalog = (options: {
-  enabled: boolean;
-  channel: 'production' | 'staging';
-  qualification: unknown;
-}): readonly QualifiedDesktopDownload[] | undefined => {
-  if (!options.enabled) {
-    return undefined;
-  }
-  const document = catalogRecord(options.qualification, [
+/** One candidate's schema 1 catalog: identity, qualification and exact artifact names. */
+const admitDesktopCatalog = (
+  input: unknown,
+  channel: 'production' | 'staging',
+  immutableArtifacts: Map<string, { sha256: string; size: number }>,
+): { result: QualifiedDesktopDownload[]; seen: ReadonlySet<string>; supported: number } => {
+  const options = { channel } as const;
+  const document = catalogRecord(input, [
     'schemaVersion',
     'tag',
     'channel',
@@ -234,7 +228,6 @@ export const createDesktopDownloadCatalog = (options: {
     },
   } as const;
   const seen = new Set<string>();
-  const immutableArtifacts = new Map<string, { sha256: string; size: number }>();
   const result: QualifiedDesktopDownload[] = [];
   for (const input of document['routes']) {
     const route = catalogRecord(input, ['route', 'target', 'qualification', 'artifacts']);
@@ -300,8 +293,63 @@ export const createDesktopDownloadCatalog = (options: {
         .map(([, artifact]) => artifact),
     });
   }
-  if (options.channel === 'production' && seen.size !== Object.keys(routeDefinitions).length) {
+  return { result, seen, supported: Object.keys(routeDefinitions).length };
+};
+
+/** Routes each platform lane of a composed catalog must carry exactly (D-H5 per-platform promotion). */
+const laneRoutes = {
+  macos: ['macos-zip:darwin-arm64'],
+  linux: ['linux-apt:linux-x64', 'linux-appimage:linux-x64'],
+} as const;
+
+/**
+ * Admit a publisher-produced projection only after explicit cutover and complete route qualification. Schema 1 is one
+ * candidate's catalog; schema 2 composes one complete catalog per promoted platform, each from its own candidate.
+ * @param options - Opt-in selection and untrusted latest/installers.json document.
+ * @returns Qualified installer choices, or undefined while the existing archive catalog remains selected.
+ */
+export const createDesktopDownloadCatalog = (options: {
+  enabled: boolean;
+  channel: 'production' | 'staging';
+  qualification: unknown;
+}): readonly QualifiedDesktopDownload[] | undefined => {
+  if (!options.enabled) {
+    return undefined;
+  }
+  const immutableArtifacts = new Map<string, { sha256: string; size: number }>();
+  if (
+    options.qualification !== null &&
+    typeof options.qualification === 'object' &&
+    (options.qualification as Record<string, unknown>)['schemaVersion'] === 2
+  ) {
+    const composed = catalogRecord(options.qualification, ['schemaVersion', 'channel', 'promoted', 'platforms']);
+    if (composed['promoted'] !== true || composed['channel'] !== options.channel) {
+      throw new TypeError('Installer catalog is unpromoted, incompatible or belongs to another channel');
+    }
+    if (!Array.isArray(composed['platforms']) || composed['platforms'].length === 0) {
+      throw new TypeError('Installer catalog has no qualified routes');
+    }
+    const lanes = new Set<string>();
+    const result: QualifiedDesktopDownload[] = [];
+    for (const input of composed['platforms']) {
+      const platform = catalogRecord(input, ['lane', 'catalog']);
+      const { lane } = platform;
+      if ((lane !== 'macos' && lane !== 'linux') || lanes.has(lane)) {
+        throw new TypeError('Unsupported or duplicate installer platform');
+      }
+      lanes.add(lane);
+      const admitted = admitDesktopCatalog(platform['catalog'], options.channel, immutableArtifacts);
+      // Each platform is complete on its own: exactly its routes, never a partial or another platform's.
+      if (JSON.stringify([...admitted.seen].sort()) !== JSON.stringify([...laneRoutes[lane]].sort())) {
+        throw new TypeError('Installer platform catalog is incomplete or carries another platform');
+      }
+      result.push(...admitted.result);
+    }
+    return result;
+  }
+  const admitted = admitDesktopCatalog(options.qualification, options.channel, immutableArtifacts);
+  if (options.channel === 'production' && admitted.seen.size !== admitted.supported) {
     throw new TypeError('Production installer catalog requires every supported route');
   }
-  return result;
+  return admitted.result;
 };

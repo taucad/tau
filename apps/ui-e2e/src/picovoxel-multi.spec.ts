@@ -55,17 +55,12 @@ test('renders PicoVoxel on the variant its isolation allows and exports the pinn
   await openCommand('Export');
   const panel = selectors.getByCss('[data-slot="export-panel-body"]');
   await target.expectVisible(panel, 15_000);
-  const formatToggle = (format: 'stl' | 'glb') => panel.getByRole('button', { name: new RegExp(`^${format}$`, 'iu') });
-  // Formats are multi-select; export exactly one so the download is that file, not an archive.
+  // One format at a time since a2045069e (#1700): pick it in the format combobox, then export that file.
   const exportExact = async (format: 'stl' | 'glb'): Promise<ReturnType<typeof base64ToUint8Array>> => {
-    for (const each of ['stl', 'glb'] as const) {
-      const toggle = formatToggle(each);
-      // oxlint-disable-next-line no-await-in-loop -- toggles change the shared selection one at a time
-      if (((await target.getAttribute(toggle, 'aria-pressed')) === 'true') !== (each === format)) {
-        // oxlint-disable-next-line no-await-in-loop -- as above
-        await target.click(toggle);
-      }
-    }
+    const picker = panel.getByRole('button', { name: 'Export format' });
+    await target.expectVisible(picker, 15_000);
+    await target.click(picker);
+    await target.click(selectors.getByCss(`[cmdk-item][data-value="${format}"]`));
     const file = await target.download(panel.getByRole('button', { name: new RegExp(`^Export ${format}$`, 'iu') }));
     expect(file.suggestedFilename).toMatch(new RegExp(`\\.${format}$`, 'u'));
     return base64ToUint8Array(file.base64);

@@ -51,6 +51,7 @@ import type {
   ProjectReadinessReading,
   ReadOutcome,
   PublishDraft,
+  RevisionCaptureIdentity,
   RevisionDiffEntry,
   RevisionDivergence,
   RevisionLogRequest,
@@ -91,8 +92,8 @@ import type {
 import { workerTimings } from '@taucad/filesystem';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import type { ChangeEvent } from '@taucad/types';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
-import { logWorkerTimings } from '#lib/worker-timing-report.js';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
+import { logWorkerTimings } from '@taucad/ui-core/lib/worker-timing-report';
 import { randomUuid } from '@taucad/utils/id';
 import { createFileSystemBridgePort } from '@taucad/fs-bridge';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
@@ -101,7 +102,7 @@ import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
-import { fetchGeoSpecCandidates, publishGeoSpecCandidate } from '#lib/geospec-candidate-git.js';
+import { fetchGeoSpecCandidates, publishGeoSpecCandidate } from '@taucad/ui-core/lib/geospec-candidate-git';
 
 /**
  * The versioned paths one content-change event touches inside this project.
@@ -139,8 +140,6 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'undo' }>
   /** *Undo*: reverse this device's newest operation on the selected line (D15). */
   | Readonly<{ command: 'undoOperation' }>
-  | Readonly<{ command: 'confirm' }>
-  | Readonly<{ command: 'cancel' }>
   | Readonly<{ command: 'switch'; branch: string }>
   | Readonly<{ command: 'followChat'; chatId: string }>
   | Readonly<{ command: 'pinTo'; checkoutId: string }>
@@ -148,16 +147,13 @@ export type WorkerRevisionCommand =
    * The *Branches* region's verbs (S26, A2/D10).
    *
    * Named `…Branch` for the same reason the Sync region's are named `…Remote`:
-   * one flat namespace per project, and `confirm`/`cancel` already belong to
-   * restore. Each one is `branch.machine`'s own event — the region drives a
-   * machine, not a promise.
+   * one flat namespace per project. Each one is `branch.machine`'s own event —
+   * the region drives a machine, not a promise. None asks first (I11).
    */
   | Readonly<{ command: 'createBranch'; name: string; from?: string }>
   | Readonly<{ command: 'discardBranch'; branch: string; checkoutId?: string }>
   | Readonly<{ command: 'mergeBranch'; branch: string }>
   | Readonly<{ command: 'renameBranch'; branch: string; name: string }>
-  | Readonly<{ command: 'confirmBranch' }>
-  | Readonly<{ command: 'cancelBranch' }>
   /*
    * The Sync region's verbs (S26, S34).
    *
@@ -180,6 +176,8 @@ export type WorkerRevisionCommand =
      with and sent its frame first; `remote.machine` re-validates (D3). */
   | Readonly<{ command: 'authorizeRemote' }>
   | Readonly<{ command: 'syncNow' }>
+  /** The page's signed-in person changed (audit R6): read the remote afresh under the new session. */
+  | Readonly<{ command: 'sessionChanged' }>
   /* The viewer's *Try again* after a large-object transfer failed; the files are already open. */
   | Readonly<{ command: 'retryLargeObjects' }>
   /* An opened file still holding its pointer: its object jumps the fill queue (D10). */
@@ -269,7 +267,7 @@ export type WorkerRevisionCommand =
    * segments name a random record device per actor form (`.git/ops-devices.json`)
    * — but a worker that has not been told writes no chat refs at all, and the id
    * counts as this host's own for a segment written before record devices
-   * existed (`apps/ui/app/lib/device-id.ts` is the one source).
+   * existed (`apps/libs/ui-core/src/lib/device-id.ts` is the one source).
    */
   | Readonly<{ command: 'setDeviceId'; deviceId: string }>
   /*
@@ -327,8 +325,17 @@ export type WorkerRevisionEvent =
  * @public
  */
 export type RevisionToast =
-  /** `revisionNumber` is `undefined` for a target that is not on the line (D5, A9). */
-  | Readonly<{ type: 'restored'; revisionNumber: number | undefined }>
+  /**
+   * A *Restore* or *Undo restore* landed. `revisionId` names the revision whose
+   * files came back; only a `restore` offers Undo (I11). `revisionNumber` is
+   * `undefined` for a target that is not on the line (D5, A9).
+   */
+  | Readonly<{
+      type: 'restored';
+      mode: 'restore' | 'undoRestore';
+      revisionId: string;
+      revisionNumber: number | undefined;
+    }>
   /** *Undo* landed; the number is the revision it undid (D15). */
   | Readonly<{ type: 'undone'; revisionNumber: number | undefined }>
   /** `heldBy`: the run whose lease held the save; its edits land in that run's revision (TS-R17, V5 A6). */
@@ -340,6 +347,10 @@ export type RevisionToast =
       /** What a `create` made, for a caller correlating one (P4). */
       checkoutId?: string;
       checkoutRoot?: string;
+      /** The branch a *Switch* left, which its Undo switches back to (I11). */
+      from?: string;
+      /** A *Switch* saved the unsaved work on `from` before it moved. */
+      saved?: true;
     }>
   /** A *Switch* the D10 guard would not make, in the words it gave (review R3). */
   | Readonly<{ type: 'refused'; branch: string; reason: string }>
@@ -797,6 +808,21 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   /* The page's latest answer, read per mint so signing in or turning anonymity
    * on changes the next revision and rewrites none of the recorded ones. */
   let person: RevisionUserActor | undefined;
+  /* Who every capture in this document is by (B1, I1), read per mint. There is
+   * no fallback id: the page names the person (`setActor`) before it opens the
+   * project, so a capture with no person is refused rather than recorded under
+   * a stand-in. */
+  const identity: RevisionCaptureIdentity = {
+    via: 'browser',
+    resolve: ({ runId }) => {
+      if (person === undefined) {
+        throw new Error('This page has not named who its revisions are by yet.');
+      }
+      /* A cut a run holds is the agent's: `git log`'s author stays the person
+       * through `onBehalfOf`, while `Tau-Actor` names the model. */
+      return runId === undefined ? person : { kind: 'agent', id: 'agent', runId, onBehalfOf: person };
+    },
+  };
   /* The page's own answer, read per use: a chat ref written under the wrong
    * device id would overwrite another device's log segment (W17). */
   let device: string | undefined;
@@ -874,6 +900,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     readContent,
     materialize,
     resolvePlaceholder,
+    checkLargeObjects,
     pullsChats,
   } = createProjectRevisionsActor({
     port: options.port,
@@ -881,7 +908,6 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.mintFloor === undefined ? {} : { mintFloor: options.mintFloor }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
-    actorId: projectId,
     /* Only a feed that sees every write lets a cut skip the files it did not name (E1). */
     completeChanges: options.completeChanges === true && options.observe !== undefined,
     deviceId: () => device,
@@ -925,14 +951,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         globalThis.removeEventListener('offline', offline);
       };
     },
-    actor: ({ runId }) => {
-      if (person === undefined) {
-        return undefined;
-      }
-      /* A cut a run holds is the agent's: `git log`'s author stays the person
-       * through `onBehalfOf`, while `Tau-Actor` names the model. */
-      return runId === undefined ? person : { kind: 'agent', id: 'agent', runId, onBehalfOf: person };
-    },
+    identity,
     filesystem: async (checkout) => options.filesystem(checkout.root),
     /* Tau Cloud's repository for this project, from the origin the page named. */
     remoteUrl: (id) => {
@@ -966,7 +985,15 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
          * answers, from the one ladder both hosts read (C6). */
         throw new Error(registerProjectFailureMessage(401));
       }
-      await registerProjectOverHttp(apiBaseUrl, { kind: 'cookie' }, { id, name });
+      /* B4c: a project its linked import tied to a GitHub repository says so, so
+       * the push check admits the commits Tau did not record (B4). */
+      const remotes = await options.port.listRemotes();
+      const linked = remotes.some((remote) => remote.provider === 'github');
+      await registerProjectOverHttp(
+        apiBaseUrl,
+        { kind: 'cookie' },
+        { id, name, ...(linked ? { origin: 'github' } : {}) },
+      );
     },
     publishPublication: async (input) => {
       const apiBaseUrl = options.apiBaseUrl?.();
@@ -1251,7 +1278,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * them, so they cross the port rather than being re-derived on the page. */
   const restoreChild = actor.getSnapshot().children.restore;
   restoreChild?.on('toast.restored', (toast) => {
-    toasts.emit({ type: 'restored', revisionNumber: toast.revisionNumber });
+    toasts.emit({
+      type: 'restored',
+      mode: toast.mode,
+      revisionId: toast.revisionId,
+      revisionNumber: toast.revisionNumber,
+    });
   });
   restoreChild?.on('toast.undone', (toast) => {
     toasts.emit({ type: 'undone', revisionNumber: toast.revisionNumber });
@@ -1270,8 +1302,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * lease removal is silent"). */
   /* D10 answers *Switch* with a refusal the person who asked must see: a verb
    * that quietly does nothing is exactly what "no outcome is silent" forbids
-   * (A25, I12; review R3). The resolved arm needs no notice — the workbench
-   * moving is the notice. */
+   * (A25, I12; review R3). A re-root moves no file, so no branch verb settles
+   * it; it still says so, with the branch to go back to (I11). */
   /*
    * A save that failed says why (I12, W18 DEF-7).
    *
@@ -1308,6 +1340,16 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   });
   actor.on('switchRefused', (refusal) => {
     toasts.emit({ type: 'refused', branch: refusal.branch, reason: refusal.reason });
+  });
+  actor.on('switchResolved', (resolved) => {
+    if (resolved.mode === 'reroot') {
+      toasts.emit({
+        type: 'branch',
+        operation: 'switch',
+        branch: resolved.branch,
+        ...(resolved.from === undefined ? {} : { from: resolved.from }),
+      });
+    }
   });
   actor.on('childToast', ({ type: _type, ...toast }) => {
     toasts.emit({ ...toast, type: 'notice' });
@@ -1360,6 +1402,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       branch: toast.branch,
       ...(toast.checkoutId === undefined ? {} : { checkoutId: toast.checkoutId }),
       ...(toast.checkoutRoot === undefined ? {} : { checkoutRoot: toast.checkoutRoot }),
+      ...(toast.from === undefined ? {} : { from: toast.from }),
+      ...(toast.saved === undefined ? {} : { saved: toast.saved }),
     });
   });
   branchChild?.on('toast.error', (toast) => {
@@ -1591,6 +1635,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           filesystem: await options.filesystem(`/projects/${projectId}`),
           remote: await candidateRemote(true),
           candidate,
+          identity,
           readConsent: candidateConsent,
           signal: controller.signal,
           abort: () => {
@@ -1641,8 +1686,29 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           actor.send({ type: 'syncNow' });
           return;
         }
-        case 'retryLargeObjects': {
+        case 'sessionChanged': {
+          actor.send({ type: 'remote', event: { type: 'sessionChanged' } });
+          actor.send({ type: 'sync', event: { type: 'sessionChanged' } });
+          /* A large-object fill refused under the last session tries again under this one; a healthy fill ignores it. */
           largeObjects.get(selectRevisionStatus(actor.getSnapshot()).checkoutId ?? '')?.retry();
+          return;
+        }
+        case 'retryLargeObjects': {
+          const { checkoutId } = selectRevisionStatus(actor.getSnapshot());
+          const running = largeObjects.get(checkoutId ?? '');
+          if (running === undefined) {
+            /* No fill to retry: the wait is for the fill's word, so the checkout is checked again. */
+            // async-iife: bootstrap -- a command answers nothing; a failed check is logged and the next capture checks again.
+            void (async (): Promise<void> => {
+              try {
+                await checkLargeObjects(checkoutId);
+              } catch (error) {
+                console.warn('[revisions] large objects could not be checked again', error);
+              }
+            })();
+          } else {
+            running.retry();
+          }
           return;
         }
         case 'prioritizeLargeObjects': {
@@ -1742,25 +1808,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           });
           return;
         }
-        case 'confirmBranch': {
-          actor.send({ type: 'branch', event: { type: 'confirm' } });
-          return;
-        }
-        case 'cancelBranch': {
-          actor.send({ type: 'branch', event: { type: 'cancel' } });
-          return;
-        }
         case 'switch': {
           actor.send({ type: 'switch', requestId: randomUuid(), branch: command.branch });
           return;
         }
         case 'undo':
         case 'undoOperation': {
-          actor.getSnapshot().children.restore?.send({ type: command.command });
-          break;
-        }
-        case 'confirm':
-        case 'cancel': {
           actor.getSnapshot().children.restore?.send({ type: command.command });
           break;
         }
@@ -2059,6 +2112,12 @@ export type WorkerRevisionResult =
    * permission for `pagehide` to run.
    */
   | Readonly<{ kind: 'saved' }>
+  /**
+   * The root has taken a `sessionChanged` (audit R6). Every frame posted after
+   * this one was projected after the change; frames before it may be from
+   * either side, so the page reads only a refusal after it as the new session's.
+   */
+  | Readonly<{ kind: 'sessionChanged' }>
   /** What recording an editor's overlapping edit did (D14). */
   | Readonly<{ kind: 'editorConflict'; outcome: EditorConflictOutcome }>
   /**
@@ -2225,6 +2284,10 @@ const answerOf = (
   request: WorkerRevisionRequest,
 ): Promise<WorkerRevisionResult> | undefined => {
   switch (request.command) {
+    case 'sessionChanged': {
+      tree.send(request);
+      return Promise.resolve({ kind: 'sessionChanged' } as const);
+    }
     case 'log': {
       const { branch, limit, from } = request;
       return tree

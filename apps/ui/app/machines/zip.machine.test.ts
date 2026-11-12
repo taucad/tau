@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor } from 'xstate';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { zipMachine } from '#machines/zip.machine.js';
 
 vi.mock('jszip', () => ({

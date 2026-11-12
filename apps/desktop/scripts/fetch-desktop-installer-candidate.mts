@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, closeSync, openSync } from 'node:fs';
 import { mkdir, stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 // oxlint-disable-next-line no-restricted-imports -- Share the internal authenticated candidate metadata contract.
@@ -91,6 +91,17 @@ export const admitInstallerCandidate = (options: {
   };
 };
 
+/**
+ * Create the candidate directory fresh. Its parent may not exist yet on a runner that has done nothing but check out
+ * (the Linux and Mac clean-host receipt jobs); the directory itself must be new, so a stale candidate is never reused.
+ */
+export const prepareCandidateDirectory = async (directory: string): Promise<string> => {
+  const root = resolve(directory);
+  await mkdir(dirname(root), { recursive: true });
+  await mkdir(root, { recursive: false });
+  return root;
+};
+
 /** Download and authenticate the archive before extracting; return metadata from GitHub, never extracted files. */
 export const fetchInstallerCandidate = async (options: {
   runId: string;
@@ -99,8 +110,7 @@ export const fetchInstallerCandidate = async (options: {
   directory: string;
 }): Promise<InstallerCandidateProvenance> => {
   const provenance = admitInstallerCandidate(options);
-  const root = resolve(options.directory);
-  await mkdir(root, { recursive: false });
+  const root = await prepareCandidateDirectory(options.directory);
   const zip = resolve(root, 'candidate.zip');
   const fd = openSync(zip, 'wx');
   try {

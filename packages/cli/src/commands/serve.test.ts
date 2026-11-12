@@ -18,6 +18,7 @@ import {
   parseAllowedOrigins,
   prepareStoreUi,
   resolveServePort,
+  serveHostLabels,
   serveNativeKernels,
   serveUiChoice,
   shouldOpenBrowser,
@@ -462,5 +463,16 @@ describe('prepareStoreUi', () => {
     } finally {
       stderr.mockRestore();
     }
+  });
+});
+
+describe('serveHostLabels', () => {
+  it('should label a self-hosted serve as the daemon host with the CLI version (LW17)', () => {
+    expect(serveHostLabels({}, '1.4.0')).toEqual({ kind: 'daemon', build: '1.4.0' });
+  });
+
+  it('should label the provisioned cloud host as the cloud host with no build, as its own facts carry none', () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
+    expect(serveHostLabels({ TAU_CLOUD_HOST: '1' }, '1.4.0')).toEqual({ kind: 'cloud' });
   });
 });

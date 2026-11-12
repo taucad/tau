@@ -1,9 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement, ReactNode } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { entitlementsFromTier } from '@taucad/billing';
 import { DataControlsSettings } from '#components/settings/data-controls-settings.js';
+import { getAnonymousRevisions, setAnonymousRevisions } from '#lib/revision-actor.js';
 import type * as TelemetrySwitchModule from '#hooks/use-telemetry-switch.js';
 
 const clientEnvironment = globalThis.window.ENV;
@@ -22,7 +23,10 @@ vi.mock('react-router', () => ({
   ),
   /* `useCommercialFeatures` reaches the settings dialog, which is URL state. */
   useSearchParams: (): [URLSearchParams, () => void] => [new URLSearchParams(), vi.fn()],
+  /* The workspace the dialog opened over, which *Hide my name in history* is chosen for (C2). */
+  useParams: (): Record<string, string> => routeParams,
 }));
+let routeParams: Record<string, string> = {};
 
 let mockSession: { user: { id: string } } | undefined;
 vi.mock('@better-auth-ui/react', () => ({
@@ -271,6 +275,30 @@ describe('DataControlsSettings', () => {
 
     expect(screen.queryByRole('switch', { name: 'Analytics' })).not.toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Cookie preferences' })).toBeInTheDocument();
+  });
+
+  it('chooses Hide my name in history for the workspace it opened over, and is absent outside one (C2)', async () => {
+    const user = userEvent.setup();
+    const outside = render(<DataControlsSettings />);
+    expect(screen.queryByRole('switch', { name: 'Hide my name in history' })).not.toBeInTheDocument();
+    outside.unmount();
+    routeParams = { workspace: 'acme' };
+    onTestFinished(() => {
+      routeParams = {};
+      setAnonymousRevisions('acme', false);
+    });
+    render(<DataControlsSettings />);
+
+    const row = screen.getByRole('group', { name: 'Hide my name in history' });
+    expect(row).toHaveTextContent(
+      'Other members see “Anonymous”. The project owner can still see which account backed up a change.',
+    );
+    const toggle = within(row).getByRole('switch', { name: 'Hide my name in history' });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    expect(getAnonymousRevisions('acme')).toBe(true);
+    expect(getAnonymousRevisions('other')).toBe(false);
+    expect(toggle).toBeChecked();
   });
 
   it('keeps data controls to four rows, with account closure last', () => {

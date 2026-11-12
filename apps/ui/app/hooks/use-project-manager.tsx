@@ -26,6 +26,8 @@ import type { CadAgentExecution, Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { generatePrefixedId } from '@taucad/utils/id';
+import { serializeStartRecord, startRecordPath } from '@taucad/revisions';
+import type { StartOrigin } from '@taucad/revisions';
 import type { Remote } from 'comlink';
 import { projectManagerMachine } from '#hooks/project-manager.machine.js';
 import type { ObjectStoreWorker, InitialEditorState } from '#hooks/object-store.worker.js';
@@ -66,12 +68,12 @@ import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/
 import { chatPlacementOf } from '@taucad/chat-ui/utils/chat-execution';
 import { writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
 import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
-import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
+import { WorkspaceDirectoryRequiredError } from '@taucad/ui-core/filesystem/workspace-errors';
 import { directoryPicker } from '#constants/browser.constants.js';
 import type { DirectoryPick } from '#constants/browser.constants.js';
 import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { removeChatPermission, seedChatPermission } from '#hooks/use-permission-mode.js';
-import { createInitialProject } from '#constants/project.constants.js';
+import { createEntrylessProject, createInitialProject } from '#constants/project.constants.js';
 import { attachmentKind, attachmentReferenceOf } from '@taucad/chat-ui/utils/attachment.utils';
 import { buildUserMessage } from '#utils/chat.utils.js';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
@@ -83,8 +85,8 @@ import {
   getKernelOption,
   getKernelProjectTemplate,
 } from '#utils/kernel.utils.js';
-import { encodeTextFile } from '#utils/filesystem.utils.js';
-import { defaultProjectName } from '#constants/project-names.js';
+import { encodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
+import { defaultProjectName } from '@taucad/ui-core/constants/project-names';
 import type { AppUiPreferences, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import type {
   PendingProjectOperation,
@@ -93,18 +95,18 @@ import type {
   PendingProjectStorage,
 } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
-import { allocateProjectDirectorySlug } from '#utils/project-directory.utils.js';
+import { allocateProjectDirectorySlug } from '@taucad/ui-core/utils/project-directory.utils';
 import { directorySlug, homeWorkspaceSlug, projectSlugsOf } from '#utils/project-url.utils.js';
 import type { ProjectSlugs } from '#utils/project-url.utils.js';
 import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import { metaConfig } from '#constants/meta.constants.js';
-import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
+import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { tauCloudIntent, withNamedLock } from '#hooks/use-cloud-projects.js';
 import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
-import { readLocalProjectOpenPerformance } from '#lib/project-open-performance.js';
-import type { ProjectOpenOutcome } from '#lib/project-open-performance.js';
+import { readLocalProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
+import type { ProjectOpenOutcome } from '@taucad/ui-core/lib/project-open-performance';
 import type {
   PreparedWorkspaceCatalog,
   RegisteredWorkspace,
@@ -219,8 +221,12 @@ type CreateProjectChatOptions = {
  * Use this when starting a fresh project from scratch.
  */
 type CreateProjectFromKernel = CreateProjectChatOptions & {
-  /** The kernel/language to use for the new project */
-  kernel: KernelProvider;
+  /**
+   * The kernel/language to use for the new project, or `auto` (automatic kernel selection blueprint D3): a project
+   * with a name and a manifest and no model file, whose first chat starts on Auto; the first model the agent writes
+   * and evaluates becomes main.
+   */
+  kernel: KernelProvider | 'auto';
   /** Override default project name */
   projectName?: string;
 };
@@ -236,6 +242,12 @@ type CreateProjectFromData = CreateProjectChatOptions & {
   project: Omit<ProjectManifest, '$schema'>;
   /** The files for the project */
   files: Record<string, { content: Uint8Array<ArrayBuffer>; mode?: '100644' | '100755' }>;
+  /**
+   * Where the files came from, for the project's Start version (A6): History
+   * reads "imported from GitHub", "a folder" or "a zip". Absent, the project
+   * reads "project created" (a fork, a remix, a template).
+   */
+  origin?: Exclude<StartOrigin, 'created'>;
   /**
    * An import already staged on the creation location's storage root (W7,
    * charter D12): its files move into the project at commit, so the journal
@@ -1647,7 +1659,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
       if ('kernel' in options) {
         // CreateProjectFromKernel: Generate from kernel template
-        kernel = options.kernel;
         const { projectName: requestedProjectName } = options;
         let projectName = requestedProjectName;
         if (!projectName && options.initialMessage) {
@@ -1664,22 +1675,39 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
             .catch((): string => '');
           projectName = generated.trim() || defaultProjectName;
         }
-        const mainFileName = getMainFile(options.kernel);
-        const emptyCode = getEmptyCode(options.kernel);
-        const result = createInitialProject({
-          projectName: projectName ?? defaultProjectName,
-          mainFileName,
-          emptyCodeContent: encodeTextFile(emptyCode),
-          ecosystem: getKernelOption(options.kernel).ecosystem,
-          dependencies: await getKernelDependencies(options.kernel),
-          template: await getKernelProjectTemplate(options.kernel),
-        });
-        projectData = result.projectData;
-        files = result.files;
+        if (options.kernel === 'auto') {
+          projectData = createEntrylessProject(projectName ?? defaultProjectName);
+          files = {};
+        } else {
+          kernel = options.kernel;
+          const mainFileName = getMainFile(options.kernel);
+          const emptyCode = getEmptyCode(options.kernel);
+          const result = createInitialProject({
+            projectName: projectName ?? defaultProjectName,
+            mainFileName,
+            emptyCodeContent: encodeTextFile(emptyCode),
+            ecosystem: getKernelOption(options.kernel).ecosystem,
+            dependencies: await getKernelDependencies(options.kernel),
+            template: await getKernelProjectTemplate(options.kernel),
+          });
+          projectData = result.projectData;
+          files = result.files;
+        }
       } else {
         // CreateProjectFromData: Use provided project data and files
         projectData = options.project;
         files = options.files;
+      }
+
+      /* A6: a project born here, with no remote of its own, asks its first open to mint the Start version, V1. A
+         caller that supplies the id brings history of its own (a Tau Cloud open, a linked GitHub import). */
+      if (options.id === undefined) {
+        files = {
+          ...files,
+          [startRecordPath]: {
+            content: serializeStartRecord('kernel' in options ? 'created' : (options.origin ?? 'created')),
+          },
+        };
       }
 
       const manifest = projectToManifest(projectData);
@@ -1733,6 +1761,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
                 messages: chatMessages,
                 activeExecution: seededActiveExecution,
                 activeKernel: seededActiveKernel,
+                /* A project created under Auto seeds its first chat with `auto` (blueprint D2). */
+                ...('kernel' in options && options.kernel === 'auto' ? { kernelPreference: 'auto' } : {}),
                 ...(startupRequest ? { startupRequest } : {}),
               },
               ...attachmentSourceOf(options),

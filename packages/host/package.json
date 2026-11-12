@@ -120,6 +120,8 @@
     "@taucad/formal": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/sandbox": "workspace:*",
+    "@taucad/shell-service": "workspace:*",
     "@taucad/telemetry": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",

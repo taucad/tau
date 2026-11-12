@@ -673,14 +673,12 @@ export const expectModelBuilt = async (options: {
    * render ride on top of that here. */
   await expectVisible(page.getByText(finalText, { exact: true }), 420_000);
 
-  /* The turn's own revision marker, not `Current`: 75b24eef3 replaced the full
-   * `RevisionMarker` in the transcript with the compact `ChatRevisionMarker`,
-   * whose only "Current" lives inside a `CollapsibleContent` that is closed —
-   * and therefore unmounted — by default. The live region is the part that is
-   * always rendered (`chat-revision-marker.tsx:246-253`). */
-  const turnMarker = page.getByRole('status', { name: 'Turn revision status' }).last();
+  /* The turn's own marker, not `Current`: the transcript shows the one-line
+   * `ChatRevisionMarker`, which never says "Current" (C5). Its live region is
+   * the part that is always rendered. */
+  const turnMarker = page.getByRole('status', { name: 'Save status' }).last();
   await expectVisible(turnMarker, 60_000);
-  await expect.poll(async () => (await turnMarker.textContent()) ?? '', { timeout: 60_000 }).toMatch(/^Rev \d+ saved/u);
+  await expect.poll(async () => (await turnMarker.textContent()) ?? '', { timeout: 60_000 }).toMatch(/^Saved/u);
   await expectCount(page.getByText(/ROOT_UNAVAILABLE/u), 0);
   await expectCount(page.getByText('File not found', { exact: true }), 0);
   await expectCount(page.getByRole('status', { name: 'Waiting for geometry' }), 0, 120_000);

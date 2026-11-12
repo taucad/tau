@@ -42,7 +42,7 @@ import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
-import { FileManagerNotReadyError } from '#filesystem/workspace-errors.js';
+import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-errors';
 import { reprovideAgentHostProjects } from '#services/agent-host-client.js';
 import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
@@ -92,6 +92,9 @@ function recordConnectionsForIncarnation(fallback: RecordBridgeOpener, ready: ()
 }
 
 export const fileManagerReadyTimeout = 30_000;
+
+/** Live mounts per rooted connection owner, so Strict Mode's disconnect-then-reconnect does not release it. */
+const rootedConnectionMounts = new WeakMap<RootedContentOwner<RootedBridgeConsumer>, number>();
 
 function createErrorAwareWaitPredicate(
   predicate: (state: FileManagerSnapshot) => boolean,
@@ -1028,12 +1031,19 @@ function FileManagerProviderCore({
     [bridgeOpener, connectionsForIncarnation],
   );
 
-  useLayoutEffect(
-    () => () => {
-      rootedConnections.dispose();
-    },
-    [rootedConnections],
-  );
+  useLayoutEffect(() => {
+    rootedConnectionMounts.set(rootedConnections, (rootedConnectionMounts.get(rootedConnections) ?? 0) + 1);
+    return () => {
+      rootedConnectionMounts.set(rootedConnections, (rootedConnectionMounts.get(rootedConnections) ?? 1) - 1);
+      // Strict Mode reconnects within the same commit; only an owner that stays released is disposed, so a read a
+      // store started on the first mount is not aborted by the replayed cleanup.
+      queueMicrotask(() => {
+        if (rootedConnectionMounts.get(rootedConnections) === 0) {
+          rootedConnections.dispose();
+        }
+      });
+    };
+  }, [rootedConnections]);
 
   /*
    * The trusted stores' working copy, handed out one narrowed slice at a time

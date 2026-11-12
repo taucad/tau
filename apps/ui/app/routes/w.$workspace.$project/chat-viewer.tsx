@@ -2,6 +2,7 @@ import { useModelAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { interactiveViewContent } from '#lib/interactive-view-content.js';
 import type { AppCapabilitiesManifest } from '#types/runtime-client.alias.js';
+import { useSelector } from '@xstate/react';
 import { memo, useEffect, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { FileEntry } from '@taucad/types';
 import { asKnownArtifact } from '@taucad/runtime';
@@ -16,6 +17,7 @@ import { canonicalPartPreviews, sourceGlbDigest } from '#services/part-thumbnail
 import type { PartThumbnailRequest } from '#services/part-thumbnail.service.js';
 import type { PartThumbnailState } from '@taucad/viewer/cad/part-thumbnail-state';
 import { FileSelector } from '#components/files/file-selector.js';
+import { StartFromTemplate } from '#routes/w.$workspace.$project/start-from-template.js';
 import { Button } from '@taucad/ui/components/button';
 import { useProject } from '#hooks/use-project.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
@@ -341,6 +343,18 @@ const ChatViewerContent = memo(function ({
     [entryPath],
   );
   const isDirectory = useFileTreeSelector(selectIsDirectory);
+  /* Entry-less (blueprint D3): the loaded manifest declares no main, or names a file that is not there. */
+  const declaredMain = useSelector(projectRef, (state) =>
+    state.context.project === undefined ? '' : (state.context.project.assets.main?.entryPath ?? undefined),
+  );
+  const isMainMissing = useFileTreeSelector(
+    useCallback(
+      (fileTree: ReadonlyMap<string, FileEntry>): boolean =>
+        declaredMain !== undefined && declaredMain !== '' && fileTree.get(declaredMain)?.type !== 'file',
+      [declaredMain],
+    ),
+  );
+  const isEntryless = declaredMain === undefined || isMainMissing;
 
   // Derive isMissing from content service orphan outcome (VS Code pattern).
   // useFileContent auto-loads on cache miss; missing files resolve to the
@@ -364,8 +378,8 @@ const ChatViewerContent = memo(function ({
   const savedCamera = viewRecord?.selectedKernelView
     ? viewRecord.kernelViews?.find((view) => view.id === viewRecord.selectedKernelView)?.camera
     : viewRecord?.camera;
-  /* Create-only seed for this view's camera session, built when the viewer mounts its canvas. The
-   * canvas-less branches mount no provider, so a directory or a missing file builds no camera (R8). */
+  /* The entry this view frames: a new identity re-arms the framing record with the persisted pose. The camera itself
+   * is the graphics actor's child, seeded once when the project spawned the view. */
   const cameraSeed: ViewCameraSeed = {
     identity: entryPath,
     camera: {
@@ -459,7 +473,13 @@ const ChatViewerContent = memo(function ({
   if (!entryPath) {
     return (
       <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
-        <span className='text-sm'>No file selected</span>
+        {/* An entry-less project (blueprint D3): the first model the agent writes becomes main. */}
+        <span className='text-sm'>{isEntryless ? 'No model yet' : 'No file selected'}</span>
+        {isEntryless ? (
+          <p className='max-w-64 text-center text-xs'>
+            The agent writes one from your first message, or start from a template.
+          </p>
+        ) : null}
         <FileSelector
           selectedFile={undefined}
           placeholder='Select file to render…'
@@ -470,6 +490,7 @@ const ChatViewerContent = memo(function ({
           emptyMessage='No files found.'
           onSelect={handleFileSelect}
         />
+        {isEntryless ? <StartFromTemplate /> : null}
       </div>
     );
   }

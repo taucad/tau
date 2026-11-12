@@ -1,13 +1,15 @@
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import { CloudOff, CircleAlert } from 'lucide-react';
 import type { LargeObjectsFacet } from '@taucad/revisions';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { Progress } from '@taucad/ui/components/progress';
-import { useLargeObjects, useProjectAvailability } from '#hooks/use-project-availability.js';
+import { useLargeObjects, useModelAvailability, useProjectAvailability } from '#hooks/use-project-availability.js';
 import type { ModelAvailability, ProjectAvailability } from '#hooks/use-project-availability.js';
 import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
-import { formatBytes } from '#lib/format-bytes.js';
+import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
+import { createModelWaitReporter } from '#lib/model-wait-reporting.js';
 
 const messages = {
   connecting: ['Connecting to Tau Cloud', 'Opening this project on this device.'],
@@ -82,8 +84,59 @@ function ModelFilesPlaceholder({ hasFailed: failed }: { readonly hasFailed: bool
   );
 }
 
+/** How long a check of the model's files may run before the viewer offers a way out. Milliseconds. */
+export const modelCheckPatienceMilliseconds = 10_000;
+
+/**
+ * The viewer's wait while no download runs: the files are being checked, which
+ * is quick. It never says "Downloading", and a check that outlasts its bound
+ * offers Try again, which checks the files again (T5).
+ */
+function ModelCheckPlaceholder(): React.JSX.Element {
+  const client = useRevisionClient();
+  const [isSlow, setIsSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsSlow(true);
+    }, modelCheckPatienceMilliseconds);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, []);
+  return (
+    <div
+      className='flex size-full flex-col items-center justify-center gap-4 p-6 text-center'
+      role='region'
+      aria-label='Preparing model'
+      aria-busy='true'
+    >
+      <Loader className='size-8 motion-reduce:animate-none' />
+      <div className='w-full max-w-64 space-y-2'>
+        <p className='text-sm font-medium'>Preparing model</p>
+        <p className='text-xs text-muted-foreground'>
+          {isSlow ? 'This is taking longer than it should.' : 'Checking your model files.'}
+        </p>
+      </div>
+      {isSlow ? (
+        <Button
+          variant='outline'
+          size='sm'
+          onClick={() => {
+            client?.send({ command: 'retryLargeObjects' });
+          }}
+        >
+          Try again
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 /** One calm first-open treatment, shared by every unavailable file surface. */
 export function ProjectSyncPlaceholder({ state }: { readonly state: ModelAvailability }): React.JSX.Element {
+  if (state === 'filesChecking') {
+    return <ModelCheckPlaceholder />;
+  }
   if (state === 'files' || state === 'filesFailed') {
     return <ModelFilesPlaceholder hasFailed={state === 'filesFailed'} />;
   }
@@ -113,13 +166,13 @@ function ProjectFilesPlaceholder({ state }: { readonly state: ProjectAvailabilit
   const isFailure = state === 'failed' || state === 'offline' || state === 'account';
   const [title, description] =
     state === 'failed' && (reason === 'forbidden' || reason === 'notFound')
-      ? ['Project unavailable', 'Your access may have changed. Open Revisions to review the connection.']
+      ? ['Project unavailable', 'Your access may have changed. Open History to review the backup.']
       : state === 'failed' && reason === 'unauthorized'
         ? ['Sign in to continue', 'Your connection needs authorization before this project can download.']
         : state === 'failed' && reason === 'quota'
           ? [
               'Storage needs attention',
-              'The download could not finish because a storage limit was reached. Open Revisions for details.',
+              'The download could not finish because a storage limit was reached. Open History for details.',
             ]
           : messages[state];
   return (
@@ -142,7 +195,7 @@ function ProjectFilesPlaceholder({ state }: { readonly state: ProjectAvailabilit
       </div>
       {isFailure && needsDetails ? (
         <Button asChild variant='outline' size='sm'>
-          <Link to={detailsUrl}>Open Revisions</Link>
+          <Link to={detailsUrl}>Open History</Link>
         </Button>
       ) : isFailure ? (
         <Button variant='outline' size='sm' onClick={retry}>
@@ -153,9 +206,36 @@ function ProjectFilesPlaceholder({ state }: { readonly state: ProjectAvailabilit
   );
 }
 
+/** The model surfaces' wait on the large objects, reported when it stalls or fails (R7); one watch per focused project. */
+function useModelWaitReporting(): void {
+  const model = useModelAvailability();
+  const status = useRevisionStatus();
+  const reporter = useRef<ReturnType<typeof createModelWaitReporter> | undefined>(undefined);
+  useEffect(() => {
+    const created = createModelWaitReporter();
+    reporter.current = created;
+    return () => {
+      created.dispose();
+      reporter.current = undefined;
+    };
+  }, []);
+  const gated = model === 'files' || model === 'filesFailed' || model === 'filesChecking';
+  const facet = status?.largeObjects;
+  useEffect(() => {
+    reporter.current?.observe({
+      gated,
+      projectId: status?.projectId,
+      checkoutId: status?.checkoutId,
+      readiness: status?.readiness,
+      facet,
+    });
+  }, [gated, status?.projectId, status?.checkoutId, status?.readiness, facet]);
+}
+
 /** One live announcement per focused project, rather than one competing announcement per pane. */
 export function ProjectSyncAnnouncement(): React.JSX.Element {
   const state = useProjectAvailability();
+  useModelWaitReporting();
   return (
     <div className='sr-only' role='status' aria-live='polite' aria-atomic='true'>
       {state === 'ready' ? '' : messages[state].join('. ')}

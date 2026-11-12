@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import type { TargetSurface } from '#support/external-target.js';
 
 /*
  * The orbit snap-back regression (incident 2026-11-06-viewer-orbit-snap-back, fixed by #1602).
@@ -20,13 +21,18 @@ type CameraPose = Readonly<{
   target: Vector3;
   quaternion: readonly [number, number, number, number];
   revision: number;
+  lastChangeSource?: string;
 }>;
 
 type PointerMark = Readonly<{ type: string; at: number; pose?: CameraPose }>;
 
 type CameraBridgeWindow = Window & {
   __TAU_SECTION_VIEW_TEST__?: {
-    getCamera(): CameraPose;
+    getCamera(): CameraPose & { lastChangeSource: string };
+    getViewSettings(): { cameraView?: unknown } | undefined;
+    getModelComponents(): Array<{ id: string }>;
+    projectModelComponent(componentId: string): Array<{ x: number; y: number; visible: boolean }>;
+    getModelHoverState(): { hoveredComponentId: string | undefined };
   };
   __TAU_E2E_POINTER_MARKS__?: PointerMark[];
 };
@@ -53,9 +59,9 @@ const previewCanvasSelector = 'canvas[data-engine]';
 const birdhouseFixtureRoute = '/__e2e/example-fixture?locator=replicad.birdhouse&graphicsBackend=webgl';
 const dragDistancePixels = 120;
 const dragSteps = 20;
-/** `poseSettle` in `use-view-settings-sync.ts`: the camera quiet before a pose is saved or adopted. */
+/** The camera's `cameraPoseSettleMilliseconds`: the quiet after a release before an adoption applies again. */
 const poseSettleMilliseconds = 250;
-/** `editDebounce` in `view-settings-sync-host.tsx`: the wait between a save and its write. */
+/** `viewRecordEditDebounce` in `view-record-session.ts`: the wait between a save and its write. */
 const editDebounceMilliseconds = 500;
 /**
  * The witness row: the shortest requested gap inside the snap window (more than `poseSettle`, less
@@ -83,21 +89,25 @@ async function openBirdhouseFixture(): Promise<void> {
   await target.expectGeometryFramed();
 }
 
-async function readCameraPose(): Promise<CameraPose> {
-  return target.evaluate(() => {
-    const bridge = (globalThis as unknown as CameraBridgeWindow).__TAU_SECTION_VIEW_TEST__;
-    if (!bridge) {
-      throw new Error('Section view e2e bridge is not installed.');
-    }
+async function readCameraPose(surface?: TargetSurface): Promise<CameraPose> {
+  return target.evaluate(
+    () => {
+      const bridge = (globalThis as unknown as CameraBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      if (!bridge) {
+        throw new Error('Section view e2e bridge is not installed.');
+      }
 
-    const { position, target: orbitTarget, quaternion, revision } = bridge.getCamera();
-    return { position, target: orbitTarget, quaternion, revision };
-  });
+      const { position, target: orbitTarget, quaternion, revision, lastChangeSource } = bridge.getCamera();
+      return { position, target: orbitTarget, quaternion, revision, lastChangeSource };
+    },
+    undefined,
+    surface,
+  );
 }
 
-async function canvasCenter(): Promise<{ x: number; y: number }> {
+async function canvasCenter(surface?: TargetSurface): Promise<{ x: number; y: number }> {
   const canvas = selectors.getByCss(previewCanvasSelector).first();
-  const box = await target.boundingBox(canvas);
+  const box = await target.boundingBox(canvas, surface);
   if (!box) {
     throw new Error('The preview canvas has no bounding box.');
   }
@@ -308,4 +318,290 @@ test.describe('Viewer camera persistence', () => {
       }
     },
   );
+});
+
+/** A save's write and the other window's watch answer well inside this. */
+const crossWindowMilliseconds = 15_000;
+
+/** Polls a surface's camera until `accept` holds, and returns the pose it accepted. */
+async function pollCameraPose(
+  accept: (pose: CameraPose) => boolean,
+  surface?: TargetSurface,
+  timeout = crossWindowMilliseconds,
+): Promise<CameraPose> {
+  let last: CameraPose | undefined;
+  await expect
+    .poll(
+      async () => {
+        last = await readCameraPose(surface);
+        return accept(last);
+      },
+      { timeout, interval: 100 },
+    )
+    .toBe(true);
+  return last!;
+}
+
+/** Whether the view's record holds a saved camera pose. */
+async function hasSavedPose(): Promise<boolean> {
+  return target.evaluate(
+    () =>
+      (globalThis as unknown as CameraBridgeWindow).__TAU_SECTION_VIEW_TEST__?.getViewSettings()?.cameraView !==
+      undefined,
+  );
+}
+
+/** Moves the camera toward its target, so a later fit or focus visibly moves it back. */
+async function zoomIn(): Promise<void> {
+  await target.evaluate(() => {
+    const bridge = (
+      globalThis as unknown as {
+        __TAU_SECTION_VIEW_TEST__?: {
+          getCamera(): { position: readonly [number, number, number]; target: readonly [number, number, number] };
+          setCamera(camera: { position: readonly number[]; target: readonly number[] }): void;
+        };
+      }
+    ).__TAU_SECTION_VIEW_TEST__;
+    const camera = bridge?.getCamera();
+    if (bridge && camera) {
+      const { position, target: orbitTarget } = camera;
+      bridge.setCamera({
+        position: position.map((value, axis) => orbitTarget[axis]! + (value - orbitTarget[axis]!) * 0.4),
+        target: orbitTarget,
+      });
+    }
+  });
+}
+
+/** A point on screen over a part: a projected point of the model the pointer's raycast confirms. */
+async function partHitPoint(): Promise<{ x: number; y: number }> {
+  const points = await target.evaluate(() => {
+    const bridge = (globalThis as unknown as CameraBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    return (bridge?.getModelComponents() ?? [])
+      .flatMap(({ id }) => bridge?.projectModelComponent(id) ?? [])
+      .filter((point) => point.visible);
+  });
+  const step = Math.max(1, Math.floor(points.length / 12));
+  for (let index = 0; index < points.length; index += step) {
+    const point = points[index]!;
+    // oxlint-disable-next-line no-await-in-loop -- each point is hovered and checked before the next.
+    await target.mouseMove(point.x, point.y);
+    // oxlint-disable-next-line no-await-in-loop -- the hover answers a frame later.
+    await target.delay(150);
+    // oxlint-disable-next-line no-await-in-loop -- the raycast confirms the point before the next is tried.
+    const hovered = await target.evaluate(
+      () =>
+        (globalThis as unknown as CameraBridgeWindow).__TAU_SECTION_VIEW_TEST__?.getModelHoverState()
+          .hoveredComponentId,
+    );
+    if (hovered !== undefined) {
+      return point;
+    }
+  }
+  throw new Error(`No projected point of the model is over a part: ${JSON.stringify(points.slice(0, 12))}`);
+}
+
+/** The view's saved camera as the record holds it, in one window; `undefined` when it holds no pose. */
+async function savedPose(surface?: TargetSurface): Promise<string | undefined> {
+  return target.evaluate(
+    () => {
+      const cameraView = (globalThis as unknown as CameraBridgeWindow).__TAU_SECTION_VIEW_TEST__?.getViewSettings()
+        ?.cameraView;
+      return cameraView === undefined ? undefined : JSON.stringify(cameraView);
+    },
+    undefined,
+    surface,
+  );
+}
+
+/** Polls until the camera stands within the tolerance of `expected`, after a reload restores it. */
+async function pollRestoredTo(expected: CameraPose): Promise<CameraPose> {
+  return pollCameraPose((pose) => distance(pose.position, expected.position) <= toleranceMeters);
+}
+
+/** Opens the same project in a second window, which shows the same view and follows its record. */
+async function openSecondWindow(): Promise<{ x: number; y: number }> {
+  await target.openSecondary(await target.currentUrl());
+  await target.setViewport({ width: 1400, height: 900 }, 'secondary');
+  await target.expectVisible(selectors.getByCss(previewCanvasSelector), 60_000, 'secondary');
+  await target.waitFor(
+    () => {
+      const bridges = (
+        globalThis as typeof globalThis & {
+          __TAU_SECTION_VIEW_TEST_BRIDGES__?: ReadonlyArray<{ isGeometryFramed(): boolean }>;
+        }
+      ).__TAU_SECTION_VIEW_TEST_BRIDGES__;
+      return Boolean(bridges && bridges.length > 0 && bridges.every((bridge) => bridge.isGeometryFramed()));
+    },
+    undefined,
+    { surface: 'secondary', timeout: 60_000 },
+  );
+  return canvasCenter('secondary');
+}
+
+/** An orbit drag in one window, released. */
+async function orbit(center: { x: number; y: number }, surface?: TargetSurface): Promise<void> {
+  await target.mouseMove(center.x, center.y, undefined, surface);
+  await target.mouseDown(undefined, surface);
+  await target.mouseMove(center.x + dragDistancePixels, center.y, { steps: dragSteps }, surface);
+  await target.mouseUp(undefined, surface);
+}
+
+/*
+ * The view record's owners after G6b (charter D15, D20): another window's edit reaches this one through
+ * the record's watch, and the camera adopts it while idle but drops it during a drag. Only a person's
+ * camera change is saved, so Fit view survives a reload and the first automatic frame does not.
+ */
+test.describe('Viewer camera persistence across windows and reloads', () => {
+  test('adopts a pose orbited in a second window while this one is idle', { timeout: 180_000 }, async () => {
+    await openBirdhouseFixture();
+    const before = await readCameraPose();
+    const secondCenter = await openSecondWindow();
+    try {
+      await orbit(secondCenter, 'secondary');
+      const orbited = await pollCameraPose(
+        (pose) => distance(pose.position, before.position) > toleranceMeters,
+        'secondary',
+      );
+      const adopted = await pollCameraPose((pose) => distance(pose.position, orbited.position) <= toleranceMeters);
+      expect(adopted.lastChangeSource, JSON.stringify({ before, orbited, adopted })).toBe('persisted');
+    } finally {
+      await target.closeSecondary();
+    }
+  });
+
+  test(
+    "drops a second window's pose that arrives during a drag and saves the drag's pose (D15)",
+    { timeout: 180_000 },
+    async () => {
+      await openBirdhouseFixture();
+      const center = await canvasCenter();
+      const secondCenter = await openSecondWindow();
+      let held: CameraPose | undefined;
+      try {
+        await target.mouseMove(center.x, center.y);
+        await target.mouseDown();
+        await dragRightFrom(center);
+        held = await readCameraPose();
+        const dragPose = held;
+        /* The other window orbits the other way and its write lands while this drag is held. */
+        await target.mouseMove(secondCenter.x, secondCenter.y, undefined, 'secondary');
+        await target.mouseDown(undefined, 'secondary');
+        await target.mouseMove(secondCenter.x - dragDistancePixels, secondCenter.y, { steps: dragSteps }, 'secondary');
+        await target.mouseUp(undefined, 'secondary');
+        const foreign = await readCameraPose('secondary');
+        expect(
+          distance(foreign.position, held.position),
+          `the other window should orbit away from the held pose, or this row proves nothing: ${JSON.stringify({ held, foreign })}`,
+        ).toBeGreaterThan(toleranceMeters);
+        /* The other window's pose reaches this window's record while the drag is still held. */
+        await expect
+          .poll(
+            async () => {
+              const [here, there] = await Promise.all([savedPose(), savedPose('secondary')]);
+              return here !== undefined && here === there;
+            },
+            { timeout: crossWindowMilliseconds },
+          )
+          .toBe(true);
+        await target.delay(poseSettleMilliseconds + editDebounceMilliseconds);
+        const stillHeld = await readCameraPose();
+        expect(
+          distance(stillHeld.position, held.position),
+          `the held drag should keep its pose: ${JSON.stringify({ held, foreign, stillHeld })}`,
+        ).toBeLessThanOrEqual(toleranceMeters);
+        await target.mouseUp();
+        /* The drag's pose is saved, and the other window follows it. */
+        await pollCameraPose((pose) => distance(pose.position, dragPose.position) <= toleranceMeters, 'secondary');
+        await target.delay(quietBeforePairMilliseconds);
+        const released = await readCameraPose();
+        expect(distance(released.position, dragPose.position)).toBeLessThanOrEqual(toleranceMeters);
+      } finally {
+        await target.closeSecondary();
+      }
+
+      await target.reload();
+      await target.expectGeometryFramed();
+      await pollRestoredTo(held);
+    },
+  );
+
+  test(
+    'keeps Fit view over a reload and does not save the first automatic frame (D20)',
+    { timeout: 180_000 },
+    async () => {
+      await openBirdhouseFixture();
+      await target.delay(quietBeforePairMilliseconds);
+      /* The first frame is automatic: a reload frames the model again rather than restoring a saved pose. */
+      await target.reload();
+      await target.expectGeometryFramed();
+      await target.delay(quietBeforePairMilliseconds);
+      expect(await hasSavedPose(), 'the first automatic frame should not be saved').toBe(false);
+
+      const center = await canvasCenter();
+      await orbit(center);
+      /* Zoomed in first, so Fit view moves the camera: an orbit alone keeps the fitted distance. */
+      await zoomIn();
+      const zoomed = await readCameraPose();
+      await target.click(selectors.getByRole('button', { name: 'Fit view' }).first());
+      const fitted = await pollCameraPose((pose) => pose.lastChangeSource === 'fit');
+      expect(
+        distance(fitted.position, zoomed.position),
+        `Fit view should move the camera, or this row proves nothing: ${JSON.stringify({ zoomed, fitted })}`,
+      ).toBeGreaterThan(toleranceMeters);
+      await expect.poll(hasSavedPose, { timeout: crossWindowMilliseconds }).toBe(true);
+      await target.delay(poseSettleMilliseconds + editDebounceMilliseconds + 1500);
+      const settled = await readCameraPose();
+      await target.reload();
+      await target.expectGeometryFramed();
+      await pollRestoredTo(settled);
+    },
+  );
+
+  test('keeps a focus on a part over a reload (D20)', { timeout: 180_000 }, async () => {
+    await openBirdhouseFixture();
+    /* The birdhouse is one part, so its focus frames the whole model: zoomed in first, the focus moves the camera. */
+    await zoomIn();
+    const before = await readCameraPose();
+    const part = await partHitPoint();
+    /* The part under the pointer, from its menu: the person's focus, one change with the source `focus`. */
+    await target.mouseClick(part.x, part.y, { button: 'right' });
+    await target.click(selectors.getByRole('menuitem', { name: 'Focus on part' }).first());
+    const focused = await pollCameraPose((pose) => pose.lastChangeSource === 'focus');
+    expect(
+      distance(focused.position, before.position),
+      `the focus should move the camera, or this row proves nothing: ${JSON.stringify({ before, focused })}`,
+    ).toBeGreaterThan(toleranceMeters);
+    await expect.poll(hasSavedPose, { timeout: crossWindowMilliseconds }).toBe(true);
+    await target.delay(poseSettleMilliseconds + editDebounceMilliseconds + 1500);
+    const settled = await readCameraPose();
+    await target.reload();
+    await target.expectGeometryFramed();
+    await pollRestoredTo(settled);
+  });
+
+  test('does not save an automatic refit after the model changes (D20)', { timeout: 240_000 }, async () => {
+    await openBirdhouseFixture();
+    await target.delay(quietBeforePairMilliseconds);
+    const before = await readCameraPose();
+    await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
+    await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), 'Open parameters');
+    await target.click(selectors.getByText('Open parameters', { exact: true }));
+    const width = selectors.getByLabelText('Input for Width', { exact: true }).first();
+    await target.expectVisible(width, 60_000);
+    /* Three times as wide: the bounds grow past the refit ratio, so framing refits the camera on its own. */
+    await target.fill(width, '360');
+    await target.press(width, 'Enter');
+    const refitted = await pollCameraPose(
+      (pose) => pose.revision > before.revision && pose.lastChangeSource === 'framing',
+      undefined,
+      120_000,
+    );
+    expect(
+      distance(refitted.position, before.position),
+      `the refit should move the camera, or this row proves nothing: ${JSON.stringify({ before, refitted })}`,
+    ).toBeGreaterThan(toleranceMeters);
+    await target.delay(poseSettleMilliseconds + editDebounceMilliseconds + 2500);
+    expect(await hasSavedPose(), 'an automatic refit should not be saved').toBe(false);
+  });
 });

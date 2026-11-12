@@ -82,6 +82,16 @@
  * | 75 | `selectSyncFacet(queued(leaseLost on another branch), undecided)` | **D90**: a branch whose conflict waits on the person says so instead of "will catch up and try again" |
  * | 76 | `pushing → recording → backedUp` over a leftover `projection` or another remote's entry | an accepted push is judged on what this remote is owed: `ok` with its lag and no backoff, and the entry it could not settle stays queued |
  * | 77 | `pushing → recording → queued` (refused chat ref beside a leftover `projection`) | a ref this push offered and the remote refused is still a `retry` |
+ * | 78 | `backedUp --sessionChanged--> opening` (stream unwatched and watched again) | **audit R6**: a session change re-reads a refused stream and pulls at once from an idle state |
+ * | 79 | `failed --sessionChanged--> opening` | **audit R6**: a failed project opens again under the new session, whatever the refusal |
+ * | 80 | `pushing --sessionChanged--> pushing → recording → opening` | **audit R6**: a push in flight is kept, and the pull follows it |
+ * | 81 | `opening --sessionChanged--> … → failed.settled(pendingSession) → opening` | **audit R6**: a refusal of an answer asked under the last session opens again, after the owed queue entry is recorded |
+ * | 82 | `--sessionChanged--> pushing → recording → failed` | **audit R6**: a refusal of a push started under the new session stays terminal |
+ * | 83 | `manual(pendingSession) --always--> opening` | **audit R6**: a manual remote busy for a session change reads it once it settles |
+ * | 84 | `quiesce(hold) --sessionChanged--> … --quiesce(release)--> opening` | **audit R6**: the pull is held through quiescing and made on release, even when a push ran during the hold |
+ * | 85 | `failed --quiesce(hold), sessionChanged, quiesce(release)--> failed.settled → opening` | **audit R6**: a release in `failed` pulls once |
+ * | 86 | `quiesce(hold) --sessionChanged, remoteDisconnected--> noRemote` | **audit R6**: a held change is forgotten with the remote |
+ * | 87 | `conflicted.offering --sessionChanged--> offering --onDone--> opening` | **audit R6**: the conflict line's push is kept and its answer recorded, then the pull follows, at once or after a release; the stream is watched afresh only by `opening` |
  */
 
 import { createActor, createAsyncLogic } from 'xstate';
@@ -1419,6 +1429,41 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  it('B6: says once that its own versions took new numbers, on the push that moved them', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    const renumbered = [{ name: 'lid-fit', from: 4, to: 5 }];
+    const tag = 'refs/tags/lid-fit';
+
+    harness.actor.send({ type: 'syncNow', pushId: 'push-1' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      output: { ...pushResult({ name: tag, status: 'updated', head: 't5' }), renumbered },
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+
+    harness.actor.send({ type: 'syncNow', pushId: 'push-2' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', { output: pushResult({ name: tag, status: 'upToDate', head: 't5' }) });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.emitted.filter((event) => event['type'] === 'pushSettled')).toHaveLength(2);
+    });
+
+    expect(harness.emitted.filter((event) => event['type'] === 'versionsRenumbered')).toEqual([
+      { type: 'versionsRenumbered', renumbered } satisfies SyncMachineEmitted,
+    ]);
+
+    harness.stop();
+  });
+
   it('row 23b: a first publish carries its new remote into the correlated push', async () => {
     const harness = start({ remote: undefined });
     await vi.waitFor(() => {
@@ -2222,6 +2267,7 @@ describe('syncMachine', () => {
       { type: 'leaseRetired', runId: 'run-1' },
       { type: 'remoteMoved', generation: 1, refs: [mainRef] },
       { type: 'remoteRefused', code: 'NOT_FOUND', message: 'not a member' },
+      { type: 'sessionChanged' },
       { type: 'branchChanged', branch: 'feature' },
       /* The root's answers to this machine's own merge cut (`sync-<n>`, D12). */
       {
@@ -2692,6 +2738,294 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
       expect(harness.holds.deliveries.at(-1)?.event).toEqual({ type: 'unwatch' });
     });
 
+    harness.stop();
+  });
+
+  it('reads a refused stream afresh and pulls when the session changes (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.holds.sendBack('remoteMoves', { type: 'remoteRefused', code: 'REMOTE_UNAUTHORIZED', message: 'x' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+    harness.effects.settle('fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+    const before = harness.holds.deliveries.length;
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.actor.send({ type: 'sessionChanged' });
+
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
+    });
+    /* Unwatched, then watched again: the refused subscription is replaced, not repeated. */
+    expect(harness.holds.deliveries.slice(before, before + 2).map(({ event }) => event)).toEqual([
+      { type: 'unwatch' },
+      { type: 'watch', remote: 'tau' },
+    ]);
+    harness.stop();
+  });
+
+  it('opens a failed project again when the session changes, whatever the refusal (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      error: Object.assign(new Error('Forbidden.'), { code: 'REMOTE_FORBIDDEN' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.actor.send({ type: 'sessionChanged' });
+
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
+    });
+    harness.stop();
+  });
+
+  it('keeps a push in flight when the session changes, and pulls once it settles (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.actor.send({ type: 'sessionChanged' });
+    await Promise.resolve();
+    expect(harness.effects.running('push')).toBe(1);
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches);
+
+    harness.effects.settle('push', { output: pushResult() });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
+    });
+    harness.stop();
+  });
+
+  it('opens again when an answer asked under the last session is a refusal (audit R6)', async () => {
+    const harness = start();
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+
+    harness.actor.send({ type: 'sessionChanged' });
+    harness.effects.settle('fetch', {
+      error: Object.assign(new Error('Sign in.'), { code: 'REMOTE_UNAUTHORIZED' }),
+    });
+
+    /* The last session's 401 is not this session's: the pull runs again under it. */
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(2);
+    });
+    harness.effects.settle('fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+    harness.stop();
+  });
+
+  it('leaves a refusal of a push made under the new session terminal (audit R6)', async () => {
+    const harness = start();
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+    harness.actor.send({ type: 'sessionChanged' });
+    harness.actor.send({ type: 'syncNow' });
+    harness.effects.settle('fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'ahead' } satisfies SyncFetchActorOutput,
+    });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.effects.settle('push', {
+      error: Object.assign(new Error('Forbidden.'), { code: 'REMOTE_FORBIDDEN' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    harness.clock.advance(60_000);
+    await Promise.resolve();
+
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches);
+    harness.stop();
+  });
+
+  it('reads a manual remote again after a session change it was busy for (audit R6)', async () => {
+    const h = start({ automaticPush: false, remote: 'github' });
+    try {
+      await vi.waitFor(() => {
+        expect(h.effects.running('fetch')).toBe(1);
+      });
+      h.actor.send({ type: 'sessionChanged' });
+      h.effects.settle('fetch', { output: { integration: 'upToDate', leases: {}, ahead: false } });
+
+      await vi.waitFor(() => {
+        expect(h.effects.inputsFor('fetch')).toHaveLength(2);
+      });
+      await settleWhenRunning(h.effects, 'fetch', { output: { integration: 'upToDate', leases: {}, ahead: false } });
+      await vi.waitFor(() => {
+        expect(h.actor.getSnapshot().matches('manual')).toBe(true);
+      });
+      expect(h.actor.getSnapshot().context.pendingSession).toBe(false);
+    } finally {
+      h.stop();
+    }
+  });
+
+  it('pulls once when a held session change is released in failed (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      error: Object.assign(new Error('Forbidden.'), { code: 'REMOTE_FORBIDDEN' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.actor.send({ type: 'quiesce', phase: 'hold' });
+    harness.actor.send({ type: 'sessionChanged' });
+    harness.actor.send({ type: 'quiesce', phase: 'release' });
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+    });
+    /* The pull it opens pushes the refused work again; the held pull is not made a second time. */
+    await settleWhenRunning(harness.effects, 'push', { output: pushResult() });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
+    expect(harness.effects.running('fetch')).toBe(0);
+    harness.stop();
+  });
+
+  it('holds a session change through quiescing and pulls on release (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.actor.send({ type: 'quiesce', phase: 'hold' });
+    harness.actor.send({ type: 'sessionChanged' });
+    await Promise.resolve();
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches);
+
+    harness.actor.send({ type: 'quiesce', phase: 'release' });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
+    });
+    harness.stop();
+  });
+
+  it.each([
+    ['at once', false],
+    ['held through quiescing', true],
+  ])('keeps the conflict line’s push through a session change %s, then pulls (audit R6)', async (_label, held) => {
+    const harness = start();
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: {}, integration: 'diverged' } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'merge', { output: mergeConflict });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches({ conflicted: 'offering' })).toBe(true);
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    const fetches = harness.effects.inputsFor('fetch').length;
+    const before = harness.holds.deliveries.length;
+
+    if (held) {
+      harness.actor.send({ type: 'quiesce', phase: 'hold' });
+    }
+    harness.actor.send({ type: 'sessionChanged' });
+    if (held) {
+      harness.actor.send({ type: 'quiesce', phase: 'release' });
+    }
+    await Promise.resolve();
+    expect(harness.actor.getSnapshot().matches({ conflicted: 'offering' })).toBe(true);
+    expect(harness.effects.running('push')).toBe(1);
+    /* The stream is stopped, not watched again, while the push runs: a refusal of a stream
+     * watched under the new session would pre-empt the push. `opening` watches it afresh. */
+    expect(harness.holds.deliveries.slice(before).map(({ event }) => event.type)).toEqual(['unwatch']);
+
+    harness.effects.settle('push', { output: pushResult({ name: syncRef, status: 'updated', head: 'line-head' }) });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
+    });
+    expect(harness.actor.getSnapshot().context.leases[syncRef]).toBe('line-head');
+    expect(harness.holds.deliveries.slice(before).map(({ event }) => event.type)).toEqual(['unwatch', 'watch']);
+    harness.stop();
+  });
+
+  it('still pulls on release when a push started during the hold (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'save',
+      revisionId: 'r1',
+      branch: 'main',
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('pending')).toBe(true);
+    });
+    const fetches = harness.effects.inputsFor('fetch').length;
+
+    harness.actor.send({ type: 'quiesce', phase: 'hold' });
+    harness.actor.send({ type: 'sessionChanged' });
+    /* The debounce does not wait for the release: the push starts during the hold. */
+    harness.clock.advance(5000);
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult({ name: mainRef, status: 'updated', head: 'r1' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().value).toBe('backedUp');
+    });
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches);
+
+    harness.actor.send({ type: 'quiesce', phase: 'release' });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches + 1);
+    });
+    harness.stop();
+  });
+
+  it('forgets a held session change when the remote goes before release (audit R6)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'quiesce', phase: 'hold' });
+    harness.actor.send({ type: 'sessionChanged' });
+    harness.actor.send({ type: 'remoteDisconnected' });
+    harness.actor.send({ type: 'quiesce', phase: 'release' });
+
+    expect(harness.actor.getSnapshot().context.pendingSession).toBe(false);
+    expect(harness.actor.getSnapshot().context.heldSessionPull).toBe(false);
     harness.stop();
   });
 

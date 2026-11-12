@@ -147,7 +147,6 @@ describe('ProjectCardCadPreview', () => {
       expect.objectContaining({
         className: 'size-full',
         enablePan: false,
-        initialVerticalFieldOfView: 45,
         graphicsOptions: {
           enableAxes: false,
           enableGizmo: false,

@@ -58,6 +58,7 @@ export type {
   ProjectRevisions,
   ProjectRevisionsOptions,
   RevisionDiscardOutcome,
+  RevisionFileRead,
   RevisionOpenOutcome,
   RevisionPublishOutcome,
   RevisionSaveOutcome,
@@ -71,6 +72,7 @@ export { isolationHeaders, serveStaticUi } from '#static-ui.js';
 export type { StaticUiHandler, StaticUiOptions } from '#static-ui.js';
 export { createProjectHost, createProjectHostActor } from '#project-host.js';
 export type {
+  ChatObservationSources,
   ProjectFileSystem,
   ProjectHost,
   ProjectHostActor,
@@ -183,17 +185,37 @@ export type {
   LocalHostMcp,
   LocalHostMcpOptions,
 } from '#mcp-server.js';
-export { createShellService, probeHostShell, shellApprovalKey, shellApprovalPrompt } from '#shell/shell-service.js';
+export {
+  createShellService,
+  isShellError,
+  probeHostShell,
+  shellApprovalKey,
+  shellApprovalPrompt,
+  shellLimits,
+  shellLogDirectory,
+  shellNotStartedCodes,
+} from '@taucad/shell-service';
 export type {
+  ApprovedBy,
   HostShell,
+  PermissionMode,
   ProbeHostShellOptions,
+  ShellAccess,
+  ShellApprovalPayload,
+  ShellApprovalRecord,
   ShellCheckout,
   ShellExecutionHolds,
   ShellHoldAnswer,
   ShellIdentity,
+  ShellInput,
+  ShellLog,
+  ShellNotStartedCode,
+  ShellOutput,
   ShellProbe,
   ShellProjectExecutions,
+  ShellRunRequest,
   ShellServiceOptions,
+  ShellStream,
   ShellUnavailable,
   ShellUnavailableCode,
   TerminalAccess,
@@ -201,18 +223,4 @@ export type {
   TerminalSession,
   TerminalSessionOutcome,
   TerminalSessionRequest,
-} from '#shell/shell-service.js';
-export { isShellError, shellLimits, shellLogDirectory, shellNotStartedCodes } from '#shell/shell-contract.js';
-export type {
-  ApprovedBy,
-  PermissionMode,
-  ShellAccess,
-  ShellApprovalPayload,
-  ShellApprovalRecord,
-  ShellInput,
-  ShellLog,
-  ShellNotStartedCode,
-  ShellOutput,
-  ShellRunRequest,
-  ShellStream,
-} from '#shell/shell-contract.js';
+} from '@taucad/shell-service';

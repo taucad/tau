@@ -16,7 +16,7 @@ type TrackOptions = Parameters<typeof trackAgentTurn>[0];
 
 const harness = (
   runId: string,
-  options: Partial<Pick<TrackOptions, 'identity' | 'usageMetrics' | 'onAccepted'>> & {
+  options: Partial<Pick<TrackOptions, 'identity' | 'usageMetrics' | 'onAccepted' | 'onSettled'>> & {
     prior?: ReadonlyArray<Record<string, unknown>>;
   } = {},
 ) => {
@@ -210,6 +210,23 @@ describe('trackAgentTurn', () => {
       },
     });
     expect(listeners.size).toBe(0);
+  });
+
+  it('tells onSettled the chat’s turns and whether the turn evaluated, after reporting it', () => {
+    const order: string[] = [];
+    const onSettled = vi.fn(() => order.push('settled'));
+    const { publish, report } = harness('run_eval', { onSettled });
+    report.mockImplementation(() => order.push('reported'));
+    publish([lifecycleRow(0, 'admitted', 'run_eval'), lifecycleRow(0, 'running', 'run_eval')], 1200);
+    publish(
+      [
+        ...tauToolRows('e1', 'evaluate_model', { input: { targetFile: 'main.scad' }, output: { status: 'ready' } }),
+        lifecycleRow(0, 'completed', 'run_eval'),
+      ],
+      2000,
+    );
+    expect(order).toEqual(['reported', 'settled']);
+    expect(onSettled).toHaveBeenCalledWith({ agentId: 'codex', turns: 1, evaluated: true });
   });
 
   it('omits tokens an agent never reported and carries the failure code', () => {

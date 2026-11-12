@@ -53,7 +53,13 @@ const fixture = (): string => {
     copy(file, join(root, file));
   }
   symlinkSync(join(repositoryRoot, 'node_modules'), join(root, 'node_modules'));
-  for (const file of ['tsdown.plugin.ts', 'pkgcheck.plugin.ts', 'tsgo.plugin.ts', 'copy-files-from-to.plugin.ts']) {
+  for (const file of [
+    'tsdown.plugin.ts',
+    'pkgcheck.plugin.ts',
+    'formal.plugin.ts',
+    'tsgo.plugin.ts',
+    'copy-files-from-to.plugin.ts',
+  ]) {
     copy(`tools/${file}`, join(root, 'tools', file));
   }
   return root;

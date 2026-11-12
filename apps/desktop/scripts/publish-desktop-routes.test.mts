@@ -17,6 +17,7 @@ import {
   assertCompletedDesktopPromotion,
   completeDesktopPromotion,
   mirrorDesktopRouteFile,
+  readCompletedPlatformCatalog,
   verifyDesktopRouteFiles,
 } from './publish-desktop-routes.mjs';
 import type { DesktopRouteStore } from './publish-desktop-routes.mjs';
@@ -118,9 +119,11 @@ const run = async (): Promise<void> => {
   await writeFile(descriptorPath, JSON.stringify({ tag, sequence: 2 }));
   await store.put(pointers[1]!.key, descriptorPath, {});
   await assert.rejects(assertCompletedDesktopPromotion(store, manifest), /pointer differs/u);
-  await assertCompletedDesktopPromotion(store, manifest, async (key, value) => {
-    assert.equal(key, pointers[1]!.key);
-    assert.equal(JSON.parse(new TextDecoder().decode(value)).tag, tag);
+  await assertCompletedDesktopPromotion(store, manifest, {
+    recover: async (key, value) => {
+      assert.equal(key, pointers[1]!.key);
+      assert.equal(JSON.parse(new TextDecoder().decode(value)).tag, tag);
+    },
   });
   await completeDesktopPromotion(store, { root, manifest, pointers });
   await assertCompletedDesktopPromotion(store, manifest);
@@ -128,6 +131,39 @@ const run = async (): Promise<void> => {
   await store.put('latest/installers.json', catalogPath, {});
   await assert.rejects(assertCompletedDesktopPromotion(store, manifest), /pointer differs/u);
   await assert.rejects(admitDesktopRoutePromotion({ store, root, manifest, isAncestor: () => false }), /Stale/u);
+  // D-H5 lanes: a platform lane keeps its own intent, completion and catalog fragment, so the all-platform state above
+  // is neither read nor rewritten. (Lane keys are mechanics only; the inert manifest stands in for a platform's.)
+  const allIntent = objects.get('latest/installer-promotion.json');
+  const allCompletion = objects.get('latest/installer-completed.json');
+  assert.equal(await readCompletedPlatformCatalog(store, 'linux'), undefined);
+  await assert.rejects(assertCompletedDesktopPromotion(store, manifest, { lane: 'linux' }), /No completed/u);
+  await admitDesktopRoutePromotion({ store, root, manifest, isAncestor: () => true, lane: 'linux' });
+  assert.ok(objects.has('latest/installer-promotion-linux.json'));
+  const fragmentPath = join(root, 'fragment.json');
+  await writeFile(fragmentPath, JSON.stringify({ tag, routes: [] }));
+  const lanePointers = [
+    { key: 'latest/installers-linux.json', path: fragmentPath },
+    { key: 'latest/desktop-update-windows-nsis-x64.json', path: descriptorPath },
+  ];
+  await writeFile(descriptorPath, JSON.stringify({ tag, sequence: 3 }));
+  await store.put(lanePointers[1]!.key, descriptorPath, {});
+  await store.put(lanePointers[0]!.key, fragmentPath, {});
+  await assert.rejects(completeDesktopPromotion(store, { root, manifest, pointers, lane: 'linux' }), /omits/u);
+  await completeDesktopPromotion(store, { root, manifest, pointers: lanePointers, lane: 'linux' });
+  await assertCompletedDesktopPromotion(store, manifest, { lane: 'linux' });
+  assert.equal(objects.get('latest/installer-promotion.json'), allIntent);
+  assert.equal(objects.get('latest/installer-completed.json'), allCompletion);
+  assert.deepEqual(await readCompletedPlatformCatalog(store, 'linux'), { tag, routes: [] });
+  assert.equal(await readCompletedPlatformCatalog(store, 'macos'), undefined);
+  await writeFile(fragmentPath, JSON.stringify({ tag, routes: ['tampered'] }));
+  await store.put(lanePointers[0]!.key, fragmentPath, {});
+  await assert.rejects(readCompletedPlatformCatalog(store, 'linux'), /differs from its completion receipt/u);
+  // A tampered fragment is never recoverable renewal drift.
+  await assert.rejects(
+    assertCompletedDesktopPromotion(store, manifest, { lane: 'linux', recover: async () => undefined }),
+    /pointer differs/u,
+  );
   console.log('Publication immutable retry, interruption and completion readback checks passed');
+  console.log('Per-platform lane intent, completion and composed catalog fragment checks passed');
 };
 await run();

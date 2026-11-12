@@ -410,7 +410,7 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
         expect(projects.some((project) => project.id === id)).toBe(false);
         await page
           .getByPlaceholder('Search projects…')
-          .or(page.getByRole('heading', { name: 'No projects yet', exact: true }))
+          .or(page.getByRole('heading', { name: 'Built with Tau', exact: true }))
           .first()
           .waitFor();
         await expect
@@ -512,7 +512,11 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
           { timeout: 120_000 },
         )
         .toBe('cube(3);\n');
-      await page.getByRole('button', { name: /^Open Revisions\..*Rev 1/u }).waitFor({ timeout: 120_000 });
+      await page
+        .getByRole('button', {
+          name: /^Open History\. You are on main\. (?!Nothing saved yet|Unsaved changes|Setting up)/u,
+        })
+        .waitFor({ timeout: 120_000 });
       // Leave the workbench before placing unsaved bytes; the real download has already completed.
       await page.goto(`${desktopE2EFrontendUrl}/projects`);
       await page.evaluate(
@@ -622,7 +626,7 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
       await session.page.screenshot({ path: join(artifacts, 'retained-native.png'), fullPage: true });
       await session.close();
       session = undefined;
-      const localSave = await cli(['revisions', 'save', '--project', root, '--json']);
+      const localSave = await cli(['history', 'save', '--project', root, '--json']);
       expect(localSave['status']).toBe('saved');
       expect(localSave['backup']).not.toBe('backedUp');
       expect(localSave['backup']).not.toBe('noRemote');
@@ -632,7 +636,7 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
       expect(await state(id)).toBe('deleted');
       await page.getByRole('link', { name: `Open ${name}`, exact: true }).click();
       await page
-        .getByRole('button', { name: /^Open Revisions\./u })
+        .getByRole('button', { name: /^Open History\./u })
         .first()
         .click();
       const sync = page.getByRole('region', { name: 'Sync', exact: true });

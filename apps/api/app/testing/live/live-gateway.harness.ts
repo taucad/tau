@@ -7,7 +7,12 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { Auth } from 'better-auth';
-import { createAgentSession, createGatewayModelTransport, requestedMaxTokens } from '@taucad/agent-host';
+import {
+  chatStateMessage,
+  createAgentSession,
+  createGatewayModelTransport,
+  requestedMaxTokens,
+} from '@taucad/agent-host';
 import type {
   AgentSession,
   AgentSessionModel,
@@ -23,8 +28,11 @@ import { createChatToolRegistry } from '@taucad/agent-tools/registry';
 import type { ChatToolRegistryOptions } from '@taucad/agent-tools/registry';
 import { toolName } from '@taucad/chat/constants';
 import type { ChatMode } from '@taucad/chat/constants';
-import { getCadSystemPrompt } from '@taucad/chat/prompts';
-import type { KernelId } from '@taucad/types/constants';
+import { getCadSystemPrompt, getChatStateNote } from '@taucad/chat/prompts';
+import type { KernelOwner, KernelRoutingProfile } from '@taucad/chat/prompts';
+import { getProviderFacingToolGrant } from '@taucad/chat/schemas';
+import type { ToolSelection } from '@taucad/chat';
+import type { KernelPreference } from '@taucad/types/constants';
 import { authInstanceKey } from '@taucad/api-auth';
 import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
 import { getEnvironment } from '@taucad/api-core';
@@ -160,6 +168,7 @@ export const liveSessionModel = (modelId: string): AgentSessionModel => {
     }
     return configuration.reasoning;
   })();
+  const declared = entry.support?.reasoning;
   return {
     id: entry.id,
     providerKind: entry.provider.id,
@@ -171,7 +180,18 @@ export const liveSessionModel = (modelId: string): AgentSessionModel => {
       cacheRead: details.cost.cacheReadTokens,
       cacheWrite: details.cost.cacheWriteTokens,
     },
-    ...(reasoning === undefined ? {} : { reasoning }),
+    /* The forms the row declares, as a browser turn sends them, except that a live suite asks the provider to refuse
+     * a replayed block whose prefix changed where production asks it to drop the block: a miss by the replay rule
+     * fails the row instead of passing quietly. */
+    ...(reasoning === undefined
+      ? {}
+      : {
+          reasoning: {
+            ...reasoning,
+            ...(declared?.effortInTranscript === true ? { effortInTranscript: true } : {}),
+            ...(declared?.replayBinding === true ? ({ replayBinding: 'refuse' } as const) : {}),
+          },
+        }),
   };
 };
 
@@ -194,11 +214,14 @@ export const liveCompletionCeiling = (modelId: string): number =>
 /**
  * The real CAD system prompt a browser turn carries.
  *
- * @param options - Kernel, chat mode, chat identity and the model row the prompt describes.
+ * @param options - Kernel preference, the project's owner and the host's kernels, chat mode, chat identity and the
+ * model row the prompt describes. Auto with no owner renders the routing card for `kernelProfile`.
  * @returns The static and dynamic sections joined the way the browser joins them.
  */
 export const liveCadSystemPrompt = (options: {
-  readonly kernel?: KernelId;
+  readonly kernel?: KernelPreference;
+  readonly kernelOwner?: KernelOwner;
+  readonly kernelProfile?: KernelRoutingProfile;
   readonly mode?: ChatMode | undefined;
   readonly chatId: string;
   readonly modelId: string;
@@ -215,9 +238,41 @@ export const liveCadSystemPrompt = (options: {
       contextWindow: entry.details.contextWindow,
       ...(entry.details.knowledgeCutoff === undefined ? {} : { knowledgeCutoff: entry.details.knowledgeCutoff }),
       supportsImageInput: entry.support?.modalities?.input.includes('image') ?? false,
+      ...(options.kernelOwner === undefined ? {} : { kernelOwner: options.kernelOwner }),
+      ...(options.kernelProfile === undefined ? {} : { kernelProfile: options.kernelProfile }),
     },
   );
   return [prompt.static, prompt.dynamic].join('\n\n');
+};
+
+/** A chat's settings, as the composer holds them; each absent one is at its default. */
+export type LiveChatSettings = {
+  readonly mode?: ChatMode | undefined;
+  readonly testingEnabled?: boolean | undefined;
+  readonly toolChoice?: ToolSelection | undefined;
+};
+
+/**
+ * What a browser turn carries for the chat's settings (ruling U10), composed by the functions the browser composes it
+ * with: the system prompt of the defaults, every tool the model supports declared, the tool choice that masks what
+ * the settings turn off, and the state note that says them. Use it with a registry that lists the test tools.
+ *
+ * @param options - The chat, its model and its settings.
+ * @returns The session options a settings-aware leg spreads.
+ */
+export const liveChatSettings = (
+  options: LiveChatSettings & { readonly chatId: string; readonly modelId: string },
+): Pick<CreateAgentSessionOptions, 'systemPrompt' | 'toolChoice' | 'allowedTools' | 'contextMessages'> => {
+  const settings = {
+    mode: options.mode ?? 'agent',
+    testingEnabled: options.testingEnabled ?? true,
+    toolChoice: options.toolChoice ?? 'auto',
+  };
+  return {
+    systemPrompt: liveCadSystemPrompt({ chatId: options.chatId, modelId: options.modelId, testingEnabled: true }),
+    ...getProviderFacingToolGrant({ ...settings, modelSupport: row(options.modelId).support }),
+    contextMessages: [chatStateMessage(getChatStateNote(settings))],
+  };
 };
 
 /**
@@ -273,7 +328,7 @@ export const lookingTools: ReadonlySet<string> = new Set<string>([
   toolName.grep,
   toolName.globSearch,
   toolName.getParameters,
-  toolName.revisions,
+  toolName.history,
   toolName.webSearch,
 ]);
 

@@ -8,13 +8,14 @@ import type { ExportFile } from '@taucad/types';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
-import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
+import { consumeBranchControl, getBranchControlRequest } from '#routes/w.$workspace.$project/revision-pane-requests.js';
+import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 
 let registeredItems: CommandPaletteItem[] = [];
 let isTauDebugEnabled = false;
 let geometryFormat: 'gltf' | 'svg' | undefined;
 let cameraState: Record<string, unknown> | undefined;
-let cameraRegistryVersion = 0;
+let cameraPresented = false;
 let hasProjectContext = true;
 const openPanel = vi.fn();
 const captureCadImages =
@@ -45,7 +46,8 @@ const cadActor = {
   on: () => ({ unsubscribe: vi.fn() }),
 };
 const graphicsActor = {
-  getSnapshot: () => ({ context: { cameraState } }),
+  // A canvas presents the camera once it attaches its controls adapter, and the flag outlives that canvas.
+  getSnapshot: () => ({ context: { cameraState, cameraPresented: cameraPresented || cameraState !== undefined } }),
 };
 
 vi.mock('#hooks/use-project-availability.js', () => ({
@@ -70,6 +72,7 @@ vi.mock('#hooks/use-project.js', () => ({
     }
     const geometryUnits = new Map([['main.ts', cadActor]]);
     return {
+      projectId: 'project-1',
       geometryUnits,
       mainEntryPath: 'main.ts',
       projectRef: {
@@ -88,14 +91,7 @@ vi.mock('#hooks/use-project.js', () => ({
 
 vi.mock('#services/headless-capture.js', () => ({ captureCadImages, omittedSectionCutsNotice }));
 
-vi.mock('@taucad/viewer/hooks/use-graphics', () => ({
-  useGraphicsCameraRigQuery: () => {
-    const _version = cameraRegistryVersion;
-    return () => Boolean(cameraState) && _version >= 0;
-  },
-}));
 vi.mock('@taucad/viewer/services/graphics-camera-registry', () => ({
-  hasGraphicsCameraRig: () => Boolean(cameraState),
   getGraphicsCameraState: () => cameraState,
 }));
 
@@ -182,7 +178,7 @@ const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Elem
 const revisionRow = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
   revisionNumber: undefined,
   changeId: `change-${over.revisionId}`,
-  actor: 'user-1',
+  who: { kind: 'recorded', identity: { kind: 'user', id: 'user-1' } },
   source: 'user',
   createdAt: 1_788_220_800_000,
   summary: 'Saved changes',
@@ -207,7 +203,7 @@ describe('ProjectCommandPaletteItems', () => {
     isTauDebugEnabled = false;
     geometryFormat = undefined;
     cameraState = undefined;
-    cameraRegistryVersion = 0;
+    cameraPresented = false;
     hasProjectContext = true;
     openPanel.mockClear();
     captureCadImages.mockReset();
@@ -223,7 +219,7 @@ describe('ProjectCommandPaletteItems', () => {
      while nothing has landed after it — so the palette never sends an undo the machine would refuse. */
   it('offers Undo restore only where the restore machine holds an undo target and nothing landed after it', async () => {
     revisionStatusHarness.rows = [
-      revisionRow({ revisionId: 'rev-3', revisionNumber: 3, trigger: 'restore', restoredFrom: 'rev-1' }),
+      revisionRow({ revisionId: 'rev-3', revisionNumber: 3, capture: 'restore', restoredFrom: 'rev-1' }),
       revisionRow({ revisionId: 'rev-2', revisionNumber: 2 }),
       revisionRow({ revisionId: 'rev-1', revisionNumber: 1 }),
     ];
@@ -245,7 +241,13 @@ describe('ProjectCommandPaletteItems', () => {
       expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(true);
     });
     const undo = registeredItems.find((item) => item.id === 'undo-restore');
-    expect(undo?.group).toBe('Revisions');
+    expect(undo?.group).toBe('History');
+    /* C8, M11: no palette item calls a save a revision or numbers one; History's are named as the copy table says. */
+    for (const item of registeredItems) {
+      expect(`${item.label} ${item.group}`).not.toMatch(/\bRev \d|\brevisions?\b/iu);
+    }
+    expect(registeredItems.find((item) => item.id === 'save-revision')?.label).toBe('Save');
+    expect(registeredItems.find((item) => item.id === 'revision-history')?.label).toBe('Open history');
     undo?.action?.();
     expect(revisionStatusHarness.commands.undo).toHaveBeenCalledOnce();
 
@@ -290,7 +292,7 @@ describe('ProjectCommandPaletteItems', () => {
       expect(registeredItems.find((item) => item.id === 'undo-operation')?.visible).toBe(true);
     });
     const undo = registeredItems.find((item) => item.id === 'undo-operation');
-    expect(undo).toMatchObject({ label: 'Undo', group: 'Revisions' });
+    expect(undo).toMatchObject({ label: 'Undo', group: 'History' });
     undo?.action?.();
     expect(revisionStatusHarness.commands.undoOperation).toHaveBeenCalledOnce();
 
@@ -346,6 +348,45 @@ describe('ProjectCommandPaletteItems', () => {
     expect(openPanel).toHaveBeenCalledTimes(expectedPanels.size);
   });
 
+  /* C2: the palette names History's verbs in the copy table's words and opens the control History owns. */
+  it('offers Create version…, Switch branch and New branch… for the entry the files are at', () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: 'rev-4',
+      branches: [
+        ...revisionStatusHarness.status.branches,
+        { name: 'enclosure-v2', head: 'rev-4', checkoutId: 'co-2', checkoutRoot: '/checkouts/co-2', leaseChatIds: [] },
+      ],
+    };
+    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    const item = (id: string): CommandPaletteItem | undefined => registeredItems.find((entry) => entry.id === id);
+
+    expect(['create-version', 'switch-branch', 'new-branch'].map((id) => [item(id)?.label, item(id)?.visible])).toEqual(
+      [
+        ['Create version…', true],
+        ['Switch branch', true],
+        ['New branch…', true],
+      ],
+    );
+    expect(item('connect-tau-cloud')?.label).toBe('Back up to Tau Cloud');
+    item('switch-branch')?.action?.();
+    expect(openPanel).toHaveBeenLastCalledWith('revisions');
+    expect(getBranchControlRequest('project-1')).toBe('switch-branch');
+    item('new-branch')?.action?.();
+    expect(getBranchControlRequest('project-1')).toBe('new-branch');
+    consumeBranchControl('project-1');
+  });
+
+  it('offers no branch or version verb before anything is saved, or to a viewer', () => {
+    revisionStatusHarness.role = 'read';
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
+    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+
+    expect(registeredItems.find((item) => item.id === 'create-version')?.visible).toBe(false);
+    expect(registeredItems.find((item) => item.id === 'new-branch')?.visible).toBe(false);
+    expect(registeredItems.find((item) => item.id === 'switch-branch')?.visible).toBe(false);
+  });
+
   it('routes backup choices through Revisions and uses the shared save request', () => {
     render(<ProjectCommandPaletteItems match={match} />, { wrapper });
 
@@ -393,7 +434,7 @@ describe('ProjectCommandPaletteItems', () => {
     const { rerender } = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
     const revisionIds = ['change-backup', 'disconnect-remote', 'sync-now', 'save-revision', 'revision-history'];
     for (const id of revisionIds) {
-      expect(registeredItems.find((item) => item.id === id)?.group).toBe('Revisions');
+      expect(registeredItems.find((item) => item.id === id)?.group).toBe('History');
     }
     expect(registeredItems.find((item) => item.id === 'change-backup')?.visible).toBe(false);
     expect(registeredItems.find((item) => item.id === 'disconnect-remote')?.visible).toBe(false);
@@ -493,19 +534,15 @@ describe('ProjectCommandPaletteItems', () => {
     expect(downloadBlob).not.toHaveBeenCalled();
   });
 
-  it('reacts to camera registration and unregistration for a stable graphics actor', () => {
+  /* A hidden viewer tab detaches its canvas, but the camera keeps its pose, so capture stays available. */
+  it('enables PNG capture once a canvas presents the camera, and keeps it after that canvas detaches', () => {
     geometryFormat = 'gltf';
+    cameraPresented = false;
     const view = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
     expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(true);
 
-    cameraState = { position: [1, 2, 3] };
-    cameraRegistryVersion += 1;
+    cameraPresented = true;
     view.rerender(<ProjectCommandPaletteItems match={match} />);
     expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(false);
-
-    cameraState = undefined;
-    cameraRegistryVersion += 1;
-    view.rerender(<ProjectCommandPaletteItems match={match} />);
-    expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(true);
   });
 });

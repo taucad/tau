@@ -52,8 +52,8 @@ measurements remain explicit.
   a false “No matches” while pages remain. Keep focus stable as results arrive.
 - **Temporal hiding preserves history.** Recent work precedes an explicit
   Earlier disclosure. Fold repetitive idle checkpoints for display without
-  deleting or squashing records. Keep current, first, named, fork/merge, restored
-  and chat-linked revisions identifiable; show a branch lane only at a real fork.
+  deleting or squashing records. Keep the current entry, the Start version and
+  every version, fork/merge, restored and chat-linked entries identifiable; show a branch lane only at a real fork.
   Closed projects and older chats follow the same recency principle.
 - **Use the lightest useful depth.** Summary → related detail → exact evidence.
   Avoid stacked cards, repeated headings and folds that restate their parent.
@@ -95,9 +95,9 @@ measurements remain explicit.
   failures belong inline with their owning surface and next action, not as a
   duplicate global toast or a false empty result.
 
-### Revisions and streamed work
+### History and streamed work
 
-A fresh Revisions pane starts with visible **Where you are** and **History**.
+A fresh History pane starts with visible **Current project and branch** and its entries.
 Branch management appears once additional branches are relevant; a discoverable
 New branch action in its place enables first use. A chat chooses its branch from
 that branch's row, never from the composer. Sync configuration
@@ -107,7 +107,7 @@ data sharing and opt-out remain visible before commitment. Connected backup
 becomes a compact summary with an explicit change action. Current checkout
 identity remains readable even when advanced controls are folded away.
 
-In chat, one compact revision summary belongs directly after its user request,
+In chat, one compact save summary belongs directly after its user request,
 before the assistant's reasoning, tools and answer, only after the admitted
 attempt confirms a change to a versioned file. A placement, base revision,
 checkout dirty state, tool invocation or save attempt does not establish that
@@ -256,7 +256,7 @@ The token architecture is three-tier — primitive → semantic → component �
 ## Typography
 
 - **Geist Variable** (`--font-sans`) for UI and prose; **Geist Mono** (`--font-mono`) for code, data, paths, and kickers. Self-hosted, `font-display: swap`. No third face, ever.
-- Scale per `docs/policy/ui-policy.md` §3: body 16/14px, code 14px, minimum 12px, H1 36px at −0.02em. Every scale step carries size, line-height, and weight together — never size alone.
+- Scale, weights and heading roles per `docs/policy/ui-policy.md` §3; minimum 12px. Headings render through `Heading` and the title slots that compose it, so every scale step carries size, line-height, and weight together — never size alone.
 - Numbers that align vertically (tables, timers, metrics) use `tabular-nums`.
 - Placeholders use normal weight; selected filenames may retain their existing
   emphasis. Active sidebar navigation and project/chat rows do not gain weight
@@ -325,6 +325,8 @@ Verify both desktop and browser behavior, not a screenshot from a stale build.
 - Pointer cursors are native hyperlink affordances by default. Actions use `--cursor-action` through the shared semantic selector or `cursor-action` utility, every action keeps visible hover and focus feedback, and specialized text/drag/resize/help/disabled cursors remain semantic. Sidebar navigation, including anchor-backed project/chat rows, follows the shared action-cursor preference; content hyperlinks retain native pointers. Enforced by `tau-lint/no-authored-pointer-cursor` and the computed-style sidebar regression.
 - Boolean props are named `is/has/should/enable/…` (lint-enforced); keyboard handling goes through the keyboard service (`event.key`, never `event.code`; the `mod` abstraction for Cmd/Ctrl).
 
+A repeated piece has one owner and every surface imports it; dialogs and sheets close from one ghost icon button; an icon beside text sits on the centre line of the text's first line; loading content is drawn as its own shape; and a feature that is not available yet carries the coming-soon icon with a legend. [UI Policy](ui-policy.md) §5 states each rule and names the owners.
+
 ## Surfaces
 
 ### apps/ui — the workspace
@@ -378,7 +380,7 @@ Engineering seriousness with personality confined to copy. Metrics are honest an
 
 Write from the user's side: name what people control and recognize, not internal
 implementation layers. Use plain verbs, sentence case and one job per label.
-Controls name their effect (Save changes, Compare revisions); keep that name
+Controls name their effect (Save changes, Compare); keep that name
 through confirmation and outcome. Failure explains what happened and the next
 recovery step without apology or vague reassurance. Empty states give orientation
 and a useful next action, never an overlapping decorative card.
@@ -386,8 +388,10 @@ Call Tau-provided skills **system** skills, not “Built-in”. The file tree us
 the lowercase trailing `system` badge without a redundant lock; read-only
 behavior still follows actual access metadata, never a path or label alone.
 
+Product copy is written from the person's side: it says what happened to them and what they can do, buttons are named after what they do, problems read "Couldn't … Try again.", and no state name or system term reaches the screen. [UX Policy](ux-policy.md) Rules 9–12 are the statute; `docs/research/billing-redesign-blueprint.md` holds the glossary they were drawn from.
+
 ## Governance
 
 - Changes to this document are reviewed diffs with rationale, like any code change. Rules only get stricter by default; loosening one names the cost that justifies it.
-- The enforcement inventory (what makes each rule real): `tau-lint/no-hardcoded-color`, `tau-lint/no-authored-pointer-cursor`, `boolean-prop-naming`, the MDX rule suite, role-based selector tests, axe smoke tests, contract tests on variant modules, word-budget and API-coverage tests, Vale, and the release-gate umbrella. When a new rule lands here, its gate lands with it or the rule is marked "default, unenforced" until it does.
+- The enforcement inventory (what makes each rule real): `tau-lint/no-hardcoded-color`, `tau-lint/no-authored-pointer-cursor`, `tau-lint/no-raw-heading-type`, `boolean-prop-naming`, the MDX rule suite, role-based selector tests, axe smoke tests, contract tests on variant modules, word-budget and API-coverage tests, Vale, and the release-gate umbrella. When a new rule lands here, its gate lands with it or the rule is marked "default, unenforced" until it does.
 - Promote new durable design law through [the shared learning owner](../../.agents/skills/update-agent-memory/SKILL.md) into its policy or this document, with its gate. Keep unaccepted candidates in the existing task evidence; they do not become a competing authority.

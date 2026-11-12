@@ -1,4 +1,7 @@
-/** Authenticate staging Mac CI application and harness identities without changing public acceptance receipts. */
+/**
+ * Authenticate Mac and Linux platform-scoped CI and clean-host (vm) application and harness identities, on staging and
+ * production, without changing public acceptance receipts.
+ */
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
 import type { DesktopArtifactManifest } from '#shared/desktop-release.js';
@@ -16,9 +19,9 @@ const candidateSchema = z.strictObject({
 export type InstallerCandidateProvenance = z.infer<typeof candidateSchema>;
 const bindingSchema = z.strictObject({
   schemaVersion: z.literal(1),
-  scope: z.literal('macos'),
-  channel: z.literal('staging'),
-  kind: z.literal('ci'),
+  scope: z.enum(['macos', 'linux']),
+  channel: z.enum(['staging', 'production']),
+  kind: z.enum(['ci', 'vm']),
   sourceCommit: sha,
   manifestSha256: digest,
   workflowCommit: sha,
@@ -26,9 +29,16 @@ const bindingSchema = z.strictObject({
   candidate: candidateSchema,
 });
 
-/** Only this mode has a separately authenticated source/harness binding. */
+/**
+ * The Mac and Linux platform scopes, on staging and production, have a separately authenticated source/harness
+ * binding for both their hosted CI rows and their clean-host (vm) rows: a candidate is built from a green ancestor,
+ * so its source can never be the tip that a later main dispatch runs at. The all-platform and Windows scopes keep
+ * exact source equality.
+ */
 export const usesQualificationBinding = (scope: string, channel: string, kind: string): boolean =>
-  scope === 'macos' && channel === 'staging' && kind === 'ci';
+  (scope === 'macos' || scope === 'linux') &&
+  (channel === 'staging' || channel === 'production') &&
+  (kind === 'ci' || kind === 'vm');
 
 /** Bind authenticated archive contents to independently admitted GitHub candidate and qualification metadata. */
 export const verifyQualificationBinding = (
@@ -36,6 +46,8 @@ export const verifyQualificationBinding = (
   options: {
     manifest: DesktopArtifactManifest;
     candidate: InstallerCandidateProvenance;
+    scope: 'macos' | 'linux';
+    kind: 'ci' | 'vm';
     runId: number;
     workflowCommit: string;
     publicationCommit: string;
@@ -47,7 +59,9 @@ export const verifyQualificationBinding = (
   const publicationCommit = sha.parse(options.publicationCommit);
   const sourceCommit = sha.parse(options.manifest.sourceCommit);
   if (
-    options.manifest.channel !== 'staging' ||
+    binding.scope !== options.scope ||
+    binding.channel !== options.manifest.channel ||
+    binding.kind !== options.kind ||
     binding.sourceCommit !== sourceCommit ||
     binding.manifestSha256 !== desktopManifestDigest(options.manifest) ||
     binding.workflowCommit !== workflowCommit ||
@@ -72,14 +86,16 @@ export const verifyQualificationBinding = (
 export const createQualificationBinding = (options: {
   manifest: DesktopArtifactManifest;
   candidate: InstallerCandidateProvenance;
+  scope: 'macos' | 'linux';
+  kind: 'ci' | 'vm';
   runId: number;
   workflowCommit: string;
 }): z.infer<typeof bindingSchema> => {
   const binding = bindingSchema.parse({
     schemaVersion: 1,
-    scope: 'macos',
-    channel: 'staging',
-    kind: 'ci',
+    scope: options.scope,
+    channel: options.manifest.channel,
+    kind: options.kind,
     sourceCommit: options.manifest.sourceCommit,
     manifestSha256: desktopManifestDigest(options.manifest),
     workflowCommit: options.workflowCommit,

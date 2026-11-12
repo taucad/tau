@@ -1,5 +1,16 @@
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
-import { createContext, lazy, Suspense, use, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  lazy,
+  Suspense,
+  use,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useLocation, useMatch, useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
 import type { Handle } from '#types/matches.types.js';
@@ -24,13 +35,13 @@ import type {
 import { isKernelAvailable, nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
 import { useLiveProjectIds, useSessions } from '#hooks/use-sessions.js';
 import { useMemoryRelease } from '#hooks/use-memory-release.js';
-import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
+import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { useCanonicalProjectUrlCorrection, useProjectIdBySlugs } from '#hooks/use-project-slug-route.js';
 import { projectChatIdFromSearch, projectUrl } from '#utils/project-url.utils.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
-import { searchParameterName } from '#constants/search-parameter.constants.js';
-import { stringParameter } from '#utils/search-parameter.codecs.js';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
+import { stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import { loadProjectWorkspace, warmProjectWorkspace } from '#lib/project-workspace-warmup.js';
 
 /*
@@ -197,7 +208,7 @@ export function ProjectRouteGate({
         if (access.status === 'ready') {
           /* What a retained subtree needs to keep running after the person
            * navigates on: recorded the once, from the resolved route. */
-          const requirement = nativeKernelRequirementForEntryPath(access.project.assets.main.entryPath);
+          const requirement = nativeKernelRequirementForEntryPath(access.project.assets.main?.entryPath);
           setRetainedKernels((prior) =>
             Object.hasOwn(prior, requestedProjectId)
               ? prior
@@ -244,7 +255,11 @@ export function ProjectRouteGate({
    * navigated away from keeps its file manager, its kernel and its revision
    * port, so a running agent settles and returning is instant.
    */
-  useEffect(() => {
+  /* A layout effect, not a passive one: until `open` lands, a ready project that is not live derives
+   * `closed`, and a passive effect let that commit paint its notice ("Project closed … Reopen
+   * project") for about 26 ms on a direct open. The registry update this sends re-renders before
+   * the browser paints. */
+  useLayoutEffect(() => {
     if (
       requestedProjectId === undefined ||
       resolved?.access.status !== 'ready' ||
@@ -290,7 +305,7 @@ export function ProjectRouteGate({
   const pending = resolved !== undefined && resolved.projectId !== requestedProjectId;
   const nativeRequirement =
     resolved?.access.status === 'ready'
-      ? nativeKernelRequirementForEntryPath(resolved.access.project.assets.main.entryPath)
+      ? nativeKernelRequirementForEntryPath(resolved.access.project.assets.main?.entryPath)
       : undefined;
 
   /*

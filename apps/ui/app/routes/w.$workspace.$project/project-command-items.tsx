@@ -8,6 +8,8 @@ import {
   FileBox,
   Files,
   GalleryThumbnails,
+  GitBranch,
+  GitBranchPlus,
   History,
   ImageDown,
   Info,
@@ -17,6 +19,7 @@ import {
   Share2,
   SlidersHorizontal,
   SquareTerminal,
+  Tag,
   Terminal,
   Undo2,
 } from 'lucide-react';
@@ -26,7 +29,7 @@ import type { UIMatch } from 'react-router';
 import { useProject, useMainGraphics } from '#hooks/use-project.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { downloadBlob } from '@taucad/utils/file';
-import { zipDownloadCeiling } from '#utils/zip-download.utils.js';
+import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import { randomUuid } from '@taucad/utils/id';
 import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
@@ -39,13 +42,14 @@ import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
 import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 import { selectStripVerbs, useRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { requestBranchControl } from '#routes/w.$workspace.$project/revision-pane-requests.js';
+import { requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { isTerminalSurfaceOffered } from '#components/terminal/terminal-availability.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 import { useFeature } from '#flags/use-feature.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, omittedSectionCutsNotice } from '#services/headless-capture.js';
-import { useGraphicsCameraRigQuery } from '@taucad/viewer/hooks/use-graphics';
 import { getGraphicsCameraState } from '@taucad/viewer/services/graphics-camera-registry';
 
 export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): React.JSX.Element | undefined {
@@ -68,8 +72,8 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
   const artifactMimeType = useSelector(mainCadRef, (state) =>
     state?.context.rendering?.success ? state.context.rendering.artifact.mimeType : undefined,
   );
-  const hasCameraRig = useGraphicsCameraRigQuery();
-  const cameraReady = hasCameraRig(mainGraphicsRef);
+  /* The camera is presented once a canvas has attached its controls; before that its pose is the unframed seed. */
+  const cameraReady = useSelector(mainGraphicsRef, (state) => state?.context.cameraPresented) === true;
   const canCapturePng = Boolean(
     artifactMimeType === 'image/svg+xml' || (artifactMimeType === 'model/gltf-binary' && cameraReady),
   );
@@ -121,6 +125,24 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
   const handleOpenSync = useCallback(() => {
     openPanel('revisions');
   }, [openPanel]);
+  /* C2: the palette's branch and version verbs open the control History owns, in its own words. */
+  const canWriteHistory = isLineKnown && projectRole !== 'read' && projectRole !== 'revoked';
+  const headRevisionId = revisionStatus?.headRevisionId;
+  const handleCreateVersion = useCallback(() => {
+    if (headRevisionId !== undefined) {
+      /* The entry the files are at opens in History, where Create version… is its first action. */
+      requestRevisionReveal(projectId, headRevisionId);
+    }
+    openPanel('revisions');
+  }, [headRevisionId, openPanel, projectId]);
+  const handleSwitchBranch = useCallback(() => {
+    requestBranchControl(projectId, 'switch-branch');
+    openPanel('revisions');
+  }, [openPanel, projectId]);
+  const handleNewBranch = useCallback(() => {
+    requestBranchControl(projectId, 'new-branch');
+    openPanel('revisions');
+  }, [openPanel, projectId]);
 
   const handleOpenExporter = useCallback(() => {
     openPanel('export');
@@ -241,7 +263,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
             {
               id: 'change-backup',
               label: 'Change backup',
-              group: 'Revisions',
+              group: 'History',
               icon: <Cloud />,
               action: handleOpenSync,
               visible: isLineKnown,
@@ -252,7 +274,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
             {
               id: 'disconnect-remote',
               label: 'Disconnect backup',
-              group: 'Revisions',
+              group: 'History',
               icon: <CloudOff />,
               action: handleOpenSync,
               visible: isLineKnown,
@@ -261,8 +283,8 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
         : [
             {
               id: 'connect-tau-cloud',
-              label: 'Connect Tau Cloud',
-              group: 'Revisions',
+              label: 'Back up to Tau Cloud',
+              group: 'History',
               icon: <Cloud />,
               action: handleOpenSync,
             },
@@ -270,7 +292,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       {
         id: 'sync-now',
         label: 'Sync now',
-        group: 'Revisions',
+        group: 'History',
         icon: <RefreshCw />,
         action: syncNow,
         visible: isRemoteConnected,
@@ -278,15 +300,39 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       },
       {
         id: 'save-revision',
-        label: 'Save revision',
-        group: 'Revisions',
+        label: 'Save',
+        group: 'History',
         icon: <Save />,
         action: saveRevision,
       },
       {
+        id: 'create-version',
+        label: 'Create version…',
+        group: 'History',
+        icon: <Tag />,
+        action: handleCreateVersion,
+        visible: canWriteHistory && headRevisionId !== undefined,
+      },
+      {
+        id: 'switch-branch',
+        label: 'Switch branch',
+        group: 'History',
+        icon: <GitBranch />,
+        action: handleSwitchBranch,
+        visible: isLineKnown && revisionStatus.branches.length > 1,
+      },
+      {
+        id: 'new-branch',
+        label: 'New branch…',
+        group: 'History',
+        icon: <GitBranchPlus />,
+        action: handleNewBranch,
+        visible: canWriteHistory && headRevisionId !== undefined,
+      },
+      {
         id: 'undo-restore',
         label: 'Undo restore',
-        group: 'Revisions',
+        group: 'History',
         icon: <Undo2 />,
         action: undo,
         visible: canUndoRestore,
@@ -294,7 +340,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       {
         id: 'undo-operation',
         label: 'Undo',
-        group: 'Revisions',
+        group: 'History',
         icon: <Undo2 />,
         action: undoOperation,
         visible: canUndo,
@@ -385,8 +431,8 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       },
       {
         id: 'revision-history',
-        label: 'Open revision history',
-        group: 'Revisions',
+        label: 'Open history',
+        group: 'History',
         icon: <History />,
         action: () => {
           openPanel('revisions');
@@ -457,6 +503,12 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       canUndoRestore,
       undoOperation,
       canUndo,
+      canWriteHistory,
+      headRevisionId,
+      handleCreateVersion,
+      handleSwitchBranch,
+      handleNewBranch,
+      revisionStatus?.branches.length,
     ],
   );
 

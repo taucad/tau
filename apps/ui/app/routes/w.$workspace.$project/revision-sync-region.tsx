@@ -7,7 +7,6 @@ import {
   Cloud,
   CloudAlert,
   CloudOff,
-  EllipsisVertical,
   ExternalLink,
   GitBranch,
   RefreshCw,
@@ -16,17 +15,18 @@ import {
   WifiOff,
 } from 'lucide-react';
 import { Link } from 'react-router';
-import { Button } from '@taucad/ui/components/button';
-import { Collapsible, CollapsibleContent } from '@taucad/ui/components/collapsible';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSwitchItem,
-  DropdownMenuTrigger,
-} from '@taucad/ui/components/dropdown-menu';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@taucad/ui/components/alert-dialog';
+import { Button, buttonVariants } from '@taucad/ui/components/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
@@ -45,16 +45,14 @@ import {
   GithubRequestError,
 } from '#lib/github-connections.js';
 import type { GithubRepository } from '#lib/github-connections.js';
-import { githubProjectBinding } from '#lib/github-project-binding.js';
+import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import { formatStorageLimit } from '@taucad/billing';
 import { ENV } from '#environment.config.js';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { SwitchRow } from '@taucad/ui/components/switch';
-import { RevisionCollaborators } from '#routes/w.$workspace.$project/revision-collaborators.js';
-import { ActionButton, DetailsToggle, disclosureMotion } from '@taucad/ui/components/actions';
-import { RevisionRegion } from '#components/revisions/revision-region.js';
-import { timelineRow } from '#components/revisions/revision-timeline.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { useSharedCount } from '#routes/w.$workspace.$project/revision-collaborators.js';
+import { ActionButton } from '@taucad/ui/components/actions';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import {
   cloudUnavailableSentence,
   asksTauSignIn,
@@ -182,7 +180,7 @@ const reconnectCopy = (remote: RemoteFacet): string => {
  *
  * Keyed on the machine's own `reason`, never on the sentence: the text is the
  * server's and changes with it, while the class is a contract (contract §3).
- * `Open Revisions` is deliberately absent — this *is* Revisions.
+ * `Open History` is deliberately absent — this *is* History.
  *
  * @param reason - The failure class the sync machine recorded.
  * @param remote - The connection, so a credential problem names its provider.
@@ -447,7 +445,7 @@ function MovedRepository({
   if (confirming) {
     return (
       <div className='flex flex-col gap-2'>
-        <p className='text-sm'>{`Update this project's remote to ${moved.fullName}? Every revision stays on this device.`}</p>
+        <p className='text-sm'>{`Back up to ${moved.fullName} from now on? Your history stays on this device.`}</p>
         <div className='flex flex-wrap items-center gap-2'>
           <Button
             autoFocus
@@ -467,7 +465,7 @@ function MovedRepository({
               setKept(true);
             }}
           >
-            Keep current remote
+            Cancel
           </Button>
         </div>
       </div>
@@ -491,7 +489,12 @@ function MovedRepository({
 }
 
 /**
- * *Sync* — the fourth region of the Revisions pane (S26, S34, S35).
+ * The backup line — the History pane's last line (C4; S26, S34, S35).
+ *
+ * One line says where the backup is and how it is doing, a second says why
+ * and offers the fix, and **Manage** holds the rest. No card and no Details
+ * (M8); People with access lives in Share (Q5). Disconnecting is the one
+ * action that asks first (I11).
  *
  * Presentational on purpose: it takes the projection's remote facet and three
  * callbacks, so the pane can render it, a test can script it, and nothing here
@@ -504,7 +507,7 @@ function MovedRepository({
  * names the files rather than a number (D16).
  *
  * @param props - The facet and the three verbs.
- * @returns The Sync region.
+ * @returns The backup line.
  */
 export function RevisionSyncRegion({
   remote,
@@ -544,7 +547,8 @@ export function RevisionSyncRegion({
   const [url, setUrl] = useState(remote.kind === 'git' ? (remote.url ?? '') : '');
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const [pendingConnection, setPendingConnection] = useState<PendingConnection>();
-  const [changingBackup, setChangingBackup] = useState(remote.phase !== 'connected');
+  /* A project on this device only shows its line and Back up; the chooser opens from there (C2). */
+  const [changingBackup, setChangingBackup] = useState(remote.phase !== 'connected' && remote.phase !== 'none');
   const [reconnecting, setReconnecting] = useState(false);
   /* A connect in flight from this region: *Replace backup* waits for it. */
   const [committing, setCommitting] = useState(false);
@@ -558,16 +562,22 @@ export function RevisionSyncRegion({
   /* W2a: a damaged cloud copy is terminal; the client has nothing to offer but the truth (I12). */
   const failureSentence =
     sync.reason === 'damaged' ? describeRevisionFailure('backup', 'REMOTE_DAMAGED').description : sync.error;
-  const settingsRef = useRef<HTMLButtonElement>(null);
-  const opensDisconnect = useRef(false);
+  const manageRef = useRef<HTMLButtonElement>(null);
+  const backUpRef = useRef<HTMLButtonElement>(null);
+  const [isManaging, setIsManaging] = useState(false);
+  /* Manage is 288 px, or the pane's width less its inset when the pane is narrower (C2). */
+  const [manageWidth, setManageWidth] = useState<number>();
+  const openManage = (isOpen: boolean): void => {
+    if (isOpen) {
+      const line = manageRef.current?.closest('[data-slot="backup-line"]');
+      setManageWidth(line === null || line === undefined ? undefined : Math.min(288, line.clientWidth - 16));
+    }
+    setIsManaging(isOpen);
+  };
   /* A fetch-only link can still be changed for a writable one; a view-only or removed collaborator cannot. */
   const canManage = role !== 'read' && role !== 'revoked' && isLineKnown;
-  /* Sync now while something waits to go, and never beside a failure's own verb (A1 item 6). */
-  const canSyncNow =
-    role !== 'revoked' &&
-    (remote.provider === 'github'
-      ? ['manual', 'failed', 'queued'].includes(sync.state)
-      : !readOnly && (sync.state === 'pending' || sync.state === 'queued'));
+  /* Backup is continuous, so only GitHub's fetch is a verb of its own; Try again follows a failure (M8). */
+  const canSyncNow = role !== 'revoked' && ['manual', 'failed', 'queued'].includes(sync.state);
   /*
    * One renderer for rule 19's action, because there are now two surfaces that
    * must offer exactly one: the Sync row's refused push, and a refused connect.
@@ -608,7 +618,7 @@ export function RevisionSyncRegion({
         );
       }
       case 'syncNow': {
-        return <ActionButton verb='Sync now' icon={RefreshCw} onClick={onSync} />;
+        return <ActionButton verb='Try again' icon={RefreshCw} onClick={onSync} />;
       }
       case 'retry': {
         return <ActionButton verb='Retry' icon={RotateCw} onClick={onRetry} />;
@@ -630,7 +640,7 @@ export function RevisionSyncRegion({
    * no Connect, no Cancel, no summary — with focus on `<body>`. */
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect -- C9: the draft mirrors the external connection phase, which no render-time derivation sees.
-    setChangingBackup(remote.phase !== 'connected');
+    setChangingBackup(remote.phase !== 'connected' && remote.phase !== 'none');
     if (remote.phase === 'connected') {
       setChoice(undefined);
     }
@@ -697,7 +707,7 @@ export function RevisionSyncRegion({
       setChangingBackup(false);
       setChoice(undefined);
     } catch (error) {
-      setConnectionError(error instanceof Error ? error.message : 'The backup could not be connected.');
+      setConnectionError(error instanceof Error ? error.message : 'Couldn’t connect the backup. Try again.');
     } finally {
       setCommitting(false);
     }
@@ -811,254 +821,191 @@ export function RevisionSyncRegion({
         : WifiOff;
   const glyphTone =
     GlyphIcon === CircleAlert ? 'text-feature' : GlyphIcon === CloudAlert ? 'text-warning' : 'text-muted-foreground';
-  const glyph = <GlyphIcon aria-hidden className={cn('size-4 shrink-0', glyphTone)} />;
-  const includes = ['Files', 'history', ...(remote.kind === 'tau' && syncChats ? ['chats'] : [])];
-  const facts: ReadonlyArray<readonly [string, ReactNode]> = [
-    [
-      'Backup',
-      remote.kind === 'tau' ? 'Tau Cloud' : remote.provider === 'github' ? 'GitHub repository' : 'Git repository',
-    ],
-    ...(remote.kind === 'git' && remote.url !== undefined
-      ? ([
-          [
-            'Address',
-            <code key='address' className='font-mono break-all'>
-              {remote.url}
-            </code>,
-          ],
-        ] as const)
-      : []),
-    [
-      'Access',
-      role === 'revoked'
-        ? 'Unavailable'
-        : role === 'read'
-          ? 'View only'
-          : remote.fetchOnly
-            ? 'Read-only link · Tau will not push'
-            : remote.provider === 'github'
-              ? 'Read access · writes require approval in Tau'
-              : 'Read and write',
-    ],
-    ['Includes', `${includes.slice(0, -1).join(', ')} and ${includes.at(-1) ?? ''}`],
-  ];
-  /*
-    Whether this project is backed up, and how much is not (S26, S41, AC21).
-
-    A `status` live region, because it changes on its own. The reason and exactly
-    one action for its class follow it (N3, C4): the sentence is the server's,
-    the action is chosen from `sync.reason`, which is a contract.
-  */
-  const hasFigure = remote.storage !== undefined && !showMeter;
-  /* D18: packs a compaction retired but still keeps, beside the figure and never in it. */
-  const retained = remote.storage?.retained ?? 0;
-  const retainedFigure =
-    retained > 0 ? (
-      <span className='text-muted-foreground'>{formatStorageLimit(retained)} kept for recovery, not counted</span>
-    ) : undefined;
+  const isConnected = remote.phase === 'connected';
   const showsAccess = readOnly && role !== 'revoked' && remote.kind !== 'none';
-  const statusBlock =
-    syncState === undefined && !hasFigure && !showsAccess ? undefined : (
-      <div role='status' aria-label='Backup status' className='flex min-w-0 flex-auto flex-col gap-1 text-xs'>
-        <span className='flex min-w-0 flex-wrap items-center gap-x-3 tabular-nums'>
-          {syncState === undefined ? undefined : <span>{syncState}</span>}
-          {sync.online ? undefined : <span className='text-muted-foreground'>Offline</span>}
-          {/* A push this viewer cannot make is said on the line, not discovered after a gesture (F1). */}
-          {showsAccess ? (
-            <span className='text-muted-foreground'>
-              {remote.fetchOnly ? 'Read-only link · Tau will not push' : 'View only'}
-            </span>
-          ) : undefined}
-          {remote.storage === undefined || !hasFigure ? undefined : (
-            <span className='text-muted-foreground'>
-              {formatStorageLimit(remote.storage.used)} of {formatStorageLimit(remote.storage.quota)}
-            </span>
-          )}
-          {hasFigure ? retainedFigure : undefined}
-        </span>
-        {role === 'revoked' ? (
-          <span className='text-muted-foreground'>
-            {sync.reason === 'notFound' && failureSentence !== undefined
-              ? `${failureSentence} Every revision stays on this device.`
-              : cloudUnavailableSentence}
-          </span>
-        ) : failureSentence === undefined ? (
-          remote.provider === 'github' ? (
-            <MovedRepository
-              projectId={projectId}
-              sentence={undefined}
-              fallback={undefined}
-              onUpdate={(connectionId, repository) => {
-                void commitConnection({ kind: 'github', connectionId, repository });
-              }}
-            />
-          ) : undefined
-        ) : failureAction === 'moved' ? (
-          <MovedRepository
-            projectId={projectId}
-            sentence={failureSentence}
-            fallback={renderFailureAction(failureAction)}
-            onUpdate={(connectionId, repository) => {
-              void commitConnection({ kind: 'github', connectionId, repository });
-            }}
-          />
-        ) : (
-          <span className='flex flex-wrap items-center gap-2'>
-            <span className='min-w-0 flex-auto'>{failureSentence}</span>
-            {renderFailureAction(failureAction)}
-          </span>
-        )}
-      </div>
+  /* Q5: the owner's listing, read where the owner sees it; the pane keeps one line about it. */
+  const sharedCount = useSharedCount(projectId, role === 'owner' && remote.kind === 'tau' && isConnected);
+  const sharedLine =
+    sharedCount === undefined || sharedCount === 0
+      ? undefined
+      : `Shared with ${String(sharedCount)} ${sharedCount === 1 ? 'person' : 'people'}`;
+
+  /*
+    Why the line says what it says, and the one fix for it (S26, S41, AC21; N3, C4).
+
+    The reason is the server's sentence; the action is chosen from
+    `sync.reason`, which is a contract.
+  */
+  const reasonLine =
+    role === 'revoked' ? (
+      <span className='text-muted-foreground'>
+        {sync.reason === 'notFound' && failureSentence !== undefined
+          ? `${failureSentence} Your history is still on this device.`
+          : cloudUnavailableSentence}
+      </span>
+    ) : failureSentence === undefined ? (
+      remote.provider === 'github' ? (
+        <MovedRepository
+          projectId={projectId}
+          sentence={undefined}
+          fallback={undefined}
+          onUpdate={(connectionId, repository) => {
+            void commitConnection({ kind: 'github', connectionId, repository });
+          }}
+        />
+      ) : undefined
+    ) : failureAction === 'moved' ? (
+      <MovedRepository
+        projectId={projectId}
+        sentence={failureSentence}
+        fallback={renderFailureAction(failureAction)}
+        onUpdate={(connectionId, repository) => {
+          void commitConnection({ kind: 'github', connectionId, repository });
+        }}
+      />
+    ) : (
+      <span className='flex flex-wrap items-center gap-2'>
+        <span className='min-w-0 flex-auto text-muted-foreground'>{failureSentence}</span>
+        {renderFailureAction(failureAction)}
+      </span>
     );
   const hasSettings = remote.provider === 'github' || canManage;
-  /* Round 18: the meter shows once storage is worth watching, and then its caption carries the figure. */
+  const branchHref =
+    remote.provider === 'github' && remote.url !== undefined
+      ? `${remote.url.replace(/\.git$/u, '')}${branchPath}`
+      : undefined;
+  const openChange = (): void => {
+    setIsManaging(false);
+    setPendingConnection(undefined);
+    setChoice(remote.kind);
+    setChangingBackup(true);
+  };
 
-  return (
-    <RevisionRegion
-      id='revision-sync-heading'
-      title='Sync'
-      className={className}
-      action={
-        canSyncNow ? (
-          <Button size='xs' variant='ghost' className='gap-1 text-muted-foreground' onClick={onSync}>
-            <RefreshCw aria-hidden className='size-3' />
-            {remote.provider === 'github' ? 'Fetch latest' : 'Sync now'}
+  /* Manage (M8): what the ⋮ and Details held, behind one labelled button. */
+  const manage =
+    isConnected && !changingBackup && hasSettings ? (
+      <Popover open={isManaging} onOpenChange={openManage}>
+        <PopoverTrigger asChild>
+          <Button ref={manageRef} size='xs' variant='ghost' className='-my-0.5 -mr-2 shrink-0'>
+            Manage
           </Button>
-        ) : null
-      }
-      bodyClassName='flex flex-col gap-3 p-1.5'
-    >
-      {remote.provider === 'github' &&
-      remote.phase === 'connected' &&
-      githubBinding !== undefined &&
-      !changingBackup ? (
-        <GithubRepositoryWriteSettings
-          connectionId={githubBinding.connectionId}
-          repositoryId={githubBinding.repositoryId}
-          onPush={onPushGithub}
-          pushUnavailable={
-            sync.online
-              ? sync.state === 'manual'
-                ? undefined
-                : 'Finish fetching or resolving changes before pushing.'
-              : 'Connect to the internet before pushing.'
-          }
-        />
-      ) : null}
-      {remote.phase === 'connected' && !changingBackup ? (
-        /* Laid out as a History row (round 8): the glyph in the markers'
-           column, the remote in the titles' column; the backup line ends in
-           More and Details as one pair (round 19). */
-        <Collapsible className='flex flex-col'>
-          <div className={timelineRow}>
-            <span className='mt-1.5 flex justify-center'>{glyph}</span>
-            <div className='flex min-w-0 flex-col py-1 pr-0.5 pl-1'>
-              <span className='min-w-0 text-sm font-medium break-words'>{connectedLabel}</span>
-              <div data-slot='sync-status-line' className='flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1'>
-                {statusBlock}
-                <div data-slot='actions-end' className='ml-auto flex shrink-0 items-center gap-2'>
-                  {hasSettings ? (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button ref={settingsRef} size='icon-xs' variant='outline' aria-label='Backup settings'>
-                          <EllipsisVertical aria-hidden />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align='end'
-                        onCloseAutoFocus={(event) => {
-                          if (!opensDisconnect.current) {
-                            return;
-                          }
-                          opensDisconnect.current = false;
-                          event.preventDefault();
-                          setConfirmingDisconnect(true);
-                        }}
-                      >
-                        <DropdownMenuLabel>{connectedLabel}</DropdownMenuLabel>
-                        {remote.provider === 'github' && remote.url !== undefined ? (
-                          <DropdownMenuItem asChild>
-                            <a
-                              href={`${remote.url.replace(/\.git$/u, '')}${branchPath}`}
-                              target='_blank'
-                              rel='noreferrer'
-                            >
-                              <ExternalLink aria-hidden />
-                              Open on GitHub
-                            </a>
-                          </DropdownMenuItem>
-                        ) : null}
-                        {remote.kind === 'tau' && canManage ? (
-                          <DropdownMenuSwitchItem isChecked={syncChats} onIsCheckedChange={onSyncChatsChange}>
-                            Sync chats
-                          </DropdownMenuSwitchItem>
-                        ) : null}
-                        {canManage ? (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              onSelect={() => {
-                                setPendingConnection(undefined);
-                                setChoice(remote.kind);
-                                setChangingBackup(true);
-                              }}
-                            >
-                              <Cloud aria-hidden />
-                              Change backup…
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              variant='destructive'
-                              onSelect={() => {
-                                opensDisconnect.current = true;
-                              }}
-                            >
-                              <Unplug aria-hidden />
-                              {`Disconnect ${connectedLabel}…`}
-                            </DropdownMenuItem>
-                          </>
-                        ) : null}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  ) : null}
-                  <DetailsToggle />
-                </div>
-              </div>
-            </div>
-          </div>
-          <CollapsibleContent className={disclosureMotion}>
-            <dl
-              aria-label={`Details for ${connectedLabel}`}
-              className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 pt-0.5 pr-2 pb-1 pl-8 text-xs'
-            >
-              {facts.map(([term, value]) => (
-                <div key={term} className='contents'>
-                  <dt className='text-muted-foreground'>{term}</dt>
-                  <dd className='min-w-0'>{value}</dd>
-                </div>
-              ))}
-            </dl>
-          </CollapsibleContent>
-        </Collapsible>
-      ) : (
-        <RadioGroup
-          aria-label='Where this project syncs'
-          value={choice}
-          disabled={busy}
-          onValueChange={selectRemote}
-          className='gap-2'
+        </PopoverTrigger>
+        <PopoverContent
+          align='end'
+          side='top'
+          aria-label='Manage backup'
+          className='flex w-72 flex-col gap-3 p-3'
+          style={manageWidth === undefined ? undefined : { width: manageWidth }}
         >
+          <div className='flex min-w-0 flex-col'>
+            <span className='text-sm font-medium break-words'>{connectedLabel}</span>
+            <span className='text-xs text-muted-foreground tabular-nums'>
+              {[
+                syncState,
+                remote.storage === undefined
+                  ? undefined
+                  : `${formatStorageLimit(remote.storage.used)} of ${formatStorageLimit(remote.storage.quota)}`,
+              ]
+                .filter((part) => part !== undefined)
+                .join(' · ')}
+            </span>
+          </div>
+          {remote.storage === undefined || !showMeter ? undefined : (
+            <div
+              role='meter'
+              aria-label='Storage used against your plan'
+              aria-valuenow={Math.round(percentage)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              className='h-1.5 w-full overflow-hidden rounded-full bg-muted'
+            >
+              <div className='h-full rounded-full bg-primary' style={{ width: `${percentage.toFixed(1)}%` }} />
+            </div>
+          )}
+          {remote.provider === 'github' && githubBinding !== undefined ? (
+            <GithubRepositoryWriteSettings
+              connectionId={githubBinding.connectionId}
+              repositoryId={githubBinding.repositoryId}
+              onPush={onPushGithub}
+              pushUnavailable={
+                sync.online
+                  ? sync.state === 'manual'
+                    ? undefined
+                    : 'Finish fetching or resolving changes before pushing.'
+                  : 'Connect to the internet before pushing.'
+              }
+            />
+          ) : null}
+          {remote.kind === 'tau' && canManage ? (
+            <SwitchRow isChecked={syncChats} onIsCheckedChange={onSyncChatsChange}>
+              Include chats
+            </SwitchRow>
+          ) : null}
+          <div className='flex flex-col border-t pt-2'>
+            {remote.provider === 'github' && canSyncNow ? (
+              <Button
+                size='xs'
+                variant='ghost'
+                className='-ml-2 justify-start'
+                onClick={() => {
+                  setIsManaging(false);
+                  onSync();
+                }}
+              >
+                <RefreshCw aria-hidden />
+                Fetch latest
+              </Button>
+            ) : null}
+            {branchHref === undefined ? null : (
+              <Button asChild size='xs' variant='ghost' className='-ml-2 justify-start'>
+                <a href={branchHref} target='_blank' rel='noreferrer'>
+                  <ExternalLink aria-hidden />
+                  Open on GitHub
+                </a>
+              </Button>
+            )}
+            {canManage ? (
+              <>
+                <Button size='xs' variant='ghost' className='-ml-2 justify-start' onClick={openChange}>
+                  <Cloud aria-hidden />
+                  Change…
+                </Button>
+                <Button
+                  size='xs'
+                  variant='ghost'
+                  className='-ml-2 justify-start'
+                  onClick={() => {
+                    setIsManaging(false);
+                    setConfirmingDisconnect(true);
+                  }}
+                >
+                  <Unplug aria-hidden />
+                  Disconnect…
+                </Button>
+              </>
+            ) : null}
+          </div>
+        </PopoverContent>
+      </Popover>
+    ) : undefined;
+
+  /* The chooser: where to back up, opened by Change… or by the header's Back up (D26). */
+  const chooser =
+    changingBackup && !busy ? (
+      <div className='flex flex-col gap-3'>
+        <RadioGroup aria-label='Where to back up' value={choice} onValueChange={selectRemote} className='gap-2'>
           <div className='flex items-center gap-2'>
             <RadioGroupItem id='remote-none' value='none' />
             <CloudOff aria-hidden className='size-4 shrink-0 text-muted-foreground' />
             <Label htmlFor='remote-none' className='font-normal'>
-              No remote
+              This device only
             </Label>
           </div>
           {/* N4: a plan that cannot back files up is not offered a backup. The
               row still exists — hiding it would make the capability invisible
               — but it says what it costs and routes to the plan surface, the
               way `project-share-panel` already gates private shares. */}
-          <div className='flex items-center gap-2'>
+          <div className='flex flex-wrap items-center gap-2'>
             <RadioGroupItem id='remote-tau' value='tau' disabled={!canSyncFiles} />
             <Cloud aria-hidden className='size-4 shrink-0 text-muted-foreground' />
             <Label htmlFor='remote-tau' className={cn('font-normal', !canSyncFiles && 'text-muted-foreground')}>
@@ -1076,337 +1023,379 @@ export function RevisionSyncRegion({
             <RadioGroupItem id='remote-git' value='git' />
             <GitBranch aria-hidden className='size-4 shrink-0 text-muted-foreground' />
             <Label htmlFor='remote-git' className='font-normal'>
-              Git remote
+              GitHub or another Git host
             </Label>
           </div>
         </RadioGroup>
-      )}
 
-      {changingBackup && choice === 'tau' ? (
-        <p className='text-xs text-muted-foreground'>Files and history are backed up to your Tau account.</p>
-      ) : null}
+        {choice === 'tau' ? (
+          <>
+            <p className='text-xs text-muted-foreground'>Files and history are backed up to your Tau account.</p>
+            <SwitchRow
+              description='Turn off to keep chats on this device.'
+              isChecked={syncChats}
+              onIsCheckedChange={onSyncChatsChange}
+            >
+              Include chats
+            </SwitchRow>
+          </>
+        ) : null}
 
-      {changingBackup && choice === 'tau' ? (
-        <div className='rounded-md border bg-card p-1'>
-          <SwitchRow
-            description='Included by default; turn off before connecting to keep chats on this device.'
-            isChecked={syncChats}
-            onIsCheckedChange={onSyncChatsChange}
-          >
-            Sync chats
-          </SwitchRow>
-        </div>
-      ) : null}
+        {choice !== 'git' && pendingConnection === undefined ? (
+          <div className='flex flex-wrap gap-2'>
+            <Button
+              size='sm'
+              disabled={(remote.kind === 'none' && choice === 'none') || (choice === 'tau' && !canSyncFiles)}
+              onClick={() => {
+                void applyRemote();
+              }}
+            >
+              {remote.kind === 'none' ? 'Back up to Tau Cloud' : 'Change backup'}
+            </Button>
+            {isConnected || remote.kind === 'none' ? (
+              <Button
+                size='sm'
+                variant='ghost'
+                onClick={() => {
+                  setChoice(undefined);
+                  setChangingBackup(false);
+                  /* Back to the line's Back up, which renders again once the chooser closes. */
+                  globalThis.requestAnimationFrame(() => {
+                    backUpRef.current?.focus();
+                  });
+                }}
+              >
+                Cancel
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
 
-      {changingBackup && choice !== 'git' ? (
-        <div className='flex flex-wrap gap-2'>
+        {choice === 'git' ? (
+          <div className='flex flex-col gap-4'>
+            <GithubRepositoryPicker
+              actionLabel='Connect repository'
+              returnTo={globalThis.location.pathname}
+              shouldConnect={shouldConnect}
+              onConnectRequestHandled={handleConnectRequest}
+              onSelect={async (selection) =>
+                requestConnection({
+                  kind: 'github',
+                  connectionId: selection.connection.id,
+                  repository: selection.repository,
+                })
+              }
+            />
+            <details>
+              <summary className='text-sm text-muted-foreground'>Another Git host</summary>
+              <div className='mt-3'>
+                <GitRemoteForm
+                  url={url}
+                  onUrlChange={setUrl}
+                  onConnect={() => {
+                    void requestConnection({ kind: 'git', url });
+                  }}
+                />
+              </div>
+            </details>
+            {isConnected && pendingConnection === undefined ? (
+              <Button
+                variant='ghost'
+                size='sm'
+                className='self-start'
+                onClick={() => {
+                  setChoice(undefined);
+                  setPendingConnection(undefined);
+                  setChangingBackup(false);
+                }}
+              >
+                Cancel
+              </Button>
+            ) : undefined}
+          </div>
+        ) : undefined}
+
+        {pendingConnection === undefined || pendingLabel === undefined ? null : (
+          <div className='flex flex-col gap-2'>
+            <p className='text-xs'>{`Replace ${connectedLabel} with ${pendingLabel}? Your history stays on this device.`}</p>
+            <div className='flex flex-wrap items-center gap-2'>
+              <Button
+                autoFocus
+                size='sm'
+                disabled={committing}
+                onClick={() => {
+                  void commitConnection(pendingConnection);
+                }}
+              >
+                Replace backup
+              </Button>
+              <Button
+                size='sm'
+                variant='ghost'
+                onClick={() => {
+                  setPendingConnection(undefined);
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    ) : undefined;
+
+  /*
+    The credential, not the remote (charter W12). An `AUTH_SECRET` rotation
+    leaves the address, the history and the intent exactly right and only
+    the stored GitHub token unreadable, so this row asks for the one thing
+    that fixes it rather than reporting a failed push.
+  */
+  const reconnectRow =
+    remote.phase === 'reconnectRequired' ? (
+      <div className='flex flex-col gap-2'>
+        <p
+          role='alert'
+          /* R11: named by what it asks for. An anonymous remote holds no credentials (D94). */
+          aria-label={isGithubRemote(remote) ? 'GitHub connection' : 'Remote sign-in'}
+          className='flex items-center gap-2 text-xs'
+        >
+          <CloudAlert aria-hidden className='size-3.5 shrink-0 text-warning' />
+          <span>{reconnectCopy(remote)}</span>
+        </p>
+        {isGithubRemote(remote) ? (
           <Button
             size='sm'
-            disabled={(remote.kind === 'none' && choice === 'none') || (choice === 'tau' && !canSyncFiles)}
+            className='self-start'
+            disabled={reconnecting}
             onClick={() => {
-              void applyRemote();
+              void reconnectGithub();
             }}
           >
-            {remote.kind === 'none' ? 'Connect backup' : 'Apply backup change'}
+            Reconnect GitHub
           </Button>
-          {remote.phase === 'connected' ? (
-            <Button
-              size='sm'
-              variant='ghost'
-              onClick={() => {
-                setChoice(undefined);
-                setChangingBackup(false);
-              }}
-            >
-              Cancel
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-
-      {changingBackup && choice === 'git' && !busy ? (
-        <div className='flex flex-col gap-4'>
-          <GithubRepositoryPicker
-            actionLabel='Connect repository'
-            returnTo={globalThis.location.pathname}
-            shouldConnect={shouldConnect}
-            onConnectRequestHandled={handleConnectRequest}
-            onSelect={async (selection) =>
-              requestConnection({
-                kind: 'github',
-                connectionId: selection.connection.id,
-                repository: selection.repository,
-              })
-            }
-          />
-          <details>
-            <summary className='text-sm text-muted-foreground'>Advanced HTTPS remote</summary>
-            <div className='mt-3'>
-              <GitRemoteForm
-                url={url}
-                onUrlChange={setUrl}
-                onConnect={() => {
-                  void requestConnection({ kind: 'git', url });
-                }}
-              />
-            </div>
-          </details>
-          {remote.phase === 'connected' ? (
-            <Button
-              variant='ghost'
-              size='sm'
-              className='self-start'
-              onClick={() => {
-                setChoice(undefined);
-                setPendingConnection(undefined);
-                setChangingBackup(false);
-              }}
-            >
-              Keep current repository
-            </Button>
-          ) : undefined}
-        </div>
-      ) : undefined}
-
-      {busy ? (
-        <div
-          role='status'
-          aria-label='Backup connection progress'
-          aria-busy='true'
-          className='flex items-center gap-2 text-sm'
-        >
-          {/* The region's own `status` carries the message; the glyph is decoration. */}
-          {/* oxlint-disable-next-line jsx-a11y/aria-role -- `undefined` removes Spinner's default status role; the region announces */}
-          <Spinner role={undefined} aria-hidden aria-label={undefined} className='size-4' />
-          <span>{connectingCopy(remote)}</span>
-          {remote.phase === 'connecting' ? (
-            <Button variant='ghost' size='sm' onClick={onCancel}>
-              Cancel
-            </Button>
-          ) : undefined}
-        </div>
-      ) : undefined}
-
-      {remote.phase === 'connected' && !changingBackup ? undefined : statusBlock}
-
-      {confirmingDisconnect && remote.phase === 'connected' ? (
-        <div className='flex flex-col gap-2'>
-          <p className='text-sm'>{`Disconnect ${connectedLabel}? Every revision stays on this device.`}</p>
-          {/* A confirmation reads as the naming form: the dismissal first, then the verb with its glyph (round 16). */}
-          <div className='flex flex-wrap items-center gap-2'>
-            <Button
-              size='xs'
-              variant='outline'
-              onClick={() => {
-                setConfirmingDisconnect(false);
-                setChoice(undefined);
-                setChangingBackup(false);
-                settingsRef.current?.focus();
-              }}
-            >
-              Keep it
-            </Button>
-            <ActionButton
-              verb={`Disconnect ${connectedLabel}`}
-              icon={Unplug}
-              variant='destructive'
-              /* The control the request came from unmounts or sits in a closed
-               * menu, so focus would fall to `<body>` without this (review R15). */
-              autoFocus
-              onClick={() => {
-                setConfirmingDisconnect(false);
-                setChoice('none');
-                onDisconnect();
-              }}
-            />
-          </div>
-        </div>
-      ) : undefined}
-
-      {pendingConnection === undefined || pendingLabel === undefined ? null : (
-        <div className='flex flex-col gap-2'>
-          <p className='text-sm'>{`Replace ${connectedLabel} with ${pendingLabel}? Every revision stays on this device.`}</p>
-          <div className='flex flex-wrap items-center gap-2'>
-            <Button
-              autoFocus
-              size='sm'
-              disabled={committing}
-              onClick={() => {
-                void commitConnection(pendingConnection);
-              }}
-            >
-              Replace backup
-            </Button>
-            <Button
-              size='sm'
-              variant='ghost'
-              onClick={() => {
-                setPendingConnection(undefined);
-              }}
-            >
-              Keep current backup
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/*
-        The credential, not the remote (charter W12). An `AUTH_SECRET` rotation
-        leaves the address, the history and the intent exactly right and only
-        the stored GitHub token unreadable, so this row asks for the one thing
-        that fixes it rather than reporting a failed push.
-      */}
-      {remote.phase === 'reconnectRequired' ? (
-        <div className='flex flex-col gap-2'>
-          <p
-            role='alert'
-            /* R11: named by what it asks for. An anonymous remote holds no credentials (D94). */
-            aria-label={isGithubRemote(remote) ? 'GitHub connection' : 'Remote sign-in'}
-            className='flex items-center gap-2 text-sm'
-          >
-            <CloudAlert aria-hidden className='size-4 shrink-0 text-warning' />
-            <span>{reconnectCopy(remote)}</span>
-          </p>
-          {isGithubRemote(remote) ? (
-            <Button
-              size='sm'
-              className='self-start'
-              disabled={reconnecting}
-              onClick={() => {
-                void reconnectGithub();
-              }}
-            >
-              Reconnect GitHub
-            </Button>
-          ) : (
-            <Button
-              size='sm'
-              variant='outline'
-              className='self-start'
-              onClick={() => {
-                if (remote.url !== undefined) {
-                  void requestConnection({ kind: 'git', url: remote.url });
-                }
-              }}
-            >
-              Retry
-            </Button>
-          )}
-        </div>
-      ) : undefined}
-
-      {/*
-        R2: the new remote refused, so nothing was replaced. Its own sentence,
-        the backup that stays, and one action: *Upgrade* for a plan refusal,
-        otherwise reopening the choice.
-      */}
-      {remote.refusedReplacement === undefined || busy || changingBackup ? undefined : (
-        <div role='alert' aria-label='Backup change refused' className='flex flex-wrap items-center gap-2 text-sm'>
-          <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
-          <span className='min-w-0 flex-1'>
-            {`${remote.refusedReplacement.error} ${connectedLabel} is still this project’s backup.`}
-          </span>
-          {renderFailureAction(refusedReplacementAction(remote.refusedReplacement, remote, viewer), () => {
-            setPendingConnection(undefined);
-            setChoice(remote.kind);
-            setChangingBackup(true);
-          })}
-        </div>
-      )}
-
-      {connectionError === undefined ? undefined : (
-        <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
-          <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
-          <span className='min-w-0 flex-1'>{connectionError}</span>
+        ) : (
           <Button
-            size='xs'
+            size='sm'
             variant='outline'
+            className='self-start'
             onClick={() => {
-              setConnectionError(undefined);
-              setChangingBackup(true);
+              if (remote.url !== undefined) {
+                void requestConnection({ kind: 'git', url: remote.url });
+              }
             }}
           >
             Retry
           </Button>
-        </div>
-      )}
+        )}
+      </div>
+    ) : undefined;
 
-      {remote.storage === undefined || !showMeter ? undefined : (
-        <div className='flex flex-col gap-1.5'>
-          <p className='flex flex-wrap items-baseline gap-x-3 text-sm tabular-nums'>
-            <span>
-              {formatStorageLimit(remote.storage.used)} of {formatStorageLimit(remote.storage.quota)}
-            </span>
-            {retainedFigure === undefined ? undefined : <span className='text-xs'>{retainedFigure}</span>}
-          </p>
-          <div
-            role='meter'
-            aria-label='Storage used against your plan'
-            aria-valuenow={Math.round(percentage)}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            className='h-2 w-full overflow-hidden rounded-full bg-muted'
-          >
-            <div className='h-full rounded-full bg-primary' style={{ width: `${percentage.toFixed(1)}%` }} />
-          </div>
-        </div>
-      )}
+  /*
+    R2: the new remote refused, so nothing was replaced. Its own sentence,
+    the backup that stays, and one action: *Upgrade* for a plan refusal,
+    otherwise reopening the choice.
+  */
+  const refusedRow =
+    remote.refusedReplacement === undefined || busy || changingBackup ? undefined : (
+      <div role='alert' aria-label='Backup change refused' className='flex flex-wrap items-center gap-2 text-xs'>
+        <CircleAlert aria-hidden className='size-3.5 shrink-0 text-feature' />
+        <span className='min-w-0 flex-1'>
+          {`${remote.refusedReplacement.error} ${connectedLabel} is still this project’s backup.`}
+        </span>
+        {renderFailureAction(refusedReplacementAction(remote.refusedReplacement, remote, viewer), () => {
+          setPendingConnection(undefined);
+          setChoice(remote.kind);
+          setChangingBackup(true);
+        })}
+      </div>
+    );
 
-      {remote.overQuota.length > 0 ? (
-        <div className='flex flex-col gap-1.5'>
-          <p className='flex items-center gap-2 text-sm'>
-            <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
-            <span>
-              {role === 'write' || role === 'read'
-                ? 'These files did not fit in the project owner’s plan and were not backed up:'
-                : 'These files are over your plan and were not backed up:'}
-            </span>
-          </p>
-          <ul className='flex flex-col gap-1'>
-            {remote.overQuota.map((path) => (
-              <li key={path} className='truncate font-mono text-xs text-muted-foreground'>
-                {path}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : undefined}
-
-      {/*
-        A refused *connect*, classified the same way a refused push is (rule 19).
-
-        `remote.reason` comes from the one classifier `sync.machine` owns, so the
-        `403 GIT_SYNC_NOT_ENTITLED` that opened this closeout offers *Upgrade*
-        here exactly as it does on the Sync row, instead of the unclassified
-        *Retry* this block could once offer for every class alike.
-      */}
-      {remote.phase === 'failed' && remote.error !== undefined ? (
-        <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
-          <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
-          <span className='min-w-0 flex-1'>{remote.error}</span>
-          {renderFailureAction(syncFailureAction(remote, remote, viewer) ?? 'retry', () => {
+  const connectionErrorRow =
+    connectionError === undefined ? undefined : (
+      <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-xs'>
+        <CircleAlert aria-hidden className='size-3.5 shrink-0 text-feature' />
+        <span className='min-w-0 flex-1'>{connectionError}</span>
+        <Button
+          size='xs'
+          variant='outline'
+          onClick={() => {
+            setConnectionError(undefined);
             setChangingBackup(true);
-          })}
-        </div>
+          }}
+        >
+          Retry
+        </Button>
+      </div>
+    );
+
+  const overQuotaRow =
+    remote.overQuota.length > 0 ? (
+      <div className='flex flex-col gap-1.5'>
+        <p className='flex items-center gap-2 text-xs'>
+          <CircleAlert aria-hidden className='size-3.5 shrink-0 text-feature' />
+          <span>
+            {role === 'write' || role === 'read'
+              ? 'These files don’t fit in the project owner’s plan and aren’t backed up:'
+              : 'These files don’t fit in your plan and aren’t backed up:'}
+          </span>
+        </p>
+        <ul className='flex flex-col gap-1'>
+          {remote.overQuota.map((path) => (
+            <li key={path} className='truncate font-mono text-xs text-muted-foreground'>
+              {path}
+            </li>
+          ))}
+        </ul>
+      </div>
+    ) : undefined;
+
+  /*
+    A refused *connect*, classified the same way a refused push is (rule 19).
+
+    `remote.reason` comes from the one classifier `sync.machine` owns, so the
+    `403 GIT_SYNC_NOT_ENTITLED` that opened this closeout offers *Upgrade*
+    here exactly as it does on the backup line, instead of the unclassified
+    *Retry* this block could once offer for every class alike.
+  */
+  const connectFailureRow =
+    remote.phase === 'failed' && remote.error !== undefined ? (
+      <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-xs'>
+        <CircleAlert aria-hidden className='size-3.5 shrink-0 text-feature' />
+        <span className='min-w-0 flex-1'>{remote.error}</span>
+        {renderFailureAction(syncFailureAction(remote, remote, viewer) ?? 'retry', () => {
+          setChangingBackup(true);
+        })}
+      </div>
+    ) : undefined;
+
+  const above = [chooser, reconnectRow, refusedRow, connectionErrorRow, connectFailureRow, overQuotaRow].filter(
+    (node) => node !== undefined,
+  );
+
+  /*
+    The line itself (C4): where the backup is and how it is doing, why, and
+    Manage. A `status` live region, because it changes on its own.
+  */
+  const line = busy ? (
+    <div
+      role='status'
+      aria-label='Backup connection progress'
+      aria-busy='true'
+      className='flex min-w-0 flex-1 items-center gap-1.5'
+    >
+      {/* The region's own `status` carries the message; the glyph is decoration. */}
+      {/* oxlint-disable-next-line jsx-a11y/aria-role -- `undefined` removes Spinner's default status role; the region announces */}
+      <Spinner role={undefined} aria-hidden aria-label={undefined} className='size-3.5' />
+      <span className='min-w-0 flex-1'>{connectingCopy(remote)}</span>
+      {remote.phase === 'connecting' ? (
+        <Button variant='ghost' size='xs' className='-my-0.5 -mr-2' onClick={onCancel}>
+          Cancel
+        </Button>
       ) : undefined}
-
-      {/*
-        Access this account no longer has (N1, HQ3): the backup line says
-        *Access removed* and the owner-directed sentence, calmly, because nothing
-        on this device was lost and only the owner can change it.
-      */}
-
-      {/*
-        Who else may work on this project (D27, charter W5).
-
-        The owner alone: every route behind the panel needs `owner`, so a
-        collaborator would only meet a refusal. Tau Cloud alone, too (N4) — a
-        GitHub-backed project has an owner but no cloud project to invite
-        anybody to, and a project with no remote has neither.
-      */}
-      {role === 'owner' && projectId !== undefined && remote.kind === 'tau' && remote.phase === 'connected' ? (
-        <RevisionCollaborators projectId={projectId} />
+    </div>
+  ) : remote.kind === 'none' ? (
+    <>
+      {/* The sentence keeps one line; Back up wraps under it in a narrow pane (canvas `state-narrow`). */}
+      <span className='flex flex-1 items-start gap-1.5 whitespace-nowrap'>
+        <CloudOff aria-hidden className='mt-px size-3.5 shrink-0 text-muted-foreground' />
+        <span>This device only</span>
+      </span>
+      {/* The header's Back up moved here (C2): it opens the chooser above the line. */}
+      {canManage && !changingBackup ? (
+        <Button
+          ref={backUpRef}
+          size='xs'
+          variant='outline'
+          className='-my-0.5 shrink-0'
+          onClick={() => {
+            setChoice(canSyncFiles ? 'tau' : undefined);
+            setChangingBackup(true);
+          }}
+        >
+          Back up to Tau Cloud
+        </Button>
       ) : undefined}
-    </RevisionRegion>
+    </>
+  ) : (
+    <>
+      <span className='flex min-w-0 flex-1 items-start gap-1.5'>
+        <GlyphIcon aria-hidden className={cn('mt-px size-3.5 shrink-0', glyphTone)} />
+        <span role='status' aria-label='Backup status' className='flex min-w-0 flex-1 flex-col gap-0.5'>
+          <span className='flex min-w-0 flex-wrap items-baseline gap-x-1'>
+            <span className='min-w-0 break-words'>{connectedLabel}</span>
+            {syncState === undefined ? undefined : (
+              <>
+                <span aria-hidden className='text-muted-foreground'>
+                  ·
+                </span>
+                <span>{syncState}</span>
+              </>
+            )}
+          </span>
+          {sync.online ? undefined : (
+            <span className='text-muted-foreground'>Offline · backs up when you reconnect</span>
+          )}
+          {/* A push this viewer cannot make is said on the line, not discovered after a gesture (F1). */}
+          {showsAccess ? (
+            <span className='text-muted-foreground'>{remote.fetchOnly ? 'Read-only' : 'View only'}</span>
+          ) : undefined}
+          {reasonLine}
+          {sharedLine === undefined ? undefined : <span className='text-muted-foreground'>{sharedLine}</span>}
+        </span>
+      </span>
+      {manage}
+    </>
+  );
+
+  return (
+    <section
+      aria-label='Backup'
+      data-slot='backup-line'
+      className={cn('flex shrink-0 flex-col border-t border-border bg-sidebar text-xs', className)}
+    >
+      {above.length === 0 ? null : <div className='flex flex-col gap-3 border-b px-3 py-2'>{above}</div>}
+      <div className='flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1 px-3 py-1.5'>{line}</div>
+      {/* I11: disconnecting is the one backup action that asks first. */}
+      <AlertDialog
+        open={confirmingDisconnect && isConnected}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) {
+            setConfirmingDisconnect(false);
+          }
+        }}
+      >
+        <AlertDialogContent
+          onCloseAutoFocus={(event) => {
+            /* The control the request came from sits in a closed popover or a closed chooser (review R15). */
+            event.preventDefault();
+            manageRef.current?.focus();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>{`Disconnect ${connectedLabel}?`}</AlertDialogTitle>
+            <AlertDialogDescription>Your history stays on this device.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                setChoice(undefined);
+                setChangingBackup(false);
+              }}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: 'destructive' })}
+              onClick={() => {
+                setChoice('none');
+                onDisconnect();
+              }}
+            >
+              Disconnect
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </section>
   );
 }

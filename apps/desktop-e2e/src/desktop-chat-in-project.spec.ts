@@ -56,9 +56,11 @@ const prompt = 'Create a cube with a centered cylindrical cutout and verify it.'
 const location = process.env['TAU_E2E_DESKTOP_LOCATION'] ?? 'picked';
 
 /**
- * Record every label the latest turn's revision marker shows, in order.
+ * Record every label the latest turn's save marker shows, in order. A new
+ * marker is a new entry even when its text repeats (an entry has no number,
+ * M11), so the seed's *Saved* and this turn's *Saved* are two labels.
  *
- * *Saving revision* lasts as long as the host's settlement takes, which a
+ * *Saving…* lasts as long as the host's settlement takes, which a
  * scripted turn can make shorter than any poll interval, so the marker's own
  * live region is observed rather than sampled. Red-First row 18.
  *
@@ -68,11 +70,14 @@ const location = process.env['TAU_E2E_DESKTOP_LOCATION'] ?? 'picked';
 const recordTurnMarker = async (page: Page): Promise<() => Promise<readonly string[]>> => {
   await page.evaluate(() => {
     const seen: string[] = [];
+    let lastKey = '';
     Object.assign(globalThis, { tauTurnMarkerLabels: seen });
     const sample = (): void => {
-      const markers = document.querySelectorAll('[role="status"][aria-label="Turn revision status"]');
+      const markers = document.querySelectorAll('[role="status"][aria-label="Save status"]');
       const text = [...markers].at(-1)?.textContent.trim() ?? '';
-      if (text !== '' && seen.at(-1) !== text) {
+      const key = `${String(markers.length)}|${text}`;
+      if (text !== '' && lastKey !== key) {
+        lastKey = key;
         seen.push(text);
       }
     };
@@ -118,7 +123,7 @@ test('builds an openrscad model on disk from the project chat', async () => {
    * shows up. */
   /* Scripted **per turn**, because this row runs two of them in one chat. The
    * same bytes twice would settle the second turn as `turn.finalized` with no
-   * changed paths — nothing to save, so no `Rev n saved` marker — and the two
+   * changed paths — nothing to save, so no *Saved* marker — and the two
    * identical `create_file`/`evaluate_model` pairs are the exact alternation
    * the host's `ping_pong` safeguard nudges on, which re-enters the script and
    * writes `main.scad` a third time. */
@@ -203,7 +208,7 @@ test('builds an openrscad model on disk from the project chat', async () => {
 
     /* Row 18: working, then the save this turn confirms, in that order.
      *
-     * *Saving revision* is the "run ended, recording unsettled" window
+     * *Saving…* is the "run ended, recording unsettled" window
      * (`chat-turn-revision-story-blueprint.md` state table), and a turn this
      * short can have no such window: the chat machine's
      * `completedWithFinalizedSettlement` takes a run whose settlement already
@@ -211,40 +216,31 @@ test('builds an openrscad model on disk from the project chat', async () => {
      * `finishing` (`chat-session.machine.ts:339-343`), and the marker prefers a
      * settled revision over any run state (`chat-turn-revision-state.ts:73`).
      * So assert the promise — any Working first, the confirmed save last, and any
-     * *Saving revision* strictly between them — not the intermediate beat. */
+     * *Saving…* strictly between them — not the intermediate beat. */
     const lastLabel = async (): Promise<string | undefined> => {
       const seen = await markerLabels();
       return seen.at(-1);
     };
-    await expect.poll(lastLabel, { timeout: 120_000 }).toMatch(/^Rev \d+ saved/u);
+    await expect.poll(lastLabel, { timeout: 120_000 }).toMatch(/^Saved/u);
     const labels = await markerLabels();
-    /* `turnRevisionLabel`'s working copy: "New revision", or "Starting …" once a
-     * base revision has a name. */
-    const working = labels.findLastIndex((label) => label === 'New revision' || label.startsWith('Starting '));
+    /* `turnRevisionLabel`'s working copy: *Working…* (no base is named, M11). */
+    const working = labels.lastIndexOf('Working…');
     console.info(`[desktop-e2e] in-project turn marker: ${JSON.stringify(labels)}`);
     /* Working is shown only while the attempt's change proof is in and its terminal row is not
-     * (`deriveTurnRevisionState`: no proof yet hides the marker, proof after the terminal row is *Saving revision*),
+     * (`deriveTurnRevisionState`: no proof yet hides the marker, proof after the terminal row is *Saving…*),
      * so a turn this short can skip it. When it is shown it comes before the save; either way the turn ends on a
-     * newer revision than any the marker showed before it (the seed's, sampled as the recorder starts). */
-    const revision = (label: string | undefined): number =>
-      Number(/^Rev (\d+) saved/u.exec(label ?? '')?.[1] ?? Number.NaN);
-    const earlierRevisions = labels
-      .slice(0, -1)
-      .map((label) => revision(label))
-      .filter((value) => Number.isFinite(value));
-    expect(earlierRevisions, `the seed's save never showed: ${JSON.stringify(labels)}`).not.toHaveLength(0);
-    expect(revision(labels.at(-1)), `this turn saved no newer revision: ${JSON.stringify(labels)}`).toBeGreaterThan(
-      Math.max(...earlierRevisions),
-    );
+     * save of its own after the seed's (sampled as the recorder starts). */
+    const isSaved = (label: string | undefined): boolean => /^Saved\b/u.test(label ?? '');
+    const earlierSaves = labels.slice(0, -1).filter((label) => isSaved(label));
+    expect(earlierSaves, `the seed's save never showed: ${JSON.stringify(labels)}`).not.toHaveLength(0);
+    expect(isSaved(labels.at(-1)), `this turn saved nothing: ${JSON.stringify(labels)}`).toBe(true);
     expect(labels.length - 1, `marker never settled after Working: ${JSON.stringify(labels)}`).toBeGreaterThan(working);
     /* Sliced from Working, or from the seed's last save, because the seeding turn's labels are in front. */
-    const seedSaved = labels.findLastIndex(
-      (label, index) => index < labels.length - 1 && Number.isFinite(revision(label)),
-    );
+    const seedSaved = labels.findLastIndex((label, index) => index < labels.length - 1 && isSaved(label));
     const thisTurn = labels.slice(working === -1 ? seedSaved + 1 : working);
     expect(
-      thisTurn.lastIndexOf('Saving revision'),
-      `Saving revision outlived this turn's save: ${JSON.stringify(labels)}`,
+      thisTurn.lastIndexOf('Saving…'),
+      `Saving… outlived this turn's save: ${JSON.stringify(labels)}`,
     ).toBeLessThan(thisTurn.length - 1);
     const desktopLog = readFileSync(session.logPath, 'utf8');
     expect(desktopLog.includes('[revisions] save undefined Channel closed')).toBe(false);
@@ -261,7 +257,7 @@ test('builds an openrscad model on disk from the project chat', async () => {
  * save it never made. A refused turn that changed nothing derives the `hidden`
  * revision state (`deriveTurnRevisionState`: "the run's own card says why"), so
  * it adds no marker of its own and the paused-turn card names the refusal;
- * *Save not confirmed* is reserved for a host that cannot be reached. */
+ * *Couldn’t confirm the save* is reserved for a host that cannot be reached. */
 test('claims no save when the gateway refuses the turn', async () => {
   const account = tauTestAccount('in-project-failure');
   seededEmail = account.email;
@@ -283,12 +279,12 @@ test('claims no save when the gateway refuses the turn', async () => {
 
     /* The seeding turn's marker settles on its save; it can remount while the route settles, so sample its count
      * and text together. */
-    const markers = page.locator('[role="status"][aria-label="Turn revision status"]');
+    const markers = page.locator('[role="status"][aria-label="Save status"]');
     await expect
       .poll(async () => `${String(await markers.count())} ${(await lastMarkerText(markers)()) ?? ''}`, {
         timeout: 120_000,
       })
-      .toMatch(/^1 Rev \d+ saved/u);
+      .toMatch(/^1 ?Saved/u);
     const markersBefore = 1;
     const savedBefore = await lastMarkerText(markers)();
 

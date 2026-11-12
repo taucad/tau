@@ -33,8 +33,8 @@ import {
 } from '#hooks/use-sidebar-status.js';
 import type { ProjectSidebarRow, useLiveNow } from '#hooks/use-sidebar-status.js';
 import { publishRecordIssue } from '#workbench-records/record-issues.js';
-import { toSnapshotCallback } from '#lib/xstate-test.utils.js';
-import type { SnapshotListener } from '#lib/xstate-test.utils.js';
+import { toSnapshotCallback } from '@taucad/ui-core/lib/xstate-test.utils';
+import type { SnapshotListener } from '@taucad/ui-core/lib/xstate-test.utils';
 
 /* The registry and the revision clients are the hooks' two inputs; the chat
  * machines below are real, because the pins are about what they say. */
@@ -683,9 +683,13 @@ describe('use-sidebar-status — pin (d): the project row rolls up its chats (A3
       expect(collapsed('bracket')).toEqual({
         mark: 'attention',
         count: 2,
-        sentence: 'Live · 2 need you · Save not confirmed',
+        sentence: 'Live · 2 need you · Couldn’t confirm the save',
       });
-      expect(expanded('bracket')).toEqual({ mark: 'attention', count: 2, sentence: 'Live · Save not confirmed' });
+      expect(expanded('bracket')).toEqual({
+        mark: 'attention',
+        count: 2,
+        sentence: 'Live · Couldn’t confirm the save',
+      });
     } finally {
       publishRecordIssue('bracket', 'entries', undefined);
       publishRecordIssue('bracket', 'layout', undefined);
@@ -1212,7 +1216,7 @@ describe('use-sidebar-status — pin (R13): closing is visible, never silent', (
     revisions('bracket', { sync: { state: 'pending', pendingCount: 1 } });
     expect(
       selectProjectRow(readProjectStatus(fakeRegistry.actor, fakeChats, 'bracket'), idleWindowMilliseconds).detail,
-    ).toBe('Backing up 1 revision, then closing…');
+    ).toBe('Backing up 1 change, then closing…');
 
     revisions('bracket');
     expect(
@@ -1255,7 +1259,7 @@ const compiledHooks = await (async () => {
     '#services/revision-client-registry.js': await import('#services/revision-client-registry.js'),
     '#hooks/use-sessions.js': await import('#hooks/use-sessions.js'),
     '#hooks/chat-session-store-provider.js': await import('#hooks/chat-session-store-provider.js'),
-    '#lib/xstate.lib.js': await import('#lib/xstate.lib.js'),
+    '@taucad/ui-core/lib/xstate.lib': await import('@taucad/ui-core/lib/xstate.lib'),
     '#machines/chat-projection.logic.js': await import('#machines/chat-projection.logic.js'),
     '#workbench-records/record-issues.js': await import('#workbench-records/record-issues.js'),
   };

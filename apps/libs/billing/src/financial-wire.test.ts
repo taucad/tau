@@ -476,4 +476,44 @@ describe('usage snapshot wires', () => {
       }),
     ).toBeTruthy();
   });
+
+  it('should accept a plan expiry in journal totals and history when an ended plan forfeits its credit', () => {
+    const ended = {
+      ...balance,
+      revision: '2',
+      planGrantCreditAtoms: '0',
+      planHeldCreditAtoms: '0',
+      eligibleAvailableCreditAtoms: '36',
+      netBalanceCreditAtoms: '40',
+    };
+    const parsed = wireBalanceExplanationSchema.parse({
+      ...identity,
+      snapshotRevision: '2',
+      asOf: ended.asOf,
+      availability: { state: 'available', reason: null },
+      balance: ended,
+      journalTotals: {
+        accountDeltaCreditAtoms: '0',
+        byKind: [
+          { kind: 'period_grant', accountDeltaCreditAtoms: '20', netUsedCreditAtoms: '-20', eventCount: '1' },
+          { kind: 'plan_expiry', accountDeltaCreditAtoms: '-20', netUsedCreditAtoms: '20', eventCount: '1' },
+        ],
+      },
+      history: {
+        items: [
+          {
+            transactionId: 'transaction-2',
+            revision: '2',
+            kind: 'plan_expiry',
+            accountDeltaCreditAtoms: '-20',
+            occurredAt: '2026-09-05T00:00:00.000Z',
+          },
+        ],
+        nextCursor: null,
+        complete: true,
+      },
+    });
+    expect(parsed.journalTotals?.byKind.map(({ kind }) => kind)).toEqual(['period_grant', 'plan_expiry']);
+    expect(parsed.history?.items[0]?.kind).toBe('plan_expiry');
+  });
 });

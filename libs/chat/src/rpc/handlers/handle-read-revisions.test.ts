@@ -7,18 +7,17 @@ const client: RpcRevisionsClient = {
   log: async ({ limit }) =>
     [
       {
-        revisionNumber: 2,
         revisionId: 'b'.repeat(40),
-        actor: 'ada',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'ada' } } as const,
         source: 'user',
         createdAt: 1_789_000_000_000,
-        summary: 'Second',
+        summary: 'Ready for print',
         conflicted: false,
+        versions: [{ name: 'Ready for print', number: 3 }],
       },
       {
-        revisionNumber: 1,
         revisionId: 'a'.repeat(40),
-        actor: 'ada',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'ada' } } as const,
         source: 'user',
         createdAt: 1_788_000_000_000,
         summary: 'First',
@@ -28,10 +27,9 @@ const client: RpcRevisionsClient = {
   diff: async (from, to) => [{ path: `${from ?? 'nothing'}-to-${to}.ts`, kind: 'modified' }],
   describe: async () => ({
     branch: 'main',
-    revisionNumber: 2,
     revisionId: 'b'.repeat(40),
-    branches: [{ name: 'main', revisionNumber: 2, revisionId: 'b'.repeat(40) }],
-    line: 'main · Rev 2',
+    branches: [{ name: 'main', revisionId: 'b'.repeat(40) }],
+    line: 'main',
   }),
   /* One conflict waits on `main`, recorded as `c…c`. */
   conflict: async (revision) =>
@@ -61,7 +59,7 @@ describe('handleReadRevisions', () => {
     for (const action of ['log', 'diff', 'describe'] as const) {
       // oxlint-disable-next-line no-await-in-loop -- three answers, read in order.
       const result = await handleReadRevisions({ action, to: 'b'.repeat(40) }, client);
-      expect(result).toMatchObject({ success: true, where: 'main · Rev 2' });
+      expect(result).toMatchObject({ success: true, where: 'main' });
     }
   });
 
@@ -69,7 +67,39 @@ describe('handleReadRevisions', () => {
     const result = await handleReadRevisions({ action: 'log', limit: 1 }, client);
     expect(result).toMatchObject({ success: true, branch: 'main' });
     expect(result.success && result.revisions).toHaveLength(1);
-    expect(result.success && result.revisions?.[0]?.revisionNumber).toBe(2);
+    /* M11: an entry has no number; a version carries its project-wide one and its name. */
+    expect(result.success && result.revisions?.[0]).not.toHaveProperty('revisionNumber');
+    expect(result.success && result.revisions?.[0]?.version).toStrictEqual({ number: 3, name: 'Ready for print' });
+  });
+
+  it('names no position on a branch for any branch', async () => {
+    const result = await handleReadRevisions({ action: 'describe' }, client);
+    expect(result.success && result.branches).toStrictEqual([{ name: 'main', revisionId: 'b'.repeat(40) }]);
+  });
+
+  /* B2: a host's row carries its trailer and ids for its own pane; the agent reads the schema's row and no more. */
+  it('hands the agent the typed who and none of the host row’s diagnostics', async () => {
+    const hostRow = {
+      revisionId: 'a'.repeat(40),
+      who: { kind: 'unrecorded', authorName: 'octo-dev' },
+      source: 'import',
+      createdAt: 1_788_000_000_000,
+      summary: 'Initial commit',
+      conflicted: false,
+      treeId: 'd'.repeat(40),
+      trailer: 'Tau-Metadata: {}',
+    } as const;
+    const result = await handleReadRevisions({ action: 'log' }, { ...client, log: async () => [hostRow] });
+    expect(result.success && result.revisions).toStrictEqual([
+      {
+        revisionId: 'a'.repeat(40),
+        who: { kind: 'unrecorded', authorName: 'octo-dev' },
+        source: 'import',
+        createdAt: 1_788_000_000_000,
+        summary: 'Initial commit',
+        conflicted: false,
+      },
+    ]);
   });
 
   it('asks for the newer revision rather than guessing one', async () => {
@@ -82,7 +112,7 @@ describe('handleReadRevisions', () => {
 
     expect(result).toEqual({
       success: true,
-      where: 'main · Rev 2',
+      where: 'main',
       conflict: {
         revisionId: 'c'.repeat(40),
         labels: { ours: 'main', theirs: 'laptop' },

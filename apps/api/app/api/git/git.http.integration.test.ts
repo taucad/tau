@@ -37,7 +37,13 @@ import { ProjectAccessService } from '@taucad/api-projects/collaboration/project
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { ProjectRole } from '@taucad/api-projects/collaboration/project-access.service';
 import { commercialEntitlementsKey } from '@taucad/api-projects/entitlements/commercial-entitlements';
-import { pktLine, repositoryStoreKey } from '@taucad/api-git-core/git.constants';
+import {
+  authorshipRefusals,
+  pktLine,
+  repositoryStoreKey,
+  versionNumberRefusals,
+  versionNumberTakenMarker,
+} from '@taucad/api-git-core/git.constants';
 import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
@@ -91,6 +97,12 @@ const state = {
   lfsBytes: 0,
   generation: 0,
   derivedGeneration: 0,
+  /**
+   * `project.origin` (B4). Stock git writes this suite's commits, as on a
+   * project linked to GitHub; the authorship rows set `local-mirror`, the
+   * origin every project Tau registers carries.
+   */
+  origin: 'github' as 'github' | 'local-mirror',
 };
 
 /** What one request cost the plan lookups, so the read path's cost is a fact. */
@@ -245,7 +257,11 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
         where: () =>
           Object.assign(Promise.resolve([] as unknown[]), {
             limit: async () =>
-              table === projectDeletion ? [] : table === project ? [{ storageAccountId: null }] : rows(),
+              table === projectDeletion
+                ? []
+                : table === project
+                  ? [{ storageAccountId: null, origin: state.origin }]
+                  : rows(),
           }),
       }),
     });
@@ -908,6 +924,170 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(stranger.body).not.toContain('refs/heads');
   }, 120_000);
 
+  /**
+   * B4 (A3, Q11; Revisions Policy rule 19): every commit new to the project's
+   * history names the pushing account, whatever its Tau record's version, on a
+   * project Tau registered. The records are the shape the client writes today.
+   * No refusal repeats an id, a name or an address the commit recorded.
+   */
+  it('refuses a revision that does not name its pusher, and one that carries an email, each with its own reason', async () => {
+    state.origin = 'local-mirror';
+    try {
+      const clone = path.join(workspace, 'authorship');
+      await gitOk(['clone', remoteFor(callers.writer.token), clone], workspace);
+      const cloned = await gitOk(['rev-parse', 'HEAD'], clone);
+      const base = cloned.stdout.trim();
+      let file = 0;
+      /** One revision on the base, recorded as `actor` and authored at `email`. */
+      const revise = async (email: string, record?: Readonly<Record<string, unknown>>): Promise<void> => {
+        await gitOk(['reset', '--quiet', '--hard', base], clone);
+        file += 1;
+        await writeFile(
+          path.join(clone, `authorship-${String(file)}.ts`),
+          `export const n = ${String(file)};\n`,
+          'utf8',
+        );
+        await gitOk(['add', '.'], clone);
+        const message =
+          record === undefined
+            ? ['-m', 'Edited outside Tau']
+            : [
+                '-m',
+                'Saved',
+                '-m',
+                `Tau-Metadata: ${JSON.stringify({
+                  version: 2,
+                  parents: [base],
+                  provenance: { source: 'user', capture: 'save', via: 'cloud', createdAt: Date.now(), ...record },
+                  summary: { generated: 'Saved' },
+                })}`,
+              ];
+        const committed = await runGit(['commit', ...message], clone, {
+          GIT_AUTHOR_NAME: 'Someone',
+          GIT_AUTHOR_EMAIL: email,
+          GIT_COMMITTER_NAME: 'Tau',
+          GIT_COMMITTER_EMAIL: 'noreply@tau.new',
+        });
+        expect(committed.code, committed.stderr).toBe(0);
+      };
+      const push = async (branch: string) => runGit(['push', 'origin', `HEAD:refs/heads/${branch}`], clone);
+      const noreply = (id: string): string => `${id}@users.noreply.tau.new`;
+
+      /* B pushing a revision signed as A. */
+      await revise(noreply(callers.owner.id), {
+        actor: { kind: 'user', id: callers.owner.id, name: 'Member owner', email: `${callers.owner.id}@test.com` },
+      });
+      const forged = await push('authorship-forged');
+      expect(forged.code).not.toBe(0);
+      expect(forged.stderr).toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
+      expect(forged.stderr).not.toContain(callers.owner.id);
+      expect(forged.stderr).not.toContain('Member owner');
+      expect(await advertised()).not.toContain('authorship-forged');
+
+      /* An agent working for A, pushed by B. */
+      await revise(noreply(callers.owner.id), {
+        source: 'agent',
+        actor: { kind: 'agent', id: 'agent', runId: 'run_b4', onBehalfOf: { kind: 'user', id: callers.owner.id } },
+      });
+      const forgedAgent = await push('authorship-forged-agent');
+      expect(forgedAgent.code).not.toBe(0);
+      expect(forgedAgent.stderr).toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
+
+      /* A Tau-written revision carrying an environment email (Q11). */
+      await revise('writer@example.com', {
+        actor: { kind: 'user', id: callers.writer.id, email: 'writer@example.com' },
+      });
+      const leaked = await push('authorship-email');
+      expect(leaked.code).not.toBe(0);
+      expect(leaked.stderr).toContain(authorshipRefusals.GIT_PUSH_AUTHOR_ADDRESS);
+      expect(leaked.stderr).not.toContain('writer@example.com');
+
+      /* A commit Tau did not record, on a project not linked to GitHub. */
+      await revise('someone@example.com');
+      const outside = await push('authorship-outside');
+      expect(outside.code).not.toBe(0);
+      expect(outside.stderr).toContain(authorshipRefusals.GIT_PUSH_NOT_RECORDED_BY_TAU);
+      expect(await advertised()).not.toMatch(/authorship-(?:forged|email|outside)/u);
+
+      /* …and the same commit on a project linked to GitHub. */
+      state.origin = 'github';
+      const linked = await push('authorship-outside');
+      expect(linked.code, linked.stderr).toBe(0);
+      state.origin = 'local-mirror';
+
+      /* The pusher's own revision, and an agent's on the pusher's behalf. */
+      await revise(noreply(callers.writer.id), {
+        actor: { kind: 'user', id: callers.writer.id, name: 'Member writer' },
+      });
+      const own = await push('authorship-own');
+      expect(own.code, own.stderr).toBe(0);
+      await revise(noreply(callers.writer.id), {
+        source: 'agent',
+        actor: { kind: 'agent', id: 'agent', runId: 'run_b4', onBehalfOf: { kind: 'user', id: callers.writer.id } },
+      });
+      const onBehalf = await push('authorship-agent');
+      expect(onBehalf.code, onBehalf.stderr).toBe(0);
+      const advertisement = await advertised();
+      expect(advertisement).toContain('refs/heads/authorship-own');
+      expect(advertisement).toContain('refs/heads/authorship-agent');
+    } finally {
+      state.origin = 'github';
+    }
+  }, 120_000);
+
+  /**
+   * B6 (Q6, I6; Revisions Policy rule 19): a version's number, in its tag's
+   * `Tau-Tag` trailer, is held by one version on Tau Cloud. A second version
+   * with that number is refused behind the marker the client renumbers on, and
+   * a backed-up version's number never changes.
+   */
+  it('refuses a version whose number another version holds, and a change to a backed-up number', async () => {
+    const clone = path.join(workspace, 'version-numbers');
+    await gitOk(['clone', remoteFor(callers.writer.token), clone], workspace);
+    /** One annotated version tag on the clone's head, recording `number`. */
+    const version = async (name: string, number: number): Promise<void> => {
+      await gitOk(
+        [
+          'tag',
+          '--force',
+          '-a',
+          name,
+          '-m',
+          name,
+          '-m',
+          `Tau-Tag: ${JSON.stringify({ version: 1, note: name, number })}`,
+        ],
+        clone,
+      );
+    };
+    const push = async (name: string) => runGit(['push', '--force', 'origin', `refs/tags/${name}`], clone);
+
+    await version('b6-hinge', 4);
+    const first = await push('b6-hinge');
+    expect(first.code, first.stderr).toBe(0);
+
+    await version('b6-lid', 4);
+    const taken = await push('b6-lid');
+    expect(taken.code).not.toBe(0);
+    expect(taken.stderr).toContain(`${versionNumberTakenMarker} — refs/tags/b6-lid names V4`);
+    expect(taken.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
+    expect(await advertised()).not.toContain('refs/tags/b6-lid');
+
+    /* The device's renumbered version: the next free number is backed up. */
+    await version('b6-lid', 5);
+    const renumbered = await push('b6-lid');
+    expect(renumbered.code, renumbered.stderr).toBe(0);
+
+    /* A backed-up number never changes. */
+    await version('b6-hinge', 6);
+    const changed = await push('b6-hinge');
+    expect(changed.code).not.toBe(0);
+    expect(changed.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_CHANGED);
+    const advertisement = await advertised();
+    expect(advertisement).toContain('refs/tags/b6-hinge');
+    expect(advertisement).toContain('refs/tags/b6-lid');
+  }, 120_000);
+
   /** Ruling P55: an account with no relation to the project is told it does not exist. */
   it('answers a stranger with 404 rather than 403', async () => {
     const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
@@ -1151,7 +1331,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
   }, 120_000);
 
   it('refuses an over-quota LFS batch with 413 and the file list', async () => {
-    state.storageBytes = 10 * 1024 ** 3 - 1024;
+    state.storageBytes = 100 * 1024 ** 3 - 1024;
     const objects = [
       { oid: 'b'.repeat(64), size: 4096 },
       { oid: 'c'.repeat(64), size: 8192 },
@@ -1171,7 +1351,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     /* D17: largest first, in the sentence addressed to the owner of a Pro plan. */
     expect(body.files?.map((file) => file.oid)).toEqual(objects.toReversed().map((object) => object.oid));
     expect(body.message).toBe(
-      'This push needs more room than your 10 GB storage plan has left, so it was not backed up.',
+      'This push needs more room than your 100 GB storage plan has left, so it was not backed up.',
     );
   });
 

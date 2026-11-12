@@ -1,5 +1,5 @@
 import { ExternalLink } from '#components/external-link.js';
-import { extractDomainFromUrl } from '#utils/url.utils.js';
+import { extractDomainFromUrl } from '@taucad/ui-core/utils/url.utils';
 import { WebFavicon } from '#routes/w.$workspace.$project/web-favicon.js';
 
 export function WebSourceLink({ url, title }: { readonly url: string; readonly title?: string }): React.JSX.Element {

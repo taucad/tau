@@ -6,8 +6,8 @@ import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { Artifact } from '@taucad/runtime';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ParameterManifest } from '@taucad/parameters';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
-import type { MachineActors } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import { cadMachine, disposeCadRuntime, selectCadFailureIssues } from '#machines/cad.machine.js';
 import { cadPreviewMachine } from '#machines/cad-preview.machine.js';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
@@ -57,6 +57,8 @@ export type CadPreviewProviderProps = {
   /** Whether the rendering should be triggered (default: true) */
   readonly isEnabled?: boolean;
   readonly kernelOptionsFactory?: LazyKernelOptionsFactory;
+  /** The camera's opening field of view in degrees, seeded once into the preview's graphics actor. */
+  readonly initialVerticalFieldOfView?: number;
   readonly children: ReactNode;
 };
 
@@ -171,6 +173,7 @@ function CadPreviewPipeline({
   parameters,
   isEnabled = true,
   kernelOptionsFactory,
+  initialVerticalFieldOfView,
   children,
 }: CadPreviewPipelineProps): React.JSX.Element {
   'use no memo';
@@ -210,6 +213,7 @@ function CadPreviewPipeline({
       enablePostProcessing: defaultGraphicsSettings.enablePostProcessing,
       upDirection: defaultGraphicsSettings.upDirection,
       graphicsBackend: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
+      camera: { cameraFovAngle: initialVerticalFieldOfView },
     },
   });
 

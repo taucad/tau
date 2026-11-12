@@ -19,6 +19,14 @@ export type FlagDefinition = {
   readonly showInExperimental: boolean;
   readonly label: string;
   readonly description: string;
+  /**
+   * PostHog feature flag key this flag follows. Once the PostHog client has evaluated flags, its value (including a
+   * console `posthog.featureFlags.overrideFeatureFlags` override) replaces the default; without a PostHog key, before
+   * evaluation, or without analytics consent the default applies. See `#flags/remote-flags`.
+   */
+  readonly posthogKey?: string;
+  /** Registry name of a flag that must also be on for this one to take effect. */
+  readonly requires?: string;
 };
 
 /**
@@ -94,6 +102,41 @@ export const flagRegistry = {
     schema: z.boolean().default(false),
     label: 'Plugin store',
     description: 'Browse plugins and skills',
+  },
+  autoKernel: {
+    showInExperimental: false,
+    schema: z.boolean().default(false),
+    label: 'Automatic kernel',
+    description: 'Let the agent choose the kernel for a new model, and remember Auto as a kernel choice',
+  },
+  zooCloudDispatch: {
+    showInExperimental: false,
+    schema: z.boolean().default(false),
+    label: 'Zoo cloud dispatch',
+    description:
+      "Offer Zoo to automatic kernel routing. Off while Zoo's cloud dispatch is closed; the change that opens dispatch turns it on",
+  },
+  viewerControls: {
+    showInExperimental: false,
+    schema: z.boolean().default(false),
+    posthogKey: 'viewer-controls',
+    label: 'Viewer controls',
+    description: 'Control presets, gizmo styles and Settings → Viewer',
+  },
+  onboarding: {
+    showInExperimental: false,
+    schema: z.boolean().default(false),
+    posthogKey: 'onboarding',
+    label: 'Onboarding',
+    description: 'The setup route, the product tour and home suggestions',
+  },
+  onboardingAutoOpen: {
+    showInExperimental: false,
+    schema: z.boolean().default(false),
+    posthogKey: 'onboarding-auto-open',
+    requires: 'onboarding',
+    label: 'Open setup on first visit',
+    description: 'Open setup automatically for a person who has not finished it. Needs Onboarding',
   },
   tauDebug: {
     showInExperimental: true,

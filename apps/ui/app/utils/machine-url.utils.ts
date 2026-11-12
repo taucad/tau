@@ -1,7 +1,7 @@
-import type { DesktopScheme } from '#lib/desktop-deep-link.js';
+import type { DesktopScheme } from '@taucad/ui-core/lib/desktop-deep-link';
 import { projectUrl } from '#utils/project-url.utils.js';
 import type { ProjectSlugs } from '#utils/project-url.utils.js';
-import { searchParameterName } from '#constants/search-parameter.constants.js';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 
 /** Identity links contain no machine address, credential or command. */
 export type MachineLocation = { readonly hostId: string; readonly machineId: string };

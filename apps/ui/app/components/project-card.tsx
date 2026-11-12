@@ -164,13 +164,15 @@ export function ProjectCardMedia({
   );
 }
 
+/** The field of view a project card's preview opens with; its `CadPreviewProvider` seeds it. */
+export const projectCardVerticalFieldOfView = 45;
+
 export function ProjectCardCadPreview(): React.JSX.Element {
   return (
     <Suspense fallback={<div role='status' aria-label='Loading preview' className='size-full bg-muted' />}>
       <CadPreviewViewer
         className='size-full'
         enablePan={false}
-        initialVerticalFieldOfView={45}
         graphicsOptions={projectCardGraphicsOptions}
         maxArtifactBytes={projectCardPreviewByteLimit}
       />

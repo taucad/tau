@@ -1,5 +1,6 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import path from 'node:path';
 import type { LeanExpectation } from '#expected.js';
 import type { Mutant, MutantResult } from '#mutants.js';
@@ -66,6 +67,48 @@ const runLean = (
     timeout: 600_000,
   });
   return { output: `${result.stdout}${result.stderr}`, status: result.status ?? 1 };
+};
+
+/** `runLean` without blocking, so independent oracle runs can share the runner's cores. */
+const runLeanAsync = async (
+  lean: LeanTool,
+  { build, cwd, args }: { readonly build: string; readonly cwd: string; readonly args: readonly string[] },
+): Promise<{ readonly output: string; readonly status: number }> =>
+  new Promise((resolve) => {
+    const child = spawn(lean.bin, args, {
+      cwd,
+      env: { ...process.env, LEAN_PATH: `${build}:${lean.lib}` }, // eslint-disable-line @typescript-eslint/naming-convention -- environment variable
+      timeout: 600_000,
+    });
+    let output = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+      output += chunk;
+    });
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+      output += chunk;
+    });
+    child.on('error', (error) => {
+      resolve({ output: `${output}${String(error)}`, status: 1 });
+    });
+    child.on('close', (status) => {
+      resolve({ output, status: status ?? 1 });
+    });
+  });
+
+/** Maps `items` through `work` with at most `limit` in flight, keeping their order. */
+const mapBounded = async <T, R>(items: readonly T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> => {
+  const results: R[] = Array.from({ length: items.length });
+  let next = 0;
+  const lane = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      // oxlint-disable-next-line no-await-in-loop -- each lane runs its items one at a time.
+      results[index] = await work(items[index] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, lane));
+  return results;
 };
 
 const corpusTraces = (directory: string): string[] => {
@@ -202,6 +245,8 @@ export const checkLean = (
 /**
  * Checks one Lean mutant (FM-A11): build the mutated module with the oracle and run the oracle over
  * the corpus. The mutant is caught when any trace's output differs from its committed goldens.
+ * The corpus traces are independent, so they run one per core: one after another, the mutant
+ * matrix alone took about half of agent-host's nightly.
  */
 export const leanMutantChecker =
   (
@@ -212,7 +257,7 @@ export const leanMutantChecker =
       spec,
     }: { readonly projectRoot: string; readonly lean: LeanTool; readonly spec: LeanExpectation },
   ) =>
-  (mutant: Mutant, mutated: string): MutantResult => {
+  async (mutant: Mutant, mutated: string): Promise<MutantResult> => {
     const directory = path.join(projectRoot, path.dirname(mutant.file));
     mkdirSync(cacheDirectory(context), { recursive: true });
     const build = mkdtempSync(path.join(cacheDirectory(context), `mutant-${mutant.id}-`));
@@ -232,13 +277,12 @@ export const leanMutantChecker =
         };
       }
       const traces = corpusTraces(directory);
-      const differing = traces.flatMap((trace) => {
-        const difference = firstDifferingLine(
-          readFileSync(goldenOf(trace), 'utf8'),
-          oracleOutput(lean, { build, directory, oracle: spec.oracle, trace }),
-        );
-        return difference === undefined ? [] : [`${path.basename(trace)} ${difference}`];
+      const differences = await mapBounded(traces, availableParallelism(), async (trace) => {
+        const { output } = await runLeanAsync(lean, { build, cwd: directory, args: ['--run', spec.oracle, trace] });
+        const difference = firstDifferingLine(readFileSync(goldenOf(trace), 'utf8'), output);
+        return difference === undefined ? undefined : `${path.basename(trace)} ${difference}`;
       });
+      const differing = differences.filter((difference) => difference !== undefined);
       return differing.length > 0
         ? { id: mutant.id, verdict: 'caught', detail: differing[0] ?? '' }
         : { id: mutant.id, verdict: 'survived' };

@@ -51,6 +51,34 @@ const launcherCloseGate = vi.hoisted(() => ({
   next: undefined as undefined | Readonly<{ entered: () => void; hold: Promise<void> }>,
 }));
 
+/** Every project's chat observer the utility composed, standing in for the real reporter (no API is reached). */
+const chatObservers = vi.hoisted(
+  () =>
+    [] as Array<
+      Readonly<{
+        projectId: string;
+        onRated: ReturnType<typeof vi.fn>;
+        close: ReturnType<typeof vi.fn>;
+      }>
+    >,
+);
+
+vi.mock('#tau/services-host-evidence.js', () => ({
+  /* The build the release workflow stamps; this test bundle stamps none. */
+  desktopHostBuild: () => 'f61685bf3496',
+  desktopChatObserver: (options: Readonly<{ projectId: string }>) => () => {
+    const observer = {
+      projectId: options.projectId,
+      onChatQuiescent: vi.fn(),
+      onPresented: vi.fn(),
+      onRated: vi.fn(),
+      close: vi.fn(),
+    };
+    chatObservers.push(observer);
+    return observer;
+  },
+}));
+
 /* The same `git` + `git lfs` probe the host refuses on (OQ-B8): the row that
  * builds a bundled-git stand-in needs both, so without them it skips rather than
  * dying on `which git-lfs`. */
@@ -1439,6 +1467,26 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     expect(broker.ports).toHaveLength(2);
   });
 
+  /* LW8: a rating made in the desktop app reaches the evidence of the project host that ran the turn. */
+  it('should hand a rating main relays to the open project host’s evidence, and to no other', async () => {
+    const evidenceDirectory = await mkdtemp(join(tmpdir(), 'tau-desktop-evidence-'));
+    workspaces.push(evidenceDirectory);
+    const { host, workspaceRoot } = await configuredHost({}, { evidenceDirectory });
+    const client = connect(host, workspaceRoot, 'proj_rated');
+    await attachUnwritten(client, 'chat-1');
+    const observer = chatObservers.findLast(({ projectId }) => projectId === 'proj_rated');
+    expect(observer).toBeDefined();
+    const rating = { chatId: 'chat-1', runId: 'run-1', value: 'positive', at: 1_700_000_000_000 } as const;
+
+    host.handleMessage(frame({ type: 'agent-host-rated', projectId: 'proj_other', ...rating }));
+    host.handleMessage(frame({ type: 'agent-host-rated', projectId: 'proj_rated', ...rating, value: 'great' }));
+    host.handleMessage(frame({ type: 'agent-host-rated', projectId: 'proj_rated', ...rating, at: 'now' }));
+    expect(observer!.onRated).not.toHaveBeenCalled();
+
+    host.handleMessage(frame({ type: 'agent-host-rated', projectId: 'proj_rated', ...rating }));
+    expect(observer!.onRated).toHaveBeenCalledExactlyOnceWith(rating);
+  });
+
   it('should release the agent host when main names the project by its physical path', async () => {
     const released = vi.fn();
     const { host, log, workspaceRoot } = await configuredHost({}, { agentHostReleased: released });
@@ -1854,6 +1902,17 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     await expect(funding.principal()).resolves.toBe('user_1');
     host.handleMessage(frame({ type: 'authToken', token: undefined }));
     await expect(funding.principal()).resolves.toBeUndefined();
+  });
+
+  /* LW17: the API's provider fact names the same host and build the desktop's own evidence does. */
+  it('should label every gateway call as the desktop host with the build its evidence reports', async () => {
+    const { host, workspaceRoot } = await configuredHost();
+    connect(host, workspaceRoot);
+    await vi.waitFor(() => {
+      expect(transportCalls).not.toHaveLength(0);
+    });
+
+    expect(transportCalls.at(-1)!.hostLabels).toEqual({ kind: 'desktop', build: 'f61685bf3496' });
   });
 
   it('starts no external agents when main discovered none', async () => {

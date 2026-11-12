@@ -16,7 +16,7 @@ import { filesPane, treeItem } from '#support/file-tree.js';
 export const visibleRevisionsPanel = '[data-slot="revisions-panel-body"]:visible';
 
 /** The always-on header chip; its accessible name carries branch, head and state. */
-export const revisionChip = (): Locator => selectors.getByRole('button', { name: /^Open Revisions\./u });
+export const revisionChip = (): Locator => selectors.getByRole('button', { name: /^Open History\./u });
 
 /**
  * Seed a project through the e2e fixture route and wait for its workspace.
@@ -73,15 +73,15 @@ export const focusSource = async (): Promise<void> => {
 /**
  * Wait for the chip to say the files differ from the head.
  *
- * `revision-vocabulary.ts` words that two ways: *Modified since Rev N* on a line
- * with a head, *Not saved yet* before the first revision — which is where every
+ * `revision-vocabulary.ts` words that two ways: *Unsaved changes* on a line
+ * with a head, *Nothing saved yet* before the first save — which is where every
  * spec's fresh fixture starts.
  */
 const awaitModified = async (): Promise<void> => {
   await target.waitFor(
     () =>
       [...document.querySelectorAll('button')].some((button) =>
-        /^Open Revisions\..*\. (?:Modified since|Not saved yet)/u.test(button.getAttribute('aria-label') ?? ''),
+        /^Open History\..*\. (?:Unsaved changes|Nothing saved yet)/u.test(button.getAttribute('aria-label') ?? ''),
       ),
     undefined,
     { timeout: 60_000 },
@@ -127,7 +127,7 @@ export const awaitSaved = async (timeout = 60_000): Promise<void> => {
   await target.waitFor(
     () =>
       [...document.querySelectorAll('button')].some((button) =>
-        /^Open Revisions\..*\. Saved\b/u.test(button.getAttribute('aria-label') ?? ''),
+        /^Open History\..*\. Saved\b/u.test(button.getAttribute('aria-label') ?? ''),
       ),
     undefined,
     { timeout },
@@ -138,16 +138,22 @@ export const awaitSaved = async (timeout = 60_000): Promise<void> => {
 export const revisionStrip = (): Locator => selectors.getByCss(`${visibleRevisionsPanel} [aria-label="Where you are"]`);
 
 /**
- * A History row, the button that opens it, by its revision number.
+ * History's entry rows in the visible pane, newest first: the button that opens
+ * each one. An entry has no number (M11), so a row is found by its place or its
+ * title, never by `Rev N`.
  *
- * @param n - The row's `Rev N`.
- * @returns The row's button, named `Rev N · <title>`.
+ * @returns Every row's button, named `<title> · <time>` or `V2 · <title>`.
  */
-export const historyRow = (n: number): Locator =>
-  selectors
-    .getByCss(visibleRevisionsPanel)
-    .getByRole('list', { name: 'Revision history' })
-    .getByRole('button', { name: new RegExp(String.raw`^Rev ${String(n)} · `, 'u') });
+export const historyRows = (): Locator =>
+  selectors.getByCss(`${visibleRevisionsPanel} ol[aria-label="History entries"] button[data-revision-row]`);
+
+/**
+ * One History row by its place, newest first.
+ *
+ * @param index - 0 for the newest row.
+ * @returns The row's button.
+ */
+export const historyRow = (index: number): Locator => historyRows().nth(index);
 
 /**
  * Answer the question a verb asks only sometimes, then wait for its outcome.
@@ -161,8 +167,10 @@ export const historyRow = (n: number): Locator =>
  * @param outcome - What is on screen once the verb has settled.
  * @param timeout - How long the verb may take.
  */
-export const answerIfAsked = async (confirm: string, outcome: Locator, timeout = 60_000): Promise<void> => {
-  const button = selectors.getByRole('alertdialog').getByRole('button', { name: confirm, exact: true });
+export const answerIfAsked = async (confirm: string | RegExp, outcome: Locator, timeout = 60_000): Promise<void> => {
+  const button = selectors
+    .getByRole('alertdialog')
+    .getByRole('button', typeof confirm === 'string' ? { name: confirm, exact: true } : { name: confirm });
   let arrived: 'outcome' | 'question' | undefined;
   await expect
     .poll(
@@ -184,39 +192,42 @@ export const answerIfAsked = async (confirm: string, outcome: Locator, timeout =
 };
 
 /**
- * Restore a revision the way a person does: open its History row, press its
- * *Restore Rev N*, and confirm the dialog when the restore asks.
+ * Restore an entry the way a person does: open its History row, press its
+ * *Restore …* (`Restore V2`, `Restore “Thicker base”`, `Restore the 10:31 AM
+ * autosave`), and confirm the dialog when the restore asks.
  *
- * @param n - The revision to restore.
+ * @param row - The entry's row, from {@link historyRow}.
  * @param outcome - What is on screen once the restore has landed.
  */
-export const restoreFromHistory = async (n: number, outcome: Locator): Promise<void> => {
-  const row = historyRow(n);
+export const restoreFromHistory = async (row: Locator, outcome: Locator): Promise<void> => {
   await target.expectVisible(row, 30_000);
   if ((await target.getAttribute(row, 'aria-expanded')) !== 'true') {
     await target.click(row);
   }
+  /* Only the open row shows its verbs, so the pane holds one *Restore …*. */
   const restore = selectors
     .getByCss(visibleRevisionsPanel)
-    .getByRole('button', { name: `Restore Rev ${String(n)}`, exact: true });
+    .getByRole('list', { name: 'History entries' })
+    .getByRole('button', { name: /^Restore (?:V\d+|“.*”|the .* autosave|an autosave|this point)$/u })
+    .first();
   await target.click(restore);
-  await answerIfAsked(`Restore Rev ${String(n)}`, outcome);
+  await answerIfAsked(/^Restore /u, outcome);
 };
 
 /**
  * Open the Sync region's chooser through the pane's own offer (A29, canvas
  * round 16): the strip's *Back up*, or More's *Back up…* while the strip's
- * button is *Save revision*. Nothing offers a backup before the first
+ * button is *Save*. Nothing offers a backup before the first
  * revision (S1), so a project with none saves one first: from the strip when
  * it has edits, with the save chord when it has none — a fresh, unedited
- * project's strip offers no *Save revision* at all.
+ * project's strip offers no *Save* at all.
  */
 export const openBackupChooser = async (): Promise<void> => {
   const sync = selectors.getByCss(`${visibleRevisionsPanel} #revision-sync-heading`);
   const strip = revisionStrip();
   const backUp = strip.getByRole('button', { name: 'Back up', exact: true });
-  const save = strip.getByRole('button', { name: 'Save revision', exact: true });
-  const nothingSaved = strip.getByRole('status', { name: 'Revision status' }).filter({ hasText: 'Nothing saved yet' });
+  const save = strip.getByRole('button', { name: 'Save', exact: true });
+  const nothingSaved = strip.getByRole('status', { name: 'History status' }).filter({ hasText: 'Nothing saved yet' });
   let offer: 'sync' | 'backUp' | 'save' | 'nothingSaved' | undefined;
   await expect
     .poll(
@@ -241,8 +252,8 @@ export const openBackupChooser = async (): Promise<void> => {
     offer = 'backUp';
   }
   if (offer === 'save') {
-    const status = await target.textContent(strip.getByRole('status', { name: 'Revision status' }));
-    if (status?.includes('Not saved yet') === true) {
+    const status = await target.textContent(strip.getByRole('status', { name: 'History status' }));
+    if (status?.includes('Nothing saved yet') === true) {
       await target.click(save);
       await target.expectVisible(backUp, 120_000);
       offer = 'backUp';

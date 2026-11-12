@@ -6,7 +6,7 @@ import type * as ReactRouter from 'react-router';
 import { consentCookieName } from '@taucad/consent';
 import { useCookieConsent } from '#hooks/use-cookie-consent.js';
 import { readConsentStatus, readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
-import { resetRequestGlobalPrivacyControl } from '#lib/global-privacy-control.lib.js';
+import { resetRequestGlobalPrivacyControl } from '@taucad/ui-core/lib/global-privacy-control.lib';
 
 type LoaderData = { consentStatus: string; globalPrivacyControl: boolean };
 

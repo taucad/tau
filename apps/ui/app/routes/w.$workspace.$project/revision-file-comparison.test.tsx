@@ -36,7 +36,7 @@ describe('Revision file comparison with the actual line renderer', () => {
             actor: '',
             turnId: undefined,
             conflicted: false,
-            trigger: 'save',
+            capture: 'save',
           }}
           compareAgainst='parent'
         />
@@ -56,7 +56,7 @@ describe('Revision file comparison with the actual line renderer', () => {
     {
       original: [0x80],
       modified: [0x81],
-      message: 'Text comparison is unavailable: a version of this file has an unsupported encoding or invalid text.',
+      message: 'This file can’t be shown as text.',
     },
     { original: [65], modified: [65, 10], message: 'Final newline changed.' },
     { original: [65, 13, 10], modified: [65, 10], message: 'Line endings changed.' },
@@ -81,7 +81,7 @@ describe('Revision file comparison with the actual line renderer', () => {
               actor: '',
               turnId: undefined,
               conflicted: false,
-              trigger: 'save',
+              capture: 'save',
             }}
             compareAgainst='parent'
           />
@@ -112,7 +112,7 @@ describe('Revision file comparison with the actual line renderer', () => {
             actor: '',
             turnId: undefined,
             conflicted: false,
-            trigger: 'save',
+            capture: 'save',
           }}
           compareAgainst='parent'
         />

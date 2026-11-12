@@ -222,6 +222,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
             },
             "kernel": {
               "enum": [
+                "auto",
                 "picogk",
                 "picovoxel",
                 "build123d",
@@ -466,6 +467,125 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                   "exclusiveMinimum": 0,
                   "maximum": 9007199254740991,
                   "type": "integer",
+                },
+                "kernel": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "available": {
+                      "items": {
+                        "enum": [
+                          "picogk",
+                          "picovoxel",
+                          "build123d",
+                          "smlibpy",
+                          "openscad",
+                          "replicad",
+                          "manifold",
+                          "zoo",
+                          "jscad",
+                          "opencascadejs",
+                          "smlib",
+                          "tscircuit",
+                        ],
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                    "guidance": {
+                      "type": "string",
+                    },
+                    "owner": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "entryPath": {
+                          "maxLength": 1024,
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "kernel": {
+                          "enum": [
+                            "picogk",
+                            "picovoxel",
+                            "build123d",
+                            "smlibpy",
+                            "openscad",
+                            "replicad",
+                            "manifold",
+                            "zoo",
+                            "jscad",
+                            "opencascadejs",
+                            "smlib",
+                            "tscircuit",
+                          ],
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "kernel",
+                        "entryPath",
+                      ],
+                      "type": "object",
+                    },
+                    "preference": {
+                      "enum": [
+                        "auto",
+                        "picogk",
+                        "picovoxel",
+                        "build123d",
+                        "smlibpy",
+                        "openscad",
+                        "replicad",
+                        "manifold",
+                        "zoo",
+                        "jscad",
+                        "opencascadejs",
+                        "smlib",
+                        "tscircuit",
+                      ],
+                      "type": "string",
+                    },
+                    "unavailable": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kernel": {
+                            "enum": [
+                              "picogk",
+                              "picovoxel",
+                              "build123d",
+                              "smlibpy",
+                              "openscad",
+                              "replicad",
+                              "manifold",
+                              "zoo",
+                              "jscad",
+                              "opencascadejs",
+                              "smlib",
+                              "tscircuit",
+                            ],
+                            "type": "string",
+                          },
+                          "reason": {
+                            "const": "not available here",
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "kernel",
+                          "reason",
+                        ],
+                        "type": "object",
+                      },
+                      "type": "array",
+                    },
+                  },
+                  "required": [
+                    "preference",
+                    "available",
+                    "unavailable",
+                    "guidance",
+                  ],
+                  "type": "object",
                 },
                 "openFiles": {
                   "items": {
@@ -1048,7 +1168,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                       "get_parameters",
                       "apply_parameter_operation",
                       "screenshot",
-                      "revisions",
+                      "history",
                       "update_todos",
                       "ask_questions",
                       "install_packages",

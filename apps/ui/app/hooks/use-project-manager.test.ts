@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Test fixtures use React component names and literal workspace file paths. */
-import { createProjectFixture } from '#lib/project.fixture.js';
+import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { render, renderHook, act, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, QueryObserver, useQuery } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -22,12 +22,13 @@ import type { useFileManager } from '#hooks/use-file-manager.js';
 import { consumableBytes } from '@taucad/fs-bridge';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { Project, ProjectManifest } from '@taucad/types';
-import { defaultPanelState } from '#constants/editor.constants.js';
+import { serializeStartRecord, startRecordPath } from '@taucad/revisions';
+import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
-import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
+import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import type { ConnectedWorkspace, CreateProjectOptions, ProjectListing } from '#hooks/use-project-manager.js';
 import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 import { sha256Bytes } from '@taucad/utils/hash';
@@ -3152,7 +3153,11 @@ describe('useProjectManager.createProject', () => {
     );
 
     const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
-    expect(prepared?.files).toBe(pendingCreate.files);
+    /* A6: the create adds the record its first open mints the Start version from. */
+    expect(prepared?.files).toStrictEqual({
+      ...pendingCreate.files,
+      [startRecordPath]: { content: serializeStartRecord('created') },
+    });
     expect(prepared?.storage).toMatchObject({ backend: 'opfs' });
     expect(mockPinHomeStorageBackend).toHaveBeenCalledWith('opfs');
     expect(mockCommitPendingProjectDirectory).toHaveBeenCalledWith({
@@ -3200,6 +3205,7 @@ describe('useProjectManager.createProject', () => {
       result.current.createProject({
         project: { name: fakeProject.name, description: '', tags: [], assets: { main: { entryPath: 'main.ts' } } },
         files: {},
+        origin: 'zip',
         location: target.location,
         staging: { operationId: 'req_staged', carriesWorkbenchLayout: true },
       }),
@@ -3208,10 +3214,30 @@ describe('useProjectManager.createProject', () => {
     const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0] as unknown as Record<string, unknown>;
     expect(prepared['staging']).toStrictEqual({ operationId: 'req_staged' });
     expect(prepared['seedWorkbench']).toBe(false);
-    expect(prepared['files']).toStrictEqual({});
+    /* A6: the only file the create adds is the record its first open mints the Start version from. */
+    expect(prepared['files']).toStrictEqual({ [startRecordPath]: { content: serializeStartRecord('zip') } });
     expect(mockCommitPendingProjectDirectory).toHaveBeenLastCalledWith(
       expect.objectContaining({ files: {}, staging: { operationId: 'req_staged' }, scope: { backend: 'opfs' } }),
     );
+  });
+
+  /* A6: a project that brings its own history (a Tau Cloud open, a linked GitHub import) asks for no Start version. */
+  it('asks no Start version of a project created under an id it brings', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+
+    await act(async () =>
+      result.current.createProject({
+        id: 'proj_bbbbbbbbbbbbbbbbbbbbb',
+        project: fakeProject,
+        files: {},
+        chat: false,
+        location: { kind: 'home' },
+      }),
+    );
+
+    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
+    expect(Object.keys(prepared?.files ?? {})).not.toContain(startRecordPath);
   });
 
   /* W7.3: a linked repository's own tau.json is committed as authored while it declares the journaled manifest. */
@@ -3486,6 +3512,23 @@ describe('useProjectManager.createProject', () => {
     const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
     expect(prepared?.manifest.name).toBe('Tall Birdhouse');
     expect(phaseOrder.indexOf('name')).toBeLessThan(phaseOrder.indexOf('pending'));
+  });
+
+  it('creates an entry-less project under Auto: no main, no model file, and a first chat on Auto (D3)', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () =>
+      result.current.createProject({
+        kernel: 'auto',
+        initialMessage: { content: 'a gyroid heat exchanger core', attachments: [] },
+        location: { kind: 'home' },
+      }),
+    );
+
+    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
+    expect(prepared?.manifest.assets.main).toBeUndefined();
+    expect(Object.keys(prepared?.files ?? {}).filter((path) => !path.startsWith('.tau/'))).toEqual([]);
+    expect(prepared?.chat).toMatchObject({ kernelPreference: 'auto', activeKernel: undefined });
   });
 
   describe('Home draft attachment promotion', () => {

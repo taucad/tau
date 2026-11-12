@@ -100,6 +100,22 @@ const uiOptimizeDepsOptions = {
 } as const satisfies UserConfig['optimizeDeps'];
 
 /**
+ * Worker modules the dev dependency optimizer crawls at startup, relative to `apps/ui`.
+ *
+ * React Router's `future.unstable_optimizeDeps` (`react-router.config.ts`) admits the client
+ * entry and the route modules; Vite merges these after them. The scanner does not follow
+ * `new Worker(new URL(...))`, so without them the kernels, GeoSpec and language servers reach
+ * the optimizer only when a worker first starts, and its re-bundle reloads every open page.
+ * `app/worker-optimize-deps-entries.node.test.ts` holds every worker the app starts to this list.
+ */
+export const uiWorkerOptimizeDepsEntries = [
+  'app/**/*.worker.ts',
+  'app/lib/kcl-language/lsp/kcl-lsp-worker.ts',
+  '../libs/*/src/**/*.worker.ts',
+  '../libs/lsp/src/typescript-worker/worker.entry.ts',
+] as const;
+
+/**
  * Module aliases shared with `desktop/vite.config.ts`.
  *
  * `@resvg/resvg-js`: `@taucad/tscircuit` (composed into the runtime worker)
@@ -389,12 +405,13 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
 export const createUiReactCompilerPlugin = (): Plugin => {
   const compilerPlugins = react({
     compiler: { target: '19', logDiagnostics: true },
-    // The ui-kit (UI wave A), chat-ui (UI wave B) and project-workspace (UI wave C) libraries were cut from apps/ui/app and keep the compilation they had there.
+    // The ui-kit (UI wave A), chat-ui (UI wave B), project-workspace (UI wave C) and ui-core (UI wave E) libraries were cut from apps/ui/app and keep the compilation they had there.
     include: [
       '**/apps/ui/app/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/ui-kit/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/chat-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/project-workspace/src/**/*.{js,jsx,ts,tsx}',
+      '**/apps/libs/ui-core/src/**/*.{js,jsx,ts,tsx}',
     ],
     exclude: [
       '**/node_modules/**',
@@ -632,7 +649,11 @@ export default defineConfig(({ command, mode }) => {
       ],
     },
     ssr: uiSsrOptions,
-    optimizeDeps: { exclude: [...uiOptimizeDepsOptions.exclude] },
+    optimizeDeps: {
+      exclude: [...uiOptimizeDepsOptions.exclude],
+      // Test mode (Vitest, the calibration preview) runs without React Router's entries; keep Vite's default crawl.
+      ...(isTest ? {} : { entries: [...uiWorkerOptimizeDepsEntries] }),
+    },
 
     server: {
       port: 3000,

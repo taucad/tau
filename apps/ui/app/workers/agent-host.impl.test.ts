@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createMachine } from 'xstate';
 import type { ParameterSetActor } from '@taucad/parameters/set-machine';
-import { closeParameterActors, hostBuildOf } from '#workers/agent-host.impl.js';
+import { browserHostLabels, closeParameterActors, hostBuildOf } from '#workers/agent-host.impl.js';
 
 /* W6.r2 M1 (D15): a parameter actor's close is bounded; one past the bound or left uncertain is stopped, and a
  * retried close passes a stopped actor instead of waiting the bound again. */
@@ -55,5 +55,16 @@ describe('hostBuildOf', () => {
     expect(hostBuildOf('0000000')).toBeUndefined();
     /* An older page sends none; the worker's own read has no define or window.ENV and is the unknown label. */
     expect(hostBuildOf(undefined)).toBeUndefined();
+  });
+});
+
+describe('browserHostLabels', () => {
+  it('labels every gateway call as the browser host with the build its evidence reports (LW17)', () => {
+    expect(browserHostLabels('abc1234')).toEqual({ kind: 'browser', build: 'abc1234' });
+  });
+
+  it('sends no build for the unknown label, as its evidence reports none', () => {
+    expect(browserHostLabels('0000000')).toEqual({ kind: 'browser' });
+    expect(browserHostLabels(undefined)).toEqual({ kind: 'browser' });
   });
 });

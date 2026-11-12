@@ -11,6 +11,7 @@ import { tauRuntime } from '@taucad/runtime/vite';
  */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
+  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
   plugins: [tailwindcss(), tauRuntime()],
   server: {
     host: '127.0.0.1',
@@ -31,7 +32,13 @@ export default defineConfig({
           channel: 'chromium',
           args:
             process.env['TAU_E2E_WEBGPU_PROFILE'] === 'software'
-              ? ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader']
+              ? [
+                  '--enable-unsafe-webgpu',
+                  '--use-webgpu-adapter=swiftshader',
+                  '--use-angle=swiftshader',
+                  '--enable-features=Vulkan',
+                  '--use-vulkan=swiftshader',
+                ]
               : ['--enable-unsafe-webgpu'],
         },
       }),

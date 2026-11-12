@@ -4,10 +4,12 @@
     "packages/rpc/src",
     "packages/revisions/src",
     "packages/host/src",
+    "libs/shell-service/src",
     "packages/cli/src",
     "apps/desktop/src/main/main.ts",
     "apps/desktop/src/main/services-broker.ts",
     "apps/desktop/src/tau",
+    "apps/libs/desktop-terminal/src",
     "apps/ui/app/workers/agent-host.impl.ts",
     "apps/ui/app/workers/agent-host.worker.ts",
     "apps/ui/app/services",
@@ -289,6 +291,14 @@
       "class": "Peer",
       "owner": "GM",
       "fixedBy": "outside this charter: desktop geometry-runner port ceremony"
+    },
+    {
+      "id": "B19",
+      "bound": "Desktop update feed request (30 s): one update check runs at a time, so a feed request that never settles would stop every later check",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "AbortSignal.timeout(30_000)",
+      "class": "External edge",
+      "owner": "desktop updater"
     },
     {
       "id": "C1",
@@ -1122,7 +1132,7 @@
     {
       "id": "SHELL-COMMAND-TIMEOUT",
       "bound": "Agent shell command deadline: the call's timeoutMs clamped to 1 s..600 s (default 120 s); on expiry the provider stops the command and every descendant and the call returns timed-out",
-      "site": "packages/host/src/shell/shell-service.ts",
+      "site": "libs/shell-service/src/shell/shell-service.ts",
       "token": "admitted.commandTimeout",
       "class": "External edge",
       "owner": "desktop-bash-terminal W3"
@@ -1130,7 +1140,7 @@
     {
       "id": "SHELL-PROBE-TIMEOUT",
       "bound": "30-second bound on the shell availability probe's version command",
-      "site": "packages/host/src/shell/shell-service.ts",
+      "site": "libs/shell-service/src/shell/shell-service.ts",
       "token": "AbortSignal.timeout(30_000)",
       "class": "External edge",
       "owner": "desktop-bash-terminal W3"
@@ -1138,7 +1148,7 @@
     {
       "id": "SHELL-DRAIN-TIMEOUT",
       "bound": "2-second bound on waiting for output readers after an unconfirmed cleanup",
-      "site": "packages/host/src/shell/shell-service.ts",
+      "site": "libs/shell-service/src/shell/shell-service.ts",
       "token": "setTimeout(resolve, milliseconds)",
       "class": "External edge",
       "owner": "desktop-bash-terminal W3"
@@ -1146,7 +1156,7 @@
     {
       "id": "TERMINAL-ADMISSION-WAIT",
       "bound": "5-second bound (terminalAdmissionMilliseconds) on main admitting a Terminal start's project root to the trusted-root allowlist; each wait ends on the next allowlist change, the connection ending, or the bound, after which the start is refused project-not-admitted",
-      "site": "apps/desktop/src/tau/services-host.terminal.ts",
+      "site": "apps/libs/desktop-terminal/src/terminal-concern.ts",
       "token": "timer = setTimeout(resolve, remaining)",
       "class": "Peer",
       "owner": "desktop-bash-terminal W7",
@@ -1155,7 +1165,7 @@
     {
       "id": "TERMINAL-REGISTRATION-RETRY",
       "bound": "250 ms retry (terminalRegistrationRetryMilliseconds) of a Terminal start the shell service refuses project-not-admitted, within the same admission bound; the service learns a project only when its agent host is served, which the pane does not wait for. Any other refusal is final, and a connection that ends stops the retry",
-      "site": "apps/desktop/src/tau/services-host.terminal.ts",
+      "site": "apps/libs/desktop-terminal/src/terminal-concern.ts",
       "token": "setTimeout(resolve, terminalRegistrationRetryMilliseconds)",
       "class": "Peer",
       "owner": "desktop-bash-terminal W7",
@@ -1164,7 +1174,7 @@
     {
       "id": "TERMINAL-OPEN-TIMEOUT",
       "bound": "30-second bound on a fresh desktop terminal port's open frame; a port that never opens is closed before any shell starts",
-      "site": "apps/desktop/src/tau/services-host.terminal.ts",
+      "site": "apps/libs/desktop-terminal/src/terminal-concern.ts",
       "token": "setTimeout(abandonUnopened, openMilliseconds)",
       "class": "External edge",
       "owner": "desktop-bash-terminal W5"

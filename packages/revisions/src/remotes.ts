@@ -883,7 +883,9 @@ export const publishOverHttp = async (
  *
  * @param apiBaseUrl - The API origin, with or without a trailing slash.
  * @param auth - How this host proves who is asking.
- * @param project - The id and the manifest name this host knows.
+ * @param project - The id and the manifest name this host knows, and `origin:
+ *   'github'` for a project linked to a GitHub repository, whose commits Tau did
+ *   not record and which the push's authorship check then admits (B4).
  * @returns Nothing.
  * @throws Error When Tau Cloud refused, in the words a person can act on (A18).
  * @public
@@ -891,14 +893,17 @@ export const publishOverHttp = async (
 export const registerProjectOverHttp = async (
   apiBaseUrl: string,
   auth: TauCloudAuth,
-  project: Readonly<{ id: string; name: string | undefined }>,
+  project: Readonly<{ id: string; name: string | undefined; origin?: 'github' }>,
 ): Promise<void> => {
   const response = await globalThis.fetch(
     `${apiBaseUrl.replace(/\/$/u, '')}/v1/projects/${encodeURIComponent(project.id)}`,
     {
       method: 'PUT',
       ...tauCloudRequestInit(auth),
-      body: JSON.stringify(project.name === undefined ? {} : { name: project.name }),
+      body: JSON.stringify({
+        ...(project.name === undefined ? {} : { name: project.name }),
+        ...(project.origin === undefined ? {} : { origin: project.origin }),
+      }),
     },
   );
   if (!response.ok) {

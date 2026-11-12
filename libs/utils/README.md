@@ -1,6 +1,6 @@
 # @taucad/utils
 
-Shared utilities for the Tau CAD platform. Exposed as granular subpaths so consumers only pull in what they use.
+Shared utilities for the Tau platform. Exposed as granular subpaths so consumers only pull in what they use.
 
 ## Subpaths
 

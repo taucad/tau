@@ -9,7 +9,7 @@
 #
 # GitHub-hosted macOS reports SIP disabled (ruling X19), so it can never run this workflow: every row fails closed in
 # its preflight unless the host shows SIP and Gatekeeper enabled, native architecture (no Rosetta) and no prior Tau
-# installation, profile or ShipIt cache. `desktop-macos-vm-receipts` is uploaded only by a Mac-scoped staging dispatch
+# installation, profile or ShipIt cache. `desktop-macos-vm-receipts` is uploaded only by a Mac-scoped dispatch
 # on main whose every row passed that preflight and its run. The Mac-only scope is Apple silicon only (operator ruling:
 # hosted Intel Macs cannot render, so Intel is neither qualified nor published), so the two Apple silicon rows on the
 # `local-mac` runner are the complete receipt set; `x64_runner_label` must stay empty.
@@ -22,18 +22,25 @@
 # repository) and reads system state, and later updates stay with the system's unattended upgrades. Every row fails
 # closed in its preflight unless the host is the stock distribution with AppArmor, its stock user-namespace policy, a
 # hardware GL renderer and no prior Tau package, tree, repository, AppImage, desktop entry or profile. There is one GPU:
-# the Linux scope shares route qualification's Linux staging concurrency group, so the two can never overlap.
+# the Linux scope shares route qualification's Linux GPU concurrency group, so the two can never overlap. The
+# first row is a canary that runs alone; the other five wait until it passes (D-H8).
 name: Desktop clean-host route acceptance
 
 on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Staging consumer-host evidence; Windows remains qualification-only
+        description: Consumer-host evidence for one platform; Windows remains staging qualification-only
         required: true
         default: macos
         type: choice
         options: [macos, windows, linux]
+      channel:
+        description: Exact candidate channel; all three candidates must agree. Production is Mac or Linux only (D-H5)
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
       candidate_a:
         description: Successful trusted installer-candidate run for baseline A
         required: true
@@ -43,7 +50,7 @@ on:
         required: true
         type: string
       candidate_c:
-        description: Successful trusted installer-candidate run C; Mac and Windows need this dispatch's main commit, Linux a trusted ancestor
+        description: Successful trusted installer-candidate run C; Windows needs this dispatch's main commit, Mac and Linux a trusted ancestor
         required: true
         type: string
       runner_group:
@@ -82,7 +89,7 @@ permissions:
   actions: read
 
 # One clean-host window at a time: rows share physical hosts, /Applications and the runner account's profile. The
-# Linux scope instead shares route qualification's Linux staging group: both hold the project's one spot T4.
+# Linux scope, on either channel, instead shares route qualification's Linux GPU group: both hold the project's spot T4s.
 concurrency:
   group: ${{ inputs.scope == 'linux' && 'desktop-route-qualification-staging-linux' || 'desktop-route-vm-acceptance' }}
   cancel-in-progress: false
@@ -99,15 +106,22 @@ jobs:
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.selection.outputs.matrix }}
+      linux_canary: ${{ steps.selection.outputs.linux_canary }}
       windows_host: ${{ steps.selection.outputs.windows_host }}
     steps:
-      - name: Fail closed unless this is an operator-enabled platform staging dispatch on main
+      - name: Fail closed unless this is an operator-enabled platform dispatch on main
         env:
           QUALIFICATION_ENABLED: ${{ vars.DESKTOP_ROUTE_QUALIFICATION_ENABLED }}
           SCOPE: ${{ inputs.scope }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
           if [ "$GITHUB_REF" != refs/heads/main ] || [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$QUALIFICATION_ENABLED" != true ] || { [ "$SCOPE" != macos ] && [ "$SCOPE" != windows ] && [ "$SCOPE" != linux ]; }; then
             echo '::error::Clean-host acceptance not run: requires a platform-scoped main dispatch and explicit operator enablement.'
+            exit 1
+          fi
+          # D-H5: production clean-host evidence exists only for the Mac and Linux platform scopes.
+          if [ "$CHANNEL" != staging ] && { [ "$CHANNEL" != production ] || [ "$SCOPE" = windows ]; }; then
+            echo '::error::Clean-host acceptance not run: production evidence is Mac or Linux only.'
             exit 1
           fi
       - name: Select the clean-host rows for the available hosts
@@ -134,7 +148,9 @@ jobs:
               { id: 'debian-apt-x11', route: 'linux-apt', distro: 'debian' },
               { id: 'debian-appimage-x11', route: 'linux-appimage', distro: 'debian' },
             ];
-            appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(linux)}\n`);
+            // Canary first (D-H8): one row runs alone and the other five wait for it, so a defect costs one row.
+            appendFileSync(process.env.GITHUB_OUTPUT, `linux_canary=${JSON.stringify(linux.slice(0, 1))}\n`);
+            appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(linux.slice(1))}\n`);
             process.exit(0);
           }
           if (process.env.SCOPE === 'windows') {
@@ -160,7 +176,7 @@ jobs:
   installed:
     if: inputs.scope == 'macos'
     needs: admission
-    environment: desktop-qualification-staging
+    environment: desktop-qualification-${{ inputs.channel }}
     timeout-minutes: 150
     strategy:
       fail-fast: false
@@ -173,7 +189,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TAU_QUALIFICATION_DIRECTORY: ${{ github.workspace }}/out/route-qualification
       TAU_QUALIFICATION_ROUTE: ${{ matrix.route }}
-      TAU_QUALIFICATION_CHANNEL: staging
+      TAU_QUALIFICATION_CHANNEL: ${{ inputs.channel }}
       TAU_QUALIFICATION_RUN_A: ${{ inputs.candidate_a }}
       TAU_QUALIFICATION_RUN_B: ${{ inputs.candidate_b }}
       TAU_QUALIFICATION_RUN_C: ${{ inputs.candidate_c }}
@@ -275,14 +291,13 @@ jobs:
     needs: installed
     # Both Apple silicon rows are the complete Mac-only receipt set; collection still refuses any missing or extra row.
     if: inputs.scope == 'macos'
-    environment: desktop-qualification-staging
+    environment: desktop-qualification-${{ inputs.channel }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
       TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate_c }}
-      DESKTOP_ASSETS_DIR: ${{ github.workspace }}/out/qualification-candidate
-      TAU_QUALIFICATION_CHANNEL: staging
+      TAU_QUALIFICATION_CHANNEL: ${{ inputs.channel }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -290,13 +305,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
-      - name: Re-admit the exact final candidate
-        run: pnpm nx run desktop:fetch-installer-candidate
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: desktop-route-row-*
           path: out/qualification-rows
-      - name: Require both Apple silicon clean-host rows and bind every receipt to the final source
+      # The collector re-admits candidate C itself and writes qualification-binding.json: C's notarized source is the
+      # newest green ancestor at build time, so it is bound to this run's main commit by authenticated S≤K≤H ancestry
+      # (the publisher adds ≤P), as the Mac-only CI receipts are, never by a caller-supplied source.
+      - name: Require both Apple silicon clean-host rows and bind every receipt to the final candidate and this run
         run: pnpm nx run desktop:collect-qualification-rows
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -306,20 +322,22 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-macos-vm-receipts
-          path: out/qualification-receipts/route-receipts.json
+          path: |
+            out/qualification-receipts/route-receipts.json
+            out/qualification-receipts/qualification-binding.json
           if-no-files-found: error
 
   windows:
     if: inputs.scope == 'windows'
     needs: admission
-    environment: desktop-qualification-staging
+    environment: desktop-qualification-${{ inputs.channel }}
     runs-on: ${{ fromJSON(needs.admission.outputs.windows_host) }}
     timeout-minutes: 150
     env:
       GH_TOKEN: ${{ github.token }}
       TAU_QUALIFICATION_DIRECTORY: ${{ github.workspace }}/out/route-qualification
       TAU_QUALIFICATION_ROUTE: windows-nsis
-      TAU_QUALIFICATION_CHANNEL: staging
+      TAU_QUALIFICATION_CHANNEL: ${{ inputs.channel }}
       TAU_QUALIFICATION_RUN_A: ${{ inputs.candidate_a }}
       TAU_QUALIFICATION_RUN_B: ${{ inputs.candidate_b }}
       TAU_QUALIFICATION_RUN_C: ${{ inputs.candidate_c }}
@@ -365,14 +383,14 @@ jobs:
 
   windows-receipts:
     needs: windows
-    environment: desktop-qualification-staging
+    environment: desktop-qualification-${{ inputs.channel }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
       TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate_c }}
       DESKTOP_ASSETS_DIR: ${{ github.workspace }}/out/qualification-candidate
-      TAU_QUALIFICATION_CHANNEL: staging
+      TAU_QUALIFICATION_CHANNEL: ${{ inputs.channel }}
       TAU_WINDOWS_PUBLISHER: ${{ vars.TAU_WINDOWS_PUBLISHER }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -393,30 +411,28 @@ jobs:
           path: out/qualification-receipts/*.json
           if-no-files-found: error
 
-  linux:
+  # The canary row runs alone first; every other Linux row waits for it (D-H8). It shares the row steps below.
+  linux-canary:
     if: inputs.scope == 'linux'
     needs: admission
-    environment: desktop-qualification-staging
+    environment: desktop-qualification-${{ inputs.channel }}
     timeout-minutes: 150
     # id-token lets each row sign in to Google Cloud keylessly; tau-ci admits only this repository's main branch in the
-    # staging qualification environment (tau-cloud stacks/gcp).
+    # desktop qualification environment (tau-cloud stacks/gcp).
     permissions:
       contents: read
       actions: read
       id-token: write
     strategy:
-      fail-fast: false
-      # Every row holds the project's one spot T4 (tau-cloud GPU quota), so they run one at a time.
-      max-parallel: 1
       matrix:
-        include: ${{ fromJSON(needs.admission.outputs.matrix) }}
+        include: ${{ fromJSON(needs.admission.outputs.linux_canary) }}
     runs-on: ubuntu-24.04
-    env:
+    env: &linux-row-env
       GH_TOKEN: ${{ github.token }}
       TAU_QUALIFICATION_DISPOSABLE_HOST: '1'
       TAU_QUALIFICATION_DIRECTORY: ${{ github.workspace }}/out/route-qualification
       TAU_QUALIFICATION_ROUTE: ${{ matrix.route }}
-      TAU_QUALIFICATION_CHANNEL: staging
+      TAU_QUALIFICATION_CHANNEL: ${{ inputs.channel }}
       TAU_QUALIFICATION_GRAPHICS: stock
       TAU_QUALIFICATION_RUN_A: ${{ inputs.candidate_a }}
       TAU_QUALIFICATION_RUN_B: ${{ inputs.candidate_b }}
@@ -425,7 +441,7 @@ jobs:
       TAU_APPIMAGE_KEY_ID: ${{ vars.TAU_APPIMAGE_KEY_ID }}
       TAU_APT_PRIMARY_FINGERPRINT: ${{ vars.TAU_APT_PRIMARY_FINGERPRINT }}
       TAU_APT_SIGNING_FINGERPRINT: ${{ vars.TAU_APT_SIGNING_FINGERPRINT }}
-    steps:
+    steps: &linux-row-steps
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
@@ -463,18 +479,38 @@ jobs:
           path: out/route-qualification/route-receipts.json
           if-no-files-found: error
 
+  linux:
+    if: inputs.scope == 'linux'
+    needs: [admission, linux-canary]
+    environment: desktop-qualification-${{ inputs.channel }}
+    timeout-minutes: 150
+    # id-token lets each row sign in to Google Cloud keylessly; tau-ci admits only this repository's main branch in the
+    # desktop qualification environment (tau-cloud stacks/gcp).
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      # Every row holds the project's one spot T4 (tau-cloud GPU quota), so they run one at a time.
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJSON(needs.admission.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    env: *linux-row-env
+    steps: *linux-row-steps
+
   linux-receipts:
-    needs: linux
+    needs: [linux-canary, linux]
     # All six rows are the complete Linux receipt set; collection refuses any missing or extra row.
     if: inputs.scope == 'linux'
-    environment: desktop-qualification-staging
+    environment: desktop-qualification-${{ inputs.channel }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
       TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate_c }}
-      DESKTOP_ASSETS_DIR: ${{ github.workspace }}/out/qualification-candidate
-      TAU_QUALIFICATION_CHANNEL: staging
+      TAU_QUALIFICATION_CHANNEL: ${{ inputs.channel }}
       TAU_APPIMAGE_KEY_ID: ${{ vars.TAU_APPIMAGE_KEY_ID }}
       TAU_APT_PRIMARY_FINGERPRINT: ${{ vars.TAU_APT_PRIMARY_FINGERPRINT }}
       TAU_APT_SIGNING_FINGERPRINT: ${{ vars.TAU_APT_SIGNING_FINGERPRINT }}
@@ -484,13 +520,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
-      - name: Re-admit the exact final candidate
-        run: pnpm nx run desktop:fetch-installer-candidate
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: desktop-route-row-*
           path: out/qualification-rows
-      - name: Require all six Linux clean-host rows and bind every receipt to the final source
+      # As for Mac, the collector re-admits candidate C itself and writes qualification-binding.json, binding C's
+      # ancestor source to this run by authenticated S≤K≤H ancestry (the publisher adds ≤P).
+      - name: Require all six Linux clean-host rows and bind every receipt to the final candidate and this run
         run: pnpm nx run desktop:collect-qualification-rows
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -500,5 +536,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-linux-vm-receipts
-          path: out/qualification-receipts/route-receipts.json
+          path: |
+            out/qualification-receipts/route-receipts.json
+            out/qualification-receipts/qualification-binding.json
           if-no-files-found: error

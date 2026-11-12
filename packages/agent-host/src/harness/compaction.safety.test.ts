@@ -365,7 +365,8 @@ describe('compaction safety regressions', () => {
       }
       if (call === 2) {
         return [
-          { type: 'text-delta', text: 'second-overflow-prefix-'.repeat(250) },
+          /* Short enough that this step and its result fit what the pass retains (a fifth of the window). */
+          { type: 'text-delta', text: 'second-overflow-prefix-'.repeat(30) },
           {
             type: 'tool-input',
             toolCallId: 'kernel-call-2',

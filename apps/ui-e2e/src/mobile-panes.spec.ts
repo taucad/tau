@@ -24,7 +24,7 @@ const allSheet = (): Locator => selectors.getByRole('dialog', { name: 'All surfa
 const surface = (title: string): Locator => selectors.getByRole('region', { name: title, exact: true });
 
 /**
- * Opened as a person would: Parameters from the nav, the rest from All. Revisions and Agents needed no change in the
+ * Opened as a person would: Parameters from the nav, the rest from All. History and Agents needed no change in the
  * pass; they stay here as a 320px regression guard. Jobs is not shipped, so All does not list it.
  */
 const panes = [
@@ -32,7 +32,7 @@ const panes = [
   'Files',
   'Model tree',
   'Kinematics',
-  'Revisions',
+  'History',
   'Share',
   'Export',
   'Details',
@@ -232,7 +232,7 @@ const probeHeaderStrip = (region: Element): Readonly<{ covered: readonly string[
   return { covered, blankIsGrabber: blank?.closest('[data-vaul-handle]') !== null && blank !== null };
 };
 
-test('holds Parameters, Files, Revisions and Kinematics at half at 320×640, their header strips dragging the sheet', async () => {
+test('holds Parameters, Files, History and Kinematics at half at 320×640, their header strips dragging the sheet', async () => {
   await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
   await target.setViewport({ width: 320, height: 640 });
   await target.navigate(seedRoute);
@@ -252,7 +252,7 @@ test('holds Parameters, Files, Revisions and Kinematics at half at 320×640, the
   await target.expectVisible(navigation(), 60_000);
   await waitForStageReady();
 
-  for (const title of ['Parameters', 'Files', 'Revisions', 'Kinematics'] as const) {
+  for (const title of ['Parameters', 'Files', 'History', 'Kinematics'] as const) {
     if (title === 'Parameters') {
       // oxlint-disable-next-line no-await-in-loop -- one pane at a time, as a person taps.
       await target.click(navButton('Parameters'), { touch: true });

@@ -50,6 +50,8 @@ import {
 import type { ProjectionFixtureProof, ProjectionDirectoryReceipt } from './projection-fixture-validation.ts';
 import { browserHostScript, createGatewayScriptWalk } from './agent-host-gateway-script.ts';
 import { completeGithubAuthorization } from './github-identity.ts';
+import { flagStateInitScript, flagStateVariable, resolveFlagState } from './flag-state.ts';
+import type { FlagStateName } from './flag-state.ts';
 import { startLinkedGithubFixture } from './linked-github-fixture.ts';
 import type { LinkedGithubFixture } from './linked-github-fixture.ts';
 import type { GatewayScriptTurn, GatewayScriptWalk, GatewayTurnCount } from './agent-host-gateway-script.ts';
@@ -448,6 +450,8 @@ export const uiOpenTarget: BrowserCommand<
       Object.defineProperty(Navigator.prototype, 'doNotTrack', { configurable: true, get: () => '1' });
     });
   }
+  /* FL4: every context opens in the run's named flag state (`TAU_E2E_FLAG_STATE`, all off when unset). */
+  await context.addInitScript({ content: flagStateInitScript(resolveFlagState(process.env[flagStateVariable])) });
   const primary = await context.newPage();
   const session: Session = {
     agentHostApiRequests: [],
@@ -1419,6 +1423,9 @@ export const uiStopTauServeFixture: BrowserCommand = async (commandContext) => {
     return;
   }
   tauServeFixtures.delete(commandContext.sessionId);
+  /* The daemon's workspace is the only copy of the chats it ran (they never reach OPFS), so keep them for
+   * `formal:logs` before disposal removes the workspace, as `uiCloseTarget` does for a daemon still running. */
+  await captureChatLogs(fixture.workspace, chatLogDestination('ui-e2e', commandContext.testPath));
   await fixture.dispose();
 };
 
@@ -1947,6 +1954,14 @@ export const uiEvaluateTargetLocator: BrowserCommand<
         ),
       { argument, source },
     );
+
+/**
+ * Put the target in another flag state for the rest of this test. Must run before the test's first navigation:
+ * the app reads its flag state once, when the page loads.
+ */
+export const uiSetFlagState: BrowserCommand<[state: FlagStateName]> = async (commandContext, state) => {
+  await sessionFor(commandContext).context.addInitScript({ content: flagStateInitScript(resolveFlagState(state)) });
+};
 
 export const uiAddInitScript: BrowserCommand<[source: string, argument?: unknown]> = async (
   commandContext,
@@ -3418,6 +3433,7 @@ export const uiBrowserCommands = {
   uiNavigateTarget,
   uiOpenSecondaryTarget,
   uiOpenTarget,
+  uiSetFlagState,
   uiPressTarget,
   uiQualifyWebGpu,
   uiReadTarget,

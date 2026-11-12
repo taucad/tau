@@ -1,3 +1,4 @@
+import { Heading } from '@taucad/ui/components/heading';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefCallback } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
@@ -274,7 +275,11 @@ export function SettingsSurface({
       )}
     >
       <div className='mx-auto flex max-w-3xl flex-col gap-6 [&_[data-settings-section]]:gap-3 [&_[data-settings-section]]:border-0 [&_[data-settings-section]]:bg-transparent [&_[data-settings-section]]:py-0 [&_[data-settings-section]>[data-slot=card-content]]:rounded-xl [&_[data-settings-section]>[data-slot=card-content]]:border [&_[data-settings-section]>[data-slot=card-content]]:bg-card [&_[data-settings-section]>[data-slot=card-content]]:py-4 [&_[data-settings-section]>[data-slot=card-content]:has(>[data-slot=settings-item])]:gap-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:pt-4 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:absolute [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:inset-x-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:top-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:border-t [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:content-[""] [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:last-child)]:pb-4 [&_[data-settings-section]>[data-slot=card-header]]:px-0 [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-description]]:hidden [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-title]]:text-sm [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-title]]:font-medium [&_[data-slot=card]]:shadow-none [&_h2]:text-sm [&_h2]:font-medium'>
-        {isMobile ? null : <h1 className='text-lg font-medium'>{active.label}</h1>}
+        {isMobile ? null : (
+          <Heading level={1} variant='title'>
+            {active.label}
+          </Heading>
+        )}
         <DeferredSettingsContent section={activeSection} />
       </div>
     </div>

@@ -1,10 +1,11 @@
 import { act, cleanup, render } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import * as THREE from 'three';
 import { createActor, createAsyncLogic } from 'xstate';
 import { mock } from 'vitest-mock-extended';
-import type { SpatialBounds } from '@taucad/spatial';
+import type { RenderFrame, SpatialBounds } from '@taucad/spatial';
 import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
 import { SectionHandles } from '#graphics/three/react/section-handles.jsx';
 import { graphicsMachine } from '#machines/graphics.machine.js';
@@ -16,11 +17,15 @@ type CompileAsync = (scene: THREE.Object3D, camera: THREE.Camera) => Promise<THR
 
 const mocks = vi.hoisted(() => {
   const bounds: SpatialBounds = { min: [-0.05, -0.05, -0.05], max: [0.05, 0.05, 0.05] };
+  const renderFrame: RenderFrame = { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 0.001 };
   return {
     actor: undefined as unknown,
     state: undefined as unknown,
     frame: undefined as FrameCallback | undefined,
     bounds,
+    renderFrame,
+    /** Callbacks subscribed to R3F's frame loop through `internal.subscribe`. */
+    frameSubscribers: new Set<{ current: () => void }>(),
     cameraRig: undefined as unknown,
   };
 });
@@ -34,7 +39,7 @@ vi.mock('#hooks/use-graphics.jsx', async () => {
     useCameraRig: () => mocks.cameraRig,
     useCameraSelector: (selector: (snapshot: unknown) => unknown) =>
       selector({ context: { view: { bounds: mocks.bounds } } }),
-    useRenderFrame: () => ({ anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 0.001 }),
+    useRenderFrame: () => mocks.renderFrame,
   };
 });
 
@@ -69,6 +74,8 @@ type HarnessOptions = Readonly<{
    * event. Otherwise R3F listens on the canvas's parent, and presses land on the canvas.
    */
   hasEventSource?: boolean;
+  /** Mount under `<StrictMode>`, which runs every effect twice. */
+  isStrict?: boolean;
 }>;
 
 type Harness = Readonly<{
@@ -83,6 +90,14 @@ type Harness = Readonly<{
   /** Every pointer and click event that reached a listener on the surface added before the handles mounted. */
   toolEvents: string[];
   runFrame: () => void;
+  /**
+   * Rebases the view's render frame onto `originMeters`, moving the camera with it so the same pixel casts the same
+   * physical ray, as the view does when its target moves far from the frame's origin. The rig moves the cameras at
+   * once; R3F's frame loop runs its subscribers on the next frame, here at once unless `isFrameDrawn` is false.
+   */
+  rebase: (originMeters: readonly [number, number, number], options?: Readonly<{ isFrameDrawn?: boolean }>) => void;
+  /** Runs every callback subscribed to R3F's frame loop, as its next frame does. */
+  drawFrame: () => void;
   /** Dispatched on the surface under an event source, else on the canvas, or on `target`. */
   pointer: (type: string, at: Point & Readonly<{ buttons?: number; target?: HTMLElement }>) => void;
   send: (event: Parameters<GraphicsActor['send']>[0]) => void;
@@ -96,6 +111,7 @@ const mountHandles = ({
   up = [0, 0, 1],
   compileAsync = async (scene) => scene,
   hasEventSource = false,
+  isStrict = false,
 }: HarnessOptions = {}): Harness => {
   const actor = createGraphicsActor();
   actor.start();
@@ -134,8 +150,16 @@ const mountHandles = ({
   camera.updateMatrixWorld();
   const perspectiveCamera = new THREE.PerspectiveCamera();
   const orthographicCamera = new THREE.OrthographicCamera();
+  mocks.renderFrame = { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 0.001 };
+  mocks.frameSubscribers = new Set();
   mocks.cameraRig = {
-    actorRef: { getSnapshot: () => ({ context: { view: { direction: [0.6, -0.6, 0.5] } } }) },
+    actorRef: {
+      getSnapshot: () => ({ context: { view: { direction: [0.6, -0.6, 0.5], bounds: mocks.bounds } } }),
+      subscribe: () => ({ unsubscribe: () => undefined }),
+    },
+    get renderFrame() {
+      return mocks.renderFrame;
+    },
     perspectiveCamera,
     orthographicCamera,
   };
@@ -149,13 +173,37 @@ const mountHandles = ({
     events: { connected: surface },
     invalidate: vi.fn(),
     get: () => state,
+    internal: {
+      subscribe: (callback: { current: () => void }) => {
+        mocks.frameSubscribers.add(callback);
+        return () => {
+          mocks.frameSubscribers.delete(callback);
+        };
+      },
+    },
   };
   mocks.state = state;
 
-  render(<SectionHandles planePicker={planePicker} />);
+  const element = (): React.JSX.Element =>
+    isStrict ? (
+      <StrictMode>
+        <SectionHandles planePicker={planePicker} />
+      </StrictMode>
+    ) : (
+      <SectionHandles planePicker={planePicker} />
+    );
+  const rendered = render(element());
   act(() => {
     mocks.frame?.({ camera, size: state.size });
   });
+
+  const drawFrame = (): void => {
+    act(() => {
+      for (const subscriber of mocks.frameSubscribers) {
+        subscriber.current();
+      }
+    });
+  };
 
   const frames = new Map<number, FrameRequestCallback>();
   let nextFrame = 0;
@@ -185,6 +233,24 @@ const mountHandles = ({
           callback(0);
         }
       });
+    },
+    drawFrame,
+    rebase: (originMeters, { isFrameDrawn = true } = {}) => {
+      const previous = mocks.renderFrame;
+      const next: RenderFrame = { ...previous, originMeters: [...originMeters] };
+      const shift = new THREE.Vector3(...originMeters)
+        .sub(new THREE.Vector3(...previous.originMeters))
+        .divideScalar(previous.metersPerRenderUnit);
+      camera.position.sub(shift);
+      camera.updateMatrixWorld();
+      act(() => {
+        mocks.renderFrame = next;
+        rendered.rerender(element());
+      });
+      if (isFrameDrawn) {
+        // The view draws the rebased frame; its frame loop runs every subscriber.
+        drawFrame();
+      }
     },
     pointer: (type, { x, y, buttons = type === 'pointerup' || type === 'click' ? 0 : 1, target }) => {
       const event = new MouseEvent(type, {
@@ -293,6 +359,138 @@ describe('SectionHandles', () => {
     expect(lateEvents).toEqual(harness.toolEvents);
   });
 
+  it('should keep dragging through a render-frame rebase mid-drag, landing where the pointer is', () => {
+    // The same drag without a rebase, for where it lands.
+    harness = mountHandles();
+    harness.pointer('pointerdown', { x: 400, y: 300 });
+    harness.pointer('pointermove', { x: 400, y: 250 });
+    harness.runFrame();
+    harness.pointer('pointermove', { x: 400, y: 200 });
+    harness.pointer('pointerup', { x: 400, y: 200 });
+    const [reference] = harness.cuts();
+    const expected = reference?.kind === 'plane' ? reference.offset : Number.NaN;
+    cleanup();
+    harness.actor.stop();
+    harness.canvas.parentElement?.remove();
+    vi.restoreAllMocks();
+
+    harness = mountHandles();
+    harness.pointer('pointerdown', { x: 400, y: 300 });
+    harness.pointer('pointermove', { x: 400, y: 250 });
+    harness.runFrame();
+    // The view's target moved far from the frame's origin, so the view rebased its render frame under the drag.
+    harness.rebase([0, 0.02, 0.01]);
+    expect(harness.controls.enabled).toBe(false);
+    expect(isHoverSuppressed(harness)).toBe(true);
+    harness.pointer('pointermove', { x: 400, y: 200 });
+    harness.pointer('pointerup', { x: 400, y: 200 });
+
+    const [cut] = harness.cuts();
+    expect(cut?.kind === 'plane' ? cut.offset : Number.NaN).toBeCloseTo(expected, 9);
+    expect(expected).toBeGreaterThan(0.05);
+    expect(harness.controls.enabled).toBe(true);
+    expect(isHoverSuppressed(harness)).toBe(false);
+  });
+
+  describe('a render-frame rebase before the next frame', () => {
+    const releaseAt = (current: Harness, press: Point, steps: readonly Point[]): number => {
+      current.pointer('pointerdown', press);
+      for (const step of steps) {
+        current.pointer('pointermove', step);
+        current.runFrame();
+      }
+      const last = steps.at(-1) ?? press;
+      current.pointer('pointerup', last);
+      const [cut] = current.cuts();
+      return cut?.kind === 'plane' ? cut.offset : Number.NaN;
+    };
+
+    /** Where the same drag lands without a rebase. */
+    const landsWithoutRebase = (steps: readonly Point[]): number => {
+      const reference = mountHandles();
+      const offset = releaseAt(reference, { x: 400, y: 300 }, steps);
+      cleanup();
+      reference.actor.stop();
+      reference.canvas.parentElement?.remove();
+      vi.restoreAllMocks();
+      return offset;
+    };
+
+    it('should land a drag step taken between the rebase and the next frame where the pointer is', () => {
+      const expected = landsWithoutRebase([
+        { x: 400, y: 250 },
+        { x: 400, y: 200 },
+      ]);
+      harness = mountHandles();
+      harness.pointer('pointerdown', { x: 400, y: 300 });
+      harness.pointer('pointermove', { x: 400, y: 250 });
+      harness.runFrame();
+
+      // The rig moved the camera; the frame that redraws the handles has not run yet.
+      harness.rebase([0, 0.02, 0.01], { isFrameDrawn: false });
+      // The frame's first step lands at once, before the next frame.
+      harness.pointer('pointermove', { x: 400, y: 200 });
+      const [cut] = harness.cuts();
+
+      expect(cut?.kind === 'plane' ? cut.offset : Number.NaN).toBeCloseTo(expected, 9);
+      expect(expected).toBeGreaterThan(0.05);
+      harness.pointer('pointerup', { x: 400, y: 200 });
+    });
+
+    it('should pick and start a drag pressed between the rebase and the next frame where the pointer is', () => {
+      const expected = landsWithoutRebase([{ x: 400, y: 250 }]);
+      harness = mountHandles();
+
+      harness.rebase([0, 0.02, 0.01], { isFrameDrawn: false });
+      harness.pointer('pointerdown', { x: 400, y: 300 });
+      expect(isHoverSuppressed(harness)).toBe(true);
+      // The next frame lands before the drag's first step.
+      harness.drawFrame();
+      harness.pointer('pointermove', { x: 400, y: 250 });
+      harness.pointer('pointerup', { x: 400, y: 250 });
+
+      const [cut] = harness.cuts();
+      expect(cut?.kind === 'plane' ? cut.offset : Number.NaN).toBeCloseTo(expected, 9);
+      expect(expected).toBeGreaterThan(0.05);
+    });
+  });
+
+  it('should listen on the surface once under StrictMode, giving a press back once', async () => {
+    const added = vi.spyOn(EventTarget.prototype, 'addEventListener');
+    harness = mountHandles({ isStrict: true });
+    // StrictMode replays the handles' ref: graphics stops the first section input before it starts the second, so one
+    // adapter listens.
+    await Promise.resolve();
+    const livePresses = added.mock.calls.filter(
+      ([type, , options]) =>
+        type === 'pointerdown' && typeof options === 'object' && options.capture === true && !options.signal?.aborted,
+    );
+    expect(livePresses).toHaveLength(1);
+    expect(harness.actor.getSnapshot().context.sectionInput).toBeDefined();
+
+    harness.pointer('pointerdown', { x: 400, y: 300 });
+    harness.pointer('pointermove', { x: 400, y: 250 });
+    harness.pointer('pointerup', { x: 400, y: 250 });
+    expect(isHoverSuppressed(harness)).toBe(false);
+    expect(harness.controls.enabled).toBe(true);
+    expect(harness.toolEvents).toEqual([]);
+  });
+
+  it('should schedule no hover pick and take no press while Section is off', () => {
+    harness = mountHandles();
+    harness.send({ type: 'setSectionViewActive', payload: false });
+    const frames = vi.mocked(globalThis.requestAnimationFrame);
+    frames.mockClear();
+
+    harness.pointer('pointermove', { x: 400, y: 300, buttons: 0 });
+    harness.pointer('pointerdown', { x: 400, y: 300 });
+    harness.pointer('pointerup', { x: 400, y: 300 });
+
+    expect(frames).not.toHaveBeenCalled();
+    expect(isHoverSuppressed(harness)).toBe(false);
+    expect(harness.toolEvents).toEqual(['pointermove', 'pointerdown', 'pointerup']);
+  });
+
   it('should keep a dragged plane within the bounds centre ± 2 × radius along its axis', () => {
     harness = mountHandles();
     harness.send({ type: 'sceneRadiusUpdated', radius: 0.01, centerMeters: [0, 0, 0.005] });
@@ -382,7 +580,7 @@ describe('SectionHandles', () => {
       ],
     };
 
-    type Exit = Readonly<{ exit: string; drag: DragPath; end: (harness: Harness) => void }>;
+    type Exit = Readonly<{ exit: string; drag: DragPath; end: (harness: Harness) => void | Promise<void> }>;
 
     it.each<Exit>([
       {
@@ -437,11 +635,13 @@ describe('SectionHandles', () => {
       {
         exit: 'an unmount',
         drag: planeDrag,
-        end: () => {
+        end: async () => {
           cleanup();
+          // Graphics stops the section input when the handles' ref is cleared; one microtask settles any late send.
+          await Promise.resolve();
         },
       },
-    ])('should give everything back and land no later step on $exit', ({ drag, end }) => {
+    ])('should give everything back and land no later step on $exit', async ({ drag, end }) => {
       const current = mountHandles(drag.options);
       harness = current;
       const [firstStep, waitingStep, laterStep] = drag.steps;
@@ -454,7 +654,7 @@ describe('SectionHandles', () => {
       expect(current.surface.hasPointerCapture(1)).toBe(true);
       current.pointer('pointermove', waitingStep);
 
-      end(current);
+      await end(current);
       const afterExit = current.cuts();
 
       expect(current.controls.enabled).toBe(true);
@@ -561,7 +761,8 @@ describe('SectionHandles', () => {
         // Its press is held from the camera and stopped before Measure and the model, and then does nothing.
         const received: string[] = [];
         harness.actor.system.inspect((inspection) => {
-          if (inspection.type === '@xstate.transition') {
+          // The section input is a graphics child in the same system; only graphics' own events are counted.
+          if (inspection.type === '@xstate.transition' && inspection.actorRef === harness?.actor) {
             received.push(inspection.eventType);
           }
         });

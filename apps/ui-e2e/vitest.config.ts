@@ -10,6 +10,8 @@ import { uiBrowserCommands } from './src/support/browser-command.ts';
 import { resolveRequiredWebGpuProfile, webGpuLaunchArguments } from './src/support/webgpu-profile.ts';
 // oxlint-disable-next-line no-restricted-imports -- Vitest config reads which live GitHub variables are set before aliases exist.
 import { missingLiveGithubVariables } from './src/support/github-identity.ts';
+// oxlint-disable-next-line no-restricted-imports -- Vitest config resolves the run's flag state before aliases exist.
+import { flagStateVariable, resolveFlagState } from './src/support/flag-state.ts';
 
 const isCi = Boolean(process.env['CI']);
 const requiredWebGpuProfile = resolveRequiredWebGpuProfile(process.env['TAU_E2E_WEBGPU_PROFILE']);
@@ -111,6 +113,8 @@ export default defineConfig({
     fileParallelism: false,
     provide: {
       crossOriginIsolation: !disableCoi,
+      /* FL4: the run's flag state, so a spec can declare the states it runs in (`#support/flag-state-test.js`). */
+      flagState: resolveFlagState(process.env[flagStateVariable]),
       picovoxelExactPins,
       /* Names only: the live GitHub rows skip naming what is missing (R17). */
       picogkBundle,
@@ -187,6 +191,7 @@ export default defineConfig({
             'src/chat-isolated-workspace.spec.ts',
             'src/picovoxel-multi.spec.ts',
             'src/remote-host.spec.ts',
+            'src/viewer-trackpad-pinch.spec.ts',
           ],
           exclude: hostExcluded,
         },
@@ -195,12 +200,12 @@ export default defineConfig({
           name: 'webkit-smoke',
           include: [
             'src/preview.spec.ts',
-            'src/birdhouse-preview.spec.ts',
             'src/browser-agent-host.spec.ts',
             'src/project-creation-location-unsupported.spec.ts',
             'src/chat-isolated-workspace.spec.ts',
             'src/picovoxel-multi.spec.ts',
             'src/remote-host.spec.ts',
+            'src/viewer-trackpad-pinch.spec.ts',
           ],
           exclude: hostExcluded,
         },

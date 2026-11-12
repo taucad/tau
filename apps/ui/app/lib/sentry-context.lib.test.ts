@@ -7,14 +7,14 @@ const environment = vi.hoisted(() => ({ TAU_DEPLOY_CONTEXT: 'deploy-preview' as 
 vi.mock('#environment.config.js', () => ({ ENV: environment }));
 vi.mock('#lib/build-identity.js', () => ({ readBuildId: () => 1_792_730_113_029 }));
 const device = vi.hoisted(() => ({ constrained: true }));
-vi.mock('#lib/device-memory-class.js', () => ({ isMemoryConstrainedDevice: () => device.constrained }));
+vi.mock('@taucad/ui-core/lib/device-memory-class', () => ({ isMemoryConstrainedDevice: () => device.constrained }));
 type Counts = { readonly liveProjectCount: number; readonly chatCount: number };
 const counts = vi.hoisted((): { value: Counts | undefined } => ({ value: { liveProjectCount: 2, chatCount: 5 } }));
 vi.mock('#lib/memory-kill-signal.js', () => ({ readDocumentSessionCounts: () => counts.value }));
 
 const { applyTauEventContext, readRouteId, setReportedUserId } = await import('#lib/sentry-context.lib.js');
 const { resetMemorySampler, setKernelHeapReader, setLiveCountsReader, takeMemorySample } =
-  await import('#lib/memory-sampler.js');
+  await import('@taucad/ui-core/lib/memory-sampler');
 
 type RouterWindow = Window & { __reactRouterDataRouter?: unknown };
 
@@ -43,6 +43,12 @@ describe('applyTauEventContext', () => {
       build_id: '1792730113029',
       deploy_context: 'deploy-preview',
     });
+  });
+
+  it('should tag a desktop route with its web id, without the out-of-tree prefix', () => {
+    publishRouter(['root', '../../app/routes/projects_']);
+
+    expect(readRouteId()).toBe('routes/projects_');
   });
 
   it('should leave a value it cannot read absent rather than guess, and keep the tags an event has', () => {

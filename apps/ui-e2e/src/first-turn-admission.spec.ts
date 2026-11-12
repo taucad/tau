@@ -49,12 +49,15 @@ test('places the first turn of a fresh project on a revision (W19-b)', async () 
   await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
 
   /*
-   * `Rev 1` on the Revisions chip: the base the turn's lease was written onto.
+   * A save on the History chip: the base the turn's lease was written onto.
    *
-   * The window is generous because the chip's ordinal comes from a graph read
+   * The window is generous because the chip's state comes from a graph read
    * rather than the projection, and a cold page is still booting its kernel
    * when the turn is placed — the pin is "this ever happens", which before the
    * fix it did not, at any length of wait.
    */
-  await target.expectVisible(selectors.getByLabelText(/Open Revisions\. You are on main, Rev 1\./u), 60_000);
+  await target.expectVisible(
+    selectors.getByLabelText(/^Open History\. You are on main\. (?!Nothing saved yet|Unsaved changes|Setting up)/u),
+    60_000,
+  );
 });

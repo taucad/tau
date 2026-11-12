@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: All platforms, Linux-only staging evidence (not public promotion), or Apple silicon-only staging ZIP/DMG evidence
+        description: All platforms, or one platform's evidence (Linux APT/AppImage, or Apple silicon ZIP/DMG) on either channel (D-H5)
         required: true
         default: all
         type: choice
@@ -28,7 +28,7 @@ on:
         required: true
         type: string
       candidate_c:
-        description: Successful trusted C run; staging Mac CI and Linux may pin a trusted ancestor
+        description: Successful trusted C run; the Mac and Linux platform scopes may pin a trusted ancestor (bound by qualification-binding.json)
         required: true
         type: string
 
@@ -36,8 +36,10 @@ permissions:
   contents: read
   actions: read
 
+# Every Linux-scoped run, on either channel, holds the one Linux GPU lock that clean-host acceptance shares: the
+# project's spot T4 quota covers one Linux matrix at a time.
 concurrency:
-  group: desktop-route-qualification-${{ inputs.channel }}-${{ inputs.scope }}
+  group: ${{ inputs.scope == 'linux' && 'desktop-route-qualification-staging-linux' || format('desktop-route-qualification-{0}-{1}', inputs.channel, inputs.scope) }}
   cancel-in-progress: false
 
 env:
@@ -52,6 +54,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.selection.outputs.matrix }}
+      canary: ${{ steps.selection.outputs.canary }}
     steps:
       - name: Fail closed when qualification has not been enabled by its operator
         env:
@@ -69,7 +72,7 @@ jobs:
           node --input-type=module <<'NODE'
           import { appendFileSync } from 'node:fs';
           const scope = process.env.TAU_DESKTOP_QUALIFICATION_SCOPE;
-          if (!['all', 'linux', 'macos'].includes(scope) || (scope !== 'all' && process.env.CHANNEL !== 'staging')) throw new Error('Invalid qualification scope/channel');
+          if (!['all', 'linux', 'macos'].includes(scope) || !['staging', 'production'].includes(process.env.CHANNEL)) throw new Error('Invalid qualification scope/channel');
           const graphics = process.env.TAU_QUALIFICATION_GRAPHICS;
           if (!['stock', 'isolated-software'].includes(graphics) || (graphics === 'isolated-software' && (scope !== 'linux' || process.env.CHANNEL !== 'staging'))) throw new Error('Software CI requires Linux staging');
           const rows = [
@@ -88,27 +91,30 @@ jobs:
           // A scoped run selects exactly its own platform's rows. Mac-only is ZIP and DMG on Apple silicon: hosted Intel
           // Macs have no WebGL, so Intel is out of the Mac-only scope by operator ruling.
           const selected = scope === 'all' ? rows : rows.filter(row => scope === 'linux' ? row.route.startsWith('linux-') : row.route.startsWith('macos-') && row.id.endsWith('-arm64'));
-          appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(selected)}\n`);
+          // Canary first (D-H8): a Linux run starts with one row alone and holds the rest until it passes, so a defect
+          // costs one row instead of the whole serial matrix. Other scopes have no canary.
+          const canary = scope === 'linux' ? selected.slice(0, 1) : [];
+          appendFileSync(process.env.GITHUB_OUTPUT, `canary=${JSON.stringify(canary)}\n`);
+          appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(selected.slice(canary.length))}\n`);
           NODE
 
-  installed:
+  # The Linux canary row runs alone first and the rest of the matrix waits for it (D-H8); it shares the row steps below.
+  canary:
+    if: inputs.scope == 'linux'
     needs: admission
     environment: desktop-qualification-${{ inputs.channel }}
     timeout-minutes: 120
     # id-token lets stock Linux rows sign in to Google Cloud keylessly; tau-ci admits only this repository's main
-    # branch in the staging qualification environment (tau-cloud stacks/gcp).
+    # branch in a desktop qualification environment (tau-cloud stacks/gcp).
     permissions:
       contents: read
       actions: read
       id-token: write
     strategy:
-      fail-fast: false
-      # Stock Linux rows each hold the project's one spot T4 (tau-cloud GPU quota), so they run one at a time.
-      max-parallel: ${{ inputs.scope == 'linux' && inputs.graphics == 'stock' && 1 || 4 }}
       matrix:
-        include: ${{ fromJSON(needs.admission.outputs.matrix) }}
+        include: ${{ fromJSON(needs.admission.outputs.canary) }}
     runs-on: ${{ inputs.scope == 'linux' && 'ubuntu-24.04' || fromJSON(matrix.host) }}
-    env:
+    env: &row-env
       GH_TOKEN: ${{ github.token }}
       TAU_QUALIFICATION_DISPOSABLE_HOST: '1'
       TAU_QUALIFICATION_DIRECTORY: ${{ github.workspace }}/out/route-qualification
@@ -124,7 +130,7 @@ jobs:
       TAU_APPIMAGE_KEY_ID: ${{ vars.TAU_APPIMAGE_KEY_ID }}
       TAU_APT_PRIMARY_FINGERPRINT: ${{ vars.TAU_APT_PRIMARY_FINGERPRINT }}
       TAU_APT_SIGNING_FINGERPRINT: ${{ vars.TAU_APT_SIGNING_FINGERPRINT }}
-    steps:
+    steps: &row-steps
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
@@ -182,16 +188,37 @@ jobs:
             out/route-qualification/qualification-evidence.json
           if-no-files-found: error
 
+  installed:
+    needs: [admission, canary]
+    # Runs after a passed Linux canary, or at once for a scope that has none.
+    if: ${{ !cancelled() && needs.admission.result == 'success' && (needs.canary.result == 'success' || (inputs.scope != 'linux' && needs.canary.result == 'skipped')) }}
+    environment: desktop-qualification-${{ inputs.channel }}
+    timeout-minutes: 120
+    # id-token lets stock Linux rows sign in to Google Cloud keylessly; tau-ci admits only this repository's main
+    # branch in a desktop qualification environment (tau-cloud stacks/gcp).
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      # Stock Linux rows each hold the project's one spot T4 (tau-cloud GPU quota), so they run one at a time.
+      max-parallel: ${{ inputs.scope == 'linux' && inputs.graphics == 'stock' && 1 || 4 }}
+      matrix:
+        include: ${{ fromJSON(needs.admission.outputs.matrix) }}
+    runs-on: ${{ inputs.scope == 'linux' && 'ubuntu-24.04' || fromJSON(matrix.host) }}
+    env: *row-env
+    steps: *row-steps
+
   receipts:
-    if: inputs.graphics != 'isolated-software'
-    needs: installed
+    if: ${{ !cancelled() && inputs.graphics != 'isolated-software' && needs.installed.result == 'success' }}
+    needs: [canary, installed]
     environment: desktop-qualification-${{ inputs.channel }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
       TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate_c }}
-      DESKTOP_ASSETS_DIR: ${{ github.workspace }}/out/qualification-candidate
       TAU_QUALIFICATION_CHANNEL: ${{ inputs.channel }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
       TAU_WINDOWS_PUBLISHER: ${{ vars.TAU_WINDOWS_PUBLISHER }}
@@ -220,5 +247,5 @@ jobs:
           name: ${{ inputs.scope == 'linux' && 'desktop-linux-ci-receipts' || inputs.scope == 'macos' && 'desktop-macos-ci-receipts' || 'desktop-route-ci-receipts' }}
           path: |
             out/qualification-receipts/route-receipts.json
-            ${{ inputs.scope == 'macos' && 'out/qualification-receipts/qualification-binding.json' || '' }}
+            ${{ (inputs.scope == 'macos' || inputs.scope == 'linux') && 'out/qualification-receipts/qualification-binding.json' || '' }}
           if-no-files-found: error

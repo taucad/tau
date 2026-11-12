@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor, createCallbackLogic } from 'xstate';
 import { importGitHubMachine } from '#machines/import-github.machine.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 
 vi.mock('#lib/github-api.js', () => ({
   getGitHubClient: vi.fn(() => ({

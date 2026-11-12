@@ -1,7 +1,7 @@
 import { Globe } from 'lucide-react';
 import type { ToolInvocation } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
-import { extractDomainFromUrl, safeExtractDomainFromUrl } from '#utils/url.utils.js';
+import { extractDomainFromUrl, safeExtractDomainFromUrl } from '@taucad/ui-core/utils/url.utils';
 import {
   ChatToolCard,
   ChatToolCardHeader,

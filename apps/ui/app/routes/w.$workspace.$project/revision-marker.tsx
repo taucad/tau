@@ -1,30 +1,25 @@
 /**
- * One revision, wherever a person meets it (charter D7; canvas rounds 3–21).
+ * One history entry, wherever a person meets it (charter D7; blueprint C3).
  *
  * `RevisionRow` is a History row: at rest the whole row is one button that opens
- * it, with its marker on the line, its title, who made it and `Rev N`. Opened,
- * it shows the files it changed (each row opening its own comparison), one
- * actions row, and the Details disclosure. `RevisionMenu` and `RevisionDetails`
- * are that row's More and Details, shared with the chat marker so a person
- * reaches the same verbs from either place.
+ * it, with its marker on the line, its title, who made it, and its time (or a
+ * version's `V3`) in the right-hand column. Opened, it has no fill: it shows the
+ * files the entry changed (each opening its own comparison), Restore, Compare
+ * and More, and one line of facts. `RevisionMenu` is that row's More, shared
+ * with the chat marker so a person reaches the same verbs from either place.
  */
 import { useEffect, useId, useRef, useState } from 'react';
-import { useSelector } from '@xstate/react';
 import {
   Bot,
-  Check,
   ChevronDown,
-  Copy,
   EllipsisVertical,
   GitBranch,
   GitCompare,
   GitMerge,
-  Link2,
+  Pencil,
   RotateCcw,
   Tag,
-  Trash2,
-  Undo2,
-  X,
+  TriangleAlert,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -37,30 +32,20 @@ import {
 import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@taucad/ui/components/dialog';
-import { Input } from '@taucad/ui/components/input';
-import { Label } from '@taucad/ui/components/label';
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import { cn } from '@taucad/ui/utils/cn';
+import { generatedSetupPaths } from '@taucad/revisions';
 import type { RevisionDiffEntry } from '@taucad/revisions';
 import type { RevisionComparisonNotice } from '@taucad/revisions/algorithms';
-import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { DiffViewer } from '#components/code/diff-viewer.js';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
-import { ActionButton, ActionsRow, disclosureMotion } from '@taucad/ui/components/actions';
+import { disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
 import {
   timelineGutter,
@@ -70,22 +55,29 @@ import {
   timelineRowContent,
   timelineRowHover,
 } from '#components/revisions/revision-timeline.js';
-import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
-import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
-import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-language-resolution';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
+import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionChanges, useRevisionChangesSince, useRevisionFileComparison } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
-import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { consumeRevisionReveal, useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import type { AffectedPublication } from '#routes/w.$workspace.$project/revision-ref-removal.js';
-import { revisionName, revisionTriggerLabel } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import {
+  entryReference,
+  entryTime,
+  startFact,
+  versionLabel,
+  versionOf,
+} from '#routes/w.$workspace.$project/revision-vocabulary.js';
 
-/** Whether a revision is one of the autosaves History folds. */
+/** Whether a revision is one of the autosaves History folds: a turn's base cut is one too (A5). */
 export const isAutosave = (revision: RevisionCard): boolean =>
-  revision.trigger === 'idle' || revision.trigger === 'hidden' || revision.trigger === 'close';
+  revision.turnCut === 'base' ||
+  (revision.turnId === undefined &&
+    (revision.capture === 'idle' || revision.capture === 'hidden' || revision.capture === 'close'));
 
 /* The file's state is muted at 90%, the lightest step that keeps 4.5:1 on the
    file list in every theme; a hovered row returns it to the full muted colour. */
@@ -96,6 +88,9 @@ const changeLabels: Readonly<Record<RevisionDiffEntry['kind'], string>> = {
 };
 
 const initialFileRows = 3;
+
+/* The files Tau owns as project setup, at the project root (A4). */
+const isSetupPath = (path: string): boolean => generatedSetupPaths.has(path);
 const comparisonNotices: Readonly<Record<RevisionComparisonNotice, string>> = {
   'empty-added': 'Empty file added.',
   'empty-deleted': 'Empty file deleted.',
@@ -118,14 +113,11 @@ function FileComparison({
   revisionId,
   path,
   compareAgainst,
-  n,
 }: {
   readonly id: string;
   readonly revisionId: string;
   readonly path: string;
   readonly compareAgainst: 'parent' | 'checkout';
-  /** The revision's number, which a comparison with the current files names. */
-  readonly n: number | undefined;
   // oxlint-disable-next-line typescript/no-restricted-types -- required by React
 }): React.JSX.Element | null {
   const { original, modified, comparison, isLoading, isLoaded, error, retry } = useRevisionFileComparison(
@@ -136,14 +128,8 @@ function FileComparison({
   const label = `Comparison for ${path}`;
   if (isLoading) {
     return (
-      <div
-        id={id}
-        role='status'
-        aria-label={label}
-        aria-busy='true'
-        className='flex items-center gap-2 border-t px-2 py-1.5 text-xs text-muted-foreground'
-      >
-        <Spinner className='size-3' /> Loading comparison…
+      <div id={id} role='status' aria-label={label} aria-busy='true' className='border-t px-2 py-1.5'>
+        <ComparisonSkeleton />
       </div>
     );
   }
@@ -155,8 +141,11 @@ function FileComparison({
         aria-label={label}
         className='flex flex-wrap items-center gap-2 border-t px-2 py-1.5 text-xs'
       >
-        <span className='min-w-0 flex-auto'>{`Could not compare ${path}. ${error}`}</span>
-        <ActionButton verb='Retry' icon={RotateCcw} className='ml-auto' onClick={retry} />
+        <span className='min-w-0 flex-auto'>{`Couldn’t compare ${path}.`}</span>
+        <Button size='xs' variant='outline' className='ml-auto' onClick={retry}>
+          <RotateCcw aria-hidden className='size-3.5' />
+          Try again
+        </Button>
       </div>
     );
   }
@@ -166,9 +155,7 @@ function FileComparison({
   if (comparison.change === 'unchanged') {
     return (
       <p id={id} role='note' aria-label={label} className='border-t px-2 py-1.5 text-xs text-muted-foreground'>
-        {compareAgainst === 'checkout'
-          ? `No changes since ${revisionName(n) ?? 'this revision'}.`
-          : 'No changes in this file.'}
+        {compareAgainst === 'checkout' ? 'No changes since then.' : 'No changes in this file.'}
       </p>
     );
   }
@@ -200,10 +187,26 @@ function FileComparison({
         <p role='note' className='px-2 py-1.5 text-xs text-muted-foreground'>
           {comparison.kind === 'binary'
             ? `Binary file ${comparison.change === 'added' ? 'added' : comparison.change === 'deleted' ? 'deleted' : 'changed'}.`
-            : 'Text comparison is unavailable: a version of this file has an unsupported encoding or invalid text.'}
+            : 'This file can’t be shown as text.'}
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * A comparison that has not arrived: two skeleton lines, with the words kept
+ * for screen readers only (M7).
+ *
+ * @returns The skeleton.
+ */
+function ComparisonSkeleton(): React.JSX.Element {
+  return (
+    <span className='flex flex-col gap-1.5 py-0.5'>
+      <span className='sr-only'>Loading comparison…</span>
+      <Skeleton aria-hidden className='h-3 w-3/4' />
+      <Skeleton aria-hidden className='h-3 w-1/2' />
+    </span>
   );
 }
 
@@ -253,9 +256,24 @@ function FileList({
   if (changes.length === 0) {
     return null;
   }
+  /* A4: Tau's own setup files last, under a plain label (canvas "An open row"). */
+  const ordered = [
+    ...changes.filter((change) => !isSetupPath(change.path)),
+    ...changes.filter((change) => isSetupPath(change.path)),
+  ];
+  const shown = isExpanded ? ordered : ordered.slice(0, initialFileRows);
+  const firstSetup = shown.findIndex((change) => isSetupPath(change.path));
   return (
     <ul aria-label={label} className='flex flex-col divide-y overflow-hidden rounded-md border bg-background'>
-      {(isExpanded ? changes : changes.slice(0, initialFileRows)).map((change, index) => (
+      {shown.flatMap((change, index) => [
+        ...(index === firstSetup
+          ? [
+              /* A label, not a file: assistive technology counts only the files as items. */
+              <li key='project-setup' role='presentation' className='px-2 py-1 text-xs text-muted-foreground'>
+                Project setup
+              </li>,
+            ]
+          : []),
         <Collapsible
           key={change.path}
           asChild
@@ -292,12 +310,11 @@ function FileList({
                 revisionId={revision.revisionId}
                 path={change.path}
                 compareAgainst={compareAgainst}
-                n={revision.n}
               />
             </CollapsibleContent>
           </li>
-        </Collapsible>
-      ))}
+        </Collapsible>,
+      ])}
       {changes.length > initialFileRows ? (
         <li>
           <button
@@ -309,7 +326,7 @@ function FileList({
               setComparing(undefined);
             }}
           >
-            {isExpanded ? 'Collapse files' : `Show all ${String(changes.length)} files`}
+            {isExpanded ? 'Show fewer' : `Show all ${String(changes.length)} files`}
           </button>
         </li>
       ) : null}
@@ -318,12 +335,11 @@ function FileList({
 }
 
 /**
- * *Compare with current* (canvas round 4b): the whole revision against the
- * files as they are now — every path that differs from the checkout's head,
- * each opening the same checkout comparison a file row does — until the person
- * stops comparing.
+ * *Compare* (blueprint C3): the whole entry against the files as they are now —
+ * every path that differs, each opening the same checkout comparison a file row
+ * does — until the person says Done.
  *
- * @param props - The revision, and how to go back to its own changes.
+ * @param props - The entry, and how to go back to its own changes.
  * @returns The comparison.
  */
 function CurrentComparison({
@@ -334,67 +350,70 @@ function CurrentComparison({
   readonly onStop: () => void;
 }): React.JSX.Element {
   const { changes, isLoaded, error, retry } = useRevisionChangesSince(revision);
-  const name = revisionName(revision.n) ?? 'this revision';
+  const name = entryReference(revision) ?? 'this point';
   const body =
     error === undefined ? (
       isLoaded ? (
         changes.length === 0 ? (
-          <p role='note' className='text-xs text-muted-foreground'>{`No changes since ${name}.`}</p>
+          <p role='note' className='text-xs text-muted-foreground'>
+            No changes since then.
+          </p>
         ) : (
           <FileList revision={revision} changes={changes} compareAgainst='checkout' label={`Changed since ${name}`} />
         )
       ) : (
-        <p role='status' aria-busy='true' className='flex items-center gap-2 text-xs text-muted-foreground'>
-          <Spinner className='size-3' /> Loading comparison…
+        <p role='status' aria-busy='true'>
+          <ComparisonSkeleton />
         </p>
       )
     ) : (
-      <div role='alert' className='flex items-center gap-2 text-xs'>
-        <span>{`Could not compare the current files. ${error}`}</span>
-        <ActionButton verb='Retry' icon={RotateCcw} onClick={retry} />
+      <div role='alert' className='flex flex-wrap items-center gap-2 text-xs'>
+        <span className='min-w-0 flex-auto'>Couldn’t compare with your current files.</span>
+        <Button size='xs' variant='outline' onClick={retry}>
+          <RotateCcw aria-hidden className='size-3.5' />
+          Try again
+        </Button>
       </div>
     );
   return (
     <div className='flex flex-col gap-1'>
-      <div className='flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground'>
-        <span className='min-w-0 flex-auto'>Compared with the current files</span>
-        <ActionButton verb='Stop comparing' icon={X} variant='ghost' onClick={onStop} />
-      </div>
+      <p role='status' className='flex min-w-0 flex-wrap items-center gap-2 text-xs'>
+        <GitCompare aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
+        <span className='min-w-0 flex-auto'>Comparing with your current files</span>
+        <Button size='xs' variant='outline' onClick={onStop}>
+          Done
+        </Button>
+      </p>
       {body}
     </div>
   );
 }
 
 /**
- * A revision's exact facts, opened by the Details toggle in the same
- * `Collapsible`. The revision's id lives here and nowhere else a person reads
- * (EQ9); copying it is More's.
+ * The ids an entry is stored under: its own, its tree's and its parent's.
+ * Diagnostics only (B5, M8): they render with Tau's debug setting on and never
+ * otherwise, so a person reads no 40-character id; copying the entry's id is
+ * More's.
  *
- * @param props - The revision and the line it is on.
- * @returns The Details content.
+ * @param revision - The entry.
+ * @returns The Details rows that name its ids.
  */
-export function RevisionDetails({
-  revision,
-  branch,
-}: {
-  readonly revision: RevisionCard;
-  readonly branch: string | undefined;
-}): React.JSX.Element {
+const storedIdRows = (revision: RevisionCard): ReadonlyArray<readonly [string, React.ReactNode]> => {
   /* The first parent the graph named; a branch's first revision follows none. A card
      from elsewhere (a remote settlement) has neither a parent nor a number here. */
   const parent =
     revision.parent === undefined ? (
       revision.n === 1 ? (
-        'None (first revision)'
+        'None (first entry)'
       ) : undefined
     ) : (
       <code key='parent' className='font-mono break-all'>
         {revision.parent}
       </code>
     );
-  const rows: ReadonlyArray<readonly [string, React.ReactNode]> = [
+  return [
     [
-      'Revision',
+      'ID',
       <code key='id' className='font-mono break-all'>
         {revision.revisionId}
       </code>,
@@ -411,34 +430,39 @@ export function RevisionDetails({
           ],
         ] as const)),
     ...(parent === undefined ? [] : ([['Parent', parent]] as const)),
-    ...(branch === undefined ? [] : ([['Branch', branch]] as const)),
-    ['Trigger', revisionTriggerLabel(revision.trigger)],
-    ...(revision.createdAt > 0
-      ? ([
-          [
-            'Recorded',
-            <span key='recorded' className='tabular-nums'>
-              {new Date(revision.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
-            </span>,
-          ],
-        ] as const)
-      : []),
-    ...(revision.actor === '' ? [] : ([['By', revision.actor]] as const)),
   ];
+};
+
+/**
+ * The ids and trailer an entry is stored under, under its open row's facts:
+ * diagnostics, rendered with Tau's debug setting on and never otherwise (B5).
+ *
+ * @param props - The entry.
+ * @returns The list, or nothing with the setting off.
+ */
+// oxlint-disable-next-line typescript/no-restricted-types -- required by React
+function RevisionDiagnostics({ revision }: { readonly revision: RevisionCard }): React.JSX.Element | null {
+  const isDebug = useFeature('tauDebug');
+  if (!isDebug) {
+    return null;
+  }
   return (
-    <CollapsibleContent className={disclosureMotion}>
-      <dl
-        aria-label={`Details for ${revisionName(revision.n) ?? 'this revision'}`}
-        className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 px-1 pt-1 text-xs'
-      >
-        {rows.map(([term, value]) => (
-          <div key={term} className='contents'>
-            <dt className='text-muted-foreground'>{term}</dt>
-            <dd className='min-w-0'>{value}</dd>
-          </div>
-        ))}
-      </dl>
-    </CollapsibleContent>
+    <dl aria-label='Diagnostics' className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs'>
+      {storedIdRows(revision).map(([term, value]) => (
+        <div key={term} className='contents'>
+          <dt className='text-muted-foreground'>{term}</dt>
+          <dd className='min-w-0'>{value}</dd>
+        </div>
+      ))}
+      {revision.trailer === undefined ? null : (
+        <div className='col-span-2 flex min-w-0 flex-col gap-0.5'>
+          <dt className='text-muted-foreground'>Recorded trailer</dt>
+          <dd className='min-w-0'>
+            <code className='block font-mono break-all whitespace-pre-wrap'>{revision.trailer}</code>
+          </dd>
+        </div>
+      )}
+    </dl>
   );
 }
 
@@ -450,14 +474,14 @@ type NameRemoval = Readonly<{
 }>;
 
 /**
- * Removing a version name, confirmed and named (L3-F5, D24): the audited server
- * verb first when the project backs up to Tau Cloud, then this device's name.
+ * A rename's second step: the old name leaves through the audited server verb
+ * first when the project backs up to Tau Cloud, then this device's name. A
+ * version itself is never removed (Q13); only the name a rename replaced goes.
  *
  * @returns The removal in progress, and its verbs.
  */
 function useNameRemoval(): Readonly<{
   removal: NameRemoval | undefined;
-  ask: (name: string) => void;
   remove: (name: string, publication?: AffectedPublication) => Promise<void>;
   dismiss: () => void;
 }> {
@@ -501,9 +525,6 @@ function useNameRemoval(): Readonly<{
 
   return {
     removal,
-    ask: (name) => {
-      setRemoval({ name, publication: undefined, error: undefined, isBusy: false });
-    },
     remove,
     dismiss: () => {
       setRemoval(undefined);
@@ -512,248 +533,75 @@ function useNameRemoval(): Readonly<{
 }
 
 /**
- * Copy revision id: it says Copied with a check for two seconds, or Copy failed
- * with the shared copy button's glyph and an announcement, and the menu stays
- * open so the person sees which.
+ * The number the next version takes, as this page knows the project's versions:
+ * the highest it has read plus one, and V2 at least, because V1 is Start (B6).
  *
- * @param props - The revision id.
- * @returns The menu item.
+ * @param revisions - The entries this page has read.
+ * @returns The number.
+ * @public
  */
-function CopyRevisionId({ revisionId }: { readonly revisionId: string }): React.JSX.Element {
-  const { ticked, trigger } = useTickAnimation();
-  const [outcome, setOutcome] = useState<'copied' | 'failed'>('copied');
-  const isCopied = ticked && outcome === 'copied';
-  const isFailed = ticked && outcome === 'failed';
-  const copy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(revisionId);
-      setOutcome('copied');
-    } catch {
-      setOutcome('failed');
-    }
-    trigger();
-  };
-  return (
-    <>
-      <DropdownMenuItem
-        onSelect={(event) => {
-          event.preventDefault();
-          void copy();
-        }}
-      >
-        {isFailed ? (
-          <X aria-hidden className='text-feature' />
-        ) : isCopied ? (
-          <Check aria-hidden className='text-success' />
-        ) : (
-          <Copy aria-hidden />
-        )}
-        {isFailed ? 'Copy failed' : isCopied ? 'Copied' : 'Copy revision id'}
-      </DropdownMenuItem>
-      {isFailed ? (
-        <span role='alert' className='sr-only'>
-          Copy failed. Select the id in Details and copy it.
-        </span>
-      ) : null}
-    </>
-  );
-}
+export const nextVersionNumber = (revisions: readonly RevisionCard[]): number =>
+  Math.max(1, ...revisions.flatMap((revision) => (revision.versions ?? []).map((version) => version.number))) + 1;
 
 /**
- * *Publish* for a revision older than the one you are on (canvas: a row's More).
+ * An entry's More, one menu on its History row and in the chat marker: two
+ * items, Create version… (Rename version… on a version) and New branch from
+ * here…, each opening the one naming form under this menu's button. There is
+ * no way to remove a version (Q13) and no Publish: Share owns publishing.
  *
- * The head publishes from the Share panel; an older revision is named and
- * published here, through the same `publish.machine` with its id, so the link
- * points at exactly this revision (W1b). The link is public: private links and
- * invitations stay in the Share panel.
- *
- * @param props - The revision, how to close, and where focus returns.
- * @returns The dialog.
- */
-function PublishRevisionDialog({
-  revision,
-  onClose,
-  restoreFocus,
-}: {
-  readonly revision: RevisionCard;
-  readonly onClose: () => void;
-  /** Puts focus back on the More that opened it. */
-  readonly restoreFocus: () => void;
-}): React.JSX.Element {
-  const status = useRevisionStatus();
-  const commands = useRevisionCommands();
-  const { projectRef } = useProject();
-  const project = useSelector(projectRef, (state) => state.context.project);
-  const inputId = useId();
-  const [name, setName] = useState(revision.tags?.[0] ?? '');
-  /* The facet is the project's one publish machine; this dialog reads it only for the publish it sent. */
-  const [isSent, setIsSent] = useState(false);
-  const facet = isSent ? status?.publish : undefined;
-  const link = facet?.phase === 'success' ? facet.shareUrl : undefined;
-  const error = facet?.phase === 'error' ? facet.error : undefined;
-  const isBusy = facet?.phase === 'choosingVersion' || facet?.phase === 'working';
-  const title = `Publish ${revisionName(revision.n) ?? 'this revision'}`;
-  const close = (): void => {
-    if (isSent) {
-      commands.resetPublish();
-    }
-    onClose();
-  };
-  return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open) {
-          close();
-        }
-      }}
-    >
-      <DialogContent
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          restoreFocus();
-        }}
-      >
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>
-            A published link always points at a named version that is backed up on Tau Cloud.
-          </DialogDescription>
-        </DialogHeader>
-        {link === undefined ? (
-          <form
-            className='flex flex-col gap-3'
-            onSubmit={(event) => {
-              event.preventDefault();
-              const tag = name.trim();
-              const projectName = project?.name ?? 'Untitled';
-              commands.publishProject(tag, revision.revisionId);
-              commands.confirmPublish({
-                tag,
-                projectName,
-                entryPath: project?.assets.main.entryPath ?? '',
-                visibility: 'public',
-                title: projectName,
-              });
-              setIsSent(true);
-            }}
-          >
-            <Label htmlFor={inputId} className='text-xs font-normal'>
-              Version name
-            </Label>
-            <Input
-              autoFocus
-              id={inputId}
-              value={name}
-              placeholder='e.g. Ready for print v2'
-              onChange={(event) => {
-                setName(event.target.value);
-              }}
-            />
-            {error === undefined ? null : (
-              <p role='alert' className='text-sm'>
-                {error}
-              </p>
-            )}
-            <DialogFooter>
-              <Button type='button' variant='outline' size='sm' onClick={close}>
-                Cancel
-              </Button>
-              <Button type='submit' size='sm' disabled={name.trim() === '' || isBusy}>
-                {isBusy ? <Spinner aria-hidden /> : <Link2 aria-hidden />}
-                Publish
-              </Button>
-            </DialogFooter>
-          </form>
-        ) : (
-          <div className='flex flex-col gap-3'>
-            <p role='status' className='text-sm'>
-              {`${name.trim()} is published. Anyone with the link can open it.`}
-            </p>
-            <div className='flex items-center gap-2'>
-              <Input
-                readOnly
-                value={link}
-                aria-label='Published link'
-                onFocus={(event) => {
-                  event.target.select();
-                }}
-              />
-              <CopyButton size='icon' tooltip='Copy link' getText={() => link} />
-            </div>
-            <DialogFooter>
-              <Button variant='outline' size='sm' onClick={close}>
-                Done
-              </Button>
-            </DialogFooter>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/**
- * A revision's More, one menu on its History row and in the chat marker, so the
- * chat reaches what History does: naming it, publishing it, a new branch from
- * it, copying its id, and removing its name. Naming and a new branch open the one
- * naming form under this menu's button; a removal asks by name first.
- *
- * @param props - The revision, whether it is the checkout's head, and its line.
- * @returns The menu.
+ * @param props - The entry, its branch, and the number a new version takes.
+ * @returns The menu, or nothing for a person who cannot write.
  */
 export function RevisionMenu({
   revision,
-  isCurrent,
   branch,
-  onCompareWithCurrent,
+  nextVersion,
 }: {
   readonly revision: RevisionCard;
-  readonly isCurrent: boolean;
   readonly branch: string | undefined;
-  /** History's row compares the whole revision with the current files; absent where nothing would show it. */
-  readonly onCompareWithCurrent?: () => void;
-}): React.JSX.Element {
-  const status = useRevisionStatus();
+  /** The number a new version takes, from {@link nextVersionNumber}; the form says it where the surface knows it. */
+  readonly nextVersion?: number;
+  // oxlint-disable-next-line typescript/no-restricted-types -- required by React
+}): React.JSX.Element | null {
   const role = useProjectRole();
   const commands = useRevisionCommands();
-  const workspace = useProjectWorkspace({ enableNoContext: true });
-  const { removal, ask, remove, dismiss } = useNameRemoval();
+  const { removal, remove, dismiss } = useNameRemoval();
   const moreRef = useRef<HTMLButtonElement>(null);
-  /* A menu item that opens a form or a dialog opens it once the menu has closed,
-     so the menu's focus trap neither keeps focus from it nor takes it back. */
-  const opens = useRef<'name' | 'branch' | 'remove' | 'publish'>(undefined);
+  /* A menu item opens its form once the menu has closed, so the menu's focus trap neither keeps focus from it nor takes it back. */
+  const opens = useRef<'name' | 'branch'>(undefined);
   const [form, setForm] = useState<'name' | 'branch'>('name');
   const [isFormOpen, setIsFormOpen] = useState(false);
-  const [isPublishOpen, setIsPublishOpen] = useState(false);
-  const name = revisionName(revision.n) ?? 'this revision';
+  const name = entryReference(revision) ?? 'this point';
   const named = revision.tags?.[0];
-  const canWrite = role !== 'read' && role !== 'revoked';
-  const isTauCloud = status?.remote.kind === 'tau' && status.remote.phase === 'connected';
-  /* Only the owner may remove a name the Hosted Remote holds; the verb the server would refuse is absent. */
-  const canRemoveName = canWrite && (!isTauCloud || role === 'owner');
+  const version = revision.versions?.[0];
+  if (role === 'read' || role === 'revoked') {
+    return null;
+  }
 
   const formCopy =
     form === 'name'
       ? {
-          label: `Name ${name}`,
+          label: 'Version name',
           placeholder: 'e.g. Ready for print',
-          note: 'A name makes this revision easy to find and to publish.',
-          saveLabel: named === undefined ? 'Save name' : 'Rename version',
+          note:
+            named === undefined
+              ? `${nextVersion === undefined ? '' : `This will be ${versionLabel(nextVersion)}. `}A version is a fixed point you can return to, compare with and share.`
+              : `${version === undefined ? 'This version' : versionLabel(version.number)} keeps its number. A version is permanent.`,
+          saveLabel: named === undefined ? 'Create version' : 'Rename',
           initial: named ?? '',
           onSave: async (value: string): Promise<void> => {
             if (value === named) {
               return;
             }
             await commands.tag({ name: value, revisionId: revision.revisionId });
-            /* A rename removes the old name through the same confirmed path. */
+            /* A rename moves the name: the old one goes through the same audited path a backed-up name needs. */
             if (named !== undefined) {
               void remove(named);
             }
           },
         }
       : {
-          label: 'Name for the new branch',
+          label: 'Branch name',
           placeholder: 'enclosure-v2',
           note: `Starts from ${name}.${branch === undefined ? '' : ` ${branch} stays as it is.`}`,
           saveLabel: 'Create branch',
@@ -768,9 +616,10 @@ export function RevisionMenu({
     <>
       <DropdownMenu>
         <NamePopover
+          align='end'
           anchor={
             <DropdownMenuTrigger asChild>
-              <Button ref={moreRef} size='icon-xs' variant='outline' aria-label={`More actions for ${name}`}>
+              <Button ref={moreRef} size='icon-xs' variant='outline' aria-label='More'>
                 <EllipsisVertical aria-hidden />
               </Button>
             </DropdownMenuTrigger>
@@ -789,93 +638,31 @@ export function RevisionMenu({
             }
             opens.current = undefined;
             event.preventDefault();
-            if (next === 'remove') {
-              if (named !== undefined) {
-                ask(named);
-              }
-              return;
-            }
-            if (next === 'publish') {
-              setIsPublishOpen(true);
-              return;
-            }
             setForm(next);
             setIsFormOpen(true);
           }}
         >
-          {onCompareWithCurrent === undefined ? null : (
-            <DropdownMenuItem onSelect={onCompareWithCurrent}>
-              <GitCompare aria-hidden />
-              Compare with current
-            </DropdownMenuItem>
-          )}
-          {canWrite ? (
-            <DropdownMenuItem
-              onSelect={() => {
-                opens.current = 'name';
-              }}
-            >
-              <Tag aria-hidden />
-              {named === undefined ? 'Name version…' : 'Rename version…'}
-            </DropdownMenuItem>
-          ) : null}
-          {/* The revision you are on publishes from the Share panel; an older one names and publishes itself here. */}
-          {canWrite && isTauCloud && (!isCurrent || workspace !== undefined) ? (
-            <DropdownMenuItem
-              onSelect={() => {
-                if (isCurrent) {
-                  workspace?.openPanel('share');
-                  return;
-                }
-                opens.current = 'publish';
-              }}
-            >
-              <Link2 aria-hidden />
-              {isCurrent ? 'Publish…' : named === undefined ? 'Publish as a named version…' : `Publish ${named}…`}
-            </DropdownMenuItem>
-          ) : null}
-          {canWrite ? (
-            <DropdownMenuItem
-              onSelect={() => {
-                opens.current = 'branch';
-              }}
-            >
-              <GitBranch aria-hidden />
-              {`New branch from ${name}…`}
-            </DropdownMenuItem>
-          ) : null}
-          <CopyRevisionId revisionId={revision.revisionId} />
-          {named === undefined || !canRemoveName ? null : (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant='destructive'
-                onSelect={() => {
-                  opens.current = 'remove';
-                }}
-              >
-                <Trash2 aria-hidden />
-                Remove version name…
-              </DropdownMenuItem>
-            </>
-          )}
+          <DropdownMenuItem
+            onSelect={() => {
+              opens.current = 'name';
+            }}
+          >
+            {named === undefined ? <Tag aria-hidden /> : <Pencil aria-hidden />}
+            {named === undefined ? 'Create version…' : 'Rename version…'}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => {
+              opens.current = 'branch';
+            }}
+          >
+            <GitBranch aria-hidden />
+            New branch from here…
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      {isPublishOpen ? (
-        <PublishRevisionDialog
-          revision={revision}
-          restoreFocus={() => {
-            moreRef.current?.focus();
-          }}
-          onClose={() => {
-            setIsPublishOpen(false);
-            /* Mounted only while open: focus goes back to More before the dialog unmounts. */
-            moreRef.current?.focus();
-          }}
-        />
-      ) : null}
+      {/* Only a rename's old name that backs a publication, or that Tau Cloud refused to move, asks here. */}
       <AlertDialog
-        open={removal !== undefined}
+        open={removal !== undefined && !removal.isBusy}
         onOpenChange={(open) => {
           if (!open) {
             dismiss();
@@ -894,7 +681,7 @@ export function RevisionMenu({
               {removal?.publication === undefined
                 ? ''
                 : `“${removal.publication.title}” is published from this name. Removing the name also retires that publication, so its link stops opening. `}
-              The revision itself stays in History.
+              The entry itself stays in History.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {removal?.error === undefined ? null : (
@@ -908,7 +695,6 @@ export function RevisionMenu({
             </Button>
             <Button
               variant='destructive'
-              disabled={removal?.isBusy ?? false}
               onClick={() => {
                 if (removal !== undefined) {
                   void remove(removal.name, removal.publication);
@@ -941,7 +727,7 @@ function RevisionMarkerGlyph({
   if (revision.conflicted) {
     return (
       <span className={timelineMarker}>
-        <GitMerge aria-label='Conflicted revision' className='size-3.5 text-warning' />
+        <GitMerge aria-label='Needs your decision' className='size-3.5 text-warning' />
       </span>
     );
   }
@@ -952,7 +738,7 @@ function RevisionMarkerGlyph({
       </span>
     );
   }
-  /* A9: a Restored row is named by what it restored, never by its trigger. */
+  /* A9: a Restored row is named by what it restored, never by its capture. */
   if (revision.restoredFrom !== undefined) {
     return (
       <span className={timelineMarker}>
@@ -960,10 +746,18 @@ function RevisionMarkerGlyph({
       </span>
     );
   }
-  if (revision.trigger === 'merge') {
+  if (revision.capture === 'merge') {
     return (
       <span className={timelineMarker}>
         <GitMerge aria-label='Merged' className='size-3.5 text-muted-foreground' />
+      </span>
+    );
+  }
+  /* A6: a version is the larger solid dot (blueprint "History, Version, Revision"). */
+  if (revision.start !== undefined) {
+    return (
+      <span className={timelineMarker}>
+        <span aria-label='Version' className='size-2.5 rounded-full bg-foreground' />
       </span>
     );
   }
@@ -981,22 +775,117 @@ function RevisionMarkerGlyph({
   );
 }
 
+const startOfDay = (time: number): number => {
+  const day = new Date(time);
+  return new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+};
+
+/**
+ * The right-hand column: the time for today and yesterday, the date before that
+ * (canvas decision 4).
+ *
+ * @param createdAt - Milliseconds since the Unix epoch.
+ * @returns `10:31 AM` or `Nov 5`, or nothing for an entry with no time.
+ */
+const whenOf = (createdAt: number): string => {
+  if (createdAt <= 0) {
+    return '';
+  }
+  const days = Math.round((startOfDay(Date.now()) - startOfDay(createdAt)) / 86_400_000);
+  if (days <= 1) {
+    return entryTime(createdAt);
+  }
+  const isThisYear = new Date(createdAt).getFullYear() === new Date().getFullYear();
+  return new Date(createdAt).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(isThisYear ? {} : { year: 'numeric' }),
+  });
+};
+
+/**
+ * The open row's first fact: who and what asked for the entry, in one phrase
+ * (blueprint copy table, "Details … one line"). A turn's base cut says it holds
+ * the person's own edits (A5); nothing is said when nothing was recorded.
+ *
+ * @param revision - The entry.
+ * @returns The phrase, or `undefined` for none.
+ */
+const entryFact = (revision: RevisionCard): string | undefined => {
+  if (revision.turnCut === 'base') {
+    return 'Your edits, saved before the agent started';
+  }
+  if (revision.actor === 'Agent') {
+    return 'Agent';
+  }
+  if (revision.start !== undefined) {
+    return startFact(revision.start);
+  }
+  const by = revision.actor === 'You' || (revision.actor === '' && revision.isYours === true) ? 'you' : revision.actor;
+  if (isAutosave(revision)) {
+    return revision.actor === '' ? 'Autosave' : `Autosave · ${revision.actor}`;
+  }
+  switch (revision.capture) {
+    case 'switch': {
+      return 'Saved before switching branch';
+    }
+    case 'save': {
+      return by === '' ? 'Saved' : `Saved by ${by}`;
+    }
+    case undefined: {
+      return revision.actor === '' ? undefined : revision.actor;
+    }
+    default: {
+      return by === '' ? undefined : `By ${by}`;
+    }
+  }
+};
+
+/**
+ * A who line as text, its parts kept apart: the agent's glyph beside `Agent`,
+ * and a warning glyph beside `recorded as …` when the account that backed the
+ * entry up is not the one it was recorded as (A3c). The words carry the
+ * meaning; the glyphs only point at them.
+ *
+ * @param props - The line.
+ * @returns The parts.
+ */
+function WhoText({ line }: { readonly line: string }): React.JSX.Element {
+  return (
+    <>
+      {line.split(' · ').map((part, index, parts) => (
+        // oxlint-disable-next-line react/no-array-index-key -- the parts of one fixed line, never reordered
+        <span key={index} className='inline-flex min-w-0 items-center gap-1'>
+          {part === 'Agent' ? <Bot aria-hidden className='size-3 shrink-0' /> : null}
+          {part.startsWith('recorded as ') ? (
+            <TriangleAlert aria-hidden className='size-3 shrink-0 text-warning' />
+          ) : null}
+          <span className='min-w-0'>{part}</span>
+          {/* The separator ends its part, so a wrapped line starts with a fact. */}
+          {index === parts.length - 1 ? null : <span aria-hidden> · </span>}
+        </span>
+      ))}
+    </>
+  );
+}
+
 export type RevisionRowProps = {
   readonly revision: RevisionCard;
   /** The row's title, from `revisionTitle`. */
   readonly title: string;
-  /** The revision the checkout reflects: it reads Current and offers no Restore. */
+  /** The newest entry that is not Tau's own setup: it reads Current. */
   readonly isCurrent: boolean;
-  /** The checkout has changes since its head, so the current row compares with them. */
-  readonly isDirty: boolean;
-  /** The line History is showing. */
+  /** The files are exactly at this entry, so there is nothing to restore or compare. */
+  readonly isAtFiles: boolean;
+  /** The branch History is showing. */
   readonly branch: string | undefined;
+  /** The number a new version takes, which Create version… says (B6). */
+  readonly nextVersion: number;
   readonly isOpen: boolean;
   readonly onOpenChange: (isOpen: boolean) => void;
-  /** A restore is in flight or asking: the row's verbs wait. */
+  /** A restore is running: Restore waits. */
   readonly isBusy: boolean;
   readonly onRestore: (revisionId: string) => void;
-  readonly onUndoRestore: () => void;
   /** The newest row shown: the line starts at its marker. */
   readonly isFirst?: boolean;
   /** The oldest row, with nothing hidden after it: the line ends at its marker. */
@@ -1004,24 +893,25 @@ export type RevisionRowProps = {
 };
 
 /**
- * One History row: at rest the whole row is one button — marker, title, who made
- * it, `Rev N` and the time — and opened it shows the files, one actions row and
- * Details (canvas rounds 3–20).
+ * One History row (blueprint C3): at rest the whole row is one button — marker,
+ * title with Current after its last word, who made it, and the time or `V3` in
+ * the right-hand column. Opened it has no fill and shows the files, Restore,
+ * Compare and More, and one line of facts: who, the date and time, and the ID.
  *
- * @param props - The revision, where the checkout is, and the row's verbs.
+ * @param props - The entry, where the files are, and the row's verbs.
  * @returns The row, an item of the History list.
  */
 export function RevisionRow({
   revision,
   title,
   isCurrent,
-  isDirty,
+  isAtFiles,
   branch,
+  nextVersion,
   isOpen,
   onOpenChange,
   isBusy,
   onRestore,
-  onUndoRestore,
   isFirst = false,
   isLast = false,
 }: RevisionRowProps): React.JSX.Element {
@@ -1029,9 +919,8 @@ export function RevisionRow({
   const role = useProjectRole();
   const isRevealed = useRevisionReveal(projectId) === revision.revisionId;
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  /* Canvas round 4b: the row shows its own changes, or the whole revision against the current files. */
-  const [isComparingCurrent, setIsComparingCurrent] = useState(false);
+  const hintId = useId();
+  const [isComparing, setIsComparing] = useState(false);
   useEffect(() => {
     if (!isRevealed) {
       return;
@@ -1041,18 +930,20 @@ export function RevisionRow({
     consumeRevisionReveal(projectId, revision.revisionId);
   }, [isRevealed, projectId, revision.revisionId]);
 
-  const name = revisionName(revision.n);
-  const time =
-    revision.createdAt > 0
-      ? new Date(revision.createdAt).toLocaleTimeString(undefined, { timeStyle: 'short' })
-      : undefined;
+  const { start } = revision;
+  /* M11: an entry has no number; a version shows its `V3` in the column where other rows show their time (A6, B6). */
+  const version = versionOf(revision);
+  const name = version === undefined ? undefined : versionLabel(version.number);
+  const when = whenOf(revision.createdAt);
   /* The who-resolver decides whether a row has a who line (Q2): none on a single-person project. */
-  const actor = revision.actor === '' ? undefined : revision.actor;
+  const actor = start !== undefined || revision.actor === '' ? undefined : revision.actor;
   const canRestore = role !== 'revoked';
-  /* D2, M1: Undo restore lives on the restore row while nothing has landed after it, and only where this
-     device's restore machine holds its undo target — never after a reload or another device's restore. */
-  const isUndoable = useRevisionStatus()?.restore.undoable === true;
-  const canUndoRestore = isCurrent && isUndoable && !isDirty && canRestore;
+  const fact = entryFact(revision);
+  const label = name === undefined ? (when === '' ? title : `${title} · ${when}`) : `${name} · ${title}`;
+  /* A version's second line says it is one; the time the right-hand column gives other rows follows where there is room (A6). */
+  const versionFact = start === undefined ? 'Version' : startFact(start);
+  const TitleIcon =
+    revision.restoredFrom === undefined ? (revision.capture === 'merge' ? GitMerge : undefined) : RotateCcw;
 
   return (
     <Collapsible
@@ -1060,123 +951,168 @@ export function RevisionRow({
       open={isOpen}
       onOpenChange={(next) => {
         if (!next) {
-          setIsComparingCurrent(false);
+          setIsComparing(false);
         }
         onOpenChange(next);
       }}
     >
-      <li className='flex flex-col rounded-md transition-colors data-[state=open]:bg-accent/50 motion-reduce:transition-none'>
+      <li className='flex flex-col'>
         <CollapsibleTrigger asChild>
           <button
             ref={buttonRef}
             type='button'
             data-revision-row={revision.revisionId}
-            aria-label={`${name ?? 'Revision'} · ${title}`}
-            className={cn(timelineRowButton, !isOpen && timelineRowHover)}
+            aria-label={label}
+            className={cn(timelineRowButton, timelineRowHover)}
           >
             <span aria-hidden className={timelineGutter({ hasTop: !isFirst, hasBottom: !isLast })}>
               <RevisionMarkerGlyph revision={revision} isCurrent={isCurrent} />
             </span>
             <span className={timelineRowContent}>
-              <span className='min-w-0 flex-1'>
-                <span
-                  className={cn(
-                    'line-clamp-2 min-w-0 text-sm break-words',
-                    isAutosave(revision) ? 'text-muted-foreground' : 'font-medium',
+              <span className='flex min-w-0 flex-1 flex-col'>
+                {/* One run of text: the title wraps as words do and Current follows its last word (canvas decision 8). */}
+                <span data-slot='row-title' className='min-w-0 text-sm leading-5 wrap-break-word'>
+                  {TitleIcon === undefined ? null : (
+                    <TitleIcon
+                      aria-hidden
+                      className='my-0.75 mr-1.5 inline-block size-3.5 align-top text-muted-foreground'
+                    />
                   )}
-                >
-                  {title}
+                  <span
+                    className={cn(
+                      version !== undefined && 'font-semibold',
+                      version === undefined && isAutosave(revision) && 'text-muted-foreground',
+                    )}
+                  >
+                    {title}
+                  </span>
+                  {isCurrent ? (
+                    <span
+                      data-slot='current-pill'
+                      className='my-0.5 ml-1.5 inline-flex h-4 items-center rounded-full border px-1.5 align-top text-[0.6875rem] leading-none font-medium'
+                    >
+                      Current
+                    </span>
+                  ) : null}
                 </span>
-                {isCurrent || actor !== undefined ? (
-                  <span className='flex min-w-0 flex-wrap items-center gap-x-2 text-xs leading-4 text-muted-foreground'>
-                    {isCurrent ? <span className='text-foreground'>Current</span> : null}
-                    {actor === undefined ? null : (
-                      <span className='flex min-w-0 items-center gap-1'>
-                        {actor === 'Agent' ? <Bot aria-hidden className='size-3 shrink-0' /> : null}
-                        <span className='min-w-0'>{actor}</span>
+                {version !== undefined || actor !== undefined ? (
+                  <span
+                    data-slot='row-meta'
+                    className='flex min-w-0 flex-wrap items-center gap-x-1 text-xs leading-4 text-muted-foreground'
+                  >
+                    {version === undefined ? null : (
+                      <span className='min-w-0'>
+                        {versionFact}
+                        {when === '' ? null : <span className='hidden @[22rem]:inline'> · {when}</span>}
                       </span>
                     )}
+                    {version !== undefined && actor !== undefined ? <span aria-hidden> · </span> : null}
+                    {actor === undefined ? null : <WhoText line={actor} />}
                   </span>
                 ) : null}
               </span>
-              <span className='flex shrink-0 items-center gap-1.5 pt-0.5 text-xs text-muted-foreground'>
-                {name === undefined ? null : <span className='font-mono'>{name}</span>}
-                {time === undefined ? null : (
-                  <time
-                    dateTime={new Date(revision.createdAt).toISOString()}
-                    className='hidden min-w-[8ch] text-right tabular-nums @[22rem]:inline'
-                  >
-                    {time}
-                  </time>
+              <span data-slot='row-when' className='flex shrink-0 items-center gap-1.5 text-xs leading-5'>
+                {name === undefined ? (
+                  when === '' ? null : (
+                    <time
+                      dateTime={new Date(revision.createdAt).toISOString()}
+                      className='whitespace-nowrap text-muted-foreground tabular-nums'
+                    >
+                      {when}
+                    </time>
+                  )
+                ) : (
+                  <span className='font-mono font-medium text-foreground tabular-nums'>{name}</span>
                 )}
                 <ChevronDown
                   aria-hidden
-                  className='size-3 transition-transform group-data-[state=open]/row:rotate-180 motion-reduce:transition-none'
+                  className={cn(
+                    'size-3 text-muted-foreground transition-transform group-data-[state=open]/row:rotate-180 motion-reduce:transition-none',
+                    /* A closed row shows its chevron on hover and keyboard focus only (canvas decision 6). */
+                    !isOpen && 'opacity-0 group-hover/row:opacity-100 group-focus-visible/row:opacity-100',
+                  )}
                 />
               </span>
             </span>
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent className={disclosureMotion}>
-          <div className={timelineOpenBlock(!isLast)}>
-            <Collapsible
-              open={isDetailsOpen}
-              className='flex flex-col gap-2 pt-0.5 pb-2'
-              onOpenChange={setIsDetailsOpen}
-            >
-              {isComparingCurrent ? (
-                <CurrentComparison
-                  revision={revision}
-                  onStop={() => {
-                    setIsComparingCurrent(false);
+          <div data-slot='open-row' className={cn(timelineOpenBlock(!isLast), 'flex flex-col gap-2 pt-0.5 pb-2')}>
+            {isComparing ? (
+              <CurrentComparison
+                revision={revision}
+                onStop={() => {
+                  setIsComparing(false);
+                }}
+              />
+            ) : (
+              <FileRows revision={revision} compareAgainst='parent' />
+            )}
+            {role === 'read' ? (
+              <p className='text-xs text-muted-foreground'>
+                You can view this project. Restore changes only your copy.
+              </p>
+            ) : null}
+            <div data-slot='row-actions' className='flex flex-wrap items-center gap-2'>
+              {canRestore ? (
+                /* The row names the entry, so the label is the short Restore; the name keeps its object. */
+                <Button
+                  size='xs'
+                  variant='outline'
+                  aria-label={`Restore ${entryReference(revision) ?? 'this point'}`}
+                  aria-describedby={isAtFiles ? hintId : undefined}
+                  disabled={isBusy || isAtFiles}
+                  onClick={() => {
+                    onRestore(revision.revisionId);
                   }}
-                />
-              ) : (
-                <FileRows revision={revision} compareAgainst='parent' />
-              )}
-              {role === 'read' && isCurrent ? (
-                <p className='text-xs text-muted-foreground'>
-                  You can view this project. Restore changes only your copy.
-                </p>
+                >
+                  <RotateCcw aria-hidden className='size-3.5' />
+                  Restore
+                </Button>
               ) : null}
-              <ActionsRow
-                slot='row-actions'
-                end={
-                  <RevisionMenu
-                    revision={revision}
-                    isCurrent={isCurrent}
-                    branch={branch}
-                    onCompareWithCurrent={() => {
-                      setIsComparingCurrent(true);
-                    }}
-                  />
-                }
+              <Button
+                size='xs'
+                variant='outline'
+                aria-pressed={isComparing}
+                aria-describedby={isAtFiles ? hintId : undefined}
+                disabled={isAtFiles}
+                onClick={() => {
+                  setIsComparing((current) => !current);
+                }}
               >
-                {isCurrent ? (
-                  canUndoRestore ? (
-                    <ActionButton
-                      verb='Undo restore'
-                      short='Undo'
-                      icon={Undo2}
-                      disabled={isBusy}
-                      onClick={onUndoRestore}
-                    />
-                  ) : null
-                ) : canRestore ? (
-                  /* The row names the revision, so the label is the short Restore; the name keeps its object. */
-                  <ActionButton
-                    verb='Restore'
-                    icon={RotateCcw}
-                    aria-label={name === undefined ? 'Restore this revision' : `Restore ${name}`}
-                    disabled={isBusy}
-                    onClick={() => {
-                      onRestore(revision.revisionId);
-                    }}
-                  />
-                ) : null}
-              </ActionsRow>
-              <RevisionDetails revision={revision} branch={branch} />
-            </Collapsible>
+                <GitCompare aria-hidden className='size-3.5' />
+                Compare
+              </Button>
+              <span className='ml-auto flex'>
+                <RevisionMenu revision={revision} branch={branch} nextVersion={nextVersion} />
+              </span>
+            </div>
+            {isAtFiles ? (
+              <p id={hintId} className='text-xs text-muted-foreground'>
+                Your files are at this point, so there is nothing to restore or compare.
+              </p>
+            ) : null}
+            <p
+              data-slot='row-facts'
+              className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground'
+            >
+              {fact === undefined ? null : (
+                <span className='inline-flex min-w-0 flex-wrap items-center gap-x-1'>
+                  <WhoText line={fact} />
+                </span>
+              )}
+              {revision.createdAt > 0 ? (
+                <span className='tabular-nums'>
+                  {new Date(revision.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                </span>
+              ) : null}
+              <span className='inline-flex items-center gap-1'>
+                ID <code className='font-mono'>{revision.revisionId.slice(0, 7)}</code>
+                {/* The glyph copies the full ID; nothing longer renders (B5). */}
+                <CopyButton size='icon-xs' tooltip='Copy ID' className='-my-1' getText={() => revision.revisionId} />
+              </span>
+            </p>
+            <RevisionDiagnostics revision={revision} />
           </div>
         </CollapsibleContent>
       </li>

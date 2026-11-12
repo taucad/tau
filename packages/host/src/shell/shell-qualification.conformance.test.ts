@@ -7,8 +7,11 @@
  * Every T row is driven the way a person's chat drives it: a scripted model (`ModelTransport`) calls the official
  * `shell` tool through a real Tau agent host, its host tool registry and admission, the shell service, the real sandbox
  * provider and the machine's own Bash. Placement uses the explicit `placementOver` fixture: it applies admission
- * and completion immediately, so these rows do not qualify real revision/custody settlement. Candidate T12 uses a
- * copied directory. Network C04/T10 deliberately substitute DNS and connection routing to an owned endpoint; they
+ * and completion immediately, so those rows do not qualify real revision/custody settlement, and candidate T12 uses a
+ * copied directory. T12-custody qualifies both instead: a real project host, composed as the desktop utility composes
+ * one, places the run in the linked checkout of a branch the project's own verb made, holds each shell execution on
+ * the run's lease, records the turn only once that hold is released, and changes the live project only when the
+ * branch is merged. Network C04/T10 deliberately substitute DNS and connection routing to an owned endpoint; they
  * do not qualify unmodified DNS/rebinding. The provider also carries count/resource observers. Every negative uses file
  * digests, a controlled network endpoint's request log, the process table.
  *
@@ -44,6 +47,7 @@ import type { Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { MessageChannel } from 'node:worker_threads';
 import { z } from 'zod';
 
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
@@ -51,14 +55,18 @@ import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vites
 import { createTauAgentHost } from '@taucad/agent-host';
 import type { InterruptRequest, JsonValue } from '@taucad/agent-host';
 import { createNodeEventLog } from '@taucad/agent-host/node';
+import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
+import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createSandboxShellProvider } from '@taucad/native-process-core/shell';
 import type { ShellLaunch, ShellProvider } from '@taucad/native-process-core/shell';
+import { probeHostShell, shellLimits } from '@taucad/shell-service';
+import type { HostShell, PermissionMode, ShellCheckout, ShellInput, ShellOutput } from '@taucad/shell-service';
 
 import { createHostToolRegistry } from '#agent-tools.js';
-import { shellLimits } from '#shell/shell-contract.js';
-import type { PermissionMode, ShellInput, ShellOutput } from '#shell/shell-contract.js';
-import { probeHostShell } from '#shell/shell-service.js';
-import type { HostShell, ShellCheckout } from '#shell/shell-service.js';
+import { createProjectHost } from '#project-host.js';
+import type { ProjectFileSystem, ProjectHost } from '#project-host.js';
+import type { TurnFinalizedEvent } from '#revisions.js';
 import { placementOver, scriptedTransport } from '#shell/tau-host.fixture.js';
 import type { ScriptedResponse } from '#shell/tau-host.fixture.js';
 import {
@@ -69,6 +77,7 @@ import {
   otherName,
   processesWith,
   seeded,
+  treeDigestOf,
 } from '#shell/qualification.fixture.js';
 
 const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
@@ -362,6 +371,157 @@ const shellCall = (id: string, input: ShellInput): Call => ({ id, input: input a
  */
 const widening = (id: string, input: ShellInput): Call[] => [shellCall(`${id}-ask`, input), shellCall(id, input)];
 
+/**
+ * A filesystem authority over one project, as the desktop utility serves a project host: it admits the workspace, and
+ * each candidate root while the host keeps it admitted.
+ */
+const authorityOver = (
+  workspaceRoot: string,
+  authorityDirectory: string,
+): Readonly<{ fileSystem: ProjectFileSystem; close: () => Promise<void> }> => {
+  mkdirSync(authorityDirectory, { recursive: true });
+  const authority = new NodeFsAuthorityHost({
+    authorityDirectory: () => authorityDirectory,
+    authorityIdentity: () => 'shell-qualification',
+  });
+  const admitted = new Map<string, number>([[workspaceRoot, 1]]);
+  const ports = new MessageChannel();
+  const served = serveNodeFsProvider(toNodeFsPort(ports.port1), {
+    authority,
+    allowRoot: (admittedRoot) => (admitted.get(admittedRoot) ?? 0) > 0,
+    policy: tauPathPolicy,
+  });
+  const channel = new NodeFsChannel(toNodeFsPort(ports.port2));
+  return {
+    fileSystem: {
+      open: (openedRoot) => new NodeFsProviderClient(channel, openedRoot),
+      admit: (admittedRoot) => {
+        admitted.set(admittedRoot, (admitted.get(admittedRoot) ?? 0) + 1);
+        return () => {
+          admitted.set(admittedRoot, (admitted.get(admittedRoot) ?? 1) - 1);
+        };
+      },
+      mutate: async (target, mutation) =>
+        authority.run({ root: target.parentRoot, paths: [target.targetPath] }, mutation),
+    },
+    close: async () => {
+      channel.close();
+      await served.close();
+    },
+  };
+};
+
+/**
+ * A real project host, composed as the desktop utility composes one, over a scripted model and this machine's shell.
+ * Its revisions, linked checkouts, turn placement and the shell's execution holds on each run's lease are the
+ * production ones; nothing settles a turn but the project's own revision tree.
+ */
+const projectHostOver = async (
+  label: string,
+  calls: readonly Call[],
+  options: Readonly<{
+    workspaceRoot: string;
+    checkoutsDirectory: string;
+    /** Called as each turn's settlement is recorded, before anything else hears of it. */
+    onFinalized?: (event: TurnFinalizedEvent) => void;
+  }>,
+) => {
+  const settlements = new Map<string, PromiseWithResolvers<TurnFinalizedEvent>>();
+  const settlementOf = (runId: string): PromiseWithResolvers<TurnFinalizedEvent> => {
+    const pending = settlements.get(runId) ?? Promise.withResolvers<TurnFinalizedEvent>();
+    settlements.set(runId, pending);
+    return pending;
+  };
+  const authority = authorityOver(options.workspaceRoot, join(root, `${label}-authority`));
+  const counting = countingProvider();
+  let checkoutsOfRuns: ReadonlyMap<string, Readonly<{ cwd: string; mode?: string }>> = new Map();
+  let probing: Promise<HostShell> | undefined;
+  let probed: HostShell | undefined;
+  const transport = scriptedTransport([
+    ...calls.map((call) => ({ toolCalls: [{ id: call.id, name: call.name ?? 'shell', input: call.input }] })),
+    { text: 'Done.' },
+  ]);
+  const host: ProjectHost = createProjectHost({
+    workspaceRoot: options.workspaceRoot,
+    checkoutsDirectory: options.checkoutsDirectory,
+    via: 'desktop',
+    projectId: 'proj_T12CUSTODYAAAAAAAAAAA',
+    fileSystem: authority.fileSystem,
+    runtimeClient: async () => {
+      throw new Error('No kernel runs in the shell qualification.');
+    },
+    systemPrompt: 'You are the shell qualification fixture.',
+    model: { id: 'scripted-shell-model', contextWindow: 200_000 },
+    modelTransport: transport,
+    credential: () => ({ mode: 'session' }),
+    onRevisionEvent: (event) => {
+      if (event.type === 'turn.finalized') {
+        options.onFinalized?.(event);
+        settlementOf(event.runId).resolve(event);
+      }
+    },
+    /* The desktop's shell: one service over the host's own run→checkout map, which carries each run's holds. */
+    shell: (checkouts) => {
+      checkoutsOfRuns = checkouts;
+      /* The host's composition is synchronous; the row awaits this probe before it starts any turn. */
+      probing = (async (): Promise<HostShell> => {
+        const probe = await probeHostShell({
+          provider: counting.provider,
+          checkouts,
+          permissionModeOf: async () => 'ask',
+          appDataRoots: [appData],
+          projectRoots: () => [project, second, candidate, options.workspaceRoot],
+          home,
+          sessionDirectory: sessions,
+          environment: process.env,
+          projectExecutions: () => [checkouts.executions],
+        });
+        if (probe.status !== 'available') {
+          throw new Error(`the probe refused the shell: ${JSON.stringify(probe)}`);
+        }
+        identity = probe.shell.identity;
+        probed = probe.shell;
+        return probe.shell;
+      })();
+      return () => probed;
+    },
+  });
+  const close = async (): Promise<void> => {
+    try {
+      await host.close();
+    } finally {
+      await authority.close();
+    }
+  };
+  try {
+    if (probing === undefined) {
+      throw new Error('the project host offered no shell');
+    }
+    await probing;
+    await host.revisions.opened();
+  } catch (error) {
+    await close();
+    throw error;
+  }
+  /** The shell result of one call, as the model saw it. */
+  const output = async (chatId: string, toolCallId: string): Promise<ShellOutput> => {
+    const snapshot = await host.launcher.host.snapshot(chatId);
+    const message = snapshot.messages.find((entry) => entry.role === 'tool-output' && entry.toolCallId === toolCallId);
+    if (message?.role !== 'tool-output') {
+      throw new Error(`no output for ${toolCallId}`);
+    }
+    return message.content as unknown as ShellOutput;
+  };
+  return {
+    host,
+    counting,
+    output,
+    checkoutOf: (runId: string) => checkoutsOfRuns.get(runId),
+    settled: async (runId: string) => settlementOf(runId).promise,
+    close,
+  };
+};
+
 /** A Unix-socket canary outside the sandbox that counts connections. */
 const unixCanary = async (path: string): Promise<Readonly<{ server: Server; connections: () => number }>> => {
   let connections = 0;
@@ -459,8 +619,8 @@ describe.runIf(enabled)('shell qualification', () => {
             },
             platform: { os: process.platform, arch: process.arch, node: process.version },
             fixtureBoundaries: {
-              placement: 'applied-immediately fixture, not revision custody',
-              candidate: 'copied directory, not revision checkout owner',
+              placement: 'applied-immediately fixture, not revision custody, except T12-custody',
+              candidate: 'T12: copied directory; T12-custody: project host linked checkout, adopted by merge',
               network: 'controlled DNS/connect preload, not unmodified DNS/rebinding',
               namedUnixServices: linux
                 ? 'E06-services requires reachable Docker, session D-Bus and user systemd positives'
@@ -944,6 +1104,140 @@ describe.runIf(enabled)('shell qualification', () => {
       const { size } = statSync(join(candidate, 'beat.txt'));
       await delay(700);
       expect(statSync(join(candidate, 'beat.txt')).size).toBe(size);
+    },
+  );
+
+  qualification(
+    'T12-custody',
+    'a run placed in an agent candidate checkout changes and verifies it; the live project changes only on adoption, once',
+    async () => {
+      const workspaceRoot = join(root, 'projects', 'custody');
+      const checkoutsDirectory = join(root, 'custody-checkouts');
+      mkdirSync(workspaceRoot, { recursive: true });
+      const liveFile = join(workspaceRoot, 'main.scad');
+      writeFileSync(liveFile, '// NEEDLE bracket\ncube(10);\n');
+      const live = digestOf(liveFile);
+      const marker = `tau-t12c-${String(process.pid)}`;
+      const chatId = 'chat-t12c';
+      const runId = 'run-t12c';
+      const leasePath = join(workspaceRoot, '.tau', 'runs', `${runId}.json`);
+      const executionsOf = (): readonly string[] | undefined =>
+        existsSync(leasePath)
+          ? ((JSON.parse(readFileSync(leasePath, 'utf8')) as Readonly<{ executionIds?: string[] }>).executionIds ?? [])
+          : undefined;
+      let candidateRoot = '';
+      let atSettlement: Readonly<{ writers: string[]; beat: number; executions?: readonly string[] }> | undefined;
+      const driven = await projectHostOver(
+        't12c',
+        [
+          shellCall('t12c-edit', {
+            command:
+              "printf '// candidate edit\\n' >> main.scad && grep -c 'candidate edit' main.scad && sha256sum main.scad",
+          }),
+          shellCall('t12c-live', { command: `cat ${liveFile}` }),
+          shellCall('t12c-writer', {
+            command: `(while :; do date >> beat.txt; sleep 0.1; done) & sleep 2; echo settled # ${marker}`,
+          }),
+        ],
+        {
+          workspaceRoot,
+          checkoutsDirectory,
+          /* Read the moment the revision tree records the turn: the writer and the hold must already be gone. */
+          onFinalized: (event) => {
+            if (event.runId === runId) {
+              atSettlement = {
+                writers: processesWith(marker),
+                beat: existsSync(join(candidateRoot, 'beat.txt')) ? statSync(join(candidateRoot, 'beat.txt')).size : -1,
+                ...(executionsOf() === undefined ? {} : { executions: executionsOf() }),
+              };
+            }
+          },
+        },
+      );
+      try {
+        /* The person's isolation: a branch with its own linked checkout, made by the project's own verb. */
+        const created = await driven.host.revisions.channel.request({
+          command: 'createBranch',
+          requestId: 'branch-t12c',
+          name: 't12-candidate',
+        });
+        const { checkoutId } = created.result as Readonly<{ checkoutId?: string }>;
+        expect(checkoutId).toEqual(expect.any(String));
+        const started = await driven.host.launcher.execute({
+          type: 'start',
+          commandId: 'start-t12c',
+          payload: {
+            trigger: 'submit',
+            chatId,
+            runId,
+            ...(checkoutId === undefined ? {} : { checkoutId }),
+            message: { id: 'turn-t12c', role: 'user', content: 'Qualification row t12c.' },
+          },
+        });
+        expect(started.status, JSON.stringify(started)).not.toBe('refused');
+
+        /* The placement put the run in the linked checkout, outside the live project, and the shell works there. */
+        expect(await eventually(() => driven.checkoutOf(runId) !== undefined, 20_000)).toBe(true);
+        const placed = driven.checkoutOf(runId);
+        expect(placed?.mode).toBe('candidate');
+        candidateRoot = realpathSync(placed?.cwd ?? '');
+        expect(candidateRoot.startsWith(`${checkoutsDirectory}/`)).toBe(true);
+
+        /* While the shell's background writer runs, its execution is held on the run's lease and nothing settled. */
+        expect(
+          await eventually(
+            () => processesWith(marker).length > 0 && existsSync(join(candidateRoot, 'beat.txt')),
+            20_000,
+          ),
+        ).toBe(true);
+        expect(executionsOf()).toHaveLength(1);
+        expect(atSettlement).toBeUndefined();
+
+        await driven.settled(runId);
+        /* Settlement waited for cleanup: no writer was left, and the hold was released before the turn was recorded. */
+        expect(atSettlement?.writers).toStrictEqual([]);
+        expect(atSettlement?.executions ?? []).toStrictEqual([]);
+        /* The attempt's lease is retired once its settlement is acknowledged. */
+        expect(await eventually(() => !existsSync(leasePath), 10_000)).toBe(true);
+
+        const edit = ok(await driven.output(chatId, 't12c-edit'));
+        const candidateFile = join(candidateRoot, 'main.scad');
+        const changed = digestOf(candidateFile);
+        expect(changed).not.toBe(live);
+        /* The agent's own verification names exactly the bytes judged outside the sandbox. */
+        expect(edit.stdout.text).toBe(`1\n${changed.slice('sha256:'.length)}  main.scad\n`);
+        /* The live project is another project to a candidate run: denied whole. */
+        expect(completed(await driven.output(chatId, 't12c-live')).exitCode).not.toBe(0);
+        expect(ok(await driven.output(chatId, 't12c-writer')).stdout.text).toBe('settled\n');
+        const beat = join(candidateRoot, 'beat.txt');
+        const { size } = statSync(beat);
+        expect(size).toBe(atSettlement?.beat);
+        await delay(700);
+        expect(statSync(beat).size).toBe(size);
+
+        /* Until the person adopts the candidate, the live project is exactly as it was. */
+        expect(digestOf(liveFile)).toBe(live);
+        expect(existsSync(join(workspaceRoot, 'beat.txt'))).toBe(false);
+
+        /* The normal explicit adoption: merge the candidate's branch into the live line. */
+        await driven.host.revisions.channel.request({
+          command: 'mergeBranch',
+          requestId: 'merge-t12c',
+          branch: 't12-candidate',
+        });
+        /* Adopted once the verb is idle again and the live line records the files it wrote, not before. */
+        const adopted = (): boolean => {
+          const status = driven.host.revisions.status();
+          return !status.branchVerb.busy && !status.projectDirty && digestOf(liveFile) === changed;
+        };
+        expect(await eventually(adopted, 20_000), JSON.stringify(driven.host.revisions.status())).toBe(true);
+        expect(driven.host.revisions.status().line).toStrictEqual({ kind: 'branch', name: 'main' });
+        expect(readFileSync(liveFile, 'utf8').split('// candidate edit').length - 1).toBe(1);
+        expect(digestOf(join(workspaceRoot, 'beat.txt'))).toBe(digestOf(beat));
+        measurements = { candidate: changed, live, beatBytes: size };
+      } finally {
+        await driven.close();
+      }
     },
   );
 
@@ -1704,6 +1998,147 @@ describe.runIf(enabled)('shell qualification', () => {
     },
   );
 
+  /*
+   * E14 (blueprint E1): read-only git through a filtered view. The view shares the real object store, so objects only
+   * `refs/tau/*` reaches stay readable by id: the operator accepted that residual (2026-11-10T12:34Z), and this row
+   * observes it rather than claiming otherwise. Ref names, the real config and every other file of `.git` stay unread.
+   */
+  qualification(
+    'E14',
+    'git log, diff, show and blame read history through a view of branches and tags; every write fails',
+    async () => {
+      const history = join(root, 'projects', 'history');
+      const secret = 'ghp_E14SEEDEDSECRET0123456789abcdef';
+      const git = (input: string | undefined, ...arguments_: string[]): string =>
+        execFileSync('git', arguments_, {
+          cwd: history,
+          encoding: 'utf8',
+          ...(input === undefined ? {} : { input }),
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: {
+            PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+            HOME: root,
+            GIT_CONFIG_NOSYSTEM: '1',
+            GIT_AUTHOR_NAME: 'Fixture',
+            GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+            GIT_COMMITTER_NAME: 'Fixture',
+            GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
+          },
+        });
+      mkdirSync(history, { recursive: true });
+      git(undefined, 'init', '--quiet', '--initial-branch=main');
+      writeFileSync(join(history, 'part.scad'), 'cube(1);\n');
+      git(undefined, 'add', 'part.scad');
+      git(undefined, 'commit', '--quiet', '-m', 'First part');
+      writeFileSync(join(history, 'part.scad'), 'cube(2);\n');
+      git(undefined, 'commit', '--quiet', '-am', 'Grow the part');
+      git(undefined, 'branch', 'feature');
+      git(undefined, 'tag', '-a', 'v1', '-m', 'Version 1');
+      const chat = git('E14-PAST-CHAT-STATE\n', 'hash-object', '-w', '--stdin').trim();
+      git(undefined, 'update-ref', 'refs/tau/chats/c1', chat);
+      git(undefined, 'update-ref', 'refs/remotes/origin/tau/ops/device', chat);
+      git(undefined, 'remote', 'add', 'origin', `https://x-access-token:${secret}@example.invalid/repo.git`);
+      git(undefined, 'config', 'credential.helper', `!echo password=${secret}`);
+      git(undefined, 'config', 'lfs.url', `https://${secret}@lfs.example.invalid`);
+      git(undefined, 'config', 'http.extraheader', `Authorization: Bearer ${secret}`);
+      git(undefined, 'pack-refs', '--all');
+      git(undefined, 'gc', '--quiet');
+      /* Tau's derived ignores, as a Tau store carries them, for the records the service creates and the stand-ins. */
+      writeFileSync(join(history, '.git', 'info', 'exclude'), '/.tau/*\n/thumbnail.webp\n/exports/\n');
+      const store = join(history, '.git');
+      const before = treeDigestOf(store);
+
+      const reads = [
+        shellCall('e14-log', { command: 'git log --format=%s' }),
+        shellCall('e14-diff', { command: 'git diff HEAD~1 HEAD -- part.scad' }),
+        shellCall('e14-show', { command: 'git show HEAD~1:part.scad' }),
+        shellCall('e14-blame', { command: 'git blame --porcelain part.scad' }),
+        shellCall('e14-refs', { command: "git for-each-ref --format='%(refname)'" }),
+        shellCall('e14-config', { command: 'git config --list --show-origin; git remote -v' }),
+        /* Accepted residual: an object only `refs/tau` reaches is still readable by id through the shared store. */
+        shellCall('e14-residual', {
+          command: 'git cat-file --batch-all-objects --batch | grep -a E14-PAST-CHAT-STATE',
+        }),
+      ];
+      const probes = [
+        shellCall('e14-secret', {
+          command: `cat .git/config .git/packed-refs .git/HEAD 2>&1; ls -a .git 2>&1; grep -ra ${secret} "$GIT_DIR" .git 2>&1; env`,
+        }),
+        shellCall('e14-real-dir', { command: 'GIT_DIR=$PWD/.git git log --format=%s' }),
+      ];
+      const writes = [
+        'git commit --allow-empty -m forged',
+        'git tag forged',
+        'git branch forged',
+        'git update-ref refs/heads/forged HEAD',
+        'git symbolic-ref HEAD refs/heads/feature',
+        'git hash-object -w part.scad',
+        'git notes add -m forged HEAD',
+        'git gc',
+        'git pack-refs --all',
+        'git config core.fsmonitor forged',
+        'touch "$GIT_DIR/forged"',
+        'printf forged >> "$GIT_DIR/config"',
+        'ln -s / "$GIT_DIR/forged-link"',
+        'touch .git/objects/forged',
+        'mkdir .git/objects/ff',
+        `rm -f .git/objects/pack/*`,
+        'mv .git/objects .git/objects-moved',
+      ].map((command, index) => shellCall(`e14-write-${String(index)}`, { command }));
+      /* On Linux a write beside the objects lands in the denied `.git`'s masking tmpfs (as in E03): judged outside. */
+      const masked = [shellCall('e14-masked', { command: 'touch .git/forged; printf forged > .git/HEAD' })];
+      /* The view carries a copy of the checkout's index, so status compares against it, never against an empty one. */
+      const status = [
+        shellCall('e14-status-clean', { command: 'git status --porcelain' }),
+        shellCall('e14-status-edited', { command: "printf 'cube(9);\\n' > part.scad && git status --porcelain" }),
+      ];
+      const { outputs } = await drive('e14', [...reads, ...probes, ...writes, ...masked, ...status], {
+        cwd: history,
+      });
+      expect(ok(outputs.at(-2)).stdout.text).toBe('');
+      expect(ok(outputs.at(-1)).stdout.text).toBe(' M part.scad\n');
+
+      expect(ok(outputs[0]).stdout.text).toBe('Grow the part\nFirst part\n');
+      expect(ok(outputs[1]).stdout.text).toMatch(/-cube\(1\);\n\+cube\(2\);/u);
+      expect(ok(outputs[2]).stdout.text).toBe('cube(1);\n');
+      expect(ok(outputs[3]).stdout.text).toMatch(/summary Grow the part/u);
+      expect(ok(outputs[4]).stdout.text).toBe('refs/heads/feature\nrefs/heads/main\nrefs/tags/v1\n');
+      /*
+       * Only the view's fresh config and the runtime's command line are read: never the real config, and never the
+       * machine's system config (Xcode's git bundles one with `credential.helper=osxkeychain`). The view's config holds
+       * the format settings the store has, which differ by platform (macOS adds `ignorecase` and `precomposeunicode`).
+       */
+      const config = ok(outputs[5]).stdout.text;
+      expect(config).not.toContain(secret);
+      expect(config).not.toMatch(/remote\.|credential|extraheader|lfs\.url|origin/u);
+      const sources = config
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.split('\t')[0] ?? '');
+      const files = sources.filter((source) => source !== 'command line:');
+      expect(files.length).toBeGreaterThanOrEqual(2);
+      expect(files.filter((source) => !/^file:.*\/tau-shell-[^/]+\/git\/config$/u.test(source))).toStrictEqual([]);
+      expect(ok(outputs[6]).stdout.text).toContain('E14-PAST-CHAT-STATE');
+      const leaked = completed(outputs[7]);
+      expect(`${leaked.stdout.text}${leaked.stderr.text}`).not.toContain(secret);
+      expect(leaked.stdout.text).not.toMatch(/\[remote|refs\/tau/u);
+      expect(completed(outputs[8]).exitCode).not.toBe(0);
+      const failed = outputs
+        .slice(reads.length + probes.length, reads.length + probes.length + writes.length)
+        .map((output, index) => ({
+          command: writes[index]!.input,
+          exitCode: completed(output).exitCode,
+        }));
+      expect(failed.filter((entry) => entry.exitCode === 0)).toStrictEqual([]);
+      /* Outside bytes are the judge: the real store is byte for byte what it was. */
+      expect(treeDigestOf(store)).toBe(before);
+      expect(git(undefined, 'for-each-ref', '--format=%(refname)')).toBe(
+        'refs/heads/feature\nrefs/heads/main\nrefs/remotes/origin/tau/ops/device\nrefs/tags/v1\nrefs/tau/chats/c1\n',
+      );
+      measurements = { writesRefused: failed.length };
+    },
+  );
+
   /* ---------------------------------------------------------------- Stress and determinism (S rows) */
 
   qualification(
@@ -1713,7 +2148,7 @@ describe.runIf(enabled)('shell qualification', () => {
       const mebibytes = 256;
       const bytes = mebibytes * 1024 * 1024;
       const receipts = mkdtempSync(join(root, 's01-supervisor-resources-'));
-      const shellModule = createRequire(import.meta.url).resolve('@taucad/native-process-core/shell');
+      const shellModule = createRequire(import.meta.url).resolve('@taucad/sandbox/shell');
       const shellDirectory = join(dirname(shellModule), 'shell');
       const preload = pathToFileURL(join(shellDirectory, 'qualification-resource.fixture.ts'));
       preload.searchParams.set('directory', receipts);

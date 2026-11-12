@@ -6,61 +6,36 @@
  *   `rust/rust-toolchain.toml`, the locked crates and the vendored tree-sitter-openscad parser.
  * Environment: Node 24+, rustup (it installs the pinned toolchain on first run), and a C compiler with the wasm32
  *   target for the parser. TAU_WASM_CC names one (with TAU_WASM_AR for its archiver); otherwise the script uses
- *   `clang` and `llvm-ar` when clang supports wasm32 and downloads a pinned wasi-sdk when it does not.
+ *   `clang` and `llvm-ar` when clang supports wasm32 and otherwise the wasi-sdk pinned in wasi-sdk.json, from a
+ *   verified archive in out/cache/wasi-sdk or downloaded from its GitHub release (wasi-sdk.mts).
  * Usage: node --import @oxc-node/core/register apps/libs/openscad-language/scripts/prepare-openscad-language-server.mts
- *   [--test]
- *   Writes out/openscad-language/stage/ (assets-manifest.json and the module). --test runs the Rust tests instead.
+ *   [--test | --wasi-sdk-archive]
+ *   Writes out/openscad-language/stage/ (assets-manifest.json and the module). --test runs the Rust tests instead;
+ *   --wasi-sdk-archive only verifies (or downloads) this host's pinned wasi-sdk archive into out/cache/wasi-sdk.
  * Exit codes: 0 when the stage is rebuilt or the tests pass; non-zero on a missing toolchain, integrity or build
  *   failure.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import process from 'node:process';
-import { setTimeout as delay } from 'node:timers/promises';
 
-const wasiSdkVersion = '27';
-const wasiSdks: Readonly<Partial<Record<string, { readonly archive: string; readonly sha256: string }>>> = {
-  'linux-x64': {
-    archive: `wasi-sdk-${wasiSdkVersion}.0-x86_64-linux.tar.gz`,
-    sha256: 'b7d4d944c88503e4f21d84af07ac293e3440b1b6210bfd7fe78e0afd92c23bc2',
-  },
-  'linux-arm64': {
-    archive: `wasi-sdk-${wasiSdkVersion}.0-arm64-linux.tar.gz`,
-    sha256: '4cf4c553c4640e63e780442146f87d83fdff5737f988c06a6e3b2f0228e37665',
-  },
-  'darwin-x64': {
-    archive: `wasi-sdk-${wasiSdkVersion}.0-x86_64-macos.tar.gz`,
-    sha256: '163dfd47f989b1a682744c1ae1f0e09a83ff5c4bbac9dcd8546909ab54cda5a1',
-  },
-  'darwin-arm64': {
-    archive: `wasi-sdk-${wasiSdkVersion}.0-arm64-macos.tar.gz`,
-    sha256: '055c3dc2766772c38e71a05d353e35c322c7b2c6458a36a26a836f9808a550f8',
-  },
-  'win32-x64': {
-    archive: `wasi-sdk-${wasiSdkVersion}.0-x86_64-windows.tar.gz`,
-    sha256: '4a576c13125c91996d8cc3b70b7ea0612c2044598d2795c9be100d15f874adf6',
-  },
-};
+// oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the package's # source alias.
+import { ensureWasiSdk, ensureWasiSdkArchive, wasiSdkPins } from './wasi-sdk.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the package's # source alias.
+import type { WasiSdkPin } from './wasi-sdk.mjs';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const crateRoot = resolve(import.meta.dirname, '../rust');
 const outputRoot = resolve(workspaceRoot, 'out/openscad-language');
 const cargoTarget = resolve(outputRoot, 'cargo');
 const moduleName = 'tau_openscad_language.wasm';
+/** The extracted wasi-sdk and its verified archive; CI caches the archive (ci.yml `affected-lane`). */
+const wasiSdkCache = resolve(workspaceRoot, 'out/cache/wasi-sdk');
 const { TAU_WASM_CC: ccOverride, TAU_WASM_AR: arOverride, CI: ci } = process.env;
 
 const sha256 = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
-
-const exists = async (path: string): Promise<boolean> => {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 const succeeds = (command: string, args: readonly string[]): string | undefined => {
   try {
@@ -70,36 +45,14 @@ const succeeds = (command: string, args: readonly string[]): string | undefined 
   }
 };
 
-const downloadAttempts = 4;
-
-/**
- * Fetch a release asset, retrying a network error or a 5xx with backoff (2 s, 4 s, 8 s).
- * GitHub release downloads answer 502/503 for minutes at a time; a 4xx is final.
- */
-const downloadWithRetry = async (url: string): Promise<Uint8Array<ArrayBuffer>> => {
-  let failure = 'no attempt';
-  for (let attempt = 1; attempt <= downloadAttempts; attempt += 1) {
-    if (attempt > 1) {
-      // oxlint-disable-next-line no-await-in-loop -- attempts are sequential by design
-      await delay(1000 * 2 ** (attempt - 1));
-    }
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- attempts are sequential by design
-      const response = await fetch(url);
-      if (response.ok) {
-        // oxlint-disable-next-line no-await-in-loop -- attempts are sequential by design
-        return new Uint8Array(await response.arrayBuffer());
-      }
-      failure = `HTTP ${String(response.status)}`;
-      if (response.status < 500) {
-        break;
-      }
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
-    }
-    console.log(`wasi-sdk download attempt ${String(attempt)} failed (${failure})`);
+/** This host's pinned wasi-sdk archive. */
+const hostWasiSdk = (): WasiSdkPin => {
+  const host = `${process.platform}-${process.arch}`;
+  const pin = wasiSdkPins.archives[host];
+  if (!pin) {
+    throw new Error(`No pinned wasi-sdk for ${host}; set TAU_WASM_CC to a clang with the wasm32 target.`);
   }
-  throw new Error(`wasi-sdk download failed with ${failure}`);
+  return pin;
 };
 
 /** A C compiler and archiver for wasm32-unknown-unknown: the override, a capable system clang, or wasi-sdk. */
@@ -111,35 +64,7 @@ const ensureWasmCompiler = async (): Promise<{ cc: string; ar: string }> => {
   if (targets?.includes('wasm32') && succeeds('llvm-ar', ['--version']) !== undefined) {
     return { cc: 'clang', ar: 'llvm-ar' };
   }
-  const host = `${process.platform}-${process.arch}`;
-  const sdk = wasiSdks[host];
-  if (!sdk) {
-    throw new Error(`No pinned wasi-sdk for ${host}; set TAU_WASM_CC to a clang with the wasm32 target.`);
-  }
-  const cacheRoot = resolve(workspaceRoot, 'out/cache/wasi-sdk');
-  const root = resolve(cacheRoot, sdk.archive.replace(/\.tar\.gz$/u, ''));
-  const marker = resolve(root, '.tau-wasi-sdk-sha256');
-  const recorded = (await exists(marker)) ? await readFile(marker, 'utf8') : undefined;
-  if (recorded?.trim() !== sdk.sha256) {
-    console.log(`Downloading ${sdk.archive}`);
-    const bytes = await downloadWithRetry(
-      `https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${wasiSdkVersion}/${sdk.archive}`,
-    );
-    if (sha256(bytes) !== sdk.sha256) {
-      throw new Error('wasi-sdk integrity mismatch');
-    }
-    await mkdir(cacheRoot, { recursive: true });
-    const archive = resolve(cacheRoot, sdk.archive);
-    await writeFile(archive, bytes);
-    const temporary = `${root}.${String(process.pid)}.tmp`;
-    await rm(temporary, { recursive: true, force: true });
-    await mkdir(temporary, { recursive: true });
-    execFileSync('tar', ['-xzf', archive, '-C', temporary, '--strip-components=1']);
-    await writeFile(resolve(temporary, '.tau-wasi-sdk-sha256'), `${sdk.sha256}\n`);
-    await rm(root, { recursive: true, force: true });
-    await rename(temporary, root);
-    await rm(archive, { force: true });
-  }
+  const root = await ensureWasiSdk({ cacheRoot: wasiSdkCache, pins: wasiSdkPins, pin: hostWasiSdk() });
   const suffix = process.platform === 'win32' ? '.exe' : '';
   return { cc: resolve(root, `bin/clang${suffix}`), ar: resolve(root, `bin/llvm-ar${suffix}`) };
 };
@@ -175,6 +100,11 @@ const toolchainVersion = (): string => {
 };
 
 const main = async (): Promise<void> => {
+  if (process.argv.includes('--wasi-sdk-archive')) {
+    await ensureWasiSdkArchive({ cacheRoot: wasiSdkCache, pins: wasiSdkPins, pin: hostWasiSdk() });
+    console.log(`wasi-sdk archive verified in ${relative(workspaceRoot, wasiSdkCache)}`);
+    return;
+  }
   ensureToolchain();
   if (process.argv.includes('--test')) {
     cargo(['test', '--all-targets']);

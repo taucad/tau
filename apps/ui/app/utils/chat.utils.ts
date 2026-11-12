@@ -22,7 +22,7 @@ import { isUndecidedFailure, summarizeTestModelOutput } from '@taucad/chat/schem
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { metaConfig } from '#constants/meta.constants.js';
-import { formatExportDate } from '#utils/date.utils.js';
+import { formatExportDate } from '@taucad/ui-core/utils/date.utils';
 import { getRpcOutcome } from '@taucad/chat-ui/services/rpc-ledger';
 import { attachmentKind, attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 import type { AttachmentName, StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
@@ -445,13 +445,15 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
           )
         : `${output.status}: ${output.message}`,
   },
-  [toolName.revisions]: {
+  [toolName.history]: {
     input: (input) => `action: ${input.action}`,
     /* The `where` line first, because it is the answer every action carries. */
     output: (output) =>
       [
         output.where,
-        output.revisions === undefined ? undefined : `${String(output.revisions.length)} revision(s)`,
+        output.revisions === undefined
+          ? undefined
+          : `${String(output.revisions.length)} ${output.revisions.length === 1 ? 'entry' : 'entries'}`,
         output.changes === undefined ? undefined : `${String(output.changes.length)} changed file(s)`,
         output.branches === undefined ? undefined : `${String(output.branches.length)} branch(es)`,
         output.conflict === undefined ? undefined : `${String(output.conflict.files.length)} conflicted file(s)`,

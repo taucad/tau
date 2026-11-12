@@ -66,7 +66,7 @@ const readConflict = async (
 };
 
 /**
- * Answer one read of the project's revision history (S28).
+ * Answer one read of the project's history (S28): the `history` tool.
  *
  * Every answer carries the same *Where you are* line the chat card shows, so an
  * agent reading history and a person looking at the pane are never told two
@@ -85,7 +85,7 @@ export async function handleReadRevisions(
     return {
       success: false,
       errorCode: rpcClientErrorCode.unknown,
-      message: 'This project has no revision history available here.',
+      message: 'This project has no history available here.',
     };
   }
 
@@ -97,7 +97,7 @@ export async function handleReadRevisions(
       success: true,
       where,
       ...(place.branch === undefined ? {} : { branch: place.branch }),
-      branches: [...place.branches],
+      branches: place.branches.map(({ name, revisionId }) => ({ name, revisionId })),
     };
   }
 
@@ -115,7 +115,20 @@ export async function handleReadRevisions(
       success: true,
       where,
       ...(branch === undefined ? {} : { branch }),
-      revisions: [...rows],
+      /* The row the schema names and no more: a host's row also carries ids and the trailer, for its own pane (B2).
+       * An entry has no number (M11); a version names its own. */
+      revisions: rows.map((row) => {
+        const version = row.versions?.[0];
+        return {
+          revisionId: row.revisionId,
+          who: row.who,
+          source: row.source,
+          createdAt: row.createdAt,
+          summary: row.summary,
+          conflicted: row.conflicted,
+          ...(version === undefined ? {} : { version: { number: version.number, name: version.name } }),
+        };
+      }),
     };
   }
 
@@ -123,7 +136,7 @@ export async function handleReadRevisions(
     return {
       success: false,
       errorCode: rpcClientErrorCode.validationError,
-      message: 'A diff needs the newer revision id in `to`. Run `revisions` with `log` first to find one.',
+      message: 'A diff needs the newer revision id in `to`. Run `history` with `log` first to find one.',
     };
   }
   return {

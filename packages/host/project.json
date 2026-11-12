@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/host",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package"],
+  "tags": ["scope:shared", "type:package", "ci:shell"],
   "targets": {
     "build": {
       "executor": "nx:run-commands",
@@ -13,11 +13,12 @@
         "cwd": "{projectRoot}"
       }
     },
-    "formal": {},
     "formal:nightly": {
       "options": {
         "command": "vitest run --root packages/host src/acp/run.integration.test.ts src/acp/run.interrupts.integration.test.ts && node tools/formal/src/cli.ts logs host && node tools/formal/src/cli.ts nightly packages/host && vitest run --root packages/host src/acp/acp-sessions.machine.conformance.test.ts",
-        "env": { "FORMAL_SIMULATED": "out/test-results/formal/packages/host/simulated" }
+        "env": {
+          "FORMAL_SIMULATED": "out/test-results/formal/packages/host/simulated"
+        }
       }
     },
     "test:acp-live": {
@@ -38,11 +39,11 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "The shell service's conformance rows (H01-H09, H08-H09 end to end through a scripted model and a real Tau agent host), extending native-process-core's provider rows: the real service over the real sandbox provider and the machine's own Bash, positive controls before negatives, negatives judged by bytes outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Never cached: a receipt is only evidence of the run that wrote it."
+        "description": "The host's shell conformance rows (H08-H10: H08-H09 end to end through a scripted model, a real Tau agent host and the host's tool registry; A20 in H10), extending shell-service's rows H01-H07 and the sandbox's provider rows: the real service over the real sandbox provider and the machine's own Bash, positive controls before negatives, negatives judged by bytes outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Never cached: a receipt is only evidence of the run that wrote it."
       },
       "options": {
         "cwd": "{workspaceRoot}/packages/host",
-        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/shell/shell-service.conformance.test.ts",
+        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/shell/shell-service.host.conformance.test.ts",
         "env": {
           "TAU_SHELL_CONFORMANCE": "1"
         }
@@ -52,7 +53,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "The shell's application and adversarial qualification rows (desktop shell blueprint W7: T01-T10, T12, T16, T19, the E rows the agent entrypoint reaches and the stress workloads S01-S04, the lifecycle and concurrency ones three times). A scripted model drives the official shell tool through a real Tau agent host, its registry and fixture admission, the shell service, the real sandbox provider and the machine's own Bash; negatives are judged outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Never cached: a receipt is only evidence of the run that wrote it."
+        "description": "The shell's application and adversarial qualification rows (desktop shell blueprint W7: T01-T10, T12 (a copied candidate and, as T12-custody, a real revision checkout adopted by merge), T16, T19, the E rows the agent entrypoint reaches and the stress workloads S01-S04, the lifecycle and concurrency ones three times). A scripted model drives the official shell tool through a real Tau agent host, its registry and fixture admission, the shell service, the real sandbox provider and the machine's own Bash; negatives are judged outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Never cached: a receipt is only evidence of the run that wrote it."
       },
       "options": {
         "cwd": "{workspaceRoot}/packages/host",

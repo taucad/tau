@@ -34,7 +34,7 @@ export function MarketingPage({ children }: { children?: React.ReactNode }): Rea
         <>
           <meta property='og:url' content={canonical} />
           <meta property='og:image' content={`${configuration?.origin}/_www/assets/social.png`} />
-          <meta property='og:image:alt' content='Tau — editable parametric CAD' />
+          <meta property='og:image:alt' content='Tau — Open-source, AI-native CAD' />
         </>
       ) : null}
       <script

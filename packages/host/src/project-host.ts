@@ -34,8 +34,14 @@ import { createParameterActors, parameterKey, parameterRoot } from '#parameter-a
 import type { HostMcpEndpoint } from '#mcp-server.js';
 import { hostRevisionActor } from '#revision-actor.js';
 import { createProjectRevisions } from '#revisions.js';
-import type { HostRevisionEvent, ProjectRevisions, ProjectRevisionsOptions, TurnCheckout } from '#revisions.js';
-import type { ShellExecutionHolds, ShellHoldAnswer, ShellProjectExecutions } from '#shell/shell-service.js';
+import type {
+  HostRevisionEvent,
+  ProjectRevisions,
+  ProjectRevisionsOptions,
+  RevisionFileRead,
+  TurnCheckout,
+} from '#revisions.js';
+import type { ShellExecutionHolds, ShellHoldAnswer, ShellProjectExecutions } from '@taucad/shell-service';
 
 /**
  * Admit a checkout's filesystem as the host tools' filesystem. Revision hosts type checkout filesystems loosely, so the
@@ -81,10 +87,26 @@ export type ProjectFileSystem = Readonly<{
 /** The runtime client a project host's tools and parameter actors run on, for one root. @public */
 export type ProjectHostRuntimeClient = HostRuntimeClient;
 
+/**
+ * What a chat observer may read besides the host's own rows (agent observability, LW6): the model files a run changed,
+ * as its final revision holds them, never the live workspace, so every read of a run's design is the same.
+ *
+ * @public
+ */
+export type ChatObservationSources = Readonly<{
+  design: (input: Readonly<{ revision: string; paths: readonly string[] }>) => Promise<readonly RevisionFileRead[]>;
+}>;
+
 /** Options for {@link createProjectHost}. @public */
 export type ProjectHostOptions = Pick<
   ProjectRevisionsOptions,
-  'projectId' | 'checkoutsDirectory' | 'gitExecutable' | 'apiBaseUrl' | 'tauCredential' | 'syncTelemetryPlacement'
+  | 'projectId'
+  | 'checkoutsDirectory'
+  | 'gitExecutable'
+  | 'apiBaseUrl'
+  | 'tauCredential'
+  | 'syncTelemetryPlacement'
+  | 'via'
 > &
   Pick<AgentLauncherOptions, 'systemPrompt' | 'model' | 'modelTransport' | 'credential'> &
   Pick<
@@ -127,6 +149,7 @@ export type ProjectHostOptions = Pick<
     observeChats?:
       | ((
           read: OwnRowsRead,
+          sources: ChatObservationSources,
         ) => Readonly<{ onChatQuiescent: (chatId: string, quiescent: boolean) => void; close: () => void }>)
       | undefined;
     /**
@@ -440,6 +463,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     /* A1: the account this host was handed, else the cloud owner or this device's pseudonym; a renderer's
      * `setActor` replaces it for every mint after it. */
     actor: hostRevisionActor(options.revisionActor),
+    via: options.via,
     projectId: options.projectId,
     ...(options.checkoutsDirectory === undefined ? {} : { checkoutsDirectory: options.checkoutsDirectory }),
     ...(options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable }),
@@ -502,7 +526,9 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
       : createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry: toolRegistry, workspaceRoot });
 
   /* Reads only on quiescence, by which time the launcher exists. */
-  const observer = options.observeChats?.(async (input) => launcher.host.readEvents(input));
+  const observer = options.observeChats?.(async (input) => launcher.host.readEvents(input), {
+    design: async ({ revision, paths }) => revisions.history.files(revision, paths),
+  });
   const launcher = createAgentLauncher({
     chats: createNodeChatStore({ workspaceRoot }),
     onChatQuiescent: (chatId, quiescent) => {

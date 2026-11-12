@@ -126,4 +126,8 @@ NoStaleReleaseDeletesNewEpoch == bad # "aba-delete"
 ConnectServed == \A e \in 1..MaxEpoch : (e \in connected) ~> (e \in served)
 \* W6.r1 finding 14: once every holder released and the utility answered everything, no launcher is left open.
 ReleasedHostCloses == (holders = {} /\ msgs = << >> /\ upc = "idle") => launcher = 0
+
+\* Every frame is handled, the utility is idle and main awaits no release (the nightly simulation
+\* keeps the behaviours that reach this).
+Quiescent == act # "Init" /\ msgs = << >> /\ upc = "idle" /\ ~rel.active
 ====

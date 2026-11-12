@@ -33,6 +33,7 @@ import {
   Menu,
   MenuItem,
   net,
+  powerMonitor,
   powerSaveBlocker,
   protocol,
   safeStorage,
@@ -131,6 +132,7 @@ import { parseDesktopInstallation } from '#main/update-identity.js';
 import { z } from 'zod';
 import type { DesktopUpdater, DesktopUpdaterOptions } from '#main/updater.js';
 import { startDesktopUpdater } from '#main/updater.js';
+import { startUpdateTriggers } from '#main/update-triggers.js';
 import type { MoveToApplicationsHost } from '#main/app-location.js';
 import {
   assessAppLocation,
@@ -147,6 +149,7 @@ import {
   openDirectoryChannel,
   directoryGrantChannels,
   revealPathChannel,
+  agentHostRatingChannel,
   agentHostSessionChannels,
   machinesChannels,
   externalAgentsChannel,
@@ -1166,6 +1169,31 @@ const bootstrapElectronApp = async (): Promise<void> => {
     const input = agentHostSessionInput(event, payload);
     dropDocumentAttachment(event.sender, input);
     await services.releaseAgentHost(input, quitQuiesceMilliseconds);
+  });
+  /* LW8: the account rated a run in this app. Main checks its shape and relays it to the services utility, where the
+   * project host that ran the turn reports it under the feedback grant once the run has ended. */
+  ipcMain.handle(agentHostRatingChannel, async (event, payload) => {
+    const { projectId, chatId, runId, value, at } = (payload ?? {}) as Record<string, unknown>;
+    if (
+      !trusted(event.senderFrame) ||
+      typeof projectId !== 'string' ||
+      projectId === '' ||
+      typeof chatId !== 'string' ||
+      chatId === '' ||
+      typeof runId !== 'string' ||
+      runId === '' ||
+      (value !== 'positive' && value !== 'negative') ||
+      typeof at !== 'number' ||
+      !Number.isFinite(at)
+    ) {
+      throw new Error('Desktop shell refused an invalid agent-host rating.');
+    }
+    try {
+      services.send({ type: 'agent-host-rated', projectId, chatId, runId, value, at });
+    } catch (error) {
+      /* A quiescing utility takes no request: a lost rating is only a missing feedback fact. */
+      log.log('warn', 'main.agent-host-rating', error);
+    }
   });
   /* The secret half of the binding ceremony (D10). The renderer never keeps
    * the access code: it rides this one invoke to the utility, which saves it
@@ -2361,7 +2389,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     ...(routeQualification?.candidateTag ? { candidateTag: routeQualification.candidateTag } : {}),
     ...(routeQualification?.expectedUpdate ? { expectedUpdate: routeQualification.expectedUpdate } : {}),
     fetchJson: async (url) => {
-      const response = await net.fetch(url);
+      /* Bounded: one check runs at a time, so a request that never settles would stop every later check. */
+      const response = await net.fetch(url, { signal: AbortSignal.timeout(30_000) });
       if (!response.ok) {
         throw new Error(`update feed answered ${response.status}`);
       }
@@ -2438,6 +2467,20 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const updater = platformUpdater ?? startDesktopUpdater(updaterOptions);
 
   updaterReady.resolve(updater);
+  /* A CI probe runs one bounded check of its own; an unpackaged build has no updater to ask. */
+  if (app.isPackaged && otaProbe === undefined && routeQualification === undefined) {
+    startUpdateTriggers({
+      powerMonitor,
+      isOnline: () => net.isOnline(),
+      check: () => {
+        void updater.check();
+      },
+      phase: () => updater.snapshot().phase,
+      log: (level, event, detail) => {
+        log.log(level, event, detail);
+      },
+    });
+  }
   const checkForUpdates = async (): Promise<void> => {
     if (BrowserWindow.getAllWindows().length === 0) {
       await createMainWindow();

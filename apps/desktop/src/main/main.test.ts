@@ -13,11 +13,13 @@ import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import { desktopNativeKernelChannels } from '@taucad/types/desktop-native-kernels';
 import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
 import type { DesktopUpdaterOptions } from '#main/updater.js';
+import type * as Updater from '#main/updater.js';
 import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
 import { desktopAgentSystemPrompt } from '#main/environment.js';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  agentHostRatingChannel,
   agentHostSessionChannels,
   computeControlChannels,
   directoryGrantChannels,
@@ -91,6 +93,7 @@ const state = vi.hoisted(() => ({
         readonly sample: (utility: { pid: number | undefined }) => number | undefined;
       },
   servicesRetainAgentHost: vi.fn(),
+  servicesSend: vi.fn(),
   servicesReleaseAgentHost: vi.fn(async () => undefined),
   servicesQuiesce: vi.fn(
     async (
@@ -151,7 +154,9 @@ vi.mock('#tau/native-store.js', () => ({
   }),
 }));
 
-vi.mock('#main/updater.js', () => ({
+vi.mock('#main/updater.js', async (importOriginal) => ({
+  /* The update controller reads the retry delays and check interval from here. */
+  ...(await importOriginal<typeof Updater>()),
   startDesktopUpdater: (options: DesktopUpdaterOptions) => {
     state.prepareToRestart = options.prepareToRestart;
     state.prepareToInstall = options.prepareToInstall;
@@ -293,7 +298,8 @@ vi.mock('electron', () => ({
     }),
   },
   MessageChannelMain: vi.fn(() => ({ port1: {}, port2: {} })),
-  net: { fetch: vi.fn() },
+  net: { fetch: vi.fn(), isOnline: vi.fn(() => true) },
+  powerMonitor: { on: vi.fn() },
   powerSaveBlocker: { start: vi.fn(() => 1), stop: vi.fn() },
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
   safeStorage: { isEncryptionAvailable: vi.fn(() => false), encryptString: vi.fn(), decryptString: vi.fn() },
@@ -416,6 +422,7 @@ vi.mock('#main/services-broker.js', () => ({
       hasActiveDirectory: state.servicesHasActiveDirectory,
       retainAgentHost: state.servicesRetainAgentHost,
       releaseAgentHost: state.servicesReleaseAgentHost,
+      send: state.servicesSend,
       computeProjectRoot: (root: string) =>
         root.includes('/.tau/checkouts/') ? root.slice(0, root.indexOf('/.tau/checkouts/')) : undefined,
     };
@@ -500,6 +507,7 @@ afterEach(async () => {
   state.geometrySampleResidentBytes = undefined;
   state.runtimeResidentLimit = undefined;
   state.servicesRetainAgentHost.mockClear();
+  state.servicesSend.mockReset();
   state.servicesReleaseAgentHost.mockClear();
   app.getAppMetrics.mockReset();
   app.getAppMetrics.mockReturnValue([]);
@@ -962,6 +970,34 @@ describe('desktop main compute owner', () => {
       expect(state.servicesReleaseAgentHost).toHaveBeenCalledTimes(2);
       expect(sender.listenerCount('destroyed')).toBe(0);
       expect(sender.listenerCount('did-navigate')).toBe(0);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should relay a trusted rating of a run to the services utility, and refuse anything else',
+    async () => {
+      await bootstrap();
+      const rated = state.handlers.get(agentHostRatingChannel)!;
+      const trusted = { sender: { id: 7 }, senderFrame: { url: 'app://tau/' } };
+      const rating = { projectId: 'proj_a', chatId: 'chat-1', runId: 'run-1', value: 'positive', at: 1 };
+
+      await rated(trusted, rating);
+      expect(state.servicesSend).toHaveBeenCalledExactlyOnceWith({ type: 'agent-host-rated', ...rating });
+
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+      await expect(rated(trusted, rating)).rejects.toThrow();
+      await expect(rated(trusted, { ...rating, value: 'great' })).rejects.toThrow();
+      await expect(rated(trusted, { ...rating, at: Number.NaN })).rejects.toThrow();
+      await expect(rated(trusted, { ...rating, projectId: '' })).rejects.toThrow();
+      expect(state.servicesSend).toHaveBeenCalledOnce();
+
+      /* A quiescing utility takes no request: the rating is only a missing feedback fact, never a renderer error. */
+      state.servicesSend.mockImplementationOnce(() => {
+        throw new Error('The services broker is quiescing and sends no requests.');
+      });
+      await expect(rated(trusted, rating)).resolves.toBeUndefined();
     },
     bootMilliseconds,
   );

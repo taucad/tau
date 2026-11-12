@@ -12,6 +12,9 @@
       "plugin": "./tools/pkgcheck.plugin.ts"
     },
     {
+      "plugin": "./tools/formal.plugin.ts"
+    },
+    {
       "plugin": "@nx/react/router-plugin",
       "options": {
         "buildTargetName": "build",
@@ -59,14 +62,14 @@
   "targetDefaults": {
     "typecheck": {
       "executor": "nx:run-commands",
-      "inputs": ["default", "^production"],
+      "inputs": ["default", "^production", "{workspaceRoot}/libs/oxlint/src/react-event-layer.ts"],
       "options": {
         "forwardAllArgs": false
       }
     },
     "test": {
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "serviceEnvironment"]
+      "inputs": ["default", "^production", "serviceEnvironment", "{workspaceRoot}/libs/oxlint/src/react-event-layer.ts"]
     },
     "build": {
       "inputs": ["production", "^production"]
@@ -142,6 +145,13 @@
       },
       "cache": false
     },
+    "formal:nightly:check": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node tools/formal/src/cli.ts check --tier nightly {projectRoot}"
+      },
+      "cache": false
+    },
     "formal:logs": {
       "executor": "nx:run-commands",
       "options": {
@@ -185,7 +195,8 @@
       "!{projectRoot}/**/*.test-d.*",
       "!{projectRoot}/vitest.config.*",
       "!{projectRoot}/**/*.md",
-      "!{projectRoot}/specs/**/*"
+      "!{projectRoot}/specs/**/*",
+      "!{projectRoot}/**/react-event-layer.ceiling.json"
     ]
   },
   "release": {
@@ -196,7 +207,8 @@
         "**/*.spec.ts",
         "**/*.test.ts",
         "**/*.md",
-        "packages/plugins/picogk/browser-host.pin.json"
+        "packages/plugins/picogk/browser-host.pin.json",
+        "**/react-event-layer.ceiling.json"
       ]
     },
     "version": {

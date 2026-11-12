@@ -1,6 +1,6 @@
 import { setup, types } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import type { cadMachine } from '#machines/cad.machine.js';
 
 /**

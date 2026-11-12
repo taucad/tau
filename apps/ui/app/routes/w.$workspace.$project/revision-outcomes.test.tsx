@@ -16,7 +16,7 @@ import {
   RevisionOutcomes,
   useTurnOutcomes,
 } from '#routes/w.$workspace.$project/revision-outcomes.js';
-import { revisionFailureCopy } from '#lib/revision-failure-copy.js';
+import { revisionFailureCopy } from '@taucad/ui-core/lib/revision-failure-copy';
 import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
 
 const listeners = new Set<(event: WorkerRevisionEvent) => void>();
@@ -103,14 +103,14 @@ describe('RevisionOutcomes', () => {
       runId: 'run-1',
       chatId: 'chat-1',
       checkoutId: 'live',
-      reason: 'The turn ended before it recorded a revision.',
+      reason: 'The turn ended before it recorded anything.',
     });
 
     /* E5: nothing classified this one, so a person is told the one thing they
      * can do rather than a sentence a machine wrote for a log. */
     expect(errors).toEqual([
       {
-        title: 'Nothing was saved for that change',
+        title: 'Nothing was saved for that request',
         description: revisionFailureCopy.turn.fallback,
       },
     ]);
@@ -136,7 +136,7 @@ describe('RevisionOutcomes', () => {
 
     expect(errors).toEqual([
       {
-        title: 'Nothing was saved for that change',
+        title: 'Nothing was saved for that request',
         description: 'Tau could not save this project’s earlier edits first. Try sending that again.',
       },
     ]);
@@ -156,8 +156,10 @@ describe('RevisionOutcomes', () => {
     publish({ type: 'turn.conflicted', turnId: 'turn-2', runId: 'run-2', chatId: 'chat-1', checkoutId: 'live' });
 
     expect(errors).toHaveLength(1);
-    expect(errors[0]?.title).toBe('That change needs your attention');
-    expect(`${errors[0]?.title ?? ''} ${errors[0]?.description ?? ''}`).not.toMatch(/merge conflict|branch|HEAD/iu);
+    expect(errors[0]?.title).toBe('Needs your decision');
+    /* The copy table's words (M11, M4): the person's own branches, never Git's terms. */
+    expect(errors[0]?.description).toBe('Both branches changed the same files.');
+    expect(`${errors[0]?.title ?? ''} ${errors[0]?.description ?? ''}`).not.toMatch(/merge conflict|checkout|HEAD/iu);
     expect(getByTestId('latest')).toHaveTextContent('conflicted:turn-2');
   });
 

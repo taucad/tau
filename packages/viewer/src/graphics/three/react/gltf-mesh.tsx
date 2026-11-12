@@ -107,7 +107,11 @@ import { releaseGltfBinaryChunk } from '#graphics/three/utils/gltf-binary-chunk.
 import { createSectionTopologyScheduler } from '#graphics/three/utils/section-topology-scheduler.js';
 import { releaseSectionTopologyWorker } from '#graphics/three/utils/section-surface-topology-worker-client.js';
 import { useKinematicsViewer } from '#graphics/three/react/kinematics-viewer.js';
-import type { GltfPresentationBarrier, GltfPresentationTelemetry } from '#machines/graphics.machine.js';
+import type {
+  GltfPresentationBarrier,
+  GltfPresentationTelemetry,
+  GraphicsCameraRef,
+} from '#machines/graphics.machine.js';
 import { useViewerEnvironment } from '#environment/viewer-environment.jsx';
 
 // Module-scoped GLTFLoader instance. GLTFLoader is stateless and fully reusable,
@@ -2028,6 +2032,10 @@ export function applyGltfEdgeThemeColor(scene: Group, edgeColor: number): void {
   }
 }
 
+/** Whether the person is dragging the view's camera, read at the moment a query needs it. */
+const selectCameraDragging = (cameraRef: GraphicsCameraRef): boolean =>
+  cameraRef.getSnapshot().matches({ input: 'dragging' });
+
 /**
  * This component renders a GLTF mesh.
  *
@@ -2166,7 +2174,7 @@ export function GltfMesh({
       // A press can reach camera controls before R3F: only movement gives the camera ownership.
       // Queries resume immediately on release, without waiting for a React render.
       if (
-        context.cameraInteractionHadMovement ||
+        selectCameraDragging(context.cameraRef) ||
         context.viewerHoverSuppressionReasons.includes('sectionViewTransform')
       ) {
         return false;
@@ -2524,13 +2532,7 @@ export function GltfMesh({
     }
 
     if (!modelVisualState.focusedComponentId) {
-      if (lastFocusedComponentIdRef.current !== undefined) {
-        cameraRig.actorRef.send({
-          type: 'setBounds',
-          bounds: cameraRig.actorRef.getSnapshot().context.view.bounds,
-        });
-        invalidate();
-      }
+      // Focus framed the part and kept the scene bounds, so clearing it leaves the camera where it is.
       lastFocusedComponentIdRef.current = undefined;
       return;
     }
@@ -2548,16 +2550,16 @@ export function GltfMesh({
     const physicalBox = applyCanonicalGltfBounds(
       new Box3(new Vector3(...focusedNode.bounds.min), new Vector3(...focusedNode.bounds.max)),
     );
-    const sceneBounds = cameraRig.actorRef.getSnapshot().context.view.bounds;
+    // Focus is the person's command: one change, with the source `focus`, that keeps the scene bounds (D20).
     cameraRig.actorRef.send({
-      type: 'frame',
+      type: 'frameBounds',
       bounds: {
         min: [physicalBox.min.x, physicalBox.min.y, physicalBox.min.z],
         max: [physicalBox.max.x, physicalBox.max.y, physicalBox.max.z],
       },
       margin: 0.1,
+      source: 'focus',
     });
-    cameraRig.actorRef.send({ type: 'setBounds', bounds: sceneBounds });
     invalidate();
   }, [cameraRig, componentManifest, invalidate, modelVisualState.focusedComponentId]);
 

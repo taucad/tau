@@ -9,11 +9,9 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type CameraControlsImpl from 'camera-controls';
 import type { ToolpathProgram } from '@taucad/slicer/toolpath';
 import { createTauR3fGlProp } from '@taucad/viewer/graphics/three/canvas-three-gl';
-import { readGraphicsBackendQueryOverride } from '#utils/graphics-backend-override.js';
-import {
-  resolveCameraControlProps,
-  TauCameraControls,
-} from '@taucad/viewer/graphics/three/controls/tau-camera-controls';
+import { readGraphicsBackendQueryOverride } from '@taucad/ui-core/utils/graphics-backend-override';
+import { resolveCameraControlProps } from '@taucad/viewer/graphics/three/controls/camera-controls-feel';
+import { PrinterCameraControls } from '#components/printer/printer-camera-controls.jsx';
 import { applyPlateGrain, plateStandInOutline } from '#components/printer/printer-plate-surface.js';
 import { createPrinterHardware, toolheadOpacity } from '#components/printer/printer-hardware.js';
 import { printerBackground, printerBody } from '#components/printer/printer-colors.constants.js';
@@ -762,7 +760,7 @@ function PrinterCamera({
     void controls.current.setLookAt(...position, ...target, isRequested && !isReducedMotion);
     invalidate();
   }, [aspect, framedBox, frameRequest, geometry, invalidate, isReducedMotion]);
-  return <TauCameraControls ref={controls} makeDefault onControl={release} {...printerCameraControlProps} />;
+  return <PrinterCameraControls ref={controls} onControl={release} {...printerCameraControlProps} />;
 }
 
 /** Observe the completed render, rather than mistaking parsed data or a spinner for first presentation. */

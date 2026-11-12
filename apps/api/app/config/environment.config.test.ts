@@ -351,6 +351,8 @@ describe('environmentSchema', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.DATABASE_POOL_MAX).toBe(10);
+      expect(result.data.DATABASE_BACKGROUND_POOL_MAX).toBe(1);
+      expect(result.data.DATABASE_POOLER_POOL_SIZE).toBeUndefined();
       expect(result.data.DATABASE_CONNECT_TIMEOUT_SECONDS).toBe(10);
       expect(result.data.DATABASE_IDLE_TIMEOUT_SECONDS).toBe(60);
       expect(result.data.DATABASE_STATEMENT_TIMEOUT_MS).toBe(15_000);
@@ -364,6 +366,10 @@ describe('environmentSchema', () => {
     ['DATABASE_POOL_MAX', '0'],
     ['DATABASE_POOL_MAX', 'unbounded'],
     ['DATABASE_POOL_MAX', '101'],
+    ['DATABASE_BACKGROUND_POOL_MAX', '0'],
+    ['DATABASE_BACKGROUND_POOL_MAX', '11'],
+    ['DATABASE_POOLER_POOL_SIZE', '0'],
+    ['DATABASE_POOLER_POOL_SIZE', 'fifteen'],
     ['DATABASE_CONNECT_TIMEOUT_SECONDS', '0'],
     ['DATABASE_IDLE_TIMEOUT_SECONDS', '0'],
     ['DATABASE_STATEMENT_TIMEOUT_MS', '99'],
@@ -473,6 +479,39 @@ describe('environmentSchema', () => {
       expect(result.data.TAU_EMAIL_FROM).toBe('Tau <identity@taucad.dev>');
       // Replies go to the staffed help mailbox (OQ8); fly.prod.toml overrides it with the tau.new address.
       expect(result.data.TAU_EMAIL_REPLY_TO).toBe('help@taucad.dev');
+    }
+  });
+
+  it('should leave the purpose-specific senders unset when omitted or empty', () => {
+    const omitted = Object.fromEntries(
+      Object.entries(baseEnvironment()).filter(
+        ([key]) => key !== 'TAU_EMAIL_FROM_NOTIFICATIONS' && key !== 'TAU_EMAIL_FROM_BILLING',
+      ),
+    );
+    const empty = { ...baseEnvironment(), TAU_EMAIL_FROM_NOTIFICATIONS: '', TAU_EMAIL_FROM_BILLING: '' };
+
+    for (const environment of [omitted, empty]) {
+      const result = environmentSchema.safeParse(environment);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        // No default address in code: EmailService falls back to TAU_EMAIL_FROM.
+        expect(result.data.TAU_EMAIL_FROM_NOTIFICATIONS).toBeUndefined();
+        expect(result.data.TAU_EMAIL_FROM_BILLING).toBeUndefined();
+      }
+    }
+  });
+
+  it('should accept the purpose-specific senders when set', () => {
+    const result = environmentSchema.safeParse({
+      ...baseEnvironment(),
+      TAU_EMAIL_FROM_NOTIFICATIONS: 'Tau <notifications@taucad.dev>',
+      TAU_EMAIL_FROM_BILLING: 'Tau Billing <billing@taucad.dev>',
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.TAU_EMAIL_FROM_NOTIFICATIONS).toBe('Tau <notifications@taucad.dev>');
+      expect(result.data.TAU_EMAIL_FROM_BILLING).toBe('Tau Billing <billing@taucad.dev>');
     }
   });
 
@@ -599,6 +638,85 @@ describe('environmentSchema', () => {
 
     expect(result.success && result.data.TAU_OBSERVABILITY_DELIVERY_ENABLED).toBe(false);
   });
+
+  it('should leave content capture off, with no account listed, by default', () => {
+    const result = environmentSchema.safeParse({ ...baseEnvironment(), NODE_ENV: 'development' });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.TAU_OBSERVABILITY_CONTENT_CAPTURE).toBe('off');
+      expect(result.data.TAU_OBSERVABILITY_CONTENT_ACCOUNTS).toEqual([]);
+    }
+  });
+
+  it.each([
+    ['off', '', []],
+    ['allowlist', 'staff-a, staff-b', ['staff-a', 'staff-b']],
+    ['on', undefined, []],
+  ])('should parse content capture mode %s with accounts %j', (mode, accounts, expected) => {
+    const result = environmentSchema.safeParse({
+      ...baseEnvironment(),
+      NODE_ENV: 'development',
+      TAU_OBSERVABILITY_CONTENT_CAPTURE: mode,
+      TAU_OBSERVABILITY_CONTENT_ACCOUNTS: accounts,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.TAU_OBSERVABILITY_CONTENT_CAPTURE).toBe(mode);
+      expect(result.data.TAU_OBSERVABILITY_CONTENT_ACCOUNTS).toEqual(expected);
+    }
+  });
+
+  it.each([
+    [{ TAU_OBSERVABILITY_CONTENT_CAPTURE: 'everyone' }, 'TAU_OBSERVABILITY_CONTENT_CAPTURE'],
+    [{ TAU_OBSERVABILITY_CONTENT_CAPTURE: 'allowlist' }, 'TAU_OBSERVABILITY_CONTENT_ACCOUNTS'],
+    [{ TAU_OBSERVABILITY_CONTENT_ACCOUNTS: 'staff-a,not an id' }, 'TAU_OBSERVABILITY_CONTENT_ACCOUNTS'],
+  ])('should refuse the content capture setting %j', (values, path) => {
+    const result = environmentSchema.safeParse({ ...baseEnvironment(), NODE_ENV: 'development', ...values });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.path[0])).toContain(path);
+    }
+  });
+
+  it.each([
+    [undefined, {}],
+    ['', {}],
+    [
+      'user-rating=cfg-rating, run-termination=cfg_termination,task-success=cfg3',
+      { 'user-rating': 'cfg-rating', 'run-termination': 'cfg_termination', 'task-success': 'cfg3' },
+    ],
+    ['task-success=cfg3', { 'task-success': 'cfg3' }],
+  ])('should parse the Langfuse score config ids %j', (value, expected) => {
+    const result = environmentSchema.safeParse({
+      ...baseEnvironment(),
+      NODE_ENV: 'development',
+      TAU_OBSERVABILITY_SCORE_CONFIG_IDS: value,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.TAU_OBSERVABILITY_SCORE_CONFIG_IDS).toEqual(expected);
+    }
+  });
+
+  it.each(['reply-quality=cfg1', 'user-rating', 'user-rating=not an id', 'user-rating=a,user-rating=b'])(
+    'should refuse the Langfuse score config ids %j',
+    (value) => {
+      const result = environmentSchema.safeParse({
+        ...baseEnvironment(),
+        NODE_ENV: 'development',
+        TAU_OBSERVABILITY_SCORE_CONFIG_IDS: value,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.map((issue) => issue.path[0])).toContain('TAU_OBSERVABILITY_SCORE_CONFIG_IDS');
+      }
+    },
+  );
 
   it('should treat the empty GitHub repository App values of a copied .env.example as unconfigured', () => {
     const result = environmentSchema.safeParse({

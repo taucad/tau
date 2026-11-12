@@ -1,6 +1,7 @@
 import { createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
 import type {
   ActorRefFrom,
+  CallbackActorLogic,
   AnyActor,
   EnqueueObject,
   MetaObject,
@@ -17,7 +18,13 @@ import { idPrefix } from '@taucad/types/constants';
 import { getLengthUnit, metersPerLengthUnit } from '#constants/length-units.js';
 import type { LengthSymbol, UnitSystem } from '#constants/length-units.js';
 import { generatePrefixedId } from '@taucad/utils/id';
+import { createCameraView } from '@taucad/camera';
+import type { CameraBounds } from '@taucad/camera';
+import { cameraMachine } from '@taucad/camera/machine';
+import type { CameraMachineEmitted, CameraMachineEvent } from '@taucad/camera/machine';
+import { resolveMetersPerRenderUnit } from '@taucad/spatial';
 import type {
+  CameraOwnedSettings,
   GraphicsBackendPreference,
   GraphicsOwnedSettings,
   PersistedSectionView,
@@ -41,6 +48,14 @@ import { viewerFirstFrame } from '#lib/viewer-events.js';
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
+import { canvasMachine } from '#machines/canvas.machine.js';
+import { framingMachine } from '#machines/framing.machine.js';
+import type { FramingEvent, FramingPendingPose } from '#machines/framing.machine.js';
+import { sectionInputMachine } from '#machines/section-input.machine.js';
+import type { SectionInputAdapterLogic } from '#machines/section-input.machine.js';
+import { defaultFramingStage } from '#graphics/three/framing-stage.js';
+import type { CanvasRef, CanvasSurfaceKind } from '#machines/canvas.machine.js';
+import type { webglContextMachine } from '#machines/webgl-context.machine.js';
 import type { MeasurementAnchor, MeasurementRecord, MeasurementOperation } from '#constants/measurement.types.js';
 
 /**
@@ -55,6 +70,49 @@ export type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
  * @public
  */
 export type KinematicsRef = ActorRefFrom<typeof kinematicsMachine>;
+
+/**
+ * Actor reference for the camera spawned by a graphics actor: the view's camera, whose lifetime is the graphics
+ * actor's (charter D5, I11).
+ *
+ * @public
+ */
+export type GraphicsCameraRef = ActorRefFrom<typeof cameraMachine>;
+
+/**
+ * The controls adapter a canvas hands graphics once its renderer exists: a callback actor whose closure holds the
+ * canvas's `camera-controls` instance, DOM surface and native cameras (charter D4). It sends back the gesture events.
+ *
+ * @public
+ */
+export type ControlsAdapterLogic = CallbackActorLogic<
+  { type: 'stop' },
+  unknown,
+  { type: 'interactionStarted' } | { type: 'interactionMoved' } | { type: 'interactionEnded' }
+>;
+
+/**
+ * The record fields a view's framing applies once after its entry's first frame, as `entryChanged` carries them.
+ *
+ * @public
+ */
+export type GraphicsPendingPose = FramingPendingPose;
+
+/**
+ * Actor reference for the framing actor spawned by a graphics actor: it decides when the view's geometry is framed
+ * and sends the camera the event that does it (charter D2, D20; I7, I8).
+ *
+ * @public
+ */
+export type GraphicsFramingRef = ActorRefFrom<typeof framingMachine>;
+
+/**
+ * Actor reference for a section input a graphics actor runs: the gesture machine with the DOM adapter its section
+ * handles provided.
+ *
+ * @public
+ */
+export type GraphicsSectionInputRef = ActorRefFrom<typeof sectionInputMachine>;
 
 /**
  * A reason for ignoring pointer clicks on the model, such as an active measure tool.
@@ -177,7 +235,7 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
  *   `currentMeasurementStart`, `modelInteractionUnitId` and `selectedSectionCutId`.
  * - **ephemeral** -- derived from geometry, the canvas or a pointer on every mount, never seeded:
  *   `gridSizes`, `gridSizesComputed`, `cadUnits`, `cameraVisibleSpan`, `geometryRadius`,
- *   `geometryCenter`, `resolvedGraphicsBackend`, `activeRenderer`, `webGpuAvailable`, `webGpuProbeSettled`, `hoveredSectionCutId`,
+ *   `geometryCenter`, `resolvedGraphicsBackend`, `canvas`, `webGpuAvailable`, `hoveredSectionCutId`,
  *   `committedSectionCuts` (what the caps last committed),
  *   `hoveredMeasurementId`, `measureSnapDistance`, every
  *   suppression and interaction flag, `pickableMeshesVersion`, `geometry`, `geometryKey` and
@@ -232,27 +290,22 @@ export interface GraphicsContext {
   upDirection: 'x' | 'y' | 'z';
   /** User preference (`auto` uses runtime GPU probe). */
   graphicsBackendPreference: GraphicsBackendPreference;
-  /** Probe result cached after startup (invoked probe). */
-  webGpuAvailable: boolean;
   /**
-   * Whether the capability probe has answered (or failed, or run out of time). Until then a WebGPU-preferring viewer
-   * mounts no canvas: a canvas mounted on WebGL meanwhile would be thrown away for a WebGPU one, and on a software
-   * adapter its work also delays the adapter answer.
+   * Probe result cached after startup (the `backend` region's invoked probe). Until the probe answers, the `backend`
+   * region is `probing` and a WebGPU-preferring viewer mounts no canvas: a canvas mounted on WebGL meanwhile would be
+   * thrown away for a WebGPU one, and on a software adapter its work also delays the adapter answer.
    */
-  webGpuProbeSettled: boolean;
+  webGpuAvailable: boolean;
   /** Capability-derived candidate; initialization can still fall back to WebGL. */
   resolvedGraphicsBackend: ResolvedGraphicsBackend;
-  /** Successfully initialized canvas; cleared on matching loss or teardown, never persisted. */
-  activeRenderer: Readonly<{ canvasId: string; backend: ResolvedGraphicsBackend }> | undefined;
   /**
-   * The mounted canvas that draws frames, and whether its first frame is on screen. Only a Three canvas sets it, or the
-   * placeholder that holds its place while the WebGPU probe runs, so a stage showing other content (an SVG) is never
-   * waiting. The stage is busy while `presented` is false.
+   * The mounted surface's canvas actor, which owns the renderer lifecycle (`creating → ready → presented ; lost ;
+   * failed`). Only a Three canvas attaches one, or the placeholder that holds its place while the WebGPU probe runs, so
+   * a stage showing other content (an SVG) is never waiting.
    *
-   * Assumes one canvas per graphics actor: a second canvas mounted on the same actor replaces the first one's entry, and
-   * the stage would then wait only on whichever mounted last.
+   * One canvas per graphics actor: a second surface attaching replaces the first one's actor.
    */
-  canvasPresentation: Readonly<{ canvasId: string; presented: boolean }> | undefined;
+  canvas: Readonly<{ canvasId: string; ref: CanvasRef }> | undefined;
 
   // Section view state
   isSectionViewActive: boolean;
@@ -284,9 +337,6 @@ export interface GraphicsContext {
   measureCandidates: Array<{ id: string; label: string }>;
   measureActiveCandidateId?: string;
   measureChosenCandidateId?: string;
-  measureCommitRequest: number;
-  measureCatalogRequest: number;
-  measureCatalogAppend: boolean;
   measureCatalogHasMore: boolean;
   measureMessage?: string;
   measurePreviewDistance?: number;
@@ -294,8 +344,6 @@ export interface GraphicsContext {
   hoveredMeasurementId?: string;
 
   // State flags
-  cameraInteracting: boolean;
-  cameraInteractionHadMovement: boolean;
   suppressNextModelPointerClick: boolean;
   modelPointerClickSuppressionReasons: ModelPointerClickSuppressionReason[];
   viewerHoverSuppressionReasons: ViewerHoverSuppressionReason[];
@@ -306,6 +354,33 @@ export interface GraphicsContext {
   modelInteractionUnitId?: string;
   /** Per-view mechanism pose, keyed by the same unit ids as model interaction. */
   kinematicsRef: KinematicsRef;
+  /**
+   * The view's camera. Its pose and render frame outlive every canvas and provider mount; its clip policy is held by
+   * the canvas that draws the grid, and cleared when that canvas stops.
+   */
+  cameraRef: GraphicsCameraRef;
+  /**
+   * The attached canvas's controls adapter: the only listener on its `camera-controls` instance (charter I9). It
+   * stops with its canvas, so a canvas remount replaces it and never runs two.
+   */
+  controlsAdapter: Readonly<{ canvasId: string; ref: AnyActor }> | undefined;
+  /**
+   * Whether a canvas has presented the camera at least once. It stays set after the canvas detaches (a hidden tab), since
+   * the camera keeps its pose.
+   */
+  cameraPresented: boolean;
+  /** The view's framing actor, beside its camera: it frames the entry's first geometry and refits on a large change. */
+  framingRef: GraphicsFramingRef;
+  /**
+   * The presentation key the camera's render frame is anchored for. A measurement of a new key re-anchors the frame on
+   * its geometry; a re-measured key (a settled pose, a remount) keeps it.
+   */
+  renderFrameKey: string | undefined;
+  /**
+   * The section input of the mounted section handles. It stops with them, so a remount or a new surface replaces it
+   * and never runs two.
+   */
+  sectionInput: Readonly<{ inputId: string; ref: GraphicsSectionInputRef }> | undefined;
 
   // Geometry data from CAD
   artifact: KnownArtifact | undefined;
@@ -330,6 +405,7 @@ export type GraphicsEvent =
   | { type: 'setGridUnit'; payload: { unit: LengthSymbol } }
   // Camera events
   | { type: 'fitView' }
+  /** The camera child's `viewChanged`, folded into the visible span. */
   | { type: 'cameraViewChanged'; verticalSpan: number }
   // Visibility events
   | { type: 'setSurfaceVisibility'; payload: boolean }
@@ -340,17 +416,54 @@ export type GraphicsEvent =
   | { type: 'setMatcapVisibility'; payload: boolean }
   | { type: 'setPostProcessingVisibility'; payload: boolean }
   | { type: 'setUpDirection'; payload: 'x' | 'y' | 'z' }
+  /**
+   * A view record's up direction (charter G6): graphics takes it, and the camera adopts it through
+   * `adoptPersistedPose`, so it is never a person's `up` change that the record would save again.
+   */
+  | { type: 'adoptUpDirection'; payload: 'x' | 'y' | 'z' }
   | { type: 'setGraphicsBackendPreference'; payload: GraphicsBackendPreference }
   /** A WebGPU canvas on this page could not present, or lost its device to the browser: WebGPU is off for the page. */
   | { type: 'webGpuCanvasLost' }
-  | { type: 'rendererInitialized'; payload: NonNullable<GraphicsContext['activeRenderer']> }
-  | { type: 'rendererRemoved'; canvasId: string }
-  /** A canvas that draws frames has mounted; the stage waits for its first frame. */
-  | { type: 'canvasMounted'; canvasId: string }
-  /** The canvas's first frame is on screen. */
-  | { type: 'rendererPresented'; canvasId: string }
-  /** The canvas no longer draws frames (unmounted, or replaced by its context-lost fallback). */
-  | { type: 'canvasUnmounted'; canvasId: string }
+  /**
+   * A viewer surface entered the document: graphics starts its canvas actor, which the surface's R3F root then hosts.
+   * Sent once per surface from its element's ref, so a StrictMode replay detaches and attaches again.
+   */
+  | {
+      type: 'canvasAttached';
+      canvasId: string;
+      kind: CanvasSurfaceKind;
+      /** The viewer's WebGL context budget, when the embedder tracks one. */
+      webglContext?: ActorRefFrom<typeof webglContextMachine>;
+      /** The surface estimate the viewer was admitted with. */
+      admittedBytes?: number;
+      /** The surface re-attached to a renderer that already exists, so its canvas actor times no load spans. */
+      reattached?: boolean;
+    }
+  /** The surface left the document: its canvas actor stops and returns its budget. */
+  | { type: 'canvasDetached'; canvasId: string }
+  /**
+   * The attached surface's renderer exists: graphics starts its controls adapter, which stops with the surface. A
+   * re-delivery for the running adapter's surface changes nothing.
+   */
+  | { type: 'controlsAttached'; canvasId: string; adapter: ControlsAdapterLogic }
+  /**
+   * Section handles mounted around a surface: graphics starts their section input with this DOM adapter, replacing the
+   * one it ran. A re-delivery for the running input changes nothing.
+   */
+  | { type: 'sectionInputAttached'; inputId: string; adapter: SectionInputAdapterLogic }
+  /** The section handles left: their section input stops, and gives back whatever it held. */
+  | { type: 'sectionInputDetached'; inputId: string }
+  // Framing events
+  /**
+   * The view's entry: a new identity frames its first geometry again, with the record's pose applied after that
+   * frame. Before the first frame, the latest record for the same entry replaces the pending pose.
+   */
+  | { type: 'entryChanged'; identity: string; pendingPose?: FramingPendingPose }
+  /**
+   * The presented geometry was measured, in metres, with the host's resolved stage and surface. A new key anchors the
+   * render frame on it; the framing actor decides whether the camera frames, refits or only takes the bounds.
+   */
+  | Extract<FramingEvent, { type: 'geometryBoundsMeasured' }>
   // Section view events
   /** Turning the section on with no cuts adds the default plane, removing the side `viewDirection` faces. */
   | { type: 'setSectionViewActive'; payload: boolean; viewDirection?: SectionVector }
@@ -411,10 +524,25 @@ export type GraphicsEvent =
   | { type: 'setHoveredMeasurement'; payload: string | undefined }
   | { type: 'setMeasurementName'; id: string; name: string }
   | { type: 'toggleMeasurementPinned'; id: string }
-  // Controls events
-  | { type: 'controlsInteractionStart' }
-  | { type: 'controlsInteractionMoved' }
-  | { type: 'controlsInteractionEnd' }
+  // Viewer shortcuts
+  /**
+   * A viewer shortcut the bar's keyboard adapter heard. Graphics decides what it does from its own state, emits
+   * `viewerShortcutApplied` with the outcome, and handles nothing when the key does nothing here, so
+   * `snapshot.can(event)` says whether the viewer claims the key. `camera` is the camera child's view at the press;
+   * `cutId` is the cut of the focused chip, which Delete and Backspace prefer to the selected cut.
+   */
+  | {
+      type: 'viewerShortcutPressed';
+      shortcut: ViewerShortcut;
+      pressId: string;
+      camera: ViewerShortcutCamera;
+      cutId?: string;
+    }
+  // Controls adapter events, forwarded to the camera
+  | { type: 'interactionStarted' }
+  /** Sent once per gesture, on its first movement. */
+  | { type: 'interactionMoved' }
+  | { type: 'interactionEnded' }
   | {
       type: 'beginViewerModelHoverSuppression';
       reason: ViewerHoverSuppressionReason;
@@ -565,13 +693,16 @@ export const graphicsEventTypes = [
   'setMatcapVisibility',
   'setPostProcessingVisibility',
   'setUpDirection',
+  'adoptUpDirection',
   'setGraphicsBackendPreference',
   'webGpuCanvasLost',
-  'rendererInitialized',
-  'rendererRemoved',
-  'canvasMounted',
-  'rendererPresented',
-  'canvasUnmounted',
+  'canvasAttached',
+  'canvasDetached',
+  'controlsAttached',
+  'sectionInputAttached',
+  'sectionInputDetached',
+  'entryChanged',
+  'geometryBoundsMeasured',
   'setSectionViewActive',
   'adoptSectionView',
   'addSectionCut',
@@ -613,9 +744,10 @@ export const graphicsEventTypes = [
   'setHoveredMeasurement',
   'setMeasurementName',
   'toggleMeasurementPinned',
-  'controlsInteractionStart',
-  'controlsInteractionMoved',
-  'controlsInteractionEnd',
+  'viewerShortcutPressed',
+  'interactionStarted',
+  'interactionMoved',
+  'interactionEnded',
   'beginViewerModelHoverSuppression',
   'endViewerModelHoverSuppression',
   'markModelPointerGestureMoved',
@@ -664,8 +796,70 @@ export type AddSectionCutPayload =
  */
 export type GraphicsEmitted =
   | { type: 'gridUpdated'; sizes: GridSizes }
+  /** Fit view, for a viewer with no camera: the SVG pan-zoom resets on it. The 3D camera fits through framing. */
   | { type: 'viewFitRequested' }
-  | { type: 'geometryRadiusCalculated'; radius: number };
+  | { type: 'geometryRadiusCalculated'; radius: number }
+  /** What the shortcut of `pressId` did, for the bar that heard it to announce. */
+  | { type: 'viewerShortcutApplied'; pressId: string; outcome: ViewerShortcutOutcome }
+  /** Use target: the measuring tool's session commits the chosen candidate. */
+  | { type: 'measureCandidateCommitRequested' }
+  /** List the targets in view: a fresh catalog, or with `append` the next page of the one listed. */
+  | { type: 'measureCatalogRequested'; append: boolean }
+  /** The person is editing the section cuts: the section region entered `on.editing`. */
+  | { type: 'sectionEdited' }
+  /**
+   * The section settled: it is off, or no cut changed for {@link sectionSettleDelay}. Read the section from context
+   * (`isSectionViewActive`, `sectionCuts`).
+   */
+  | { type: 'sectionSettled' };
+
+/**
+ * Milliseconds the section cuts stay quiet before they are settled (the section quiet gate, charter G6).
+ *
+ * @public
+ */
+export const sectionSettleDelay = 250;
+
+/**
+ * A viewer shortcut: F fits the view, S and M toggle Section and Measure, G the grid, P the projection, Escape steps
+ * back, and Delete or Backspace removes a cut.
+ *
+ * @public
+ */
+export type ViewerShortcut = 'fitView' | 'section' | 'measure' | 'grid' | 'projection' | 'escape' | 'removeCut';
+
+/**
+ * What a viewer shortcut did.
+ *
+ * @public
+ */
+export type ViewerShortcutOutcome =
+  | 'fitted'
+  | 'noModelToFit'
+  | 'sectionOn'
+  | 'sectionOff'
+  | 'sectionNeedsModel'
+  | 'measureOn'
+  | 'measureOff'
+  | 'measureNeedsModel'
+  | 'gridShown'
+  | 'gridHidden'
+  | 'perspective'
+  | 'orthographic'
+  | 'pointCancelled'
+  | 'cutRemoved';
+
+/**
+ * The camera child's view at a shortcut press: Section cuts away the side `direction` faces, and P switches between
+ * orthographic (a field of view of 0) and the last perspective angle.
+ *
+ * @public
+ */
+export type ViewerShortcutCamera = Readonly<{
+  direction: SectionVector;
+  requestedVerticalFieldOfView: number;
+  lastPerspectiveVerticalFieldOfView: number;
+}>;
 
 /**
  * Create-only seed. The durable half is exactly the keys this machine owns (Law 1), so a new
@@ -674,6 +868,8 @@ export type GraphicsEmitted =
  */
 // oxlint-disable-next-line typescript/consistent-type-definitions -- an interface, not a type alias, so declarations reference it by name (TS7056)
 export interface GraphicsInput extends Partial<GraphicsOwnedSettings> {
+  /** The camera's create-only seed: the view's persisted field of view and pose. */
+  camera?: Partial<CameraOwnedSettings>;
   measureSnapDistance?: number; // Default 10px for a fine pointer
   modelInteractionRef?: ModelInteractionRef;
 }
@@ -783,9 +979,149 @@ const graphicsActors = {
   ),
   modelInteraction: modelInteractionMachine,
   kinematics: kinematicsMachine,
+  canvas: canvasMachine,
+  camera: cameraMachine,
+  framing: framingMachine,
 };
 
 type GraphicsEnqueue = EnqueueObject<GraphicsEvent, GraphicsEmitted, SystemRegistry, typeof graphicsActors>;
+
+type ViewerShortcutDecision = Readonly<{
+  outcome: ViewerShortcutOutcome;
+  /** Raised on graphics, so the shortcut takes the same transition as its control. */
+  event?: GraphicsEvent;
+  camera?: Extract<CameraMachineEvent, { type: 'setVerticalFieldOfView' }>;
+}>;
+
+type ViewerShortcutPressedEvent = Extract<GraphicsEvent, { type: 'viewerShortcutPressed' }>;
+
+const sectionOffDecision: ViewerShortcutDecision = {
+  outcome: 'sectionOff',
+  event: { type: 'setSectionViewActive', payload: false },
+};
+const measureOffDecision: ViewerShortcutDecision = {
+  outcome: 'measureOff',
+  event: { type: 'setMeasureActive', payload: false },
+};
+
+/** S and M: turn the tool off, or on when there is a model to cut or measure. */
+const decideToolToggle = (
+  context: GraphicsContext,
+  tool: 'section' | 'measure',
+  camera: ViewerShortcutCamera,
+): ViewerShortcutDecision => {
+  const hasModel = context.geometryRadius > 0;
+  if (tool === 'section') {
+    if (context.isSectionViewActive) {
+      return sectionOffDecision;
+    }
+    return hasModel
+      ? {
+          outcome: 'sectionOn',
+          event: { type: 'setSectionViewActive', payload: true, viewDirection: camera.direction },
+        }
+      : { outcome: 'sectionNeedsModel' };
+  }
+  if (context.isMeasureActive) {
+    return measureOffDecision;
+  }
+  return hasModel
+    ? { outcome: 'measureOn', event: { type: 'setMeasureActive', payload: true } }
+    : { outcome: 'measureNeedsModel' };
+};
+
+/** Escape steps back: a half-placed point, then Measure, then Section. */
+const decideEscape = (context: GraphicsContext): ViewerShortcutDecision | undefined => {
+  if (context.currentMeasurementStart) {
+    return { outcome: 'pointCancelled', event: { type: 'cancelCurrentMeasurement' } };
+  }
+  if (context.isMeasureActive) {
+    return measureOffDecision;
+  }
+  return context.isSectionViewActive ? sectionOffDecision : undefined;
+};
+
+/** Delete and Backspace remove the focused chip's cut, else the selected one, while Section is on. */
+const decideRemoveCut = (context: GraphicsContext, cutId: string | undefined): ViewerShortcutDecision | undefined => {
+  const id = cutId ?? context.selectedSectionCutId;
+  return id !== undefined && context.isSectionViewActive && context.sectionCuts.some((cut) => cut.id === id)
+    ? { outcome: 'cutRemoved', event: { type: 'removeSectionCut', payload: id } }
+    : undefined;
+};
+
+/** What a shortcut does in `context`, or nothing: S, M and P do nothing for 2D geometry. */
+const decideViewerShortcut = (
+  context: GraphicsContext,
+  { shortcut, camera, cutId }: ViewerShortcutPressedEvent,
+): ViewerShortcutDecision | undefined => {
+  const is2d = context.artifact?.mimeType === 'image/svg+xml';
+  switch (shortcut) {
+    case 'fitView': {
+      return is2d || (context.geometryRadius > 0 && selectFramingFits(context.framingRef))
+        ? { outcome: 'fitted', event: { type: 'fitView' } }
+        : { outcome: 'noModelToFit' };
+    }
+    case 'grid': {
+      const isShown = !context.enableGrid;
+      return { outcome: isShown ? 'gridShown' : 'gridHidden', event: { type: 'setGridVisibility', payload: isShown } };
+    }
+    case 'section':
+    case 'measure': {
+      return is2d ? undefined : decideToolToggle(context, shortcut, camera);
+    }
+    case 'projection': {
+      if (is2d) {
+        return undefined;
+      }
+      const isOrthographic = camera.requestedVerticalFieldOfView === 0;
+      return {
+        outcome: isOrthographic ? 'perspective' : 'orthographic',
+        camera: {
+          type: 'setVerticalFieldOfView',
+          verticalFieldOfView: isOrthographic ? camera.lastPerspectiveVerticalFieldOfView : 0,
+        },
+      };
+    }
+    case 'escape': {
+      return decideEscape(context);
+    }
+    case 'removeCut': {
+      return decideRemoveCut(context, cutId);
+    }
+  }
+};
+
+/**
+ * Whether Fit view fits a model: framing has framed the entry and holds a measurement to fit (it ignores the request
+ * while an entry waits for its first presentation). Read it from the framing actor, with `useSelector(framingRef, …)`.
+ * @public
+ */
+export const selectFramingFitsModel = (framing: SnapshotFrom<typeof framingMachine>): boolean =>
+  framing.matches('framed') && 'measuredBounds' in framing.context && framing.context.measuredBounds !== undefined;
+
+const selectFramingFits = (framingRef: GraphicsFramingRef): boolean => selectFramingFitsModel(framingRef.getSnapshot());
+
+/** Whether the person is holding a camera gesture (pointer down on the controls). */
+const selectGestureHeld = (cameraRef: GraphicsCameraRef): boolean =>
+  cameraRef.getSnapshot().matches({ gesture: 'held' });
+
+/**
+ * The controls adapter stops with its canvas: a new or detached surface ends the old gesture listener. A gesture it
+ * held ends with it, so the camera cannot stay `gesture.held` and hover suppression cannot stick (G3 report).
+ */
+const stopControlsAdapter = (
+  context: GraphicsContext,
+  enq: GraphicsEnqueue,
+): Pick<GraphicsContext, 'controlsAdapter' | 'viewerHoverSuppressionReasons'> => {
+  if (context.controlsAdapter) {
+    enq.stop(context.controlsAdapter.ref);
+    enq.sendTo(context.cameraRef, { type: 'interactionEnded' });
+  }
+  return {
+    controlsAdapter: undefined,
+    viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, 'cameraControls'),
+  };
+};
 type GraphicsPatch = Partial<GraphicsContext>;
 type ModelInteractionMessage = Parameters<ModelInteractionRef['send']>[0];
 
@@ -832,6 +1168,21 @@ const endMeasureHoverSuppression = (context: GraphicsContext): GraphicsPatch => 
   ),
   viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, 'measureTool'),
 });
+
+/** The cuts after a patch of one cut, or `undefined` when the cut is gone or the patch changes nothing. */
+const updatedSectionCut = (
+  context: GraphicsContext,
+  payload: Extract<GraphicsEvent, { type: 'updateSectionCut' }>['payload'],
+): Pick<GraphicsContext, 'sectionCuts'> | undefined => {
+  const cut = context.sectionCuts.find((candidate) => candidate.id === payload.id);
+  if (!cut) {
+    return undefined;
+  }
+  const next = applySectionCutPatch(cut, payload.patch, context.geometryCenter);
+  return next === cut
+    ? undefined
+    : { sectionCuts: context.sectionCuts.map((candidate) => (candidate === cut ? next : candidate)) };
+};
 
 /** Appends a cut made with the defaults, selects it and marks the section on; the caller checks the budget. */
 const appendSectionCut = (
@@ -888,6 +1239,53 @@ const sectionOffContext: Pick<GraphicsContext, 'isSectionViewActive' | 'committe
 const isSectionCutReference = (context: GraphicsContext, current: string | undefined, next: string | undefined) =>
   next !== current && (next === undefined || context.sectionCuts.some((cut) => cut.id === next));
 
+/** WebGPU is off for the page: the preference resolves without it. */
+const webGpuOffContext = ({ context }: { context: GraphicsContext }): GraphicsPatch => ({
+  webGpuAvailable: false,
+  resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
+});
+
+/** The frame every view's camera is placed in; the render frame anchors on it. */
+const cameraFrameId = 'tau:root';
+
+/** The centre of measured bounds, in metres. */
+const boundsCenter = ({ min, max }: CameraBounds): [number, number, number] => [
+  (min[0] + max[0]) / 2,
+  (min[1] + max[1]) / 2,
+  (min[2] + max[2]) / 2,
+];
+
+/** The camera's opening direction when the view has no persisted pose. */
+const initialCameraDirection = [Math.sqrt(3 / 8), -Math.sqrt(3 / 8), 0.5] as const;
+const upAxisVectors = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] } as const;
+
+/* The camera seed as the view-camera registry built it: the persisted pose and field of view, else the default pose. */
+const cameraSeed = (input: GraphicsInput, upDirection: 'x' | 'y' | 'z') => {
+  const pixelRatio: unknown = Reflect.get(globalThis, 'devicePixelRatio');
+  return {
+    pixelBudget: 0.25,
+    initialView: createCameraView({
+      ...(input.camera?.cameraView ?? {
+        target: [0, 0, 0],
+        direction: initialCameraDirection,
+        up: upAxisVectors[upDirection],
+        // Keep the seed bounds in front of the camera so the empty scene has stable depth precision.
+        verticalSpan: 4,
+        perspectiveZoom: 1,
+      }),
+      frameId: cameraFrameId,
+      // Matches `defaultGraphicsSettings.cameraFovAngle`.
+      requestedVerticalFieldOfView: input.camera?.cameraFovAngle ?? 60,
+      viewport: {
+        width: 1,
+        height: 1,
+        pixelRatio: Math.min(typeof pixelRatio === 'number' && pixelRatio > 0 ? pixelRatio : 1, 2),
+      },
+      bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
+    }),
+  };
+};
+
 const graphicsMachineDefinition = setup({
   actors: graphicsActors,
   schemas: {
@@ -895,35 +1293,12 @@ const graphicsMachineDefinition = setup({
     events: eventSchemas<GraphicsEvent>(),
     input: types<GraphicsInput>(),
     emitted: eventSchemas<GraphicsEmitted>(),
+    tags: types<GraphicsTag>(),
   },
 }).createMachine({
   id: 'graphics',
 
-  invoke: [
-    {
-      src: 'probeWebGpu',
-      id: 'probeWebGpuInvocation',
-      onDone: ({ context, event }) => {
-        const output = typeof event.output === 'boolean' ? event.output : false;
-        return {
-          context: {
-            webGpuAvailable: output,
-            webGpuProbeSettled: true,
-            resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, output),
-          },
-        };
-      },
-      /** Probe actor rejected / threw — pessimistic fallback. */
-      onError: ({ context }) => ({
-        context: {
-          webGpuAvailable: false,
-          webGpuProbeSettled: true,
-          resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
-        },
-      }),
-    },
-    { src: 'watchWebGpuCanvasLoss', id: 'watchWebGpuCanvasLossInvocation' },
-  ],
+  invoke: [{ src: 'watchWebGpuCanvasLoss', id: 'watchWebGpuCanvasLossInvocation' }],
 
   context: ({ input, spawn, actors }) => {
     const preference = input.graphicsBackend ?? 'webgpu';
@@ -934,6 +1309,8 @@ const graphicsMachineDefinition = setup({
         id: 'model-interaction',
         input: {},
       });
+    const seed = cameraSeed(input, input.upDirection ?? 'z');
+    const cameraRef = spawn(actors.camera, { id: 'camera', input: seed });
 
     return {
       // Grid state
@@ -969,10 +1346,8 @@ const graphicsMachineDefinition = setup({
       upDirection: input.upDirection ?? 'z',
       graphicsBackendPreference: preference,
       webGpuAvailable: false,
-      webGpuProbeSettled: false,
       resolvedGraphicsBackend: resolveGraphicsBackendPreference(preference, false),
-      activeRenderer: undefined,
-      canvasPresentation: undefined,
+      canvas: undefined,
 
       // Section view state (the cuts are durable and entry-scoped)
       ...createSectionViewSeed(input.sectionView),
@@ -998,9 +1373,6 @@ const graphicsMachineDefinition = setup({
       measureCandidates: [],
       measureActiveCandidateId: undefined,
       measureChosenCandidateId: undefined,
-      measureCommitRequest: 0,
-      measureCatalogRequest: 0,
-      measureCatalogAppend: false,
       measureCatalogHasMore: false,
       measureMessage: undefined,
       measurePreviewDistance: undefined,
@@ -1008,8 +1380,6 @@ const graphicsMachineDefinition = setup({
       hoveredMeasurementId: undefined,
 
       // State flags
-      cameraInteracting: false,
-      cameraInteractionHadMovement: false,
       suppressNextModelPointerClick: false,
       modelPointerClickSuppressionReasons: [],
       viewerHoverSuppressionReasons: [],
@@ -1018,6 +1388,20 @@ const graphicsMachineDefinition = setup({
       ownsModelInteractionRef,
       modelInteractionUnitId: undefined,
       kinematicsRef: spawn(actors.kinematics, { id: 'kinematics', input: {} }),
+      cameraRef,
+      framingRef: spawn(actors.framing, {
+        id: 'framing',
+        input: {
+          camera: cameraRef,
+          // The camera opens on the persisted pose, and framing applies it again over the entry's first frame.
+          pendingPose: input.camera?.cameraView && { requestId: 'seed', pose: input.camera.cameraView },
+          ...defaultFramingStage(seed.initialView.up),
+        },
+      }),
+      renderFrameKey: undefined,
+      sectionInput: undefined,
+      controlsAdapter: undefined,
+      cameraPresented: false,
 
       // Shapes
       artifact: undefined,
@@ -1034,12 +1418,31 @@ const graphicsMachineDefinition = setup({
       enq.stop(context.modelInteractionRef);
     }
     enq.stop(context.kinematicsRef);
+    if (context.controlsAdapter) {
+      enq.stop(context.controlsAdapter.ref);
+    }
+    if (context.canvas) {
+      enq.stop(context.canvas.ref);
+    }
+    if (context.sectionInput) {
+      enq.stop(context.sectionInput.ref);
+    }
+    enq.stop(context.framingRef);
+    enq.stop(context.cameraRef);
   },
   initial: 'operational',
   states: {
     operational: {
       /* Seeded cuts set context directly; this raise only enters the section region's `on` state. */
       entry: ({ context }, enq) => {
+        enq.listen(
+          context.cameraRef,
+          'viewChanged',
+          (event): GraphicsEvent => ({
+            type: 'cameraViewChanged',
+            verticalSpan: (event as CameraMachineEmitted & { type: 'viewChanged' }).verticalSpan,
+          }),
+        );
         if (context.isSectionViewActive) {
           enq.raise({ type: 'setSectionViewActive', payload: true });
         }
@@ -1088,13 +1491,56 @@ const graphicsMachineDefinition = setup({
           };
         },
 
+        // Viewer shortcuts: graphics decides, and a key that does nothing here is left unhandled.
+        viewerShortcutPressed: ({ context, event }, enq) => {
+          const decision = decideViewerShortcut(context, event);
+          if (!decision) {
+            return undefined;
+          }
+          if (decision.event) {
+            enq.raise(decision.event);
+          }
+          if (decision.camera) {
+            enq.sendTo(context.cameraRef, decision.camera);
+          }
+          enq.emit({ type: 'viewerShortcutApplied', pressId: event.pressId, outcome: decision.outcome });
+          return {};
+        },
+
         // Camera events
-        fitView: (_, enq) => {
+        fitView: ({ context }, enq) => {
+          // Fit view zooms and recentres the camera on the latest measurement; it never turns it (framing).
+          enq.sendTo(context.framingRef, { type: 'fitRequested' });
           enq.emit({ type: 'viewFitRequested' });
           return {};
         },
+        entryChanged: ({ context, event }, enq) => {
+          enq.sendTo(context.framingRef, event);
+          return {};
+        },
+        geometryBoundsMeasured: ({ context, event }, enq) => {
+          const anchored = event.key === context.renderFrameKey || !(event.radius > 0);
+          if (!anchored) {
+            // A new presentation anchors the render frame on its geometry before the camera frames it, as the stage did.
+            enq.sendTo(context.cameraRef, {
+              type: 'setRenderFrame',
+              renderFrame: {
+                anchorFrameId: cameraFrameId,
+                originMeters: boundsCenter(event.bounds),
+                metersPerRenderUnit: resolveMetersPerRenderUnit({ characteristicLengthMeters: event.radius * 2 }),
+              },
+            });
+          }
+          enq.sendTo(context.framingRef, event);
+          return anchored ? {} : { context: { renderFrameKey: event.key } };
+        },
         cameraViewChanged: ({ context, event, self }, enq) => {
-          if (!Number.isFinite(event.verticalSpan) || event.verticalSpan <= 0) {
+          // Every camera change emits `viewChanged`; only a new span re-derives the grid.
+          if (
+            !Number.isFinite(event.verticalSpan) ||
+            event.verticalSpan <= 0 ||
+            event.verticalSpan === context.cameraVisibleSpan
+          ) {
             return {};
           }
           // Recalculate grid sizes based on new controls state
@@ -1127,7 +1573,19 @@ const graphicsMachineDefinition = setup({
         setAxesVisibility: { context: ({ event }) => ({ enableAxes: event.payload }) },
         setMatcapVisibility: { context: ({ event }) => ({ enableMatcap: event.payload }) },
         setPostProcessingVisibility: { context: ({ event }) => ({ enablePostProcessing: event.payload }) },
-        setUpDirection: { context: ({ event }) => ({ upDirection: event.payload }) },
+        setUpDirection: ({ context, event }, enq) => {
+          if (event.payload === context.upDirection) {
+            return {};
+          }
+          // The camera keeps its view direction and takes the new world up, unless the two are parallel.
+          enq.sendTo(context.cameraRef, { type: 'setUpDirection', axis: event.payload });
+          if (context.canvas) {
+            enq.sendTo(context.canvas.ref, { type: 'upDirectionChanged', upDirection: event.payload });
+          }
+          return { context: { upDirection: event.payload } };
+        },
+        adoptUpDirection: ({ context, event }) =>
+          event.payload === context.upDirection ? {} : { context: { upDirection: event.payload } },
         setGraphicsBackendPreference: {
           context: ({ context, event }) => ({
             graphicsBackendPreference: event.payload,
@@ -1135,55 +1593,88 @@ const graphicsMachineDefinition = setup({
           }),
         },
 
-        // A Retry or remount then starts on WebGL instead of repeating the WebGPU start the browser cannot present.
-        webGpuCanvasLost: {
-          context: ({ context }) => ({
-            webGpuAvailable: false,
-            resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
-          }),
-        },
-        rendererInitialized: { context: ({ event }) => ({ activeRenderer: event.payload }) },
-        canvasMounted: {
-          context: ({ event }) => ({ canvasPresentation: { canvasId: event.canvasId, presented: false } }),
-        },
-        rendererPresented: {
-          context: ({ context, event }) => ({
-            canvasPresentation:
-              context.canvasPresentation?.canvasId === event.canvasId
-                ? { canvasId: event.canvasId, presented: true }
-                : context.canvasPresentation,
-          }),
-        },
-        canvasUnmounted: {
-          context: ({ context, event }) => ({
-            canvasPresentation:
-              context.canvasPresentation?.canvasId === event.canvasId ? undefined : context.canvasPresentation,
-          }),
-        },
-        rendererRemoved: {
-          context: ({ context, event }) => ({
-            activeRenderer: context.activeRenderer?.canvasId === event.canvasId ? undefined : context.activeRenderer,
-          }),
-        },
-
-        // Controls events
-        controlsInteractionStart: {
-          context: {
-            cameraInteracting: true,
-            cameraInteractionHadMovement: false,
-            suppressNextModelPointerClick: false,
-          },
-        },
-        controlsInteractionMoved: ({ context }, enq) => {
-          if (!context.cameraInteracting) {
+        canvasAttached: ({ context, event, actors }, enq) => {
+          if (context.canvas?.canvasId === event.canvasId) {
+            // Idempotent re-delivery: this surface's actor is already running.
             return {};
           }
-          if (!context.viewerHoverSuppressionReasons.includes('cameraControls')) {
-            clearViewerHover(context, enq, 'viewer');
+          if (context.canvas) {
+            enq.stop(context.canvas.ref);
           }
+          const adapter = stopControlsAdapter(context, enq);
+          const ref = enq.spawn(actors.canvas, {
+            id: `canvas:${event.canvasId}`,
+            input: {
+              canvasId: event.canvasId,
+              kind: event.kind,
+              webglContext: event.webglContext,
+              admittedBytes: event.admittedBytes,
+              reattached: event.reattached,
+              camera: context.cameraRef,
+              upDirection: context.upDirection,
+            },
+          });
+          return { context: { canvas: { canvasId: event.canvasId, ref }, ...adapter } };
+        },
+        canvasDetached: ({ context, event }, enq) => {
+          if (context.canvas?.canvasId !== event.canvasId) {
+            // Stale: a replacement surface already took the slot.
+            return {};
+          }
+          enq.stop(context.canvas.ref);
+          return { context: { canvas: undefined, ...stopControlsAdapter(context, enq) } };
+        },
+        controlsAttached: ({ context, event }, enq) => {
+          if (context.canvas?.canvasId !== event.canvasId) {
+            // Stale: that surface is no longer attached.
+            return {};
+          }
+          if (context.controlsAdapter?.canvasId === event.canvasId) {
+            // Idempotent re-delivery: this surface's adapter is already running.
+            return {};
+          }
+          const ref = enq.spawn(event.adapter, { id: `controls:${event.canvasId}` });
+          return { context: { controlsAdapter: { canvasId: event.canvasId, ref }, cameraPresented: true } };
+        },
+        sectionInputAttached: ({ context, event }, enq) => {
+          if (context.sectionInput?.inputId === event.inputId) {
+            // Idempotent re-delivery: these handles' input is already running.
+            return {};
+          }
+          if (context.sectionInput) {
+            enq.stop(context.sectionInput.ref);
+          }
+          const ref = enq.spawn(sectionInputMachine.provide({ actors: { adapter: event.adapter } }), {
+            id: `sectionInput:${event.inputId}`,
+          });
+          return { context: { sectionInput: { inputId: event.inputId, ref } } };
+        },
+        sectionInputDetached: ({ context, event }, enq) => {
+          if (context.sectionInput?.inputId !== event.inputId) {
+            // Stale: newer handles already took the slot.
+            return {};
+          }
+          enq.stop(context.sectionInput.ref);
+          return { context: { sectionInput: undefined } };
+        },
+
+        // Controls adapter events: the camera owns the gesture phase; graphics owns click and hover suppression.
+        interactionStarted: ({ context }, enq) => {
+          enq.sendTo(context.cameraRef, { type: 'interactionStarted' });
+          return { context: { suppressNextModelPointerClick: false } };
+        },
+        interactionMoved: ({ context }, enq) => {
+          if (!selectGestureHeld(context.cameraRef)) {
+            // A move with no held gesture (a stray control event) neither guards a click nor drops the hover.
+            return {};
+          }
+          enq.sendTo(context.cameraRef, { type: 'interactionMoved' });
+          if (context.viewerHoverSuppressionReasons.includes('cameraControls')) {
+            return { context: { suppressNextModelPointerClick: true } };
+          }
+          clearViewerHover(context, enq, 'viewer');
           return {
             context: {
-              cameraInteractionHadMovement: true,
               suppressNextModelPointerClick: true,
               viewerHoverSuppressionReasons: addSuppressionReason(
                 context.viewerHoverSuppressionReasons,
@@ -1192,15 +1683,16 @@ const graphicsMachineDefinition = setup({
             },
           };
         },
-        controlsInteractionEnd: {
-          context: ({ context }) => ({
-            cameraInteracting: false,
-            cameraInteractionHadMovement: false,
-            viewerHoverSuppressionReasons: removeSuppressionReason(
-              context.viewerHoverSuppressionReasons,
-              'cameraControls',
-            ),
-          }),
+        interactionEnded: ({ context }, enq) => {
+          enq.sendTo(context.cameraRef, { type: 'interactionEnded' });
+          return {
+            context: {
+              viewerHoverSuppressionReasons: removeSuppressionReason(
+                context.viewerHoverSuppressionReasons,
+                'cameraControls',
+              ),
+            },
+          };
         },
         beginViewerModelHoverSuppression: ({ context, event }, enq) => {
           if (context.viewerHoverSuppressionReasons.includes(event.reason)) {
@@ -1519,21 +2011,6 @@ const graphicsMachineDefinition = setup({
           return {};
         },
 
-        // Section cuts are data: editing one never changes a region.
-        updateSectionCut: ({ context, event }) => {
-          const cut = context.sectionCuts.find((candidate) => candidate.id === event.payload.id);
-          if (!cut) {
-            return {};
-          }
-          const next = applySectionCutPatch(cut, event.payload.patch, context.geometryCenter);
-          return next === cut
-            ? {}
-            : {
-                context: {
-                  sectionCuts: context.sectionCuts.map((candidate) => (candidate === cut ? next : candidate)),
-                },
-              };
-        },
         selectSectionCut: ({ context, event }) =>
           isSectionCutReference(context, context.selectedSectionCutId, event.payload)
             ? { context: { selectedSectionCutId: event.payload } }
@@ -1660,14 +2137,14 @@ const graphicsMachineDefinition = setup({
         clearMeasureChosenCandidate: {
           context: () => ({ measureChosenCandidateId: undefined }),
         },
-        requestMeasureCandidateCommit: {
-          context: ({ context }) => ({ measureCommitRequest: context.measureCommitRequest + 1 }),
+        // The measuring tool's session hears these and does the work; graphics keeps no request counter (G10b).
+        requestMeasureCandidateCommit: (_, enq) => {
+          enq.emit({ type: 'measureCandidateCommitRequested' });
+          return {};
         },
-        requestMeasureCatalog: {
-          context: ({ context, event }) => ({
-            measureCatalogRequest: context.measureCatalogRequest + 1,
-            measureCatalogAppend: event.append ?? false,
-          }),
+        requestMeasureCatalog: ({ event }, enq) => {
+          enq.emit({ type: 'measureCatalogRequested', append: event.append ?? false });
+          return {};
         },
         setMeasureMessage: { context: ({ event }) => ({ measureMessage: event.message }) },
         setMeasurePreviewDistance: { context: ({ event }) => ({ measurePreviewDistance: event.distance }) },
@@ -1708,10 +2185,65 @@ const graphicsMachineDefinition = setup({
         },
       },
       states: {
+        /*
+         * The rendering backend: `probing` while the WebGPU capability probe runs, `resolved` once it answered (or failed
+         * or ran out of time), and `lost` once a WebGPU canvas on this page could not present. A canvas loss reported
+         * while probing turns WebGPU off but, as before, the probe's own answer then decides.
+         */
+        backend: {
+          initial: 'probing',
+          states: {
+            probing: {
+              tags: ['backend-probing'],
+              invoke: {
+                src: 'probeWebGpu',
+                id: 'probeWebGpuInvocation',
+                onDone: ({ context, event }) => {
+                  const output = typeof event.output === 'boolean' ? event.output : false;
+                  return {
+                    target: 'resolved',
+                    context: {
+                      webGpuAvailable: output,
+                      resolvedGraphicsBackend: resolveGraphicsBackendPreference(
+                        context.graphicsBackendPreference,
+                        output,
+                      ),
+                    },
+                  };
+                },
+                /** Probe actor rejected / threw — pessimistic fallback. */
+                onError: ({ context }) => ({
+                  target: 'resolved',
+                  context: {
+                    webGpuAvailable: false,
+                    resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
+                  },
+                }),
+              },
+              on: {
+                webGpuCanvasLost: { context: webGpuOffContext },
+              },
+            },
+            resolved: {
+              on: {
+                // A Retry or remount then starts on WebGL instead of repeating the WebGPU start the browser cannot present.
+                webGpuCanvasLost: { target: 'lost', context: webGpuOffContext },
+              },
+            },
+            lost: {
+              on: {
+                webGpuCanvasLost: { context: webGpuOffContext },
+              },
+            },
+          },
+        },
         section: {
           initial: 'off',
           states: {
             off: {
+              entry: (_, enq) => {
+                enq.emit({ type: 'sectionSettled' });
+              },
               on: {
                 adoptSectionView: ({ context, event }) => {
                   const patch = adoptedSection(context, event.section);
@@ -1733,14 +2265,47 @@ const graphicsMachineDefinition = setup({
                   context.sectionCuts.length >= maxSectionCuts
                     ? {}
                     : { target: 'on', context: appendSectionCut(context, event.payload) },
-                removeSectionCut: ({ context, event }) => {
+                removeSectionCut: ({ context, event }, enq) => {
                   const patch = withoutSectionCut(context, event.payload);
-                  return patch ? { context: patch } : {};
+                  if (!patch) {
+                    return {};
+                  }
+                  // Nothing is being edited while the section is off: the change is settled at once.
+                  enq.emit({ type: 'sectionSettled' });
+                  return { context: patch };
+                },
+                updateSectionCut: ({ context, event }, enq) => {
+                  const patch = updatedSectionCut(context, event.payload);
+                  if (!patch) {
+                    return {};
+                  }
+                  enq.emit({ type: 'sectionSettled' });
+                  return { context: patch };
                 },
               },
             },
 
+            /*
+             * The section quiet gate (charter G6): a change to the cuts enters `editing`, and the cuts settle
+             * `sectionSettleDelay` after the last one. Only a settled section is written to the view record, and a
+             * foreign section is adopted only then; graphics tells its listeners with `sectionEdited` and
+             * `sectionSettled`.
+             */
             on: {
+              initial: 'settled',
+              states: {
+                settled: {
+                  entry: (_, enq) => {
+                    enq.emit({ type: 'sectionSettled' });
+                  },
+                },
+                editing: {
+                  entry: (_, enq) => {
+                    enq.emit({ type: 'sectionEdited' });
+                  },
+                  after: { [sectionSettleDelay]: { target: 'settled' } },
+                },
+              },
               on: {
                 adoptSectionView: ({ context, event }) => {
                   const patch = adoptedSection(context, event.section);
@@ -1751,7 +2316,7 @@ const graphicsMachineDefinition = setup({
                 addSectionCut: ({ context, event }) =>
                   context.sectionCuts.length >= maxSectionCuts
                     ? {}
-                    : { context: appendSectionCut(context, event.payload) },
+                    : { target: '.editing', context: appendSectionCut(context, event.payload) },
                 removeSectionCut: ({ context, event }) => {
                   const patch = withoutSectionCut(context, event.payload);
                   if (!patch) {
@@ -1759,7 +2324,12 @@ const graphicsMachineDefinition = setup({
                   }
                   return patch.sectionCuts.length === 0
                     ? { target: 'off', context: { ...patch, ...sectionOffContext } }
-                    : { context: patch };
+                    : { target: '.editing', context: patch };
+                },
+                // Each step of a drag or an edit restarts the quiet period.
+                updateSectionCut: ({ context, event }) => {
+                  const patch = updatedSectionCut(context, event.payload);
+                  return patch ? { target: '.editing', context: patch } : {};
                 },
               },
             },
@@ -1914,7 +2484,9 @@ const graphicsMachineDefinition = setup({
  * @public
  */
 export const graphicsIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
-  // Declared in the alphabet but handled in no state.
+  // Declared in the alphabet but handled in no state, deliberately: nothing sends it. The measuring tool's commit
+  // places a feature's first point with `startMeasurement` and its anchor, and completes a one-target feature
+  // measurement with `completeFeatureMeasurement`.
   ['*', 'startFeatureMeasurement'],
   // Turning the section on while on, or off while off, returns `undefined`.
   ['operational.section.off', 'setSectionViewActive'],
@@ -1933,12 +2505,26 @@ export const graphicsIgnoredEvents: ReadonlyArray<readonly [state: string, event
   ['operational.measure.on.selected', 'startMeasurement'],
   ['operational.measure.on.selecting', 'completeMeasurement'],
   ['operational.measure.on.selecting', 'cancelCurrentMeasurement'],
+  // A shortcut that does nothing in the current context is left unhandled, so `can` says whether the bar claims the
+  // key: Escape with nothing on, Delete or Backspace with no known cut, and S, M or P on 2D geometry, in any state.
+  ['*', 'viewerShortcutPressed'],
 ];
 
-/** The graphics machine's state value: the operational section and measure regions. @public */
+/** The graphics machine's state value: the operational backend, section and measure regions. @public */
 export type GraphicsStateValue = {
-  operational: { measure: 'off' | { on: 'selected' | 'selecting' }; section: 'off' | 'on' };
+  operational: {
+    backend: 'probing' | 'resolved' | 'lost';
+    measure: 'off' | { on: 'selected' | 'selecting' };
+    section: 'off' | { on: 'settled' | 'editing' };
+  };
 };
+
+/**
+ * The graphics machine's tags. `backend-probing`: the WebGPU capability probe has not answered yet.
+ *
+ * @public
+ */
+export type GraphicsTag = 'backend-probing';
 
 /**
  * The graphics machine's type, written out rather than inferred. The inferred type carries every inline
@@ -1952,7 +2538,7 @@ export type GraphicsMachine = StateMachine<
   GraphicsEvent,
   Record<string, AnyActor>,
   GraphicsStateValue,
-  string,
+  GraphicsTag,
   GraphicsInput,
   Record<never, never>,
   GraphicsEmitted,
@@ -2032,6 +2618,10 @@ const checkedGraphicsMachineDefinition: MatchingDefinition<typeof graphicsMachin
  * State Architecture:
  *
  * operational (parallel: the tools run together)
+ *   ├── backend
+ *   │   ├── probing (default; the WebGPU capability probe runs)
+ *   │   ├── resolved
+ *   │   └── lost (a WebGPU canvas on the page could not present)
  *   ├── section
  *   │   ├── off (default; the cuts are kept)
  *   │   └── on (at least one cut)
@@ -2057,3 +2647,47 @@ export const graphicsMachine = checkedGraphicsMachineDefinition as unknown as Gr
  */
 export const selectPresentedGeometryKey = (snapshot: GraphicsSnapshot): string =>
   snapshot.context.gltfPresentation.presentedKey ?? snapshot.context.artifactKey;
+
+/**
+ * Whether the person is dragging the view's camera: a pose their held gesture made, read at the moment it is needed.
+ *
+ * @param cameraRef - The view's camera.
+ * @returns Whether the camera is in `input.dragging`.
+ * @public
+ */
+export const selectCameraDragging = (cameraRef: GraphicsCameraRef): boolean =>
+  cameraRef.getSnapshot().matches({ input: 'dragging' });
+
+/**
+ * The view's framing actor.
+ *
+ * @param snapshot - The graphics machine snapshot.
+ * @returns The framing actor.
+ * @public
+ */
+export const selectGraphicsFraming = (snapshot: GraphicsSnapshot): GraphicsFramingRef => snapshot.context.framingRef;
+
+/**
+ * Whether the view's entry has had its first geometry framed: until then, the camera holds the seeded or default pose,
+ * which no person placed and nothing persists.
+ * The value lives in the framing child, so the graphics snapshot does not change with it: read it when it is needed,
+ * never through `useGraphicsSelector` or another snapshot-identity subscription.
+ *
+ * @param snapshot - The graphics machine snapshot.
+ * @returns Whether the framing actor is `framed`.
+ * @public
+ */
+export const selectGraphicsFramed = (snapshot: GraphicsSnapshot): boolean =>
+  snapshot.context.framingRef.getSnapshot().matches('framed');
+
+/**
+ * The entry the view frames, once one was named with `entryChanged`.
+ * The value lives in the framing child, so the graphics snapshot does not change with it: read it when it is needed,
+ * never through `useGraphicsSelector` or another snapshot-identity subscription.
+ *
+ * @param snapshot - The graphics machine snapshot.
+ * @returns The entry identity, or `undefined` before the view knows it.
+ * @public
+ */
+export const selectGraphicsFramingIdentity = (snapshot: GraphicsSnapshot): string | undefined =>
+  snapshot.context.framingRef.getSnapshot().context.identity;

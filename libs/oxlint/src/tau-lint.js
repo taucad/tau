@@ -36,6 +36,7 @@ import { pluginCapabilityFilenameRule } from './rules/plugin-capability-filename
 import { noAuthoredPointerCursorRule } from './rules/no-authored-pointer-cursor.js';
 import { noInlineActorSelectorRule } from './rules/no-inline-actor-selector.js';
 import { noEngineeringVocabularyInCopyRule } from './rules/no-engineering-vocabulary-in-copy.js';
+import { noSaveRevisionInCopyRule } from './rules/no-save-revision-in-copy.js';
 import { xstateContractRule } from './rules/xstate-contract.js';
 import { xstateOwnerMachineRule } from './rules/xstate-owner-machine.js';
 import { noAsciiEllipsisRule } from './rules/no-ascii-ellipsis.js';
@@ -44,14 +45,14 @@ import { noLabelReplacingLoaderRule } from './rules/no-label-replacing-loader.js
 import { noArbitraryPixelSizeRule } from './rules/no-arbitrary-pixel-size.js';
 import { noAccentHoverRule } from './rules/no-accent-hover.js';
 import { noButtonSizeOverrideRule } from './rules/no-button-size-override.js';
-import { noRawPageHeadingRule } from './rules/no-raw-page-heading.js';
+import { noRawHeadingTypeRule } from './rules/no-raw-heading-type.js';
 import { noRaisedOverlayLayerRule } from './rules/no-raised-overlay-layer.js';
 
 /** @type {Plugin} */
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.26.0',
+    version: '1.28.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -83,6 +84,7 @@ const plugin = {
     'no-authored-pointer-cursor': noAuthoredPointerCursorRule,
     'no-inline-actor-selector': noInlineActorSelectorRule,
     'no-engineering-vocabulary-in-copy': noEngineeringVocabularyInCopyRule,
+    'no-save-revision-in-copy': noSaveRevisionInCopyRule,
     'xstate-contract': xstateContractRule,
     'xstate-owner-machine': xstateOwnerMachineRule,
     'no-ascii-ellipsis': noAsciiEllipsisRule,
@@ -91,7 +93,7 @@ const plugin = {
     'no-arbitrary-pixel-size': noArbitraryPixelSizeRule,
     'no-accent-hover': noAccentHoverRule,
     'no-button-size-override': noButtonSizeOverrideRule,
-    'no-raw-page-heading': noRawPageHeadingRule,
+    'no-raw-heading-type': noRawHeadingTypeRule,
     'no-raised-overlay-layer': noRaisedOverlayLayerRule,
   },
 };

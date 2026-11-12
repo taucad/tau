@@ -76,15 +76,25 @@ export type {
   ReadInput,
   ReadRequest,
 } from '#wire/frames.schema.js';
-export { attemptReceiptSchema, gatewayErrorCodes, gatewayTurnGaps, gatewayTurnSteps } from '#wire/gateway.js';
+export {
+  attemptReceiptSchema,
+  gatewayErrorCodes,
+  gatewayHostKinds,
+  gatewayTurnGaps,
+  gatewayTurnSteps,
+} from '#wire/gateway.js';
 export type {
   GatewayErrorCode,
+  GatewayHostKind,
+  GatewayHostLabels,
   GatewayTurnGap,
   GatewayTurnLabels,
   GatewayTurnStep,
   InvocationResolution,
 } from '#wire/gateway.js';
 export { isResumable, refusalOf, refusals } from '#wire/refusals.js';
+export { externalToolName, tauToolEvidence } from '#wire/tool-evidence.js';
+export type { ToolEvidenceClass } from '#wire/tool-evidence.js';
 export { turnPlacementSchema, turnSettlementSchema } from '#wire/settlement.schema.js';
 export type { TurnPlacementRecord, TurnSettlementBody } from '#wire/settlement.schema.js';
 export type { RefusalCode, RefusalEntry, RefusalOwner, RetryClass } from '#wire/refusals.js';

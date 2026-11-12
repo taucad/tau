@@ -42,7 +42,7 @@ import { peekRevisionClient } from '#services/revision-client-registry.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSidebarState } from '@taucad/chat-ui/types/chat-sidebar.types';
-import { actorSessionIdOf } from '#lib/xstate.lib.js';
+import { actorSessionIdOf } from '@taucad/ui-core/lib/xstate.lib';
 import { isQuestionTool } from '@taucad/chat-ui/utils/question-tool';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import {
@@ -358,12 +358,12 @@ const idleCloseText = (idleWindowMilliseconds: number): string =>
 
 /*
  * I24, and the canvas's own heading: closing is visible, never silent. Backup
- * state otherwise belongs to the Revisions pane (v2 D4); the sidebar names it
+ * state otherwise belongs to the History pane (v2 D4); the sidebar names it
  * only while it holds a close up.
  */
 const closingDetail = (revisions: RevisionStatusProjection | undefined): string => {
   const pending = revisions?.sync.pendingCount ?? 0;
-  return pending > 0 ? `Backing up ${pluralize(pending, 'revision')}, then closing…` : 'Closing…';
+  return pending > 0 ? `Backing up ${pluralize(pending, 'change')}, then closing…` : 'Closing…';
 };
 
 /*

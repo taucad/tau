@@ -1,0 +1,23 @@
+{
+  "name": "desktop-terminal",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/desktop-terminal",
+  "projectType": "library",
+  "tags": ["scope:ui", "type:app-lib", "layer:feature", "shell:terminal", "ci:shell"],
+  "targets": {
+    "test:terminal-conformance": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "The Terminal concern's conformance rows (P01, R01-R03, T01-T10 at concern level): createTerminalConcern over a MessageChannel port speaking the validated wire, into the real shell service, the real sandbox provider and the machine's own Bash in a PTY. The services host's frame routing stays proven by desktop:test:terminal-conformance. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Never cached: a receipt is only evidence of the run that wrote it."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/apps/libs/desktop-terminal",
+        "command": "../../../node_modules/.bin/vitest run --config vitest.config.ts src/terminal-concern.conformance.test.ts",
+        "env": {
+          "TAU_SHELL_CONFORMANCE": "1"
+        }
+      }
+    }
+  }
+}

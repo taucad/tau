@@ -1,6 +1,6 @@
 # @taucad/mcp
 
-Model Context Protocol tools for Tau CAD. The package maps
+Model Context Protocol tools for Tau. The package maps
 `evaluate_model`, `test_model`, `screenshot`, and `export_model` onto the
 canonical `@taucad/chat` RPC dispatcher used by Tau's browser and headless
 runtimes.

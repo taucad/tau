@@ -261,6 +261,312 @@ export const ceilingRefusalMarker = 'Tau: repository size limit exceeded';
 export const conflictedRevisionRefusal = 'it carries a revision that still needs your decision';
 
 /**
+ * Why `pre-receive` refuses a commit new to a project's history (blueprint B4,
+ * Q11; Revisions Policy rule 19). Each name is a row of rule 19's ladder; the
+ * client reads the hook's sentence as `REMOTE_REJECTED` and renders it.
+ *
+ * No sentence repeats anything the commit records — not an id, a name or an
+ * address — so a refusal never shows one account another account's email.
+ */
+/* eslint-disable @typescript-eslint/naming-convention -- the keys are refusal codes, spelled as rule 19's ladder names them */
+export const authorshipRefusals = {
+  /** The commit's Tau record, or its author address, names an account other than the pusher. */
+  GIT_PUSH_ACTOR_NOT_PUSHER:
+    'it does not name the account pushing it. Tau Cloud backs up a revision only for the account that recorded it, or the account an agent worked for.',
+  /** A Tau-written commit whose author address is not a Tau no-reply address (Q11, I3). */
+  GIT_PUSH_AUTHOR_ADDRESS:
+    'Tau recorded it with an email address as its author, and Tau Cloud keeps only Tau no-reply addresses. Start a new project to back up this work.',
+  /** A commit with no Tau record, on a project that is not linked to GitHub. */
+  GIT_PUSH_NOT_RECORDED_BY_TAU:
+    'Tau did not record it, and only a project linked to GitHub backs up commits made outside Tau.',
+  /** A Tau record that does not parse, or names no one; also a check that could not finish (fail closed). */
+  GIT_PUSH_RECORD_UNREADABLE: 'its Tau record could not be read, so the server refused it rather than guess.',
+} as const;
+/* eslint-enable @typescript-eslint/naming-convention -- end of the refusal codes */
+
+export type AuthorshipRefusal = keyof typeof authorshipRefusals;
+
+/**
+ * The fixed first words of the taken-number refusal (blueprint B6).
+ *
+ * The one hook refusal a client clears by itself: it gives its own version
+ * that is not backed up the next free number and pushes again. The client
+ * matches on it in `packages/revisions/src/refusal-markers.ts`, which holds the
+ * same string because that package does not depend on this app: those two
+ * copies, each tested, are the only ones, and changing one changes the other.
+ */
+export const versionNumberTakenMarker = 'Tau: version number taken';
+
+/**
+ * Why `pre-receive` refuses a version tag (blueprint B6, Q6, Q13, I6; Revisions
+ * Policy rule 19). A version is an annotated tag whose `Tau-Tag` trailer
+ * records its number, V2 onward (V1 is the Start entry, which has no tag).
+ * Each name is a row of rule 19's ladder.
+ */
+/* eslint-disable @typescript-eslint/naming-convention -- the keys are refusal codes, spelled as rule 19's ladder names them */
+export const versionNumberRefusals = {
+  /** Another version on Tau Cloud already holds the number, or it is V1, which Start holds. */
+  GIT_PUSH_VERSION_NUMBER_TAKEN:
+    'another version already holds its number. Tau gives a version that is not backed up yet the next free number and backs it up again.',
+  /** The tag moves a version Tau Cloud already holds to another number, or drops its number. */
+  GIT_PUSH_VERSION_NUMBER_CHANGED:
+    'it changes the number of a version that is already backed up, and that number never changes.',
+} as const;
+/* eslint-enable @typescript-eslint/naming-convention -- end of the refusal codes */
+
+export type VersionNumberRefusal = keyof typeof versionNumberRefusals;
+
+/**
+ * The version-number check `pre-receive` runs over the tags a push brings (B6).
+ * A Node program, for the reason the authorship check is one: the number is
+ * JSON in the tag's `Tau-Tag` trailer, read here as the client reads it (the
+ * last `Tau-Tag: ` line, through `JSON.parse`). `argv[1]` is the push's tag
+ * updates as `<old> <new> <ref>` triples, `argv[2]` the repository's tags as
+ * `<oid> <ref>` lines, and stdin `git cat-file --batch` over every object both
+ * name, which the hook's shell reads (the quarantine is visible to it) so the
+ * program spawns nothing; an object missing from stdin is a refusal.
+ *
+ * A pushed tag is refused when:
+ *
+ * - its number is 1, or another tag after this push holds the same number
+ *   (`GIT_PUSH_VERSION_NUMBER_TAKEN`, printed after the fixed marker the client
+ *   matches);
+ * - it replaces a tag that had a number with one that records another number
+ *   or none (`GIT_PUSH_VERSION_NUMBER_CHANGED`: I6, a backed-up number never
+ *   changes);
+ * - its trailer or its number cannot be read (`GIT_PUSH_RECORD_UNREADABLE`).
+ *
+ * A tag with no number (one Tau did not write, or one written before numbers)
+ * passes: it is numbered when read. Written without template literals so it
+ * embeds in the hook's quoted heredoc unchanged.
+ */
+export const versionNumberCheckScript = String.raw`'use strict';
+const refusals = ${JSON.stringify({ ...versionNumberRefusals, ...authorshipRefusals })};
+const marker = ${JSON.stringify(versionNumberTakenMarker)};
+const prefix = 'Tau-Tag: ';
+const words = (process.argv[1] || '').split(' ').filter(Boolean);
+const zero = /^0+$/;
+const unreadable = { unreadable: true };
+const fail = (lines) => {
+  for (const line of lines) {
+    process.stderr.write(line + '\n');
+  }
+  process.exitCode = 1;
+};
+try {
+  const pushed = [];
+  for (let index = 0; index + 2 < words.length; index += 3) {
+    pushed.push({ old: words[index], now: words[index + 1], ref: words[index + 2] });
+  }
+  const held = new Map();
+  for (const line of (process.argv[2] || '').split('\n')) {
+    const space = line.indexOf(' ');
+    if (space > 0) {
+      held.set(line.slice(space + 1), line.slice(0, space));
+    }
+  }
+  for (const update of pushed) {
+    held.set(update.ref, update.now);
+  }
+  const numbers = new Map();
+  const batch = require('node:fs').readFileSync(0);
+  {
+    let offset = 0;
+    while (offset < batch.length) {
+      const end = batch.indexOf(10, offset);
+      const header = batch.toString('latin1', offset, end === -1 ? batch.length : end).split(' ');
+      if (end !== -1 && header.length === 2 && header[1] === 'missing') {
+        numbers.set(header[0], unreadable);
+        offset = end + 1;
+        continue;
+      }
+      if (end === -1 || header.length !== 3) {
+        numbers.set(header[0], unreadable);
+        break;
+      }
+      const size = Number(header[2]);
+      const body = batch.toString('utf8', end + 1, end + 1 + size);
+      offset = end + 2 + size;
+      if (header[1] !== 'tag') {
+        numbers.set(header[0], undefined);
+        continue;
+      }
+      const split = body.indexOf('\n\n');
+      const message = split === -1 ? '' : body.slice(split + 2);
+      const line = message.split('\n').findLast((candidate) => candidate.startsWith(prefix));
+      if (line === undefined) {
+        numbers.set(header[0], undefined);
+        continue;
+      }
+      let record;
+      try {
+        record = JSON.parse(line.slice(prefix.length));
+      } catch {
+        numbers.set(header[0], unreadable);
+        continue;
+      }
+      const number = typeof record === 'object' && record !== null ? record.number : undefined;
+      numbers.set(header[0], number === undefined || (Number.isSafeInteger(number) && number >= 1) ? number : unreadable);
+    }
+  }
+  const holders = new Map();
+  for (const [ref, oid] of held) {
+    const number = numbers.get(oid);
+    if (typeof number === 'number') {
+      holders.set(number, [...(holders.get(number) || []), ref]);
+    }
+  }
+  const refused = [];
+  for (const update of pushed) {
+    const number = numbers.get(update.now);
+    const before = zero.test(update.old) ? undefined : numbers.get(update.old);
+    if (!numbers.has(update.now) || number === unreadable) {
+      refused.push('Tau: refused ' + update.ref + ' — ' + refusals.GIT_PUSH_RECORD_UNREADABLE);
+    } else if (typeof before === 'number' && number !== before) {
+      refused.push('Tau: refused ' + update.ref + ' — ' + refusals.GIT_PUSH_VERSION_NUMBER_CHANGED);
+    } else if (typeof number === 'number' && (number === 1 || (holders.get(number) || []).length > 1)) {
+      refused.push(marker + ' — ' + update.ref + ' names V' + String(number) + ': ' + refusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
+    }
+  }
+  if (refused.length > 0) {
+    fail(refused);
+  }
+} catch {
+  fail(['Tau: refused the push — ' + refusals.GIT_PUSH_RECORD_UNREADABLE]);
+}
+`;
+
+/** The forges a Tau Cloud project can be linked to (B4): `project.origin` names one. */
+export const linkedForges = ['github'] as const;
+export type LinkedForge = (typeof linkedForges)[number];
+
+/** The most refused commits one refusal lists by id; the rest are counted. */
+const listedRefusals = 10;
+
+/**
+ * The authorship check `pre-receive` runs over every commit new to the
+ * project's history (B4): a Node program, because a commit's Tau record is
+ * JSON and a hook that parsed it differently from the client would be a way
+ * past it. It reads `git cat-file --batch` on stdin and exits non-zero after
+ * naming each refused commit; `argv[1]` is how many commits it must read, so a
+ * stream cut short is a refusal and never a pass (fail closed, like the walk).
+ *
+ * The record must be version 2 (B1, I7: no older reader is kept), naming its
+ * actor, `capture` and `via`; anything else is unreadable. A commit passes when:
+ *
+ * - it has no `Tau-Metadata` trailer and the project is linked to a forge
+ *   (`TAU_GIT_FORGE`), whose commits Tau did not write;
+ * - its author address is a Tau no-reply address (Q11, I3), or the linked
+ *   forge's no-reply address on a linked project;
+ * - the person its record names — the user, or the user an agent's run acted
+ *   on behalf of — is the
+ *   pusher (`TAU_GIT_PUSHER`), and a Tau no-reply author is that same id; or it
+ *   is an `anon:` pseudonym (Q3) authored as itself, which names nobody.
+ *
+ * The trailer is read as the client reads it: the last `Tau-Metadata: ` line of
+ * the message, through `JSON.parse`. Written without template literals so it
+ * embeds in the hook's quoted heredoc unchanged.
+ */
+export const authorshipCheckScript = String.raw`'use strict';
+const refusals = ${JSON.stringify(authorshipRefusals)};
+const pusher = process.env.TAU_GIT_PUSHER || '';
+const forge = process.env.TAU_GIT_FORGE || '';
+const expected = Number(process.argv[1]);
+const tauNoreply = /^([^@\s<>]+)@users\.noreply\.tau\.new$/;
+const githubNoreply = /^\d+\+[A-Za-z\d](?:[A-Za-z\d-]*[A-Za-z\d])?@users\.noreply\.github\.com$/;
+const prefix = 'Tau-Metadata: ';
+const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+const isText = (value) => typeof value === 'string' && value !== '';
+const personOf = (provenance) => {
+  const actor = provenance.actor;
+  if (!isRecord(actor) || !isText(provenance.capture) || !isText(provenance.via)) {
+    return undefined;
+  }
+  if (actor.kind === 'user') {
+    return actor;
+  }
+  if (actor.kind === 'agent' && isText(actor.runId)) {
+    return isRecord(actor.onBehalfOf) && actor.onBehalfOf.kind === 'user' ? actor.onBehalfOf : undefined;
+  }
+  return undefined;
+};
+const verdict = (text) => {
+  const split = text.indexOf('\n\n');
+  const head = split === -1 ? text : text.slice(0, split);
+  const message = split === -1 ? '' : text.slice(split + 2);
+  const author = head.split('\n').find((line) => line.startsWith('author '));
+  const address = author === undefined ? undefined : /<([^<>]*)>[^<>]*$/.exec(author);
+  if (address === null || address === undefined) {
+    return 'GIT_PUSH_RECORD_UNREADABLE';
+  }
+  const line = message.split('\n').findLast((candidate) => candidate.startsWith(prefix));
+  if (line === undefined) {
+    return forge === '' ? 'GIT_PUSH_NOT_RECORDED_BY_TAU' : '';
+  }
+  let record;
+  try {
+    record = JSON.parse(line.slice(prefix.length));
+  } catch {
+    return 'GIT_PUSH_RECORD_UNREADABLE';
+  }
+  const provenance = isRecord(record) && record.version === 2 ? record.provenance : undefined;
+  const person = isRecord(provenance) ? personOf(provenance) : undefined;
+  if (person === undefined) {
+    return 'GIT_PUSH_RECORD_UNREADABLE';
+  }
+  const tau = tauNoreply.exec(address[1]);
+  if (tau === null && !(forge === 'github' && githubNoreply.test(address[1]))) {
+    return 'GIT_PUSH_AUTHOR_ADDRESS';
+  }
+  const id = person.id;
+  if (typeof id !== 'string' || id === '') {
+    return 'GIT_PUSH_ACTOR_NOT_PUSHER';
+  }
+  if (id.startsWith('anon:')) {
+    return tau !== null && tau[1] === id ? '' : 'GIT_PUSH_ACTOR_NOT_PUSHER';
+  }
+  if (pusher === '' || id !== pusher || (tau !== null && tau[1] !== pusher)) {
+    return 'GIT_PUSH_ACTOR_NOT_PUSHER';
+  }
+  return '';
+};
+const chunks = [];
+process.stdin.on('data', (chunk) => chunks.push(chunk));
+process.stdin.on('end', () => {
+  const input = Buffer.concat(chunks);
+  const refused = [];
+  let read = 0;
+  let offset = 0;
+  while (offset < input.length) {
+    const end = input.indexOf(10, offset);
+    const header = end === -1 ? [] : input.toString('latin1', offset, end).split(' ');
+    const size = Number(header[2]);
+    if (header.length !== 3 || !Number.isSafeInteger(size) || end + 1 + size > input.length) {
+      refused.push([header[0] || 'the push', 'GIT_PUSH_RECORD_UNREADABLE']);
+      break;
+    }
+    read += 1;
+    const body = input.toString('utf8', end + 1, end + 1 + size);
+    offset = end + 2 + size;
+    const reason = header[1] === 'commit' ? verdict(body) : 'GIT_PUSH_RECORD_UNREADABLE';
+    if (reason !== '') {
+      refused.push([header[0], reason]);
+    }
+  }
+  if (refused.length === 0 && read !== expected) {
+    refused.push(['the push', 'GIT_PUSH_RECORD_UNREADABLE']);
+  }
+  for (const [oid, reason] of refused.slice(0, ${String(listedRefusals)})) {
+    process.stderr.write('Tau: refused ' + (oid === 'the push' ? oid : 'commit ' + oid.slice(0, 12)) + ' — ' + refusals[reason] + '\n');
+  }
+  if (refused.length > ${String(listedRefusals)}) {
+    process.stderr.write('Tau: and ' + String(refused.length - ${String(listedRefusals)}) + ' more commits for the same reasons.\n');
+  }
+  process.exitCode = refused.length === 0 ? 0 : 1;
+});
+`;
+
+/**
  * `pre-receive`: the ref allow-list (A39), a fail-closed admission flag,
  * compare-and-swap for every ref family (I7/I9, ruling OQ4), append-only chat
  * and operation log segments (charter I9, D22, ruling R4), conflicted revisions on conflict lines only
@@ -347,6 +653,8 @@ carries_conflict() {
 
 status=0
 arriving=''
+history=''
+versions=''
 while read -r _old _new ref; do
   case "$ref" in
     refs/remotes|refs/remotes/?*|refs/tau/owners|refs/tau/owners/?*|refs/tau/workspaces|refs/tau/workspaces/?*|refs/tau/revisions|refs/tau/revisions/?*|refs/tau/transactions|refs/tau/transactions/?*|refs/tau/head|refs/tau/head/?*|refs/tau/retention|refs/tau/retention/?*)
@@ -415,10 +723,79 @@ while read -r _old _new ref; do
       ;;
   esac
   arriving="$arriving $_new"
+  case "$ref" in
+    refs/heads/?*) history="$history $_new" ;;
+    refs/tags/?*)
+      history="$history $_new"
+      versions="$versions $_old $_new $ref"
+      ;;
+  esac
 done
 if [ "$status" -ne 0 ]; then
   echo "Tau: pushable refs are ${pushableRefPrefixes.map((prefix) => `${prefix}*`).join(', ')}." >&2
   exit "$status"
+fi
+
+# B4 (Q11, I3): every commit new to the project's history names the account
+# pushing it, whatever its Tau record's version. "New to the history" is what
+# no branch or tag already reaches — not \`--all\` — so a commit first carried
+# on a record ref is still checked when a branch takes it in. Set by the
+# storage worker for every push it admits; a hook run without a pusher is a
+# test or a maintenance push, which the admission flag above already gates.
+# Fail closed: a walk, a read or a check that cannot finish refuses the push.
+if [ -n "\${TAU_GIT_PUSHER:-}" ] && [ -n "$history" ]; then
+  if [ -z "\${TAU_GIT_NODE:-}" ]; then
+    echo "Tau: refused the push — ${authorshipRefusals.GIT_PUSH_RECORD_UNREADABLE}" >&2
+    echo "Tau: nothing was written." >&2
+    exit 1
+  fi
+  if ! commits=$(git rev-list $history --not --branches --tags 2>/dev/null); then
+    echo "Tau: refused the push — ${authorshipRefusals.GIT_PUSH_RECORD_UNREADABLE}" >&2
+    echo "Tau: nothing was written." >&2
+    exit 1
+  fi
+  if [ -n "$commits" ]; then
+    count=$(printf '%s\\n' "$commits" | wc -l | tr -d ' ')
+    authorship_check=$(cat <<'TAU_AUTHORSHIP_CHECK'
+${authorshipCheckScript}
+TAU_AUTHORSHIP_CHECK
+)
+    if ! printf '%s\\n' "$commits" | git cat-file --batch 2>/dev/null | "$TAU_GIT_NODE" -e "$authorship_check" "$count"; then
+      echo "Tau: nothing was written." >&2
+      exit 1
+    fi
+  fi
+fi
+
+# B6 (Q6, I6): a version's number, in its tag's \`Tau-Tag\` trailer, is held by
+# one version on Tau Cloud and never changes once backed up. Gated like the
+# authorship check, and fail closed the same way.
+if [ -n "\${TAU_GIT_PUSHER:-}" ] && [ -n "$versions" ]; then
+  if [ -z "\${TAU_GIT_NODE:-}" ]; then
+    echo "Tau: refused the push — ${authorshipRefusals.GIT_PUSH_RECORD_UNREADABLE}" >&2
+    echo "Tau: nothing was written." >&2
+    exit 1
+  fi
+  version_check=$(cat <<'TAU_VERSION_CHECK'
+${versionNumberCheckScript}
+TAU_VERSION_CHECK
+)
+  if ! held_tags=$(git for-each-ref --format='%(objectname) %(refname)' refs/tags/ 2>/dev/null); then
+    echo "Tau: refused the push — ${authorshipRefusals.GIT_PUSH_RECORD_UNREADABLE}" >&2
+    echo "Tau: nothing was written." >&2
+    exit 1
+  fi
+  version_objects=$(
+    { [ -z "$held_tags" ] || printf '%s\n' "$held_tags" | cut -d ' ' -f 1
+      for word in $versions; do
+        case "$word" in refs/*) ;; *[!0]*) printf '%s\n' "$word" ;; esac
+      done
+    } | sort -u
+  )
+  if ! printf '%s\n' "$version_objects" | git cat-file --batch 2>/dev/null | "$TAU_GIT_NODE" -e "$version_check" "$versions" "$held_tags"; then
+    echo "Tau: nothing was written." >&2
+    exit 1
+  fi
 fi
 
 # The blobs this push brings that no existing ref already reaches, largest

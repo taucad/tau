@@ -6,7 +6,7 @@ import { useChatSelector } from '#hooks/use-chat.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useChatSnapshot } from '#hooks/use-chat-snapshot.js';
 import { useContextPayload } from '#hooks/use-context-payload.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { isBrowserAgentHostProviderKind, probeBrowserAgentHostCapability } from '#services/agent-host-client.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
@@ -351,7 +351,7 @@ export const useAgentHostPlacements = (): {
 export const useCadAgentConfig = (): CadAgentConfigInput => {
   const {
     execution: { execution },
-    kernel: { kernelId },
+    kernel: { preference },
     model: { model },
   } = useChatComposer();
   // Mounted for its effect, never to rewrite the execution. Capability gates a
@@ -362,13 +362,13 @@ export const useCadAgentConfig = (): CadAgentConfigInput => {
   const mode = useChatSelector((state) => state.draftMode as ChatMode);
   const toolChoice = useChatSelector((state) => state.draftToolChoice as ToolSelection);
   const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
-  const snapshot = useChatSnapshot();
+  const snapshot = useChatSnapshot(preference);
   const contextPayload = useContextPayload();
 
   return {
     profile: 'cad',
     execution,
-    kernel: kernelId,
+    kernel: preference,
     mode,
     toolChoice,
     testingEnabled,

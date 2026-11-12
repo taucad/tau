@@ -22,6 +22,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
+import { recordedBy } from '#test/identity.js';
 
 const roots: string[] = [];
 
@@ -48,7 +49,7 @@ it('records a revision on a host with no `Buffer` global', async () => {
   const receipt = await port.writeRevision({
     parents: [],
     tree: new ImmutableRevisionTree([['part.ts', 'export const part = 1;\n']]),
-    provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+    provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 8, 13) },
     summary: { generated: 'Add the part' },
   });
 

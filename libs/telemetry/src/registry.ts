@@ -12,6 +12,7 @@ import {
   builtInSkillSlugs,
   evaluationClasses,
   geospecRunStatuses,
+  kernelHostProfiles,
   kernelIds,
   lfsTransports,
   workerTimingSpanNames,
@@ -173,7 +174,18 @@ const r2Actions = [
 const r2Windows = ['hour', 'month'] as const;
 
 /** `tau.db.application`: the PostgreSQL `application_name` of a connection, mapped to Tau's processes. */
-const databaseApplications = ['api', 'billing-operations', 'maintenance', 'mirror', 'release', 'other'] as const;
+const databaseApplications = [
+  'api',
+  'api-background',
+  'billing-operations',
+  'maintenance',
+  'mirror',
+  'release',
+  'other',
+] as const;
+
+/** `tau.db.pool`: the API's client-side PostgreSQL pools, request traffic and the background loops. */
+const databasePools = ['request', 'background'] as const;
 
 /** `tau.storage.accounting.task`: the accounting scheduler's periodic tasks. */
 const accountingTasks = ['usage', 'r2_analytics', 'db', 'hot_projects', 'route'] as const;
@@ -182,13 +194,15 @@ const accountingTasks = ['usage', 'r2_analytics', 'db', 'hot_projects', 'route']
 const agentEvidencePlanes = ['summary', 'feedback', 'content'] as const;
 
 /**
- * `outcome` of one agent-evidence admission. `duplicate` answered a held receipt, `revoked` and
+ * `outcome` of one agent-evidence admission. `duplicate` answered a held receipt, `superseded` a new
+ * projection of a source whose earlier projection is delivered or on its way, `revoked` and
  * `expired` a replay current policy or retention no longer delivers; `policy_stale` a submission
  * under a superseded policy epoch, `refused` one whose purpose is not granted.
  */
 const agentEvidenceAdmissionOutcomes = [
   'accepted',
   'duplicate',
+  'superseded',
   'revoked',
   'expired',
   'refused',
@@ -203,7 +217,9 @@ const agentEvidenceAdmissionOutcomes = [
  * `outcome` of one agent-evidence delivery step. `acknowledged` and `uncertain` are sends whose
  * visibility is not yet proven; `confirmed` was read back; `gap` was never visible and is not resent;
  * `key_unavailable` is held for a payload key this deployment no longer has; `abandoned` is a lease a
- * stopped worker left, returned for another pass.
+ * stopped worker left, returned for another pass; `superseded` names a Langfuse object another receipt
+ * already writes, or none; `held` is a generation waiting for its call's settlement, or a settlement
+ * waiting for its generation (Langfuse blueprint LW4, rule 8).
  */
 const agentEvidenceDeliveryOutcomes = [
   'acknowledged',
@@ -217,14 +233,54 @@ const agentEvidenceDeliveryOutcomes = [
   'gap',
   'expired',
   'abandoned',
+  'superseded',
+  'held',
   'lease_lost',
 ] as const;
 
 /** `tau.agent_evidence.state`: an agent-evidence backlog row's delivery state. */
-const agentEvidenceBacklogStates = ['pending', 'sending', 'confirmed', 'uncertain', 'rejected', 'expired'] as const;
+const agentEvidenceBacklogStates = [
+  'pending',
+  'sending',
+  'confirmed',
+  'uncertain',
+  'rejected',
+  'expired',
+  'superseded',
+] as const;
 
-/** `outcome` of one Langfuse trace erasure step; only `absent` settles a trace. */
-const agentEvidenceErasureOutcomes = ['requested', 'retry', 'absent', 'present', 'recheck', 'lease_lost'] as const;
+/**
+ * `reason` a receipt was settled without writing to Langfuse (LD12): `reprojected` at admission, a new
+ * projection of a source already delivered or on its way; `object`, a second receipt for a Langfuse
+ * object another receipt writes; `no_object`, a fact that maps to no Langfuse object; `merged`, a
+ * settlement whose values its generation carries; `late`, a settlement whose generation went without it.
+ */
+const agentEvidenceSupersededReasons = ['reprojected', 'object', 'no_object', 'merged', 'late'] as const;
+
+/**
+ * `outcome` of one ledger settlement against its generation (Langfuse blueprint LW4): `merged` into the
+ * generation's one send; `late`, admitted after its generation went, so written nowhere; `unsettled`, a
+ * funded generation sent without its settlement once its hold ran out.
+ */
+const agentEvidenceSettlementOutcomes = ['merged', 'late', 'unsettled'] as const;
+
+/** `tau.agent_evidence.score`: the Langfuse score one agent-evidence write carried (Langfuse blueprint LW7). */
+const agentEvidenceScoreNames = ['user-rating', 'run-termination', 'task-success'] as const;
+
+/**
+ * `outcome` of one Langfuse score write, settled by its answer alone (nothing reads a score back): `not_sent` never
+ * reached Langfuse and is retried with its receipt.
+ */
+const agentEvidenceScoreOutcomes = ['accepted', 'rejected', 'uncertain', 'not_sent'] as const;
+
+/**
+ * `kind` of one Langfuse billable unit (Langfuse blueprint LW24, ruling 13): Langfuse counts traces, observations and
+ * scores against the plan's monthly units.
+ */
+const agentEvidenceLangfuseUnitKinds = ['trace', 'observation', 'score'] as const;
+
+/** `outcome` of one Langfuse trace deletion request; an `accepted` delete settles the trace (nothing is read back). */
+const agentEvidenceErasureOutcomes = ['accepted', 'retry', 'lease_lost'] as const;
 
 /**
  * Canonical metric registry for Tau.
@@ -1595,6 +1651,74 @@ export const TauMetrics = {
     }),
   }),
 
+  /*
+   * Automatic kernel selection (blueprint D10). The tuning loop reads the override matrix (`resolved` against
+   * `manual`) and the first-outcome failures; every label is a kernel id, a host profile or a small enum, and the
+   * rubric version tells one rubric's numbers from the next.
+   */
+  kernelAutoResolutions: defineCounter({
+    name: 'tau.kernel.auto.resolutions',
+    unit: '{turn}',
+    description:
+      'Settled turns Auto ran, by the kernel the project ended bound to (`none` while entry-less), whether it was bound at admission, agent, model and rubric version (reported by client)',
+    attributes: z.object({
+      'tau.host.profile': z.enum(kernelHostProfiles),
+      'agent.id': z.string(),
+      'kernel.id': z.enum([...kernelIds, 'none']),
+      'tau.kernel.had_owner': z.enum(['true', 'false']),
+      'gen_ai.request.model': z.string().optional(),
+      'tau.kernel.rubric_version': z.string(),
+    }),
+  }),
+
+  kernelOverrides: defineCounter({
+    name: 'tau.kernel.overrides',
+    unit: '{pick}',
+    description:
+      'Manual kernel picks in a chat that was on Auto, by the kernel Auto had bound (`none` when nothing was) and the kernel picked (reported by client)',
+    attributes: z.object({
+      'tau.host.profile': z.enum(kernelHostProfiles),
+      'tau.kernel.resolved': z.enum([...kernelIds, 'none']),
+      'tau.kernel.manual': z.enum(kernelIds),
+      'tau.kernel.rubric_version': z.string(),
+    }),
+  }),
+
+  kernelOverrideTurns: defineHistogram({
+    name: 'tau.kernel.override.turns',
+    unit: '{turn}',
+    description: 'Chat turns before a manual kernel pick replaced Auto (reported by client)',
+    buckets: [0, 1, 2, 3, 5, 10, 20, 50],
+    attributes: z.object({
+      'tau.kernel.resolved': z.enum([...kernelIds, 'none']),
+      'tau.kernel.manual': z.enum(kernelIds),
+    }),
+  }),
+
+  kernelFirstOutcomes: defineCounter({
+    name: 'tau.kernel.first_outcomes',
+    unit: '{chat}',
+    description:
+      'How an entry-less project’s Auto chat first came out: ready (a main that binds a kernel), failed (its first turn evaluated and bound nothing) or none (its first turn wrote no model), by kernel (reported by client)',
+    attributes: z.object({
+      'tau.host.profile': z.enum(kernelHostProfiles),
+      'kernel.id': z.enum([...kernelIds, 'none']),
+      outcome: z.enum(['ready', 'failed', 'none']),
+      'tau.kernel.rubric_version': z.string(),
+    }),
+  }),
+
+  kernelTurnsToFirstRender: defineHistogram({
+    name: 'tau.kernel.turns_to_first_render',
+    unit: '{turn}',
+    description:
+      'Chat turns an entry-less project’s Auto chat took to its first main that binds a kernel (reported by client)',
+    buckets: [1, 2, 3, 4, 5, 7, 10, 20],
+    attributes: z.object({
+      'kernel.id': z.enum(kernelIds),
+    }),
+  }),
+
   // --- B2 second copy: the `tau-mirror` copier and reconciler (W13 Finding 8, W14 OB6) ---
   // W13's Prometheus names end in their unit, so the unit word is part of the OTel name. No label
   // carries an owner or project; the busiest-lagging repositories are logged, not labelled.
@@ -1868,6 +1992,44 @@ export const TauMetrics = {
     attributes: z.object({}),
   }),
 
+  databaseClientConnections: defineUpDownCounter({
+    name: 'tau.db.client.connections',
+    unit: '{connection}',
+    description:
+      'PostgreSQL connections this process holds open, by client pool. Each process reports only its own sockets, so sum across instances',
+    attributes: z.object({
+      'tau.db.pool': z.enum(databasePools),
+    }),
+  }),
+
+  databaseClientConnects: defineCounter({
+    name: 'tau.db.client.connects',
+    unit: '{connection}',
+    description: 'PostgreSQL connections this process opened, by client pool and whether the TCP connect succeeded',
+    attributes: z.object({
+      'tau.db.pool': z.enum(databasePools),
+      outcome: z.enum(['ok', 'error']),
+    }),
+  }),
+
+  databaseClientRefusals: defineCounter({
+    name: 'tau.db.client.refusals',
+    unit: '{query}',
+    description:
+      'Queries that failed because the database or its session pooler refused a connection (53300, Supavisor EMAXCONN), by client pool',
+    attributes: z.object({
+      'tau.db.pool': z.enum(databasePools),
+    }),
+  }),
+
+  databasePoolerCapacity: defineGauge({
+    name: 'tau.db.pooler.capacity',
+    unit: '{connection}',
+    description:
+      'Client connections the session pooler admits for the API login (DATABASE_POOLER_POOL_SIZE); every instance reports the same value',
+    attributes: z.object({}),
+  }),
+
   r2Requests: defineGauge({
     name: 'tau.r2.requests',
     unit: '{request}',
@@ -1964,6 +2126,15 @@ export const TauMetrics = {
     }),
   }),
 
+  agentEvidenceSuperseded: defineCounter({
+    name: 'tau.agent_evidence.superseded_receipts',
+    unit: '{receipt}',
+    description: 'Agent-evidence receipts settled without a Langfuse write, by reason',
+    attributes: z.object({
+      reason: z.enum(agentEvidenceSupersededReasons),
+    }),
+  }),
+
   agentEvidenceBacklogRows: defineGauge({
     name: 'tau.agent_evidence.backlog_rows',
     unit: '{row}',
@@ -1983,7 +2154,7 @@ export const TauMetrics = {
   agentEvidenceErasureTraces: defineCounter({
     name: 'tau.agent_evidence.erasure_traces',
     unit: '{trace}',
-    description: 'Langfuse traces moved through an erasure step, by outcome',
+    description: 'Langfuse trace deletion requests made for an erasure, by outcome',
     attributes: z.object({
       outcome: z.enum(agentEvidenceErasureOutcomes),
     }),
@@ -2006,6 +2177,39 @@ export const TauMetrics = {
     attributes: z.object({
       'tau.worker': z.enum(['delivery', 'lifecycle']),
       outcome: z.enum(['ok', 'error']),
+    }),
+  }),
+
+  agentEvidenceScores: defineCounter({
+    name: 'tau.agent_evidence.scores',
+    unit: '{score}',
+    description:
+      'Langfuse score writes for agent ratings and outcomes, by score, whether it named a score config, and outcome',
+    attributes: z.object({
+      'tau.agent_evidence.score': z.enum(agentEvidenceScoreNames),
+      /* `false`: the deployment names no config id for the score, so it was written without one. */
+      'tau.agent_evidence.score_configured': z.enum(['true', 'false']),
+      outcome: z.enum(agentEvidenceScoreOutcomes),
+    }),
+  }),
+
+  agentEvidenceSettlements: defineCounter({
+    name: 'tau.agent_evidence.settlements',
+    unit: '{settlement}',
+    description:
+      'Ledger settlements carried on their generation (merged), settled after it went (late), or generations sent without theirs (unsettled)',
+    attributes: z.object({
+      outcome: z.enum(agentEvidenceSettlementOutcomes),
+    }),
+  }),
+
+  agentEvidenceLangfuseUnits: defineCounter({
+    name: 'tau.agent_evidence.langfuse_units',
+    unit: '{unit}',
+    description:
+      'Langfuse billable units Tau wrote, by kind: an observation per span and a score per score Langfuse holds, and a trace per span with no parent, each counted once',
+    attributes: z.object({
+      kind: z.enum(agentEvidenceLangfuseUnitKinds),
     }),
   }),
 

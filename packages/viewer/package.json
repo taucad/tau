@@ -60,8 +60,9 @@
     "./graphics/metadata/gltf-component-visibility": "./src/graphics/metadata/gltf-component-visibility.ts",
     "./graphics/section-cuts": "./src/graphics/section-cuts.ts",
     "./graphics/three/canvas-three-gl": "./src/graphics/three/canvas-three-gl.ts",
+    "./graphics/three/controls/camera-controls-feel": "./src/graphics/three/controls/camera-controls-feel.ts",
+    "./graphics/three/controls/camera-wheel-router": "./src/graphics/three/controls/camera-wheel-router.ts",
     "./graphics/three/controls/section-handles": "./src/graphics/three/controls/section-handles.ts",
-    "./graphics/three/controls/tau-camera-controls": "./src/graphics/three/controls/tau-camera-controls.tsx",
     "./graphics/three/controls/viewport-gizmo-interaction-lock": "./src/graphics/three/controls/viewport-gizmo-interaction-lock.tsx",
     "./graphics/three/gltf-world": "./src/graphics/three/gltf-world.ts",
     "./graphics/three/materials/infinite-grid-material": "./src/graphics/three/materials/infinite-grid-material.ts",
@@ -78,7 +79,6 @@
     "./graphics/three/three-canvas-instance": "./src/graphics/three/three-canvas-instance.tsx",
     "./graphics/three/three-context": "./src/graphics/three/three-context.tsx",
     "./graphics/three/three-graphics-backend-context": "./src/graphics/three/three-graphics-backend-context.tsx",
-    "./graphics/three/use-camera-framing": "./src/graphics/three/use-camera-framing.ts",
     "./graphics/three/utils/camera-controls-adapter": "./src/graphics/three/utils/camera-controls-adapter.ts",
     "./graphics/three/utils/geometry-presentation-admission": "./src/graphics/three/utils/geometry-presentation-admission.ts",
     "./graphics/three/utils/infinite-grid-frame": "./src/graphics/three/utils/infinite-grid-frame.ts",
@@ -103,6 +103,7 @@
     "./hooks/use-webgl-context-tracker": "./src/hooks/use-webgl-context-tracker.tsx",
     "./lib/renderer-telemetry": "./src/lib/renderer-telemetry.ts",
     "./lib/viewer-load-timing": "./src/lib/viewer-load-timing.ts",
+    "./machines/canvas.machine": "./src/machines/canvas.machine.ts",
     "./machines/graphics.machine": "./src/machines/graphics.machine.ts",
     "./machines/kinematics.machine": "./src/machines/kinematics.machine.ts",
     "./machines/model-interaction.machine": "./src/machines/model-interaction.machine.ts",
@@ -252,15 +253,20 @@
         "import": "./dist/graphics/three/canvas-three-gl.mjs",
         "default": "./dist/graphics/three/canvas-three-gl.mjs"
       },
+      "./graphics/three/controls/camera-controls-feel": {
+        "types": "./dist/graphics/three/controls/camera-controls-feel.d.mts",
+        "import": "./dist/graphics/three/controls/camera-controls-feel.mjs",
+        "default": "./dist/graphics/three/controls/camera-controls-feel.mjs"
+      },
+      "./graphics/three/controls/camera-wheel-router": {
+        "types": "./dist/graphics/three/controls/camera-wheel-router.d.mts",
+        "import": "./dist/graphics/three/controls/camera-wheel-router.mjs",
+        "default": "./dist/graphics/three/controls/camera-wheel-router.mjs"
+      },
       "./graphics/three/controls/section-handles": {
         "types": "./dist/graphics/three/controls/section-handles.d.mts",
         "import": "./dist/graphics/three/controls/section-handles.mjs",
         "default": "./dist/graphics/three/controls/section-handles.mjs"
-      },
-      "./graphics/three/controls/tau-camera-controls": {
-        "types": "./dist/graphics/three/controls/tau-camera-controls.d.mts",
-        "import": "./dist/graphics/three/controls/tau-camera-controls.mjs",
-        "default": "./dist/graphics/three/controls/tau-camera-controls.mjs"
       },
       "./graphics/three/controls/viewport-gizmo-interaction-lock": {
         "types": "./dist/graphics/three/controls/viewport-gizmo-interaction-lock.d.mts",
@@ -341,11 +347,6 @@
         "types": "./dist/graphics/three/three-graphics-backend-context.d.mts",
         "import": "./dist/graphics/three/three-graphics-backend-context.mjs",
         "default": "./dist/graphics/three/three-graphics-backend-context.mjs"
-      },
-      "./graphics/three/use-camera-framing": {
-        "types": "./dist/graphics/three/use-camera-framing.d.mts",
-        "import": "./dist/graphics/three/use-camera-framing.mjs",
-        "default": "./dist/graphics/three/use-camera-framing.mjs"
       },
       "./graphics/three/utils/camera-controls-adapter": {
         "types": "./dist/graphics/three/utils/camera-controls-adapter.d.mts",
@@ -466,6 +467,11 @@
         "types": "./dist/lib/viewer-load-timing.d.mts",
         "import": "./dist/lib/viewer-load-timing.mjs",
         "default": "./dist/lib/viewer-load-timing.mjs"
+      },
+      "./machines/canvas.machine": {
+        "types": "./dist/machines/canvas.machine.d.mts",
+        "import": "./dist/machines/canvas.machine.mjs",
+        "default": "./dist/machines/canvas.machine.mjs"
       },
       "./machines/graphics.machine": {
         "types": "./dist/machines/graphics.machine.d.mts",

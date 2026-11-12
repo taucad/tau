@@ -5,7 +5,6 @@ import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import {
-  answerIfAsked,
   awaitSaved,
   editSource,
   focusSource,
@@ -68,7 +67,7 @@ const expectRevisionLayout = async (): Promise<void> => {
      * assertion is about is missing, so an absent History or Sync fails loudly
      * rather than passing vacuously.
      */
-    const historyList = panel.querySelector<HTMLElement>('ol[aria-label="Revision history"]');
+    const historyList = panel.querySelector<HTMLElement>('ol[aria-label="History entries"]');
     const historySection = historyList?.closest('section');
     const syncSection = panel.querySelector<HTMLElement>('#revision-sync-heading')?.closest('section');
     const historyRect = historySection?.getBoundingClientRect();
@@ -97,11 +96,11 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
   await target.navigate('/__e2e/project-file-tree');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 180_000);
 
-  const openRevisions = selectors.getByRole('button', { name: /^Open Revisions\./u });
+  const openRevisions = selectors.getByRole('button', { name: /^Open History\./u });
   await target.expectVisible(openRevisions, 120_000);
   /*
    * S20 (M2, I6): while History has not answered, the pane says *Loading
-   * history…* and can never say *No revisions yet* in the same frame. The
+   * history…* and can never say *No history yet* in the same frame. The
    * window is too short to photograph reliably, so it is watched instead: an
    * observer records every frame in which both are on screen.
    */
@@ -113,7 +112,7 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
         (candidate) => candidate.getClientRects().length > 0,
       );
       const text = panel?.textContent ?? '';
-      if (text.includes('Loading history') && text.includes('No revisions yet')) {
+      if (text.includes('Loading history') && text.includes('No history yet')) {
         record.revisionLoadingContradictions = (record.revisionLoadingContradictions ?? 0) + 1;
       }
     }).observe(document.body, { subtree: true, childList: true, characterData: true });
@@ -123,7 +122,7 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
   const emptyTitle = selectors.getByCss(`${visibleRevisionsPanel} [data-slot="panel-empty-state-title"]`);
   const emptyDescription = selectors.getByCss(`${visibleRevisionsPanel} [data-slot="panel-empty-state-description"]`);
   await target.expectVisible(emptyTitle, 60_000);
-  await target.expectText(emptyTitle, 'No revisions yet');
+  await target.expectText(emptyTitle, 'No history yet');
   await target.expectVisible(emptyDescription, 60_000);
   await target.expectText(emptyDescription, 'Save a revision or send a request and it will appear here.');
   expect(
@@ -133,7 +132,7 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
     ),
   ).toBe(0);
   /* S1: the strip says so plainly, and nothing offers a branch or a backup before there is a revision. */
-  const stripStatus = selectors.getByCss(`${visibleRevisionsPanel} [role="status"][aria-label="Revision status"]`);
+  const stripStatus = selectors.getByCss(`${visibleRevisionsPanel} [role="status"][aria-label="History status"]`);
   await target.expectVisible(stripStatus, 60_000);
   expect(await target.isVisible(selectors.getByRole('button', { name: 'New branch' }))).toBe(false);
   expect(await target.isVisible(selectors.getByRole('button', { name: 'Back up' }))).toBe(false);
@@ -163,26 +162,33 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
     await target.click(openRevisions);
   }
   const historyRows = selectors.getByCss(
-    `${visibleRevisionsPanel} ol[aria-label="Revision history"] button[data-revision-row]`,
+    `${visibleRevisionsPanel} ol[aria-label="History entries"] button[data-revision-row]`,
   );
   await target.expectCount(historyRows, 2, 120_000);
 
   /* Round 16/18: naming lives in the row's More; Cancel hands focus back to it. */
-  await target.click(selectors.getByRole('button', { name: /^Rev 1 · /u }));
-  const moreForRev1 = selectors.getByRole('button', { name: 'More actions for Rev 1' });
-  await target.click(moreForRev1);
-  await target.click(selectors.getByRole('menuitem', { name: 'Name version…' }));
-  const nameInput = selectors.getByRole('textbox', { name: 'Name Rev 1' });
+  const olderRow = historyRows.nth(1);
+  await target.click(olderRow);
+  const moreForOlder = selectors
+    .getByCss(visibleRevisionsPanel)
+    .getByRole('button', { name: 'More', exact: true })
+    .first();
+  await target.click(moreForOlder);
+  await target.click(selectors.getByRole('menuitem', { name: 'Create version…' }));
+  const nameInput = selectors.getByRole('textbox', { name: 'Version name' });
   await target.expectVisible(nameInput);
   await target.expectFocused(nameInput);
   const cancelName = selectors.getByRole('button', { name: 'Cancel' }).first();
   await target.focus(cancelName);
   await target.keyboardPress('Enter');
   await target.expectHidden(nameInput);
-  await target.expectFocused(moreForRev1);
+  await target.expectFocused(moreForOlder);
 
-  /* S5 (A9, D1, D2): a restore is a new row named by what it restored, with Undo restore on the strip and the row. */
-  await restoreFromHistory(1, selectors.getByRole('button', { name: 'Rev 3 · Restored Rev 1' }));
+  /* S5 (A9, D1, D2): a restore is a new row named by what it restored, with Undo restore on the strip. */
+  await restoreFromHistory(
+    olderRow,
+    selectors.getByCss(`${visibleRevisionsPanel} button[data-revision-row][aria-label^="Restored "]`),
+  );
   await target.expectVisible(
     selectors
       .getByCss(`${visibleRevisionsPanel} [data-slot="strip-actions"]`)
@@ -197,7 +203,7 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
       .getByCss(`${visibleRevisionsPanel} [aria-label="Where you are"]`)
       .getByRole('button', { name: 'New branch' }),
   );
-  const branchName = selectors.getByRole('textbox', { name: 'Name for the new branch' });
+  const branchName = selectors.getByRole('textbox', { name: 'Branch name' });
   await target.expectFocused(branchName);
   await target.fill(branchName, 'fillet-exploration');
   await target.click(selectors.getByRole('button', { name: 'Create branch' }));
@@ -375,21 +381,20 @@ const branchRow = (name: string, isCurrent = false): Locator =>
 /** S25's gesture: New branch on the strip, named, then the Branches row it made. */
 const createBranch = async (name: string): Promise<void> => {
   await target.click(revisionStrip().getByRole('button', { name: 'New branch' }));
-  await target.fill(selectors.getByRole('textbox', { name: 'Name for the new branch' }), name);
+  await target.fill(selectors.getByRole('textbox', { name: 'Branch name' }), name);
   await target.click(selectors.getByRole('button', { name: 'Create branch' }));
   await target.expectVisible(branchRow(name), 60_000);
 };
 
-/** Put the workbench on a branch through its row's Switch, answering the guard when it asks. */
+/** Put the workbench on a branch through its row's Switch, which acts at once (C7). */
 const workOn = async (name: string): Promise<void> => {
   if (await target.isVisible(branchRow(name, true))) {
     return;
   }
   await target.click(selectors.getByRole('button', { name: `Switch to ${name}`, exact: true }));
-  await answerIfAsked('Switch branch', branchRow(name, true));
 };
 
-test('S24: places the chat in focus on a branch from its row, then offers Follow chat', async () => {
+test('S24: places the chat in focus on a branch from its row, then offers Switch to the branch', async () => {
   await target.emulateColorScheme('light');
   await openFixture('?chat=1');
   await target.expectVisible(revisionChip(), 120_000);
@@ -403,10 +408,7 @@ test('S24: places the chat in focus on a branch from its row, then offers Follow
   await target.expectVisible(place, 30_000);
   await target.screenshot(undefined, 'revisions-S24-use-in-chat-1440-light.png');
   await target.click(place);
-  await target.expectVisible(
-    selectors.getByRole('button', { name: `Follow chat, which is working on ${branchName}`, exact: true }),
-    60_000,
-  );
+  await target.expectVisible(selectors.getByRole('button', { name: `Switch to ${branchName}`, exact: true }), 60_000);
   await target.screenshot(undefined, 'revisions-S24-follow-chat-1440-light.png');
 });
 
@@ -426,10 +428,10 @@ test('S7: a merge that changed the same lines on both branches waits for a decis
   await target.click(branchRow(branchName).getByRole('button', { name: `Actions for ${branchName}`, exact: true }));
   await target.click(selectors.getByRole('menuitem', { name: `Merge ${branchName} into main`, exact: true }));
   const decision = selectors.getByCss(`${visibleRevisionsPanel} #revision-conflicts-heading`);
-  await answerIfAsked('Merge branch', decision, 120_000);
+  await target.expectVisible(decision, 120_000);
   /* HQ1, HQ2: one sentence, naming the line the decision lands on; main is untouched until then. */
   await target.expectText(
-    revisionStrip().getByRole('status', { name: 'Revision status' }),
+    revisionStrip().getByRole('status', { name: 'History status' }),
     'Needs your decision on main',
     60_000,
   );
@@ -441,7 +443,7 @@ test('S7: a merge that changed the same lines on both branches waits for a decis
   await target.screenshot(selectors.getByCss(visibleRevisionsPanel), 'revisions-S7-needs-decision-1440-light.png');
 });
 
-test('S19: says Save not confirmed when the store refuses a save, and keeps where you are', async () => {
+test('S19: says Couldn’t confirm the save when the store refuses a save, and keeps where you are', async () => {
   await target.emulateColorScheme('light');
   await openFixture('');
   await target.expectVisible(revisionChip(), 120_000);
@@ -458,8 +460,8 @@ test('S19: says Save not confirmed when the store refuses a save, and keeps wher
   await target.keyboardPress(await saveShortcut());
   await openPane();
   await target.expectText(
-    revisionStrip().getByRole('status', { name: 'Revision status' }),
-    'Save not confirmed',
+    revisionStrip().getByRole('status', { name: 'History status' }),
+    'Couldn’t confirm the save',
     120_000,
   );
   await target.expectContainingText(
@@ -467,9 +469,9 @@ test('S19: says Save not confirmed when the store refuses a save, and keeps wher
     'One change could not be saved.',
     30_000,
   );
-  /* The last known identity is held: main at Rev 1, never *Setting up*. */
+  /* The last known identity is held: main, never *Setting up*. */
   await target.expectVisible(
-    selectors.getByRole('button', { name: 'Open Revisions. You are on main, Rev 1. Save not confirmed.', exact: true }),
+    selectors.getByRole('button', { name: 'Open History. You are on main. Couldn’t confirm the save.', exact: true }),
     30_000,
   );
   await target.screenshot(selectors.getByCss(visibleRevisionsPanel), 'revisions-S19-save-not-confirmed-1440-light.png');

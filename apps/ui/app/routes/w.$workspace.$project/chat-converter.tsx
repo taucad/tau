@@ -58,10 +58,11 @@ import type {
 } from '@taucad/workbench-panes/export/export-source';
 import type { ParameterCommit } from '@taucad/viewer/parameters/rjsf-context';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
-import { createExportArtifactZip, downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
+import { createExportArtifactZip, downloadExportArtifactSet } from '@taucad/ui-core/utils/export-artifact-set.utils';
 import { downloadBlob } from '@taucad/utils/file';
+import { reportFirstExport } from '#telemetry/onboarding-telemetry.js';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import { ProjectWorkbenchPanesHost } from '#routes/w.$workspace.$project/workbench-panes-host.js';
 
 const toggleConverterKeyCombination = projectWorkspaceKeyCombinations.export;
@@ -623,6 +624,9 @@ function useProjectExportSource({ downloadOnly }: { readonly downloadOnly: boole
 
         if (download) {
           await downloadExports(downloadQueue, { zipMultiple, projectName });
+        }
+        if (succeeded.length > 0) {
+          reportFirstExport({ kernel: freshKernelId });
         }
         return { succeeded, failed };
       } finally {

@@ -121,8 +121,26 @@ describe('desktop artifact contract', () => {
     );
     expect(parseDesktopArtifactManifest(full)).toEqual(full);
     expect(() => parseDesktopArtifactManifest({ ...full, artifacts: full.artifacts.slice(0, 3) })).toThrow(
-      new TypeError('Production artifact manifests require every supported target'),
+      new TypeError('Production artifact manifests require every supported target or one complete platform'),
     );
+  });
+
+  it('should admit a single-platform production candidate only for Apple silicon Mac or Linux', () => {
+    const tag = 'desktop@0.2.0';
+    const mac = manifest([artifact('macos-zip', 'darwin-arm64', tag)], tag);
+    const linux = manifest([artifact('linux-tar', 'linux-x64', tag)], tag);
+    expect(parseDesktopArtifactManifest(mac)).toEqual(mac);
+    expect(parseDesktopArtifactManifest(linux)).toEqual(linux);
+    for (const artifacts of [
+      [artifact('macos-zip', 'darwin-x64', tag)],
+      [artifact('windows-zip', 'win32-x64', tag)],
+      [artifact('macos-zip', 'darwin-arm64', tag), artifact('linux-tar', 'linux-x64', tag)],
+      [artifact('macos-zip', 'darwin-arm64', tag), artifact('macos-zip', 'darwin-x64', tag)],
+    ]) {
+      expect(() => parseDesktopArtifactManifest(manifest(artifacts, tag))).toThrow(
+        new TypeError('Production artifact manifests require every supported target or one complete platform'),
+      );
+    }
   });
 
   it('should bind installer roles and require complete Mac and APT route artifacts', () => {

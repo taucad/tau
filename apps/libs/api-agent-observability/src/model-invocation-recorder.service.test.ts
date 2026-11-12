@@ -10,6 +10,7 @@ import type { TelemetryPurposeService } from '#telemetry-purposes/telemetry-purp
 import type { EvidenceIngressService } from '#evidence-ingress.service.js';
 import { ModelInvocationEvidenceRecorder } from '#model-invocation-recorder.service.js';
 import { providerAttemptEvidence } from '#model-invocation-evidence.js';
+import type { ObservedAttempt } from '#model-invocation-evidence.js';
 import type { ObservedSettlement } from '@taucad/api-billing';
 
 const settlement = (change: Partial<ObservedSettlement['operation']> = {}): ObservedSettlement => ({
@@ -35,7 +36,17 @@ const ownerDatabase = (owners: ReadonlyArray<{ authUserId: string | undefined }>
   return { database: { select: () => chain } } as unknown as DatabaseService;
 };
 
-const setup = (input: { owners?: ReadonlyArray<{ authUserId: string | undefined }>; allowed?: boolean } = {}) => {
+const setup = (
+  input: {
+    owners?: ReadonlyArray<{ authUserId: string | undefined }>;
+    allowed?: boolean;
+    content?: boolean;
+    mode?: 'off' | 'allowlist' | 'on';
+    refuse?: (evidence: Evidence) => string | undefined;
+    /** Answer every admission with a receipt instead of the default refusal. */
+    accept?: boolean;
+  } = {},
+) => {
   const config = mock<ConfigService>();
   config.get.mockImplementation((name: string) =>
     name === 'TAU_OBSERVABILITY_PAYLOAD_KEY' || name === 'TAU_OBSERVABILITY_NOTICE_VERSION' ? 'set' : undefined,
@@ -44,15 +55,25 @@ const setup = (input: { owners?: ReadonlyArray<{ authUserId: string | undefined 
   purposes.getAdmissionAuthority.mockResolvedValue({
     effective: {
       epoch: 'epoch-a',
-      purposes: [{ purpose: 'summary', allowed: input.allowed ?? true, decided: true, granted: true }],
+      purposes: [
+        { purpose: 'summary', allowed: input.allowed ?? true, decided: true, granted: true },
+        { purpose: 'content', allowed: input.content ?? false, decided: true, granted: true },
+      ],
     },
     protection: 'pro',
   });
+  purposes.contentCapture.mockReturnValue({ mode: input.mode, accounts: [] });
   const admitted: Evidence[] = [];
   const ingress = mock<EvidenceIngressService>();
   ingress.admitApiReported.mockImplementation(async (evidence) => {
     admitted.push(evidence);
-    return { refused: 'recorded-by-test' };
+    if (input.accept === true) {
+      const at = new Date().toISOString();
+      return {
+        receipt: { receipt: 'evr_1', disposition: 'accepted', duplicate: false, receivedAt: at, expiresAt: at },
+      };
+    }
+    return { refused: input.refuse?.(evidence) ?? 'recorded-by-test' };
   });
   const shutdown = new ShutdownService();
   const recorder = new ModelInvocationEvidenceRecorder(
@@ -126,5 +147,110 @@ describe('ModelInvocationEvidenceRecorder settlements', () => {
     expect(unscoped.recorder.outcomes()).toEqual({ unscoped: 1 });
     expect(unbound.recorder.outcomes()).toEqual({ unbound: 1 });
     expect(refused.recorder.outcomes()).toEqual({ 'not-permitted': 1 });
+  });
+});
+
+describe('ModelInvocationEvidenceRecorder content', () => {
+  const attempt = (change: Partial<ObservedAttempt> = {}): ObservedAttempt => ({
+    principal: 'user-a',
+    project: 'project-a',
+    attemptKey: 'run-1:1:0',
+    chat: 'chat-a',
+    surface: 'gateway',
+    wire: 'anthropic',
+    activity: 'agent',
+    requestedModel: undefined,
+    provider: undefined,
+    operation: undefined,
+    startedAt: Date.now(),
+    duration: 1,
+    stream: undefined,
+    ended: 'completed',
+    ...change,
+  });
+  const captured = {
+    input: {
+      messages: [{ role: 'user', parts: [{ kind: 'text', text: 'Make it taller' }] }],
+      context: { historyMessages: 0, history: null, system: null, tools: null },
+      parameters: {},
+    },
+    output: [{ role: 'assistant', parts: [{ kind: 'text', text: 'Done.' }] }],
+    truncated: false,
+  } as const;
+
+  it('starts the purpose lookup when asked and reuses it for the record', async () => {
+    const { recorder, admitted, purposes, settled } = setup({ content: true, mode: 'on', accept: true });
+
+    const permission = recorder.permission('user-a', 'project-a');
+    expect(purposes.getAdmissionAuthority).toHaveBeenCalledTimes(1);
+    await permission.authority;
+    expect(permission.content()).toBe(true);
+    recorder.record(attempt({ content: captured }), permission);
+    await settled();
+
+    expect(purposes.getAdmissionAuthority).toHaveBeenCalledTimes(1);
+    expect(admitted.map((evidence) => evidence.payload.plane)).toEqual(['content']);
+    expect(evidenceSchema.safeParse(admitted[0]).success).toBe(true);
+    expect(recorder.outcomes()).toEqual({ accepted: 1 });
+  });
+
+  it('answers no content while the lookup is pending, and none the mode or account refuses', async () => {
+    const refused = setup({ content: false, mode: 'on' });
+    const pending = setup({ content: true, mode: 'on' });
+    let answer: () => void = () => undefined;
+    pending.purposes.getAdmissionAuthority.mockReturnValueOnce(
+      new Promise((resolve) => {
+        answer = () => {
+          resolve({ effective: { epoch: 'e', purposes: [] }, protection: 'pro' });
+        };
+      }),
+    );
+
+    const stalled = pending.recorder.permission('user-a', 'project-a');
+    expect(stalled.content()).toBeUndefined();
+    answer();
+    const denied = refused.recorder.permission('user-a', 'project-a');
+    await denied.authority;
+    expect(denied.content()).toBe(false);
+  });
+
+  it('knows from the mode alone when no account can be captured', () => {
+    expect(setup({ mode: 'off' }).recorder.contentEligible('user-a')).toBe(false);
+    expect(setup({ mode: undefined }).recorder.contentEligible('user-a')).toBe(false);
+    expect(setup({ mode: 'on' }).recorder.contentEligible('user-a')).toBe(true);
+  });
+
+  it('falls back to the summary fact when ingress refuses the content envelope', async () => {
+    const { recorder, admitted, settled } = setup({
+      content: true,
+      mode: 'on',
+      refuse: (evidence) => (evidence.payload.plane === 'content' ? 'EVIDENCE_CAPACITY' : undefined),
+    });
+
+    recorder.record(attempt({ content: captured }), recorder.permission('user-a', 'project-a'));
+    await settled();
+
+    expect(admitted.map((evidence) => evidence.payload.plane)).toEqual(['content', 'summary']);
+    expect(admitted[1]!.coverage).toMatchObject({ input: 'omitted', output: 'omitted' });
+    expect(recorder.outcomes()).toMatchObject({ 'content-refused': 1 });
+  });
+
+  it('sends only the summary when content is not effective at admission, whatever was captured', async () => {
+    const { recorder, admitted, settled } = setup({ content: false, mode: 'on' });
+
+    recorder.record(attempt({ content: captured }));
+    await settled();
+
+    expect(admitted.map((evidence) => evidence.payload.plane)).toEqual(['summary']);
+  });
+
+  it('counts a call whose lookup missed the first chunk and labels its summary', async () => {
+    const { recorder, admitted, settled } = setup({ content: true, mode: 'on' });
+
+    recorder.record(attempt({ capture: 'missing' }));
+    await settled();
+
+    expect(admitted[0]!.coverage).toMatchObject({ input: 'missing', output: 'missing' });
+    expect(recorder.outcomes()).toMatchObject({ 'content-missing': 1 });
   });
 });

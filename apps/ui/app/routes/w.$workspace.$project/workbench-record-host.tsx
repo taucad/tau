@@ -23,7 +23,7 @@ import { confirmFlush } from '#workbench-records/record-health.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
 import { recordIssueState, usePublishRecordIssue } from '#workbench-records/record-issues.js';
 import type { RecordIssue } from '#workbench-records/record-issues.js';
-import type { PreviousWorkbenchLayout } from '#types/editor.types.js';
+import type { PreviousWorkbenchLayout } from '@taucad/ui-core/types/editor.types';
 
 const storeMounts = new WeakMap<ReturnType<typeof createWorkbenchLayoutStore>, number>();
 

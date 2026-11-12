@@ -13,7 +13,6 @@
         "cwd": "{projectRoot}"
       }
     },
-    "formal": {},
     "formal:nightly": {}
   }
 }

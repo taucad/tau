@@ -599,6 +599,24 @@ describe('createHostToolRegistry', () => {
     expect(JSON.stringify(result.content)).toContain('Skill not found');
   });
 
+  /* Automatic kernel selection D3, on every surface this registry serves (desktop, daemon, ACP, `tau mcp`). */
+  it('adopts the first model evaluate_model renders as main of an entry-less project, keeping the manifest', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const manifest = { $schema: 'https://tau.new/schemas/tau-v1.json', name: 'Bracket', description: '', tags: [] };
+    await writeFile(join(workspaceRoot, 'tau.json'), `${JSON.stringify({ ...manifest, assets: {} })}\n`, 'utf8');
+    await writeFile(join(workspaceRoot, 'other.ts'), 'export const other = 1;\n', 'utf8');
+    const registry = createHostToolRegistry({ workspaceRoot, runtimeClient: async () => fakeRuntime() });
+
+    const evaluated = await invoke(registry, 'evaluate_model', { targetFile: 'main.ts' });
+    expect(evaluated.isError).toBe(false);
+    await invoke(registry, 'evaluate_model', { targetFile: 'other.ts' });
+
+    expect(JSON.parse(await readFile(join(workspaceRoot, 'tau.json'), 'utf8'))).toEqual({
+      ...manifest,
+      assets: { main: { entryPath: 'main.ts' } },
+    });
+  });
+
   it('offers the geometry tools once a runtime is attached', async () => {
     const registry = createHostToolRegistry({
       workspaceRoot: await makeWorkspace(),

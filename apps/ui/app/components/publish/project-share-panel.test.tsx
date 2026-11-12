@@ -19,7 +19,7 @@ import type * as useSettingsDialogModule from '#hooks/use-settings-dialog.js';
 import type * as shareProvidersModule from '#lib/share-providers.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { store as preferenceStore } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { metaConfig } from '#constants/meta.constants.js';
 
 const portableProviderPublish = vi.hoisted(() => vi.fn());
@@ -780,7 +780,7 @@ describe('ProjectSharePanel', () => {
     await waitFor(() => {
       expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalled();
     });
-    expect(await screen.findByText('People with access')).toBeInTheDocument();
+    expect(await screen.findByText('Who can view this link')).toBeInTheDocument();
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
   });
 

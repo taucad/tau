@@ -180,10 +180,26 @@ const clearOldToolResults = (
   return { messages: next, cleared };
 };
 
+/**
+ * Where a pass starts and where it must land, as shares of the context window.
+ *
+ * A pass starts once a request passes `window - reserveTokens`. It rewrites the provider's cached prefix from the
+ * first message it changes and makes the reasoning behind that point unreplayable, so what it pays for is the distance
+ * to the next pass. Landing just under the trigger bought 26,000 tokens of distance for 112,000 rewritten; landing at
+ * a fifth of the window frees more than it rewrites (provider reasoning replay contract, Finding 11 and ruling U15).
+ * Both tiers land there: a summary keeps that much of the newest history, and clearing is accepted only when it gets
+ * there alone.
+ *
+ * @param contextWindow - The model's context window, in tokens.
+ * @returns The token figures a pass is decided with.
+ */
 const compactionSettings = (contextWindow: number) => ({
   enabled: true,
   reserveTokens: Math.max(64, Math.floor(contextWindow * 0.2)),
+  /** The least a pass must leave free below the trigger, so the next message does not compact again. */
   keepRecentTokens: Math.max(32, Math.floor(contextWindow * 0.1)),
+  /** The most history a pass retains verbatim. */
+  landingTokens: Math.max(32, Math.floor(contextWindow * 0.2)),
 });
 
 const messageTokens = (messages: readonly AgentMessage[]): number =>
@@ -604,11 +620,12 @@ export const installCompaction = (
     );
     const tierOne = clearOldToolResults(input, emergencyClearings);
     const tierOneTokens = fixedOverhead + messageTokens(tierOne.messages);
+    /* What a summary may keep, and what clearing must reach to stand in for one. */
+    const landingBudget = Math.min(messageBudget, settings.landingTokens);
     if (
       tierOne.cleared.length > 0 &&
       (emergencyClearings.size > 0 ||
-        ((!force || trigger.anchored) &&
-          tierOneTokens <= options.contextWindow - settings.reserveTokens - settings.keepRecentTokens))
+        ((!force || trigger.anchored) && messageTokens(tierOne.messages) <= landingBudget))
     ) {
       tokensAfter = tierOneTokens;
       const details = trace('tool_result_clearing', tierOne.cleared.length);
@@ -646,7 +663,7 @@ export const installCompaction = (
         tier: 'summarization',
       });
     }
-    let cutoff = tokenBudgetCutoff(tierTwoMessages, messageBudget);
+    let cutoff = tokenBudgetCutoff(tierTwoMessages, landingBudget);
     let evicted: AgentMessage[] = [];
     let summary: UserMessage;
     let messages: AgentMessage[];

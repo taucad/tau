@@ -333,6 +333,35 @@ const drawn = async (root: Frame | Page, action: string): Promise<void> => {
 };
 
 /**
+ * Rest the pointer on a point of the canvas and read the hover label there. `drawn` waits for the canvas and the bar,
+ * not for the model, and since a2045069e (#1700) the viewer answers the pointer from a GPU pick read back after a
+ * frame: a pointer that lands on a model still preparing, or before its pick is answered, names nothing, and a click on
+ * a pick not answered yet is ignored, neither a selection nor a miss. The viewer resolves a hover again only on a move,
+ * as R3F does, so each call moves the pointer by one pixel and back onto the point, as a resting hand does, and reads
+ * the label once the pick has had a frame to land. Poll it until it names the part, before a click that must land on
+ * it.
+ *
+ * @param page - The page whose pointer moves.
+ * @param root - The frame or page the viewer is in.
+ * @param point - The point on the canvas, in page coordinates.
+ * @returns The label's text once it names a part, or `undefined` while it names none.
+ */
+const hoverName = async (
+  page: Page,
+  root: Frame | Page,
+  point: Readonly<{ x: number; y: number }>,
+): Promise<string | undefined> => {
+  const badge = root.getByTestId('model-component-name-badge');
+  await page.mouse.move(point.x + 1, point.y);
+  await page.mouse.move(point.x, point.y);
+  /* The pick of this ray is answered after a drawn frame and replayed onto the resting pointer: give it that time. */
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 500);
+  });
+  return (await badge.count()) === 0 ? undefined : ((await badge.textContent()) ?? undefined);
+};
+
+/**
  * Check the tab's chrome against the desktop's (VUI-1, VUI-2): the bar ends with Viewer settings, the canvas header
  * carries Share and Export, and the one workbench toggle ends the top row: in the lane's header beside its tabs while
  * the lane is open, in the canvas header while it is closed. The toggle hides and shows the lane, and Export opens its
@@ -508,9 +537,15 @@ describe('the viewer page in an MCP Apps host', () => {
       expect(await openFullView.isVisible()).toBe(true);
       await capture(page, 'basic-host-inline');
 
-      /* Besides its live link (app_sync), the card reads only its model. */
+      /* Besides its live link (app_sync), the card reads its model, the view the project's records keep for it
+       * (app_workbench_state, PAR-3) and its viewer settings (app_viewer_settings), each once. */
       const openingCalls = await recorded(page, 'toolCalls');
-      expect(openingCalls.map((call) => call.name).filter((name) => name !== 'app_sync')).toEqual(['app_read']);
+      expect(
+        openingCalls
+          .map((call) => call.name)
+          .filter((name) => name !== 'app_sync')
+          .toSorted(),
+      ).toEqual(['app_read', 'app_viewer_settings', 'app_workbench_state']);
 
       await addToChat.click();
       await expect.poll(async () => recorded(page, 'modelContext')).toHaveLength(1);
@@ -752,11 +787,14 @@ describe("the tab's panels (W10)", () => {
         .not.toBe(before);
 
       /* Right-clicking a part opens the app's part menu (viewer parity V13). */
-      const canvas = frame.locator(`#tau-viewer-canvas canvas`).first();
-      const box = await canvas.boundingBox();
+      /* The region's box, not the canvas's: a canvas measured before R3F sizes it still has the default 300 x 150. */
+      const box = await frame.locator('#tau-viewer-canvas').boundingBox();
       if (box === null) {
-        throw new Error('The canvas has no box.');
+        throw new Error('The canvas region has no box.');
       }
+      /* Once the pick under the pointer is answered, so the right click lands on the part. */
+      const middle = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      await expect.poll(async () => hoverName(page, frame, middle), { timeout: 30_000 }).toBeDefined();
       await frame.locator('#tau-viewer-canvas').click({
         button: 'right',
         position: { x: box.width / 2, y: box.height / 2 },
@@ -1089,13 +1127,15 @@ describe('the live view (W6)', () => {
       const frame = viewerFrame(page);
       await drawn(frame, 'Export');
 
-      /* The person picks the box in the middle of the canvas. */
-      const canvasBox = await frame.locator('canvas').first().boundingBox();
-      expect(canvasBox).not.toBeNull();
-      await page.mouse.click(
-        (canvasBox?.x ?? 0) + (canvasBox?.width ?? 0) / 2,
-        (canvasBox?.y ?? 0) + (canvasBox?.height ?? 0) / 2,
-      );
+      /* The person picks the box in the middle of the canvas, once the pick under the pointer is answered. The region's
+       * box, not the canvas's: a canvas measured before R3F sizes it still has the default 300 x 150. */
+      const canvasBox = await frame.getByRole('application', { name: 'Model viewer' }).boundingBox();
+      if (canvasBox === null) {
+        throw new Error('The canvas region has no box.');
+      }
+      const middle = { x: canvasBox.x + canvasBox.width / 2, y: canvasBox.y + canvasBox.height / 2 };
+      await expect.poll(async () => hoverName(page, frame, middle), { timeout: 30_000 }).toBeDefined();
+      await page.mouse.click(middle.x, middle.y);
       const viewOf = async (args: Record<string, unknown> = {}) => {
         const result = await callTool(client, 'view_state', args);
         expect(result.isError).toBeFalsy();
@@ -1121,8 +1161,11 @@ describe('the live view (W6)', () => {
       expect(view.camera?.verticalSpan).toBeGreaterThan(0);
       const [picked] = view.selected;
 
-      /* A click on empty space clears the selection; the agent then selects the same component through show_model. */
-      await page.mouse.click((canvasBox?.x ?? 0) + 12, (canvasBox?.y ?? 0) + (canvasBox?.height ?? 0) / 2);
+      /* A click on empty space, once its pick is answered as a miss, clears the selection; the agent then selects the
+       * same component through show_model. */
+      const empty = { x: canvasBox.x + 12, y: canvasBox.y + canvasBox.height / 2 };
+      await expect.poll(async () => hoverName(page, frame, empty), { timeout: 30_000 }).toBeUndefined();
+      await page.mouse.click(empty.x, empty.y);
       await expect
         .poll(
           async () => {
@@ -1667,8 +1710,9 @@ describe('the viewer page from a text host', () => {
       }
       const badge = page.getByTestId('model-component-name-badge');
       /* The surface fills the middle of the framed view; the label names it as the Model pane's row does. */
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 4 });
-      await expect.poll(async () => badge.textContent(), { timeout: 30_000 }).toBe('surface');
+      const middle = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      await page.mouse.move(middle.x, middle.y, { steps: 4 });
+      await expect.poll(async () => hoverName(page, page, middle), { timeout: 30_000 }).toBe('surface');
       expect(await badge.getAttribute('aria-hidden')).toBe('true');
       await capture(page, 'hover-label');
       /* Off the canvas, into the lane: the label goes. */
@@ -1708,9 +1752,7 @@ describe('the viewer page from a text host', () => {
       const middle = { x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height / 2 };
       /* The person picks the surface, once it is under the pointer, so its component id is known. */
       await page.mouse.move(middle.x, middle.y, { steps: 4 });
-      await expect
-        .poll(async () => page.getByTestId('model-component-name-badge').textContent(), { timeout: 30_000 })
-        .toBe('surface');
+      await expect.poll(async () => hoverName(page, page, middle), { timeout: 30_000 }).toBe('surface');
       await page.mouse.click(middle.x, middle.y);
       await expect
         .poll(

@@ -115,7 +115,7 @@ const loadDataActor = fromSafeAsync<LoadedEvent, LoadInput>(async () => {
 
 ### 5. Match Mock Types Exactly in `provide()`
 
-When providing actor implementations via `machine.provide()`, the mock's input and return types must exactly match the placeholder actor's types. Use generic parameters on the mock's `fromSafeAsync` call, and check the map with `satisfies Partial<MachineActors<typeof machine>>` (`#lib/xstate.lib.js`).
+When providing actor implementations via `machine.provide()`, the mock's input and return types must exactly match the placeholder actor's types. Use generic parameters on the mock's `fromSafeAsync` call, and check the map with `satisfies Partial<MachineActors<typeof machine>>` (`@taucad/ui-core/lib/xstate.lib`).
 
 **Why**: XState's `provide()` type system performs exact structural matching. Even subtle differences (e.g., `false` vs `boolean`, `string` vs `string | undefined`) cause type errors. Since XState v6, `provide()` infers the actors map from its own argument, so an inline logic gets no contextual input or output type; without explicit generics and the `satisfies` check, a mismatched stub surfaces far from the call.
 

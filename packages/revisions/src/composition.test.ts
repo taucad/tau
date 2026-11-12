@@ -42,6 +42,7 @@ import type { TurnAttemptKey } from '#turn.types.js';
 import { createFakeCallbackActors, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
 import type { FakeCallbackActors, FakePromiseActors } from '@taucad/xstate-testing/fakes';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { testIdentity, testPerson } from '#test/identity.js';
 
 /** Let every queued microtask and the actors' promise handlers run. */
 const flush = async (): Promise<void> => {
@@ -389,7 +390,7 @@ describe('revision machine composition (S48 Node set)', () => {
 
     tree.actor.send({ type: 'branch', event: { type: 'merge', requestId: 'merge-1', branch: 'bracket-fillet' } });
     await flush();
-    tree.promises.settle('checkBranch', { output: { needsConfirmation: false } });
+    tree.promises.settle('checkBranch', { output: {} });
     await flush();
     tree.promises.settle('mergeBranch', {
       output: { status: 'conflicted', paths: ['src/bracket.ts'] },
@@ -493,6 +494,50 @@ describe('revision machine composition (S48 Node set)', () => {
     expect(tree.promises.inputsFor('computePlan')).toEqual([]);
     expect(tree.promises.inputsFor('applyPlan')).toEqual([]);
     expect(tree.promises.inputsFor('addCheckout')).toEqual([]);
+
+    tree.actor.stop();
+  });
+
+  /* 14, the apply half (C7, I11) — a *Switch* that rewrites the live files acts
+   * without asking, so it must lose nothing: the unsaved edits are cut on the
+   * branch being left before `applySwitch` writes the other branch's tree, and
+   * the settled toast says both where the person came from and that a save
+   * happened, which is what its Undo switches back to. */
+  it('records unsaved changes on the branch it leaves before a switch rewrites the files', async () => {
+    const tree = startTree();
+    await openRegistry(tree);
+
+    tree.actor.send({ type: 'switch', requestId: 'switch-1', branch: 'bracket-fillet' });
+    await flush();
+    tree.promises.settle('checkBranch', { output: { checkoutId: 'checkout-live', mode: 'applyToLive' } });
+    await flush();
+
+    /* Nothing is written until the cut lands. */
+    expect(tree.promises.inputsFor('applySwitch')).toEqual([]);
+    await mint(tree, 'rev-saved');
+    expect(tree.promises.inputsFor('writeRevision')).toEqual([
+      expect.objectContaining({ checkoutId: 'checkout-live', trigger: 'switch' }),
+    ]);
+    expect(tree.promises.inputsFor('applySwitch')).toEqual([
+      { projectId: 'project-1', branch: 'bracket-fillet', checkoutId: 'checkout-live' },
+    ]);
+    const order = names(tree.promises.calls);
+    expect(order.lastIndexOf('casHead')).toBeLessThan(order.indexOf('applySwitch'));
+
+    tree.promises.settle('applySwitch', {
+      output: {
+        checkoutId: 'checkout-live',
+        revisionId: 'rev-fillet',
+        treeId: 'tree-fillet',
+        branch: 'bracket-fillet',
+      },
+    });
+    await flush();
+    const branchChild = tree.actor.getSnapshot().children.branch;
+    expect(branchChild?.getSnapshot().matches('idle')).toBe(true);
+    expect(tree.emitted).toContainEqual(
+      expect.objectContaining({ type: 'switchResolved', mode: 'applyToLive', from: 'main' }),
+    );
 
     tree.actor.stop();
   });
@@ -676,8 +721,10 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
       clock: stoppedClock(),
       /* A stopped clock never passes the floor between mints (D11). */
       mintFloor: 0,
-      actorId: 'actor-1',
-      actor: () => ({ kind: 'agent', id: 'model-1', runId: 'run-1' }),
+      identity: {
+        via: 'browser',
+        resolve: () => ({ kind: 'agent', id: 'model-1', runId: 'run-1', onBehalfOf: testPerson }),
+      },
       deviceId: () => 'device-1',
       onPlacement: (placement) => {
         placements.push(placement);
@@ -825,6 +872,7 @@ describe('composition root options (MC-R4)', () => {
     const actorIds: string[] = [];
     const rejections: string[] = [];
     const { actor, settled } = createProjectRevisionsActor({
+      identity: testIdentity,
       port,
       projectId: 'project-1',
       filesystem: () => filesystem,
@@ -867,6 +915,7 @@ describe('placement over a real port (RM-R12)', () => {
     await filesystem.writeFile('main.ts', 'export const size = 1;\n');
     const order: string[] = [];
     const { actor, settled } = createProjectRevisionsActor({
+      identity: testIdentity,
       port,
       projectId: 'project-1',
       filesystem: () => filesystem,

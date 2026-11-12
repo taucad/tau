@@ -54,9 +54,6 @@ import { getErrno } from '@taucad/utils/error';
 import { randomUuid } from '@taucad/utils/id';
 import { recordRpcOutcome } from '@taucad/chat-ui/services/rpc-ledger';
 import type { projectMachine } from '#machines/project.machine.js';
-import { createEntryAdoption } from '#hooks/entry-adoption.js';
-import { testModelLoadedModels } from '@taucad/chat/schemas/tools/test-model-summary';
-import type { EntryAdoption } from '#hooks/entry-adoption.js';
 import { selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
@@ -592,7 +589,6 @@ async function renderDefaultViewWith(
 function createBrowserRuntimeClient(
   projectRef: ActorRefFrom<typeof projectMachine>,
   operationTimeoutForFile: (path: string) => Promise<number | undefined>,
-  adoption?: EntryAdoption,
 ): RpcRuntimeClient {
   return {
     async evaluateModel({ targetFile, includeCapabilities, options }, context): Promise<EvaluateModelRpcResult> {
@@ -607,12 +603,6 @@ function createBrowserRuntimeClient(
         const { cadSnapshot } = resolved;
         context?.signal?.throwIfAborted();
         const { evaluation, kernelClient, activeKernelId } = cadSnapshot.context;
-        /* An entry-less project adopts this file as main and gains its kernel's package files (blueprint D3). */
-        await adoption
-          ?.afterEvaluation({ targetFile, runtimeKernelId: activeKernelId, isSuccess: evaluation?.success === true })
-          .catch((error: unknown) => {
-            console.warn('[rpc] entry adoption failed', error);
-          });
         const viewed =
           options === undefined
             ? undefined
@@ -670,28 +660,14 @@ function createBrowserRuntimeClient(
   };
 }
 
-function createBrowserGeoSpecClient(
-  createGeoSpecClient: (() => RpcGeoSpecClient) | undefined,
-  adoption?: EntryAdoption,
-): RpcGeoSpecClient {
+function createBrowserGeoSpecClient(createGeoSpecClient: (() => RpcGeoSpecClient) | undefined): RpcGeoSpecClient {
   return {
     async runTests(args): Promise<RunGeoSpecTestsRpcResult> {
       try {
         if (!createGeoSpecClient) {
           throw new Error('GeoSpec browser worker runner is not configured.');
         }
-        const result = await createGeoSpecClient().runTests(args);
-        /* An agent that proves its model with GeoSpec may never call `evaluate_model`: an entry-less project adopts
-         * the first model a complete load rendered (blueprint D3). */
-        const [loaded] = result.success ? testModelLoadedModels(result) : [];
-        if (loaded !== undefined) {
-          await adoption
-            ?.afterEvaluation({ targetFile: loaded, runtimeKernelId: undefined, isSuccess: true })
-            .catch((error: unknown) => {
-              console.warn('[rpc] entry adoption failed', error);
-            });
-        }
-        return result;
+        return await createGeoSpecClient().runTests(args);
       } catch (error) {
         return {
           success: false,
@@ -891,36 +867,11 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
     },
   });
 
-  const adoption =
-    projectRef === undefined
-      ? undefined
-      : createEntryAdoption({
-          project: {
-            manifest() {
-              const { project } = projectRef.getSnapshot().context;
-              return project === undefined
-                ? undefined
-                : { name: project.name, mainEntryPath: project.assets.main?.entryPath };
-            },
-            setMainFile(path) {
-              projectRef.send({ type: 'setMainFile', path });
-            },
-          },
-          files: {
-            async exists(path) {
-              const { treeService } = await fileManager.whenServicesReady();
-              return treeService.exists(path);
-            },
-            async writeFile(path, data) {
-              await fileManager.writeFile(path, data, { source: 'machine' });
-            },
-          },
-        });
   const kernelDeps = {
     kernelClient:
       deps.kernelClient ??
       (projectRef
-        ? createBrowserRuntimeClient(projectRef, operationTimeoutForFile, adoption)
+        ? createBrowserRuntimeClient(projectRef, operationTimeoutForFile)
         : {
             evaluateModel: async () => ({
               success: false,
@@ -928,7 +879,7 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
               message: 'No project runtime is available',
             }),
           }),
-    geospec: deps.geoSpecClient ?? createBrowserGeoSpecClient(createGeoSpecClient, adoption),
+    geospec: deps.geoSpecClient ?? createBrowserGeoSpecClient(createGeoSpecClient),
     graphics:
       deps.graphicsClient ??
       (projectRef ? createBrowserGraphicsClient(projectRef, operationTimeoutForFile) : undefined),

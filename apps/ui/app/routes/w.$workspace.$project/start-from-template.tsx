@@ -10,7 +10,7 @@ import {
 import { toast } from '@taucad/ui/components/sonner';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { availableKernelConfigurations } from '#constants/available-kernel-configurations.js';
-import { kernelPackageFiles } from '#hooks/entry-adoption.js';
+import { kernelPackageFiles } from '#utils/kernel-package-files.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { encodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
@@ -38,7 +38,7 @@ export function StartFromTemplate(): React.JSX.Element {
         const { treeService } = await fileManager.whenServicesReady();
         const files = {
           ...(await kernelPackageFiles(kernel, project.name)),
-          [mainFile]: { content: encodeTextFile(getEmptyCode(kernel)) },
+          [mainFile]: encodeTextFile(getEmptyCode(kernel)),
         };
         // A file already there is kept: the person or the agent may have started one.
         const entries = Object.entries(files);
@@ -46,7 +46,7 @@ export function StartFromTemplate(): React.JSX.Element {
         await Promise.all(
           entries
             .filter((_entry, index) => !present[index])
-            .map(async ([path, { content }]) => fileManager.writeFile(path, content, { source: 'machine' })),
+            .map(async ([path, content]) => fileManager.writeFile(path, content, { source: 'machine' })),
         );
         projectRef.send({ type: 'setMainFile', path: mainFile });
       } catch (error) {

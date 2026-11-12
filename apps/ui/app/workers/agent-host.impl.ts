@@ -20,7 +20,13 @@ import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { materializeCaptureCamera } from '@taucad/agent-tools/capture';
-import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
+import {
+  createRuntimeAgentClients,
+  createRuntimeParameterAgentClient,
+  withEntryAdoption,
+} from '@taucad/agent-tools/runtime';
+import { catalogKernelOfRuntimeKernel } from '@taucad/types/constants';
+import { kernelPackageFiles } from '#utils/kernel-package-files.js';
 import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
@@ -800,7 +806,21 @@ const composeProjectHost = async (
       workbench: createRuntimeWorkbenchClient(async () => runtimeClient),
       skillResolver,
       /* The kernel reads the model's files itself, so it runs once every large object has landed. */
-      ...guardLargeObjectKernel({ ...runtimeRpc, geospec: geoSpecClient }, () => revisions?.largeObjects()),
+      ...guardLargeObjectKernel(
+        /* An entry-less project adopts its first model as main and gains its kernel's package files (blueprint D3). */
+        withEntryAdoption(
+          { ...runtimeRpc, geospec: geoSpecClient },
+          {
+            fileSystem: createProviderRpcFileSystem({ provider: record, mutations: fileSystemMutations }),
+            async packageFiles({ targetFile, projectName, signal }) {
+              const { kernelId } = await runtimeClient.describe({ source: { path: targetFile }, signal });
+              const kernel = kernelId === undefined ? undefined : catalogKernelOfRuntimeKernel(kernelId);
+              return kernel === undefined ? {} : kernelPackageFiles(kernel, projectName);
+            },
+          },
+        ),
+        () => revisions?.largeObjects(),
+      ),
       parameters,
       ...(residentRuntime === undefined ? {} : { machines: residentRuntime.machines }),
       machineSettings: preferences,

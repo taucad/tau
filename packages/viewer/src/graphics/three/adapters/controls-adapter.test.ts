@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import CameraControlsImpl from 'camera-controls';
-import { OrthographicCamera, PerspectiveCamera as ThreePerspectiveCamera, Raycaster, Scene, Vector3 } from 'three';
+import {
+  EventDispatcher,
+  OrthographicCamera,
+  PerspectiveCamera as ThreePerspectiveCamera,
+  Raycaster,
+  Scene,
+  Vector3,
+} from 'three';
 import type { Camera, PerspectiveCamera } from 'three';
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { Actor, InspectionEvent } from 'xstate';
@@ -16,6 +23,8 @@ import {
 } from '#graphics/three/adapters/controls-adapter.js';
 import { surfacePriority } from '#graphics/three/three-canvas-instance-host.js';
 import type { RetargetableCameraControls } from '#graphics/three/adapters/controls-adapter.js';
+import { bindViewportGizmoControls } from '#graphics/three/controls/viewport-gizmo-controls-adapter.js';
+import { createViewportGizmoInteractionLock } from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { GraphicsCameraRef } from '#machines/graphics.machine.js';
 import { asCameraActor } from '#services/graphics-camera-registry.js';
@@ -447,6 +456,49 @@ describe('controls adapter', () => {
     harness.controls().enabled = false;
     ticker.current(harness.state, 1 / 60);
     expect(update).toHaveBeenCalledOnce();
+  });
+
+  it('moves no camera on a frame step while the view cube holds its interaction lock', () => {
+    vi.useFakeTimers();
+    try {
+      const harness = createHarness();
+      harness.attach();
+      const subscriptions = vi.mocked(harness.state.internal.subscribe).mock.calls as unknown as Array<
+        [{ current: (state: RootState, delta: number) => void }, number]
+      >;
+      const [[ticker]] = subscriptions as [[{ current: (state: RootState, delta: number) => void }, number]];
+      const controls = harness.controls();
+      const lock = createViewportGizmoInteractionLock();
+      const gizmo = Object.assign(new EventDispatcher<Record<string, object>>(), {
+        target: new Vector3(),
+        update: vi.fn(),
+      });
+      const binding = bindViewportGizmoControls({
+        camera: harness.rig.activeCamera,
+        controls,
+        gizmo,
+        interactionLock: lock,
+      });
+      const update = vi.spyOn(controls, 'update');
+
+      // The cube takes the camera: it holds the lock and the controls are disabled together.
+      gizmo.dispatchEvent({ type: 'start' });
+      expect(lock.isActive()).toBe(true);
+      const { revision } = harness.camera.getSnapshot().context;
+      ticker.current(harness.state, 1 / 60);
+      expect(update).not.toHaveBeenCalled();
+      expect(harness.camera.getSnapshot().context.revision).toBe(revision);
+
+      // Released together: the next frame steps the controls again.
+      gizmo.dispatchEvent({ type: 'end' });
+      expect(lock.isActive()).toBe(false);
+      update.mockClear();
+      ticker.current(harness.state, 1 / 60);
+      expect(update).toHaveBeenCalledOnce();
+      binding?.detach();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('stops stepping the controls when its canvas leaves', () => {

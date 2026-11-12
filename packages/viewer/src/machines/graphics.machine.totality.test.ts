@@ -181,6 +181,13 @@ const samples: Samples = {
       pressId: 'bar:2',
       camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
     },
+    {
+      type: 'viewerShortcutPressed',
+      shortcut: 'removeCut',
+      pressId: 'bar:3',
+      cutId: 'missing',
+      camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
+    },
   ],
   interactionStarted: [{ type: 'interactionStarted' }],
   interactionMoved: [{ type: 'interactionMoved' }],

@@ -454,11 +454,14 @@ describe('useViewerShortcuts', () => {
     const actor = startGraphics();
     const user = userEvent.setup();
     renderViewers(['Left', actor], ['Right', actor]);
-    hoverViewer('Right');
 
+    // Left presses first, so its adapter listens on the shared actor before Right's press.
+    hoverViewer('Left');
+    await user.keyboard('g');
+    hoverViewer('Right');
     await user.keyboard('g');
 
+    expect(announcementsOf('Left')).toHaveLength(1);
     expect(announcementsOf('Right')).toHaveLength(1);
-    expect(announcementsOf('Left')).toEqual([]);
   });
 });

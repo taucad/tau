@@ -100,7 +100,7 @@ type KeyboardAdapterInput = Readonly<{
  * The bar's keyboard adapter: the one path from its key bindings to graphics and back. It sends each press to the
  * graphics actor that the press names, listens there for `viewerShortcutApplied`, and announces the outcome of its own
  * presses. The listener lives in this closure and follows the bar to a new graphics actor, so no React effect sends
- * or subscribes (charter I10).
+ * or subscribes (the React event-layer ceiling).
  */
 const viewerKeyboardAdapter = createCallbackLogic<KeyboardAdapterEvent, KeyboardAdapterInput>(({ input, receive }) => {
   let pressCount = 0;

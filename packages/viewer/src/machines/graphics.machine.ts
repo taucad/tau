@@ -2319,8 +2319,9 @@ export const graphicsIgnoredEvents: ReadonlyArray<readonly [state: string, event
   ['operational.measure.on.selected', 'startMeasurement'],
   ['operational.measure.on.selecting', 'completeMeasurement'],
   ['operational.measure.on.selecting', 'cancelCurrentMeasurement'],
-  // A shortcut that does nothing here is left unhandled, so `can` says whether the bar claims the key.
-  ['operational.measure.off', 'viewerShortcutPressed'],
+  // A shortcut that does nothing in the current context is left unhandled, so `can` says whether the bar claims the
+  // key: Escape with nothing on, Delete or Backspace with no known cut, and S, M or P on 2D geometry, in any state.
+  ['*', 'viewerShortcutPressed'],
 ];
 
 /** The graphics machine's state value: the operational backend, section and measure regions. @public */

@@ -50,7 +50,7 @@ describe('revisionFailureCopy', () => {
       'description',
       'A file this point in history needs is not on this device. Back up and sync, then try again.',
     ],
-  ] as const)('says %s (%s) %s as the table proposes', (subject, code, field, sentence) => {
+  ] as const)('says %s (%s) %s as the table proposes', (...[subject, code, field, sentence]) => {
     expect(describeRevisionFailure(subject, code)[field]).toBe(sentence);
   });
 

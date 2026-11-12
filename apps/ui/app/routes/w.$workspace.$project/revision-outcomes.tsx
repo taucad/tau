@@ -91,7 +91,9 @@ export function RevisionOutcomes(): undefined {
     workspace?.openPanel('revisions');
   };
   const openHistoryRef = useRef(openHistory);
-  openHistoryRef.current = openHistory;
+  useEffect(() => {
+    openHistoryRef.current = openHistory;
+  });
   useEffect(() => {
     if (client === undefined) {
       return undefined;

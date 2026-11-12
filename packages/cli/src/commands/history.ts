@@ -430,7 +430,8 @@ const versionRenameCommand = defineCommand({
   async run({ args }) {
     const { revisions, workspaceRoot } = await open(args.project);
     try {
-      const version = (await readVersions(workspaceRoot)).find((candidate) => candidate.name === args.name);
+      const versions = await readVersions(workspaceRoot);
+      const version = versions.find((candidate) => candidate.name === args.name);
       if (version === undefined) {
         throw cliError('NO_VERSION', `This project has no version named ${args.name}.`, exitCodes.refused);
       }
@@ -493,7 +494,7 @@ const logCommand = defineCommand({
           branch,
           entries:
             provenance === undefined
-              ? rows.map(entryJson)
+              ? rows.map((row) => entryJson(row))
               : rows.map((row) => ({ ...entryJson(row), provenance: provenance.get(row.revisionId) ?? null })),
         });
         return;

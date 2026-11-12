@@ -108,6 +108,7 @@ describe('no-save-revision-in-copy', () => {
         },
         {
           name: 'a planted number in the vocabulary module',
+          // oxlint-disable-next-line no-template-curly-in-string -- The planted source is itself a template literal.
           code: 'export const name = (n) => `Rev ${n}`;',
           filename: vocabulary,
           errors: [{ messageId: 'violation', data: { word: 'Rev 0' } }],

@@ -212,7 +212,7 @@ const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
  * a1 drove the command palette (`Mod+K` → *Open revision history*) and two rows
  * died there waiting for the palette to mount, so they never reached the defect
  * they claimed to pin (W18 review R1). `revision-status-action.tsx` renders a
- * always-visible button — *Open Revisions. You are on \<branch\>* — that calls the
+ * always-visible button — *Open History. You are on \<branch\>* — that calls the
  * same `openPanel('revisions')`. It appears once the root answers, which is
  * also the signal that there is a projection to read.
  */

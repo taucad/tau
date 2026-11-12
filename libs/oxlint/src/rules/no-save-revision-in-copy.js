@@ -158,10 +158,8 @@ export const noSaveRevisionInCopyRule = {
       },
       JSXExpressionContainer(node) {
         /* A child expression is copy too: `{'Restored Rev 3'}` and `{`Rev ${n}`}`. */
-        if (node.parent?.type === 'JSXElement' || node.parent?.type === 'JSXFragment') {
-          if (!isCopyModule) {
-            checkCopy(node.expression);
-          }
+        if (!isCopyModule && (node.parent?.type === 'JSXElement' || node.parent?.type === 'JSXFragment')) {
+          checkCopy(node.expression);
         }
       },
       JSXAttribute(node) {
@@ -180,12 +178,14 @@ export const noSaveRevisionInCopyRule = {
                 checkCopy(property.value);
               }
               /* A toast action `{ label: 'Undo restore' }` is read too. */
-              if (property.type === 'Property' && propertyName(property) === 'action') {
-                if (property.value.type === 'ObjectExpression') {
-                  for (const inner of property.value.properties) {
-                    if (inner.type === 'Property' && propertyName(inner) === 'label') {
-                      checkCopy(inner.value);
-                    }
+              if (
+                property.type === 'Property' &&
+                propertyName(property) === 'action' &&
+                property.value.type === 'ObjectExpression'
+              ) {
+                for (const inner of property.value.properties) {
+                  if (inner.type === 'Property' && propertyName(inner) === 'label') {
+                    checkCopy(inner.value);
                   }
                 }
               }

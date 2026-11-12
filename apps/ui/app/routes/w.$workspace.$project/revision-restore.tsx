@@ -87,7 +87,9 @@ export function RevisionRestore(): React.JSX.Element {
   const entryAt = (n: number | undefined): RevisionCard | undefined =>
     n === undefined ? undefined : revisions.find((revision) => revision.n === n);
   const entryAtRef = useRef(entryAt);
-  entryAtRef.current = entryAt;
+  useEffect(() => {
+    entryAtRef.current = entryAt;
+  });
 
   useEffect(() => {
     if (client === undefined) {

@@ -3447,8 +3447,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const rows = await readRevisionLog(port, { branch: place.branch });
     return rows.find((row) => row.revisionId === revision);
   };
-  const ordinalOnLine = async (place: Checkout, revision: string): Promise<number | undefined> =>
-    (await rowOnLine(place, revision))?.revisionNumber;
+  const ordinalOnLine = async (place: Checkout, revision: string): Promise<number | undefined> => {
+    const row = await rowOnLine(place, revision);
+    return row?.revisionNumber;
+  };
 
   /**
    * How a restore or undo row refers to the entry it brought back (M11): a
@@ -3482,8 +3484,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (undoes === undefined) {
         return `Saved changes (${input.trigger})`;
       }
-      /* D15: an undo row names the entry it undid, as a restore row names its source. */
-      const undone = referenceOf(await rowOnLine(await placeOf(input.checkoutId), undoes));
+      /* D15: an undo row names the entry it undid, as a restore row names its source;
+       * a restore's own title is generated, so undoing one says so plainly. */
+      const undoneRow = await rowOnLine(await placeOf(input.checkoutId), undoes);
+      if (undoneRow?.restoredFrom !== undefined) {
+        return 'Undid the restore';
+      }
+      const undone = referenceOf(undoneRow);
       return undone === undefined ? 'Undid an earlier change' : `Undid ${undone}`;
     }
     const restored = referenceOf(await rowOnLine(await placeOf(input.checkoutId), input.restoredFrom));

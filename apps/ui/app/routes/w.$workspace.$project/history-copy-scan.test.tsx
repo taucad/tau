@@ -288,14 +288,23 @@ describe('History copy (C8, M11)', () => {
   });
 
   it('the chat marker says no save number and no “revision” in any state', () => {
-    const saved = { revisionId: 'rev-5', n: 5, createdAt: 1, summary: 'Thicker base', actor: '', conflicted: false };
+    const saved: RevisionCard = {
+      revisionId: 'rev-5',
+      n: 5,
+      createdAt: 1,
+      summary: 'Thicker base',
+      actor: '',
+      turnId: undefined,
+      capture: 'save',
+      conflicted: false,
+    };
     const marker: readonly TurnRevisionState[] = [
       { kind: 'working', base: { kind: 'revision', n: 4 }, isWaiting: false },
       { kind: 'working', base: { kind: 'first' }, isWaiting: true },
       { kind: 'working', base: { kind: 'unknown' }, isWaiting: false },
       { kind: 'saving' },
-      { kind: 'saved', revision: saved satisfies RevisionCard, isInterrupted: false },
-      { kind: 'saved', revision: saved satisfies RevisionCard, isInterrupted: true },
+      { kind: 'saved', revision: saved, isInterrupted: false },
+      { kind: 'saved', revision: saved, isInterrupted: true },
       { kind: 'conflicted' },
       { kind: 'unconfirmed', base: { kind: 'revision', n: 3 } },
     ];
@@ -337,7 +346,7 @@ describe('History copy (C8, M11)', () => {
       ...(['restore', 'branch', 'save', 'connection'] as const).flatMap((subject) => [
         { type: 'error', subject, message: 'diagnostic' } as const,
         ...[...revisionFailureCopy[subject].codes.keys()].map(
-          (code) => ({ type: 'error', subject, code, message: 'diagnostic' }) as RevisionToast,
+          (code): RevisionToast => ({ type: 'error', subject, code, message: 'diagnostic' }),
         ),
       ]),
     ];
@@ -352,16 +361,15 @@ describe('History copy (C8, M11)', () => {
       { type: 'turn.conflicted', turnId: 't-2', runId: 'r-2', chatId: 'chat-1', checkoutId: 'live' },
       { type: 'turn.failed', turnId: 't-3', runId: 'r-3', chatId: 'chat-1', checkoutId: 'live', reason: 'diagnostic' },
       ...[...revisionFailureCopy.turn.codes.keys()].map(
-        (code, index) =>
-          ({
-            type: 'turn.failed',
-            turnId: `t-${String(index + 4)}`,
-            runId: `r-${String(index + 4)}`,
-            chatId: 'chat-1',
-            checkoutId: 'live',
-            reason: 'diagnostic',
-            code,
-          }) as WorkerRevisionEvent,
+        (code, index): WorkerRevisionEvent => ({
+          type: 'turn.failed',
+          turnId: `t-${String(index + 4)}`,
+          runId: `r-${String(index + 4)}`,
+          chatId: 'chat-1',
+          checkoutId: 'live',
+          reason: 'diagnostic',
+          code,
+        }),
       ),
     ];
     act(() => {

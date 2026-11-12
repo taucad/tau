@@ -1141,7 +1141,7 @@ describe('History over a long line (B2)', () => {
     const names = within(list)
       .getAllByRole('button')
       .map((button) => button.getAttribute('aria-label') ?? button.textContent);
-    expect(names.findIndex((name) => /^Change 7 · /u.test(name ?? ''))).toBeGreaterThan(
+    expect(names.findIndex((name) => name.startsWith('Change 7 · '))).toBeGreaterThan(
       names.findIndex((name) => /^Show \d+ more/u.test(name)),
     );
 

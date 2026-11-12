@@ -109,5 +109,13 @@ test('keeps History, the chip and the next save on main after restoring an older
   await target.expectVisible(chipOnMain(), 60_000);
   await target.click(revisionChip());
   await target.expectVisible(historyRow(0), 30_000);
-  await expect.poll(async () => (await historyRowNames()).length, { timeout: 30_000 }).toBe(before.length + 2);
+  await expect
+    .poll(
+      async () => {
+        const names = await historyRowNames();
+        return names.length;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(before.length + 2);
 });

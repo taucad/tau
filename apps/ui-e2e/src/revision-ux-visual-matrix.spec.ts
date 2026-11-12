@@ -410,10 +410,7 @@ test('S24: places the chat in focus on a branch from its row, then offers Switch
   await target.expectVisible(place, 30_000);
   await target.screenshot(undefined, 'revisions-S24-use-in-chat-1440-light.png');
   await target.click(place);
-  await target.expectVisible(
-    selectors.getByRole('button', { name: `Switch to ${branchName}, where the chat is working`, exact: true }),
-    60_000,
-  );
+  await target.expectVisible(selectors.getByRole('button', { name: `Switch to ${branchName}`, exact: true }), 60_000);
   await target.screenshot(undefined, 'revisions-S24-follow-chat-1440-light.png');
 });
 

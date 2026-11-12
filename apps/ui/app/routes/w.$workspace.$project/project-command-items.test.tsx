@@ -242,7 +242,7 @@ describe('ProjectCommandPaletteItems', () => {
     expect(undo?.group).toBe('History');
     /* C8, M11: no palette item calls a save a revision or numbers one; History's are named as the copy table says. */
     for (const item of registeredItems) {
-      expect(`${item.label} ${item.group ?? ''}`).not.toMatch(/\bRev \d|\brevisions?\b/iu);
+      expect(`${item.label} ${item.group}`).not.toMatch(/\bRev \d|\brevisions?\b/iu);
     }
     expect(registeredItems.find((item) => item.id === 'save-revision')?.label).toBe('Save');
     expect(registeredItems.find((item) => item.id === 'revision-history')?.label).toBe('Open history');

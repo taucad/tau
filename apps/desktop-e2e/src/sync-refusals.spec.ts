@@ -121,7 +121,7 @@ const openRevisions = async (client: PageClient): Promise<void> => {
     .click({ timeout: 120_000 });
 };
 
-/** Open Revisions and its Sync region through the product's own offer. */
+/** Open History and its Sync region through the product's own offer. */
 const openSync = async (client: PageClient): Promise<void> => {
   await openRevisions(client);
   await openBackupChooser(client.page);

@@ -224,7 +224,7 @@ test('builds an openrscad model on disk from the project chat', async () => {
     await expect.poll(lastLabel, { timeout: 120_000 }).toMatch(/^Saved/u);
     const labels = await markerLabels();
     /* `turnRevisionLabel`'s working copy: *Working…* (no base is named, M11). */
-    const working = labels.findLastIndex((label) => label === 'Working…');
+    const working = labels.lastIndexOf('Working…');
     console.info(`[desktop-e2e] in-project turn marker: ${JSON.stringify(labels)}`);
     /* Working is shown only while the attempt's change proof is in and its terminal row is not
      * (`deriveTurnRevisionState`: no proof yet hides the marker, proof after the terminal row is *Saving…*),

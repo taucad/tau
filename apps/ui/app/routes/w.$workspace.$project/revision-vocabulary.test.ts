@@ -253,7 +253,7 @@ describe('the copy table', () => {
         onMain,
         'Backed up · Sign in again to keep backing up',
       ],
-    ] as const)('says “%s” as the table proposes', (_, status, where, sentence) => {
+    ] as const)('says “%s” as the table proposes', (...[, status, where, sentence]) => {
       expect(selectRevisionFacts(status, where).sentence).toBe(sentence);
     });
 

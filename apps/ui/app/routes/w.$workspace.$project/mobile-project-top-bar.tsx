@@ -300,7 +300,7 @@ function SheetRow({
 
 /**
  * The project sheet the title opens: the name and status line, the recovery a
- * status names (Follow chat, settings records), then Revisions, Export and
+ * status names (Switch to the chat's branch, settings records), then History, Export and
  * Details, each once. A waiting conflict moves the Revisions row first, as the
  * decision it opens (I5), rather than adding a second way there (I4). Share is
  * not here: it is the bar's own trailing control.

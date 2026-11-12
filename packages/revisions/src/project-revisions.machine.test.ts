@@ -2491,6 +2491,98 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  /*
+   * D4's boundary at the projection: an offline device whose main has rev-1
+   * on the remote and rev-2, rev-3 only here. Nothing has been fetched, so the
+   * owed entry's lease is the only word on where the remote is, and a fetch's
+   * lease replaces it once one lands.
+   */
+  it('D4: carries the remote head per branch, from the owed entry offline and the fetch once online', async () => {
+    const harness = start();
+    const origin = { name: 'origin', url: 'https://tau.example/p/project-1.git', kind: 'tau' } as const;
+
+    await readyRegistry(harness, [live]);
+    harness.callbacks.sendBack('connectivity', { type: 'offline' });
+    harness.promises.settle('readRemote', { output: { remote: origin } });
+    harness.promises.settle('readPending', {
+      output: {
+        version: 1,
+        entries: [
+          {
+            ref: 'refs/heads/main',
+            head: 'rev-3',
+            expected: 'rev-1',
+            reason: 'offline',
+            recordedAt: 1,
+            remote: 'origin',
+          },
+          /* Owed to a remote this project no longer has: says nothing about this one. */
+          { ref: 'refs/heads/old', head: 'rev-9', expected: 'rev-8', reason: 'offline', recordedAt: 1, remote: 'gone' },
+        ],
+      },
+    });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'origin', branch: 'main' } });
+    await flush();
+    harness.actor.send({ type: 'checkoutChanged', checkoutId: live.id, revisionId: 'rev-3', treeId: 'tree-3' });
+    harness.promises.settle('readHead', { output: { revisionId: 'rev-3', treeId: 'tree-3', branch: 'main' } });
+    await flush();
+
+    const offline = selectRevisionStatus(harness.actor.getSnapshot());
+    expect(offline.sync).toMatchObject({ online: false, pendingCount: 1 });
+    expect(offline.headRevisionId).toBe('rev-3');
+    expect(offline.branches).toStrictEqual([
+      {
+        name: 'main',
+        head: 'rev-3',
+        checkoutId: live.id,
+        checkoutRoot: live.root,
+        leaseChatIds: [],
+        remoteHead: 'rev-1',
+      },
+    ]);
+
+    /* Back online, the fetch's leases are the remote's word, a branch only it has included. */
+    harness.callbacks.sendBack('connectivity', { type: 'online' });
+    await flush();
+    harness.promises.settle('syncFetch', {
+      output: {
+        leases: { 'refs/heads/main': 'rev-2', 'refs/heads/feature': 'rev-f', 'refs/tags/v1': 'rev-1' },
+        integration: 'ahead',
+        branches: [
+          { name: 'main', head: 'rev-3', onRemote: true },
+          { name: 'feature', head: 'rev-f', onRemote: true },
+        ],
+      },
+    });
+    await flush();
+
+    const online = selectRevisionStatus(harness.actor.getSnapshot()).branches;
+    expect(online.map(({ name, remoteHead }) => [name, remoteHead])).toStrictEqual([
+      ['main', 'rev-2'],
+      ['feature', 'rev-f'],
+    ]);
+
+    harness.actor.stop();
+  });
+
+  it('D4: carries no remote head while the project has no remote', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [live]);
+    harness.promises.settle('readRemote', { output: { remote: undefined } });
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: undefined, branch: 'main' } });
+    await flush();
+
+    const [main] = selectRevisionStatus(harness.actor.getSnapshot()).branches;
+    expect(main).toBeDefined();
+    expect(main).not.toHaveProperty('remoteHead');
+
+    harness.actor.stop();
+  });
+
   it('D50: pulls the branch the live checkout switched to, not the one the project opened on', async () => {
     const harness = start();
 

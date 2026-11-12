@@ -32,7 +32,7 @@ let session: DesktopSession | undefined;
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 
-/** DSK-16/DSK-20 evidence: the docked Terminal in the production workbench, collected with the row's application evidence. */
+/** Screenshot evidence of the docked Terminal in the production workbench, saved with the run's test results. */
 const evidenceShot = async (page: DesktopSession['page'], name: string): Promise<void> => {
   await page.screenshot({ path: join(workspaceRoot, `out/test-results/desktop-e2e/terminal-${name}.png`) });
 };
@@ -93,8 +93,8 @@ describe('production Electron Terminal keyboard qualification', () => {
   });
 
   /*
-   * DSK-19 specialist-tool boundary (U11-U38): the shell owns starting an installed program, streaming its output and
-   * letting it write in the project. tar and gzip stand in for any installed tool; T08 owns the missing-tool case.
+   * Specialist tools: the shell owns starting an installed program, streaming its output and letting it write in the
+   * project. tar and gzip stand in for any installed tool; a missing tool's honest failure is covered elsewhere.
    */
   it('should run an installed tool through to a file in the project and stream its output', async () => {
     const { session: desktop, root } = await startTerminal();

@@ -25,14 +25,15 @@ afterEach(async (context) => {
 });
 
 /*
- * DSK-21 packaged shell smoke (operator ruling 2026-11-12): the packaged app, not the development build, starts its
+ * Packaged shell smoke: the packaged app, not the development build, starts its
  * shipped shell provider, and a command typed into the Terminal writes real bytes in the project. The executable is
  * required, never defaulted, so this row cannot pass against a development build. On macOS the human Terminal runs the
- * system Zsh with the person's startup files (operator ruling 2026-11-01T18:57Z); elsewhere it runs Bash.
+ * system Zsh with the person's startup files, so its prompt is theirs: readiness waits for any drawn prompt line, and
+ * the version marker the command writes proves which shell ran. Elsewhere the Terminal runs Bash.
  */
 const terminalShell =
   process.platform === 'darwin'
-    ? { prompt: /%\s*$/u, version: 'ZSH_VERSION' }
+    ? { prompt: /\S/u, version: 'ZSH_VERSION' }
     : { prompt: /\$\s*$/u, version: 'BASH_VERSION' };
 
 describe('packaged Terminal smoke', () => {

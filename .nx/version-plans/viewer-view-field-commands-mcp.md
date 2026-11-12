@@ -1,7 +1,7 @@
 ---
 mcp: minor
 host: minor
-agent-plugin: patch
+agent-plugin: minor
 ---
 
 Keep a viewer page's display, grid unit, field of view and up direction in the view record only when the person sets them.

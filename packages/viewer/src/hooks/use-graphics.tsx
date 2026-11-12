@@ -46,7 +46,6 @@ const GraphicsContext = createContext<GraphicsContextValue | undefined>(undefine
 export const useGraphicsCamera = (graphicsRef: GraphicsActorRef | undefined): GraphicsCameraRef | undefined =>
   useSelector(graphicsRef, (snapshot) => snapshot?.context.cameraRef);
 
-/* The per-mount presentation of the view's camera: the native cameras, the publication slots and the render frame. */
 /** The view's camera, read once when a presentation is made. */
 const selectViewCamera = (graphicsRef: GraphicsActorRef): GraphicsCameraRef =>
   graphicsRef.getSnapshot().context.cameraRef;
@@ -55,6 +54,7 @@ const selectViewCamera = (graphicsRef: GraphicsActorRef): GraphicsCameraRef =>
 const selectViewFraming = (graphicsRef: GraphicsActorRef): ViewCameraFraming =>
   graphicsRef.getSnapshot().context.cameraFraming;
 
+/* The per-mount presentation of the view's camera: the native cameras, the publication slots and the render frame. */
 const createViewPresentation = (
   graphicsRef: GraphicsActorRef,
 ): Omit<GraphicsContextValue, 'graphicsRef' | 'framing'> => {

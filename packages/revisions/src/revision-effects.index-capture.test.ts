@@ -249,6 +249,10 @@ const run = async <Output>(logic: unknown, input: unknown): Promise<Output> =>
           reject(asError(snapshot.error));
         }
       },
+      /* A rejected promise actor reports here, not as a `next` snapshot. */
+      error: (failure: unknown) => {
+        reject(asError(failure));
+      },
     });
     running.start();
   });
@@ -405,8 +409,14 @@ describe('a cut driven by a real Project Index (S10)', () => {
     const at = await fixture(files(20));
     await mint(at);
 
+    /* A removal reads the files themselves (A25): unsaved work makes it refuse after that read, removing nothing. */
+    await at.rooted.writeFile('dir3/f3.txt', 'edited\n');
     at.count();
-    await run(at.actors.branch.checkBranch, { projectId: 'project-1', operation: 'switch', branch: 'other' });
+    await expect(run(at.actors.checkouts.removeCheckout, { projectId: 'project-1', id: 'live' })).rejects.toMatchObject(
+      {
+        code: 'CHECKOUT_CONFLICT',
+      },
+    );
     /* Every versioned file, read past the memo: the fixture's twenty and what init wrote. */
     expect(at.walked()).toBe(true);
     expect(at.reads.length).toBe(22);
@@ -414,7 +424,8 @@ describe('a cut driven by a real Project Index (S10)', () => {
     await at.rooted.writeFile('dir1/f1.txt', 'edited\n');
     at.count();
     const { treeId } = await cut(at.actors);
-    expect(at.reads).toEqual(['dir1/f1.txt']);
+    /* Only what differs from the head: the new edit and the one the removal refused on. */
+    expect(at.reads).toEqual(['dir1/f1.txt', 'dir3/f3.txt']);
     expect(at.walked()).toBe(false);
     expect(treeId).toBe(await walkedTreeId(at.walking));
   });

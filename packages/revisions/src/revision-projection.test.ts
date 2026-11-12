@@ -32,7 +32,7 @@ describe('the projection comparator (P52, W18 DEF-6)', () => {
     headRevisionId: 'rev-1',
     follow: 'chat',
     attention: 0,
-    restore: { asking: true, busy: true, removedPathCount: 1, dirty: true, revisionNumber: 2 },
+    restore: { busy: true, revisionNumber: 2 },
     remote: {
       kind: 'tau',
       url: 'https://example.test/repo.git',
@@ -78,7 +78,7 @@ describe('the projection comparator (P52, W18 DEF-6)', () => {
         leaseChatIds: ['chat-1'],
       },
     ],
-    branchVerb: { busy: true, asking: true, operation: 'switch', branch: 'feature', question: 'Replace these files?' },
+    branchVerb: { busy: true, operation: 'switch', branch: 'feature' },
     conflicts: [
       {
         revisionId: 'rev-conflict',
@@ -105,16 +105,7 @@ describe('the projection comparator (P52, W18 DEF-6)', () => {
     ['headRevisionId', (status) => ({ ...status, headRevisionId: 'rev-2' })],
     ['follow', (status) => ({ ...status, follow: 'pinned' })],
     ['attention', (status) => ({ ...status, attention: 1 })],
-    ['restore.asking', (status) => ({ ...status, restore: { ...status.restore, asking: false } })],
     ['restore.busy', (status) => ({ ...status, restore: { ...status.restore, busy: false } })],
-    [
-      'restore.removedPathCount',
-      (status) => ({
-        ...status,
-        restore: { ...status.restore, removedPathCount: 2 },
-      }),
-    ],
-    ['restore.dirty', (status) => ({ ...status, restore: { ...status.restore, dirty: false } })],
     ['restore.revisionNumber', (status) => ({ ...status, restore: { ...status.restore, revisionNumber: 3 } })],
     ['remote.kind', (status) => ({ ...status, remote: { ...status.remote, kind: 'git' } })],
     ['remote.url', (status) => ({ ...status, remote: { ...status.remote, url: 'https://example.test/other.git' } })],
@@ -234,10 +225,8 @@ describe('the projection comparator (P52, W18 DEF-6)', () => {
       }),
     ],
     ['branchVerb.busy', (status) => ({ ...status, branchVerb: { ...status.branchVerb, busy: false } })],
-    ['branchVerb.asking', (status) => ({ ...status, branchVerb: { ...status.branchVerb, asking: false } })],
     ['branchVerb.operation', (status) => ({ ...status, branchVerb: { ...status.branchVerb, operation: 'merge' } })],
     ['branchVerb.branch', (status) => ({ ...status, branchVerb: { ...status.branchVerb, branch: 'other' } })],
-    ['branchVerb.question', (status) => ({ ...status, branchVerb: { ...status.branchVerb, question: 'Continue?' } })],
     [
       'conflicts.revisionId',
       (status) => ({

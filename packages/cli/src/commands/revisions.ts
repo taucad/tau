@@ -452,16 +452,12 @@ const switchCommand = defineCommand({
   args: {
     ...projectArguments,
     branch: { type: 'positional', description: 'Branch to move to', required: true },
-    force: {
-      type: 'boolean',
-      description: 'Switch even though the project has changes that are not in a revision yet',
-      required: false,
-    },
   },
   async run({ args }) {
     const { revisions } = await open(args.project);
     try {
-      const outcome = await revisions.switchTo(args.branch, { confirm: args.force === true });
+      /* Unsaved changes are saved on the branch being left first, so nothing asks (I11). */
+      const outcome = await revisions.switchTo(args.branch);
       if (args.json) {
         await emit({ kind: 'revision-switch', ok: outcome.status === 'switched', ...outcome });
       }
@@ -471,13 +467,7 @@ const switchCommand = defineCommand({
         }
         return;
       }
-      throw cliError(
-        outcome.status === 'needs-confirmation' ? 'SWITCH_NEEDS_CONFIRMATION' : 'SWITCH_REFUSED',
-        outcome.status === 'needs-confirmation'
-          ? `${outcome.reason} Save a revision first, or pass --force.`
-          : outcome.reason,
-        exitCodes.refused,
-      );
+      throw cliError('SWITCH_REFUSED', outcome.reason, exitCodes.refused);
     } finally {
       await revisions.close();
     }

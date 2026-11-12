@@ -15,10 +15,11 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
 /*
  * Path table — `branch.machine` (S47).
  *
- *  1  `switch` checks, then applies without asking, and the checkout change is
- *     both emitted and sent to the parent
- *  2  a `switch` the check calls risky asks first; `confirm` applies it
- *  3  `cancel` returns to `idle` and applies nothing
+ *  1  `switch` checks, records the checkout, then applies without asking, and the
+ *     checkout change is both emitted and sent to the parent
+ *  2  no verb asks a person (I11): a `switch` cuts the unsaved work on the branch it
+ *     leaves before `applySwitch` runs, and `toast.branch` names that branch and the save
+ *  3  a `switch` whose recording cut fails moves nothing
  *  4  `checkBranch` failure → `failed` → `toast.error` → `idle`
  *  5  `applySwitch` failure → `failed` → `toast.error` → `idle`
  *  6  `create` delegates `addCheckout` to the parent and settles on the
@@ -92,15 +93,26 @@ const start = (): Harness => {
   return { actor, promises, parent, emitted, clock };
 };
 
-const cleanCheck = { output: { needsConfirmation: false } } as const;
-const riskyCheck = {
-  output: { needsConfirmation: true, question: 'This overwrites changes that are not in a revision yet.' },
-} as const;
+const cleanCheck = { output: {} } as const;
 const switched = {
   output: { checkoutId: 'live', revisionId: 'rev-9', treeId: 'tree-9', branch: 'bracket-fillet' },
 } as const;
 
 const types = (events: ReadonlyArray<{ type: string }>): readonly string[] => events.map((event) => event.type);
+
+/** Answer a *Switch*'s recording cut the way the root routes the checkout's answer (RM-R1). */
+const answerSwitchCut = (
+  actor: Harness['actor'],
+  answer: 'revisionMinted' | 'nothingToSave',
+  requestId = 'req-1',
+): void => {
+  const addressed = { checkoutId: 'live', trigger: 'switch', requestId: `${requestId}/cut` } as const;
+  actor.send(
+    answer === 'revisionMinted'
+      ? { type: 'revisionMinted', ...addressed, revisionId: 'rev-saved' }
+      : { type: 'nothingToSave', ...addressed },
+  );
+};
 
 describe('branchMachine', () => {
   it('applies a switch the check clears, and tells the parent the checkout moved', async () => {
@@ -115,6 +127,15 @@ describe('branchMachine', () => {
     expect(promises.inputsFor('checkBranch')).toEqual([
       { projectId: 'project-1', operation: 'switch', branch: 'bracket-fillet', into: 'main' },
     ]);
+    expect(parent.events).toContainEqual({
+      type: 'cut',
+      requestId: 'req-1/cut',
+      trigger: 'switch',
+      checkoutId: undefined,
+      leaseIds: [],
+    });
+    answerSwitchCut(actor, 'nothingToSave');
+    await flush();
     expect(promises.inputsFor('applySwitch')).toEqual([
       { projectId: 'project-1', branch: 'bracket-fillet', checkoutId: undefined },
     ]);
@@ -131,42 +152,82 @@ describe('branchMachine', () => {
     parent.stop();
   });
 
-  it('asks before a risky switch and applies it on confirm', async () => {
-    const { actor, promises, emitted } = start();
-    promises.script('checkBranch', riskyCheck);
+  it('saves unsaved work on the branch it leaves before it moves, without asking (I11)', async () => {
+    const { actor, promises, parent, emitted } = start();
+    promises.script('checkBranch', cleanCheck);
     promises.script('applySwitch', switched);
 
-    actor.send({ type: 'switch', requestId: 'req-1', branch: 'bracket-fillet' });
+    actor.send({
+      type: 'switch',
+      requestId: 'req-1',
+      branch: 'bracket-fillet',
+      mode: 'applyToLive',
+      checkoutId: 'live',
+      from: 'main',
+    });
     await flush();
 
-    expect(actor.getSnapshot().matches('confirming')).toBe(true);
+    /* Busy, never asking: the only wait is for the checkout's own answer. */
+    expect(actor.getSnapshot().matches({ applying: { switching: 'recording' } })).toBe(true);
     expect(selectBranchFacet(actor.getSnapshot())).toEqual({
-      busy: false,
-      asking: true,
+      busy: true,
       operation: 'switch',
       branch: 'bracket-fillet',
-      question: 'This overwrites changes that are not in a revision yet.',
+    });
+    expect(parent.events).toContainEqual({
+      type: 'cut',
+      requestId: 'req-1/cut',
+      trigger: 'switch',
+      checkoutId: 'live',
+      leaseIds: [],
     });
     expect(promises.inputsFor('applySwitch')).toEqual([]);
 
-    actor.send({ type: 'confirm' });
+    answerSwitchCut(actor, 'revisionMinted');
     await flush();
-    expect(types(emitted)).toContain('checkoutChanged');
+
+    expect(promises.inputsFor('applySwitch')).toEqual([
+      { projectId: 'project-1', branch: 'bracket-fillet', checkoutId: 'live' },
+    ]);
+    expect(emitted.at(-1)).toEqual({
+      type: 'toast.branch',
+      requestId: 'req-1',
+      operation: 'switch',
+      branch: 'bracket-fillet',
+      from: 'main',
+      saved: true,
+    });
+    expect(actor.getSnapshot().matches('idle')).toBe(true);
     actor.stop();
+    parent.stop();
   });
 
-  it('applies nothing when the confirmation is cancelled', async () => {
+  it('moves nothing when the recording cut fails', async () => {
     const { actor, promises, emitted } = start();
-    promises.script('checkBranch', riskyCheck);
+    promises.script('checkBranch', cleanCheck);
 
-    actor.send({ type: 'switch', requestId: 'req-1', branch: 'bracket-fillet' });
+    actor.send({ type: 'switch', requestId: 'req-1', branch: 'bracket-fillet', checkoutId: 'live', from: 'main' });
     await flush();
-    actor.send({ type: 'cancel' });
+    actor.send({
+      type: 'cutFailed',
+      checkoutId: 'live',
+      trigger: 'switch',
+      requestId: 'req-1/cut',
+      reason: 'The disk is full.',
+    });
+    await flush();
 
-    expect(actor.getSnapshot().matches('idle')).toBe(true);
-    expect(actor.getSnapshot().context.operation).toBeUndefined();
     expect(promises.inputsFor('applySwitch')).toEqual([]);
-    expect(emitted).toEqual([]);
+    expect(emitted).toEqual([
+      {
+        type: 'toast.error',
+        requestId: 'req-1',
+        operation: 'switch',
+        branch: 'bracket-fillet',
+        message: 'The disk is full.',
+      },
+    ]);
+    expect(actor.getSnapshot().matches('idle')).toBe(true);
     actor.stop();
   });
 
@@ -196,6 +257,8 @@ describe('branchMachine', () => {
     promises.script('applySwitch', { error: new Error('The store holds no tree for that revision.') });
 
     actor.send({ type: 'switch', requestId: 'req-1', branch: 'bracket-fillet' });
+    await flush();
+    answerSwitchCut(actor, 'nothingToSave');
     await flush();
 
     expect(emitted).toEqual([
@@ -584,17 +647,13 @@ describe('branchMachine', () => {
     parent.stop();
   });
 
-  it('asks before a discard, then removes the checkout through the registry', async () => {
+  it('removes the checkout a discard names through the registry', async () => {
     const { actor, promises, parent, emitted } = start();
-    promises.script('checkBranch', {
-      output: { needsConfirmation: true, question: 'Discarding this branch deletes its files.', checkoutId: 'co-2' },
-    });
+    promises.script('checkBranch', { output: { checkoutId: 'co-2' } });
 
     actor.send({ type: 'discard', requestId: 'req-1', branch: 'bracket-fillet' });
     await flush();
-    expect(actor.getSnapshot().matches('confirming')).toBe(true);
 
-    actor.send({ type: 'confirm' });
     expect(parent.events).toContainEqual({ type: 'removeCheckout', requestId: 'req-1/remove', id: 'co-2' });
 
     actor.send({ type: 'checkoutRemoved', requestId: 'req-1/remove' });
@@ -607,7 +666,7 @@ describe('branchMachine', () => {
 
   it('reports the registry reason when a discard is refused', async () => {
     const { actor, promises, emitted } = start();
-    promises.script('checkBranch', { output: { needsConfirmation: false, checkoutId: 'co-2' } });
+    promises.script('checkBranch', { output: { checkoutId: 'co-2' } });
 
     actor.send({ type: 'discard', requestId: 'req-1', branch: 'bracket-fillet' });
     await flush();
@@ -738,7 +797,6 @@ describe('branchMachine', () => {
 
   it('should refuse a verb while busy with REVISIONS_BUSY', async () => {
     const { actor, promises, emitted } = start();
-    promises.script('checkBranch', riskyCheck);
 
     actor.send({ type: 'switch', requestId: 'req-1', branch: 'bracket-fillet' });
     actor.send({ type: 'merge', requestId: 'req-2', branch: 'enclosure-v2' });
@@ -766,7 +824,7 @@ describe('branchMachine', () => {
         code: 'REVISIONS_BUSY',
       },
     ]);
-    expect(actor.getSnapshot().matches('confirming')).toBe(true);
+    expect(actor.getSnapshot().matches('checking')).toBe(true);
     actor.stop();
   });
 
@@ -832,7 +890,7 @@ describe('branchMachine', () => {
   it('should answer every public event in every reachable state', () => {
     const parent = createFakeParent();
     const outputs: Readonly<Record<string, unknown>> = {
-      checkBranch: { needsConfirmation: true, question: 'This overwrites changes that are not in a revision yet.' },
+      checkBranch: {},
       applySwitch: switched.output,
       merge: { status: 'conflicted', paths: ['enclosure.ts'] },
       rename: { branch: 'enclosure-v4' },
@@ -840,7 +898,7 @@ describe('branchMachine', () => {
     /* Effect outcomes reach the states behind each invoke; they are not public. */
     const invokes = [
       branchMachine.getStateNodeById('branch.checking'),
-      branchMachine.getStateNodeById('branch.applying.switching'),
+      branchMachine.getStateNodeById('branch.applying.switching.moving'),
       branchMachine.getStateNodeById('branch.applying.merging'),
       branchMachine.getStateNodeById('branch.applying.renaming'),
     ].flatMap((node) => node.invoke);
@@ -855,8 +913,6 @@ describe('branchMachine', () => {
       { type: 'create', requestId: 'req-1', name: 'enclosure-v2', from: 'rev-12' },
       { type: 'create', requestId: 'req-1', name: 'enclosure-v3', checkoutId: 'checkout-live', head: 'rev-1' },
       { type: 'rename', requestId: 'req-1', branch: 'enclosure-v2', name: 'enclosure-v4' },
-      { type: 'confirm' },
-      { type: 'cancel' },
       { type: 'selectBranch', branch: 'main' },
       { type: 'checkoutAdded', requestId: 'req-1/add', checkoutId: 'checkout-c', checkoutRoot: '/checkouts/c' },
       { type: 'checkoutRemoved', requestId: 'req-1/remove' },

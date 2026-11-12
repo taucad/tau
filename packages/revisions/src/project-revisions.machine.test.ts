@@ -694,6 +694,8 @@ describe('projectRevisionsMachine', () => {
       branch: 'agent/b',
       mode: 'reroot',
       checkoutId: 'checkout-b',
+      /* The branch the selection left: what the toast's Undo switches back to (I11). */
+      from: 'main',
     });
 
     harness.actor.stop();
@@ -849,7 +851,7 @@ describe('projectRevisionsMachine', () => {
 
     expect(promises.inputsFor('computePlan')).toEqual([{ checkoutId: 'checkout-live', target: 'rev-3' }]);
     promises.settle('computePlan', {
-      output: { planId: 'plan-1', revisionId: 'rev-3', revisionNumber: 3, removedPathCount: 0, dirty: false },
+      output: { planId: 'plan-1', revisionId: 'rev-3', revisionNumber: 3 },
     });
     await flush();
     promises.settle('applyPlan', { output: { revisionId: 'rev-3', treeId: 'tree-3' } });
@@ -905,7 +907,7 @@ describe('projectRevisionsMachine', () => {
     promises.settle('cut', { output: { treeId: 'tree-5', cutId: 'cut-1' } });
     await flush();
     promises.settle('computePlan', {
-      output: { planId: 'plan-1', revisionId: 'rev-3', revisionNumber: 3, removedPathCount: 0, dirty: false },
+      output: { planId: 'plan-1', revisionId: 'rev-3', revisionNumber: 3 },
     });
     await flush();
     promises.settle('applyPlan', { output: { revisionId: 'rev-3', treeId: 'tree-3' } });
@@ -980,7 +982,7 @@ describe('projectRevisionsMachine', () => {
     actor.stop();
   });
 
-  it('holds an admission made while the restore question is open until the restore row lands (A2, M4)', async () => {
+  it('holds an admission made while a restore applies until the restore row lands (A2, M4)', async () => {
     const harness = start();
     const { actor, promises, callbacks } = harness;
     registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
@@ -991,16 +993,16 @@ describe('projectRevisionsMachine', () => {
     promises.settle('cut', { output: { treeId: 'tree-5', cutId: 'cut-1' } });
     await flush();
     promises.settle('computePlan', {
-      output: { planId: 'plan-1', revisionId: 'rev-3', revisionNumber: 3, removedPathCount: 2, dirty: false },
+      output: { planId: 'plan-1', revisionId: 'rev-3', revisionNumber: 3 },
     });
     await flush();
-    expect(restoreRef?.getSnapshot().matches('confirming')).toBe(true);
+    /* No question: the plan applies at once (I11). */
+    expect(restoreRef?.getSnapshot().matches('applying')).toBe(true);
 
-    /* The person has not answered yet; a chat turn arrives for the same files. */
+    /* The files are being rewritten; a chat turn arrives for the same files. */
     actor.send({ type: 'admitTurn', key: key1 });
     expect(actor.getSnapshot().context.turnRefs['run-1/0']).toBeUndefined();
 
-    restoreRef?.send({ type: 'confirm' });
     promises.settle('applyPlan', { output: { revisionId: 'rev-3', treeId: 'tree-3' } });
     await flush();
     /* The turn still waits: the files are the target's, and the restore row is not minted yet. */
@@ -1064,13 +1066,10 @@ describe('projectRevisionsMachine', () => {
       headRevisionId: undefined,
       follow: 'pinned',
       attention: 0,
-      /* The restore child is idle until someone asks for a restore, and the
-       * plan's two risk facts are read from it rather than copied (S19). */
+      /* The restore child is idle until someone asks for a restore, and its
+       * facts are read from it rather than copied (S19). */
       restore: {
-        asking: false,
         busy: false,
-        removedPathCount: 0,
-        dirty: false,
         revisionNumber: undefined,
         undoable: false,
         canUndo: false,
@@ -1107,7 +1106,7 @@ describe('projectRevisionsMachine', () => {
           leaseChatIds: [],
         },
       ],
-      branchVerb: { busy: false, asking: false, operation: undefined, branch: undefined, question: undefined },
+      branchVerb: { busy: false, operation: undefined, branch: undefined },
       /* W8's own row, filled here only because this assertion is one object
          literal: leaving it out keeps the suite red on a facet W13 does not
          own. Disclosed in the W13 report. */

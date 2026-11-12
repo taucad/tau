@@ -3541,9 +3541,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }),
         revisionId: to,
         revisionNumber: number,
-        /* Step 1 minted the files, so the head's tree is what they are. */
-        removedPathCount: ours.entries().filter(({ path }) => !merged.tree.has(path)).length,
-        dirty: false,
       };
     }
     const code: RestoreFailureCode = 'NOTHING_TO_UNDO';
@@ -4656,7 +4653,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             return planUndo(input.checkoutId, input.skip);
           }
           const place = await placeOf(input.checkoutId);
-          const head = await headOf(place);
           /* *Undo restore* is a restore of the restore row's first parent (D2). */
           const restored = input.firstParent === true ? await port.readRevision(revisionId(input.target)) : undefined;
           const target = input.firstParent === true ? restored?.parents[0] : input.target;
@@ -4666,18 +4662,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if ((await port.readRevision(revisionId(target))) === undefined) {
             throw new RevisionPortError('UNKNOWN_REVISION', `No recorded revision to restore: ${target}`);
           }
-          /* E5: the memoised capture, not a fresh one. Step 1 already minted
-           * what the checkout had (D1), so `dirty` here only asks for a
-           * confirmation; what protects the bytes is `applyPlan`'s `validate`,
-           * which proves the head again inside the fence before one is written. */
-          const live = await capture(place);
-          /* What the restore removes, by oid diff from the head the files equal (D10): no blob is read to count it. */
-          const changes = head === undefined ? [] : await port.diff({ from: revisionId(head), to: revisionId(target) });
-          const removed =
-            head === undefined
-              ? live.entries().map(({ path }) => path)
-              : changes.filter(({ kind }) => kind === 'deleted').map(({ path }) => path);
-          const headTreeId = await treeIdOf(head);
+          /* Nothing is asked here (I11): step 1 already minted what the checkout
+           * had (D1), and `applyPlan`'s `validate` proves the head again inside
+           * the fence before one byte is written. */
           return {
             /* D2's undo also records which restore it undid, so *Undo* (D15) passes over both. */
             planId: plans.put(input.checkoutId, {
@@ -4687,8 +4674,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             }),
             revisionId: target,
             revisionNumber: await ordinalOnLine(place, target),
-            removedPathCount: removed.length,
-            dirty: headTreeId !== (await checkoutTreeId(place.id, live)),
           };
         },
       ),
@@ -4835,33 +4820,21 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
      */
     branch: {
       /* D10, answered where the trees are. *Switch* into a branch that already
-       * has a checkout re-roots and asks nothing; into one that does not, the
-       * live tree is rewritten — so it asks exactly when that would throw away
-       * work no revision holds (A25). */
+       * has a checkout re-roots; into one that does not, the live tree is
+       * rewritten. Neither asks (I11): `branch.machine` records the live
+       * checkout's unsaved work on the branch it leaves before it moves. */
       checkBranch: fromAuthorityPromise<BranchCheckActorOutput, BranchCheckActorInput>(async ({ input }) => {
         await ensureStore();
         if (input.operation !== 'switch') {
-          return { needsConfirmation: false };
+          return {};
         }
         const places = await listPlaces();
         const linked = places.find((place) => place.branch === input.branch && place.kind === 'linked');
         if (linked !== undefined) {
-          return { needsConfirmation: false, checkoutId: linked.id, mode: 'reroot' };
+          return { checkoutId: linked.id, mode: 'reroot' };
         }
         const live = places.find((place) => place.kind === 'live');
-        if (live === undefined) {
-          return { needsConfirmation: false };
-        }
-        const headTreeId = await treeIdOf(await headOf(live));
-        const dirty = headTreeId !== (await checkoutTreeId(live.id, await captureFresh(live)));
-        return dirty
-          ? {
-              needsConfirmation: true,
-              question: 'The files you have open have changes that are not in a revision yet. Moving replaces them.',
-              checkoutId: live.id,
-              mode: 'applyToLive',
-            }
-          : { needsConfirmation: false, checkoutId: live.id, mode: 'applyToLive' };
+        return live === undefined ? {} : { checkoutId: live.id, mode: 'applyToLive' };
       }),
 
       /* Apply-to-live: the *other* half of one verb a person never
@@ -4890,7 +4863,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }
         /*
          * By oid diff from the checkout's head when the files are that head
-         * (D10); files the person agreed to replace are not, and until the
+         * (D10), which they are once `branch.machine`'s recording cut saved
+         * them (I11); files that changed since that cut are not, and until the
          * index knows which paths those are, the branch's whole tree is read
          * (its large objects from this store alone, for the fill).
          */

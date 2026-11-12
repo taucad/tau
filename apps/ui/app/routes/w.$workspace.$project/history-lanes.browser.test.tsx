@@ -1,7 +1,8 @@
 /**
- * History's lanes in a real browser (History D2): the canvas scenarios at a
+ * History's lanes in a real browser (History D2, D3): the canvas scenarios at a
  * 336 px and a 236 px pane, light and dark, and the bend rule measured on the
- * SVG the list draws.
+ * SVG the list draws, including the dashed link of a merge that needs a
+ * decision and the open end while the agent works.
  *
  * For every bend: it starts at its dot's centre, both ends are vertical, no rail
  * on the lane it arrives at overlaps it and none stops short of it, and its
@@ -46,12 +47,25 @@ vi.mock('#hooks/use-revision-status.js', async () => {
   const harness = await import('#hooks/use-revision-status.test-harness.js');
   return harness.revisionStatusMock();
 });
+/* The chat whose agent is working on the files, when a scenario has one (D2's open end). */
+const agent = vi.hoisted(() => ({ chats: [] as ReadonlyArray<{ id: string; name: string; checkoutId: undefined }> }));
+const noChats: readonly string[] = [];
+const workingChats: readonly string[] = ['chat-agent'];
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: () => ({ observedChatIdsOf: () => [], subscribeMembership: () => () => undefined }),
+  useChatSessionStore: () => ({
+    observedChatIdsOf: () => (agent.chats.length === 0 ? noChats : workingChats),
+    subscribeMembership: () => () => undefined,
+    subscribeProjection: () => () => undefined,
+    getProjection: (chatId: string) => ({ chatId, ledger: { position: { cursor: 0 }, runs: {} } }),
+  }),
 }));
-vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats: [] }) }));
+vi.mock('#machines/chat-projection.logic.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  selectRunPhase: () => 'running',
+}));
+vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats: agent.chats }) }));
 vi.mock('#hooks/use-chat-records.js', () => ({
-  useChatRecords: () => ({ chats: [], isLoading: false, error: undefined }),
+  useChatRecords: () => ({ chats: agent.chats, isLoading: false, error: undefined }),
 }));
 vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -82,6 +96,8 @@ const branchStatus = (name: string, head: string) =>
 /** Script the client with one scenario and render the pane at `width`. */
 const renderPane = async (scenario: LanesScenario | undefined, width: number): Promise<void> => {
   revisionStatusHarness.reset();
+  agent.chats =
+    scenario?.agentChat === undefined ? [] : [{ id: 'chat-agent', name: scenario.agentChat, checkoutId: undefined }];
   if (scenario === undefined) {
     revisionStatusHarness.rows = oneBranchRows;
     revisionStatusHarness.status = {
@@ -97,6 +113,7 @@ const renderPane = async (scenario: LanesScenario | undefined, width: number): P
       line: { kind: 'branch', name: scenario.current },
       headRevisionId: scenario.head,
       branches: scenario.graph.branches.map((branch) => branchStatus(branch.name, branch.head)),
+      conflicts: scenario.conflicts ?? [],
     };
   }
   render(
@@ -248,6 +265,65 @@ describe('History lanes', () => {
             expectBendRule(scenario);
           });
         }
+
+        /* D3: a merge that needs a decision is one amber diamond above main, linked to the branch it brings in by a dashed S. */
+        it('should draw a pending merge as a diamond on main with a dashed link to enclosure-v2, and no lane for its line', async () => {
+          document.documentElement.classList.toggle('dark', theme === 'dark');
+          await renderPane(
+            lanesScenarios.find((entry) => entry.id === 'branch-conflict'),
+            width,
+          );
+
+          const frame = document.querySelector<HTMLElement>('[data-slot="history-graph-frame"]');
+          expect(frame?.dataset['lanes']).toBe('main,enclosure-v2');
+          expect(screen.getByText('Merge enclosure-v2 into main')).toBeVisible();
+          const diamond = document.querySelector<SVGPathElement>('[data-graph="marker"][data-kind="conflict"]');
+          expect(diamond?.dataset['lane']).toBe('0');
+          const [x, top] = (diamond?.getAttribute('d') ?? '').match(/-?\d+(?:\.\d+)?/gu)!.map(Number) as [
+            number,
+            number,
+          ];
+          const link = document.querySelector<SVGPathElement>('[data-graph="bend"][data-kind="link"]');
+          expect(link?.dataset['style']).toBe('dashed');
+          /* It leaves the diamond's centre, heading down, and arrives on enclosure-v2's lane, one lane step to the right. */
+          expect(Number(link?.dataset['x0'])).toBe(x);
+          expect(Number(link?.dataset['y0'])).toBe(top + 7);
+          expect(Number(link?.dataset['y1'])).toBeGreaterThan(top + 7);
+          expect(Number(link?.dataset['x1']) - x).toBe(16);
+          /* Nothing has landed, so the rail it arrives on runs dashed to enclosure-v2's newest entry. */
+          const arriving = [...document.querySelectorAll<SVGLineElement>('[data-graph="rail"][data-lane="1"]')].find(
+            (rail) => Math.abs(Number(rail.getAttribute('y1')) - Number(link?.dataset['y1'])) < 0.01,
+          );
+          expect(arriving?.dataset['style']).toBe('dashed');
+          expect(arriving?.dataset['branch']).toBe('enclosure-v2');
+        });
+
+        /* D2's open end: the agent's result is not an entry yet, so it is the branch's dashed circle, joined by dashes. */
+        it('should draw the agent’s work as the branch’s open end, joined to Current by a dashed rail', async () => {
+          document.documentElement.classList.toggle('dark', theme === 'dark');
+          await renderPane(
+            lanesScenarios.find((entry) => entry.id === 'agent-working'),
+            width,
+          );
+
+          expect(screen.getByText('Agent is working…')).toBeVisible();
+          expect(screen.getByText('Add a cable gland cutout')).toBeVisible();
+          const open = document.querySelector<SVGCircleElement>('[data-graph="marker"][data-kind="open"]');
+          const current = document.querySelector<SVGCircleElement>('[data-graph="marker"][data-kind="current"]');
+          expect(open?.dataset['lane']).toBe('1');
+          expect(current?.dataset['lane']).toBe('1');
+          const [openY, currentY] = [open, current].map((marker) => Number(marker?.getAttribute('cy'))) as [
+            number,
+            number,
+          ];
+          expect(openY).toBeLessThan(currentY);
+          const rail = [...document.querySelectorAll<SVGLineElement>('[data-graph="rail"][data-lane="1"]')].find(
+            (line) =>
+              Math.abs(Number(line.getAttribute('y1')) - openY) < 0.01 &&
+              Math.abs(Number(line.getAttribute('y2')) - currentY) < 0.01,
+          );
+          expect(rail?.dataset['style']).toBe('dashed');
+        });
       });
     }
   }

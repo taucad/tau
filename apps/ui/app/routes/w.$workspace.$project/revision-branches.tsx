@@ -1,18 +1,18 @@
 import { useRef, useState } from 'react';
 import {
+  ArrowDownToLine,
   ArrowLeftRight,
-  Check,
   Circle,
   CircleCheck,
   EllipsisVertical,
   FileText,
-  GitBranch,
   GitCompare,
   GitMerge,
   MessageSquare,
   Pencil,
   RotateCw,
   Trash2,
+  X,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -22,16 +22,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@taucad/ui/components/alert-dialog';
-import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { cn } from '@taucad/ui/utils/cn';
 import type { RevisionBranchFacet, RevisionConflictFacet } from '@taucad/revisions';
 import { DiffViewer } from '#components/code/diff-viewer.js';
 import { ActionButton } from '@taucad/ui/components/actions';
@@ -42,7 +41,6 @@ import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-langua
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { RevisionConflictEditor } from '#routes/w.$workspace.$project/revision-conflict-editor.js';
 import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
-import { needsDecision } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 
 /**
  * One conflicted file as the worker materialized it (S33, W10).
@@ -67,13 +65,6 @@ const files = (count: number): string => `${String(count)} file${count === 1 ? '
 
 export type ConflictDecisionProps = {
   readonly conflict: RevisionConflictFacet;
-  /**
-   * The line the checkout is on.
-   *
-   * ponytail: unread since D14 — the facet names the line the decision lands on
-   * (`into`) on every device. Drop it with the pane's next edit.
-   */
-  readonly currentBranch: string | undefined;
   readonly onKeepSide: (revisionId: string, path: string, side: 'mine' | 'theirs') => void;
   readonly onOpenConflict: (revisionId: string, path: string) => void;
   readonly onAskChat: (revisionId: string) => void;
@@ -93,7 +84,7 @@ export type ConflictDecisionProps = {
  * choice (a radio's glyphs), then Compare and Edit manually where there is text.
  * The region states no status: the strip owns *Needs your decision*.
  *
- * @param props - The facet, the line the checkout is on, and the verbs.
+ * @param props - The facet and the verbs.
  * @returns The decision.
  */
 export function ConflictDecision({
@@ -279,6 +270,7 @@ export function ConflictDecision({
             }}
           />
         ) : null}
+        <ConflictDismissal conflict={conflict} />
         <ActionButton
           verb={`Merge into ${target}`}
           icon={GitMerge}
@@ -295,174 +287,33 @@ export function ConflictDecision({
 }
 
 /**
- * Why *Rename* would be refused for a row, as the rename effect decides it (D91):
- * a linked checkout's branch first, then a branch the remote holds under its
- * name. The sentence is the refusal's own, so the menu and the toast never
- * disagree. A row whose live checkout is not known yet is not called linked.
+ * Another device's conflict, dismissed from Tau Cloud through D24's audited
+ * verb (D14), on the conflict card (copy table: *Dismiss this conflict…*, owner
+ * only). A conflict is never listed as a branch, so this is its one control. The
+ * device that recorded it keeps it and offers it again when it next syncs; the
+ * raw line is behind *Details*. It asks first: Tau Cloud's copy cannot be put
+ * back from here (I11).
  *
- * @param branch - The row.
- * @param liveCheckoutId - The live checkout's id, from the same projection.
- * @returns The refusal's sentence, or `undefined` when the rename can go through.
+ * @param props - The conflict.
+ * @returns The button and its confirmation, or nothing for anyone but the owner of a connected project.
  */
-const renameRefusalOf = (branch: RevisionBranchFacet, liveCheckoutId: string | undefined): string | undefined => {
-  const isLinked =
-    branch.checkoutId !== undefined && liveCheckoutId !== undefined && branch.checkoutId !== liveCheckoutId;
-  const code = isLinked ? 'BRANCH_RENAME_LINKED' : branch.onRemote === true ? 'BRANCH_RENAME_PUSHED' : undefined;
-  return code === undefined ? undefined : describeRevisionFailure('branch', code).description;
-};
-
-/**
- * A branch row's More, each verb with its glyph. Rename names the branch in the
- * one naming form under this menu's button, as New branch does (round 16); a
- * rename that would be refused stays listed, unavailable, with the reason under
- * it, as a print profile's verbs are.
- *
- * @param props - The branch, the line the checkout is on, and the verbs.
- * @returns The menu.
- */
-function BranchMenu({
-  branch,
-  currentBranch,
-  isCurrent,
-  isBusy,
-  renameRefusal,
-  onMerge,
-  onRename,
-  onPlace,
-  onDiscard,
-}: {
-  readonly branch: string;
-  readonly currentBranch: string | undefined;
-  readonly isCurrent: boolean;
-  readonly isBusy: boolean;
-  /** Why *Rename* would be refused (D91); `undefined` offers it. */
-  readonly renameRefusal: string | undefined;
-  readonly onMerge: () => void;
-  readonly onRename: (name: string) => void;
-  /** Present only when using this branch would move the chat in focus. */
-  readonly onPlace: (() => void) | undefined;
-  readonly onDiscard: () => void;
-}): React.JSX.Element {
-  const moreRef = useRef<HTMLButtonElement>(null);
-  const opensRename = useRef(false);
-  const [isRenaming, setIsRenaming] = useState(false);
-  return (
-    <DropdownMenu>
-      <NamePopover
-        anchor={
-          <DropdownMenuTrigger asChild>
-            <Button ref={moreRef} size='icon-xs' variant='ghost' disabled={isBusy} aria-label={`Actions for ${branch}`}>
-              <EllipsisVertical aria-hidden />
-            </Button>
-          </DropdownMenuTrigger>
-        }
-        isOpen={isRenaming}
-        returnFocus={moreRef}
-        align='end'
-        label={`New name for ${branch}`}
-        placeholder={branch}
-        initial={branch}
-        note='Its history and the chats on it keep working.'
-        saveLabel='Rename branch'
-        onOpenChange={setIsRenaming}
-        onSave={(name) => {
-          if (name !== branch) {
-            onRename(name);
-          }
-        }}
-      />
-      <DropdownMenuContent
-        align='end'
-        onCloseAutoFocus={(event) => {
-          if (!opensRename.current) {
-            return;
-          }
-          opensRename.current = false;
-          event.preventDefault();
-          setIsRenaming(true);
-        }}
-      >
-        {currentBranch === undefined || isCurrent ? null : (
-          <DropdownMenuItem onSelect={onMerge}>
-            <GitMerge aria-hidden />
-            {`Merge ${branch} into ${currentBranch}`}
-          </DropdownMenuItem>
-        )}
-        {renameRefusal === undefined ? (
-          <DropdownMenuItem
-            onSelect={() => {
-              opensRename.current = true;
-            }}
-          >
-            <Pencil aria-hidden />
-            {`Rename ${branch}…`}
-          </DropdownMenuItem>
-        ) : (
-          <DropdownMenuItem disabled className='h-auto items-start'>
-            <Pencil aria-hidden className='mt-0.5' />
-            <span className='flex flex-col'>
-              {`Rename ${branch}…`}
-              <span className='max-w-64 text-xs text-muted-foreground'>{renameRefusal}</span>
-            </span>
-          </DropdownMenuItem>
-        )}
-        {onPlace === undefined ? null : (
-          <DropdownMenuItem onSelect={onPlace}>
-            <MessageSquare aria-hidden />
-            {`Use ${branch} in this chat`}
-          </DropdownMenuItem>
-        )}
-        {isCurrent ? null : (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant='destructive' onSelect={onDiscard}>
-              <Trash2 aria-hidden />
-              {`Discard branch changes from ${branch}`}
-            </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-/**
- * The words a conflict line is shown by (W14): whose decision, about which
- * line — never the raw line name, which lives in *Details*.
- *
- * @param conflict - The conflict on the line.
- * @returns The row's name.
- */
-const decisionName = (conflict: RevisionConflictFacet): string =>
-  conflict.foreign ? `Another device’s decision on ${conflict.into}` : `Your decision on ${conflict.into}`;
-
-/**
- * Another device's conflict line, removed from Tau Cloud through D24's audited
- * verb (D14): offered to the project's owner only, as the server allows it; the
- * confirmation names the decision and its files, and the raw line is in
- * *Details*. The device that recorded it keeps it and offers it again when it
- * next syncs; the decision itself is still made in *Choose a version*.
- *
- * @param props - The conflict on the line, and whether a branch verb is in flight.
- * @returns The line's More, and its confirmation.
- */
-function ConflictLineRemoval({
-  conflict,
-  isBusy,
-}: {
-  readonly conflict: RevisionConflictFacet;
-  readonly isBusy: boolean;
-}): React.JSX.Element | undefined {
+function ConflictDismissal({ conflict }: { readonly conflict: RevisionConflictFacet }): React.JSX.Element | undefined {
   const { projectId } = useProject();
   const status = useRevisionStatus();
   const role = useProjectRole();
   const { syncNow } = useRevisionCommands();
-  const moreRef = useRef<HTMLButtonElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const [removal, setRemoval] = useState<Readonly<{ isBusy: boolean; error: string | undefined }>>();
-  const line = conflict.branch ?? '';
-  const name = decisionName(conflict);
-  /* Only the owner may remove what the Hosted Remote holds; the verb the server would refuse is absent (RV-W6 F5). */
-  if (status?.remote.kind !== 'tau' || status.remote.phase !== 'connected' || role !== 'owner') {
+  const line = conflict.branch;
+  /* Only another device's line, and only the owner may remove what Tau Cloud holds (RV-W6 F5). */
+  if (
+    !conflict.foreign ||
+    line === undefined ||
+    line === conflict.into ||
+    status?.remote.kind !== 'tau' ||
+    status.remote.phase !== 'connected' ||
+    role !== 'owner'
+  ) {
     return undefined;
   }
   const names = conflict.paths.map(({ path }) => path);
@@ -482,24 +333,19 @@ function ConflictLineRemoval({
   };
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button ref={moreRef} size='icon-xs' variant='ghost' disabled={isBusy} aria-label={`Actions for ${name}`}>
-            <EllipsisVertical aria-hidden />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align='end'>
-          <DropdownMenuItem
-            variant='destructive'
-            onSelect={() => {
-              setRemoval({ isBusy: false, error: undefined });
-            }}
-          >
-            <Trash2 aria-hidden />
-            Remove this decision…
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <Button
+        ref={buttonRef}
+        size='xs'
+        variant='ghost'
+        disabled={conflict.busy}
+        className='text-muted-foreground'
+        onClick={() => {
+          setRemoval({ isBusy: false, error: undefined });
+        }}
+      >
+        <Trash2 aria-hidden className='size-3' />
+        Dismiss this conflict…
+      </Button>
       <AlertDialog
         open={removal !== undefined}
         onOpenChange={(open) => {
@@ -511,11 +357,11 @@ function ConflictLineRemoval({
         <AlertDialogContent
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            moreRef.current?.focus();
+            buttonRef.current?.focus();
           }}
         >
           <AlertDialogHeader>
-            <AlertDialogTitle>{`Remove another device’s decision on ${conflict.into}?`}</AlertDialogTitle>
+            <AlertDialogTitle>{`Dismiss another device’s conflict on ${conflict.into}?`}</AlertDialogTitle>
             <AlertDialogDescription>
               {`It is about ${names.length === 0 ? conflict.into : names.join(', ')}. ${conflict.into} is unchanged, and the device that made it keeps it and offers it again when it next syncs.`}
             </AlertDialogDescription>
@@ -546,7 +392,7 @@ function ConflictLineRemoval({
                 void remove();
               }}
             >
-              Remove
+              Dismiss
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -555,186 +401,187 @@ function ConflictLineRemoval({
   );
 }
 
-export type RevisionBranchesProps = {
-  /** Every branch the project has, from the `RevisionStatus` projection. */
-  readonly branches: readonly RevisionBranchFacet[];
-  /** The branch the workbench is on; its row is marked and has no Switch. */
+/**
+ * Why *Rename* would be refused for a branch, as the rename effect decides it
+ * (D91): a linked checkout's branch first, then a branch the remote holds under
+ * its name. The sentence is the refusal's own, so the menu and the toast never
+ * disagree. A branch whose live checkout is not known yet is not called linked.
+ *
+ * @param branch - The branch.
+ * @param liveCheckoutId - The live checkout's id, from the same projection.
+ * @returns The refusal's sentence, or `undefined` when the rename can go through.
+ */
+export const renameRefusalOf = (
+  branch: RevisionBranchFacet,
+  liveCheckoutId: string | undefined,
+): string | undefined => {
+  const isLinked =
+    branch.checkoutId !== undefined && liveCheckoutId !== undefined && branch.checkoutId !== liveCheckoutId;
+  const code = isLinked ? 'BRANCH_RENAME_LINKED' : branch.onRemote === true ? 'BRANCH_RENAME_PUSHED' : undefined;
+  return code === undefined ? undefined : describeRevisionFailure('branch', code).description;
+};
+
+export type BranchMenuProps = {
+  /** The branch whose chip this menu is on. */
+  readonly branch: string;
+  /** The branch the files are on. */
   readonly currentBranch: string | undefined;
-  /**
-   * The live checkout's id, from the same projection (C40). A branch on any
-   * other checkout is *Linked*, whatever the host puts its files behind.
-   */
-  readonly liveCheckoutId: string | undefined;
-  /** Chat names by id, for the chips that say who is working where. */
-  readonly chatNames: Readonly<Record<string, string>>;
-  /** Durable chat placement by chat id. */
-  readonly chatCheckoutIds: Readonly<Record<string, string | undefined>>;
-  /** The chat in focus, which *Use in this chat* places; absent when none is. */
-  readonly activeChatId?: string;
-  /** Put a chat's next turns on a branch's checkout — the only place a chat chooses its branch (C3). */
-  readonly onPlaceChat?: (chatId: string, checkoutId: string) => void;
-  /** Graph-derived context by branch name. */
-  readonly branchFacts: ReadonlyMap<
-    string,
-    Readonly<{ revisionNumber: number | undefined; ahead: number; behind: number }>
-  >;
-  /** Every branch whose head is a conflicted revision: its row carries the amber mark. */
-  readonly conflicts: readonly RevisionConflictFacet[];
-  /** A branch verb is in flight — every row's verbs wait for it. */
+  /** The project's first branch, which *Update from* names. */
+  readonly trunk: string;
+  /** How many entries the trunk has that the current branch lacks; *Update from* shows while it is more than none. */
+  readonly behind: number;
+  /** A branch verb is in flight: the menu waits for it (review R4). */
   readonly isBusy: boolean;
-  /** The person may change the project's shared state here (A1 item 6). */
-  readonly isWritable: boolean;
+  /** Why *Rename…* would be refused (D91); `undefined` offers it. */
+  readonly renameRefusal: string | undefined;
   readonly onSwitch: (branch: string) => void;
+  /** Merges a branch into the branch the files are on. */
   readonly onMerge: (branch: string) => void;
-  readonly onDiscard: (branch: string, checkoutId: string | undefined) => void;
   readonly onRename: (branch: string, name: string) => void;
+  /** Closes the branch on this device; its history stays. */
+  readonly onClose: (branch: string) => void;
+  /** Present only when running the chat in focus on this branch would move it (C3). */
+  readonly onRunChatHere: (() => void) | undefined;
 };
 
 /**
- * The Branches list, shown once a second branch exists (S26, A29): each row the
- * name with its verbs pinned beside it, then its facts, which wrap (A1 item 13).
- * New branch lives on the strip; a conflict's decision lives in *Choose a
- * version*, so a conflicted row carries only the amber mark.
+ * A branch's own menu, the ⋮ on its name chip in History (D3, canvas
+ * `branch-menu`): Switch to x, Merge into the branch you are on, Update from
+ * main while the branch you are on is behind it, Run this chat here, Rename…
+ * and Close branch. Every verb acts at once (I11); its toast says what landed.
+ * Rename names the branch in the one naming form under this menu's button; a
+ * rename that would be refused stays listed, unavailable, with the reason under it.
  *
- * Presentational on purpose: rows and verbs come from the projection and the
- * commands, so a suite can script every state without a worker.
+ * Presentational: the verbs come from the commands, so a suite can script every
+ * state without a worker.
  *
- * @param props - The rows, the selection, and the verbs.
- * @returns The list.
+ * @param props - The branch, where the files are, and the verbs.
+ * @returns The menu.
  */
-export function RevisionBranches({
-  branches,
+export function BranchMenu({
+  branch,
   currentBranch,
-  liveCheckoutId,
-  chatNames,
-  chatCheckoutIds,
-  activeChatId,
-  onPlaceChat,
-  branchFacts,
-  conflicts,
+  trunk,
+  behind,
   isBusy,
-  isWritable,
+  renameRefusal,
   onSwitch,
   onMerge,
-  onDiscard,
   onRename,
-}: RevisionBranchesProps): React.JSX.Element {
+  onClose,
+  onRunChatHere,
+}: BranchMenuProps): React.JSX.Element {
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const opensRename = useRef(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const isCurrent = branch === currentBranch;
   return (
-    <ul aria-label='Branches' className='flex list-none flex-col'>
-      {branches.map((branch) => {
-        const isCurrent = branch.name === currentBranch;
-        const conflictOnLine = conflicts.find((entry) => entry.branch === branch.name);
-        const isConflicted = conflictOnLine !== undefined;
-        /* A conflict line is a decision in flight, not a place to work: no Switch, Rename or Merge (D14). */
-        const isConflictLine = conflictOnLine !== undefined && conflictOnLine.branch !== conflictOnLine.into;
-        const fact = branchFacts.get(branch.name);
-        /* An unplaced chat has no checkout id; a remote-only branch has none either, and must not claim it. */
-        const placedChats = Object.entries(chatCheckoutIds).filter(
-          ([, checkoutId]) => checkoutId !== undefined && checkoutId === branch.checkoutId,
-        );
-        /* Offered only when it would change where the chat in focus works: an unplaced chat works in the live checkout. */
-        const placement =
-          activeChatId !== undefined &&
-          onPlaceChat !== undefined &&
-          branch.checkoutId !== undefined &&
-          (chatCheckoutIds[activeChatId] ?? liveCheckoutId) !== branch.checkoutId
-            ? { chatId: activeChatId, checkoutId: branch.checkoutId }
-            : undefined;
-        const counts = [
-          fact !== undefined && fact.ahead > 0 ? `${String(fact.ahead)} ahead` : '',
-          fact !== undefined && fact.behind > 0 ? `${String(fact.behind)} behind` : '',
-        ].filter(Boolean);
-        return (
-          <li
-            key={branch.name}
-            aria-current={isCurrent ? 'true' : undefined}
-            className={cn(
-              'flex flex-col gap-1 border-b px-3 py-1.5 last:rounded-b-xl last:border-b-0',
-              isCurrent && !isConflicted && 'bg-muted/40',
-            )}
+    <DropdownMenu>
+      <NamePopover
+        anchor={
+          <DropdownMenuTrigger asChild>
+            <Button ref={moreRef} size='icon-xs' variant='ghost' disabled={isBusy} aria-label={`More for ${branch}`}>
+              <EllipsisVertical aria-hidden />
+            </Button>
+          </DropdownMenuTrigger>
+        }
+        isOpen={isRenaming}
+        returnFocus={moreRef}
+        align='end'
+        label={`New name for ${branch}`}
+        placeholder={branch}
+        initial={branch}
+        note='Its history and the chats on it keep working.'
+        saveLabel='Rename branch'
+        onOpenChange={setIsRenaming}
+        onSave={(name) => {
+          if (name !== branch) {
+            onRename(branch, name);
+          }
+        }}
+      />
+      <DropdownMenuContent
+        align='end'
+        className='max-w-[calc(100vw-2rem)] min-w-52'
+        onCloseAutoFocus={(event) => {
+          if (!opensRename.current) {
+            return;
+          }
+          opensRename.current = false;
+          event.preventDefault();
+          setIsRenaming(true);
+        }}
+      >
+        <DropdownMenuLabel className='truncate'>{branch}</DropdownMenuLabel>
+        {isCurrent || currentBranch === undefined ? null : (
+          <>
+            <DropdownMenuItem
+              onSelect={() => {
+                onSwitch(branch);
+              }}
+            >
+              <ArrowLeftRight aria-hidden />
+              {`Switch to ${branch}`}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => {
+                onMerge(branch);
+              }}
+            >
+              <GitMerge aria-hidden />
+              {`Merge into ${currentBranch}`}
+            </DropdownMenuItem>
+          </>
+        )}
+        {isCurrent && branch !== trunk && behind > 0 ? (
+          <DropdownMenuItem
+            onSelect={() => {
+              onMerge(trunk);
+            }}
           >
-            <span className='flex min-w-0 items-center gap-2'>
-              {isConflicted ? (
-                <GitMerge aria-label={needsDecision} className='size-3.5 shrink-0 text-warning' />
-              ) : (
-                <GitBranch aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
-              )}
-              <span className='min-w-0 flex-1 truncate text-sm font-medium'>
-                {isConflictLine ? decisionName(conflictOnLine) : branch.name}
-              </span>
-              <span className='flex shrink-0 items-center gap-1'>
-                {isCurrent ? <Check aria-label='Current branch' className='size-3.5 shrink-0 text-primary' /> : null}
-                {!isCurrent && !isConflicted ? (
-                  <Button
-                    size='xs'
-                    variant='ghost'
-                    disabled={isBusy}
-                    aria-label={`Switch to ${branch.name}`}
-                    className='gap-1 text-muted-foreground'
-                    onClick={() => {
-                      onSwitch(branch.name);
-                    }}
-                  >
-                    <ArrowLeftRight aria-hidden className='size-3' />
-                    Switch
-                  </Button>
-                ) : null}
-                {isConflictLine ? (
-                  isWritable && conflictOnLine.foreign ? (
-                    <ConflictLineRemoval conflict={conflictOnLine} isBusy={isBusy} />
-                  ) : null
-                ) : isWritable ? (
-                  <BranchMenu
-                    branch={branch.name}
-                    currentBranch={currentBranch}
-                    isCurrent={isCurrent}
-                    isBusy={isBusy}
-                    renameRefusal={renameRefusalOf(branch, liveCheckoutId)}
-                    onPlace={
-                      placement === undefined
-                        ? undefined
-                        : () => {
-                            onPlaceChat?.(placement.chatId, placement.checkoutId);
-                          }
-                    }
-                    onMerge={() => {
-                      onMerge(branch.name);
-                    }}
-                    onRename={(name) => {
-                      onRename(branch.name, name);
-                    }}
-                    onDiscard={() => {
-                      onDiscard(branch.name, branch.checkoutId);
-                    }}
-                  />
-                ) : null}
-              </span>
+            <ArrowDownToLine aria-hidden />
+            <span className='flex-1'>{`Update from ${trunk}`}</span>
+            <span className='text-xs text-muted-foreground tabular-nums'>{`${String(behind)} behind`}</span>
+          </DropdownMenuItem>
+        ) : null}
+        {onRunChatHere === undefined ? null : (
+          <DropdownMenuItem onSelect={onRunChatHere}>
+            <MessageSquare aria-hidden />
+            Run this chat here
+          </DropdownMenuItem>
+        )}
+        {renameRefusal === undefined ? (
+          <DropdownMenuItem
+            onSelect={() => {
+              opensRename.current = true;
+            }}
+          >
+            <Pencil aria-hidden />
+            Rename…
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem disabled className='h-auto items-start'>
+            <Pencil aria-hidden className='mt-0.5' />
+            <span className='flex flex-col'>
+              Rename…
+              <span className='max-w-64 text-xs text-muted-foreground'>{renameRefusal}</span>
             </span>
-            <span className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pl-5.5 text-xs text-muted-foreground'>
-              {fact?.revisionNumber === undefined ? null : <span className='font-mono'>Rev {fact.revisionNumber}</span>}
-              {counts.length === 0 ? null : <span className='tabular-nums'>{counts.join(', ')}</span>}
-              {/* Checkout identity, not a path prefix (I2, C40). */}
-              {branch.checkoutId === undefined ? (
-                /* A branch only this device has, with no checkout, is not *Remote only* (D93). */
-                branch.onRemote === true ? (
-                  <Badge variant='outline' className='font-normal'>
-                    Remote only
-                  </Badge>
-                ) : null
-              ) : branch.checkoutId === liveCheckoutId ? null : (
-                <Badge variant='outline' className='font-normal'>
-                  Linked
-                </Badge>
-              )}
-              {placedChats.map(([chatId]) => (
-                <Badge key={chatId} variant='secondary' className='max-w-40 min-w-0 font-normal'>
-                  <span className='truncate'>{chatNames[chatId] ?? 'Chat'}</span>
-                </Badge>
-              ))}
-            </span>
-          </li>
-        );
-      })}
-    </ul>
+          </DropdownMenuItem>
+        )}
+        {isCurrent ? null : (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => {
+                onClose(branch);
+              }}
+            >
+              <X aria-hidden />
+              Close branch
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

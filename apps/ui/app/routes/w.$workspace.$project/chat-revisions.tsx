@@ -10,7 +10,7 @@ import {
 } from 'react';
 import type { KeyboardEvent } from 'react';
 import { ChevronDown, CircleAlert, CircleDashed, Cloud, GitBranch, History, Plus, Undo2, XIcon } from 'lucide-react';
-import { Link, useLocation } from 'react-router';
+import { Link } from 'react-router';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
@@ -43,15 +43,12 @@ import { NamePopover } from '#components/revisions/name-popover.js';
 import { RevisionRegion } from '#components/revisions/revision-region.js';
 import { graphGeometry, gutterWidth, layoutRevisionGraph } from '#components/revisions/revision-graph-layout.js';
 import type { GraphNode, GraphRow, MarkerKind } from '#components/revisions/revision-graph-layout.js';
-import {
-  BranchSwatch,
-  HistoryGraph,
-  HistoryLanesContext,
-  useRowBoxes,
-} from '#components/revisions/revision-graph-view.js';
+import { HistoryGraph, HistoryLanesContext, useRowBoxes } from '#components/revisions/revision-graph-view.js';
 import type { BranchSlot } from '#components/revisions/revision-graph-view.js';
-import { historyLanesOf } from '#routes/w.$workspace.$project/history-lanes.js';
+import { conflictLinesOf, historyLanesOf, listedBranchesOf } from '#routes/w.$workspace.$project/history-lanes.js';
 import type { HistoryFilter, HistoryLanes } from '#routes/w.$workspace.$project/history-lanes.js';
+import { LaneStepRow, laneGraphRowOf, pendingStepsOf } from '#routes/w.$workspace.$project/history-lanes-rows.js';
+import type { LaneStep } from '#routes/w.$workspace.$project/history-lanes-rows.js';
 import {
   timelineGutter,
   timelineList,
@@ -63,7 +60,7 @@ import {
   timelineMarker,
 } from '#components/revisions/revision-timeline.js';
 import { RevisionRow, isAutosave, nextVersionNumber } from '#routes/w.$workspace.$project/revision-marker.js';
-import { ConflictDecision, RevisionBranches } from '#routes/w.$workspace.$project/revision-branches.js';
+import { ConflictDecision } from '#routes/w.$workspace.$project/revision-branches.js';
 import type { ConflictMaterialization } from '#routes/w.$workspace.$project/revision-branches.js';
 import { RevisionSyncRegion } from '#routes/w.$workspace.$project/revision-sync-region.js';
 import {
@@ -98,8 +95,6 @@ import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { useChatRecords } from '#hooks/use-chat-records.js';
-import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
-import { projectChatIdFromSearch } from '#utils/project-url.utils.js';
 import { useProject } from '#hooks/use-project.js';
 import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
@@ -165,9 +160,9 @@ const workingPhases: ReadonlySet<string> = new Set(['admitted', 'running', 'paus
  * unplaced one on the live checkout, whose current run has not settled.
  *
  * @param status - The revision status projection.
- * @returns True while such a turn runs.
+ * @returns The working chat's name while such a turn runs (empty when it has none), else `undefined`.
  */
-const useAgentWorkingHere = (status: RevisionStatusProjection | undefined): boolean => {
+const useAgentWorkHere = (status: RevisionStatusProjection | undefined): string | undefined => {
   const { projectId } = useProject();
   const store = useChatSessionStore();
   const { chats } = useChatRecords(projectId);
@@ -209,11 +204,12 @@ const useAgentWorkingHere = (status: RevisionStatusProjection | undefined): bool
     () => '',
   );
   if (working === '' || checkoutId === undefined) {
-    return false;
+    return undefined;
   }
-  return working
+  const chatId = working
     .split('|')
-    .some((chatId) => (chats.find((chat) => chat.id === chatId)?.checkoutId ?? liveCheckoutId) === checkoutId);
+    .find((id) => (chats.find((chat) => chat.id === id)?.checkoutId ?? liveCheckoutId) === checkoutId);
+  return chatId === undefined ? undefined : (chats.find((chat) => chat.id === chatId)?.name ?? '');
 };
 
 /**
@@ -233,7 +229,7 @@ function WhereYouAre(): React.JSX.Element {
   const saveRevision = useSaveRevisionRequest();
   const { requestUpgrade, canUpgradePlan } = useCommercialFeatures();
   const { signIn } = useAuthLinks();
-  const isAgentWorking = useAgentWorkingHere(status);
+  const isAgentWorking = useAgentWorkHere(status) !== undefined;
   const isUnknown = line.kind === 'unknown';
   const canWrite = role !== 'read' && role !== 'revoked';
   /* No head, no branch point; and nothing is offered over a line nobody has located yet (HQ7). */
@@ -370,12 +366,7 @@ function BranchChip({
   const chipRef = useRef<HTMLButtonElement>(null);
   /* New branch… opens its form once the menu has closed, so the menu's focus trap does not take focus back. */
   const willName = useRef(false);
-  const conflictLines = new Set(
-    (status?.conflicts ?? [])
-      .filter((conflict) => conflict.branch !== undefined && conflict.branch !== conflict.into)
-      .map((conflict) => conflict.branch),
-  );
-  const branches = (status?.branches ?? []).filter((entry) => !conflictLines.has(entry.name));
+  const branches = listedBranchesOf(status);
   const isBusy = status?.branchVerb.busy ?? false;
   /* A palette item asked for the menu or the form: open it here, once. */
   useEffect(() => {
@@ -449,12 +440,13 @@ function BranchChip({
               fact !== undefined && fact.ahead > 0 ? `${String(fact.ahead)} ahead` : '',
               fact !== undefined && fact.behind > 0 ? `${String(fact.behind)} behind` : '',
             ].filter(Boolean);
+            /* M4: a branch Tau Cloud has and this device has no files for (D93); one only this device has says nothing. */
+            const note =
+              entry.checkoutId === undefined && entry.onRemote === true ? 'Not on this device' : counts.join(', ');
             return (
               <DropdownMenuRadioItem key={entry.name} value={entry.name} disabled={isBusy}>
                 <span className='min-w-0 flex-1 truncate'>{entry.name}</span>
-                {counts.length === 0 ? null : (
-                  <span className='text-xs text-muted-foreground tabular-nums'>{counts.join(', ')}</span>
-                )}
+                {note === '' ? null : <span className='text-xs text-muted-foreground tabular-nums'>{note}</span>}
               </DropdownMenuRadioItem>
             );
           })}
@@ -797,54 +789,11 @@ function SetupLine({
   );
 }
 
-/**
- * A branch's name, in the row above its newest entry, on History's lanes (D2).
- * It draws no rail: the graph's markers and bends do. A branch with no entries
- * yet has its open end on its lane, centred on this row.
- *
- * @param props - The branch, its slot and what it says beside its name.
- * @returns The chip's row.
- */
-function BranchChipRow({
-  branch,
-  slot,
-  note,
-  isCurrent,
-}: {
-  readonly branch: string;
-  readonly slot: BranchSlot | undefined;
-  readonly note: string;
-  readonly isCurrent: boolean;
-}): React.JSX.Element {
-  return (
-    <li data-graph-key={`chip:${branch}`} data-row='chip' className={timelineRow}>
-      <span aria-hidden />
-      <span className='flex min-h-7 min-w-0 flex-wrap items-center gap-x-2 py-1 pr-2 pl-1'>
-        <span
-          data-slot='branch-name'
-          className={cn(
-            'inline-flex h-5 max-w-full min-w-0 items-center gap-1.5 rounded-full border bg-background px-2 text-xs',
-            isCurrent && 'font-medium',
-          )}
-        >
-          <BranchSwatch slot={slot} />
-          <span className='truncate'>{branch}</span>
-        </span>
-        {note === '' ? null : (
-          <span data-slot='branch-note' className='text-xs leading-5 whitespace-nowrap text-muted-foreground'>
-            {note}
-          </span>
-        )}
-      </span>
-    </li>
-  );
-}
-
-/** One display step of the list: a day, *Backed up to here*, a branch's chip, or a row or fold. */
+/** One display step of the list: a day, *Backed up to here*, a step of the lanes, or a row or fold. */
 type HistoryStep =
   | Readonly<{ kind: 'day'; key: string; label: string }>
   | Readonly<{ kind: 'backup'; key: string }>
-  | Readonly<{ kind: 'chip'; key: string; branch: string; startsFrom?: string }>
+  | LaneStep
   | Readonly<{ kind: 'group'; group: HistoryGroup; isLast: boolean }>;
 
 /** The list's frame on History's lanes: the gutter is as wide as the lanes in view. */
@@ -939,15 +888,8 @@ const graphRowsOf = ({
       rows.push({ key: step.key, anchor: 12, height: step.kind === 'day' ? 26 : 28 });
       continue;
     }
-    if (step.kind === 'chip') {
-      rows.push({
-        key: step.key,
-        anchor: rowAnchor,
-        height: 30,
-        ...(step.startsFrom === undefined
-          ? {}
-          : { node: { branch: step.branch, marker: 'open', ids: [], startsFrom: step.startsFrom } }),
-      });
+    if (step.kind === 'chip' || step.kind === 'pending' || step.kind === 'working') {
+      rows.push(laneGraphRowOf(step));
       continue;
     }
     const { group } = step;
@@ -1054,6 +996,7 @@ const mergedBranchOf = (
 const useHistorySource = (
   view: Pick<RevisionsView, 'revisions' | 'hasOlder' | 'loadOlder'>,
   branch: string | undefined,
+  conflicts: RevisionStatusProjection['conflicts'] | undefined,
 ): Readonly<{
   filter: HistoryFilter;
   setFilter: (filter: HistoryFilter) => void;
@@ -1066,10 +1009,12 @@ const useHistorySource = (
   const graph = useRevisionGraph();
   const [filter, setFilter] = useState<HistoryFilter>('this');
   const lanes = useMemo(
-    () => (graph === undefined ? undefined : historyLanesOf({ ...graph, current: branch, filter })),
-    [branch, filter, graph],
+    () => (graph === undefined ? undefined : historyLanesOf({ ...graph, current: branch, filter, conflicts })),
+    [branch, filter, graph, conflicts],
   );
-  const hasFilter = graph !== undefined && graph.branches.length > 1;
+  /* A conflict line is not a branch (D3), so it never makes the filter appear. */
+  const conflictLines = conflictLinesOf(conflicts);
+  const hasFilter = graph !== undefined && graph.branches.filter((entry) => !conflictLines.has(entry.name)).length > 1;
   const { loadOlder: loadOlderOnBranch } = view;
   const pageBoth = useCallback(async (): Promise<void> => {
     await Promise.all([loadOlderOnBranch(), graph?.hasOlder === true ? graph.loadOlder() : undefined]);
@@ -1188,7 +1133,8 @@ function HistoryList(): React.JSX.Element {
     revisions,
     hasOlder,
     loadOlder,
-  } = useHistorySource(view, branch);
+  } = useHistorySource(view, branch, status?.conflicts);
+  const agentWork = useAgentWorkHere(status);
   const lineOf = onLanes?.lineOf;
   /* D4: the newest entry any branch's remote head names; the entries above it are the ones not backed up. */
   const backedUpTo = useMemo(() => {
@@ -1376,6 +1322,9 @@ function HistoryList(): React.JSX.Element {
   /* Days, chips and rows in the order they render; the graph's rows follow the same order. */
   const steps: HistoryStep[] = [];
   const chipped = new Set<string>();
+  if (onLanes !== undefined) {
+    steps.push(...pendingStepsOf({ lanes: onLanes, branch, agentChat: agentWork }, chipped));
+  }
   for (const [index, group] of shown.entries()) {
     const day = dayOf(firstOf(group));
     const previous = shown[index - 1];
@@ -1408,16 +1357,10 @@ function HistoryList(): React.JSX.Element {
         items.push(<BackupBoundary key={step.key} graphKey={step.key} />);
         break;
       }
-      case 'chip': {
-        items.push(
-          <BranchChipRow
-            key={step.key}
-            branch={step.branch}
-            slot={onLanes?.slots.get(step.branch)}
-            note={onLanes?.notes.get(step.branch) ?? ''}
-            isCurrent={step.branch === branch}
-          />,
-        );
+      case 'chip':
+      case 'pending':
+      case 'working': {
+        items.push(<LaneStepRow key={step.key} step={step} lanes={onLanes} currentBranch={branch} />);
         break;
       }
       case 'group': {
@@ -1644,8 +1587,9 @@ function RevisionAlerts(): React.JSX.Element | undefined {
 /**
  * The Revisions pane's body, shared by the Workbench and the mobile panel
  * (S26, A29): the pinned strip, then each region only when it has something to
- * say — *Choose a version* while a conflict waits, *Branches* at two lines,
- * *History* always, *Sync* once a remote exists or the person opens it.
+ * say — *Choose a version* while a conflict waits, *History* always, with a
+ * lane per branch where a fork is in view and each branch's verbs on its chip
+ * (D3), *Sync* once a remote exists or the person opens it.
  *
  * Everything here reads `useRevisions()` for the graph and
  * `useRevisionStatus()` for the projection and sends the machine's own verbs
@@ -1658,25 +1602,16 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const { projectId, projectRef } = useProject();
   const project = useSelector(projectRef, (snapshot) => snapshot.context.project);
   const { updateProject } = useProjectManager();
-  const { revisions, line, branchFacts = new Map(), isLoading } = useRevisions();
+  const { revisions, line, isLoading } = useRevisions();
   const status = useRevisionStatus();
   const commands = useRevisionCommands();
   const projectRole = useProjectRole();
   const isSignedOut = useRevisionSessionUser() === undefined;
-  const { chats } = useChatRecords(projectId);
   /* N4: the plan, read once here — the region itself stays presentational. */
   const { canSyncFiles, storageLimitBytes, canUpgradePlan, requestUpgrade } = useCommercialFeatures();
   const { signIn } = useAuthLinks();
-  const chatNames = useMemo(() => Object.fromEntries(chats.map((chat) => [chat.id, chat.name])), [chats]);
-  const chatCheckoutIds = useMemo(() => Object.fromEntries(chats.map((chat) => [chat.id, chat.checkoutId])), [chats]);
-  /* The chat the route has in focus: *Use in this chat* places it (C3). */
-  const activeChatId = projectChatIdFromSearch(useLocation().search);
-  const authority = useOptionalChatWorkspaceAuthority();
-  const branches = status?.branches ?? [];
   const conflicts = status?.conflicts ?? [];
   const conflictTexts = useConflictTexts();
-  const currentBranch = line.kind === 'unknown' ? undefined : line.name;
-  const canWrite = projectRole !== 'read' && projectRole !== 'revoked';
   /* M2 (I6): an unlocated line is loading, never an empty History. */
   const isHistoryLoading = isLoading || line.kind === 'unknown';
 
@@ -1703,7 +1638,6 @@ export function RevisionsPanelBody(): React.JSX.Element {
                 <ConflictDecision
                   key={conflict.revisionId}
                   conflict={conflict}
-                  currentBranch={currentBranch}
                   conflictTexts={conflictTexts}
                   onKeepSide={commands.resolveFile}
                   onOpenConflict={commands.openConflictInEditor}
@@ -1715,36 +1649,6 @@ export function RevisionsPanelBody(): React.JSX.Element {
             </div>
           </RevisionRegion>
         )}
-
-        {/* A29: one branch is not a choice, so the region does not exist yet. */}
-        {branches.length > 1 ? (
-          <RevisionRegion id='revision-branches-heading' title='Branches' bodyClassName='p-0'>
-            <RevisionBranches
-              branches={branches}
-              currentBranch={currentBranch}
-              liveCheckoutId={status?.liveCheckoutId}
-              chatNames={chatNames}
-              chatCheckoutIds={chatCheckoutIds}
-              {...(activeChatId === undefined ? {} : { activeChatId })}
-              {...(authority === undefined
-                ? {}
-                : {
-                    onPlaceChat: (chatId: string, checkoutId: string) => {
-                      void authority.placeChat(chatId, checkoutId);
-                    },
-                  })}
-              branchFacts={branchFacts}
-              conflicts={conflicts}
-              /* A verb waiting on a person is still in flight (review R4). */
-              isBusy={status?.branchVerb.busy ?? false}
-              isWritable={canWrite}
-              onSwitch={commands.switchTo}
-              onMerge={commands.mergeBranch}
-              onDiscard={commands.discardBranch}
-              onRename={commands.renameBranch}
-            />
-          </RevisionRegion>
-        ) : null}
 
         <RevisionRegion id='revision-history-heading' title='History'>
           {isHistoryLoading && revisions.length === 0 ? (

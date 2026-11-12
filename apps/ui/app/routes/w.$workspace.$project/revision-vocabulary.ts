@@ -673,6 +673,33 @@ export type StripVerb = 'Discard' | 'Save' | 'Undo restore' | 'Undo' | 'Try agai
 /** The header's sentence while the agent's turn holds these files (C2). @public */
 export const agentWorkingSentence = 'Agent is working · saves when it finishes';
 
+/** The title of the agent's work in progress on History's lanes: not an entry yet (D2, canvas `agent-working`). @public */
+export const agentWorkingTitle = 'Agent is working…';
+
+/**
+ * A merge waiting on a decision, as its row on History's lanes names it (D3,
+ * canvas `branch-conflict`). With no branch to name, it is the decision itself.
+ *
+ * @param from - The branch it brings in, when History can name one.
+ * @param into - The branch it lands on.
+ * @returns The row's title.
+ * @public
+ */
+export const pendingMergeTitle = (from: string | undefined, into: string): string =>
+  from === undefined ? `${needsDecision} on ${into}` : `Merge ${from} into ${into}`;
+
+/**
+ * What a pending merge's row says beside *Resolve*: how many files are left and
+ * that nothing has landed (copy table, *Conflict*).
+ *
+ * @param filesLeft - Files without a side yet; `undefined` while the conflict is being read.
+ * @param into - The branch it lands on.
+ * @returns The note.
+ * @public
+ */
+export const pendingMergeNote = (filesLeft: number | undefined, into: string): string =>
+  `${filesLeft === undefined ? '' : `${String(filesLeft)} ${filesLeft === 1 ? 'file' : 'files'} · `}${into} is unchanged until you choose`;
+
 /**
  * The header's verbs for this state: at most two, one of them primary (C2).
  * A conflict names no verb: its card sits directly below the header. Backing
@@ -772,51 +799,3 @@ export const turnRevisionGlyph = (state: TurnRevisionState): Readonly<{ icon: Lu
 
 /** Work that arrived from elsewhere: the family's arrival glyph (RS28, gated on W5). @public */
 export const arrivedGlyph: LucideIcon = ArrowDownToLine;
-
-/**
- * What asked for an entry, in a person's words, for its Details.
- *
- * A turn's base cut is recorded under the turn's trigger, but it holds the
- * person's own edits, saved before the agent started (A5): it says so.
- *
- * @param trigger - The recorded trigger, when the store recorded one.
- * @param turnCut - Which of a turn's two entries it is, when a turn minted it.
- * @returns The label.
- * @public
- */
-export const revisionTriggerLabel = (trigger: string | undefined, turnCut?: RevisionCard['turnCut']): string => {
-  if (turnCut === 'base') {
-    return 'Your edits, saved before the agent started';
-  }
-  switch (trigger) {
-    case 'turn': {
-      return 'Agent turn';
-    }
-    case 'restore': {
-      return 'Restore';
-    }
-    case 'merge': {
-      return 'Merge';
-    }
-    case 'switch': {
-      return 'Branch switch';
-    }
-    case 'idle':
-    case 'hidden':
-    case 'close': {
-      return 'Autosave';
-    }
-    case 'save': {
-      return 'Save';
-    }
-    case 'create': {
-      return 'Project created';
-    }
-    case 'import': {
-      return 'Import';
-    }
-    default: {
-      return 'Not recorded';
-    }
-  }
-};

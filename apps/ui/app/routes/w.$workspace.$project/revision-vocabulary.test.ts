@@ -11,7 +11,6 @@ import {
   restoredSentence,
   revisionAccessibleName,
   revisionTitle,
-  revisionTriggerLabel,
   selectRevisionFacts,
   selectStripVerbs,
   startFact,
@@ -312,7 +311,6 @@ describe('the copy table', () => {
           canWrite: true,
         }).primary,
       ).toBe('Save');
-      expect(revisionTriggerLabel('save')).toBe('Save');
     });
 
     it.each([

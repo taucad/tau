@@ -1257,4 +1257,64 @@ describe('workbench entries store over recordSync', () => {
       entries.dispose();
     }
   });
+
+  it('keeps another party’s later change on an entry under an owed directory rename that moves nothing onto it', async () => {
+    vi.useFakeTimers();
+    const m = memory();
+    const write = (entries: WorkbenchEntries['entries']) => {
+      m.setBytes(encoder.encode(workbenchRecords.entries.serialize({ version: 1, entries })));
+    };
+    const held = () => {
+      const read = workbenchRecords.entries.read(m.get()!);
+      return read.status === 'current' ? read.record.entries : {};
+    };
+    write({ 'D/f.ts': { renderTimeout: 1000 }, 'E/g.ts': { renderTimeout: 5000 } });
+    let fail = true;
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      editDebounce: 500,
+      files: {
+        ...m.files,
+        writeFileChecked: async (input) => {
+          if (fail) {
+            fail = false;
+            throw new Error('disk busy');
+          }
+          return m.files.writeFileChecked(input);
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    const foreign = async (renderTimeout: number) => {
+      write({ ...held(), 'E/g.ts': { ...held()['E/g.ts'], renderTimeout } });
+      entries.invalidateRead();
+      await entries.read();
+    };
+    try {
+      await entries.read();
+      void entries.changePaths({ type: 'rename', oldPath: 'D', newPath: 'E' });
+      await vi.advanceTimersByTimeAsync(0);
+      await foreign(10_000);
+      const edited = entries.edit('E/g.ts', {
+        ...entries.snapshot().record!.entries['E/g.ts'],
+        components: { hidden: ['x'], isolated: [], opacity: [] },
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      await foreign(20_000);
+      let saved = false;
+      for (let attempt = 0; attempt < 10 && !saved; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(9000);
+        saved = await entries.flush();
+      }
+      expect(await edited).toBe(true);
+      expect(held()['E/g.ts']).toEqual({
+        renderTimeout: 20_000,
+        components: { hidden: ['x'], isolated: [], opacity: [] },
+      });
+    } finally {
+      entries.dispose();
+      vi.useRealTimers();
+    }
+  });
 });

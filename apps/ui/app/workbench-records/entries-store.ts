@@ -16,9 +16,9 @@ import {
   replacingMoves,
   changedEntry,
   coversFields,
-  owedMoves,
+  originOf,
+  owedSteps,
   entriesPolicy,
-  matchesPath,
   movePaths,
   withoutMoves,
 } from '#workbench-records/entries-policy.js';
@@ -245,15 +245,15 @@ export function createWorkbenchEntriesStore(
       const { published, deferred, cycle, pending } = context();
       const owed = authoredFields([...(cycle?.patch ?? []), ...(deferred ?? []), ...(pending?.patch ?? [])]);
       // The entry as shown, at the path the person's owed path changes put it on: an edit made while its entry's rename
-      // is written was made on the renamed entry. A path change already on the file moves nothing again.
-      const moves = [cycle?.patch, deferred, pending?.patch].flatMap((patch) =>
-        patch === undefined ? [] : owedMoves(patch, published.record),
+      // is written was made on the renamed entry, as the file holds it at its old path. A path change already on the
+      // file moves nothing again, and an entry only the person's owed fields make was shown as they asked for it.
+      const steps = [cycle?.patch, deferred, pending?.patch].flatMap((patch) =>
+        patch === undefined ? [] : owedSteps(patch, published.record),
       );
-      // An owed rename onto the path replaces the entry there with one the file does not hold yet: the person was
-      // shown what they asked for.
-      const replaced = moves.some((move) => move.type === 'rename' && matchesPath(entryPath, move.newPath));
+      const shownEntries = published.record?.entries ?? {};
+      const origin = originOf(shownEntries, steps, entryPath);
       const { entry, fields } = changedEntry({
-        shown: replaced ? from.entries[entryPath] : movePaths(published.record?.entries ?? {}, moves)[entryPath],
+        shown: origin === null ? from.entries[entryPath] : origin === undefined ? undefined : shownEntries[origin],
         next,
         onto: from.entries[entryPath],
         owed: owed[entryPath],

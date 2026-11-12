@@ -478,9 +478,28 @@ export type DroppedFields = (
  * The path changes of a patch not yet on the file `current` holds: those after the longest prefix it has landed, or
  * every one when none is known to have.
  */
-export const owedMoves = (patch: EntriesPatch, current: EntriesRecord | undefined): EntryPathChange[] => {
+export const owedSteps = (patch: EntriesPatch, current: EntriesRecord | undefined): EntriesStep[] => {
   const read = current === undefined ? undefined : asRead(withoutMoves(current), current);
-  return patch.slice(landedMark(patch, read)?.upTo ?? 0).flatMap((step) => step.moves);
+  return patch.slice(landedMark(patch, read)?.upTo ?? 0);
+};
+
+/**
+ * Where the entry at `path` comes from once owed steps apply to the file's entries: the file path it is moved from,
+ * `null` for an entry only the steps' fields make, or `undefined` for none.
+ */
+export const originOf = (
+  entries: Readonly<Record<string, Entry>>,
+  steps: readonly EntriesStep[],
+  path: string,
+): string | null | undefined => {
+  let origins: Record<string, string | null> = Object.fromEntries(Object.keys(entries).map((key) => [key, key]));
+  for (const step of steps) {
+    origins = moveKeys(origins, step.moves);
+    for (const key of Object.keys(step.fields)) {
+      origins[key] ??= null;
+    }
+  }
+  return Object.hasOwn(origins, path) ? origins[path] : undefined;
 };
 
 /**

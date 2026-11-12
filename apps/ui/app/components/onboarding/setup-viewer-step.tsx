@@ -1,6 +1,13 @@
 import { Fragment, useId } from 'react';
 import type { DeviceRecord, MousePresetId, PersonProfile, ViewerPreferences } from '@taucad/preferences';
-import { effectivePreset, familiarProducts, gizmoStyleIds, mousePresetIds, suggestedPreset } from '@taucad/preferences';
+import {
+  effectiveGizmoStyle,
+  effectivePreset,
+  familiarProducts,
+  gizmoStyleIds,
+  mousePresetIds,
+  suggestedPreset,
+} from '@taucad/preferences';
 import { resolveCameraMapping } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import type { CameraMappingId } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
@@ -16,6 +23,7 @@ import {
 import type { GizmoChoiceId } from '#components/onboarding/setup-copy.js';
 import { gizmoChoice, legendBindings, presetReason } from '#components/onboarding/setup-model.js';
 import { SetupViewerPreview } from '#components/onboarding/setup-viewer-preview.js';
+import { resolveViewerCameraInput } from '#routes/w.$workspace.$project/use-viewer-camera-input.js';
 
 /** What step 3 reads and writes. */
 export type SetupViewerStepProps = Readonly<{
@@ -34,12 +42,18 @@ const isGizmoChoice = (value: string): value is GizmoChoiceId => (gizmoChoices a
 
 /**
  * The binding legend: orbit, pan and zoom as key caps rendered from the preset data, then the bindings every preset
- * shares.
+ * shares. The gizmo's line is left out while the gizmo is hidden.
  *
- * @param properties - The mapping in effect.
+ * @param properties - The mapping in effect and whether the gizmo shows.
  * @returns The legend.
  */
-export function BindingLegend({ mapping }: { readonly mapping: CameraMappingId }): React.JSX.Element {
+export function BindingLegend({
+  mapping,
+  isGizmoShown,
+}: {
+  readonly mapping: CameraMappingId;
+  readonly isGizmoShown: boolean;
+}): React.JSX.Element {
   const bindings = legendBindings(mapping);
   return (
     <dl
@@ -74,13 +88,15 @@ export function BindingLegend({ mapping }: { readonly mapping: CameraMappingId }
         </Fragment>
       ))}
       <dt className='font-medium'>{viewerStepCopy.legendAlways}</dt>
-      <dd className='text-muted-foreground'>{viewerStepCopy.legendAlwaysText}</dd>
+      <dd className='text-muted-foreground'>
+        {isGizmoShown ? viewerStepCopy.legendAlwaysText : viewerStepCopy.legendAlwaysTextWithoutGizmo}
+      </dd>
     </dl>
   );
 }
 
 /**
- * Step 3 (Finding 2, S4): the mouse preset and gizmo, preselected from the tool answer, the trackpad switch, the
+ * Step 3: the mouse preset and gizmo, preselected from the tool answer, the trackpad switch, the
  * binding legend and the preview. Choosing a preset stores `viewer.controls.preset`, a style `viewer.gizmo.style`,
  * None `viewDefaults['display.gizmo'] = false`, and the switch the device's `inputDevice`.
  *
@@ -101,6 +117,8 @@ export function SetupViewerStep({
   const gizmo = gizmoChoice(viewer, profile);
   const isTrackpad = device.inputDevice === 'trackpad';
   const mapping = resolveCameraMapping({ preset, inputDevice: device.inputDevice });
+  /* The preview moves as every open viewer will: the same resolution the project viewer uses. */
+  const navigation = resolveViewerCameraInput({ enabled: true, profile, viewer, device });
   return (
     <div className='grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]'>
       <div className='flex min-w-0 flex-col gap-5'>
@@ -174,8 +192,13 @@ export function SetupViewerStep({
       </div>
 
       <div className='flex min-w-0 flex-col gap-4'>
-        <SetupViewerPreview mapping={mapping} />
-        <BindingLegend mapping={mapping} />
+        <SetupViewerPreview
+          mapping={mapping}
+          cameraInput={navigation.cameraInput ?? { preset }}
+          gizmoStyle={navigation.gizmoStyle ?? effectiveGizmoStyle(viewer, profile)}
+          isGizmoShown={gizmo !== 'none'}
+        />
+        <BindingLegend mapping={mapping} isGizmoShown={gizmo !== 'none'} />
       </div>
     </div>
   );

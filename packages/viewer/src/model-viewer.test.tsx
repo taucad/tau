@@ -282,6 +282,24 @@ describe('ModelViewer', () => {
       expect(mockUseActorRef).toHaveBeenCalled();
     });
 
+    it.each([
+      [false, false],
+      [undefined, true],
+    ])('starts its own graphics actor with graphicsOptions.enablePostProcessing %s as %s', (option, expected) => {
+      render(
+        <ModelViewer
+          artifact={testArtifact}
+          artifactHash={testHash}
+          graphicsOptions={{ enablePostProcessing: option }}
+        />,
+      );
+
+      expect(mockUseActorRef).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ input: expect.objectContaining({ enablePostProcessing: expected }) as unknown }),
+      );
+    });
+
     it('should render CadViewer with external graphicsRef when geometry is provided', () => {
       const externalRef = { send: vi.fn(), getSnapshot: () => ({ context: {} }) };
 

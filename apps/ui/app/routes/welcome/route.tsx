@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { MetaFunction } from 'react-router';
-import { Navigate, useNavigate, useSearchParams } from 'react-router';
+import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { toast } from '@taucad/ui/components/sonner';
 import { SetupFlow } from '#components/onboarding/setup-flow.js';
 import { setupChromeCopy, setupFinishCopy, setupStepIds } from '#components/onboarding/setup-copy.js';
@@ -14,7 +14,7 @@ import type { Handle } from '#types/matches.types.js';
 
 /*
  * No server `loader`, `action` or `headers`: the desktop route manifest drops any module with one, and setup runs
- * there too (Finding 10).
+ * there too.
  */
 
 export const meta: MetaFunction = () => [{ title: `${setupChromeCopy.pageTitle} · ${metaConfig.name}` }];
@@ -64,11 +64,12 @@ const useOpenFolder = (): (() => Promise<void>) | undefined => {
 const isSetupStepId = (value: string | undefined): value is SetupStepId =>
   value !== undefined && (setupStepIds as readonly string[]).includes(value);
 
-/** Setup (onboarding blueprint, Finding 2), behind `onboarding`. With the flag off the route sends the person home. */
+/** Setup, behind `onboarding`. With the flag off the route sends the person home. */
 export default function WelcomeRoute(): React.JSX.Element {
   const isHydrated = useIsHydrated();
   const isOnboardingEnabled = useFeature('onboarding');
   const [searchParameters] = useSearchParams();
+  const location = useLocation();
   const onOpenFolder = useOpenFolder();
   if (!isHydrated) {
     return <div className='min-h-full' />;
@@ -78,7 +79,9 @@ export default function WelcomeRoute(): React.JSX.Element {
   }
   const step = searchParameters.get('step') ?? undefined;
   return (
+    /* Keyed by navigation: Help's "How Tau works" while setup is open changes only the query, and must open step 4. */
     <SetupFlow
+      key={location.key}
       entry={parseSetupEntry(searchParameters.get(setupEntryParameter) ?? undefined)}
       initialStep={isSetupStepId(step) ? step : undefined}
       onOpenFolder={onOpenFolder}

@@ -7,13 +7,16 @@ import type { Plugin } from 'vite';
  * Import any file with `?base64` suffix to get its contents as a base64 string.
  * The data encoding for url() imports is not supplied.
  *
+ * The bytes are read in `load`, not `transform`: a production (Rolldown) build loads an id no plugin loads with its
+ * native loader, which treats the query as part of the path and fails, and a binary file has no text to transform.
+ *
  * @public
  */
 export const base64Loader: Plugin = {
   name: 'vite:base64-loader',
-  transform: {
+  load: {
     filter: { id: /\?base64$/ },
-    handler(_, id) {
+    handler(id) {
       const [path, query] = id.split('?');
       if (query !== 'base64' || !path) {
         return;

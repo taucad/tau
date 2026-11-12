@@ -11,6 +11,7 @@ const capture = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture }) }));
 
 const { default: WelcomeRoute } = await import('#routes/welcome/route.js');
+const { personRecordStores } = await import('#preferences/person-record.store.js');
 
 const renderSetup = (path: string): void => {
   const router = createMemoryRouter(
@@ -28,7 +29,7 @@ const events = (name: string): unknown[] =>
     .filter(([event]) => event === name)
     .map(([, properties]) => properties);
 
-describe('setup telemetry (M1, M2)', () => {
+describe('setup telemetry', () => {
   beforeEach(() => {
     globalThis.localStorage.clear();
     capture.mockReset();
@@ -89,7 +90,7 @@ describe('setup telemetry (M1, M2)', () => {
     expect(events('onboarding_setup_skipped')).toEqual([{ at_step: 'background' }]);
   });
 
-  it('sets goals, tool and setup status as person properties when they change (M2)', async () => {
+  it('sets goals, tool and setup status as person properties when they change', async () => {
     const user = userEvent.setup();
     renderSetup('/welcome?entry=help');
     await user.click(screen.getByRole('checkbox', { name: /Electronics/ }));
@@ -102,6 +103,14 @@ describe('setup telemetry (M1, M2)', () => {
       { $set: { goals: ['electronics'], tool: 'kicad' } },
       { $set: { setup_status: 'skipped' } },
     ]);
+  });
+
+  it('sets the stored setup status, so reopening setup after Finish or skipping it then keeps completed', async () => {
+    const user = userEvent.setup();
+    personRecordStores.onboarding.write({ setupStatus: 'completed' });
+    renderSetup('/welcome?entry=help');
+    await user.click(screen.getByRole('button', { name: 'Skip setup' }));
+    expect(events('$set')).toEqual([{ $set: { setup_status: 'completed' } }, { $set: { setup_status: 'completed' } }]);
   });
 
   it('sends no free text: every property is a closed value, a number or a boolean', async () => {

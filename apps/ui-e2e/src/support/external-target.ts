@@ -347,6 +347,9 @@ export type UiBrowserCommands = {
   uiReadTauVertexOperations(email: string): Promise<TargetTauBillingOperation[]>;
   uiReadAgentHostApiRequests(): Promise<string[]>;
   uiReadLinkedGithubFixture(): Promise<TargetLinkedGithubState>;
+  uiReadPostHogEvents(
+    names: readonly string[],
+  ): Promise<ReadonlyArray<Readonly<{ event: string; properties: Readonly<Record<string, unknown>> }>>>;
   uiReadPostHogSummary(sentinels: readonly string[]): Promise<{
     readonly events: string[];
     readonly requests: string[];
@@ -801,6 +804,12 @@ export const readPostHogSummary = (
   readonly requests: string[];
   readonly present: Record<string, boolean>;
 }> => server.commands.uiReadPostHogSummary(sentinels);
+
+/** The captured PostHog events with these names, in order, each with the properties it carried. */
+export const readPostHogEvents = (
+  names: readonly string[],
+): Promise<ReadonlyArray<Readonly<{ event: string; properties: Readonly<Record<string, unknown>> }>>> =>
+  server.commands.uiReadPostHogEvents(names);
 
 /** The two points a row can park a chat's turn at; see {@link holdChatTurn}. */
 export type ChatTurnHold = 'admission' | 'settlement';

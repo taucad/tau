@@ -75,7 +75,7 @@ function DeviceDrawing({
 }
 
 /**
- * The preview's stand-in when it cannot render (Finding 2, S5 f): a mouse, or a trackpad with the switch on, whose
+ * The preview's stand-in when it cannot render: a mouse, or a trackpad with the switch on, whose
  * button and modifier light up for orbit, pan and zoom in turn. Under `prefers-reduced-motion` nothing animates and
  * the three gestures stand side by side. It captures `onboarding_preview_fallback_shown` once, with the reason.
  *

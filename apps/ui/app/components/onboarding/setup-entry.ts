@@ -1,5 +1,5 @@
 /**
- * How a person reached setup, carried on `/welcome` so `onboarding_setup_opened` can say (Finding 12). An address
+ * How a person reached setup, carried on `/welcome` so `onboarding_setup_opened` can say. An address
  * without it, such as a typed URL, counts as Help.
  */
 import type { SetupEntry } from '#telemetry/onboarding-telemetry.js';

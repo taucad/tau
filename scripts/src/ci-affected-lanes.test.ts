@@ -446,7 +446,8 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
   });
 
   it('should pass each called native workflow its rows and the cache read token', () => {
-    const token = expression('secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN');
+    const secret = 'NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN';
+    const token = expression(`secrets.${secret}`);
     expect(ci.jobs['native-darwin']?.with).toEqual({
       projects: expression('needs.plan.outputs.native-darwin-projects'),
     });
@@ -455,7 +456,7 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
       'darwin-x64': expression("needs.plan.outputs.native-darwin == 'true'"),
     });
     for (const job of ['native-darwin', 'native-hosts']) {
-      expect(ci.jobs[job]?.secrets, job).toEqual({ NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: token });
+      expect(ci.jobs[job]?.secrets, job).toEqual({ [secret]: token });
     }
     expect(nativeDarwin.on?.workflow_call?.inputs?.['projects']?.type).toBe('string');
     expect(nativeHosts.on?.workflow_call?.inputs?.['native-linux']?.type).toBe('string');

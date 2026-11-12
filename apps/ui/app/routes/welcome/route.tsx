@@ -10,6 +10,7 @@ import { metaConfig } from '#constants/meta.constants.js';
 import { useFeature } from '#flags/use-feature.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { useTourReplay } from '#components/tour/tour-menu.js';
 import type { Handle } from '#types/matches.types.js';
 
 /*
@@ -71,6 +72,8 @@ export default function WelcomeRoute(): React.JSX.Element {
   const [searchParameters] = useSearchParams();
   const location = useLocation();
   const onOpenFolder = useOpenFolder();
+  /* "Take it again" replays the tour in the most recently active project; with none it stays disabled. */
+  const onReplayTour = useTourReplay();
   if (!isHydrated) {
     return <div className='min-h-full' />;
   }
@@ -85,6 +88,7 @@ export default function WelcomeRoute(): React.JSX.Element {
       entry={parseSetupEntry(searchParameters.get(setupEntryParameter) ?? undefined)}
       initialStep={isSetupStepId(step) ? step : undefined}
       onOpenFolder={onOpenFolder}
+      onReplayTour={onReplayTour}
     />
   );
 }

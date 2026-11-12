@@ -274,6 +274,7 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
               onChangeAnswers={() => {
                 goTo(steps[0] ?? 'goals');
               }}
+              onReplayTour={onReplayTour}
             />
           ) : (
             <>

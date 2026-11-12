@@ -8,6 +8,8 @@ import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 vi.mock('#flags/use-feature.js', () => ({ useFeature: () => true }));
 
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ connectWorkspace: vi.fn() }) }));
+/* "Take it again" reads the project listing; these suites have no project. */
+vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => ({ projects: [] }) }));
 
 const { default: WelcomeRoute } = await import('#routes/welcome/route.js');
 const { personRecordStores, deviceRecordStore } = await import('#preferences/person-record.store.js');

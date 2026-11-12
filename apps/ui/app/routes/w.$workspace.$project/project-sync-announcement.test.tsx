@@ -12,7 +12,7 @@ import { ProjectSyncAnnouncement } from '#routes/w.$workspace.$project/project-s
 const mocks = vi.hoisted(() => ({
   model: 'ready' as ModelAvailability,
   facet: undefined as LargeObjectsFacet | undefined,
-  status: { checkoutId: 'checkout-1', readiness: 'filled' as ProjectReadiness },
+  status: { projectId: 'project-0', checkoutId: 'checkout-1', readiness: 'filled' as ProjectReadiness },
   report: vi.fn(async (_error: unknown, _details?: unknown) => undefined),
 }));
 
@@ -53,12 +53,17 @@ const wait = (milliseconds: number): void => {
 };
 
 describe('model wait reporting', () => {
+  /* The cap is per project for the page, so each case opens a project of its own. */
+  let projects = 0;
+  let projectId = 'project-0';
   beforeEach(() => {
     vi.useFakeTimers();
     mocks.report.mockClear();
     mocks.model = 'ready';
     mocks.facet = undefined;
-    mocks.status = { checkoutId: 'checkout-1', readiness: 'filled' };
+    projects += 1;
+    projectId = `project-${String(projects)}`;
+    mocks.status = { projectId, checkoutId: 'checkout-1', readiness: 'filled' };
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -72,7 +77,7 @@ describe('model wait reporting', () => {
 
   it('reports a model gate with no download that outlasts its bound, once for the wait', () => {
     mocks.model = 'filesChecking';
-    mocks.status = { checkoutId: 'checkout-1', readiness: 'materialized' };
+    mocks.status = { projectId, checkoutId: 'checkout-1', readiness: 'materialized' };
     const view = render(<ProjectSyncAnnouncement />);
     wait(29_999);
     expect(mocks.report).not.toHaveBeenCalled();
@@ -90,7 +95,7 @@ describe('model wait reporting', () => {
 
   it('reports a download only once it stops making progress', () => {
     mocks.model = 'files';
-    mocks.status = { checkoutId: 'checkout-1', readiness: 'materialized' };
+    mocks.status = { projectId, checkoutId: 'checkout-1', readiness: 'materialized' };
     mocks.facet = facet();
     const view = render(<ProjectSyncAnnouncement />);
     for (let step = 2; step <= 6; step += 1) {
@@ -105,7 +110,7 @@ describe('model wait reporting', () => {
 
   it('reports a failed fill once for the wait, and again for the next wait', () => {
     mocks.model = 'filesFailed';
-    mocks.status = { checkoutId: 'checkout-1', readiness: 'materialized' };
+    mocks.status = { projectId, checkoutId: 'checkout-1', readiness: 'materialized' };
     mocks.facet = facet({ phase: 'failed', error: 'The remote https://tau.test/v1/git/p.git?x=1 did not answer.' });
     const view = render(<ProjectSyncAnnouncement />);
     expect(reports()).toEqual([['ModelFillFailure', expect.objectContaining({ 'revisions.fill': 'failed' })]]);
@@ -120,21 +125,39 @@ describe('model wait reporting', () => {
     /* A new tree: the wait ends at filled, and the next one is its own. */
     mocks.model = 'ready';
     mocks.facet = undefined;
-    mocks.status = { checkoutId: 'checkout-1', readiness: 'filled' };
+    mocks.status = { projectId, checkoutId: 'checkout-1', readiness: 'filled' };
     view.rerender(<ProjectSyncAnnouncement />);
     mocks.model = 'filesFailed';
     mocks.facet = facet({ phase: 'failed', error: 'The remote did not answer.' });
-    mocks.status = { checkoutId: 'checkout-1', readiness: 'materialized' };
+    mocks.status = { projectId, checkoutId: 'checkout-1', readiness: 'materialized' };
     view.rerender(<ProjectSyncAnnouncement />);
     expect(reports().map(([name]) => name)).toEqual(['ModelFillFailure', 'ModelFillFailure']);
   });
 
+  it('sends at most three of a kind for a project, however often its watch is made again', () => {
+    mocks.model = 'filesChecking';
+    mocks.status = { projectId, checkoutId: 'checkout-1', readiness: 'materialized' };
+    /* Four waits, each on a watch of its own, as a remount of the announcement makes one. */
+    for (let remount = 0; remount < 4; remount += 1) {
+      const view = render(<ProjectSyncAnnouncement />);
+      wait(30_000);
+      view.unmount();
+    }
+    expect(reports().map(([name]) => name)).toEqual(['ModelWaitStalled', 'ModelWaitStalled', 'ModelWaitStalled']);
+    /* Another project has its own three. */
+    mocks.status = { projectId: `${projectId}-other`, checkoutId: 'checkout-1', readiness: 'materialized' };
+    const other = render(<ProjectSyncAnnouncement />);
+    wait(30_000);
+    other.unmount();
+    expect(mocks.report).toHaveBeenCalledTimes(4);
+  });
+
   it('starts a new wait when another checkout is selected', () => {
     mocks.model = 'filesChecking';
-    mocks.status = { checkoutId: 'checkout-1', readiness: 'materialized' };
+    mocks.status = { projectId, checkoutId: 'checkout-1', readiness: 'materialized' };
     const view = render(<ProjectSyncAnnouncement />);
     wait(30_000);
-    mocks.status = { checkoutId: 'checkout-2', readiness: 'materialized' };
+    mocks.status = { projectId, checkoutId: 'checkout-2', readiness: 'materialized' };
     view.rerender(<ProjectSyncAnnouncement />);
     wait(30_000);
     expect(mocks.report).toHaveBeenCalledTimes(2);

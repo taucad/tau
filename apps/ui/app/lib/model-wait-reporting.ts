@@ -9,13 +9,14 @@ import { reportUiError } from '#lib/error-reporting.js';
  *
  * Low volume by construction. One report of each kind per wait, where a wait is one stretch of the selected
  * checkout's model gate: every new tree (a new write generation) drops readiness below `filled` and so opens a new
- * wait, and a mint does not. One watch also sends at most {@link modelWaitReportLimit} of each kind.
+ * wait, and a mint does not. One project also sends at most {@link modelWaitReportLimit} of each kind per page load,
+ * however often its watch is made again.
  */
 
 /** How long a model gate may go without progress before it is reported. Milliseconds. */
 export const modelWaitBoundMilliseconds = 30_000;
 
-/** The most reports of each kind one watch sends. */
+/** The most reports of each kind one project sends per page load. */
 export const modelWaitReportLimit = 3;
 
 /** A model surface gated past {@link modelWaitBoundMilliseconds} with no progress. */
@@ -32,12 +33,17 @@ export class ModelFillFailure extends Error {
 export type ModelWaitObservation = Readonly<{
   /** Whether the model gate is closed on the project's large objects: `filesChecking`, `files` or `filesFailed`. */
   gated: boolean;
+  /** The project whose cap the reports count against; a watch with none yet counts its own. */
+  projectId: string | undefined;
   checkoutId: string | undefined;
   readiness: ProjectReadiness | undefined;
   facet: Pick<LargeObjectsFacet, 'phase' | 'objects' | 'totalObjects' | 'bytes' | 'totalBytes' | 'error'> | undefined;
 }>;
 
 type Kind = 'stalled' | 'failed';
+
+/* Reports sent per project in this page ({@link modelWaitReportLimit}): a remounted watch keeps its project's count. */
+const sentByProject = new Map<string, Record<Kind, number>>();
 
 /** A failure's reason without any address it names: a remote's URL is not diagnosis, and may carry a project's id. */
 const redacted = (reason: string | undefined): string | undefined =>
@@ -72,10 +78,23 @@ export const createModelWaitReporter = (
       }
     | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  /* Reports sent by this watch, by kind ({@link modelWaitReportLimit}). */
-  const sent: Record<Kind, number> = { stalled: 0, failed: 0 };
+  /* Reports sent by this watch before it knows its project, by kind. */
+  const unattributed: Record<Kind, number> = { stalled: 0, failed: 0 };
+  const sentFor = (projectId: string | undefined): Record<Kind, number> => {
+    if (projectId === undefined) {
+      return unattributed;
+    }
+    const existing = sentByProject.get(projectId);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const created: Record<Kind, number> = { stalled: 0, failed: 0 };
+    sentByProject.set(projectId, created);
+    return created;
+  };
 
   const send = (kind: Kind, observation: ModelWaitObservation): void => {
+    const sent = sentFor(observation.projectId);
     if (wait === undefined || wait.reported.has(kind) || sent[kind] >= modelWaitReportLimit) {
       return;
     }

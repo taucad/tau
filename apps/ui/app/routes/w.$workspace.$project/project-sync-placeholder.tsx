@@ -222,8 +222,14 @@ function useModelWaitReporting(): void {
   const gated = model === 'files' || model === 'filesFailed' || model === 'filesChecking';
   const facet = status?.largeObjects;
   useEffect(() => {
-    reporter.current?.observe({ gated, checkoutId: status?.checkoutId, readiness: status?.readiness, facet });
-  }, [gated, status?.checkoutId, status?.readiness, facet]);
+    reporter.current?.observe({
+      gated,
+      projectId: status?.projectId,
+      checkoutId: status?.checkoutId,
+      readiness: status?.readiness,
+      facet,
+    });
+  }, [gated, status?.projectId, status?.checkoutId, status?.readiness, facet]);
 }
 
 /** One live announcement per focused project, rather than one competing announcement per pane. */

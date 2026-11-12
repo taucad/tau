@@ -1,6 +1,5 @@
 // @vitest-environment node
 
-import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -25,6 +24,8 @@ import {
   validateGlbData,
 } from '@taucad/runtime-testing';
 import { kernelConfigurations } from '@taucad/types/constants';
+import { exactPinOf } from '@taucad/tau-examples/exact-pin';
+import type { ExactPin } from '@taucad/tau-examples/exact-pin';
 
 const createRuntime = (wasm?: PicovoxelOptionsInput['wasm']) =>
   defineRuntime({ plugins: [picovoxel(wasm ? { kernels: { default: { wasm } } } : undefined), esbuild()] });
@@ -405,24 +406,19 @@ describe('PicoVoxel packaged runtime', () => {
   }, 60_000);
 
   it('should export the pinned exact STL and GLB of sphere-minus-beams on both wasm builds (DP18)', async () => {
-    // The same pins the browser leg asserts (apps/ui-e2e picovoxel-multi.spec.ts).
-    type Pin = { readonly sha256: string; readonly bytes: number };
+    // The same pins, hashed by the same helper, as the browser leg (apps/ui-e2e picovoxel-multi.spec.ts).
     const pins = (
       JSON.parse(await readFile(join(picovoxelExamples, 'exact-pins.json'), 'utf8')) as {
-        readonly 'sphere-minus-beams': { readonly stl: Pin; readonly glb: Pin };
+        readonly 'sphere-minus-beams': { readonly stl: ExactPin; readonly glb: ExactPin };
       }
     )['sphere-minus-beams'];
-    const digest = (bytes: Uint8Array<ArrayBuffer>): Pin => ({
-      sha256: createHash('sha256').update(bytes).digest('hex'),
-      bytes: bytes.byteLength,
-    });
     const exportExact = async (wasm: PicovoxelOptionsInput['wasm']) => {
       const client = await createNodeClient({
         runtime: createRuntime(wasm),
         projectPath: join(picovoxelExamples, 'sphere-minus-beams'),
       });
       try {
-        const exported: Record<'stl' | 'glb', Pin | undefined> = { stl: undefined, glb: undefined };
+        const exported: Record<'stl' | 'glb', ExactPin | undefined> = { stl: undefined, glb: undefined };
         const document = client.open({ source: { path: 'main.ts' } });
         for (const format of ['stl', 'glb'] as const) {
           // oxlint-disable-next-line no-await-in-loop -- one client, one export at a time
@@ -430,7 +426,8 @@ describe('PicoVoxel packaged runtime', () => {
           if (!result.success) {
             throw new Error(result.issues.map(({ message }) => message).join('; '));
           }
-          exported[format] = digest(result.files[0].bytes);
+          // oxlint-disable-next-line no-await-in-loop -- as above
+          exported[format] = await exactPinOf(format, result.files[0].bytes);
         }
         return exported;
       } finally {

@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./builtin": "./src/builtin.ts",
+    "./exact-pin": "./src/exact-pin.ts",
     "./fixtures": "./src/fixture-loader.ts",
     "./manifest": "./src/manifest.ts",
     "./runtime": "./scripts/runtime.ts",

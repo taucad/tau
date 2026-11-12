@@ -1,7 +1,10 @@
 import { expect, inject, test } from 'vitest';
 import { page as selectors, server } from 'vitest/browser';
-import { base64ToUint8Array, uint8ArrayToHex } from 'uint8array-extras';
+import { base64ToUint8Array } from 'uint8array-extras';
 import * as target from '#support/external-target.js';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- the pin helper runtime-e2e shares; `apps/ui-e2e` has no manifest or path mapping to reach `@taucad/tau-examples` through
+// oxlint-disable-next-line no-restricted-imports -- as above
+import { exactPinOf } from '../../../libs/tau-examples/src/exact-pin.ts';
 
 /*
  * PicoVoxel in the browser (T2.9). With COOP/COEP the 'auto' wasm option serves the
@@ -65,10 +68,11 @@ test('renders PicoVoxel on the variant its isolation allows and exports the pinn
     expect(file.suggestedFilename).toMatch(new RegExp(`\\.${format}$`, 'u'));
     return base64ToUint8Array(file.base64);
   };
+  // The helper runtime-e2e hashes with too: a GLB's generator version is normalized out of its pin.
   const pinOf = async (format: 'stl' | 'glb', bytes: ReturnType<typeof base64ToUint8Array>) => {
-    const hex = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
-    await target.writeArtifact(`picovoxel-exact-${format}-${server.browser}.sha256`, `${hex}  ${bytes.byteLength}\n`);
-    return { sha256: hex, bytes: bytes.byteLength };
+    const pin = await exactPinOf(format, bytes);
+    await target.writeArtifact(`picovoxel-exact-${format}-${server.browser}.sha256`, `${pin.sha256}  ${pin.bytes}\n`);
+    return pin;
   };
   const pins = inject('picovoxelExactPins');
 

@@ -114,19 +114,19 @@ const renderRow = (props: Partial<RevisionRowProps> = {}): void => {
   );
 };
 
-const openRow = async (user: ReturnType<typeof userEvent.setup>, name = 'Rev 2 · Thicker base'): Promise<void> => {
+const openRow = async (
+  user: ReturnType<typeof userEvent.setup>,
+  name: string | RegExp = /^Thicker base · /u,
+): Promise<void> => {
   await user.click(screen.getByRole('button', { name }));
 };
 
 describe('RevisionRow', () => {
-  it('is one button at rest, naming the revision by Rev N and its title (canvas round 8)', () => {
+  it('is one button at rest, naming the entry by its title and time (canvas round 8)', () => {
     renderRow();
     const item = screen.getByRole('listitem');
     expect(within(item).getAllByRole('button')).toHaveLength(1);
-    expect(within(item).getByRole('button', { name: 'Rev 2 · Thicker base' })).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    );
+    expect(within(item).getByRole('button', { name: /^Thicker base · /u })).toHaveAttribute('aria-expanded', 'false');
     expect(item).toHaveTextContent('Agent');
   });
 
@@ -142,9 +142,9 @@ describe('RevisionRow', () => {
     expect(screen.getByRole('listitem')).toHaveTextContent('You');
   });
 
-  it('says so instead of inventing a number for a revision off this line', () => {
+  it('names a row off this line by its title and time, inventing no number', () => {
     renderRow({ revision: card({ n: undefined }) });
-    expect(screen.getByRole('button', { name: 'Revision · Thicker base' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Thicker base · /u })).toBeInTheDocument();
     expect(screen.queryByText(/Rev \d/u)).toBeNull();
   });
 
@@ -184,7 +184,7 @@ describe('RevisionRow', () => {
     expect(revisionStatusHarness.comparisonRequests).toContain('rev-2:bracket.scad:parent');
     expect(screen.queryByText('Original bytes')).not.toBeInTheDocument();
     expect(screen.queryByText('Current bytes')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('button', { name: 'More' }));
     expect(screen.getByRole('menuitem', { name: 'Compare with current' })).toBeInTheDocument();
   });
 
@@ -225,10 +225,10 @@ describe('RevisionRow', () => {
     );
     renderRow();
     await openRow(user);
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('button', { name: 'More' }));
     await user.click(screen.getByRole('menuitem', { name: 'Compare with current' }));
 
-    const files = await screen.findByRole('list', { name: 'Changed since Rev 2' });
+    const files = await screen.findByRole('list', { name: 'Changed since “Thicker base”' });
     expect(within(files).getAllByRole('button', { name: /^Compare /u })).toHaveLength(3);
     expect(within(files).getByRole('button', { name: 'Show all 4 files' })).toBeInTheDocument();
   });
@@ -260,7 +260,7 @@ describe('RevisionRow', () => {
     onRestore.mockClear();
     renderRow();
     await openRow(user);
-    await user.click(screen.getByRole('button', { name: 'Restore Rev 2' }));
+    await user.click(screen.getByRole('button', { name: 'Restore “Thicker base”' }));
     expect(onRestore).toHaveBeenCalledWith('rev-2');
   });
 
@@ -276,9 +276,9 @@ describe('RevisionRow', () => {
   it('names a restore row by its provenance, with the Restored glyph', () => {
     const restored = card({ revisionId: 'rev-5', n: 5, summary: 'Restore', capture: 'restore', restoredFrom: 'rev-3' });
     const target = card({ revisionId: 'rev-3', n: 3 });
-    expect(revisionTitle(restored, [restored, target])).toBe('Restored Rev 3');
-    renderRow({ revision: restored, title: 'Restored Rev 3' });
-    expect(screen.getByRole('button', { name: 'Rev 5 · Restored Rev 3' })).toBeInTheDocument();
+    expect(revisionTitle(restored, [restored, target])).toBe('Restored “Thicker base”');
+    renderRow({ revision: restored, title: 'Restored “Thicker base”' });
+    expect(screen.getByRole('button', { name: /^Restored “Thicker base” · /u })).toBeInTheDocument();
     expect(screen.getByLabelText('Restored')).toBeInTheDocument();
     expect(screen.queryByLabelText(/Rewind/u)).toBeNull();
   });
@@ -292,10 +292,10 @@ describe('RevisionRow', () => {
     };
     renderRow({
       revision: card({ restoredFrom: 'rev-1', capture: 'restore' }),
-      title: 'Restored Rev 1',
+      title: 'Restored “Thicker base”',
       isCurrent: true,
     });
-    await openRow(user, 'Rev 2 · Restored Rev 1');
+    await openRow(user, /^Restored “Thicker base” · /u);
     await user.click(screen.getByRole('button', { name: 'Undo restore' }));
     expect(onUndoRestore).toHaveBeenCalledOnce();
   });
@@ -305,10 +305,10 @@ describe('RevisionRow', () => {
     const user = userEvent.setup();
     renderRow({
       revision: card({ restoredFrom: 'rev-1', capture: 'restore' }),
-      title: 'Restored Rev 1',
+      title: 'Restored “Thicker base”',
       isCurrent: true,
     });
-    await openRow(user, 'Rev 2 · Restored Rev 1');
+    await openRow(user, /^Restored “Thicker base” · /u);
     expect(screen.queryByRole('button', { name: 'Undo restore' })).not.toBeInTheDocument();
   });
 
@@ -319,9 +319,9 @@ describe('RevisionRow', () => {
     const row = document.querySelector('[data-slot="row-actions"]');
     expect(row).toHaveClass('@container/actions', 'flex-wrap', 'justify-between');
     const end = row?.querySelector('[data-slot="actions-end"]');
-    expect(within(end as HTMLElement).getByRole('button', { name: 'More actions for Rev 2' })).toBeInTheDocument();
+    expect(within(end as HTMLElement).getByRole('button', { name: 'More' })).toBeInTheDocument();
     await user.click(within(end as HTMLElement).getByRole('button', { name: 'Details' }));
-    const details = document.querySelector('dl[aria-label="Details for Rev 2"]');
+    const details = document.querySelector('dl[aria-label="Details for “Thicker base”"]');
     expect(details).toHaveTextContent('Agent turn');
   });
 
@@ -332,7 +332,7 @@ describe('RevisionRow', () => {
     renderRow({ revision: card({ revisionId: id, treeId: tree, parent, trailer: 'Tau-Metadata: {"version":2}' }) });
     await openRow(user);
     await user.click(screen.getByRole('button', { name: 'Details' }));
-    const details = document.querySelector('dl[aria-label="Details for Rev 2"]');
+    const details = document.querySelector('dl[aria-label="Details for “Thicker base”"]');
     expect(details).toHaveTextContent('Agent turn');
     expect(details).not.toHaveTextContent(/Revision|Tree|Parent|Recorded trailer|Tau-Metadata/u);
     expect(document.body.textContent).not.toMatch(/[\da-f]{40}/u);
@@ -352,7 +352,7 @@ describe('RevisionRow', () => {
       renderRow();
       await openRow(user);
       await user.click(screen.getByRole('button', { name: 'Details' }));
-      expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(/Revision\s*rev-2/u);
+      expect(document.querySelector('dl[aria-label="Details for “Thicker base”"]')).toHaveTextContent(/ID\s*rev-2/u);
     });
 
     /* W1 Details: the revision a row follows, and a first revision that follows none. */
@@ -361,7 +361,9 @@ describe('RevisionRow', () => {
       renderRow({ revision: card({ parent: 'rev-1' }) });
       await openRow(user);
       await user.click(screen.getByRole('button', { name: 'Details' }));
-      expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(/Parent\s*rev-1/u);
+      expect(document.querySelector('dl[aria-label="Details for “Thicker base”"]')).toHaveTextContent(
+        /Parent\s*rev-1/u,
+      );
     });
 
     /* Canvas DetailsList: the tree the revision carries, from the log row itself. */
@@ -370,7 +372,7 @@ describe('RevisionRow', () => {
       renderRow({ revision: card({ treeId: 'a'.repeat(40) }) });
       await openRow(user);
       await user.click(screen.getByRole('button', { name: 'Details' }));
-      expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(
+      expect(document.querySelector('dl[aria-label="Details for “Thicker base”"]')).toHaveTextContent(
         new RegExp(`Tree\\s*${'a'.repeat(40)}`, 'u'),
       );
     });
@@ -391,16 +393,18 @@ describe('RevisionRow', () => {
       renderRow();
       await openRow(user);
       await user.click(screen.getByRole('button', { name: 'Details' }));
-      expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).not.toHaveTextContent('Recorded trailer');
+      expect(document.querySelector('dl[aria-label="Details for “Thicker base”"]')).not.toHaveTextContent(
+        'Recorded trailer',
+      );
     });
 
     it('says a branch’s first revision follows none', async () => {
       const user = userEvent.setup();
       renderRow({ revision: card({ revisionId: 'rev-1', n: 1 }) });
-      await openRow(user, 'Rev 1 · Thicker base');
+      await openRow(user, /^Thicker base · /u);
       await user.click(screen.getByRole('button', { name: 'Details' }));
-      expect(document.querySelector('dl[aria-label="Details for Rev 1"]')).toHaveTextContent(
-        /Parent\s*None \(first revision\)/u,
+      expect(document.querySelector('dl[aria-label="Details for “Thicker base”"]')).toHaveTextContent(
+        /Parent\s*None \(first entry\)/u,
       );
     });
   });
@@ -418,17 +422,17 @@ describe('RevisionRow', () => {
     };
     renderRow();
     await openRow(user);
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('button', { name: 'More' }));
     await user.click(screen.getByRole('menuitem', { name: 'Compare with current' }));
 
-    const since = await screen.findByRole('list', { name: 'Changed since Rev 2' });
+    const since = await screen.findByRole('list', { name: 'Changed since “Thicker base”' });
     expect(revisionStatusHarness.diffRequests).toContain('rev-2..checkout');
     await user.click(within(since).getByRole('button', { name: 'Compare bracket.scad with the current file' }));
     expect(await screen.findByTestId('diff')).toHaveTextContent('cube(1);|cube(5);');
 
     await user.click(screen.getByRole('button', { name: 'Stop comparing' }));
     expect(screen.getByRole('list', { name: 'Changed files' })).toBeInTheDocument();
-    expect(screen.queryByRole('list', { name: 'Changed since Rev 2' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Changed since “Thicker base”' })).not.toBeInTheDocument();
   });
 
   it('says so when nothing changed since the revision', async () => {
@@ -437,23 +441,23 @@ describe('RevisionRow', () => {
     renderRow();
     await openRow(user);
     revisionStatusHarness.diff = [];
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('button', { name: 'More' }));
     await user.click(screen.getByRole('menuitem', { name: 'Compare with current' }));
-    expect(await screen.findByRole('note')).toHaveTextContent('No changes since Rev 2.');
+    expect(await screen.findByRole('note')).toHaveTextContent('No changes since then.');
   });
 
   it('should offer Compare with current on the current revision', async () => {
     const user = userEvent.setup();
     renderRow({ isCurrent: true, isDirty: true });
     await openRow(user);
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('button', { name: 'More' }));
     expect(screen.getByRole('menuitem', { name: 'Compare with current' })).toBeInTheDocument();
   });
 
   it('gives every target at least 24 × 24 CSS px', async () => {
     const user = userEvent.setup();
     renderRow({ revision: card({ tags: ['v1'] }) });
-    await openRow(user, 'Rev 2 · v1');
+    await openRow(user, /^v1 · /u);
     await user.click(screen.getByRole('button', { name: 'Details' }));
     for (const button of screen.getAllByRole('button')) {
       expect(button.className).toMatch(/\b(h-6|size-6|min-h-6|h-8|h-9|size-8)\b/u);
@@ -475,8 +479,8 @@ describe('RevisionMenu', () => {
     const writeText = vi.fn(async () => undefined);
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
     renderMenu();
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Copy revision id' }));
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Copy ID' }));
 
     expect(writeText).toHaveBeenCalledWith('rev-2');
     expect(await screen.findByRole('menuitem', { name: 'Copied' })).toBeInTheDocument();
@@ -486,10 +490,10 @@ describe('RevisionMenu', () => {
   it('names a version in the one naming form, and Cancel or Escape return focus to More (round 16)', async () => {
     const user = userEvent.setup();
     renderMenu(card());
-    const more = screen.getByRole('button', { name: 'More actions for Rev 2' });
+    const more = screen.getByRole('button', { name: 'More' });
     await user.click(more);
-    await user.click(screen.getByRole('menuitem', { name: 'Name version…' }));
-    const field = await screen.findByRole('textbox', { name: 'Name Rev 2' });
+    await user.click(screen.getByRole('menuitem', { name: 'Create version…' }));
+    const field = await screen.findByRole('textbox', { name: 'Version name' });
     await waitFor(() => {
       expect(field).toHaveFocus();
     });
@@ -499,8 +503,8 @@ describe('RevisionMenu', () => {
     });
 
     await user.click(more);
-    await user.click(screen.getByRole('menuitem', { name: 'Name version…' }));
-    await user.type(await screen.findByRole('textbox', { name: 'Name Rev 2' }), 'Ready for print');
+    await user.click(screen.getByRole('menuitem', { name: 'Create version…' }));
+    await user.type(await screen.findByRole('textbox', { name: 'Version name' }), 'Ready for print');
     await user.keyboard('{Escape}');
     await waitFor(() => {
       expect(more).toHaveFocus();
@@ -508,19 +512,19 @@ describe('RevisionMenu', () => {
     expect(revisionStatusHarness.commands.tag).not.toHaveBeenCalled();
 
     await user.click(more);
-    await user.click(screen.getByRole('menuitem', { name: 'Name version…' }));
-    await user.type(await screen.findByRole('textbox', { name: 'Name Rev 2' }), 'Ready for print');
-    await user.click(screen.getByRole('button', { name: 'Save name' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Create version…' }));
+    await user.type(await screen.findByRole('textbox', { name: 'Version name' }), 'Ready for print');
+    await user.click(screen.getByRole('button', { name: 'Create version' }));
     expect(revisionStatusHarness.commands.tag).toHaveBeenCalledWith({ name: 'Ready for print', revisionId: 'rev-2' });
   });
 
   it('starts a new branch from the revision, with Cancel (round 16)', async () => {
     const user = userEvent.setup();
     renderMenu();
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    await user.click(screen.getByRole('menuitem', { name: 'New branch from Rev 2…' }));
-    expect(await screen.findByText('Starts from Rev 2. main stays as it is.')).toBeInTheDocument();
-    await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'enclosure-v2');
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    await user.click(screen.getByRole('menuitem', { name: 'New branch from here…' }));
+    expect(await screen.findByText('Starts from “Thicker base”. main stays as it is.')).toBeInTheDocument();
+    await user.type(screen.getByRole('textbox', { name: 'Branch name' }), 'enclosure-v2');
     await user.click(screen.getByRole('button', { name: 'Create branch' }));
     expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('enclosure-v2', 'rev-2');
   });
@@ -530,9 +534,11 @@ describe('RevisionMenu', () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
     renderMenu();
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('button', { name: 'More' }));
     await user.click(screen.getByRole('menuitem', { name: 'Remove version name…' }));
-    expect(await screen.findByRole('alertdialog', { name: 'Remove the name “v1” from Rev 2?' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('alertdialog', { name: 'Remove the name “v1” from “Thicker base”?' }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Remove name' }));
 
     await waitFor(() => {
@@ -563,7 +569,7 @@ describe('RevisionMenu', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ ref: 'refs/tags/v1', tip: 'rev-2' }), { status: 200 }));
     vi.stubGlobal('fetch', fetch);
     renderMenu();
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('button', { name: 'More' }));
     await user.click(screen.getByRole('menuitem', { name: 'Remove version name…' }));
     await user.click(await screen.findByRole('button', { name: 'Remove name' }));
 
@@ -599,9 +605,9 @@ describe('RevisionMenu', () => {
       </TooltipProvider>
     );
     const { rerender } = render(menu());
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Publish as a named version…' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Publish Rev 2' });
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Publish as a version…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Publish “Thicker base”' });
     await user.type(within(dialog).getByLabelText('Version name'), 'first print');
     await user.click(within(dialog).getByRole('button', { name: 'Publish' }));
 
@@ -623,7 +629,7 @@ describe('RevisionMenu', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Done' }));
     expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalledOnce();
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'More actions for Rev 2' })).toHaveFocus();
+      expect(screen.getByRole('button', { name: 'More' })).toHaveFocus();
     });
   });
 
@@ -639,7 +645,7 @@ describe('RevisionMenu', () => {
       vi.fn(async () => new Response(JSON.stringify({ code: 'GIT_RATE_LIMITED' }), { status: 429 })),
     );
     renderMenu();
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('button', { name: 'More' }));
     await user.click(screen.getByRole('menuitem', { name: 'Remove version name…' }));
     await user.click(await screen.findByRole('button', { name: 'Remove name' }));
 
@@ -655,7 +661,7 @@ describe('RevisionMenu', () => {
       remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
     };
     renderMenu();
-    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('button', { name: 'More' }));
     expect(screen.getByRole('menuitem', { name: 'Rename version…' })).toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: 'Remove version name…' })).not.toBeInTheDocument();
   });

@@ -86,9 +86,13 @@ const subCommands: Record<string, CommandDef> = {
     const { tuiCommand } = await import('./commands/tui.js');
     return tuiCommand as CommandDef;
   }),
-  revisions: lazyCommand('revisions', 'Read and move between a project’s revisions', async () => {
-    const { revisionsCommand } = await import('./commands/revisions.js');
-    return revisionsCommand as CommandDef;
+  history: lazyCommand('history', 'Save, read and move between a project’s history', async () => {
+    const { historyCommand } = await import('./commands/history.js');
+    return historyCommand as CommandDef;
+  }),
+  version: lazyCommand('version', 'Create, list and rename a project’s versions', async () => {
+    const { versionCommand } = await import('./commands/history.js');
+    return versionCommand as CommandDef;
   }),
   open: lazyCommand('open', 'Open a project folder, file or Tau link in the browser', async () => {
     const { openCommand } = await import('./commands/open.js');

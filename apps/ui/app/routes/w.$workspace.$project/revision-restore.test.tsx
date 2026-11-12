@@ -28,6 +28,15 @@ vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { success: toastSuccess, error: toastError, info: toastInfo, warning: toastWarning },
 }));
 const capture = vi.hoisted(() => vi.fn<(event: string, payload?: Record<string, unknown>) => void>());
+/* A toast names an entry by its title or version (M11), read from the loaded History page. */
+vi.mock('#hooks/use-revisions.js', () => ({
+  useRevisions: () => ({
+    revisions: [
+      { revisionId: 'rev-4', n: 4, createdAt: 1, summary: 'Thicker walls for the lid', actor: '', conflicted: false },
+      { revisionId: 'rev-3', n: 3, createdAt: 1, summary: 'Add vent slots', actor: '', conflicted: false },
+    ],
+  }),
+}));
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture }) }));
 const raiseHeldSave = vi.hoisted(() => vi.fn());
 vi.mock('#routes/w.$workspace.$project/held-save-toast.js', () => ({ useHeldSaveToast: () => raiseHeldSave }));
@@ -75,13 +84,13 @@ describe('RevisionRestore', () => {
         type: 'error',
         subject: 'connection',
         code: 'HOST_CONFIGURATION_MISMATCH',
-        message: 'The host refused this revision connection.',
+        message: 'The host refused this history connection.',
         generation: 1,
         connectionOperation: 'status',
       });
     }
     expect(toastError).toHaveBeenCalledOnce();
-    expect(toastError.mock.calls[0]?.[0]).toBe('History could not connect');
+    expect(toastError.mock.calls[0]?.[0]).toBe('Couldn’t load history');
     expect(capture).toHaveBeenCalledWith(
       'revision_connection_failed',
       expect.objectContaining({ code: 'HOST_CONFIGURATION_MISMATCH', generation: 1, operation: 'status' }),
@@ -119,18 +128,29 @@ describe('RevisionRestore', () => {
     expect(revisionStatusHarness.commands.undo).toHaveBeenCalledOnce();
   });
 
+  it('names a restore of a loaded entry by its title without reading its row', () => {
+    render(<RevisionRestore />);
+
+    emit({ type: 'restored', mode: 'restore', revisionId: 'rev-3', revisionNumber: 3 });
+
+    const [title, options] = toastSuccess.mock.calls[0] ?? [];
+    expect(title).toBe('Restored “Add vent slots”');
+    expect(revisionStatusHarness.rowRequests).toEqual([]);
+    pressUndo(options);
+  });
+
   it('names a restored version by its number, and a target it cannot read without a number (A9)', async () => {
     revisionStatusHarness.rows = [
       revisionRow({
-        revisionId: 'rev-4',
-        revisionNumber: 4,
+        revisionId: 'rev-9',
+        revisionNumber: 9,
         tags: ['Ready for print'],
         versions: [{ name: 'Ready for print', number: 3 }],
       }),
     ];
     render(<RevisionRestore />);
 
-    emit({ type: 'restored', mode: 'restore', revisionId: 'rev-4', revisionNumber: 4 });
+    emit({ type: 'restored', mode: 'restore', revisionId: 'rev-9', revisionNumber: 9 });
     emit({ type: 'restored', mode: 'restore', revisionId: 'rev-gone', revisionNumber: undefined });
 
     await waitFor(() => {
@@ -178,7 +198,7 @@ describe('RevisionRestore', () => {
 
     emit({ type: 'refused', branch: 'enclosure-v2', reason: 'A chat is working in these files.' });
 
-    expect(toastError).toHaveBeenCalledWith("Couldn't switch to enclosure-v2", {
+    expect(toastError).toHaveBeenCalledWith('Couldn’t switch to enclosure-v2', {
       description: 'A chat is working in these files.',
     });
   });
@@ -190,6 +210,15 @@ describe('RevisionRestore', () => {
     emit({ type: 'branch', operation: 'merge', branch: 'enclosure-v2' });
 
     expect(toastSuccess.mock.calls).toEqual([['Merged enclosure-v2']]);
+  });
+
+  /* A discarded branch reads as closed, the branch menu's word for it. */
+  it('says a discarded branch was closed', () => {
+    render(<RevisionRestore />);
+
+    emit({ type: 'branch', operation: 'discard', branch: 'enclosure-v2' });
+
+    expect(toastSuccess.mock.calls).toEqual([['Closed enclosure-v2']]);
   });
 
   /* V5 A6, TS-R17: a save another run's lease held names that run, never "Nothing to save". */
@@ -217,7 +246,10 @@ describe('RevisionRestore', () => {
       listener({ type: 'mergeConflicted', branch: 'fillet', into: 'main', paths: ['main.scad'] });
     }
 
-    expect(toastWarning.mock.calls[0]?.[0]).toBe('Needs your decision on main');
+    expect(toastWarning.mock.calls[0]).toEqual([
+      'Needs your decision on main',
+      { description: '1 file changed on both branches. main is unchanged until you choose.' },
+    ]);
   });
 
   /* W2b: a remote or resolution child's notice is already a person's sentence; it is never a restore. */
@@ -249,7 +281,7 @@ describe('RevisionRestore', () => {
       'Files restored',
       {
         description:
-          'The earlier files are back, but something else changed this project at the same time, so this restore is not in History as its own revision. Your files are kept.',
+          'The earlier files are back, but something else changed this project at the same time, so this restore is not in History as its own entry. Your files are kept.',
       },
     ]);
     expect(toastWarning.mock.calls[1]?.[1]).toEqual({
@@ -258,8 +290,8 @@ describe('RevisionRestore', () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  /* D15: an Undo names the revision it undid, and a refusal with nothing to undo is not a failure. */
-  it('announces an Undo by the revision it undid, and warns rather than fails when nothing is left', () => {
+  /* D15: an Undo names the entry it undid, and a refusal with nothing to undo is not a failure. */
+  it('announces an Undo by the entry it undid, and warns rather than fails when nothing is left', () => {
     render(<RevisionRestore />);
 
     for (const listener of revisionStatusHarness.toasts) {
@@ -274,12 +306,12 @@ describe('RevisionRestore', () => {
         type: 'error',
         subject: 'restore',
         code: 'UNDO_CONFLICT',
-        message: 'A later revision changed the same lines, so Rev 2 can’t be undone.',
+        message: 'A later change touched the same lines, so this one can’t be undone.',
         revisionNumber: 2,
       });
     }
 
-    expect(toastSuccess.mock.calls[0]).toEqual(['Undid Rev 4']);
+    expect(toastSuccess.mock.calls[0]).toEqual(['Undid “Thicker walls for the lid”']);
     expect(toastWarning.mock.calls[0]).toEqual([
       'Nothing to undo here',
       { description: 'Nothing you did on this branch is left to undo.' },
@@ -288,7 +320,7 @@ describe('RevisionRestore', () => {
       'That change can’t be undone',
       {
         description:
-          'A later revision changed the same lines, so Rev 2 can’t be undone. Restore an earlier revision instead.',
+          'A later change touched the same lines, so this one can’t be undone. Restore an earlier point instead.',
       },
     ]);
   });
@@ -309,7 +341,7 @@ describe('RevisionRestore', () => {
     }
 
     const [title, options] = toastError.mock.calls[0] ?? [];
-    expect(title).toBe('That branch change did not go through');
+    expect(title).toBe('Couldn’t change the branch');
     expect(options?.description).toBe('There is nothing to branch from yet. Add a file, then try again.');
     expect(options?.description).not.toMatch(/checkout|unborn/iu);
   });
@@ -327,7 +359,7 @@ describe('RevisionRestore', () => {
     }
 
     const [title, options] = toastError.mock.calls[0] ?? [];
-    expect(title).toBe('That change could not be saved');
+    expect(title).toBe('Couldn’t save');
     expect(options?.description).toBe('Tau could not record this change. Reload the page and try again.');
     // SB4: the product event keeps outcome fields; the diagnostic goes to error reporting (`reportRevisionToast`).
     expect(capture).toHaveBeenCalledWith('revision_save_failed', { code: undefined });

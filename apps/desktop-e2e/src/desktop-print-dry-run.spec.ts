@@ -166,8 +166,8 @@ const openPrintProject = async (
   await selectKernel(page, 'OpenSCAD');
   await selectChatModel(page, gatewayFixtureModelName);
   const slug = await submitPrompt(page, seedPrompt);
-  const marker = page.getByRole('status', { name: 'Turn revision status' }).last();
-  await expect.poll(async () => (await marker.textContent()) ?? '', { timeout: 180_000 }).toMatch(/^Rev \d+ saved/u);
+  const marker = page.getByRole('status', { name: 'Save status' }).last();
+  await expect.poll(async () => (await marker.textContent()) ?? '', { timeout: 180_000 }).toMatch(/^Saved/u);
 
   await page.keyboard.press('Meta+Comma');
   const settings = page.getByRole('dialog').first();

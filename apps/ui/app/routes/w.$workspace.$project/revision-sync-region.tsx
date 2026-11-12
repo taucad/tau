@@ -180,7 +180,7 @@ const reconnectCopy = (remote: RemoteFacet): string => {
  *
  * Keyed on the machine's own `reason`, never on the sentence: the text is the
  * server's and changes with it, while the class is a contract (contract §3).
- * `Open Revisions` is deliberately absent — this *is* Revisions.
+ * `Open History` is deliberately absent — this *is* History.
  *
  * @param reason - The failure class the sync machine recorded.
  * @param remote - The connection, so a credential problem names its provider.

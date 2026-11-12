@@ -2,8 +2,10 @@
  * React hook for feature flags.
  *
  * Wraps the flag runtime in a `useSyncExternalStore` so components
- * re-render when overrides change. A future context provider can
- * inject per-user / remote overrides by supplying a custom resolver.
+ * re-render when overrides change, and when PostHog evaluates, re-evaluates
+ * or overrides a PostHog-backed flag (`#flags/remote-flags`). The server
+ * snapshot is always the registry defaults, so SSR and hydration never show a
+ * flagged surface on; PostHog values arrive only after hydration.
  */
 
 import { useCallback, useSyncExternalStore } from 'react';
@@ -11,6 +13,7 @@ import { Topic } from '@taucad/events';
 import type { FeatureFlagName, FeatureFlags } from '#flags/flag.constants.js';
 import { featureFlagDefaults } from '#flags/flag.constants.js';
 import { getAllFlags, setFlagOverrides, resetFlagCache } from '#flags/feature-flags.js';
+import { subscribeRemoteFlags } from '#flags/remote-flags.js';
 
 type FlagStore = {
   subscribe(listener: () => void): () => void;
@@ -39,6 +42,9 @@ function refreshSnapshot(): void {
   snapshot = getAllFlags();
   flagTopic.emit();
 }
+
+// One module-lifetime listener: PostHog evaluations refresh the shared snapshot before subscribers read it.
+subscribeRemoteFlags(refreshSnapshot);
 
 /**
  * Read a single feature flag. Re-renders when the flag value changes.

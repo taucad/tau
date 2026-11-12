@@ -117,7 +117,7 @@ export function GithubRepositoryWriteSettings({
           {onPush ? (
             <div className='flex flex-col items-start gap-2'>
               <p className='text-xs text-muted-foreground'>
-                Review your revisions and what is included before pushing. Enabling writes does not upload anything.
+                Review your history and what is included before pushing. Enabling writes does not upload anything.
               </p>
               <Button
                 size='sm'

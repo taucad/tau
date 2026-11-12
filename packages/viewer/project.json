@@ -5,6 +5,9 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:package"],
   "targets": {
+    "build": {
+      "dependsOn": ["^build"]
+    },
     "test:e2e": {
       "executor": "nx:run-commands",
       "metadata": {

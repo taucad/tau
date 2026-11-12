@@ -90,7 +90,7 @@ export const tauToolNames = [
   'test_model',
   'export_model',
   'screenshot',
-  'revisions',
+  'history',
   'use_skill',
   'update_todos',
   'ask_questions',

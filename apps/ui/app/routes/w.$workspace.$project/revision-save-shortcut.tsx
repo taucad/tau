@@ -64,7 +64,7 @@ export function useSaveRevisionRequest(): () => Promise<void> {
          code to phrase (P4) — and its own words are a diagnostic a person
          cannot act on (E5). They get what did not happen; the console gets why. */
       console.error('[revisions]', 'save', error);
-      toast.error('Revision not saved', { description: 'The editor could not finish saving its files.' });
+      toast.error('Couldn’t save', { description: 'Some files didn’t finish saving. Try again.' });
     }
   }, [editorRef, projectRef, fileManagerRef, saveRevision]);
 }

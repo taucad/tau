@@ -29,7 +29,7 @@ export const tauToolEvidence: ReadonlyMap<string, ToolEvidenceClass> = new Map<s
   ['test_model', 'verification'],
   ['export_model', 'export'],
   ['screenshot', 'geometry'],
-  ['revisions', 'read'],
+  ['history', 'read'],
   ['use_skill', 'read'],
   ['update_todos', 'write'],
   ['ask_questions', 'other'],

@@ -49,16 +49,16 @@ const plain: FileProvenanceLabel = Object.freeze({ description: '', dimmed: fals
 const unversionedLabel = (path: string): Pick<FileProvenanceLabel, 'description' | 'breadcrumbBadge'> => {
   switch (classify(path).class) {
     case 'cache': {
-      return { description: 'Cache · not saved in revisions' };
+      return { description: 'Cache · not saved in history' };
     }
     case 'records': {
       return {
         breadcrumbBadge: 'Artifact',
-        description: 'Supporting data used by Tau. Not included in revisions.',
+        description: 'Supporting data used by Tau. Not included in history.',
       };
     }
     default: {
-      return { description: 'Not saved in revisions' };
+      return { description: 'Not saved in history' };
     }
   }
 };

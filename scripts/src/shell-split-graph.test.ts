@@ -8,10 +8,12 @@ import { describe, expect, it } from 'vitest';
 /*
  * The shell split's graph guards (shell split blueprint). PR 1 extracted the sandbox into the private
  * `libs/sandbox` library that `@taucad/native-process-core` bundles; PR 2 extracted the shell service into the
- * private `libs/shell-service` library that `@taucad/host` bundles. Both sections are in the project-level form: the
- * closure each library's rows test, private, bundled by its one published owner. The service reaches the sandbox only
- * through its stateless `./shell/*` subpaths, so `@taucad/host` ships neither the SRT provider nor its native
- * dependencies (blueprint F2.7).
+ * private `libs/shell-service` library that `@taucad/host` bundles; PR 3 extracted the desktop Terminal's concern into
+ * the private app library `apps/libs/desktop-terminal` that the desktop app bundles. Every section is in the
+ * project-level form: the closure each library's rows test, private, bundled by its one owner. The service reaches the
+ * sandbox only through its stateless `./shell/*` subpaths, so `@taucad/host` ships neither the SRT provider nor its
+ * native dependencies (blueprint F2.7). The Terminal concern reaches only the service and the wire; the desktop keeps
+ * its services host, its frame routing and the unchanged rows that drive them (decision D4).
  */
 
 const root = resolve(import.meta.dirname, '../..');
@@ -63,6 +65,29 @@ const shellServiceForbiddenImports = [
 
 /** What is left of the host's shell directory: tests and fixtures only. */
 const hostShellFiles = globSync('packages/host/src/shell/*.ts', { cwd: root }).toSorted();
+
+const desktopTerminalRoot = 'apps/libs/desktop-terminal';
+
+/** Every source file of `apps/libs/desktop-terminal` (blueprint F1 row 34 and its new rows), relative to the root. */
+const desktopTerminalFiles = globSync(`${desktopTerminalRoot}/src/**/*.ts`, { cwd: root }).toSorted();
+const desktopTerminalProductionFiles = desktopTerminalFiles.filter((file) => isProduction(file));
+
+/** The only workspace modules the concern's production files import: the service's types and the wire. */
+const desktopTerminalAllowedWorkspaceImports = new Set(['@taucad/shell-service', '@taucad/types/desktop-terminal']);
+
+/** Modules no file of the concern imports: Electron, the services host and what the service already wraps. */
+const desktopTerminalForbiddenImports = [
+  'electron',
+  '@taucad/host',
+  '@taucad/native-process-core',
+  '@taucad/agent-host',
+  '#tau',
+  '#main',
+  '#shared',
+];
+
+/** The desktop Terminal rows that stay in `desktop`, unchanged (decision D4). */
+const desktopTerminalConformance = 'apps/desktop/src/tau/services-host.terminal.conformance.test.ts';
 
 /** The workspace projects one project depends on directly. */
 const directDependencies = (projectGraphValue: ProjectGraph, project: string): readonly string[] =>
@@ -236,6 +261,100 @@ describe('shell split graph', () => {
     },
   );
 
+  it('finds the Terminal concern file set where the blueprint maps it', () => {
+    expect(desktopTerminalProductionFiles).toEqual([
+      'apps/libs/desktop-terminal/src/index.ts',
+      'apps/libs/desktop-terminal/src/terminal-concern.ts',
+    ]);
+    expect(desktopTerminalFiles).toEqual(
+      expect.arrayContaining([
+        'apps/libs/desktop-terminal/src/terminal-concern.conformance.test.ts',
+        'apps/libs/desktop-terminal/src/terminal-concern.test.ts',
+      ]),
+    );
+    expect(globSync('apps/desktop/src/tau/services-host.terminal.ts', { cwd: root })).toEqual([]);
+  });
+
+  it('keeps the desktop Terminal rows and their target in desktop', async () => {
+    expect(globSync(desktopTerminalConformance, { cwd: root })).toEqual([desktopTerminalConformance]);
+    expect(specifiers(read(desktopTerminalConformance))).toContain('#tau/services-host.impl.js');
+    const graph = await projectGraph();
+    const target = graph.nodes['desktop']?.data.targets?.['test:terminal-conformance'];
+    const options = target?.options as { command?: string } | undefined;
+    expect(target?.cache).toBe(false);
+    expect(options?.command).toContain('src/tau/services-host.terminal.conformance.test.ts');
+  });
+
+  it('imports only the shell service and the Terminal wire from the concern', () => {
+    const offenders = desktopTerminalProductionFiles.flatMap((file) =>
+      specifiers(read(file))
+        .filter(
+          (specifier) =>
+            specifier.startsWith('@taucad/') ||
+            (specifier.startsWith('#') && specifier !== '#terminal-concern.js') ||
+            specifier.startsWith('..'),
+        )
+        .filter((specifier) => !desktopTerminalAllowedWorkspaceImports.has(specifier))
+        .map((specifier) => `${file} -> ${specifier}`),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('imports neither Electron nor the services host from any file of the concern', () => {
+    const offenders = desktopTerminalFiles.flatMap((file) =>
+      specifiers(read(file))
+        .filter(
+          (specifier) =>
+            specifier.startsWith('..') ||
+            desktopTerminalForbiddenImports.some(
+              (forbidden) => specifier === forbidden || specifier.startsWith(`${forbidden}/`),
+            ),
+        )
+        .map((specifier) => `${file} -> ${specifier}`),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('gives the Terminal concern its workspace dependencies and the tags of a private shell app library', async () => {
+    const graph = await projectGraph();
+    const concern = graph.nodes['desktop-terminal'];
+
+    expect(concern?.data.root).toBe(desktopTerminalRoot);
+    expect(concern?.data.tags?.filter((tag) => !tag.startsWith('npm:')).toSorted()).toEqual([
+      'ci:shell',
+      'layer:feature',
+      'scope:ui',
+      'shell:terminal',
+      'type:app-lib',
+    ]);
+    /* `sandbox` is a devDependency only: the conformance rows build the real provider through `@taucad/sandbox/shell`. */
+    expect(
+      directDependencies(graph, 'desktop-terminal')
+        .filter((target) => !target.startsWith('npm:'))
+        .toSorted(),
+    ).toEqual(['sandbox', 'shell-service', 'types']);
+    const manifest = JSON.parse(read(`${desktopTerminalRoot}/package.json`)) as Record<string, unknown>;
+    expect(manifest).toMatchObject({ name: '@taucad/desktop-terminal', private: true });
+    expect(Object.keys((manifest['dependencies'] ?? {}) as Record<string, string>).toSorted()).toEqual([
+      '@taucad/shell-service',
+      '@taucad/types',
+    ]);
+    expect(Object.keys((manifest['devDependencies'] ?? {}) as Record<string, string>)).toEqual(['@taucad/sandbox']);
+  });
+
+  it('bundles the Terminal concern into the desktop app from source', async () => {
+    expect(directDependencies(await projectGraph(), 'desktop')).toContain('desktop-terminal');
+    const manifest = JSON.parse(read('apps/desktop/package.json')) as { dependencies?: Record<string, string> };
+    expect(manifest.dependencies?.['@taucad/desktop-terminal']).toBe('workspace:*');
+    const bundled = /const bundledWorkspaceDependencies = \[(?<list>[^\]]*)\]/u.exec(
+      read('apps/desktop/electron.vite.config.ts'),
+    )?.groups?.['list'];
+    expect(bundled).toContain("'@taucad/desktop-terminal'");
+    expect(specifiers(read('apps/desktop/src/tau/services-host.impl.ts'))).toContain('@taucad/desktop-terminal');
+  });
+
   it('keeps every shell conformance and qualification target uncached', async () => {
     const graph = await projectGraph();
     const targets = Object.values(graph.nodes).flatMap(({ name, data }) =>
@@ -248,6 +367,7 @@ describe('shell split graph', () => {
 
     expect(targets.map(({ target }) => target).toSorted()).toEqual(
       expect.arrayContaining([
+        'desktop-terminal:test:terminal-conformance',
         'desktop:test:terminal-conformance',
         'host:test:shell-conformance',
         'host:test:shell-qualification',

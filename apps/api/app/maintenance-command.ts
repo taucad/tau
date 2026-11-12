@@ -28,7 +28,7 @@ import { readMaintenanceLiveness, recordMaintenancePass } from '@taucad/api-git-
 import { freezeEverything, parseFreezeSeconds, thawEverything } from '@taucad/api-git-core/routing/global-freeze';
 import { RedisInFlightRegistry } from '@taucad/api-git-core/routing/in-flight';
 import type { ScheduledMaintenanceCommand } from '@taucad/api-git-mirror/maintenance/liveness';
-import { holdInStandby } from '@taucad/api-git-mirror/maintenance/standby';
+import { holdInStandby, retryingCheck } from '@taucad/api-git-mirror/maintenance/standby';
 import {
   inventoryLfsIntegrity,
   lfsIntegrityExclusions,
@@ -374,7 +374,9 @@ async function main(): Promise<void> {
               signal: stop.signal,
               report,
               checks: {
-                database: async () => client`select 1`,
+                /* A release can restart Postgres as this Machine boots: retry a refused
+                   connection briefly so it does not exit and fail the deploy's check. */
+                database: retryingCheck(async () => client`select 1`, { attempts: 3, retryDelay: 2000 }),
                 privateStorage: async () => readMaintenanceLiveness(driver, new Date()),
                 publicStorage: async () => driver.headProbeObject(AbortSignal.timeout(5000)),
               },

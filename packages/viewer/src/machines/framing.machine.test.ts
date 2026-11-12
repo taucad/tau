@@ -1,8 +1,8 @@
 /**
  * The framing actor against a scripted camera child, and against a real camera where the pose it leaves matters. The
- * first eight rows are `use-camera-framing.test.ts` re-homed (graphics event-driven state charter, G5); that file stays
- * until the wiring lane (G5b) deletes the hook. Path table (the shortest path to each state), kept current with
- * `pathTable`:
+ * first eight rows are `use-camera-framing.test.ts` re-homed (graphics event-driven state charter, G5); the wiring
+ * lane (G5b) deleted that hook, and its up-resolution half lives in `framing-stage.test.ts`. Path table (the
+ * shortest path to each state), kept current with `pathTable`:
  *
  * 1. `awaitingGeometry`: initial
  * 2. `framed`: `geometryBoundsMeasured`
@@ -249,6 +249,23 @@ describe('framing machine', () => {
   });
 
   describe('refit and entry rules', () => {
+    it('should only refresh the bounds when a settled drag moves the same geometry far, and Fit view frames them', () => {
+      const scripted = scriptCamera();
+      const framing = startFraming({ camera: scripted.camera });
+      framing.send(measured('a', box(1, [10, 0, 0]), 2));
+      scripted.clear();
+
+      // A part dragged well past the refit ratio keeps its key, so the camera stays where the person put it.
+      framing.send(measured('a', box(1, [20, 0, 0]), 2));
+      expect(scripted.sent()).toEqual([{ type: 'setBounds', bounds: box(1, [20, 0, 0]) }]);
+      scripted.clear();
+
+      framing.send({ type: 'fitRequested' });
+      expect(scripted.sent()).toEqual([
+        { type: 'frameGeometry', bounds: box(1, [20, 0, 0]), margin: 0.1, source: 'fit' },
+      ]);
+    });
+
     it('should leave the camera alone under the refit ratio and refit once the drift adds up', () => {
       const scripted = scriptCamera();
       const framing = startFraming({ camera: scripted.camera });

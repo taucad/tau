@@ -8,7 +8,7 @@ const titles = {
   model: 'Model tree',
   print: 'Print',
   kinematics: 'Kinematics',
-  revisions: 'Revisions',
+  revisions: 'History',
   agents: 'Agents',
   jobs: 'Jobs',
   export: 'Export',

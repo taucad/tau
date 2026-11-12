@@ -1391,7 +1391,7 @@ describe('the phone shell with reduced motion', () => {
     await waitForModelReady();
     expect(await target.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
 
-    // A real save: change Width, then Save revision from the project sheet's Revisions.
+    // A real save: change Width, then Save from the project sheet's History.
     await tapDestination('Parameters');
     const width = selectors.getByRole('region', { name: 'Parameters', exact: true }).getByLabelText('Input for Width');
     await target.expectVisible(width.first(), 60_000);
@@ -1399,11 +1399,11 @@ describe('the phone shell with reduced motion', () => {
     await target.press(width.first(), 'Enter');
     await target.expectValue(width.first(), '31', 30_000);
     await target.click(titleButton(), { touch: true });
-    await target.click(projectSheet().getByRole('button', { name: 'Revisions', exact: true }), { touch: true });
+    await target.click(projectSheet().getByRole('button', { name: 'History', exact: true }), { touch: true });
     const save = selectors
-      .getByRole('region', { name: 'Revisions', exact: true })
+      .getByRole('region', { name: 'History', exact: true })
       .getByRole('region', { name: 'Where you are', exact: true })
-      .getByRole('button', { name: 'Save revision', exact: true });
+      .getByRole('button', { name: 'Save', exact: true });
     await target.expectVisible(save, 60_000);
     await target.click(save, { touch: true });
     await target.expectVisible(titleButton().getByText('Saved', { exact: true }), 120_000);

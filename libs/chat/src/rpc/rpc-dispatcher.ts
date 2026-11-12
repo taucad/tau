@@ -59,7 +59,7 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
     [rpcName.appendFile]: async (args) => handleAppendFile(args, deps.fileSystem),
     [rpcName.editFile]: async (args) => handleEditFile(args, deps.fileSystem),
     [rpcName.resolveSkill]: async (args) => handleResolveSkill(args, deps.skillResolver),
-    [rpcName.readRevisions]: async (args) => handleReadRevisions(args, deps.revisions),
+    [rpcName.readHistory]: async (args) => handleReadRevisions(args, deps.revisions),
     [rpcName.getParameters]: async (args, context) => handleGetParameters(args, deps.parameters, context),
     [rpcName.applyParameterOperation]: async (args, context) =>
       handleApplyParameterOperation(args, deps.parameters, context),

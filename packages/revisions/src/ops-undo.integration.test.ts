@@ -291,10 +291,10 @@ describe('Undo through the tree (D15)', () => {
     expect(secondUndo).toEqual({ type: 'toast.undone', revisionNumber: 3 });
     const rows = await readRevisionLog(target.port, { branch: 'main' });
     expect(rows.map((row) => [row.revisionNumber, row.summary])).toEqual([
-      [6, 'Undid Rev 3'],
-      [5, 'Undid Rev 4'],
+      [6, 'Undid the restore'],
+      [5, 'Undid an earlier change'],
       [4, 'Saved changes (save)'],
-      [3, 'Restored Rev 1'],
+      [3, 'Restored V1'],
       [2, 'Saved changes (save)'],
       [1, 'Saved changes (save)'],
     ]);

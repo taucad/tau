@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: All platforms, Linux-only staging qualification (not public promotion), or Apple silicon-only staging ZIP/DMG candidate
+        description: All platforms, or one platform candidate (Linux APT/AppImage, or Apple silicon ZIP/DMG) on either channel (D-H5)
         required: true
         default: all
         type: choice
@@ -14,7 +14,7 @@ on:
         required: true
         type: string
       release_run_id:
-        description: Exact-tag release-build.yml run; scoped staging verifies only its own prerequisite jobs (Linux may start before the run finishes)
+        description: Exact-tag release-build.yml run; a platform scope verifies only its own prerequisite jobs (Linux may start before the run finishes)
         required: true
         type: string
 
@@ -82,7 +82,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The Mac-only staging scope is Apple silicon only (hosted Intel Macs cannot qualify the renderer).
+        # The Mac-only scope is Apple silicon only (hosted Intel Macs cannot qualify the renderer).
         arch: ${{ inputs.scope == 'macos' && fromJSON('["arm64"]') || fromJSON('["arm64", "x64"]') }}
     env:
       DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
@@ -294,7 +294,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
-      # Full candidates bind the archive to the attached release metadata. A Linux-only staging candidate instead has
+      # Full candidates bind the archive to the attached release metadata. A Linux-only candidate instead has
       # the stage step fetch the exact release run's archive artifact and check its GitHub digest itself.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: inputs.scope != 'linux'
@@ -415,8 +415,8 @@ jobs:
           TAU_UPDATE_ISSUED_AT=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
           export TAU_UPDATE_ISSUED_AT
           pnpm nx run desktop:publish --args=prepare-routes
-      - name: Require exactly both Mac ZIP and DMG pairs in a Mac-only candidate
-        if: inputs.scope == 'macos'
+      - name: Require exactly the selected platform's routes in a platform candidate
+        if: inputs.scope != 'all'
         run: pnpm nx run desktop:installer-candidate --args=admit-scope
       - name: Prepare the signed qualification APT snapshot
         if: inputs.scope != 'macos'

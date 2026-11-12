@@ -13,15 +13,17 @@ describe('no-engineering-vocabulary-in-copy', () => {
   it('reports violations and accepts valid code', () => {
     ruleTester.run('no-engineering-vocabulary-in-copy', noEngineeringVocabularyInCopyRule, {
       valid: [
-        { name: 'product vocabulary', code: "toast.error('Could not restore the revision');" },
+        { name: 'product vocabulary', code: "toast.error('Couldn’t restore');" },
         { name: 'reference is not ref', code: "toast.error('The referenced file is missing');" },
         { name: 'refresh is not ref', code: "toast.info('Refresh to try again');" },
-        { name: 'lowercase head in prose', code: "toast.info('Jump to the head of the list');" },
+        { name: 'headline is not head', code: "toast.info('Read the headline');" },
+        { name: 'Git host is the product phrase', code: "toast.error('Your Git host refused access');" },
+        { name: 'online is not line', code: "toast.info('Back online');" },
         { name: 'non-toast call', code: "console.error('checkout');" },
         { name: 'the decision phrase', code: "toast.warning('Needs your decision on main');" },
-        { name: 'Tau agent is a product word', code: "toast.info('Tau agent saved Rev 4');" },
-        { name: 'a restore row', code: "toast.success('Restored Rev 3');" },
-        { name: 'opens is not ops', code: "toast.info('Opens in Revisions');" },
+        { name: 'Tau agent is a product word', code: "toast.info('Tau agent saved this');" },
+        { name: 'a restore row', code: "toast.success('Restored “Add vent slots”');" },
+        { name: 'opens is not ops', code: "toast.info('Opens in History');" },
         { name: 'dynamic message', code: 'toast.error(message);' },
         { name: 'bare toast with a dynamic message', code: 'toast(message);' },
         { name: 'dynamic description', code: "toast.error('Could not switch', { description: reason });" },
@@ -34,6 +36,31 @@ describe('no-engineering-vocabulary-in-copy', () => {
         },
       ],
       invalid: [
+        {
+          name: 'head in any case (C8)',
+          code: "toast.info('Moved the head of main');",
+          errors: [{ messageId: 'violation', data: { word: 'head' } }],
+        },
+        {
+          name: 'remote (C8)',
+          code: "toast.error('Could not reach the remote');",
+          errors: [{ messageId: 'violation', data: { word: 'remote' } }],
+        },
+        {
+          name: 'line (C8)',
+          code: "toast.info('2 files changed on both lines');",
+          errors: [{ messageId: 'violation', data: { word: 'lines' } }],
+        },
+        {
+          name: 'linked (C8)',
+          code: "toast.info('This branch is linked');",
+          errors: [{ messageId: 'violation', data: { word: 'linked' } }],
+        },
+        {
+          name: 'host without Git (C8)',
+          code: "toast.error('Tau could not reach the host');",
+          errors: [{ messageId: 'violation', data: { word: 'host' } }],
+        },
         {
           name: 'banned noun in a toast argument',
           code: "toast.error('Could not move the checkout');",

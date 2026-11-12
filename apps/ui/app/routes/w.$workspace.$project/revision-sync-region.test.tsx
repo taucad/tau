@@ -953,12 +953,12 @@ describe('RevisionSyncRegion', () => {
    * up" is the sentence this whole lane exists to be able to say honestly.
    */
   const rows: ReadonlyArray<readonly [SyncFacet['state'], number, string]> = [
-    ['checking', 0, 'Checking…'],
+    ['checking', 0, 'Checking for changes…'],
     ['backedUp', 0, 'Backed up'],
-    ['pending', 1, 'Backing up… 1 revision'],
-    ['pending', 2, 'Backing up… 2 revisions'],
-    ['queued', 1, 'Not backed up · 1 revision'],
-    ['failed', 3, 'Not backed up · 3 revisions'],
+    ['pending', 1, 'Backing up 1 change…'],
+    ['pending', 2, 'Backing up 2 changes…'],
+    ['queued', 1, 'Not backed up · 1 change'],
+    ['failed', 3, 'Not backed up · 3 changes'],
     ['conflicted', 0, 'Needs your decision'],
   ];
 
@@ -1001,8 +1001,8 @@ describe('RevisionSyncRegion', () => {
   /* D100: signed out, this device withholds its GitHub credential; GitHub refused nothing. */
   it.each([
     [0, 'Backed up'],
-    [1, 'Not backed up · 1 revision'],
-  ] as const)('should ask a signed-out viewer to sign in when %i revisions wait, saying “%s”', (pendingCount, copy) => {
+    [1, 'Not backed up · 1 change'],
+  ] as const)('should ask a signed-out viewer to sign in when %i changes wait, saying “%s”', (pendingCount, copy) => {
     renderRegion(
       facet({ kind: 'git', provider: 'github', phase: 'connected', url: 'https://github.com/rifont/example.git' }),
       syncFacet({
@@ -1050,7 +1050,7 @@ describe('RevisionSyncRegion', () => {
       syncFacet({ state: 'queued', pendingCount: 1, online: false }),
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent('Not backed up · 1 revision');
+    expect(screen.getByRole('status')).toHaveTextContent('Not backed up · 1 change');
     expect(screen.getByRole('status')).toHaveTextContent('Offline · backs up when you reconnect');
   });
 });
@@ -1544,7 +1544,7 @@ describe('RevisionSyncRegion people with access', () => {
     const backup = screen.getByRole('status', { name: 'Backup status' });
     expect(backup).toHaveTextContent('Cloud copy unavailable');
     expect(backup).toHaveTextContent(
-      'The cloud copy may have been deleted or your access may have changed. Every revision stays on this device.',
+      'The cloud copy was deleted or your access changed. Your history is still on this device.',
     );
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();

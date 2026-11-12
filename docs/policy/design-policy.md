@@ -52,8 +52,8 @@ measurements remain explicit.
   a false “No matches” while pages remain. Keep focus stable as results arrive.
 - **Temporal hiding preserves history.** Recent work precedes an explicit
   Earlier disclosure. Fold repetitive idle checkpoints for display without
-  deleting or squashing records. Keep current, first, named, fork/merge, restored
-  and chat-linked revisions identifiable; show a branch lane only at a real fork.
+  deleting or squashing records. Keep the current entry, the Start version and
+  every version, fork/merge, restored and chat-linked entries identifiable; show a branch lane only at a real fork.
   Closed projects and older chats follow the same recency principle.
 - **Use the lightest useful depth.** Summary → related detail → exact evidence.
   Avoid stacked cards, repeated headings and folds that restate their parent.
@@ -95,9 +95,9 @@ measurements remain explicit.
   failures belong inline with their owning surface and next action, not as a
   duplicate global toast or a false empty result.
 
-### Revisions and streamed work
+### History and streamed work
 
-A fresh Revisions pane starts with visible **Where you are** and **History**.
+A fresh History pane starts with visible **Current project and branch** and its entries.
 Branch management appears once additional branches are relevant; a discoverable
 New branch action in its place enables first use. A chat chooses its branch from
 that branch's row, never from the composer. Sync configuration
@@ -107,7 +107,7 @@ data sharing and opt-out remain visible before commitment. Connected backup
 becomes a compact summary with an explicit change action. Current checkout
 identity remains readable even when advanced controls are folded away.
 
-In chat, one compact revision summary belongs directly after its user request,
+In chat, one compact save summary belongs directly after its user request,
 before the assistant's reasoning, tools and answer, only after the admitted
 attempt confirms a change to a versioned file. A placement, base revision,
 checkout dirty state, tool invocation or save attempt does not establish that
@@ -380,7 +380,7 @@ Engineering seriousness with personality confined to copy. Metrics are honest an
 
 Write from the user's side: name what people control and recognize, not internal
 implementation layers. Use plain verbs, sentence case and one job per label.
-Controls name their effect (Save changes, Compare revisions); keep that name
+Controls name their effect (Save changes, Compare); keep that name
 through confirmation and outcome. Failure explains what happened and the next
 recovery step without apology or vague reassurance. Empty states give orientation
 and a useful next action, never an overlapping decorative card.

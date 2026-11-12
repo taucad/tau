@@ -9,7 +9,7 @@ import { waitForStageReady } from '#support/viewer-stage.js';
 /**
  * W2 on a real phone route (D2, D3, EQ2 = H1; canvas HDR-03, HDR-07, HDR-08): the project's top bar is one 48px row of
  * three controls — sidebar, title with its status line, Share — each a 40px target inside the bar, with no horizontal
- * overflow at 320px and 390px. The title opens the project sheet, where Revisions, Export and Details live once and
+ * overflow at 320px and 390px. The title opens the project sheet, where History, Export and Details live once and
  * open their surfaces; the viewer's dock strip no longer carries Share, Export or the revision trigger.
  */
 
@@ -152,7 +152,7 @@ test.each([
     }),
   );
   const names = rows.map((row) => row.name);
-  for (const name of ['Revisions', 'Export', 'Details']) {
+  for (const name of ['History', 'Export', 'Details']) {
     expect(names.filter((candidate) => candidate === name)).toHaveLength(1);
   }
   expect(names).not.toContain('Share');
@@ -226,7 +226,7 @@ const navButton = (name: string): Locator =>
   selectors.getByRole('navigation', { name: 'Workbench' }).getByRole('button', { name, exact: true });
 
 /** Open a destination from the project sheet, as the person does from the title. */
-const openFromProjectSheet = async (name: 'Revisions' | 'Export' | 'Details'): Promise<void> => {
+const openFromProjectSheet = async (name: 'History' | 'Export' | 'Details'): Promise<void> => {
   await target.click(titleButton(), { touch: true });
   await target.expectVisible(projectSheet());
   await target.click(projectSheet().getByRole('button', { name, exact: true }), { touch: true });
@@ -236,7 +236,7 @@ const openFromProjectSheet = async (name: 'Revisions' | 'Export' | 'Details'): P
 
 const revisionsStrip = (): Locator =>
   selectors
-    .getByRole('region', { name: 'Revisions', exact: true })
+    .getByRole('region', { name: 'History', exact: true })
     .getByRole('region', { name: 'Where you are', exact: true });
 
 /** Change the seed's Width parameter, which lives in versioned `.tau/parameters`, so the files differ from the head. */
@@ -249,10 +249,10 @@ const editWidth = async (value: string): Promise<void> => {
   await target.expectValue(width.first(), value, 30_000);
 };
 
-/** Save a revision from the Revisions strip, reached through the project sheet. */
+/** Save from the History strip, reached through the project sheet. */
 const saveRevisionFromSheet = async (): Promise<void> => {
-  await openFromProjectSheet('Revisions');
-  const save = revisionsStrip().getByRole('button', { name: 'Save revision', exact: true });
+  await openFromProjectSheet('History');
+  const save = revisionsStrip().getByRole('button', { name: 'Save', exact: true });
   await target.expectVisible(save, 60_000);
   await target.click(save, { touch: true });
 };
@@ -261,10 +261,10 @@ test.each([
   { width: 320, height: 640 },
   { width: 390, height: 844 },
 ])(
-  'says Save not confirmed when the store refuses a settings save, and Retry save in the sheet recovers at $width×$height (HDR-05)',
+  'says Couldn’t confirm the save when the store refuses a settings save, and Retry save in the sheet recovers at $width×$height (HDR-05)',
   async (viewport) => {
     await openTouchPhone(viewport, '/__e2e/project-file-tree');
-    await expectStatusWithout('Save not confirmed');
+    await expectStatusWithout('Couldn’t confirm the save');
     const directory = await projectDirectory();
     let viewId: string | undefined;
     await expect
@@ -294,7 +294,7 @@ test.each([
         .getByRole('button', { name: 'Section view', exact: true }),
       { touch: true },
     );
-    await expectStatus('Save not confirmed · 1 issue', 60_000);
+    await expectStatus('Couldn’t confirm the save · 1 issue', 60_000);
     await target.expectVisible(attentionGlyph());
     // Still three controls: the record issues have no trigger of their own on a phone (I4).
     await target.expectCount(topBar().getByRole('button'), 3);
@@ -309,7 +309,7 @@ test.each([
 
     await releaseProjectFile(viewRecord);
     await target.click(retry, { touch: true });
-    await expectStatusWithout('Save not confirmed');
+    await expectStatusWithout('Couldn’t confirm the save');
     await expectStatusWithout('issue');
     await target.expectCount(projectSheet().getByRole('button', { name: 'Retry save', exact: true }), 0);
     await expect.poll(sectionActive, { timeout: 30_000 }).toBe(true);
@@ -320,7 +320,7 @@ test.each([
   { width: 320, height: 640 },
   { width: 390, height: 844 },
 ])(
-  'says Save not confirmed when the store refuses a revision, and keeps where you are at $width×$height (HDR-05, S19)',
+  'says Couldn’t confirm the save when the store refuses a revision, and keeps where you are at $width×$height (HDR-05, S19)',
   async (viewport) => {
     await openTouchPhone(viewport, '/__e2e/project-file-tree?main=touch-parameters');
     await editWidth('31');
@@ -331,14 +331,14 @@ test.each([
     await holdProjectFile('.git/refs/heads/main');
     await editWidth('32');
     await saveRevisionFromSheet();
-    await expectStatus('Save not confirmed', 120_000);
+    await expectStatus('Couldn’t confirm the save', 120_000);
     await target.expectVisible(attentionGlyph());
-    // The project sheet names the head it still holds: main at Rev 1, never *Setting up*.
+    // The project sheet names the branch it still holds: main, never *Setting up*.
     await target.click(titleButton(), { touch: true });
     await target.expectVisible(projectSheet());
     await target.expectContainingText(
-      projectSheet().getByRole('button', { name: 'Revisions', exact: true }),
-      'Rev 1 · main',
+      projectSheet().getByRole('button', { name: 'History', exact: true }),
+      'main',
       30_000,
     );
     await target.screenshot(undefined, `mobile-status-revision-not-confirmed-${String(viewport.width)}.png`);
@@ -356,7 +356,7 @@ test.each([
   { width: 320, height: 640 },
   { width: 390, height: 844 },
 ])(
-  'names the branch only off main and says Follow chat as a fact, with the verb in the sheet at $width×$height (HDR-06)',
+  'names the branch only off main and says Switch to the branch as a fact, with the verb in the sheet at $width×$height (HDR-06)',
   async (viewport) => {
     const branch = 'fillet-exploration';
     await openTouchPhone(viewport, '/__e2e/project-file-tree?main=touch-parameters&chat=1');
@@ -364,12 +364,12 @@ test.each([
     await saveRevisionFromSheet();
     await expectStatus('Saved', 120_000);
 
-    await openFromProjectSheet('Revisions');
+    await openFromProjectSheet('History');
     await target.click(revisionsStrip().getByRole('button', { name: 'New branch' }), { touch: true });
-    await target.fill(selectors.getByRole('textbox', { name: 'Name for the new branch' }), branch);
+    await target.fill(selectors.getByRole('textbox', { name: 'Branch name' }), branch);
     await target.click(selectors.getByRole('button', { name: 'Create branch' }), { touch: true });
     const row = selectors
-      .getByRole('region', { name: 'Revisions', exact: true })
+      .getByRole('region', { name: 'History', exact: true })
       .getByRole('list', { name: 'Branches', exact: true })
       .getByRole('listitem')
       .filter({ has: selectors.getByRole('button', { name: `Actions for ${branch}`, exact: true }) });
@@ -382,34 +382,36 @@ test.each([
     await target.click(selectors.getByRole('menuitem', { name: `Use ${branch} in this chat`, exact: true }), {
       touch: true,
     });
-    await expectStatus('Saved · Follow chat', 60_000);
+    await expectStatus(`Saved · Switch to ${branch}`, 60_000);
     await target.expectCount(topBar().getByRole('button'), 3);
 
     // Following is the sheet's verb; the workbench then works on the branch, which the line names.
     await target.click(titleButton(), { touch: true });
     await target.expectVisible(projectSheet());
-    await target.click(projectSheet().getByRole('button', { name: 'Follow chat', exact: true }), { touch: true });
+    await target.click(projectSheet().getByRole('button', { name: `Switch to ${branch}`, exact: true }), {
+      touch: true,
+    });
     await expectStatus(`Saved · on ${branch}`, 60_000);
     await target.screenshot(undefined, `mobile-status-on-branch-${String(viewport.width)}.png`);
   },
 );
 
-/** The Revisions surface's Branches row for `name`, by its own *Actions for* button. */
+/** The History surface's Branches row for `name`, by its own *Actions for* button. */
 const branchRow = (name: string): Locator =>
   selectors
-    .getByRole('region', { name: 'Revisions', exact: true })
+    .getByRole('region', { name: 'History', exact: true })
     .getByRole('list', { name: 'Branches', exact: true })
     .getByRole('listitem')
     .filter({ has: selectors.getByRole('button', { name: `Actions for ${name}`, exact: true }) });
 
 /** Put the workbench on `name` from its Branches row, answering the guard when it asks. */
 const switchTo = async (name: string): Promise<void> => {
-  await openFromProjectSheet('Revisions');
+  await openFromProjectSheet('History');
   await target.click(selectors.getByRole('button', { name: `Switch to ${name}`, exact: true }), { touch: true });
   await answerIfAsked(
     'Switch branch',
     selectors
-      .getByRole('region', { name: 'Revisions', exact: true })
+      .getByRole('region', { name: 'History', exact: true })
       .getByCss(`ul[aria-label="Branches"] > li[aria-current="true"]`)
       .filter({ has: selectors.getByRole('button', { name: `Actions for ${name}`, exact: true }) }),
   );
@@ -427,9 +429,9 @@ test.each([
     await editWidth('31');
     await saveRevisionFromSheet();
     await expectStatus('Saved', 120_000);
-    await openFromProjectSheet('Revisions');
+    await openFromProjectSheet('History');
     await target.click(revisionsStrip().getByRole('button', { name: 'New branch' }), { touch: true });
-    await target.fill(selectors.getByRole('textbox', { name: 'Name for the new branch' }), branch);
+    await target.fill(selectors.getByRole('textbox', { name: 'Branch name' }), branch);
     await target.click(selectors.getByRole('button', { name: 'Create branch' }), { touch: true });
     await target.expectVisible(branchRow(branch), 60_000);
     await switchTo(branch);
@@ -442,7 +444,7 @@ test.each([
     await saveRevisionFromSheet();
     await expectStatus('Saved', 120_000);
 
-    await openFromProjectSheet('Revisions');
+    await openFromProjectSheet('History');
     await target.click(branchRow(branch).getByRole('button', { name: `Actions for ${branch}`, exact: true }), {
       touch: true,
     });
@@ -464,14 +466,14 @@ test.each([
     expect(conflictBar.documentOverflow).toBeLessThanOrEqual(0);
     await target.screenshot(undefined, `mobile-status-conflict-${String(viewport.width)}.png`);
 
-    // The project sheet moves Revisions first as the decision, once, and it opens where the decision is made (I4, I5).
+    // The project sheet moves History first as the decision, once, and it opens where the decision is made (I4, I5).
     await target.click(titleButton(), { touch: true });
     await target.expectVisible(projectSheet());
     const decide = projectSheet()
       .getByRole('list', { name: 'Decision', exact: true })
-      .getByRole('button', { name: 'Revisions', exact: true });
+      .getByRole('button', { name: 'History', exact: true });
     await target.expectVisible(decide, 30_000);
-    await target.expectCount(projectSheet().getByRole('button', { name: 'Revisions', exact: true }), 1);
+    await target.expectCount(projectSheet().getByRole('button', { name: 'History', exact: true }), 1);
     await target.expectAccessibleDescription(decide, 'Needs your decision on main');
     await target.screenshot(undefined, `mobile-project-sheet-conflict-${String(viewport.width)}.png`);
     await target.click(decide, { touch: true });

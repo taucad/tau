@@ -325,7 +325,7 @@ describe('ChatInterfaceMobile', () => {
     state.activeTab = 'revisions';
     renderShell();
 
-    const surface = await screen.findByRole('region', { name: 'Revisions' });
+    const surface = await screen.findByRole('region', { name: 'History' });
     expect(await within(surface).findByText('Revision list')).toBeInTheDocument();
     expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
     for (const labelled of document.querySelectorAll('[aria-labelledby]')) {
@@ -441,7 +441,7 @@ describe('ChatInterfaceMobile', () => {
     files: 'Files',
     model: 'Model tree',
     print: 'Print',
-    revisions: 'Revisions',
+    revisions: 'History',
     agents: 'Agents',
     jobs: 'Jobs',
     export: 'Export',

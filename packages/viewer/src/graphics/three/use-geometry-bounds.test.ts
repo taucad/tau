@@ -3,15 +3,19 @@ import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { createActor } from 'xstate';
-import type { Actor } from 'xstate';
+import type { Actor, SnapshotFrom } from 'xstate';
+import type * as XStateReact from '@xstate/react';
+import { mock } from 'vitest-mock-extended';
 import type { Mechanism } from '@taucad/kinematics';
 import { fromThreeRenderBounds } from '@taucad/three/spatial';
 import type { RenderFrame } from '@taucad/spatial';
 import { useGeometryBounds } from '#graphics/three/use-geometry-bounds.js';
-import { useCameraFraming } from '#graphics/three/use-camera-framing.js';
 import { createEdgePrototypeGeometry } from '#graphics/three/utils/gltf-edge-batches.js';
 import { sceneTag } from '#graphics/three/utils/scene-tags.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
+import type { graphicsMachine } from '#machines/graphics.machine.js';
+
+type GraphicsSnapshot = SnapshotFrom<typeof graphicsMachine>;
 
 const mocks = vi.hoisted(() => ({
   frame: undefined as (() => void) | undefined,
@@ -38,9 +42,8 @@ const mocks = vi.hoisted(() => ({
       }),
     },
   },
-  framing: { initialized: false, preserveOrientationOnFirstFrame: false },
-  fitListener: undefined as (() => void) | undefined,
   geometryKey: 'geometry-key',
+  presentedRevision: 1,
 }));
 
 const getCanvasState = () => ({ size: { width: 800, height: 600 } });
@@ -53,20 +56,31 @@ vi.mock('@react-three/fiber', () => ({
     selector ? selector({ invalidate: mocks.invalidate, get: getCanvasState }) : getCanvasState(),
 }));
 
-vi.mock('#hooks/use-graphics.jsx', () => ({
-  useGraphics: () => ({
-    send: mocks.send,
-    on: (_type: string, listener: () => void) => {
-      mocks.fitListener = listener;
-      return { unsubscribe: vi.fn() };
-    },
-  }),
-  useGraphicsSelector: () => mocks.geometryKey,
-  useCameraRig: () => mocks.camera,
-  useViewCameraFraming: () => mocks.framing,
-  useRenderFrame: () => mocks.renderFrame,
-  useKinematicsRef: () => mocks.kinematics,
-}));
+vi.mock('#hooks/use-graphics.jsx', async () => {
+  const { useSelector } = await vi.importActual<typeof XStateReact>('@xstate/react');
+  return {
+    useGraphics: () => ({ send: mocks.send }),
+    useGraphicsSelector: <T>(selector: (snapshot: GraphicsSnapshot) => T) =>
+      selector(
+        mock<GraphicsSnapshot>({
+          context: {
+            artifactKey: mocks.geometryKey,
+            gltfPresentation: { presentedKey: mocks.geometryKey, presentedRevision: mocks.presentedRevision },
+          },
+        }),
+      ),
+    useCameraRig: () => mocks.camera,
+    useRenderFrame: () => mocks.renderFrame,
+    useKinematicsSelector: <T>(selector: (snapshot: SnapshotFrom<typeof kinematicsMachine>) => T) =>
+      useSelector(mocks.kinematics!, selector),
+  };
+});
+
+/** The measurements the hook reported to the graphics actor. */
+const measurements = () =>
+  mocks.send.mock.calls
+    .map(([event]) => event as { type: string; key?: string; bounds?: unknown; radius?: number; stage?: unknown })
+    .filter((event) => event.type === 'geometryBoundsMeasured');
 
 const createSceneReferences = (x: number) => {
   const outer = new THREE.Group();
@@ -89,8 +103,8 @@ describe('useGeometryBounds', () => {
     mocks.send.mockClear();
     mocks.invalidate.mockClear();
     mocks.camera.actorRef.send.mockClear();
-    mocks.framing.initialized = false;
     mocks.geometryKey = 'geometry-key';
+    mocks.presentedRevision = 1;
     mocks.renderFrame = { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 };
     mocks.kinematics = createActor(kinematicsMachine, { input: {} }).start();
   });
@@ -107,6 +121,35 @@ describe('useGeometryBounds', () => {
     act(() => mocks.frame?.());
     expect(bounds).toHaveBeenCalledOnce();
     bounds.mockRestore();
+  });
+
+  it('should measure a committed presentation that keeps its key', () => {
+    const { innerRef, outerRef } = createSceneReferences(10);
+    const hook = renderHook(() => useGeometryBounds(innerRef, outerRef));
+    // The demand-driven canvas draws, and so measures, only when asked.
+    expect(mocks.invalidate).toHaveBeenCalledOnce();
+    act(() => mocks.frame?.());
+    expect(measurements()).toHaveLength(1);
+
+    mocks.presentedRevision = 2;
+    hook.rerender();
+    expect(mocks.invalidate).toHaveBeenCalledTimes(2);
+    act(() => mocks.frame?.());
+    expect(measurements()).toHaveLength(2);
+    expect(measurements().at(-1)).toMatchObject({ key: 'geometry-key', bounds: { min: [9, -2, -3], max: [11, 2, 3] } });
+  });
+
+  it('should measure again with a new fit margin, so Fit view uses it', () => {
+    const { innerRef, outerRef } = createSceneReferences(10);
+    const hook = renderHook(({ fitMargin }) => useGeometryBounds(innerRef, outerRef, { fitMargin }), {
+      initialProps: { fitMargin: 0.1 },
+    });
+    act(() => mocks.frame?.());
+
+    hook.rerender({ fitMargin: 0.3 });
+    expect(mocks.invalidate).toHaveBeenCalledTimes(2);
+    act(() => mocks.frame?.());
+    expect(measurements().map(({ stage }) => (stage as { margin: number }).margin)).toEqual([0.1, 0.3]);
   });
 
   it('excludes real edge quads and nested presentation surfaces from physical bounds', () => {
@@ -126,10 +169,10 @@ describe('useGeometryBounds', () => {
     const updatePresentation = vi.spyOn(presentation, 'updateWorldMatrix');
     const originalParent = presentation.parent;
     const { result } = renderHook(() => useGeometryBounds(innerRef, outerRef));
+    act(() => mocks.frame?.());
     expect(result.current.geometryBounds.equals(expected)).toBe(true);
     expect(updatePresentation).not.toHaveBeenCalled();
     expect(presentation.parent).toBe(originalParent);
-    act(() => mocks.frame?.());
     act(() => mocks.frame?.());
     expect(updatePresentation).not.toHaveBeenCalled();
   });
@@ -156,6 +199,7 @@ describe('useGeometryBounds', () => {
       bounds: new THREE.Box3().setFromObject(instances),
     });
     const { result } = renderHook(() => useGeometryBounds(innerRef, outerRef));
+    act(() => mocks.frame?.());
     expect(result.current.geometryBounds.min.toArray()).toEqual(expected.min);
     expect(result.current.geometryBounds.max.toArray()).toEqual(expected.max);
     const bounds = vi.spyOn(instances, 'updateWorldMatrix');
@@ -173,14 +217,28 @@ describe('useGeometryBounds', () => {
     expect(result.current.geometryBounds.min.toArray()).toEqual([9, -2, -3]);
     expect(result.current.geometryBounds.max.toArray()).toEqual([11, 2, 3]);
     expect(result.current.geometryRadius).toBeCloseTo(Math.sqrt(14), 10);
-    const event = mocks.send.mock.calls.at(-1)?.[0] as unknown as {
-      readonly type: string;
-      readonly radius: number;
-      readonly centerMeters: [number, number, number];
-    };
-    expect(event.type).toBe('sceneRadiusUpdated');
-    expect(event.radius).toBeCloseTo(Math.sqrt(14), 10);
-    expect(event.centerMeters).toEqual([10, 0, 0]);
+    const event = mocks.send.mock.calls.findLast(
+      ([sent]) => (sent as { type: string }).type === 'sceneRadiusUpdated',
+    )?.[0] as
+      | { readonly type: string; readonly radius: number; readonly centerMeters: [number, number, number] }
+      | undefined;
+    expect(event?.type).toBe('sceneRadiusUpdated');
+    expect(event?.radius).toBeCloseTo(Math.sqrt(14), 10);
+    expect(event?.centerMeters).toEqual([10, 0, 0]);
+    const [{ radius, ...measured }] = measurements() as [ReturnType<typeof measurements>[number]];
+    expect(radius).toBeCloseTo(Math.sqrt(14), 10);
+    expect([measured]).toEqual([
+      {
+        type: 'geometryBoundsMeasured',
+        key: 'geometry-key',
+        bounds: { min: [9, -2, -3], max: [11, 2, 3] },
+        viewport: { width: 800, height: 600, pixelRatio: 1 },
+        stage: {
+          orientation: { direction: expect.any(Array) as unknown, up: [0, 0, 1] },
+          margin: 0.1,
+        },
+      },
+    ]);
   });
 
   it('inverts render-local bounds into physical metres', () => {
@@ -226,17 +284,19 @@ describe('useGeometryBounds', () => {
     });
     act(() => mocks.frame?.());
     expect(result.current.geometryCenter.toArray()).toEqual([10, 0, 0]);
-    expect(mocks.invalidate).not.toHaveBeenCalled();
 
+    // A paused clip is a settled pose, which no `poseSettled` reports: the settled revision re-measures it.
+    mocks.invalidate.mockClear();
     act(() => {
       kinematics.send({ type: 'pause', unitId });
     });
-    expect(mocks.invalidate).toHaveBeenCalledTimes(1);
+    // The settled pose asks the demand-driven canvas for the frame that measures it.
+    expect(mocks.invalidate).toHaveBeenCalled();
     act(() => mocks.frame?.());
     expect(result.current.geometryCenter.toArray()).toEqual([20, 0, 0]);
   });
 
-  it('should refresh settled drag bounds without moving the camera and still allow Fit view', () => {
+  it('should report a settled drag and a new presentation as measurements of their keys', () => {
     const unitId = 'file:main.ts';
     const kinematics = mocks.kinematics!;
     kinematics.send({
@@ -251,44 +311,44 @@ describe('useGeometryBounds', () => {
       },
     });
     const { innerRef, outerRef } = createSceneReferences(10);
-    const hook = renderHook(() => {
-      const bounds = useGeometryBounds(innerRef, outerRef);
-      useCameraFraming(bounds);
-      return bounds;
-    });
+    const hook = renderHook(() => useGeometryBounds(innerRef, outerRef));
     act(() => mocks.frame?.());
     act(() => mocks.frame?.());
-    expect(mocks.camera.actorRef.send).toHaveBeenCalledWith({ type: 'frame', margin: 0.1 });
-    mocks.camera.actorRef.send.mockClear();
+    expect(measurements().map(({ key, bounds }) => ({ key, bounds }))).toEqual([
+      { key: 'geometry-key', bounds: { min: [9, -2, -3], max: [11, 2, 3] } },
+    ]);
 
     act(() => {
       kinematics.send({ type: 'setDragEnabled', unitId, enabled: true });
       kinematics.send({ type: 'dragStart', unitId, componentId: 'component:arm', point: [1, 0, 0] });
       kinematics.send({ type: 'dragMove', unitId, target: [0, 1, 0] });
     });
-    // The pose composer moves the scene before bounds are measured on release.
+    // The pose composer moves the scene; nothing is measured until the drag ends.
     innerRef.current!.children[0]!.position.x = 20;
+    act(() => mocks.frame?.());
+    expect(measurements()).toHaveLength(1);
     act(() => {
       kinematics.send({ type: 'dragEnd', unitId });
     });
     act(() => mocks.frame?.());
-    act(() => mocks.frame?.());
 
+    // The same key: framing only refreshes the camera's bounds, so the camera stays where the person put it.
     expect(hook.result.current.geometryCenter.toArray()).toEqual([20, 0, 0]);
-    expect(mocks.camera.actorRef.send).toHaveBeenCalledOnce();
-    expect(mocks.camera.actorRef.send).toHaveBeenCalledWith({
-      type: 'setBounds',
-      bounds: { min: [19, -2, -3], max: [21, 2, 3] },
-    });
-
-    act(() => mocks.fitListener?.());
-    expect(mocks.camera.actorRef.send).toHaveBeenLastCalledWith({ type: 'frame', margin: 0.1 });
-    mocks.camera.actorRef.send.mockClear();
+    expect(measurements().map(({ key, bounds }) => ({ key, bounds }))).toEqual([
+      { key: 'geometry-key', bounds: { min: [9, -2, -3], max: [11, 2, 3] } },
+      { key: 'geometry-key', bounds: { min: [19, -2, -3], max: [21, 2, 3] } },
+    ]);
 
     mocks.geometryKey = 'replacement-geometry';
     innerRef.current!.children[0]!.position.x = 30;
+    mocks.invalidate.mockClear();
     hook.rerender();
+    expect(mocks.invalidate).toHaveBeenCalledOnce();
     act(() => mocks.frame?.());
-    expect(mocks.camera.actorRef.send).toHaveBeenLastCalledWith({ type: 'frame', margin: 0.1 });
+    expect(measurements().at(-1)).toMatchObject({
+      key: 'replacement-geometry',
+      bounds: { min: [29, -2, -3], max: [31, 2, 3] },
+    });
+    expect(mocks.camera.actorRef.send).not.toHaveBeenCalled();
   });
 });

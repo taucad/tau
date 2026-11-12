@@ -3,13 +3,14 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-11-11'
+updated: '2026-11-12'
 related:
   - docs/research/revisions-always-on-sync-charter.md
   - docs/research/git-storage-substrate-charter.md
   - docs/research/project-git-index-always-empty.md
   - docs/architecture/revisions-cloud-handbook.md
   - docs/research/revisions-sync-closeout-blueprint.md
+  - docs/research/revisions-history-versions-blueprint.md
   - docs/architecture/workspace-filesystem-and-revisions.md
   - docs/architecture/github-repository-integration.md
   - docs/research/github-repository-import-and-linked-revisions-blueprint.md
@@ -37,7 +38,8 @@ Use each term for exactly one concept and keep engineering terms out of product 
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Workspace       | Directory served by one authority and the unit a client binds to; Home is a workspace                                                                                               |
 | Project         | Directory containing `tau.json`; unit of export, portability, and revision history                                                                                                  |
-| Revision        | Immutable authored tree plus parents, provenance, and summary, addressed by commit id                                                                                               |
+| Revision        | Engineering term only: immutable authored tree plus parents, provenance, and summary, addressed by commit id                                                                        |
+| History entry   | What a person sees of one revision: its title, who and time, and no number                                                                                                          |
 | Revision graph  | Revisions and named refs of one project; one repository per project                                                                                                                 |
 | Branch          | Movable named ref; `main` is the default for a new project, while an import may select another line                                                                                 |
 | Head            | Revision named by a branch or applied to a checkout                                                                                                                                 |
@@ -48,13 +50,15 @@ Use each term for exactly one concept and keep engineering terms out of product 
 | Lease           | Host record attaching a run to a checkout, stored under `.tau/runs/`                                                                                                                |
 | Backend         | Local revision engine behind `RevisionPort`                                                                                                                                         |
 | Remote          | Peer Git revision graph; refs and objects move, never working trees                                                                                                                 |
-| Named version   | Annotated tag with note, actor, creation time, and number (`V2` onward; V1 is the Start entry)                                                                                      |
-| Publication     | Share record pointing at a named version synced to Tau Cloud                                                                                                                        |
+| Version         | Annotated tag with note, actor, creation time, and a project-wide number (`V2` onward; V1 is the Start entry), shown as `V3 · Ready for print`                                      |
+| Publication     | Share record pointing at a version synced to Tau Cloud                                                                                                                              |
 | Project session | All resources held for one live project on one client                                                                                                                               |
 
-Use **Revision**, **Branch**, **Current**, **Restore**, **Switch**, **Merge**, **Discard**, **Work in**, **Sync**, **Tau Cloud**, **system**, and **Read-only** in operator-facing UI. Never expose checkout, lease, backend, worktree, ref, or HEAD as product vocabulary.
+Use **History**, **Version**, **Branch**, **Current**, **Restore**, **Switch**, **Merge**, **Close**, **Back up**, **Tau Cloud**, **system**, and **Read-only** in operator-facing UI. Never expose checkout, lease, backend, worktree, ref, head, remote, line, linked, or host (except "Git host") as product vocabulary.
 
-Carry a refusal across the worker boundary as a `RevisionPortErrorCode`, never as a sentence: the page owns the words (`apps/libs/ui-core/src/lib/revision-failure-copy.ts`) and a port or machine message is a diagnostic for logs and tests. `tau-lint/no-engineering-vocabulary-in-copy` enforces the banned vocabulary in toast copy.
+Reserve **revision** and **Rev A, B, C** for a release workflow (blueprint M11). A save is a history entry: product copy never calls it a revision and never gives it a number; it names an entry by its title, an autosave by its time, and a version by `V3`. "Revision" stays the engineering term for the immutable tree in code, package and file names (`@taucad/revisions`, `RevisionRow`, `RevisionPort`).
+
+Carry a refusal across the worker boundary as a `RevisionPortErrorCode`, never as a sentence: the page owns the words (`apps/libs/ui-core/src/lib/revision-failure-copy.ts`) and a port or machine message is a diagnostic for logs and tests. `tau-lint/no-engineering-vocabulary-in-copy` enforces the banned vocabulary in toast copy, and `tau-lint/no-save-revision-in-copy` flags "revision" and `Rev` followed by a digit in JSX text, toast copy and the two copy modules (`revision-vocabulary.ts`, `revision-failure-copy.ts`).
 
 ### 2. Keep one immutable graph per project
 
@@ -64,11 +68,11 @@ A revision id is its commit id. Its `treeId` is the content identity of exactly 
 
 Carry a structured actor, trigger, summary, and provenance on every revision. The `Tau-Metadata` trailer is version 2 (blueprint B1): `provenance.actor` (a user, or an agent with its run id and the user it acted for), `provenance.capture` (the trigger) and `provenance.via` (the surface that wrote it: `browser`, `desktop`, `cli`, `serve` or `cloud`) are required, no capture is built without a resolved identity, there is no fallback actor id, and no version 1 reader is kept. Include `provenance.turnId` in the `Tau-Metadata` trailer and change-id preimage so `log(branch)` alone can rebuild a chat revision card after reload. Admit only host-attested `turn.finalized`, `turn.conflicted`, and `turn.failed` settlements to revision UI.
 
-Read who made a revision by type, never from a string (blueprint B2). A history row carries `who`: `{ kind: 'recorded', identity }` with the identity its trailer records, or `{ kind: 'unrecorded', authorName? }` with the git author of a commit Tau did not write; it carries `capture` under the trailer's name, and its recorded trailer only for diagnostics behind Tau's debug setting. No row has a string actor or an `unknown` stand-in, no reader matches an id against a known fallback, and the agent's `revisions` tool returns the same typed `who` and none of the row's ids beyond its own.
+Read who made a revision by type, never from a string (blueprint B2). A history row carries `who`: `{ kind: 'recorded', identity }` with the identity its trailer records, or `{ kind: 'unrecorded', authorName? }` with the git author of a commit Tau did not write; it carries `capture` under the trailer's name, and its recorded trailer only for diagnostics behind Tau's debug setting. No row has a string actor or an `unknown` stand-in, no reader matches an id against a known fallback, and the agent's `history` tool returns the same typed `who` and none of the row's ids beyond its own.
 
-Derive `Rev N` as a first-parent ordinal on the selected branch. Derive dirty, **Current**, branch labels, and **Follow chat** from the graph and selected checkout at read time. Never persist those projections or derive them from a chat transcript.
+Never display a first-parent ordinal: an entry has no number (M11), and the ordinal stays an internal fact that only says whether anything is saved yet. Derive dirty, **Current**, branch labels, and **Switch to _branch_** from the graph and selected checkout at read time. Never persist those projections or derive them from a chat transcript.
 
-Show the workbench checkout in one always-visible header chip. Make it the only branch label outside the Revisions pane and show **Follow chat** only when the active chat and workbench select different checkouts.
+Show the workbench checkout in one always-visible header chip. Make it the only branch label outside the History pane and show **Switch to _branch_** only when the active chat and workbench select different checkouts.
 
 ### 3. Make one checkout the workbench root
 
@@ -85,7 +89,7 @@ Implement **Switch** as one verb:
 | Target branch has no linked checkout and no lease holds the live checkout | Apply the branch to the live checkout        |
 | Target has a linked checkout, or the live checkout is leased              | Re-root the workbench at the linked checkout |
 
-Never re-base a running turn. Refuse a **Restore**, with **Switch**'s sentence and before any cut, while a turn holds the checkout; a turn admitted during a restore waits until the restore revision lands. Apply **Restore** to the selected checkout it was planned against and keep that checkout on its line, never moving its branch: cut a dirty checkout first, then apply the target tree and cut a revision with trigger `restore` and provenance `restoredFrom`, so the line fast-forwards and no working-tree byte becomes unreachable. Re-check the head's tree and the lease inside the checkout fence before applying, and apply nothing when either moved. A restore to the current tree mints nothing. A checkout is on a branch or unborn and is never detached; viewing an older revision read-only is a separate verb (a compare view or a linked checkout), never a state of the selected checkout. Offer **Undo restore** as another restore whose target is the restored revision's first parent. Implement **Undo** as the scoped inverse of one operation recorded under rule 10's operation log: mint the reverse of that operation's own tree delta as a new revision, apply it as a three-way merge when the line has moved since, and refuse with a named reason when it cannot apply cleanly; never undo by restoring a whole earlier tree over other work. The editor's undo stack stays inside unsaved checkout state.
+Never re-base a running turn. Refuse a **Restore**, with **Switch**'s sentence and before any cut, while a turn holds the checkout; a turn admitted during a restore waits until the restore revision lands. Apply **Restore** to the selected checkout it was planned against and keep that checkout on its line, never moving its branch: cut a dirty checkout first, then apply the target tree and cut a revision with trigger `restore` and provenance `restoredFrom`, so the line fast-forwards and no working-tree byte becomes unreachable. Re-check the head's tree and the lease inside the checkout fence before applying, and apply nothing when either moved. A restore to the current tree mints nothing. A checkout is on a branch or unborn and is never detached; viewing an older entry read-only is a separate verb (a compare view or a linked checkout), never a state of the selected checkout. Offer **Undo restore** as another restore whose target is the restored revision's first parent. Implement **Undo** as the scoped inverse of one operation recorded under rule 10's operation log: mint the reverse of that operation's own tree delta as a new revision, apply it as a three-way merge when the line has moved since, and refuse with a named reason when it cannot apply cleanly; never undo by restoring a whole earlier tree over other work. The editor's undo stack stays inside unsaved checkout state.
 
 ### 4. Classify the project layout once
 
@@ -156,19 +160,20 @@ Apply these composition constraints:
 
 Apply one tree-hash gate: mint only when the checkout's versioned `treeId` differs from its head. A no-change turn or save mints nothing. If concurrent cuts pass the gate, the compare-and-swap loser drops its candidate and re-reads.
 
-| Trigger          | When                                                                                           | Display                                 |
-| ---------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `save`           | `Mod+S` after editor buffers flush                                                             | normal row                              |
-| `idle`           | 5 minutes after the last checkout write                                                        | fold with consecutive automatic rows    |
-| `hidden`         | browser becomes hidden after a write                                                           | fold with automatic rows                |
-| `turn`           | every executed attempt ends                                                                    | normal row and chat card                |
-| `restore`        | before a restore, a dirty checkout; after it, the restored tree with provenance `restoredFrom` | normal row naming the restored revision |
-| `merge`          | before a fetch or branch merge touches a dirty checkout; after it, the merge revision          | normal row                              |
-| `switch`, `sync` | before or after the operation as required                                                      | normal row                              |
-| `close`          | page unload or desktop quit after a write                                                      | fold with automatic rows                |
-| `import`         | project import                                                                                 | normal row                              |
+| Trigger          | When                                                                                           | Display                                  |
+| ---------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `save`           | `Mod+S` after editor buffers flush                                                             | normal row                               |
+| `idle`           | 5 minutes after the last checkout write                                                        | fold with consecutive automatic rows     |
+| `hidden`         | browser becomes hidden after a write                                                           | fold with automatic rows                 |
+| `turn`           | every executed attempt ends                                                                    | normal row and chat card                 |
+| `restore`        | before a restore, a dirty checkout; after it, the restored tree with provenance `restoredFrom` | normal row naming the restored entry     |
+| `merge`          | before a fetch or branch merge touches a dirty checkout; after it, the merge revision          | normal row                               |
+| `switch`, `sync` | before or after the operation as required                                                      | normal row                               |
+| `close`          | page unload or desktop quit after a write                                                      | fold with automatic rows                 |
+| `create`         | a new project's first files                                                                    | the Start version, V1, "project created" |
+| `import`         | project import from GitHub, a folder or a zip                                                  | the Start version, V1, "imported from …" |
 
-Keep the idle window configurable per workspace, never per project. Keep every automatic revision immutable and append-only; fold only in display. "Always committed" means the working copy is always within one trigger of a revision; never amend, squash, or rebase a revision to get there. `Mod+S` means **Save revision** everywhere in the workbench.
+Keep the idle window configurable per workspace, never per project. Keep every automatic revision immutable and append-only; fold only in display. "Always committed" means the working copy is always within one trigger of a revision; never amend, squash, or rebase a revision to get there. `Mod+S` means **Save** everywhere in the workbench.
 
 Pace one checkout's published mints at `checkoutMintFloorMilliseconds`, 1 second, the hosted remote's same-project compare-and-set ceiling (D11). The floor is per checkout: two checkouts of one project each keep their own, so the project's mints can still exceed one a second. The floor runs after the mint has released the checkout fence, so it never holds a producer's apply; requests arriving meanwhile queue, the ambient ones become one mint (group commit), and a turn's cut keeps its own place and is never merged. A write or head move during the floor only counts, and the checkout leaves `clean`, `dirty` or re-reads once the floor has passed. A mint that published nothing is not paced. A `close` or `hidden` cut never waits for the floor, because the page may be gone before it passes: it starts at once and takes the ambient requests already queued into its mint.
 
@@ -261,9 +266,9 @@ Hide LFS terminology from users. Show storage usage against the plan in Sync, su
 
 When `tau.json.syncLargeExports` is `true`, record the allowed generated paths under the exact `refs/tau/evidence/exports` ref and transfer their LFS objects independently from authored history. The allowed set is `exports/**`, `thumbnail.webp`, `.tau/artifacts/**`, `.tau/tool-results/**`, and `.tau/offloaded-tool-results/**`. Restore only absent local files on fetch. The default and an explicit `false` transfer no evidence; disabling the preference never deletes local or remote bytes.
 
-### 14. Publish named graph versions
+### 14. Publish versions
 
-Represent a named version as an annotated tag. Publish only a named version whose graph and large objects are synced to the Tau Hosted Remote. Have the API materialize its tagged tree into the existing publication blob store; preserve public CDN and private grant-checking proxy behavior. Never upload a second project snapshot.
+Represent a version as an annotated tag carrying a project-wide number that the Tau Hosted Remote allocates. Publish only a version whose graph and large objects are synced to the Tau Hosted Remote. Have the API materialize its tagged tree into the existing publication blob store; preserve public CDN and private grant-checking proxy behavior. Never upload a second project snapshot.
 
 Number versions V1, V2, … once per project across every branch, in the tag's `Tau-Tag` trailer (`number`); V1 is the Start entry, which has no tag. Allocate no counter: a new version takes the highest known number plus one, and a moved version keeps its number. Read a tag that records no number, written before numbers or by another tool, as the lowest free number from V2 in creation order (`numberVersions` in `packages/revisions/src/version-numbers.ts`); that is reader logic, not a migration. A number is provisional until its version is backed up, and Tau Cloud is the allocator (rule 19's `GIT_PUSH_VERSION_NUMBER_TAKEN`): after backup a number never changes, and because a version is never removed, no number is retired.
 
@@ -305,21 +310,21 @@ Run these same liveness machines in browser and desktop with host-specific injec
 
 Render liveness, run progress, attention, failures, branches, and sync only as selectors over `sessions`, `project-session`, `chat-session`, and `project-revisions` snapshots. Persist only per-client unread state.
 
-| Machine signal                          | User state                                                       |
-| --------------------------------------- | ---------------------------------------------------------------- |
-| admitted                                | **Queued**                                                       |
-| running without tool                    | **Working…**                                                     |
-| tool in flight                          | **Running _tool_**                                               |
-| approval interrupt                      | **Needs your approval**                                          |
-| paused for answer                       | **Waiting for you**                                              |
-| durable reattach or retry               | **Reconnecting…**                                                |
-| run complete before revision settlement | **Finishing…**                                                   |
-| finalized and unread                    | **Done**                                                         |
-| failed and unread                       | **Failed · _reason_**                                            |
-| cancelled or stopping                   | **Stopped**                                                      |
-| branch checkout                         | branch chip; add a ring when dirty                               |
-| project sync pending or queued          | **Backing up _n_** or **Not backed up · _n_** on the project row |
-| sync or merge conflict                  | **Needs your decision**                                          |
+| Machine signal                          | User state                                                     |
+| --------------------------------------- | -------------------------------------------------------------- |
+| admitted                                | **Queued**                                                     |
+| running without tool                    | **Working…**                                                   |
+| tool in flight                          | **Running _tool_**                                             |
+| approval interrupt                      | **Needs your approval**                                        |
+| paused for answer                       | **Waiting for you**                                            |
+| durable reattach or retry               | **Reconnecting…**                                              |
+| run complete before revision settlement | **Finishing…**                                                 |
+| finalized and unread                    | **Done**                                                       |
+| failed and unread                       | **Failed · _reason_**                                          |
+| cancelled or stopping                   | **Stopped**                                                    |
+| branch checkout                         | branch chip; add a ring when dirty                             |
+| project sync pending or queued          | **Backing up _n_ changes…** or **Not backed up · _n_ changes** |
+| sync or merge conflict                  | **Needs your decision**                                        |
 
 Use glyph plus accessible text, never hue alone. Aggregate project rows from their chat children. Apply progressive disclosure: keep older History groups and autosaves collapsed, hide Branches and the composer picker until a user branch exists, remove merged branches from the active list, and hide Sync until a remote exists.
 

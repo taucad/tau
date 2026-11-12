@@ -1500,7 +1500,7 @@ describe('restore, through the machine that owns it', () => {
     const firstRecord = await port.readRevision(revisionId(first));
     expect(record?.treeId).toBe(firstRecord?.treeId);
     expect(record?.provenance).toMatchObject({ source: 'restore', capture: 'restore', restoredFrom: first });
-    expect(record?.summary.generated).toBe('Restored Rev 1');
+    expect(record?.summary.generated).toBe('Restored V1');
     expect(selectRevisionStatus(tree.actor.getSnapshot())).toMatchObject({
       line: { kind: 'branch', name: 'main' },
       headRevisionId: restored,

@@ -10,19 +10,40 @@ import type { WorkbenchView } from '@taucad/workbench';
 import { GraphicsProvider } from '@taucad/viewer/hooks/use-graphics';
 import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
 import type { ViewRecordPatch } from '#workbench-records/view-store.js';
-import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import {
+  graphicsMachine,
+  selectGraphicsFramed,
+  selectGraphicsFramingIdentity,
+} from '@taucad/viewer/machines/graphics.machine';
 import { cadMachine } from '#machines/cad.machine.js';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type { KernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { editorMachine } from '#machines/editor.machine.js';
-import { useCameraFraming } from '@taucad/viewer/graphics/three/use-camera-framing';
-import { Box3, Vector3 } from 'three';
 
-/** The view's camera and its framing record, as the graphics actor holds them. */
-const getViewCameraSession = (graphicsRef: ActorRefFrom<typeof graphicsMachine>) => {
-  const { cameraRef, cameraFraming } = graphicsRef.getSnapshot().context;
-  return { rig: { actorRef: cameraRef }, framing: cameraFraming };
+/** The view's camera, as the graphics actor holds it. */
+const getViewCameraSession = (graphicsRef: ActorRefFrom<typeof graphicsMachine>) => ({
+  rig: { actorRef: graphicsRef.getSnapshot().context.cameraRef },
+});
+
+/** Whether the view's entry has had its first geometry framed. */
+const isFramed = (graphicsRef: ActorRefFrom<typeof graphicsMachine>): boolean =>
+  selectGraphicsFramed(graphicsRef.getSnapshot());
+
+/**
+ * The canvas measures a presentation `key`: a cube of half-size `half` about the origin. The first measurement of an
+ * entry frames it; a new key that moved more than 10 % refits.
+ */
+const measure = (graphicsRef: ActorRefFrom<typeof graphicsMachine>, half = 2, key = `cube-${String(half)}`): void => {
+  act(() => {
+    graphicsRef.send({
+      type: 'geometryBoundsMeasured',
+      key,
+      bounds: { min: [-half, -half, -half], max: [half, half, half] },
+      radius: half * Math.sqrt(3),
+      viewport: { width: 800, height: 600, pixelRatio: 1 },
+    });
+  });
 };
 
 const getCanvasState = () => ({ size: { width: 800, height: 600 } });
@@ -135,24 +156,17 @@ describe('view record owner synchronization', () => {
       camera,
     });
     const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
-    const bounds = new Box3(new Vector3(-2, -2, -2), new Vector3(2, 2, 2));
-    function Frame({ radius }: { readonly radius: number }): React.JSX.Element {
-      useCameraFraming({ geometryRadius: radius, geometryBounds: bounds });
-      return <div />;
-    }
-    const draw = (radius: number) => (
+    const view = render(
       <GraphicsProvider graphicsRef={graphicsRef}>
         <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={record} writeRecord={writeRecord} />
-        <Frame radius={radius} />
-      </GraphicsProvider>
+      </GraphicsProvider>,
     );
-    const view = render(draw(0));
     const session = getViewCameraSession(graphicsRef);
     await waitFor(() => {
       expect(session.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
     });
-    view.rerender(draw(4));
-    expect(session.framing.initialized).toBe(true);
+    measure(graphicsRef);
+    expect(isFramed(graphicsRef)).toBe(true);
     expect(session.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
     expect(session.rig.actorRef.getSnapshot().context.view.verticalSpan).toBeGreaterThan(4);
     view.unmount();
@@ -178,12 +192,7 @@ describe('view record owner synchronization', () => {
         camera,
       });
       const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
-      const bounds = new Box3(new Vector3(-2, -2, -2), new Vector3(2, 2, 2));
-      function Frame({ radius }: { readonly radius: number }): React.JSX.Element {
-        useCameraFraming({ geometryRadius: radius, geometryBounds: bounds });
-        return <div />;
-      }
-      const draw = (radius: number) => (
+      const view = render(
         <GraphicsProvider graphicsRef={graphicsRef}>
           <Harness
             graphicsRef={graphicsRef}
@@ -192,10 +201,8 @@ describe('view record owner synchronization', () => {
             record={record}
             writeRecord={writeRecord}
           />
-          <Frame radius={radius} />
-        </GraphicsProvider>
+        </GraphicsProvider>,
       );
-      const view = render(draw(0));
       const session = getViewCameraSession(graphicsRef);
       await waitFor(() => {
         expect(session.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
@@ -214,8 +221,8 @@ describe('view record owner synchronization', () => {
         const { rendering } = cadRef.getSnapshot().context;
         expect(rendering?.success ? rendering.artifact.mimeType : undefined).toBe('model/gltf-binary');
       });
-      view.rerender(draw(4));
-      expect(session.framing.initialized).toBe(true);
+      measure(graphicsRef);
+      expect(isFramed(graphicsRef)).toBe(true);
       expect(session.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
       const firstFrame = session.rig.actorRef.getSnapshot().context.view;
       await new Promise((resolve) => {
@@ -466,7 +473,7 @@ describe('view record owner synchronization', () => {
     const { rerender, unmount } = render(draw(record));
     const session = getViewCameraSession(graphicsRef);
     const rig = session.rig.actorRef;
-    session.framing.initialized = true;
+    measure(graphicsRef);
     await waitFor(() => expect(rig.getSnapshot().context.view.direction[1]).toBeLessThan(-0.6));
     act(() =>
       rig.send({
@@ -517,7 +524,7 @@ describe('view record owner synchronization', () => {
     );
     const session = getViewCameraSession(graphicsRef);
     const rig = session.rig.actorRef;
-    session.framing.initialized = true;
+    measure(graphicsRef);
     await waitFor(() => expect(rig.getSnapshot().context.view.direction[1]).toBeLessThan(-0.6));
     act(() => {
       rig.send({
@@ -730,7 +737,7 @@ describe('view record owner synchronization', () => {
 
     pane.rerender(draw({ ...base, selectedKernelView: 'drawing' }));
     await waitFor(() => expect(rig.getSnapshot().context.view.direction).toEqual([1, 0, 0]));
-    session.framing.initialized = true;
+    measure(graphicsRef);
     writeRecord.mockClear();
     act(() =>
       rig.send({
@@ -831,7 +838,7 @@ describe('useViewSettingsSync settle-window characterisation', () => {
   it('today waits for the drag to go quiet, then applies a foreign pose and loses the drag pose (G3 flips, D15)', () => {
     const base = initial();
     const harness = mount(base);
-    harness.session.framing.initialized = true;
+    measure(harness.graphicsRef);
     advance(settle * 4);
     harness.writeRecord.mockClear();
     const drag = (step: number) => {
@@ -861,7 +868,7 @@ describe('useViewSettingsSync settle-window characterisation', () => {
   it('should apply a foreign pose at once while the camera is idle', () => {
     const base = initial();
     const harness = mount(base);
-    harness.session.framing.initialized = true;
+    measure(harness.graphicsRef);
     advance(settle * 4);
     const foreign = workbenchRecords.view.schema.parse({ ...base, camera: pose([0, 1, 0], 9) });
     harness.rerender(foreign);
@@ -871,7 +878,7 @@ describe('useViewSettingsSync settle-window characterisation', () => {
   it('should never write an adopted pose back over the foreign instruction it came from', () => {
     const base = initial();
     const harness = mount(base);
-    harness.session.framing.initialized = true;
+    measure(harness.graphicsRef);
     advance(settle * 4);
     harness.writeRecord.mockClear();
     const foreign = workbenchRecords.view.schema.parse({ ...base, camera: { kind: 'preset', preset: 'front' } });
@@ -889,7 +896,7 @@ describe('useViewSettingsSync settle-window characterisation', () => {
   it('should never apply an own echo while a newer local pose is live', () => {
     const base = initial();
     const harness = mount(base);
-    harness.session.framing.initialized = true;
+    measure(harness.graphicsRef);
     advance(settle * 4);
     act(() => {
       harness.rig.send({ type: 'poseObserved', source: 'input', ...pose([1, 0, 0], 4) });
@@ -912,7 +919,7 @@ describe('useViewSettingsSync settle-window characterisation', () => {
   it('should leave a live pose alone when a foreign grid-only edit arrives during a drag', () => {
     const base = workbenchRecords.view.schema.parse({ ...initial(), camera: pose([0, 1, 0], 9) });
     const harness = mount(base);
-    harness.session.framing.initialized = true;
+    measure(harness.graphicsRef);
     advance(settle * 4);
     act(() => {
       harness.rig.send({ type: 'poseObserved', source: 'input', ...pose([1, 0, 0], 4) });
@@ -927,24 +934,18 @@ describe('useViewSettingsSync settle-window characterisation', () => {
   });
 
   describe('framing', () => {
-    const smallBounds = new Box3(new Vector3(-2, -2, -2), new Vector3(2, 2, 2));
-    const largeBounds = new Box3(new Vector3(-8, -8, -8), new Vector3(8, 8, 8));
+    const smallBounds = 2;
+    const largeBounds = 8;
 
     function mountFramed(record: WorkbenchView) {
       const graphicsRef = graphics();
       const editorRef = editor();
       const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
-      function Frame({ radius, bounds }: { readonly radius: number; readonly bounds: Box3 }): React.JSX.Element {
-        useCameraFraming({ geometryRadius: radius, geometryBounds: bounds });
-        return <div />;
-      }
-      const draw = (radius: number, bounds: Box3) => (
+      const view = render(
         <GraphicsProvider graphicsRef={graphicsRef}>
           <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={record} writeRecord={writeRecord} />
-          <Frame radius={radius} bounds={bounds} />
-        </GraphicsProvider>
+        </GraphicsProvider>,
       );
-      const view = render(draw(0, smallBounds));
       disposers.push(() => {
         view.unmount();
         graphicsRef.stop();
@@ -955,8 +956,8 @@ describe('useViewSettingsSync settle-window characterisation', () => {
         writeRecord,
         session,
         rig: session.rig.actorRef,
-        frame: (radius: number, bounds: Box3) => {
-          view.rerender(draw(radius, bounds));
+        frame: (_radius: number, half: number) => {
+          measure(graphicsRef, half);
         },
       };
     }
@@ -965,10 +966,150 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       const harness = mountFramed(initial());
       advance(settle * 4);
       harness.frame(4, smallBounds);
-      expect(harness.session.framing.initialized).toBe(true);
-      expect(harness.session.framing.firstFrameView).toBeDefined();
+      expect(isFramed(harness.graphicsRef)).toBe(true);
+      expect(harness.rig.getSnapshot().context.lastChange.source).toBe('persisted');
       advance(settle * 4);
       expect(poseWrites(harness.writeRecord)).toEqual([]);
+    });
+
+    it('should never write the first automatic frame after a field of view change inside its settle window', () => {
+      const harness = mountFramed(initial());
+      advance(settle * 4);
+      harness.frame(4, smallBounds);
+      act(() => {
+        harness.rig.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 30 });
+      });
+      expect(harness.rig.getSnapshot().context.lastChange.source).toBe('fov');
+      advance(settle * 4);
+      expect(poseWrites(harness.writeRecord)).toEqual([]);
+    });
+
+    it('should save a first drag that a viewport change follows inside the first settle window', () => {
+      const harness = mountFramed(initial());
+      advance(settle * 4);
+      harness.frame(4, smallBounds);
+      act(() => {
+        harness.rig.send({ type: 'poseObserved', source: 'input', ...pose([1, 0, 0], 40) });
+      });
+      act(() => {
+        harness.rig.send({
+          type: 'setViewport',
+          viewport: { ...harness.rig.getSnapshot().context.view.viewport, width: 640 },
+        });
+      });
+      expect(harness.rig.getSnapshot().context.lastChange.source).toBe('viewport');
+      advance(settle * 4);
+      expect(poseWrites(harness.writeRecord).at(-1)).toMatchObject({ direction: [1, 0, 0], verticalSpan: 40 });
+    });
+
+    it('should never write the first automatic frame of an entry switched away from and back to', () => {
+      const harness = mountFramed(initial());
+      advance(settle * 4);
+      harness.frame(4, smallBounds);
+      act(() => {
+        harness.rig.send({ type: 'poseObserved', source: 'input', ...pose([1, 0, 0], 40) });
+      });
+      advance(settle * 4);
+      expect(poseWrites(harness.writeRecord).at(-1)).toMatchObject({ verticalSpan: 40 });
+      harness.writeRecord.mockClear();
+      act(() => {
+        harness.graphicsRef.send({ type: 'entryChanged', identity: 'src/other.ts' });
+        harness.graphicsRef.send({ type: 'entryChanged', identity: 'src/main.ts' });
+      });
+      measure(harness.graphicsRef, smallBounds, 'cube-returned');
+      expect(isFramed(harness.graphicsRef)).toBe(true);
+      expect(['framing', 'persisted']).toContain(harness.rig.getSnapshot().context.lastChange.source);
+      advance(settle * 4);
+      expect(poseWrites(harness.writeRecord)).toEqual([]);
+    });
+
+    it('should keep the entry on screen framed when a record for another entry arrives', () => {
+      const graphicsRef = graphics();
+      const editorRef = editor();
+      const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+      const record = initial();
+      const draw = (next: WorkbenchView) => (
+        <GraphicsProvider graphicsRef={graphicsRef}>
+          <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={next} writeRecord={writeRecord} />
+        </GraphicsProvider>
+      );
+      const view = render(draw(record));
+      disposers.push(() => {
+        view.unmount();
+        graphicsRef.stop();
+      });
+      advance(settle * 4);
+      // The pane shows another entry than the record names, and framing has framed it.
+      act(() => {
+        graphicsRef.send({ type: 'entryChanged', identity: 'src/other.ts' });
+      });
+      measure(graphicsRef, smallBounds, 'cube-other');
+      expect(isFramed(graphicsRef)).toBe(true);
+      const camera = graphicsRef.getSnapshot().context.cameraRef;
+      const shown = camera.getSnapshot().context.view;
+
+      view.rerender(draw({ ...record, camera: { kind: 'preset', preset: 'front' } }));
+      advance(settle * 4);
+      expect(isFramed(graphicsRef)).toBe(true);
+      expect(selectGraphicsFramingIdentity(graphicsRef.getSnapshot())).toBe('src/other.ts');
+      // The record's camera waits for its own entry rather than turning the one on screen.
+      expect(camera.getSnapshot().context.view.direction).toEqual(shown.direction);
+      expect(poseWrites(writeRecord)).toEqual([]);
+
+      // Once the pane shows the record's entry again, its first frame takes the record's side.
+      act(() => {
+        graphicsRef.send({ type: 'entryChanged', identity: 'src/main.ts' });
+      });
+      measure(graphicsRef, smallBounds, 'cube-main');
+      advance(settle * 4);
+      expect(camera.getSnapshot().context.view.direction).not.toEqual(shown.direction);
+      expect(poseWrites(writeRecord)).toEqual([]);
+    });
+
+    it("should apply a waiting record's side over its entry's first frame, however late that frame comes", () => {
+      const graphicsRef = graphics();
+      const editorRef = editor();
+      const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+      const record = initial();
+      const draw = (next: WorkbenchView) => (
+        <GraphicsProvider graphicsRef={graphicsRef}>
+          <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={next} writeRecord={writeRecord} />
+        </GraphicsProvider>
+      );
+      const view = render(draw(record));
+      disposers.push(() => {
+        view.unmount();
+        graphicsRef.stop();
+      });
+      advance(settle * 4);
+      // The pane shows another entry than the record names, and framing has framed it.
+      act(() => {
+        graphicsRef.send({ type: 'entryChanged', identity: 'src/other.ts' });
+      });
+      measure(graphicsRef, smallBounds, 'cube-other');
+      expect(isFramed(graphicsRef)).toBe(true);
+      const camera = graphicsRef.getSnapshot().context.cameraRef;
+      const shown = camera.getSnapshot().context.view;
+
+      view.rerender(draw({ ...record, camera: { kind: 'preset', preset: 'front' } }));
+      advance(settle * 4);
+      expect(isFramed(graphicsRef)).toBe(true);
+      expect(selectGraphicsFramingIdentity(graphicsRef.getSnapshot())).toBe('src/other.ts');
+      // The record's camera waits for its own entry rather than turning the one on screen.
+      expect(camera.getSnapshot().context.view.direction).toEqual(shown.direction);
+      expect(poseWrites(writeRecord)).toEqual([]);
+
+      // Once the pane shows the record's entry again, its first frame takes the record's side.
+      act(() => {
+        graphicsRef.send({ type: 'entryChanged', identity: 'src/main.ts' });
+      });
+      // The build takes longer than the record's retry: the entry waits for its frame when the record is released.
+      advance(settle * 4);
+      measure(graphicsRef, smallBounds, 'cube-main');
+      advance(settle * 4);
+      expect(camera.getSnapshot().context.lastChange.source).toBe('persisted');
+      expect(camera.getSnapshot().context.view.direction).not.toEqual(shown.direction);
+      expect(poseWrites(writeRecord)).toEqual([]);
     });
 
     it('today saves an automatic refit after the bounds grow by more than 10 % (G6b flips, D20)', () => {

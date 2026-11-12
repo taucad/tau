@@ -164,8 +164,8 @@ describe('the workbench save shortcut', () => {
     await userEvent.keyboard('{Control>}s{/Control}');
 
     await waitFor(() => {
-      expect(toastError).toHaveBeenCalledWith('Revision not saved', {
-        description: 'The editor could not finish saving its files.',
+      expect(toastError).toHaveBeenCalledWith('Couldn’t save', {
+        description: 'Some files didn’t finish saving. Try again.',
       });
     });
     expect(consoleError).toHaveBeenCalledWith('[revisions]', 'save', expect.any(Error));

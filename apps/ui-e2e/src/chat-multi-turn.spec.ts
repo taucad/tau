@@ -146,7 +146,7 @@ test('shows the revision of a turn stopped after it changed files', async () => 
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
 
   await target.click(selectors.getByCss('button:has(svg.lucide-square)').last());
-  await target.expectVisible(selectors.getByText(/Rev \d+ saved · Work interrupted/u).first(), 120_000);
+  await target.expectVisible(selectors.getByText(/Saved · stopped early/u).first(), 120_000);
   await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'] });
   expect(await readHomeGlobText('/*/interrupted-proof.txt')).toBe('saved before stop\n');
   const records = await chatLog(chatId!);
@@ -208,7 +208,13 @@ test('edits a turn after resuming a refused one', async () => {
   await tryAgain();
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
+  await target.expectVisible(
+    selectors
+      .getByRole('status', { name: 'Save status' })
+      .filter({ hasText: /^Saved\b/u })
+      .first(),
+    60_000,
+  );
 
   await editFirstMessage(' Edited.');
 
@@ -289,7 +295,13 @@ test('resumes a refused turn twice', async () => {
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
   /* The third attempt is the one that records a revision, and its settlement
    * is written with it — the log invariant is only meaningful once it has. */
-  await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
+  await target.expectVisible(
+    selectors
+      .getByRole('status', { name: 'Save status' })
+      .filter({ hasText: /^Saved\b/u })
+      .first(),
+    60_000,
+  );
   await expectNoAdmissionRefusal();
   /* One run, three attempts, three settlements. The retry verb used to rewind
    * and mint a fresh run id, which paid for the refused prefix again (W7). */
@@ -305,7 +317,7 @@ test('edits a turn before its revision is saved', async () => {
   await sendDraft('First plain message.');
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
 
-  /* Deliberately *not* waiting for `Rev 1 saved`: the previous run's turn actor
+  /* Deliberately *not* waiting for the marker's *Saved*: the previous run's turn actor
    * is still retiring, and the edit leases the same turn id. The root now
    * queues that admission until the hold clears instead of refusing it (F7). */
   await editFirstMessage(' Edited.');
@@ -323,7 +335,13 @@ test('resumes, edits, then sends a new message', async () => {
   await tryAgain();
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
+  await target.expectVisible(
+    selectors
+      .getByRole('status', { name: 'Save status' })
+      .filter({ hasText: /^Saved\b/u })
+      .first(),
+    60_000,
+  );
 
   await editFirstMessage(' Edited.');
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(3);
@@ -471,7 +489,13 @@ test('resumes a refused turn under its own run, rewinding nothing', async () => 
   await tryAgain();
 
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
+  await target.expectVisible(
+    selectors
+      .getByRole('status', { name: 'Save status' })
+      .filter({ hasText: /^Saved\b/u })
+      .first(),
+    60_000,
+  );
   /* One run, two attempts. *Try again* entered as a `regenerate` before W7: it
    * rewound, minted a fresh run id and paid for the refused prefix again, and
    * the host's record for the old id was orphaned so `drop` could not match it. */
@@ -546,7 +570,13 @@ test('resumes the turn a navigation abandoned, then sends another', async () => 
   await expect.poll(gatewayPendingCount, { timeout: 120_000 }).toBe(2);
   await target.releaseAgentHostGatewayFixture('First plain message.');
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
+  await target.expectVisible(
+    selectors
+      .getByRole('status', { name: 'Save status' })
+      .filter({ hasText: /^Saved\b/u })
+      .first(),
+    60_000,
+  );
   await expectLogInvariant(chatId!, {
     runs: 1,
     attempts: [2],
@@ -596,7 +626,7 @@ test('reads Done, never Finishing, while a finished turn saves its revision', as
 
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
   await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'] });
-  await target.expectText(selectors.getByRole('status', { name: 'Turn revision status' }), /^Rev \d+ saved$/u, 60_000);
+  await target.expectText(selectors.getByRole('status', { name: 'Save status' }), /^Saved$/u, 60_000);
   expect(await target.evaluate(() => (globalThis as unknown as { pvS9: { finishing: boolean } }).pvS9.finishing)).toBe(
     false,
   );
@@ -611,10 +641,6 @@ test('shows the revision of a turn stopped after it changed files', async () => 
   await target.click(selectors.getByRole('button', { name: 'Stop' }).last());
   await target.releaseAgentHostGatewayFixture();
 
-  await target.expectText(
-    selectors.getByRole('status', { name: 'Turn revision status' }),
-    /^Rev \d+ saved · Work interrupted$/u,
-    60_000,
-  );
+  await target.expectText(selectors.getByRole('status', { name: 'Save status' }), /^Saved · stopped early$/u, 60_000);
   await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'] });
 });

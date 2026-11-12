@@ -4,7 +4,11 @@
 
 /**
  * Revisions policy Rule 1 bans checkout, lease, backend, worktree, ref and HEAD as product
- * vocabulary. `HEAD` is matched uppercase only, so "the head of the list" stays legal prose.
+ * vocabulary.
+ *
+ * The History, Versions and Branch Graph blueprint (C8, M4) adds remote, head in any case, line,
+ * linked and host: a toast says GitHub, branch, or "Git host", never the model underneath.
+ * "Git host" is the one product phrase that keeps "host" (copy table, Backup).
  *
  * The always-on sync charter retired a second list (W14): the detached checkout's words
  * (`detached`, `Return to latest`, `Viewing Rev N`, `viewing an older revision`), the four
@@ -14,7 +18,11 @@
  */
 const BANNED_PATTERNS = [
   /\b(?:checkouts?|lease[sd]?|backends?|worktrees?|refs?)\b/iu,
-  /\bHEAD\b/u,
+  /\bheads?\b/iu,
+  /\bremotes?\b/iu,
+  /\blines?\b/iu,
+  /\blinked\b/iu,
+  /\b(?<!git )hosts?\b/iu,
   /\bdetached\b/iu,
   /\breturn to latest\b/iu,
   /\bviewing (?:rev \d+|an older revision)/iu,
@@ -66,7 +74,7 @@ export const noEngineeringVocabularyInCopyRule = {
     },
     messages: {
       violation:
-        '"{{word}}" is engineering vocabulary. Revisions policy Rule 1 bans checkout, lease, backend, worktree, ref and HEAD in product copy, and the always-on sync charter retired detached, Return to latest, Viewing Rev N, Needs resolution, Changes need review, raw line names, actor ids and ops — say Revision, Branch, Current, Restore, Switch, Merge, Discard, Sync or Needs your decision instead.',
+        '"{{word}}" is engineering vocabulary. Revisions policy Rule 1 bans checkout, lease, backend, worktree, ref, head, remote, line, linked and host in product copy, and the always-on sync charter retired detached, Return to latest, Viewing Rev N, Needs resolution, Changes need review, raw line names, actor ids and ops — say History, Branch, Current, Restore, Switch, Merge, Close, Back up, GitHub, Git host or Needs your decision instead.',
     },
     schema: [],
   },

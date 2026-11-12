@@ -416,6 +416,8 @@ const conformance = (adapter: Adapter): void => {
         note: 'First cut of the bracket',
         actor,
         createdAt,
+        /* The first version after Start is V2 (B6). */
+        number: 2,
       });
       expect(await port.listTags()).toStrictEqual([created]);
 
@@ -424,6 +426,8 @@ const conformance = (adapter: Adapter): void => {
       const moved = await port.tag({ name: 'v1.0', revisionId: base, note: 'Moved', actor, createdAt });
       const afterMove = await port.listTags();
       expect(afterMove[0]).toStrictEqual(moved);
+      /* A moved version keeps its number. */
+      expect(moved.number).toBe(2);
       const named = await port.readRevision(child);
       expect(named?.id).toBe(child);
 

@@ -517,6 +517,13 @@ export type RevisionTag = Readonly<{
   actor: RevisionActor | undefined;
   /** Milliseconds since the Unix epoch. */
   createdAt: number;
+  /**
+   * Its number, `V<n>`, once per project (blueprint B6): what its tag records,
+   * or for a tag that records none, the number it reads as
+   * (`numberVersions` in `version-numbers.ts`). Set on every tag a port lists; V1 is the Start
+   * entry, which has no tag, so a tag's number is 2 or more.
+   */
+  number?: number;
 }>;
 
 /** Input for naming one revision. @public */
@@ -525,6 +532,11 @@ export type CreateRevisionTagInput = Readonly<{
   revisionId: RevisionId;
   note?: string;
   actor?: RevisionActor;
+  /**
+   * The number to record (B6). Absent, a name that exists keeps its number and
+   * a new name takes the highest known plus one (`versionNumberFor`).
+   */
+  number?: number;
   /** Milliseconds since the Unix epoch. Defaults to the store's clock. */
   createdAt?: number;
 }>;

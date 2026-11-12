@@ -47,6 +47,7 @@ import {
 import type { RevisionTrailer } from '#revision-headers.js';
 import { walkRevisionLog } from '#revision-log-order.js';
 import { RevisionPortError } from '#revision-port.js';
+import { numberVersions, versionNumberFor } from '#version-numbers.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import type {
   AddCheckoutInput,
@@ -1469,7 +1470,22 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       note: trailer.note,
       actor: trailer.actor,
       createdAt: decoded.tagger.seconds * 1000,
+      ...(trailer.number === undefined ? {} : { number: trailer.number }),
     });
+  };
+
+  /* Every named version, by name, each with the number it reads as (B6). */
+  const listTags = async (): Promise<readonly RevisionTag[]> => {
+    const records = await text(['for-each-ref', '--format=%(refname)%00%(objectname)', `${tagRefPrefix}/`]);
+    const names = records
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => line.split('\0')[0] ?? '')
+      .map((ref) => ref.slice(tagRefPrefix.length + 1))
+      .filter((name) => name !== '')
+      .toSorted();
+    const tags = await Promise.all(names.map(async (name) => readTagRef(name)));
+    return numberVersions(tags.filter((entry) => entry !== undefined));
   };
 
   const resolve = async (ref: string): Promise<string | undefined> => {
@@ -2323,12 +2339,13 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         throw new RevisionPortError('UNKNOWN_REVISION', 'The revision this name would point at is not in the store.');
       }
       const createdAt = input.createdAt ?? Date.now();
+      const number = input.number ?? versionNumberFor(await listTags(), input.name);
       const object = encodeTag({
         objectFormat: await format(),
         object: input.revisionId,
         tag: input.name,
         tagger: taggerSignature(input.actor, createdAt),
-        message: revisionTagMessage({ name: input.name, note: input.note, actor: input.actor }),
+        message: revisionTagMessage({ name: input.name, note: input.note, actor: input.actor, number }),
       });
       const written = await run(['hash-object', '-t', 'tag', '-w', '--stdin'], { input: [object.body] });
       if (written.exitCode !== 0) {
@@ -2345,21 +2362,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         note: input.note,
         actor: input.actor,
         createdAt,
+        number,
       });
     },
 
-    listTags: async (): Promise<readonly RevisionTag[]> => {
-      const records = await text(['for-each-ref', '--format=%(refname)%00%(objectname)', `${tagRefPrefix}/`]);
-      const names = records
-        .split('\n')
-        .filter((line) => line !== '')
-        .map((line) => line.split('\0')[0] ?? '')
-        .map((ref) => ref.slice(tagRefPrefix.length + 1))
-        .filter((name) => name !== '')
-        .toSorted();
-      const tags = await Promise.all(names.map(async (name) => readTagRef(name)));
-      return Object.freeze(tags.filter((entry) => entry !== undefined));
-    },
+    listTags,
 
     deleteTag: async (name: string): Promise<void> => {
       const removed = await run(['update-ref', '-d', `${tagRefPrefix}/${name}`]);

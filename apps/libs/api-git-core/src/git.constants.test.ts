@@ -14,6 +14,8 @@ import {
   quotaRefusalMarker,
   quotaRefusalSentence,
   serviceAdvertisementPrefix,
+  versionNumberRefusals,
+  versionNumberTakenMarker,
 } from '#git.constants.js';
 import { storageLimitBytesByTier } from '@taucad/billing';
 import * as constants from '#git.constants.js';
@@ -1015,5 +1017,165 @@ describe('pre-receive authorship check (B4)', () => {
     expect(outcome.code).toBe(1);
     expect(outcome.stderr.match(/Tau: refused commit /gu)).toHaveLength(10);
     expect(outcome.stderr).toContain('and 2 more commits');
+  });
+});
+
+describe('pre-receive version-number check (B6)', () => {
+  const pusher = 'user_b6_pusher';
+
+  let versionHookDirectory: string;
+  let versionHookPath: string;
+
+  beforeAll(async () => {
+    versionHookDirectory = await mkdtemp(path.join(tmpdir(), 'tau-git-version-hook-'));
+    versionHookPath = path.join(versionHookDirectory, 'pre-receive');
+    await writeFile(versionHookPath, preReceiveHookScript, 'utf8');
+    await chmod(versionHookPath, 0o755);
+  });
+
+  afterAll(async () => {
+    await rm(versionHookDirectory, { recursive: true, force: true });
+  });
+
+  /** A repository with one commit, and a writer of version tags on it. */
+  const versionRepository = async () => {
+    const fixture = await mkdtemp(path.join(tmpdir(), 'tau-git-version-repo-'));
+    /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+    const environment: Record<string, string> = {
+      PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+      HOME: fixture,
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_SYSTEM: '/dev/null',
+      GIT_AUTHOR_NAME: 'Base',
+      GIT_AUTHOR_EMAIL: 'base@tau.test',
+      GIT_COMMITTER_NAME: 'Base',
+      GIT_COMMITTER_EMAIL: 'base@tau.test',
+    };
+    /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
+    const git = (...args: readonly string[]): string =>
+      execFileSync(realGit, [...args], {
+        cwd: fixture,
+        env: environment as NodeJS.ProcessEnv,
+        encoding: 'utf8',
+      }).trim();
+    git('init', '--quiet', '--initial-branch=main', '.');
+    git('commit', '--quiet', '--allow-empty', '-m', 'base');
+    const base = git('rev-parse', 'HEAD');
+    /** One annotated version tag on the base commit, recording `record` as its `Tau-Tag` trailer. */
+    const tag = async (name: string, record: Readonly<Record<string, unknown>> | undefined): Promise<string> => {
+      const file = path.join(fixture, '.git', `tag-${String(Math.random()).slice(2)}`);
+      await writeFile(
+        file,
+        [
+          `object ${base}`,
+          'type commit',
+          `tag ${name}`,
+          `tagger Someone <${pusher}@users.noreply.tau.new> 1790000000 +0000`,
+          '',
+          name,
+          ...(record === undefined ? [] : ['', `Tau-Tag: ${JSON.stringify({ version: 1, ...record })}`]),
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+      return git('hash-object', '-t', 'tag', '-w', file);
+    };
+    /** One hook run over `<old> <new> <ref>` lines, pushed by {@link pusher}. */
+    const push = async (
+      lines: readonly string[],
+      extra: Readonly<Record<string, string>> = {},
+    ): Promise<{ code: number | undefined; stderr: string }> =>
+      new Promise((resolve) => {
+        const child = spawn('sh', [versionHookPath], {
+          cwd: fixture,
+          env: {
+            ...environment,
+            /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+            TAU_GIT_PUSH_ADMITTED: '1',
+            TAU_GIT_PUSHER: pusher,
+            TAU_GIT_NODE: process.execPath,
+            /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
+            ...extra,
+          } as unknown as NodeJS.ProcessEnv,
+        });
+        const stderr: Array<Uint8Array<ArrayBuffer>> = [];
+        child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => stderr.push(chunk));
+        child.stdin.end(lines.map((line) => `${line}\n`).join(''));
+        child.on('close', (code) => {
+          resolve({ code: code ?? undefined, stderr: Buffer.concat(stderr).toString('utf8') });
+        });
+      });
+    return { git, tag, push, dispose: async () => rm(fixture, { recursive: true, force: true }) };
+  };
+
+  it('refuses a version whose number another version holds, behind the marker the client matches', async () => {
+    const repository = await versionRepository();
+    onTestFinished(repository.dispose);
+    repository.git('update-ref', 'refs/tags/Hinge', await repository.tag('Hinge', { number: 4 }));
+    const outcome = await repository.push([`${none} ${await repository.tag('Lid', { number: 4 })} refs/tags/Lid`]);
+    expect(outcome.code).toBe(1);
+    expect(outcome.stderr).toContain(`${versionNumberTakenMarker} — refs/tags/Lid names V4`);
+    expect(outcome.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
+    expect(outcome.stderr).toContain('Tau: nothing was written.');
+  });
+
+  it('refuses V1, which the Start entry holds, and two new versions with one number in one push', async () => {
+    const repository = await versionRepository();
+    onTestFinished(repository.dispose);
+    const start = await repository.push([`${none} ${await repository.tag('First', { number: 1 })} refs/tags/First`]);
+    expect(start.code).toBe(1);
+    expect(start.stderr).toContain('names V1');
+    const twice = await repository.push([
+      `${none} ${await repository.tag('A', { number: 5 })} refs/tags/A`,
+      `${none} ${await repository.tag('B', { number: 5 })} refs/tags/B`,
+    ]);
+    expect(twice.code).toBe(1);
+    expect(twice.stderr.match(/version number taken/gu)).toHaveLength(2);
+  });
+
+  it('passes a free number, a tag written before numbers, and a tag Tau did not write', async () => {
+    const repository = await versionRepository();
+    onTestFinished(repository.dispose);
+    repository.git('update-ref', 'refs/tags/Hinge', await repository.tag('Hinge', { number: 4 }));
+    const outcome = await repository.push([
+      `${none} ${await repository.tag('Lid', { number: 5, note: 'Lid fit' })} refs/tags/Lid`,
+      `${none} ${await repository.tag('Older', { note: 'Before numbers' })} refs/tags/Older`,
+      `${none} ${await repository.tag('v1.0.0', undefined)} refs/tags/v1.0.0`,
+    ]);
+    expect(outcome.code, outcome.stderr).toBe(0);
+  });
+
+  it('keeps a backed-up number: a moved version keeps it, and changing or dropping it is refused', async () => {
+    const repository = await versionRepository();
+    onTestFinished(repository.dispose);
+    const held = await repository.tag('Hinge', { number: 4 });
+    repository.git('update-ref', 'refs/tags/Hinge', held);
+    const moved = await repository.tag('Hinge', { number: 4, note: 'Moved' });
+    const kept = await repository.push([`${held} ${moved} refs/tags/Hinge`]);
+    expect(kept.code, kept.stderr).toBe(0);
+    for (const record of [{ number: 6 }, {}]) {
+      // oxlint-disable-next-line no-await-in-loop -- two hook runs, each read alone.
+      const changed = await repository.push([`${held} ${await repository.tag('Hinge', record)} refs/tags/Hinge`]);
+      expect(changed.code).toBe(1);
+      expect(changed.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_CHANGED);
+    }
+  });
+
+  it('refuses a number it cannot read, and fails closed without a Node to read it with', async () => {
+    const repository = await versionRepository();
+    onTestFinished(repository.dispose);
+    const odd = await repository.tag('Odd', { number: 2.5 });
+    const unreadable = await repository.push([`${none} ${odd} refs/tags/Odd`]);
+    expect(unreadable.code).toBe(1);
+    expect(unreadable.stderr).toContain(authorshipRefusals.GIT_PUSH_RECORD_UNREADABLE);
+    const lid = await repository.tag('Lid', { number: 5 });
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment name
+    const noNode = await repository.push([`${none} ${lid} refs/tags/Lid`], { TAU_GIT_NODE: '' });
+    expect(noNode.code).toBe(1);
+    expect(noNode.stderr).toContain(authorshipRefusals.GIT_PUSH_RECORD_UNREADABLE);
+  });
+
+  it('spells the taken-number marker the way packages/revisions matches it', () => {
+    expect(versionNumberTakenMarker).toBe('Tau: version number taken');
   });
 });

@@ -155,6 +155,7 @@ export {
 export type { ConflictPerspective, RevisionConflictTerms } from '#revision-conflict.js';
 export { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';
 export type { RevisionLogRequest, RevisionPlace, RevisionRow } from '#revision-verbs.js';
+export { numberVersions } from '#version-numbers.js';
 export {
   parseStartRecord,
   serializeStartRecord,
@@ -182,6 +183,7 @@ export type {
   SyncQueueEntry,
   SyncQueueRecord,
   SyncRefOutcome,
+  VersionRenumbering,
 } from '#sync.types.js';
 export type {
   RemoteFacet,

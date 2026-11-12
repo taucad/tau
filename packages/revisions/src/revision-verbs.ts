@@ -22,9 +22,13 @@ import type { RevisionId } from '#algorithms/index.js';
 import { revisionId } from '#algorithms/index.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import type { RevisionDiffEntry, RevisionLogEntry, RevisionPort } from '#revision-port.js';
+import { numberVersions } from '#version-numbers.js';
 import { generatedSetupPaths } from '#workspace-config.js';
 import { startReadingOf } from '#start-version.js';
 import type { StartReading } from '#start-version.js';
+
+/** One named version on a row: its name and its number, `V<n>` (B6). @public */
+export type RevisionVersion = Readonly<{ name: string; number: number }>;
 
 /** One revision as a person reads it. @public */
 export type RevisionRow = Readonly<{
@@ -57,6 +61,12 @@ export type RevisionRow = Readonly<{
    * second copy of the tag set to keep in step.
    */
   tags: readonly string[];
+  /**
+   * The same named versions with their numbers, lowest first (blueprint B6):
+   * `V<n>` once per project, read from each tag the way `tags` is. Present
+   * only on a row a version names. The Start entry is V1 and has no tag.
+   */
+  versions?: readonly RevisionVersion[];
   /**
    * What asked for this revision (S30), when the store recorded it.
    *
@@ -290,7 +300,7 @@ const numbersOn = async (
 const rowOf = (
   entry: RevisionLogEntry,
   revisionNumber: number | undefined,
-  tags: readonly string[] = [],
+  versions: readonly RevisionVersion[] = [],
 ): RevisionRow =>
   Object.freeze({
     revisionNumber,
@@ -305,7 +315,10 @@ const rowOf = (
     summary: entry.summary.edited ?? entry.summary.generated,
     conflicted: entry.conflicted,
     turnId: entry.provenance.turnId,
-    tags,
+    tags: Object.freeze(versions.map((version) => version.name).toSorted()),
+    ...(versions.length === 0
+      ? {}
+      : { versions: Object.freeze(versions.toSorted((left, right) => left.number - right.number)) }),
     trigger: entry.provenance.capture,
     ...(entry.provenance.restoredFrom === undefined ? {} : { restoredFrom: entry.provenance.restoredFrom }),
     ...(entry.provenance.turnCut === undefined ? {} : { turnCut: entry.provenance.turnCut }),
@@ -407,10 +420,13 @@ export const readRevisionLog = async (
     return Object.freeze([]);
   }
   const numbers = await numbersOn(port, head, entries);
-  /* One `listTags` for the whole page, not one per row. */
-  const named = new Map<string, string[]>();
-  for (const tag of await port.listTags()) {
-    named.set(tag.revisionId, [...(named.get(tag.revisionId) ?? []), tag.name]);
+  /* One `listTags` for the whole page, not one per row; each tag arrives numbered (B6). */
+  const named = new Map<string, RevisionVersion[]>();
+  for (const tag of numberVersions(await port.listTags())) {
+    named.set(tag.revisionId, [
+      ...(named.get(tag.revisionId) ?? []),
+      Object.freeze({ name: tag.name, number: tag.number }),
+    ]);
   }
   /* The port's own order, not the chain's: a merge is followed by the side it
    * merged, and those revisions are in this branch's history without being on
@@ -418,7 +434,7 @@ export const readRevisionLog = async (
   const page = limit === undefined ? [...entries.values()] : [...entries.values()].slice(0, limit);
   const setup = await setupEntriesOf(port, page);
   const rows = page.map((entry) => {
-    const row = rowOf(entry, numbers.get(entry.id), Object.freeze((named.get(entry.id) ?? []).toSorted()));
+    const row = rowOf(entry, numbers.get(entry.id), named.get(entry.id));
     /* The Start entry is V1 and reads as itself, never folded into the setup line. */
     return setup.has(entry.id) && row.start === undefined ? Object.freeze({ ...row, isSetup: true }) : row;
   });

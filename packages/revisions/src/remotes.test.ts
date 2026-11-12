@@ -873,6 +873,22 @@ describe('the Tau Cloud publish and register legs', () => {
     }
   });
 
+  /* B4c: a GitHub-linked project says so when it registers, so the push check admits commits Tau did not record. */
+  it('should send the GitHub origin with the registration of a linked project', async () => {
+    const answered = capture(200, {});
+    try {
+      await registerProjectOverHttp(
+        'https://api.test',
+        { kind: 'cookie' },
+        { id: 'p1', name: 'Alpha', origin: 'github' },
+      );
+
+      expect(answered.calls[0]?.body).toBe(JSON.stringify({ name: 'Alpha', origin: 'github' }));
+    } finally {
+      answered.restore();
+    }
+  });
+
   /* D18: the Sync region's figure, from the owner-scoped usage route. */
   it('should read the owner’s usage as bytes used of the allowance, on either leg', async () => {
     const answered = capture(200, { storageBytes: 300, lfsBytes: 40, storageLimitBytes: 1024 });

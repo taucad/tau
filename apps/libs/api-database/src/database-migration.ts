@@ -105,6 +105,40 @@ export async function installApiRuntimeRole(client: postgres.Sql): Promise<void>
 }
 
 /**
+ * Withdraws everything Supabase grants its Data API roles by default.
+ *
+ * Supabase grants `anon` and `authenticated` every privilege on `public`, now and by default
+ * for future tables, and PostgREST serves those roles to anyone holding the project's
+ * publishable key. Tau uses Postgres as plain Postgres, so the roles keep no schema usage, no
+ * table, sequence or function privilege, and no default privilege from the migration login.
+ * It re-runs after every migration and is a no-op where the roles do not exist (local and CI
+ * clusters).
+ */
+export async function installDataApiLockdown(client: postgres.Sql): Promise<void> {
+  await client.begin(async (transaction) => {
+    await transaction`DO $$
+    DECLARE
+      grantee text;
+      target text;
+    BEGIN
+      FOREACH grantee IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+        CONTINUE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = grantee);
+        FOREACH target IN ARRAY ARRAY['public', 'billing', 'drizzle'] LOOP
+          CONTINUE WHEN NOT EXISTS (SELECT FROM pg_namespace WHERE nspname = target);
+          EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM %I', target, grantee);
+          EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA %I FROM %I', target, grantee);
+          EXECUTE format('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA %I FROM %I', target, grantee);
+          EXECUTE format('REVOKE ALL ON SCHEMA %I FROM %I', target, grantee);
+          EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON TABLES FROM %I', target, grantee);
+          EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON SEQUENCES FROM %I', target, grantee);
+          EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON FUNCTIONS FROM %I', target, grantee);
+        END LOOP;
+      END LOOP;
+    END $$`;
+  });
+}
+
+/**
  * Protected one-shot migration job: the only identity permitted to run DDL.
  *
  * Runs on its own `max: 1` connection under the migration identity, then reinstalls the
@@ -159,6 +193,7 @@ const migrateOnce = async (
     await installApiRuntimeRole(client);
     await installMirrorRole(client, options.mirrorPassword);
     await installMaintenanceRole(client, options.maintenancePassword);
+    await installDataApiLockdown(client);
     await assertSchemaCompatibility(client);
     const after = await readAppliedMigrations(client);
     return { count: after.count, head: await readMigrationHead() };

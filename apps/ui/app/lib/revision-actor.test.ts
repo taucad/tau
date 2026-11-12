@@ -239,7 +239,7 @@ describe('revisionWho', () => {
   it('names a commit Tau did not write by its author, and nothing else by a guess', () => {
     expect(revisionWho({ ...entry('unknown', 'import'), authorName: 'octo-dev' }, solo).line).toBe('octo-dev');
     expect(revisionWho(entry('unknown', 'import'), solo).line).toBe('');
-    expect(revisionWho(entry('github:12345'), solo).line).toBe('');
+    expect(revisionWho(entry('usr_another_account'), solo).line).toBe('');
   });
 
   /* Blueprint A3 acceptance: on a one-member project every pushed entry is that member's, whatever its trailer says. */

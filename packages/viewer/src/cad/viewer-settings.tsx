@@ -1,5 +1,5 @@
 import { useViewerControlSize } from '#cad/viewer-control-size.js';
-import React, { useCallback, useRef, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
 import { Aperture, Axis3D, Box, Grid3X3, Rotate3D, Settings, Spline, Sparkles, ArrowUp, Timer } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -111,23 +111,51 @@ function FieldOfViewRow(): React.JSX.Element {
   const cameraRig = useCameraRig();
   const viewFields = useViewerViewFields();
   const fieldOfView = useCameraSelector((state) => state.context.view.requestedVerticalFieldOfView);
+  /* The angle a view command is still writing, which the next step counts from until the camera shows it. `write`
+   * names the command, so an older write that is refused never clears a newer angle. */
+  const pendingRef = useRef<Readonly<{ angle: number; write: number }> | undefined>(undefined);
+  const writesRef = useRef(0);
+  useEffect(() => {
+    if (pendingRef.current?.angle === fieldOfView) {
+      pendingRef.current = undefined;
+    }
+  }, [fieldOfView]);
 
   // The camera throws on an angle outside its range, so typed values are clamped as well as stepped ones.
   const setFieldOfView = useCallback(
     (value: number) => {
       const verticalFieldOfView = clamp(Math.round(value), 0, maxVerticalFieldOfView);
-      if (viewFields) {
-        void viewFields.set('fieldOfView', verticalFieldOfView);
+      if (!viewFields) {
+        cameraRig.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView });
         return;
       }
-      cameraRig.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView });
+      const written = viewFields.set('fieldOfView', verticalFieldOfView);
+      if (written === undefined) {
+        return;
+      }
+      writesRef.current += 1;
+      const write = writesRef.current;
+      pendingRef.current = { angle: verticalFieldOfView, write };
+      const forgetRefused = async (): Promise<void> => {
+        let saved = false;
+        try {
+          saved = await written;
+        } catch {
+          // The host reports its own failure.
+        }
+        if (!saved && pendingRef.current?.write === write) {
+          pendingRef.current = undefined;
+        }
+      };
+      void forgetRefused();
     },
     [cameraRig, viewFields],
   );
 
   const stepFieldOfView = useCallback(
     (direction: -1 | 1, { shift }: { shift: boolean }) => {
-      setFieldOfView(fieldOfView + direction * (shift ? shiftVerticalFieldOfViewStep : 1));
+      const from = pendingRef.current?.angle ?? fieldOfView;
+      setFieldOfView(from + direction * (shift ? shiftVerticalFieldOfViewStep : 1));
     },
     [fieldOfView, setFieldOfView],
   );

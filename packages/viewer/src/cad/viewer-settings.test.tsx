@@ -171,6 +171,34 @@ describe('ViewerSettings', () => {
       expect(mocks.graphicsSend).not.toHaveBeenCalled();
       expect(mocks.cameraSend).not.toHaveBeenCalled();
     });
+    it('should step the field of view from the angle still being written, and from the camera once it is refused', async () => {
+      const user = userEvent.setup();
+      const writes: Array<PromiseWithResolvers<boolean>> = [];
+      const set = vi.fn(async (_leaf: string, _value: unknown) => {
+        const write = Promise.withResolvers<boolean>();
+        writes.push(write);
+        return write.promise;
+      });
+      await openViewerSettings(user, { set, reset: vi.fn() });
+      act(() => {
+        screen.getByRole('menuitem', { name: `${fieldOfViewName}, 42°` }).focus();
+      });
+
+      // The camera still shows 42° while both writes are in flight.
+      await user.keyboard('{ArrowRight}{ArrowRight}');
+      expect(set.mock.calls).toEqual([
+        ['fieldOfView', 43],
+        ['fieldOfView', 44],
+      ]);
+
+      // The newer write is refused: the next step counts from what the camera shows again.
+      await act(async () => {
+        writes.at(-1)!.resolve(false);
+        await writes.at(-1)!.promise;
+      });
+      await user.keyboard('{ArrowRight}');
+      expect(set).toHaveBeenLastCalledWith('fieldOfView', 43);
+    });
   });
 
   describe('closing', () => {

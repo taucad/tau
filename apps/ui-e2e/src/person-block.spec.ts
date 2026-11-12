@@ -89,7 +89,7 @@ test('sends the person block with each turn while the switch is on', async () =>
   await seedSetupAnswers();
   const [chatId] = await openChat([reply('Reply one.')]);
 
-  await completeFirstTurn();
+  await completeFirstTurn(chatId!);
 
   const [system] = await requestSystemPrompts();
   expect(system).toContain(personOpen);
@@ -113,7 +113,7 @@ test('sends no person block while the switch is off', async () => {
     await target.click(toggle);
     await expect.poll(async () => target.getAttribute(toggle, 'aria-checked')).toBe('false');
   });
-  await completeFirstTurn();
+  await completeFirstTurn(chatId!);
 
   const [system] = await requestSystemPrompts();
   expect(system).not.toContain(personOpen);
@@ -129,7 +129,7 @@ test('drops the person block from the next turn after Clear', async () => {
   await seedSetupAnswers();
   const [chatId] = await openChat([reply('Reply one.'), reply('Reply two.')]);
 
-  await completeFirstTurn();
+  await completeFirstTurn(chatId!);
   const [beforeClear] = await requestSystemPrompts();
   expect(beforeClear).toContain(personOpen);
 

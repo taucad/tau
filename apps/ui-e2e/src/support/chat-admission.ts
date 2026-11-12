@@ -200,20 +200,35 @@ export const openChat = async (script: readonly GatewayScriptTurn[], query = '')
 };
 
 /**
- * Send the first message and wait out its reply and its revision.
+ * Wait for a chat's log to record this many finalized turns.
  *
+ * A turn that changed no file shows no *Save status*: its settlement names no
+ * revision, so `deriveTurnRevisionState` renders nothing for it
+ * (`chat-turn-revision-state.ts`, since 47d78b9dca). A reply-only turn's
+ * settlement is therefore read from the log, where it is written.
+ *
+ * @param chatId - The chat to read.
+ * @param count - How many `turn.finalized` rows the log must hold.
  * @returns Nothing.
  */
-export const completeFirstTurn = async (): Promise<void> => {
+export const expectFinalizedTurns = async (chatId: string, count: number): Promise<void> => {
+  const finalized = async (): Promise<number> => {
+    const records = await chatLog(chatId);
+    return records.filter((record) => record.type === 'turn.finalized').length;
+  };
+  await expect.poll(finalized, { timeout: 60_000 }).toBe(count);
+};
+
+/**
+ * Send the first message and wait out its reply and its settlement.
+ *
+ * @param chatId - The chat the message is sent in.
+ * @returns Nothing.
+ */
+export const completeFirstTurn = async (chatId: string): Promise<void> => {
   await sendDraft('First plain message.');
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  await target.expectVisible(
-    selectors
-      .getByRole('status', { name: 'Save status' })
-      .filter({ hasText: /^Saved\b/u })
-      .first(),
-    60_000,
-  );
+  await expectFinalizedTurns(chatId, 1);
   await expect.poll(gatewayRequestCount, { timeout: 30_000 }).toBe(1);
 };
 

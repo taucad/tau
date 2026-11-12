@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { KeyboardEvent } from 'react';
-import { ChevronDown, CircleAlert, CircleDashed, GitBranch, History, Plus, Undo2, XIcon } from 'lucide-react';
+import { ChevronDown, CircleAlert, CircleDashed, Cloud, GitBranch, History, Plus, Undo2, XIcon } from 'lucide-react';
 import { Link, useLocation } from 'react-router';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
@@ -471,19 +471,25 @@ const isSetupCard = (revision: RevisionCard): boolean =>
  * Consecutive entries of Tau's own setup are one compact line, the head among
  * them: Current never marks them ({@link currentRevisionOf}).
  *
+ * The newest backed-up entry starts a group of its own, so *Backed up to here*
+ * sits between groups and never inside a fold (D4).
+ *
  * @param revisions - The line's history, newest first.
  * @param headRevisionId - The revision the checkout reflects, which never folds into autosaves.
+ * @param backedUpTo - The newest entry the remote holds, which no newer entry folds with.
  * @returns The rows and folds History renders.
  */
 export const groupRevisionHistory = (
   revisions: readonly RevisionCard[],
   headRevisionId: string | undefined,
+  backedUpTo?: string,
 ): readonly HistoryGroup[] => {
   const groups: HistoryGroup[] = [];
   for (const revision of revisions) {
+    const startsGroup = revision.revisionId === backedUpTo;
     if (isSetupCard(revision)) {
       const previous = groups.at(-1);
-      if (previous?.kind === 'setup') {
+      if (previous?.kind === 'setup' && !startsGroup) {
         groups[groups.length - 1] = { kind: 'setup', revisions: [...previous.revisions, revision] };
       } else {
         groups.push({ kind: 'setup', revisions: [revision] });
@@ -496,7 +502,7 @@ export const groupRevisionHistory = (
       !revision.conflicted &&
       isAutosave(revision);
     const previous = groups.at(-1);
-    if (foldable && previous?.kind === 'autosaves') {
+    if (foldable && previous?.kind === 'autosaves' && !startsGroup) {
       groups[groups.length - 1] = { kind: 'autosaves', revisions: [...previous.revisions, revision] };
     } else if (foldable) {
       groups.push({ kind: 'autosaves', revisions: [revision] });
@@ -590,6 +596,29 @@ function DayDivider({ label, hasLine }: { readonly label: string; readonly hasLi
         )}
       />
       <span className='pt-1.5 pl-1 text-xs text-muted-foreground'>{label}</span>
+    </li>
+  );
+}
+
+/**
+ * How far the backup has reached (D4, canvas `state-offline`): one dashed line
+ * under the entries that are not backed up yet. Nothing above it is at risk on
+ * this device; it is simply not backed up yet.
+ *
+ * @returns The boundary row.
+ */
+function BackupBoundary(): React.JSX.Element {
+  return (
+    <li data-row='boundary' className={timelineRow}>
+      <span
+        aria-hidden
+        className='relative flex justify-center before:absolute before:-top-0.5 before:bottom-0 before:w-px before:bg-border'
+      />
+      <span className='flex min-w-0 items-center gap-1.5 py-1 pr-2 pl-1 text-xs leading-5 text-muted-foreground'>
+        <Cloud aria-hidden className='size-3.5 shrink-0' />
+        Backed up to here
+        <span aria-hidden className='h-px min-w-4 flex-1 border-t border-dashed' />
+      </span>
     </li>
   );
 }
@@ -738,7 +767,15 @@ function HistoryList(): React.JSX.Element {
   const { restore, isBusy } = useRestoreToPoint();
   const revealed = useRevisionReveal(projectId);
   const branch = line.kind === 'unknown' ? undefined : line.name;
-  const groups = useMemo(() => groupRevisionHistory(revisions, headRevisionId), [revisions, headRevisionId]);
+  /* D4: the newest entry any branch's remote head names; the entries above it are the ones not backed up. */
+  const backedUpTo = useMemo(() => {
+    const remoteHeads = new Set((status?.branches ?? []).flatMap((facet) => facet.remoteHead ?? []));
+    return revisions.find((revision) => remoteHeads.has(revision.revisionId))?.revisionId;
+  }, [revisions, status?.branches]);
+  const groups = useMemo(
+    () => groupRevisionHistory(revisions, headRevisionId, backedUpTo),
+    [revisions, headRevisionId, backedUpTo],
+  );
   const currentRevisionId = useMemo(() => currentRevisionOf(revisions, headRevisionId), [revisions, headRevisionId]);
   const nextVersion = useMemo(() => nextVersionNumber(revisions), [revisions]);
   const [openRows, setOpenRows] = useState<ReadonlySet<string>>(() => new Set());
@@ -924,6 +961,9 @@ function HistoryList(): React.JSX.Element {
     const previous = shown[index - 1];
     if (previous === undefined || dayOf(firstOf(previous)) !== day) {
       items.push(<DayDivider key={`day-${day}`} label={day} hasLine={index > 0} />);
+    }
+    if (index > 0 && holds(group, backedUpTo)) {
+      items.push(<BackupBoundary key='backup-boundary' />);
     }
     items.push(
       renderGroup(

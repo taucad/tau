@@ -15,6 +15,7 @@ import type { MockInstance } from 'vitest';
 import { writeGlb } from '@taucad/geometry-core';
 import type { GlbMaterial, GlbPrimitive } from '@taucad/geometry-core';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { Vector3 } from 'three';
 import type { InstancedMesh, Mesh, Object3D } from 'three';
 import * as sectionTopology from '#graphics/three/utils/section-surface-topology.js';
 import { awaitGeometryPresentation } from '#graphics/three/utils/geometry-presentation-admission.js';
@@ -1403,7 +1404,7 @@ describe('GltfMesh presentation protocol', () => {
       expect([fatLines.mock.calls.length, batches.mock.calls.length, matcap.mock.calls.length]).toEqual(counts);
     });
 
-    it('should resync the instanced batch of a shared mesh in place and recompute its bounds', async () => {
+    it('should keep the instanced batch of a shared mesh in place and recompute its box and sphere', async () => {
       const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
       const batches = vi.spyOn(surfaceBatches, 'createGltfSurfaceBatches');
       const view = render(
@@ -1420,6 +1421,8 @@ describe('GltfMesh presentation protocol', () => {
       expect(instanced).toHaveLength(1);
       const [batch] = instanced;
       const batchCount = batches.mock.calls.length;
+      const sphereBefore = batch!.boundingSphere?.clone();
+      const liftedCorner = new Vector3(10, 1, 5);
 
       view.rerender(
         <GltfMesh
@@ -1435,7 +1438,9 @@ describe('GltfMesh presentation protocol', () => {
       expect(parseAsync).toHaveBeenCalledOnce();
       expect(batches.mock.calls.length).toBe(batchCount);
       expect(batch!.boundingBox?.max.toArray().map((value) => Math.round(value))).toEqual(expect.arrayContaining([5]));
-      expect(batch!.boundingSphere?.radius).toBeGreaterThan(5);
+      // The lifted corner of the far placement lies outside the old sphere and inside the recomputed one.
+      expect(sphereBefore?.containsPoint(liftedCorner)).toBe(false);
+      expect(batch!.boundingSphere?.containsPoint(liftedCorner)).toBe(true);
     });
 
     it('should keep and never free the committed scene across an in-place update, renaming the unit on commit', async () => {

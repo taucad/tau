@@ -97,9 +97,16 @@ type ProjectActor = ReturnType<typeof createProjectActor>;
 function presentInView(project: ProjectActor, viewId: string, unitId: string): void {
   project.send({ type: 'createViewGraphics', viewId });
   const graphics = project.getSnapshot().context.viewGraphics.get(viewId)!;
-  graphics.send({ type: 'updateArtifact', artifact: gltf(), hash: unitId });
+  // The geometry key differs from the unit, so a row cannot pass by reading one for the other.
+  graphics.send({ type: 'updateArtifact', artifact: gltf(), hash: `glb-${unitId}` });
   const { requestedRevision } = graphics.getSnapshot().context.gltfPresentation;
-  graphics.send({ type: 'gltfPresentationCommitted', revision: requestedRevision, key: unitId, unitId, manifest });
+  graphics.send({
+    type: 'gltfPresentationCommitted',
+    revision: requestedRevision,
+    key: `glb-${unitId}`,
+    unitId,
+    manifest,
+  });
   // A selection and a focus on the unit, which reconciliation clears with the manifest.
   const { modelInteractionRef } = project.getSnapshot().context;
   modelInteractionRef.send({ type: 'selectComponent', unitId, componentId: 'root' });
@@ -174,7 +181,7 @@ describe('project view manifest reconciliation (G11b characterisation)', () => {
       presentInView(project, 'v2', 'unit:b');
       const v1 = project.getSnapshot().context.viewGraphics.get('v1')!;
       // The first view asks for unit:b, but unit:a stays on screen until that commit lands.
-      v1.send({ type: 'updateArtifact', artifact: gltf(), hash: 'unit:b' });
+      v1.send({ type: 'updateArtifact', artifact: gltf(), hash: 'glb-unit:b' });
 
       project.send({ type: 'destroyViewGraphics', viewId: 'v2' });
       project.send({ type: 'reconcileViewManifest', unitId: 'unit:a' });

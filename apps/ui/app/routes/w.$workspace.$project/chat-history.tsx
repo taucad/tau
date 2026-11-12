@@ -1,5 +1,6 @@
 import { chatComposerTrayClassName } from '@taucad/chat-ui/components/chat-input-styles';
 import { ChatMessageQueue } from '#components/chat/chat-message-queue.js';
+import { ChatAutoKernelRow } from '#components/chat/chat-auto-kernel-row.js';
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
@@ -50,9 +51,11 @@ import { ArchivedChats } from '#routes/w.$workspace.$project/archived-chats.js';
 // One conversational turn per virtual row, sized only by its content.
 const TurnGroup = memo(function ({
   messageIds,
+  isFirst,
   isLast,
 }: {
   readonly messageIds: readonly string[];
+  readonly isFirst: boolean;
   readonly isLast: boolean;
 }) {
   return (
@@ -66,6 +69,7 @@ const TurnGroup = memo(function ({
           footer={index === 0 ? <ChatRevisionMarker userMessageId={id} isLatestTurn={isLast} /> : undefined}
         />
       ))}
+      {isFirst ? <ChatAutoKernelRow /> : null}
       {isLast ? <ChatError className='mx-4' /> : null}
     </div>
   );
@@ -223,7 +227,7 @@ const ExpandedChatHistory = memo(function ({
   const renderItem = useCallback(
     (index: number, group: TurnGroupData) => {
       const isLast = index === groups.length - 1;
-      return <TurnGroup messageIds={group.messageIds} isLast={isLast} />;
+      return <TurnGroup messageIds={group.messageIds} isFirst={index === 0} isLast={isLast} />;
     },
     [groups.length],
   );

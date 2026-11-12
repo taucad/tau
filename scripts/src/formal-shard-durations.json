@@ -1,0 +1,17 @@
+{
+  "$comment": "Uncached `formal` plus `formal:lean` task seconds per Nx project for the two `Formal models (<n>/2)` shards of ci.yml, which deal the affected projects with scripts/src/test-shard-dealer.ts. Source: merge-queue job 131090042426 (run 43190779343, 2026-11-12), where a tools/formal change made every formal project affected, timed between consecutive task ends at --parallel=1; ui from job 130913925705 (its only uncached task). A project not listed weighs defaultSeconds. Refresh when a listed project's time moves by more than a quarter or when a project adds a large tier.",
+  "measuredAt": "2026-11-12",
+  "defaultSeconds": 30,
+  "seconds": {
+    "agent-host": 438,
+    "api": 5,
+    "api-billing": 36,
+    "camera": 21,
+    "chat-ui": 1,
+    "formal": 11,
+    "host": 42,
+    "revisions": 40,
+    "sandbox": 7,
+    "ui": 127
+  }
+}

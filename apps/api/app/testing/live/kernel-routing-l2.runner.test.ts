@@ -3,7 +3,7 @@ import type { JsonValue, ToolRegistry } from '@taucad/agent-host';
 import { toolName } from '@taucad/chat/constants';
 import { runL2Task } from '#testing/live/kernel-routing-l2.js';
 import type { L2Agent } from '#testing/live/kernel-routing-l2.js';
-import { l2Tasks } from '#testing/live/kernel-routing-l2.tasks.js';
+import { l2Tasks, renderL2Oracle } from '#testing/live/kernel-routing-l2.tasks.js';
 import type { L2ModelFile } from '#testing/live/kernel-routing-l2.tasks.js';
 
 /*
@@ -46,5 +46,23 @@ describe('the L2 runner on tau mcp', () => {
     const [task] = l2Tasks;
     const verdict = await runL2Task({ task: task!, agent: async () => undefined });
     expect(verdict).toMatchObject({ passed: false, entryPath: undefined });
+  });
+
+  it('should judge the model a turn proved with test_model alone, as the host adopts it (D3)', async () => {
+    const [task] = l2Tasks;
+    const model = { ...task!.reference, path: `parts/${task!.reference.path}` };
+    const verdict = await runL2Task({
+      task: task!,
+      agent: async ({ registry }) => {
+        await call(registry, toolName.createFile, { targetFile: model.path, content: model.source });
+        await call(registry, toolName.createFile, {
+          targetFile: 'parts/check.geospec.ts',
+          content: renderL2Oracle({ id: task!.id, oracle: task!.oracle, entryPath: model.path }),
+        });
+        const tested = await call(registry, toolName.testModel, { files: ['parts/check.geospec.ts'] });
+        expect(tested.isError, JSON.stringify(tested.content)).toBe(false);
+      },
+    });
+    expect(verdict).toMatchObject({ passed: true, entryPath: model.path, kernel: model.kernel });
   });
 });

@@ -51,6 +51,7 @@ import { resolveMetersPerRenderUnit, shouldRebaseRenderFrame, shouldRescaleRende
 import type { RenderFrame } from '@taucad/spatial';
 import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
 import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
+import { attachCameraWheelRouter } from '#graphics/three/controls/camera-wheel-router.js';
 import { syncControlsLookAt } from '#graphics/three/utils/camera-controls-adapter.js';
 import type { ControlsAdapterLogic } from '#machines/graphics.machine.js';
 
@@ -389,14 +390,18 @@ export const createControlsAdapter = ({
      * reconnects them when the source changes, so each frame checks for a new one.
      */
     let surface: HTMLElement | undefined;
+    // The wheel router sits on the same surface, in the capture phase, so a trackpad pinch dollies like a wheel (PF1).
+    let detachWheelRouter: (() => void) | undefined;
     const followSurface = (state: RootState): void => {
       const next = (state.events.connected as HTMLElement | undefined) ?? gl.domElement;
       if (next !== surface) {
         if (surface !== undefined) {
+          detachWheelRouter?.();
           controls.disconnect();
         }
         surface = next;
         controls.connect(next);
+        detachWheelRouter = attachCameraWheelRouter({ controls, element: next });
       }
     };
 
@@ -439,6 +444,7 @@ export const createControlsAdapter = ({
       for (const [type, listener] of listeners) {
         controls.removeEventListener(type, listener);
       }
+      detachWheelRouter?.();
       controls.disconnect();
       if (root.get().controls === (controls as unknown as RootState['controls'])) {
         root.set({ controls: previousControls });

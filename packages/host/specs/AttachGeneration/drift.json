@@ -24,7 +24,7 @@
   },
   "alphabet": ["closed", "connect", "openFailed", "opened", "quiescent", "release", "shutdown"],
   "specs": {
-    "AttachGeneration.tla": "aa9f974659b94e9efa708eea47444e764c1eb8c99382d61e2a2c7ed212a2a755"
+    "AttachGeneration.tla": "3b44e137156c4e07a546e1ad89d27310bfce9ede047694db056f5f47e791e605"
   },
   "tables": {},
   "versions": {

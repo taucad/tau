@@ -210,3 +210,53 @@ export const summarizeTestModelOutput = (output: TestModelOutput): TestModelSumm
     undecided,
   };
 };
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * The model files a `test_model` run loaded completely, project-relative and in load order. An entry-less project
+ * adopts the first one as main (automatic kernel selection blueprint D3), as it adopts a successful `evaluate_model`
+ * target, because an agent that proves its model with GeoSpec may never call `evaluate_model`.
+ *
+ * Reads the output loosely so a host can pass a tool result it has not parsed.
+ *
+ * @param output - The `test_model` output.
+ * @returns The loaded model paths, without duplicates.
+ * @public
+ */
+export const testModelLoadedModels = (output: unknown): readonly string[] => {
+  const files = isObject(output) && Array.isArray(output['lineage']) ? output['lineage'] : [];
+  const paths: string[] = [];
+  for (const file of files) {
+    const lineage = isObject(file) ? file['lineage'] : undefined;
+    const loads = isObject(lineage) && Array.isArray(lineage['loads']) ? lineage['loads'] : [];
+    for (const load of loads) {
+      const evidence = isObject(load) ? load['evidence'] : undefined;
+      if (!isObject(load) || load['status'] !== 'complete' || !isObject(evidence)) {
+        continue;
+      }
+      /* The source revision names the rendered entry project-relative; `sourcePath` is the older, rooted field. */
+      const revision = evidence['sourceRevision'];
+      const entry = isObject(revision) && typeof revision['entry'] === 'string' ? revision['entry'] : undefined;
+      const sourcePath = typeof evidence['sourcePath'] === 'string' ? evidence['sourcePath'] : undefined;
+      const rootDirectory =
+        typeof evidence['rootDir'] === 'string' ? evidence['rootDir'].replaceAll(/^\.?\/*|\/+$/gu, '') : '';
+      const rooted = sourcePath?.replace(/^\.?\/+/u, '');
+      const path =
+        entry?.replace(/^\.?\/+/u, '') ??
+        (rooted === undefined || rooted === ''
+          ? undefined
+          : rootDirectory === '' || rooted.startsWith(`${rootDirectory}/`)
+            ? rooted
+            : `${rootDirectory}/${rooted}`);
+      if (path === undefined || path === '') {
+        continue;
+      }
+      if (!paths.includes(path)) {
+        paths.push(path);
+      }
+    }
+  }
+  return paths;
+};

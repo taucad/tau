@@ -217,3 +217,58 @@ describe('qualified desktop download catalog', () => {
     }
   });
 });
+
+// D-H5: production composes one complete catalog per promoted platform, each from its own candidate and tag.
+describe('composed per-platform desktop download catalog', () => {
+  const platformCatalog = (keep: (route: { route: string; target: string }) => boolean) => {
+    const value = projection();
+    value.routes = value.routes.filter(keep);
+    return value;
+  };
+  const mac = () => platformCatalog(({ route, target }) => route === 'macos-zip' && target === 'darwin-arm64');
+  const linux = () => platformCatalog(({ target }) => target === 'linux-x64');
+  const composed = (platforms: unknown[]) => ({ schemaVersion: 2, channel: 'production', promoted: true, platforms });
+
+  it('admits a production Linux platform alone, then Mac and Linux from different tags', () => {
+    expect(select(composed([{ lane: 'linux', catalog: linux() }]))?.map(({ platform }) => platform)).toEqual([
+      'linux',
+      'linuxPortable',
+    ]);
+    const later = { ...linux(), tag: 'desktop@0.3.0', version: '0.3.0' };
+    later.routes = later.routes.map((route) => ({
+      ...route,
+      artifacts: route.artifacts.map((item) => ({ ...item, name: item.name.replaceAll('0.2.0', '0.3.0') })),
+    }));
+    const both = select(
+      composed([
+        { lane: 'macos', catalog: mac() },
+        { lane: 'linux', catalog: later },
+      ]),
+    )!;
+    expect(both.map(({ platform }) => platform)).toEqual(['mac', 'linux', 'linuxPortable']);
+    expect(both[0]?.href).toBe('https://downloads.tau.new/releases/desktop%400.2.0/Tau-macos-arm64.dmg');
+    expect(both[2]?.sha256).toHaveLength(64);
+    expect(both[1]?.alternatives.some(({ href }) => href.includes('desktop%400.3.0'))).toBe(true);
+  });
+
+  it('refuses a partial, mislabelled, duplicated or other-channel platform', () => {
+    const appImageOnly = platformCatalog(({ route }) => route === 'linux-appimage');
+    for (const document of [
+      composed([]),
+      composed([{ lane: 'linux', catalog: appImageOnly }]),
+      composed([{ lane: 'macos', catalog: linux() }]),
+      composed([{ lane: 'linux', catalog: projection() }]),
+      composed([{ lane: 'windows', catalog: projection() }]),
+      composed([
+        { lane: 'linux', catalog: linux() },
+        { lane: 'linux', catalog: linux() },
+      ]),
+      { ...composed([{ lane: 'linux', catalog: linux() }]), channel: 'staging' },
+      { ...composed([{ lane: 'linux', catalog: linux() }]), promoted: false },
+      { ...composed([{ lane: 'linux', catalog: linux() }]), extra: true },
+      composed([{ lane: 'linux', catalog: linux(), extra: true }]),
+    ]) {
+      expect(() => select(document)).toThrow();
+    }
+  });
+});

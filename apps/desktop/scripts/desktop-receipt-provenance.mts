@@ -146,6 +146,7 @@ export const fetchDesktopQualifiedReceipts = async (
       verifyQualificationBinding(binding, {
         manifest,
         candidate,
+        scope: z.enum(['macos', 'linux']).parse(scope),
         kind: environment,
         runId: admitted.runId,
         workflowCommit: admitted.workflowCommit,

@@ -1780,12 +1780,14 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       /* B3 (O5 inverted): a commit Tau did not write reads as its own git author, with no identity standing in. */
       it('reads a commit Tau did not record as its git author', async () => {
         const cwd = fixture.repositoryPath;
-        const signature = { GIT_AUTHOR_NAME: 'Octo Dev', GIT_AUTHOR_EMAIL: 'octo@example.com' };
         const env = {
           ...process.env,
-          ...signature,
-          GIT_COMMITTER_NAME: 'Octo Dev',
-          GIT_COMMITTER_EMAIL: 'octo@example.com',
+          ...Object.fromEntries([
+            ['GIT_AUTHOR_NAME', 'Octo Dev'],
+            ['GIT_AUTHOR_EMAIL', 'octo@example.com'],
+            ['GIT_COMMITTER_NAME', 'Octo Dev'],
+            ['GIT_COMMITTER_EMAIL', 'octo@example.com'],
+          ]),
         };
         const emptyTree = execFileSync('git', ['mktree'], { cwd, input: '', encoding: 'utf8' }).trim();
         const upstream = execFileSync('git', ['commit-tree', emptyTree, '-m', 'Upstream change'], {

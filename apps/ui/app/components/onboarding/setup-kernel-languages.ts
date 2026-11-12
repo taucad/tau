@@ -1,5 +1,5 @@
 /**
- * Which of setup's languages have a kernel on this host and on the desktop app (Finding 2), from the same two inputs
+ * Which of setup's languages have a kernel on this host and on the desktop app, from the same two inputs
  * the kernel program gives the prompt: the kernel catalog's language per kernel, and the kernels this host can run.
  */
 import { kernelConfigurations } from '@taucad/types/constants';

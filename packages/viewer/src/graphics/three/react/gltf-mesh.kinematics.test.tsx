@@ -1,5 +1,6 @@
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createGltfMeshPresentationHarness } from '#graphics/three/react/gltf-mesh.test-utils.jsx';
 import { createActor } from 'xstate';
 import type { Actor, SnapshotFrom } from 'xstate';
 import { Matrix4 } from 'three';
@@ -30,7 +31,12 @@ const mocks = vi.hoisted(() => {
     graphicsActor: {
       send: vi.fn(),
       getSnapshot: () => ({
-        context: { modelPointerClickSuppressionReasons: [], suppressNextModelPointerClick: false },
+        context: {
+          modelPointerClickSuppressionReasons: [],
+          suppressNextModelPointerClick: false,
+          // The host reads the section barrier from graphics as it prepares.
+          isSectionViewActive: mocks.sectionView.isActive,
+        },
       }),
     },
     gl: Object.create(null) as { compileAsync?: ReturnType<typeof vi.fn>; coordinateSystem?: number },
@@ -76,7 +82,7 @@ vi.mock('#hooks/use-graphics.jsx', async () => {
   const { useSelector } = await import('@xstate/react');
   return {
     useCameraRig: () => mocks.cameraRig,
-    useGraphics: () => mocks.graphicsActor,
+    useGraphics: () => harness.graphics,
     useGraphicsSelector: () => false,
     useRenderFrame: () => mocks.renderFrame,
     // Material retargeting is not under test here.
@@ -100,7 +106,17 @@ vi.mock('#graphics/three/use-section-view.js', () => ({
   useSectionViewFlags: () => mocks.sectionView,
 }));
 
-const { GltfMesh } = await import('#graphics/three/react/gltf-mesh.jsx');
+const { GltfMesh: RealGltfMesh } = await import('#graphics/three/react/gltf-mesh.jsx');
+const { deriveModelInteractionUnitId } = await import('#machines/model-interaction.machine.js');
+const harness = createGltfMeshPresentationHarness({
+  graphicsActor: mocks.graphicsActor,
+  GltfMesh: RealGltfMesh,
+  deriveUnitId: deriveModelInteractionUnitId,
+});
+const { GltfMesh } = harness;
+afterEach(() => {
+  harness.reset();
+});
 
 const unitId = 'unit:a';
 

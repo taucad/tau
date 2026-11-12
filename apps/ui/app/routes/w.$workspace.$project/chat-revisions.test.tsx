@@ -307,35 +307,8 @@ describe('Revisions pane', () => {
     await waitFor(() => {
       expect(screen.getAllByText('Current')).toHaveLength(1);
     });
-    expect(screen.getByRole('listitem', { current: true })).toHaveTextContent('main');
-  });
-
-  it('shows the branch region only once a second branch exists', async () => {
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'branch', name: 'main' } };
-
-    const { rerender } = render(<RevisionsPanelBody />, { wrapper });
-    expect(screen.queryByRole('list', { name: 'Branches' })).not.toBeInTheDocument();
-
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      branches: [
-        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
-        {
-          name: 'bracket-fillet',
-          head: undefined,
-          checkoutId: 'co-2',
-          checkoutRoot: '/checkouts/co-2',
-          leaseChatIds: ['chat-1'],
-        },
-      ],
-    };
-    rerender(<RevisionsPanelBody />);
-
-    await waitFor(() => {
-      expect(screen.getByRole('list', { name: 'Branches' })).toBeInTheDocument();
-    });
-    /* The chips say who is working where, by the chat's own name. */
-    expect(screen.getByText('Optimize bracket')).toBeInTheDocument();
+    /* D3: the header's chip names the branch; no list of branches marks one. */
+    expect(screen.getByRole('button', { name: 'Branch: main. Switch branch' })).toBeInTheDocument();
   });
 
   /* W10 red pin (d), HQ1–HQ2: a conflicted head is a decision in *Choose a
@@ -377,7 +350,6 @@ describe('Revisions pane', () => {
 
     expect(await screen.findByRole('heading', { name: 'Choose a version' })).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'History status' })).toHaveTextContent('Needs your decision on main');
-    expect(screen.getByLabelText('Needs your decision')).toHaveClass('text-warning');
     expect(screen.queryByText(/Needs resolution/u)).toBeNull();
     expect(screen.getByText('src/bracket.ts')).toBeInTheDocument();
     /* AC14's promise, in the one sentence a person reads first. */
@@ -635,7 +607,9 @@ describe('Revisions pane', () => {
     };
 
     renderPane();
-    await user.click(screen.getByRole('button', { name: 'Switch to bracket-fillet' }));
+    /* D3: the header's chip is the branch menu. */
+    await user.click(screen.getByRole('button', { name: 'Branch: main. Switch branch' }));
+    await user.click(screen.getByRole('menuitemradio', { name: /^bracket-fillet/u }));
 
     expect(revisionStatusHarness.commands.switchTo).toHaveBeenCalledWith('bracket-fillet');
   });
@@ -669,7 +643,7 @@ describe('Revisions pane', () => {
   });
 
   /* C3: the composer offers no branch, so a one-line project makes its second here. */
-  it('offers New branch at one line, where the Branches region does not exist yet', async () => {
+  it('offers New branch at one line, from the branch chip', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
     revisionStatusHarness.status = {
@@ -679,7 +653,6 @@ describe('Revisions pane', () => {
     };
 
     renderPane();
-    expect(screen.queryByRole('list', { name: 'Branches' })).not.toBeInTheDocument();
     await openNewBranch(user);
     /* The one naming form, which says where the branch starts (round 14). */
     expect(screen.getByText('Starts from where you are now. main stays as it is.')).toBeInTheDocument();
@@ -689,46 +662,11 @@ describe('Revisions pane', () => {
     expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('enclosure-v2');
   });
 
-  it('places the chat in focus on a branch from that branch’s row', async () => {
-    const user = userEvent.setup();
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      line: { kind: 'branch', name: 'main' },
-      branches: [
-        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
-        {
-          name: 'bracket-fillet',
-          head: undefined,
-          checkoutId: 'co-2',
-          checkoutRoot: '/checkouts/co-2',
-          leaseChatIds: [],
-        },
-      ],
-    };
-
-    render(<RevisionsPanelBody />, {
-      wrapper: ({ children }) => (
-        <QueryClientProvider client={new QueryClient()}>
-          <MemoryRouter initialEntries={['/w/home/p?chat=chat-1']}>{children}</MemoryRouter>
-        </QueryClientProvider>
-      ),
-    });
-    /* The chat in focus already works in bracket-fillet, so only main offers to take it. */
-    await user.click(screen.getByRole('button', { name: 'Actions for bracket-fillet' }));
-    expect(screen.queryByRole('menuitem', { name: /in this chat$/u })).not.toBeInTheDocument();
-    await user.keyboard('{Escape}');
-    await user.click(screen.getByRole('button', { name: 'Actions for main' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Use main in this chat' }));
-
-    expect(placeChat).toHaveBeenCalledWith('chat-1', 'live');
-  });
-
   /* Review W8 finding 4: the pane consumes the verb as `(name) => void`, which
      discards the answer but not its rejection — a duplicate name, the normal
      refusal here, went loose. The toast channel already reports it. */
   it('handles a refused branch rather than leaving its rejection loose', async () => {
     const user = userEvent.setup();
-    /* The *Branches* region appears at two branches (S26). */
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
       line: { kind: 'branch', name: 'main' },
@@ -852,33 +790,6 @@ describe('Revisions pane', () => {
 
     expect(container.textContent).not.toMatch(/checkout|worktree|lease|\bHEAD\b|\bref\b/iu);
   });
-  it('renames a branch in place, the one verb whose effect has landed (review R3)', async () => {
-    const user = userEvent.setup();
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      line: { kind: 'branch', name: 'main' },
-      branches: [
-        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
-        {
-          name: 'bracket-fillet',
-          head: undefined,
-          checkoutId: 'co-2',
-          checkoutRoot: '/checkouts/co-2',
-          leaseChatIds: [],
-        },
-      ],
-    };
-
-    render(<RevisionsPanelBody />, { wrapper });
-    await user.click(screen.getByRole('button', { name: 'Actions for bracket-fillet' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Rename bracket-fillet…' }));
-    const field = await screen.findByRole('textbox', { name: 'New name for bracket-fillet' });
-    await user.clear(field);
-    await user.type(field, 'enclosure-v2');
-    await user.click(screen.getByRole('button', { name: 'Rename branch' }));
-
-    expect(revisionStatusHarness.commands.renameBranch).toHaveBeenCalledWith('bracket-fillet', 'enclosure-v2');
-  });
 });
 
 /** The W5 closeout pins: what the pane owed a person and did not give them. */
@@ -941,82 +852,6 @@ describe('Revisions pane closeout', () => {
     expect(
       within(since).getByRole('button', { name: 'Compare src/main.scad with the current file' }),
     ).toBeInTheDocument();
-  });
-
-  it('marks a branch on a host data directory as Linked (C40, I2)', async () => {
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      line: { kind: 'branch', name: 'main' },
-      checkoutId: 'live',
-      liveCheckoutId: 'live',
-      branches: [
-        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
-        {
-          name: 'bracket-fillet',
-          head: undefined,
-          checkoutId: 'co-2',
-          /* A disk host puts linked checkouts under its own data directory, so
-           * the old `/checkouts/` prefix test never fired off the browser. */
-          checkoutRoot: '/Users/x/Library/Application Support/Tau/checkouts/co-2',
-          leaseChatIds: [],
-        },
-      ],
-    };
-
-    renderPane();
-
-    expect(await screen.findByText('Linked')).toBeInTheDocument();
-  });
-
-  it('marks the linked branch, not the live one, while the pane is on the linked checkout (D96)', async () => {
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      line: { kind: 'branch', name: 'bracket-fillet' },
-      checkoutId: 'co-2',
-      liveCheckoutId: 'live',
-      branches: [
-        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
-        {
-          name: 'bracket-fillet',
-          head: undefined,
-          checkoutId: 'co-2',
-          checkoutRoot: '/checkouts/co-2',
-          leaseChatIds: [],
-        },
-      ],
-    };
-
-    renderPane();
-
-    const badges = await screen.findAllByText('Linked');
-    expect(badges).toHaveLength(1);
-    expect(badges[0]!.closest('li')).toHaveTextContent('bracket-fillet');
-  });
-
-  it('places no chat on a remote-only branch, which has no checkout (D37)', async () => {
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      line: { kind: 'branch', name: 'main' },
-      checkoutId: 'live',
-      branches: [
-        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
-        {
-          name: 'upstream-only',
-          head: undefined,
-          checkoutId: undefined,
-          checkoutRoot: undefined,
-          leaseChatIds: [],
-          onRemote: true,
-        },
-      ],
-    };
-
-    renderPane();
-
-    const badge = await screen.findByText('Remote only');
-    const remote = badge.closest('li');
-    expect(remote).not.toBeNull();
-    expect(remote).not.toHaveTextContent('Sketch lid');
   });
 
   it('asks for no diff it does not render, and shows twelve rows before Show older (C52)', async () => {

@@ -4,6 +4,7 @@ import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createGltfMeshPresentationHarness } from '#graphics/three/react/gltf-mesh.test-utils.jsx';
 import { writeGlb } from '@taucad/geometry-core';
 import type { GlbMaterial } from '@taucad/geometry-core';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -39,6 +40,8 @@ const mocks = vi.hoisted(() => {
           cameraRef: { getSnapshot: () => ({ matches: () => false }) },
           modelPointerClickSuppressionReasons: [],
           suppressNextModelPointerClick: false,
+          // The host reads the section barrier from graphics as it prepares.
+          isSectionViewActive: mocks.sectionView.isActive,
           viewerHoverSuppressionReasons: [] as string[],
         },
       }),
@@ -92,7 +95,7 @@ vi.mock('#graphics/three/three-graphics-backend-context.jsx', () => ({
 
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useCameraRig: () => mocks.cameraRig,
-  useGraphics: () => mocks.graphicsActor,
+  useGraphics: () => harness.graphics,
   useGraphicsSelector: () => false,
   useRenderFrame: () => mocks.renderFrame,
   useRenderFrameRetarget: (handler: (frame: RenderFrame) => void) => {
@@ -121,7 +124,17 @@ vi.mock('#graphics/three/react/kinematics-viewer.js', () => ({
   useKinematicsViewer: () => () => undefined,
 }));
 
-const { GltfMesh } = await import('#graphics/three/react/gltf-mesh.jsx');
+const { GltfMesh: RealGltfMesh } = await import('#graphics/three/react/gltf-mesh.jsx');
+const { deriveModelInteractionUnitId } = await import('#machines/model-interaction.machine.js');
+const harness = createGltfMeshPresentationHarness({
+  graphicsActor: mocks.graphicsActor,
+  GltfMesh: RealGltfMesh,
+  deriveUnitId: deriveModelInteractionUnitId,
+});
+const { GltfMesh } = harness;
+afterEach(() => {
+  harness.reset();
+});
 
 const surfaceMaterial: GlbMaterial = {
   doubleSided: false,

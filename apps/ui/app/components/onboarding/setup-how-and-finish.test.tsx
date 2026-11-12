@@ -26,7 +26,7 @@ const renderSetup = (path = '/welcome?step=how'): ReturnType<typeof createMemory
   return router;
 };
 
-describe('setup step 4 and Finish (S6, S7, S9, DT2)', () => {
+describe('setup step 4 and Finish', () => {
   beforeEach(() => {
     globalThis.localStorage.clear();
     flags.viewerControls = true;
@@ -35,7 +35,7 @@ describe('setup step 4 and Finish (S6, S7, S9, DT2)', () => {
     connectWorkspace.mockReset();
   });
 
-  it('shows Design, Verify and Build cards in that order with the copy of Finding 9 (S6, S9)', () => {
+  it("shows Design, Verify and Build cards in that order with the marketing site's copy", () => {
     renderSetup();
     const steps = [...screen.getByTestId('design-verify-build').querySelectorAll('article')].map(
       (card) => card.dataset['testid'],
@@ -61,7 +61,7 @@ describe('setup step 4 and Finish (S6, S7, S9, DT2)', () => {
     expect(screen.getByTestId('concept-kernels')).toHaveTextContent('board.circuit.tsx');
   });
 
-  it('shows the desktop card only on the desktop and the warehouse card only with partsWarehouse (S6, DT2)', () => {
+  it('shows the desktop card only on the desktop and the warehouse card only with partsWarehouse', () => {
     host.isDesktop = true;
     flags.partsWarehouse = true;
     renderSetup();
@@ -69,7 +69,7 @@ describe('setup step 4 and Finish (S6, S7, S9, DT2)', () => {
     expect(screen.getByTestId('concept-warehouse')).toHaveTextContent('Start from real parts');
   });
 
-  it('has the tour switch on by default and Finish stores it in tour.wanted (S6)', async () => {
+  it('has the tour switch on by default and Finish stores it in tour.wanted', async () => {
     const user = userEvent.setup();
     renderSetup();
     const tourSwitch = screen.getByRole('switch', { name: 'Show me around the next project I open' });
@@ -79,7 +79,7 @@ describe('setup step 4 and Finish (S6, S7, S9, DT2)', () => {
     expect(personRecordStores.onboarding.read().tour.wanted).toBe(false);
   });
 
-  it('replaces the switch with "You have taken the tour" once the tour has ended (S6)', () => {
+  it('replaces the switch with "You have taken the tour" once the tour has ended', () => {
     personRecordStores.onboarding.write({ ended: 'completed' });
     renderSetup();
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
@@ -87,7 +87,17 @@ describe('setup step 4 and Finish (S6, S7, S9, DT2)', () => {
     expect(screen.getByRole('button', { name: 'Take it again' })).toBeInTheDocument();
   });
 
-  it('stores completed and shows a three-line summary with Start building (S7)', async () => {
+  it('says the tour was taken in the summary once it has ended, not that tips will appear', async () => {
+    personRecordStores.onboarding.write({ ended: 'dismissed' });
+    const user = userEvent.setup();
+    renderSetup();
+    await user.click(screen.getByRole('button', { name: 'Finish' }));
+    const summary = screen.getByTestId('setup-summary');
+    expect(summary).toHaveTextContent('You have taken the tour');
+    expect(summary).not.toHaveTextContent('Tips will appear');
+  });
+
+  it('stores completed and shows a three-line summary with Start building', async () => {
     personRecordStores.profile.write({ goals: ['mechanical'], tool: 'solidworks' });
     const user = userEvent.setup();
     const router = renderSetup();
@@ -104,7 +114,7 @@ describe('setup step 4 and Finish (S6, S7, S9, DT2)', () => {
     expect(router.state.location.pathname).toBe('/');
   });
 
-  it('has two summary lines and no Viewer settings link with viewerControls off (S7)', async () => {
+  it('has two summary lines and no Viewer settings link with viewerControls off', async () => {
     flags.viewerControls = false;
     const user = userEvent.setup();
     renderSetup();
@@ -113,7 +123,7 @@ describe('setup step 4 and Finish (S6, S7, S9, DT2)', () => {
     expect(screen.queryByRole('button', { name: 'Open Viewer settings' })).not.toBeInTheDocument();
   });
 
-  it('offers Open a folder on the desktop (S7, DT2)', async () => {
+  it('offers Open a folder on the desktop', async () => {
     host.isDesktop = true;
     connectWorkspace.mockResolvedValue({ workspace: { workspaceId: 'w', name: 'Parts' }, minted: false });
     const user = userEvent.setup();
@@ -126,7 +136,7 @@ describe('setup step 4 and Finish (S6, S7, S9, DT2)', () => {
     });
   });
 
-  it('shows every stored answer on re-entry, and a change is stored at once (S7)', async () => {
+  it('shows every stored answer on re-entry, and a change is stored at once', async () => {
     personRecordStores.profile.write({ goals: ['printing'], tool: 'slicer', languages: ['none'] });
     personRecordStores.onboarding.write({ setupStatus: 'completed' });
     const user = userEvent.setup();

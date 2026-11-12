@@ -30,6 +30,7 @@ import type { GeometryComponentManifest } from '@taucad/types';
 import type { MeasurementAnchor, MeasurementRecord } from '#constants/measurement.types.js';
 import { graphicsEventTypes, graphicsIgnoredEvents, graphicsMachine } from '#machines/graphics.machine.js';
 import type { GltfPresentationTelemetry, GraphicsEvent } from '#machines/graphics.machine.js';
+import type { PresentationHostCommand } from '#machines/presentation.machine.js';
 
 const unitId = 'src/main.ts';
 const capabilities = {
@@ -106,6 +107,15 @@ const samples: Samples = {
     { type: 'cameraViewChanged', verticalSpan: 0 },
   ],
   poseRevisionObserved: [{ type: 'poseRevisionObserved', revision: 1 }],
+  presentationHostAttached: [
+    {
+      type: 'presentationHostAttached',
+      hostId: 'host',
+      host: createCallbackLogic<PresentationHostCommand, undefined>(() => undefined),
+    },
+  ],
+  presentationHostDetached: [{ type: 'presentationHostDetached', hostId: 'host' }],
+  componentFocusObserved: [{ type: 'componentFocusObserved', focus: { [unitId]: 'root' } }],
   setSurfaceVisibility: [{ type: 'setSurfaceVisibility', payload: false }],
   setLinesVisibility: [{ type: 'setLinesVisibility', payload: false }],
   setGizmoVisibility: [{ type: 'setGizmoVisibility', payload: false }],

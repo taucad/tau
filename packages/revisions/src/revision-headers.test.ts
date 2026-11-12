@@ -210,38 +210,41 @@ describe('the commit signatures', () => {
 
 describe('the version tag trailer (B6)', () => {
   const actor = { kind: 'user', id: 'user_1', name: 'Ada' } as const;
+  const id = '0123456789abcdef0123456789abcdef';
 
-  it('records the number beside the note and the actor, and reads it back', () => {
-    const message = revisionTagMessage({ name: 'lid-fit', note: 'Lid fit', actor, number: 5 });
+  it('records the id and the free-text name beside the note and the actor, and reads them back', () => {
+    const message = revisionTagMessage({ id, name: 'Ready for print', note: 'Lid fit', actor });
     expect(message).toBe(
-      `Lid fit\n\n${tagTrailerPrefix}{"version":1,"note":"Lid fit","actor":{"kind":"user","id":"user_1","name":"Ada"},"number":5}\n`,
+      `Lid fit\n\n${tagTrailerPrefix}{"version":2,"id":"${id}","name":"Ready for print","note":"Lid fit","actor":{"kind":"user","id":"user_1","name":"Ada"}}\n`,
     );
-    expect(parseRevisionTagMessage(message)).toStrictEqual({ note: 'Lid fit', actor, number: 5 });
+    expect(parseRevisionTagMessage(message)).toStrictEqual({ id, name: 'Ready for print', note: 'Lid fit', actor });
   });
 
-  it('reads a tag written before numbers with no number, so it is numbered when read', () => {
-    const message = `Lid fit\n\n${tagTrailerPrefix}{"version":1,"note":"Lid fit"}\n`;
-    expect(parseRevisionTagMessage(message)).toStrictEqual({ note: 'Lid fit', actor: undefined, number: undefined });
-  });
-
-  it('reads nothing from a tag Tau did not write, or a lightweight tag', () => {
-    const empty = { note: undefined, actor: undefined, number: undefined };
-    expect(parseRevisionTagMessage('v1.0.0\n')).toStrictEqual(empty);
-    expect(parseRevisionTagMessage(undefined)).toStrictEqual(empty);
+  it('titles a version with no note by its name, spaces and all', () => {
+    const message = revisionTagMessage({ id, name: 'Ready for print', note: undefined, actor: undefined });
+    expect(message.split('\n')[0]).toBe('Ready for print');
+    expect(parseRevisionTagMessage(message)).toStrictEqual({
+      id,
+      name: 'Ready for print',
+      note: undefined,
+      actor: undefined,
+    });
   });
 
   it.each([
-    ['V1, which the Start entry holds', 1],
-    ['a number that is not whole', 2.5],
-    ['a number below one', 0],
-    ['a number spelled as text', '3'],
-  ])('refuses a trailer whose number is %s', (_label, number) => {
-    const message = `Lid fit\n\n${tagTrailerPrefix}${JSON.stringify({ version: 1, note: 'Lid fit', number })}\n`;
-    expect(parseRevisionTagMessage(message)).toStrictEqual({ note: undefined, actor: undefined, number: undefined });
+    ['a tag Tau did not write', 'Release one\n\nNotes.\n'],
+    ['a lightweight tag', undefined],
+    ['a record without its id (I7)', `Lid\n\n${tagTrailerPrefix}{"version":2,"name":"Lid"}\n`],
+    ['a record with a malformed id', `Lid\n\n${tagTrailerPrefix}{"version":2,"id":"ABC","name":"Lid"}\n`],
+    ['a record with an empty name', `Lid\n\n${tagTrailerPrefix}{"version":2,"id":"${id}","name":""}\n`],
+    ['a trailer of another version (I7)', `Lid fit\n\n${tagTrailerPrefix}{"version":1,"note":"Lid fit","number":3}\n`],
+    ['a trailer that is not JSON', `Lid\n\n${tagTrailerPrefix}{version\n`],
+  ])('reads no version from %s', (_label, message) => {
+    expect(parseRevisionTagMessage(message)).toBeUndefined();
   });
 
   it('reads the last Tau-Tag line, as the server does', () => {
-    const message = `Lid fit\n\n${tagTrailerPrefix}{"version":1,"number":4}\n${tagTrailerPrefix}{"version":1,"number":7}\n`;
-    expect(parseRevisionTagMessage(message).number).toBe(7);
+    const message = `Lid\n\n${tagTrailerPrefix}{"version":2,"id":"${id}","name":"A"}\n${tagTrailerPrefix}{"version":2,"id":"${id}","name":"B"}\n`;
+    expect(parseRevisionTagMessage(message)?.name).toBe('B');
   });
 });

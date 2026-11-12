@@ -450,6 +450,11 @@ streamingFadeTest('presents sequential reasoning and semantic activity through c
   await target.expectVisible(reasoningBody, 30_000);
 
   await target.setViewport({ width: 430, height: 820 });
+  /* A phone opens a project on the model (`mobileActiveTab: 'viewer'`, 4ea155f0b), and opening the desktop chat lane
+   * does not choose the phone's surface, so the narrow tree reaches the transcript through its Chat destination. */
+  await target.click(
+    selectors.getByRole('navigation', { name: 'Workbench' }).getByRole('button', { name: 'Chat', exact: true }),
+  );
   const alignment = await target.evaluateLocator(activityTrigger, (element) => {
     const icon = element.querySelector('svg');
     const label = element.querySelector('span');
@@ -886,7 +891,10 @@ describe('durable log reattach after a reload', () => {
     await expect
       .poll(durableFailureReason, { timeout: 120_000 })
       .toBe('The host executing this run is gone. Resume the turn to continue it.');
-    await target.expectVisible(selectors.getByText('The host executing this run is gone', { exact: false }), 60_000);
+    /* The card names the pause and promises the saved turn; the host's diagnostic sentence stays out of the copy
+     * (deb4672073). */
+    await target.expectVisible(selectors.getByText('Chat paused', { exact: true }), 60_000);
+    await target.expectVisible(selectors.getByText('Everything up to here is saved.', { exact: true }), 60_000);
     expect(await readGatewayRequestCount()).toBe(1);
     await assertNoApiRunCalls();
     const firstSettlement = await waitForAbandonedSettlement('home');

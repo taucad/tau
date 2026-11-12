@@ -169,7 +169,7 @@ describe('NavUser', () => {
     expect(screen.queryByText('About Tau')).not.toBeInTheDocument();
   });
 
-  /* Onboarding E3: Help opens setup, and its explainer at step 4. */
+  /* Help opens setup, and its explainer at step 4. */
   it('should offer Set up Tau and How Tau works in Help with onboarding on', () => {
     onboardingFlag.isEnabled = true;
     render(<NavUser />, { wrapper: MemoryRouter });

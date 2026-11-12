@@ -230,6 +230,17 @@ describe('ModelViewer', () => {
       );
     });
 
+    it('should send the source file, which names the model unit, and an empty hash when none is given (G11b)', () => {
+      render(<ModelViewer artifact={testArtifact} artifactHash={undefined} sourceFile='src/main.ts' />);
+
+      expect(mockSend).toHaveBeenCalledWith({
+        type: 'updateArtifact',
+        artifact: testArtifact,
+        hash: '',
+        sourceFile: 'src/main.ts',
+      });
+    });
+
     it('should not send updateGeometry when geometry is absent', () => {
       render(<ModelViewer artifact={undefined} artifactHash={undefined} />);
 
@@ -280,6 +291,24 @@ describe('ModelViewer', () => {
       render(<ModelViewer artifact={testArtifact} artifactHash={testHash} />);
 
       expect(mockUseActorRef).toHaveBeenCalled();
+    });
+
+    it.each([
+      [false, false],
+      [undefined, true],
+    ])('starts its own graphics actor with graphicsOptions.enablePostProcessing %s as %s', (option, expected) => {
+      render(
+        <ModelViewer
+          artifact={testArtifact}
+          artifactHash={testHash}
+          graphicsOptions={{ enablePostProcessing: option }}
+        />,
+      );
+
+      expect(mockUseActorRef).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ input: expect.objectContaining({ enablePostProcessing: expected }) as unknown }),
+      );
     });
 
     it('should render CadViewer with external graphicsRef when geometry is provided', () => {

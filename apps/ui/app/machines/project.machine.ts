@@ -18,8 +18,8 @@ import type { GraphicsOwnedSettings, GraphicsViewSettings } from '@taucad/viewer
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
 import { actorIdOf, eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { cadMachine, closeCadRuntime, disposeCadRuntime } from '#machines/cad.machine.js';
-import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
-import type { GraphicsEmitted } from '@taucad/viewer/machines/graphics.machine';
+import { graphicsMachine, sameComponentFocus, selectComponentFocus } from '@taucad/viewer/machines/graphics.machine';
+import type { ComponentFocus, GraphicsEmitted } from '@taucad/viewer/machines/graphics.machine';
 import { logMachine } from '#machines/logs.machine.js';
 import { modelInteractionMachine } from '@taucad/viewer/machines/model-interaction.machine';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
@@ -64,6 +64,11 @@ export type ProjectContext = {
   viewPresentationListeners: Map<string, AnyActor>;
   /** Project-scoped model appearance shared by every viewer of the same geometry unit. */
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
+  /**
+   * Each unit's focused component, folded from the shared model interaction and forwarded to every view's graphics:
+   * graphics observes only a model interaction it owns (MC-R11), and the project owns this one.
+   */
+  componentFocus: ComponentFocus;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
   /** Visible viewer panels and explicit operations are the runtime's entry-scoped demand. */
@@ -221,6 +226,8 @@ type ProjectEventInternal =
   | { type: 'destroyViewGraphics'; viewId: string }
   /** A view's graphics reported `presentedUnitChanged`. */
   | { type: 'viewPresentationChanged'; viewId: string; unitId: string | undefined; mediaType: string | undefined }
+  /** The shared model interaction's snapshot, folded to each unit's focused component. */
+  | { type: 'modelComponentFocusObserved'; focus: ComponentFocus }
   // Filesystem participant intents — fired by the
   // `file-operation-participants.ts` adapter on rename/delete events.
   // The participant is the single source of truth; UI components must
@@ -379,6 +386,11 @@ const createViewGraphics = ({ context, event }: ProjectArgs<'createViewGraphics'
     id: `view-record-${context.projectId}-${event.viewId}`,
     input: { viewId: event.viewId, graphics: gfx },
   });
+
+  // A focus made before this view opened frames it once it presents that unit.
+  if (Object.keys(context.componentFocus).length > 0) {
+    enq.sendTo(gfx, { type: 'componentFocusObserved', focus: context.componentFocus });
+  }
 
   const listener = enq.listen(
     gfx,
@@ -581,6 +593,7 @@ export const projectMachine = setup({
       viewPresentations: new Map(),
       viewPresentationListeners: new Map(),
       modelInteractionRef,
+      componentFocus: {},
       geometryUnits,
       viewerGeometryDemand: new Map(),
       operationGeometryDemand: new Map(),
@@ -590,10 +603,30 @@ export const projectMachine = setup({
       logRef,
     };
   },
+  // The project owns the shared model interaction, so it observes the focus there and forwards it to each view.
+  entry: ({ context }, enq) => {
+    enq.subscribeTo(
+      context.modelInteractionRef,
+      (snapshot): ProjectEvent => ({
+        type: 'modelComponentFocusObserved',
+        focus: selectComponentFocus(snapshot.context),
+      }),
+    );
+  },
   on: {
     closeRuntime: { target: '.runtimeClosing', context: { error: undefined } },
     // A view's report is answered in every state, so its record never goes stale while the project runs.
     viewPresentationChanged,
+    // Only a change of focus reaches the views: most model-interaction snapshots (hover, selection) leave it alone.
+    modelComponentFocusObserved: ({ context, event }, enq) => {
+      if (sameComponentFocus(context.componentFocus, event.focus)) {
+        return {};
+      }
+      for (const gfx of context.viewGraphics.values()) {
+        enq.sendTo(gfx, { type: 'componentFocusObserved', focus: event.focus });
+      }
+      return { context: { componentFocus: event.focus } };
+    },
     // eslint-disable-next-line @typescript-eslint/naming-convention -- XState event name
     'geometryUnit.runtimeClosed': ({ context, event, children }, enq) => {
       const owned = Object.values(children).some((child) => child === event.unit);

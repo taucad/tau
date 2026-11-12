@@ -50,6 +50,8 @@ describe('the projection comparator (P52, W18 DEF-6)', () => {
       phase: 'success',
       tags: [
         {
+          id: '2'.repeat(32),
+          number: 2,
           name: 'v1',
           revisionId: revisionId('rev-1'),
           note: 'First version',

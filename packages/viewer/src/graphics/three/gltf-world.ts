@@ -1,17 +1,7 @@
 import { Matrix4 } from 'three';
 import type { Box3, Object3D } from 'three';
 import { resolveCoordinateTransform } from '@taucad/spatial';
-
-/**
- * The glTF world convention: Y up, Z forward, one metre per unit.
- * @public
- */
-export const canonicalGltfWorld = { up: '+y', forward: '+z', metersPerUnit: 1 } as const;
-/**
- * Tau's world convention: Z up, negative Y forward, one metre per unit.
- * @public
- */
-export const tauWorld = { up: '+z', forward: '-y', metersPerUnit: 1 } as const;
+import { canonicalGltfWorld, tauWorld } from '#graphics/world-conventions.js';
 
 const canonicalGltfToTau = new Matrix4().fromArray(
   resolveCoordinateTransform({ source: canonicalGltfWorld, target: tauWorld }).matrix,

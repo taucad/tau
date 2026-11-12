@@ -224,6 +224,13 @@ it.each(cases)('should capture the viewer frame of %s on %s with ao=%s', async (
   }
   const bytes = await readFixture(fixture.glb);
   const artifact: Artifact = { mimeType: 'model/gltf-binary', content: bytes };
+  // A host that renders a GLB sends it to graphics too, which hands it to the mesh's presentation (G11b).
+  actor.send({
+    type: 'updateArtifact',
+    artifact: { mimeType: 'model/gltf-binary', content: bytes },
+    hash: name,
+    sourceFile: 'main.ts',
+  });
   render(
     <div role='application' aria-label='CAD canvas' style={{ width, height, position: 'relative' }}>
       <ViewerEnvironmentProvider value={{ ...defaultViewerEnvironment, colorScheme: 'dark', graphicsBackend: backend }}>

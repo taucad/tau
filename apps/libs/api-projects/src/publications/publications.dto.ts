@@ -24,8 +24,11 @@ export const publishRequestSchema = z
        rather than a refusal further in (review R1). */
     projectId: z.string().refine(isProjectRepositoryId, 'projectId must be a project id'),
     projectName: z.string().min(1),
-    /** The named version, without `refs/tags/`. */
-    tag: z.string().min(1).max(200),
+    /**
+     * The version's tag, without `refs/tags/`: `v<number>` (B6). The version's
+     * name is free text in the tag itself; the ref is always its number.
+     */
+    tag: z.string().regex(/^v[1-9]\d{0,8}$/u, 'tag must be a version tag, v<number>'),
     /** The revision that name points at, as the client observed it. */
     revisionId: z.string().min(1).max(64),
     entryPath: z.string().min(1),

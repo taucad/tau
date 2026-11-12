@@ -1,5 +1,5 @@
 /**
- * When the person last started using the page (Finding 3, line 5): a key press, a pointer press, or focus in a text
+ * When the person last started using the page: a key press, a pointer press, or focus in a text
  * field such as the composer. Home compares it with when it mounted, so typing a password on the sign-in page before
  * home appears does not count, and someone who has begun on home is never pulled into setup. One module-lifetime
  * listener per event, installed when the module loads in a browser.

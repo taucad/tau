@@ -2,6 +2,7 @@ import { useLayoutEffect } from 'react';
 import type { RenderFrame } from '@taucad/spatial';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createGltfMeshPresentationHarness } from '#graphics/three/react/gltf-mesh.test-utils.jsx';
 import { mock } from 'vitest-mock-extended';
 import { createRoot, events as createPointerEvents, extend } from '@react-three/fiber';
 import type * as Fiber from '@react-three/fiber';
@@ -79,6 +80,8 @@ const mocks = vi.hoisted(() => {
           },
           modelPointerClickSuppressionReasons: [],
           suppressNextModelPointerClick: false,
+          // The host reads the section barrier from graphics as it prepares.
+          isSectionViewActive: mocks.sectionView.isActive,
           viewerHoverSuppressionReasons: [],
         },
       }),
@@ -142,7 +145,7 @@ vi.mock('#graphics/three/react/section-clipping-group.jsx', () => ({
 
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useCameraRig: () => mocks.cameraRig,
-  useGraphics: () => mocks.graphicsActor,
+  useGraphics: () => harness.graphics,
   useGraphicsSelector: () => false,
   useRenderFrame: () => mocks.renderFrame,
   useRenderFrameRetarget: (handler: (frame: RenderFrame) => void) => {
@@ -216,7 +219,18 @@ vi.mock('#graphics/metadata/gltf-component-manifest.js', () => ({
   }),
 }));
 
-const { GltfMesh, collectModelPickableSurfaceMeshes } = await import('#graphics/three/react/gltf-mesh.jsx');
+const { GltfMesh: RealGltfMesh, collectModelPickableSurfaceMeshes } =
+  await import('#graphics/three/react/gltf-mesh.jsx');
+const { deriveModelInteractionUnitId } = await import('#machines/model-interaction.machine.js');
+const harness = createGltfMeshPresentationHarness({
+  graphicsActor: mocks.graphicsActor,
+  GltfMesh: RealGltfMesh,
+  deriveUnitId: deriveModelInteractionUnitId,
+});
+const { GltfMesh } = harness;
+afterEach(() => {
+  harness.reset();
+});
 
 /** A raycast clip that removes the points past the plane through `point`, along `normal`. */
 const clipBeyond = (normal: Vector3, point: Vector3): RaycastClipState => {
@@ -345,40 +359,7 @@ describe('GltfMesh camera lifecycle', () => {
     expect(compileAsync).not.toHaveBeenCalled();
   });
 
-  it('frames physical component bounds as one focus change that keeps the scene bounds, and leaves them when focus clears', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(createGltf());
-    mocks.modelUnit = { ...mocks.modelUnit, focusedComponentId: 'root' };
-    mocks.renderFrame = {
-      anchorFrameId: 'tau:root',
-      originMeters: [10, 20, 30],
-      metersPerRenderUnit: 0.001,
-    };
-
-    const view = render(
-      <GltfMesh gltfFile={new Uint8Array([1, 2, 3])} geometryHash='focused-component' enableMatcap={false} />,
-    );
-
-    await waitFor(() => {
-      expect(mocks.cameraRig.actorRef.send).toHaveBeenCalledExactlyOnceWith({
-        type: 'frameBounds',
-        bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
-        margin: 0.1,
-        source: 'focus',
-      });
-    });
-
-    mocks.modelUnit = { ...mocks.modelUnit, focusedComponentId: undefined };
-    view.rerender(
-      <GltfMesh gltfFile={new Uint8Array([1, 2, 3])} geometryHash='focused-component' enableMatcap={false} />,
-    );
-
-    // `frameBounds` never replaced the scene bounds, so clearing focus has nothing to restore.
-    await new Promise((resolve) => {
-      setTimeout(resolve, 20);
-    });
-    expect(mocks.cameraRig.actorRef.send).toHaveBeenCalledOnce();
-  });
+  // Focus framing moved to graphics (G11b): `graphics-presentation.test.ts` frames a focused component.
 
   it('keeps the parsed scene mounted when the active camera identity changes', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);

@@ -10,7 +10,7 @@ import { setupHref } from '#components/onboarding/setup-entry.js';
 import { shouldShowSetupInvite } from '#components/onboarding/should-offer-setup.js';
 
 /**
- * The invite on home (Finding 3, E2): for everyone setup did not open for, until it is dismissed or setup is opened.
+ * The invite on home: for everyone setup did not open for, until it is dismissed or setup is opened.
  * Dismissal is stored on the device.
  *
  * @returns The invite, or nothing.

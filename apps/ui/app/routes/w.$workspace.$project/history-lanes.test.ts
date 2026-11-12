@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import type { RevisionGraph } from '@taucad/revisions';
+import type { RevisionConflictFacet, RevisionGraph } from '@taucad/revisions';
 import type { RevisionCard } from '#hooks/use-revisions.js';
-import { historyLanesOf } from '#routes/w.$workspace.$project/history-lanes.js';
+import { conflictLinesOf, historyLanesOf } from '#routes/w.$workspace.$project/history-lanes.js';
 import type { HistoryFilter, HistoryLanes } from '#routes/w.$workspace.$project/history-lanes.js';
-import { lanesScenarios } from '#routes/w.$workspace.$project/history-lanes.test-harness.js';
+import { conflictLine, lanesScenarios, lidConflict } from '#routes/w.$workspace.$project/history-lanes.test-harness.js';
 
 const scenario = (id: string) => lanesScenarios.find((entry) => entry.id === id)!;
 
 const lanesOf = (
   graph: RevisionGraph,
   current: string,
-  options: Readonly<{ filter?: HistoryFilter; overrides?: ReadonlyMap<string, Partial<RevisionCard>> }> = {},
+  options: Readonly<{
+    filter?: HistoryFilter;
+    overrides?: ReadonlyMap<string, Partial<RevisionCard>>;
+    conflicts?: readonly RevisionConflictFacet[];
+  }> = {},
 ): HistoryLanes =>
   historyLanesOf({
     branches: graph.branches,
@@ -32,6 +36,7 @@ const lanesOf = (
     lineOf: new Map(graph.rows.map((row) => [row.revisionId, row.line] as const)),
     current,
     filter: options.filter ?? 'this',
+    ...(options.conflicts === undefined ? {} : { conflicts: options.conflicts }),
   });
 
 describe('historyLanesOf', () => {
@@ -94,5 +99,29 @@ describe('historyLanesOf', () => {
     expect(lanes.revisions.map((revision) => revision.revisionId)).not.toContain('d2walls0');
     /* The branch you are on keeps its lane whatever it holds. */
     expect(lanesOf(graph, 'enclosure-v2', { overrides: setupOnly }).hasLanes).toBe(true);
+  });
+
+  /* D3: a conflict line is a decision in flight, never a branch. */
+  it('should give a conflict line no lane and no chip, and draw its merge as one pending node on main', () => {
+    const lanes = lanesOf(scenario('branch-conflict').graph, 'main', { conflicts: [lidConflict] });
+
+    expect(lanes.lanePreference).toEqual(['main', 'enclosure-v2']);
+    expect(lanes.chips.has(conflictLine)).toBe(false);
+    expect(lanes.notes.has(conflictLine)).toBe(false);
+    expect(lanes.revisions.map((revision) => revision.revisionId)).not.toContain('c8confl0');
+    /* The branch the merge brings in is in view on This branch, so its link has a lane to reach. */
+    expect(lanes.pending).toEqual([{ revisionId: 'c8confl0', into: 'main', from: 'enclosure-v2' }]);
+  });
+
+  it('should read the branch a merge brings in from its other parent when the labels are not read yet', () => {
+    const lanes = lanesOf(scenario('branch-conflict').graph, 'main', {
+      conflicts: [{ ...lidConflict, labels: undefined }],
+    });
+
+    expect(lanes.pending[0]?.from).toBe('enclosure-v2');
+  });
+
+  it('should name no conflict line for a conflict recorded on the branch it lands on', () => {
+    expect([...conflictLinesOf([lidConflict, { ...lidConflict, branch: 'main' }])]).toEqual([conflictLine]);
   });
 });

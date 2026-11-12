@@ -377,6 +377,40 @@ describe('ProjectCommandPaletteItems', () => {
     consumeBranchControl('project-1');
   });
 
+  /* D3: a conflict line is a decision in flight, never a branch, so it does not make Switch branch appear. */
+  it('offers no Switch branch when the only other line holds a conflict', () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: 'rev-4',
+      branches: [
+        ...revisionStatusHarness.status.branches,
+        {
+          name: 'conflicts/main/device-b',
+          head: 'rev-c',
+          checkoutId: undefined,
+          checkoutRoot: undefined,
+          leaseChatIds: [],
+        },
+      ],
+      conflicts: [
+        {
+          revisionId: 'rev-c',
+          branch: 'conflicts/main/device-b',
+          into: 'main',
+          foreign: true,
+          labels: undefined,
+          paths: [],
+          busy: false,
+          ready: false,
+        },
+      ],
+    };
+    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+
+    expect(registeredItems.find((item) => item.id === 'switch-branch')?.visible).toBe(false);
+    expect(registeredItems.find((item) => item.id === 'new-branch')?.visible).toBe(true);
+  });
+
   it('offers no branch or version verb before anything is saved, or to a viewer', () => {
     revisionStatusHarness.role = 'read';
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };

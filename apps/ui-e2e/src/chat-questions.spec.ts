@@ -19,6 +19,11 @@ const answeredText = 'Going with the faceted gem.';
 const defaultedText = 'No reply yet, so I went with the twisted ribbon.';
 const lateText = 'Switching to the faceted gem.';
 const usage = { inputTokens: 12, outputTokens: 6 };
+/* The question record the tool returns as its `path`: the v2 record since 766e55e725 (`questionsPath`). */
+const questionsRecord = 'questions.v2.yaml';
+/* Since 3dca302b78 each option is a radio that only selects, and Submit records the reply. */
+const facetedGem = () => selectors.getByRole('radio', { name: 'Faceted gem. Crisp at 0.2 mm layers.' });
+const submitAnswer = () => selectors.getByRole('button', { name: 'Submit', exact: true });
 
 const formQuestion = (chatId: string, waitSeconds: number): Readonly<Record<string, unknown>> => ({
   chatId,
@@ -94,21 +99,22 @@ test('answers an agent question from its card and returns the choice to the agen
   await target.installAgentHostGatewayFixture(script);
   await sendMessage('Design a desk ornament');
 
-  const choice = selectors.getByRole('button', { name: 'B, Faceted gem. Crisp at 0.2 mm layers.' });
+  const choice = facetedGem();
   await target.expectVisible(choice, 120_000);
   await target.expectVisible(
-    selectors.getByRole('button', { name: 'A, Twisted ribbon, recommended. Prints without supports.' }),
+    selectors.getByRole('radio', { name: 'Twisted ribbon, recommended. Prints without supports.' }),
     10_000,
   );
   await target.click(choice);
+  await target.click(submitAnswer());
 
   await target.expectVisible(selectors.getByText(answeredText, { exact: true }), 120_000);
   await target.expectVisible(selectors.getByRole('group', { name: 'You answered' }), 60_000);
   const texts = requestTexts(await target.readAgentHostGatewayRequests());
-  const result = texts.findLast((text) => text.includes(`questions.yaml`)) ?? '';
+  const result = texts.findLast((text) => text.includes(questionsRecord)) ?? '';
   expect(JSON.parse(result)).toMatchObject({
     status: 'answered',
-    path: `.tau/chats/${chatId}/questions.yaml`,
+    path: `.tau/chats/${chatId}/${questionsRecord}`,
     answers: [{ id: 'form', answer: 'Faceted gem', source: 'person' }],
   });
 });
@@ -126,7 +132,7 @@ test('adopts the recommendation when nobody answers and delivers a late answer a
   await target.expectVisible(selectors.getByText(defaultedText, { exact: true }), 120_000);
   await target.expectVisible(selectors.getByRole('group', { name: 'Recommendation used' }), 60_000);
   const defaulted = requestTexts(await target.readAgentHostGatewayRequests()).findLast((text) =>
-    text.includes('questions.yaml'),
+    text.includes(questionsRecord),
   );
   expect(JSON.parse(defaulted ?? '')).toMatchObject({
     status: 'defaulted',
@@ -134,7 +140,8 @@ test('adopts the recommendation when nobody answers and delivers a late answer a
   });
 
   await target.click(selectors.getByRole('button', { name: 'Answer anyway' }));
-  await target.click(selectors.getByRole('button', { name: 'B, Faceted gem. Crisp at 0.2 mm layers.' }));
+  await target.click(facetedGem());
+  await target.click(submitAnswer());
 
   await target.expectVisible(selectors.getByText(lateText, { exact: true }), 120_000);
   const texts = requestTexts(await target.readAgentHostGatewayRequests());

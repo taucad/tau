@@ -42,6 +42,11 @@ describe('questions record', () => {
     expect(() => parseAnswersFile('version: 2')).toThrow('Invalid answers.yaml');
   });
 
+  it('reads an empty record, as a file being created is first observed, as no record', () => {
+    expect(parseAnswersFile('')).toEqual({ version: 2, answers: {} });
+    expect(parseQuestionsFile(' \n').asks).toEqual([]);
+  });
+
   it('holds the deadline to the cap once the person starts answering', () => {
     expect(effectiveDeadline(ask, undefined)).toBe(t0 + 120_000);
     expect(effectiveDeadline(ask, { heldAt: at, questions: {} })).toBe(t0 + 240_000);

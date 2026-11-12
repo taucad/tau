@@ -917,16 +917,16 @@ describe('a project on the browser client', () => {
      * destination's own revision store — not inferred from the remote tag or
      * from the unpublished Share authoring form. */
     await openHostedShare(source);
-    await source.page.getByRole('combobox', { name: /Version name/iu }).fill('v1');
+    await source.page.getByRole('combobox', { name: /Version name/iu }).fill('Ready for print');
     await source.page.getByRole('button', { name: /Publish and copy link/iu }).click();
     await expect
-      .poll(async () => gitOutput(await tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v1^{}']), {
+      .poll(async () => gitOutput(await tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v2^{}']), {
         message: 'V15: the browser named version must reach Tau Cloud',
         timeout: 180_000,
       })
       .toBe(browserHeadAfterStep);
     const publishedTagOid = required(
-      await gitOutput(await tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v1']),
+      await gitOutput(await tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v2']),
       'V10/V15: Tau Cloud has no unpeeled named-version ref.',
     );
     expect(publishedTagOid, 'V10/V15: the unpeeled named-version ref must be a concrete SHA-1 OID').toMatch(
@@ -947,7 +947,7 @@ describe('a project on the browser client', () => {
               '.git',
               'refs',
               'tags',
-              'v1',
+              'v2',
             ]);
             return ref?.trim();
           },
@@ -978,7 +978,7 @@ describe('a project on the browser client', () => {
       })
       .toEqual(Buffer.from(browserStep));
     await expect
-      .poll(async () => gitOutput(destinationRoot, ['rev-parse', 'refs/tags/v1']), {
+      .poll(async () => gitOutput(destinationRoot, ['rev-parse', 'refs/tags/v2']), {
         message: 'V15: the desktop destination must hold the fetched named-version ref',
         timeout: 120_000,
       })

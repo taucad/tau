@@ -1,12 +1,12 @@
 /**
- * The review canvas's branch-graph projects as graph reads (History D2): `main`
- * with a branch, four lanes, a branch just created, one from an older entry, and
- * a merge that landed. Times are relative to now so day labels read as they do
- * on the canvas.
+ * The review canvas's branch-graph projects as graph reads (History D2, D3):
+ * `main` with a branch, four lanes, a branch just created, one from an older
+ * entry, a merge that landed, a merge that needs a decision, and the agent
+ * working. Times are relative to now so day labels read as they do on the canvas.
  *
  * @see docs/research/revisions-history-versions-blueprint.md, "One History, with a lane per branch"
  */
-import type { RevisionGraph, RevisionGraphRow, RevisionRow } from '@taucad/revisions';
+import type { RevisionConflictFacet, RevisionGraph, RevisionGraphRow, RevisionRow } from '@taucad/revisions';
 
 const minute = 60_000;
 const day = 86_400_000;
@@ -106,6 +106,10 @@ export type LanesScenario = Readonly<{
   isAll?: boolean;
   /** How many lanes History draws. */
   lanes: number;
+  /** Conflicts waiting on a decision, as the status projection carries them (D3). */
+  conflicts?: readonly RevisionConflictFacet[];
+  /** The chat whose agent is working on the files, by name (D2's open end). */
+  agentChat?: string;
 }>;
 
 const newestFirst = (rows: readonly RevisionRow[]): RevisionRow[] =>
@@ -151,6 +155,32 @@ const graphOf = (rows: readonly RevisionRow[], branches: ReadonlyArray<readonly 
 };
 
 const bench = [...olderMain, ...mainRows, ...enclosureRows];
+
+/** Where this device keeps a merge that needs a decision (D14): a stored line, never a branch (D3). */
+export const conflictLine = 'conflicts/main/this-device';
+
+/* Merging enclosure-v2 into main stopped on lid.tsx: the conflicted entry waits on its own line. */
+const conflictRow = entry({
+  revisionId: 'c8confl0',
+  createdAt: at(0, 15, 40),
+  summary: 'Merge enclosure-v2',
+  capture: 'merge',
+  conflicted: true,
+  parent: 'c7bom000',
+  otherParents: ['d2walls0'],
+});
+
+/** The conflict the status projection carries for {@link conflictRow}. */
+export const lidConflict: RevisionConflictFacet = {
+  revisionId: 'c8confl0',
+  branch: conflictLine,
+  into: 'main',
+  foreign: false,
+  labels: { ours: 'main', theirs: 'enclosure-v2' },
+  paths: [{ path: 'lid.tsx', openable: true, side: undefined }],
+  busy: false,
+  ready: false,
+};
 
 export const lanesScenarios: readonly LanesScenario[] = [
   {
@@ -222,6 +252,36 @@ export const lanesScenarios: readonly LanesScenario[] = [
     head: 'c8merged',
     rows: historyOf([...bench, mergeRow], 'c8merged'),
     lanes: 2,
+  },
+  {
+    /* A merge that needs a decision: a diamond above main, linked by dashes to enclosure-v2; the conflict line takes no lane. */
+    id: 'branch-conflict',
+    graph: graphOf(
+      [...bench, conflictRow],
+      [
+        ['main', 'c7bom000'],
+        ['enclosure-v2', 'd2walls0'],
+        [conflictLine, 'c8confl0'],
+      ],
+    ),
+    current: 'main',
+    head: 'c7bom000',
+    rows: historyOf(bench, 'c7bom000'),
+    lanes: 2,
+    conflicts: [lidConflict],
+  },
+  {
+    /* The agent is working on enclosure-v2: its result is the branch's open end, joined by a dashed rail. */
+    id: 'agent-working',
+    graph: graphOf(bench, [
+      ['main', 'c7bom000'],
+      ['enclosure-v2', 'd2walls0'],
+    ]),
+    current: 'enclosure-v2',
+    head: 'd2walls0',
+    rows: historyOf(bench, 'd2walls0'),
+    lanes: 2,
+    agentChat: 'Add a cable gland cutout',
   },
   {
     /* This branch on main with an unmerged branch: no fork in view, so one lane, exactly the one-branch list. */

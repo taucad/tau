@@ -34,6 +34,13 @@ describe('publishRequestSchema', () => {
     }
   });
 
+  it.each(['Ready for print', 'v0', 'V3', 'v3.1', 'refs/tags/v3'])(
+    'rejects %j: a version is published by its tag, v<number> (B6)',
+    (tag) => {
+      expect(publishRequestSchema.safeParse({ ...valid, tag }).success).toBe(false);
+    },
+  );
+
   it('rejects a request with no named version', () => {
     const { tag: _tag, ...withoutTag } = valid;
     const result = publishRequestSchema.safeParse(withoutTag);

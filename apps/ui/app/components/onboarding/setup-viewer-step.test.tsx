@@ -10,6 +10,10 @@ const capture = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture }) }));
 const webgl = vi.hoisted(() => ({ isAvailable: true }));
 vi.mock('#components/onboarding/webgl-support.js', () => ({ canCreateWebGl: () => webgl.isAvailable }));
+// The live preview is its own chunk with the real viewer; `setup-viewer-preview.test.tsx` covers its loading.
+vi.mock('#components/onboarding/setup-live-preview.js', () => ({
+  default: () => <div data-testid='setup-live-preview' />,
+}));
 
 const { default: WelcomeRoute } = await import('#routes/welcome/route.js');
 const { personRecordStores, deviceRecordStore } = await import('#preferences/person-record.store.js');
@@ -24,7 +28,7 @@ const renderViewerStep = (): void => {
 
 const mouseControls = (): HTMLElement => screen.getByRole('group', { name: 'Mouse controls' });
 
-describe('setup step 3 (S4)', () => {
+describe('setup step 3', () => {
   beforeEach(() => {
     globalThis.localStorage.clear();
     capture.mockReset();
@@ -61,7 +65,9 @@ describe('setup step 3 (S4)', () => {
     await user.click(screen.getByRole('radio', { name: 'None' }));
     expect(personRecordStores.viewer.read().viewDefaults['display.gizmo']).toBe(false);
     expect(screen.getByRole('radio', { name: 'None' })).toBeChecked();
+    expect(screen.getByTestId('setup-binding-legend')).not.toHaveTextContent('gizmo');
     await user.click(screen.getByRole('radio', { name: 'Axes' }));
+    expect(screen.getByTestId('setup-binding-legend')).toHaveTextContent('the gizmo snaps to standard views');
     expect(personRecordStores.viewer.read().viewDefaults).not.toHaveProperty('display.gizmo');
     expect(personRecordStores.viewer.read().gizmo.style).toBe('axes');
   });
@@ -88,7 +94,7 @@ describe('setup step 3 (S4)', () => {
   });
 });
 
-describe('setup preview fallback (S5 f)', () => {
+describe('setup preview fallback', () => {
   beforeEach(() => {
     capture.mockReset();
   });

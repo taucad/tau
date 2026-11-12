@@ -641,7 +641,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const roots = createProjectRootRegistry({ storePath: join(app.getPath('userData'), 'granted-roots.json') });
   roots.admit(homeRoot);
   const windowStatePath = join(app.getPath('userData'), 'window-state.json');
-  /* Onboarding DT1: decided once at startup, before any window writes the file; only the first window carries it. */
+  /* The first run is decided once at startup, before any window writes the file; only the first window carries it. */
   let isFirstLaunchWindow = isFirstRun({
     windowStatePath,
     hasLaunchLink: queuedDeepLink !== undefined,

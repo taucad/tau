@@ -85,13 +85,18 @@ async function mount(initial: WorkbenchView = view()) {
       return { status: 'applied', content: bytes };
     },
   };
+  /* Each registered watch's close: the filesystem ends it, as a worker restart does. */
+  const closes: Array<() => void> = [];
   const watch = (_path: string, listener: (event: WatchEvent) => void) => {
     listeners.add(listener);
+    const closed = Promise.withResolvers<void>();
+    closes.push(() => {
+      listeners.delete(listener);
+      closed.resolve();
+    });
     return {
       ready: Promise.resolve(),
-      closed: new Promise<void>(() => {
-        // The watch never closes in these rows.
-      }),
+      closed: closed.promise,
       dispose: () => {
         listeners.delete(listener);
       },
@@ -127,6 +132,7 @@ async function mount(initial: WorkbenchView = view()) {
     ports,
     writes,
     records,
+    closes,
     stop,
     file: (): WorkbenchView | undefined =>
       bytes === undefined ? undefined : workbenchRecords.view.schema.parse(JSON.parse(new TextDecoder().decode(bytes))),
@@ -180,11 +186,16 @@ describe('view record session', () => {
     const harness = await mount();
     await harness.frame();
     harness.drag([1, 0, 0], 4);
+    // The drag's pose is written before the foreign record lands, so no queued edit of the drag remains to merge.
+    await harness.quiet();
+    expect(harness.file()?.camera).toMatchObject({ kind: 'pose', direction: [1, 0, 0] });
     await harness.foreign(view({ camera: pose([0, 1, 0], 9) }));
-    // The person's drag wins: the camera keeps the drag's pose.
+    // The person's drag wins: the camera keeps the drag's pose, while the file holds the other window's.
     expect(harness.direction()).toEqual([1, 0, 0]);
+    expect(harness.file()?.camera).toMatchObject({ kind: 'pose', direction: [0, 1, 0] });
     harness.release();
     await harness.quiet();
+    // The dropped adoption re-saves the drag's pose over the foreign one.
     expect(harness.file()?.camera).toMatchObject({ kind: 'pose', direction: [1, 0, 0], verticalSpan: 4 });
   });
 
@@ -250,6 +261,21 @@ describe('view record session', () => {
     expect(harness.writes.slice(written).filter((record) => record.camera.kind === 'pose')).toEqual([]);
   });
 
+  it('should save a section still inside the quiet gate when the session stops or the window closes', async () => {
+    const harness = await mount();
+    await harness.frame();
+    harness.graphics.send({ type: 'setSectionViewActive', payload: true });
+    await harness.quiet();
+    const [cut] = harness.graphics.getSnapshot().context.sectionCuts;
+    harness.graphics.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.5 } } });
+    await harness.ports.flush();
+    expect(harness.file()?.section.cuts[0]).toMatchObject({ offset: 0.5 });
+    harness.graphics.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.75 } } });
+    harness.stop();
+    await settle();
+    expect(harness.file()?.section.cuts[0]).toMatchObject({ offset: 0.75 });
+  });
+
   it('should write what is owed when the session stops', async () => {
     const harness = await mount();
     await harness.frame();
@@ -257,6 +283,65 @@ describe('view record session', () => {
     harness.stop();
     await settle();
     expect(harness.file()?.display.grid).toBe(false);
+  });
+
+  it('should re-register a closed watch on retry and adopt later foreign edits', async () => {
+    const harness = await mount();
+    await harness.frame();
+    harness.closes[0]!();
+    await settle();
+    const [issue] = readRecordIssues(projectId);
+    expect(issue?.state).toBe('unavailable');
+    await issue!.retryRead();
+    await settle();
+    expect(harness.closes).toHaveLength(2);
+    expect(readRecordIssues(projectId)).toEqual([]);
+    await harness.foreign(view({ display: { ...view().display, grid: false } }));
+    expect(harness.graphics.getSnapshot().context.enableGrid).toBe(false);
+  });
+
+  it('should read, follow and write the new files when the host replaces them (a checkout switch)', async () => {
+    const harness = await mount();
+    await harness.frame();
+    let checkout = encode(view({ display: { ...view().display, axes: false } }));
+    const written: string[] = [];
+    const listeners = new Set<(event: WatchEvent) => void>();
+    harness.ports.replaceHost({
+      files: {
+        exists: async () => true,
+        readFile: async () => checkout,
+        writeFileChecked: async ({ data }: { data: string }) => {
+          checkout = new TextEncoder().encode(data);
+          written.push(data);
+          return { status: 'applied', content: checkout };
+        },
+      },
+      watch: (_path, listener) => {
+        listeners.add(listener);
+        return {
+          ready: Promise.resolve(),
+          closed: new Promise<void>(() => {
+            // The checkout's watch stays open in this row.
+          }),
+          dispose: () => {
+            listeners.delete(listener);
+          },
+        };
+      },
+    });
+    await settle();
+    expect(harness.graphics.getSnapshot().context.enableAxes).toBe(false);
+    checkout = encode(view({ display: { ...view().display, axes: false, grid: false } }));
+    for (const listener of listeners) {
+      listener({ type: 'change', path } as WatchEvent);
+    }
+    await settle();
+    expect(harness.graphics.getSnapshot().context.enableGrid).toBe(false);
+    const before = harness.writes.length;
+    harness.graphics.send({ type: 'setGridVisibility', payload: true });
+    await harness.ports.flush();
+    expect(written).toHaveLength(1);
+    expect(harness.writes).toHaveLength(before);
   });
 
   it('should reopen its store on replaced file ports and keep following foreign edits', async () => {

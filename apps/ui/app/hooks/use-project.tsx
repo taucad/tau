@@ -507,14 +507,18 @@ export function ProjectProvider({
 
   // D-RT-03: read once, as the actor's input is fixed at creation.
   const [recycleHeapBytes] = useState(() => runtimeRecycleHeapBytes(isMemoryConstrainedDevice()));
-  /* Every view's record session runs beside its graphics actor in the project machine, over these ports (G6b). A
-   * project loaded from its own source (`provide`) writes no view records. */
+  /* Every view's record session runs beside its graphics actor in the project machine, over these ports (G6b). Only the
+   * editor writes view records: a project loaded from its own source (`provide`), an owned preview or a shared
+   * workbench shows the project without saving its views, as before G6b, when the record host was mounted by the
+   * editor's live sessions only. */
   const viewRecordSession = createCallbackLogic<{ type: 'never' }, ViewRecordSessionActorInput>(({ input: session }) =>
     startViewRecordSession({ viewId: session.viewId, graphics: session.graphics, ports: viewRecordPorts }),
   );
   const providedMachine =
     provide === undefined
-      ? projectMachine.provide({ actors: { ...projectActors, viewRecord: viewRecordSession } })
+      ? projectMachine.provide({
+          actors: profile === 'editor' ? { ...projectActors, viewRecord: viewRecordSession } : projectActors,
+        })
       : projectMachine.provide({ actors: provide.actors });
   const actorRef = useActorRef(providedMachine, {
     input: {

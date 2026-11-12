@@ -146,6 +146,10 @@ type FramingRef = GraphicsContext['framingRef'];
 /** Graphics' context now. */
 const selectGraphicsContext = (graphics: GraphicsRef): GraphicsContext => graphics.getSnapshot().context;
 
+/** Whether graphics holds an edited section inside its quiet gate. */
+const selectSectionEditing = (graphics: GraphicsRef): boolean =>
+  graphics.getSnapshot().matches({ operational: { section: { on: 'editing' } } });
+
 /** The camera's revision now. */
 const selectCameraRevision = (camera: CameraRef): number => camera.getSnapshot().context.revision;
 
@@ -332,6 +336,8 @@ export function startViewRecordSession(input: ViewRecordSessionInput): () => voi
 
   const openStore = (): StoreSession => {
     const { files, watch } = ports.host();
+    /* A replaced store finishes its last flush over the old connections; what it reports then is no longer this view's. */
+    let retired = false;
     const opened = createWorkbenchViewStore({
       root: ports.root,
       viewId,
@@ -339,14 +345,14 @@ export function startViewRecordSession(input: ViewRecordSessionInput): () => voi
       editDebounce: viewRecordEditDebounce,
       ...actorOptions,
       onHealth: (next) => {
-        if (stopped) {
+        if (stopped || retired) {
           return;
         }
         health = next;
         publishIssue();
       },
       onChange: (state, source, patch) => {
-        if (stopped) {
+        if (stopped || retired) {
           return;
         }
         generation++;
@@ -402,6 +408,7 @@ export function startViewRecordSession(input: ViewRecordSessionInput): () => voi
       observation,
       lease,
       dispose: () => {
+        retired = true;
         unsubscribe();
         lease.release();
         // Whatever is owed is written before the store closes; the close fence answers it `false` once the view closed.
@@ -511,16 +518,25 @@ export function startViewRecordSession(input: ViewRecordSessionInput): () => voi
     }),
   );
 
+  /* A section still inside graphics' quiet gate is the person's latest: a close or a stop saves it as settled. */
+  const settleEditedSection = (): void => {
+    if (selectSectionEditing(graphics)) {
+      binding.send({ type: 'sectionSettled', section: sectionOf(selectGraphicsContext(graphics)) });
+    }
+  };
+
   const flushAtClose = async (): Promise<void> => {
     const current = store?.store;
     if (current === undefined) {
       return;
     }
+    settleEditedSection();
     await confirmFlush(current.flush, `View settings for ${record?.entryPath ?? viewId} are not confirmed saved.`);
   };
   subscriptions.push(ports.addFlush(flushAtClose));
 
   return () => {
+    settleEditedSection();
     stopped = true;
     for (const subscription of subscriptions) {
       if (typeof subscription === 'function') {

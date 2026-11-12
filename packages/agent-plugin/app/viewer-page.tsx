@@ -608,7 +608,14 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
         });
         /* The section and measurements the server keeps in the view record, and the leaves the person set. */
         const settings = liveViewSettings(graphicsRef);
-        return settings === undefined ? reported : { ...reported, settings, viewFields: viewFields.commanded() };
+        return settings === undefined
+          ? reported
+          : {
+              ...reported,
+              settings,
+              viewFields: viewFields.commanded(),
+              viewFieldSequence: viewFields.sequence(),
+            };
       },
       follows: () => latest.current.view.follows,
       linked: () => latest.current.view.linked,

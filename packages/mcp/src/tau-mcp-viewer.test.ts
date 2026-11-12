@@ -490,6 +490,7 @@ describe('Tau MCP viewer', () => {
         measurements: [],
       },
       viewFields: { 'display.grid': false, 'grid.unit': 'in', fieldOfView: 0 },
+      viewFieldSequence: { 'display.grid': 3, 'grid.unit': 1, fieldOfView: 0 },
       mechanism: { preserved: true, joints: 2, animations: ['four-sun-turns'] },
       playback: { status: 'paused', animationId: 'four-sun-turns', time: 2, speed: 1 },
       coordinates: { sun: 360, carrier: 90 },
@@ -507,6 +508,10 @@ describe('Tau MCP viewer', () => {
     expect(rejected.isError).toBe(true);
     const unknownLeaf = await sync({ viewFields: { 'display.shadows': true } });
     expect(unknownLeaf.isError).toBe(true);
+    const unknownSequence = await sync({ viewFieldSequence: { 'display.shadows': 1 } });
+    expect(unknownSequence.isError).toBe(true);
+    const fractionalSequence = await sync({ viewFieldSequence: { 'display.grid': 1.5 } });
+    expect(fractionalSequence.isError).toBe(true);
     await client.close();
   });
 
@@ -528,7 +533,11 @@ describe('Tau MCP viewer', () => {
       measurements: [],
     };
     const viewFields = { 'display.grid': false } as const;
-    const viewer = { ...createViewer(), viewState: async () => ({ view: { ...view, settings, viewFields } }) };
+    const viewFieldSequence = { 'display.grid': 2 };
+    const viewer = {
+      ...createViewer(),
+      viewState: async () => ({ view: { ...view, settings, viewFields, viewFieldSequence } }),
+    };
     const client = await connect(clients.claudeDesktop, viewer);
 
     const result = await client.callTool({ name: 'view_state', arguments: {} });

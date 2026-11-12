@@ -404,6 +404,55 @@ describe('createMcpViewerWorkbench', () => {
         viewFieldValuesOf(workbenchRecords.view.schema.parse(await readRecord(root, workbenchPaths.view('front')))),
       ).toEqual({ ...viewRecordV1Defaults, 'display.grid': false, 'grid.unit': 'in' });
     });
+    it('should write a leaf commanded again with the same value after another writer changed it', async () => {
+      await writeFront();
+      const keeper = createMcpViewerWorkbench({ settle: 10 });
+      keeper.report({ root, pageId: 'page-1', view: viewOf({ viewFields: {}, viewFieldSequence: {} }) });
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({
+          interactedAt: 4,
+          viewFields: { 'display.grid': false },
+          viewFieldSequence: { 'display.grid': 1 },
+        }),
+      });
+      await keeper.flush();
+
+      /* Another writer turns the grid back on; a report repeating the command is no new command. */
+      await writeFront();
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({
+          interactedAt: 5,
+          hidden: ['gear'],
+          viewFields: { 'display.grid': false },
+          viewFieldSequence: { 'display.grid': 1 },
+        }),
+      });
+      await keeper.flush();
+      expect(
+        viewFieldValuesOf(workbenchRecords.view.schema.parse(await readRecord(root, workbenchPaths.view('front')))),
+      ).toEqual(viewRecordV1Defaults);
+
+      /* The person turns the grid off again: the same value, a new command. */
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({
+          interactedAt: 6,
+          hidden: ['gear'],
+          viewFields: { 'display.grid': false },
+          viewFieldSequence: { 'display.grid': 2 },
+        }),
+      });
+      await keeper.close();
+      expect(
+        viewFieldValuesOf(workbenchRecords.view.schema.parse(await readRecord(root, workbenchPaths.view('front')))),
+      ).toEqual({ ...viewRecordV1Defaults, 'display.grid': false });
+    });
+
     it('should create a view with every leaf the reports merged while it waited commanded', async () => {
       const keeper = createMcpViewerWorkbench({ settle: 10 });
       keeper.report({ root, pageId: 'page-1', view: viewOf({ settings: shownOverTau, viewFields: {} }) });

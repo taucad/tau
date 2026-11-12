@@ -93,6 +93,28 @@ describe('page view fields', () => {
     expect(viewFields.sourceOf?.('display.lines')).toBe('view');
   });
 
+  it('numbers each command, so a repeated set of the same value is a new command, and never restarts the count', () => {
+    const graphicsRef = createGraphicsActor();
+    const viewFields = createPageViewFields(graphicsRef);
+    viewFields.seed(seedViewer(graphicsRef, entryPath, saved()) ?? {});
+
+    void viewFields.set('display.grid', true);
+    void viewFields.set('display.lines', false);
+    expect(viewFields.sequence()).toEqual({ 'display.grid': 1, 'display.lines': 2 });
+    void viewFields.set('display.grid', true);
+    viewFields.reset('display.lines');
+    expect(viewFields.commanded()).toEqual({
+      'display.grid': true,
+      'display.lines': viewRecordV1Defaults['display.lines'],
+    });
+    expect(viewFields.sequence()).toEqual({ 'display.grid': 3, 'display.lines': 4 });
+
+    viewFields.seed(seedViewer(graphicsRef, 'src/other.ts', undefined) ?? {});
+    expect(viewFields.sequence()).toEqual({});
+    void viewFields.set('display.grid', true);
+    expect(viewFields.sequence()).toEqual({ 'display.grid': 5 });
+  });
+
   it('ignores a grid unit no view record holds, and starts a newly seeded entry with no commands', () => {
     const graphicsRef = createGraphicsActor();
     const viewFields = createPageViewFields(graphicsRef);

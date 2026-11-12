@@ -61,14 +61,23 @@ type Write = Read & Readonly<{ next: string }>;
  */
 type Changed = Readonly<{ camera: boolean; settings: boolean; components: boolean; fields: TauViewerViewFields }>;
 
-/* The inheritable leaves whose commanded value is new in `next`. */
-const fieldsChanged = (
-  previous: TauViewerViewFields | undefined,
-  next: TauViewerViewFields | undefined,
-): TauViewerViewFields =>
+/* Whether the page commanded a leaf again since its previous report: by the command's sequence number when the page
+ * sends one, so the same value set again after another writer changed the record is still written; by value from a
+ * page older than the sequence. */
+const commandedAgain = (previous: TauViewerViewState, next: TauViewerViewState, leaf: ViewFieldPath): boolean => {
+  const sequence = next.viewFieldSequence?.[leaf];
+  return sequence === undefined
+    ? next.viewFields?.[leaf] !== previous.viewFields?.[leaf]
+    : sequence !== previous.viewFieldSequence?.[leaf];
+};
+
+/* The inheritable leaves the page commanded since its previous report, with the values commanded. */
+const fieldsChanged = (previous: TauViewerViewState, next: TauViewerViewState): TauViewerViewFields =>
   Object.fromEntries(
     viewFieldPaths.flatMap((leaf) =>
-      next?.[leaf] !== undefined && next[leaf] !== previous?.[leaf] ? [[leaf, next[leaf]]] : [],
+      next.viewFields?.[leaf] !== undefined && commandedAgain(previous, next, leaf)
+        ? [[leaf, next.viewFields[leaf]]]
+        : [],
     ),
   );
 
@@ -114,7 +123,7 @@ const changedBetween = (previous: TauViewerViewState, next: TauViewerViewState):
   /* A page older than the field reports no settings, which is no change. */
   settings: next.settings !== undefined && JSON.stringify(previous.settings) !== JSON.stringify(next.settings),
   components: !sameList(previous.hidden, next.hidden) || !sameList(previous.isolated, next.isolated),
-  fields: fieldsChanged(previous.viewFields, next.viewFields),
+  fields: fieldsChanged(previous, next),
 });
 
 const readText = async (root: string, path: string): Promise<string | undefined> => {

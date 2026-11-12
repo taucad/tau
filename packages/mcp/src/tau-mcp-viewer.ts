@@ -202,6 +202,9 @@ const vectorSchema = z.tuple([z.number(), z.number(), z.number()]);
 /** Files one reported source revision lists at most: a model's import closure, not a checkout. */
 const sourceRevisionFileLimit = 1024;
 
+/** A page's sequence number for one leaf's latest command. */
+const commandSequenceSchema = z.number().int().nonnegative();
+
 const componentSchema = z
   .object({
     componentId: z.string().min(1).max(256),
@@ -264,6 +267,22 @@ const viewSchema = z
         'display.matcap': z.boolean(),
         'display.postProcessing': z.boolean(),
         'grid.unit': z.enum(lengthUnits),
+      })
+      .partial()
+      .strict()
+      .optional(),
+    viewFieldSequence: z
+      .object({
+        upDirection: commandSequenceSchema,
+        fieldOfView: commandSequenceSchema,
+        'display.surfaces': commandSequenceSchema,
+        'display.lines': commandSequenceSchema,
+        'display.gizmo': commandSequenceSchema,
+        'display.grid': commandSequenceSchema,
+        'display.axes': commandSequenceSchema,
+        'display.matcap': commandSequenceSchema,
+        'display.postProcessing': commandSequenceSchema,
+        'grid.unit': commandSequenceSchema,
       })
       .partial()
       .strict()
@@ -653,7 +672,7 @@ export const registerTauMcpViewer = (
       }
       /* The view's settings are the page's record of its display for the server to keep, not what the model reads. */
       const { view: reported, image, captureError } = result;
-      const { settings: _settings, viewFields: _viewFields, ...view } = reported;
+      const { settings: _settings, viewFields: _viewFields, viewFieldSequence: _viewFieldSequence, ...view } = reported;
       return {
         content: [
           {

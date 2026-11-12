@@ -295,6 +295,14 @@ export type TauViewerViewState = Readonly<{
    * whose `app_sync` lists it under {@link TauViewerSyncResult.accepts}; `view_state` leaves it out.
    */
   viewFields?: TauViewerViewFields | undefined;
+  /**
+   * For each leaf in {@link TauViewerViewState.viewFields}, the sequence number of the person's command that gave it
+   * its value. The page's sequence rises with every set or reset, so the server writes a repeated command (the same
+   * value again, after another writer changed the record) and never a report that merely repeats one. Sent with
+   * `viewFields`, only to a server whose `app_sync` lists it under {@link TauViewerSyncResult.accepts}; `view_state`
+   * leaves it out.
+   */
+  viewFieldSequence?: TauViewerViewFieldSequence | undefined;
   /** The mechanism the page's Kinematics pane loaded from the shown GLB. Sent only to a server that `accepts` it. */
   mechanism?: TauViewerMechanism | undefined;
   /** The animation playback. Sent only to a server that `accepts` it. */
@@ -342,6 +350,9 @@ export type TauViewerViewSettings = ViewSettings;
 /** The inheritable view leaves a page's person set, keyed by leaf path (`display.grid`, `grid.unit`, ...). @public */
 export type TauViewerViewFields = Readonly<Partial<ViewFieldValues>>;
 
+/** Per inheritable leaf, the sequence number of the person's latest command on a page. @public */
+export type TauViewerViewFieldSequence = Readonly<Partial<Record<keyof ViewFieldValues, number>>>;
+
 /**
  * The optional {@link TauViewerViewState} fields this server's `app_sync` takes. Its schema is strict, so a page sends
  * one of them only after a sync result listed it: an older server rejects the whole sync otherwise.
@@ -353,6 +364,7 @@ export const tauViewerAcceptedViewFields = [
   'sourceRevision',
   'settings',
   'viewFields',
+  'viewFieldSequence',
   'mechanism',
   'playback',
   'coordinates',

@@ -8,6 +8,7 @@ import type { ActorRefFrom } from 'xstate';
 import { tauViewerToolName } from '@taucad/mcp/viewer-protocol';
 import type {
   TauViewerModel,
+  TauViewerViewFieldSequence,
   TauViewerViewFields,
   TauViewerViewState,
   TauViewerWorkbenchState,
@@ -269,6 +270,11 @@ export type PageViewFields = ViewerViewFields &
     seed: (sources: SeededSources) => void;
     /** The leaves the person set or reset since the entry was seeded, with the values to write. */
     commanded: () => TauViewerViewFields;
+    /**
+     * Per commanded leaf, the sequence number of its latest set or reset. The sequence rises with every command and is
+     * never reset, so the server can tell a repeated command from a report that repeats one.
+     */
+    sequence: () => TauViewerViewFieldSequence;
   }>;
 
 /**
@@ -280,26 +286,37 @@ export type PageViewFields = ViewerViewFields &
  */
 export const createPageViewFields = (graphicsRef: GraphicsActorRef): PageViewFields => {
   let commanded: Partial<Record<ViewFieldPath, ViewFieldValues[ViewFieldPath]>> = {};
+  let sequence: TauViewerViewFieldSequence = {};
+  let latest = 0;
   let sources: Partial<Record<ViewFieldPath, ViewFieldSource>> = {};
+  /* Number the person's latest command for a leaf. */
+  const numbered = (leaf: ViewFieldPath): void => {
+    latest += 1;
+    sequence = { ...sequence, [leaf]: latest };
+  };
   return {
     set(leaf, value) {
       if (leaf === 'grid.unit' && !isLengthUnit(value as string)) {
         return;
       }
       commanded = { ...commanded, [leaf]: value };
+      numbered(leaf);
       sources = { ...sources, [leaf]: 'view' };
       show(graphicsRef, leaf, value);
     },
     reset(leaf) {
       commanded = { ...commanded, [leaf]: viewRecordV1Defaults[leaf] };
+      numbered(leaf);
       sources = { ...sources, [leaf]: 'tau' };
       show(graphicsRef, leaf, tauViewDefaults[leaf]);
     },
     sourceOf: (leaf) => sources[leaf] ?? 'tau',
     seed(next) {
       commanded = {};
+      sequence = {};
       sources = { ...next };
     },
     commanded: () => commanded as TauViewerViewFields,
+    sequence: () => sequence,
   };
 };

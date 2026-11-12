@@ -89,6 +89,11 @@ function selectShortcutApplies(graphicsRef: GraphicsActorRef, press: ViewerShort
   return graphicsRef.getSnapshot().can(press);
 }
 
+/** Whether graphics shows the grid at the press, which G with view commands needs. */
+function selectShortcutGridShown(graphicsRef: GraphicsActorRef): boolean {
+  return graphicsRef.getSnapshot().context.enableGrid;
+}
+
 /** G or P with the host's view commands: the same decision graphics makes, issued as the view's command. */
 function setViewField({
   viewFields,
@@ -102,7 +107,7 @@ function setViewField({
   announce: (phrase: string) => void;
 }>): void {
   if (shortcut === 'grid') {
-    const isShown = !graphicsRef.getSnapshot().context.enableGrid;
+    const isShown = !selectShortcutGridShown(graphicsRef);
     viewFields.set('display.grid', isShown);
     announce(outcomePhrases[isShown ? 'gridShown' : 'gridHidden']);
     return;

@@ -43,7 +43,7 @@ describe('S3HealthIndicator', () => {
   });
 
   it('should keep slow successful storage ready and reports the complete probe duration', async () => {
-    vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValueOnce(700).mockReturnValueOnce(1200);
+    vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValueOnce(1200);
 
     const result = await indicator.isHealthy();
 
@@ -51,6 +51,48 @@ describe('S3HealthIndicator', () => {
     const signal: unknown = mockHeadProbe.mock.calls[0]?.[0];
     expect(signal).toBeInstanceOf(AbortSignal);
     expect(mockHeadPrivateBucket).toHaveBeenCalledWith(signal);
+  });
+
+  it('should keep storage ready when each head fits the deadline but their sum would not', async () => {
+    // TAU-API-6: two 1000 ms heads run one after the other exceed the shared 1500 ms deadline.
+    vi.useFakeTimers();
+    const resolveAfter = async <T>(value: T, milliseconds: number): Promise<T> =>
+      new Promise((resolve) => {
+        setTimeout(() => {
+          resolve(value);
+        }, milliseconds);
+      });
+    mockHeadProbe.mockImplementation(async () => resolveAfter(probeResult, 1000));
+    mockHeadPrivateBucket.mockImplementation(async () => resolveAfter(true, 1000));
+
+    const pending = indicator.isHealthy();
+    // Long enough for either order to settle: run in sequence, the deadline fires at 1500 ms.
+    await vi.advanceTimersByTimeAsync(2000);
+    const result = await pending;
+
+    expect(result['s3']?.status).toBe('up');
+    expect(result['s3']?.['responseTimeMs']).toEqual(expect.any(Number));
+    expect(mockHeadProbe).toHaveBeenCalledTimes(1);
+    expect(mockHeadPrivateBucket).toHaveBeenCalledTimes(1);
+  });
+
+  it('should still time out when the slower head alone exceeds the deadline', async () => {
+    vi.useFakeTimers();
+    mockHeadProbe.mockResolvedValue(probeResult);
+    mockHeadPrivateBucket.mockImplementation(
+      async (signal: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            reject(new Error('aborted', { cause: signal.reason }));
+          });
+        }),
+    );
+
+    const pending = indicator.isHealthy();
+    await vi.advanceTimersByTimeAsync(1500);
+    const result = await pending;
+
+    expect(result['s3']).toMatchObject({ status: 'down', message: 'Storage readiness timed out after 1500 ms' });
   });
 
   it('should bound SDK retry backoff and abort the transport at the shared deadline', async () => {

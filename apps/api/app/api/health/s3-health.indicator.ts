@@ -27,7 +27,11 @@ export class S3HealthIndicator {
     const { signal } = controller;
 
     try {
-      const result = await Promise.race([this.objectStorage.headProbeObject(signal), deadline]);
+      // Both heads run at once, so the deadline bounds the slower one rather than their sum (TAU-API-6).
+      const [result, privateBucketReachable] = await Promise.race([
+        Promise.all([this.objectStorage.headProbeObject(signal), this.objectStorage.headPrivateBucket(signal)]),
+        deadline,
+      ]);
       const responseTimeMs = Math.round(performance.now() - start);
 
       if (result === undefined) {
@@ -39,7 +43,6 @@ export class S3HealthIndicator {
 
       // The private-publication serving path is gated on this bucket existing;
       // fail readiness rather than 500 on the first private publish.
-      const privateBucketReachable = await Promise.race([this.objectStorage.headPrivateBucket(signal), deadline]);
       if (!privateBucketReachable) {
         return indicator.down({
           responseTimeMs,
@@ -47,7 +50,7 @@ export class S3HealthIndicator {
         });
       }
 
-      return indicator.up({ responseTimeMs: Math.round(performance.now() - start) });
+      return indicator.up({ responseTimeMs });
     } catch (error) {
       return indicator.down({
         responseTimeMs: Math.round(performance.now() - start),

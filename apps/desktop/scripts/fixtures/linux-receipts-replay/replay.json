@@ -1,0 +1,15 @@
+{
+  "source": "Saved unchanged from clean-host acceptance run 42706520569 (desktop-route-row-* artifacts) and candidate C run 42392372853 (desktop-artifacts.json of desktop-linux-installer-candidate artifact 13582421048).",
+  "acceptanceRun": { "id": 42706520569, "headSha": "8630f9fd95fa97258cf374137a94c40b153006c1" },
+  "candidateRun": {
+    "id": 42392372853,
+    "headSha": "e92861f2712a628ec90e3f487c944eb166f367c0",
+    "artifactId": 13582421048
+  },
+  "sourceCommit": "0f54f34f1254b6429cf7bdaab605bf366c571263",
+  "trust": {
+    "aptPrimaryFingerprint": "3607A6E9CD4D8CADF550483665C92879E20F7436",
+    "aptSigningFingerprint": "76CA5F7A0E66A532B75D002A698C5ABADE0A83CB",
+    "appImageKeyId": "tau-staging-appimage-2026-10-22"
+  }
+}

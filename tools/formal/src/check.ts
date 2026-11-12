@@ -531,16 +531,21 @@ export const mutantsProject = async (
  * `formal nightly <projectRoot>`: the project's nightly-tier configs and Apalache commands, the Lean
  * tier with its fresh-seed differential, fresh-seed simulation of each exported graph, and every
  * mutant matrix (whose runs replay the simulated behaviours). Each part runs; any failure fails.
+ * `--without-check` leaves out the configs and Apalache commands, for an owner whose
+ * `formal:nightly:check` target runs them (`formal check --tier nightly`) in a job of its own.
  */
 export const nightlyProject = async (
   context: FormalContext,
   projectRoot: string,
-  log: (line: string) => void = (line) => process.stdout.write(`${line}\n`),
+  {
+    log = (line) => process.stdout.write(`${line}\n`),
+    check = true,
+  }: { readonly log?: (line: string) => void; readonly check?: boolean } = {},
 ): Promise<number> => {
   const locations = findExpectedFiles(projectRoot);
   const target = `${path.relative(context.root, projectRoot)}:formal:nightly`;
   const statuses: number[] = [];
-  if (locations.some((location) => location.file.lean === undefined)) {
+  if (check && locations.some((location) => location.file.lean === undefined)) {
     statuses.push(await checkProject(context, { tier: 'nightly', projectRoot, log }));
   }
   if (locations.some((location) => location.file.lean !== undefined)) {

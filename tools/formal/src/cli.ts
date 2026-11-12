@@ -17,11 +17,14 @@ const out = (line: string): void => {
 
 /** The commands that take one project root. */
 const projectCommands: Readonly<
-  Record<string, (context: FormalContext, projectRoot: string) => number | Promise<number>>
+  Record<
+    string,
+    (context: FormalContext, projectRoot: string, options: { readonly check: boolean }) => number | Promise<number>
+  >
 > = {
-  update: updateProject,
-  mutants: mutantsProject,
-  nightly: nightlyProject,
+  update: async (context, projectRoot) => updateProject(context, projectRoot),
+  mutants: async (context, projectRoot) => mutantsProject(context, projectRoot),
+  nightly: async (context, projectRoot, { check }) => nightlyProject(context, projectRoot, { check }),
 };
 
 const main = async (argv: readonly string[]): Promise<number> => {
@@ -33,6 +36,7 @@ const main = async (argv: readonly string[]): Promise<number> => {
       tools: { type: 'string' },
       from: { type: 'string' },
       tier: { type: 'string' },
+      'without-check': { type: 'boolean' },
     },
   });
   const context = defaultContext();
@@ -43,7 +47,9 @@ const main = async (argv: readonly string[]): Promise<number> => {
       out(`usage: formal ${command} <projectRoot>`);
       return 2;
     }
-    return projectCommand(context, path.resolve(context.root, projectRoot));
+    return projectCommand(context, path.resolve(context.root, projectRoot), {
+      check: values['without-check'] !== true,
+    });
   }
   switch (command) {
     case 'setup': {

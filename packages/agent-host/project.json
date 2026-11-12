@@ -10,13 +10,14 @@
     "formal:logs": {},
     "formal:nightly": {
       "options": {
-        "command": "vitest run --root packages/agent-host src/log/chat-ledger.differential.test.ts && node tools/formal/src/cli.ts nightly packages/agent-host && vitest run --root packages/agent-host src/host/chat-run.conformance.test.ts src/launchers/leadership/leadership.machine.conformance.test.ts",
+        "command": "vitest run --root packages/agent-host src/log/chat-ledger.differential.test.ts && node tools/formal/src/cli.ts nightly --without-check packages/agent-host && vitest run --root packages/agent-host src/host/chat-run.conformance.test.ts src/launchers/leadership/leadership.machine.conformance.test.ts",
         "env": {
           "FORMAL_FRESH_TRACES": "20000",
           "FORMAL_SIMULATED": "out/test-results/formal/packages/agent-host/simulated"
         }
       }
     },
+    "formal:nightly:check": {},
     "build": {
       "executor": "nx:run-commands",
       "dependsOn": ["^build"],

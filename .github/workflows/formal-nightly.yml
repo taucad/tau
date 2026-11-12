@@ -29,6 +29,8 @@ jobs:
   # Q-4). On split run 43164083769 six projects took 2 to 9 minutes and `agent-host` alone took 55, so
   # each job has 120 for headroom over a single 60-minute budget. The per-project
   # durations size the queue lane and the release-gate matrix (RG-1) that follow.
+  # A project with a `formal:nightly:check` target runs its nightly configs and Apalache there, in a
+  # job of its own (`agent-host`, run 43178267338: 32 min of configs, 17 for the rest).
   projects:
     name: List the formal nightly projects
     runs-on: ubuntu-latest
@@ -37,7 +39,7 @@ jobs:
       actions: 'read'
       contents: 'read'
     outputs:
-      projects: ${{ steps.list.outputs.projects }}
+      tiers: ${{ steps.list.outputs.tiers }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -55,10 +57,17 @@ jobs:
             echo "::error::No project has a formal:nightly target."
             exit 1
           fi
-          echo "projects=$projects" >> "$GITHUB_OUTPUT"
+          tiers='[]'
+          for target in formal:nightly formal:nightly:check; do
+            selected=$(pnpm nx show projects --with-target "$target" --json | tail -1)
+            tiers=$(jq -c --arg target "$target" --argjson projects "$selected" \
+              '. + [$projects[] | {project: ., target: $target, slug: ("\(.)-\($target)" | gsub(":"; "-"))}]' <<< "$tiers")
+          done
+          echo "Formal nightly tiers: $tiers"
+          echo "tiers=$tiers" >> "$GITHUB_OUTPUT"
 
   formal-nightly:
-    name: Formal nightly tiers (${{ matrix.project }})
+    name: Formal nightly tiers (${{ matrix.tier.project }} ${{ matrix.tier.target }})
     needs: projects
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -68,7 +77,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: ${{ fromJSON(needs.projects.outputs.projects) }}
+        tier: ${{ fromJSON(needs.projects.outputs.tiers) }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -85,14 +94,15 @@ jobs:
       # would lose it.
       - name: Run the project's formal nightly tier
         env:
-          PROJECT: ${{ matrix.project }}
-        run: pnpm nx run-many -t formal:nightly --projects "$PROJECT" --parallel=1 --outputStyle=stream
+          PROJECT: ${{ matrix.tier.project }}
+          TARGET: ${{ matrix.tier.target }}
+        run: pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream
 
       - name: Upload formal reports and captured logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: formal-nightly-reports-${{ matrix.project }}
+          name: formal-nightly-reports-${{ matrix.tier.slug }}
           path: |
             out/reports/formal
             out/test-results/chat-logs

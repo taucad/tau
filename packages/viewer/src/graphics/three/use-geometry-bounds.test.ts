@@ -12,6 +12,7 @@ import { useGeometryBounds } from '#graphics/three/use-geometry-bounds.js';
 import { createEdgePrototypeGeometry } from '#graphics/three/utils/gltf-edge-batches.js';
 import { sceneTag } from '#graphics/three/utils/scene-tags.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
+import { selectGraphicsFramingIdentity } from '#machines/graphics.machine.js';
 
 const mocks = vi.hoisted(() => ({
   frame: undefined as (() => void) | undefined,
@@ -39,6 +40,7 @@ const mocks = vi.hoisted(() => ({
     },
   },
   geometryKey: 'geometry-key',
+  framingIdentity: 'entry-a' as string | undefined,
 }));
 
 const getCanvasState = () => ({ size: { width: 800, height: 600 } });
@@ -55,7 +57,8 @@ vi.mock('#hooks/use-graphics.jsx', async () => {
   const { useSelector } = await vi.importActual<typeof XStateReact>('@xstate/react');
   return {
     useGraphics: () => ({ send: mocks.send }),
-    useGraphicsSelector: () => mocks.geometryKey,
+    useGraphicsSelector: (selector: unknown) =>
+      selector === selectGraphicsFramingIdentity ? mocks.framingIdentity : mocks.geometryKey,
     useCameraRig: () => mocks.camera,
     useRenderFrame: () => mocks.renderFrame,
     useKinematicsSelector: <T>(selector: (snapshot: SnapshotFrom<typeof kinematicsMachine>) => T) =>
@@ -91,6 +94,7 @@ describe('useGeometryBounds', () => {
     mocks.invalidate.mockClear();
     mocks.camera.actorRef.send.mockClear();
     mocks.geometryKey = 'geometry-key';
+    mocks.framingIdentity = 'entry-a';
     mocks.renderFrame = { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 };
     mocks.kinematics = createActor(kinematicsMachine, { input: {} }).start();
   });
@@ -107,6 +111,19 @@ describe('useGeometryBounds', () => {
     act(() => mocks.frame?.());
     expect(bounds).toHaveBeenCalledOnce();
     bounds.mockRestore();
+  });
+
+  it('should measure the geometry on screen again for a new entry that keeps its key', () => {
+    const { innerRef, outerRef } = createSceneReferences(10);
+    const hook = renderHook(() => useGeometryBounds(innerRef, outerRef));
+    act(() => mocks.frame?.());
+    expect(measurements()).toHaveLength(1);
+
+    mocks.framingIdentity = 'entry-b';
+    hook.rerender();
+    act(() => mocks.frame?.());
+    expect(measurements()).toHaveLength(2);
+    expect(measurements().at(-1)).toMatchObject({ key: 'geometry-key', bounds: { min: [9, -2, -3], max: [11, 2, 3] } });
   });
 
   it('excludes real edge quads and nested presentation surfaces from physical bounds', () => {

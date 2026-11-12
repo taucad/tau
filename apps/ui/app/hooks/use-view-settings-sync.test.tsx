@@ -968,6 +968,24 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       expect(poseWrites(harness.writeRecord)).toEqual([]);
     });
 
+    it('should save a first drag that a viewport change follows inside the first settle window', () => {
+      const harness = mountFramed(initial());
+      advance(settle * 4);
+      harness.frame(4, smallBounds);
+      act(() => {
+        harness.rig.send({ type: 'poseObserved', source: 'input', ...pose([1, 0, 0], 40) });
+      });
+      act(() => {
+        harness.rig.send({
+          type: 'setViewport',
+          viewport: { ...harness.rig.getSnapshot().context.view.viewport, width: 640 },
+        });
+      });
+      expect(harness.rig.getSnapshot().context.lastChange.source).toBe('viewport');
+      advance(settle * 4);
+      expect(poseWrites(harness.writeRecord).at(-1)).toMatchObject({ direction: [1, 0, 0], verticalSpan: 40 });
+    });
+
     it('today saves an automatic refit after the bounds grow by more than 10 % (G6b flips, D20)', () => {
       const harness = mountFramed(initial());
       advance(settle * 4);

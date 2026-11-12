@@ -13,7 +13,7 @@ import {
   useKinematicsSelector,
   useRenderFrame,
 } from '#hooks/use-graphics.jsx';
-import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
+import { selectGraphicsFramingIdentity, selectPresentedGeometryKey } from '#machines/graphics.machine.js';
 import { sceneTag } from '#graphics/three/utils/scene-tags.js';
 import { resolveFramingStage } from '#graphics/three/framing-stage.js';
 import type { StageOptions } from '#graphics/three/stage-options.js';
@@ -105,6 +105,11 @@ export function useGeometryBounds(
   const settledPoseRevision = useKinematicsSelector(selectSettledPoseRevision);
   const lastPoseRevisionRef = useRef(settledPoseRevision);
 
+  // A new entry waits for its first frame; the geometry on screen may keep its key (a failed build, an identical
+  // artifact), so it is measured again for the new entry.
+  const framingIdentity = useGraphicsSelector(selectGraphicsFramingIdentity);
+  const lastFramingIdentityRef = useRef(framingIdentity);
+
   const measureBounds = useCallback(() => {
     if (!innerRef.current) {
       return;
@@ -113,6 +118,10 @@ export function useGeometryBounds(
     // When geometryKey changes, invalidate stability
     if (geometryKey !== lastGeometryKeyRef.current) {
       lastGeometryKeyRef.current = geometryKey;
+      boundsStableRef.current = false;
+    }
+    if (framingIdentity !== lastFramingIdentityRef.current) {
+      lastFramingIdentityRef.current = framingIdentity;
       boundsStableRef.current = false;
     }
     if (settledPoseRevision !== undefined && settledPoseRevision !== lastPoseRevisionRef.current) {
@@ -198,7 +207,18 @@ export function useGeometryBounds(
         geometryBounds: boundsChanged ? snapshotBounds : previous.geometryBounds,
       };
     });
-  }, [cameraRig, geometryKey, get, graphicsActor, innerRef, outerRef, renderFrame, settledPoseRevision, stageOptions]);
+  }, [
+    cameraRig,
+    framingIdentity,
+    geometryKey,
+    get,
+    graphicsActor,
+    innerRef,
+    outerRef,
+    renderFrame,
+    settledPoseRevision,
+    stageOptions,
+  ]);
 
   // Committed geometry and saved pose are attached before layout effects. Fit the
   // active camera before its first draw; the frame callback handles settled poses.

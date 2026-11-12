@@ -164,6 +164,8 @@ export function useViewSettingsSync({
   const session = useMemo(() => (camera ? { rig: { actorRef: camera } } : undefined), [camera]);
   /* The framed entry the first-frame receipt below was taken for; a new entry's first frame takes a new one. */
   const firstFrameEntryRef = useRef<{ identity: string | undefined } | undefined>(undefined);
+  /* The framed entry a person last changed the pose of: a pose read after that is the person's, not the first frame. */
+  const personChangedEntryRef = useRef<{ identity: string | undefined } | undefined>(undefined);
   const cameraFovAngle = useSelector(session?.rig.actorRef, (s) => s?.context.view.requestedVerticalFieldOfView);
   /* A viewer that is not rendering glTF has no pose to persist, so it clears the stale one. */
   const artifactMimeType = useSelector(graphicsRef, (s) => s.context.artifact?.mimeType);
@@ -419,6 +421,7 @@ export function useViewSettingsSync({
         if (!selectFramed(graphicsRef)) {
           firstFrameEntryRef.current = undefined;
           firstFrameReceiptRef.current = undefined;
+          personChangedEntryRef.current = undefined;
           return {};
         }
         const { view } = session.rig.actorRef.getSnapshot().context;
@@ -435,9 +438,11 @@ export function useViewSettingsSync({
         const framedEntry = selectFramingIdentity(graphicsRef);
         if (!firstFrameEntryRef.current || firstFrameEntryRef.current.identity !== framedEntry) {
           firstFrameEntryRef.current = { identity: framedEntry };
-          firstFrameReceiptRef.current = firstFrameSources.has(selectLastCameraChange(session.rig.actorRef).source)
-            ? { view: next, consumed: false }
-            : undefined;
+          const personChanged = personChangedEntryRef.current?.identity === framedEntry;
+          firstFrameReceiptRef.current =
+            !personChanged && firstFrameSources.has(selectLastCameraChange(session.rig.actorRef).source)
+              ? { view: next, consumed: false }
+              : undefined;
         }
         const firstFrameView = firstFrameReceiptRef.current?.view;
         if (includePose && firstFrameView && !cameraViewEqual(firstFrameView, next) && firstFrameReceiptRef.current) {
@@ -585,6 +590,11 @@ export function useViewSettingsSync({
         return;
       }
       cameraRevision = context.revision;
+      if (!selectFramed(graphicsRef)) {
+        personChangedEntryRef.current = undefined;
+      } else if (!firstFrameSources.has(context.lastChange.source)) {
+        personChangedEntryRef.current = { identity: selectFramingIdentity(graphicsRef) };
+      }
       lastCameraEmissionRef.current = Date.now();
       restartSettle(true);
     });

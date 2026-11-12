@@ -240,3 +240,44 @@ describe('ci.yml', () => {
     }
   });
 });
+
+describe('viewer-parity.yml', () => {
+  type Step = { readonly name?: string; readonly run?: string; readonly env?: Record<string, string> };
+  const workflow = load(readFileSync(resolve(root, '.github/workflows/viewer-parity.yml'), 'utf8')) as {
+    readonly jobs: Record<string, { readonly steps?: readonly Step[] }>;
+  };
+  const steps = workflow.jobs['viewer']?.steps ?? [];
+  const fixtures = (
+    JSON.parse(readFileSync(resolve(root, 'libs/tau-examples/fixtures/viewer-parity/fixtures.json'), 'utf8')) as {
+      fixtures: Array<{ name: string }>;
+    }
+  ).fixtures.map(({ name }) => name);
+  const captureSeconds = parseDurations(
+    JSON.parse(readFileSync(resolve(root, 'libs/tau-examples/fixtures/viewer-parity/capture-seconds.json'), 'utf8')),
+  );
+
+  it('deals the viewer shards with this script and the capture-seconds snapshot', () => {
+    expect(steps.find((step) => step.name === "Deal this shard's fixtures")?.run).toMatch(
+      /node scripts\/src\/test-shard-dealer\.ts --shard "\$SHARD" --shards 4 \\\n\s+--durations libs\/tau-examples\/fixtures\/viewer-parity\/capture-seconds\.json/u,
+    );
+    const capture = steps.find((step) => step.name === "Capture the viewer's frames");
+    expect(capture?.env?.['PARITY_FIXTURES']).toMatch(/^\$\{\{ steps\.deal\.outputs\.fixtures \}\}$/u);
+    expect(capture?.env).not.toHaveProperty('PARITY_SHARD');
+  });
+
+  it('names only real fixtures in the snapshot', () => {
+    for (const fixture of Object.keys(captureSeconds.seconds)) {
+      expect(fixtures).toContain(fixture);
+    }
+  });
+
+  it('gives every shard fixtures and keeps the slowest shard within one fixture of the fastest', () => {
+    const dealt = deal(fixtures, 4, captureSeconds);
+    expectPartition(fixtures, dealt);
+    const loads = dealt.map((shard) => shard.reduce((sum, fixture) => sum + weightOf(fixture, captureSeconds), 0));
+    expect(dealt.every((shard) => shard.length > 0)).toBe(true);
+    expect(Math.max(...loads) - Math.min(...loads)).toBeLessThanOrEqual(
+      Math.max(...fixtures.map((fixture) => weightOf(fixture, captureSeconds))),
+    );
+  });
+});

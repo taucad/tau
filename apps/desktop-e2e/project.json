@@ -75,7 +75,7 @@
         "commands": [
           "pnpm --dir ../.. exec nx run ui:build",
           "./scripts/ensure-services.sh",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-consent-boundary.spec.ts src/desktop-flag-state.spec.ts src/desktop-onboarding-first-run.spec.ts src/desktop-onboarding-offline.spec.ts src/desktop-chat-in-project.spec.ts src/desktop-chat-replay.spec.ts src/desktop-chat-launcher-2.spec.ts src/desktop-mcp-fixture.spec.ts src/desktop-arrange-workbench.spec.ts src/desktop-chat-attachments.spec.ts src/desktop-share-link-copy.spec.ts src/desktop-kernel-freshness.spec.ts src/desktop-quit-hold.spec.ts src/desktop-revision-author.spec.ts src/desktop-record-recovery.spec.ts src/desktop-print-dry-run.spec.ts src/two-client.spec.ts src/sync-refusals.spec.ts"
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-consent-boundary.spec.ts src/desktop-flag-state.spec.ts src/desktop-onboarding-first-run.spec.ts src/desktop-onboarding-offline.spec.ts src/desktop-onboarding-tour.spec.ts src/desktop-chat-in-project.spec.ts src/desktop-chat-replay.spec.ts src/desktop-chat-launcher-2.spec.ts src/desktop-mcp-fixture.spec.ts src/desktop-arrange-workbench.spec.ts src/desktop-chat-attachments.spec.ts src/desktop-share-link-copy.spec.ts src/desktop-kernel-freshness.spec.ts src/desktop-quit-hold.spec.ts src/desktop-revision-author.spec.ts src/desktop-record-recovery.spec.ts src/desktop-print-dry-run.spec.ts src/two-client.spec.ts src/sync-refusals.spec.ts"
         ],
         "env": {
           "TAU_E2E_API_URL": "http://localhost:4014",

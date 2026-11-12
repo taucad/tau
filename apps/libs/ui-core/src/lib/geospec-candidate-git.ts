@@ -2,7 +2,7 @@
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { createRawObjectReader } from '@taucad/revisions';
-import type { RevisionPort, RevisionPushRef } from '@taucad/revisions';
+import type { RevisionCaptureIdentity, RevisionPort, RevisionPushRef } from '@taucad/revisions';
 import { candidateConsentChannelName, withCandidateConsentLock } from '#lib/geospec-candidate-consent.js';
 
 export const geoSpecCandidateRef = 'refs/tau/artifacts/geospec-candidates';
@@ -154,6 +154,8 @@ export const publishGeoSpecCandidate = async (
     filesystem: CandidateGitFileSystem;
     remote: string;
     candidate: Uint8Array<ArrayBuffer>;
+    /** Who shares it (B1): the candidate's commit names the person, never a fixed id. */
+    identity: RevisionCaptureIdentity;
     readConsent: () => Promise<boolean>;
     signal?: AbortSignal;
     abort?: () => void;
@@ -200,7 +202,13 @@ export const publishGeoSpecCandidate = async (
       parents: [],
       tree,
       largeObjects: false,
-      provenance: { source: 'user', actorId: 'geospec-candidate', createdAt: Date.now() },
+      provenance: {
+        source: 'user',
+        actor: input.identity.resolve({ runId: undefined, trigger: 'save' }),
+        capture: 'save',
+        via: input.identity.via,
+        createdAt: Date.now(),
+      },
       summary: { generated: 'Share locally verified GeoSpec candidate' },
     });
     const localHead = await input.port.readRef(geoSpecCandidateRef);

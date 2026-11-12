@@ -31,6 +31,7 @@ import type { RevisionPort } from '#revision-port.js';
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
 import type { SyncMachineEmitted } from '#sync.machine.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
+import { recordedBy, testIdentity } from '#test/identity.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 const projectId = 'proj_b6versionnumbers0000001';
@@ -127,6 +128,7 @@ const device = async (leg: Leg, label: string, remoteUrl: string) => {
     projectId,
     filesystem: () => filesystem,
     deviceId: () => `device-${label}`,
+    identity: testIdentity,
   });
   const said: Array<Extract<SyncMachineEmitted, { type: 'versionsRenumbered' }>> = [];
   /**
@@ -185,7 +187,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('version numbers across two device
       const receipt = await one.port.writeRevision({
         parents: [],
         tree: new ImmutableRevisionTree([['lid.scad', encoder.encode('cube(10);\n')]]),
-        provenance: { source: 'user', actorId: 'actor-b6', createdAt: Date.UTC(2026, 10, 11, 9, 0, 0) },
+        provenance: { source: 'user', ...recordedBy('actor-b6'), createdAt: Date.UTC(2026, 10, 11, 9, 0, 0) },
         summary: { generated: 'Lid' },
       });
       const head = receipt.commitId;

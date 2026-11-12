@@ -237,6 +237,7 @@ const desktopProjectHostOptions = async (
   const fileSystem = await nodeFileSystem(sandbox, workspaceRoot);
   return {
     workspaceRoot,
+    via: 'desktop',
     projectId: 'proj_test',
     checkoutsDirectory: join(sandbox, 'home', '.tau', 'checkouts', 'proj_test'),
     fileSystem,

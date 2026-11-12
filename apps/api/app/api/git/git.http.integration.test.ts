@@ -956,9 +956,9 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
                 'Saved',
                 '-m',
                 `Tau-Metadata: ${JSON.stringify({
-                  version: 1,
+                  version: 2,
                   parents: [base],
-                  provenance: { source: 'user', createdAt: Date.now(), ...record },
+                  provenance: { source: 'user', capture: 'save', via: 'cloud', createdAt: Date.now(), ...record },
                   summary: { generated: 'Saved' },
                 })}`,
               ];
@@ -975,7 +975,6 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
 
       /* B pushing a revision signed as A. */
       await revise(noreply(callers.owner.id), {
-        actorId: callers.owner.id,
         actor: { kind: 'user', id: callers.owner.id, name: 'Member owner', email: `${callers.owner.id}@test.com` },
       });
       const forged = await push('authorship-forged');
@@ -988,7 +987,6 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       /* An agent working for A, pushed by B. */
       await revise(noreply(callers.owner.id), {
         source: 'agent',
-        actorId: 'agent',
         actor: { kind: 'agent', id: 'agent', runId: 'run_b4', onBehalfOf: { kind: 'user', id: callers.owner.id } },
       });
       const forgedAgent = await push('authorship-forged-agent');
@@ -997,7 +995,6 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
 
       /* A Tau-written revision carrying an environment email (Q11). */
       await revise('writer@example.com', {
-        actorId: callers.writer.id,
         actor: { kind: 'user', id: callers.writer.id, email: 'writer@example.com' },
       });
       const leaked = await push('authorship-email');
@@ -1020,14 +1017,12 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
 
       /* The pusher's own revision, and an agent's on the pusher's behalf. */
       await revise(noreply(callers.writer.id), {
-        actorId: callers.writer.id,
         actor: { kind: 'user', id: callers.writer.id, name: 'Member writer' },
       });
       const own = await push('authorship-own');
       expect(own.code, own.stderr).toBe(0);
       await revise(noreply(callers.writer.id), {
         source: 'agent',
-        actorId: 'agent',
         actor: { kind: 'agent', id: 'agent', runId: 'run_b4', onBehalfOf: { kind: 'user', id: callers.writer.id } },
       });
       const onBehalf = await push('authorship-agent');

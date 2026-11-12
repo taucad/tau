@@ -63,6 +63,7 @@ import { keyedResource } from '#keyed-resource.js';
 import { resolveNodeProjectIdentity } from '#project-identity.js';
 import { createProjectHost } from '#project-host.js';
 import type { ProjectHost, ProjectHostOptions } from '#project-host.js';
+import { daemonRevisionVia } from '#revision-actor.js';
 import { startRuntimeChild } from '#runtime-child-supervisor.js';
 import { createZooProxyChildCredential } from '#zoo-proxy-child.js';
 import type { HostZooProxyOptions } from '#zoo-proxy-child.js';
@@ -1010,6 +1011,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
        */
       apiBaseUrl: options.relayUrl.origin,
       syncTelemetryPlacement: 'daemon',
+      via: daemonRevisionVia(),
       ...(agent.revisionActor === undefined ? {} : { revisionActor: agent.revisionActor }),
       ...(observeChats === undefined
         ? {}

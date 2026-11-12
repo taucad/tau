@@ -13,7 +13,7 @@
  */
 
 import type { ImmutableRevisionTree, RevisionId } from '#algorithms/index.js';
-import type { RevisionActor, RevisionProvenance, RevisionSummary } from '#revision-authority.js';
+import type { RecordedProvenance, RevisionActor, RevisionProvenance, RevisionSummary } from '#revision-authority.js';
 import type {
   RevisionDiffKind as ComparisonDiffKind,
   RevisionDiffEntry as ComparisonDiffEntry,
@@ -98,7 +98,7 @@ export type RevisionRecord = Readonly<{
    * single blob.
    */
   treeId: string;
-  provenance: RevisionProvenance;
+  provenance: RecordedProvenance;
   summary: RevisionSummary;
   receipt: RevisionReceipt;
 }>;
@@ -116,7 +116,7 @@ export type RevisionLogEntry = Readonly<{
   /** Object id of the tree this revision carries, as {@link RevisionRecord.treeId}. */
   treeId: string;
   summary: RevisionSummary;
-  provenance: RevisionProvenance;
+  provenance: RecordedProvenance;
   conflicted: boolean;
 }>;
 

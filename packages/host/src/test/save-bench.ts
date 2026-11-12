@@ -59,6 +59,7 @@ const then = new Date(Date.now() - 60_000);
 await Promise.all(paths.map(async (path) => utimes(join(workspaceRoot, path), then, then)));
 
 const revisions = createProjectRevisions({
+  via: 'desktop',
   workspaceRoot,
   projectId: 'save-bench',
   port: createNativeGitRevisionPort({

@@ -5,6 +5,7 @@ import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { revisionTagMessage } from '#revision-headers.js';
 import { readRevisionLog } from '#revision-verbs.js';
+import { recordedBy } from '#test/identity.js';
 import { nextVersionNumber, numberVersions, planVersionRenumbering, versionNumberFor } from '#version-numbers.js';
 
 const encoder = new TextEncoder();
@@ -106,7 +107,7 @@ describe('version numbers in a store', () => {
     const receipt = await port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['part.scad', encoder.encode('cube(1);')]]),
-      provenance: { source: 'user', actorId: 'b6', createdAt: 1_790_000_000_000 },
+      provenance: { source: 'user', ...recordedBy('b6'), createdAt: 1_790_000_000_000 },
       summary: { generated: 'Saved' },
     });
     const head = revisionId(receipt.commitId);

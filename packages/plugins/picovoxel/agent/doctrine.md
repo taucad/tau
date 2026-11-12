@@ -14,6 +14,7 @@ Across files, use explicit ESM paths such as `./lib/widget.js` and pass `pico` t
 - `voxelSize` is the model, not a mesh setting: PicoVoxel views take no `tessellation` presets. Results report `tessellation` with `voxelSize`, `activeVoxels`, `memoryBytes`, triangles, vertices and elapsed. A fast view that sets no `meshAdaptivity` meshes adaptively at 0.25, so flat regions get fewer, larger triangles and `tessellation` reports `adaptivity`; set `meshAdaptivity` (0 for the uniform mesh) to change it. Exports mesh at 0 unless the export sets `meshAdaptivity`, which needs `lane: 'fast'` (STL only). Tau does not simplify a delivered mesh, so while a view is slow, raise `meshAdaptivity` or coarsen `voxelSize` per call. The grid, exports and GeoSpec subjects stay exact.
 - Prefer voxel booleans, offsets, ShapeKernel and LatticeLibrary over manual triangles. Output is mesh, not BRep.
 - Prefer an `SdfExpression` (`['max', ['abs', 'x'], ['abs', 'y']]`) over a JS `sdf` callback: expressions fill in parallel, callbacks run serially.
+- Stylised characters (mascots, chess pieces, toy creatures) are one blended SDF field: read [characters-reference.md](characters-reference.md) for the smooth-union and ellipsoid helpers.
 - Dispose large intermediates after their last use.
 - The viewer shows a fast preview; exports and GeoSpec checks replay the model exactly, so they can differ by about one voxel. Never request `lane: 'fast'` for manufacturing exports.
 

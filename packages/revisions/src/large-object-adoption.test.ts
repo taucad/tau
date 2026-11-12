@@ -12,6 +12,7 @@ import { createLargeObjectAdoption } from '#large-object-adoption.js';
 import type { Checkout } from '#revision-port.js';
 import { generatedGitattributesContent, generatedGitattributesPath } from '#workspace-config.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
+import { testIdentity } from '#test/identity.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -79,7 +80,7 @@ const killable = (filesystem: RevisionFileSystem) => {
 /* One project on disk, its root reading and writing through `view`. */
 const project = async (view: RevisionFileSystem): Promise<RevisionActors> => {
   const port = createIsomorphicGitRevisionPort({ filesystem: view });
-  return createRevisionActors({ port, projectId: 'project-1', filesystem: async () => view });
+  return createRevisionActors({ identity: testIdentity, port, projectId: 'project-1', filesystem: async () => view });
 };
 
 /* A root past its start-up: the repository made, the generated files written and the first fill scan done. */
@@ -139,7 +140,12 @@ describe('adopting a large file (D9)', () => {
       ...port,
       describe: async () => ({ ...(await describe()), keepsLargeObjectFiles: true }),
     });
-    const actors = createRevisionActors({ port: keeping, projectId: 'project-1', filesystem: async () => raw });
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port: keeping,
+      projectId: 'project-1',
+      filesystem: async () => raw,
+    });
     expect(await actors.adoptLargeObjects(undefined)).toStrictEqual({ adopted: [], left: [] });
     expect(await whole(raw)).toBe('file');
     await actors.settled();

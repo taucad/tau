@@ -23,6 +23,7 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { RevisionLogEntry, RevisionPort } from '#revision-port.js';
 import { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { recordedBy } from '#test/identity.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 
 /* Every commit object the browser leg reads goes through `readObject`. */
@@ -63,7 +64,7 @@ const record = async (
   const receipt = await port.writeRevision({
     parents: options.parents,
     tree: new ImmutableRevisionTree([['part.ts', options.content]]),
-    provenance: { source: 'user', actorId: options.actorId, createdAt },
+    provenance: { source: 'user', ...recordedBy(options.actorId), createdAt },
     summary: { generated: options.summary },
   });
   return revisionId(receipt.commitId);
@@ -99,14 +100,14 @@ describe('revision verbs', () => {
     const saved = await port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['part.ts', 'one']]),
-      provenance: { source: 'user', actorId: 'ada', trigger: 'save', createdAt },
+      provenance: { source: 'user', ...recordedBy('ada'), capture: 'save', createdAt },
       summary: { generated: 'Saved' },
     });
     const savedId = revisionId(saved.commitId);
     const idle = await port.writeRevision({
       parents: [savedId],
       tree: new ImmutableRevisionTree([['part.ts', 'two']]),
-      provenance: { source: 'user', actorId: 'ada', trigger: 'idle', createdAt },
+      provenance: { source: 'user', ...recordedBy('ada'), capture: 'idle', createdAt },
       summary: { generated: 'Autosaved' },
     });
     await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(idle.commitId) });
@@ -119,25 +120,31 @@ describe('revision verbs', () => {
   it('reads a turn base cut as the person’s and leaves the result the agent’s', async () => {
     const port = await openPort();
     await port.setHead('main');
-    const turn = { runId: 'run-1', attempt: 1, turnId: 'u1', trigger: 'turn', createdAt } as const;
+    const turn = { runId: 'run-1', attempt: 1, turnId: 'u1', capture: 'turn', via: 'browser', createdAt } as const;
+    const ada = { kind: 'user', id: 'ada' } as const;
     const base = await port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['part.ts', 'mine']]),
       /* What a build before A5 recorded: source `agent`, the person as actor. */
-      provenance: { ...turn, source: 'agent', actorId: 'ada', turnCut: 'base' },
+      provenance: { ...turn, source: 'agent', actor: ada, turnCut: 'base' },
       summary: { generated: 'Agent turn u1' },
     });
     const baseId = revisionId(base.commitId);
     const result = await port.writeRevision({
       parents: [baseId],
       tree: new ImmutableRevisionTree([['part.ts', 'agent']]),
-      provenance: { ...turn, source: 'agent', actorId: 'agent', turnCut: 'result' },
+      provenance: {
+        ...turn,
+        source: 'agent',
+        actor: { kind: 'agent', id: 'agent', runId: 'run-1', onBehalfOf: ada },
+        turnCut: 'result',
+      },
       summary: { generated: 'Agent turn u1' },
     });
     const saved = await port.writeRevision({
       parents: [revisionId(result.commitId)],
       tree: new ImmutableRevisionTree([['part.ts', 'later']]),
-      provenance: { source: 'user', actorId: 'ada', trigger: 'save', createdAt },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt },
       summary: { generated: 'Saved' },
     });
     await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(saved.commitId) });
@@ -159,13 +166,13 @@ describe('revision verbs', () => {
     const before = await port.writeRevision({
       parents: [first],
       tree: new ImmutableRevisionTree([['part.ts', 'late']]),
-      provenance: { source: 'user', actorId: 'ada', trigger: 'restore', createdAt },
+      provenance: { source: 'user', ...recordedBy('ada'), capture: 'restore', createdAt },
       summary: { generated: 'Saved changes (restore)' },
     });
     const restored = await port.writeRevision({
       parents: [revisionId(before.commitId)],
       tree: new ImmutableRevisionTree([['part.ts', 'one']]),
-      provenance: { source: 'restore', actorId: 'ada', trigger: 'restore', restoredFrom: first, createdAt },
+      provenance: { source: 'restore', ...recordedBy('ada'), capture: 'restore', restoredFrom: first, createdAt },
       summary: { generated: 'Restored Rev 1' },
     });
     await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(restored.commitId) });
@@ -296,7 +303,7 @@ describe('revision verbs', () => {
       const receipt = await port.writeRevision({
         parents: head === undefined ? [] : [head],
         tree: new ImmutableRevisionTree([['part.ts', `export const part = ${String(index)};\n`]]),
-        provenance: { source: 'user', actorId, createdAt: createdAt + index * 1000 },
+        provenance: { source: 'user', ...recordedBy(actorId), createdAt: createdAt + index * 1000 },
         summary: { generated: `Rev ${String(index + 1)}` },
       });
       // oxlint-disable-next-line no-await-in-loop -- the ref follows each revision.
@@ -320,7 +327,7 @@ describe('revision verbs', () => {
     const receipt = await port.writeRevision({
       parents: [head],
       tree: new ImmutableRevisionTree([['part.ts', 'export const part = "minted";\n']]),
-      provenance: { source: 'user', actorId: 'e6-page', createdAt: createdAt + 200_000 },
+      provenance: { source: 'user', ...recordedBy('e6-page'), createdAt: createdAt + 200_000 },
       summary: { generated: 'Minted' },
     });
     await port.updateRef({ name: 'main', expectedHead: head, head: revisionId(receipt.commitId) });
@@ -373,7 +380,7 @@ describe('setup entries on a long page', () => {
         parents: index === 1 ? [] : [idOf(index - 1)],
         treeId: 'a'.repeat(40),
         summary: { generated: 'Saved changes (idle)' },
-        provenance: { source: 'user', actorId: 'ada', trigger: 'idle', createdAt },
+        provenance: { source: 'user', ...recordedBy('ada'), capture: 'idle', createdAt },
         conflicted: false,
       };
     });
@@ -403,7 +410,7 @@ describe('setup entries on a long page', () => {
         parents: [idOf(2)],
         treeId: 'a'.repeat(40),
         summary: { generated: 'Saved changes (idle)' },
-        provenance: { source: 'user', actorId: 'ada', trigger: 'idle', createdAt },
+        provenance: { source: 'user', ...recordedBy('ada'), capture: 'idle', createdAt },
         conflicted: false,
       },
       {
@@ -412,7 +419,7 @@ describe('setup entries on a long page', () => {
         parents: [idOf(1)],
         treeId: 'b'.repeat(40),
         summary: { generated: 'Start' },
-        provenance: { source: 'user', actorId: 'ada', trigger: 'create', createdAt },
+        provenance: { source: 'user', ...recordedBy('ada'), capture: 'create', createdAt },
         conflicted: false,
       },
       {
@@ -421,7 +428,8 @@ describe('setup entries on a long page', () => {
         parents: [],
         treeId: 'c'.repeat(40),
         summary: { generated: 'Initial commit' },
-        provenance: { source: 'import', actorId: 'ada', createdAt },
+        /* A commit Tau did not write: no actor, capture or leg (B1). */
+        provenance: { source: 'import', createdAt },
         conflicted: false,
       },
     ];

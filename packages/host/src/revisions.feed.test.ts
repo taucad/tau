@@ -81,6 +81,7 @@ const open = async () => {
     checkouts: { projectId: 'project-feed', root: () => new NodeFsProvider(workspaceRoot) },
   });
   const revisions = createProjectRevisions({
+    via: 'desktop',
     workspaceRoot,
     projectId: 'project-feed',
     port,

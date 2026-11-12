@@ -706,9 +706,10 @@ describe('Tau Hosted Remote constants', () => {
 
 /**
  * B4 (blueprint A3, Q11; Revisions Policy rule 19): every commit new to a
- * project's history names the account pushing it, whatever its Tau record's
- * version, through the installed hook itself. The pusher's own record is the
- * shape `revisionCommitMessage` and `revisionAuthorSignature` write today.
+ * project's history names the account pushing it, through the installed hook
+ * itself. The pusher's own record is the version 2 shape (B1)
+ * `revisionCommitMessage` and `revisionAuthorSignature` write; no older version
+ * is read (I7).
  */
 describe('pre-receive authorship check (B4)', () => {
   const pusher = 'user_b4_pusher';
@@ -729,15 +730,15 @@ describe('pre-receive authorship check (B4)', () => {
     await rm(authorshipHookDirectory, { recursive: true, force: true });
   });
 
-  /** A Tau record in the current trailer shape, with the readable trailer beside it. */
+  /** A version 2 Tau record (B1), with the readable trailer beside it. */
   const recorded = (provenance: Readonly<Record<string, unknown>>, title = 'Saved'): string =>
     [
       title,
       '',
       `Tau-Metadata: ${JSON.stringify({
-        version: 1,
+        version: 2,
         parents: [],
-        provenance: { source: 'user', createdAt: 1_790_000_000_000, ...provenance },
+        provenance: { source: 'user', capture: 'save', via: 'browser', createdAt: 1_790_000_000_000, ...provenance },
         summary: { generated: title },
       })}`,
       'Tau-Actor: user Someone',
@@ -820,16 +821,15 @@ describe('pre-receive authorship check (B4)', () => {
     onTestFinished(repository.dispose);
     const own = await repository.commit(
       noreply(pusher),
-      recorded({ actorId: pusher, actor: { kind: 'user', id: pusher, name: 'Pusher' }, trigger: 'save' }),
+      recorded({ actor: { kind: 'user', id: pusher, name: 'Pusher' } }),
     );
     const agent = await repository.commit(
       noreply(pusher),
       recorded({
         source: 'agent',
-        actorId: 'agent',
         runId: 'run_1',
         actor: { kind: 'agent', id: 'agent', runId: 'run_1', onBehalfOf: { kind: 'user', id: pusher } },
-        trigger: 'turn',
+        capture: 'turn',
       }),
       own,
     );
@@ -842,7 +842,7 @@ describe('pre-receive authorship check (B4)', () => {
     onTestFinished(repository.dispose);
     const forged = await repository.commit(
       noreply(other),
-      recorded({ actorId: other, actor: { kind: 'user', id: other, name: 'Other Person' } }),
+      recorded({ actor: { kind: 'user', id: other, name: 'Other Person' } }),
     );
     const outcome = await repository.push(forged);
     expect(outcome.code).toBe(1);
@@ -858,23 +858,20 @@ describe('pre-receive authorship check (B4)', () => {
     {
       label: 'an agent acting for A',
       email: noreply(other),
-      provenance: { actorId: 'agent', actor: { kind: 'agent', id: 'agent', onBehalfOf: { kind: 'user', id: other } } },
-    },
-    {
-      label: 'an agent acting for nobody',
-      email: noreply('agent'),
-      provenance: { actorId: 'agent', actor: { kind: 'agent', id: 'agent' } },
+      provenance: {
+        actor: { kind: 'agent', id: 'agent', runId: 'run_1', onBehalfOf: { kind: 'user', id: other } },
+        capture: 'turn',
+      },
     },
     {
       label: 'a record naming the pusher under the address of A',
       email: noreply(other),
-      provenance: { actorId: pusher, actor: { kind: 'user', id: pusher } },
+      provenance: { actor: { kind: 'user', id: pusher } },
     },
-    { label: 'an older record with only a host id', email: noreply('tau-host'), provenance: { actorId: 'tau-host' } },
     {
       label: 'a machine login name',
       email: noreply('root'),
-      provenance: { actorId: 'root', actor: { kind: 'user', id: 'root' } },
+      provenance: { actor: { kind: 'user', id: 'root' } },
     },
   ])('refuses $label as not naming the pusher', async ({ email, provenance }) => {
     const repository = await authorshipRepository();
@@ -884,14 +881,12 @@ describe('pre-receive authorship check (B4)', () => {
     expect(outcome.stderr).toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
   });
 
-  it('passes an older record whose bare actor id is the pusher, and an anonymous revision', async () => {
+  it('passes an anonymous revision authored as its own pseudonym', async () => {
     const repository = await authorshipRepository();
     onTestFinished(repository.dispose);
-    const legacy = await repository.commit(noreply(pusher), recorded({ actorId: pusher }));
     const anonymous = await repository.commit(
       noreply('anon:3fa9c1d2'),
-      recorded({ actorId: 'anon:3fa9c1d2', actor: { kind: 'user', id: 'anon:3fa9c1d2', anonymous: true } }),
-      legacy,
+      recorded({ actor: { kind: 'user', id: 'anon:3fa9c1d2', anonymous: true } }),
     );
     const outcome = await repository.push(anonymous);
     expect(outcome.code, outcome.stderr).toBe(0);
@@ -902,7 +897,7 @@ describe('pre-receive authorship check (B4)', () => {
     onTestFinished(repository.dispose);
     const leaked = await repository.commit(
       'person@example.com',
-      recorded({ actorId: pusher, actor: { kind: 'user', id: pusher, email: 'person@example.com' } }),
+      recorded({ actor: { kind: 'user', id: pusher, email: 'person@example.com' } }),
     );
     const outcome = await repository.push(leaked);
     expect(outcome.code).toBe(1);
@@ -929,7 +924,7 @@ describe('pre-receive authorship check (B4)', () => {
     onTestFinished(repository.dispose);
     const revision = await repository.commit(
       '583231+octocat@users.noreply.github.com',
-      recorded({ actorId: pusher, actor: { kind: 'user', id: pusher } }),
+      recorded({ actor: { kind: 'user', id: pusher } }),
     );
     // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
     const linked = await repository.push(revision, { TAU_GIT_FORGE: 'github' });
@@ -939,10 +934,23 @@ describe('pre-receive authorship check (B4)', () => {
     expect(unlinked.stderr).toContain(authorshipRefusals.GIT_PUSH_AUTHOR_ADDRESS);
   });
 
-  it('refuses a Tau record that does not parse or names no one', async () => {
+  it('refuses a Tau record that does not parse, names no one, or is not version 2', async () => {
     const repository = await authorshipRepository();
     onTestFinished(repository.dispose);
-    for (const message of ['Saved\n\nTau-Metadata: {not json\n', 'Saved\n\nTau-Metadata: {"version":1}\n']) {
+    const v2 = (provenance: Readonly<Record<string, unknown>>): string =>
+      `Saved\n\nTau-Metadata: ${JSON.stringify({ version: 2, parents: [], provenance, summary: {} })}\n`;
+    const own = { source: 'user', actor: { kind: 'user', id: pusher }, capture: 'save', via: 'browser', createdAt: 0 };
+    for (const message of [
+      'Saved\n\nTau-Metadata: {not json\n',
+      'Saved\n\nTau-Metadata: {"version":2}\n',
+      /* A version 1 record naming the pusher: no older reader is kept (I7). */
+      `Saved\n\nTau-Metadata: ${JSON.stringify({ version: 1, parents: [], provenance: { source: 'user', actorId: pusher, createdAt: 0 }, summary: {} })}\n`,
+      v2({ ...own, actor: undefined }),
+      v2({ ...own, capture: undefined }),
+      v2({ ...own, via: undefined }),
+      v2({ ...own, actor: { kind: 'agent', id: 'agent', runId: 'run_1' } }),
+      v2({ ...own, actor: { kind: 'agent', id: 'agent', onBehalfOf: { kind: 'user', id: pusher } } }),
+    ]) {
       // oxlint-disable-next-line no-await-in-loop -- one hook run per record, by design
       const outcome = await repository.push(await repository.commit(noreply(pusher), message));
       expect(outcome.code, message).toBe(1);
@@ -953,8 +961,8 @@ describe('pre-receive authorship check (B4)', () => {
   it('reads the last Tau-Metadata line, as the client does', async () => {
     const repository = await authorshipRepository();
     onTestFinished(repository.dispose);
-    const own = recorded({ actorId: pusher, actor: { kind: 'user', id: pusher } });
-    const forged = recorded({ actorId: other, actor: { kind: 'user', id: other } });
+    const own = recorded({ actor: { kind: 'user', id: pusher } });
+    const forged = recorded({ actor: { kind: 'user', id: other } });
     /* The forged record last: the client reads that one, so the hook must too. */
     const outcome = await repository.push(
       await repository.commit(noreply(pusher), `${own}${forged.split('\n').slice(2).join('\n')}`),
@@ -966,7 +974,7 @@ describe('pre-receive authorship check (B4)', () => {
   it('checks what the history does not reach yet, including a commit a record ref carried first', async () => {
     const repository = await authorshipRepository();
     onTestFinished(repository.dispose);
-    const forged = await repository.commit(noreply(other), recorded({ actorId: other }));
+    const forged = await repository.commit(noreply(other), recorded({ actor: { kind: 'user', id: other } }));
     /* Record refs are not history: an artifact ref is not checked… */
     const record = await repository.push(forged, {}, 'refs/tau/artifacts/a1');
     expect(record.code, record.stderr).toBe(0);

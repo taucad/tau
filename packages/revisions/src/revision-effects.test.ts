@@ -61,6 +61,7 @@ import type { ParameterRecordCodec, RevisionId } from '#algorithms/index.js';
 import type { SyncFetchActorOutput, SyncMergeActorOutput, SyncProjectRecordsActorOutput } from '#sync.machine.js';
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { syncPullDeadlineMilliseconds } from '#sync.machine.js';
+import { recordedBy, testIdentity, testPerson } from '#test/identity.js';
 
 /*
  * A surface whose primitives a test overrides is driven through them: Node's own batch (D16) stages,
@@ -188,6 +189,7 @@ const fixture = async (
         : linkedFilesystem(checkout.id)
       : new NodeFsProvider(checkout.root);
   const actors = createRevisionActors({
+    identity: testIdentity,
     port,
     projectId: 'project-1',
     filesystem: async (checkout) => wrap(await actorFilesystem(checkout)),
@@ -200,14 +202,17 @@ const fixture = async (
 const recorderDevice = '00000000-0000-4000-8000-00000000000a';
 
 /**
- * Name the record device a host's `host` form records under, before any effect
- * reads `.git/ops-devices.json`.
+ * Name the record device the test host's person form records under, before any
+ * effect reads `.git/ops-devices.json` (B1: every host has a person).
  *
  * @param filesystem - The records filesystem `.git/` lives in.
  * @param device - The record device id.
  */
 const ownRecordDevice = async (filesystem: RevisionFileSystem, device: string): Promise<void> => {
-  await filesystem.writeFile('.git/ops-devices.json', JSON.stringify({ version: 1, devices: { host: device } }));
+  await filesystem.writeFile(
+    '.git/ops-devices.json',
+    JSON.stringify({ version: 1, devices: { [testPerson.id]: device } }),
+  );
 };
 
 /** Run one injected promise actor the way its machine would. */
@@ -255,7 +260,7 @@ describe('close cancels background transfers', () => {
     const receipt = await context.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['main.ts', 'local']]),
-      provenance: { source: 'user', actorId: 'ada', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: 1 },
       summary: { generated: 'Local work' },
     });
     await context.port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
@@ -290,6 +295,7 @@ describe('close cancels background transfers', () => {
       });
     };
     const { actor } = createProjectRevisionsActor({
+      identity: testIdentity,
       port: {
         ...context.port,
         listRemoteRefs: async (_remote, options) =>
@@ -366,7 +372,7 @@ describe('close distinguishes remote refusal from failed local persistence', () 
     const receipt = await context.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['main.ts', 'local']]),
-      provenance: { source: 'user', actorId: 'ada', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: 1 },
       summary: { generated: 'Local' },
     });
     let head = revisionId(receipt.commitId);
@@ -391,6 +397,7 @@ describe('close distinguishes remote refusal from failed local persistence', () 
     });
     const refused = new RevisionPortError('REMOTE_DAMAGED', 'Remote repository is damaged.');
     const { actor } = createProjectRevisionsActor({
+      identity: testIdentity,
       port: {
         ...context.port,
         listRemoteRefs: async () => {
@@ -413,7 +420,7 @@ describe('close distinguishes remote refusal from failed local persistence', () 
       const next = await context.port.writeRevision({
         parents: [head],
         tree: new ImmutableRevisionTree([['main.ts', `${head} changed`]]),
-        provenance: { source: 'user', actorId: 'ada', createdAt: 2 },
+        provenance: { source: 'user', ...recordedBy('ada'), createdAt: 2 },
         summary: { generated: 'Close work' },
       });
       const before = head;
@@ -487,7 +494,7 @@ it('does not restart transport when a correlated request races successful close 
   const receipt = await context.port.writeRevision({
     parents: [],
     tree: new ImmutableRevisionTree([['main.ts', 'local']]),
-    provenance: { source: 'user', actorId: 'ada', createdAt: 1 },
+    provenance: { source: 'user', ...recordedBy('ada'), createdAt: 1 },
     summary: { generated: 'Local' },
   });
   const head = revisionId(receipt.commitId);
@@ -498,6 +505,7 @@ it('does not restart transport when a correlated request races successful close 
   let discovering = false;
   let pushes = 0;
   const { actor } = createProjectRevisionsActor({
+    identity: testIdentity,
     port: {
       ...context.port,
       listRemoteRefs: async () => {
@@ -554,6 +562,7 @@ it('refuses to cancel a directly composed root without transport ownership', asy
   let fetching = false;
   let aborted = false;
   const created = createProjectRevisionsActor({
+    identity: testIdentity,
     port: {
       ...context.port,
       listRemoteRefs: async (_remote, options) => {
@@ -597,7 +606,7 @@ it.each(['live', 'linked'])(
     const base = await context.port.writeRevision({
       parents: [],
       tree: baseTree,
-      provenance: { source: 'user', actorId: 'ada', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: 1 },
       summary: { generated: 'Base' },
     });
     await context.port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(base.commitId) });
@@ -609,7 +618,7 @@ it.each(['live', 'linked'])(
           .entries()
           .map((entry) => [entry.path, entry.path === 'main.ts' ? 'remote' : entry.content, entry.mode]),
       ),
-      provenance: { source: 'user', actorId: 'ada', createdAt: 2 },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: 2 },
       summary: { generated: 'Remote' },
     });
     const head = revisionId(remote.commitId);
@@ -623,6 +632,7 @@ it.each(['live', 'linked'])(
     let reading = false;
     let pushed = false;
     const { actor } = createProjectRevisionsActor({
+      identity: testIdentity,
       port: {
         ...context.port,
         listRemoteRefs: async () =>
@@ -1253,7 +1263,11 @@ describe('settling a turn', () => {
   it('writes a turn base cut as the person’s and its result as the run’s', async () => {
     const person = { kind: 'user', id: 'user-ada', name: 'Ada' } as const;
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, undefined, {
-      actor: ({ runId }) => (runId === undefined ? person : { kind: 'agent', id: 'agent', runId, onBehalfOf: person }),
+      identity: {
+        via: 'browser',
+        resolve: ({ runId }) =>
+          runId === undefined ? person : { kind: 'agent', id: 'agent', runId, onBehalfOf: person },
+      },
     });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
     const key = { runId: 'run-2', turnId: 'turn-2', chatId: 'chat-2', attempt: 1 };
@@ -1280,17 +1294,15 @@ describe('settling a turn', () => {
     const baseRecord = await port.readRevision(revisionId(base));
     expect(baseRecord?.provenance).toMatchObject({
       source: 'user',
-      actorId: 'user-ada',
       actor: person,
       turnCut: 'base',
       turnId: 'turn-2',
-      trigger: 'turn',
+      capture: 'turn',
     });
     /* The result row is unchanged: the run's, for the person. */
     const resultRecord = await port.readRevision(revisionId(result));
     expect(resultRecord?.provenance).toMatchObject({
       source: 'agent',
-      actorId: 'agent',
       actor: { kind: 'agent', runId: 'run-2', onBehalfOf: person },
       turnCut: 'result',
     });
@@ -1341,7 +1353,7 @@ describe('settling a turn', () => {
     const base = await port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([]),
-      provenance: { source: 'user', actorId: 'tau-host', createdAt: Date.now() },
+      provenance: { source: 'user', ...recordedBy('tau-host'), createdAt: Date.now() },
       summary: { generated: 'base' },
     });
     await filesystem.unlink('main.ts');
@@ -1374,6 +1386,7 @@ const startTree = async (
   extra: Partial<RevisionActorsOptions> = {},
 ) => {
   const { actor, checkLargeObjects } = createProjectRevisionsActor({
+    identity: testIdentity,
     port,
     projectId: 'project-1',
     filesystem: async () => filesystem,
@@ -1493,7 +1506,7 @@ describe('restore, through the machine that owns it', () => {
     expect(record?.parents).toEqual([second]);
     const firstRecord = await port.readRevision(revisionId(first));
     expect(record?.treeId).toBe(firstRecord?.treeId);
-    expect(record?.provenance).toMatchObject({ source: 'restore', trigger: 'restore', restoredFrom: first });
+    expect(record?.provenance).toMatchObject({ source: 'restore', capture: 'restore', restoredFrom: first });
     expect(record?.summary.generated).toBe('Restored Rev 1');
     expect(selectRevisionStatus(tree.actor.getSnapshot())).toMatchObject({
       line: { kind: 'branch', name: 'main' },
@@ -1715,7 +1728,7 @@ describe('restore, through the machine that owns it', () => {
     const first = await port.writeRevision({
       tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
       parents: [],
-      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('person-1'), createdAt: 1 },
       summary: { generated: 'base' },
     });
     const second = await port.writeRevision({
@@ -1724,7 +1737,7 @@ describe('restore, through the machine that owns it', () => {
         ['extra.txt', new TextEncoder().encode('added\n')],
       ]),
       parents: [revisionId(first.commitId)],
-      provenance: { source: 'user', actorId: 'person-1', createdAt: 2 },
+      provenance: { source: 'user', ...recordedBy('person-1'), createdAt: 2 },
       summary: { generated: 'extra' },
     });
     await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
@@ -1769,7 +1782,7 @@ describe('restore, through the machine that owns it', () => {
     const first = await port.writeRevision({
       tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
       parents: [],
-      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('person-1'), createdAt: 1 },
       summary: { generated: 'base' },
     });
     await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
@@ -1798,7 +1811,7 @@ describe('restore, through the machine that owns it', () => {
     const first = await port.writeRevision({
       tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
       parents: [],
-      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('person-1'), createdAt: 1 },
       summary: { generated: 'base' },
     });
     await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
@@ -1856,7 +1869,7 @@ describe('restore, through the machine that owns it', () => {
     const first = await port.writeRevision({
       tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
       parents: [],
-      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('person-1'), createdAt: 1 },
       summary: { generated: 'base' },
     });
     const second = await port.writeRevision({
@@ -1865,7 +1878,7 @@ describe('restore, through the machine that owns it', () => {
         ['extra.txt', new TextEncoder().encode('added\n')],
       ]),
       parents: [revisionId(first.commitId)],
-      provenance: { source: 'user', actorId: 'person-1', createdAt: 2 },
+      provenance: { source: 'user', ...recordedBy('person-1'), createdAt: 2 },
       summary: { generated: 'extra' },
     });
     await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
@@ -1935,7 +1948,7 @@ describe('restore, through the machine that owns it', () => {
     /* Two rows: the pre-restore cut (the person's own bytes) and the restore. */
     const beforeRecord = await port.readRevision(revisionId(before));
     expect(beforeRecord?.parents).toEqual([second]);
-    expect(beforeRecord?.provenance).toMatchObject({ source: 'user', trigger: 'restore' });
+    expect(beforeRecord?.provenance).toMatchObject({ source: 'user', capture: 'restore' });
     expect(beforeRecord?.provenance.restoredFrom).toBeUndefined();
     const beforeTree = await port.readTree(revisionId(before));
     expect(beforeTree?.has('late.ts')).toBe(true);
@@ -2147,7 +2160,7 @@ describe('the checkout registry', () => {
     const receipt = await port.writeRevision({
       tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('one\n')]]),
       parents: [],
-      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('person-1'), createdAt: 1 },
       summary: { generated: 'base' },
     });
     const head = revisionId(receipt.commitId);
@@ -2158,6 +2171,7 @@ describe('the checkout registry', () => {
     const events: string[] = [];
     let refuse = false;
     const actors = createRevisionActors({
+      identity: testIdentity,
       port,
       projectId: 'project-1',
       filesystem: () => filesystem,
@@ -2218,6 +2232,7 @@ describe('the checkout registry', () => {
     const day = 24 * 60 * 60 * 1000;
     const recordedAt = Date.UTC(2026, 0, 1);
     const actors = createRevisionActors({
+      identity: testIdentity,
       port,
       projectId: 'project-1',
       filesystem: () => filesystem,
@@ -2230,7 +2245,7 @@ describe('the checkout registry', () => {
     const receipt = await port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['part.ts', 'one\n']]),
-      provenance: { source: 'user', actorId: 'ada', createdAt: recordedAt },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: recordedAt },
       summary: { generated: 'First' },
     });
     const head = revisionId(receipt.commitId);
@@ -2257,6 +2272,7 @@ describe('the checkout registry', () => {
     });
     const recordedAt = Date.UTC(2026, 0, 1);
     const actors = createRevisionActors({
+      identity: testIdentity,
       port,
       projectId: 'project-1',
       filesystem: () => filesystem,
@@ -2269,7 +2285,7 @@ describe('the checkout registry', () => {
     const receipt = await port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['part.ts', 'one\n']]),
-      provenance: { source: 'user', actorId: 'ada', createdAt: recordedAt },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: recordedAt },
       summary: { generated: 'First' },
     });
     const head = revisionId(receipt.commitId);
@@ -2311,7 +2327,7 @@ for (const actorSet of actorSets) {
       const baseReceipt = await port.writeRevision({
         parents: [],
         tree: baseTree,
-        provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+        provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 8, 13) },
         summary: { generated: 'Base' },
       });
       const base = revisionId(baseReceipt.commitId);
@@ -2325,7 +2341,7 @@ for (const actorSet of actorSets) {
       const remoteReceipt = await port.writeRevision({
         parents: [base],
         tree: remoteTree,
-        provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 8, 13, 1) },
+        provenance: { source: 'user', ...recordedBy('grace'), createdAt: Date.UTC(2026, 8, 13, 1) },
         summary: { generated: 'Remote' },
       });
       const remote = revisionId(remoteReceipt.commitId);
@@ -2346,7 +2362,7 @@ for (const actorSet of actorSets) {
             ['tau.json', remoteManifest],
             ['main.scad', 'cube(1);\n'],
           ]),
-          provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 8, 13) },
+          provenance: { source: 'user', ...recordedBy('grace'), createdAt: Date.UTC(2026, 8, 13) },
           summary: { generated: 'Remote' },
         });
         const remote = revisionId(remoteReceipt.commitId);
@@ -2398,7 +2414,7 @@ for (const actorSet of actorSets) {
             ['tau.json', remoteManifest],
             ['main.scad', 'cube(1);\n'],
           ]),
-          provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 8, 13) },
+          provenance: { source: 'user', ...recordedBy('grace'), createdAt: Date.UTC(2026, 8, 13) },
           summary: { generated: 'Remote' },
         });
         if (fetched) {
@@ -2475,7 +2491,7 @@ for (const actorSet of actorSets) {
       const protectedReceipt = await context.port.writeRevision({
         parents: [context.remote],
         tree: protectedTree,
-        provenance: { source: 'user', actorId: 'mallory', createdAt: Date.UTC(2026, 8, 13, 2) },
+        provenance: { source: 'user', ...recordedBy('mallory'), createdAt: Date.UTC(2026, 8, 13, 2) },
         summary: { generated: 'Protected-path injection' },
       });
       const protectedHead = revisionId(protectedReceipt.commitId);
@@ -2506,6 +2522,7 @@ for (const actorSet of actorSets) {
         },
       });
       const failingActors = createRevisionActors({
+        identity: testIdentity,
         port: context.port,
         projectId: 'project-1',
         filesystem: () => wrapped,
@@ -2530,6 +2547,7 @@ for (const actorSet of actorSets) {
             : context.port.updateRef(input),
       };
       const refusingActors = createRevisionActors({
+        identity: testIdentity,
         port: refusingPort,
         projectId: 'project-1',
         filesystem: () => context.filesystem,
@@ -2561,6 +2579,7 @@ for (const actorSet of actorSets) {
         },
       };
       const racingActors = createRevisionActors({
+        identity: testIdentity,
         port: racingPort,
         projectId: 'project-1',
         filesystem: () => context.filesystem,
@@ -2633,6 +2652,7 @@ for (const actorSet of actorSets) {
         },
       };
       const heldActors = createRevisionActors({
+        identity: testIdentity,
         port: heldPort,
         projectId: 'project-1',
         filesystem: () => context.filesystem,
@@ -2666,6 +2686,7 @@ for (const actorSet of actorSets) {
         },
       });
       const actors = createRevisionActors({
+        identity: testIdentity,
         port: context.port,
         projectId: 'project-1',
         filesystem: () => wrapped,
@@ -2689,7 +2710,7 @@ for (const actorSet of actorSets) {
       const local = await context.port.writeRevision({
         parents: [context.base],
         tree: localTree,
-        provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13, 3) },
+        provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 8, 13, 3) },
         summary: { generated: 'New local revision' },
       });
       await context.filesystem.writeFile('main.ts', 'new local revision\n');
@@ -2730,7 +2751,7 @@ for (const actorSet of actorSets) {
         const written = await port.writeRevision({
           parents,
           tree,
-          provenance: { source: 'user', actorId: summary, createdAt: Date.UTC(2026, 8, 25) },
+          provenance: { source: 'user', ...recordedBy(summary), createdAt: Date.UTC(2026, 8, 25) },
           summary: { generated: summary },
         });
         return revisionId(written.commitId);
@@ -2874,7 +2895,7 @@ for (const actorSet of actorSets) {
             .map((entry) => [entry.path, entry.content, entry.mode] as const),
           ...Object.entries(change),
         ]),
-        provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13, 4) },
+        provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 8, 13, 4) },
         summary: { generated: 'Work on feature' },
       });
       await context.port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(own.commitId) });
@@ -2898,6 +2919,7 @@ for (const actorSet of actorSets) {
         },
       };
       const actors = createRevisionActors({
+        identity: testIdentity,
         port: wrappedPort,
         projectId: 'project-1',
         filesystem: async (checkout) => context.actorFilesystem(checkout),
@@ -3031,7 +3053,7 @@ for (const actorSet of actorSets) {
         const receipt = await port.writeRevision({
           parents: parents.map((parent) => revisionId(parent)),
           tree: new ImmutableRevisionTree([['main.ts', content]]),
-          provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 25) },
+          provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 8, 25) },
           summary: { generated: content },
         });
         return revisionId(receipt.commitId);
@@ -3065,7 +3087,7 @@ describe('independent sync record failures', () => {
     const mainReceipt = await context.port.writeRevision({
       parents: [],
       tree,
-      provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 8, 13) },
       summary: { generated: 'Main' },
     });
     const main = revisionId(mainReceipt.commitId);
@@ -3097,6 +3119,7 @@ describe('independent sync record failures', () => {
       },
     };
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: isolatedPort,
       projectId: 'project-1',
       filesystem: () => context.filesystem,
@@ -3140,7 +3163,7 @@ describe('independent sync record failures', () => {
     const receipt = await context.port.writeRevision({
       parents: [],
       tree,
-      provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 8, 13) },
       summary: { generated: 'Main' },
     });
     await context.port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
@@ -3155,6 +3178,7 @@ describe('independent sync record failures', () => {
       ...wrap(context.port),
     };
     const actors = createRevisionActors({
+      identity: testIdentity,
       port,
       projectId: 'project-1',
       filesystem: () => context.filesystem,
@@ -3290,14 +3314,14 @@ describe('independent sync record failures', () => {
       deviceId: recorderDevice,
       chatId: 'chat-one',
       syncChats: true,
-      actorId: 'ada',
+      ...recordedBy('ada'),
       now: 1,
     });
     const remoteReceipt = await port.writeRevision({
       parents: [],
       tree: (await port.readTree(own.head!))!,
       largeObjects: false,
-      provenance: { source: 'user', actorId: 'grace', createdAt: 2 },
+      provenance: { source: 'user', ...recordedBy('grace'), createdAt: 2 },
       summary: { generated: 'Chat chat-one' },
     });
     remote.head = revisionId(remoteReceipt.commitId);
@@ -3323,7 +3347,7 @@ describe('independent sync record failures', () => {
     const receipt = await context.port.writeRevision({
       parents: [],
       tree,
-      provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 8, 13) },
       summary: { generated: 'Main' },
     });
     await context.port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
@@ -3335,6 +3359,7 @@ describe('independent sync record failures', () => {
       },
     };
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: refusing,
       projectId: 'project-1',
       filesystem: () => context.filesystem,
@@ -3354,7 +3379,7 @@ describe('independent sync record failures', () => {
     const receipt = await context.port.writeRevision({
       parents: [],
       tree,
-      provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 8, 13) },
       summary: { generated: 'Main' },
     });
     await context.port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
@@ -3366,6 +3391,7 @@ describe('independent sync record failures', () => {
       },
     };
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: refusing,
       projectId: 'project-1',
       filesystem: () => context.filesystem,
@@ -3406,7 +3432,7 @@ describe('independent sync record failures', () => {
       const receipt = await context.port.writeRevision({
         parents: [],
         tree,
-        provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+        provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
         summary: { generated: `Chat ${id}` },
       });
       return { name: `refs/remotes/tau/tau/chats/${id}`, head: revisionId(receipt.commitId) };
@@ -3422,6 +3448,7 @@ describe('independent sync record failures', () => {
       fetch: async () => ({ refs: references }),
     };
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: remote,
       projectId: 'project-1',
       filesystem: () => projecting,
@@ -3475,7 +3502,7 @@ describe('independent sync record failures', () => {
       [],
     );
     /* This host's log for its unattributed form, written before the push. */
-    const log = createOpsLog({ port, recordsFileSystem: async () => filesystem, now: () => 1, actorId: 'tau-host' });
+    const log = createOpsLog({ port, recordsFileSystem: async () => filesystem, now: () => 1, identity: testIdentity });
     await log.append(undefined, { v: 1, ref: 'refs/heads/main', to: 'r1', kind: 'save', actor: 'tau-host', at: 1 });
     const refused = opsRefName(await log.deviceFor(undefined));
 
@@ -3503,7 +3530,7 @@ describe('independent sync record failures', () => {
     const receipt = await context.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['events/device-a.jsonl', '{"sequence":0}\n']]),
-      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
       summary: { generated: 'Chat records' },
     });
     const references = Array.from({ length: 20 }, (_, index) => ({
@@ -3514,6 +3541,7 @@ describe('independent sync record failures', () => {
     let active = 0;
     let peak = 0;
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...context.port,
         readTree: async (head) => {
@@ -3566,13 +3594,14 @@ describe('independent sync record failures', () => {
         ['chat.json', '{"name":"Remote name"}'],
         ['events/device-a.jsonl', '{"sequence":0}\n'],
       ]),
-      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
       summary: { generated: 'Chat talk' },
     });
     const fetchedRef = { name: 'refs/remotes/tau/tau/chats/talk', head: revisionId(receipt.commitId) };
     await context.port.updateRef({ name: fetchedRef.name, expectedHead: undefined, head: fetchedRef.head });
     const projected: string[][] = [];
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...context.port,
         listRemoteRefs: async () => [{ name: 'refs/tau/chats/talk', head: fetchedRef.head }],
@@ -3603,12 +3632,13 @@ describe('independent sync record failures', () => {
     const receipt = await context.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
-      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
       summary: { generated: 'Main' },
     });
     const head = revisionId(receipt.commitId);
     const requested: Array<readonly string[] | undefined> = [];
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...context.port,
         listRemoteRefs: async () => [
@@ -3641,7 +3671,7 @@ describe('independent sync record failures', () => {
       const receipt = await context.port.writeRevision({
         parents: [],
         tree: new ImmutableRevisionTree(remotePreference ? [['tau.json', '{"syncLargeExports":true}\n']] : []),
-        provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+        provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
         summary: { generated: 'Main' },
       });
       const head = revisionId(receipt.commitId);
@@ -3650,6 +3680,7 @@ describe('independent sync record failures', () => {
       const unrelated = 'refs/tau/artifacts/other';
       const requested: Array<readonly string[] | undefined> = [];
       const actors = createRevisionActors({
+        identity: testIdentity,
         port: {
           ...context.port,
           listRemoteRefs: async () => [
@@ -3696,7 +3727,7 @@ describe('independent sync record failures', () => {
     const receipt = await context.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
-      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
       summary: { generated: 'Main' },
     });
     const head = revisionId(receipt.commitId);
@@ -3706,6 +3737,7 @@ describe('independent sync record failures', () => {
     let failNext = true;
     const requested: Array<readonly string[] | undefined> = [];
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...context.port,
         listRemoteRefs: async () => [{ name: 'refs/heads/main', head: advertisedHead }],
@@ -3759,13 +3791,14 @@ describe('independent sync record failures', () => {
         ['main.ts', 'base\n'],
         ['parts/a.step', 'solid a\n'],
       ]),
-      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
       summary: { generated: 'Main' },
     });
     const head = revisionId(receipt.commitId);
     await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head });
     const reads: Array<readonly string[] | undefined> = [];
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...context.port,
         readTree: async (id, options) => {
@@ -3799,7 +3832,7 @@ describe('independent sync record failures', () => {
     const receipt = await context.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
-      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
       summary: { generated: 'Main' },
     });
     const head = revisionId(receipt.commitId);
@@ -3817,6 +3850,7 @@ describe('independent sync record failures', () => {
     let listings = 0;
     const requested: Array<readonly string[] | undefined> = [];
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...context.port,
         listRemoteRefs: async () => {
@@ -3867,7 +3901,7 @@ describe('independent sync record failures', () => {
     const receipt = await context.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
-      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
       summary: { generated: 'Main' },
     });
     const head = revisionId(receipt.commitId);
@@ -3875,6 +3909,7 @@ describe('independent sync record failures', () => {
     const listings: Array<readonly RemoteRef[]> = [];
     const handed: Array<readonly RemoteRef[] | undefined> = [];
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...context.port,
         listRemoteRefs: async () => {
@@ -3921,7 +3956,7 @@ describe('independent sync record failures', () => {
     const receipt = await context.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
-      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
       summary: { generated: 'Main' },
     });
     const head = revisionId(receipt.commitId);
@@ -3930,6 +3965,7 @@ describe('independent sync record failures', () => {
     let remoteHead: RevisionId | undefined = head;
     const pushed: RevisionPushInput[] = [];
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...context.port,
         listRemoteRefs: async () => (remoteHead === undefined ? [] : [{ name: 'refs/heads/main', head: remoteHead }]),
@@ -3958,7 +3994,7 @@ describe('independent sync record failures', () => {
     const receipt = await context.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
-      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
       summary: { generated: 'Main' },
     });
     const head = revisionId(receipt.commitId);
@@ -3968,6 +4004,7 @@ describe('independent sync record failures', () => {
     let hold = false;
     const handed: Array<readonly RemoteRef[] | undefined> = [];
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...context.port,
         listRemoteRefs: async () => {
@@ -4033,7 +4070,7 @@ describe('independent sync record failures', () => {
     const receipt = await context.port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
-      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
       summary: { generated: 'Main' },
     });
     const head = revisionId(receipt.commitId);
@@ -4042,6 +4079,7 @@ describe('independent sync record failures', () => {
     let failNext = true;
     const requested: Array<readonly string[] | undefined> = [];
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...context.port,
         listRemoteRefs: async () => [{ name: 'refs/heads/main', head }],
@@ -4082,7 +4120,7 @@ describe('independent sync record failures', () => {
       const recorded = await context.port.writeRevision({
         parents: [],
         tree: new ImmutableRevisionTree([['exports/shared.step', 'recorded output\n']]),
-        provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+        provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
         summary: { generated: 'Exports' },
       });
       const remoteHead = revisionId(recorded.commitId);
@@ -4092,12 +4130,13 @@ describe('independent sync record failures', () => {
           : await context.port.writeRevision({
               parents: [remoteHead],
               tree: new ImmutableRevisionTree([['exports/shared.step', 'recorded again\n']]),
-              provenance: { source: 'user', actorId: 'device-a', createdAt: 2 },
+              provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 2 },
               summary: { generated: 'Exports again' },
             });
       const localHead = ahead === undefined ? remoteHead : revisionId(ahead.commitId);
       await context.port.updateRef({ name: 'refs/tau/evidence/exports', expectedHead: undefined, head: localHead });
       const actors = createRevisionActors({
+        identity: testIdentity,
         port: {
           ...context.port,
           listRemoteRefs: async () => [{ name: 'refs/tau/evidence/exports', head: remoteHead }],
@@ -4135,7 +4174,7 @@ describe('independent sync record failures', () => {
         ['exports/shared.step', 'new remote output\n'],
         ['exports/remote.step', 'remote only\n'],
       ]),
-      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
       summary: { generated: 'Remote exports' },
     });
     const head = revisionId(receipt.commitId);
@@ -4159,6 +4198,7 @@ describe('independent sync record failures', () => {
       }),
     };
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: remote,
       projectId: 'project-1',
       filesystem: () => context.filesystem,
@@ -4205,7 +4245,7 @@ it('keeps a placeholder a fill wrote during a real merge, writing only the merge
     const written = await port.writeRevision({
       parents: parents.map((parent) => revisionId(parent)),
       tree: new ImmutableRevisionTree([...generated, ...Object.entries(content)]),
-      provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 8, 13) },
       summary: { generated: 'Revision' },
     });
     return written.commitId;
@@ -4226,6 +4266,7 @@ it('keeps a placeholder a fill wrote during a real merge, writing only the merge
         undefined,
   );
   const actors = createRevisionActors({
+    identity: testIdentity,
     port: {
       ...port,
       diff: async (input) => {
@@ -4298,7 +4339,7 @@ for (const actorSet of actorSets) {
         const receipt = await port.writeRevision({
           parents: parents.map((parent) => revisionId(parent)),
           tree: new ImmutableRevisionTree([...generated, ...Object.entries(content)]),
-          provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+          provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 8, 13) },
           summary: { generated: summary },
         });
         return receipt.commitId;
@@ -4501,6 +4542,7 @@ for (const actorSet of actorSets) {
             : context.port.updateRef(input),
       };
       const actors = createRevisionActors({
+        identity: testIdentity,
         port: refusingPort,
         projectId: 'project-1',
         filesystem: () => context.filesystem,
@@ -4710,6 +4752,7 @@ for (const actorSet of actorSets) {
         /* Another device over the same store: the line is foreign to it, and its `main` is the recorder's. */
         await ownRecordDevice(context.filesystem, '00000000-0000-4000-8000-00000000000b');
         const second = createRevisionActors({
+          identity: testIdentity,
           port: context.port,
           projectId: 'project-1',
           deviceId: () => 'device-b',
@@ -4908,6 +4951,7 @@ for (const actorSet of actorSets) {
 
         /* A reload is a fresh actor set over the same store: the decision is still there. */
         const reloaded = createRevisionActors({
+          identity: testIdentity,
           port: context.port,
           projectId: 'project-1',
           deviceId: () => 'device-a',
@@ -4931,6 +4975,7 @@ for (const actorSet of actorSets) {
       it('lists the decision at once and offers its line to the remote, through the project tree', async () => {
         const context = await applied('theirs\n');
         const tree = createProjectRevisionsActor({
+          identity: testIdentity,
           port: context.port,
           projectId: 'project-1',
           deviceId: () => 'device-a',
@@ -5082,7 +5127,7 @@ describe('connecting a remote', () => {
     const receipt = await port.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['main.scad', 'cube(1);\n']]),
-      provenance: { source: 'user', actorId: 'user-1', createdAt: 1 },
+      provenance: { source: 'user', ...recordedBy('user-1'), createdAt: 1 },
       summary: { generated: 'Local work' },
     });
     const head = revisionId(receipt.commitId);
@@ -5124,6 +5169,7 @@ describe('connecting a remote', () => {
     const asked: unknown[] = [];
     const registerRemoteProject = vi.fn(async (_id: string) => undefined);
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...port,
         listRemoteRefs: async (remote) => {
@@ -5170,6 +5216,7 @@ describe('connecting a remote', () => {
     await port.setRemote({ name: 'origin', url: 'https://github.com/old/project.git' });
     const before = await port.listRemotes();
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...port,
         listRemoteRefs: async () => {
@@ -5201,6 +5248,7 @@ describe('connecting a remote', () => {
     await port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
     await port.setRemote({ name: 'origin', url: 'https://github.com/owner/repository.git' });
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...port,
         listRemoteRefs: async (remote) => {
@@ -5248,6 +5296,7 @@ describe('connecting a remote', () => {
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
     await port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...port,
         listRemoteRefs: async () => {
@@ -5271,6 +5320,7 @@ describe('connecting a remote', () => {
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
     await port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...port,
         listRemoteRefs: async () => {
@@ -5346,6 +5396,7 @@ describe('the revision stream subscription (W5b; RV-W5b F3, F5, F9)', () => {
   const subscription = () => {
     const streams: Stream[] = [];
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: { init: vi.fn(async () => undefined) } as unknown as RevisionPort,
       projectId: 'p',
       filesystem: () => {
@@ -5422,7 +5473,7 @@ describe('the revision stream subscription (W5b; RV-W5b F3, F5, F9)', () => {
       const receipt = await context.port.writeRevision({
         parents: [],
         tree: new ImmutableRevisionTree([['main.ts', content]]),
-        provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+        provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
         summary: { generated: 'Main' },
       });
       return revisionId(receipt.commitId);
@@ -5437,6 +5488,7 @@ describe('the revision stream subscription (W5b; RV-W5b F3, F5, F9)', () => {
     let reading = 0;
     let stream: RevisionStreamHandlers | undefined;
     const actors = createRevisionActors({
+      identity: testIdentity,
       port: {
         ...context.port,
         readRef: async (name) => {
@@ -5583,7 +5635,7 @@ describe('opening before large objects arrive', () => {
         ['main.scad', 'import("models/part.step");\n'],
         ['models/part.step', part],
       ]),
-      provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 9, 29) },
+      provenance: { source: 'user', ...recordedBy('grace'), createdAt: Date.UTC(2026, 9, 29) },
       summary: { generated: 'Remote' },
     });
     const remote = revisionId(receipt.commitId);
@@ -5605,6 +5657,7 @@ describe('opening before large objects arrive', () => {
       },
     };
     const actors = createRevisionActors({
+      identity: testIdentity,
       port,
       projectId: 'project-1',
       filesystem: async () => filesystem,
@@ -5651,7 +5704,7 @@ describe('opening before large objects arrive', () => {
           ['main.scad', 'import("models/part.step");\n'],
           ['models/part.step', part],
         ]),
-        provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 10, 8) },
+        provenance: { source: 'user', ...recordedBy('grace'), createdAt: Date.UTC(2026, 10, 8) },
         summary: { generated: 'Remote' },
       });
       const remote = revisionId(receipt.commitId);
@@ -5676,6 +5729,7 @@ describe('opening before large objects arrive', () => {
       const filesystem = new NodeFsProvider(harness.liveRoot, { largeObjectStore: store });
       const batches = vi.spyOn(filesystem, 'applyBatch');
       const actors = createRevisionActors({
+        identity: testIdentity,
         port,
         projectId: 'project-1',
         filesystem: async () => filesystem,
@@ -5719,7 +5773,7 @@ describe('opening before large objects arrive', () => {
           ['main.scad', 'import("models/part.step");\n'],
           ['models/part.step', part],
         ]),
-        provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 10, 8) },
+        provenance: { source: 'user', ...recordedBy('grace'), createdAt: Date.UTC(2026, 10, 8) },
         summary: { generated: 'Remote' },
       });
       const remote = revisionId(receipt.commitId);
@@ -5749,6 +5803,7 @@ describe('opening before large objects arrive', () => {
       const filesystem = new NodeFsProvider(harness.liveRoot, { largeObjectStore: store });
       const batches = vi.spyOn(filesystem, 'applyBatch');
       const actors = createRevisionActors({
+        identity: testIdentity,
         port,
         projectId: 'project-1',
         filesystem: async () => filesystem,
@@ -5787,7 +5842,7 @@ describe('opening before large objects arrive', () => {
         ['main.scad', 'import("models/part.step");\n'],
         ['models/part.step', part],
       ]),
-      provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 9, 29) },
+      provenance: { source: 'user', ...recordedBy('grace'), createdAt: Date.UTC(2026, 9, 29) },
       summary: { generated: 'Remote' },
     });
     const head = revisionId(receipt.commitId);
@@ -5822,6 +5877,7 @@ describe('opening before large objects arrive', () => {
       },
     };
     const actors = createRevisionActors({
+      identity: testIdentity,
       port,
       projectId: 'project-1',
       filesystem: async () => filesystem,
@@ -5918,7 +5974,7 @@ describe('opening before large objects arrive', () => {
     const other = await project.real.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([['main.scad', 'cube(1);\n']]),
-      provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 9, 29) },
+      provenance: { source: 'user', ...recordedBy('grace'), createdAt: Date.UTC(2026, 9, 29) },
       summary: { generated: 'Other' },
     });
     await project.real.updateRef({
@@ -6124,7 +6180,7 @@ for (const actorSet of actorSets) {
           [generatedIgnorePath, ignore],
           ['main.scad', 'cube(1);\n'],
         ]),
-        provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 9, 1), trigger: 'save' },
+        provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 9, 1) },
         summary: { generated: 'Saved by an older build' },
       });
       await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
@@ -6260,7 +6316,7 @@ for (const actorSet of actorSets) {
               .map(({ path, content }) => [path, content] as const),
             ...Object.entries(files),
           ]),
-          provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 9, 2), trigger },
+          provenance: { source: 'user', ...recordedBy('ada'), capture: trigger, createdAt: Date.UTC(2026, 9, 2) },
           summary: { generated: summary },
         });
         await port.updateRef({ name: 'main', expectedHead: revisionId(parent), head: revisionId(receipt.commitId) });
@@ -6378,7 +6434,12 @@ for (const actorSet of actorSets) {
           proposedHead: input.head,
         }),
       };
-      const racing = createRevisionActors({ port: racingPort, projectId: 'project-1', filesystem: actorFilesystem });
+      const racing = createRevisionActors({
+        port: racingPort,
+        identity: testIdentity,
+        projectId: 'project-1',
+        filesystem: actorFilesystem,
+      });
 
       /* The open warns and goes on; the record is what lets a later open mint V1 once the line is settled. */
       await openHead(racing);
@@ -6388,11 +6449,16 @@ for (const actorSet of actorSets) {
       const racer = await port.writeRevision({
         parents: [],
         tree: new ImmutableRevisionTree([['main.scad', 'cube(2);\n']]),
-        provenance: { source: 'user', actorId: 'ada', createdAt: 1 },
+        provenance: { source: 'user', ...recordedBy('ada'), createdAt: 1 },
         summary: { generated: 'Racing work' },
       });
       await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(racer.commitId) });
-      const reopened = createRevisionActors({ port, projectId: 'project-1', filesystem: actorFilesystem });
+      const reopened = createRevisionActors({
+        port,
+        identity: testIdentity,
+        projectId: 'project-1',
+        filesystem: actorFilesystem,
+      });
 
       const head = await openHead(reopened);
       expect(head.revisionId).toBe(racer.commitId);

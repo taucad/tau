@@ -10,11 +10,12 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { bootstrapRemoteRevisionStore } from '#remote-bootstrap.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { generatedGitattributesContent, generatedIgnoreContent } from '#workspace-config.js';
+import { recordedBy } from '#test/identity.js';
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
 const provenance = {
   source: 'import',
-  actorId: 'github:42',
+  ...recordedBy('github:42'),
   createdAt: Date.UTC(2026, 8, 14),
 } as const;
 

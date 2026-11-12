@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { revisionMetadataSchema } from '#algorithms/revision-metadata.js';
+import { recordedBy } from '#test/identity.js';
 
 describe('revisionMetadataSchema', () => {
   it('rejects an unknown sixth provenance source', () => {
@@ -7,7 +8,7 @@ describe('revisionMetadataSchema', () => {
       version: 1,
       id: 'a-revision',
       parents: [],
-      provenance: { source: 'automation', actorId: 'test', createdAt: 0 },
+      provenance: { source: 'automation', ...recordedBy('test'), createdAt: 0 },
       summary: { generated: 'test' },
     });
 
@@ -19,7 +20,7 @@ describe('revisionMetadataSchema', () => {
       version: 1,
       revisionId: 'native-git-revision',
       parents: [],
-      provenance: { source: 'agent', actorId: 'test', createdAt: 0 },
+      provenance: { source: 'agent', ...recordedBy('test'), createdAt: 0 },
       summary: { generated: 'test' },
     });
 

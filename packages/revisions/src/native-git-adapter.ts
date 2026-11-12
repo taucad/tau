@@ -8,7 +8,13 @@ import { revisionBranchName } from '#revision-authority.js';
 import { refPatternIsHostLocal } from '#remotes.js';
 import type { FileMode } from '@taucad/filesystem';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
-import type { BranchHeadUpdateResult, Revision, RevisionProvenance, RevisionSummary } from '#revision-authority.js';
+import type {
+  BranchHeadUpdateResult,
+  Revision,
+  RevisionProvenance,
+  RevisionSummary,
+  RevisionUserActor,
+} from '#revision-authority.js';
 import { runGitCommand } from '#git-command.js';
 import type { GitCommandResult } from '#git-command.js';
 import { NativeGitError } from '#native-git.types.js';
@@ -46,7 +52,7 @@ type OwnershipRecord = Readonly<{
 }>;
 
 type RevisionMetadata = Readonly<{
-  version: 1;
+  version: 2;
   id: string;
   parents: readonly string[];
   provenance: RevisionProvenance;
@@ -117,7 +123,6 @@ const revisionSchema = revisionMetadataSchema.extend({
       .number()
       .refine(Number.isSafeInteger)
       .refine((value) => value >= 0),
-    actorId: z.string().min(1),
   }),
   summary: revisionMetadataSchema.shape.summary.extend({ generated: z.string().min(1) }),
 });
@@ -165,7 +170,7 @@ export const parseExternalRefspec = (refspec: string): void => {
 };
 
 const parseRevision = (revision: Revision): Revision => {
-  const result = revisionSchema.safeParse({ ...revision, version: 1 });
+  const result = revisionSchema.safeParse({ ...revision, version: 2 });
   if (!result.success) {
     throw new TypeError('Revision is invalid.');
   }
@@ -200,16 +205,41 @@ const validateTreePaths = (tree: ImmutableRevisionTree): void => {
   }
 };
 
+const canonicalPerson = (person: RevisionUserActor): RevisionUserActor => ({
+  kind: 'user',
+  id: person.id,
+  ...(person.name === undefined ? {} : { name: person.name }),
+  ...(person.email === undefined ? {} : { email: person.email }),
+  ...(person.anonymous === undefined ? {} : { anonymous: person.anonymous }),
+});
+
 const encodeMetadata = (revision: Revision): string => {
+  /* Version 2 provenance (B1), in one key order, so a reordered object stores the same bytes. */
+  const { provenance } = revision;
   const metadata: RevisionMetadata = {
-    version: 1,
+    version: 2,
     id: revision.id,
     parents: [...revision.parents],
     provenance: {
-      source: revision.provenance.source,
-      actorId: revision.provenance.actorId,
-      ...(revision.provenance.runId === undefined ? {} : { runId: revision.provenance.runId }),
-      createdAt: revision.provenance.createdAt,
+      source: provenance.source,
+      actor:
+        provenance.actor.kind === 'agent'
+          ? {
+              kind: 'agent',
+              id: provenance.actor.id,
+              runId: provenance.actor.runId,
+              onBehalfOf: canonicalPerson(provenance.actor.onBehalfOf),
+            }
+          : canonicalPerson(provenance.actor),
+      capture: provenance.capture,
+      via: provenance.via,
+      ...(provenance.runId === undefined ? {} : { runId: provenance.runId }),
+      ...(provenance.attempt === undefined ? {} : { attempt: provenance.attempt }),
+      ...(provenance.turnCut === undefined ? {} : { turnCut: provenance.turnCut }),
+      ...(provenance.heldRunIds === undefined ? {} : { heldRunIds: [...provenance.heldRunIds] }),
+      ...(provenance.turnId === undefined ? {} : { turnId: provenance.turnId }),
+      ...(provenance.restoredFrom === undefined ? {} : { restoredFrom: provenance.restoredFrom }),
+      createdAt: provenance.createdAt,
     },
     summary: {
       generated: revision.summary.generated,

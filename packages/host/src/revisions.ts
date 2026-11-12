@@ -81,7 +81,6 @@ import type {
   PublishDraft,
   PublishPublicationActorInput,
   PublishPublicationActorOutput,
-  RevisionActor,
   RevisionDiffEntry,
   RevisionEngineDescriptor,
   RevisionLogRequest,
@@ -91,6 +90,7 @@ import type {
   RevisionStatusProjection,
   RevisionTag,
   RevisionUserActor,
+  RevisionVia,
   SyncPushOutcome,
 } from '@taucad/revisions';
 import { GitToolchainError, createNativeGitRevisionPort, resolveGitToolchain } from '@taucad/revisions/node';
@@ -106,6 +106,7 @@ import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
 import { defaultConfigDirectory } from '#credential-store.js';
 import { actorFor, hostRevisionActor, revisionUserActorSchema } from '#revision-actor.js';
+import type { HostRevisionActorResolver } from '#revision-actor.js';
 
 /**
  * How this host reads and writes `.tau/parameters/**` for the per-key merge (D12).
@@ -248,12 +249,11 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
    */
   readonly checkouts?: Map<string, TurnCheckout> | undefined;
   /**
-   * Actor recorded on this host's revisions.
-   *
-   * W5 replaces it with the turn's real author (the model row, or the external
-   * agent id); until then every host turn is the host itself.
+   * Which Tau leg this host records through (blueprint B1): `desktop` for the
+   * desktop app, `serve` for `tau serve`, `cloud` for a Tau Cloud agent host.
+   * Required: the trailer names it on every capture.
    */
-  readonly actorId?: string | undefined;
+  readonly via: RevisionVia;
   /**
    * The actor recorded on every revision this host mints until a `setActor` request names the session (S37, A26, A1).
    *
@@ -261,9 +261,7 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
    * Tau account passes `hostRevisionActor(account)`. Once a renderer sends `setActor`, its session wins: it is the
    * person signed in on this device, anonymity already applied, so switching it later rewrites nothing.
    */
-  readonly actor?:
-    | ((input: { readonly runId: string | undefined; readonly trigger: string }) => RevisionActor | undefined)
-    | undefined;
+  readonly actor?: HostRevisionActorResolver | undefined;
   /**
    * Observe this workspace's own writes, so the checkout knows it is dirty.
    *
@@ -625,10 +623,12 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
-    ...(options.actorId === undefined ? {} : { actorId: options.actorId }),
-    /* A1: the session the renderer last sent, else the account or pseudonym this host was wired with; never the OS
-     * login name or an environment email, and never the opaque fallback id (I1). */
-    actor: (input) => (session === undefined ? fallbackActor(input) : actorFor(session, input.runId)),
+    /* A1, B1: the session the renderer last sent, else the account or pseudonym this host was wired with; never the
+     * OS login name, an environment email or a fallback id (I1). */
+    identity: {
+      via: options.via,
+      resolve: (input) => (session === undefined ? fallbackActor(input) : actorFor(session, input.runId)),
+    },
     /*
      * Which device this host is (W13, W17).
      *
@@ -2133,8 +2133,8 @@ export const openProjectRevisions = async (
         ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
         ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
         parameters: parameterCodec,
-        /* The account the terminal's token belongs to, else this device's pseudonym (A1, AC15). */
-        actor: hostRevisionActor(options.actor),
+        /* The account the terminal's token belongs to, else this device's pseudonym (A1, AC15), through the CLI (B1). */
+        identity: { via: 'cli', resolve: hostRevisionActor(options.actor) },
         ...(remoteUrl === undefined ? {} : { remoteUrl }),
         ...(publishPublication === undefined ? {} : { publishPublication }),
         ...(registerRemoteProject === undefined ? {} : { registerRemoteProject }),

@@ -1,5 +1,5 @@
 import { projectManifestSchemaUrl, serializeProjectManifest, projectToManifest } from '@taucad/types';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { largeObjectThresholdBytes } from '@taucad/revisions';
 import type * as GithubConnections from '#lib/github-connections.js';
 import { githubConnections } from '#lib/github-connections.js';
@@ -65,6 +65,27 @@ describe('readLinkedGithubManifest', () => {
 });
 
 describe('prepareLinkedGithubImport', () => {
+  /* A GitHub connection belongs to a signed-in Tau account (B1). */
+  beforeEach(() => {
+    setRevisionSessionUser({ id: 'tau-user-1' });
+  });
+  afterEach(() => {
+    setRevisionSessionUser(undefined);
+  });
+
+  it('should refuse to record an import with no Tau account to name, rather than a stand-in id (B1)', async () => {
+    setRevisionSessionUser(undefined);
+
+    await expect(
+      prepareLinkedGithubImport({
+        selection: { ...selection, files: [] },
+        targetBranch: 'main',
+        manifest: new TextEncoder().encode('{}'),
+        mainFile: 'main.scad',
+      }),
+    ).rejects.toThrow('Sign in to Tau');
+  });
+
   it('refuses a large ordinary Git blob before fetching or rewriting repository history', async () => {
     await expect(
       prepareLinkedGithubImport({
@@ -94,7 +115,9 @@ describe('prepareLinkedGithubImport', () => {
     expect(generation).toBe(4);
     expect(request).toMatchObject({
       author: noreply,
-      setup: { provenance: { actorId: 'tau-user-1', actor: { kind: 'user', id: 'tau-user-1', ...noreply } } },
+      setup: {
+        provenance: { actor: { kind: 'user', id: 'tau-user-1', ...noreply }, capture: 'import', via: 'browser' },
+      },
     });
     setRevisionSessionUser(undefined);
   });

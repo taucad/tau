@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import type { OtlpSpan } from '#langfuse-observation.js';
+import type { OtlpSpan, SettlementFact } from '#langfuse-observation.js';
 import { langfuseObservation, pseudonymKey } from '#langfuse-observation.js';
+import { providerAttemptEvidence } from '#model-invocation-evidence.js';
 import type { LangfuseObservationRow } from '#langfuse-scorecard.js';
 import type { LedgerSettlement } from '#ledger-reconciliation.js';
 import { reconcileLedger } from '#ledger-reconciliation.js';
@@ -40,14 +41,39 @@ const settled = (operation: string, chargedAtoms: bigint, terminalRevision = 1n)
   normalization: 'openai-responses-v1',
 });
 
-const delivered = async (settlements: readonly ObservedSettlement[]): Promise<LangfuseObservationRow[]> =>
-  Promise.all(
-    settlements.map(async (settlement) => {
-      const evidence = await settlementEvidence(settlement, 'user-a', authority);
-      const observation = langfuseObservation(evidence, { environment: 'synthetic', protection: 'free' }, pseudonym);
-      return rowOf(observation!.spans[0]!);
-    }),
+/* The generation of the call a settlement settled, as delivery sends it: with the settlement's values, or without. */
+const generationOf = async (settlement: ObservedSettlement, carried: boolean): Promise<LangfuseObservationRow> => {
+  const call = await providerAttemptEvidence(
+    {
+      principal: 'user-a',
+      project: 'project-a',
+      attemptKey: settlement.operation.attemptKey,
+      chat: 'chat-1',
+      surface: 'gateway',
+      wire: 'anthropic',
+      requestedModel: undefined,
+      provider: undefined,
+      operation: settlement.operation.id,
+      startedAt: at,
+      duration: 900,
+      stream: undefined,
+      ended: 'completed',
+    },
+    authority,
   );
+  const evidence = await settlementEvidence(settlement, 'user-a', authority);
+  const fact = evidence.payload.fact as SettlementFact;
+  const observation = langfuseObservation(
+    call,
+    { environment: 'synthetic', protection: 'free', settlement: carried ? fact : undefined },
+    pseudonym,
+  );
+  return rowOf(observation!.spans[0]!);
+};
+
+/* Each settlement's generation, carrying its values. */
+const delivered = async (settlements: readonly ObservedSettlement[]): Promise<LangfuseObservationRow[]> =>
+  Promise.all(settlements.map(async (settlement) => generationOf(settlement, true)));
 
 const ledgerOf = ({ operation, receipt }: ObservedSettlement, principal = 'user-a'): LedgerSettlement => ({
   principal,
@@ -96,30 +122,60 @@ describe('reconcileLedger', () => {
     });
   });
 
-  it('reads a settlement langfuse-v4.3 wrote as the same settlement, and counts it once beside its v5 row', async () => {
+  it('reads a late settlement, whose generation went without its values, as missing and never as drift', async () => {
     const charged = [settled('op-1', 2_000_000n), settled('op-2', 500_000n)];
-    const rows = await delivered(charged);
-    /* The v4.3 mapper wrote a family and a source beside the same facts; v5 writes neither. */
-    const older = rows.map((row) => ({
-      ...row,
-      id: `${row.id}-v4.3`,
-      metadata: { ...row.metadata, mapper: 'langfuse-v4.3', family: 'financial', source: `source-${row.id}` },
-    }));
+    const rows = [await generationOf(charged[0]!, true), await generationOf(charged[1]!, false)];
 
     const reconciliation = await reconcileLedger(
       charged.map((settlement) => ledgerOf(settlement)),
-      [older[0]!, ...rows, older[1]!],
+      rows,
       'synthetic',
     );
 
-    expect(reconciliation).toMatchObject({ matched: 2, observed: { settlements: 2, credits: 2.5 }, drift: 0 });
-    await expect(
-      reconcileLedger(
-        [ledgerOf(charged[0]!)],
-        [{ ...rows[0]!, metadata: { ...rows[0]!.metadata, mapper: 'other' } }],
-        'synthetic',
-      ),
-    ).resolves.toMatchObject({ matched: 0, missing: { settlements: 1 } });
+    expect(reconciliation).toMatchObject({
+      matched: 1,
+      missing: { settlements: 1, credits: 0.5 },
+      unexpected: { settlements: 0 },
+      mismatched: 0,
+      drift: 0,
+    });
+  });
+
+  it('reads only v5 generations the API reported, and no longer reads a tau.financial row', async () => {
+    const charged = settled('op-1', 2_000_000n);
+    const [row] = await delivered([charged]);
+    const ledger = [ledgerOf(charged)];
+    /* A settlement span as LW2 wrote it: the same values under `fact.*` keys. */
+    const span = {
+      ...row!,
+      metadata: {
+        mapper: 'langfuse-v5',
+        authority: 'api-reported',
+        'fact.kind': 'financial',
+        'fact.ledger': row!.metadata!['ledger'],
+        'fact.credits': 2,
+      },
+    };
+
+    await expect(reconcileLedger(ledger, [span], 'synthetic')).resolves.toMatchObject({
+      matched: 0,
+      missing: { settlements: 1 },
+    });
+    for (const metadata of [
+      { ...row!.metadata, mapper: 'langfuse-v4.3' },
+      { ...row!.metadata, authority: 'host-reported' },
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- two independent readings of one fixture
+      await expect(reconcileLedger(ledger, [{ ...row!, metadata }], 'synthetic')).resolves.toMatchObject({
+        matched: 0,
+        missing: { settlements: 1 },
+      });
+    }
+    /* A replay of the same generation is one settlement. */
+    await expect(reconcileLedger(ledger, [row!, row!], 'synthetic')).resolves.toMatchObject({
+      matched: 1,
+      observed: { settlements: 1, credits: 2 },
+    });
   });
 
   it("never joins another principal's settlement, a later revision, or another environment", async () => {

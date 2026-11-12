@@ -61,6 +61,8 @@ const harness = (): { project: RootedFileSystem; revisions: ReturnType<typeof cr
     port: createIsomorphicGitRevisionPort({ filesystem: project }),
     filesystem: (root) => service.createRootedFileSystem(root),
   });
+  /* The page names who its revisions are by before anything else (B1): a capture with no person is refused. */
+  revisions.send({ command: 'setActor', actor: { kind: 'user', id: 'usr_pin_4' } });
   disposers.push(() => {
     void revisions.release();
     service.dispose();

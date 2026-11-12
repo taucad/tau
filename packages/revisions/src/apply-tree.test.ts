@@ -47,6 +47,7 @@ import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
 import { generatedGitattributesContent, generatedGitattributesPath, tauRevisionPolicy } from '#workspace-config.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
+import { testIdentity } from '#test/identity.js';
 
 /** A clock stopped at `time`: these rows read only its `now()`. */
 const clockAt = (time: number): StepClock => {
@@ -256,6 +257,7 @@ const project = async (
     reset,
     open: () =>
       createRevisionActors({
+        identity: testIdentity,
         port,
         projectId: 'project-1',
         clock: clockAt(clockReading),

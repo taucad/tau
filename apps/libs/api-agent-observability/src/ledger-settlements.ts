@@ -15,7 +15,8 @@ export type LedgerWindow = Readonly<{
 
 /**
  * The ledger's terminal settlements in a window, each under its account's
- * active owner, for `reconcileLedger` (T15, U36). It reads only what a
+ * active owner, for `reconcileLedger` (T15, U36), which compares them with
+ * the values each settled generation carries (LW4). It reads only what a
  * settlement fact could have been admitted for: a resolved operation with a
  * project hint, on an account that still has an owner. The owner is read now,
  * so a settlement from before an ownership change reads as the new owner's

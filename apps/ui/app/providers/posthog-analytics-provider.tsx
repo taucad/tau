@@ -8,6 +8,7 @@ import { setAnalyticsLinkSource } from '#lib/analytics-link.lib.js';
 import type { AnalyticsLink } from '#lib/analytics-link.lib.js';
 import { AnalyticsContextProvider } from '#hooks/use-analytics.js';
 import { connectRemoteFlags, disconnectRemoteFlags } from '#flags/remote-flags.js';
+import { connectBaselineTelemetry, disconnectBaselineTelemetry } from '#telemetry/onboarding-telemetry.js';
 import type { Analytics } from '#hooks/use-analytics.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog configuration keys are SDK wire names. */
@@ -47,6 +48,19 @@ const setConsoleClient = (client: PostHog | undefined): void => {
 };
 
 const isCapturing = (): boolean => sdk?.__loaded === true && !sdk.has_opted_out_capturing();
+
+/**
+ * Capture one event while analytics are admitted; the single path every product event takes.
+ *
+ * @returns Whether the event was handed to PostHog.
+ */
+const captureAdmitted = (event: string, properties?: Readonly<Record<string, unknown>>): boolean => {
+  if (!isCapturing()) {
+    return false;
+  }
+  sdk?.capture(event, properties);
+  return true;
+};
 
 /**
  * Where a Sentry event's PostHog person and replay are (SB7). Read at event time, so it is absent the
@@ -119,6 +133,7 @@ function PostHogLifecycle({
       setAnalyticsLinkSource(undefined);
       // PostHog-backed flags return to their defaults before the client forgets its flags.
       disconnectRemoteFlags();
+      disconnectBaselineTelemetry();
       setConsoleClient(undefined);
       /* Nothing to stop where the singleton was never fetched: it captures nothing until `init`,
          which only an admission reaches. The storage a previous admission left is still cleared. */
@@ -166,6 +181,8 @@ function PostHogLifecycle({
       setAnalyticsLinkSource(readAnalyticsLink);
       connectRemoteFlags(posthog);
       setConsoleClient(posthog);
+      // The onboarding baseline (`first_seen` once per device, then first model and first export) follows admission.
+      connectBaselineTelemetry(captureAdmitted);
       setAdmittedGeneration(generation);
       if (!isReplayEnabled) {
         return;
@@ -181,6 +198,7 @@ function PostHogLifecycle({
       cancelReplay?.();
       setAnalyticsLinkSource(undefined);
       disconnectRemoteFlags();
+      disconnectBaselineTelemetry();
       setConsoleClient(undefined);
     };
     // `options` and `isReplayEnabled` are fixed per host, so only `isActive` re-runs this.
@@ -225,9 +243,7 @@ export function PostHogAnalyticsProvider({
   const analytics = useMemo<Analytics>(
     () => ({
       capture(event, properties) {
-        if (isCapturing()) {
-          sdk?.capture(event, properties);
-        }
+        captureAdmitted(event, properties);
       },
     }),
     [],

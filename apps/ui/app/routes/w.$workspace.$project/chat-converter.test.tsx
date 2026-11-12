@@ -25,6 +25,8 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import { toast } from '@taucad/ui/components/sonner';
+import { reportFirstExport } from '#telemetry/onboarding-telemetry.js';
+import type * as OnboardingTelemetryModule from '#telemetry/onboarding-telemetry.js';
 
 vi.mock('#hooks/use-project-availability.js', () => ({
   useProjectAvailability: () => 'ready',
@@ -33,6 +35,10 @@ vi.mock('#hooks/use-project-availability.js', () => ({
 }));
 
 vi.mock('#machines/await-fresh-render.js', () => ({ awaitFreshRender: vi.fn() }));
+vi.mock('#telemetry/onboarding-telemetry.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof OnboardingTelemetryModule>()),
+  reportFirstExport: vi.fn(),
+}));
 
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown } | undefined, selector: (state: unknown) => unknown) => {
@@ -749,6 +755,31 @@ describe('ChatConverter', () => {
     await waitFor(() => {
       expect(mockDocumentFixture.document.export).toHaveBeenCalledWith('glb', { options: {} });
     });
+  });
+
+  it('should report the first export with the kernel that produced it (M3)', async () => {
+    render(<ChatConverter isExpanded />);
+    selectFormat('glb');
+    fireEvent.click(screen.getByRole('button', { name: /export glb/i }));
+    await waitFor(() => {
+      expect(reportFirstExport).toHaveBeenCalledExactlyOnceWith({ kernel: 'replicad' });
+    });
+  });
+
+  it('should not report an export that produced no file', async () => {
+    vi.mocked(mockDocumentFixture.document.export).mockResolvedValue({
+      success: false,
+      exportId: 'glb',
+      evaluationId: mockDocumentFixture.evaluation.id,
+      issues: [],
+    } as unknown as Awaited<ReturnType<typeof mockDocumentFixture.document.export>>);
+    render(<ChatConverter isExpanded />);
+    selectFormat('glb');
+    fireEvent.click(screen.getByRole('button', { name: /export glb/i }));
+    await waitFor(() => {
+      expect(mockDocumentFixture.document.export).toHaveBeenCalledWith('glb', { options: {} });
+    });
+    expect(reportFirstExport).not.toHaveBeenCalled();
   });
 
   it('should identify the export source when only one geometry unit exists', () => {

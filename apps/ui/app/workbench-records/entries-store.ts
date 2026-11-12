@@ -230,6 +230,20 @@ export function createWorkbenchEntriesStore(
     const record = origin === 'none' ? undefined : (intended ?? published.record);
     return record ? withoutMoves(record) : emptyRecord;
   };
+  /**
+   * The entry as shown, at the path the person's owed path changes put it on: an edit made while its entry's rename is
+   * written was made on the renamed entry, as the file holds it at its old path. A path change already on the file
+   * moves nothing again, and an entry only the person's owed fields make was shown as they asked for it.
+   */
+  const shownAt = (entryPath: string, from: WorkbenchEntries): Entry | undefined => {
+    const { published, deferred, cycle, pending } = context();
+    const steps = [cycle?.patch, deferred, pending?.patch].flatMap((patch) =>
+      patch === undefined ? [] : owedSteps(patch, published.record),
+    );
+    const shownEntries = published.record?.entries ?? {};
+    const origin = originOf(shownEntries, steps, entryPath);
+    return origin === 'made' ? from.entries[entryPath] : origin === undefined ? undefined : shownEntries[origin.path];
+  };
   return {
     read: async (notify = false) => commands.read(notify),
     invalidateRead: () => {
@@ -242,18 +256,10 @@ export function createWorkbenchEntriesStore(
       const from = base();
       // Only what the person changed: on the entry they were shown, or over their own change the file lacks. A field
       // another party changed since keeps the file's value. A cycle took what was deferred when it formed.
-      const { published, deferred, cycle, pending } = context();
+      const { deferred, cycle, pending } = context();
       const owed = authoredFields([...(cycle?.patch ?? []), ...(deferred ?? []), ...(pending?.patch ?? [])]);
-      // The entry as shown, at the path the person's owed path changes put it on: an edit made while its entry's rename
-      // is written was made on the renamed entry, as the file holds it at its old path. A path change already on the
-      // file moves nothing again, and an entry only the person's owed fields make was shown as they asked for it.
-      const steps = [cycle?.patch, deferred, pending?.patch].flatMap((patch) =>
-        patch === undefined ? [] : owedSteps(patch, published.record),
-      );
-      const shownEntries = published.record?.entries ?? {};
-      const origin = originOf(shownEntries, steps, entryPath);
       const { entry, fields } = changedEntry({
-        shown: origin === null ? from.entries[entryPath] : origin === undefined ? undefined : shownEntries[origin],
+        shown: shownAt(entryPath, from),
         next,
         onto: from.entries[entryPath],
         owed: owed[entryPath],
@@ -298,7 +304,8 @@ export function createWorkbenchEntriesStore(
       });
       let record = moved([change]);
       const unnamed = change.type === 'rename' ? errorOf(record) : undefined;
-      if (unnamed !== undefined && change.type === 'rename') {
+      // A record over the file's limit is refused below, keeping every setting, as any change the file cannot take.
+      if (unnamed !== undefined && !(unnamed instanceof RangeError) && change.type === 'rename') {
         // The record cannot name the new path: the settings cannot follow the file, so they go with its old path.
         input.onError(unnamed);
         record = moved([{ type: 'delete', path: change.oldPath }]);

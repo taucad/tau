@@ -485,18 +485,20 @@ export const owedSteps = (patch: EntriesPatch, current: EntriesRecord | undefine
 
 /**
  * Where the entry at `path` comes from once owed steps apply to the file's entries: the file path it is moved from,
- * `null` for an entry only the steps' fields make, or `undefined` for none.
+ * `'made'` for an entry only the steps' fields make, or `undefined` for none.
  */
 export const originOf = (
   entries: Readonly<Record<string, Entry>>,
   steps: readonly EntriesStep[],
   path: string,
-): string | null | undefined => {
-  let origins: Record<string, string | null> = Object.fromEntries(Object.keys(entries).map((key) => [key, key]));
+): { path: string } | 'made' | undefined => {
+  let origins: Record<string, { path: string } | 'made'> = Object.fromEntries(
+    Object.keys(entries).map((key) => [key, { path: key }]),
+  );
   for (const step of steps) {
     origins = moveKeys(origins, step.moves);
     for (const key of Object.keys(step.fields)) {
-      origins[key] ??= null;
+      origins[key] ??= 'made';
     }
   }
   return Object.hasOwn(origins, path) ? origins[path] : undefined;

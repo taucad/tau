@@ -1317,4 +1317,29 @@ describe('workbench entries store over recordSync', () => {
       vi.useRealTimers();
     }
   });
+
+  it('refuses a rename that takes the record over the file’s limit, and keeps every setting under it', async () => {
+    const m = memory();
+    const many = Object.fromEntries(
+      Array.from({ length: 175 }, (_, index) => [`dir/${'p'.repeat(300)}-${index}.ts`, { renderTimeout: 15_000 }]),
+    );
+    m.setBytes(encoder.encode(workbenchRecords.entries.serialize({ version: 1, entries: many })));
+    const onError = vi.fn();
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: m.files,
+      onChange: () => undefined,
+      onError,
+    });
+    try {
+      await entries.read();
+      expect(await entries.changePaths({ type: 'rename', oldPath: 'dir', newPath: 'd'.repeat(120) })).toBe(false);
+      expect(await entries.flush()).toBe(false);
+      expect(onError).toHaveBeenCalledWith(expect.any(RangeError));
+      const read = workbenchRecords.entries.read(m.get()!);
+      expect(read.status === 'current' ? Object.keys(read.record.entries) : []).toHaveLength(175);
+    } finally {
+      entries.dispose();
+    }
+  });
 });

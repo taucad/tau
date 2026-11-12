@@ -71,6 +71,25 @@ export const workspaceRuntime = defineRuntime({
 });
 
 /**
+ * The workspace runtime's resolved kernel rows, in precedence order: what the kernel routing eval binds a written entry
+ * against, read from here so the eval needs no edge to the runtime or the kernels.
+ *
+ * @returns Each kernel's id, extensions and import pattern.
+ * @public
+ */
+export const workspaceKernelRows = async (): Promise<
+  ReadonlyArray<{
+    readonly id: string;
+    readonly extensions: readonly string[];
+    readonly detectImport?: RegExp | Readonly<{ source: string; flags: string }>;
+    readonly builtinModuleNames?: readonly string[];
+  }>
+> => {
+  const resolved = await resolveRuntimeDefinition(workspaceRuntime, undefined);
+  return resolved.kernels;
+};
+
+/**
  * The kernels a runtime can evaluate on this machine: every kernel it lists, less each native kernel whose closure the
  * dependency store does not hold sealed. Read from launch indexes only: nothing is downloaded.
  * @param runtime - The runtime.

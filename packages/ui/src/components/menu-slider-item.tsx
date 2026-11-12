@@ -1,10 +1,13 @@
 import * as React from 'react';
-import type { ClassValue } from 'clsx';
-import { CheckIcon, ChevronDownIcon } from 'lucide-react';
 import { ContextMenu as ContextMenuPrimitive, DropdownMenu as DropdownMenuPrimitive } from 'radix-ui';
-import { Button } from '#components/button.js';
 import { menuItemIconClass, menuItemLayoutClass, menuItemVariants } from '#components/menu.variants.js';
-import { ComboBoxResponsive } from '#components/combobox-responsive.js';
+import {
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+} from '#components/dropdown-menu.js';
 import { SliderInput, snapToStep } from '#components/slider-input.js';
 import type { SliderInputProperties } from '#components/slider-input.js';
 import { cn } from '#utils/cn.js';
@@ -245,14 +248,17 @@ type DropdownMenuSelectItemProperties<T> = {
   readonly getOptionLabel: (option: T) => string;
   readonly renderOption?: (option: T, isSelected: boolean) => React.ReactNode;
   readonly onValueChange?: (value: string) => void;
+  /** The sub-view's title on its Back row; defaults to the row's text. */
   readonly title?: string;
-  readonly description?: string;
-  readonly selectPopoverContentClassName?: ClassValue;
+  /**
+   * Whether choosing a value steps back to the menu. Return false to stay on the options. Defaults to stepping back.
+   */
   readonly shouldCloseOnSelect?: (value: string) => boolean;
 };
 
 /**
- * A dropdown-menu row with a label and a responsive select for one of several options.
+ * A dropdown-menu row naming a setting and its value, whose options open as a sub-view of the menu (UX policy §7):
+ * choosing one steps back to the row, and the menu stays open.
  *
  * @param props - The label, options, value and change handler.
  * @returns The select row.
@@ -269,67 +275,52 @@ export const DropdownMenuSelectItem = <T,>({
   getOptionLabel,
   renderOption,
   onValueChange,
-  title = 'Select option',
-  description = 'Choose from available options',
-  selectPopoverContentClassName,
+  title,
   shouldCloseOnSelect,
 }: DropdownMenuSelectItemProperties<T>): React.JSX.Element => {
-  const groupedItems = React.useMemo(() => [{ name: '', items: options }], [options]);
-  const renderLabel = React.useCallback(
-    // oxlint-disable-next-line @typescript-eslint/promise-function-async -- ReactNode includes promises, but menu labels render synchronously.
-    (item: T, selectedItem: T | undefined) => {
-      const isSelected = selectedItem !== undefined && getOptionValue(item) === getOptionValue(selectedItem);
-
-      if (renderOption) {
-        return renderOption(item, isSelected);
-      }
-
-      return (
-        <span className='flex w-full items-center justify-between'>
-          <span>{getOptionLabel(item)}</span>
-          {isSelected ? <CheckIcon className='size-4' /> : null}
-        </span>
-      );
-    },
-    [getOptionLabel, getOptionValue, renderOption],
-  );
-
+  const [isOpen, setOpen] = React.useState(false);
+  const selected = getOptionValue(value);
+  const label = getOptionLabel(value);
   return (
-    <div
-      data-slot='dropdown-menu-select-item'
-      className={cn('flex items-center justify-between px-3 py-1.5', className)}
-      onPointerDown={(event) => {
-        event.stopPropagation();
-      }}
-    >
-      <span className={cn(menuItemLayoutClass, menuItemIconClass, 'text-sm')}>
-        {children}
-        {infoTooltip}
-      </span>
-      <ComboBoxResponsive
-        isNested
-        groupedItems={groupedItems}
-        value={value}
-        getValue={getOptionValue}
-        renderLabel={renderLabel}
-        title={title}
-        description={description}
-        isSearchEnabled={false}
-        popoverProperties={{
-          align: 'end',
-          side: 'bottom',
-          sideOffset: 4,
-          ...(selectPopoverContentClassName === undefined ? {} : { className: cn(selectPopoverContentClassName) }),
-        }}
-        shouldCloseOnSelect={shouldCloseOnSelect}
-        onSelect={onValueChange}
+    <DropdownMenuSub open={isOpen} onOpenChange={setOpen}>
+      <DropdownMenuSubTrigger
+        data-slot='dropdown-menu-select-item'
+        className={className}
+        {...(title === undefined ? {} : { textValue: title })}
       >
-        {/* oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- the ComboBoxResponsive trigger sets aria-expanded and aria-controls */}
-        <Button variant='outline' size='sm' className='h-7 gap-1 px-2 text-xs' role='combobox'>
-          {getOptionLabel(value)}
-          <ChevronDownIcon className='size-3 opacity-50' />
-        </Button>
-      </ComboBoxResponsive>
-    </div>
+        <span className={cn(menuItemLayoutClass, menuItemIconClass, 'min-w-0')}>
+          {children}
+          {infoTooltip}
+        </span>
+        <span className='ml-auto truncate pl-3 text-muted-foreground'>{label}</span>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent {...(title === undefined ? {} : { title })}>
+        <DropdownMenuRadioGroup
+          value={selected}
+          onValueChange={(next) => {
+            onValueChange?.(next);
+            if (shouldCloseOnSelect?.(next) ?? true) {
+              setOpen(false);
+            }
+          }}
+        >
+          {options.map((option) => {
+            const optionValue = getOptionValue(option);
+            return (
+              <DropdownMenuRadioItem
+                key={optionValue}
+                value={optionValue}
+                onSelect={(event) => {
+                  // A value is a setting, not a command: the menu stays open.
+                  event.preventDefault();
+                }}
+              >
+                {renderOption ? renderOption(option, optionValue === selected) : getOptionLabel(option)}
+              </DropdownMenuRadioItem>
+            );
+          })}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   );
 };

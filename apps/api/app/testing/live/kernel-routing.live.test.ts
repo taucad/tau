@@ -436,7 +436,7 @@ describe.skipIf(runnable.length === 0)(
                 caseId: observation.caseId,
                 failure,
               })),
-            ...(arm === 'examples' ? { examples: summarizeExampleRuns(cases, byCase) } : {}),
+            ...(arm === 'examples' ? { examples: summarizeExampleRuns(cases, byCase, repeats) } : {}),
             ...(gateRun && arm === 'in-turn'
               ? summarizeKernelRoutingGate(covered, byCase)
               : repeats > 1

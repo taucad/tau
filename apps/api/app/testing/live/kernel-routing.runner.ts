@@ -691,6 +691,8 @@ export type ExampleVerdict = {
   /** Runs bound to a kernel that is not acceptable. */
   readonly misrouted: number;
   readonly runs: number;
+  /** Fewer runs were graded than the run requested, so the verdict is not met. */
+  readonly inconclusive: boolean;
   readonly met: boolean;
 };
 
@@ -705,9 +707,11 @@ export type ExampleVerdict = {
 export const summarizeExampleRuns = (
   cases: readonly KernelRoutingCase[],
   runs: ReadonlyMap<string, readonly KernelRoutingObservation[]>,
+  expectedRuns: number,
 ): readonly ExampleVerdict[] =>
   cases.map((testCase) => {
     const observations = runs.get(testCase.id) ?? [];
+    const inconclusive = observations.length < Math.max(1, expectedRuns);
     const bound = observations.flatMap(({ boundKernel }) => (boundKernel === undefined ? [] : [boundKernel]));
     const resolved = bound.filter((kernel) => testCase.acceptable.includes(kernel)).length;
     const misrouted = bound.length - resolved;
@@ -716,6 +720,7 @@ export const summarizeExampleRuns = (
       resolved,
       misrouted,
       runs: observations.length,
-      met: observations.length > 0 && resolved >= Math.ceil(observations.length * 0.8 - 1e-9) && misrouted === 0,
+      inconclusive,
+      met: !inconclusive && resolved >= Math.ceil(observations.length * 0.8 - 1e-9) && misrouted === 0,
     };
   });

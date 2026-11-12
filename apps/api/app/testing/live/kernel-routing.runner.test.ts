@@ -461,7 +461,7 @@ describe('the examples arm', () => {
       ...(kernel === undefined ? {} : { boundKernel: kernel }),
     });
     const verdict = (observations: readonly KernelRoutingObservation[]) =>
-      summarizeExampleRuns([testCase], new Map([[testCase.id, observations]]))[0];
+      summarizeExampleRuns([testCase], new Map([[testCase.id, observations]]), 5)[0];
     expect(verdict([...Array.from({ length: 4 }, () => bound('tscircuit')), bound()])).toMatchObject({
       resolved: 4,
       misrouted: 0,
@@ -474,5 +474,18 @@ describe('the examples arm', () => {
     expect(verdict([...Array.from({ length: 3 }, () => bound('tscircuit')), bound(), bound()])).toMatchObject({
       met: false,
     });
+  });
+
+  it('should report a suggestion with fewer graded runs than requested as inconclusive', () => {
+    const testCase = exampleRoutingCase({ id: 'shelf', prompt: 'A wall shelf.', goals: ['printing'] });
+    const resolvedRun: KernelRoutingObservation = {
+      caseId: testCase.id,
+      asked: false,
+      boundKernel: testCase.acceptable[0],
+    };
+    const [partial] = summarizeExampleRuns([testCase], new Map([[testCase.id, [resolvedRun, resolvedRun]]]), 5);
+    expect(partial).toMatchObject({ runs: 2, resolved: 2, inconclusive: true, met: false });
+    const [unmeasured] = summarizeExampleRuns([testCase], new Map(), 5);
+    expect(unmeasured).toMatchObject({ runs: 0, inconclusive: true, met: false });
   });
 });

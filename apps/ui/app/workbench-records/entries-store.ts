@@ -15,6 +15,7 @@ import {
   carriesFields,
   replacingMoves,
   changedEntry,
+  coversFields,
   entriesPolicy,
   movePaths,
   withoutMoves,
@@ -50,6 +51,9 @@ export type EntriesState = Readonly<{
   bytes: Uint8Array<ArrayBuffer> | null;
   refusal: { code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string } | undefined;
 }>;
+
+/** An edit waiting on its write, at the path its entry is on now. */
+type WaitingEdit = { path: string; readonly fields: EntryFields; left: string | undefined; gone: boolean };
 
 const emptyRecord: WorkbenchEntries = { version: 1, entries: {} };
 
@@ -115,8 +119,11 @@ export function createWorkbenchEntriesStore(
 }> {
   const path = `${input.root}/${workbenchPaths.entries}`;
   let disposed = false;
-  /** The paths whose fields a merge left out, and no later merge carried, because the file could not take them all. */
-  const dropped = new Map<string, string>();
+  /**
+   * The edits waiting on the write that carries them, each at the path its entry is on now, with why the last merge of
+   * its fields left them out, if it did. `gone` once its entry is deleted or replaced.
+   */
+  const waiting = new Set<WaitingEdit>();
   /** Changes refused because the file cannot take them, by entry path: owed to the person, never to the file. */
   const refused = new Map<string, string>();
   /** The machine's health, with a refused change counted as one the file does not hold. */
@@ -128,11 +135,13 @@ export function createWorkbenchEntriesStore(
     // Each store's own policy, so a field its merge leaves out is counted as this store's refused change.
     machine: createRecordSyncMachine(
       createEntriesPolicy((left, carried, message) => {
-        for (const path of carried) {
-          dropped.delete(path);
-        }
-        for (const path of left) {
-          dropped.set(path, message);
+        for (const edit of waiting) {
+          if (left.includes(edit.path)) {
+            edit.left = message;
+          } else if (coversFields(carried[edit.path], edit.fields)) {
+            // Only a merge that carries this edit's own fields settles it: a later change of the entry may not.
+            edit.left = undefined;
+          }
         }
       }),
     ),
@@ -243,15 +252,25 @@ export function createWorkbenchEntriesStore(
       if (refused.delete(entryPath)) {
         refusalChanged();
       }
-      if (!(await commands.edit(record))) {
-        return false;
+      const waits: WaitingEdit = { path: entryPath, fields, left: undefined, gone: false };
+      waiting.add(waits);
+      try {
+        if (!(await commands.edit(record))) {
+          return false;
+        }
+      } finally {
+        waiting.delete(waits);
       }
-      // The write that carried the change left it out: another party's change left the record no room for it.
-      const shown = context().published.record?.entries[entryPath];
-      const left = dropped.get(entryPath);
-      if (left !== undefined && !carriesFields(shown, fields)) {
-        dropped.delete(entryPath);
-        return refuse(entryPath, new RangeError(left));
+      // The write that carried the change left it out: another party's change left the record no room for it. A
+      // change whose entry the person deleted or replaced since is not owed to them.
+      const shown = context().published.record?.entries;
+      if (
+        waits.left !== undefined &&
+        !waits.gone &&
+        !carriesFields(shown?.[entryPath], fields) &&
+        !carriesFields(shown?.[waits.path], fields)
+      ) {
+        return refuse(waits.path, new RangeError(waits.left));
       }
       return true;
     },
@@ -275,7 +294,15 @@ export function createWorkbenchEntriesStore(
       if (!writable(change.type === 'rename' ? change.oldPath : change.path, record)) {
         return false;
       }
-      // A refused change follows its entry, and goes when the entry is deleted or replaced.
+      // A refused change, and a waiting one, follows its entry, and goes when the entry is deleted or replaced.
+      for (const edit of waiting) {
+        const [moved] = Object.keys(replacingMoves({ [edit.path]: true }, record.moves ?? []));
+        if (moved === undefined) {
+          edit.gone = true;
+        } else {
+          edit.path = moved;
+        }
+      }
       const kept = replacingMoves(Object.fromEntries(refused), record.moves ?? []);
       if (JSON.stringify(kept) !== JSON.stringify(Object.fromEntries(refused))) {
         refused.clear();

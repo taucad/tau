@@ -440,10 +440,14 @@ const writeError = (record: WorkbenchEntries): string | undefined => {
 };
 
 /**
- * Told, on every merge, the paths whose fields it left out because the file it met could not take them all, the paths
- * whose fields it carried, and why. A later merge of the same change can carry what an earlier one left out.
+ * Told, on every merge, the paths whose fields it left out because the file it met could not take them all, the fields
+ * it carried by path, and why. A later merge of the same change can carry what an earlier one left out.
  */
-export type DroppedFields = (left: readonly string[], carried: readonly string[], message: string) => void;
+export type DroppedFields = (
+  left: readonly string[],
+  carried: Readonly<Record<string, EntryFields>>,
+  message: string,
+) => void;
 
 /**
  * A merge that cannot be written, made writable by leaving out the person's fields path by path, latest first: the
@@ -484,16 +488,19 @@ const fitted = ({
           left.splice(left.indexOf(kept), 1);
         }
       }
-      onDropped?.(
-        left,
-        paths.filter((path) => !left.includes(path)),
-        message,
-      );
+      const authored = surelyAuthoredFields(patch);
+      onDropped?.(left, Object.fromEntries(Object.entries(authored).filter(([path]) => !left.includes(path))), message);
       return { ...base, entries };
     }
   }
   return merged;
 };
+
+/** Whether `carried` sets each of `fields`, to its value or to one the person set after it. */
+export const coversFields = (carried: EntryFields | undefined, fields: EntryFields): boolean =>
+  carried !== undefined &&
+  (!Object.hasOwn(fields, 'renderTimeout') || Object.hasOwn(carried, 'renderTimeout')) &&
+  Object.keys(fields.components ?? {}).every((field) => Object.hasOwn(carried.components ?? {}, field));
 
 /** Whether an entry holds every field a person set on it. */
 export const carriesFields = (entry: Entry | undefined, fields: EntryFields): boolean =>
@@ -537,7 +544,7 @@ export const createEntriesPolicy = (onDropped?: DroppedFields): RecordPolicy<Ent
     let merged = { ...base, entries: applied(base.entries, patch, { landed: found?.upTo ?? 0, fields: true }) };
     const unwritable = writeError(merged);
     if (unwritable === undefined) {
-      onDropped?.([], Object.keys(surelyAuthoredFields(patch)), '');
+      onDropped?.([], surelyAuthoredFields(patch), '');
     } else {
       merged = fitted({ base, patch, landed: found?.upTo ?? 0, merged, message: unwritable, onDropped });
     }

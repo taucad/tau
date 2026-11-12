@@ -50,7 +50,7 @@ concurrency:
 
 jobs:
   # One affected computation for the lanes that need a project list or a flag: the
-  # service, browser, formal, GeoSpec, native-host, viewer-parity and standalone lanes,
+  # service, browser, formal, GeoSpec, native-host and viewer-parity lanes,
   # the PR-only reports, and
   # `staging.yml` (the `ci-plan` artifact). The seven `affected-lane` jobs do not wait
   # for it: they run their own `nx affected` and read the queue verdict themselves.
@@ -77,7 +77,6 @@ jobs:
       geospec-examples: ${{ steps.plan.outputs.geospec-examples }}
       browser: ${{ steps.plan.outputs.browser }}
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
-      standalone: ${{ steps.plan.outputs.standalone }}
       native-hosts: ${{ steps.plan.outputs.native-hosts }}
       native-linux: ${{ steps.plan.outputs.native-linux }}
       viewer-parity: ${{ steps.plan.outputs.viewer-parity }}
@@ -118,10 +117,7 @@ jobs:
         env:
           REUSED: ${{ steps.queue.outputs.run-id }}
           QUEUE_LANES: ${{ steps.queue.outputs.lanes || '{}' }}
-          # `tag:ci:standalone` marks the projects whose source the standalone oracles execute
-          # (`check-standalone-project.ts` runs the CLI from source and imports the UI's project
-          # factory); Nx marks each affected when any dependency of it changes. Billing
-          # contracts: the project that owns them (`api-billing`) or one it depends on changed.
+          # Billing contracts: the project that owns them (`api-billing`) or one it depends on changed.
           # CLI end-to-end suites: the project that owns them or one it depends on (the CLI) changed.
           # API image: the project with the `docker:smoke` target (`api`) or one it depends on
           # changed, so a change to another `scope:api` project (an end-to-end suite, `files`)
@@ -140,7 +136,6 @@ jobs:
              "formal": {"targets": ["formal"]},
              "geospec-examples": {"targets": ["test-geospec"]},
              "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"]},
-             "standalone": {"tags": ["ci:standalone"]},
              "native-hosts": {"tags": ["ci:native-hosts"]},
              "native-linux": {"targets": ["test:native-linux"]},
              "viewer-parity": {"targets": ["test:viewer-parity"]}}
@@ -177,22 +172,25 @@ jobs:
           viewer_parity=$(flag viewer-parity)
           run_api=$api
           run_billing=$billing
-          # The queue run already ran the formal, browser, GeoSpec, CLI end-to-end, native-host and
-          # viewer-parity lanes on this tree, and the API tests and billing contracts where it concluded them
-          # `success`. The API lane's suites are the affected `tag:scope:api` projects of that
-          # queue run, which is the verdict the affected lanes reuse too: every earlier commit
-          # carries its own. A service lane the queue run skipped or failed runs here when this
-          # plan selects it.
+          # The queue run's required gate passed, so it ran the browser, GeoSpec, CLI end-to-end,
+          # native-host and viewer-parity lanes on this tree wherever it selected them. The lanes
+          # outside the gate (API tests, billing contracts, formal) are reused one by one: a lane
+          # the queue concluded `success` passed on this tree, and one it concluded `skipped` was
+          # not affected by this commit's change (the queue diffs against `HEAD^1`). This plan's
+          # wider base reaches back over earlier commits, but every earlier commit carries its own
+          # queue run. A lane outside the gate that the queue failed, cancelled or had not
+          # finished runs here when this plan selects it.
           if [ -n "$REUSED" ]; then
-            formal=false
             browser=false
             geospec_examples=false
             cli_e2e=false
             viewer_parity=false
             browser_projects='[]'
-            if [ "$(jq -r '.api // ""' <<< "$QUEUE_LANES")" = success ]; then run_api=false; fi
-            if [ "$(jq -r '."billing-e2e" // ""' <<< "$QUEUE_LANES")" = success ]; then run_billing=false; fi
-            echo "Reusing merge-queue run $REUSED: formal, browser, GeoSpec, CLI end-to-end and viewer-parity lanes skip; queue service lanes: $QUEUE_LANES."
+            queue_lane() { jq -r --arg lane "$1" '.[$lane] // ""' <<< "$QUEUE_LANES"; }
+            case "$(queue_lane api)" in success | skipped) run_api=false ;; esac
+            case "$(queue_lane billing-e2e)" in success | skipped) run_billing=false ;; esac
+            case "$(queue_lane formal)" in success | skipped) formal=false ;; esac
+            echo "Reusing merge-queue run $REUSED: browser, GeoSpec, CLI end-to-end and viewer-parity lanes skip; queue lanes outside the gate: $QUEUE_LANES."
           fi
           # A push to `main` runs the native host rows from `native-hosts.yml`'s own push trigger:
           # every Linux row, and the Intel row when affected since its last successful push run.
@@ -201,13 +199,12 @@ jobs:
             native_linux=''
           fi
           # A pull request runs the fast lanes only. The service, formal, browser, GeoSpec,
-          # CLI end-to-end, native-host, viewer-parity and standalone lanes run in the merge queue, on the exact commit
+          # CLI end-to-end, native-host and viewer-parity lanes run in the merge queue, on the exact commit
           # that lands: a PR run of them proved nothing the queue does not prove again, and
           # PR runs held about six times the queue's runner minutes when the 60-job pool was
           # the queue's bottleneck (2026-11-10). `api-image` keeps the PR-only Docker smoke
           # test on the PRs that affect the API image.
           api_image=$(flag api-image)
-          standalone=$(flag standalone)
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             run_api=false
             run_billing=false
@@ -219,8 +216,7 @@ jobs:
             native_linux=''
             viewer_parity=false
             browser_projects='[]'
-            standalone=false
-            echo "Pull request: service, formal, browser, GeoSpec, CLI end-to-end, native-host, viewer-parity and standalone lanes run in the merge queue."
+            echo "Pull request: service, formal, browser, GeoSpec, CLI end-to-end, native-host and viewer-parity lanes run in the merge queue."
           fi
           {
             echo "apps=$(jq -c '.apps' <<< "$lanes")"
@@ -233,7 +229,6 @@ jobs:
             echo "formal=$formal"
             echo "browser=$browser"
             echo "geospec-examples=$geospec_examples"
-            echo "standalone=$standalone"
             echo "native-hosts=$native_hosts"
             echo "native-linux=$native_linux"
             echo "viewer-parity=$viewer_parity"
@@ -241,7 +236,8 @@ jobs:
           # `staging.yml` reads which service lanes this plan found affected (`api`,
           # `billing-e2e`), and the merge-queue run this push reused with that run's
           # conclusion of each (`reused-run`, `queue`): a lane skipped here is acceptable to
-          # a deploy only when it was not affected, or when the reused queue run passed it.
+          # a deploy only when it was not affected, or when the reused queue run passed or
+          # skipped it.
           mkdir -p out/ci-plan
           jq -n --arg api "$api" --arg billing "$billing" --arg reused "$REUSED" --argjson queue "$QUEUE_LANES" \
             '{api: $api, "billing-e2e": $billing, "reused-run": $reused, queue: (if $reused == "" then {} else $queue end)}' \
@@ -563,16 +559,19 @@ jobs:
           path: out/reports/
           retention-days: 14
 
-  # Standalone-project oracles, in `standalone-projects.yml` (also nightly). Only when the plan
-  # finds a project they execute affected, and on every push to `main`. Not required checks, so
-  # they wait for the required gate rather than take three runners while the required lanes
-  # still queue for one (X3); `!cancelled()` keeps them running when a lane failed.
+  # Standalone-project oracles, in `standalone-projects.yml` (also nightly): on every push to
+  # `main` only. Not required checks, so they wait for the required gate rather than take three
+  # runners while the required lanes still queue for one (X3); `!cancelled()` keeps them running
+  # when a lane failed. Never in the merge queue: there they started after the gate, so the queue
+  # run was still in progress when GitHub merged, `merge-queue-sweep.yml` cancelled it, and the
+  # push found no queue verdict to reuse (Brain ci-audit 2026-11-12, F1 and F2). The push and the
+  # nightly already run them on every commit that lands.
   standalone:
     name: Standalone projects
     needs: [plan, affected]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
-      (needs.plan.outputs.standalone == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push'))
+      github.ref == 'refs/heads/main' && github.event_name == 'push'
     uses: ./.github/workflows/standalone-projects.yml
     secrets: inherit
 
@@ -1026,9 +1025,9 @@ jobs:
   # files reach a service — plus the service-backed targets (`test:models`,
   # `test:server-modes`, `test:git`) and the API's billing composition suites. Billing contracts
   # have their own job. Like every lane here it runs only when the plan finds it affected, on
-  # `main` pushes too, and a push skips it when the merge-queue run it reuses passed it;
-  # `staging.yml` accepts a skipped lane only when this run's plan says it was not affected or
-  # names that reused run (`lanes.json`).
+  # `main` pushes too, and a push skips it when the merge-queue run it reuses passed or skipped
+  # it; `staging.yml` accepts a skipped lane only when this run's plan says it was not affected
+  # or names that reused run and its conclusion (`lanes.json`).
   # Writes the dependency layers the PR-only `api-docker-smoke` job reads: the GHA cache
   # a branch writes is readable by pull requests into it, so one `main` writer replaces a
   # cold cache and a 4-minute export on every PR run. It rebuilds only when an input of
@@ -1202,7 +1201,7 @@ jobs:
   # Credential-free database and Stripe adapter contracts, including fork PRs. Runs when
   # `api-billing` or a project it depends on is affected, on pull requests, in the merge
   # queue and on `main` pushes alike; a change under `apps/api/app/**` alone skips it. A push
-  # that reuses a merge-queue run which passed it skips it, like the API lane.
+  # that reuses a merge-queue run which passed or skipped it skips it, like the API lane.
   # Keep the job name stable: `staging.yml` gates the API deploy on its result, and
   # `queue-verdict` reads it from the reused run.
   billing-e2e:

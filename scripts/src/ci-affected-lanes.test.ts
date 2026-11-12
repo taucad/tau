@@ -1,5 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import process from 'node:process';
 import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
@@ -139,7 +142,6 @@ describe('ci.yml affected-only lanes', () => {
       formal: { targets: ['formal'] },
       'geospec-examples': { targets: ['test-geospec'] },
       browser: { tags: ['ci:browser'], targets: ['verify-browser'] },
-      standalone: { tags: ['ci:standalone'] },
       'native-hosts': { tags: ['ci:native-hosts'] },
       'native-linux': { targets: ['test:native-linux'] },
       'viewer-parity': { targets: ['test:viewer-parity'] },
@@ -182,10 +184,13 @@ describe('ci.yml affected-only lanes', () => {
       expect(guard, step.name).toContain("steps.queue.outputs.run-id == ''");
       expect(guard.replaceAll("steps.queue.outputs.run-id == ''", ''), step.name).not.toMatch(/run-id|reused/u);
     }
-    // The verdict is empty unless this is a push to `main` with a green merge-group run on the same commit.
+    // The verdict is empty unless this is a push to `main` with a merge-group run on the same commit whose
+    // required jobs passed; the run's own status is not asked for (the sweep cancels a landed run).
     const action = read('.github/actions/queue-verdict/action.yml');
     expect(action).toContain('if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then');
-    expect(action).toContain('event=merge_group&status=success');
+    expect(action).toContain('head_sha=$GITHUB_SHA&event=merge_group&per_page=10');
+    expect(action).not.toContain('status=success');
+    expect(action).toContain('passed("Run affected tasks") and passed("Validate workspace")');
     // The required gate still waits for the plan and every lane, and passes a skip only on the plan's verdict.
     const gate = ci.jobs['affected'];
     expect(gate?.needs).toEqual([
@@ -235,7 +240,7 @@ describe('ci.yml affected-only lanes', () => {
     expect(check.indexOf('if [ "$DRAFT" = true ]; then')).toBeLessThan(check.indexOf('test "$PLAN_RESULT" = success'));
   });
 
-  it('should leave the service, formal, browser, GeoSpec, CLI end-to-end, native-host, viewer-parity and standalone lanes to the merge queue on a pull request', () => {
+  it('should leave the service, formal, browser, GeoSpec, CLI end-to-end, native-host and viewer-parity lanes to the merge queue on a pull request', () => {
     const slim = planScript.slice(planScript.indexOf('if [ "$GITHUB_EVENT_NAME" = pull_request ]; then'));
     expect(slim).toMatch(/^\s*native_linux=''$/mu);
     for (const lane of [
@@ -247,7 +252,6 @@ describe('ci.yml affected-only lanes', () => {
       'cli_e2e',
       'native_hosts',
       'viewer_parity',
-      'standalone',
     ]) {
       expect(slim, lane).toMatch(new RegExp(`^\\s*${lane}=false$`, 'mu'));
     }
@@ -259,20 +263,51 @@ describe('ci.yml affected-only lanes', () => {
     );
   });
 
-  it('should skip a service lane on a push only where the reused queue run passed it', () => {
+  it('should skip a lane outside the gate on a push only where the reused queue run passed or skipped it', () => {
     expect(planStep?.env?.['QUEUE_LANES']).toBe(expression("steps.queue.outputs.lanes || '{}'"));
-    expect(planScript).toContain(`if [ "$(jq -r '.api // ""' <<< "$QUEUE_LANES")" = success ]; then run_api=false; fi`);
-    expect(planScript).toContain(
-      `if [ "$(jq -r '."billing-e2e" // ""' <<< "$QUEUE_LANES")" = success ]; then run_billing=false; fi`,
-    );
+    expect(planScript).toContain(`queue_lane() { jq -r --arg lane "$1" '.[$lane] // ""' <<< "$QUEUE_LANES"; }`);
+    // `skipped` in the queue means the queue's plan did not select it on this commit (F3); a failed,
+    // cancelled, pending or missing lane runs again.
+    expect(planScript).toContain('case "$(queue_lane api)" in success | skipped) run_api=false ;; esac');
+    expect(planScript).toContain('case "$(queue_lane billing-e2e)" in success | skipped) run_billing=false ;; esac');
+    expect(planScript).toContain('case "$(queue_lane formal)" in success | skipped) formal=false ;; esac');
+    expect(planScript.match(/run_api=false/gu)).toHaveLength(2);
+    expect(planScript.match(/run_billing=false/gu)).toHaveLength(2);
+    expect(planScript.match(/^\s*formal=false$/gmu)).toHaveLength(1);
     expect(planScript).toContain('echo "api=$run_api"');
     expect(planScript).toContain('echo "billing=$run_billing"');
-    // Both are decided inside `if [ -n "$REUSED" ]`, which only a push to `main` can enter.
+    // All three are decided inside `if [ -n "$REUSED" ]`, which only a push to `main` can enter.
     const reused = planScript.slice(planScript.indexOf('if [ -n "$REUSED" ]; then'));
     const end = reused.indexOf('\nfi\n');
     expect(end).toBeGreaterThan(0);
-    expect(reused.indexOf('run_api=false')).toBeLessThan(end);
-    expect(reused.indexOf('run_billing=false')).toBeLessThan(end);
+    for (const lane of ['run_api=false', 'run_billing=false', 'formal=false']) {
+      expect(reused.indexOf(lane), lane).toBeGreaterThan(0);
+      expect(reused.indexOf(lane), lane).toBeLessThan(end);
+    }
+  });
+
+  it('should run the standalone oracles on a push to main only, never in the merge queue', () => {
+    // In the queue they started after the gate, so the landed queue run was still in progress and the
+    // sweep cancelled it before the push could reuse it (F1, F2). Push and nightly cover every commit.
+    const { standalone } = ci.jobs;
+    expect(standalone?.uses).toBe('./.github/workflows/standalone-projects.yml');
+    expect(standalone?.needs).toEqual(['plan', 'affected']);
+    expect(standalone?.if).toBe(
+      "!cancelled() && needs.plan.result == 'success' && github.ref == 'refs/heads/main' && github.event_name == 'push'",
+    );
+    expect(ci.jobs['plan']?.outputs?.['standalone']).toBeUndefined();
+    const standaloneWorkflow = load(read('.github/workflows/standalone-projects.yml')) as {
+      readonly on: Record<string, unknown>;
+    };
+    expect(Object.keys(standaloneWorkflow.on).sort()).toEqual(['schedule', 'workflow_call', 'workflow_dispatch']);
+    // Nothing else the queue schedules waits for the required gate, so a landed queue run is done with
+    // everything required when GitHub merges it.
+    const afterGate = Object.entries(ci.jobs)
+      .filter(([, definition]) => [definition.needs ?? []].flat().includes('affected'))
+      .map(([name, definition]) => ({ name, condition: definition.if ?? '' }));
+    for (const { name, condition } of afterGate) {
+      expect(condition, name).toContain("github.event_name == 'push'");
+    }
   });
 
   it('should gate billing contracts on the billing plan output alone', () => {
@@ -422,13 +457,22 @@ describe('staging.yml skipped-lane rule', () => {
     expect(script).toContain('if [ "$conclusion" = skipped ] &&');
     expect(script).toContain(`jq -e --arg key "$key" 'index($key) != null' <<< "$PLANNED_LANES"`);
     // An absent plan or lane reads as selected, so the skip stays `skipped` and refuses.
-    expect(script).toContain(`[ "$(jq -r --arg key "$key" '.[$key] // "true"' <<< "$plan")" = false ]; then`);
+    expect(script).toContain(`[ "$(jq -r --arg key "$key" '.[$key] // "true"' <<< "$plan")" = false ] ||`);
     expect(script.match(/conclusion=not-affected/gu)).toHaveLength(1);
   });
 
+  it('should turn a skip into not-affected for a planned lane the reused queue run skipped', () => {
+    // The queue's conclusion is read only when the plan names the run it reused.
+    expect(script).toContain(`if [ -n "$(jq -r '."reused-run" // ""' <<< "$plan")" ]; then`);
+    expect(script).toContain(`queue=$(jq -r --arg key "$key" '.queue[$key] // ""' <<< "$plan")`);
+    expect(script).toContain(
+      `if [ "$(jq -r --arg key "$key" '.[$key] // "true"' <<< "$plan")" = false ] || [ "$queue" = skipped ]; then`,
+    );
+    expect(script.indexOf('queue=$(')).toBeGreaterThan(script.indexOf('<<< "$PLANNED_LANES"'));
+  });
+
   it('should turn a skip into reused only for a planned lane the reused queue run passed', () => {
-    expect(script).toContain(`elif [ -n "$(jq -r '."reused-run" // ""' <<< "$plan")" ] &&`);
-    expect(script).toContain(`[ "$(jq -r --arg key "$key" '.queue[$key] // ""' <<< "$plan")" = success ]; then`);
+    expect(script).toContain('elif [ "$queue" = success ]; then');
     expect(script.match(/conclusion=reused/gu)).toHaveLength(1);
     // Inside the planned-lane branch, so `workspace` and `affected` can never report it.
     expect(script.indexOf('conclusion=reused')).toBeGreaterThan(script.indexOf('<<< "$PLANNED_LANES"'));
@@ -447,5 +491,181 @@ describe('staging.yml skipped-lane rule', () => {
         expect(['success', ...(planned.includes(key ?? '') ? ['not-affected', 'reused'] : [])], name).toContain(value);
       }
     }
+  });
+});
+
+describe('queue-verdict action', () => {
+  const action = load(read('.github/actions/queue-verdict/action.yml')) as {
+    readonly runs: { readonly steps: readonly Step[] };
+  };
+  const script = action.runs.steps.find((step) => step.id === 'find')?.run ?? '';
+
+  /** A job of a queue run as the jobs API lists it; a job still running has no conclusion (`null` there). */
+  type RunJob = { readonly name: string; readonly status: string; readonly conclusion?: string };
+  type QueueRun = { readonly id: number; readonly createdAt: string; readonly jobs: readonly RunJob[] };
+  const done = (name: string, conclusion: string): RunJob => ({ name, status: 'completed', conclusion });
+  const running = (name: string): RunJob => ({ name, status: 'in_progress' });
+  const gatePassed = [
+    done('Plan affected lanes', 'success'),
+    done('Validate workspace', 'success'),
+    done('Run affected tasks', 'success'),
+  ];
+
+  /** Runs the action's step with a `gh` that answers from `runs`, and returns its outputs. */
+  const verdict = (runs: readonly QueueRun[], event = 'push', ref = 'refs/heads/main'): Record<string, string> => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-queue-verdict-'));
+    try {
+      // The REST API's snake_case keys, as entries so the fixture's own names stay camelCase.
+      const listing = Object.fromEntries<unknown>([
+        [
+          'workflow_runs',
+          runs.map(({ id, createdAt }) =>
+            Object.fromEntries<number | string>([
+              ['id', id],
+              ['created_at', createdAt],
+            ]),
+          ),
+        ],
+      ]);
+      writeFileSync(join(directory, 'runs.json'), JSON.stringify(listing));
+      for (const run of runs) {
+        writeFileSync(join(directory, `jobs-${run.id}.json`), JSON.stringify({ jobs: run.jobs }));
+      }
+      // `gh api [--paginate] <path> --jq <filter>`: answers the runs listing or one run's jobs from a file.
+      writeFileSync(
+        join(directory, 'gh'),
+        [
+          '#!/usr/bin/env bash',
+          'set -euo pipefail',
+          'path=""; filter="."',
+          'while [ $# -gt 0 ]; do case "$1" in --jq) filter=$2; shift 2 ;; repos/*) path=$1; shift ;; *) shift ;; esac; done',
+          'echo "$path" >> "$FIXTURES/calls"',
+          'case "$path" in',
+          '  */workflows/ci.yml/runs?*) file="$FIXTURES/runs.json" ;;',
+          // `repos/<owner>/<repo>/actions/runs/<id>/jobs?…`: the sixth path segment is the run id.
+          '  */actions/runs/*/jobs?*) file="$FIXTURES/jobs-$(cut -d/ -f6 <<< "$path").json" ;;',
+          '  *) echo "unexpected gh api $path" >&2; exit 1 ;;',
+          'esac',
+          'jq -r "$filter" "$file"',
+          '',
+        ].join('\n'),
+        { mode: 0o700 },
+      );
+      const output = join(directory, 'output');
+      writeFileSync(output, '');
+      writeFileSync(join(directory, 'calls'), '');
+      const result = spawnSync('bash', ['-c', script], {
+        encoding: 'utf8',
+        env: Object.fromEntries([
+          ['PATH', `${directory}:${process.env['PATH'] ?? ''}`],
+          ['FIXTURES', directory],
+          ['GH_TOKEN', 'fixture'],
+          ['EVENT', event],
+          ['REF', ref],
+          ['GITHUB_REPOSITORY', 'taucad/tau'],
+          ['GITHUB_SHA', 'abc123'],
+          ['GITHUB_OUTPUT', output],
+        ]),
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const outputs = Object.fromEntries(
+        readFileSync(output, 'utf8')
+          .trim()
+          .split('\n')
+          .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]),
+      );
+      return { ...outputs, calls: readFileSync(join(directory, 'calls'), 'utf8') };
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  };
+
+  it('should reuse a queue run that is still in progress once its required gate passed', () => {
+    const outputs = verdict([
+      {
+        id: 7,
+        createdAt: '2026-11-12T01:40:00Z',
+        jobs: [
+          ...gatePassed,
+          running('API tests (Postgres + MinIO)'),
+          done('Billing contracts (no Stripe credentials)', 'skipped'),
+          done('Formal models', 'success'),
+          running('Standalone projects (npm)'),
+        ],
+      },
+    ]);
+    expect(outputs['run-id']).toBe('7');
+    expect(JSON.parse(outputs['lanes'] ?? '')).toEqual({ api: 'pending', 'billing-e2e': 'skipped', formal: 'success' });
+    expect(outputs['api']).toBe('skipped');
+    expect(outputs['calls']).toContain('head_sha=abc123&event=merge_group&per_page=10');
+  });
+
+  it('should reuse a queue run the sweep cancelled after its required gate passed', () => {
+    const outputs = verdict([
+      {
+        id: 8,
+        createdAt: '2026-11-12T01:40:00Z',
+        jobs: [
+          ...gatePassed,
+          done('API tests (Postgres + MinIO)', 'success'),
+          done('Billing contracts (no Stripe credentials)', 'success'),
+          done('Formal models', 'cancelled'),
+        ],
+      },
+    ]);
+    expect(outputs['run-id']).toBe('8');
+    expect(outputs['api']).toBe('success');
+    expect(JSON.parse(outputs['lanes'] ?? '')).toEqual({
+      api: 'success',
+      'billing-e2e': 'success',
+      formal: 'cancelled',
+    });
+  });
+
+  it.each([
+    ['the gate failed', [done('Validate workspace', 'success'), done('Run affected tasks', 'failure')]],
+    ['the gate was cancelled', [done('Validate workspace', 'success'), done('Run affected tasks', 'cancelled')]],
+    ['the gate is still running', [done('Validate workspace', 'success'), running('Run affected tasks')]],
+    ['the run never reached the gate', [done('Validate workspace', 'success'), done('Affected (lint)', 'cancelled')]],
+    ['the workspace validators failed', [done('Validate workspace', 'failure'), done('Run affected tasks', 'success')]],
+    [
+      'the workspace validators are still running',
+      [running('Validate workspace'), done('Run affected tasks', 'success')],
+    ],
+  ] as const)('should never reuse a queue run when %s', (_case, jobs) => {
+    const outputs = verdict([{ id: 9, createdAt: '2026-11-12T01:40:00Z', jobs }]);
+    expect(outputs['run-id']).toBe('');
+    expect(outputs['lanes']).toBe('{}');
+    expect(outputs['api']).toBe('skipped');
+  });
+
+  it('should pick the most recent queue run on the commit whose required gate passed', () => {
+    const older = { id: 10, createdAt: '2026-11-12T01:00:00Z', jobs: gatePassed };
+    const newer = { id: 11, createdAt: '2026-11-12T01:30:00Z', jobs: gatePassed };
+    const failed = {
+      id: 12,
+      createdAt: '2026-11-12T01:50:00Z',
+      jobs: [done('Validate workspace', 'success'), done('Run affected tasks', 'failure')],
+    };
+    expect(verdict([older, newer])['run-id']).toBe('11');
+    expect(verdict([newer, older])['run-id']).toBe('11');
+    expect(verdict([failed, older, newer])['run-id']).toBe('11');
+  });
+
+  it('should find nothing and call nothing outside a push to main', () => {
+    const run = { id: 13, createdAt: '2026-11-12T01:00:00Z', jobs: gatePassed };
+    for (const [event, ref] of [
+      ['merge_group', 'refs/heads/gh-readonly-queue/main/pr-1-abc'],
+      ['pull_request', 'refs/pull/1/merge'],
+      ['push', 'refs/heads/release/ui'],
+    ] as const) {
+      const outputs = verdict([run], event, ref);
+      expect(outputs['run-id'], event).toBe('');
+      expect(outputs['calls'], event).toBe('');
+    }
+  });
+
+  it('should find nothing on a bypass push with no queue run', () => {
+    expect(verdict([])['run-id']).toBe('');
   });
 });

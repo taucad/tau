@@ -97,12 +97,14 @@ jobs:
   # built from its code also need `API tests` and `Billing contracts`. Those two run
   # only when that CI run's plan finds them affected: a `skipped` one reports
   # `not-affected` only when the run's `ci-plan` artifact says the plan did not select
-  # it, and `reused` only when the artifact names the merge-queue run this push reused
-  # (`reused-run`) and says that run concluded the lane `success` (`queue`): both suites
-  # run every test of their target on the identical commit, so the queue's pass stands.
-  # It stays `skipped` otherwise. A check that never ran reports `missing`. Deploys
-  # accept `success`, and `not-affected` or `reused` for those two lanes; anything else
-  # refuses.
+  # it, or names the merge-queue run this push reused (`reused-run`) and says that run
+  # concluded the lane `skipped` (`queue`): the queue found it unaffected by this commit,
+  # and every earlier commit the push plan's wider base covers had its own queue run. It
+  # reports `reused` only when the artifact names that run and says it concluded the lane
+  # `success`: both suites run every test of their target on the identical commit, so the
+  # queue's pass stands. It stays `skipped` otherwise. A check that never ran reports
+  # `missing`. Deploys accept `success`, and `not-affected` or `reused` for those two
+  # lanes; anything else refuses.
   # This job passes whatever it reports: a red check belongs to `ci.yml`.
   # While the gating checks are still running it reports `pending`, every deploy
   # skips, and the run ends. `staging-gate.yml` reruns this run once that `ci.yml` run
@@ -178,10 +180,17 @@ jobs:
                 'first(.[] | select(.name == $name and .status == "completed") | .conclusion) // "missing"' <<< "$jobs")
               if [ "$conclusion" = skipped ] &&
                 jq -e --arg key "$key" 'index($key) != null' <<< "$PLANNED_LANES" > /dev/null; then
-                if [ "$(jq -r --arg key "$key" '.[$key] // "true"' <<< "$plan")" = false ]; then
+                # The reused queue run's conclusion of the lane, only when the plan names that run.
+                queue=''
+                if [ -n "$(jq -r '."reused-run" // ""' <<< "$plan")" ]; then
+                  queue=$(jq -r --arg key "$key" '.queue[$key] // ""' <<< "$plan")
+                fi
+                if [ "$(jq -r --arg key "$key" '.[$key] // "true"' <<< "$plan")" = false ] || [ "$queue" = skipped ]; then
                   conclusion=not-affected
-                elif [ -n "$(jq -r '."reused-run" // ""' <<< "$plan")" ] &&
-                  [ "$(jq -r --arg key "$key" '.queue[$key] // ""' <<< "$plan")" = success ]; then
+                  if [ "$queue" = skipped ]; then
+                    echo "$name was not affected in merge-queue run $(jq -r '."reused-run"' <<< "$plan") on this commit."
+                  fi
+                elif [ "$queue" = success ]; then
                   conclusion=reused
                   echo "$name passed in merge-queue run $(jq -r '."reused-run"' <<< "$plan") on this commit."
                 fi

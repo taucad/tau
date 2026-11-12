@@ -1,15 +1,26 @@
 name: 'Queue verdict'
 description: >-
-  On a push to `main`, finds the green merge-queue `ci.yml` run on the identical commit,
-  so the push run can reuse its verdict instead of running the same checks again.
+  On a push to `main`, finds the merge-queue `ci.yml` run on the identical commit whose required
+  checks passed, so the push run can reuse its verdict instead of running the same checks again.
 
 # The merge queue tests the exact commit that lands: `main` fast-forwards to the
-# group's commit, so a green `merge_group` run on `github.sha` already ran every
-# affected lane, the workspace validators and, when the API was affected, the API
-# tests and billing contracts on this tree. Rerunning them on the push cost about
-# 3.4 runner-hours per commit (operator decision 2026-11-08, Brain
+# group's commit, so a `merge_group` run on `github.sha` whose required checks passed
+# already ran every affected lane, the workspace validators and, when the API was
+# affected, the API tests and billing contracts on this tree. Rerunning them on the push
+# cost about 3.4 runner-hours per commit (operator decision 2026-11-08, Brain
 # research/ci-throughput-review.md). A commit that reached `main` without the queue
 # (an emergency bypass) has no such run and gets the full push run.
+#
+# The proof is the two required jobs, not the run's overall conclusion. GitHub merges
+# as soon as the required checks pass, so the queue run is often still `in_progress`
+# when this push starts, and `merge-queue-sweep.yml` then cancels it as a run of a
+# deleted queue branch. Until 2026-11-12 this lookup asked only for successful runs, found
+# nothing, and 25 of 41 pushes reran every lane (Brain ci-audit 2026-11-12, F1). A run
+# counts only when `Run affected tasks` and `Validate workspace` both completed
+# `success`; the gate itself fails on any selected lane that did not pass, so a run
+# whose gate failed, was cancelled before it finished or never reached it is never
+# reused. The lanes outside the gate (API, billing, formal) are reported one by one, and
+# the plan reuses each only on its own conclusion.
 
 inputs:
   github-token:
@@ -18,19 +29,19 @@ inputs:
 
 outputs:
   run-id:
-    description: "The green merge-group run on this commit, or '' when there is none or this is not a push to main"
+    description: "The most recent merge-group run on this commit whose `Run affected tasks` and `Validate workspace` jobs concluded `success`, or '' when there is none or this is not a push to main"
     value: ${{ steps.find.outputs.run-id }}
   api:
     description: "Conclusion of that run's `API tests (Postgres + MinIO)` and `Billing contracts` jobs: 'success' when both passed, otherwise 'skipped'"
     value: ${{ steps.find.outputs.api }}
   lanes:
-    description: "That run's conclusion of each service lane, as JSON keyed like `ci.yml`'s `lanes.json` (`api`, `billing-e2e`), 'missing' for a job it did not report; '{}' when there is no run"
+    description: "That run's conclusion of each lane outside the gate, as JSON keyed like `ci.yml`'s `lanes.json` (`api`, `billing-e2e`) plus `formal`: the job's conclusion once completed, 'pending' while it runs, 'missing' for a job it did not report; '{}' when there is no run"
     value: ${{ steps.find.outputs.lanes }}
 
 runs:
   using: 'composite'
   steps:
-    - name: Find the green merge-queue run on this commit
+    - name: Find the merge-queue run on this commit whose required checks passed
       id: find
       shell: bash
       env:
@@ -42,22 +53,40 @@ runs:
         run_id=''
         api=skipped
         lanes='{}'
+        jobs='[]'
         if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
-          run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=merge_group&status=success&per_page=1" \
-            --jq '.workflow_runs[0].id // empty')
+          # Every merge-group run on this commit, any status, newest first: the first whose
+          # required jobs both completed `success` is the verdict.
+          candidates=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=merge_group&per_page=10" \
+            --jq '.workflow_runs | sort_by(.created_at) | reverse | .[].id')
+          for candidate in $candidates; do
+            candidate_jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$candidate/jobs?per_page=100" \
+              --jq '.jobs[] | {name, status, conclusion}' | jq -s .)
+            if jq -e '
+              def passed($name): any(.[]; .name == $name and .status == "completed" and .conclusion == "success");
+              passed("Run affected tasks") and passed("Validate workspace")' <<< "$candidate_jobs" > /dev/null; then
+              run_id=$candidate
+              jobs=$candidate_jobs
+              break
+            fi
+            echo "Merge-queue run $candidate on $GITHUB_SHA has no passed required gate; not reused."
+          done
         fi
         if [ -n "$run_id" ]; then
-          jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" \
-            --jq '.jobs[] | {name, conclusion}' | jq -s .)
           api=$(jq -r '
             [first(.[] | select(.name == "API tests (Postgres + MinIO)") | .conclusion) // "skipped",
              first(.[] | select(.name == "Billing contracts (no Stripe credentials)") | .conclusion) // "skipped"]
             | if all(. == "success") then "success" else "skipped" end' <<< "$jobs")
           # Per lane, so a push reuses the lane the queue ran and runs only the one it did not.
+          # A job still running when the sweep cancels the run ends `cancelled`, never `success`
+          # or `skipped`, so the push runs it again.
           lanes=$(jq -c '
-            {api: (first(.[] | select(.name == "API tests (Postgres + MinIO)") | .conclusion) // "missing"),
-             "billing-e2e": (first(.[] | select(.name == "Billing contracts (no Stripe credentials)") | .conclusion) // "missing")}' <<< "$jobs")
-          echo "::notice::Reusing the green merge-queue run $run_id on $GITHUB_SHA (service lanes: $lanes)."
+            def lane($name): first(.[] | select(.name == $name)
+              | if .status == "completed" then .conclusion else "pending" end) // "missing";
+            {api: lane("API tests (Postgres + MinIO)"),
+             "billing-e2e": lane("Billing contracts (no Stripe credentials)"),
+             formal: lane("Formal models")}' <<< "$jobs")
+          echo "::notice::Reusing merge-queue run $run_id on $GITHUB_SHA, whose required checks passed (lanes outside the gate: $lanes)."
         fi
         echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
         echo "api=$api" >> "$GITHUB_OUTPUT"

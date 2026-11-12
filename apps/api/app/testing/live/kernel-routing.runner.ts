@@ -684,6 +684,91 @@ export const exampleRoutingCase = (example: ExampleSuggestion): KernelRoutingCas
 };
 
 /** One suggestion's runs under Auto. */
+/**
+ * The checkpoint key of one run: a case and its repeat number.
+ *
+ * @param caseId - The case id.
+ * @param repeat - The repeat number, from 1.
+ * @returns The key.
+ */
+export const checkpointKey = (caseId: string, repeat: number): string => `${caseId}#${repeat}`;
+
+type CheckpointRow = Readonly<{
+  observation: Readonly<{ caseId: string }>;
+  repeat: number;
+  state: string;
+  bindingKind?: unknown;
+}>;
+
+/**
+ * The runs an earlier process already paid for, by checkpoint key, so a resumed run sends only the rest. A run the
+ * provider failed before any write is dropped and runs again; a later row for the same key replaces an earlier one.
+ *
+ * @param rows - Rows read back from an arm's JSONL file, oldest first.
+ * @returns The kept rows by checkpoint key.
+ */
+export const checkpointedRuns = <Row extends CheckpointRow>(rows: readonly Row[]): ReadonlyMap<string, Row> => {
+  const kept = new Map<string, Row>();
+  for (const row of rows) {
+    if (row.state === 'failed' && row.bindingKind === undefined) {
+      continue;
+    }
+    kept.set(checkpointKey(row.observation.caseId, row.repeat), row);
+  }
+  return kept;
+};
+
+/** Where an arm's spend stands: what earlier processes paid, what this one has paid, and what is left to pay. */
+export type SpendProgress = Readonly<{
+  earlierUsd: number;
+  thisRunUsd: number;
+  totalUsd: number;
+  /** The mean cost of a run so far, or undefined before any run has a cost. */
+  perRunUsd: number | undefined;
+  remainingRuns: number;
+  /** `remainingRuns` at `perRunUsd`, or undefined before any run has a cost. */
+  projectedRemainingUsd: number | undefined;
+}>;
+
+/**
+ * Sum what an arm has spent and project the rest from the mean cost of the runs so far.
+ *
+ * @param input - The costs of runs kept from earlier processes, the costs of this process's runs, and the runs left.
+ * @returns The arm's spend so far and the projected spend to finish.
+ */
+export const spendProgress = (
+  input: Readonly<{ earlier: readonly number[]; current: readonly number[]; remainingRuns: number }>,
+): SpendProgress => {
+  const sum = (costs: readonly number[]): number => costs.reduce((total, cost) => total + cost, 0);
+  const earlierUsd = sum(input.earlier);
+  const thisRunUsd = sum(input.current);
+  const count = input.earlier.length + input.current.length;
+  const perRunUsd = count === 0 ? undefined : (earlierUsd + thisRunUsd) / count;
+  return {
+    earlierUsd,
+    thisRunUsd,
+    totalUsd: earlierUsd + thisRunUsd,
+    perRunUsd,
+    remainingRuns: input.remainingRuns,
+    projectedRemainingUsd: perRunUsd === undefined ? undefined : perRunUsd * input.remainingRuns,
+  };
+};
+
+/**
+ * One log line for an arm's spend.
+ *
+ * @param progress - The arm's spend progress.
+ * @returns The line, in dollars.
+ */
+export const formatSpendProgress = (progress: SpendProgress): string => {
+  const usd = (value: number): string => `$${value.toFixed(2)}`;
+  const projected =
+    progress.projectedRemainingUsd === undefined
+      ? 'unknown until a run has a cost'
+      : usd(progress.projectedRemainingUsd);
+  return `spent ${usd(progress.totalUsd)} (${usd(progress.earlierUsd)} earlier, ${usd(progress.thisRunUsd)} this run); ${progress.remainingRuns} runs left, about ${projected} more`;
+};
+
 export type ExampleVerdict = {
   readonly caseId: string;
   /** Runs bound to an acceptable kernel. */
@@ -691,6 +776,8 @@ export type ExampleVerdict = {
   /** Runs bound to a kernel that is not acceptable. */
   readonly misrouted: number;
   readonly runs: number;
+  /** Fewer runs were graded than the run requested, so the verdict is not met. */
+  readonly inconclusive: boolean;
   readonly met: boolean;
 };
 
@@ -705,9 +792,11 @@ export type ExampleVerdict = {
 export const summarizeExampleRuns = (
   cases: readonly KernelRoutingCase[],
   runs: ReadonlyMap<string, readonly KernelRoutingObservation[]>,
+  expectedRuns: number,
 ): readonly ExampleVerdict[] =>
   cases.map((testCase) => {
     const observations = runs.get(testCase.id) ?? [];
+    const inconclusive = observations.length < Math.max(1, expectedRuns);
     const bound = observations.flatMap(({ boundKernel }) => (boundKernel === undefined ? [] : [boundKernel]));
     const resolved = bound.filter((kernel) => testCase.acceptable.includes(kernel)).length;
     const misrouted = bound.length - resolved;
@@ -716,6 +805,7 @@ export const summarizeExampleRuns = (
       resolved,
       misrouted,
       runs: observations.length,
-      met: observations.length > 0 && resolved >= Math.ceil(observations.length * 0.8 - 1e-9) && misrouted === 0,
+      inconclusive,
+      met: !inconclusive && resolved >= Math.ceil(observations.length * 0.8 - 1e-9) && misrouted === 0,
     };
   });

@@ -13,6 +13,8 @@ export type ViewportGizmoStyle = {
   readonly label: number;
   readonly hover: number;
   readonly hoverLabel: number;
+  /** The label on an axis ball: a dark neutral, legible on every axis hue in both themes. */
+  readonly ballLabel: number;
   readonly font: string;
   readonly axes: Readonly<{ x: string; y: string; z: string }>;
   /** The section plane picker's tile tints, by the axis normal to each tile's plane. */
@@ -89,6 +91,7 @@ const resolveViewportGizmoStyle = ({
     hover: hover.getHex(),
     // Choose the higher-contrast neutral for every user-selected accent, including very pale hues.
     hoverLabel: neutral(luminance > 0.179 ? 0 : 1),
+    ballLabel: neutral(0.16),
     font: styles.getPropertyValue('--font-sans').trim() || "'Geist Sans', ui-sans-serif, system-ui, sans-serif",
     axes: { x: axisColor(axesHelperColors.x), y: axisColor(axesHelperColors.y), z: axisColor(axesHelperColors.z) },
     planeTiles: { x: planeTile('x'), y: planeTile('y'), z: planeTile('z') },

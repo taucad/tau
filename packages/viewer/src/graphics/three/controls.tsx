@@ -11,6 +11,7 @@ import { SectionPlanePickerContext } from '#graphics/three/controls/viewport-giz
 import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
 import { useCameraSelector, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import type { SecondaryMouseButtonMode } from '#graphics/three/three-viewer-properties.js';
+import type { GizmoStyleId } from '#graphics/three/controls/viewport-gizmo-styles.js';
 
 const MeasureTool = React.lazy(async () => {
   const module = await import('#graphics/three/react/measure-tool.jsx');
@@ -57,6 +58,10 @@ type ControlsProperties = {
    * A container element or selector to append the gizmo to.
    */
   readonly gizmoContainer?: HTMLElement | string;
+  /**
+   * The view cube's style. Absent: the rounded cube.
+   */
+  readonly gizmoStyle?: GizmoStyleId;
 };
 
 export const Controls = React.memo(function ({
@@ -66,6 +71,7 @@ export const Controls = React.memo(function ({
   secondaryMouseButtonMode = 'camera-pan',
   zoomSpeed,
   gizmoContainer,
+  gizmoStyle,
 }: ControlsProperties) {
   const backend = useThreeGraphicsBackend();
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
@@ -109,7 +115,7 @@ export const Controls = React.memo(function ({
       </React.Suspense>
       {enableGizmo ? (
         <SectionPlanePickerContext.Provider value={isSectionViewActive ? planePicker : undefined}>
-          <ViewportGizmoCube container={gizmoContainer} />
+          <ViewportGizmoCube container={gizmoContainer} gizmoStyle={gizmoStyle} />
         </SectionPlanePickerContext.Provider>
       ) : null}
     </>

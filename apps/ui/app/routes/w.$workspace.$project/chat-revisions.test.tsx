@@ -1501,7 +1501,7 @@ describe('Revisions pane vocabulary and History', () => {
   it('keeps Start under the agent’s first entry, and the agent’s entry its own Rev', async () => {
     revisionStatusHarness.rows = [
       row({ revisionId: 'rev-2', revisionNumber: 2, summary: 'Add vent slots', source: 'agent', capture: 'turn' }),
-      row({ revisionId: 'rev-1', revisionNumber: 1, summary: 'Agent turn t1', capture: 'turn', start: 'created' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, summary: 'Agent change', capture: 'turn', start: 'created' }),
     ];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
 

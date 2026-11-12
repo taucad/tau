@@ -38,6 +38,33 @@ describe('refusedShellEnvironment', () => {
     ]);
   });
 
+  it('should accept GIT_CONFIG_NOSYSTEM=1, which only drops the system config, and nothing else under GIT_CONFIG', () => {
+    expect(refusedShellEnvironment({ PATH: '/usr/bin', GIT_CONFIG_NOSYSTEM: '1' })).toStrictEqual([]);
+    expect(
+      refusedShellEnvironment({
+        GIT_CONFIG_NOSYSTEM: '0',
+        git_config_nosystem: '1',
+        GIT_CONFIG: '/x',
+        GIT_CONFIG_GLOBAL: '/x',
+        GIT_CONFIG_SYSTEM: '/x',
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'core.fsmonitor',
+        GIT_CONFIG_VALUE_0: '/x',
+        GIT_CONFIG_PARAMETERS: "'core.fsmonitor=/x'",
+      }),
+    ).toStrictEqual([
+      'GIT_CONFIG_NOSYSTEM',
+      'git_config_nosystem',
+      'GIT_CONFIG',
+      'GIT_CONFIG_GLOBAL',
+      'GIT_CONFIG_SYSTEM',
+      'GIT_CONFIG_COUNT',
+      'GIT_CONFIG_KEY_0',
+      'GIT_CONFIG_VALUE_0',
+      'GIT_CONFIG_PARAMETERS',
+    ]);
+  });
+
   it('should refuse a malformed name or a value holding NUL', () => {
     expect(refusedShellEnvironment({ 'A=B': 'x', OK: 'a\0b' })).toStrictEqual(['A=B', 'OK']);
   });

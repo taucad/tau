@@ -488,8 +488,11 @@ export const createShellGitView = async (checkout: string, privateRoot: string):
 };
 
 /**
- * The environment that points git in the shell at a view: its directory and work tree, and no optional lock (status
- * must not try to refresh the read-only index copy, and every write fails).
+ * The environment that points git in the shell at a view: its directory and work tree, no optional lock (status must
+ * not try to refresh the read-only index copy, and every write fails) and no system-wide config. The machine's system
+ * config is not the view's: Xcode's git carries `credential.helper=osxkeychain` in its bundled one, and a distribution's
+ * `/etc/gitconfig` may name helpers, hooks, an fsmonitor or includes, so git in the shell reads only the view's fresh
+ * config, the private HOME's and its own command line.
  *
  * @param view - The launch's view.
  * @returns The variables to add to the launch environment.
@@ -499,4 +502,5 @@ export const shellGitEnvironment = (view: ShellGitView): Readonly<Record<string,
   GIT_DIR: view.directory,
   GIT_WORK_TREE: view.workTree,
   GIT_OPTIONAL_LOCKS: '0',
+  GIT_CONFIG_NOSYSTEM: '1',
 });

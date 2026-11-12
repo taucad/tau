@@ -8,6 +8,8 @@ import type { DesktopArtifactManifest } from '#shared/desktop-release.js';
 import { verifyQualificationMirrorObject } from './qualification-mirror.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Carry authenticated candidate provenance into source admission.
 import { fetchInstallerCandidate } from './fetch-desktop-installer-candidate.mjs';
+// oxlint-disable-next-line no-restricted-imports -- The binding owns which modes may test an ancestor source.
+import { usesQualificationBinding } from './qualification-binding.mjs';
 
 export type QualificationCandidateInput = {
   manifest: DesktopArtifactManifest;
@@ -39,8 +41,8 @@ export const assertQualificationConsumerScope = (options: {
 };
 
 /**
- * Staging Mac CI and Linux may test trusted ancestors. Mac CI publication additionally authenticates a source/harness
- * binding; clean-host and all-platform runs retain exact-source admission.
+ * Staging Mac (CI and clean-host) and Linux may test trusted ancestors. Staging Mac publication additionally
+ * authenticates a source/harness binding; Windows clean-host and all-platform runs retain exact-source admission.
  */
 export const assertQualificationSource = (options: {
   sourceCommit: string;
@@ -61,7 +63,7 @@ export const assertQualificationSource = (options: {
   }
   if (
     options.scope !== 'linux' &&
-    !(options.scope === 'macos' && options.channel === 'staging' && options.kind === 'ci') &&
+    !usesQualificationBinding(options.scope, options.channel, options.kind) &&
     options.sourceCommit !== options.workflowCommit
   ) {
     throw new Error('Qualification requires the workflow exact source');
@@ -95,7 +97,7 @@ export const fetchQualificationCandidates = async (options: {
       JSON.parse(await readFile(join(artifactDirectory, 'desktop-artifacts.json'), 'utf8')),
     );
     execFileSync('git', ['merge-base', '--is-ancestor', manifest.sourceCommit, options.sourceCommit]);
-    if (options.scope === 'macos' && manifest.channel === 'staging' && options.kind === 'ci') {
+    if (usesQualificationBinding(options.scope, manifest.channel, options.kind)) {
       execFileSync('git', ['merge-base', '--is-ancestor', manifest.sourceCommit, provenance.workflowCommit]);
     }
     for (const artifact of manifest.artifacts) {

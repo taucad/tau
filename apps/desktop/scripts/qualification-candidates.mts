@@ -57,7 +57,7 @@ export const assertQualificationSource = (options: {
     !['ci', 'vm'].includes(options.kind) ||
     !['all', 'linux', 'macos', 'windows'].includes(options.scope) ||
     !['staging', 'production'].includes(options.channel) ||
-    (options.scope !== 'all' && options.channel !== 'staging')
+    (options.scope === 'windows' && options.channel !== 'staging')
   ) {
     throw new Error('Invalid qualification source scope/channel');
   }

@@ -93,15 +93,15 @@ describe('createPortRevisionsClient', () => {
 
     await expect(client.log({ branch: 'main', limit: 5 })).resolves.toEqual([row(3, 'rev-m')]);
     await expect(client.diff(undefined, 'rev-m')).resolves.toEqual([]);
+    /* M11: the place names the branch and no number. */
     await expect(client.describe()).resolves.toEqual({
       branch: 'main',
-      revisionNumber: 3,
       revisionId: 'rev-m',
       branches: [
-        { name: 'main', revisionNumber: 3, revisionId: 'rev-m' },
-        { name: 'feature', revisionNumber: 2, revisionId: 'rev-f' },
+        { name: 'main', revisionId: 'rev-m' },
+        { name: 'feature', revisionId: 'rev-f' },
       ],
-      line: 'main · Rev 3',
+      line: 'main',
     });
     expect(seen[1]).toMatchObject({ command: 'diff', revisionId: 'rev-m' });
 

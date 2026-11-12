@@ -545,7 +545,7 @@ describe('publishMachine', () => {
     actor.stop();
   });
 
-  it('13: refuses a project that has no revisions yet', async () => {
+  it('13: refuses a project that has no history yet', async () => {
     const { actor } = start({
       listVersions: versions({ tags: [], revisionId: undefined, expected: undefined, remoteTags: {} }),
     });
@@ -556,7 +556,7 @@ describe('publishMachine', () => {
     await settle();
 
     expect(actor.getSnapshot().matches('error')).toBe(true);
-    expect(selectPublishFacet(actor.getSnapshot()).error).toContain('no revisions yet');
+    expect(selectPublishFacet(actor.getSnapshot()).error).toContain('no history yet');
     actor.stop();
   });
 

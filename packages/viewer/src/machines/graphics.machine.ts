@@ -2423,7 +2423,9 @@ const graphicsMachineDefinition = setup({
  * @public
  */
 export const graphicsIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
-  // Declared in the alphabet but handled in no state.
+  // Declared in the alphabet but handled in no state, deliberately: nothing sends it. The measuring tool's commit
+  // places a feature's first point with `startMeasurement` and its anchor, and completes a one-target feature
+  // measurement with `completeFeatureMeasurement`.
   ['*', 'startFeatureMeasurement'],
   // Turning the section on while on, or off while off, returns `undefined`.
   ['operational.section.off', 'setSectionViewActive'],

@@ -1,10 +1,11 @@
 /**
- * The Revisions pane's own gestures, as every desktop-e2e spec drives them
+ * The History pane's own gestures, as every desktop-e2e spec drives them
  * (revisions charter D7; canvas rounds 14–21).
  *
  * The strip is the pane's first region: where you are, the one status sentence
- * and its verbs. History's rows are buttons named `Rev N · <title>` that open
- * in place; a restore is the opened row's *Restore Rev N*.
+ * and its verbs. History's rows are `data-revision-row` buttons named
+ * `<title> · <time>` or `V2 · <title>` that open in place; a restore is the
+ * opened row's *Restore …*. An entry has no number (M11).
  */
 import process from 'node:process';
 import { expect } from 'vitest';
@@ -16,7 +17,7 @@ export const revisionStrip = (page: Page): Locator =>
 
 /** The strip's one status sentence, such as `Saved · Backed up` or `Saved on this device`. */
 export const revisionStatus = (page: Page): Locator =>
-  revisionStrip(page).getByRole('status', { name: 'Revision status' });
+  revisionStrip(page).getByRole('status', { name: 'History status' });
 
 /**
  * Opt a new project out of backup by default (D19) before its first revision.
@@ -37,12 +38,12 @@ export const forgetBackupByDefault = async (page: Page, projectId: string): Prom
   await page.reload({ waitUntil: 'domcontentloaded' });
 };
 
-/** History's revision rows, newest first: one button per revision, named `Rev N · <title>`. */
+/**
+ * History's entry rows, newest first: one button per entry, named
+ * `<title> · <time>` or `V2 · <title>`. An entry has no number (M11).
+ */
 export const historyRows = (page: Page): Locator =>
-  page
-    .getByRole('list', { name: 'Revision history' })
-    .first()
-    .getByRole('button', { name: /^Rev \d+ · /u });
+  page.getByRole('list', { name: 'History entries' }).first().locator('button[data-revision-row]');
 
 /**
  * Answer the question a verb asks only sometimes, then wait for its outcome.
@@ -55,9 +56,11 @@ export const historyRows = (page: Page): Locator =>
  * @param confirm - The dialog's confirming button.
  * @param outcome - What is on screen once the verb has settled, within two minutes.
  */
-export const answerIfAsked = async (page: Page, confirm: string, outcome: Locator): Promise<void> => {
+export const answerIfAsked = async (page: Page, confirm: string | RegExp, outcome: Locator): Promise<void> => {
   const verbMilliseconds = 120_000;
-  const button = page.getByRole('alertdialog').getByRole('button', { name: confirm, exact: true });
+  const button = page
+    .getByRole('alertdialog')
+    .getByRole('button', typeof confirm === 'string' ? { name: confirm, exact: true } : { name: confirm });
   let arrived: 'outcome' | 'question' | undefined;
   await expect
     .poll(
@@ -76,38 +79,38 @@ export const answerIfAsked = async (page: Page, confirm: string, outcome: Locato
 
 /**
  * Restore a History row the way a person does: open it, press its
- * *Restore Rev N*, and confirm when the restore asks.
+ * *Restore …* (`Restore V2`, `Restore “Thicker base”`, `Restore the 10:31 AM
+ * autosave`), and confirm when the restore asks.
  *
  * @param page - The page.
  * @param row - The row's button.
  * @param outcome - What is on screen once the restore has landed.
- * @returns The restored revision's number.
  */
-export const restoreFromHistory = async (
-  page: Page,
-  row: Locator,
-  outcome: (n: string) => Locator,
-): Promise<string> => {
+export const restoreFromHistory = async (page: Page, row: Locator, outcome: Locator): Promise<void> => {
   await row.waitFor({ state: 'visible', timeout: 60_000 });
-  const n = /^Rev (\d+) · /u.exec((await row.getAttribute('aria-label')) ?? '')?.[1];
-  if (n === undefined) {
-    throw new Error('The History row names no revision.');
-  }
   if ((await row.getAttribute('aria-expanded')) !== 'true') {
     await row.click();
   }
+  /* Only the open row shows its verbs, so the list holds one *Restore …*. */
   await page
-    .getByRole('button', { name: `Restore Rev ${n}`, exact: true })
+    .getByRole('list', { name: 'History entries' })
+    .first()
+    .getByRole('button', { name: /^Restore (?:V\d+|“.*”|the .* autosave|an autosave|this point)$/u })
     .first()
     .click();
-  await answerIfAsked(page, `Restore Rev ${n}`, outcome(n));
-  return n;
+  await answerIfAsked(page, /^Restore /u, outcome);
 };
+
+/** The Current row once it is a restore: `Restored V2`, `Restored “…”` or `Restored an earlier point`. */
+export const currentRestoreRow = (page: Page): Locator =>
+  historyRows(page)
+    .filter({ hasText: 'Current' })
+    .filter({ hasText: /Restored /u });
 
 /**
  * Open the Sync region's chooser through the pane's own offer (A29, canvas
  * round 16): the strip's *Back up*, or More's *Back up…* while the strip's
- * button is *Save revision*. Nothing offers a backup before the first
+ * button is *Save*. Nothing offers a backup before the first
  * revision (S1), so a project with none saves one first: from the strip when
  * it has edits, with the save chord when it has none — a fresh, unedited
  * project reads *Nothing saved yet* and its strip offers no verb at all.
@@ -122,8 +125,8 @@ export const openBackupChooser = async (page: Page): Promise<void> => {
   const sync = page.getByRole('region', { name: 'Sync' }).filter({ visible: true }).first();
   const strip = revisionStrip(page);
   const backUp = strip.getByRole('button', { name: 'Back up', exact: true });
-  const save = strip.getByRole('button', { name: 'Save revision', exact: true });
-  const nothingSaved = strip.getByRole('status', { name: 'Revision status' }).filter({ hasText: 'Nothing saved yet' });
+  const save = strip.getByRole('button', { name: 'Save', exact: true });
+  const nothingSaved = strip.getByRole('status', { name: 'History status' }).filter({ hasText: 'Nothing saved yet' });
   type Offer = 'sync' | 'backUp' | 'save' | 'nothingSaved';
   const offerAmong = async (accepted: readonly Offer[]): Promise<Offer> => {
     let offer: Offer | undefined;
@@ -153,8 +156,8 @@ export const openBackupChooser = async (page: Page): Promise<void> => {
   }
   if (offer === 'save') {
     // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- Playwright's own locator method.
-    const status = await strip.getByRole('status', { name: 'Revision status' }).innerText();
-    if (status.includes('Not saved yet')) {
+    const status = await strip.getByRole('status', { name: 'History status' }).innerText();
+    if (status.includes('Nothing saved yet')) {
       await save.click();
       offer = await offerAmong(['sync', 'backUp']);
     } else {

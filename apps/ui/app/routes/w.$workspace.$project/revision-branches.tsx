@@ -362,7 +362,7 @@ function BranchMenu({
         label={`New name for ${branch}`}
         placeholder={branch}
         initial={branch}
-        note='Its revisions and the chats on it keep working.'
+        note='Its history and the chats on it keep working.'
         saveLabel='Rename branch'
         onOpenChange={setIsRenaming}
         onSave={(name) => {

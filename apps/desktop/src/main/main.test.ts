@@ -13,6 +13,7 @@ import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import { desktopNativeKernelChannels } from '@taucad/types/desktop-native-kernels';
 import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
 import type { DesktopUpdaterOptions } from '#main/updater.js';
+import type * as Updater from '#main/updater.js';
 import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
 import { desktopAgentSystemPrompt } from '#main/environment.js';
 
@@ -153,7 +154,9 @@ vi.mock('#tau/native-store.js', () => ({
   }),
 }));
 
-vi.mock('#main/updater.js', () => ({
+vi.mock('#main/updater.js', async (importOriginal) => ({
+  /* The update controller reads the retry delays and check interval from here. */
+  ...(await importOriginal<typeof Updater>()),
   startDesktopUpdater: (options: DesktopUpdaterOptions) => {
     state.prepareToRestart = options.prepareToRestart;
     state.prepareToInstall = options.prepareToInstall;

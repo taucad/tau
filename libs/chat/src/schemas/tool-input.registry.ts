@@ -137,7 +137,7 @@ export const uiMessageTools = {
     inputSchema: screenshotInputSchema,
     outputSchema: screenshotOutputSchema,
   },
-  [toolName.revisions]: {
+  [toolName.history]: {
     inputSchema: revisionsInputSchema,
     outputSchema: revisionsOutputSchema,
   },

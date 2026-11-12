@@ -12,6 +12,9 @@
       "plugin": "./tools/pkgcheck.plugin.ts"
     },
     {
+      "plugin": "./tools/formal.plugin.ts"
+    },
+    {
       "plugin": "@nx/react/router-plugin",
       "options": {
         "buildTargetName": "build",

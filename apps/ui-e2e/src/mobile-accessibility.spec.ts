@@ -533,7 +533,7 @@ const panes = [
   'Files',
   'Model tree',
   'Kinematics',
-  'Revisions',
+  'History',
   'Share',
   'Export',
   'Details',

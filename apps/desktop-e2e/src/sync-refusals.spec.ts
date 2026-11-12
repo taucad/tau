@@ -116,12 +116,12 @@ type GitIn = (...args: readonly string[]) => ReturnType<typeof runGit>;
 /** Open the Revisions pane through the header's own chip. */
 const openRevisions = async (client: PageClient): Promise<void> => {
   await client.page
-    .getByRole('button', { name: /^Open Revisions\./u })
+    .getByRole('button', { name: /^Open History\./u })
     .first()
     .click({ timeout: 120_000 });
 };
 
-/** Open Revisions and its Sync region through the product's own offer. */
+/** Open History and its Sync region through the product's own offer. */
 const openSync = async (client: PageClient): Promise<void> => {
   await openRevisions(client);
   await openBackupChooser(client.page);
@@ -156,7 +156,7 @@ const mintRevision = async (client: BrowserClient, filename: string): Promise<vo
     .first()
     .waitFor({ timeout: 60_000 });
   await page
-    .getByRole('button', { name: /^Open Revisions\./u })
+    .getByRole('button', { name: /^Open History\./u })
     .first()
     .click();
   await page.keyboard.press(`${modifier}+KeyS`);
@@ -424,12 +424,12 @@ describe('a Pro owner and a decision that travels (D14)', () => {
      * project opens with Files already showing, where the Files chord closes it;
      * Revisions first leaves the chord to open Files, as it does after a connect. */
     await page
-      .getByRole('button', { name: /^Open Revisions\./u })
+      .getByRole('button', { name: /^Open History\./u })
       .first()
       .click({ timeout: 120_000 });
     await mintRevision(client, 'reserved.scad');
     await page.getByRole('button', { name: 'New branch', exact: true }).first().click({ timeout: 120_000 });
-    await page.getByLabel('Name for the new branch').fill('conflicts');
+    await page.getByLabel('Branch name').fill('conflicts');
     await page.getByRole('button', { name: 'Create branch', exact: true }).click();
 
     await expect

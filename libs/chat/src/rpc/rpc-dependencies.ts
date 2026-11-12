@@ -323,12 +323,20 @@ export type RpcSkillResolver = {
 };
 
 /**
- * The read half of a project's revision graph (S28).
+ * One history entry as a host reads it: the wire row, with every version naming it (B6), lowest first.
+ *
+ * @public
+ */
+export type RpcHistoryRow = Omit<RevisionRowOutput, 'version'> &
+  Readonly<{ versions?: ReadonlyArray<Readonly<{ name: string; number: number }>> | undefined }>;
+
+/**
+ * The read half of a project's revision graph (S28), behind the agent's `history` tool.
  *
  * Read-only on purpose: an agent sees where it is, what changed and both sides of a conflict, and every
  * verb that *moves* anything — branch, merge, restore, discard, sync — belongs
  * to a person (I10). The host satisfies this with the same functions the
- * Revisions pane and `tau revisions` call, so the three cannot disagree.
+ * History pane and `tau history` call, so the three cannot disagree.
  *
  * @public
  */
@@ -338,14 +346,13 @@ export type RpcRevisionsClient = {
       branch?: string | undefined;
       limit?: number | undefined;
     }>,
-  ): Promise<readonly RevisionRowOutput[]>;
+  ): Promise<readonly RpcHistoryRow[]>;
   diff(from: string | undefined, to: string): Promise<readonly RevisionChangeOutput[]>;
   describe(): Promise<
     Readonly<{
       branch: string | undefined;
-      revisionNumber: number | undefined;
       revisionId: string | undefined;
-      branches: ReadonlyArray<Readonly<{ name: string; revisionNumber: number; revisionId: string }>>;
+      branches: ReadonlyArray<Readonly<{ name: string; revisionId: string }>>;
       line: string;
     }>
   >;

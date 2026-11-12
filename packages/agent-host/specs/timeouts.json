@@ -9,6 +9,7 @@
     "apps/desktop/src/main/main.ts",
     "apps/desktop/src/main/services-broker.ts",
     "apps/desktop/src/tau",
+    "apps/libs/desktop-terminal/src",
     "apps/ui/app/workers/agent-host.impl.ts",
     "apps/ui/app/workers/agent-host.worker.ts",
     "apps/ui/app/services",
@@ -1155,7 +1156,7 @@
     {
       "id": "TERMINAL-ADMISSION-WAIT",
       "bound": "5-second bound (terminalAdmissionMilliseconds) on main admitting a Terminal start's project root to the trusted-root allowlist; each wait ends on the next allowlist change, the connection ending, or the bound, after which the start is refused project-not-admitted",
-      "site": "apps/desktop/src/tau/services-host.terminal.ts",
+      "site": "apps/libs/desktop-terminal/src/terminal-concern.ts",
       "token": "timer = setTimeout(resolve, remaining)",
       "class": "Peer",
       "owner": "desktop-bash-terminal W7",
@@ -1164,7 +1165,7 @@
     {
       "id": "TERMINAL-REGISTRATION-RETRY",
       "bound": "250 ms retry (terminalRegistrationRetryMilliseconds) of a Terminal start the shell service refuses project-not-admitted, within the same admission bound; the service learns a project only when its agent host is served, which the pane does not wait for. Any other refusal is final, and a connection that ends stops the retry",
-      "site": "apps/desktop/src/tau/services-host.terminal.ts",
+      "site": "apps/libs/desktop-terminal/src/terminal-concern.ts",
       "token": "setTimeout(resolve, terminalRegistrationRetryMilliseconds)",
       "class": "Peer",
       "owner": "desktop-bash-terminal W7",
@@ -1173,7 +1174,7 @@
     {
       "id": "TERMINAL-OPEN-TIMEOUT",
       "bound": "30-second bound on a fresh desktop terminal port's open frame; a port that never opens is closed before any shell starts",
-      "site": "apps/desktop/src/tau/services-host.terminal.ts",
+      "site": "apps/libs/desktop-terminal/src/terminal-concern.ts",
       "token": "setTimeout(abandonUnopened, openMilliseconds)",
       "class": "External edge",
       "owner": "desktop-bash-terminal W5"

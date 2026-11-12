@@ -1,5 +1,5 @@
 /**
- * `tau revisions` over a real project directory and a real `git`.
+ * `tau history` and `tau version` over a real project directory and a real `git`.
  *
  * The claim is headless parity (S13, AC5): what the verb prints is what the
  * port holds, not a second reading of the graph. The suite runs where `git`
@@ -13,7 +13,8 @@ import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { openProjectRevisions, requireRevisionToolchain } from '@taucad/host';
@@ -24,6 +25,36 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { exitCodes } from '#output.js';
 
 const execute = promisify(execFile);
+const repoRoot = resolvePath(dirname(fileURLToPath(import.meta.url)), '../../../..');
+const binPath = resolvePath(repoRoot, 'packages/cli/src/bin.ts');
+
+/**
+ * Run the real `tau` entry the way a person types it, never rejecting, so a refusal reports its output.
+ *
+ * @param args - The words after `tau`.
+ * @returns What it printed and its exit code.
+ */
+const runTau = async (args: readonly string[]): Promise<Readonly<{ stdout: string; stderr: string; code: number }>> => {
+  try {
+    const { stdout, stderr } = await execute(process.execPath, ['--import', 'tsx', binPath, ...args], {
+      cwd: repoRoot,
+    });
+    return { stdout, stderr, code: 0 };
+  } catch (error) {
+    const failure = error as { stdout?: string; stderr?: string; code?: number };
+    return { stdout: failure.stdout ?? '', stderr: failure.stderr ?? '', code: failure.code ?? 1 };
+  }
+};
+
+/* I7: pre-release, no alias. `tau revisions` is gone, and `tau` says so as it says it of any word it does not know. */
+describe('tau revisions', () => {
+  it('exits with the unknown-command usage error', async () => {
+    const run = await runTau(['revisions', 'log']);
+    expect(run.code).toBe(exitCodes.usage);
+    expect(run.stderr).toMatch(/Unknown command `?revisions`?/u);
+    expect(run.stdout).toBe('');
+  }, 60_000);
+});
 /* The fixture's commits must not pick up the operator's own git configuration.
  * Environment names, not identifiers: assigned rather than spelled as keys. */
 const seedEnvironment: NodeJS.ProcessEnv = { ...process.env };
@@ -36,7 +67,7 @@ const gitToolchainOnPath = await requireRevisionToolchain().then(
   () => false,
 );
 
-describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
+describe.runIf(gitToolchainOnPath)('historyCommand', () => {
   let project: string;
   let config: string;
   let stdout: string[];
@@ -105,18 +136,21 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
   };
 
   const importCommand = async () => {
-    const { revisionsCommand } = await import('#commands/revisions.js');
-    return revisionsCommand;
+    const { historyCommand } = await import('#commands/history.js');
+    return historyCommand;
   };
 
-  it('lists what the port holds, numbered as the pane numbers it', async () => {
+  const importVersionCommand = async () => {
+    const { versionCommand } = await import('#commands/history.js');
+    return versionCommand;
+  };
+
+  it('lists what the port holds by short id and title, with no number on an entry (M11)', async () => {
     await seed();
     await runCommand(await importCommand(), { rawArgs: ['log', '--project', project] });
     const printed = stdout.join('');
-    expect(printed).toContain('Rev 2');
-    expect(printed).toContain('Revision 2');
+    expect(printed).not.toMatch(/\bRev \d/u);
     expect(printed).toContain('main');
-    expect(printed).toContain('Revision 1');
 
     const revisions = await openProjectRevisions({ workspaceRoot: project });
     try {
@@ -124,6 +158,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
       expect(printed.trim().split('\n')).toHaveLength(rows.length);
       for (const row of rows) {
         expect(printed).toContain(row.summary);
+        expect(printed).toContain(row.revisionId.slice(0, 7));
       }
     } finally {
       await revisions.close();
@@ -134,18 +169,18 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
     await seed();
     await runCommand(await importCommand(), { rawArgs: ['describe', '--project', project] });
     const printed = stdout.join('');
-    expect(printed).toContain('main · Rev 2');
-    for (const jargon of ['checkout', 'worktree', 'lease', 'HEAD']) {
+    expect(printed.split('\n')[0]).toBe('main');
+    for (const jargon of ['checkout', 'worktree', 'lease', 'HEAD', 'Rev ', 'revision']) {
       expect(printed).not.toContain(jargon);
     }
   }, 60_000);
 
-  it('refuses a directory that has no revision history, with the code a script reads', async () => {
+  it('refuses a directory that has no history, with the code a script reads', async () => {
     const outcome = await runCommand(await importCommand(), { rawArgs: ['log', '--project', project] }).then(
       () => undefined,
       (error: unknown) => error as { readonly code?: string; readonly exit?: number },
     );
-    expect(outcome?.code).toBe('NO_REVISION_HISTORY');
+    expect(outcome?.code).toBe('NO_HISTORY');
     expect(outcome?.exit).toBe(exitCodes.refused);
   }, 60_000);
 
@@ -174,7 +209,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
     expect(stdout.join('')).toContain('part.ts');
   }, 60_000);
 
-  it('saves the project’s files as the revision the log then lists first', async () => {
+  it('saves the project’s files as the entry the log then lists first', async () => {
     await seed();
     await writeFile(join(project, 'bracket.ts'), 'export const bracket = 3;\n');
     await runCommand(await importCommand(), { rawArgs: ['save', '--project', project] });
@@ -183,7 +218,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
     try {
       const [latest] = await revisions.log();
       expect(latest?.revisionNumber).toBe(3);
-      expect(stdout.join('')).toBe('Saved main · Rev 3. Saved on this device.\n');
+      expect(stdout.join('')).toBe('Saved on main. Saved on this device.\n');
       expect(await revisions.diff(undefined, latest?.revisionId ?? '')).toContainEqual(
         expect.objectContaining({ path: 'bracket.ts' }),
       );
@@ -247,7 +282,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
       await seed();
       await writeFile(join(project, 'bracket.ts'), 'export const bracket = 3;\n');
       await runCommand(await importCommand(), { rawArgs: ['save', '--project', project] });
-      expect(stdout.join('')).toMatch(/^Saved main · Rev 3\./u);
+      expect(stdout.join('')).toMatch(/^Saved on main\./u);
       const { stdout: commit } = await execute('git', ['-C', project, 'cat-file', 'commit', 'refs/heads/main']);
       for (const forbidden of [accountEmail, environmentEmail, userInfo().username]) {
         expect(commit).not.toContain(`<${forbidden}`);
@@ -283,16 +318,17 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
       for (const forbidden of [accountEmail, environmentEmail, '@users.noreply', `<${userInfo().username}`]) {
         expect(printed).not.toContain(forbidden);
       }
-      /* Object ids and the pseudonym's hash differ per run; the shape between them does not. */
+      /* Object ids, times and the pseudonym's hash differ per run; the shape between them does not. */
       const oids = new Map<string, string>();
       const stable = printed
         .replaceAll(/\b[\da-f]{40}\b/gu, (oid) => {
           oids.set(oid, oids.get(oid) ?? `<oid ${String(oids.size + 1)}>`);
           return oids.get(oid)!;
         })
+        .replaceAll(/^ {4} {2}[\da-f]{7} {2}\d{4}-\d\d-\d\d \d\d:\d\d/gmu, '<short id>  <time>')
         .replaceAll(/anon:[\da-f]{8}/gu, 'anon:<hash>');
       expect(stable).toMatchInlineSnapshot(`
-        "Rev 4     main  anon:<hash>  Saved changes (save)
+        "<short id>  <time>  main  anon:<hash>  Saved changes (save)
           id        <oid 1>
           tree      <oid 2>
           parent    <oid 3>
@@ -300,7 +336,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
           identity  user anon:<hash> (anonymous)
           capture   save
           via       cli
-        Rev 3     main  usr_cli_a1  Saved changes (save)
+        <short id>  <time>  main  usr_cli_a1  Saved changes (save)
           id        <oid 3>
           tree      <oid 4>
           parent    <oid 5>
@@ -308,7 +344,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
           identity  user usr_cli_a1
           capture   save
           via       cli
-        Rev 2     main  ada  Revision 2
+        <short id>  <time>  main  ada  Revision 2
           id        <oid 5>
           tree      <oid 6>
           parent    <oid 7>
@@ -316,7 +352,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
           identity  not recorded
           capture   not recorded
           via       not recorded
-        Rev 1     main  ada  Revision 1
+        <short id>  <time>  main  ada  Revision 1
           id        <oid 7>
           tree      <oid 8>
           parent    none
@@ -337,11 +373,13 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
       });
       const printed = stdout.join('');
       expect(printed).not.toContain(accountEmail);
-      expect(JSON.parse(printed)).toMatchObject({
-        kind: 'revisions',
-        revisions: [
+      const record = JSON.parse(printed) as { entries: ReadonlyArray<Record<string, unknown>> };
+      /* M11: an entry carries no per-branch number in JSON either. */
+      expect(record.entries[0]).not.toHaveProperty('revisionNumber');
+      expect(record).toMatchObject({
+        kind: 'history',
+        entries: [
           {
-            revisionNumber: 3,
             provenance: {
               identity: { kind: 'user', id: 'usr_cli_a1' },
               capture: 'save',
@@ -354,7 +392,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
     }, 60_000);
   });
 
-  it('says there is nothing new to save, and mints nothing, when the files are the last revision', async () => {
+  it('says there is nothing new to save, and mints nothing, when the files are the last entry', async () => {
     await seed();
     const command = await importCommand();
     await writeFile(join(project, 'bracket.ts'), 'export const bracket = 3;\n');
@@ -363,10 +401,10 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
 
     await runCommand(command, { rawArgs: ['save', '--project', project, '--json'] });
     expect(JSON.parse(stdout.join(''))).toMatchObject({
-      kind: 'revision-save',
+      kind: 'history-save',
       ok: true,
       status: 'unchanged',
-      line: 'main · Rev 3',
+      line: 'main',
     });
   }, 60_000);
 
@@ -396,20 +434,32 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
     }
   }, 60_000);
 
-  it('names the current revision and can remove that name', async () => {
+  it('creates a version where the files are, lists it by its number and renames it keeping that number', async () => {
     await seed();
-    const command = await importCommand();
+    const version = await importVersionCommand();
 
-    await runCommand(command, { rawArgs: ['tag', 'v1', '--project', project] });
-    const revisions = await openProjectRevisions({ workspaceRoot: project });
-    try {
-      const rows = await revisions.log();
-      expect(rows[0]?.tags).toContain('v1');
-    } finally {
-      await revisions.close();
-    }
+    await runCommand(version, { rawArgs: ['create', 'ready-for-print', '--project', project] });
+    expect(stdout.join('')).toMatch(/^Created V2 · ready-for-print at [\da-f]{7}\.\n$/u);
+    stdout.length = 0;
 
-    await runCommand(command, { rawArgs: ['tag', 'v1', '--delete', '--project', project] });
-    expect(stdout.join('')).toContain('Removed version name v1.');
+    await runCommand(version, { rawArgs: ['rename', 'ready-for-print', 'fit-check', '--project', project] });
+    expect(stdout.join('')).toBe('Renamed V2 to fit-check.\n');
+    stdout.length = 0;
+
+    await runCommand(version, { rawArgs: ['list', '--project', project] });
+    expect(stdout.join('')).toMatch(/^V2 {4}[\da-f]{7} {2}fit-check\n$/u);
+    stdout.length = 0;
+
+    /* The history row a version names leads with its number. */
+    await runCommand(await importCommand(), { rawArgs: ['log', '--limit', '1', '--project', project] });
+    expect(stdout.join('')).toMatch(/^V2 {4}[\da-f]{7} {2}\S+ \S+ {2}main {2}ada {2}fit-check\n$/u);
   }, 60_000);
+
+  it('offers no way to remove a version: versions are permanent (Q13)', async () => {
+    const version = await importVersionCommand();
+    const subCommands = (await (typeof version.subCommands === 'function'
+      ? version.subCommands()
+      : version.subCommands)) as Record<string, unknown>;
+    expect(Object.keys(subCommands).toSorted()).toEqual(['create', 'list', 'rename']);
+  });
 });

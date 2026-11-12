@@ -2032,6 +2032,9 @@ importers:
       '@taucad/converter':
         specifier: workspace:*
         version: link:../libs/converter
+      '@taucad/desktop-terminal':
+        specifier: workspace:*
+        version: link:../libs/desktop-terminal
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../../packages/plugins/esbuild
@@ -3434,6 +3437,19 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
+  apps/libs/desktop-terminal:
+    dependencies:
+      '@taucad/shell-service':
+        specifier: workspace:*
+        version: link:../../../libs/shell-service
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../../libs/types
+    devDependencies:
+      '@taucad/sandbox':
+        specifier: workspace:*
+        version: link:../../../libs/sandbox
 
   apps/libs/fs-client:
     dependencies:

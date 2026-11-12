@@ -45,6 +45,12 @@ describe('applyTauEventContext', () => {
     });
   });
 
+  it('should tag a desktop route with its web id, without the out-of-tree prefix', () => {
+    publishRouter(['root', '../../app/routes/projects_']);
+
+    expect(readRouteId()).toBe('routes/projects_');
+  });
+
   it('should leave a value it cannot read absent rather than guess, and keep the tags an event has', () => {
     environment.TAU_DEPLOY_CONTEXT = undefined;
     device.constrained = false;

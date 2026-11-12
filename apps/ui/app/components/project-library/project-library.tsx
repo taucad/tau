@@ -1264,7 +1264,7 @@ function BulkActions({ table, deleteProject }: BulkActionsProps) {
           </AlertDialogTitle>
           <AlertDialogDescription className='space-y-2'>
             <p>The following projects will be moved to the trash:</p>
-            <p>Any running agents will be stopped first. Their work so far is saved as revisions.</p>
+            <p>Any running agents will be stopped first. Their work so far is saved in history.</p>
             <ul className='max-h-40 list-disc overflow-y-auto pl-6 text-sm'>
               {selectedRows.map((row) => {
                 const project = row.original;

@@ -9,7 +9,8 @@ import type { Actor } from 'xstate';
 import { GraphicsProvider, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { GraphicsCameraRef } from '#machines/graphics.machine.js';
-import { MeasureTool, restingPointerOver } from '#graphics/three/react/measure-tool.jsx';
+import { MeasureTool } from '#graphics/three/react/measure-tool.jsx';
+import { restingPointerOver } from '#graphics/three/react/measure-tool.adapter.js';
 import { hasSceneTag, sceneTag } from '#graphics/three/utils/scene-tags.js';
 import {
   getCachedMeshMeasurementFeatures,
@@ -415,7 +416,7 @@ describe('MeasureTool activation', () => {
     });
     dispatch('pointerdown', pixelOf(0, -1, 1));
     dispatch('pointerup', pixelOf(0, -1, 1));
-    // A settings change while the worker prepares the graph re-renders the tool and rebinds its listeners.
+    // A settings change while the worker prepares the graph re-renders the tool; the session and its listeners stay.
     act(() => {
       actor.send({ type: 'setMeasureFrame', frame: 'selected-local' });
     });
@@ -686,7 +687,86 @@ describe('MeasureTool activation', () => {
     expect(measurementMarks()).toBe(marksAfterLanding);
   });
 
-  it('does not bring a hover back after a window blur when the tool rebinds', () => {
+  it('clears the hover a landed click drew when it placed a start and the pointer left while it waited', async () => {
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+      actor.send({ type: 'setMeasureMode', mode: 'point' });
+    });
+    dispatch('pointerdown', pixelOf(0, -1, 1));
+    dispatch('pointerup', pixelOf(0, -1, 1));
+    dispatch('pointerleave', pixelOf(0, -1, 1));
+
+    await answerWorker();
+
+    expect(actor.getSnapshot().context.currentMeasurementStart).toBeDefined();
+    runFrames();
+    const marksAfterLanding = measurementMarks();
+    // Leaving again clears any hover still drawn; only the start's own marks stay.
+    dispatch('pointerleave', pixelOf(0, -1, 1));
+    runFrames();
+    expect(measurementMarks()).toBe(marksAfterLanding);
+  });
+
+  it('stays ready when the event source is reconnected while Measure is on', async () => {
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+    });
+    expect(actor.getSnapshot().context.isMeasureInputReady).toBe(true);
+    const region = document.createElement('div');
+    region.getBoundingClientRect = canvas.getBoundingClientRect;
+    document.body.append(region);
+    try {
+      await act(async () => {
+        getState().events.disconnect?.();
+        getState().events.connect?.(region);
+        await Promise.resolve();
+      });
+
+      expect(actor.getSnapshot().context.isMeasureInputReady).toBe(true);
+    } finally {
+      region.remove();
+    }
+  });
+
+  it('hovers the snap points of a graph that lands after the event source was reconnected', async () => {
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+    });
+    dispatch('pointermove', pixelOf(0, -1, 1));
+    runFrames();
+    const region = document.createElement('div');
+    region.getBoundingClientRect = canvas.getBoundingClientRect;
+    document.body.append(region);
+    try {
+      await act(async () => {
+        getState().events.disconnect?.();
+        getState().events.connect?.(region);
+        await Promise.resolve();
+      });
+      const [x, y] = pixelOf(0, -1, 1);
+      const event = new MouseEvent('pointermove', { bubbles: true, clientX: x, clientY: y });
+      Object.defineProperties(event, {
+        pointerId: { value: 1 },
+        pointerType: { value: 'mouse' },
+        isPrimary: { value: true },
+      });
+      act(() => {
+        region.dispatchEvent(event);
+      });
+      runFrames();
+      const marksBeforeGraph = measurementMarks();
+
+      // The graph the old surface asked for lands under the new one: the resting pointer hovers its snap points.
+      await answerWorker();
+      runFrames();
+
+      expect(measurementMarks()).toBeGreaterThan(marksBeforeGraph);
+    } finally {
+      region.remove();
+    }
+  });
+
+  it('does not bring a hover back when the camera moves after a window blur', () => {
     getMeshMeasurementFeatures(model);
     dispatch('pointermove', pixelOf(0, -1, 1));
     act(() => {
@@ -698,7 +778,7 @@ describe('MeasureTool activation', () => {
       globalThis.dispatchEvent(new Event('blur'));
     });
     expect(measurementMarks()).toEqual(0);
-    // A camera drag starts: the tool rebinds its listeners.
+    // A camera drag presents a new camera: the blur left nothing hovering to take again.
     act(() => {
       actor.send({ type: 'interactionStarted' });
       actor.send({ type: 'interactionMoved' });

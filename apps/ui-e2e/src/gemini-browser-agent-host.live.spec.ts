@@ -81,10 +81,8 @@ const expectGeoSpecContract = (source: string, volume: RegExp): void => {
 
 /** Wait until the revision graph lists at least `minimumCount` published revisions. */
 const expectRevisionsPublished = async (minimumCount: number): Promise<number> => {
-  /* One History row per revision, each a button named `Rev N · <title>`; day dividers and folds are not revisions. */
-  const revisions = selectors
-    .getByRole('list', { name: 'Revision history' })
-    .getByRole('button', { name: /^Rev \d+ · /u });
+  /* One History row per entry, each a `data-revision-row` button; day dividers and folds are not entries. */
+  const revisions = selectors.getByCss('ol[aria-label="History entries"] button[data-revision-row]');
   let published = 0;
   await expect
     .poll(
@@ -145,7 +143,7 @@ test('Gemini creates a cube, then adds a vertical cylinder cutout on the next us
   expect(cube.source).toMatch(/center\s*=\s*true/iu);
   expect(cube.source).not.toMatch(/cylinder\s*\(/u);
   expectGeoSpecContract(cube.spec, /8000/u);
-  await target.click(selectors.getByText('Revisions', { exact: true }).last());
+  await target.click(selectors.getByText('History', { exact: true }).last());
   // The published revisions are the graph's list items. How many a turn
   // publishes is the model's business — it may save each file separately — so
   // the acceptance is that the first turn published at least one and the second

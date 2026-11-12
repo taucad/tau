@@ -20,6 +20,7 @@ import { expectCount, expectVisible, selectChatModel, sendPrompt, stopButtonOf }
 import {
   forgetBackupByDefault,
   connectTauCloud,
+  currentRestoreRow,
   historyRows,
   openBackupChooser,
   restoreFromHistory,
@@ -211,13 +212,13 @@ const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
  * a1 drove the command palette (`Mod+K` → *Open revision history*) and two rows
  * died there waiting for the palette to mount, so they never reached the defect
  * they claimed to pin (W18 review R1). `revision-status-action.tsx` renders a
- * always-visible button — *Open Revisions. You are on \<branch\>* — that calls the
+ * always-visible button — *Open History. You are on \<branch\>* — that calls the
  * same `openPanel('revisions')`. It appears once the root answers, which is
  * also the signal that there is a projection to read.
  */
 const openRevisionsPane = async (client: PageClient): Promise<void> => {
   await client.page
-    .getByRole('button', { name: /^Open Revisions\./u })
+    .getByRole('button', { name: /^Open History\./u })
     .first()
     .click({ timeout: 120_000 });
 };
@@ -286,11 +287,11 @@ const focusBrowserEditor = async (client: BrowserClient): Promise<void> => {
 const revisionRowCount = async (client: BrowserClient): Promise<number> => historyRows(client.page).count();
 
 /**
- * The header chip once the checkout is modified: `… Modified since Rev N.` It
+ * The header chip once the checkout is modified: `… Unsaved changes.` It
  * is always mounted, so it observes an edit whichever pane is in front.
  */
 const modifiedChip = (page: Page): Locator =>
-  page.getByRole('button', { name: /^Open Revisions\..* Modified since Rev \d+\.$/u });
+  page.getByRole('button', { name: /^Open History\..* Unsaved changes\.$/u });
 
 /** What the Sync region says right now. */
 const syncRegionText = async (client: PageClient): Promise<string> =>
@@ -1260,16 +1261,13 @@ describe('a project on the browser client', () => {
     const before = required(await browserHead(client, slug), 'T10: the browser has no head before the restore.');
     await expect.poll(async () => gitHead(await tauRepository(projectId)), { timeout: 180_000 }).toBe(before);
 
-    /* The newest revision History offers to restore: the newest row that is not Current.
-     * The row opens, its *Restore Rev N* restores it, and a restore that removes
+    /* The newest entry History offers to restore: the newest row that is not Current.
+     * The row opens, its *Restore …* restores it, and a restore that removes
      * files or saves edits asks first (`restore.machine`'s `isRisky`). */
-    const restoredNumber = await restoreFromHistory(
+    await restoreFromHistory(
       client.page,
       historyRows(client.page).filter({ hasNotText: 'Current' }).first(),
-      (n) =>
-        historyRows(client.page)
-          .filter({ hasText: 'Current' })
-          .filter({ hasText: `Restored Rev ${n}` }),
+      currentRestoreRow(client.page),
     );
 
     await expect
@@ -1299,11 +1297,11 @@ describe('a project on the browser client', () => {
       .poll(
         async () =>
           second.page
-            .getByRole('list', { name: 'Revision history' })
+            .getByRole('list', { name: 'History entries' })
             .first()
             .getByRole('listitem')
             .filter({ hasText: 'Current' })
-            .filter({ hasText: `Restored Rev ${restoredNumber}` })
+            .filter({ hasText: /Restored /u })
             .count(),
         { message: 'T10: the second device must land on the restore revision and name it', timeout: 180_000 },
       )
@@ -1813,7 +1811,7 @@ describe('live and automatic', () => {
     };
     /* The visible strip's: a mounted but hidden pane has one too (W13d). */
     const statusText = async (page: Page): Promise<string> =>
-      (await revisionStrip(page).getByRole('status', { name: 'Revision status' }).textContent()) ?? '';
+      (await revisionStrip(page).getByRole('status', { name: 'History status' }).textContent()) ?? '';
     const cards = (page: Page): Locator => page.getByRole('list', { name: /^Files to resolve in/u });
     const desktopText = (round: number): string => `cube(${String(round)}); // desktop ${String(round)}\n`;
     const overlap = async (round: number): Promise<void> => {
@@ -1895,7 +1893,7 @@ describe('live and automatic', () => {
     await undoOnDesktop();
 
     await expectVisible(
-      b().page.getByText('Your last change on this branch was a merge. Restore an earlier revision instead.'),
+      b().page.getByText('Your last change on this branch was a merge. Restore an earlier point instead.'),
       60_000,
     );
     expect(await gitHead(destinationRoot), 'D15: a refused Undo mints nothing').toBe(before);
@@ -1915,8 +1913,8 @@ describe('live and automatic', () => {
 
     await undoOnDesktop();
     /* Either the scoped inverse lands, or it refuses by name; never a revert of the browser's bytes. */
-    const landed = b().page.getByText(/^Undid (Rev \d+|an earlier revision)$/u);
-    const refused = b().page.getByText(/^A later revision changed the same lines, so Rev \d+ can’t be undone\./u);
+    const landed = b().page.getByText(/^Undid (V\d+|“.*”|the .* autosave|an autosave|an earlier change)$/u);
+    const refused = b().page.getByText(/^A later change touched the same lines, so this one can’t be undone\./u);
     await expect
       .poll(async () => (await landed.first().isVisible()) || (await refused.first().isVisible()), {
         message: 'D15: Undo must land or refuse by name',
@@ -2746,27 +2744,23 @@ describe('a terminal as the third client', () => {
       await expect.poll(() => gate.gatewayRequests.length, { timeout: 180_000 }).toBeGreaterThanOrEqual(requested + 2);
 
       await writeFile(join(terminalRoot, 'terminal.scad'), 'sphere(5); // the terminal\n');
-      const saved = await runCli(['revisions', 'save', '--project', terminalRoot, '--json'], bearer);
+      const saved = await runCli(['history', 'save', '--project', terminalRoot, '--json'], bearer);
       expect(saved.code, saved.stderr).toBe(0);
       const record = cliRecord(saved);
-      expect(record).toMatchObject({ kind: 'revision-save', ok: true, status: 'saved', backup: 'backedUp' });
+      expect(record).toMatchObject({ kind: 'history-save', ok: true, status: 'saved', backup: 'backedUp' });
       theirs = String(record['revisionId']);
       expect(await remoteHead(), 'W15: the terminal’s save must reach Tau Cloud').toBe(theirs);
 
-      /* RV-W15 F7: the strip's own sentence, naming the terminal's revision by
-       * its `Rev N` — the first-parent ordinal History numbers it by — rather
-       * than any control on the page that happens to say *arrived*. */
-      const ordinal = required(
-        await gitOutput(await tauRepository(projectId), ['rev-list', '--count', '--first-parent', theirs]),
-        'W15: Tau Cloud cannot number the terminal’s revision.',
-      );
+      /* RV-W15 F7: the strip's own sentence for the terminal's save, rather than
+       * any control on the page that happens to say *ready*. An entry has no
+       * number (M11), so the sentence names who it came from. */
       await openRevisionsPane(a());
       await expect
         .poll(async () => revisionStatus(a().page).textContent(), {
           message: 'W15: the browser must say the terminal’s revision arrived',
           timeout: 60_000,
         })
-        .toMatch(new RegExp(`^Rev ${ordinal} arrived\\b`, 'u'));
+        .toMatch(/^(?:New changes|Changes from .+) are ready\b/u);
       expect(await browserHead(a(), sourceSlug), 'Rule 9: a leased checkout is never re-based').toBe(before);
     } finally {
       release();

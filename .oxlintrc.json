@@ -1689,6 +1689,20 @@
       }
     },
     {
+      // History, Versions and Branch Graph (C8, M11): a save is a history entry with no number, so product copy never
+      // says "revision" or `Rev` and a digit. JSX text, toast copy and the two copy modules. Tests are fixtures, not copy.
+      // See docs/policy/revisions-policy.md Rule 1.
+      "files": [
+        "apps/ui/app/**/*.{ts,tsx}",
+        "apps/libs/project-workspace/src/**/*.{ts,tsx}",
+        "apps/libs/ui-core/src/**/*.{ts,tsx}"
+      ],
+      "excludeFiles": ["**/*.{test,spec}.{ts,tsx}", "**/*.test-harness.{ts,tsx}", "**/*.stories.{ts,tsx}"],
+      "rules": {
+        "tau-lint/no-save-revision-in-copy": "error"
+      }
+    },
+    {
       // Overlays share z-50 and stack by open order (each portals to the end of <body> as it opens). A surface raised
       // above that layer forces everything opened from it to be raised too, and the one that is missed opens behind it.
       "files": [

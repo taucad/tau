@@ -5,13 +5,13 @@ import type {
   TerminalSession,
   TerminalSessionOutcome,
   TerminalSessionRequest,
-} from '@taucad/host';
-import { shellLimits } from '@taucad/host';
+} from '@taucad/shell-service';
+import { shellLimits } from '@taucad/shell-service';
 import { terminalHostFrameSchema, terminalLimits } from '@taucad/types/desktop-terminal';
 import type { TerminalClientFrame, TerminalHostFrame } from '@taucad/types/desktop-terminal';
 
-import { createTerminalConcern } from '#tau/services-host.terminal.js';
-import type { TerminalConcern, TerminalConcernOptions, TerminalPort } from '#tau/services-host.terminal.js';
+import { createTerminalConcern } from '#terminal-concern.js';
+import type { TerminalConcern, TerminalConcernOptions, TerminalPort } from '#terminal-concern.js';
 
 const flush = async (): Promise<void> => {
   for (let index = 0; index < 10; index++) {

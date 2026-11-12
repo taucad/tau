@@ -15,6 +15,7 @@ export type {
   RpcGraphicsExportModelResult,
   RpcSkillResolver,
   RpcRevisionsClient,
+  RpcHistoryRow,
   RpcParameterClient,
   RpcDependencies,
   RpcHandlerError,

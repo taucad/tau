@@ -185,10 +185,10 @@ const armPageClock = async (surface: PageClockSurface): Promise<void> => {
     const reached = (): boolean =>
       kind === 'saved'
         ? [...document.querySelectorAll('button')].some((button) =>
-            /^Open Revisions\..*\. Saved\b/u.test(button.getAttribute('aria-label') ?? ''),
+            /^Open History\..*\. Saved\b/u.test(button.getAttribute('aria-label') ?? ''),
           )
         : document.querySelector(
-            '[data-slot="revisions-panel-body"] ol[aria-label="Revision history"] button[data-revision-row]',
+            '[data-slot="revisions-panel-body"] ol[aria-label="History entries"] button[data-revision-row]',
           ) !== null;
     const observer = new MutationObserver(() => {
       if (clock.startAt === undefined || !reached()) {
@@ -253,7 +253,7 @@ const forkBranchHere = async (name: string): Promise<void> => {
   await target.click(revisionChip());
   const panel = selectors.getByCss(visibleRevisionsPanel);
   await target.click(panel.getByCss('[aria-label="Where you are"]').getByRole('button', { name: 'New branch' }));
-  await target.fill(selectors.getByRole('textbox', { name: 'Name for the new branch' }), name);
+  await target.fill(selectors.getByRole('textbox', { name: 'Branch name' }), name);
   await target.click(selectors.getByRole('button', { name: 'Create branch' }));
   await target.expectVisible(
     selectors.getByRole('list', { name: 'Branches' }).getByText(name, { exact: true }),
@@ -352,8 +352,9 @@ test('records how long the History region takes to open at D11 (B4)', async () =
   await target.reload();
   await target.expectVisible(revisionChip(), 120_000);
   await target.hover(revisionChip());
-  const recent = selectors.getByRole('list', { name: 'Recent revisions' });
-  await target.expectVisible(recent.getByText(`Rev ${String(depth)}`, { exact: true }), 60_000);
+  const recent = selectors.getByRole('list', { name: 'Recent changes' });
+  /* An entry has no number (M11): the card's newest row is the read's evidence. */
+  await target.expectVisible(recent.getByRole('listitem').first(), 60_000);
   await target.mouseMove(8, 450);
   await target.expectHidden(recent, 15_000);
 

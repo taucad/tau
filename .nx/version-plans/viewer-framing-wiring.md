@@ -15,4 +15,4 @@ Deliberate changes (D14):
 - A section input stops when its handles unmount, at once, rather than one microtask later.
 - Bounds are measured in the frame callback before each draw, and each committed presentation or settled pose asks the demand-driven canvas for that frame; no React effect sends the measurement.
 - An entry switch alone measures nothing: a new entry is first framed on its own committed presentation, unless a remount or a settled pose re-measures the geometry still on screen first, as before. Fit view does nothing while an entry waits for that presentation (a build that fails keeps the previous geometry on screen and the entry unframed), so the Fit view button is unavailable and the F shortcut reports no model to fit until then.
-- Fit view fits against the viewport the controls adapter last published to the camera and the stage of the last measurement; a new `fitMargin` on the stage is measured again, so Fit view uses it.
+- Fit view fits against the viewport the canvas last presented to the camera and the stage of the last measurement; a new `fitMargin` on the stage is measured again, so Fit view uses it.

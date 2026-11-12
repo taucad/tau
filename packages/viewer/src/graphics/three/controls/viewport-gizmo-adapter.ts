@@ -173,6 +173,46 @@ export const readViewportGizmoPose = ({
  * @returns The options to build or regenerate the cube with.
  * @public
  */
+type Disposable = { dispose: () => void };
+type PaintedMaterial = Disposable & { map?: Disposable };
+
+const disposeMaterial = (material: PaintedMaterial): void => {
+  material.map?.dispose();
+  material.dispose();
+};
+
+/**
+ * Removes and disposes every child of the cube, with its descendants: the faces, the background and the axes with their
+ * label textures. `ViewportGizmo.dispose` removes children while it iterates them, so it skips every other one and
+ * leaves it drawn; this walks a reversed copy first, which leaves `set` and `dispose` nothing to skip.
+ *
+ * @param gizmo - The cube whose children go.
+ */
+export const disposeViewportGizmoChildren = (gizmo: Object3D): void => {
+  for (const child of gizmo.children.toReversed()) {
+    gizmo.remove(child);
+    child.traverse((node) => {
+      const { idleMaterial, hoverMaterial } = node.userData as {
+        idleMaterial?: PaintedMaterial;
+        hoverMaterial?: PaintedMaterial;
+      };
+      const { material, geometry } = node as Object3D & {
+        material?: PaintedMaterial | PaintedMaterial[];
+        geometry?: Disposable;
+      };
+      const materials = new Set<PaintedMaterial>(
+        [idleMaterial, hoverMaterial, ...(Array.isArray(material) ? material : [material])].filter(
+          (entry): entry is PaintedMaterial => entry !== undefined,
+        ),
+      );
+      for (const entry of materials) {
+        disposeMaterial(entry);
+      }
+      geometry?.dispose();
+    });
+  }
+};
+
 export const viewportGizmoOptions = ({
   style,
   upDirection,
@@ -312,6 +352,7 @@ export const createViewportGizmoAdapter = (host: ViewportGizmoHost): ViewportGiz
       /* Regenerates the cube in place: the same instance, camera, target and listeners. */
       const repaint = (): void => {
         style = readStyle();
+        disposeViewportGizmoChildren(gizmo);
         gizmo.set(options(style));
         decorate();
       };
@@ -383,7 +424,7 @@ export const createViewportGizmoAdapter = (host: ViewportGizmoHost): ViewportGiz
           return;
         }
         locked = true;
-        const { controls } = store.getState() as { controls: { enabled?: boolean } | null };
+        const { controls } = store.getState() as { controls?: { enabled?: boolean } };
         controlsEnabledBeforeLock = controls?.enabled ?? true;
         if (controls) {
           controls.enabled = false;
@@ -395,7 +436,7 @@ export const createViewportGizmoAdapter = (host: ViewportGizmoHost): ViewportGiz
           return;
         }
         locked = false;
-        const { controls } = store.getState() as { controls: { enabled?: boolean } | null };
+        const { controls } = store.getState() as { controls?: { enabled?: boolean } };
         if (controls) {
           controls.enabled = controlsEnabledBeforeLock;
         }
@@ -419,7 +460,7 @@ export const createViewportGizmoAdapter = (host: ViewportGizmoHost): ViewportGiz
           case 'appearanceChanged': {
             appearance = { environment: message.environment, upDirection: message.upDirection };
             repaint();
-            return;
+            break;
           }
         }
       });
@@ -480,6 +521,7 @@ export const createViewportGizmoAdapter = (host: ViewportGizmoHost): ViewportGiz
           gizmo.removeEventListener(type, listener);
         }
         releaseLock();
+        disposeViewportGizmoChildren(gizmo);
         gizmo.dispose();
         invalidate();
       };

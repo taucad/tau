@@ -67,6 +67,10 @@ vi.mock('three-viewport-gizmo', async () => {
 
     public readonly add = vi.fn();
 
+    public readonly children: unknown[] = [];
+
+    public readonly remove = vi.fn();
+
     public readonly dispose = vi.fn();
 
     public readonly render = vi.fn();

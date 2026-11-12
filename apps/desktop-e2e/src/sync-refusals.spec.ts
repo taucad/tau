@@ -252,12 +252,13 @@ describe('a Pro owner whose pushes are refused', () => {
     /* Audit §7.2 item 4: both classes were proven in units and on the server
      * (`git.http.integration.test.ts`, `fault-injection.spec.ts`) and never
      * rendered. A 422 is the remote refusing the refs, not the device, so its
-     * verb is *Sync now*; a 503 is the retryable busy class, so it is *Retry*
+     * action is the class that syncs again, worded *Try again* since C4
+     * (dbee175fd2); a 503 is the retryable busy class, so it is *Retry*
      * (`remotes.ts` classification, `revision-sync-region.tsx` actions). */
     {
       name: '422',
       refusal: { status: 422, message: 'The pushed refs failed the remote connectivity check (W3 422).' },
-      action: /^Sync now$/u,
+      action: /^Try again$/u,
     },
     {
       name: '503',
@@ -444,8 +445,9 @@ describe('a Pro owner and a decision that travels (D14)', () => {
     await page.getByLabel('Branch name').fill('conflicts');
     await page.getByRole('button', { name: 'Create branch', exact: true }).click();
 
+    /* The refusal is the branch toast's words for BRANCH_NAME_RESERVED, shortened by C1 (13ae1b6fab). */
     await expect
-      .poll(async () => page.getByText(/is kept for decisions that travel between devices/u).count(), {
+      .poll(async () => page.getByText('“conflicts” is reserved. Choose another name.', { exact: true }).count(), {
         timeout: 60_000,
       })
       .toBeGreaterThan(0);

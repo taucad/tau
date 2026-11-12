@@ -991,6 +991,21 @@ describe('ThreeCanvasInstance', () => {
     expect(camera().clipPolicy).toBeUndefined();
   });
 
+  it('hands a canvas that attaches after a new world up the axis graphics holds', () => {
+    graphicsHolder.current?.send({ type: 'setUpDirection', payload: 'y' });
+    const { unmount } = render(
+      <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
+        {null}
+      </ThreeCanvasInstance>,
+    );
+
+    expect(camera().clipPolicy).toEqual({
+      farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
+      presentationPlane: infiniteGridPresentationPlaneByUpDirection.y,
+    });
+    unmount();
+  });
+
   it('re-reports the drawn grid to a new canvas actor while the scene stays mounted', async () => {
     // As after a Suspense reveal in real R3F: the surface's canvas actor is replaced, but the scene (its own root) and
     // the grid marker in it never unmount, so only the marker's new callback identity can tell the new actor.

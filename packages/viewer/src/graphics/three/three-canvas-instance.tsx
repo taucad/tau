@@ -5,7 +5,7 @@ import { flushSync } from 'react-dom';
 import type { ActorRefFrom } from 'xstate';
 import type { RefCallback } from 'react';
 import type { Group } from 'three';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RendererInstance } from '#graphics/three/renderer.js';
 import { RenderFpsOverlay } from '#graphics/three/render-fps-overlay.jsx';
 import { renderLoopObservers } from '#graphics/three/render-loop-observer.js';
@@ -162,7 +162,7 @@ export function ThreeCanvasInstance({
    * This canvas's view-cube interaction lock: the cube takes it, and the controls adapter does not step while it is
    * held.
    */
-  const interactionLock = useMemo(createViewportGizmoInteractionLock, []);
+  const [interactionLock] = useState(createViewportGizmoInteractionLock);
   /** Hands graphics the controls adapter for this mount's root; graphics stops it with the surface (charter I9, I11). */
   const attachControls = useCallback(
     (held: CanvasHostRoot): void => {

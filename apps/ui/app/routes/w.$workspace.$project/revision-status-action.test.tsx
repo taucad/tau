@@ -2,14 +2,14 @@
 /**
  * The header's revision trigger (S29, workspace-header-actions section 2 and 6).
  *
- * `[glyph] main` at rest, one glyph for the most urgent fact, the rest in a
- * hover card and the accessible name; *Follow chat* only while the focused
- * chat works somewhere else.
+ * `[glyph] main` at rest, one glyph for the most urgent fact, the branch and
+ * the status sentence in its tooltip and accessible name, and no hover card
+ * (C6); *Switch to ⟨branch⟩* only while the focused chat works somewhere else.
  */
 
 import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { ArrowDownToLine, CircleAlert, CircleDashed, CloudAlert, FileDiff, GitMerge, History } from 'lucide-react';
@@ -48,11 +48,6 @@ let chats = [{ id: 'chat-1', name: 'Initial design', checkoutId: 'live' }];
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
 vi.mock('#hooks/use-chat-records.js', () => ({
   useChatRecords: () => ({ chats, isLoading: false, error: undefined }),
-}));
-/* D19: the card's Backup row asks about the account; these rows are signed in and entitled. */
-vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  useTauCloudEligibility: () => ({ auth: 'authed', isResolved: true, canSyncFiles: true }),
 }));
 
 const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
@@ -320,10 +315,9 @@ describe('RevisionStatusAction', () => {
   /*
    * RA2: a restore is a revision on the line (D1), so after restoring Rev 3 of
    * a twelve-revision `main` the header names the line — never *Rev 3*, never
-   * *Viewing* — and the new head is `Rev 13` in the accessible name and card.
+   * *Viewing* — and the new head is `Rev 13` in the accessible name.
    */
-  it('reads main with the History glyph after a restore, and names the restore row Rev N+1 (RA2)', async () => {
-    const user = userEvent.setup();
+  it('reads main with the History glyph after a restore (RA2)', async () => {
     revisionStatusHarness.rows = [
       row({ revisionId: 'rev-13', revisionNumber: 13, summary: 'Restore', source: 'restore', restoredFrom: 'rev-3' }),
       row({ revisionId: 'rev-12', revisionNumber: 12 }),
@@ -339,32 +333,6 @@ describe('RevisionStatusAction', () => {
     expect(trigger).toHaveTextContent(/^main$/u);
     expect(trigger.querySelector('[data-slot="revision-icon"]')).toHaveClass('lucide-history');
     expect(trigger).not.toHaveTextContent(/Viewing|Rev 3/u);
-
-    await user.tab();
-    await screen.findByRole('list', { name: 'Recent revisions' });
-    const card = document.querySelector('[data-slot="revision-card"]');
-    expect(card?.firstElementChild).toHaveTextContent(/^main\s*Rev 13$/u);
-    expect(card).toHaveTextContent('Restored Rev 3');
-  });
-
-  it('names a restore by its target when that target is older than the loaded page (B4)', async () => {
-    const user = userEvent.setup();
-    revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-60', revisionNumber: 60, summary: 'Restore', source: 'restore', restoredFrom: 'rev-3' }),
-      ...Array.from({ length: 59 }, (_, index) => row({ revisionId: `rev-${59 - index}`, revisionNumber: 59 - index })),
-    ];
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-60' };
-
-    render(<RevisionStatusAction />, { wrapper });
-    await screen.findByRole('button', { name: /^Open Revisions\. You are on main, Rev 60\./u });
-    await user.tab();
-    await screen.findByRole('list', { name: 'Recent revisions' });
-
-    const card = document.querySelector('[data-slot="revision-card"]');
-    await waitFor(() => {
-      expect(card).toHaveTextContent('Restored Rev 3');
-    });
-    expect(revisionStatusHarness.rowRequests).toEqual(['rev-3']);
   });
 
   /* D100: signed out, this device withholds its GitHub credential, so GitHub refused nothing. */
@@ -412,7 +380,15 @@ describe('RevisionStatusAction', () => {
     expect(openPanel).toHaveBeenCalledWith('revisions');
   });
 
-  it('shows its card on keyboard focus, with the status and the recent revisions', async () => {
+  /* C6: the tooltip is the branch and the status sentence; the hover card, its facts and its recent list are gone. */
+  it.each([
+    ['keyboard focus', async (user: ReturnType<typeof userEvent.setup>) => user.tab()],
+    [
+      'hover',
+      async (user: ReturnType<typeof userEvent.setup>) =>
+        user.hover(screen.getByRole('button', { name: /^Open Revisions\./u })),
+    ],
+  ] as const)('shows the status sentence as a tooltip on %s, and no hover card', async (_, reach) => {
     const user = userEvent.setup();
     revisionStatusHarness.rows = [
       row({ revisionId: 'rev-12', revisionNumber: 12, summary: 'Motor mount holes' }),
@@ -421,36 +397,27 @@ describe('RevisionStatusAction', () => {
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-12', dirty: true };
 
     render(<RevisionStatusAction />, { wrapper });
-    await screen.findByRole('button', { name: /Modified since Rev 12\.$/u });
-    await user.tab();
+    const trigger = await screen.findByRole('button', { name: /Modified since Rev 12\.$/u });
+    await reach(user);
 
-    const recent = await screen.findByRole('list', { name: 'Recent revisions' });
-    expect(recent).toHaveTextContent('Motor mount holes');
-    expect(recent).toHaveTextContent('Thinner arms');
-    expect(screen.getByText('Modified since Rev 12')).toBeInTheDocument();
-    expect(screen.getByText('Click to open Revisions')).toBeInTheDocument();
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/^main · Modified since Rev 12$/u);
+    expect(trigger).toHaveAccessibleDescription('main · Modified since Rev 12');
+    expect(document.querySelector('[data-slot="revision-card"], [data-slot="hover-card-content"]')).toBeNull();
+    expect(screen.queryByText('Motor mount holes')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Click to open/u)).not.toBeInTheDocument();
   });
 
-  /* Before the first save of a project backed up by default, the card agrees with the pane (W10-L B-3). */
-  it.each([
-    ['noticed', 'Backs up to Tau Cloud automatically after your first save'],
-    [undefined, 'No backup connected'],
-  ] as const)('reads the Backup row of a project whose backup intent is %s', async (intent, backup) => {
+  it('says Setting up in the tooltip while the line is unknown', async () => {
     const user = userEvent.setup();
-    const { tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
-    tauCloudIntent.set('p', intent);
-    onTestFinished(() => {
-      tauCloudIntent.set('p', undefined);
-    });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
 
     render(<RevisionStatusAction />, { wrapper });
-    await screen.findByRole('button', { name: /^Open Revisions\./u });
     await user.tab();
 
-    expect(await screen.findByText(backup)).toBeInTheDocument();
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/^Setting up · Loading history…$/u);
   });
 
-  it('offers Follow chat only while the chat works on another branch', async () => {
+  it('offers Switch to the chat’s branch only while the chat works there, and switches (M2)', async () => {
     const user = userEvent.setup();
     chats = [{ id: 'chat-1', name: 'Initial design', checkoutId: 'co-2' }];
     revisionStatusHarness.status = {
@@ -468,15 +435,20 @@ describe('RevisionStatusAction', () => {
     };
 
     render(<RevisionStatusAction />, { wrapper });
-    await user.click(screen.getByRole('button', { name: 'Follow chat, which is working on bracket-fillet' }));
+    const switchTo = screen.getByRole('button', { name: 'Switch to bracket-fillet' });
+    expect(switchTo.nextElementSibling).toBe(screen.getByRole('button', { name: /^Open Revisions\./u }));
+    await user.hover(switchTo);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/^This chat is working on bracket-fillet$/u);
+    await user.click(switchTo);
 
     expect(revisionStatusHarness.commands.pinTo).toHaveBeenCalledWith('co-2');
+    expect(screen.queryByText(/Follow chat/u)).not.toBeInTheDocument();
   });
 
-  it('says nothing about following while the chat is where the workbench is', () => {
+  it('offers no switch while the chat is where the workbench is', () => {
     render(<RevisionStatusAction />, { wrapper });
 
-    expect(screen.queryByText('Follow chat')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Switch to/u })).not.toBeInTheDocument();
   });
 
   /* R10, M2 (I6): before the projection names the line, History is loading — never empty, never `main`. */

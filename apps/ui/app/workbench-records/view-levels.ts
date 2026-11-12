@@ -4,11 +4,13 @@
  * every flag state. Turning the flag off stops saved defaults applying; turning it on applies them again. No view file
  * changes either way.
  */
+import { useMemo } from 'react';
 import { isFeatureEnabled } from '#flags/feature-flags.js';
-import { subscribeFeatureFlags } from '#flags/use-feature.js';
+import { subscribeFeatureFlags, useFeature } from '#flags/use-feature.js';
 import { personRecordStores } from '#preferences/person-record.store.js';
+import { usePersonRecord } from '#preferences/use-person-record.js';
 import type { ViewResolutionLevels } from '#workbench-records/view-record-binding-changes.js';
-import { exceptionsForView, viewExceptionsStore } from '#workbench-records/view-exceptions.js';
+import { exceptionsForView, useViewExceptions, viewExceptionsStore } from '#workbench-records/view-exceptions.js';
 
 /**
  * The levels for one view, read now: for a create-only seed outside React's render.
@@ -52,3 +54,21 @@ export const deviceViewLevels = (projectId: string): ViewLevelsSource => ({
     };
   },
 });
+
+/**
+ * The levels for one view in React, for a surface that shows where a leaf's value comes from (a view's menu). It
+ * refreshes when the flag, the person's defaults or the exceptions change, here or in another tab.
+ *
+ * @param projectId - The project.
+ * @param viewId - The view.
+ * @returns The levels, stable while none of them changes.
+ */
+export const useViewLevels = (projectId: string, viewId: string): ViewResolutionLevels => {
+  const viewerControls = useFeature('viewerControls');
+  const { viewer } = usePersonRecord();
+  const exceptions = exceptionsForView(useViewExceptions(), projectId, viewId);
+  return useMemo(
+    () => ({ ...(viewerControls ? { person: viewer.viewDefaults } : {}), exceptions }),
+    [exceptions, viewer.viewDefaults, viewerControls],
+  );
+};

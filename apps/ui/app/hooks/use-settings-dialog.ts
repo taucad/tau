@@ -16,6 +16,7 @@ export const settingsSectionSchema = z.enum([
   'repositories',
   'billing',
   'data-controls',
+  'viewer',
   'compute',
   'machines',
   'models',

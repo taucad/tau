@@ -159,6 +159,16 @@ jobs:
       - name: Setup Linux sandbox prerequisites
         uses: ./.github/actions/setup-linux-sandbox
 
+      # Hosts that render under plain Node (nanoraster: the desktop services utility's
+      # MCP `screenshot`, the CLI and the daemon) need a Vulkan adapter, and the runner
+      # has no GPU. lavapipe, Mesa's Vulkan CPU driver, is their counterpart of the
+      # browsers' SwiftShader (`TAU_E2E_WEBGPU_PROFILE: software`); viewer-parity.yml
+      # runs both side by side the same way.
+      - name: Install a software Vulkan driver for native rendering
+        run: |
+          sudo apt-get install -y mesa-vulkan-drivers
+          echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
+
       # `desktop-e2e:test:e2e` boots a real API, which reads this file for its
       # `BILLING_*` development values; without them it refuses to start.
       - name: Prepare API env file

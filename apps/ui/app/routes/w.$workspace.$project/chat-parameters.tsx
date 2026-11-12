@@ -34,6 +34,8 @@ import { usePaneviewPersistence } from '#routes/w.$workspace.$project/use-chat-i
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ProjectWorkbenchPanesHost } from '#routes/w.$workspace.$project/workbench-panes-host.js';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
+import { useTourAnchor } from '#components/tour/tour-anchors.js';
+import { reportTourAction } from '#components/tour/tour-actions.js';
 
 const toggleParametersKeyCombination = projectWorkspaceKeyCombinations.parameters;
 
@@ -323,9 +325,13 @@ function useProjectParametersSource(): ParametersSource {
       useEntryPaths: useProjectParameterEntryPaths,
       useEntry: useProjectParameterEntry,
       target: (entryPath) => parameterService.target(entryPath),
-      commitValue: async (entryPath, manifest, field) =>
-        parameterService.commitValue(parameterService.target(entryPath), manifest, field),
+      commitValue: async (entryPath, manifest, field) => {
+        /* A committed value is what the product tour's Parameters tip is about. */
+        reportTourAction('adjust');
+        return parameterService.commitValue(parameterService.target(entryPath), manifest, field);
+      },
       editValues: (entryPath, manifest, { values, base }) => {
+        reportTourAction('adjust');
         editGeometryUnitParameters(entryPath, manifest, { values: { ...values }, base: { ...base } });
       },
       replaceValues: (entryPath, manifest, values) => {
@@ -447,5 +453,11 @@ export const ChatParameters = memo(function (props: {
 
 export function ParametersPanelBody(): React.JSX.Element {
   const availability = useModelAvailability();
-  return availability === 'ready' ? <ProjectParametersPane /> : <ProjectSyncPlaceholder state={availability} />;
+  /* The product tour's Parameters tip is placed beside this pane. */
+  const parametersAnchor = useTourAnchor('parameters');
+  return (
+    <div ref={parametersAnchor} className='flex size-full min-h-0 flex-col'>
+      {availability === 'ready' ? <ProjectParametersPane /> : <ProjectSyncPlaceholder state={availability} />}
+    </div>
+  );
 }

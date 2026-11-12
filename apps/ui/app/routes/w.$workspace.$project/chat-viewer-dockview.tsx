@@ -49,6 +49,7 @@ import type { ActorRefFrom } from 'xstate';
 import { setLocalInstanceChoice } from '#workbench-records/local-instance.js';
 import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
+import { useTourAnchor } from '#components/tour/tour-anchors.js';
 
 /**
  * Params passed to each viewer panel via Dockview.
@@ -154,6 +155,7 @@ function ViewerPanel({
   readonly profile: ViewerProfile;
 }): React.JSX.Element | undefined {
   const { viewId, entryPath } = properties.params;
+  const viewerAnchor = useTourAnchor('viewer');
   const subscribeVisibility = useCallback(
     (onChange: () => void) => {
       const subscription = properties.api.onDidVisibilityChange(onChange);
@@ -169,7 +171,10 @@ function ViewerPanel({
     () => true,
   );
   return isVisible ? (
-    <ChatViewer viewId={viewId} entryPath={entryPath} panelApi={properties.api} profile={profile} />
+    /* The product tour's Look around tip hangs from this viewer's corner; the first viewer on the page is used. */
+    <div ref={viewerAnchor} className='size-full'>
+      <ChatViewer viewId={viewId} entryPath={entryPath} panelApi={properties.api} profile={profile} />
+    </div>
   ) : undefined;
 }
 

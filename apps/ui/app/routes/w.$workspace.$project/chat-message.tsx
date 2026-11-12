@@ -35,6 +35,8 @@ import { ChatPermissionRequest } from '#components/chat/chat-permission-request.
 import { ChatAcpActivity } from '#components/chat/chat-acp-activity.js';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { ChatActivityGroup } from '@taucad/chat-ui/components/chat-activity-group';
+import { useTourAnchor } from '#components/tour/tour-anchors.js';
+import { reportTourAction } from '#components/tour/tour-actions.js';
 import { agentApprovalToolName, parseAgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { ChatMessageReasoning } from '#routes/w.$workspace.$project/chat-message-reasoning.js';
 import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
@@ -635,8 +637,9 @@ function renderActivityGroup(
     );
   }
 
+  const ActivityGroup = group.families.includes('test') ? TestActivityGroup : ChatActivityGroup;
   return (
-    <ChatActivityGroup
+    <ActivityGroup
       key={`${context.messageId}-group-${groupIndex}`}
       summary={group.summary}
       icon={activityIcons[group.families[0] ?? 'other']}
@@ -647,8 +650,24 @@ function renderActivityGroup(
       }
     >
       {renderActivityRows(group, context)}
-    </ChatActivityGroup>
+    </ActivityGroup>
   );
+}
+
+const reportTestRowOpened = (): void => {
+  reportTourAction('verify');
+};
+
+/**
+ * An activity row that holds a test run. The product tour's Verify tip points at the first such row, and opening it,
+ * which shows each check, is what that tip is about.
+ *
+ * @param properties - The row, as {@link ChatActivityGroup} takes it.
+ * @returns The row, registered as the tour's test-run anchor.
+ */
+function TestActivityGroup(properties: React.ComponentProps<typeof ChatActivityGroup>): React.JSX.Element {
+  const testRowAnchor = useTourAnchor('activity-test');
+  return <ChatActivityGroup {...properties} triggerRef={testRowAnchor} onOpen={reportTestRowOpened} />;
 }
 
 type ReasoningPart = Extract<MyMessagePart, { type: 'reasoning' }>;

@@ -64,6 +64,7 @@ import { reportFirstExport } from '#telemetry/onboarding-telemetry.js';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import { ProjectWorkbenchPanesHost } from '#routes/w.$workspace.$project/workbench-panes-host.js';
+import { reportTourActionOnMount } from '#components/tour/tour-actions.js';
 
 const toggleConverterKeyCombination = projectWorkspaceKeyCombinations.export;
 
@@ -651,6 +652,8 @@ function useProjectExportSource({ downloadOnly }: { readonly downloadOnly: boole
   );
 }
 
+const reportExportOpened = reportTourActionOnMount('build');
+
 /** Exporters mount only after the first project checkout is reconciled. */
 export function ConverterPanelBody(
   props: { readonly downloadOnly?: boolean; readonly isShown?: boolean } = {},
@@ -674,6 +677,8 @@ function ConverterPanelBodyContent({
   const sources = useMemo(() => ({ export: source }), [source]);
   return (
     <ProjectWorkbenchPanesHost sources={sources}>
+      {/* Mounted while the pane is shown, so its ref reports the pane opening to the product tour. */}
+      {isShown ? <span hidden ref={reportExportOpened} /> : null}
       <ExportPane isShown={isShown} />
     </ProjectWorkbenchPanesHost>
   );

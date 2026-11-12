@@ -508,9 +508,15 @@ describe('the viewer page in an MCP Apps host', () => {
       expect(await openFullView.isVisible()).toBe(true);
       await capture(page, 'basic-host-inline');
 
-      /* Besides its live link (app_sync), the card reads only its model. */
+      /* Besides its live link (app_sync), the card reads its model, the view the project's records keep for it
+       * (app_workbench_state, PAR-3) and its viewer settings (app_viewer_settings), each once. */
       const openingCalls = await recorded(page, 'toolCalls');
-      expect(openingCalls.map((call) => call.name).filter((name) => name !== 'app_sync')).toEqual(['app_read']);
+      expect(
+        openingCalls
+          .map((call) => call.name)
+          .filter((name) => name !== 'app_sync')
+          .toSorted(),
+      ).toEqual(['app_read', 'app_viewer_settings', 'app_workbench_state']);
 
       await addToChat.click();
       await expect.poll(async () => recorded(page, 'modelContext')).toHaveLength(1);

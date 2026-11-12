@@ -2626,12 +2626,18 @@ importers:
       '@nestjs/config':
         specifier: ^4.0.4
         version: 4.0.4(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(rxjs@7.8.2)
+      '@opentelemetry/api':
+        specifier: 'catalog:'
+        version: 1.9.1
       '@taucad/api-core':
         specifier: workspace:*
         version: link:../api-core
       '@taucad/billing':
         specifier: workspace:*
         version: link:../billing
+      '@taucad/telemetry':
+        specifier: workspace:*
+        version: link:../../../libs/telemetry
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types

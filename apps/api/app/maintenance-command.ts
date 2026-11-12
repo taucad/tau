@@ -5,7 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { and, asc, eq, gt, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { getMaintenanceEnvironment } from '#config/maintenance-environment.config.js';
+import { getMaintenanceEnvironment, maintenanceDatabasePoolMax } from '#config/maintenance-environment.config.js';
 import type { MaintenanceEnvironment } from '#config/maintenance-environment.config.js';
 import * as schema from '@taucad/api-database/schema';
 import { project, projectGitLfsObject, storageTombstone } from '@taucad/api-database/schema';
@@ -257,7 +257,7 @@ async function main(): Promise<void> {
 
   /* eslint-disable @typescript-eslint/naming-convention -- PostgreSQL connection options */
   const client = postgres(environment.DATABASE_URL, {
-    max: 2,
+    max: maintenanceDatabasePoolMax,
     prepare: false,
     connect_timeout: environment.DATABASE_CONNECT_TIMEOUT_SECONDS,
     idle_timeout: environment.DATABASE_IDLE_TIMEOUT_SECONDS,

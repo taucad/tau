@@ -15,7 +15,9 @@ import { BillingRecoveryNoticeEmailTransport } from '#billing-recovery-notice.tr
 import { createBillingStripeClient } from '#billing-stripe.js';
 import { resolveBillingCollection } from '#billing-collection.js';
 import { EmailModule, EmailService } from '@taucad/api-email';
-import { LlmGatewayAuthGuard, ModelModule } from '@taucad/api-llm-gateway';
+import { invocationEvidenceRecorderToken, LlmGatewayAuthGuard, ModelModule } from '@taucad/api-llm-gateway';
+import type { InvocationEvidenceRecorder } from '@taucad/api-llm-gateway';
+import type { ObservedSettlement } from '#observed-settlement.js';
 import { BillingController } from '#billing.controller.js';
 import { BillingService } from '#billing.service.js';
 import { BillingPolicyService } from '#billing-policy.service.js';
@@ -150,13 +152,26 @@ const providerUpstreamFetch =
     },
     {
       provide: BillingRecoveryScheduler,
-      inject: [CreditLedgerService, MetricsService, ConfigService],
+      inject: [
+        DatabaseService,
+        BillingPolicyService,
+        MetricsService,
+        ConfigService,
+        { token: invocationEvidenceRecorderToken, optional: true },
+      ],
+      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves five distinct provider tokens.
       useFactory(
-        ledger: CreditLedgerService,
+        database: DatabaseService,
+        policy: BillingPolicyService,
         metrics: MetricsService,
         config: ConfigService<Environment, true>,
+        evidenceRecorder: InvocationEvidenceRecorder<ObservedSettlement> | undefined,
       ): BillingRecoveryScheduler {
         const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
+        /* The in-process clock polls every few seconds on every Machine, so it runs its ledger on the
+           background pool (database connection audit R3); request-path settlements keep the request pool.
+           Its recovery transactions take only their own connection, which one background connection serves. */
+        const ledger = new CreditLedgerService({ database: database.background }, policy, metrics, evidenceRecorder);
         return new BillingRecoveryScheduler(ledger, metrics, {
           environment: environment.success ? environment.data : 'development',
           intervalMilliseconds: config.get('BILLING_RECOVERY_INTERVAL_MS', { infer: true }),

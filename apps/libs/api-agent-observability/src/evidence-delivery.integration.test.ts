@@ -261,7 +261,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       });
     }
     return new EvidenceDeliveryService(
-      { database } as unknown as DatabaseService,
+      { background: database } as unknown as DatabaseService,
       config as unknown as ConstructorParameters<typeof EvidenceDeliveryService>[1],
       purposes,
       new ShutdownService(),

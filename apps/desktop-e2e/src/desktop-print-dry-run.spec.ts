@@ -158,7 +158,14 @@ const openPrintProject = async (
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
   fixture = await startGatewayFixture({ toolCalls: () => script.current });
-  session = await launchDesktopApp({ token });
+  session = await launchDesktopApp({
+    token,
+    /* Machines ship disabled unless the deployment opts in (37e93ead41), which an
+     * unpackaged qualification build may do; without it Settings has no Machines
+     * section and the shell offers no Print. */
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
+    env: { TAU_MACHINES_ENABLED: '1' },
+  });
   const { page } = session;
   await fixture.routeThrough(page);
   await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);

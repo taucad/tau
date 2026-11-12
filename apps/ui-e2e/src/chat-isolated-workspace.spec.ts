@@ -153,7 +153,9 @@ const expectCaptureTurn = async (): Promise<void> => {
     expect(wire).not.toContain('dataUrl');
     return;
   }
-  await target.expectCount(selectors.getByRole('button', { name: /Attempted screenshot/u }), 2, 60_000);
+  /* Without WebGPU both captures fail with the image service's IO_ERROR, and a coded failure's row names its code
+   * ("io error screenshot") rather than the generic "Attempted" (455d663a10). */
+  await target.expectCount(selectors.getByRole('button', { name: /^io error screenshot\b/u }), 2, 60_000);
 };
 
 const expectWorkspaceSuccess = async (): Promise<void> => {

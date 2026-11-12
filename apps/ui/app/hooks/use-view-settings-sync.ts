@@ -346,6 +346,7 @@ export function useViewSettingsSync({
     }
     const actor = session.rig.actorRef;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let waitedForEntry = false;
     const apply = (): void => {
       const remaining = poseSettle - (Date.now() - lastCameraEmissionRef.current);
       if (remaining > 0) {
@@ -358,8 +359,15 @@ export function useViewSettingsSync({
       }
       if (entryPath !== undefined && framesAnotherEntry(graphicsRef, entryPath)) {
         /* The camera shows another entry: the record waits until framing names its own. */
+        waitedForEntry = true;
         timer = setTimeout(apply, poseSettle);
         return;
+      }
+      if (waitedForEntry && entryPath !== undefined && mayRefreshPendingPose(graphicsRef, entryPath)) {
+        /* Framing names the record's entry again and waits for its first frame, which applies the record's camera. */
+        waitedForEntry = false;
+        const pendingPose = pendingPoseOf(latest, `record:${viewId}`);
+        graphicsRef.send({ type: 'entryChanged', identity: entryPath, ...(pendingPose ? { pendingPose } : {}) });
       }
       const current = actor.getSnapshot().context.view;
       const adoption =

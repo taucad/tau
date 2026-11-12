@@ -1066,6 +1066,52 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       expect(poseWrites(writeRecord)).toEqual([]);
     });
 
+    it("should apply a waiting record's side over its entry's first frame, however late that frame comes", () => {
+      const graphicsRef = graphics();
+      const editorRef = editor();
+      const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+      const record = initial();
+      const draw = (next: WorkbenchView) => (
+        <GraphicsProvider graphicsRef={graphicsRef}>
+          <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={next} writeRecord={writeRecord} />
+        </GraphicsProvider>
+      );
+      const view = render(draw(record));
+      disposers.push(() => {
+        view.unmount();
+        graphicsRef.stop();
+      });
+      advance(settle * 4);
+      // The pane shows another entry than the record names, and framing has framed it.
+      act(() => {
+        graphicsRef.send({ type: 'entryChanged', identity: 'src/other.ts' });
+      });
+      measure(graphicsRef, smallBounds, 'cube-other');
+      expect(isFramed(graphicsRef)).toBe(true);
+      const camera = graphicsRef.getSnapshot().context.cameraRef;
+      const shown = camera.getSnapshot().context.view;
+
+      view.rerender(draw({ ...record, camera: { kind: 'preset', preset: 'front' } }));
+      advance(settle * 4);
+      expect(isFramed(graphicsRef)).toBe(true);
+      expect(selectGraphicsFramingIdentity(graphicsRef.getSnapshot())).toBe('src/other.ts');
+      // The record's camera waits for its own entry rather than turning the one on screen.
+      expect(camera.getSnapshot().context.view.direction).toEqual(shown.direction);
+      expect(poseWrites(writeRecord)).toEqual([]);
+
+      // Once the pane shows the record's entry again, its first frame takes the record's side.
+      act(() => {
+        graphicsRef.send({ type: 'entryChanged', identity: 'src/main.ts' });
+      });
+      // The build takes longer than the record's retry: the entry waits for its frame when the record is released.
+      advance(settle * 4);
+      measure(graphicsRef, smallBounds, 'cube-main');
+      advance(settle * 4);
+      expect(camera.getSnapshot().context.lastChange.source).toBe('persisted');
+      expect(camera.getSnapshot().context.view.direction).not.toEqual(shown.direction);
+      expect(poseWrites(writeRecord)).toEqual([]);
+    });
+
     it('today saves an automatic refit after the bounds grow by more than 10 % (G6b flips, D20)', () => {
       const harness = mountFramed(initial());
       advance(settle * 4);

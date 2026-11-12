@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createActor, createAsyncLogic, setup, types } from 'xstate';
 import type { Actor, ActorRefFrom } from 'xstate';
 import type { CameraOwnedSettings } from '#graphics/graphics-settings.js';
-import { getGraphicsCameraState, selectGraphicsCamera } from '#graphics/graphics-camera.js';
+import { getGraphicsCameraState, selectCameraViewDirection, selectGraphicsCamera } from '#graphics/graphics-camera.js';
 import {
   graphicsMachine,
   selectGraphicsFramed,
@@ -59,6 +59,7 @@ describe('the view camera as a graphics child', () => {
     expect(framing.value).toBe('awaitingGeometry');
     expect(framing.context).toMatchObject({ pendingPose: { pose: cameraView } });
     expect(getGraphicsCameraState(graphicsRef)?.target).toEqual(cameraView.target);
+    expect(selectCameraViewDirection(camera)).toEqual(camera.getSnapshot().context.view.direction);
   });
 
   it('should keep the framed entry until the entry identity changes', () => {

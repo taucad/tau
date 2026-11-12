@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type { SnapshotFrom } from 'xstate';
 import * as THREE from 'three';
@@ -67,7 +67,8 @@ type GeometryBoundsResult = {
  * Tracks the axis-aligned bounding box of the geometry inside `innerRef`,
  * exposes the bounding sphere radius and center as React state, and reports
  * each new measurement to the graphics actor as `geometryBoundsMeasured`,
- * which anchors the render frame and frames the camera (charter G5).
+ * which anchors the render frame, frames the camera (charter G5) and keeps
+ * the scene's bounding sphere for its other observers.
  *
  * Integrates with the graphics machine's `geometryKey` to avoid expensive
  * scene traversals once bounds have stabilized — they are only recomputed
@@ -242,19 +243,6 @@ export function useGeometryBounds(
     invalidate();
   }, [fitMargin, geometryKey, invalidate, presentedRevision, settledPoseRevision]);
   useFrame(measureBounds);
-
-  // Sync the real bounding-sphere radius to the graphics machine so other
-  // components (and downstream consumers of geometryRadius) get the actual value
-  // computed from the Three.js scene graph, not a placeholder.
-  useEffect(() => {
-    if (geometryRadius > 0) {
-      graphicsActor.send({
-        type: 'sceneRadiusUpdated',
-        radius: geometryRadius,
-        centerMeters: [geometryCenter.x, geometryCenter.y, geometryCenter.z],
-      });
-    }
-  }, [geometryCenter, graphicsActor, geometryRadius]);
 
   return { geometryRadius, geometryCenter, geometryBounds };
 }

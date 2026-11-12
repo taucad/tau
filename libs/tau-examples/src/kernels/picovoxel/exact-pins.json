@@ -1,13 +1,13 @@
 {
-  "$comment": "DP18: exact-lane export bytes every host produces for these examples (Node serial and auto in runtime-e2e, every browser engine in ui-e2e). Exports always replay on the serial L0 build, and GLB normals are normalized with the correctly rounded Math.sqrt, so a change here is a Class-X pin event: attribute it before updating. The GLB's asset.generator names the @taucad/geometry-core version, so every release of the group changes the GLB hash.",
+  "$comment": "DP18: exact-lane export bytes every host produces for these examples (Node serial and auto in runtime-e2e, every browser engine in ui-e2e). Exports always replay on the serial L0 build, and GLB normals are normalized with the correctly rounded Math.sqrt, so a change here is a Class-X pin event: attribute it before updating. The GLB pin covers the file with its asset.generator version replaced by <version> (libs/tau-examples/src/exact-pin.ts, which both hosts hash through), so a release of the group alone leaves it unchanged; every other byte, materials and buffers included, still moves it.",
   "sphere-minus-beams": {
     "stl": {
       "sha256": "b924eabf75ed38eb64a60ef5fad1dc03db059f2cda7eee7f1e2549e9e69a2dc3",
       "bytes": 1042884
     },
     "glb": {
-      "sha256": "29fd2a38aba41b6751eb11f11b020fb2c87c825bd239fcc433c8fc12f84aed37",
-      "bytes": 507484
+      "sha256": "e782f2d93af9af2a3c2c76b1681239f23793f824976933f2840482618ef25bda",
+      "bytes": 507480
     }
   }
 }

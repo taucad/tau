@@ -366,12 +366,9 @@ const ChatViewerContent = memo(function ({
     if (!graphicsActor || (entryPath && !isDirectory && !isMissing)) {
       return;
     }
-    const unitId = graphicsActor.getSnapshot().context.modelInteractionUnitId;
+    // Graphics reports the unit it stops presenting, and the project releases its manifest with the last view.
     graphicsActor.send({ type: 'clearArtifact' });
-    if (unitId) {
-      projectRef.send({ type: 'reconcileViewManifest', unitId });
-    }
-  }, [entryPath, graphicsActor, isDirectory, isMissing, projectRef]);
+  }, [entryPath, graphicsActor, isDirectory, isMissing]);
 
   // The project view record is the camera seed for this pane.
   const viewRecord = viewRecords.get(viewId);
@@ -659,29 +656,6 @@ const ViewerContent = memo(function ({
   // Bridge this pane's projection to its graphics owner. Other panes may show
   // different views of the same evaluated document without changing this one.
   const graphicsActor = useGraphics();
-  const presentedUnitId = useGraphicsSelector((state) => state.context.modelInteractionUnitId);
-  const presentedMediaType = useGraphicsSelector((state) => state.context.artifact?.mimeType);
-  const previousPresentation = useRef({
-    unitId: presentedUnitId,
-    mimeType: presentedMediaType,
-  });
-  useEffect(() => {
-    const previous = previousPresentation.current;
-    previousPresentation.current = {
-      unitId: presentedUnitId,
-      mimeType: presentedMediaType,
-    };
-    if (
-      previous.unitId &&
-      (previous.unitId !== presentedUnitId ||
-        (previous.mimeType === 'model/gltf-binary' && presentedMediaType !== 'model/gltf-binary'))
-    ) {
-      projectRef.send({
-        type: 'reconcileViewManifest',
-        unitId: previous.unitId,
-      });
-    }
-  }, [presentedUnitId, presentedMediaType, projectRef]);
   useEffect(() => {
     if (emptyModel) {
       graphicsActor.send({ type: 'clearArtifact' });

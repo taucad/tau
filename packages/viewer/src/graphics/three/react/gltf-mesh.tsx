@@ -111,6 +111,7 @@ import type {
   GltfPresentationBarrier,
   GltfPresentationTelemetry,
   GraphicsCameraRef,
+  GraphicsContext,
 } from '#machines/graphics.machine.js';
 import { useViewerEnvironment } from '#environment/viewer-environment.jsx';
 
@@ -2032,9 +2033,47 @@ export function applyGltfEdgeThemeColor(scene: Group, edgeColor: number): void {
   }
 }
 
+/** Whether a ref's object is attached: a Three.js object with a parent, or any other host node React attached. */
+const isAttachedHost = (object: unknown): boolean =>
+  typeof object === 'object' && object !== null && (!('isObject3D' in object) || (object as Object3D).parent !== null);
+
+/**
+ * The scene's ref callback, which commits a presentation once React has attached its scene. One callback per
+ * presentation, so an in-place update, which keeps its scene, attaches again and commits too. R3F sets a rebuilt
+ * primitive's refs (this callback and the one before it) before it adds the new scene to its parent, and React
+ * attaches the ref again once it has: only an attached scene commits, and graphics ignores a repeated commit. Built
+ * at module scope, so the callback holds its presentation and not a render's scope.
+ *
+ * @public
+ */
+export function createPresentationAttach(
+  graphicsActor: Readonly<{ send: ReturnType<typeof useGraphics>['send'] }>,
+  presentation: Readonly<Pick<PreparedGltfPresentation, 'revision' | 'key' | 'unitId' | 'manifest'>> | undefined,
+): (object: unknown) => void {
+  return (object) => {
+    if (!presentation || !isAttachedHost(object)) {
+      return;
+    }
+    graphicsActor.send({
+      type: 'gltfPresentationCommitted',
+      revision: presentation.revision,
+      key: presentation.key,
+      unitId: presentation.unitId,
+      manifest: presentation.manifest,
+    });
+  };
+}
+
 /** Whether the person is dragging the view's camera, read at the moment a query needs it. */
 const selectCameraDragging = (cameraRef: GraphicsCameraRef): boolean =>
   cameraRef.getSnapshot().matches({ input: 'dragging' });
+
+/**
+ * The graphics state a pointer handler reads when the pointer moves, not when it renders: a selected value would
+ * re-render the model on every section drag step and click guard.
+ */
+const selectPointerContext = (graphicsActor: ReturnType<typeof useGraphics>): GraphicsContext =>
+  graphicsActor.getSnapshot().context;
 
 /**
  * This component renders a GLTF mesh.
@@ -2170,7 +2209,7 @@ export function GltfMesh({
     // false to stop Three's descendant walk after the model pick.
     // oxlint-disable-next-line react/immutability -- This presentation owns the external Three.js scene and restores its imperative raycast hook on teardown.
     scene.raycast = (raycaster, intersections): false => {
-      const { context } = graphicsActor.getSnapshot();
+      const context = selectPointerContext(graphicsActor);
       // A press can reach camera controls before R3F: only movement gives the camera ownership.
       // Queries resume immediately on release, without waiting for a React render.
       if (
@@ -2307,18 +2346,10 @@ export function GltfMesh({
     invalidate();
   }, [scene, activeEdgeColor, invalidate]);
 
-  useLayoutEffect(() => {
-    if (!presentation) {
-      return;
-    }
-    graphicsActor.send({
-      type: 'gltfPresentationCommitted',
-      revision: presentation.revision,
-      key: presentation.key,
-      unitId: presentation.unitId,
-      manifest: presentation.manifest,
-    });
-  }, [graphicsActor, presentation]);
+  const attachPresentation = useMemo(
+    () => createPresentationAttach(graphicsActor, presentation),
+    [graphicsActor, presentation],
+  );
 
   useLayoutEffect(() => {
     if (!presentation || !needsMeasurementFeatures) {
@@ -2593,7 +2624,7 @@ export function GltfMesh({
         return;
       }
 
-      if (graphicsActor.getSnapshot().context.suppressNextModelPointerClick) {
+      if (selectPointerContext(graphicsActor).suppressNextModelPointerClick) {
         graphicsActor.send({ type: 'clearModelPointerClickGuard' });
       }
 
@@ -2642,7 +2673,7 @@ export function GltfMesh({
         event.stopPropagation();
         return;
       }
-      const graphicsContext = graphicsActor.getSnapshot().context;
+      const graphicsContext = selectPointerContext(graphicsActor);
       const clickAction = resolveModelPointerClickAction({
         intersections: event.intersections,
         modelComponentId: getPickedComponentId(event.object, componentManifest),
@@ -2667,7 +2698,7 @@ export function GltfMesh({
 
   const resolveContextMenuActionFromEvent = useCallback(
     (event: ThreeEvent<MouseEvent | PointerEvent>): ModelContextMenuAction => {
-      const graphicsContext = graphicsActor.getSnapshot().context;
+      const graphicsContext = selectPointerContext(graphicsActor);
       return resolveModelContextMenuAction({
         intersections: event.intersections,
         modelComponentId: getPickedComponentId(event.object, componentManifest),
@@ -2741,9 +2772,10 @@ export function GltfMesh({
       });
     }
 
+    const pointerContext = selectPointerContext(graphicsActor);
     const missedAction = resolveModelPointerMissedAction({
-      suppressNextModelPointerClick: graphicsActor.getSnapshot().context.suppressNextModelPointerClick,
-      isModelPointerClickSuppressed: graphicsActor.getSnapshot().context.modelPointerClickSuppressionReasons.length > 0,
+      suppressNextModelPointerClick: pointerContext.suppressNextModelPointerClick,
+      isModelPointerClickSuppressed: pointerContext.modelPointerClickSuppressionReasons.length > 0,
     });
     if (missedAction.type === 'consumeModelPointerGuard') {
       graphicsActor.send({ type: 'clearModelPointerClickGuard' });
@@ -2769,6 +2801,7 @@ export function GltfMesh({
   return (
     <group matrix={assetMatrix} matrixAutoUpdate={false}>
       <primitive
+        ref={attachPresentation}
         object={scene}
         onPointerMove={handlePointerMove}
         onPointerDown={handlePointerDown}

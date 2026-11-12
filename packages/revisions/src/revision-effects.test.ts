@@ -6571,7 +6571,7 @@ for (const actorSet of actorSets) {
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({
         start: 'created',
-        trigger: 'create',
+        capture: 'create',
         source: 'user',
         summary: 'Project created',
       });
@@ -6604,7 +6604,7 @@ for (const actorSet of actorSets) {
       const [row] = await readRevisionLog(port, { branch: 'main' });
       expect(row).toMatchObject({
         start: 'folder',
-        trigger: 'import',
+        capture: 'import',
         source: 'import',
         summary: 'Imported from a folder',
       });

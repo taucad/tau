@@ -80,9 +80,9 @@ describe('revision verbs', () => {
     await port.updateRef({ name: 'main', expectedHead: first, head: second });
 
     const rows = await readRevisionLog(port);
-    expect(rows.map((row) => [row.revisionNumber, row.summary, row.actor])).toStrictEqual([
-      [2, 'Second', 'grace'],
-      [1, 'First', 'ada'],
+    expect(rows.map((row) => [row.revisionNumber, row.summary, row.who])).toStrictEqual([
+      [2, 'Second', { kind: 'recorded', identity: { kind: 'user', id: 'grace' } }],
+      [1, 'First', { kind: 'recorded', identity: { kind: 'user', id: 'ada' } }],
     ]);
 
     const place = await readRevisionPlace(port);
@@ -93,7 +93,7 @@ describe('revision verbs', () => {
   });
 
   /* W6-a2 R3: History folds consecutive autosaves into one row (A20), and the
-   * trigger is the only thing that tells one from a save a person asked for. */
+   * capture is the only thing that tells one from a save a person asked for. */
   it('carries what asked for each revision onto its row', async () => {
     const port = await openPort();
     await port.setHead('main');
@@ -113,7 +113,13 @@ describe('revision verbs', () => {
     await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(idle.commitId) });
 
     const rows = await readRevisionLog(port);
-    expect(rows.map((row) => row.trigger)).toStrictEqual(['idle', 'save']);
+    expect(rows.map((row) => row.capture)).toStrictEqual(['idle', 'save']);
+
+    /* B5 through B2: the row's trailer is the trailer block the commit carries, byte for byte. */
+    const root = roots.at(-1) ?? '';
+    const { readCommit } = await vi.importActual<typeof isomorphicGit>('isomorphic-git');
+    const { commit } = await readCommit({ fs: await import('node:fs'), dir: root, oid: savedId });
+    expect(rows[1]?.trailer).toBe(commit.message.slice(commit.message.indexOf('\n\n') + 2).trimEnd());
   });
 
   /* A5, fixture B4: a turn's base cut is the person's, read from the trailer an earlier build wrote. */
@@ -150,12 +156,58 @@ describe('revision verbs', () => {
     await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(saved.commitId) });
 
     const rows = await readRevisionLog(port);
-    expect(rows.map((row) => [row.source, row.actor, row.turnCut, row.turnId])).toStrictEqual([
-      ['user', 'ada', undefined, undefined],
-      ['agent', 'agent', 'result', 'u1'],
-      ['user', 'ada', 'base', 'u1'],
+    const agent = { kind: 'agent', id: 'agent', runId: 'run-1', onBehalfOf: ada };
+    expect(rows.map((row) => [row.source, row.who, row.turnCut, row.turnId])).toStrictEqual([
+      ['user', { kind: 'recorded', identity: ada }, undefined, undefined],
+      ['agent', { kind: 'recorded', identity: agent }, 'result', 'u1'],
+      ['user', { kind: 'recorded', identity: ada }, 'base', 'u1'],
     ]);
     expect(rows.map((row) => Object.hasOwn(row, 'turnCut'))).toStrictEqual([false, true, true]);
+  });
+
+  /* B2: a row's who is typed, the trailer rides with it for diagnostics, and a commit Tau did not write names its git author. */
+  it('carries a typed who and the trailer, and a git author for a commit Tau did not record', async () => {
+    const ada = { kind: 'user', id: 'ada', anonymous: true } as const;
+    const entries: readonly RevisionLogEntry[] = [
+      {
+        id: revisionId('2'.repeat(40)),
+        changeId: 'change-2',
+        parents: [revisionId('1'.repeat(40))],
+        treeId: 'b'.repeat(40),
+        summary: { generated: 'Saved' },
+        provenance: { source: 'user', actor: ada, capture: 'save', via: 'desktop', createdAt },
+        conflicted: false,
+      },
+      {
+        id: revisionId('1'.repeat(40)),
+        changeId: 'change-1',
+        parents: [],
+        treeId: 'c'.repeat(40),
+        summary: { generated: 'Initial commit' },
+        provenance: { source: 'import', createdAt },
+        authorName: 'octo-dev',
+        conflicted: false,
+      },
+    ];
+    const port: Partial<RevisionPort> = {
+      readHead: async () => ({ branch: 'main', head: revisionId('2'.repeat(40)) }),
+      log: async () => entries,
+      listTags: async () => [],
+      firstParentChanges: async (ids) => new Map(ids.map((id) => [id, ['part.ts']] as const)),
+    };
+
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log read asks only these four methods.
+    const [saved, imported] = await readRevisionLog(port as RevisionPort);
+
+    expect(saved?.who).toStrictEqual({ kind: 'recorded', identity: ada });
+    expect(saved?.capture).toBe('save');
+    expect(saved?.trailer?.split('\n')).toStrictEqual([
+      `Tau-Metadata: {"version":2,"parents":["${'1'.repeat(40)}"],"provenance":{"source":"user","actor":{"kind":"user","id":"ada","anonymous":true},"capture":"save","via":"desktop","createdAt":${String(createdAt)}},"summary":{"generated":"Saved"}}`,
+      'Tau-Actor: user ada',
+      'Tau-Trigger: save',
+    ]);
+    expect(imported?.who).toStrictEqual({ kind: 'unrecorded', authorName: 'octo-dev' });
+    expect(imported?.trailer).toBeUndefined();
   });
 
   /* A9: only the revision a restore minted names what it restored; the cut before it does not. */
@@ -280,6 +332,11 @@ describe('revision verbs', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.source).toBe('import');
     expect(rows[0]?.createdAt).toBeGreaterThan(Date.UTC(2020, 0, 1));
+    /* B2: no capture, no trailer, and no identity stood in for the one it lacks. */
+    expect(rows[0]?.who.kind).toBe('unrecorded');
+    expect(
+      rows[0] === undefined ? [] : [Object.hasOwn(rows[0], 'capture'), Object.hasOwn(rows[0], 'trailer')],
+    ).toStrictEqual([false, false]);
   });
 
   it('answers a project that has no revisions yet without inventing one', async () => {

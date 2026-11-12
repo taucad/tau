@@ -30,6 +30,10 @@ import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 import { viewerRendererCreated } from '#lib/viewer-events.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
 import { canvasHostCreated } from '#graphics/three/three-canvas-instance-host.js';
+import {
+  createViewportGizmoInteractionLock,
+  ViewportGizmoInteractionLockProvider,
+} from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
 import type { CanvasHostRoot } from '#graphics/three/three-canvas-instance-host.js';
 import type { CanvasEvent, CanvasFailure, CanvasRef, CanvasSnapshot } from '#machines/canvas.machine.js';
 import type { webglContextMachine } from '#machines/webgl-context.machine.js';
@@ -158,6 +162,8 @@ export function ThreeCanvasInstance({
     },
     [canvasId, graphicsRef],
   );
+  /** This canvas's view-cube interaction lock: the cube takes it, and the controls adapter does not step while it is held. */
+  const interactionLock = useMemo(createViewportGizmoInteractionLock, []);
   /** Hands graphics the controls adapter for this mount's root; graphics stops it with the surface (charter I9, I11). */
   const attachControls = useCallback(
     (held: CanvasHostRoot): void => {
@@ -170,10 +176,11 @@ export function ThreeCanvasInstance({
           connectorRef: cameraConnectorRef,
           consumersRef: cameraConsumersRef,
           getUpAxis: () => selectGraphicsUpDirection(graphicsRef),
+          isInteractionLocked: interactionLock.isActive,
         }),
       });
     },
-    [cameraConnectorRef, cameraConsumersRef, cameraRig, canvasId, graphicsRef],
+    [cameraConnectorRef, cameraConsumersRef, cameraRig, canvasId, graphicsRef, interactionLock],
   );
   const resize = useMemo(
     () => ({
@@ -331,18 +338,20 @@ export function ThreeCanvasInstance({
       {/* Both execution backends consume node materials. Effective API is reported above after init. */}
       <ThreeGraphicsBackendProvider value='webgpu'>
         <OverlayDepthProvider>
-          <Scene
-            enableGizmo={enableGizmo}
-            enableDamping={enableDamping}
-            enableZoom={enableZoom}
-            enablePan={enablePan}
-            secondaryMouseButtonMode={secondaryMouseButtonMode}
-            stageOptions={stageOptions}
-            zoomSpeed={zoomSpeed}
-            gizmoContainer={gizmoContainer}
-          >
-            {children}
-          </Scene>
+          <ViewportGizmoInteractionLockProvider lock={interactionLock}>
+            <Scene
+              enableGizmo={enableGizmo}
+              enableDamping={enableDamping}
+              enableZoom={enableZoom}
+              enablePan={enablePan}
+              secondaryMouseButtonMode={secondaryMouseButtonMode}
+              stageOptions={stageOptions}
+              zoomSpeed={zoomSpeed}
+              gizmoContainer={gizmoContainer}
+            >
+              {children}
+            </Scene>
+          </ViewportGizmoInteractionLockProvider>
           <PostProcessing settings={postProcessingSettings} />
           {isInspectorEnabled ? <WebGpuInspectorOverlay /> : null}
           <ModelEmphasisOverlay />

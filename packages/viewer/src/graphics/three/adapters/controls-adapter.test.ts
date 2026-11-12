@@ -53,6 +53,8 @@ type Harness = {
   graphicsEvents: string[];
   cameraEvents: Array<Readonly<{ type: string; echoRevision?: number }>>;
   controls: () => CameraControlsImpl;
+  /** The canvas's view-cube interaction lock, which the adapter reads each frame. */
+  lock: ReturnType<typeof createViewportGizmoInteractionLock>;
   attach: () => void;
 };
 
@@ -91,6 +93,7 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
     },
   });
   const calls: string[] = [];
+  const lock = createViewportGizmoInteractionLock();
   const scene = new Scene();
   const state = {
     camera: rig.activeCamera as Camera,
@@ -120,6 +123,7 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
     graphicsEvents,
     cameraEvents,
     controls: () => state.controls as unknown as CameraControlsImpl,
+    lock,
     attach() {
       graphics.send({ type: 'canvasAttached', canvasId: 'canvas', kind: 'canvas' });
       // The canvas actor hands the camera the surface's viewport when its renderer exists, as `onCreated` does.
@@ -139,6 +143,7 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
           connectorRef,
           consumersRef: { current: consumers },
           getUpAxis: () => 'z',
+          isInteractionLocked: lock.isActive,
         }),
       });
     },
@@ -468,7 +473,7 @@ describe('controls adapter', () => {
       >;
       const [[ticker]] = subscriptions as [[{ current: (state: RootState, delta: number) => void }, number]];
       const controls = harness.controls();
-      const lock = createViewportGizmoInteractionLock();
+      const { lock } = harness;
       const gizmo = Object.assign(new EventDispatcher<Record<string, Record<string, unknown>>>(), {
         target: new Vector3(),
         update: vi.fn(),
@@ -485,6 +490,11 @@ describe('controls adapter', () => {
       gizmo.dispatchEvent({ type: 'start' });
       expect(lock.isActive()).toBe(true);
       const { revision } = harness.camera.getSnapshot().context;
+      ticker.current(harness.state, 1 / 60);
+      expect(update).not.toHaveBeenCalled();
+      expect(harness.camera.getSnapshot().context.revision).toBe(revision);
+      // Another tool's drag ends under the cube (a second pointer) and re-enables the controls: the lock still holds them.
+      controls.enabled = true;
       ticker.current(harness.state, 1 / 60);
       expect(update).not.toHaveBeenCalled();
       expect(harness.camera.getSnapshot().context.revision).toBe(revision);

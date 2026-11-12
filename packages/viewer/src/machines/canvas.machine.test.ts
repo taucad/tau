@@ -19,6 +19,7 @@ import type { AnyMachineSnapshot } from 'xstate';
 import { createCameraView } from '@taucad/camera';
 import { cameraMachine } from '@taucad/camera/machine';
 import { createCanvasHostLogic } from '#graphics/three/three-canvas-instance-host.js';
+import { tickPriority } from '#graphics/three/adapters/controls-adapter.js';
 import { subscribeViewerLoadTiming } from '#lib/viewer-load-timing.js';
 import type { ViewerLoadSpan } from '#lib/viewer-load-timing.js';
 import {
@@ -442,25 +443,33 @@ describe('canvas camera presentation', () => {
     camera.stop();
   });
 
-  it('should present a resize from the frame loop before the frame renders', () => {
+  it('should present a resize from the frame loop before the controls step and the frame renders', () => {
     animationFrames();
     const loop = scriptRoot();
     const camera = startCamera();
     const canvas = startCanvas({ ...defaultInput, camera });
     canvas.send(hostCreated(createCanvasHostLogic({ root: loop.root, isRetired: () => false })));
-    let viewportAtRender: unknown;
-    // A stand-in for the render pass, after every pre-render subscriber.
-    loop.subscribers.push({
-      ref: {
-        current: () => {
-          viewportAtRender = camera.getSnapshot().context.view.viewport;
+    const seen: Record<string, unknown> = {};
+    // Stand-ins for the controls adapter's step, at its own priority, and for the render pass after it.
+    for (const [name, priority] of [
+      ['tick', tickPriority],
+      ['render', 1],
+    ] as const) {
+      loop.subscribers.push({
+        ref: {
+          current: () => {
+            seen[name] = camera.getSnapshot().context.view.viewport;
+          },
         },
-      },
-      priority: 1,
-    });
+        priority,
+      });
+    }
     loop.root.size.width = 1024;
     loop.frame();
-    expect(viewportAtRender).toEqual({ width: 1024, height: 600, pixelRatio: 1 });
+    expect(seen).toEqual({
+      tick: { width: 1024, height: 600, pixelRatio: 1 },
+      render: { width: 1024, height: 600, pixelRatio: 1 },
+    });
     canvas.stop();
     camera.stop();
   });

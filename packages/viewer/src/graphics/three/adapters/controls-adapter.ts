@@ -87,6 +87,8 @@ export type ControlsAdapterDependencies = Readonly<{
   consumersRef: Readonly<{ current: ReadonlySet<CameraUpdateHandler> }>;
   /** The world up axis the scene's objects take, read when the camera's up changes. */
   getUpAxis: () => keyof typeof upAxes;
+  /** Whether the view cube holds the canvas's interaction lock, read each frame: the controls then do not step. */
+  isInteractionLocked?: () => boolean;
 }>;
 
 /**
@@ -241,6 +243,7 @@ export const createControlsAdapter = ({
   connectorRef,
   consumersRef,
   getUpAxis,
+  isInteractionLocked = () => false,
 }: ControlsAdapterDependencies): ControlsAdapterLogic =>
   createCallbackLogic(({ sendBack }) => {
     installCameraControls();
@@ -395,12 +398,13 @@ export const createControlsAdapter = ({
 
     /*
      * The tick: once per frame of this canvas's loop, the controls step by the frame's delta (their damping and
-     * transitions), unless they are disabled (the view cube disables them while it turns the camera).
+     * transitions), unless they are disabled or the view cube holds the interaction lock while it turns the camera
+     * (another tool that re-enables the controls when its own drag ends must not let them step under the cube).
      */
     const ticker = {
       current(state: RootState, delta: number): void {
         followSurface(state);
-        if (controls.enabled) {
+        if (controls.enabled && !isInteractionLocked()) {
           controls.update(delta);
         }
       },

@@ -19,13 +19,20 @@ import { isNewerVersion } from '#main/updater.js';
 /* oxlint-disable no-restricted-imports -- Adjacent publication helpers are script-owned interfaces. */
 import {
   assertDesktopCatalogRetainsRoutes,
+  composeDesktopInstallerCatalog,
   createDesktopInstallerCatalog,
   createDesktopRouteDescriptor,
+  desktopLaneKeys,
   desktopManifestDigest,
   desktopPublicationScopes,
   verifyDesktopRouteDescriptor,
 } from './desktop-route-publication.mjs';
-import type { DesktopRouteTrust } from './desktop-route-publication.mjs';
+import type {
+  DesktopInstallerCatalog,
+  DesktopPlatformLane,
+  DesktopPublicationScope,
+  DesktopRouteTrust,
+} from './desktop-route-publication.mjs';
 import {
   requireDesktopInstallerPublicationEnabled,
   requireDesktopPublicationAuthority,
@@ -112,9 +119,11 @@ export const admitDesktopRoutePromotion = async (options: {
   root: string;
   manifest: DesktopArtifactManifest;
   isAncestor: (older: string, newer: string) => boolean;
+  /** The lane being promoted; each platform lane is monotonic on its own (D-H5). */
+  lane?: DesktopPublicationScope;
 }): Promise<void> => {
   const { store, root, manifest } = options;
-  const key = 'latest/installer-promotion.json';
+  const key = desktopLaneKeys(options.lane ?? 'all').intent;
   const previous = await store.read(key);
   const next = {
     schemaVersion: 1,
@@ -134,7 +143,7 @@ export const admitDesktopRoutePromotion = async (options: {
       throw new Error('Stale, divergent or conflicting installer promotion');
     }
   }
-  const path = resolve(root, 'installer-promotion.json');
+  const path = resolve(root, key.slice('latest/'.length));
   await writeFile(path, JSON.stringify(next) + '\n');
   await store.put(key, path, previous ? { etag: previous.etag } : { immutable: true });
 };
@@ -151,9 +160,9 @@ const completionSchema = intentSchema.extend({
     .min(1),
 });
 
-const expectedPointers = (manifest: DesktopArtifactManifest): string[] =>
+const expectedPointers = (manifest: DesktopArtifactManifest, lane: DesktopPublicationScope): string[] =>
   [
-    'latest/installers.json',
+    desktopLaneKeys(lane).catalog,
     ...(['windows-nsis', 'linux-appimage'] as const)
       .filter((route) => manifest.artifacts.some((item) => item.kind === route))
       .map((route) => `latest/desktop-update-${route}-x64.json`),
@@ -161,8 +170,12 @@ const expectedPointers = (manifest: DesktopArtifactManifest): string[] =>
       ? [`apt/dists/${manifest.channel === 'production' ? 'stable' : 'staging'}/InRelease`]
       : []),
   ].sort();
-const requireCompletePointers = (manifest: DesktopArtifactManifest, keys: string[]): void => {
-  if (JSON.stringify([...keys].sort()) !== JSON.stringify(expectedPointers(manifest))) {
+const requireCompletePointers = (
+  manifest: DesktopArtifactManifest,
+  keys: string[],
+  lane: DesktopPublicationScope,
+): void => {
+  if (JSON.stringify([...keys].sort()) !== JSON.stringify(expectedPointers(manifest, lane))) {
     throw new Error('Completion receipt omits or duplicates an advertised route');
   }
 };
@@ -171,12 +184,14 @@ const requireCompletePointers = (manifest: DesktopArtifactManifest, keys: string
 export const assertCompletedDesktopPromotion = async (
   store: DesktopRouteStore,
   manifest: DesktopArtifactManifest,
-  recover?: (key: string, bytes: Uint8Array<ArrayBuffer>, previousSha256: string) => Promise<void>,
+  options: {
+    recover?: (key: string, bytes: Uint8Array<ArrayBuffer>, previousSha256: string) => Promise<void>;
+    lane?: DesktopPublicationScope;
+  } = {},
 ): Promise<void> => {
-  const [intentObject, completedObject] = await Promise.all([
-    store.read('latest/installer-promotion.json'),
-    store.read('latest/installer-completed.json'),
-  ]);
+  const { recover, lane = 'all' } = options;
+  const keys = desktopLaneKeys(lane);
+  const [intentObject, completedObject] = await Promise.all([store.read(keys.intent), store.read(keys.completion)]);
   if (!intentObject || !completedObject) {
     throw new Error('No completed installer promotion');
   }
@@ -198,6 +213,7 @@ export const assertCompletedDesktopPromotion = async (
   requireCompletePointers(
     manifest,
     completed.pointers.map((item) => item.key),
+    lane,
   );
   for (const pointer of completed.pointers) {
     // oxlint-disable-next-line no-await-in-loop -- Verify each small committed metadata pointer before renewal.
@@ -206,7 +222,7 @@ export const assertCompletedDesktopPromotion = async (
       throw new Error('Published pointer is missing');
     }
     if (createHash('sha256').update(actual.bytes).digest('hex') !== pointer.sha256) {
-      if (!recover || pointer.key === 'latest/installers.json') {
+      if (!recover || pointer.key === keys.catalog) {
         throw new Error('Published pointer differs from completion receipt');
       }
       // oxlint-disable-next-line no-await-in-loop -- Authenticate exact same-candidate drift before retrying interrupted renewal.
@@ -218,12 +234,19 @@ export const assertCompletedDesktopPromotion = async (
 /** Commit a publication receipt only after all advertised route pointers have public readback. */
 export const completeDesktopPromotion = async (
   store: DesktopRouteStore,
-  options: { root: string; manifest: DesktopArtifactManifest; pointers: Array<{ key: string; path: string }> },
+  options: {
+    root: string;
+    manifest: DesktopArtifactManifest;
+    pointers: Array<{ key: string; path: string }>;
+    lane?: DesktopPublicationScope;
+  },
 ): Promise<void> => {
   const { root, manifest, pointers } = options;
+  const keys = desktopLaneKeys(options.lane ?? 'all');
   requireCompletePointers(
     manifest,
     pointers.map((item) => item.key),
+    options.lane ?? 'all',
   );
   const records = [];
   for (const pointer of pointers) {
@@ -233,7 +256,7 @@ export const completeDesktopPromotion = async (
     const digest = await hashes(pointer.path);
     records.push({ key: pointer.key, sha256: digest.sha256 });
   }
-  const path = resolve(root, 'installer-completed.json');
+  const path = resolve(root, keys.completion.slice('latest/'.length));
   await writeFile(
     path,
     JSON.stringify({
@@ -247,8 +270,8 @@ export const completeDesktopPromotion = async (
       pointers: records,
     }) + '\n',
   );
-  await store.put('latest/installer-completed.json', path, {});
-  await store.verify('latest/installer-completed.json', path);
+  await store.put(keys.completion, path, {});
+  await store.verify(keys.completion, path);
 };
 
 const collect = async (root: string, tag: string, sourceCommit: string): Promise<DesktopArtifactManifest> => {
@@ -310,6 +333,25 @@ const issueDescriptors = async (root: string, manifest: DesktopArtifactManifest,
     files.push(name);
   }
   return files;
+};
+
+/** Another platform's completed catalog, exactly as its own completion receipt recorded it, or none if never completed. */
+export const readCompletedPlatformCatalog = async (
+  store: DesktopRouteStore,
+  lane: DesktopPlatformLane,
+): Promise<DesktopInstallerCatalog | undefined> => {
+  const keys = desktopLaneKeys(lane);
+  const completion = await store.read(keys.completion);
+  if (!completion) {
+    return undefined;
+  }
+  const record = completionSchema.parse(JSON.parse(new TextDecoder().decode(completion.bytes)));
+  const pointer = record.pointers.find((item) => item.key === keys.catalog);
+  const fragment = await store.read(keys.catalog);
+  if (!pointer || !fragment || createHash('sha256').update(fragment.bytes).digest('hex') !== pointer.sha256) {
+    throw new Error(`The ${lane} platform catalog differs from its completion receipt`);
+  }
+  return JSON.parse(new TextDecoder().decode(fragment.bytes)) as DesktopInstallerCatalog;
 };
 
 /** Run only as an explicit publish-desktop operation; no route is enabled by the legacy prepare/mirror/promote calls. */
@@ -471,9 +513,16 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
       offer: true,
     });
   }
-  const catalogPath = resolve(root, 'installers.json');
+  // The lane a promotion writes is its scope; renewal names the completed lane it renews (D-H5).
+  const scope = z.enum(desktopPublicationScopes).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
+  const lane = z.enum(desktopPublicationScopes).parse(process.env['TAU_PUBLICATION_LANE'] ?? scope);
+  const laneKeys = desktopLaneKeys(lane);
+  const catalogPath = resolve(root, laneKeys.catalog.slice('latest/'.length));
+  const composedPath = resolve(root, 'installers.json');
   if (operation === 'promote-routes') {
-    const scope = z.enum(desktopPublicationScopes).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
+    if (lane !== scope) {
+      throw new Error('A promotion writes only its own scope lane');
+    }
     // An omitted VM run is admitted only for staging Mac-only scope, and the catalog then says `vm: 'pending'`.
     const vmRun = process.env['TAU_ROUTE_VM_RUN_ID'];
     const receipts = await fetchDesktopQualifiedReceipts(manifest, root, {
@@ -492,10 +541,24 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
       approval: await readJson(resolve(root, 'promotion-approval.json')),
       scope,
     });
+    // A platform lane composes its catalog with every other platform's completed catalog, each read back exactly as
+    // that platform's own completion receipt recorded it; the all-platform lane keeps its single catalog.
+    const others = await Promise.all(
+      (['macos', 'linux'] as const)
+        .filter((other) => other !== lane)
+        .map(async (other) => [other, await readCompletedPlatformCatalog(store, other)] as const),
+    );
+    const published =
+      lane === 'all'
+        ? catalog
+        : composeDesktopInstallerCatalog(manifest.channel, {
+            [lane]: catalog,
+            ...Object.fromEntries(others.filter(([, fragment]) => fragment !== undefined)),
+          });
     const previousCatalog = await store.read('latest/installers.json');
     assertDesktopCatalogRetainsRoutes(
       previousCatalog ? (JSON.parse(new TextDecoder().decode(previousCatalog.bytes)) as unknown) : undefined,
-      catalog,
+      published,
     );
     // Immutable assets/descriptors must already be public before any update pointer changes.
     for (const name of [
@@ -507,10 +570,14 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
       await store.verify(`releases/${tag}/${name}`, resolve(root, name));
     }
     await writeFile(catalogPath, JSON.stringify(catalog) + '\n');
+    if (lane !== 'all') {
+      await writeFile(composedPath, JSON.stringify(published) + '\n');
+    }
     await admitDesktopRoutePromotion({
       store,
       root,
       manifest,
+      lane,
       isAncestor: (older, newer) => {
         try {
           execFileSync('git', ['merge-base', '--is-ancestor', older, newer]);
@@ -521,64 +588,72 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
       },
     });
   } else {
-    await assertCompletedDesktopPromotion(store, manifest, async (key, bytes, previousSha256) => {
-      if (
-        key === 'latest/desktop-update-windows-nsis-x64.json' ||
-        key === 'latest/desktop-update-linux-appimage-x64.json'
-      ) {
-        verifyDesktopRouteDescriptor({
-          manifest,
-          route: key.includes('windows-nsis') ? 'windows-nsis' : 'linux-appimage',
-          document: JSON.parse(new TextDecoder().decode(bytes)),
-          keys,
-        });
-        return;
-      }
-      const suite = manifest.channel === 'production' ? 'stable' : 'staging';
-      if (key !== `apt/dists/${suite}/InRelease`) {
-        throw new Error('Unexpected renewal pointer');
-      }
-      const snapshots: Array<Awaited<ReturnType<typeof readDesktopAptSnapshot>>> = [];
-      for (const hash of [previousSha256, createHash('sha256').update(bytes).digest('hex')]) {
-        const prefix = `apt/snapshots/${hash}`;
-        // oxlint-disable-next-line no-await-in-loop -- Independently authenticate prior completion and interrupted renewal snapshots.
-        const [pointer, inventory, signature] = await Promise.all([
-          store.read(`${prefix}/InRelease`),
-          store.read(`${prefix}/inventory.json`),
-          store.read(`${prefix}/inventory.json.gpg`),
-        ]);
-        if (!pointer || !inventory || !signature || createHash('sha256').update(pointer.bytes).digest('hex') !== hash) {
-          throw new Error('Incomplete renewal recovery snapshot');
+    await assertCompletedDesktopPromotion(store, manifest, {
+      lane,
+      recover: async (key, bytes, previousSha256) => {
+        if (
+          key === 'latest/desktop-update-windows-nsis-x64.json' ||
+          key === 'latest/desktop-update-linux-appimage-x64.json'
+        ) {
+          verifyDesktopRouteDescriptor({
+            manifest,
+            route: key.includes('windows-nsis') ? 'windows-nsis' : 'linux-appimage',
+            document: JSON.parse(new TextDecoder().decode(bytes)),
+            keys,
+          });
+          return;
         }
-        // oxlint-disable-next-line no-await-in-loop -- Exact release key and signed pointer bind every retained byte.
-        const snapshot = await readDesktopAptSnapshot({
-          inRelease: Uint8Array.from(pointer.bytes),
-          signedInventory: Uint8Array.from(inventory.bytes),
-          signature: Uint8Array.from(signature.bytes),
-          channel: manifest.channel,
-          gnupgHome: required('TAU_APT_GNUPGHOME'),
-          signingFingerprint: required('TAU_APT_SIGNING_FINGERPRINT'),
-        });
-        snapshots.push(snapshot);
-      }
-      const [prior, current] = snapshots;
-      const canonicalPackages = (items: (typeof snapshots)[number]['inventory']['packages']): string =>
-        JSON.stringify([...items].sort((a, b) => a.poolPath.localeCompare(b.poolPath)));
-      if (
-        !prior ||
-        !current ||
-        canonicalPackages(prior.inventory.packages) !== canonicalPackages(current.inventory.packages) ||
-        prior.objects.some(
-          (item) =>
-            !current.objects.some(
-              (entry) => entry.path === item.path && entry.sha256 === item.sha256 && entry.size === item.size,
-            ),
-        )
-      ) {
-        throw new Error('APT renewal changed retained package generations');
-      }
+        const suite = manifest.channel === 'production' ? 'stable' : 'staging';
+        if (key !== `apt/dists/${suite}/InRelease`) {
+          throw new Error('Unexpected renewal pointer');
+        }
+        const snapshots: Array<Awaited<ReturnType<typeof readDesktopAptSnapshot>>> = [];
+        for (const hash of [previousSha256, createHash('sha256').update(bytes).digest('hex')]) {
+          const prefix = `apt/snapshots/${hash}`;
+          // oxlint-disable-next-line no-await-in-loop -- Independently authenticate prior completion and interrupted renewal snapshots.
+          const [pointer, inventory, signature] = await Promise.all([
+            store.read(`${prefix}/InRelease`),
+            store.read(`${prefix}/inventory.json`),
+            store.read(`${prefix}/inventory.json.gpg`),
+          ]);
+          if (
+            !pointer ||
+            !inventory ||
+            !signature ||
+            createHash('sha256').update(pointer.bytes).digest('hex') !== hash
+          ) {
+            throw new Error('Incomplete renewal recovery snapshot');
+          }
+          // oxlint-disable-next-line no-await-in-loop -- Exact release key and signed pointer bind every retained byte.
+          const snapshot = await readDesktopAptSnapshot({
+            inRelease: Uint8Array.from(pointer.bytes),
+            signedInventory: Uint8Array.from(inventory.bytes),
+            signature: Uint8Array.from(signature.bytes),
+            channel: manifest.channel,
+            gnupgHome: required('TAU_APT_GNUPGHOME'),
+            signingFingerprint: required('TAU_APT_SIGNING_FINGERPRINT'),
+          });
+          snapshots.push(snapshot);
+        }
+        const [prior, current] = snapshots;
+        const canonicalPackages = (items: (typeof snapshots)[number]['inventory']['packages']): string =>
+          JSON.stringify([...items].sort((a, b) => a.poolPath.localeCompare(b.poolPath)));
+        if (
+          !prior ||
+          !current ||
+          canonicalPackages(prior.inventory.packages) !== canonicalPackages(current.inventory.packages) ||
+          prior.objects.some(
+            (item) =>
+              !current.objects.some(
+                (entry) => entry.path === item.path && entry.sha256 === item.sha256 && entry.size === item.size,
+              ),
+          )
+        ) {
+          throw new Error('APT renewal changed retained package generations');
+        }
+      },
     });
-    const catalog = await store.read('latest/installers.json');
+    const catalog = await store.read(laneKeys.catalog);
     if (!catalog) {
       throw new Error('Missing completed installer catalog');
     }
@@ -675,7 +750,7 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
     aptPointers.push({ key, path: resolve(outputDirectory, `dists/${suite}/InRelease`) });
   }
   // Refresh only latest documents: historical running-tag descriptors remain immutable forever.
-  const pointers = [{ key: 'latest/installers.json', path: catalogPath }, ...aptPointers];
+  const pointers = [{ key: laneKeys.catalog, path: catalogPath }, ...aptPointers];
   for (const name of fresh) {
     const key = `latest/${name.slice('fresh-'.length)}`;
     pointers.push({ key, path: resolve(root, name) });
@@ -694,8 +769,13 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
     await store.verify(key, resolve(root, name));
   }
   if (operation === 'promote-routes') {
-    await store.put('latest/installers.json', catalogPath, {});
-    await store.verify('latest/installers.json', catalogPath);
+    await store.put(laneKeys.catalog, catalogPath, {});
+    await store.verify(laneKeys.catalog, catalogPath);
+    if (lane !== 'all') {
+      // The composed catalog the website reads commits last; renewal never rewrites it.
+      await store.put('latest/installers.json', composedPath, {});
+      await store.verify('latest/installers.json', composedPath);
+    }
   }
-  await completeDesktopPromotion(store, { root, manifest, pointers });
+  await completeDesktopPromotion(store, { root, manifest, pointers, lane });
 };

@@ -1,4 +1,6 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
@@ -245,3 +247,51 @@ describe('desktop installer publication channel gates', () => {
   });
 });
 /* eslint-enable @typescript-eslint/naming-convention -- End exact external names. */
+
+/* eslint-disable @typescript-eslint/naming-convention -- The publish step reads exact process environment keys. */
+// D-H5: renewal renews every promoted lane, each from its own completed candidate and directory; promotion is one call.
+describe('desktop-route-promotion.yml lane renewal', () => {
+  const { steps } = workflow.jobs.publication as unknown as { steps: Array<{ name?: string; run?: string }> };
+  const script = steps.find((step) => step.name === 'Publish or renew under the shared channel lock')?.run ?? '';
+  const runStep = (env: Record<string, string>): string[] => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-lane-renewal-'));
+    try {
+      const log = join(directory, 'calls');
+      writeFileSync(
+        join(directory, 'pnpm'),
+        `#!/usr/bin/env bash\necho "$* lane=\${TAU_PUBLICATION_LANE:-} tag=\${DESKTOP_RELEASE_TAG:-} source=\${TAU_DESKTOP_SOURCE_SHA:-} dir=\${DESKTOP_ASSETS_DIR}" >> "${log}"\n`,
+        { mode: 0o755 },
+      );
+      execFileSync('bash', ['-c', script], {
+        env: { PATH: `${directory}:${process.env['PATH'] ?? ''}`, DESKTOP_ASSETS_DIR: 'out/p', ...env },
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+      return readFileSync(log, 'utf8').trim().split('\n');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  };
+
+  it('promotes once under the job environment', () => {
+    expect(runStep({ TAU_ROUTE_OPERATION: 'promote-routes' })).toEqual([
+      'nx run desktop:publish --args=promote-routes lane= tag= source= dir=out/p',
+    ]);
+  });
+
+  it('renews each promoted lane from its own candidate and directory', () => {
+    expect(
+      runStep({
+        TAU_ROUTE_OPERATION: 'renew-routes',
+        TAU_RENEWAL_LANES: `macos:desktop@0.3.0:${'a'.repeat(40)} linux:desktop@0.4.0:${'b'.repeat(40)}`,
+      }),
+    ).toEqual([
+      `nx run desktop:publish --args=renew-routes lane=macos tag=desktop@0.3.0 source=${'a'.repeat(40)} dir=out/p/macos`,
+      `nx run desktop:publish --args=renew-routes lane=linux tag=desktop@0.4.0 source=${'b'.repeat(40)} dir=out/p/linux`,
+    ]);
+  });
+
+  it('refuses a renewal with no promoted lane', () => {
+    expect(() => runStep({ TAU_ROUTE_OPERATION: 'renew-routes' })).toThrow();
+  });
+});
+/* eslint-enable @typescript-eslint/naming-convention -- End process environment keys. */

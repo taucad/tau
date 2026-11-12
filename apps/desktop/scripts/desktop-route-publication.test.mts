@@ -19,7 +19,10 @@ import { linuxInstallation } from '#shared/linux-installation.js';
 /* oxlint-disable no-restricted-imports -- Test the publication gate itself. */
 import {
   assertDesktopCatalogRetainsRoutes,
+  composeDesktopInstallerCatalog,
   createDesktopInstallerCatalog,
+  desktopCatalogLanes,
+  desktopLaneKeys,
   createDesktopRouteDescriptor,
   desktopManifestDigest,
   qualifyDesktopRoutes,
@@ -861,3 +864,60 @@ rejectPlatform(
 // Intel stays out of the Mac scope in production too: an Intel-only production candidate never parses.
 assert.throws(() => platformCandidate('darwin-x64'), /every supported target or one complete platform/u);
 console.log('Per-platform production promotion (D-H5) checks passed');
+
+// Composition (D-H5): one catalog per promoted platform, each from its own candidate; lanes keep their own state.
+const macProductionCatalog = createDesktopInstallerCatalog({
+  manifest: macProduction,
+  receipts: macProductionReceipts,
+  trust: productionTrust,
+  approval: {
+    ...approval,
+    tag: productionTag,
+    channel: 'production',
+    version: macProduction.version,
+    manifestSha256: desktopManifestDigest(macProduction),
+  },
+  scope: 'macos',
+});
+assert.deepEqual(desktopLaneKeys('all'), {
+  intent: 'latest/installer-promotion.json',
+  completion: 'latest/installer-completed.json',
+  catalog: 'latest/installers.json',
+});
+assert.deepEqual(desktopLaneKeys('linux'), {
+  intent: 'latest/installer-promotion-linux.json',
+  completion: 'latest/installer-completed-linux.json',
+  catalog: 'latest/installers-linux.json',
+});
+const linuxOnly = composeDesktopInstallerCatalog('production', { linux: linuxCatalog });
+const composed = composeDesktopInstallerCatalog('production', { linux: linuxCatalog, macos: macProductionCatalog });
+assert.deepEqual(
+  composed.platforms.map(({ lane }) => lane),
+  ['macos', 'linux'],
+);
+assert.deepEqual(desktopCatalogLanes(composed), ['macos', 'linux']);
+assert.deepEqual(desktopCatalogLanes(macCatalog), ['all']);
+// Adding a platform keeps the other; dropping one, or replacing a legacy single catalog's routes, is refused.
+assertDesktopCatalogRetainsRoutes(undefined, linuxOnly);
+assertDesktopCatalogRetainsRoutes(linuxOnly, composed);
+assertDesktopCatalogRetainsRoutes(composed, composed);
+assert.throws(() => {
+  assertDesktopCatalogRetainsRoutes(composed, linuxOnly);
+}, /withdraw previously promoted routes/u);
+assert.throws(() => {
+  assertDesktopCatalogRetainsRoutes({ ...macProductionCatalog, schemaVersion: 1 }, linuxOnly);
+}, /darwin-arm64\/macos-zip/u);
+assert.throws(() => {
+  assertDesktopCatalogRetainsRoutes(macCatalog, linuxOnly);
+}, /channel differs/u);
+// Each platform carries exactly its own routes, on the composed channel.
+for (const platforms of [
+  {},
+  { macos: linuxCatalog },
+  { linux: macProductionCatalog },
+  { linux: { ...linuxCatalog, routes: linuxCatalog.routes.slice(1) } },
+  { linux: { ...linuxCatalog, channel: 'staging' } },
+] as const) {
+  assert.throws(() => composeDesktopInstallerCatalog('production', platforms));
+}
+console.log('Per-platform catalog composition and lane checks passed');

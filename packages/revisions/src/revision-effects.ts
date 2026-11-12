@@ -2024,6 +2024,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         treeWrites.set(place.id, (treeWrites.get(place.id) ?? 0) + 1);
         /* The write owns its generation's word (`fillSoon`): no check meanwhile starts a second fill. */
         answeredFills.set(place.id, generationOf(place.id));
+        /* A retry for the old generation would do nothing: the new tree's fill speaks, and re-arms one if it throws. */
+        cancelFillRetry(place.id);
         largeObjects.forget(place.id);
       }
       return options.onApplyingTree?.(place, paths, bracket);
@@ -2109,8 +2111,23 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const resumeTimers = new Set<ReturnType<typeof setTimeout>>();
   /* Checks in a row that threw, per checkout: the next one waits longer (L7). A check that answers clears it. */
   const failedChecks = new Map<string, number>();
+  /* The one retry waiting per checkout: a failure re-arms it, so retries never multiply into parallel chains. */
+  const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let fillsStopped = false;
   const generationOf = (checkoutId: string): number => treeWrites.get(checkoutId) ?? 0;
+  const cancelFillRetry = (checkoutId: string): void => {
+    const timer = retryTimers.get(checkoutId);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      resumeTimers.delete(timer);
+      retryTimers.delete(checkoutId);
+    }
+  };
+  /* A check that answered: the backoff starts over and no retry is still waiting. */
+  const fillAnswered = (checkoutId: string): void => {
+    failedChecks.delete(checkoutId);
+    cancelFillRetry(checkoutId);
+  };
   const unanswerFill = (checkoutId: string): void => {
     if (answeredFills.get(checkoutId) === generationOf(checkoutId)) {
       answeredFills.delete(checkoutId);
@@ -2128,13 +2145,34 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const failures = (failedChecks.get(place.id) ?? 0) + 1;
     failedChecks.set(place.id, failures);
     const wait = fillCheckRetryMilliseconds[Math.min(failures, fillCheckRetryMilliseconds.length) - 1];
+    cancelFillRetry(place.id);
     const timer = setTimeout(() => {
       resumeTimers.delete(timer);
-      if (generationOf(place.id) === generation) {
-        checkFill(place);
+      retryTimers.delete(place.id);
+      if (generationOf(place.id) !== generation) {
+        return;
       }
+      // async-iife: bootstrap -- a background retry; a listing that fails retries the checkout it had.
+      void (async (): Promise<void> => {
+        let current: Checkout | undefined = place;
+        try {
+          const places = await listPlaces('background');
+          current = places.find((candidate) => candidate.id === place.id);
+        } catch {
+          /* Not known to be gone: the check itself says whether it still fails. */
+        }
+        /* A checkout removed meanwhile ends its chain: no retry checks files that are gone. */
+        if (current === undefined) {
+          failedChecks.delete(place.id);
+          return;
+        }
+        if (generationOf(place.id) === generation) {
+          checkFill(current);
+        }
+      })();
     }, wait); // Bound: fillCheckRetryMilliseconds.
     resumeTimers.add(timer);
+    retryTimers.set(place.id, timer);
   };
   const checkFill = (place: Checkout): void => {
     if (fillsStopped || checkingFills.has(place.id) || answeredFills.get(place.id) === generationOf(place.id)) {
@@ -2155,7 +2193,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
           answeredFills.set(place.id, generation);
           await largeObjects.fill(place, head === undefined ? undefined : revisionId(head), placeholders);
-          failedChecks.delete(place.id);
+          fillAnswered(place.id);
         } catch (error) {
           if (answeredFills.get(place.id) === generation) {
             answeredFills.delete(place.id);
@@ -2177,7 +2215,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const runningTreeWrites = new Map<string, number>();
   const retriesDuringWrite = new Set<string>();
   const recheckFill = (place: Checkout): void => {
-    failedChecks.delete(place.id);
+    fillAnswered(place.id);
     answeredFills.delete(place.id);
     checkFill(place);
   };
@@ -2203,6 +2241,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       clearTimeout(timer);
     }
     resumeTimers.clear();
+    retryTimers.clear();
     await largeObjects.stop();
   };
   /* As the root starts, every checkout: a reload may show any of them, live or linked. A
@@ -2317,7 +2356,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             return;
           }
           await largeObjects.fill(place, head === undefined ? undefined : revisionId(head), placeholders);
-          failedChecks.delete(place.id);
+          fillAnswered(place.id);
         } catch (error) {
           /* Unanswered, and checked again with backoff: readiness never waits on a word nobody gives (L7). */
           if (answeredFills.get(place.id) === (writes ?? 0)) {
@@ -4875,6 +4914,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
          * this process can no longer reach (EQ7). */
         checkoutMemos.delete(input.id);
         swept.delete(input.id);
+        /* No retry checks a checkout that is gone, and a checkout of the same id later starts its backoff over. */
+        cancelFillRetry(input.id);
+        failedChecks.delete(input.id);
       }),
 
       /* A turn's retirement names its attempt and is checked like the turn's own; a run-only one drops the record. */

@@ -100,7 +100,13 @@ export type ChatObservationSources = Readonly<{
 /** Options for {@link createProjectHost}. @public */
 export type ProjectHostOptions = Pick<
   ProjectRevisionsOptions,
-  'projectId' | 'checkoutsDirectory' | 'gitExecutable' | 'apiBaseUrl' | 'tauCredential' | 'syncTelemetryPlacement'
+  | 'projectId'
+  | 'checkoutsDirectory'
+  | 'gitExecutable'
+  | 'apiBaseUrl'
+  | 'tauCredential'
+  | 'syncTelemetryPlacement'
+  | 'via'
 > &
   Pick<AgentLauncherOptions, 'systemPrompt' | 'model' | 'modelTransport' | 'credential'> &
   Pick<
@@ -457,6 +463,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     /* A1: the account this host was handed, else the cloud owner or this device's pseudonym; a renderer's
      * `setActor` replaces it for every mint after it. */
     actor: hostRevisionActor(options.revisionActor),
+    via: options.via,
     projectId: options.projectId,
     ...(options.checkoutsDirectory === undefined ? {} : { checkoutsDirectory: options.checkoutsDirectory }),
     ...(options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable }),

@@ -190,6 +190,7 @@ const startHarness = async (
   const settlements: TurnFinalizedEvent[] = [];
   const revisions = options.revisions
     ? createProjectRevisions({
+        via: 'desktop',
         workspaceRoot,
         projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
         checkouts,

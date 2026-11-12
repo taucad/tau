@@ -20,6 +20,7 @@ import { lfsObjectPath, lfsPointerFor, readLfsPointer } from '#lfs.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
+import { recordedBy } from '#test/identity.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 const roots: string[] = [];
@@ -89,7 +90,7 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
         ['photo.png', new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])],
         ['scan.stl', image],
       ]),
-      provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 9, 13) },
+      provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 9, 13) },
       summary: { generated: 'Adopted' },
     });
 
@@ -174,7 +175,7 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
 
   describe('with its own large-file attributes (D16)', () => {
     const stlAttributes = '*.stl filter=lfs diff=lfs merge=lfs -text\n';
-    const provenance = { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 10, 7) } as const;
+    const provenance = { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 10, 7) } as const;
 
     it('should open it, and leave its attributes, ignore file and config as written', async () => {
       const { project } = await personRepository({ 'models/.gitattributes': stlAttributes });
@@ -254,7 +255,7 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
 
   describe('an entry unchanged from the parent keeps its representation (rule 13)', () => {
     const psdAttributes = '*.psd filter=lfs diff=lfs merge=lfs -text\n';
-    const provenance = { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 10, 8) } as const;
+    const provenance = { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 10, 8) } as const;
     const blobOf = (project: string, rev: string, path: string): string =>
       git(project, ['rev-parse', `${rev}:${path}`]);
 

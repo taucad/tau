@@ -178,7 +178,7 @@ import type {
   RestoreComputePlanActorOutput,
   RestoreFailureCode,
 } from '#restore.machine.js';
-import type { RevisionActor, RevisionProvenance } from '#revision-authority.js';
+import type { RevisionIdentity, RevisionProvenance } from '#revision-authority.js';
 import { RevisionPortError } from '#revision-port.js';
 import { parseStartRecord, startRecordPath, startSummary, startTrigger } from '#start-version.js';
 import type {
@@ -898,8 +898,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     writeRevision: async (input: WriteRevisionInput): Promise<RevisionReceipt> => {
       const receipt = await options.port.writeRevision(input);
       if (input.parents.length > 1) {
-        const actor = options.actor?.({ runId: undefined, trigger: 'merge' });
-        mintedOperations.set(receipt.commitId, { kind: 'merge', actor, actorId: input.provenance.actorId });
+        mintedOperations.set(receipt.commitId, { kind: 'merge', actor: input.provenance.actor });
       }
       return receipt;
     },
@@ -916,7 +915,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const policy = options.policy ?? tauRevisionPolicy.policy;
   const useFileSystem: UseCheckoutFileSystem =
     options.useFileSystem ?? (async (checkout, operation) => operation(await filesystem(checkout)));
-  const actorId = options.actorId ?? 'tau-host';
   /* One codec for every merge (D12): a recorded conflict re-derives as it was made. */
   const mergeOptions = options.parameters === undefined ? {} : { parameters: options.parameters };
   /* A host that cannot re-send a push remembers none: the identity function. */
@@ -1961,16 +1959,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
         }
         const tree = await captureCheckout(place, { bypassMemo: true });
-        const trigger = startTrigger(origin);
-        const actor = options.actor?.({ runId: undefined, trigger });
+        const capture = startTrigger(origin);
         const receipt = await options.port.writeRevision({
           parents: [],
           tree,
           provenance: Object.freeze({
-            source: trigger === 'create' ? 'user' : 'import',
-            actorId: actor?.id ?? actorId,
-            ...(actor === undefined ? {} : { actor }),
-            trigger,
+            source: capture === 'create' ? 'user' : 'import',
+            /* B1: the person who created or brought in the project, never a stand-in. */
+            actor: options.identity.resolve({ runId: undefined, trigger: capture }),
+            capture,
+            via: options.identity.via,
             createdAt: now(),
           }),
           summary: Object.freeze({ generated: startSummary(origin) }),
@@ -2718,7 +2716,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 
   /* The unwrapped store: an ops ref is not a head, and its own writes are not operations. */
-  const opsLog = createOpsLog({ port: options.port, recordsFileSystem, now, actorId });
+  const opsLog = createOpsLog({ port: options.port, recordsFileSystem, now, identity: options.identity });
 
   const {
     chatContext,
@@ -2735,9 +2733,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     recordsFileSystem,
     deviceId: options.deviceId,
     recordDevices: opsLog,
-    actor: options.actor,
+    identity: options.identity,
     onChatsProjected: options.onChatsProjected,
-    actorId,
     now,
   });
 
@@ -2752,7 +2749,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    */
   const mintedOperations = new Map<
     string,
-    Readonly<{ kind: CheckoutCutTrigger; undoes?: string; actor: RevisionActor | undefined; actorId: string }>
+    Readonly<{ kind: CheckoutCutTrigger; undoes?: string; actor: RevisionIdentity }>
   >();
 
   /**
@@ -2986,7 +2983,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (to !== undefined) {
       mintedOperations.delete(to);
     }
-    const actor = minted === undefined ? options.actor?.({ runId: undefined, trigger: 'save' }) : minted.actor;
+    const actor = minted === undefined ? options.identity.resolve({ runId: undefined, trigger: 'save' }) : minted.actor;
     try {
       await opsLog.append(actor, {
         v: 1,
@@ -2995,7 +2992,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         ...(to === undefined ? {} : { to: String(to) }),
         kind: minted?.kind ?? 'move',
         ...(minted?.undoes === undefined ? {} : { undoes: minted.undoes }),
-        actor: minted?.actorId ?? actor?.id ?? actorId,
+        actor: actor.id,
         at: now(),
       });
     } catch (error) {
@@ -3486,7 +3483,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const place = await placeOf(checkoutId);
     const head = await headOf(place);
     const empty = new ImmutableRevisionTree([]);
-    const entries = await opsLog.read(options.actor?.({ runId: undefined, trigger: 'restore' }));
+    const entries = await opsLog.read(options.identity.resolve({ runId: undefined, trigger: 'restore' }));
     const candidates =
       place.branch === undefined || head === undefined
         ? []
@@ -3566,7 +3563,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const runId = turn?.key.runId;
     const heldRunIds = leaseIds.filter((id) => id !== runId).toSorted();
     const actorRunId = turn === undefined ? heldRunIds[0] : turn.turnCut === 'result' ? runId : undefined;
-    const actor = options.actor?.({ runId: actorRunId, trigger });
+    const actor = options.identity.resolve({ runId: actorRunId, trigger });
     return Object.freeze({
       /* Only the restore row is the restore's: the cut before it records the
        * person's own bytes under the same trigger (D1, A9). */
@@ -3578,9 +3575,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               ? 'merge'
               : 'user'
             : 'restore',
-      /* One id, not two: `actorId` *is* the actor's id whenever the host could
-       * resolve one, so nothing has to decide which of the pair to believe. */
-      actorId: actor?.id ?? actorId,
+      /* S37, B1: who, in the shape stock `git log` renders, what asked (S30), and on which leg. */
+      actor,
+      capture: trigger,
+      via: options.identity.via,
       ...(turn === undefined
         ? {}
         : {
@@ -3591,9 +3589,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             turnId: turn.key.turnId,
           }),
       ...(heldRunIds.length === 0 ? {} : { heldRunIds }),
-      /* S37: who, in the shape stock `git log` renders, and what asked (S30). */
-      ...(actor === undefined ? {} : { actor }),
-      trigger,
       ...(restoredFrom === undefined ? {} : { restoredFrom }),
       createdAt: now(),
     });
@@ -3774,7 +3769,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * @returns `conflicts/<into>/<record device>`.
    */
   const ownConflictLine = async (into: string): Promise<string> =>
-    conflictLineOf(into, await opsLog.deviceFor(options.actor?.({ runId: undefined, trigger: 'merge' })));
+    conflictLineOf(into, await opsLog.deviceFor(options.identity.resolve({ runId: undefined, trigger: 'merge' })));
 
   /**
    * The one conflict write (charter D14): sync, a branch merge and an editor all
@@ -4373,7 +4368,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           kind: input.trigger,
           ...(undoes === undefined ? {} : { undoes }),
           actor: provenance.actor,
-          actorId: provenance.actorId,
         });
         /* The claim {@link revisionTreeId} makes, checked where it is cheap:
          * a tree id this host computed differently from the engine's would
@@ -4648,7 +4642,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         if (place.branch === undefined) {
           return false;
         }
-        const entries = await opsLog.read(options.actor?.({ runId: undefined, trigger: 'restore' }));
+        const entries = await opsLog.read(options.identity.resolve({ runId: undefined, trigger: 'restore' }));
         return undoCandidates(entries, `refs/heads/${place.branch}`).length > 0;
       }),
 
@@ -5482,12 +5476,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* W6's tag members, on a revision that already exists. */
       createTag: fromAuthorityPromise<RevisionTag, PublishTagActorInput>(async ({ input }) => {
         await ensureStore();
-        const person = options.actor?.({ runId: undefined, trigger: 'save' });
         return port.tag({
           name: input.name,
           revisionId: revisionId(input.revisionId),
           ...(input.note === undefined ? {} : { note: input.note }),
-          ...(person === undefined ? {} : { actor: person }),
+          actor: options.identity.resolve({ runId: undefined, trigger: 'save' }),
         });
       }),
 

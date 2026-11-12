@@ -22,7 +22,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import type { RevisionActor, RevisionUserActor } from '@taucad/revisions';
+import type { RevisionIdentity, RevisionUserActor, RevisionVia } from '@taucad/revisions';
 import { z } from 'zod';
 
 import { defaultConfigDirectory } from '#credential-store.js';
@@ -30,8 +30,8 @@ import { defaultConfigDirectory } from '#credential-store.js';
 /** What a mint asks the resolver: the run holding the cut, if any, and what asked for it. @public */
 export type HostRevisionActorInput = Readonly<{ runId: string | undefined; trigger: string }>;
 
-/** The resolver every mint of a project is authored by. @public */
-export type HostRevisionActorResolver = (input: HostRevisionActorInput) => RevisionActor | undefined;
+/** The resolver every mint of a project is authored by: it always names someone (blueprint B1, I1). @public */
+export type HostRevisionActorResolver = (input: HostRevisionActorInput) => RevisionIdentity;
 
 /**
  * The person a `setActor` request names, as the page's `revisionUserActor` builds it.
@@ -128,6 +128,15 @@ const cloudOwner = (): RevisionUserActor | undefined => {
 };
 
 /**
+ * The leg a host daemon records through (blueprint B1): a Tau Cloud agent host
+ * when the provisioner named the project owner it acts for, else `tau serve`.
+ *
+ * @returns `cloud` or `serve`.
+ */
+export const daemonRevisionVia = (): RevisionVia =>
+  environment('TAU_HOST_OWNER_ID') === undefined ? 'serve' : 'cloud';
+
+/**
  * A cut a run holds is the agent's, in the browser's shape: `git log`'s author
  * stays the person through `onBehalfOf`, while `Tau-Actor` names the run (rule 15).
  *
@@ -135,7 +144,7 @@ const cloudOwner = (): RevisionUserActor | undefined => {
  * @param runId - The run holding the cut, if any.
  * @returns The actor of that cut.
  */
-export const actorFor = (person: RevisionUserActor, runId: string | undefined): RevisionActor =>
+export const actorFor = (person: RevisionUserActor, runId: string | undefined): RevisionIdentity =>
   runId === undefined ? person : { kind: 'agent', id: 'agent', runId, onBehalfOf: person };
 
 /**

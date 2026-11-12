@@ -32,6 +32,7 @@ import type { RevisionPort, RevisionPushRef } from '#revision-port.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { recordedBy } from '#test/identity.js';
 
 /* Asynchronous, always: the P40 fixture's HTTP server shares this event loop,
  * and a synchronous `git` blocks the very server it is talking to. */
@@ -46,7 +47,7 @@ const tree = (files: Readonly<Record<string, string>>): ImmutableRevisionTree =>
 
 const provenance = {
   source: 'user',
-  actorId: 'actor-w8',
+  ...recordedBy('actor-w8'),
   createdAt: Date.UTC(2026, 8, 13, 11, 0, 0),
 } as const satisfies RevisionProvenance;
 

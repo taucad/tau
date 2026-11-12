@@ -301,14 +301,15 @@ const listedRefusals = 10;
  * naming each refused commit; `argv[1]` is how many commits it must read, so a
  * stream cut short is a refusal and never a pass (fail closed, like the walk).
  *
- * Whatever the record's version, a commit passes when:
+ * The record must be version 2 (B1, I7: no older reader is kept), naming its
+ * actor, `capture` and `via`; anything else is unreadable. A commit passes when:
  *
  * - it has no `Tau-Metadata` trailer and the project is linked to a forge
  *   (`TAU_GIT_FORGE`), whose commits Tau did not write;
  * - its author address is a Tau no-reply address (Q11, I3), or the linked
  *   forge's no-reply address on a linked project;
- * - the person its record names — the user, or the user an agent acted on
- *   behalf of, or the bare `actorId` of a record without an actor — is the
+ * - the person its record names — the user, or the user an agent's run acted
+ *   on behalf of — is the
  *   pusher (`TAU_GIT_PUSHER`), and a Tau no-reply author is that same id; or it
  *   is an `anon:` pseudonym (Q3) authored as itself, which names nobody.
  *
@@ -325,19 +326,17 @@ const tauNoreply = /^([^@\s<>]+)@users\.noreply\.tau\.new$/;
 const githubNoreply = /^\d+\+[A-Za-z\d](?:[A-Za-z\d-]*[A-Za-z\d])?@users\.noreply\.github\.com$/;
 const prefix = 'Tau-Metadata: ';
 const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+const isText = (value) => typeof value === 'string' && value !== '';
 const personOf = (provenance) => {
   const actor = provenance.actor;
-  if (actor === undefined) {
-    return { id: provenance.actorId };
-  }
-  if (!isRecord(actor)) {
+  if (!isRecord(actor) || !isText(provenance.capture) || !isText(provenance.via)) {
     return undefined;
   }
   if (actor.kind === 'user') {
     return actor;
   }
-  if (actor.kind === 'agent') {
-    return isRecord(actor.onBehalfOf) && actor.onBehalfOf.kind === 'user' ? actor.onBehalfOf : { id: undefined };
+  if (actor.kind === 'agent' && isText(actor.runId)) {
+    return isRecord(actor.onBehalfOf) && actor.onBehalfOf.kind === 'user' ? actor.onBehalfOf : undefined;
   }
   return undefined;
 };
@@ -360,7 +359,7 @@ const verdict = (text) => {
   } catch {
     return 'GIT_PUSH_RECORD_UNREADABLE';
   }
-  const provenance = isRecord(record) ? record.provenance : undefined;
+  const provenance = isRecord(record) && record.version === 2 ? record.provenance : undefined;
   const person = isRecord(provenance) ? personOf(provenance) : undefined;
   if (person === undefined) {
     return 'GIT_PUSH_RECORD_UNREADABLE';

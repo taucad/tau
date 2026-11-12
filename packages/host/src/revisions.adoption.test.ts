@@ -58,7 +58,11 @@ describe.runIf(gitToolchainOnPath)('close revision of an adopted repository', ()
     await writeFile(join(project, 'dist', 'bundle.js'), 'built\n');
     await writeFile(join(project, '.env'), 'SECRET=1\n');
 
-    const revisions = createProjectRevisions({ workspaceRoot: project, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA' });
+    const revisions = createProjectRevisions({
+      via: 'desktop',
+      workspaceRoot: project,
+      projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
+    });
     try {
       await vi.waitFor(() => {
         expect(revisions.status().registrySettled).toBe(true);
@@ -101,7 +105,11 @@ describe.runIf(gitToolchainOnPath)('close revision of an adopted repository', ()
     await writeFile(join(project, 'bracket.stl'), new Uint8Array(8192).fill(4));
     await writeFile(join(project, 'notes.bin'), new Uint8Array(2 * 1024 * 1024).fill(5));
 
-    const revisions = createProjectRevisions({ workspaceRoot: project, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA' });
+    const revisions = createProjectRevisions({
+      via: 'desktop',
+      workspaceRoot: project,
+      projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
+    });
     try {
       await vi.waitFor(() => {
         expect(revisions.status().registrySettled).toBe(true);

@@ -18,6 +18,7 @@ it('should pull the remote again when the page reports a session change (audit R
   });
   const listRemoteReferences = vi.fn(async () => []);
   const revisions = createProjectRevisions({
+    via: 'desktop',
     workspaceRoot,
     projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
     watchWorkspace: false,

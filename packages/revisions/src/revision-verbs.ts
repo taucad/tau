@@ -62,11 +62,10 @@ export type RevisionRow = Readonly<{
    *
    * History folds consecutive `idle`, `hidden` and `close` rows into one
    * *n autosaves* row (A20), and only the trigger can tell an autosave from a
-   * `save` the person asked for. Derived at read like `tags` (I3), and
-   * `undefined` for a revision written before the vocabulary existed — which is
-   * also why the field is optional: a fixture that predates it is still a row.
+   * `save` the person asked for. Read from the trailer's `capture` (B1), and
+   * `undefined` for a commit Tau did not record.
    */
-  trigger?: RevisionProvenance['trigger'];
+  trigger?: RevisionProvenance['capture'];
   /**
    * The revision a restore brought back (D1), by id.
    *
@@ -298,7 +297,8 @@ const rowOf = (
     revisionId: entry.id,
     changeId: entry.changeId,
     treeId: entry.treeId,
-    actor: entry.provenance.actorId,
+    /* B2 types this row's who; until then a commit Tau did not record reads as `unknown`, as before B1. */
+    actor: entry.provenance.actor?.id ?? 'unknown',
     /* A5: a turn's base holds the person's bytes, never the agent's. */
     source: entry.provenance.turnCut === 'base' ? 'user' : entry.provenance.source,
     createdAt: entry.provenance.createdAt,
@@ -306,7 +306,7 @@ const rowOf = (
     conflicted: entry.conflicted,
     turnId: entry.provenance.turnId,
     tags,
-    trigger: entry.provenance.trigger,
+    trigger: entry.provenance.capture,
     ...(entry.provenance.restoredFrom === undefined ? {} : { restoredFrom: entry.provenance.restoredFrom }),
     ...(entry.provenance.turnCut === undefined ? {} : { turnCut: entry.provenance.turnCut }),
     ...(entry.parents[0] === undefined ? {} : { parent: entry.parents[0] }),
@@ -333,8 +333,8 @@ const setupVerdicts = new Map<string, boolean>();
  */
 const setupEntriesOf = async (port: RevisionPort, page: readonly RevisionLogEntry[]): Promise<ReadonlySet<string>> => {
   const candidates = page.filter(
-    ({ provenance: { trigger }, parents }) =>
-      (trigger === 'idle' || trigger === 'hidden' || trigger === 'close') && parents.length === 1,
+    ({ provenance: { capture }, parents }) =>
+      (capture === 'idle' || capture === 'hidden' || capture === 'close') && parents.length === 1,
   );
   /* This page's verdicts, held apart from the cache: a page longer than the
    * cache's bound would otherwise evict a verdict it is about to read. */

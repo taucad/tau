@@ -20,12 +20,16 @@ export { coveredByIgnoreListing } from '#git-ignore.js';
 export { revisionBranchName } from '#revision-authority.js';
 export type {
   BranchHeadUpdateResult,
+  RecordedProvenance,
   Revision,
   RevisionActor,
   RevisionBranchName,
+  RevisionCaptureIdentity,
+  RevisionIdentity,
   RevisionProvenance,
   RevisionSummary,
   RevisionUserActor,
+  RevisionVia,
 } from '#revision-authority.js';
 export { decodeCommit, decodeTag, encodeCommit, encodeTag, GitObjectError } from '#git-objects.js';
 export type { DecodedCommit, GitSignature } from '#git-objects.js';

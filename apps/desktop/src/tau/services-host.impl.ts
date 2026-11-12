@@ -1101,6 +1101,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         : { prepareKernel: nativeKernels.prepare, preparableKernels: nativeKernels.preparable }),
       apiBaseUrl: config.tauApiUrl,
       syncTelemetryPlacement: 'desktop',
+      /* B1: every revision this host records names the desktop app as its leg. */
+      via: 'desktop',
       tauCredential: () => {
         const token = authToken;
         return token === undefined ? undefined : { apiBaseUrl: config.tauApiUrl, authorization: `Bearer ${token}` };

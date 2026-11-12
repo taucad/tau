@@ -3,7 +3,7 @@ import type { ParameterRecordCodec } from '#algorithms/index.js';
 import type { LargeObjectsReport } from '#project-revisions.types.js';
 import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
 import type { RemoteStorageSupplier } from '#remote.types.js';
-import type { RevisionActor, RevisionTrigger } from '#revision-authority.js';
+import type { RevisionCaptureIdentity } from '#revision-authority.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 
@@ -122,21 +122,19 @@ export type RevisionActorsOptions = Readonly<{
    * falling back to `Date.now`. Each root takes its own clock.
    */
   clock?: RevisionClock;
-  /** Actor recorded on every revision this host mints. */
-  actorId?: string;
   /**
-   * The session → actor mapping this host resolved (S37, A26).
+   * Who every revision this host mints is by, and which leg it is (S37, A26;
+   * blueprint B1, I1).
    *
-   * Read per mint rather than captured once, because signing in, signing out
-   * and turning anonymity on all change the answer inside one session. The host
-   * owns the mapping — a page reads it from the session, a daemon from the
-   * machine's own user — and the anonymity setting is applied *here*, before
-   * the revision is written, so no later change rewrites a recorded identity.
-   *
-   * An agent turn is resolved by `runId`, which is how the model behind a turn
-   * reaches the revision at all.
+   * Required, with no default: a capture cannot be built without a resolved
+   * identity. `resolve` is read per mint rather than captured once, because
+   * signing in, signing out and turning anonymity on all change the answer
+   * inside one session. The host owns the mapping — a page reads it from the
+   * session, a disk host from the account it was handed or its device
+   * pseudonym — and the anonymity setting is applied *there*, before the
+   * revision is written, so no later change rewrites a recorded identity.
    */
-  actor?: (input: Readonly<{ runId: string | undefined; trigger: RevisionTrigger }>) => RevisionActor | undefined;
+  identity: RevisionCaptureIdentity;
   /**
    * The classifier this project's layout answers with (EQ6, D6).
    *

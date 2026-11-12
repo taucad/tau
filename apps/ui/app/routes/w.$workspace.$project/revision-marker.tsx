@@ -21,14 +21,6 @@ import {
   Tag,
   TriangleAlert,
 } from 'lucide-react';
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@taucad/ui/components/alert-dialog';
 import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import {
@@ -58,15 +50,12 @@ import {
   timelineRowHover,
 } from '#components/revisions/revision-timeline.js';
 import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-language-resolution';
-import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionChanges, useRevisionChangesSince, useRevisionFileComparison } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
-import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
+import { useProjectRole, useRevisionCommands } from '#hooks/use-revision-status.js';
 import { consumeRevisionReveal, useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
-import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
-import type { AffectedPublication } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import {
   entryReference,
   entryTime,
@@ -468,72 +457,6 @@ function RevisionDiagnostics({ revision }: { readonly revision: RevisionCard }):
   );
 }
 
-type NameRemoval = Readonly<{
-  name: string;
-  publication: AffectedPublication | undefined;
-  error: string | undefined;
-  isBusy: boolean;
-}>;
-
-/**
- * A rename's second step: the old name leaves through the audited server verb
- * first when the project backs up to Tau Cloud, then this device's name. A
- * version itself is never removed (Q13); only the name a rename replaced goes.
- *
- * @returns The removal in progress, and its verbs.
- */
-function useNameRemoval(): Readonly<{
-  removal: NameRemoval | undefined;
-  remove: (name: string, publication?: AffectedPublication) => Promise<void>;
-  dismiss: () => void;
-}> {
-  const { projectId } = useProject();
-  const status = useRevisionStatus();
-  const commands = useRevisionCommands();
-  const [removal, setRemoval] = useState<NameRemoval>();
-  const isTauCloud = status?.remote.kind === 'tau' && status.remote.phase === 'connected';
-
-  const remove = async (name: string, publication?: AffectedPublication): Promise<void> => {
-    setRemoval({ name, publication, error: undefined, isBusy: true });
-    const answer = isTauCloud
-      ? await requestRefRemoval(projectId, `refs/tags/${name}`, publication?.id)
-      : ({ kind: 'removed' } as const);
-    if (answer.kind === 'published') {
-      /* The person sees what the removal affects before anything changes. */
-      setRemoval({ name, publication: answer.publication, error: undefined, isBusy: false });
-      return;
-    }
-    if (answer.kind === 'refused') {
-      setRemoval({
-        name,
-        publication,
-        error: describeRevisionFailure('removeName', answer.code).description,
-        isBusy: false,
-      });
-      return;
-    }
-    try {
-      await commands.deleteTag(name);
-      setRemoval(undefined);
-    } catch {
-      setRemoval({
-        name,
-        publication,
-        error: describeRevisionFailure('removeName', undefined).description,
-        isBusy: false,
-      });
-    }
-  };
-
-  return {
-    removal,
-    remove,
-    dismiss: () => {
-      setRemoval(undefined);
-    },
-  };
-}
-
 /**
  * The number the next version takes, as this page knows the project's versions:
  * the highest it has read plus one, and V2 at least, because V1 is Start (B6).
@@ -567,7 +490,6 @@ export function RevisionMenu({
 }): React.JSX.Element | null {
   const role = useProjectRole();
   const commands = useRevisionCommands();
-  const { removal, remove, dismiss } = useNameRemoval();
   const moreRef = useRef<HTMLButtonElement>(null);
   /* A menu item opens its form once the menu has closed, so the menu's focus trap neither keeps focus from it nor takes it back. */
   const opens = useRef<'name' | 'branch'>(undefined);
@@ -595,11 +517,12 @@ export function RevisionMenu({
             if (value === named) {
               return;
             }
-            await commands.tag({ name: value, revisionId: revision.revisionId });
-            /* A rename moves the name: the old one goes through the same audited path a backed-up name needs. */
-            if (named !== undefined) {
-              void remove(named);
-            }
+            /* B6: a rename rewrites the version's tag at its own ref, `refs/tags/v<n>`, keeping its number; nothing is removed. */
+            await commands.tag({
+              name: value,
+              revisionId: revision.revisionId,
+              ...(version === undefined ? {} : { number: version.number }),
+            });
           },
         }
       : {
@@ -615,100 +538,52 @@ export function RevisionMenu({
         };
 
   return (
-    <>
-      <DropdownMenu>
-        <NamePopover
-          align='end'
-          anchor={
-            <DropdownMenuTrigger asChild>
-              <Button ref={moreRef} size='icon-xs' variant='outline' aria-label='More'>
-                <EllipsisVertical aria-hidden />
-              </Button>
-            </DropdownMenuTrigger>
+    <DropdownMenu>
+      <NamePopover
+        align='end'
+        anchor={
+          <DropdownMenuTrigger asChild>
+            <Button ref={moreRef} size='icon-xs' variant='outline' aria-label='More'>
+              <EllipsisVertical aria-hidden />
+            </Button>
+          </DropdownMenuTrigger>
+        }
+        isOpen={isFormOpen}
+        returnFocus={moreRef}
+        onOpenChange={setIsFormOpen}
+        {...formCopy}
+      />
+      <DropdownMenuContent
+        align='end'
+        onCloseAutoFocus={(event) => {
+          const next = opens.current;
+          if (next === undefined) {
+            return;
           }
-          isOpen={isFormOpen}
-          returnFocus={moreRef}
-          onOpenChange={setIsFormOpen}
-          {...formCopy}
-        />
-        <DropdownMenuContent
-          align='end'
-          onCloseAutoFocus={(event) => {
-            const next = opens.current;
-            if (next === undefined) {
-              return;
-            }
-            opens.current = undefined;
-            event.preventDefault();
-            setForm(next);
-            setIsFormOpen(true);
-          }}
-        >
-          <DropdownMenuItem
-            onSelect={() => {
-              opens.current = 'name';
-            }}
-          >
-            {named === undefined ? <Tag aria-hidden /> : <Pencil aria-hidden />}
-            {named === undefined ? 'Create version…' : 'Rename version…'}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={() => {
-              opens.current = 'branch';
-            }}
-          >
-            <GitBranch aria-hidden />
-            New branch from here…
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {/* Only a rename's old name that backs a publication, or that Tau Cloud refused to move, asks here. */}
-      <AlertDialog
-        open={removal !== undefined && !removal.isBusy}
-        onOpenChange={(open) => {
-          if (!open) {
-            dismiss();
-          }
+          opens.current = undefined;
+          event.preventDefault();
+          setForm(next);
+          setIsFormOpen(true);
         }}
       >
-        <AlertDialogContent
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            moreRef.current?.focus();
+        <DropdownMenuItem
+          onSelect={() => {
+            opens.current = 'name';
           }}
         >
-          <AlertDialogHeader>
-            <AlertDialogTitle>{`Remove the name “${removal?.name ?? ''}” from ${name}?`}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {removal?.publication === undefined
-                ? ''
-                : `“${removal.publication.title}” is published from this name. Removing the name also retires that publication, so its link stops opening. `}
-              The entry itself stays in History.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {removal?.error === undefined ? null : (
-            <p role='alert' className='text-sm'>
-              {removal.error}
-            </p>
-          )}
-          <AlertDialogFooter>
-            <Button autoFocus variant='outline' onClick={dismiss}>
-              Cancel
-            </Button>
-            <Button
-              variant='destructive'
-              onClick={() => {
-                if (removal !== undefined) {
-                  void remove(removal.name, removal.publication);
-                }
-              }}
-            >
-              Remove name
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+          {named === undefined ? <Tag aria-hidden /> : <Pencil aria-hidden />}
+          {named === undefined ? 'Create version…' : 'Rename version…'}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            opens.current = 'branch';
+          }}
+        >
+          <GitBranch aria-hidden />
+          New branch from here…
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

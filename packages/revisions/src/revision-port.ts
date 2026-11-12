@@ -500,47 +500,88 @@ export type ConflictRecord = Readonly<{
 }>;
 
 /**
- * One named version: an annotated tag on a revision (S31, A21).
+ * One version: an annotated tag on a revision (S31, A21, B6).
  *
- * Annotated rather than lightweight, because a name has an author, a time and a
- * reason of its own — and because an annotated tag is an object every git
- * client and host already understands, so `refs/tags/*` transports with the
- * history set (A39) and a clone shows the names without Tau.
+ * Annotated rather than lightweight, because a version has a name, an author,
+ * a time and a reason of its own — and because an annotated tag is an object
+ * every git client and host already understands, so `refs/tags/*` transports
+ * with the history set (A39) and a clone shows the versions without Tau.
+ *
+ * The ref is `refs/tags/v<number>` (`versionTagRef`). The name is free text
+ * and lives in the tag's message and trailer, never in the ref, so any name a
+ * person types is a valid one and a rename rewrites the tag at the same ref.
  *
  * @public
  */
 export type RevisionTag = Readonly<{
-  /** Unique per project. `refs/tags/<name>`. */
+  /**
+   * Its identity: random, minted when the version is made and kept by a
+   * rename or a move to another number. Two versions are the same version
+   * exactly when their ids are equal (`isSameVersion`).
+   */
+  id: string;
+  /**
+   * Its number, `V<n>`, once per project (blueprint B6), and its ref,
+   * `refs/tags/v<n>`. V1 is the Start entry, which has no tag, so a tag's
+   * number is 2 or more.
+   */
+  number: number;
+  /** What a person called it, such as "Ready for print". Not unique. */
   name: string;
   revisionId: RevisionId;
   /** Why this version has a name. */
   note: string | undefined;
-  /** Who named it (S37). `undefined` on a tag this store did not write. */
+  /** Who made it (S37). `undefined` on a tag this store did not write. */
   actor: RevisionActor | undefined;
-  /** Milliseconds since the Unix epoch. */
+  /** Milliseconds since the Unix epoch, to the second the tag records. */
   createdAt: number;
-  /**
-   * Its number, `V<n>`, once per project (blueprint B6): what its tag records,
-   * or for a tag that records none, the number it reads as
-   * (`numberVersions` in `version-numbers.ts`). Set on every tag a port lists; V1 is the Start
-   * entry, which has no tag, so a tag's number is 2 or more.
-   */
-  number?: number;
 }>;
 
-/** Input for naming one revision. @public */
+/**
+ * A version's tag name, `v<number>`: what follows `refs/tags/`.
+ *
+ * @param number - The version's number, 2 or more.
+ * @returns The tag name.
+ * @public
+ */
+export const versionTagName = (number: number): string => `v${String(number)}`;
+
+/**
+ * A version's ref, `refs/tags/v<number>`.
+ *
+ * @param number - The version's number, 2 or more.
+ * @returns The fully-qualified ref.
+ * @public
+ */
+export const versionTagRef = (number: number): string => `refs/tags/${versionTagName(number)}`;
+
+/** Input for making, renaming or moving one version. @public */
 export type CreateRevisionTagInput = Readonly<{
   name: string;
   revisionId: RevisionId;
   note?: string;
   actor?: RevisionActor;
   /**
-   * The number to record (B6). Absent, a name that exists keeps its number and
-   * a new name takes the highest known plus one (`versionNumberFor`).
+   * The version's number, 2 or more. Absent, this is a new version and takes
+   * the lowest number above every `refs/tags/v<n>` this store holds, version
+   * or not. A number that already names a version renames it: it keeps its
+   * id, entry, creation time and actor (`versionTagWrite`). A number another
+   * tag holds that is not a version is refused.
    */
   number?: number;
+  /**
+   * The version's id. Only a move to another number passes it, so the moved
+   * version stays the same version; a new version mints its own.
+   */
+  id?: string;
   /** Milliseconds since the Unix epoch. Defaults to the store's clock. */
   createdAt?: number;
+}>;
+
+/** Which tags {@link RevisionPort.listTags} reads. @public */
+export type ListRevisionTagsInput = Readonly<{
+  /** A remote's tags as last fetched (`refs/remotes/<remote>/tags/*`) instead of this store's own. */
+  remote?: string;
 }>;
 
 /** Input for adding one linked checkout. @public */
@@ -722,16 +763,25 @@ export type RevisionPort = Readonly<{
   /** Remove one remote. History and remote-tracking refs stay. */
   removeRemote(name: string): Promise<void>;
   /**
-   * Name one revision, replacing an existing name of the same spelling.
+   * Make a version at `refs/tags/v<number>`, or rename one.
    *
-   * Re-pointing is the same operation as creating: a name is a name for a head,
-   * exactly as a branch is, and *Rename* in the pane is a create plus a delete.
+   * A new version takes the next number. Given the number of a version that
+   * exists, the tag is rewritten at the same ref with the new name: *Rename*
+   * in the pane is this, and keeps the number (Q13).
    */
   tag(input: CreateRevisionTagInput): Promise<RevisionTag>;
-  /** Every named version in this store, by name. */
-  listTags(): Promise<readonly RevisionTag[]>;
-  /** Remove one name. The revision it named stays, and stays reachable by id. */
-  deleteTag(name: string): Promise<void>;
+  /**
+   * Every version in this store, or in a remote's tracking refs, lowest
+   * number first. A `refs/tags/v<n>` that is not an annotated tag with a valid
+   * `Tau-Tag` record is not listed, but it still holds its number.
+   */
+  listTags(input?: ListRevisionTagsInput): Promise<readonly RevisionTag[]>;
+  /**
+   * Remove this store's tag for one number. Only renumbering uses it: a
+   * version is never removed (Q13), but one that is not backed up moves to a
+   * free number. The revision it named stays, and stays reachable by id.
+   */
+  deleteTag(number: number): Promise<void>;
   /** Rendered Jujutsu change id of one revision. */
   changeId?(id: RevisionId): Promise<string | undefined>;
   /**

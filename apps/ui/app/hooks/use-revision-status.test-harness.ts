@@ -125,7 +125,6 @@ export const revisionStatusHarness = {
     syncNow: vi.fn(),
     saveRevision: vi.fn<(trigger?: 'save' | 'hidden' | 'close') => void>(),
     tag: vi.fn(),
-    deleteTag: vi.fn(),
     publishProject: vi.fn<(tag?: string, revisionId?: string) => void>(),
     confirmPublish: vi.fn(),
     cancelPublish: vi.fn(),

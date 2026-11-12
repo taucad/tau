@@ -3,18 +3,25 @@ import type { RevisionTag } from '#revision-port.js';
 /** What `createPublication` is asked to record. @public */
 export type PublishPublicationActorInput = Readonly<{
   projectId: string;
+  /** The version's tag, `v<number>`: what follows `refs/tags/` (B6). */
   tag: string;
   revisionId: string;
 }> &
-  PublishDraft;
+  Omit<PublishDraft, 'tag' | 'version'>;
 
 /** What `createPublication` answers: the row, and the link to copy. @public */
 export type PublishPublicationActorOutput = Readonly<{ publicationId: string; url: string }>;
 
 /** What the dialog and `tau publish` collect before anything is written. @public */
 export type PublishDraft = Readonly<{
-  /** The named version. Existing name re-points it; a new one creates it. */
+  /**
+   * The version's name, free text. A version on the revision being published
+   * with this name (or {@link PublishDraft.version}) is published as it is,
+   * renamed when the name differs; otherwise a new version is made.
+   */
   tag: string;
+  /** The number of the version to publish again, when the person picked one. */
+  version?: number;
   /** Why this version has a name (the annotated tag's message). */
   note?: string;
   /** The project's own name, which the publication's project mirror records. */

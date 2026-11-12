@@ -100,10 +100,10 @@ export type RevisionClient = Readonly<{
     from?: string,
     options?: Readonly<{ against?: 'checkout' }>,
   ) => Promise<readonly RevisionDiffEntry[]>;
-  /** Name one revision, or re-point an existing name (S31). */
-  tag: (input: Readonly<{ name: string; revisionId: string; note?: string }>) => Promise<RevisionTag | undefined>;
-  /** Remove one name. The revision it named stays. */
-  deleteTag: (name: string) => Promise<void>;
+  /** Make a version of one revision, or with `number` rename that version at its own ref (S31, B6). */
+  tag: (
+    input: Readonly<{ name: string; revisionId: string; note?: string; number?: number }>,
+  ) => Promise<RevisionTag | undefined>;
   /**
    * One file's text before and after a revision, for *Compare* (S38).
    *

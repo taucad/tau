@@ -78,8 +78,8 @@ if (delayed && !fs.existsSync(${JSON.stringify(release)})) {
   await clone.init({ author });
   await clone.setRemote({ name: 'tau', url: server.url });
   if (operation !== 'push') {
-    await source.tag({ name: 'ready', revisionId: head });
-    await source.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }, { name: 'refs/tags/ready' }] });
+    await source.tag({ name: 'Ready for print', revisionId: head });
+    await source.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }, { name: 'refs/tags/v2' }] });
   }
   return {
     marker,
@@ -95,7 +95,7 @@ if (delayed && !fs.existsSync(${JSON.stringify(release)})) {
         ? source.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }], ...(signal ? { signal } : {}) })
         : clone.fetch({
             remote: 'tau',
-            ...(operation === 'discovery' ? {} : { refs: ['refs/heads/main', 'refs/tags/ready'] }),
+            ...(operation === 'discovery' ? {} : { refs: ['refs/heads/main', 'refs/tags/v2'] }),
             ...(signal ? { signal } : {}),
           }),
     /* Large objects fill lazily (D16): the read of the fetched tip is what transfers them. */
@@ -170,7 +170,7 @@ describe.runIf(gitToolchainOnPath)('native LFS operation bounds', () => {
       await writeFile(fixture.fail, 'fail LFS');
       await fixture.transfer();
       expect(await fixture.clone.readRef('refs/remotes/tau/main')).toBe(fixture.head);
-      expect(await fixture.clone.readRef('refs/tags/ready')).toBe(fixture.head);
+      expect(await fixture.clone.readRef('refs/tags/v2')).toBe(fixture.head);
       expect(await fixture.clone.listRefs('refs/tau/transactions')).toEqual([]);
       await expect(fixture.read()).rejects.toMatchObject({ code: 'ENGINE_FAILED' });
       await rm(fixture.fail);

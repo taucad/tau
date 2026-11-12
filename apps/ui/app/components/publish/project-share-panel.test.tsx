@@ -12,7 +12,7 @@ import type { ShareProjectSnapshot } from '@taucad/share/snapshot';
 import { ShareError } from '@taucad/share/provider';
 import type { RevisionTag } from '@taucad/revisions';
 import { entitlementsFromTier } from '@taucad/billing';
-import { ProjectSharePanel, nextVersionName } from '#components/publish/project-share-panel.js';
+import { ProjectSharePanel, publishedVersionLabel } from '#components/publish/project-share-panel.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type * as useEntitlementsModule from '@taucad/billing/hooks/use-entitlements';
 import type * as useSettingsDialogModule from '#hooks/use-settings-dialog.js';
@@ -104,7 +104,9 @@ vi.mock('#hooks/use-settings-dialog.js', async (importOriginal) => {
   };
 });
 
-const tag = (name: string): RevisionTag => ({
+const tag = (number: number, name: string): RevisionTag => ({
+  id: String(number).padStart(32, '0'),
+  number,
   name,
   revisionId: `rev-${name}` as RevisionTag['revisionId'],
   note: undefined,
@@ -143,7 +145,7 @@ const publishedEnvelope = {
   project: { id: 'proj_ui', name: 'Demo', description: 'a beautiful model' },
   currentPublication: {
     id: 'pub_ui',
-    tag: 'v1',
+    tag: 'v2',
     title: 'Demo',
     description: 'a beautiful model',
     visibility: 'private',
@@ -728,9 +730,10 @@ describe('ProjectSharePanel', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
 
-    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledExactlyOnceWith('v1');
+    /* The name starts from the title: a version's number is its own, never typed (B6). */
+    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledExactlyOnceWith('Demo');
     expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledExactlyOnceWith({
-      tag: 'v1',
+      tag: 'Demo',
       projectName: 'Demo',
       entryPath: 'main.ts',
       visibility: 'private',
@@ -738,24 +741,24 @@ describe('ProjectSharePanel', () => {
     });
   });
 
-  it('names the next free version and offers the ones the project already has', async () => {
-    publishFacet({ tags: [tag('v1'), tag('v2')] });
+  it('offers the names the project already has, and takes a name with spaces', async () => {
+    publishFacet({ tags: [tag(2, 'Ready for print'), tag(3, 'Lid fit')] });
     renderPanel(<ProjectSharePanel projectId='proj_ok' projectName='Demo' entryPath='main.ts' />);
 
     const field = await screen.findByRole('combobox', { name: /version name/i });
     await waitFor(() => {
-      expect(field).toHaveValue('v3');
+      expect(field).toHaveValue('Demo');
     });
     const options = [...document.querySelectorAll('#share-version-options option')].map((option) =>
       option.getAttribute('value'),
     );
-    expect(options).toStrictEqual(['v1', 'v2']);
+    expect(options).toStrictEqual(['Ready for print', 'Lid fit']);
 
     await userEvent.clear(field);
-    await userEvent.type(field, 'v1');
+    await userEvent.type(field, 'Ready for print');
     await userEvent.click(screen.getByRole('button', { name: /publish and copy link/i }));
 
-    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledExactlyOnceWith('v1');
+    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledExactlyOnceWith('Ready for print');
   });
 
   it('refuses to publish without a version name', async () => {
@@ -847,14 +850,36 @@ describe('ProjectSharePanel', () => {
 
   it('republishes the exact named version and makes another version explicit', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    publishFacet({ tags: [tag(2, 'Ready for print')] });
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText('Version v1')).toBeInTheDocument();
+    /* The number comes from the publication's tag and the name from the version, never the tag (B6). */
+    expect(await screen.findByText('V2 · Ready for print')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Republish this version' }));
-    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledWith('v1');
+    /* The version's own entry, not the branch head, so the snapshot is the one published before. */
+    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledWith(
+      'Ready for print',
+      'rev-Ready for print',
+    );
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledWith(
+      expect.objectContaining({ tag: 'Ready for print', version: 2 }),
+    );
 
     await userEvent.click(screen.getByRole('button', { name: 'Publish another version' }));
     expect(screen.getByRole('combobox', { name: /version name/i })).toBeInTheDocument();
+  });
+
+  it('never offers the publication title as a version name when this page has not read the versions', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    publishFacet({ tags: [] });
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Republish this version' }));
+    /* By number alone: the machine reads V2 and keeps its stored name (B6). */
+    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledWith('');
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledWith(
+      expect.objectContaining({ tag: '', version: 2, title: 'Demo' }),
+    );
   });
 
   it('switches private publications to public without removing listed grants', async () => {
@@ -967,15 +992,13 @@ describe('ProjectSharePanel', () => {
   });
 });
 
-describe('nextVersionName', () => {
+describe('publishedVersionLabel', () => {
   it.each([
-    [[], 'v1'],
-    [['v1'], 'v2'],
-    [['v2'], 'v1'],
-    [['v1', 'v2', 'v3'], 'v4'],
-    [['release-1'], 'v1'],
-  ])('answers %j with %s', (names, expected) => {
-    expect(nextVersionName(names)).toBe(expected);
+    ['v2', [tag(2, 'Ready for print')], 'V2 · Ready for print'],
+    ['v4', [tag(2, 'Ready for print')], 'V4'],
+    ['Ready for print', [tag(2, 'Ready for print')], 'An earlier version'],
+  ] as const)('labels %s as %s', (published, versions, expected) => {
+    expect(publishedVersionLabel(published, versions)).toBe(expected);
   });
 });
 

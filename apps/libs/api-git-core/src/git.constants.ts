@@ -299,18 +299,19 @@ export const versionNumberTakenMarker = 'Tau: version number taken';
 
 /**
  * Why `pre-receive` refuses a version tag (blueprint B6, Q6, Q13, I6; Revisions
- * Policy rule 19). A version is an annotated tag whose `Tau-Tag` trailer
- * records its number, V2 onward (V1 is the Start entry, which has no tag).
- * Each name is a row of rule 19's ladder.
+ * Policy rule 19). A version is an annotated tag at `refs/tags/v<number>`, V2
+ * onward (V1 is the Start entry, which has no tag): the ref is the number, and
+ * the name is free text in the tag's message. Each name is a row of rule 19's
+ * ladder.
  */
 /* eslint-disable @typescript-eslint/naming-convention -- the keys are refusal codes, spelled as rule 19's ladder names them */
 export const versionNumberRefusals = {
   /** Another version on Tau Cloud already holds the number, or it is V1, which Start holds. */
   GIT_PUSH_VERSION_NUMBER_TAKEN:
     'another version already holds its number. Tau gives a version that is not backed up yet the next free number and backs it up again.',
-  /** The tag moves a version Tau Cloud already holds to another number, or drops its number. */
-  GIT_PUSH_VERSION_NUMBER_CHANGED:
-    'it changes the number of a version that is already backed up, and that number never changes.',
+  /** The ref is a version's, but what it names is not a version: not an annotated tag with a valid Tau-Tag record. */
+  GIT_PUSH_VERSION_TAG_INVALID:
+    'a version tag must be an annotated tag with its Tau-Tag record. Only Tau writes version tags at refs/tags/v<number>.',
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- end of the refusal codes */
 
@@ -318,35 +319,39 @@ export type VersionNumberRefusal = keyof typeof versionNumberRefusals;
 
 /**
  * The version-number check `pre-receive` runs over the tags a push brings (B6).
- * A Node program, for the reason the authorship check is one: the number is
- * JSON in the tag's `Tau-Tag` trailer, read here as the client reads it (the
- * last `Tau-Tag: ` line, through `JSON.parse`). `argv[1]` is the push's tag
- * updates as `<old> <new> <ref>` triples, `argv[2]` the repository's tags as
- * `<oid> <ref>` lines, and stdin `git cat-file --batch` over every object both
- * name, which the hook's shell reads (the quarantine is visible to it) so the
- * program spawns nothing; an object missing from stdin is a refusal.
+ * A Node program, for the reason the authorship check is one. `argv[1]` is the
+ * push's tag updates as `<old> <new> <ref>` triples, `argv[2]` the
+ * repository's tags as `<oid> <ref>` lines, and stdin `git cat-file --batch`
+ * over every object the updates name, which the hook's shell reads (the
+ * quarantine is visible to it) so the program spawns nothing; an object
+ * missing from stdin is a refusal.
  *
- * A pushed tag is refused when:
+ * Only a version may hold `refs/tags/v<n>`: an annotated tag whose message
+ * ends in a valid `Tau-Tag` record (`{ version: 2, id, name, … }`). Anything
+ * else there — a lightweight tag, a tag another tool wrote, a record without
+ * its id — is `GIT_PUSH_VERSION_TAG_INVALID`, because once it landed it would
+ * hold a number no reader can show and no push can clear.
  *
- * - its number is 1, or another tag after this push holds the same number
- *   (`GIT_PUSH_VERSION_NUMBER_TAKEN`, printed after the fixed marker the client
- *   matches);
- * - it replaces a tag that had a number with one that records another number
- *   or none (`GIT_PUSH_VERSION_NUMBER_CHANGED`: I6, a backed-up number never
- *   changes);
- * - its trailer or its number cannot be read (`GIT_PUSH_RECORD_UNREADABLE`).
+ * The number is the ref's, so a pushed version is refused
+ * (`GIT_PUSH_VERSION_NUMBER_TAKEN`, printed after the fixed marker the client
+ * matches) when:
  *
- * A tag with no number (one Tau did not write, or one written before numbers)
- * passes: it is numbered when read. Written without template literals so it
- * embeds in the hook's quoted heredoc unchanged.
+ * - `n` is 1, which Start holds;
+ * - it creates a number Tau Cloud already holds;
+ * - it replaces the tag there with another version: a record with another
+ *   `id`, or anything over a tag that is not a version. A rename keeps the id
+ *   and passes, so a backed-up number never changes (I6).
+ *
+ * An object that cannot be read is `GIT_PUSH_RECORD_UNREADABLE`. A tag under
+ * any other name is not a version and passes. Written without template
+ * literals so it embeds in the hook's quoted heredoc unchanged.
  */
 export const versionNumberCheckScript = String.raw`'use strict';
 const refusals = ${JSON.stringify({ ...versionNumberRefusals, ...authorshipRefusals })};
 const marker = ${JSON.stringify(versionNumberTakenMarker)};
-const prefix = 'Tau-Tag: ';
 const words = (process.argv[1] || '').split(' ').filter(Boolean);
 const zero = /^0+$/;
-const unreadable = { unreadable: true };
+const versionRef = /^refs\/tags\/v([1-9][0-9]*)$/;
 const fail = (lines) => {
   for (const line of lines) {
     process.stderr.write(line + '\n');
@@ -354,78 +359,81 @@ const fail = (lines) => {
   process.exitCode = 1;
 };
 try {
-  const pushed = [];
-  for (let index = 0; index + 2 < words.length; index += 3) {
-    pushed.push({ old: words[index], now: words[index + 1], ref: words[index + 2] });
-  }
-  const held = new Map();
+  const held = new Set();
   for (const line of (process.argv[2] || '').split('\n')) {
     const space = line.indexOf(' ');
     if (space > 0) {
-      held.set(line.slice(space + 1), line.slice(0, space));
+      held.add(line.slice(space + 1));
     }
   }
-  for (const update of pushed) {
-    held.set(update.ref, update.now);
-  }
-  const numbers = new Map();
+  const trailerPrefix = 'Tau-Tag: ';
+  const versionId = /^[0-9a-f]{32}$/;
+  /* A version's id, or null for an object that is not a version. */
+  const versionOf = (type, body) => {
+    if (type !== 'tag') {
+      return null;
+    }
+    const split = body.indexOf('\n\n');
+    const lines = (split === -1 ? '' : body.slice(split + 2)).split('\n');
+    let line;
+    for (const candidate of lines) {
+      if (candidate.startsWith(trailerPrefix)) {
+        line = candidate;
+      }
+    }
+    if (line === undefined) {
+      return null;
+    }
+    let record;
+    try {
+      record = JSON.parse(line.slice(trailerPrefix.length));
+    } catch {
+      return null;
+    }
+    return record !== null &&
+      typeof record === 'object' &&
+      record.version === 2 &&
+      typeof record.id === 'string' &&
+      versionId.test(record.id) &&
+      typeof record.name === 'string' &&
+      record.name.length > 0
+      ? record.id
+      : null;
+  };
+  const versions = new Map();
   const batch = require('node:fs').readFileSync(0);
   {
     let offset = 0;
     while (offset < batch.length) {
       const end = batch.indexOf(10, offset);
       const header = batch.toString('latin1', offset, end === -1 ? batch.length : end).split(' ');
-      if (end !== -1 && header.length === 2 && header[1] === 'missing') {
-        numbers.set(header[0], unreadable);
-        offset = end + 1;
-        continue;
-      }
       if (end === -1 || header.length !== 3) {
-        numbers.set(header[0], unreadable);
         break;
       }
       const size = Number(header[2]);
       const body = batch.toString('utf8', end + 1, end + 1 + size);
       offset = end + 2 + size;
-      if (header[1] !== 'tag') {
-        numbers.set(header[0], undefined);
-        continue;
-      }
-      const split = body.indexOf('\n\n');
-      const message = split === -1 ? '' : body.slice(split + 2);
-      const line = message.split('\n').findLast((candidate) => candidate.startsWith(prefix));
-      if (line === undefined) {
-        numbers.set(header[0], undefined);
-        continue;
-      }
-      let record;
-      try {
-        record = JSON.parse(line.slice(prefix.length));
-      } catch {
-        numbers.set(header[0], unreadable);
-        continue;
-      }
-      const number = typeof record === 'object' && record !== null ? record.number : undefined;
-      numbers.set(header[0], number === undefined || (Number.isSafeInteger(number) && number >= 1) ? number : unreadable);
-    }
-  }
-  const holders = new Map();
-  for (const [ref, oid] of held) {
-    const number = numbers.get(oid);
-    if (typeof number === 'number') {
-      holders.set(number, [...(holders.get(number) || []), ref]);
+      versions.set(header[0], versionOf(header[1], body));
     }
   }
   const refused = [];
-  for (const update of pushed) {
-    const number = numbers.get(update.now);
-    const before = zero.test(update.old) ? undefined : numbers.get(update.old);
-    if (!numbers.has(update.now) || number === unreadable) {
-      refused.push('Tau: refused ' + update.ref + ' — ' + refusals.GIT_PUSH_RECORD_UNREADABLE);
-    } else if (typeof before === 'number' && number !== before) {
-      refused.push('Tau: refused ' + update.ref + ' — ' + refusals.GIT_PUSH_VERSION_NUMBER_CHANGED);
-    } else if (typeof number === 'number' && (number === 1 || (holders.get(number) || []).length > 1)) {
-      refused.push(marker + ' — ' + update.ref + ' names V' + String(number) + ': ' + refusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
+  for (let index = 0; index + 2 < words.length; index += 3) {
+    const old = words[index];
+    const now = words[index + 1];
+    const ref = words[index + 2];
+    const match = versionRef.exec(ref);
+    if (match === null) {
+      continue;
+    }
+    if (!versions.has(now) || (!zero.test(old) && !versions.has(old))) {
+      refused.push('Tau: refused ' + ref + ' — ' + refusals.GIT_PUSH_RECORD_UNREADABLE);
+    } else if (versions.get(now) === null) {
+      refused.push('Tau: refused ' + ref + ' — ' + refusals.GIT_PUSH_VERSION_TAG_INVALID);
+    } else if (
+      match[1] === '1' ||
+      (zero.test(old) ? held.has(ref) : versions.get(old) === null || versions.get(old) !== versions.get(now))
+    ) {
+      refused.push(marker + ' — ' + ref + ' names V' + match[1] + ': ' + refusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
     }
   }
   if (refused.length > 0) {
@@ -767,8 +775,8 @@ TAU_AUTHORSHIP_CHECK
   fi
 fi
 
-# B6 (Q6, I6): a version's number, in its tag's \`Tau-Tag\` trailer, is held by
-# one version on Tau Cloud and never changes once backed up. Gated like the
+# B6 (Q6, I6): a version's number, its ref \`refs/tags/v<n>\`, is held by one
+# version on Tau Cloud and never changes once backed up. Gated like the
 # authorship check, and fail closed the same way.
 if [ -n "\${TAU_GIT_PUSHER:-}" ] && [ -n "$versions" ]; then
   if [ -z "\${TAU_GIT_NODE:-}" ]; then
@@ -786,11 +794,9 @@ TAU_VERSION_CHECK
     exit 1
   fi
   version_objects=$(
-    { [ -z "$held_tags" ] || printf '%s\n' "$held_tags" | cut -d ' ' -f 1
-      for word in $versions; do
-        case "$word" in refs/*) ;; *[!0]*) printf '%s\n' "$word" ;; esac
-      done
-    } | sort -u
+    for word in $versions; do
+      case "$word" in refs/*) ;; *[!0]*) printf '%s\n' "$word" ;; esac
+    done | sort -u
   )
   if ! printf '%s\n' "$version_objects" | git cat-file --batch 2>/dev/null | "$TAU_GIT_NODE" -e "$version_check" "$versions" "$held_tags"; then
     echo "Tau: nothing was written." >&2

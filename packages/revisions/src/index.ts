@@ -46,7 +46,7 @@ export {
   taggerSignature,
 } from '#revision-headers.js';
 export type { RevisionTrailer } from '#revision-headers.js';
-export { RevisionPortError } from '#revision-port.js';
+export { RevisionPortError, versionTagName, versionTagRef } from '#revision-port.js';
 export type {
   AddCheckoutInput,
   Checkout,
@@ -54,6 +54,7 @@ export type {
   ConflictRecord,
   CreateRevisionTagInput,
   InitRevisionStoreInput,
+  ListRevisionTagsInput,
   RevisionConflict,
   RevisionDiffEntry,
   RevisionDiffInput,
@@ -155,7 +156,7 @@ export {
 export type { ConflictPerspective, RevisionConflictTerms } from '#revision-conflict.js';
 export { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';
 export type { RevisionLogRequest, RevisionPlace, RevisionRow, RevisionRowWho } from '#revision-verbs.js';
-export { numberVersions } from '#version-numbers.js';
+export { versionNumberOfTag } from '#version-numbers.js';
 export {
   parseStartRecord,
   serializeStartRecord,

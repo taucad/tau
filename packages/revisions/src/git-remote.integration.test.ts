@@ -226,7 +226,7 @@ describe.runIf(gitToolchainOnPath)('AC18 — a Git remote, from both legs', () =
     });
     const head = revisionId(receipt.commitId);
     await port.updateRef({ name: 'main', expectedHead: undefined, head });
-    await port.tag({ name: 'v1', revisionId: head, note: 'The first one' });
+    await port.tag({ name: 'The first one', revisionId: head, note: 'The first one' });
 
     /* *Connect Git remote*: the URL the person typed, under git's own
      * non-reserved name, so `remoteKindOf` reads it back as a Git remote. */
@@ -236,13 +236,13 @@ describe.runIf(gitToolchainOnPath)('AC18 — a Git remote, from both legs', () =
 
     const pushed = await port.push({
       remote: 'origin',
-      refs: [{ name: 'refs/heads/main' }, { name: 'refs/tags/v1' }],
+      refs: [{ name: 'refs/heads/main' }, { name: 'refs/tags/v2' }],
       atomic: true,
     });
 
     expect(pushed.refs.map((entry) => [entry.name, entry.status])).toStrictEqual([
       ['refs/heads/main', 'updated'],
-      ['refs/tags/v1', 'updated'],
+      ['refs/tags/v2', 'updated'],
     ]);
     return head;
   };
@@ -266,8 +266,9 @@ describe.runIf(gitToolchainOnPath)('AC18 — a Git remote, from both legs', () =
       // oxlint-disable-next-line no-await-in-loop -- one small file at a time is the point.
       expect(decoder.decode(await readFile(join(target, path)))).toBe(content);
     }
-    const { stdout } = await runGit('git', ['tag', '--list'], { cwd: target });
-    expect(stdout.trim()).toBe('v1');
+    /* A stock clone lists the version by its number and shows its name and note (B6). */
+    const { stdout } = await runGit('git', ['tag', '-n1', '--list'], { cwd: target });
+    expect(stdout.trim()).toMatch(/^v2\s+The first one$/u);
   };
 
   it('pushes main and its tags natively, and a stock clone reproduces the tree byte for byte', async () => {
@@ -280,7 +281,7 @@ describe.runIf(gitToolchainOnPath)('AC18 — a Git remote, from both legs', () =
 
     expect(await nativeRemote.git(['rev-parse', 'refs/heads/main'])).toBe(head);
     // The name travelled with the history set (A39), as a tag object.
-    expect(await nativeRemote.git(['cat-file', '-t', 'refs/tags/v1'])).toBe('tag');
+    expect(await nativeRemote.git(['cat-file', '-t', 'refs/tags/v2'])).toBe('tag');
     await expectCloneReproduces('native', nativeRemote.url, files);
   }, 180_000);
 

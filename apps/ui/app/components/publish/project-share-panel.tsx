@@ -36,6 +36,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { GithubGistManagement } from '#components/share/github-gist-management.js';
 import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
+import { versionNumberOfTag } from '@taucad/revisions';
 import type { PublishDraft, PublishFacet, PublishVisibility } from '@taucad/revisions';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { PublicationEmailTagsField, getPublicationEmailTagsError } from '#components/publish/publication-email-tags.js';
@@ -171,18 +172,22 @@ const emptyPublishFacet: PublishFacet = {
 };
 
 /**
- * The next free `v<n>` for a project that already has some names.
+ * How the panel names the version a publication points at: `V3 · Ready for
+ * print` (B6). The publication records the version's tag, `v<number>`; the
+ * number comes from it and the name from the project's own versions, never
+ * from the tag itself.
  *
- * @param names - Names this project already uses.
- * @returns A name nothing in the project holds.
+ * @param tag - The publication's tag.
+ * @param versions - The project's versions, as the publish facet read them.
+ * @returns The phrase.
  */
-export const nextVersionName = (names: readonly string[]): string => {
-  const taken = new Set(names);
-  let index = 1;
-  while (taken.has(`v${String(index)}`)) {
-    index += 1;
+export const publishedVersionLabel = (tag: string, versions: PublishFacet['tags']): string => {
+  const number = versionNumberOfTag(tag);
+  if (number === undefined) {
+    return 'An earlier version';
   }
-  return `v${String(index)}`;
+  const name = versions.find((version) => version.number === number)?.name;
+  return name === undefined ? `V${String(number)}` : `V${String(number)} · ${name}`;
 };
 
 const parseProjectShareEnvelope = (value: unknown): ProjectShareEnvelope | undefined => {
@@ -703,19 +708,19 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   // entitlements load never strands a locked selection in form state.
   const effectiveVisibility: PublishVisibility = canCreatePrivateShares ? visibility : 'public';
   /*
-   * The named version this publication points at (S32, A21, D11).
+   * The version this publication points at (S32, A21, D11, B6).
    *
-   * Defaulted to the next free `v<n>` so the common case is one click, and
-   * offered as a list of the project's existing names so re-publishing a name
-   * is a choice rather than a guess. A native `datalist` rather than a combobox
-   * widget: the field accepts a new name as readily as an existing one.
+   * The name is free text and its number is the project's next one, so the
+   * field starts from the title until a person types a name. The project's
+   * existing names are offered, so publishing a version again is a choice
+   * rather than a guess. A native `datalist` rather than a combobox widget:
+   * the field accepts a new name as readily as an existing one.
    */
-  const existingNames = publishFacet.tags.map((tag: PublishFacet['tags'][number]) => tag.name);
-  /* Derived, not synchronized: the field shows the next free name until a person
-   * types one, so the names arriving from the worker never need an effect. */
+  const existingNames = [...new Set(publishFacet.tags.map((tag: PublishFacet['tags'][number]) => tag.name))];
   const [chosenName, setChosenName] = useState<string>();
-  const versionName = chosenName ?? nextVersionName(existingNames);
   const [title, setTitle] = useState(projectName);
+  /* Derived, not synchronized: the field shows the title until a person types a name. */
+  const versionName = chosenName ?? title;
   const [description, setDescription] = useState(projectDescription);
   const [sharedEmails, setSharedEmails] = useState<string[]>([]);
   const [visibilityMutating, setVisibilityMutating] = useState(false);
@@ -809,9 +814,14 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
    * names, so nothing here waits.
    *
    * @param draft - Everything only a person decides.
+   * @param revisionId - The entry a republished version names, when this page knows it.
    */
-  const sendPublish = (draft: PublishDraft): void => {
-    commands.publishProject(draft.tag);
+  const sendPublish = (draft: PublishDraft, revisionId?: string): void => {
+    if (revisionId === undefined) {
+      commands.publishProject(draft.tag);
+    } else {
+      commands.publishProject(draft.tag, revisionId);
+    }
     commands.confirmPublish(draft);
   };
 
@@ -871,14 +881,22 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       return;
     }
 
-    sendPublish({
-      tag: publication.tag,
-      projectName,
-      entryPath,
-      visibility: publication.visibility,
-      title: publication.title,
-      ...(publication.description ? { description: publication.description } : {}),
-    });
+    /* The version itself, by number: the machine publishes its own entry under
+     * its stored name, so the publication's title never renames it (B6). */
+    const number = versionNumberOfTag(publication.tag);
+    const version = publishFacet.tags.find((candidate) => candidate.number === number);
+    sendPublish(
+      {
+        tag: version?.name ?? '',
+        ...(number === undefined ? {} : { version: number }),
+        projectName,
+        entryPath,
+        visibility: publication.visibility,
+        title: publication.title,
+        ...(publication.description ? { description: publication.description } : {}),
+      },
+      version?.revisionId,
+    );
   };
 
   return () => {
@@ -949,7 +967,9 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
                 <Heading level={3} variant='label' className='truncate'>
                   {publication.title}
                 </Heading>
-                <p className='mt-1 text-xs text-muted-foreground'>Version {publication.tag}</p>
+                <p className='mt-1 text-xs text-muted-foreground'>
+                  {publishedVersionLabel(publication.tag, publishFacet.tags)}
+                </p>
                 {publication.description ? (
                   <p className='mt-1 line-clamp-2 text-sm text-muted-foreground'>{publication.description}</p>
                 ) : null}
@@ -1023,7 +1043,8 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
                 ))}
               </datalist>
               <p className='text-xs text-muted-foreground'>
-                People who open your link see this version. Publishing again with the same name moves the link forward.
+                People who open your link see this version. A version is permanent: publishing later changes makes a new
+                one.
               </p>
             </div>
             <div className='flex flex-col gap-2'>

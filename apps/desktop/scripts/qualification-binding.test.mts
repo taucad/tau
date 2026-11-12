@@ -170,11 +170,19 @@ else { if (!(path in responses)) throw new Error('Unexpected API path ' + path);
   };
   saveApi();
   const candidate = admitInstallerCandidate({ runId: '789', workflowCommit: harness, scope: 'macos' });
-  const binding = createQualificationBinding({ manifest, candidate, kind: 'ci', runId: 123, workflowCommit: harness });
+  const binding = createQualificationBinding({
+    manifest,
+    candidate,
+    scope: 'macos',
+    kind: 'ci',
+    runId: 123,
+    workflowCommit: harness,
+  });
   const verify = (input: unknown, changes = {}) => {
     verifyQualificationBinding(input, {
       manifest,
       candidate,
+      scope: 'macos',
       kind: 'ci',
       runId: 123,
       workflowCommit: harness,
@@ -214,13 +222,14 @@ else { if (!(path in responses)) throw new Error('Unexpected API path ' + path);
   }
   for (const head of [source, divergent]) {
     assert.throws(() =>
-      createQualificationBinding({ manifest, candidate, kind: 'ci', runId: 123, workflowCommit: head }),
+      createQualificationBinding({ manifest, candidate, scope: 'macos', kind: 'ci', runId: 123, workflowCommit: head }),
     );
   }
   assert.throws(() =>
     createQualificationBinding({
       manifest: { ...manifest, sourceCommit: harness },
       candidate,
+      scope: 'macos',
       kind: 'ci',
       runId: 123,
       workflowCommit: harness,
@@ -312,6 +321,7 @@ else { if (!(path in responses)) throw new Error('Unexpected API path ' + path);
   const vmBinding = createQualificationBinding({
     manifest,
     candidate,
+    scope: 'macos',
     kind: 'vm',
     runId: 124,
     workflowCommit: harness,
@@ -320,6 +330,7 @@ else { if (!(path in responses)) throw new Error('Unexpected API path ' + path);
     verifyQualificationBinding(input, {
       manifest,
       candidate,
+      scope: 'macos',
       kind: 'vm',
       runId: 124,
       workflowCommit: harness,
@@ -342,7 +353,7 @@ else { if (!(path in responses)) throw new Error('Unexpected API path ' + path);
   }
   for (const head of [source, divergent]) {
     assert.throws(() =>
-      createQualificationBinding({ manifest, candidate, kind: 'vm', runId: 124, workflowCommit: head }),
+      createQualificationBinding({ manifest, candidate, scope: 'macos', kind: 'vm', runId: 124, workflowCommit: head }),
     );
   }
   const fetchWithVm = async (bindingInput: unknown = vmBinding, receiptInput: unknown = vmReceipts) => {
@@ -390,6 +401,59 @@ else { if (!(path in responses)) throw new Error('Unexpected API path ' + path);
   await assert.rejects(fetchWithVm({ ...binding, runId: 124 }), /binding differs/u);
   await assert.rejects(fetchWithVm({ ...vmBinding, candidate: { ...candidate, artifactId: 999 } }), /binding differs/u);
   await assert.rejects(fetchWithVm(vmBinding, receipts), /Receipt kind differs/u);
+  // Platform-scoped production candidates bind the same way: the sidecar carries the manifest's own channel and the
+  // platform scope, and neither can be relabelled.
+  const productionTag = 'desktop@0.2.0';
+  const productionIdentity = desktopReleaseIdentity(productionTag);
+  const productionManifest = parseDesktopArtifactManifest({
+    schemaVersion: 1,
+    tag: productionTag,
+    ...productionIdentity,
+    sourceCommit: source,
+    artifacts: manifest.artifacts.map((artifact) => ({
+      ...artifact,
+      name: desktopArtifactName({ ...productionIdentity, kind: artifact.kind, arch: 'arm64' }),
+    })),
+  });
+  const productionBinding = createQualificationBinding({
+    manifest: productionManifest,
+    candidate,
+    scope: 'macos',
+    kind: 'vm',
+    runId: 124,
+    workflowCommit: harness,
+  });
+  assert.equal(productionBinding.channel, 'production');
+  const verifyProduction = (input: unknown, changes = {}) => {
+    verifyQualificationBinding(input, {
+      manifest: productionManifest,
+      candidate,
+      scope: 'macos',
+      kind: 'vm',
+      runId: 124,
+      workflowCommit: harness,
+      publicationCommit: publication,
+      ...changes,
+    });
+  };
+  verifyProduction(productionBinding);
+  for (const change of [{ channel: 'staging' }, { scope: 'linux' }, { scope: 'windows' }, { channel: 'beta' }]) {
+    assert.throws(() => {
+      verifyProduction({ ...productionBinding, ...change });
+    });
+  }
+  for (const changes of [{ scope: 'linux' }, { manifest }, { publicationCommit: divergent }]) {
+    assert.throws(() => {
+      verifyProduction(productionBinding, changes);
+    });
+  }
+  // A staging sidecar never admits the production candidate built from the same source, nor the reverse.
+  assert.throws(() => {
+    verifyProduction(vmBinding);
+  }, /binding differs/u);
+  assert.throws(() => {
+    verifyVm(productionBinding);
+  }, /binding differs/u);
   delete (api as Record<string, unknown>)['repos/taucad/tau/actions/runs/124'];
   delete (api as Record<string, unknown>)['repos/taucad/tau/actions/runs/124/artifacts?per_page=100'];
   saveApi();
@@ -460,6 +524,7 @@ else { if (!(path in responses)) throw new Error('Unexpected API path ' + path);
   const equalBinding = createQualificationBinding({
     manifest,
     candidate: equalCandidate,
+    scope: 'macos',
     kind: 'ci',
     runId: 123,
     workflowCommit: source,

@@ -7,8 +7,11 @@
  * Every T row is driven the way a person's chat drives it: a scripted model (`ModelTransport`) calls the official
  * `shell` tool through a real Tau agent host, its host tool registry and admission, the shell service, the real sandbox
  * provider and the machine's own Bash. Placement uses the explicit `placementOver` fixture: it applies admission
- * and completion immediately, so these rows do not qualify real revision/custody settlement. Candidate T12 uses a
- * copied directory. Network C04/T10 deliberately substitute DNS and connection routing to an owned endpoint; they
+ * and completion immediately, so those rows do not qualify real revision/custody settlement, and candidate T12 uses a
+ * copied directory. T12-custody qualifies both instead: a real project host, composed as the desktop utility composes
+ * one, places the run in the linked checkout of a branch the project's own verb made, holds each shell execution on
+ * the run's lease, records the turn only once that hold is released, and changes the live project only when the
+ * branch is merged. Network C04/T10 deliberately substitute DNS and connection routing to an owned endpoint; they
  * do not qualify unmodified DNS/rebinding. The provider also carries count/resource observers. Every negative uses file
  * digests, a controlled network endpoint's request log, the process table.
  *
@@ -44,6 +47,7 @@ import type { Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { MessageChannel } from 'node:worker_threads';
 import { z } from 'zod';
 
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
@@ -51,12 +55,18 @@ import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vites
 import { createTauAgentHost } from '@taucad/agent-host';
 import type { InterruptRequest, JsonValue } from '@taucad/agent-host';
 import { createNodeEventLog } from '@taucad/agent-host/node';
+import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
+import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createSandboxShellProvider } from '@taucad/native-process-core/shell';
 import type { ShellLaunch, ShellProvider } from '@taucad/native-process-core/shell';
 import { probeHostShell, shellLimits } from '@taucad/shell-service';
 import type { HostShell, PermissionMode, ShellCheckout, ShellInput, ShellOutput } from '@taucad/shell-service';
 
 import { createHostToolRegistry } from '#agent-tools.js';
+import { createProjectHost } from '#project-host.js';
+import type { ProjectFileSystem, ProjectHost } from '#project-host.js';
+import type { TurnFinalizedEvent } from '#revisions.js';
 import { placementOver, scriptedTransport } from '#shell/tau-host.fixture.js';
 import type { ScriptedResponse } from '#shell/tau-host.fixture.js';
 import {
@@ -361,6 +371,157 @@ const shellCall = (id: string, input: ShellInput): Call => ({ id, input: input a
  */
 const widening = (id: string, input: ShellInput): Call[] => [shellCall(`${id}-ask`, input), shellCall(id, input)];
 
+/**
+ * A filesystem authority over one project, as the desktop utility serves a project host: it admits the workspace, and
+ * each candidate root while the host keeps it admitted.
+ */
+const authorityOver = (
+  workspaceRoot: string,
+  authorityDirectory: string,
+): Readonly<{ fileSystem: ProjectFileSystem; close: () => Promise<void> }> => {
+  mkdirSync(authorityDirectory, { recursive: true });
+  const authority = new NodeFsAuthorityHost({
+    authorityDirectory: () => authorityDirectory,
+    authorityIdentity: () => 'shell-qualification',
+  });
+  const admitted = new Map<string, number>([[workspaceRoot, 1]]);
+  const ports = new MessageChannel();
+  const served = serveNodeFsProvider(toNodeFsPort(ports.port1), {
+    authority,
+    allowRoot: (admittedRoot) => (admitted.get(admittedRoot) ?? 0) > 0,
+    policy: tauPathPolicy,
+  });
+  const channel = new NodeFsChannel(toNodeFsPort(ports.port2));
+  return {
+    fileSystem: {
+      open: (openedRoot) => new NodeFsProviderClient(channel, openedRoot),
+      admit: (admittedRoot) => {
+        admitted.set(admittedRoot, (admitted.get(admittedRoot) ?? 0) + 1);
+        return () => {
+          admitted.set(admittedRoot, (admitted.get(admittedRoot) ?? 1) - 1);
+        };
+      },
+      mutate: async (target, mutation) =>
+        authority.run({ root: target.parentRoot, paths: [target.targetPath] }, mutation),
+    },
+    close: async () => {
+      channel.close();
+      await served.close();
+    },
+  };
+};
+
+/**
+ * A real project host, composed as the desktop utility composes one, over a scripted model and this machine's shell.
+ * Its revisions, linked checkouts, turn placement and the shell's execution holds on each run's lease are the
+ * production ones; nothing settles a turn but the project's own revision tree.
+ */
+const projectHostOver = async (
+  label: string,
+  calls: readonly Call[],
+  options: Readonly<{
+    workspaceRoot: string;
+    checkoutsDirectory: string;
+    /** Called as each turn's settlement is recorded, before anything else hears of it. */
+    onFinalized?: (event: TurnFinalizedEvent) => void;
+  }>,
+) => {
+  const settlements = new Map<string, PromiseWithResolvers<TurnFinalizedEvent>>();
+  const settlementOf = (runId: string): PromiseWithResolvers<TurnFinalizedEvent> => {
+    const pending = settlements.get(runId) ?? Promise.withResolvers<TurnFinalizedEvent>();
+    settlements.set(runId, pending);
+    return pending;
+  };
+  const authority = authorityOver(options.workspaceRoot, join(root, `${label}-authority`));
+  const counting = countingProvider();
+  let checkoutsOfRuns: ReadonlyMap<string, Readonly<{ cwd: string; mode?: string }>> = new Map();
+  let probing: Promise<HostShell> | undefined;
+  let probed: HostShell | undefined;
+  const transport = scriptedTransport([
+    ...calls.map((call) => ({ toolCalls: [{ id: call.id, name: call.name ?? 'shell', input: call.input }] })),
+    { text: 'Done.' },
+  ]);
+  const host: ProjectHost = createProjectHost({
+    workspaceRoot: options.workspaceRoot,
+    checkoutsDirectory: options.checkoutsDirectory,
+    via: 'desktop',
+    projectId: 'proj_T12CUSTODYAAAAAAAAAAA',
+    fileSystem: authority.fileSystem,
+    runtimeClient: async () => {
+      throw new Error('No kernel runs in the shell qualification.');
+    },
+    systemPrompt: 'You are the shell qualification fixture.',
+    model: { id: 'scripted-shell-model', contextWindow: 200_000 },
+    modelTransport: transport,
+    credential: () => ({ mode: 'session' }),
+    onRevisionEvent: (event) => {
+      if (event.type === 'turn.finalized') {
+        options.onFinalized?.(event);
+        settlementOf(event.runId).resolve(event);
+      }
+    },
+    /* The desktop's shell: one service over the host's own run→checkout map, which carries each run's holds. */
+    shell: (checkouts) => {
+      checkoutsOfRuns = checkouts;
+      /* The host's composition is synchronous; the row awaits this probe before it starts any turn. */
+      probing = (async (): Promise<HostShell> => {
+        const probe = await probeHostShell({
+          provider: counting.provider,
+          checkouts,
+          permissionModeOf: async () => 'ask',
+          appDataRoots: [appData],
+          projectRoots: () => [project, second, candidate, options.workspaceRoot],
+          home,
+          sessionDirectory: sessions,
+          environment: process.env,
+          projectExecutions: () => [checkouts.executions],
+        });
+        if (probe.status !== 'available') {
+          throw new Error(`the probe refused the shell: ${JSON.stringify(probe)}`);
+        }
+        identity = probe.shell.identity;
+        probed = probe.shell;
+        return probe.shell;
+      })();
+      return () => probed;
+    },
+  });
+  const close = async (): Promise<void> => {
+    try {
+      await host.close();
+    } finally {
+      await authority.close();
+    }
+  };
+  try {
+    if (probing === undefined) {
+      throw new Error('the project host offered no shell');
+    }
+    await probing;
+    await host.revisions.opened();
+  } catch (error) {
+    await close();
+    throw error;
+  }
+  /** The shell result of one call, as the model saw it. */
+  const output = async (chatId: string, toolCallId: string): Promise<ShellOutput> => {
+    const snapshot = await host.launcher.host.snapshot(chatId);
+    const message = snapshot.messages.find((entry) => entry.role === 'tool-output' && entry.toolCallId === toolCallId);
+    if (message?.role !== 'tool-output') {
+      throw new Error(`no output for ${toolCallId}`);
+    }
+    return message.content as unknown as ShellOutput;
+  };
+  return {
+    host,
+    counting,
+    output,
+    checkoutOf: (runId: string) => checkoutsOfRuns.get(runId),
+    settled: async (runId: string) => settlementOf(runId).promise,
+    close,
+  };
+};
+
 /** A Unix-socket canary outside the sandbox that counts connections. */
 const unixCanary = async (path: string): Promise<Readonly<{ server: Server; connections: () => number }>> => {
   let connections = 0;
@@ -458,8 +619,8 @@ describe.runIf(enabled)('shell qualification', () => {
             },
             platform: { os: process.platform, arch: process.arch, node: process.version },
             fixtureBoundaries: {
-              placement: 'applied-immediately fixture, not revision custody',
-              candidate: 'copied directory, not revision checkout owner',
+              placement: 'applied-immediately fixture, not revision custody, except T12-custody',
+              candidate: 'T12: copied directory; T12-custody: project host linked checkout, adopted by merge',
               network: 'controlled DNS/connect preload, not unmodified DNS/rebinding',
               namedUnixServices: linux
                 ? 'E06-services requires reachable Docker, session D-Bus and user systemd positives'
@@ -943,6 +1104,140 @@ describe.runIf(enabled)('shell qualification', () => {
       const { size } = statSync(join(candidate, 'beat.txt'));
       await delay(700);
       expect(statSync(join(candidate, 'beat.txt')).size).toBe(size);
+    },
+  );
+
+  qualification(
+    'T12-custody',
+    'a run placed in an agent candidate checkout changes and verifies it; the live project changes only on adoption, once',
+    async () => {
+      const workspaceRoot = join(root, 'projects', 'custody');
+      const checkoutsDirectory = join(root, 'custody-checkouts');
+      mkdirSync(workspaceRoot, { recursive: true });
+      const liveFile = join(workspaceRoot, 'main.scad');
+      writeFileSync(liveFile, '// NEEDLE bracket\ncube(10);\n');
+      const live = digestOf(liveFile);
+      const marker = `tau-t12c-${String(process.pid)}`;
+      const chatId = 'chat-t12c';
+      const runId = 'run-t12c';
+      const leasePath = join(workspaceRoot, '.tau', 'runs', `${runId}.json`);
+      const executionsOf = (): readonly string[] | undefined =>
+        existsSync(leasePath)
+          ? ((JSON.parse(readFileSync(leasePath, 'utf8')) as Readonly<{ executionIds?: string[] }>).executionIds ?? [])
+          : undefined;
+      let candidateRoot = '';
+      let atSettlement: Readonly<{ writers: string[]; beat: number; executions?: readonly string[] }> | undefined;
+      const driven = await projectHostOver(
+        't12c',
+        [
+          shellCall('t12c-edit', {
+            command:
+              "printf '// candidate edit\\n' >> main.scad && grep -c 'candidate edit' main.scad && sha256sum main.scad",
+          }),
+          shellCall('t12c-live', { command: `cat ${liveFile}` }),
+          shellCall('t12c-writer', {
+            command: `(while :; do date >> beat.txt; sleep 0.1; done) & sleep 2; echo settled # ${marker}`,
+          }),
+        ],
+        {
+          workspaceRoot,
+          checkoutsDirectory,
+          /* Read the moment the revision tree records the turn: the writer and the hold must already be gone. */
+          onFinalized: (event) => {
+            if (event.runId === runId) {
+              atSettlement = {
+                writers: processesWith(marker),
+                beat: existsSync(join(candidateRoot, 'beat.txt')) ? statSync(join(candidateRoot, 'beat.txt')).size : -1,
+                ...(executionsOf() === undefined ? {} : { executions: executionsOf() }),
+              };
+            }
+          },
+        },
+      );
+      try {
+        /* The person's isolation: a branch with its own linked checkout, made by the project's own verb. */
+        const created = await driven.host.revisions.channel.request({
+          command: 'createBranch',
+          requestId: 'branch-t12c',
+          name: 't12-candidate',
+        });
+        const { checkoutId } = created.result as Readonly<{ checkoutId?: string }>;
+        expect(checkoutId).toEqual(expect.any(String));
+        const started = await driven.host.launcher.execute({
+          type: 'start',
+          commandId: 'start-t12c',
+          payload: {
+            trigger: 'submit',
+            chatId,
+            runId,
+            ...(checkoutId === undefined ? {} : { checkoutId }),
+            message: { id: 'turn-t12c', role: 'user', content: 'Qualification row t12c.' },
+          },
+        });
+        expect(started.status, JSON.stringify(started)).not.toBe('refused');
+
+        /* The placement put the run in the linked checkout, outside the live project, and the shell works there. */
+        expect(await eventually(() => driven.checkoutOf(runId) !== undefined, 20_000)).toBe(true);
+        const placed = driven.checkoutOf(runId);
+        expect(placed?.mode).toBe('candidate');
+        candidateRoot = realpathSync(placed?.cwd ?? '');
+        expect(candidateRoot.startsWith(`${checkoutsDirectory}/`)).toBe(true);
+
+        /* While the shell's background writer runs, its execution is held on the run's lease and nothing settled. */
+        expect(
+          await eventually(
+            () => processesWith(marker).length > 0 && existsSync(join(candidateRoot, 'beat.txt')),
+            20_000,
+          ),
+        ).toBe(true);
+        expect(executionsOf()).toHaveLength(1);
+        expect(atSettlement).toBeUndefined();
+
+        await driven.settled(runId);
+        /* Settlement waited for cleanup: no writer was left, and the hold was released before the turn was recorded. */
+        expect(atSettlement?.writers).toStrictEqual([]);
+        expect(atSettlement?.executions ?? []).toStrictEqual([]);
+        /* The attempt's lease is retired once its settlement is acknowledged. */
+        expect(await eventually(() => !existsSync(leasePath), 10_000)).toBe(true);
+
+        const edit = ok(await driven.output(chatId, 't12c-edit'));
+        const candidateFile = join(candidateRoot, 'main.scad');
+        const changed = digestOf(candidateFile);
+        expect(changed).not.toBe(live);
+        /* The agent's own verification names exactly the bytes judged outside the sandbox. */
+        expect(edit.stdout.text).toBe(`1\n${changed.slice('sha256:'.length)}  main.scad\n`);
+        /* The live project is another project to a candidate run: denied whole. */
+        expect(completed(await driven.output(chatId, 't12c-live')).exitCode).not.toBe(0);
+        expect(ok(await driven.output(chatId, 't12c-writer')).stdout.text).toBe('settled\n');
+        const beat = join(candidateRoot, 'beat.txt');
+        const { size } = statSync(beat);
+        expect(size).toBe(atSettlement?.beat);
+        await delay(700);
+        expect(statSync(beat).size).toBe(size);
+
+        /* Until the person adopts the candidate, the live project is exactly as it was. */
+        expect(digestOf(liveFile)).toBe(live);
+        expect(existsSync(join(workspaceRoot, 'beat.txt'))).toBe(false);
+
+        /* The normal explicit adoption: merge the candidate's branch into the live line. */
+        await driven.host.revisions.channel.request({
+          command: 'mergeBranch',
+          requestId: 'merge-t12c',
+          branch: 't12-candidate',
+        });
+        /* Adopted once the verb is idle again and the live line records the files it wrote, not before. */
+        const adopted = (): boolean => {
+          const status = driven.host.revisions.status();
+          return !status.branchVerb.busy && !status.projectDirty && digestOf(liveFile) === changed;
+        };
+        expect(await eventually(adopted, 20_000), JSON.stringify(driven.host.revisions.status())).toBe(true);
+        expect(driven.host.revisions.status().line).toStrictEqual({ kind: 'branch', name: 'main' });
+        expect(readFileSync(liveFile, 'utf8').split('// candidate edit').length - 1).toBe(1);
+        expect(digestOf(join(workspaceRoot, 'beat.txt'))).toBe(digestOf(beat));
+        measurements = { candidate: changed, live, beatBytes: size };
+      } finally {
+        await driven.close();
+      }
     },
   );
 

@@ -152,7 +152,7 @@ test('should retain record intent through direct close and quit, then finish onl
     const appliedBeforeReply = await readFile(layoutPath, 'utf8');
     await closeProject();
     await page
-      .getByRole('button', { name: 'Save not confirmed · 1 record', exact: true })
+      .getByRole('button', { name: 'Couldn’t confirm the save · 1 record', exact: true })
       .waitFor({ state: 'visible', timeout: 15_000 });
     // Wait beyond the close-confirmation bound, while the original reply is still withheld.
     await expect
@@ -164,7 +164,7 @@ test('should retain record intent through direct close and quit, then finish onl
     await session.capture('record-direct-close-refusal');
     await control('release');
     await page
-      .getByRole('button', { name: 'Save not confirmed · 1 record', exact: true })
+      .getByRole('button', { name: 'Couldn’t confirm the save · 1 record', exact: true })
       .waitFor({ state: 'hidden', timeout: 15_000 });
     expect(await readFile(layoutPath, 'utf8')).toBe(appliedBeforeReply);
     expect(await share.isVisible()).toBe(true);

@@ -5,7 +5,6 @@
   "projectType": "library",
   "tags": ["scope:api", "type:app-lib", "layer:feature", "api:billing"],
   "targets": {
-    "formal": {},
     "formal:nightly": {},
     "test:billing-foundation": {
       "executor": "nx:run-commands",

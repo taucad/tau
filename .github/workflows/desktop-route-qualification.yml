@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: All platforms, Linux-only staging evidence (not public promotion), or Apple silicon-only staging ZIP/DMG evidence
+        description: All platforms, or one platform's evidence (Linux APT/AppImage, or Apple silicon ZIP/DMG) on either channel (D-H5)
         required: true
         default: all
         type: choice
@@ -28,7 +28,7 @@ on:
         required: true
         type: string
       candidate_c:
-        description: Successful trusted C run; staging Mac CI and Linux may pin a trusted ancestor
+        description: Successful trusted C run; the Mac and Linux platform scopes may pin a trusted ancestor (bound by qualification-binding.json)
         required: true
         type: string
 
@@ -36,8 +36,10 @@ permissions:
   contents: read
   actions: read
 
+# Every Linux-scoped run, on either channel, holds the one Linux GPU lock that clean-host acceptance shares: the
+# project's spot T4 quota covers one Linux matrix at a time.
 concurrency:
-  group: desktop-route-qualification-${{ inputs.channel }}-${{ inputs.scope }}
+  group: ${{ inputs.scope == 'linux' && 'desktop-route-qualification-staging-linux' || format('desktop-route-qualification-{0}-{1}', inputs.channel, inputs.scope) }}
   cancel-in-progress: false
 
 env:
@@ -70,7 +72,7 @@ jobs:
           node --input-type=module <<'NODE'
           import { appendFileSync } from 'node:fs';
           const scope = process.env.TAU_DESKTOP_QUALIFICATION_SCOPE;
-          if (!['all', 'linux', 'macos'].includes(scope) || (scope !== 'all' && process.env.CHANNEL !== 'staging')) throw new Error('Invalid qualification scope/channel');
+          if (!['all', 'linux', 'macos'].includes(scope) || !['staging', 'production'].includes(process.env.CHANNEL)) throw new Error('Invalid qualification scope/channel');
           const graphics = process.env.TAU_QUALIFICATION_GRAPHICS;
           if (!['stock', 'isolated-software'].includes(graphics) || (graphics === 'isolated-software' && (scope !== 'linux' || process.env.CHANNEL !== 'staging'))) throw new Error('Software CI requires Linux staging');
           const rows = [
@@ -103,7 +105,7 @@ jobs:
     environment: desktop-qualification-${{ inputs.channel }}
     timeout-minutes: 120
     # id-token lets stock Linux rows sign in to Google Cloud keylessly; tau-ci admits only this repository's main
-    # branch in the staging qualification environment (tau-cloud stacks/gcp).
+    # branch in a desktop qualification environment (tau-cloud stacks/gcp).
     permissions:
       contents: read
       actions: read
@@ -193,7 +195,7 @@ jobs:
     environment: desktop-qualification-${{ inputs.channel }}
     timeout-minutes: 120
     # id-token lets stock Linux rows sign in to Google Cloud keylessly; tau-ci admits only this repository's main
-    # branch in the staging qualification environment (tau-cloud stacks/gcp).
+    # branch in a desktop qualification environment (tau-cloud stacks/gcp).
     permissions:
       contents: read
       actions: read
@@ -217,7 +219,6 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate_c }}
-      DESKTOP_ASSETS_DIR: ${{ github.workspace }}/out/qualification-candidate
       TAU_QUALIFICATION_CHANNEL: ${{ inputs.channel }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
       TAU_WINDOWS_PUBLISHER: ${{ vars.TAU_WINDOWS_PUBLISHER }}
@@ -246,5 +247,5 @@ jobs:
           name: ${{ inputs.scope == 'linux' && 'desktop-linux-ci-receipts' || inputs.scope == 'macos' && 'desktop-macos-ci-receipts' || 'desktop-route-ci-receipts' }}
           path: |
             out/qualification-receipts/route-receipts.json
-            ${{ inputs.scope == 'macos' && 'out/qualification-receipts/qualification-binding.json' || '' }}
+            ${{ (inputs.scope == 'macos' || inputs.scope == 'linux') && 'out/qualification-receipts/qualification-binding.json' || '' }}
           if-no-files-found: error

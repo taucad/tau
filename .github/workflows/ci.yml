@@ -488,8 +488,21 @@ jobs:
                 ($shard | split(",")) as $mine
                 | [.tasks.tasks[] | select(.target.target == "pkgcheck") | .target.project]
                 | unique | map(select(IN($mine[]))) | join(",")' "$RUNNER_TEMP/pkgcheck-graph.json")
+              # A `build` without `^build` may run before the libraries its package bundles and
+              # keep their specifiers in its declarations, and the local cache hands that build
+              # to its check. The builds its checks depend on run first, and the shard's own
+              # builds skip the remote cache, which may still hold such a build from before
+              # this order: the hash does not see whether a dependency was built.
+              deps=$(jq -r --arg built "$built" '
+                ($built | split(",")) as $mine
+                | [$mine[] as $p | .tasks.dependencies["\($p):pkgcheck"][]? | select(endswith(":build"))
+                   | split(":")[0] | select(IN($mine[]) | not)]
+                | unique | join(",")' "$RUNNER_TEMP/pkgcheck-graph.json")
+              if [ -n "$deps" ]; then
+                pnpm nx run-many -t build --projects "$deps" --parallel=1
+              fi
               if [ -n "$built" ]; then
-                pnpm nx run-many -t build --projects "$built" --parallel=1
+                pnpm nx run-many -t build --projects "$built" --parallel=1 --skip-remote-cache
               fi
               pnpm nx run-many -t pkgcheck audit-public-surface readme-quickstart --projects "$shard" --parallel=3
               ;;
@@ -700,14 +713,25 @@ jobs:
   # expected verdict and never turns this red; a changed verdict, a stale generated
   # file, a missing tool or a watchdog does. Toolchains come from setup-formal,
   # pinned by sha256 in tools/formal/toolchain.lock, never from `pnpm install`.
+  # Two shards deal the affected projects by measured uncached seconds with the test
+  # shards' dealer and its own snapshot (scripts/src/formal-shard-durations.json): a
+  # change to tools/formal makes every project affected, and on one runner that ran out
+  # of 15 minutes with ui still to go (queue run 43190779343, job 131090042426: 3.5 min
+  # of setup, then 11.7 min of checks). agent-host's 7.3 min is the floor of one shard.
   formal:
-    name: Formal models
+    name: Formal models (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
     environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     needs: [plan]
     if: needs.plan.outputs.formal == 'true'
-    timeout-minutes: 15
+    # The heavier shard measures about 11 min (3.5 of setup, agent-host's 7.3); 20 allows
+    # for the up-to-twofold runner variance the formal nightly showed (runs 43167548945 and 43178267338).
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
       id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: 'read'
@@ -732,7 +756,21 @@ jobs:
 
       - name: Run affected formal tiers
         # FM-R15: at most two JVMs at once. The runner caps them per process, so one project at a time.
-        run: pnpm nx affected -t formal formal:lean --parallel=1
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          pnpm nx affected -t formal formal:lean --graph="$RUNNER_TEMP/formal-graph.json" > /dev/null
+          projects=$(jq -c '
+            [.tasks.tasks[] | select(.target.target | IN("formal", "formal:lean")) | .target.project]
+            | unique' "$RUNNER_TEMP/formal-graph.json")
+          shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "$SHARD" --shards 2 \
+            --durations scripts/src/formal-shard-durations.json)
+          if [ -z "$shard" ]; then
+            echo "No affected formal projects in this shard."
+            exit 0
+          fi
+          echo "Shard projects: $shard"
+          pnpm nx run-many -t formal formal:lean --projects "$shard" --parallel=1
 
       - name: Check workspace root hygiene
         if: always()
@@ -742,7 +780,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: formal-reports
+          name: formal-reports-${{ matrix.shard }}
           path: out/reports/formal
           if-no-files-found: ignore
           retention-days: 14

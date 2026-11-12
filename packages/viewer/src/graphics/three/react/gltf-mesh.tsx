@@ -2532,13 +2532,7 @@ export function GltfMesh({
     }
 
     if (!modelVisualState.focusedComponentId) {
-      if (lastFocusedComponentIdRef.current !== undefined) {
-        cameraRig.actorRef.send({
-          type: 'setBounds',
-          bounds: cameraRig.actorRef.getSnapshot().context.view.bounds,
-        });
-        invalidate();
-      }
+      // Focus framed the part and kept the scene bounds, so clearing it leaves the camera where it is.
       lastFocusedComponentIdRef.current = undefined;
       return;
     }
@@ -2556,16 +2550,16 @@ export function GltfMesh({
     const physicalBox = applyCanonicalGltfBounds(
       new Box3(new Vector3(...focusedNode.bounds.min), new Vector3(...focusedNode.bounds.max)),
     );
-    const sceneBounds = cameraRig.actorRef.getSnapshot().context.view.bounds;
+    // Focus is the person's command: one change, with the source `focus`, that keeps the scene bounds (D20).
     cameraRig.actorRef.send({
-      type: 'frame',
+      type: 'frameBounds',
       bounds: {
         min: [physicalBox.min.x, physicalBox.min.y, physicalBox.min.z],
         max: [physicalBox.max.x, physicalBox.max.y, physicalBox.max.z],
       },
       margin: 0.1,
+      source: 'focus',
     });
-    cameraRig.actorRef.send({ type: 'setBounds', bounds: sceneBounds });
     invalidate();
   }, [cameraRig, componentManifest, invalidate, modelVisualState.focusedComponentId]);
 

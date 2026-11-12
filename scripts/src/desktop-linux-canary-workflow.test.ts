@@ -142,3 +142,57 @@ describe('Linux route qualification canary', () => {
     expect(String(jobs['receipts']?.if)).toContain("needs.installed.result == 'success'");
   });
 });
+
+/*
+ * D-H5: each platform is promoted on its own receipts, so the Mac and Linux platform scopes produce evidence on the
+ * production channel too. Windows stays staging qualification-only, and every Linux run on either channel holds the
+ * one Linux GPU lock.
+ */
+describe('Platform-scoped production evidence', () => {
+  const qualification = workflow('desktop-route-qualification.yml');
+  const acceptance = workflow('desktop-route-vm-acceptance.yml');
+  const raw = (file: string): string => readFileSync(resolve(root, '.github/workflows', file), 'utf8');
+  // The literal GitHub expression the workflow must carry, not a template.
+  const channelExpression = ['$', '{{ inputs.channel }}'].join('');
+
+  it('selects Linux and Mac rows for a production qualification', () => {
+    for (const [scope, rows] of [
+      ['linux', linuxRows.slice(1)],
+      ['macos', ['macos-zip-arm64', 'macos-dmg-arm64']],
+    ] as const) {
+      const outputs = selectRows(qualification.jobs['admission'], {
+        TAU_DESKTOP_QUALIFICATION_SCOPE: scope,
+        TAU_QUALIFICATION_GRAPHICS: 'stock',
+        CHANNEL: 'production',
+      });
+      expect(ids(outputs['matrix'])).toEqual(rows);
+    }
+  });
+
+  it('keeps software CI on Linux staging', () => {
+    expect(() =>
+      selectRows(qualification.jobs['admission'], {
+        TAU_DESKTOP_QUALIFICATION_SCOPE: 'linux',
+        TAU_QUALIFICATION_GRAPHICS: 'isolated-software',
+        CHANNEL: 'production',
+      }),
+    ).toThrow();
+  });
+
+  it('refuses production Windows clean-host acceptance and runs the rest in the channel environment', () => {
+    const guard = acceptance.jobs['admission']?.steps?.find((step) => step.name?.startsWith('Fail closed'))?.run;
+    expect(guard).toContain('production evidence is Mac or Linux only');
+    for (const job of ['installed', 'linux-canary', 'linux', 'linux-receipts']) {
+      expect(String((acceptance.jobs[job] as { environment?: unknown } | undefined)?.environment)).toBe(
+        `desktop-qualification-${channelExpression}`,
+      );
+      expect(acceptance.jobs[job]?.env?.['TAU_QUALIFICATION_CHANNEL']).toBe(channelExpression);
+    }
+  });
+
+  it('holds one Linux GPU lock across channels', () => {
+    const lock = 'desktop-route-qualification-staging-linux';
+    expect(raw('desktop-route-qualification.yml')).toContain(`inputs.scope == 'linux' && '${lock}'`);
+    expect(raw('desktop-route-vm-acceptance.yml')).toContain(`inputs.scope == 'linux' && '${lock}'`);
+  });
+});

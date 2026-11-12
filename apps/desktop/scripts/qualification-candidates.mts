@@ -41,8 +41,9 @@ export const assertQualificationConsumerScope = (options: {
 };
 
 /**
- * Staging Mac (CI and clean-host) and Linux may test trusted ancestors. Staging Mac publication additionally
- * authenticates a source/harness binding; Windows clean-host and all-platform runs retain exact-source admission.
+ * The Mac and Linux platform scopes (CI and clean-host, staging and production) may test trusted ancestors; their
+ * publication additionally authenticates a source/harness binding. Windows clean-host and all-platform runs retain
+ * exact-source admission.
  */
 export const assertQualificationSource = (options: {
   sourceCommit: string;
@@ -57,12 +58,11 @@ export const assertQualificationSource = (options: {
     !['ci', 'vm'].includes(options.kind) ||
     !['all', 'linux', 'macos', 'windows'].includes(options.scope) ||
     !['staging', 'production'].includes(options.channel) ||
-    (options.scope !== 'all' && options.channel !== 'staging')
+    (options.scope === 'windows' && options.channel !== 'staging')
   ) {
     throw new Error('Invalid qualification source scope/channel');
   }
   if (
-    options.scope !== 'linux' &&
     !usesQualificationBinding(options.scope, options.channel, options.kind) &&
     options.sourceCommit !== options.workflowCommit
   ) {

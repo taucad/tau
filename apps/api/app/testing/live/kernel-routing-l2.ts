@@ -6,6 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { HostToolInvocation, HostToolResult, JsonValue, ToolRegistry } from '@taucad/agent-host';
 import { toolName } from '@taucad/chat/constants';
+import { testModelLoadedModels } from '@taucad/chat/schemas/tools/test-model-summary';
 import type { KernelId } from '@taucad/types/constants';
 import { bindEntryFirstPass } from '@taucad/chat/prompts';
 import type { EntryBinding } from '@taucad/chat/prompts';
@@ -140,7 +141,8 @@ const stringField = (value: unknown, key: string): string | undefined => {
 };
 
 /**
- * The entry a turn wrote: the last file its own `evaluate_model` rendered, else the manifest's main.
+ * The entry a turn wrote: the last file its own `evaluate_model` rendered, else the first model its own `test_model`
+ * loaded, else the manifest's main.
  *
  * @param input - The folder and the turn's CAD calls.
  * @returns The entry's path relative to the folder, or undefined when the turn rendered nothing and declared no main.
@@ -155,6 +157,15 @@ export const findL2Entry = async (
     .findLast((path) => path !== undefined);
   if (rendered !== undefined) {
     return rendered;
+  }
+  /* An agent that proves its model with GeoSpec may never call `evaluate_model`; the host adopts the first model a
+   * complete `test_model` load rendered, as it adopts an `evaluate_model` target (blueprint D3). */
+  const loaded = input.cadCalls
+    .filter(({ invocation, result }) => invocation.toolName === toolName.testModel && !result.isError)
+    .flatMap(({ result }) => testModelLoadedModels(result.content))
+    .find((path) => path !== l2OraclePath);
+  if (loaded !== undefined) {
+    return loaded;
   }
   try {
     const manifest: unknown = JSON.parse(await readFile(join(input.projectRoot, 'tau.json'), 'utf8'));

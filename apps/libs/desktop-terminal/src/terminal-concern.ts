@@ -20,7 +20,7 @@
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 
-import type { ShellProbe, TerminalSession, TerminalSessionOutcome } from '@taucad/host';
+import type { ShellProbe, TerminalSession, TerminalSessionOutcome } from '@taucad/shell-service';
 import { terminalClientFrameSchema, terminalLimits } from '@taucad/types/desktop-terminal';
 import type {
   TerminalAccess,

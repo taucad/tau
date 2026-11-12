@@ -328,7 +328,7 @@ export const lookingTools: ReadonlySet<string> = new Set<string>([
   toolName.grep,
   toolName.globSearch,
   toolName.getParameters,
-  toolName.revisions,
+  toolName.history,
   toolName.webSearch,
 ]);
 

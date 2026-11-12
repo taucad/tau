@@ -22,7 +22,7 @@ import { durableMessages, latestCompletedRun, toolResult } from '#support/acp-ev
 import { gatewayFixtureFinalText, gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { firstNativeRenderMilliseconds } from '#support/prepared-kernels.js';
-import { historyRows, restoreFromHistory } from '#support/revisions-pane.js';
+import { currentRestoreRow, historyRows, restoreFromHistory } from '#support/revisions-pane.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   activeChatId,
@@ -216,13 +216,12 @@ if (turbojetSourcePath !== undefined && !existsSync(turbojetSourcePath)) {
  * missing is never advertised, so there would be no row to click.
  */
 /**
- * Open a turn's revision card: its Restore button lives inside the collapsed
- * details since 43884ce6a, so the card is expanded before the button is read.
+ * Open the newest turn's save card: its Restore button lives inside the
+ * collapsed details since 43884ce6a, so the card is expanded before the button
+ * is read. An entry has no number (M11), so the card is found by its place.
  */
-const openRevisionCard = async (page: Page, revision: number): Promise<void> => {
-  const trigger = page
-    .getByRole('button', { name: new RegExp(String.raw`^Rev ${revision}\b.*· revision details$`, 'u') })
-    .first();
+const openRevisionCard = async (page: Page): Promise<void> => {
+  const trigger = page.getByRole('button', { name: /· details$/u }).last();
   await trigger.waitFor({ state: 'visible', timeout: 60_000 });
   if ((await trigger.getAttribute('data-state')) !== 'open') {
     await trigger.click();
@@ -1254,7 +1253,7 @@ test.skipIf(!codexAvailable)(
        * correctly refused as unborn because no base revision is visible yet.
        * Synchronize on the user-visible head instead of racing that projection. */
       await expectVisible(
-        page.getByRole('button', { name: /^Open Revisions\. You are on main, Rev \d+(?:, Modified)?\.$/u }),
+        page.getByRole('button', { name: /^Open History\. You are on main\. (?!Nothing saved yet|Setting up)/u }),
         60_000,
       );
       const seededSource = liveSource();
@@ -1286,7 +1285,7 @@ test.skipIf(!codexAvailable)(
          below, is what proves the placement held. */
       await openRevisionHistory(page);
       await page.getByRole('button', { name: 'New branch', exact: true }).first().click();
-      await page.getByLabel('Name for the new branch').fill(candidateBranch);
+      await page.getByLabel('Branch name').fill(candidateBranch);
       await page.getByRole('button', { name: 'Create branch', exact: true }).click();
       await expectVisible(branchRow(page, candidateBranch), 60_000);
       await useBranchInChat(page, candidateBranch);
@@ -1340,12 +1339,6 @@ test.skipIf(!codexAvailable)(
       if (candidateRevisionId === undefined) {
         throw new Error('Candidate turn finalized without a revision ID.');
       }
-      const candidateRevisionNumber = Number.parseInt(
-        execFileSync('git', ['-C', projectRoot(), 'rev-list', '--first-parent', '--count', candidateRevisionId], {
-          encoding: 'utf8',
-        }).trim(),
-        10,
-      );
       const checkoutMetadata = readdirSync(join(projectRoot(), '.git/worktrees'))[0]!;
       const candidateRoot = dirname(
         readFileSync(join(projectRoot(), '.git/worktrees', checkoutMetadata, 'gitdir'), 'utf8').trim(),
@@ -1370,13 +1363,10 @@ test.skipIf(!codexAvailable)(
        * tree over the other. */
       // Selecting a chat checkout does not move the independently browsed workbench.
       await expectCurrentBranch(page, 'main');
-      /* The chat's card opens in place and reaches the same verbs History does: View revision and its More. */
-      await openRevisionCard(page, candidateRevisionNumber);
-      await expectVisible(
-        page.getByRole('button', { name: `More actions for Rev ${String(candidateRevisionNumber)}`, exact: true }),
-        60_000,
-      );
-      await expectVisible(page.getByRole('button', { name: 'View revision', exact: true }), 60_000);
+      /* The chat's card opens in place and reaches the same verbs History does: View and its More. */
+      await openRevisionCard(page);
+      await expectVisible(page.getByRole('button', { name: 'More', exact: true }).last(), 60_000);
+      await expectVisible(page.getByRole('button', { name: 'View', exact: true }), 60_000);
       expect(liveSource()).toBe(seededSource);
 
       await branchRow(page, candidateBranch)
@@ -1393,7 +1383,7 @@ test.skipIf(!codexAvailable)(
       await expectCurrentBranch(page, 'main');
 
       /* Merge the candidate into the trunk from their shared base. */
-      const revisionStatusButton = page.getByRole('button', { name: /^Open Revisions\./u }).first();
+      const revisionStatusButton = page.getByRole('button', { name: /^Open History\./u }).first();
       const beforeMerge = await revisionStatusButton.getAttribute('aria-label');
       await branchRow(page, candidateBranch)
         .getByRole('button', { name: `Actions for ${candidateBranch}`, exact: true })
@@ -1448,21 +1438,12 @@ test.skipIf(!codexAvailable)(
         .toBe(finalizedBeforeNativeReturn + 1);
       expect(finalizedRevisions(logOf(candidateChatId)).at(-1)?.branch).toBe('main');
 
-      /* Restore to the direct turn's revision through the Revisions pane's history
-       * (the candidate chat holds no Rev 2 card): its row opens, *Restore Rev 2*
+      /* Restore to the direct turn's entry through the History pane (the candidate
+       * chat holds no card for it): the second-oldest row opens, its *Restore …*
        * restores it, and the live folder is the seed again. */
       await openRevisionHistory(page);
-      await restoreFromHistory(
-        page,
-        page
-          .getByRole('list', { name: 'Revision history' })
-          .first()
-          .getByRole('button', { name: /^Rev 2 · /u }),
-        (n) =>
-          historyRows(page)
-            .filter({ hasText: 'Current' })
-            .filter({ hasText: `Restored Rev ${n}` }),
-      );
+      const entryRows = historyRows(page);
+      await restoreFromHistory(page, entryRows.nth((await entryRows.count()) - 2), currentRestoreRow(page));
       await expect.poll(liveSource, { timeout: 120_000 }).toBe(seededSource);
       await session.capture('rev-branches-after-restore');
 

@@ -2,13 +2,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createActor, createAsyncLogic, setup, types } from 'xstate';
 import type { Actor, ActorRefFrom } from 'xstate';
 import type { CameraOwnedSettings } from '#graphics/graphics-settings.js';
+import { getGraphicsCameraState, selectGraphicsCamera } from '#services/graphics-camera-registry.js';
 import {
-  getGraphicsCameraState,
-  latchViewCameraFraming,
-  selectGraphicsCamera,
-  selectGraphicsCameraFraming,
-} from '#services/graphics-camera-registry.js';
-import { graphicsMachine } from '#machines/graphics.machine.js';
+  graphicsMachine,
+  selectGraphicsFramed,
+  selectGraphicsFraming,
+  selectGraphicsFramingIdentity,
+} from '#machines/graphics.machine.js';
+import type { GraphicsEvent } from '#machines/graphics.machine.js';
 import { eventSchemas } from '#machines/machine-schemas.js';
 
 const actors: Array<Actor<typeof graphicsMachine>> = [];
@@ -32,6 +33,14 @@ const cameraView = {
   perspectiveZoom: 1,
 } as const;
 
+/* A measured cube about `center`, whose corners lie `half` from it on each axis. */
+const measured = (key: string, center = 0, half = 1): Extract<GraphicsEvent, { type: 'geometryBoundsMeasured' }> => ({
+  type: 'geometryBoundsMeasured',
+  key,
+  bounds: { min: [center - half, center - half, center - half], max: [center + half, center + half, center + half] },
+  radius: half * Math.sqrt(3),
+});
+
 describe('the view camera as a graphics child', () => {
   afterEach(() => {
     for (const actor of actors.splice(0)) {
@@ -39,68 +48,83 @@ describe('the view camera as a graphics child', () => {
     }
   });
 
-  it('should seed the camera once, from the graphics input, and arm its pose for the first framing', () => {
+  it('should seed the camera once, from the graphics input, and hold its pose for the first framing', () => {
     const graphicsRef = createGraphicsActor({ cameraFovAngle: 42, cameraView });
     const snapshot = graphicsRef.getSnapshot();
     const camera = selectGraphicsCamera(snapshot);
+    const framing = selectGraphicsFraming(snapshot).getSnapshot();
 
     expect(camera.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(42);
     expect(camera.getSnapshot().context.view).toMatchObject(cameraView);
-    expect(selectGraphicsCameraFraming(snapshot).pendingView).toEqual(cameraView);
+    expect(framing.value).toBe('awaitingGeometry');
+    expect(framing.context).toMatchObject({ pendingPose: { pose: cameraView } });
     expect(getGraphicsCameraState(graphicsRef)?.target).toEqual(cameraView.target);
   });
 
-  it('should keep a consumed framing record until the entry identity changes', () => {
+  it('should keep the framed entry until the entry identity changes', () => {
     const graphicsRef = createGraphicsActor({ cameraView });
-    const framing = selectGraphicsCameraFraming(graphicsRef.getSnapshot());
-    latchViewCameraFraming(framing, { identity: 'part.ts', camera: { cameraView } });
-    framing.initialized = true;
+    graphicsRef.send({ type: 'entryChanged', identity: 'part.ts', pendingPose: { requestId: 'r', pose: cameraView } });
+    graphicsRef.send(measured('a'));
+    expect(selectGraphicsFramed(graphicsRef.getSnapshot())).toBe(true);
 
-    latchViewCameraFraming(framing, { identity: 'part.ts', camera: { cameraView } });
+    graphicsRef.send({ type: 'entryChanged', identity: 'part.ts', pendingPose: { requestId: 'r', pose: cameraView } });
 
-    expect(framing.initialized).toBe(true);
+    expect(selectGraphicsFramed(graphicsRef.getSnapshot())).toBe(true);
+    expect(selectGraphicsFramingIdentity(graphicsRef.getSnapshot())).toBe('part.ts');
   });
 
-  it('should re-latch framing on a new entry identity while the live field of view survives', () => {
+  it('should frame a new entry again while the live field of view survives', () => {
     const graphicsRef = createGraphicsActor({ cameraFovAngle: 42, cameraView });
-    const snapshot = graphicsRef.getSnapshot();
-    const framing = selectGraphicsCameraFraming(snapshot);
-    const camera = selectGraphicsCamera(snapshot);
-    latchViewCameraFraming(framing, { identity: 'part.ts', camera: { cameraView } });
-    framing.initialized = true;
-    framing.preserveOrientationOnFirstFrame = true;
-    framing.firstFrameView = cameraView;
+    const camera = selectGraphicsCamera(graphicsRef.getSnapshot());
+    graphicsRef.send({ type: 'entryChanged', identity: 'part.ts' });
+    graphicsRef.send(measured('a'));
     camera.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 33 });
 
-    latchViewCameraFraming(framing, { identity: 'bracket.ts', camera: {} });
+    graphicsRef.send({ type: 'entryChanged', identity: 'bracket.ts' });
 
-    expect(framing).toEqual({
-      identity: 'bracket.ts',
-      pendingView: undefined,
-      preserveOrientationOnFirstFrame: false,
-      firstFrameView: undefined,
-      initialized: false,
-    });
+    expect(selectGraphicsFramed(graphicsRef.getSnapshot())).toBe(false);
+    expect(selectGraphicsFramingIdentity(graphicsRef.getSnapshot())).toBe('bracket.ts');
     expect(camera.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(33);
   });
 
-  /* A viewer panel can render before its entry path is known, and that is not a file switch: the
-   * live pose stays and the persisted one is not re-armed behind it. */
-  it('should ignore a re-latch that names no entry', () => {
+  it('should frame the first measurement, then apply the held pose over it', () => {
     const graphicsRef = createGraphicsActor({ cameraView });
-    const framing = selectGraphicsCameraFraming(graphicsRef.getSnapshot());
-    latchViewCameraFraming(framing, { identity: 'part.ts', camera: { cameraView } });
-    framing.initialized = true;
+    const camera = selectGraphicsCamera(graphicsRef.getSnapshot());
+    const sources: string[] = [];
+    camera.on('viewChanged', (event) => sources.push(event.source));
 
-    latchViewCameraFraming(framing, { identity: undefined, camera: {} });
+    graphicsRef.send(measured('a'));
 
-    expect(framing).toEqual({
-      identity: 'part.ts',
-      pendingView: cameraView,
-      preserveOrientationOnFirstFrame: false,
-      firstFrameView: undefined,
-      initialized: true,
-    });
+    expect(sources).toEqual(['framing', 'persisted']);
+    expect(camera.getSnapshot().context.view).toMatchObject({ target: cameraView.target, verticalSpan: 12 });
+  });
+
+  it('should anchor the render frame on a new presentation only', () => {
+    const graphicsRef = createGraphicsActor();
+    const camera = selectGraphicsCamera(graphicsRef.getSnapshot());
+
+    graphicsRef.send(measured('a', 1));
+    const anchored = camera.getSnapshot().context.renderFrame;
+    graphicsRef.send(measured('a', 1.05));
+
+    expect(anchored).toMatchObject({ anchorFrameId: 'tau:root', originMeters: [1, 1, 1] });
+    expect(camera.getSnapshot().context.renderFrame).toBe(anchored);
+
+    graphicsRef.send(measured('b', 4));
+
+    expect(camera.getSnapshot().context.renderFrame.originMeters).toEqual([4, 4, 4]);
+  });
+
+  it('should fit the camera on Fit view without turning it', () => {
+    const graphicsRef = createGraphicsActor();
+    const camera = selectGraphicsCamera(graphicsRef.getSnapshot());
+    graphicsRef.send(measured('a'));
+    const { direction } = camera.getSnapshot().context.view;
+
+    graphicsRef.send({ type: 'fitView' });
+
+    expect(camera.getSnapshot().context.lastChange.source).toBe('fit');
+    expect(camera.getSnapshot().context.view.direction).toEqual(direction);
   });
 
   it('should stop the camera with its graphics actor', () => {
@@ -111,6 +135,7 @@ describe('the view camera as a graphics child', () => {
     graphicsRef.stop();
 
     expect(camera.getSnapshot().status).toBe('stopped');
+    expect(selectGraphicsFraming(graphicsRef.getSnapshot()).getSnapshot().status).toBe('stopped');
     expect(getGraphicsCameraState(undefined)).toBeUndefined();
   });
 

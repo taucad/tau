@@ -57,7 +57,11 @@ import {
 } from '@taucad/agent-tools/registry';
 import type { ReadSkillResource } from '@taucad/agent-tools/registry';
 import { createSkillResolver } from '@taucad/agent-tools/skills';
-import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
+import {
+  createRuntimeAgentClients,
+  createRuntimeParameterAgentClient,
+  withEntryAdoption,
+} from '@taucad/agent-tools/runtime';
 import type { ModelAdmissionLimits } from '@taucad/agent-tools/runtime';
 import { createGeoSpecConfigSession, runGeoSpecTests, tauClientExporter } from '@taucad/agent-tools/geospec';
 import type { GeoSpecTestModelConfig } from '@taucad/agent-tools/geospec';
@@ -1087,6 +1091,11 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * candidate turn's slice lands in its checkout, which the machine host
      * finds through the same project id. */
     const { revisions, machines } = options;
+    /* An entry-less project adopts its first model as main (blueprint D3), on every surface this host serves. */
+    const adopted = withEntryAdoption(
+      { kernelClient, ...(geospec === undefined ? {} : { geospec }) },
+      { fileSystem: createProviderRpcFileSystem({ provider: recordView, mutations }) },
+    );
     const registry = createChatToolRegistry({
       machineSettings: {
         readMachineSettings: async (typeId: MachineTypeId) => settingsOwner.read({ typeId }),
@@ -1098,9 +1107,9 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       workbench: createRuntimeWorkbenchClient(
         runtimeClient === undefined ? undefined : async () => runtimeClient(options.workspaceRoot),
       ),
-      ...(runtimeClient === undefined ? {} : { kernelClient, graphics, images }),
+      ...(runtimeClient === undefined ? {} : { kernelClient: adopted.kernelClient, graphics, images }),
       ...(parameters === undefined ? {} : { parameters }),
-      ...(geospec === undefined ? {} : { geospec }),
+      ...(adopted.geospec === undefined ? {} : { geospec: adopted.geospec }),
       ...(revisions === undefined ? {} : { revisions }),
       ...(projectId === undefined
         ? {}

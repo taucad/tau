@@ -37,7 +37,7 @@ it.each([
   const lines: string[] = [];
 
   const env = { PATH: '', JAVA_HOME: '/missing/java', ...(ci ? { CI: 'true' } : {}) };
-  expect(await nightlyProject({ root, env }, projectRoot, (line) => lines.push(line))).toBe(status);
+  expect(await nightlyProject({ root, env }, projectRoot, { log: (line) => lines.push(line) })).toBe(status);
   expect(lines).toContain('SKIPPED packages/example simulation: java, tlc not found; run pnpm nx run formal:setup');
   expect(existsSync(stale)).toBe(false);
   expect(existsSync(removedGraph)).toBe(false);
@@ -58,7 +58,9 @@ it('should remove a trace whose graph is no longer declared', async () => {
   writeFileSync(removedGraph, '[{"act":"Init"}]\n');
 
   expect(
-    await nightlyProject({ root, env: { PATH: '', JAVA_HOME: '/missing/java' } }, projectRoot, () => undefined),
+    await nightlyProject({ root, env: { PATH: '', JAVA_HOME: '/missing/java' } }, projectRoot, {
+      log: () => undefined,
+    }),
   ).toBe(0);
   expect(existsSync(removedGraph)).toBe(false);
   expect(existsSync(path.join(output, '.skipped'))).toBe(false);
@@ -80,7 +82,9 @@ it('should reject an unsafe graph key before deleting simulation output', async 
   writeFileSync(victim, 'keep me');
 
   expect(
-    await nightlyProject({ root, env: { PATH: '', JAVA_HOME: '/missing/java' } }, projectRoot, () => undefined),
+    await nightlyProject({ root, env: { PATH: '', JAVA_HOME: '/missing/java' } }, projectRoot, {
+      log: () => undefined,
+    }),
   ).toBe(1);
   expect(readFileSync(victim, 'utf8')).toBe('keep me');
 });
@@ -105,9 +109,9 @@ it('should reject a symlinked simulation parent without deleting outside files',
   const lines: string[] = [];
 
   expect(
-    await nightlyProject({ root, env: { PATH: '', JAVA_HOME: '/missing/java' } }, projectRoot, (line) =>
-      lines.push(line),
-    ),
+    await nightlyProject({ root, env: { PATH: '', JAVA_HOME: '/missing/java' } }, projectRoot, {
+      log: (line) => lines.push(line),
+    }),
   ).toBe(1);
   expect(readFileSync(victim, 'utf8')).toBe('keep me');
   expect(existsSync(path.join(outside, 'simulated/.skipped'))).toBe(false);

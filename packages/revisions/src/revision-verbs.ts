@@ -154,7 +154,7 @@ export type RevisionPlace = Readonly<{
   revisionId: string | undefined;
   /** Every branch this project has, with the ordinal of its own latest revision. */
   branches: ReadonlyArray<Readonly<{ name: string; revisionNumber: number; revisionId: string }>>;
-  /** The one line every surface shows: `main · Rev 12`. */
+  /** The one line every surface shows: the branch, `main`, or `No history yet` (M11). */
   line: string;
 }>;
 
@@ -528,7 +528,7 @@ export const readRevisionDiff = async (
  * import type { RevisionPort } from '@taucad/revisions';
  *
  * declare const port: RevisionPort;
- * (await readRevisionPlace(port)).line; // 'main · Rev 12'
+ * (await readRevisionPlace(port)).line; // 'main'
  * ```
  */
 export const readRevisionPlace = async (port: RevisionPort): Promise<RevisionPlace> => {
@@ -561,13 +561,8 @@ export const readRevisionPlace = async (port: RevisionPort): Promise<RevisionPla
     revisionNumber,
     revisionId: head,
     branches: Object.freeze(branches),
-    /* The words are the operator's (A18, I12): a branch name and a revision
-     * number, never a commit id, a head or a checkout. */
-    line:
-      branch === undefined
-        ? 'No revisions yet'
-        : revisionNumber === undefined
-          ? `${branch} · no revisions yet`
-          : `${branch} · Rev ${String(revisionNumber)}`,
+    /* The words are the operator's (A18, I12, M11): a branch name, never a
+     * number, a commit id, a head or a checkout. A save has no number. */
+    line: branch === undefined || revisionNumber === undefined ? 'No history yet' : branch,
   });
 };

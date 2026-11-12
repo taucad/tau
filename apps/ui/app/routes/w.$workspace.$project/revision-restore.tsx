@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { toast } from '@taucad/ui/components/sonner';
 import { useAnalytics } from '#hooks/use-analytics.js';
@@ -8,12 +8,16 @@ import { revisionWarningCodes } from '#lib/revision-failure-reporting.js';
 import type { RevisionFailureSubject } from '@taucad/ui-core/lib/revision-failure-copy';
 import type { BranchOperation } from '@taucad/revisions';
 import type { RevisionToast } from '#machines/file-manager.worker.revisions.js';
+import { useRevisions } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionClient } from '#types/revision-client.types.js';
 import {
   needsDecision,
   restoredSentence,
   switchedSentence,
   switchRefusedSentence,
   undidRestoreSentence,
+  undidSentence,
   undoLabel,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { useHeldSaveToast } from '#routes/w.$workspace.$project/held-save-toast.js';
@@ -21,7 +25,7 @@ import { useHeldSaveToast } from '#routes/w.$workspace.$project/held-save-toast.
 /** What a settled branch verb other than *Switch* says. Document words only (A18, I12). */
 const branchSettledCopy: Readonly<Record<Exclude<BranchOperation, 'switch'>, (branch: string) => string>> = {
   merge: (branch) => `Merged ${branch}`,
-  discard: (branch) => `Discarded ${branch}`,
+  discard: (branch) => `Closed ${branch}`,
   create: (branch) => `Created ${branch}`,
   rename: (branch) => `Renamed to ${branch}`,
 };
@@ -73,6 +77,49 @@ function raiseBranchSettled(
 }
 
 /**
+ * Says a *Restore* or *Undo restore* landed. *Undo restore* is itself the
+ * undo: it says so and offers no second one. A restore acted at once (I11):
+ * its toast names what came back by its version or title — the loaded card,
+ * or one row read wherever it sits in History — and offers *Undo restore*.
+ *
+ * @param entry - The settled restore.
+ * @param context - What names it and what takes it back.
+ * @param context.loaded - History's loaded page.
+ * @param context.client - Reads the restored row when the page does not hold it.
+ * @param context.undo - Takes the restore back.
+ */
+function raiseRestored(
+  entry: Extract<RevisionToast, { type: 'restored' }>,
+  {
+    loaded,
+    client,
+    undo,
+  }: Readonly<{ loaded: readonly RevisionCard[]; client: Pick<RevisionClient, 'log'>; undo: () => void }>,
+): void {
+  if (entry.mode === 'undoRestore') {
+    toast.success(undidRestoreSentence);
+    return;
+  }
+  const card = loaded.find((revision) => revision.revisionId === entry.revisionId);
+  if (card !== undefined) {
+    toast.success(restoredSentence(card), { action: { label: undoLabel, onClick: undo } });
+    return;
+  }
+  const announce = async (): Promise<void> => {
+    let restored: Parameters<typeof restoredSentence>[0];
+    try {
+      [restored] = await client.log({ from: entry.revisionId, limit: 1 });
+    } catch {
+      /* The files are back either way; an unread row is named without its title. */
+      restored = undefined;
+    }
+    toast.success(restoredSentence(restored), { action: { label: undoLabel, onClick: undo } });
+  };
+  // async-iife: toast -- one row read names what came back; a failed read still says the restore landed.
+  void announce();
+}
+
+/**
  * The toasts the revision tree raises for a person (S19, PC9).
  *
  * Restore and Switch act at once and offer Undo here, in the toast (I11): a
@@ -88,6 +135,12 @@ export function RevisionRestore(): ReactNode {
   const client = useRevisionClient();
   const analytics = useAnalytics();
   const raiseHeldSave = useHeldSaveToast();
+  /* A toast names an entry by its title or version, never by its number (M11): the loaded page answers which one. */
+  const { revisions } = useRevisions();
+  const loaded = useRef(revisions);
+  useEffect(() => {
+    loaded.current = revisions;
+  });
 
   useEffect(() => {
     if (client === undefined) {
@@ -102,7 +155,7 @@ export function RevisionRestore(): ReactNode {
          * words (P4, Rule 1); the diagnostic — `Buffer is not defined`, a port
          * sentence naming a checkout — goes where someone can act on it, which
          * is not a toast (E5). */
-        const copy = describeRevisionFailure(entry.subject, entry.code, { revisionNumber: entry.revisionNumber });
+        const copy = describeRevisionFailure(entry.subject, entry.code);
         // Outcome fields only: the diagnostic goes to error reporting with these tags (SB4, `reportRevisionToast`).
         analytics.capture(revisionFailureEvent[entry.subject], {
           code: entry.code,
@@ -167,40 +220,23 @@ export function RevisionRestore(): ReactNode {
         analytics.capture('revision_merge_conflicted', { pathCount: entry.paths.length });
         /* HQ1, HQ2: the one sentence, naming the line the decision lands on. */
         toast.warning(`${needsDecision} on ${entry.into}`, {
-          description: `${String(entry.paths.length)} ${entry.paths.length === 1 ? 'file changed' : 'files changed'} on both lines. ${entry.into} is untouched until you choose.`,
+          description: `${String(entry.paths.length)} ${entry.paths.length === 1 ? 'file changed' : 'files changed'} on both branches. ${entry.into} is unchanged until you choose.`,
         });
         return;
       }
       /* D15: an undo row names what it undid, as a restore row names its source. */
       if (entry.type === 'undone') {
         analytics.capture('revision_undone', { revision: entry.revisionNumber });
+        const { revisionNumber } = entry;
         toast.success(
-          entry.revisionNumber === undefined
-            ? 'Undid an earlier revision'
-            : `Undid Rev ${String(entry.revisionNumber)}`,
+          undidSentence(
+            revisionNumber === undefined ? undefined : loaded.current.find((revision) => revision.n === revisionNumber),
+          ),
         );
         return;
       }
       analytics.capture('revision_restored', { revision: entry.revisionNumber, mode: entry.mode });
-      /* *Undo restore* is itself the undo: it says so and offers no second one. */
-      if (entry.mode === 'undoRestore') {
-        toast.success(undidRestoreSentence);
-        return;
-      }
-      /* I11: the restore acted at once. The toast names what came back — one
-       * row read, wherever it sits in History — and offers *Undo restore*. */
-      const announce = async (): Promise<void> => {
-        let restored: Parameters<typeof restoredSentence>[0];
-        try {
-          [restored] = await client.log({ from: entry.revisionId, limit: 1 });
-        } catch {
-          /* The files are back either way; an unread row is named without its title. */
-          restored = undefined;
-        }
-        toast.success(restoredSentence(restored), { action: { label: undoLabel, onClick: commands.undo } });
-      };
-      // async-iife: toast -- one row read names what came back; a failed read still says the restore landed.
-      void announce();
+      raiseRestored(entry, { loaded: loaded.current, client, undo: commands.undo });
     });
   }, [analytics, client, commands, raiseHeldSave]);
 

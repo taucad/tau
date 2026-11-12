@@ -51,6 +51,8 @@ export type RevisionCard = {
   readonly turnId: string | undefined;
   readonly conflicted: boolean;
   readonly tags?: readonly string[];
+  /** The versions naming it with their project-wide numbers, lowest first (B6); absent on an entry no version names. */
+  readonly versions?: RevisionRow['versions'];
   /** What asked for it, as the trailer's `capture` names it; absent on a commit Tau did not record. */
   readonly capture: RevisionRow['capture'];
   /** The trailer Tau recorded, shown only behind Tau's debug setting (B5); absent on a commit Tau did not record. */
@@ -194,6 +196,7 @@ const cardOf = (row: RevisionRow, who: RevisionWhoContext): RevisionCard => {
     turnId: row.turnId,
     conflicted: row.conflicted,
     tags: row.tags,
+    ...(row.versions === undefined || row.versions.length === 0 ? {} : { versions: row.versions }),
     capture: row.capture,
     ...(row.trailer === undefined ? {} : { trailer: row.trailer }),
     ...(row.turnCut === undefined ? {} : { turnCut: row.turnCut }),
@@ -801,7 +804,7 @@ export function useRevisionChangesSince(card: RevisionCard | undefined): Readonl
     enabled: client !== undefined && revision !== undefined && checkoutId !== undefined,
     queryFn: async () => {
       if (client === undefined || revision === undefined) {
-        throw new Error('The revision comparison is unavailable.');
+        throw new Error('This comparison is unavailable.');
       }
       return client.diff(revision, undefined, { against: 'checkout' });
     },
@@ -875,7 +878,7 @@ export function useRevisionFileComparison(
     enabled: client !== undefined && revisionId !== undefined && path !== undefined,
     queryFn: async () => {
       if (client === undefined || revisionId === undefined || path === undefined) {
-        throw new Error('The revision comparison is unavailable.');
+        throw new Error('This comparison is unavailable.');
       }
       return client.compare(revisionId, path, against === undefined ? undefined : { against });
     },

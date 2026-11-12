@@ -86,7 +86,7 @@ describe('revision verbs', () => {
     ]);
 
     const place = await readRevisionPlace(port);
-    expect(place.line).toBe('main · Rev 2');
+    expect(place.line).toBe('main');
     expect(place.branch).toBe('main');
     expect(place.revisionId).toBe(second);
     expect(place.branches).toStrictEqual([{ name: 'main', revisionNumber: 2, revisionId: second }]);
@@ -339,12 +339,12 @@ describe('revision verbs', () => {
     ).toStrictEqual([false, false]);
   });
 
-  it('answers a project that has no revisions yet without inventing one', async () => {
+  it('answers a project that has no history yet without inventing one', async () => {
     const port = await openPort();
     expect(await readRevisionLog(port)).toStrictEqual([]);
     const place = await readRevisionPlace(port);
     expect(place.revisionNumber).toBeUndefined();
-    expect(place.line === 'No revisions yet' || place.line.endsWith('no revisions yet')).toBe(true);
+    expect(place.line).toBe('No history yet');
   });
 
   /**

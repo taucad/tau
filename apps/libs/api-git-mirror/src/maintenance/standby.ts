@@ -1,5 +1,49 @@
 import { once } from 'node:events';
 
+/** A SQLSTATE (`57P03`), a Node errno (`ECONNREFUSED`) or a driver code (`CONNECT_TIMEOUT`): never a value. */
+const loggableCode = /^[\dA-Z_]{1,32}$/;
+
+/**
+ * The error's `code` when it is a bare identifier such as a Postgres SQLSTATE.
+ * The message is never logged: a driver's can carry a connection string or a value.
+ */
+const errorCodeOf = (error: unknown): string | undefined => {
+  const code: unknown = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+  return typeof code === 'string' && loggableCode.test(code) ? code : undefined;
+};
+
+/**
+ * Wraps a standby check so a transient failure — Postgres refusing connections
+ * while a release restarts it — is retried a bounded number of times, `retryDelay`
+ * apart, before the check fails with the last attempt's error.
+ */
+export const retryingCheck =
+  (
+    check: () => Promise<unknown>,
+    options: {
+      /** Total tries, the first included. */
+      attempts: number;
+      /** Milliseconds between tries. */
+      retryDelay: number;
+    },
+  ): (() => Promise<unknown>) =>
+  async () => {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- attempts are sequential by design.
+        return await check();
+      } catch (error) {
+        if (attempt >= options.attempts) {
+          throw error;
+        }
+      }
+      // oxlint-disable-next-line no-await-in-loop -- the bounded pause between attempts.
+      await new Promise((resolve) => {
+        setTimeout(resolve, options.retryDelay);
+      });
+    }
+  };
+
 /**
  * The standby the `tau-maintenance` app starts in while the API's
  * `revisions-maintenance` group still runs the worker (north star DC4).
@@ -29,6 +73,7 @@ export const holdInStandby = async (args: {
           event: 'revisions_maintenance.standby_failed',
           check: name,
           error: error instanceof Error ? error.name : 'StandbyCheckError',
+          code: errorCodeOf(error),
         }),
       );
       throw new Error(`Maintenance standby check '${name}' failed`, { cause: error });

@@ -66,7 +66,7 @@ export function summarizeRecordIssues(
   }
   const label =
     state === 'unconfirmed'
-      ? 'Save not confirmed'
+      ? 'Couldn’t confirm the save'
       : state === 'invalid' || state === 'newer'
         ? 'Settings not applied'
         : 'Settings unavailable';

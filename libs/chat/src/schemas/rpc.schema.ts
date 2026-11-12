@@ -333,7 +333,7 @@ export type RpcSchemasRegistry = {
   [rpcName.appendFile]: RpcSchemaEntry<AppendFileRpcInput, AppendFileRpcResult>;
   [rpcName.editFile]: RpcSchemaEntry<EditFileRpcInput, EditFileRpcResult>;
   [rpcName.resolveSkill]: RpcSchemaEntry<ResolveSkillRpcInput, ResolveSkillRpcResult>;
-  [rpcName.readRevisions]: RpcSchemaEntry<ReadRevisionsRpcInput, ReadRevisionsRpcResult>;
+  [rpcName.readHistory]: RpcSchemaEntry<ReadRevisionsRpcInput, ReadRevisionsRpcResult>;
   [rpcName.getParameters]: RpcSchemaEntry<GetParametersRpcInput, GetParametersRpcResult>;
   [rpcName.applyParameterOperation]: RpcSchemaEntry<ApplyParameterOperationRpcInput, ApplyParameterOperationRpcResult>;
   [rpcName.writeTodos]: RpcSchemaEntry<WriteTodosRpcInput, WriteTodosRpcResult>;
@@ -400,7 +400,7 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
     inputSchema: resolveSkillRpc.inputSchema,
     resultSchema: resolveSkillRpc.resultSchema,
   },
-  [rpcName.readRevisions]: {
+  [rpcName.readHistory]: {
     inputSchema: readRevisionsRpc.inputSchema,
     resultSchema: readRevisionsRpc.resultSchema,
   },

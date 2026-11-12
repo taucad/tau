@@ -239,6 +239,30 @@ describe('ci.yml', () => {
       expect(projects).toContain(project);
     }
   });
+
+  it('deals the formal shards with this script and their own snapshot', () => {
+    const formal = ci.jobs['formal'] as
+      | { strategy?: { matrix?: { shard?: number[] } }; steps?: readonly Step[] }
+      | undefined;
+    const tiers = formal?.steps?.find((step) => step.name === 'Run affected formal tiers')?.run;
+    expect(tiers).toMatch(
+      /node scripts\/src\/test-shard-dealer\.ts --shard "\$SHARD" --shards 2 \\\n\s+--durations scripts\/src\/formal-shard-durations\.json/u,
+    );
+    expect(formal?.strategy?.matrix?.shard).toEqual([1, 2]);
+  });
+
+  it('names only real projects in the formal snapshot', () => {
+    const formal = parseDurations(
+      JSON.parse(readFileSync(resolve(import.meta.dirname, 'formal-shard-durations.json'), 'utf8')),
+    );
+    const projects = execFileSync('git', ['ls-files', '*project.json'], { cwd: root, encoding: 'utf8' })
+      .split('\n')
+      .filter((file) => file.endsWith('/project.json'))
+      .map((file) => (JSON.parse(readFileSync(resolve(root, file), 'utf8')) as { name?: string }).name);
+    for (const project of Object.keys(formal.seconds)) {
+      expect(projects).toContain(project);
+    }
+  });
 });
 
 describe('viewer-parity.yml', () => {

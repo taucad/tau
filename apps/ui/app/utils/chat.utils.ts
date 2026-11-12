@@ -445,13 +445,15 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
           )
         : `${output.status}: ${output.message}`,
   },
-  [toolName.revisions]: {
+  [toolName.history]: {
     input: (input) => `action: ${input.action}`,
     /* The `where` line first, because it is the answer every action carries. */
     output: (output) =>
       [
         output.where,
-        output.revisions === undefined ? undefined : `${String(output.revisions.length)} revision(s)`,
+        output.revisions === undefined
+          ? undefined
+          : `${String(output.revisions.length)} ${output.revisions.length === 1 ? 'entry' : 'entries'}`,
         output.changes === undefined ? undefined : `${String(output.changes.length)} changed file(s)`,
         output.branches === undefined ? undefined : `${String(output.branches.length)} branch(es)`,
         output.conflict === undefined ? undefined : `${String(output.conflict.files.length)} conflicted file(s)`,

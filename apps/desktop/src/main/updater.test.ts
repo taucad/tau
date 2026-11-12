@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { DesktopUpdaterOptions, SquirrelUpdater } from '#main/updater.js';
-import { availableUpdate, isNewerVersion, startDesktopUpdater, updateFeedUrl, updateSource } from '#main/updater.js';
+import {
+  availableUpdate,
+  isNewerVersion,
+  startDesktopUpdater,
+  updateFeedUrl,
+  updateRetryDelays,
+  updateSource,
+} from '#main/updater.js';
 
 const feed = (version: string, tag = `desktop@${version}`, platform = 'darwin'): unknown => ({
   currentRelease: version,
@@ -43,6 +50,7 @@ const options = (overrides: Partial<DesktopUpdaterOptions> = {}): DesktopUpdater
   openExternal: vi.fn(async () => undefined),
   log: vi.fn(),
   schedule: vi.fn(),
+  retry: vi.fn(),
   ...overrides,
 });
 
@@ -323,6 +331,171 @@ describe('staging and restart safety', () => {
       await updater.install();
       expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
     });
+  });
+});
+
+describe('restarting from one request', () => {
+  it('should restart when the download finishes after a request made while it was downloading', async () => {
+    const autoUpdater = squirrel();
+    const onState = vi.fn();
+    const updater = startDesktopUpdater(options({ autoUpdater, onState }));
+    await updater.check();
+    expect(updater.snapshot().phase).toBe('downloading');
+
+    await updater.install();
+    expect(updater.snapshot()).toMatchObject({ phase: 'downloading', installWhenReady: true });
+    expect(onState).toHaveBeenLastCalledWith(updater.snapshot());
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+
+    autoUpdater.listeners.get('update-downloaded')?.();
+    await vi.waitFor(() => {
+      expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
+    });
+    expect(updater.snapshot().installWhenReady).toBeUndefined();
+  });
+
+  it('should take a failed update to installed from a single retry request', async () => {
+    const autoUpdater = squirrel();
+    const fetchJson = vi.fn<(url: string) => Promise<unknown>>(async () => {
+      throw new Error('net::ERR_INTERNET_DISCONNECTED');
+    });
+    const updater = startDesktopUpdater(options({ autoUpdater, fetchJson }));
+    await updater.check();
+    expect(updater.snapshot().phase).toBe('error');
+
+    fetchJson.mockImplementation(async () => feed('0.3.0'));
+    await updater.install();
+    expect(updater.snapshot()).toMatchObject({ phase: 'downloading', installWhenReady: true });
+    autoUpdater.listeners.get('update-downloaded')?.();
+    await vi.waitFor(() => {
+      expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
+    });
+  });
+
+  it('should drop the request when the attempt fails or finds nothing, so a later background download only waits', async () => {
+    const autoUpdater = squirrel();
+    const fetchJson = vi.fn<(url: string) => Promise<unknown>>(async () => feed('0.3.0'));
+    const updater = startDesktopUpdater(options({ autoUpdater, fetchJson }));
+    await updater.check();
+    await updater.install();
+    autoUpdater.listeners.get('error')?.(new Error('download interrupted'));
+    expect(updater.snapshot()).toMatchObject({ phase: 'error' });
+    expect(updater.snapshot().installWhenReady).toBeUndefined();
+
+    await updater.check();
+    autoUpdater.listeners.get('update-downloaded')?.();
+    expect(updater.snapshot().phase).toBe('ready');
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+
+    const current = startDesktopUpdater(
+      options({
+        fetchJson: vi
+          .fn<(url: string) => Promise<unknown>>()
+          .mockRejectedValueOnce(new Error('offline'))
+          .mockResolvedValue(feed('0.2.0')),
+      }),
+    );
+    await current.check();
+    await current.install();
+    expect(current.snapshot().phase).toBe('current');
+    expect(current.snapshot().installWhenReady).toBeUndefined();
+  });
+
+  it('should hold no restart request where Tau cannot install: a copy to move, or an archive install', async () => {
+    const blocked = startDesktopUpdater(options({ appLocation: { blocksUpdates: true, move: vi.fn(() => true) } }));
+    await blocked.check();
+    await blocked.install();
+    expect(blocked.snapshot().phase).toBe('move-required');
+    expect(blocked.snapshot().installWhenReady).toBeUndefined();
+
+    const archive = startDesktopUpdater(
+      options({ platform: 'linux', arch: 'x64', fetchJson: async () => feed('0.3.0', 'desktop@0.3.0', 'linux') }),
+    );
+    await archive.check();
+    await archive.install();
+    expect(archive.snapshot().phase).toBe('available');
+    expect(archive.snapshot().installWhenReady).toBeUndefined();
+  });
+});
+
+describe('automatic retry after a failure', () => {
+  it('should retry a failed check on its own with growing delays, and start over after a success', async () => {
+    const retry = vi.fn<(callback: () => void, retryDelay: number) => void>();
+    const autoUpdater = squirrel();
+    const fetchJson = vi.fn<(url: string) => Promise<unknown>>(async () => {
+      throw new Error('net::ERR_INTERNET_DISCONNECTED');
+    });
+    const updater = startDesktopUpdater(options({ autoUpdater, fetchJson, retry }));
+    await updater.check();
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(retry.mock.calls[0]?.[1]).toBe(15_000);
+
+    retry.mock.calls[0]?.[0]();
+    await vi.waitFor(() => {
+      expect(retry).toHaveBeenCalledTimes(2);
+    });
+    expect(retry.mock.calls[1]?.[1]).toBe(60_000);
+
+    fetchJson.mockImplementation(async () => feed('0.3.0'));
+    retry.mock.calls[1]?.[0]();
+    await vi.waitFor(() => {
+      expect(autoUpdater.checkForUpdates).toHaveBeenCalledOnce();
+    });
+    autoUpdater.listeners.get('update-downloaded')?.();
+    expect(updater.snapshot().phase).toBe('ready');
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+
+    autoUpdater.listeners.get('error')?.(new Error('download validation failed'));
+    expect(retry).toHaveBeenCalledTimes(3);
+    expect(retry.mock.calls[2]?.[1]).toBe(15_000);
+  });
+
+  it('should keep one retry pending at a time and stop after the last delay', async () => {
+    const retry = vi.fn<(callback: () => void, retryDelay: number) => void>();
+    const updater = startDesktopUpdater(
+      options({
+        retry,
+        fetchJson: vi.fn(async () => {
+          throw new Error('offline');
+        }),
+      }),
+    );
+    await updater.check();
+    await updater.check();
+    expect(retry).toHaveBeenCalledTimes(1);
+    for (let attempt = 0; attempt < updateRetryDelays.length + 2; attempt += 1) {
+      retry.mock.calls.at(-1)?.[0]();
+      // oxlint-disable-next-line no-await-in-loop -- Each retry is scheduled by the failure before it.
+      await updater.check();
+    }
+    expect(retry.mock.calls.map(([, retryDelay]) => retryDelay)).toEqual(updateRetryDelays);
+  });
+
+  it('should retry, and say so in the log, when Squirrel finds no update at a feed Tau validated', async () => {
+    const retry = vi.fn();
+    const log = vi.fn();
+    const autoUpdater = squirrel();
+    const updater = startDesktopUpdater(options({ autoUpdater, retry, log }));
+    await updater.check();
+    await updater.install();
+    autoUpdater.listeners.get('update-not-available')?.();
+    expect(updater.snapshot().phase).toBe('error');
+    expect(updater.snapshot().installWhenReady).toBeUndefined();
+    expect(retry).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledWith('warn', 'updater.error', expect.anything());
+  });
+
+  it('should leave a copy that must move alone', async () => {
+    const retry = vi.fn();
+    const autoUpdater = squirrel();
+    const updater = startDesktopUpdater(
+      options({ autoUpdater, retry, appLocation: { blocksUpdates: false, move: vi.fn(() => true) } }),
+    );
+    await updater.check();
+    autoUpdater.listeners.get('error')?.(new Error('Cannot update while running on a read-only volume'));
+    expect(updater.snapshot().phase).toBe('move-required');
+    expect(retry).not.toHaveBeenCalled();
   });
 });
 

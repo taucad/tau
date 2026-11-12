@@ -103,7 +103,14 @@ export default defineConfig({
           channel: 'chromium',
           args: [
             '--enable-unsafe-webgpu',
-            ...(process.env['TAU_E2E_WEBGPU_PROFILE'] === 'software' ? ['--use-webgpu-adapter=swiftshader'] : []),
+            ...(process.env['TAU_E2E_WEBGPU_PROFILE'] === 'software'
+              ? [
+                  '--use-webgpu-adapter=swiftshader',
+                  '--use-angle=swiftshader',
+                  '--enable-features=Vulkan',
+                  '--use-vulkan=swiftshader',
+                ]
+              : []),
           ],
         },
       }),

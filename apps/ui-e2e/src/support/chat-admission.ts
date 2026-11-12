@@ -207,7 +207,13 @@ export const openChat = async (script: readonly GatewayScriptTurn[], query = '')
 export const completeFirstTurn = async (): Promise<void> => {
   await sendDraft('First plain message.');
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
+  await target.expectVisible(
+    selectors
+      .getByRole('status', { name: 'Save status' })
+      .filter({ hasText: /^Saved\b/u })
+      .first(),
+    60_000,
+  );
   await expect.poll(gatewayRequestCount, { timeout: 30_000 }).toBe(1);
 };
 

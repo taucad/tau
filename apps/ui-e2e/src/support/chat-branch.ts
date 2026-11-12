@@ -12,12 +12,12 @@ import * as target from '#support/external-target.js';
  * @returns Nothing.
  */
 export const placeChatOnNewBranch = async (name: string): Promise<void> => {
-  const openRevisions = selectors.getByRole('button', { name: /^Open Revisions\./u });
+  const openRevisions = selectors.getByRole('button', { name: /^Open History\./u });
   await target.expectVisible(openRevisions, 60_000);
   await target.click(openRevisions);
   const whereYouAre = selectors.getByCss('[aria-label="Where you are"]');
   const newBranch = whereYouAre.getByRole('button', { name: 'New branch' });
-  const save = whereYouAre.getByRole('button', { name: 'Save revision' });
+  const save = whereYouAre.getByRole('button', { name: 'Save' });
   let ready: 'branch' | 'unsaved' | undefined;
   await expect
     .poll(
@@ -26,7 +26,7 @@ export const placeChatOnNewBranch = async (name: string): Promise<void> => {
           ready = 'branch';
         } else if (await target.isVisible(save)) {
           const stripText = await target.textContent(whereYouAre);
-          if (stripText?.includes('Not saved yet')) {
+          if (stripText?.includes('Nothing saved yet')) {
             ready = 'unsaved';
           }
         }
@@ -40,7 +40,7 @@ export const placeChatOnNewBranch = async (name: string): Promise<void> => {
   }
   await target.expectVisible(newBranch, 60_000);
   await target.click(newBranch);
-  await target.fill(selectors.getByLabelText('Name for the new branch'), name);
+  await target.fill(selectors.getByLabelText('Branch name'), name);
   await target.click(selectors.getByRole('button', { name: 'Create branch' }));
   const actions = selectors.getByRole('button', { name: `Actions for ${name}` });
   await target.expectVisible(actions, 60_000);

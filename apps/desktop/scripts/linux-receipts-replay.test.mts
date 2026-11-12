@@ -7,7 +7,8 @@
  * 42392372853 (see fixtures/linux-receipts-replay/replay.json). Both scripts run as their own processes from a fresh
  * directory holding nothing but what the job's checkout and download-artifact steps leave, with the job's environment.
  * Only the network and repository edges are replaced: `gh` serves the recorded run and artifact metadata and a
- * candidate archive holding the real manifest, and `git` answers only the two recorded ancestry facts.
+ * candidate archive holding the real manifest, and `git` answers only the three recorded ancestry facts. The job's
+ * collector re-admits candidate C itself and writes the qualification binding (no separate re-admission step).
  */
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -66,9 +67,12 @@ const writeEdges = (bin: string, archive: string, digest: string): void => {
     [`repos/taucad/tau/actions/runs/${replay.candidateRun.id}`]: JSON.stringify(run),
     [`repos/taucad/tau/actions/runs/${replay.candidateRun.id}/artifacts?per_page=100`]: JSON.stringify(artifacts),
   };
+  // The qualification binding adds S≤K (source ≤ candidate head), also true of the recorded commits on main; like Git,
+  // a commit is its own ancestor (the collector checks H≤H).
   const ancestry = [
     `${replay.candidateRun.headSha} ${replay.acceptanceRun.headSha}`,
     `${replay.sourceCommit} ${replay.acceptanceRun.headSha}`,
+    `${replay.sourceCommit} ${replay.candidateRun.headSha}`,
   ];
   const gh = `#!/usr/bin/env node
 const { readFileSync } = require('node:fs');
@@ -87,7 +91,7 @@ if (path === 'repos/taucad/tau/actions/artifacts/${replay.candidateRun.artifactI
   const git = `#!/usr/bin/env node
 const [command, flag, ancestor, descendant, ...rest] = process.argv.slice(2);
 const recorded = ${JSON.stringify(ancestry)};
-process.exit(command === 'merge-base' && flag === '--is-ancestor' && rest.length === 0 && recorded.includes(ancestor + ' ' + descendant) ? 0 : 1);
+process.exit(command === 'merge-base' && flag === '--is-ancestor' && rest.length === 0 && (ancestor === descendant || recorded.includes(ancestor + ' ' + descendant)) ? 0 : 1);
 `;
   writeFileSync(join(bin, 'gh'), gh);
   writeFileSync(join(bin, 'git'), git);
@@ -155,8 +159,6 @@ const main = (): void => {
   {
     const { workspace, env } = prepareWorkspace();
     try {
-      const fetched = runStep('fetch-desktop-installer-candidate.mts', workspace, env);
-      assert.equal(fetched.status, 0, `Re-admit the exact final candidate failed:\n${fetched.stderr}`);
       downloadRows(workspace, rowIds);
       const collected = runStep('collect-qualification-rows.mts', workspace, env);
       assert.equal(collected.status, 0, `Collection failed:\n${collected.stderr}`);
@@ -188,6 +190,17 @@ const main = (): void => {
         matrix.map(({ id }) => id),
         rowIds,
       );
+      const binding = JSON.parse(
+        readFileSync(join(workspace, 'out', 'qualification-receipts', 'qualification-binding.json'), 'utf8'),
+      ) as Record<string, unknown> & { candidate: Record<string, unknown> };
+      assert.equal(binding['scope'], 'linux');
+      assert.equal(binding['channel'], 'staging');
+      assert.equal(binding['kind'], 'vm');
+      assert.equal(binding['sourceCommit'], replay.sourceCommit);
+      assert.equal(binding['workflowCommit'], replay.acceptanceRun.headSha);
+      assert.equal(binding['runId'], replay.acceptanceRun.id);
+      assert.equal(binding.candidate['runId'], replay.candidateRun.id);
+      assert.equal(binding.candidate['artifactId'], replay.candidateRun.artifactId);
     } finally {
       rmSync(join(workspace, '..'), { recursive: true, force: true });
     }
@@ -197,7 +210,6 @@ const main = (): void => {
   {
     const { workspace, env } = prepareWorkspace();
     try {
-      assert.equal(runStep('fetch-desktop-installer-candidate.mts', workspace, env).status, 0);
       downloadRows(workspace, rowIds.slice(1));
       assert.notEqual(runStep('collect-qualification-rows.mts', workspace, env).status, 0, 'five rows are refused');
     } finally {
@@ -209,7 +221,6 @@ const main = (): void => {
   {
     const { workspace, env } = prepareWorkspace();
     try {
-      assert.equal(runStep('fetch-desktop-installer-candidate.mts', workspace, env).status, 0);
       downloadRows(workspace, rowIds);
       const other = runStep('collect-qualification-rows.mts', workspace, { ...env, GITHUB_RUN_ID: '42655454144' });
       assert.notEqual(other.status, 0, 'receipts naming another run are refused');
@@ -223,7 +234,7 @@ const main = (): void => {
 
 try {
   main();
-  console.log('linux-receipts-replay: recorded run 42706520569 replays through fetch and collection');
+  console.log('linux-receipts-replay: recorded run 42706520569 replays through collection and binding');
 } catch (error) {
   console.error(error);
   process.exitCode = 1;

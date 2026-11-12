@@ -172,7 +172,7 @@ function SavedRevisionDetails({
         slot='marker-actions'
         end={<RevisionMenu revision={revision} isCurrent={revision.revisionId === headRevisionId} branch={branch} />}
       >
-        <ActionButton verb='View revision' short='View' onClick={onView} />
+        <ActionButton verb='View' onClick={onView} />
       </ActionsRow>
       <RevisionDetails revision={revision} branch={branch} />
     </Collapsible>
@@ -233,7 +233,7 @@ export const ChatRevisionMarker = memo(function ({
         <span
           role='status'
           aria-live='polite'
-          aria-label='Turn revision status'
+          aria-label='Save status'
           aria-busy={state.kind === 'working' || state.kind === 'saving'}
         >
           {label}
@@ -245,10 +245,10 @@ export const ChatRevisionMarker = memo(function ({
 
   if (savedRevision !== undefined && !isLatestTurn) {
     return (
-      <div aria-label='Turn revision' className={cn(cardClassName, 'flex items-center gap-2 pr-1 pl-2')}>
+      <div aria-label='Changes from this request' className={cn(cardClassName, 'flex items-center gap-2 pr-1 pl-2')}>
         <span className='flex min-w-0 flex-1 items-start gap-2 py-1.5 text-xs text-muted-foreground'>{status}</span>
         <ActionButton
-          verb='View revision'
+          verb='View'
           variant='ghost'
           onClick={() => {
             openRevisions(savedRevision.revisionId);
@@ -275,7 +275,7 @@ export const ChatRevisionMarker = memo(function ({
           <p className='text-xs leading-relaxed text-muted-foreground'>{turnRevisionDetail(state)}</p>
           {state.kind === 'conflicted' ? (
             <ActionButton
-              verb='Open Revisions'
+              verb='Resolve'
               onClick={() => {
                 openRevisions();
               }}

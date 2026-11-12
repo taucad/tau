@@ -30,6 +30,12 @@ const startGraphics = (): GraphicsActor => {
   ).start();
   actors.push(actor);
   actor.send({ type: 'sceneRadiusUpdated', radius: 0.1, centerMeters: [0, 0, 0] });
+  actor.send({
+    type: 'geometryBoundsMeasured',
+    key: 'model',
+    bounds: { min: [-0.1, -0.1, -0.1], max: [0.1, 0.1, 0.1] },
+    radius: 0.1,
+  });
   return actor;
 };
 

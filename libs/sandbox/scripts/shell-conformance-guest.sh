@@ -118,6 +118,10 @@ sudo -u tau env PATH="$PATH" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" DBUS_SESSION_BUS
 NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
   TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/terminal-conformance-receipt.json" \
   pnpm nx run desktop:test:terminal-conformance --skip-nx-cache || status=$?
+# The Terminal concern's own rows over a port into the concern (shell split PR 3), with their own receipt.
+NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
+  TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/terminal-concern-conformance-receipt.json" \
+  pnpm nx run desktop-terminal:test:terminal-conformance --skip-nx-cache || status=$?
 # Chromium's SwiftShader profile and native capture's Mesa Vulkan adapter are independent backends.
 icds=(/usr/share/vulkan/icd.d/lvp_icd*.json)
 [[ "${#icds[@]}" == 1 && -s "${icds[0]}" ]]

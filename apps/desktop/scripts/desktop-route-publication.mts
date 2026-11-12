@@ -28,17 +28,16 @@ export const desktopManifestDigest = (manifest: DesktopArtifactManifest): string
     .digest('hex');
 
 /**
- * Explicitly selected publication scope the publisher workflows accept. `all` keeps the original admission; `macos` is
- * the Apple silicon rollout that must carry exactly its ZIP and DMG and no other architecture's or platform's
- * artifact. Intel is excluded by operator ruling until a GPU-capable Intel Mac host can qualify it.
+ * Explicitly selected publication scope the publisher workflows accept. `all` keeps the original admission. `macos`
+ * and `linux` are platform scopes (D-H5, operator ruling 2026-11-10: each platform is promoted on its own receipts from
+ * its own candidate): `macos` must carry exactly the Apple silicon ZIP and DMG, `linux` exactly the linux-x64 APT and
+ * AppImage routes, and neither any other architecture's or platform's artifact. Intel is excluded by operator ruling
+ * until a GPU-capable Intel Mac host can qualify it.
  */
-export const desktopPublicationScopes = ['all', 'macos'] as const;
+export const desktopPublicationScopes = ['all', 'macos', 'linux'] as const;
 export type DesktopPublicationScope = (typeof desktopPublicationScopes)[number];
-/**
- * Platform scopes route admission understands (D-H5, operator ruling 2026-11-10: each platform is promoted on its own
- * receipts from its own candidate). `linux` is admitted here before the publisher workflows select it.
- */
-export const desktopAdmissionScopes = [...desktopPublicationScopes, 'linux'] as const;
+/** Route admission and publication accept the same scopes. */
+export const desktopAdmissionScopes = desktopPublicationScopes;
 export type DesktopAdmissionScope = (typeof desktopAdmissionScopes)[number];
 /** Every route and artifact of each platform scope: a platform candidate carries exactly these and nothing else. */
 const platformScopes = {
@@ -260,23 +259,121 @@ export const createDesktopInstallerCatalog = (options: {
   };
 };
 
+/** A promoted platform: its own lane of publication state and its own complete catalog (D-H5). */
+export type DesktopPlatformLane = Exclude<DesktopPublicationScope, 'all'>;
+
+/** One catalog per promoted platform, each from its own candidate; `latest/installers.json` when a lane promotes. */
+export type DesktopComposedInstallerCatalog = {
+  schemaVersion: 2;
+  channel: 'production' | 'staging';
+  promoted: true;
+  platforms: Array<{ lane: DesktopPlatformLane; catalog: DesktopInstallerCatalog }>;
+};
+
+/**
+ * Mutable publication keys of one lane. The `all` lane keeps the original single-candidate keys; each platform lane
+ * has its own intent, completion and catalog fragment, so one platform's promotion or renewal never rewrites another's.
+ */
+export const desktopLaneKeys = (
+  lane: DesktopPublicationScope,
+): { intent: string; completion: string; catalog: string } =>
+  lane === 'all'
+    ? {
+        intent: 'latest/installer-promotion.json',
+        completion: 'latest/installer-completed.json',
+        catalog: 'latest/installers.json',
+      }
+    : {
+        intent: `latest/installer-promotion-${lane}.json`,
+        completion: `latest/installer-completed-${lane}.json`,
+        catalog: `latest/installers-${lane}.json`,
+      };
+
+const routeKey = ({ route, target }: { route: string; target: string }): string => `${route}:${target}`;
+
+/** Compose platform catalogs: each carries exactly its platform's routes, on one channel, in a fixed lane order. */
+export const composeDesktopInstallerCatalog = (
+  channel: 'production' | 'staging',
+  platforms: Partial<Record<DesktopPlatformLane, DesktopInstallerCatalog>>,
+): DesktopComposedInstallerCatalog => {
+  const entries = (['macos', 'linux'] as const).flatMap((lane) => {
+    const catalog = platforms[lane];
+    if (!catalog) {
+      return [];
+    }
+    const expected = platformScopes[lane].routes.map((route) =>
+      routeKey({ route, target: platformScopes[lane].target }),
+    );
+    if (
+      catalog.channel !== channel ||
+      JSON.stringify(catalog.routes.map(routeKey).sort()) !== JSON.stringify([...expected].sort())
+    ) {
+      throw new Error(`Composed installer catalog requires exactly the ${lane} platform routes on ${channel}`);
+    }
+    return [{ lane, catalog }];
+  });
+  if (entries.length === 0) {
+    throw new Error('Composed installer catalog requires a promoted platform');
+  }
+  return { schemaVersion: 2, channel, promoted: true, platforms: entries };
+};
+
+const catalogDocument = z.union([
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      channel: z.enum(['production', 'staging']),
+      routes: z.array(z.object({ route: z.string(), target: z.string() })),
+    })
+    .transform((value) => ({
+      channel: value.channel,
+      lanes: ['all'] as DesktopPublicationScope[],
+      routes: value.routes,
+    })),
+  z
+    .object({
+      schemaVersion: z.literal(2),
+      channel: z.enum(['production', 'staging']),
+      platforms: z.array(
+        z.object({
+          lane: z.enum(['macos', 'linux']),
+          catalog: z.object({ routes: z.array(z.object({ route: z.string(), target: z.string() })) }),
+        }),
+      ),
+    })
+    .transform((value) => ({
+      channel: value.channel,
+      lanes: value.platforms.map(({ lane }) => lane) as DesktopPublicationScope[],
+      routes: value.platforms.flatMap(({ catalog }) => catalog.routes),
+    })),
+]);
+
+/**
+ * The lanes a published catalog says are promoted: a schema 1 catalog is the original single-candidate (`all`) lane,
+ * whatever scope promoted it; a composed catalog names its platform lanes. Renewal renews exactly these.
+ */
+export const desktopCatalogLanes = (document: unknown): DesktopPublicationScope[] =>
+  catalogDocument.parse(document).lanes;
+
 /**
  * A narrower catalog must not silently withdraw a route an earlier promotion advertised: the website would fall back
  * for that platform while its signed update descriptors and APT metadata stop being renewed. Absent platforms that
- * were never promoted keep the website's legacy archive choices.
+ * were never promoted keep the website's legacy archive choices. A composed catalog is compared route by route.
  */
-export const assertDesktopCatalogRetainsRoutes = (previous: unknown, next: DesktopInstallerCatalog): void => {
+export const assertDesktopCatalogRetainsRoutes = (
+  previous: unknown,
+  next: DesktopInstallerCatalog | DesktopComposedInstallerCatalog,
+): void => {
   if (previous === undefined) {
     return;
   }
-  const prior = z
-    .object({
-      channel: z.literal(next.channel),
-      routes: z.array(z.object({ route: z.string(), target: z.string() })),
-    })
-    .parse(previous);
-  const kept = new Set(next.routes.map(({ route, target }) => `${route}:${target}`));
-  const dropped = prior.routes.filter(({ route, target }) => !kept.has(`${route}:${target}`));
+  const prior = catalogDocument.parse(previous);
+  const current = catalogDocument.parse(next);
+  if (prior.channel !== current.channel) {
+    throw new Error('Installer catalog channel differs');
+  }
+  const kept = new Set(current.routes.map(routeKey));
+  const dropped = prior.routes.filter((route) => !kept.has(routeKey(route)));
   if (dropped.length > 0) {
     throw new Error(
       `Installer catalog would withdraw previously promoted routes: ${dropped.map(({ route, target }) => `${target}/${route}`).join(', ')}`,

@@ -203,7 +203,11 @@ let catalog: Catalog | undefined;
 if (catalogResponse.status === 200 && catalogResponse.body) {
   await writeFile(join(output, 'installers.json'), catalogResponse.body);
   try {
-    catalog = JSON.parse(catalogResponse.body.toString('utf8')) as Catalog;
+    const document = JSON.parse(catalogResponse.body.toString('utf8')) as
+      | Catalog
+      | { schemaVersion: 2; platforms: Array<{ lane: string; catalog: Catalog }> };
+    // A composed catalog (schema 2) carries one catalog per promoted platform; this Mac evidence reads the Mac one.
+    catalog = 'platforms' in document ? document.platforms.find(({ lane }) => lane === 'macos')?.catalog : document;
   } catch {
     failures.push('latest/installers.json is not JSON');
   }

@@ -12,9 +12,9 @@ on:
         options: [promote-routes, renew-routes]
         required: true
       scope:
-        description: All qualified routes, or an Apple silicon-only staging ZIP/DMG catalog (promotion only)
+        description: All qualified routes, or one platform's catalog (Apple silicon ZIP/DMG, or Linux APT/AppImage) on either channel (D-H5, promotion only)
         type: choice
-        options: [all, macos]
+        options: [all, macos, linux]
         default: all
       tag:
         description: Exact candidate tag (promotion only)
@@ -44,7 +44,7 @@ jobs:
   # `release-desktop-staging.yml` for a full candidate (`intel`) of the same commit and stops: the
   # operator promotes that tag once its installer candidate and qualification runs are green. A
   # production tag (`desktop@*`) always packages both. Only the `all` scope asks for Intel, so a
-  # per-platform scope (`macos` today, and a `linux` scope once publication has one) never does.
+  # per-platform scope (`macos` or `linux`) never does.
   candidate:
     name: Require a full candidate
     if: github.ref == 'refs/heads/main'
@@ -215,7 +215,20 @@ jobs:
         run: pnpm nx run desktop:route-workflow --args=prepare
       - name: Publish or renew under the shared channel lock
         if: steps.selected.outputs.run == 'true'
-        run: pnpm nx run desktop:publish --args="$TAU_ROUTE_OPERATION"
+        run: |
+          set -euo pipefail
+          if [ "$TAU_ROUTE_OPERATION" != renew-routes ]; then
+            pnpm nx run desktop:publish --args="$TAU_ROUTE_OPERATION"
+            exit 0
+          fi
+          # Renewal renews every promoted lane (the all-platform catalog, or each platform of a composed one, D-H5),
+          # each from its own completed candidate and directory.
+          [ -n "${TAU_RENEWAL_LANES:-}" ] || { echo '::error::No promoted lane to renew.'; exit 1; }
+          for entry in $TAU_RENEWAL_LANES; do
+            IFS=: read -r lane tag source <<< "$entry"
+            TAU_PUBLICATION_LANE="$lane" DESKTOP_RELEASE_TAG="$tag" TAU_DESKTOP_SOURCE_SHA="$source" \
+              DESKTOP_ASSETS_DIR="$DESKTOP_ASSETS_DIR/$lane" pnpm nx run desktop:publish --args=renew-routes
+          done
       - name: Clean ephemeral signing files
         if: always() && steps.selected.outputs.run == 'true'
         run: rm -rf "$RUNNER_TEMP/desktop-signing"

@@ -18,3 +18,9 @@ export {
   type ModelPoseRefusal,
   type ModelPoseRequest,
 } from '#runtime/model-pose.js';
+export {
+  withEntryAdoption,
+  type EntryAdoptionFileSystem,
+  type EntryAdoptionPackageFiles,
+  type WithEntryAdoptionOptions,
+} from '#runtime/entry-adoption.js';

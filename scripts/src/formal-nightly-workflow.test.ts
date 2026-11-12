@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
  * 120-minute budget (CI throughput review, Q-4): one serial job of every project ran out of its 60
  * minutes on each scheduled run of 2026-11-07 to 2026-11-11, and `agent-host` alone took 55 on its own job. The project list comes from Nx, so a new
  * owner's target joins the matrix without a workflow edit, and an empty list fails rather than passes.
+ * A project with a `formal:nightly:check` target runs its nightly configs and Apalache in a job of
+ * their own, so the matrix is one job per project and target.
  */
 
 const root = resolve(import.meta.dirname, '../..');
@@ -44,32 +46,35 @@ describe('formal nightly workflow', () => {
     expect(workflow.concurrency).toEqual({ group: 'formal-nightly', 'cancel-in-progress': false });
   });
 
-  it('should list the projects from Nx and fail on an empty list', () => {
+  it('should list the projects of each nightly target from Nx and fail on an empty list', () => {
     const step = list?.steps?.find((candidate) => candidate.id === 'list');
     expect(step?.run).toContain('pnpm nx show projects --with-target formal:nightly --json | tail -1');
     expect(step?.run).toContain('exit 1');
-    expect(list?.outputs?.['projects']).toBe(`\${{ steps.list.outputs.projects }}`);
+    expect(step?.run).toContain('for target in formal:nightly formal:nightly:check; do');
+    expect(step?.run).toContain('pnpm nx show projects --with-target "$target" --json | tail -1');
+    expect(list?.outputs?.['tiers']).toBe(`\${{ steps.list.outputs.tiers }}`);
   });
 
-  it('should run one job per project, each with its own 120-minute budget', () => {
+  it('should run one job per project and target, each with its own 120-minute budget', () => {
     expect(shard?.needs).toBe('projects');
     expect(shard?.['timeout-minutes']).toBe(120);
     expect(shard?.strategy?.['fail-fast']).toBe(false);
-    expect(shard?.strategy?.matrix?.['project']).toBe(`\${{ fromJSON(needs.projects.outputs.projects) }}`);
+    expect(shard?.strategy?.matrix?.['tier']).toBe(`\${{ fromJSON(needs.projects.outputs.tiers) }}`);
   });
 
-  it('should run only its own project, streamed, with every formal toolchain', () => {
+  it('should run only its own project and target, streamed, with every formal toolchain', () => {
     const setup = shard?.steps?.find((step) => step.uses === './.github/actions/setup-formal');
     expect(setup?.with?.['tools']).toBe('tlc,lean,apalache');
-    const run = shard?.steps?.find((step) => step.run?.includes('formal:nightly'));
-    expect(run?.env?.['PROJECT']).toBe(`\${{ matrix.project }}`);
-    expect(run?.run).toBe('pnpm nx run-many -t formal:nightly --projects "$PROJECT" --parallel=1 --outputStyle=stream');
+    const run = shard?.steps?.find((step) => step.run?.includes('nx run-many'));
+    expect(run?.env?.['PROJECT']).toBe(`\${{ matrix.tier.project }}`);
+    expect(run?.env?.['TARGET']).toBe(`\${{ matrix.tier.target }}`);
+    expect(run?.run).toBe('pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream');
   });
 
-  it('should upload each project reports under its own artifact name, after a failure too', () => {
+  it("should upload each tier's reports under its own artifact name, after a failure too", () => {
     const upload = shard?.steps?.find((step) => step.uses?.startsWith('actions/upload-artifact@'));
     expect(upload?.uses).toMatch(/^actions\/upload-artifact@[\da-f]{40}$/u);
     expect(upload?.if).toBe('always()');
-    expect(upload?.with?.['name']).toBe(`formal-nightly-reports-\${{ matrix.project }}`);
+    expect(upload?.with?.['name']).toBe(`formal-nightly-reports-\${{ matrix.tier.slug }}`);
   });
 });

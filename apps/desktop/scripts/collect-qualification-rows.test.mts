@@ -599,8 +599,11 @@ try {
   assert.throws(() => {
     assertQualificationSource({ ...admitted, scope: 'all' });
   }, /exact source/u);
+  // D-H5: platform-scoped production evidence; Linux may still test a trusted ancestor, Windows stays staging-only.
+  assertQualificationSource({ ...admitted, channel: 'production' });
+  assertQualificationSource({ ...admitted, channel: 'production', kind: 'vm' });
   assert.throws(() => {
-    assertQualificationSource({ ...admitted, channel: 'production' });
+    assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'windows', channel: 'production' });
   }, /scope\/channel/u);
   assert.throws(() => {
     assertQualificationSource({ ...admitted, scope: 'unknown' });
@@ -613,9 +616,13 @@ try {
   assert.throws(() => {
     assertQualificationSource({ ...admitted, scope: 'windows', kind: 'vm' });
   }, /exact source/u);
+  // Production Mac binds an ancestor source through the same authenticated sidecar; all-platform stays exact.
+  assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'macos', channel: 'production' });
+  assertQualificationSource({ ...admitted, scope: 'macos', channel: 'production' });
+  assertQualificationSource({ ...admitted, scope: 'macos', channel: 'production', kind: 'vm' });
   assert.throws(() => {
-    assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'macos', channel: 'production' });
-  }, /scope\/channel/u);
+    assertQualificationSource({ ...admitted, scope: 'all', channel: 'production' });
+  }, /exact source/u);
   assert.throws(() => {
     assertQualificationSource({ ...admitted, sourceCommit: '--all' });
   }, /scope\/channel/u);

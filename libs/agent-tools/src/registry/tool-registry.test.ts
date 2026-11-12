@@ -228,10 +228,10 @@ describe('createChatToolRegistry listing', () => {
    * for it is attached — a disk host today, the browser when W11 wires its
    * worker — and silently absent elsewhere, which is the right degradation and
    * the thing nothing asserted. */
-  it('lists the revisions tool only where a revisions client is attached', () => {
-    expect(listOf({})).not.toContain('revisions');
+  it('lists the history tool only where a revisions client is attached', () => {
+    expect(listOf({})).not.toContain('history');
     expect(listOf({ revisions: { log: vi.fn(), diff: vi.fn(), describe: vi.fn(), conflict: vi.fn() } })).toContain(
-      'revisions',
+      'history',
     );
   });
 

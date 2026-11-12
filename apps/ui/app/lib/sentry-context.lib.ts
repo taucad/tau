@@ -32,8 +32,15 @@ type PublishedRouter = {
 };
 
 /**
+ * The desktop manifest (`apps/ui/desktop/app/routes.ts`) reads the web routes from outside its own app
+ * directory, so its ids carry a `../../app/` prefix; the tag drops it so desktop and web ids match.
+ */
+const outOfTreeRoutePrefix = /^(?:\.\.\/)+app\//u;
+
+/**
  * The React Router route id of the deepest match (for example `routes/w.$workspace.$project`), from
- * the data router the framework's `HydratedRouter` publishes on `window`.
+ * the data router the framework's `HydratedRouter` publishes on `window`. A desktop id
+ * (`../../app/routes/…`) reads as its web id.
  *
  * @returns The route id, or `undefined` before hydration and outside a page.
  */
@@ -43,7 +50,11 @@ export const readRouteId = (): string | undefined => {
     const router = (globalThis.window as (Window & { __reactRouterDataRouter?: PublishedRouter }) | undefined)
       ?.__reactRouterDataRouter;
     const id = router?.state?.matches?.at(-1)?.route?.id;
-    return typeof id === 'string' && id !== '' ? id : undefined;
+    if (typeof id !== 'string') {
+      return undefined;
+    }
+    const routeId = id.replace(outOfTreeRoutePrefix, '');
+    return routeId === '' ? undefined : routeId;
   } catch {
     return undefined;
   }

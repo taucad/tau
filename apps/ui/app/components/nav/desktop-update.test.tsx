@@ -218,6 +218,38 @@ describe('desktop update control', () => {
     source.emit({ ...current, requestId: 4, revision: 7 });
     expect(await screen.findByRole('dialog', { name: 'Tau update' })).toBeInTheDocument();
   });
+  it('should take one request while downloading and then only say that Tau restarts when it finishes', async () => {
+    const downloading: DesktopUpdateSnapshot = { ...ready, phase: 'downloading', revision: 1 };
+    const source = fixture(Promise.resolve(downloading));
+    render(
+      <SidebarProvider>
+        <DesktopUpdateControl bridge={source.bridge} />
+      </SidebarProvider>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Downloading an update' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Restart when ready' }));
+    await waitFor(() => {
+      expect(source.bridge.install).toHaveBeenCalledOnce();
+    });
+    expect(source.bridge.check).not.toHaveBeenCalled();
+    source.emit({ ...downloading, revision: 2, installWhenReady: true, detail: 'Downloading Tau 1.0.75…' });
+    expect(await screen.findByText(/restart as soon as the download finishes/u)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Restart when ready' })).not.toBeInTheDocument();
+  });
+  it('should send a retry from a failed update as the request to install it', async () => {
+    const source = fixture(Promise.resolve({ ...ready, phase: 'error', revision: 1 }));
+    render(
+      <SidebarProvider>
+        <DesktopUpdateControl bridge={source.bridge} />
+      </SidebarProvider>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Update interrupted' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+    await waitFor(() => {
+      expect(source.bridge.install).toHaveBeenCalledOnce();
+    });
+    expect(source.bridge.check).not.toHaveBeenCalled();
+  });
   it('should offer a download rather than a restart on manual platforms', async () => {
     const source = fixture(Promise.resolve({ ...ready, phase: 'available' }));
     render(

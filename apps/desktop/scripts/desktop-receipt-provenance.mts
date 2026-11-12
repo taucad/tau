@@ -16,11 +16,19 @@ import { usesQualificationBinding, verifyQualificationBinding } from './qualific
 const producer = {
   ci: {
     path: '.github/workflows/desktop-route-qualification.yml',
-    artifact: { all: 'desktop-route-ci-receipts', macos: 'desktop-macos-ci-receipts' },
+    artifact: {
+      all: 'desktop-route-ci-receipts',
+      macos: 'desktop-macos-ci-receipts',
+      linux: 'desktop-linux-ci-receipts',
+    },
   },
   vm: {
     path: '.github/workflows/desktop-route-vm-acceptance.yml',
-    artifact: { all: 'desktop-route-vm-receipts', macos: 'desktop-macos-vm-receipts' },
+    artifact: {
+      all: 'desktop-route-vm-receipts',
+      macos: 'desktop-macos-vm-receipts',
+      linux: 'desktop-linux-vm-receipts',
+    },
   },
 } as const;
 
@@ -138,6 +146,7 @@ export const fetchDesktopQualifiedReceipts = async (
       verifyQualificationBinding(binding, {
         manifest,
         candidate,
+        scope: z.enum(['macos', 'linux']).parse(scope),
         kind: environment,
         runId: admitted.runId,
         workflowCommit: admitted.workflowCommit,

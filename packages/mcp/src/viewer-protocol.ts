@@ -4,7 +4,7 @@
  * The page imports this module, so it holds names, shapes and pure helpers
  * only: no SDK, no zod and no Node built-ins. The runtime's issue and source revision types are imported as types only.
  */
-import type { ComponentDisplay, ViewSettings, WorkbenchView } from '@taucad/workbench';
+import type { ComponentDisplay, ViewFieldValues, ViewSettings, WorkbenchView } from '@taucad/workbench';
 
 import type { KernelIssue, SourceRevision } from '@taucad/runtime/types';
 
@@ -282,11 +282,19 @@ export type TauViewerViewState = Readonly<{
    */
   sourceRevision?: Readonly<{ entry: string; files: Readonly<Record<string, string>> }> | undefined;
   /**
-   * The view's display, grid, field of view, up direction, section and pinned measurements, which the server keeps in
-   * the view record. A page sends it only to a server whose `app_sync` lists it under
-   * {@link TauViewerSyncResult.accepts}; `view_state` leaves it out.
+   * The view's section and pinned measurements, which the server keeps in the view record. A page sends it only to a
+   * server whose `app_sync` lists it under {@link TauViewerSyncResult.accepts}; `view_state` leaves it out. The server
+   * takes no inheritable leaf (display, grid unit, field of view, up direction) from it, even when an older page sends
+   * one: those reach the record only as {@link TauViewerViewState.viewFields}.
    */
-  settings?: TauViewerViewSettings | undefined;
+  settings?: (Pick<TauViewerViewSettings, 'section' | 'measurements'> & Partial<TauViewerViewSettings>) | undefined;
+  /**
+   * The inheritable view leaves (display toggles, grid unit, field of view, up direction) the person set or reset from
+   * the page's controls since the page seeded this model's view, with the values set; a reset sends the format value.
+   * The server writes these leaves and no other, and never takes them from `settings`. A page sends it only to a server
+   * whose `app_sync` lists it under {@link TauViewerSyncResult.accepts}; `view_state` leaves it out.
+   */
+  viewFields?: TauViewerViewFields | undefined;
   /** The mechanism the page's Kinematics pane loaded from the shown GLB. Sent only to a server that `accepts` it. */
   mechanism?: TauViewerMechanism | undefined;
   /** The animation playback. Sent only to a server that `accepts` it. */
@@ -331,6 +339,9 @@ export type TauViewerPoseCommand = Readonly<{
 /** The fields of a `.tau/workbench` view record a viewer owns besides its camera. @public */
 export type TauViewerViewSettings = ViewSettings;
 
+/** The inheritable view leaves a page's person set, keyed by leaf path (`display.grid`, `grid.unit`, ...). @public */
+export type TauViewerViewFields = Readonly<Partial<ViewFieldValues>>;
+
 /**
  * The optional {@link TauViewerViewState} fields this server's `app_sync` takes. Its schema is strict, so a page sends
  * one of them only after a sync result listed it: an older server rejects the whole sync otherwise.
@@ -341,6 +352,7 @@ export const tauViewerAcceptedViewFields = [
   'references',
   'sourceRevision',
   'settings',
+  'viewFields',
   'mechanism',
   'playback',
   'coordinates',

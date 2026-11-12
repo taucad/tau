@@ -1,7 +1,7 @@
 import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { viewSettingsSchema } from '@taucad/workbench';
+import { lengthUnits, viewSettingsSchema } from '@taucad/workbench';
 import { poseModelDescription, poseModelInputSchema } from '@taucad/chat/schemas/tools/pose-model';
 import {
   resolveTauViewerPresentation,
@@ -252,6 +252,22 @@ const viewSchema = z
       .strict()
       .optional(),
     settings: viewSettingsSchema.optional(),
+    viewFields: z
+      .object({
+        upDirection: z.enum(['x', 'y', 'z']),
+        fieldOfView: z.number().min(0).max(90),
+        'display.surfaces': z.boolean(),
+        'display.lines': z.boolean(),
+        'display.gizmo': z.boolean(),
+        'display.grid': z.boolean(),
+        'display.axes': z.boolean(),
+        'display.matcap': z.boolean(),
+        'display.postProcessing': z.boolean(),
+        'grid.unit': z.enum(lengthUnits),
+      })
+      .partial()
+      .strict()
+      .optional(),
     mechanism: z
       .object({
         preserved: z.boolean(),
@@ -637,7 +653,7 @@ export const registerTauMcpViewer = (
       }
       /* The view's settings are the page's record of its display for the server to keep, not what the model reads. */
       const { view: reported, image, captureError } = result;
-      const { settings: _settings, ...view } = reported;
+      const { settings: _settings, viewFields: _viewFields, ...view } = reported;
       return {
         content: [
           {

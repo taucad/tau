@@ -11,7 +11,7 @@ import { createControlsAdapter } from '#graphics/three/adapters/controls-adapter
 import { Scene } from '#graphics/three/scene.jsx';
 import { GraphicsProvider, useCameraConnectorRef, useCameraConsumersRef, useCameraRig } from '#hooks/use-graphics.jsx';
 import { graphicsMachine } from '#machines/graphics.machine.js';
-import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
+import { getGraphicsCameraState } from '#graphics/graphics-camera.js';
 
 vi.mock('#graphics/three/use-geometry-bounds.js', async () => {
   const three = await import('three');

@@ -11,6 +11,12 @@ import { webGpuFallbackReason } from '#graphics/graphics-backend.js';
 import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 import { admitsViewerContext, estimateViewerSurfaceBytes } from '#machines/webgl-context.machine.js';
 
+/** Whether the WebGL context budget admits one more viewer surface of this size, read once when the view mounts. */
+const selectAdmitsViewerSurface = (
+  webglRef: NonNullable<ReturnType<typeof useWebglContextRef>>,
+  surfaceBytes: number,
+): boolean => admitsViewerContext(webglRef.getSnapshot().context, surfaceBytes);
+
 // Three owns one global switch; each requesting WebGPU canvas holds a reference.
 let shaderStackOwners = 0;
 
@@ -96,7 +102,7 @@ function ThreeProviderCanvas({
       return false;
     }
 
-    return !admitsViewerContext(webglRef.getSnapshot().context, initialSurfaceBytes);
+    return !selectAdmitsViewerSurface(webglRef, initialSurfaceBytes);
   });
 
   useEffect(() => {

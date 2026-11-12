@@ -11,7 +11,7 @@ import { createControlsAdapter } from '#graphics/three/adapters/controls-adapter
 import type { CameraPresetId } from '#graphics/three/controls/camera-presets.js';
 import type { CameraInputRouting } from '#graphics/three/controls/camera-wheel-router.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
-import { asCameraActor } from '#services/graphics-camera-registry.js';
+import { asCameraActor } from '#graphics/graphics-camera.js';
 
 type CameraUpdateHandler = (camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void;
 type Ticker = Readonly<{ current: (state: RootState, delta: number) => void }>;

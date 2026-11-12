@@ -19,7 +19,7 @@ import type { RetargetableCameraControls } from '#graphics/three/adapters/contro
 import { graphicsMachine, selectGraphicsViewportGizmoLocked } from '#machines/graphics.machine.js';
 import type { ViewportGizmoAdapterEvent, ViewportGizmoAdapterLogic } from '#machines/viewport-gizmo-gesture.machine.js';
 import type { GraphicsCameraRef } from '#machines/graphics.machine.js';
-import { asCameraActor } from '#services/graphics-camera-registry.js';
+import { asCameraActor } from '#graphics/graphics-camera.js';
 
 type CameraUpdateHandler = (camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void;
 

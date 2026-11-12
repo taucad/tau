@@ -16,14 +16,14 @@ import {
 import type { HeadlessImageJob } from '#services/headless-image.service.js';
 import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
-import { getGraphicsCameraState } from '@taucad/viewer/services/graphics-camera-registry';
+import { getGraphicsCameraState } from '@taucad/viewer/graphics/graphics-camera';
 import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
 import { parseGltfBytes } from '@taucad/viewer/graphics/metadata/gltf-component-manifest';
 import { isSectionRemoved, maxSectionPieces, resolveSectionPieces } from '@taucad/viewer/graphics/section-cuts';
 import type { SectionAxis, SectionCut, SectionPlane } from '@taucad/viewer/graphics/section-cuts';
 
 vi.mock('#machines/await-fresh-render.js', () => ({ awaitFreshRender: vi.fn() }));
-vi.mock('@taucad/viewer/services/graphics-camera-registry', () => ({ getGraphicsCameraState: vi.fn() }));
+vi.mock('@taucad/viewer/graphics/graphics-camera', () => ({ getGraphicsCameraState: vi.fn() }));
 vi.mock('#services/headless-image-debug.js', () => ({ recordHeadlessImageTiming: vi.fn() }));
 
 type ExportImage = (job: HeadlessImageJob) => Promise<ExportFile[] | undefined>;

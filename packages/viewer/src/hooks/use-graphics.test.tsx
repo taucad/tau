@@ -14,7 +14,7 @@ import {
   useSetRenderFrame,
 } from '#hooks/use-graphics.jsx';
 import type { CameraOwnedSettings } from '#graphics/graphics-settings.js';
-import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
+import { getGraphicsCameraState } from '#graphics/graphics-camera.js';
 import { graphicsMachine, selectGraphicsFramed, selectGraphicsFraming } from '#machines/graphics.machine.js';
 import type { FramingPendingPose } from '#machines/framing.machine.js';
 

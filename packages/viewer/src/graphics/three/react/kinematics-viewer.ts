@@ -43,6 +43,10 @@ type KinematicsTestGlobal = typeof globalThis & { __TAU_KINEMATICS_TEST__?: Kine
 
 const testViewers = new Map<string, KinematicsTestViewer>();
 
+/** One unit's playback, read on each render-loop frame. */
+const selectUnitPlayback = (kinematicsRef: KinematicsRef, unitId: string): KinematicsUnitState['playback'] =>
+  getKinematicsUnitState(kinematicsRef.getSnapshot().context, unitId).playback;
+
 const collectComponentObjects = (scene: Object3D, componentId: string): Object3D[] => {
   const objects: Object3D[] = [];
   scene.traverse((object) => {
@@ -126,7 +130,7 @@ function useKinematicsPlaybackClock(unitId: string): void {
   const lastFrameAtRef = useRef<number | undefined>(undefined);
 
   useFrame(() => {
-    const { playback } = getKinematicsUnitState(kinematicsRef.getSnapshot().context, unitId);
+    const playback = selectUnitPlayback(kinematicsRef, unitId);
     if (playback.status !== 'playing' || document.visibilityState === 'hidden') {
       lastFrameAtRef.current = undefined;
       return;

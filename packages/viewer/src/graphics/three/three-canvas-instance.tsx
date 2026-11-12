@@ -44,6 +44,16 @@ const selectGraphicsUpDirection = (graphicsRef: ReturnType<typeof useGraphics>):
 const selectViewCubeLocked = (graphicsRef: ReturnType<typeof useGraphics>): boolean =>
   selectGraphicsViewportGizmoLocked(graphicsRef.getSnapshot());
 
+/** The canvas actor graphics holds for this mount, if it still holds this mount's. */
+const selectMountCanvas = (graphicsRef: ReturnType<typeof useGraphics>, canvasId: string): CanvasRef | undefined => {
+  const { canvas } = graphicsRef.getSnapshot().context;
+  return canvas?.canvasId === canvasId ? canvas.ref : undefined;
+};
+
+/** The phase a canvas actor has reached, kept when its surface detaches so the re-attached one resumes there. */
+const selectCanvasPhase = (canvas: CanvasRef | undefined): CanvasSnapshot['value'] | undefined =>
+  canvas?.getSnapshot().value;
+
 /** Whether this mount's canvas actor still takes events: a detached one stopped with its surface. */
 const selectCanvasRunning = (canvas: CanvasRef | undefined): canvas is CanvasRef =>
   canvas?.getSnapshot().status === 'active';
@@ -167,10 +177,7 @@ export function ThreeCanvasInstance({
   /** Host callbacks run outside React: they address this mount's canvas actor as graphics holds it now. */
   const sendToCanvas = useCallback(
     (event: CanvasEvent): void => {
-      const { canvas } = graphicsRef.getSnapshot().context;
-      if (canvas?.canvasId === canvasId) {
-        canvas.ref.send(event);
-      }
+      selectMountCanvas(graphicsRef, canvasId)?.send(event);
     },
     [canvasId, graphicsRef],
   );
@@ -261,8 +268,7 @@ export function ThreeCanvasInstance({
   const attachSurface = useCallback<RefCallback<HTMLDivElement>>(
     (element) => {
       if (!element) {
-        const { canvas } = graphicsRef.getSnapshot().context;
-        detachedPhase.current = canvas?.canvasId === canvasId ? canvas.ref.getSnapshot().value : undefined;
+        detachedPhase.current = selectCanvasPhase(selectMountCanvas(graphicsRef, canvasId));
         graphicsRef.send({ type: 'canvasDetached', canvasId });
         return;
       }

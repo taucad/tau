@@ -12,7 +12,7 @@ import { createControlsAdapter } from '#graphics/three/adapters/controls-adapter
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { GraphicsCameraRef } from '#machines/graphics.machine.js';
 import { resolveCameraControlProps } from '#graphics/three/controls/camera-controls-feel.js';
-import { asCameraActor } from '#services/graphics-camera-registry.js';
+import { asCameraActor } from '#graphics/graphics-camera.js';
 
 /*
  * PF1 in a real browser: a trackpad pinch (a `ctrlKey` wheel) moves the view's camera as a plain wheel of the same sign

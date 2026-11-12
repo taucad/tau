@@ -303,6 +303,7 @@ function MeasureSession({ adapters }: Readonly<{ adapters: MeasureToolAdapters }
 
 export function MeasureTool(): React.JSX.Element {
   const { camera, gl, scene, invalidate, get: getRootState } = useThree();
+  // Recorded debt (react-policy 5.5): a subscription behind a helper the counter cannot see.
   useEffect(() => subscribeToMatcapLoad(invalidate), [invalidate]);
   const events = useThree((state) => state.events) as EventManager<HTMLElement>;
   // R3F binds pointer events to `eventSource` (the viewer region div), which covers the canvas.

@@ -193,7 +193,7 @@ export function deriveModelInteractionUnitId({
  * @public
  */
 export function getModelInteractionUnitState(
-  context: ModelInteractionContext,
+  context: Pick<ModelInteractionContext, 'unitsById'>,
   unitId: string,
 ): ModelInteractionUnitState {
   return context.unitsById[unitId] ?? emptyUnitState;

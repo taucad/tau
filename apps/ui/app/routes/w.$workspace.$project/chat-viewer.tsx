@@ -30,7 +30,7 @@ import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import { viewTabTitle } from '#workbench-records/view-titles.js';
 import { CadProvider, useCad, useCadSelector } from '#hooks/use-cad.js';
 import { GraphicsProvider, useGraphics, useGraphicsSelector } from '@taucad/viewer/hooks/use-graphics';
-import type { ViewCameraSeed } from '@taucad/viewer/services/graphics-camera-registry';
+import type { ViewCameraSeed } from '@taucad/viewer/graphics/graphics-camera';
 import { ViewerIssues } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';

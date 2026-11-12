@@ -14,7 +14,7 @@ import { normalizeImageLabel } from '@taucad/image/label';
 import { selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
-import { getGraphicsCameraState } from '@taucad/viewer/services/graphics-camera-registry';
+import { getGraphicsCameraState } from '@taucad/viewer/graphics/graphics-camera';
 import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
 import { getKinematicsUnitState } from '@taucad/viewer/machines/kinematics.machine';
 import { prepareCapturePresentation } from '@taucad/ui-core/services/headless-capture-presentation';

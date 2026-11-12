@@ -596,7 +596,6 @@ export type GraphicsEvent =
   | { type: 'measurementCutChanged' }
   | { type: 'addMeasurementRecord'; record: MeasurementRecord }
   | { type: 'resolveMeasurementRecord'; id: string; patch: Partial<MeasurementRecord> }
-  | { type: 'cancelPendingMeasurements'; reason: string }
   | { type: 'cancelCurrentMeasurement' }
   | { type: 'clearMeasurement'; payload: string } // Measurement id
   | { type: 'clearAllMeasurements' }
@@ -834,7 +833,6 @@ export const graphicsEventTypes = [
   'measurementCutChanged',
   'addMeasurementRecord',
   'resolveMeasurementRecord',
-  'cancelPendingMeasurements',
   'cancelCurrentMeasurement',
   'clearMeasurement',
   'clearAllMeasurements',
@@ -2439,15 +2437,6 @@ const graphicsMachineDefinition = setup({
             measurements: context.measurements.map((measurement) =>
               measurement.id === event.id && measurement.status === 'pending'
                 ? { ...measurement, ...event.patch }
-                : measurement,
-            ),
-          }),
-        },
-        cancelPendingMeasurements: {
-          context: ({ context, event }) => ({
-            measurements: context.measurements.map((measurement) =>
-              measurement.status === 'pending'
-                ? { ...measurement, status: 'unavailable', unavailableReason: event.reason }
                 : measurement,
             ),
           }),

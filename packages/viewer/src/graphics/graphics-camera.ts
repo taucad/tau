@@ -1,5 +1,5 @@
 import type { Actor, ActorRefFrom, SnapshotFrom } from 'xstate';
-import type { CameraState } from '@taucad/camera';
+import type { CameraState, CameraVector } from '@taucad/camera';
 import type { CameraDriverSnapshot, CameraMachine } from '@taucad/camera/machine';
 import type { RenderFrame } from '@taucad/spatial';
 import { createThreeCameraRig } from '@taucad/three/camera';
@@ -9,7 +9,7 @@ import type { GraphicsCameraRef, graphicsMachine } from '#machines/graphics.mach
 
 /*
  * The view's camera is the graphics actor's `camera` child (charter D5, I11): its lifetime is structural, so there is
- * no session registry. What was the registry's is now a type or a selector of the graphics snapshot.
+ * no session registry. What the registry held is a type here, or a selector of the graphics snapshot or the camera's.
  */
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
@@ -76,3 +76,17 @@ export const getGraphicsCameraState = (graphicsRef: GraphicsActorRef | undefined
   rig.dispose();
   return state;
 };
+
+/**
+ * Reads a camera's current view direction at the moment an event needs it, such as a section added or a plane
+ * changed facing away from the viewer.
+ *
+ * @param camera - The camera actor, as a rig or the graphics actor's camera presents it.
+ * @returns The view direction.
+ * @public
+ */
+export const selectCameraViewDirection = (
+  camera: Readonly<{
+    getSnapshot: () => Readonly<{ context: Readonly<{ view: Readonly<{ direction: CameraVector }> }> }>;
+  }>,
+): CameraVector => camera.getSnapshot().context.view.direction;

@@ -18,6 +18,7 @@ const baseConfig: UserConfig = {
     'src/components/chart.tsx',
     'src/components/checkbox.tsx',
     'src/components/client-only.tsx',
+    'src/components/coach-mark.tsx',
     'src/components/collapsible.tsx',
     'src/components/combobox-responsive.tsx',
     'src/components/command.tsx',

@@ -12,6 +12,10 @@ type ChatActivityGroupProps = {
   readonly isActive?: boolean;
   /** A row inside is still running; a collapsed header shows that instead of its family icon. */
   readonly hasActiveRows?: boolean;
+  /** The header button, for a host that points at this row (the product tour). */
+  readonly triggerRef?: React.Ref<HTMLButtonElement>;
+  /** Called when the person opens the row. */
+  readonly onOpen?: () => void;
 };
 
 /** One semantic summary over a flat, chronological group of tool rows. */
@@ -21,6 +25,8 @@ export function ChatActivityGroup({
   icon: Icon = Wrench,
   isActive = false,
   hasActiveRows = false,
+  triggerRef,
+  onOpen,
 }: ChatActivityGroupProps): React.JSX.Element {
   const [userOpen, setUserOpen] = useState<boolean | undefined>(undefined);
   const isOpen = userOpen ?? isActive;
@@ -28,9 +34,18 @@ export function ChatActivityGroup({
   const isBusy = hasActiveRows && !isOpen;
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setUserOpen}>
+    <Collapsible
+      open={isOpen}
+      onOpenChange={(isNowOpen) => {
+        setUserOpen(isNowOpen);
+        if (isNowOpen) {
+          onOpen?.();
+        }
+      }}
+    >
       <CollapsibleTrigger asChild>
         <Button
+          ref={triggerRef}
           variant='ghost'
           size='xs'
           aria-busy={isBusy || undefined}

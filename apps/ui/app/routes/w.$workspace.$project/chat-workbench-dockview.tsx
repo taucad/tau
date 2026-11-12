@@ -146,6 +146,7 @@ import type {
   FileViewerRenderRequest,
   ResolvedFileViewer,
 } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
+import { useTourAnchor } from '#components/tour/tour-anchors.js';
 
 const reportEditorSaveFailure = async (completion: Promise<void>, path: string): Promise<void> => {
   try {
@@ -783,12 +784,14 @@ export function WorkbenchLeftActions(properties: IDockviewHeaderActionsProps): R
   const isTauDebugEnabled = useFeature('tauDebug');
   const profile = useContext(WorkbenchProfileContext);
   const groups = visibleWorkbenchSurfaceGroups(isTauDebugEnabled, profile);
+  /* Opens the Parameters and Export panes, so the product tour places those tips here while the pane is closed. */
+  const openTabAnchor = useTourAnchor('workbench-open-tab');
 
   return (
     <div className='flex h-full items-center gap-1'>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <DockviewPaneAction aria-label='Open workbench tab'>
+          <DockviewPaneAction ref={openTabAnchor} aria-label='Open workbench tab'>
             <Plus className='size-3.5' />
           </DockviewPaneAction>
         </DropdownMenuTrigger>
@@ -890,8 +893,31 @@ export const getWorkbenchTabIcon: DockviewTabIconRenderer = (properties) => {
         : filePath !== undefined && isPrinterFileName(filePath)
           ? Printer
           : surface?.icon;
+  if (surface?.id === 'export' && Icon !== undefined) {
+    return <ExportTabIcon icon={Icon} />;
+  }
   return Icon ? <Icon aria-hidden className='size-3 shrink-0' /> : undefined;
 };
+
+/**
+ * The Export tab's glyph, which is also where the product tour's Export tip is placed: the tab itself is drawn by
+ * Dockview and takes no ref.
+ *
+ * @param properties - The glyph.
+ * @returns The glyph, registered as the tour's Export anchor.
+ */
+function ExportTabIcon({
+  icon: Icon,
+}: {
+  readonly icon: React.ComponentType<{ className?: string }>;
+}): React.JSX.Element {
+  const exportAnchor = useTourAnchor('export');
+  return (
+    <span ref={exportAnchor} className='inline-flex shrink-0'>
+      <Icon aria-hidden className='size-3 shrink-0' />
+    </span>
+  );
+}
 
 export const WorkbenchDockviewTab = withTabContextMenu(WorkbenchTabContextMenu, {
   getIcon: getWorkbenchTabIcon,

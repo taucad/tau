@@ -10,15 +10,21 @@ const host = vi.hoisted(() => ({ isDesktop: false }));
 vi.mock('#lib/build-target.js', () => ({ isDesktopTarget: () => host.isDesktop }));
 const connectWorkspace = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ connectWorkspace }) }));
+const listing = vi.hoisted(() => ({
+  projects: [] as Array<{ id: string; lastActivityAt: number; slugs?: { workspaceSlug: string; projectSlug: string } }>,
+}));
+vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => ({ projects: listing.projects }) }));
 
 const { default: WelcomeRoute } = await import('#routes/welcome/route.js');
 const { personRecordStores } = await import('#preferences/person-record.store.js');
+const { tourSession } = await import('#components/tour/tour-session.js');
 
 const renderSetup = (path = '/welcome?step=how'): ReturnType<typeof createMemoryRouter> => {
   const router = createMemoryRouter(
     [
       { path: '/welcome', element: <WelcomeRoute /> },
       { path: '/', element: <p>Home</p> },
+      { path: '/w/:workspace/:project', element: <p>Project</p> },
     ],
     { initialEntries: [path] },
   );
@@ -33,6 +39,8 @@ describe('setup step 4 and Finish', () => {
     flags.partsWarehouse = false;
     host.isDesktop = false;
     connectWorkspace.mockReset();
+    listing.projects = [];
+    tourSession.reset();
   });
 
   it("shows Design, Verify and Build cards in that order with the marketing site's copy", () => {
@@ -84,7 +92,30 @@ describe('setup step 4 and Finish', () => {
     renderSetup();
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     expect(screen.getByText('You have taken the tour')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Take it again' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Take it again' })).toBeDisabled();
+  });
+
+  it('takes the tour again in the most recently active project, from step 4 and from Finish', async () => {
+    personRecordStores.onboarding.write({ ended: 'completed', seenAdd: ['ask'] });
+    listing.projects = [
+      { id: 'old', lastActivityAt: 1, slugs: { workspaceSlug: 'acme', projectSlug: 'old' } },
+      { id: 'new', lastActivityAt: 2, slugs: { workspaceSlug: 'acme', projectSlug: 'bracket' } },
+    ];
+    const user = userEvent.setup();
+    const router = renderSetup();
+    await user.click(screen.getByRole('button', { name: 'Take it again' }));
+
+    expect(router.state.location.pathname).toBe('/w/acme/bracket');
+    expect(tourSession.read().isReplay).toBe(true);
+    /* A replay stores nothing: what the guided tour stored is unchanged. */
+    expect(personRecordStores.onboarding.read().tour).toMatchObject({ seen: ['ask'], ended: 'completed' });
+
+    tourSession.reset();
+    await router.navigate('/welcome?step=how');
+    await user.click(await screen.findByRole('button', { name: 'Finish' }));
+    await user.click(screen.getByRole('button', { name: 'Take it again' }));
+    expect(router.state.location.pathname).toBe('/w/acme/bracket');
+    expect(tourSession.read().isReplay).toBe(true);
   });
 
   it('says the tour was taken in the summary once it has ended, not that tips will appear', async () => {

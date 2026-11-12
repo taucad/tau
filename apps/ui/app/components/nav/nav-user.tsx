@@ -37,6 +37,7 @@ import { NavBillingItem, NavCreditsMeter } from '#cloud/nav-billing.js';
 import { useFeature } from '#flags/use-feature.js';
 import { setupEntryCopy } from '#components/onboarding/setup-copy.js';
 import { setupHref } from '#components/onboarding/setup-entry.js';
+import { TourHelpMenuItem } from '#components/tour/tour-menu.js';
 
 /**
  * Nav user button: delegates avatar, sign-in/up/out chrome to the registry
@@ -73,6 +74,8 @@ export function NavUser(): React.JSX.Element {
               {setupEntryCopy.howTauWorks}
             </Link>
           </DropdownMenuItem>,
+          /* The product tour's one item, which changes with the tour's state. */
+          <TourHelpMenuItem key='tour' />,
         ]
       : []),
     ...(isDesktopTarget()

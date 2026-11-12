@@ -3,6 +3,7 @@ import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { PartThumbnailProvider } from '#providers/part-thumbnail-provider.js';
 import { PartGalleryProvider } from '#components/geometry/cad/part-gallery.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
+import { TourHost } from '#components/tour/tour-host.js';
 
 /* B-27, D-UI-16: each layout is its own chunk, so a phone never loads the
  * desktop shell (the dockview workbench and its panels) and a desktop never
@@ -46,7 +47,10 @@ export const ChatInterface = memo(function (): React.JSX.Element {
   return (
     <PartThumbnailProvider>
       <PartGalleryProvider>
-        <Suspense fallback={<WorkspaceSkeleton />}>{isClientRender ? layout : <WorkspaceSkeleton />}</Suspense>
+        {/* The product tour's anchors and live region; the tour itself is a chunk loaded only when it runs. */}
+        <TourHost>
+          <Suspense fallback={<WorkspaceSkeleton />}>{isClientRender ? layout : <WorkspaceSkeleton />}</Suspense>
+        </TourHost>
       </PartGalleryProvider>
     </PartThumbnailProvider>
   );

@@ -38,6 +38,9 @@ vi.mock('#routes/w.$workspace.$project/focused-chat-gate.js', () => ({
   ChatHistoryGate: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
   ChatInterfaceSessionGate: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
 }));
+/* The product tour is its own chunk, loaded only while a tour runs; with none wanted it is never requested. */
+vi.mock('#components/tour/tour-runtime.js', panel('TourRuntime', 'Tour'));
+vi.mock('#components/layout/command-palette.js', () => ({ useCommandPaletteItems: () => undefined }));
 vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', () => ({ ViewerDockview: () => null }));
 vi.mock('#routes/w.$workspace.$project/chat-history.js', panel('ChatHistory', 'Chat history'));
 vi.mock('#routes/w.$workspace.$project/chat-file-tree.js', panel('ChatFileTree', 'Files'));

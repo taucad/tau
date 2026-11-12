@@ -9,6 +9,8 @@ vi.mock('#flags/use-feature.js', () => ({ useFeature: () => true }));
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ connectWorkspace: vi.fn() }) }));
 const capture = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture }) }));
+/* "Take it again" reads the project listing; these suites have no project. */
+vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => ({ projects: [] }) }));
 
 const { default: WelcomeRoute } = await import('#routes/welcome/route.js');
 const { personRecordStores } = await import('#preferences/person-record.store.js');

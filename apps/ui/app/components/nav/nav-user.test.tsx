@@ -52,6 +52,13 @@ vi.mock('#flags/use-feature.js', async (importOriginal) => {
   };
 });
 
+/* Help's tour item opens the most recently active project for a replay. */
+vi.mock('#hooks/use-projects.js', () => ({
+  useProjects: () => ({
+    projects: [{ id: 'p1', lastActivityAt: 1, slugs: { workspaceSlug: 'acme', projectSlug: 'bracket' } }],
+  }),
+}));
+
 vi.mock('#hooks/use-network-connectivity.js', () => ({
   useNetworkConnectivity: useNetworkConnectivityMock,
 }));
@@ -176,6 +183,7 @@ describe('NavUser', () => {
 
     expect(screen.getByRole('link', { name: 'Set up Tau' })).toHaveAttribute('href', '/welcome?entry=help');
     expect(screen.getByRole('link', { name: 'How Tau works' })).toHaveAttribute('href', '/welcome?entry=help&step=how');
+    expect(screen.getByRole('menuitem', { name: 'Take the tour' })).toBeInTheDocument();
   });
 
   it('should leave the setup entries out of Help with onboarding off', () => {
@@ -183,6 +191,7 @@ describe('NavUser', () => {
 
     expect(screen.queryByRole('link', { name: 'Set up Tau' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'How Tau works' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Take the tour' })).not.toBeInTheDocument();
   });
 
   /* On a phone the Help menu opens in a drawer. */

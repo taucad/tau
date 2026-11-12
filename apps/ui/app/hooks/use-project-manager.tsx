@@ -104,6 +104,7 @@ import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-crea
 import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { tauCloudIntent, withNamedLock } from '#hooks/use-cloud-projects.js';
+import { prepareFirstProjectTour } from '#components/tour/first-project-tour.js';
 import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { readLocalProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
 import type { ProjectOpenOutcome } from '@taucad/ui-core/lib/project-open-performance';
@@ -3404,6 +3405,30 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [chatStore, invalidateProjectsList, touchProject],
   );
 
+  /* A newcomer's first project asks for the product tour: decided before the project exists, stored once it does. */
+  const createProjectAskingForTour = useCallback(
+    async (options: CreateProjectOptions): Promise<CreatedProject> => {
+      const askForTour = await prepareFirstProjectTour({
+        async readProjectCount() {
+          const listing = await getProjectListing({ includeDeleted: true });
+          return listing.projects.length;
+        },
+        async readAccount() {
+          const { authClient } = await import('#lib/auth-client.js');
+          const { data, error } = await authClient.getSession();
+          if (error !== null) {
+            throw new Error('The session could not be read');
+          }
+          return data === null ? { isSignedIn: false } : { isSignedIn: true, createdAt: data.user.createdAt };
+        },
+      });
+      const created = await createProject(options);
+      askForTour?.();
+      return created;
+    },
+    [createProject, getProjectListing],
+  );
+
   const value = useMemo<ProjectManagerContextType>(() => {
     return {
       isLoading,
@@ -3418,7 +3443,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       retryWorkspaceConnection,
       refreshWorkspaceCatalog,
       repairWorkspaceBindings,
-      createProject,
+      createProject: createProjectAskingForTour,
       prepareImportStaging,
       ownsImportStaging,
       updateProject,
@@ -3474,7 +3499,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     retryWorkspaceConnection,
     refreshWorkspaceCatalog,
     repairWorkspaceBindings,
-    createProject,
+    createProjectAskingForTour,
     prepareImportStaging,
     ownsImportStaging,
     updateProject,

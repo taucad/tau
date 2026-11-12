@@ -18,6 +18,7 @@ import {
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import { useTourAnchors } from '#components/tour/tour-anchors.js';
 import { ChatTodoList } from '#components/chat/chat-todo-list.js';
 import { ChatQuestionQueue } from '#components/chat/chat-question-queue.js';
 import { ChatQuestionsProvider } from '#components/chat/chat-questions-context.js';
@@ -174,6 +175,9 @@ const ExpandedChatHistory = memo(function ({
   const isMobile = useIsMobile();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatTextareaRef = useRef<ChatTextareaHandle>(null);
+  /* The product tour points at the composer; the region is also the foot of the chat lane, where a tip about a
+   * transcript row that has scrolled away is placed. */
+  const composerAnchor = useTourAnchors('composer', 'chat-lane');
   const focusComposer = useCallback(() => {
     chatTextareaRef.current?.focus();
   }, []);
@@ -323,6 +327,7 @@ const ExpandedChatHistory = memo(function ({
               tray directly above the composer; the task list is keyed by chat so
               its fold never carries across chats (D8, agent questions D8). */}
             <div
+              ref={composerAnchor}
               role='region'
               aria-label='Chat composer'
               className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'

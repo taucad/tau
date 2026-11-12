@@ -1,6 +1,7 @@
 import { Box, LayoutGrid, MessageCircle, SlidersHorizontal } from 'lucide-react';
 import { useId } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
+import { useTourAnchor } from '#components/tour/tour-anchors.js';
 
 const destinations = [
   { id: 'chat', label: 'Chat', icon: MessageCircle },
@@ -38,6 +39,13 @@ export function MobileWorkbenchNavigation({
   readonly cues?: Partial<Record<Destination, MobileWorkbenchDestinationCue>>;
 }): React.JSX.Element {
   const cueId = useId();
+  /* One region shows at a time on a phone, so the product tour places a tip beside the entry for its target's region. */
+  const tourAnchors = {
+    chat: useTourAnchor('mobile-tab-chat'),
+    parameters: useTourAnchor('mobile-tab-parameters'),
+    model: useTourAnchor('mobile-tab-model'),
+    all: useTourAnchor('mobile-tab-all'),
+  };
   return (
     <nav
       aria-label='Workbench'
@@ -56,6 +64,7 @@ export function MobileWorkbenchNavigation({
         return (
           <button
             key={id}
+            ref={tourAnchors[id]}
             type='button'
             aria-current={active === id ? 'page' : undefined}
             aria-describedby={cue ? `${cueId}-${id}` : undefined}

@@ -391,6 +391,46 @@ describe('useViewerShortcuts', () => {
       expect(announcementsOf('Viewer')).toEqual([isGridShown ? 'Grid hidden' : 'Grid shown', 'Orthographic']);
     });
 
+    it('should toggle a second G or P from the value still being written, not the stale one shown', async () => {
+      const actor = startGraphics();
+      const writes: Array<PromiseWithResolvers<boolean>> = [];
+      const set = vi.fn(async () => {
+        const write = Promise.withResolvers<boolean>();
+        writes.push(write);
+        return write.promise;
+      });
+      const user = userEvent.setup();
+      renderViewers(['Viewer', actor, { set, reset: vi.fn() }]);
+      hoverViewer('Viewer');
+      const isGridShown = actor.getSnapshot().context.enableGrid;
+      const fieldOfView = actor.getSnapshot().context.cameraRef.getSnapshot().context.view.requestedVerticalFieldOfView;
+
+      await user.keyboard('gg');
+      await user.keyboard('pp');
+
+      expect(set.mock.calls).toEqual([
+        ['display.grid', !isGridShown],
+        ['display.grid', isGridShown],
+        ['fieldOfView', 0],
+        ['fieldOfView', fieldOfView],
+      ]);
+
+      // A refused write is forgotten, so the next press reads graphics again.
+      for (const write of writes) {
+        write.resolve(true);
+      }
+      await user.keyboard('g');
+      const refused = writes.at(-1)!;
+      refused.resolve(false);
+      await refused.promise;
+      await Promise.resolve();
+      await user.keyboard('g');
+      expect(set.mock.calls.slice(-2)).toEqual([
+        ['display.grid', !isGridShown],
+        ['display.grid', !isGridShown],
+      ]);
+    });
+
     it('should keep sending F, S and M to graphics with the host view commands', async () => {
       const actor = startGraphics();
       const send = recordSends(actor);

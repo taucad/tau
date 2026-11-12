@@ -48,8 +48,11 @@ export type ViewerViewFieldSource = 'tau' | 'person' | 'view';
  * @public
  */
 export type ViewerViewFields = Readonly<{
-  /** Set a leaf in this view. */
-  set: <Leaf extends ViewerViewFieldPath>(leaf: Leaf, value: ViewerViewFieldValues[Leaf]) => void;
+  /**
+   * Set a leaf in this view. A host whose write completes later returns a promise of whether it was saved, so a key
+   * pressed again before graphics shows the value toggles from the value being written, not the one still shown.
+   */
+  set: <Leaf extends ViewerViewFieldPath>(leaf: Leaf, value: ViewerViewFieldValues[Leaf]) => void | Promise<boolean>;
   /** Reset a leaf in this view, so it inherits again. */
   reset: (leaf: ViewerViewFieldPath) => void;
   /** Where a leaf's shown value comes from, for the menu's markers. */

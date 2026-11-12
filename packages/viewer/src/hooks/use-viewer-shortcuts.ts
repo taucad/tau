@@ -1,6 +1,6 @@
 import { useId, useLayoutEffect, useMemo, useRef } from 'react';
 import { useViewerViewFields } from '#cad/viewer-view-fields.jsx';
-import type { ViewerViewFields } from '#cad/viewer-view-fields.jsx';
+import type { ViewerViewFieldValues, ViewerViewFields } from '#cad/viewer-view-fields.jsx';
 import type { RefObject } from 'react';
 import { useActorRef } from '@xstate/react';
 import { createCallbackLogic } from 'xstate';
@@ -94,6 +94,72 @@ function selectShortcutGridShown(graphicsRef: GraphicsActorRef): boolean {
   return graphicsRef.getSnapshot().context.enableGrid;
 }
 
+/** A G or P value the host is still writing, per graphics actor: what the next press toggles from. */
+type PendingShortcutWrites = Map<'display.grid' | 'fieldOfView', boolean | number>;
+const pendingShortcutWrites = new WeakMap<GraphicsActorRef, PendingShortcutWrites>();
+
+/* The value a press toggles from: the one still being written, until graphics shows it, else the one shown. */
+function toggledFrom<Value extends boolean | number>(
+  graphicsRef: GraphicsActorRef,
+  leaf: 'display.grid' | 'fieldOfView',
+  shown: Value,
+): Value {
+  const pending = pendingShortcutWrites.get(graphicsRef);
+  const value = pending?.get(leaf);
+  if (value === undefined || value === shown) {
+    pending?.delete(leaf);
+    return shown;
+  }
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Each leaf only ever holds its own value type.
+  return value as Value;
+}
+
+/* Forgets a pending value once its write is refused or fails; a saved one is forgotten when graphics shows it. */
+async function settleShortcutWrite({
+  graphicsRef,
+  leaf,
+  value,
+  written,
+}: Readonly<{
+  graphicsRef: GraphicsActorRef;
+  leaf: 'display.grid' | 'fieldOfView';
+  value: boolean | number;
+  written: Promise<boolean>;
+}>): Promise<void> {
+  let saved = false;
+  try {
+    saved = await written;
+  } catch {
+    // The host reports its own failure.
+  }
+  const pending = pendingShortcutWrites.get(graphicsRef);
+  if (!saved && pending?.get(leaf) === value) {
+    pending.delete(leaf);
+  }
+}
+
+/* Issues one G or P value as the view's command, remembering it until graphics shows it or the write fails. */
+function issueShortcutWrite<Leaf extends 'display.grid' | 'fieldOfView'>({
+  viewFields,
+  graphicsRef,
+  leaf,
+  value,
+}: Readonly<{
+  viewFields: ViewerViewFields;
+  graphicsRef: GraphicsActorRef;
+  leaf: Leaf;
+  value: ViewerViewFieldValues[Leaf];
+}>): void {
+  const written = viewFields.set(leaf, value);
+  if (written === undefined) {
+    return;
+  }
+  const pending: PendingShortcutWrites = pendingShortcutWrites.get(graphicsRef) ?? new Map();
+  pendingShortcutWrites.set(graphicsRef, pending);
+  pending.set(leaf, value);
+  void settleShortcutWrite({ graphicsRef, leaf, value, written });
+}
+
 /** G or P with the host's view commands: the same decision graphics makes, issued as the view's command. */
 function setViewField({
   viewFields,
@@ -107,14 +173,20 @@ function setViewField({
   announce: (phrase: string) => void;
 }>): void {
   if (shortcut === 'grid') {
-    const isShown = !selectShortcutGridShown(graphicsRef);
-    viewFields.set('display.grid', isShown);
+    const isShown = !toggledFrom(graphicsRef, 'display.grid', selectShortcutGridShown(graphicsRef));
+    issueShortcutWrite({ viewFields, graphicsRef, leaf: 'display.grid', value: isShown });
     announce(outcomePhrases[isShown ? 'gridShown' : 'gridHidden']);
     return;
   }
   const camera = selectShortcutCamera(graphicsRef);
-  const isOrthographic = camera.requestedVerticalFieldOfView === 0;
-  viewFields.set('fieldOfView', isOrthographic ? camera.lastPerspectiveVerticalFieldOfView : 0);
+  const fieldOfView = toggledFrom(graphicsRef, 'fieldOfView', camera.requestedVerticalFieldOfView);
+  const isOrthographic = fieldOfView === 0;
+  /* Back to the perspective still shown when an orthographic write is pending, else the last one graphics kept. */
+  const perspective =
+    camera.requestedVerticalFieldOfView === 0
+      ? camera.lastPerspectiveVerticalFieldOfView
+      : camera.requestedVerticalFieldOfView;
+  issueShortcutWrite({ viewFields, graphicsRef, leaf: 'fieldOfView', value: isOrthographic ? perspective : 0 });
   announce(outcomePhrases[isOrthographic ? 'perspective' : 'orthographic']);
 }
 

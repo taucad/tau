@@ -95,8 +95,8 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
   const get = useThree((state) => state.get);
   const invalidate = useThree((state) => state.invalidate);
   // The drawing is an external Three resource: one per backend, disposed when it is replaced or the handles unmount.
-  // StrictMode's second effect pass builds a new one, which the section input then starts around. A section input
-  // stops a microtask after its unmount, so it checks `isRetired` before it draws into a disposed drawing.
+  // StrictMode's second effect pass builds a new one, which the section input then starts around. Graphics stops the
+  // section input when the handles' ref is cleared; it still checks `isRetired`, for a drawing disposed before then.
   const [drawing, setDrawing] = useState<Drawing>();
   useLayoutEffect(() => {
     const handles = createSectionHandles({ backend });

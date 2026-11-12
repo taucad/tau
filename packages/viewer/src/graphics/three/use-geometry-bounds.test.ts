@@ -123,11 +123,14 @@ describe('useGeometryBounds', () => {
   it('should measure a committed presentation that keeps its key', () => {
     const { innerRef, outerRef } = createSceneReferences(10);
     const hook = renderHook(() => useGeometryBounds(innerRef, outerRef));
+    // The demand-driven canvas draws, and so measures, only when asked.
+    expect(mocks.invalidate).toHaveBeenCalledOnce();
     act(() => mocks.frame?.());
     expect(measurements()).toHaveLength(1);
 
     mocks.presentedRevision = 2;
     hook.rerender();
+    expect(mocks.invalidate).toHaveBeenCalledTimes(2);
     act(() => mocks.frame?.());
     expect(measurements()).toHaveLength(2);
     expect(measurements().at(-1)).toMatchObject({ key: 'geometry-key', bounds: { min: [9, -2, -3], max: [11, 2, 3] } });
@@ -321,7 +324,9 @@ describe('useGeometryBounds', () => {
 
     mocks.geometryKey = 'replacement-geometry';
     innerRef.current!.children[0]!.position.x = 30;
+    mocks.invalidate.mockClear();
     hook.rerender();
+    expect(mocks.invalidate).toHaveBeenCalledOnce();
     act(() => mocks.frame?.());
     expect(measurements().at(-1)).toMatchObject({
       key: 'replacement-geometry',

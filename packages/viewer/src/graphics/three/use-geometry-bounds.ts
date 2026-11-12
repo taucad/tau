@@ -112,7 +112,8 @@ export function useGeometryBounds(
   const lastPoseRevisionRef = useRef(settledPoseRevision);
 
   // Each committed presentation is measured, so a new entry whose geometry keeps its key (an identical artifact)
-  // still gets its first frame. The geometry still on screen is never measured for an entry it does not belong to.
+  // still gets its first frame. An entry switch alone measures nothing; a remount or a settled pose before the new
+  // entry's presentation commits still measures the geometry on screen, as before this lane.
   const presentedRevision = useGraphicsSelector(selectPresentedRevision);
   const lastPresentedRevisionRef = useRef(presentedRevision);
 

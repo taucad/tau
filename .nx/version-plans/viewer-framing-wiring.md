@@ -14,5 +14,5 @@ Deliberate changes (D14):
 - Focus frames the component with one `frameBounds{source: 'focus'}` change that keeps the scene bounds; clearing focus sends nothing.
 - A section input stops when its handles unmount, at once, rather than one microtask later.
 - Bounds are measured in the frame callback before each draw, and each committed presentation or settled pose asks the demand-driven canvas for that frame; no React effect sends the measurement.
-- A new entry is first framed on its own committed presentation, never on the geometry still on screen from the entry it replaces. Fit view does nothing while an entry waits for that presentation (a build that fails keeps the previous geometry on screen and the entry unframed).
+- An entry switch alone measures nothing: a new entry is first framed on its own committed presentation, unless a remount or a settled pose re-measures the geometry still on screen first, as before. Fit view does nothing while an entry waits for that presentation (a build that fails keeps the previous geometry on screen and the entry unframed).
 - Fit view fits against the viewport the controls adapter last published to the camera and the stage of the last measurement.

@@ -60,7 +60,8 @@ const selectViewFramingIdentity = (graphicsRef: GraphicsActorRef): string | unde
  * pose is not re-armed over the live one. The same identity again is a re-delivery and sends nothing.
  *
  * ponytail: sent while the provider renders, where the framing record was latched, until the view's binding (G6b)
- * names the entry from its record. No component renders from the framing actor (its selectors are read when needed), so the send re-renders none.
+ * names the entry from its record. No component renders from the framing actor (its selectors are read when
+ * needed), so the send re-renders none.
  */
 const deliverSeedEntry = (graphicsRef: GraphicsActorRef, seed: ViewCameraSeed | undefined): void => {
   const identity = seed?.identity;

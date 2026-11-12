@@ -637,7 +637,7 @@ describe('SectionHandles', () => {
         drag: planeDrag,
         end: async () => {
           cleanup();
-          // The section input stops a microtask after its unmount, as every `useActorRef` actor does.
+          // Graphics stops the section input when the handles' ref is cleared; one microtask settles any late send.
           await Promise.resolve();
         },
       },

@@ -8,6 +8,7 @@ import type { ExportFile } from '@taucad/types';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
+import { consumeBranchControl, getBranchControlRequest } from '#routes/w.$workspace.$project/revision-pane-requests.js';
 import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 
 let registeredItems: CommandPaletteItem[] = [];
@@ -71,6 +72,7 @@ vi.mock('#hooks/use-project.js', () => ({
     }
     const geometryUnits = new Map([['main.ts', cadActor]]);
     return {
+      projectId: 'project-1',
       geometryUnits,
       mainEntryPath: 'main.ts',
       projectRef: {
@@ -344,6 +346,45 @@ describe('ProjectCommandPaletteItems', () => {
       expect(openPanel).toHaveBeenLastCalledWith(panelId);
     }
     expect(openPanel).toHaveBeenCalledTimes(expectedPanels.size);
+  });
+
+  /* C2: the palette names History's verbs in the copy table's words and opens the control History owns. */
+  it('offers Create version…, Switch branch and New branch… for the entry the files are at', () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: 'rev-4',
+      branches: [
+        ...revisionStatusHarness.status.branches,
+        { name: 'enclosure-v2', head: 'rev-4', checkoutId: 'co-2', checkoutRoot: '/checkouts/co-2', leaseChatIds: [] },
+      ],
+    };
+    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    const item = (id: string): CommandPaletteItem | undefined => registeredItems.find((entry) => entry.id === id);
+
+    expect(['create-version', 'switch-branch', 'new-branch'].map((id) => [item(id)?.label, item(id)?.visible])).toEqual(
+      [
+        ['Create version…', true],
+        ['Switch branch', true],
+        ['New branch…', true],
+      ],
+    );
+    expect(item('connect-tau-cloud')?.label).toBe('Back up to Tau Cloud');
+    item('switch-branch')?.action?.();
+    expect(openPanel).toHaveBeenLastCalledWith('revisions');
+    expect(getBranchControlRequest('project-1')).toBe('switch-branch');
+    item('new-branch')?.action?.();
+    expect(getBranchControlRequest('project-1')).toBe('new-branch');
+    consumeBranchControl('project-1');
+  });
+
+  it('offers no branch or version verb before anything is saved, or to a viewer', () => {
+    revisionStatusHarness.role = 'read';
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
+    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+
+    expect(registeredItems.find((item) => item.id === 'create-version')?.visible).toBe(false);
+    expect(registeredItems.find((item) => item.id === 'new-branch')?.visible).toBe(false);
+    expect(registeredItems.find((item) => item.id === 'switch-branch')?.visible).toBe(false);
   });
 
   it('routes backup choices through Revisions and uses the shared save request', () => {

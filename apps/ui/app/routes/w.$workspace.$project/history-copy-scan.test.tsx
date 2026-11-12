@@ -170,7 +170,7 @@ const line: readonly RevisionRow[] = [
   row({
     revisionId: 'rev-2',
     revisionNumber: 2,
-    summary: 'Agent turn t-1',
+    summary: 'Agent change',
     source: 'agent',
     turnId: 't-1',
     capture: 'turn',

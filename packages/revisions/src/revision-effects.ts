@@ -690,6 +690,34 @@ const heldMarks = new Map<string, Promise<void>>();
 const recordSections = new ResourceQueue();
 /** The trunk: a project's live tree starts on it and a turn records onto it. */
 const mainBranch = 'main';
+
+/* The generated titles of a turn's two cuts when nothing better names them (A5, Q9). */
+const autosaveTitle = 'Autosave';
+const agentChangeTitle = 'Agent change';
+/* One row's line of History: 72 code points, a commit subject's length (Q9). */
+const requestTitleLength = 72;
+
+/*
+ * A result's title from the person's request (Q9): its first non-blank line,
+ * whitespace collapsed, shortened at a word with an ellipsis. `undefined` when
+ * the request holds no text, so the caller falls back to "Agent change".
+ */
+const requestTitleOf = (request: string | undefined): string | undefined => {
+  const line = request
+    ?.split(/\r?\n/u)
+    .map((part) => part.replaceAll(/\s+/gu, ' ').trim())
+    .find((part) => part.length > 0);
+  if (line === undefined) {
+    return undefined;
+  }
+  const points = [...line];
+  if (points.length <= requestTitleLength) {
+    return line;
+  }
+  const kept = points.slice(0, requestTitleLength - 1).join('');
+  const space = kept.lastIndexOf(' ');
+  return `${(space > requestTitleLength / 2 ? kept.slice(0, space) : kept).trimEnd()}…`;
+};
 /** Identity every revision this host records is committed under. */
 const hostAuthor = Object.freeze({ name: 'Tau', email: 'noreply@tau.new' });
 /**
@@ -3556,8 +3584,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /**
    * How a restore or undo row refers to the entry it brought back (M11): a
    * version by its number, an entry by a title a person or Tau gave it, never
-   * by a save number. A generated title (`Saved changes (…)`, `Agent turn …`)
-   * names nothing a person would recognise, so it is left out.
+   * by a save number. A generated title (`Saved changes (…)`, `Autosave`,
+   * `Agent change`) names nothing a person would recognise, so it is left out.
    *
    * @param row - The entry, when the line holds it.
    * @returns `V3` or `“Add vent slots”`, or `undefined` when nothing names it.
@@ -3571,7 +3599,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       return 'V1';
     }
     const summary = row?.summary;
-    return summary === undefined || summary.startsWith('Saved changes (') || summary.startsWith('Agent turn ')
+    return summary === undefined ||
+      summary.startsWith('Saved changes (') ||
+      summary === autosaveTitle ||
+      summary === agentChangeTitle
       ? undefined
       : `“${summary}”`;
   };
@@ -3579,7 +3610,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /* A cut's generated title; a restore row names what it restored, never a number (A9, M11). */
   const summaryOf = async (input: CheckoutWriteRevisionActorInput, undoes?: string): Promise<string> => {
     if (input.turn !== undefined) {
-      return `Agent turn ${input.turn.key.turnId}`;
+      /* A5: a base cut holds the person's own edits; Q9: a result is titled by the request. */
+      return input.turn.turnCut === 'base' ? autosaveTitle : (requestTitleOf(input.turn.request) ?? agentChangeTitle);
     }
     if (input.restoredFrom === undefined) {
       if (undoes === undefined) {

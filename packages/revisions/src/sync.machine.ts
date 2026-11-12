@@ -2710,6 +2710,42 @@ const waitingSaid = (context: SyncMachineContext, undecided: readonly string[]):
 };
 
 /**
+ * The remote's head for each branch, as far as this host knows it (D4).
+ *
+ * The lease is the last thing a fetch or a push saw the remote hold. A device
+ * that opened offline has fetched nothing, so a branch it still owes falls back
+ * to the lease its queued entry was recorded under. A branch with neither, and
+ * every branch while there is no remote, has no entry: nothing is known to be
+ * backed up, so History draws no boundary.
+ *
+ * @param snapshot - Current sync snapshot.
+ * @returns Branch name to the revision the remote holds.
+ * @public
+ */
+export const selectRemoteHeads = (snapshot: SnapshotFrom<typeof syncMachine>): ReadonlyMap<string, string> => {
+  const { context } = snapshot;
+  const heads = new Map<string, string>();
+  if (context.remote === undefined) {
+    return heads;
+  }
+  const branchOf = (ref: string): string | undefined =>
+    ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : undefined;
+  for (const entry of owedPushes(context)) {
+    const branch = branchOf(entry.ref);
+    if (branch !== undefined && entry.expected !== undefined) {
+      heads.set(branch, entry.expected);
+    }
+  }
+  for (const [ref, head] of Object.entries(context.leases)) {
+    const branch = branchOf(ref);
+    if (branch !== undefined) {
+      heads.set(branch, head);
+    }
+  }
+  return heads;
+};
+
+/**
  * The Sync row's whole input, read where it lives.
  *
  * @param snapshot - Current sync snapshot.

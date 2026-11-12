@@ -34,7 +34,7 @@ import type { RemoteKind } from '#remotes.js';
 import { resolutionMachine, selectResolutionFacet } from '#resolution.machine.js';
 import type { ResolutionMachineEvent } from '#resolution.machine.js';
 import { restoreMachine, selectRestoreBusy } from '#restore.machine.js';
-import { selectSyncFacet, syncMachine } from '#sync.machine.js';
+import { selectRemoteHeads, selectSyncFacet, syncMachine } from '#sync.machine.js';
 import type { SyncMachineEvent } from '#sync.machine.js';
 import type { SyncFacet, SyncPushOutcome } from '#sync.types.js';
 import type { CheckoutRecord, ConflictRecord, RevisionPortErrorCode } from '#revision-port.js';
@@ -81,7 +81,7 @@ export type ProjectRevisionsMachineInput = Readonly<{
   mintFloor?: number;
 }>;
 
-type Admission = Readonly<{ key: TurnAttemptKey; checkoutId?: string }>;
+type Admission = Readonly<{ key: TurnAttemptKey; checkoutId?: string; request?: string }>;
 
 /* The fields of {@link ProjectRevisionsMachineContext}, named by the interface below. */
 type ProjectRevisionsMachineContextFields = Readonly<{
@@ -158,7 +158,8 @@ export type ProjectRevisionsMachineEvent =
       headTreeId?: string;
     }>
   /* The host's turn verbs, keyed by attempt (D14). */
-  | Readonly<{ type: 'admitTurn'; key: TurnAttemptKey; checkoutId?: string }>
+  /* `request` is the person's request, which titles the attempt's result (Q9). */
+  | Readonly<{ type: 'admitTurn'; key: TurnAttemptKey; checkoutId?: string; request?: string }>
   | Readonly<{ type: 'turnCompleted'; key: TurnAttemptKey }>
   | Readonly<{ type: 'turnAbandoned'; key: TurnAttemptKey }>
   | Readonly<{ type: 'acknowledge'; key: TurnAttemptKey }>
@@ -671,6 +672,7 @@ const spawnTurn = (
       ...(checkoutId === undefined ? {} : { checkoutId }),
       /* The record's own head bounds the search; the find effect reads it when this names none (RM-R14). */
       ...(adopt === undefined ? {} : { adopt: { checkoutId: adopt.id } }),
+      ...(admission.request === undefined ? {} : { request: admission.request }),
       parentRef: self,
     },
   });
@@ -1734,6 +1736,13 @@ const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>):
   /* The fetch's word on every branch, a checked-out one included: *Rename*
      reads it, because a branch the remote holds is never renamed (D91). */
   const onRemoteOf = new Map(context.availableBranches.map((branch) => [branch.name, branch.onRemote]));
+  /* Where the backup has reached on each branch, for History's boundary (D4). */
+  const sync = snapshot.children.sync?.getSnapshot();
+  const remoteHeads = sync === undefined ? new Map<string, string>() : selectRemoteHeads(sync);
+  const remoteHeadOf = (name: string): { remoteHead?: string } => {
+    const remoteHead = remoteHeads.get(name);
+    return remoteHead === undefined ? {} : { remoteHead };
+  };
   const checkedOut = viewsOf(context).flatMap((checkout) => {
     if (checkout.branch === undefined) {
       return [];
@@ -1753,6 +1762,7 @@ const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>):
            reloaded, because nothing on disk said it (I3; review R9). */
         leaseChatIds: checkout.leaseChatIds,
         ...(onRemote === undefined ? {} : { onRemote }),
+        ...remoteHeadOf(checkout.branch),
       },
     ];
   });
@@ -1783,6 +1793,7 @@ const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>):
         checkoutRoot: undefined,
         leaseChatIds: [],
         onRemote: branch.onRemote,
+        ...remoteHeadOf(branch.name),
       })),
   ];
 };

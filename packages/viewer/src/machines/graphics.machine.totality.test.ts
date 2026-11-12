@@ -9,14 +9,16 @@
  * each state value), kept current with `pathTable`:
  *
  * 1. `section.off`, `measure.off`: initial
- * 2. `section.on`, `measure.off`: `setSectionViewActive(true)`
- * 3. `section.off`, `measure.on.selecting`: `setMeasureActive(true)`
- * 4. `section.on`, `measure.on.selecting`: `setSectionViewActive(true)`, `setMeasureActive(true)`
+ * 2. `section.on.settled`, `measure.off`: `setSectionViewActive(true)`
+ * 3. `section.on.editing`, `measure.off`: `setSectionViewActive(true)`, `addSectionCut`
+ * 4. `section.off`, `measure.on.selecting`: `setMeasureActive(true)`
  * 5. `section.off`, `measure.on.selected`: `setMeasureActive(true)`, `startMeasurement`
- * 6. `section.on`, `measure.on.selected`: `setSectionViewActive(true)`, `setMeasureActive(true)`, `startMeasurement`
+ * 6. each `section` row with each `measure` row: the section events, then the measure events
  *
- * The `backend` region runs beside them: each row above holds in `backend.probing` (initial), in `backend.resolved`
- * (the probe answers last) and in `backend.lost` (the probe answers, then `webGpuCanvasLost`), eighteen rows in all.
+ * The `backend` region runs beside them: each row holds in `backend.probing` (initial), in `backend.resolved`
+ * (the probe answers last) and in `backend.lost` (the probe answers, then `webGpuCanvasLost`), twenty-seven rows in
+ * all. `section.on.editing` is the section quiet gate (charter G6): it settles `sectionSettleDelay` after the last
+ * change to the cuts.
  */
 import { pathTable, unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 import type { UnansweredEvent } from '@taucad/xstate-testing/paths';
@@ -102,6 +104,7 @@ const samples: Samples = {
     { type: 'cameraViewChanged', verticalSpan: 1 },
     { type: 'cameraViewChanged', verticalSpan: 0 },
   ],
+  poseRevisionObserved: [{ type: 'poseRevisionObserved', revision: 1 }],
   setSurfaceVisibility: [{ type: 'setSurfaceVisibility', payload: false }],
   setLinesVisibility: [{ type: 'setLinesVisibility', payload: false }],
   setGizmoVisibility: [{ type: 'setGizmoVisibility', payload: false }],
@@ -110,6 +113,7 @@ const samples: Samples = {
   setMatcapVisibility: [{ type: 'setMatcapVisibility', payload: true }],
   setPostProcessingVisibility: [{ type: 'setPostProcessingVisibility', payload: false }],
   setUpDirection: [{ type: 'setUpDirection', payload: 'y' }],
+  adoptUpDirection: [{ type: 'adoptUpDirection', payload: 'y' }],
   setGraphicsBackendPreference: [{ type: 'setGraphicsBackendPreference', payload: 'webgl' }],
   webGpuCanvasLost: [{ type: 'webGpuCanvasLost' }],
   canvasAttached: [{ type: 'canvasAttached', canvasId: 'c', kind: 'placeholder' }],
@@ -270,7 +274,7 @@ describe('graphics machine totality baseline', () => {
     ).toEqual([
       { state: 'operational.backend.probing | operational.section.off | operational.measure.off', events: [] },
       {
-        state: 'operational.backend.probing | operational.section.on | operational.measure.off',
+        state: 'operational.backend.probing | operational.section.on.settled | operational.measure.off',
         events: ['setSectionViewActive'],
       },
       {
@@ -282,11 +286,15 @@ describe('graphics machine totality baseline', () => {
         events: ['xstate.done.actor.probeWebGpuInvocation'],
       },
       {
-        state: 'operational.backend.probing | operational.section.on | operational.measure.on.selecting',
+        state: 'operational.backend.probing | operational.section.on.editing | operational.measure.off',
+        events: ['setSectionViewActive', 'addSectionCut'],
+      },
+      {
+        state: 'operational.backend.probing | operational.section.on.settled | operational.measure.on.selecting',
         events: ['setSectionViewActive', 'setMeasureActive'],
       },
       {
-        state: 'operational.backend.resolved | operational.section.on | operational.measure.off',
+        state: 'operational.backend.resolved | operational.section.on.settled | operational.measure.off',
         events: ['setSectionViewActive', 'xstate.done.actor.probeWebGpuInvocation'],
       },
       {
@@ -302,15 +310,23 @@ describe('graphics machine totality baseline', () => {
         events: ['xstate.done.actor.probeWebGpuInvocation', 'webGpuCanvasLost'],
       },
       {
-        state: 'operational.backend.probing | operational.section.on | operational.measure.on.selected',
+        state: 'operational.backend.probing | operational.section.on.editing | operational.measure.on.selecting',
+        events: ['setSectionViewActive', 'addSectionCut', 'setMeasureActive'],
+      },
+      {
+        state: 'operational.backend.resolved | operational.section.on.editing | operational.measure.off',
+        events: ['setSectionViewActive', 'addSectionCut', 'xstate.done.actor.probeWebGpuInvocation'],
+      },
+      {
+        state: 'operational.backend.probing | operational.section.on.settled | operational.measure.on.selected',
         events: ['setSectionViewActive', 'setMeasureActive', 'startMeasurement'],
       },
       {
-        state: 'operational.backend.resolved | operational.section.on | operational.measure.on.selecting',
+        state: 'operational.backend.resolved | operational.section.on.settled | operational.measure.on.selecting',
         events: ['setSectionViewActive', 'setMeasureActive', 'xstate.done.actor.probeWebGpuInvocation'],
       },
       {
-        state: 'operational.backend.lost | operational.section.on | operational.measure.off',
+        state: 'operational.backend.lost | operational.section.on.settled | operational.measure.off',
         events: ['setSectionViewActive', 'xstate.done.actor.probeWebGpuInvocation', 'webGpuCanvasLost'],
       },
       {
@@ -322,7 +338,29 @@ describe('graphics machine totality baseline', () => {
         events: ['setMeasureActive', 'xstate.done.actor.probeWebGpuInvocation', 'webGpuCanvasLost'],
       },
       {
-        state: 'operational.backend.resolved | operational.section.on | operational.measure.on.selected',
+        state: 'operational.backend.probing | operational.section.on.editing | operational.measure.on.selected',
+        events: ['setSectionViewActive', 'addSectionCut', 'setMeasureActive', 'startMeasurement'],
+      },
+      {
+        state: 'operational.backend.resolved | operational.section.on.editing | operational.measure.on.selecting',
+        events: [
+          'setSectionViewActive',
+          'addSectionCut',
+          'setMeasureActive',
+          'xstate.done.actor.probeWebGpuInvocation',
+        ],
+      },
+      {
+        state: 'operational.backend.lost | operational.section.on.editing | operational.measure.off',
+        events: [
+          'setSectionViewActive',
+          'addSectionCut',
+          'xstate.done.actor.probeWebGpuInvocation',
+          'webGpuCanvasLost',
+        ],
+      },
+      {
+        state: 'operational.backend.resolved | operational.section.on.settled | operational.measure.on.selected',
         events: [
           'setSectionViewActive',
           'setMeasureActive',
@@ -331,7 +369,7 @@ describe('graphics machine totality baseline', () => {
         ],
       },
       {
-        state: 'operational.backend.lost | operational.section.on | operational.measure.on.selecting',
+        state: 'operational.backend.lost | operational.section.on.settled | operational.measure.on.selecting',
         events: [
           'setSectionViewActive',
           'setMeasureActive',
@@ -344,9 +382,40 @@ describe('graphics machine totality baseline', () => {
         events: ['setMeasureActive', 'startMeasurement', 'xstate.done.actor.probeWebGpuInvocation', 'webGpuCanvasLost'],
       },
       {
-        state: 'operational.backend.lost | operational.section.on | operational.measure.on.selected',
+        state: 'operational.backend.resolved | operational.section.on.editing | operational.measure.on.selected',
         events: [
           'setSectionViewActive',
+          'addSectionCut',
+          'setMeasureActive',
+          'startMeasurement',
+          'xstate.done.actor.probeWebGpuInvocation',
+        ],
+      },
+      {
+        state: 'operational.backend.lost | operational.section.on.editing | operational.measure.on.selecting',
+        events: [
+          'setSectionViewActive',
+          'addSectionCut',
+          'setMeasureActive',
+          'xstate.done.actor.probeWebGpuInvocation',
+          'webGpuCanvasLost',
+        ],
+      },
+      {
+        state: 'operational.backend.lost | operational.section.on.settled | operational.measure.on.selected',
+        events: [
+          'setSectionViewActive',
+          'setMeasureActive',
+          'startMeasurement',
+          'xstate.done.actor.probeWebGpuInvocation',
+          'webGpuCanvasLost',
+        ],
+      },
+      {
+        state: 'operational.backend.lost | operational.section.on.editing | operational.measure.on.selected',
+        events: [
+          'setSectionViewActive',
+          'addSectionCut',
           'setMeasureActive',
           'startMeasurement',
           'xstate.done.actor.probeWebGpuInvocation',
@@ -417,12 +486,17 @@ describe('graphics machine totality baseline', () => {
       'gltfPresentationCommitted',
     ];
     const withSelectSectionCut = [...everywhere.slice(0, 7), 'selectSectionCut', ...everywhere.slice(7)];
+    // While the cuts are being edited, adopting the sampled section is a change (it differs from the edited cuts).
+    const whileEditing = everywhere.filter((type) => type !== 'adoptSectionView');
     expect(silent).toEqual([
       {
         state: 'operational.backend.probing | operational.section.off | operational.measure.off',
         types: withSelectSectionCut,
       },
-      { state: 'operational.backend.probing | operational.section.on | operational.measure.off', types: everywhere },
+      {
+        state: 'operational.backend.probing | operational.section.on.settled | operational.measure.off',
+        types: everywhere,
+      },
       {
         state: 'operational.backend.probing | operational.section.off | operational.measure.on.selecting',
         types: withSelectSectionCut,
@@ -432,10 +506,17 @@ describe('graphics machine totality baseline', () => {
         types: withSelectSectionCut,
       },
       {
-        state: 'operational.backend.probing | operational.section.on | operational.measure.on.selecting',
+        state: 'operational.backend.probing | operational.section.on.editing | operational.measure.off',
+        types: whileEditing,
+      },
+      {
+        state: 'operational.backend.probing | operational.section.on.settled | operational.measure.on.selecting',
         types: everywhere,
       },
-      { state: 'operational.backend.resolved | operational.section.on | operational.measure.off', types: everywhere },
+      {
+        state: 'operational.backend.resolved | operational.section.on.settled | operational.measure.off',
+        types: everywhere,
+      },
       {
         state: 'operational.backend.probing | operational.section.off | operational.measure.on.selected',
         types: withSelectSectionCut,
@@ -449,14 +530,25 @@ describe('graphics machine totality baseline', () => {
         types: withSelectSectionCut,
       },
       {
-        state: 'operational.backend.probing | operational.section.on | operational.measure.on.selected',
+        state: 'operational.backend.probing | operational.section.on.editing | operational.measure.on.selecting',
+        types: whileEditing,
+      },
+      {
+        state: 'operational.backend.resolved | operational.section.on.editing | operational.measure.off',
+        types: whileEditing,
+      },
+      {
+        state: 'operational.backend.probing | operational.section.on.settled | operational.measure.on.selected',
+        types: withSelectSectionCut,
+      },
+      {
+        state: 'operational.backend.resolved | operational.section.on.settled | operational.measure.on.selecting',
         types: everywhere,
       },
       {
-        state: 'operational.backend.resolved | operational.section.on | operational.measure.on.selecting',
+        state: 'operational.backend.lost | operational.section.on.settled | operational.measure.off',
         types: everywhere,
       },
-      { state: 'operational.backend.lost | operational.section.on | operational.measure.off', types: everywhere },
       {
         state: 'operational.backend.resolved | operational.section.off | operational.measure.on.selected',
         types: withSelectSectionCut,
@@ -466,11 +558,23 @@ describe('graphics machine totality baseline', () => {
         types: withSelectSectionCut,
       },
       {
-        state: 'operational.backend.resolved | operational.section.on | operational.measure.on.selected',
-        types: everywhere,
+        state: 'operational.backend.probing | operational.section.on.editing | operational.measure.on.selected',
+        types: whileEditing,
       },
       {
-        state: 'operational.backend.lost | operational.section.on | operational.measure.on.selecting',
+        state: 'operational.backend.resolved | operational.section.on.editing | operational.measure.on.selecting',
+        types: whileEditing,
+      },
+      {
+        state: 'operational.backend.lost | operational.section.on.editing | operational.measure.off',
+        types: whileEditing,
+      },
+      {
+        state: 'operational.backend.resolved | operational.section.on.settled | operational.measure.on.selected',
+        types: withSelectSectionCut,
+      },
+      {
+        state: 'operational.backend.lost | operational.section.on.settled | operational.measure.on.selecting',
         types: everywhere,
       },
       {
@@ -478,8 +582,20 @@ describe('graphics machine totality baseline', () => {
         types: withSelectSectionCut,
       },
       {
-        state: 'operational.backend.lost | operational.section.on | operational.measure.on.selected',
-        types: everywhere,
+        state: 'operational.backend.resolved | operational.section.on.editing | operational.measure.on.selected',
+        types: whileEditing,
+      },
+      {
+        state: 'operational.backend.lost | operational.section.on.editing | operational.measure.on.selecting',
+        types: whileEditing,
+      },
+      {
+        state: 'operational.backend.lost | operational.section.on.settled | operational.measure.on.selected',
+        types: withSelectSectionCut,
+      },
+      {
+        state: 'operational.backend.lost | operational.section.on.editing | operational.measure.on.selected',
+        types: whileEditing,
       },
     ]);
   });

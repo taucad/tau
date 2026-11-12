@@ -9,6 +9,16 @@ import type { KernelId } from '#constants/kernel.constants.js';
  */
 
 /**
+ * The routing rubric's version (automatic kernel selection blueprint D10). Every kernel-selection telemetry event
+ * carries it, so one rubric's override and first-outcome numbers are never read as the next one's. Bump it in the
+ * change that edits {@link kernelRoutingCopy}, {@link kernelRoutingRules} or {@link kernelRoutingZones}, and record
+ * that change's `EVAL(...)` entry against the new number.
+ *
+ * @public
+ */
+export const kernelRoutingRubricVersion = 1;
+
+/**
  * Model-read routing copy for one kernel, rendered into the routing rubric on every surface (automatic kernel
  * selection blueprint D4). Each field is one line, names no default and states no preference order.
  *

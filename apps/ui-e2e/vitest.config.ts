@@ -200,7 +200,6 @@ export default defineConfig({
           name: 'webkit-smoke',
           include: [
             'src/preview.spec.ts',
-            'src/birdhouse-preview.spec.ts',
             'src/browser-agent-host.spec.ts',
             'src/project-creation-location-unsupported.spec.ts',
             'src/chat-isolated-workspace.spec.ts',

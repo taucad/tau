@@ -222,14 +222,8 @@ describe('useGeometryBounds', () => {
     expect(result.current.geometryBounds.min.toArray()).toEqual([9, -2, -3]);
     expect(result.current.geometryBounds.max.toArray()).toEqual([11, 2, 3]);
     expect(result.current.geometryRadius).toBeCloseTo(Math.sqrt(14), 10);
-    const event = mocks.send.mock.calls.findLast(
-      ([sent]) => (sent as { type: string }).type === 'sceneRadiusUpdated',
-    )?.[0] as
-      | { readonly type: string; readonly radius: number; readonly centerMeters: [number, number, number] }
-      | undefined;
-    expect(event?.type).toBe('sceneRadiusUpdated');
-    expect(event?.radius).toBeCloseTo(Math.sqrt(14), 10);
-    expect(event?.centerMeters).toEqual([10, 0, 0]);
+    // The measurement carries the sphere: graphics keeps it, and the hook sends nothing else.
+    expect(mocks.send.mock.calls.map(([sent]) => (sent as { type: string }).type)).toEqual(['geometryBoundsMeasured']);
     const [{ radius, ...measured }] = measurements() as [ReturnType<typeof measurements>[number]];
     expect(radius).toBeCloseTo(Math.sqrt(14), 10);
     expect([measured]).toEqual([
@@ -363,7 +357,7 @@ describe('useGeometryBounds', () => {
  * once per committed presentation and per settled pose instead of polling in the frame callback, so each row names
  * the behaviour that move keeps, or changes deliberately (charter D14).
  */
-describe('useGeometryBounds before the presentation actor (G11b characterisation)', () => {
+describe('useGeometryBounds measurement seams (G11b)', () => {
   beforeEach(() => {
     mocks.frame = undefined;
     mocks.send.mockClear();
@@ -414,28 +408,16 @@ describe('useGeometryBounds before the presentation actor (G11b characterisation
     expect(mocks.send).not.toHaveBeenCalled();
   });
 
-  it('should send sceneRadiusUpdated after a measurement that changes the sphere, and not for an unchanged one', () => {
+  it('should send only the measurement for each presentation, which graphics folds into its sphere', () => {
     const { innerRef, outerRef } = createSceneReferences(10);
     const hook = renderHook(() => useGeometryBounds(innerRef, outerRef));
     act(() => mocks.frame?.());
-    const radius = Math.hypot(2, 4, 6) / 2;
-    expect(mocks.send.mock.calls.map(([event]) => (event as { type: string }).type)).toEqual([
-      'geometryBoundsMeasured',
-      'sceneRadiusUpdated',
-    ]);
-    expect(mocks.send.mock.calls[1]?.[0]).toEqual({
-      type: 'sceneRadiusUpdated',
-      radius: expect.closeTo(radius, 12) as unknown,
-      centerMeters: [10, 0, 0],
-    });
-
-    // A new presentation of the same geometry is measured again, but the unchanged sphere is not sent again.
+    // A new presentation of the same geometry is measured again; graphics decides whether its sphere changed.
     mocks.presentedRevision = 2;
     hook.rerender();
     act(() => mocks.frame?.());
     expect(mocks.send.mock.calls.map(([event]) => (event as { type: string }).type)).toEqual([
       'geometryBoundsMeasured',
-      'sceneRadiusUpdated',
       'geometryBoundsMeasured',
     ]);
   });

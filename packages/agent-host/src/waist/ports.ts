@@ -492,6 +492,8 @@ export type TurnAdmitInput = TurnAttemptInput &
   Readonly<{
     /** The person's placement choice (TS-R12). Absent: the chat record's checkout, then the live one. */
     checkoutId?: string | undefined;
+    /** The text of the person's request, which titles the attempt's result in History (Q9). */
+    request?: string | undefined;
   }>;
 
 /** `complete`: settle the attempt. `cut` is true for every attempt that executed, whatever its outcome (TS-R11). @public */

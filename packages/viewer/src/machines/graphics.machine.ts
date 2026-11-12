@@ -239,9 +239,10 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
  *   `committedSectionCuts` (what the caps last committed),
  *   `hoveredMeasurementId`, `measureSnapDistance`, every
  *   suppression and interaction flag, `pickableMeshesVersion`, `geometry`, `geometryKey` and
- *   `gltfPresentation`.
+ *   `gltfPresentation`; and `poseRevision`, folded from the kinematics child.
  *
- * No field here stores a copy of a value another actor owns; the camera's field of view and pose
+ * No field here stores a copy of a value another actor owns, except `poseRevision`: the stamp a measurement takes,
+ * folded from each snapshot of the kinematics child so a completion never reads that child's snapshot; the camera's field of view and pose
  * belong to the view's camera session, and the render timeout to the entry's CAD actor.
  * @public
  */
@@ -354,7 +355,12 @@ export interface GraphicsContext {
   modelInteractionUnitId?: string;
   /** Per-view mechanism pose, keyed by the same unit ids as model interaction. */
   kinematicsRef: KinematicsRef;
-  /** The view's camera. Its pose, render frame and clip policy outlive every canvas and provider mount. */
+  /** The kinematics revision last observed, which a completed measurement is stamped with. */
+  poseRevision: number;
+  /**
+   * The view's camera. Its pose and render frame outlive every canvas and provider mount; its clip policy is held by
+   * the canvas that draws the grid, and cleared when that canvas stops.
+   */
   cameraRef: GraphicsCameraRef;
   /**
    * The attached canvas's controls adapter: the only listener on its `camera-controls` instance (charter I9). It
@@ -404,6 +410,11 @@ export type GraphicsEvent =
   | { type: 'fitView' }
   /** The camera child's `viewChanged`, folded into the visible span. */
   | { type: 'cameraViewChanged'; verticalSpan: number }
+  /**
+   * Internal: the kinematics child's revision, folded from each of its snapshots for the measurements taken at it.
+   * Graphics subscribes to its own child for this; a host has no reason to send it.
+   */
+  | { type: 'poseRevisionObserved'; revision: number }
   // Visibility events
   | { type: 'setSurfaceVisibility'; payload: boolean }
   | { type: 'setLinesVisibility'; payload: boolean }
@@ -413,6 +424,11 @@ export type GraphicsEvent =
   | { type: 'setMatcapVisibility'; payload: boolean }
   | { type: 'setPostProcessingVisibility'; payload: boolean }
   | { type: 'setUpDirection'; payload: 'x' | 'y' | 'z' }
+  /**
+   * A view record's up direction (charter G6): graphics takes it, and the camera adopts it through
+   * `adoptPersistedPose`, so it is never a person's `up` change that the record would save again.
+   */
+  | { type: 'adoptUpDirection'; payload: 'x' | 'y' | 'z' }
   | { type: 'setGraphicsBackendPreference'; payload: GraphicsBackendPreference }
   /** A WebGPU canvas on this page could not present, or lost its device to the browser: WebGPU is off for the page. */
   | { type: 'webGpuCanvasLost' }
@@ -658,7 +674,10 @@ export type GraphicsEvent =
       unitId: string;
       source?: ModelInteractionSource;
     }
-  // Scene radius update from Three.js bounding sphere (sent by Stage)
+  /**
+   * Seeds the scene's bounding sphere without a measurement, for a host with no Three.js stage. The stage's own
+   * measurement sets it through `geometryBoundsMeasured`.
+   */
   | {
       type: 'sceneRadiusUpdated';
       radius: number;
@@ -677,6 +696,7 @@ export const graphicsEventTypes = [
   'setGridUnit',
   'fitView',
   'cameraViewChanged',
+  'poseRevisionObserved',
   'setSurfaceVisibility',
   'setLinesVisibility',
   'setGizmoVisibility',
@@ -685,6 +705,7 @@ export const graphicsEventTypes = [
   'setMatcapVisibility',
   'setPostProcessingVisibility',
   'setUpDirection',
+  'adoptUpDirection',
   'setGraphicsBackendPreference',
   'webGpuCanvasLost',
   'canvasAttached',
@@ -790,12 +811,31 @@ export type GraphicsEmitted =
   /** Fit view, for a viewer with no camera: the SVG pan-zoom resets on it. The 3D camera fits through framing. */
   | { type: 'viewFitRequested' }
   | { type: 'geometryRadiusCalculated'; radius: number }
+  /**
+   * The unit this view presents, or the media type of its artifact, changed. A project that shares one model
+   * interaction across views releases a unit's manifest once no view presents it as a GLB.
+   */
+  | { type: 'presentedUnitChanged'; unitId: string | undefined; mediaType: string | undefined }
   /** What the shortcut of `pressId` did, for the bar that heard it to announce. */
   | { type: 'viewerShortcutApplied'; pressId: string; outcome: ViewerShortcutOutcome }
   /** Use target: the measuring tool's session commits the chosen candidate. */
   | { type: 'measureCandidateCommitRequested' }
   /** List the targets in view: a fresh catalog, or with `append` the next page of the one listed. */
-  | { type: 'measureCatalogRequested'; append: boolean };
+  | { type: 'measureCatalogRequested'; append: boolean }
+  /** The person is editing the section cuts: the section region entered `on.editing`. */
+  | { type: 'sectionEdited' }
+  /**
+   * The section settled: it is off, or no cut changed for {@link sectionSettleDelay}. Read the section from context
+   * (`isSectionViewActive`, `sectionCuts`).
+   */
+  | { type: 'sectionSettled' };
+
+/**
+ * Milliseconds the section cuts stay quiet before they are settled (the section quiet gate, charter G6).
+ *
+ * @public
+ */
+export const sectionSettleDelay = 250;
 
 /**
  * A viewer shortcut: F fits the view, S and M toggle Section and Measure, G the grid, P the projection, Escape steps
@@ -1122,6 +1162,17 @@ const clearViewerHover = (context: GraphicsContext, enq: GraphicsEnqueue, source
   }
 };
 
+/** Tells the view's observers when the unit it presents, or its artifact's media type, changes. */
+const emitPresentedUnitChange = (
+  context: GraphicsContext,
+  enq: GraphicsEnqueue,
+  next: Readonly<{ unitId: string | undefined; mediaType: string | undefined }>,
+): void => {
+  if (next.unitId !== context.modelInteractionUnitId || next.mediaType !== context.artifact?.mimeType) {
+    enq.emit({ type: 'presentedUnitChanged', ...next });
+  }
+};
+
 const gltfRequestMatches = (context: GraphicsContext, event: Readonly<{ revision: number; key: string }>): boolean =>
   event.revision === context.gltfPresentation.requestedRevision && event.key === context.gltfPresentation.requestedKey;
 
@@ -1145,6 +1196,21 @@ const endMeasureHoverSuppression = (context: GraphicsContext): GraphicsPatch => 
   ),
   viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, 'measureTool'),
 });
+
+/** The cuts after a patch of one cut, or `undefined` when the cut is gone or the patch changes nothing. */
+const updatedSectionCut = (
+  context: GraphicsContext,
+  payload: Extract<GraphicsEvent, { type: 'updateSectionCut' }>['payload'],
+): Pick<GraphicsContext, 'sectionCuts'> | undefined => {
+  const cut = context.sectionCuts.find((candidate) => candidate.id === payload.id);
+  if (!cut) {
+    return undefined;
+  }
+  const next = applySectionCutPatch(cut, payload.patch, context.geometryCenter);
+  return next === cut
+    ? undefined
+    : { sectionCuts: context.sectionCuts.map((candidate) => (candidate === cut ? next : candidate)) };
+};
 
 /** Appends a cut made with the defaults, selects it and marks the section on; the caller checks the budget. */
 const appendSectionCut = (
@@ -1350,6 +1416,7 @@ const graphicsMachineDefinition = setup({
       ownsModelInteractionRef,
       modelInteractionUnitId: undefined,
       kinematicsRef: spawn(actors.kinematics, { id: 'kinematics', input: {} }),
+      poseRevision: 0,
       cameraRef,
       framingRef: spawn(actors.framing, {
         id: 'framing',
@@ -1404,6 +1471,11 @@ const graphicsMachineDefinition = setup({
             type: 'cameraViewChanged',
             verticalSpan: (event as CameraMachineEmitted & { type: 'viewChanged' }).verticalSpan,
           }),
+        );
+        // A measurement is stamped with the pose it was taken at, folded from each kinematics snapshot.
+        enq.subscribeTo(
+          context.kinematicsRef,
+          (snapshot): GraphicsEvent => ({ type: 'poseRevisionObserved', revision: snapshot.context.revision }),
         );
         if (context.isSectionViewActive) {
           enq.raise({ type: 'setSectionViewActive', payload: true });
@@ -1494,8 +1566,23 @@ const graphicsMachineDefinition = setup({
             });
           }
           enq.sendTo(context.framingRef, event);
-          return anchored ? {} : { context: { renderFrameKey: event.key } };
+          // The measured sphere is the scene's, for the section defaults and the observers of its radius.
+          const center = boundsCenter(event.bounds);
+          const sphereChanged =
+            event.radius > 0 &&
+            (event.radius !== context.geometryRadius ||
+              center.some((value, axis) => value !== context.geometryCenter[axis]));
+          if (sphereChanged) {
+            enq.emit({ type: 'geometryRadiusCalculated', radius: event.radius });
+          }
+          const patch: GraphicsPatch = {
+            ...(anchored ? {} : { renderFrameKey: event.key }),
+            ...(sphereChanged ? { geometryRadius: event.radius, geometryCenter: center } : {}),
+          };
+          return Object.keys(patch).length === 0 ? {} : { context: patch };
         },
+        poseRevisionObserved: ({ context, event }) =>
+          event.revision === context.poseRevision ? {} : { context: { poseRevision: event.revision } },
         cameraViewChanged: ({ context, event, self }, enq) => {
           // Every camera change emits `viewChanged`; only a new span re-derives the grid.
           if (
@@ -1541,8 +1628,13 @@ const graphicsMachineDefinition = setup({
           }
           // The camera keeps its view direction and takes the new world up, unless the two are parallel.
           enq.sendTo(context.cameraRef, { type: 'setUpDirection', axis: event.payload });
+          if (context.canvas) {
+            enq.sendTo(context.canvas.ref, { type: 'upDirectionChanged', upDirection: event.payload });
+          }
           return { context: { upDirection: event.payload } };
         },
+        adoptUpDirection: ({ context, event }) =>
+          event.payload === context.upDirection ? {} : { context: { upDirection: event.payload } },
         setGraphicsBackendPreference: {
           context: ({ context, event }) => ({
             graphicsBackendPreference: event.payload,
@@ -1567,6 +1659,8 @@ const graphicsMachineDefinition = setup({
               webglContext: event.webglContext,
               admittedBytes: event.admittedBytes,
               reattached: event.reattached,
+              camera: context.cameraRef,
+              upDirection: context.upDirection,
             },
           });
           return { context: { canvas: { canvasId: event.canvasId, ref }, ...adapter } };
@@ -1693,6 +1787,7 @@ const graphicsMachineDefinition = setup({
             });
           }
           const revision = context.gltfPresentation.requestedRevision + 1;
+          emitPresentedUnitChange(context, enq, { unitId: undefined, mediaType: undefined });
           return {
             context: {
               artifact: undefined,
@@ -1721,6 +1816,16 @@ const graphicsMachineDefinition = setup({
             }
           }
           const requestedRevision = context.gltfPresentation.requestedRevision + 1;
+          const modelInteractionUnitId =
+            event.artifact.mimeType === 'model/gltf-binary'
+              ? context.modelInteractionUnitId
+              : event.sourceFile
+                ? deriveModelInteractionUnitId({ sourceFile: event.sourceFile })
+                : undefined;
+          emitPresentedUnitChange(context, enq, {
+            unitId: modelInteractionUnitId,
+            mediaType: event.artifact.mimeType,
+          });
           return {
             context: {
               artifact: event.artifact,
@@ -1742,12 +1847,7 @@ const graphicsMachineDefinition = setup({
                       },
                       'idle',
                     ),
-              modelInteractionUnitId:
-                event.artifact.mimeType === 'model/gltf-binary'
-                  ? context.modelInteractionUnitId
-                  : event.sourceFile
-                    ? deriveModelInteractionUnitId({ sourceFile: event.sourceFile })
-                    : undefined,
+              modelInteractionUnitId,
               pickableMeshesVersion:
                 event.artifact.mimeType === 'model/gltf-binary'
                   ? context.pickableMeshesVersion
@@ -1781,7 +1881,11 @@ const graphicsMachineDefinition = setup({
           }),
         },
         gltfPresentationCommitted: ({ context, event }, enq) => {
-          if (!gltfRequestMatches(context, event)) {
+          const { presentedRevision, presentedKey, phase } = context.gltfPresentation;
+          const isRepeat = phase === 'presented' && presentedRevision === event.revision && presentedKey === event.key;
+          // React may attach the same presentation's scene again (StrictMode, a Suspense reveal); it commits once. A
+          // scene prepared again at the same revision has left `presented` first, so its commit still lands.
+          if (!gltfRequestMatches(context, event) || isRepeat) {
             return {};
           }
           forwardToModelInteraction(context, enq, {
@@ -1790,6 +1894,7 @@ const graphicsMachineDefinition = setup({
             manifest: event.manifest,
             source: 'viewer',
           });
+          emitPresentedUnitChange(context, enq, { unitId: event.unitId, mediaType: context.artifact?.mimeType });
           return {
             context: {
               gltfPresentation: withGltfPresentationPhase(
@@ -1846,6 +1951,7 @@ const graphicsMachineDefinition = setup({
             manifest: event.manifest,
             source: event.source,
           });
+          emitPresentedUnitChange(context, enq, { unitId: event.unitId, mediaType: context.artifact?.mimeType });
           return { context: { modelInteractionUnitId: event.unitId } };
         },
         clearModelComponentManifest: ({ context, event }, enq) => {
@@ -1966,21 +2072,6 @@ const graphicsMachineDefinition = setup({
           return {};
         },
 
-        // Section cuts are data: editing one never changes a region.
-        updateSectionCut: ({ context, event }) => {
-          const cut = context.sectionCuts.find((candidate) => candidate.id === event.payload.id);
-          if (!cut) {
-            return {};
-          }
-          const next = applySectionCutPatch(cut, event.payload.patch, context.geometryCenter);
-          return next === cut
-            ? {}
-            : {
-                context: {
-                  sectionCuts: context.sectionCuts.map((candidate) => (candidate === cut ? next : candidate)),
-                },
-              };
-        },
         selectSectionCut: ({ context, event }) =>
           isSectionCutReference(context, context.selectedSectionCutId, event.payload)
             ? { context: { selectedSectionCutId: event.payload } }
@@ -2211,6 +2302,9 @@ const graphicsMachineDefinition = setup({
           initial: 'off',
           states: {
             off: {
+              entry: (_, enq) => {
+                enq.emit({ type: 'sectionSettled' });
+              },
               on: {
                 adoptSectionView: ({ context, event }) => {
                   const patch = adoptedSection(context, event.section);
@@ -2232,14 +2326,47 @@ const graphicsMachineDefinition = setup({
                   context.sectionCuts.length >= maxSectionCuts
                     ? {}
                     : { target: 'on', context: appendSectionCut(context, event.payload) },
-                removeSectionCut: ({ context, event }) => {
+                removeSectionCut: ({ context, event }, enq) => {
                   const patch = withoutSectionCut(context, event.payload);
-                  return patch ? { context: patch } : {};
+                  if (!patch) {
+                    return {};
+                  }
+                  // Nothing is being edited while the section is off: the change is settled at once.
+                  enq.emit({ type: 'sectionSettled' });
+                  return { context: patch };
+                },
+                updateSectionCut: ({ context, event }, enq) => {
+                  const patch = updatedSectionCut(context, event.payload);
+                  if (!patch) {
+                    return {};
+                  }
+                  enq.emit({ type: 'sectionSettled' });
+                  return { context: patch };
                 },
               },
             },
 
+            /*
+             * The section quiet gate (charter G6): a change to the cuts enters `editing`, and the cuts settle
+             * `sectionSettleDelay` after the last one. Only a settled section is written to the view record, and a
+             * foreign section is adopted only then; graphics tells its listeners with `sectionEdited` and
+             * `sectionSettled`.
+             */
             on: {
+              initial: 'settled',
+              states: {
+                settled: {
+                  entry: (_, enq) => {
+                    enq.emit({ type: 'sectionSettled' });
+                  },
+                },
+                editing: {
+                  entry: (_, enq) => {
+                    enq.emit({ type: 'sectionEdited' });
+                  },
+                  after: { [sectionSettleDelay]: { target: 'settled' } },
+                },
+              },
               on: {
                 adoptSectionView: ({ context, event }) => {
                   const patch = adoptedSection(context, event.section);
@@ -2250,7 +2377,7 @@ const graphicsMachineDefinition = setup({
                 addSectionCut: ({ context, event }) =>
                   context.sectionCuts.length >= maxSectionCuts
                     ? {}
-                    : { context: appendSectionCut(context, event.payload) },
+                    : { target: '.editing', context: appendSectionCut(context, event.payload) },
                 removeSectionCut: ({ context, event }) => {
                   const patch = withoutSectionCut(context, event.payload);
                   if (!patch) {
@@ -2258,7 +2385,12 @@ const graphicsMachineDefinition = setup({
                   }
                   return patch.sectionCuts.length === 0
                     ? { target: 'off', context: { ...patch, ...sectionOffContext } }
-                    : { context: patch };
+                    : { target: '.editing', context: patch };
+                },
+                // Each step of a drag or an edit restarts the quiet period.
+                updateSectionCut: ({ context, event }) => {
+                  const patch = updatedSectionCut(context, event.payload);
+                  return patch ? { target: '.editing', context: patch } : {};
                 },
               },
             },
@@ -2380,7 +2512,7 @@ const graphicsMachineDefinition = setup({
                                 ? [context.currentMeasurementAnchor, event.anchor]
                                 : undefined,
                               geometryKey: sourceGeometryKey,
-                              poseRevision: context.kinematicsRef.getSnapshot().context.revision,
+                              poseRevision: context.poseRevision,
                               status: 'current',
                               isPinned: false,
                             },
@@ -2444,7 +2576,7 @@ export type GraphicsStateValue = {
   operational: {
     backend: 'probing' | 'resolved' | 'lost';
     measure: 'off' | { on: 'selected' | 'selecting' };
-    section: 'off' | 'on';
+    section: 'off' | { on: 'settled' | 'editing' };
   };
 };
 

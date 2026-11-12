@@ -4,11 +4,13 @@ import { useSelector } from '@xstate/react';
 import { flushSync } from 'react-dom';
 import type { ActorRefFrom } from 'xstate';
 import type { RefCallback } from 'react';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
+import type { Group } from 'three';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RendererInstance } from '#graphics/three/renderer.js';
 import { RenderFpsOverlay } from '#graphics/three/render-fps-overlay.jsx';
 import { renderLoopObservers } from '#graphics/three/render-loop-observer.js';
 import { createControlsAdapter } from '#graphics/three/adapters/controls-adapter.js';
+import type { CameraInput, CameraInputRouting } from '#graphics/three/controls/camera-wheel-router.js';
 import { createTauR3fGlProp } from '#graphics/three/canvas-three-gl.js';
 import type { TauR3fGlFactory } from '#graphics/three/canvas-three-gl.js';
 import { GraphicsContextLostFallback } from '#graphics/three/graphics-context-lost-fallback.jsx';
@@ -20,10 +22,6 @@ import { Scene } from '#graphics/three/scene.jsx';
 import { AxesHelper } from '#graphics/three/react/axes-helper.jsx';
 import { ThreeGraphicsBackendProvider } from '#graphics/three/three-graphics-backend-context.jsx';
 import type { ThreeContextProperties } from '#graphics/three/three-viewer-properties.js';
-import {
-  infiniteGridFadeEndVisibleSpans,
-  infiniteGridPresentationPlaneByUpDirection,
-} from '#graphics/three/utils/infinite-grid-frame.js';
 import { setRaycasterFromCamera } from '#graphics/three/utils/raycaster-from-camera.js';
 import { WebGpuInspectorOverlay } from '#graphics/three/webgpu-inspector-overlay.jsx';
 import { cn } from '@taucad/ui/utils/cn';
@@ -33,13 +31,21 @@ import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 import { viewerRendererCreated } from '#lib/viewer-events.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
 import { canvasHostCreated } from '#graphics/three/three-canvas-instance-host.js';
+import {
+  createViewportGizmoInteractionLock,
+  ViewportGizmoInteractionLockProvider,
+} from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
 import type { CanvasHostRoot } from '#graphics/three/three-canvas-instance-host.js';
-import type { CanvasEvent, CanvasFailure, CanvasSnapshot } from '#machines/canvas.machine.js';
+import type { CanvasEvent, CanvasFailure, CanvasRef, CanvasSnapshot } from '#machines/canvas.machine.js';
 import type { webglContextMachine } from '#machines/webgl-context.machine.js';
 
 /** The world up axis graphics keeps, read when the camera's up changes. */
-const selectUpDirection = (graphicsRef: ReturnType<typeof useGraphics>): 'x' | 'y' | 'z' =>
+const selectGraphicsUpDirection = (graphicsRef: ReturnType<typeof useGraphics>): 'x' | 'y' | 'z' =>
   graphicsRef.getSnapshot().context.upDirection;
+
+/** Whether this mount's canvas actor still takes events: a detached one stopped with its surface. */
+const selectCanvasRunning = (canvas: CanvasRef | undefined): canvas is CanvasRef =>
+  canvas?.getSnapshot().status === 'active';
 
 /**
  * Props for {@link ThreeCanvasInstance}: the Three.js context properties plus a retry callback for context loss.
@@ -93,10 +99,22 @@ const failureError = (failure: CanvasFailure): Error =>
     ? new WebGpuInitializationError(failure.message)
     : new Error(failure.message);
 
+/** What the input router reads: nothing without a camera input, so today's bindings hold. */
+const toCameraRouting = ({
+  cameraInput,
+  enablePan,
+  enableZoom,
+}: Readonly<{ cameraInput: CameraInput | undefined; enablePan: boolean; enableZoom: boolean }>):
+  | CameraInputRouting
+  | undefined => (cameraInput === undefined ? undefined : { cameraInput, enablePan, enableZoom });
+
 /**
  * One R3F `<Canvas>` mount. Its renderer lifecycle (creating, ready, presented, lost, failed) is the graphics actor's
  * canvas child, attached from the surface element's ref and hosted from R3F's `onCreated`; this component only renders
- * the canvas, its context-lost fallback or its failure from that actor's state.
+ * the canvas, its context-lost fallback or its failure from that actor's state. The canvas actor also presents the
+ * view's camera on the surface (its viewport, and its clip policy while the grid is in the
+ * scene) and graphics' controls adapter steps the controls each frame. No effect here sends, subscribes or times: the
+ * surface and the grid report only their own mounts, from their refs.
  * `ThreeProvider` mounts this with `key` = `${graphicsBackend}:${retryCount}`, so each mount is a new canvas actor.
  * @public
  */
@@ -112,12 +130,15 @@ export function ThreeCanvasInstance({
   enablePan = false,
   secondaryMouseButtonMode = 'camera-pan',
   enableDamping = false,
-  upDirection = 'z',
+  // Graphics' world up decides the grid's orientation and its clip plane, which the canvas actor presents.
+  upDirection: _upDirection,
   className,
   stageOptions,
   postProcessingSettings,
   zoomSpeed = 2,
   gizmoContainer,
+  cameraInput,
+  gizmoStyle,
   webglContext,
   admittedBytes,
   ...canvasProperties
@@ -139,6 +160,9 @@ export function ThreeCanvasInstance({
   const cameraConsumersRef = useCameraConsumersRef();
   /** The live R3F root, kept so a surface that re-attaches (a Suspense reveal) hosts its new canvas actor on it. */
   const rootRef = useRef<CanvasHostRoot | undefined>(undefined);
+  /** The latest camera input, read by the input router at each gesture so a change applies without a new canvas. */
+  const cameraRoutingRef = useRef<CameraInputRouting | undefined>(undefined);
+  cameraRoutingRef.current = toCameraRouting({ cameraInput, enablePan, enableZoom });
   /** Host callbacks run outside React: they address this mount's canvas actor as graphics holds it now. */
   const sendToCanvas = useCallback(
     (event: CanvasEvent): void => {
@@ -149,6 +173,11 @@ export function ThreeCanvasInstance({
     },
     [canvasId, graphicsRef],
   );
+  /**
+   * This canvas's view-cube interaction lock: the cube takes it, and the controls adapter does not step while it is
+   * held.
+   */
+  const [interactionLock] = useState(createViewportGizmoInteractionLock);
   /** Hands graphics the controls adapter for this mount's root; graphics stops it with the surface (charter I9, I11). */
   const attachControls = useCallback(
     (held: CanvasHostRoot): void => {
@@ -160,11 +189,13 @@ export function ThreeCanvasInstance({
           rig: cameraRig,
           connectorRef: cameraConnectorRef,
           consumersRef: cameraConsumersRef,
-          getUpAxis: () => selectUpDirection(graphicsRef),
+          getUpAxis: () => selectGraphicsUpDirection(graphicsRef),
+          isInteractionLocked: interactionLock.isActive,
+          getCameraRouting: () => cameraRoutingRef.current,
         }),
       });
     },
-    [cameraConnectorRef, cameraConsumersRef, cameraRig, canvasId, graphicsRef],
+    [cameraConnectorRef, cameraConsumersRef, cameraRig, canvasId, graphicsRef, interactionLock],
   );
   const resize = useMemo(
     () => ({
@@ -229,6 +260,7 @@ export function ThreeCanvasInstance({
   // its R3F root, live on without a second `onCreated`. The detach records how far the renderer got, and the
   // re-attached surface's new canvas actor resumes from there: lost again, or hosted on the root it already has.
   const detachedPhase = useRef<CanvasSnapshot['value'] | undefined>(undefined);
+
   const attachSurface = useCallback<RefCallback<HTMLDivElement>>(
     (element) => {
       if (!element) {
@@ -252,29 +284,27 @@ export function ThreeCanvasInstance({
     [admittedBytes, attachControls, canvasId, graphicsRef, sendToCanvas, webglContext],
   );
 
+  /*
+   * The grid's place in the scene: the canvas actor pads the camera's clip planes for the grid while it is drawn,
+   * reported from the scene's own mount and unmount as the surface's attach is; graphics tells the canvas the axis the
+   * grid lies across. The marker re-reports to each canvas actor this mount attaches: a Suspense reveal (which
+   * re-attaches the surface but not the scene, a separate root) gives the callback a new identity, so React detaches it
+   * and attaches it again.
+   */
+  const presentGrid = useCallback<RefCallback<Group>>(
+    (marker) => {
+      if (selectCanvasRunning(canvasRef)) {
+        canvasRef.send({ type: 'gridChanged', enabled: marker !== null });
+      }
+    },
+    [canvasRef],
+  );
+
   const bindCanvas = useCallback<RefCallback<HTMLCanvasElement>>(
     (canvas) => {
       glProperty.bindCanvas(canvas ?? undefined);
     },
     [glProperty],
-  );
-
-  useLayoutEffect(() => {
-    cameraRig.setClipPlanes(
-      enableGrid && !isContextLost
-        ? {
-            farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
-            presentationPlane: infiniteGridPresentationPlaneByUpDirection[upDirection],
-          }
-        : undefined,
-    );
-  }, [cameraRig, enableGrid, isContextLost, upDirection]);
-
-  useLayoutEffect(
-    () => () => {
-      cameraRig.setClipPlanes(undefined);
-    },
-    [cameraRig],
   );
 
   const onCanvasCreated = useCallback(
@@ -322,18 +352,21 @@ export function ThreeCanvasInstance({
       {/* Both execution backends consume node materials. Effective API is reported above after init. */}
       <ThreeGraphicsBackendProvider value='webgpu'>
         <OverlayDepthProvider>
-          <Scene
-            enableGizmo={enableGizmo}
-            enableDamping={enableDamping}
-            enableZoom={enableZoom}
-            enablePan={enablePan}
-            secondaryMouseButtonMode={secondaryMouseButtonMode}
-            stageOptions={stageOptions}
-            zoomSpeed={zoomSpeed}
-            gizmoContainer={gizmoContainer}
-          >
-            {children}
-          </Scene>
+          <ViewportGizmoInteractionLockProvider lock={interactionLock}>
+            <Scene
+              enableGizmo={enableGizmo}
+              enableDamping={enableDamping}
+              enableZoom={enableZoom}
+              enablePan={enablePan}
+              secondaryMouseButtonMode={secondaryMouseButtonMode}
+              stageOptions={stageOptions}
+              zoomSpeed={zoomSpeed}
+              gizmoContainer={gizmoContainer}
+              gizmoStyle={gizmoStyle}
+            >
+              {children}
+            </Scene>
+          </ViewportGizmoInteractionLockProvider>
           <PostProcessing settings={postProcessingSettings} />
           {isInspectorEnabled ? <WebGpuInspectorOverlay /> : null}
           <ModelEmphasisOverlay />
@@ -341,6 +374,7 @@ export function ThreeCanvasInstance({
             {enableAxes ? <AxesHelper /> : null}
             {enableGrid ? <Grid /> : null}
           </SceneOverlay>
+          {enableGrid ? <group ref={presentGrid} name='grid-clip-policy' /> : null}
         </OverlayDepthProvider>
         {showRenderFps && isTauDebugEnabled ? (
           <RenderFpsOverlay hasTopRightGizmo={enableGizmo && Boolean(gizmoContainer)} />

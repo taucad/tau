@@ -137,6 +137,8 @@ type Slot = Readonly<{
   key: TurnAttemptKey;
   mode: 'start' | 'continue' | 'complete';
   checkoutId?: string;
+  /** The text of the person's request, which placement records as the result's title (Q9). */
+  request?: string;
   /** Attempt 1's start rows before `running`. */
   start: readonly LogRowBody[];
   placement?: TurnPlacement;
@@ -1477,6 +1479,7 @@ export const chatRunMachine = setup({
                     key: { ...context.slot.key, turnId: prepared.turnId },
                     start: prepared.start,
                     ...(prepared.checkoutId === undefined ? {} : { checkoutId: prepared.checkoutId }),
+                    ...(prepared.request === undefined ? {} : { request: prepared.request }),
                   },
                 },
               };
@@ -1507,6 +1510,7 @@ export const chatRunMachine = setup({
                     kind: prepared.kind,
                     mode: prepared.mode,
                     key: { ...context.slot.key, turnId: prepared.turnId },
+                    ...(prepared.request === undefined ? {} : { request: prepared.request }),
                     /* A resumed attempt is placed on the run's checkout of record, under a new lease (TS-R12). */
                     ...(runCheckout(context.ledger, context.slot.key.runId) === undefined
                       ? {}
@@ -1569,6 +1573,7 @@ export const chatRunMachine = setup({
                 enq(actions.admitPlacement, {
                   key: slot.key,
                   ...(slot.checkoutId === undefined ? {} : { checkoutId: slot.checkoutId }),
+                  ...(slot.request === undefined ? {} : { request: slot.request }),
                 });
                 return { target: '#placing', context: { ...context, ledger, pending: undefined, slot } };
               }

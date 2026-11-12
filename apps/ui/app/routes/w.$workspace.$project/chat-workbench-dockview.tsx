@@ -101,6 +101,7 @@ import { EditorSymbolPathProvider } from '#routes/w.$workspace.$project/editor-s
 import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
 import { ModelPanelBody } from '#routes/w.$workspace.$project/chat-explorer.js';
 import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
+import { useReportHistoryPaneShown } from '#routes/w.$workspace.$project/revision-pane-requests.js';
 import { AgentsPanelBody } from '#routes/w.$workspace.$project/chat-agents.js';
 import { JobsPanelBody } from '#routes/w.$workspace.$project/chat-jobs.js';
 import { PrintPanelBody } from '#routes/w.$workspace.$project/chat-print.js';
@@ -289,7 +290,10 @@ function ModelWorkbenchPanel(): React.JSX.Element {
   return <ModelPanelBody />;
 }
 
-function RevisionsWorkbenchPanel(): React.JSX.Element {
+function RevisionsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
+  const { projectId } = useProject();
+  /* The toolbar chip reads as pressed while History is on screen (C2). */
+  useReportHistoryPaneShown(projectId, useWorkbenchPanelShown(api));
   return <RevisionsPanelBody />;
 }
 

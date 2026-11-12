@@ -401,6 +401,7 @@ export const createChatRunEffects = (
             requestId: requestId('admit', args.key),
             key: args.key,
             ...(args.checkoutId === undefined ? {} : { checkoutId: args.checkoutId }),
+            ...(args.request === undefined ? {} : { request: args.request }),
           }),
         (answer) => {
           if (answer.status === 'refused') {

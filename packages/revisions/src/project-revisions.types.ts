@@ -221,6 +221,13 @@ export type RevisionBranchFacet = Readonly<{
    * every row as *Rename* refused, since the remote keeps the old name (D91).
    */
   onRemote?: boolean;
+  /**
+   * The revision the remote holds for this branch, as far as this device
+   * knows (D4). History draws *Backed up to here* above it, so the rows above
+   * are exactly the ones not backed up yet. Absent when nothing is known to be
+   * backed up: no remote, or a branch the remote has never had.
+   */
+  remoteHead?: string;
 }>;
 
 /** One undecided conflicted revision as the *Needs your decision* card renders it (D14). @public */

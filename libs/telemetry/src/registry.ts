@@ -12,6 +12,7 @@ import {
   builtInSkillSlugs,
   evaluationClasses,
   geospecRunStatuses,
+  kernelHostProfiles,
   kernelIds,
   lfsTransports,
   workerTimingSpanNames,
@@ -1647,6 +1648,74 @@ export const TauMetrics = {
     attributes: z.object({
       stage: z.enum(['first_view', 'fully_fetched', 'lfs_fetch']),
       span: z.enum(workerTimingSpanNames),
+    }),
+  }),
+
+  /*
+   * Automatic kernel selection (blueprint D10). The tuning loop reads the override matrix (`resolved` against
+   * `manual`) and the first-outcome failures; every label is a kernel id, a host profile or a small enum, and the
+   * rubric version tells one rubric's numbers from the next.
+   */
+  kernelAutoResolutions: defineCounter({
+    name: 'tau.kernel.auto.resolutions',
+    unit: '{turn}',
+    description:
+      'Settled turns Auto ran, by the kernel the project ended bound to (`none` while entry-less), whether it was bound at admission, agent, model and rubric version (reported by client)',
+    attributes: z.object({
+      'tau.host.profile': z.enum(kernelHostProfiles),
+      'agent.id': z.string(),
+      'kernel.id': z.enum([...kernelIds, 'none']),
+      'tau.kernel.had_owner': z.enum(['true', 'false']),
+      'gen_ai.request.model': z.string().optional(),
+      'tau.kernel.rubric_version': z.string(),
+    }),
+  }),
+
+  kernelOverrides: defineCounter({
+    name: 'tau.kernel.overrides',
+    unit: '{pick}',
+    description:
+      'Manual kernel picks in a chat that was on Auto, by the kernel Auto had bound (`none` when nothing was) and the kernel picked (reported by client)',
+    attributes: z.object({
+      'tau.host.profile': z.enum(kernelHostProfiles),
+      'tau.kernel.resolved': z.enum([...kernelIds, 'none']),
+      'tau.kernel.manual': z.enum(kernelIds),
+      'tau.kernel.rubric_version': z.string(),
+    }),
+  }),
+
+  kernelOverrideTurns: defineHistogram({
+    name: 'tau.kernel.override.turns',
+    unit: '{turn}',
+    description: 'Chat turns before a manual kernel pick replaced Auto (reported by client)',
+    buckets: [0, 1, 2, 3, 5, 10, 20, 50],
+    attributes: z.object({
+      'tau.kernel.resolved': z.enum([...kernelIds, 'none']),
+      'tau.kernel.manual': z.enum(kernelIds),
+    }),
+  }),
+
+  kernelFirstOutcomes: defineCounter({
+    name: 'tau.kernel.first_outcomes',
+    unit: '{chat}',
+    description:
+      'How an entry-less project’s Auto chat first came out: ready (a main that binds a kernel), failed (its first turn evaluated and bound nothing) or none (its first turn wrote no model), by kernel (reported by client)',
+    attributes: z.object({
+      'tau.host.profile': z.enum(kernelHostProfiles),
+      'kernel.id': z.enum([...kernelIds, 'none']),
+      outcome: z.enum(['ready', 'failed', 'none']),
+      'tau.kernel.rubric_version': z.string(),
+    }),
+  }),
+
+  kernelTurnsToFirstRender: defineHistogram({
+    name: 'tau.kernel.turns_to_first_render',
+    unit: '{turn}',
+    description:
+      'Chat turns an entry-less project’s Auto chat took to its first main that binds a kernel (reported by client)',
+    buckets: [1, 2, 3, 4, 5, 7, 10, 20],
+    attributes: z.object({
+      'kernel.id': z.enum(kernelIds),
     }),
   }),
 

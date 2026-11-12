@@ -28,7 +28,7 @@ describe('foreignChanges', () => {
       'setMatcapVisibility',
       'setPostProcessingVisibility',
       'setGridUnit',
-      'setUpDirection',
+      'adoptUpDirection',
       'adoptPinnedMeasurements',
     ]);
     expect(changes.section).toEqual(first.section);
@@ -101,7 +101,7 @@ describe('foreignChanges', () => {
   it('should carry field of view and up direction in the camera adoption', () => {
     const changes = foreignChanges(record(), record({ fieldOfView: 30, upDirection: 'y' }));
     expect(changes.camera).toEqual({ verticalFieldOfView: 30, upDirection: 'y' });
-    expect(changes.graphics).toEqual([{ type: 'setUpDirection', payload: 'y' }]);
+    expect(changes.graphics).toEqual([{ type: 'adoptUpDirection', payload: 'y' }]);
   });
 
   it('should read the selected kernel view camera', () => {

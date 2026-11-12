@@ -20,7 +20,15 @@ export type TurnAttemptKey = Readonly<{ chatId: string; turnId: string; runId: s
 export type TurnCut = 'base' | 'result';
 
 /** The attempt a cut is minted for, and which of its two revisions it is. @public */
-export type TurnCutOf = Readonly<{ key: TurnAttemptKey; turnCut: TurnCut }>;
+export type TurnCutOf = Readonly<{
+  key: TurnAttemptKey;
+  turnCut: TurnCut;
+  /**
+   * The person's request, as the host admitted it: a result cut is titled by its first line, shortened (Q9). Absent on
+   * a base cut, and where the host sent none.
+   */
+  request?: string;
+}>;
 
 /**
  * One attempt's lease record, as `.tau/runs/<runId>.json` holds it (S7, TS-R13).

@@ -1043,7 +1043,6 @@ describe('projectMachine', () => {
           hash: 'drawing',
           sourceFile: 'main.ts',
         });
-        actor.send({ type: 'reconcileViewManifest', unitId });
       };
 
       showGlb(first, 'first');

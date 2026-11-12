@@ -224,6 +224,7 @@ describe('the projection comparator (P52, W18 DEF-6)', () => {
         branches: [{ ...status.branches[0]!, leaseChatIds: ['chat-2'] }],
       }),
     ],
+    ['branches.remoteHead', (status) => ({ ...status, branches: [{ ...status.branches[0]!, remoteHead: 'rev-1' }] })],
     ['branchVerb.busy', (status) => ({ ...status, branchVerb: { ...status.branchVerb, busy: false } })],
     ['branchVerb.operation', (status) => ({ ...status, branchVerb: { ...status.branchVerb, operation: 'merge' } })],
     ['branchVerb.branch', (status) => ({ ...status, branchVerb: { ...status.branchVerb, branch: 'other' } })],

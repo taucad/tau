@@ -2,9 +2,9 @@
  * The view-record binding's two pure functions (graphics event-driven state charter G6; D2, D6, D20; I6, I7): what a
  * foreign view record asks the live owners to adopt, and the record the owners' current values make.
  *
- * They are extracted from `useViewSettingsSync` (`#hooks/use-view-settings-sync.ts`), which stays until the wiring lane
- * (G6b) deletes it. Neither reads an actor's snapshot, a clock or React state: the binding machine holds every value
- * they read and calls them inside its transitions.
+ * They were extracted from `useViewSettingsSync`, which the wiring lane (G6b) deleted. Neither reads an actor's
+ * snapshot, a clock or React state: the binding machine holds every value they read and calls them inside its
+ * transitions.
  *
  * The ten inheritable leaves (up direction, field of view, the seven display flags and the grid unit) are command-written
  * and resolver-seeded (graphics charter ruling of 2026-11-12, amending D20, I6 and I7 for those leaves; onboarding
@@ -43,12 +43,12 @@ export type ViewResolutionLevels = Readonly<{
 /**
  * What the live owners show for a view's ten inheritable leaves.
  *
- * @param record - The view record.
+ * @param record - The view record; absent, the view holds the format value for every leaf.
  * @param levels - The levels above it.
  * @returns The resolved values.
  */
 export const resolvedViewFields = (
-  record: WorkbenchView,
+  record: WorkbenchView | undefined,
   levels: ViewResolutionLevels = {},
 ): Readonly<ViewFieldValues> =>
   resolveViewSettings({
@@ -65,7 +65,7 @@ export type ViewGraphicsAdoption = Extract<
     type:
       | (typeof viewDisplayOwners)[number][2]
       | 'setGridUnit'
-      | 'setUpDirection'
+      | 'adoptUpDirection'
       | 'adoptPinnedMeasurements'
       | 'adoptSectionView';
   }
@@ -166,9 +166,8 @@ type Publication = Readonly<{
 const seeds = (resolution: Resolution, leaf: ViewFieldPath): boolean =>
   resolution.before === undefined || resolution.before[leaf] !== resolution.after[leaf];
 
-/* The graphics adoptions: display, grid unit and up direction when their resolution changed, whatever wrote the
- * record (a view command's write included), and pinned measurements when another view changed them. */
-const graphicsChanges = ({ previous, next, patch, resolution }: Publication): ViewGraphicsAdoption[] => {
+/* The graphics adoptions of the leaves graphics holds (display, grid unit, up direction) whose resolution changed. */
+const leafGraphics = (resolution: Resolution): ViewGraphicsAdoption[] => {
   const graphics: ViewGraphicsAdoption[] = [];
   for (const [, leaf, type] of viewDisplayOwners) {
     if (seeds(resolution, leaf)) {
@@ -179,8 +178,21 @@ const graphicsChanges = ({ previous, next, patch, resolution }: Publication): Vi
     graphics.push({ type: 'setGridUnit', payload: { unit: resolution.after['grid.unit'] } });
   }
   if (seeds(resolution, 'upDirection')) {
-    graphics.push({ type: 'setUpDirection', payload: resolution.after.upDirection });
+    graphics.push({ type: 'adoptUpDirection', payload: resolution.after.upDirection });
   }
+  return graphics;
+};
+
+/* The camera's leaves (field of view, up direction) whose resolution changed. */
+const leafCamera = (resolution: Resolution): ViewCameraAdoption => ({
+  ...(seeds(resolution, 'fieldOfView') ? { verticalFieldOfView: resolution.after.fieldOfView } : {}),
+  ...(seeds(resolution, 'upDirection') ? { upDirection: resolution.after.upDirection } : {}),
+});
+
+/* The graphics adoptions: display, grid unit and up direction when their resolution changed, whatever wrote the
+ * record (a view command's write included), and pinned measurements when another view changed them. */
+const graphicsChanges = ({ previous, next, patch, resolution }: Publication): ViewGraphicsAdoption[] => {
+  const graphics = leafGraphics(resolution);
   if (!previous || (patch?.measurements === undefined && !same(previous.measurements, next.measurements))) {
     graphics.push({ type: 'adoptPinnedMeasurements', measurements: next.measurements });
   }
@@ -196,10 +208,30 @@ const cameraChanges = ({ previous, next, patch, resolution }: Publication): View
     (!ownsCamera(next, patch) && !same(activeViewCamera(previous), activeViewCamera(next)));
   return {
     ...(cameraChanged ? cameraAdoptionOf(next) : {}),
-    ...(seeds(resolution, 'fieldOfView') ? { verticalFieldOfView: resolution.after.fieldOfView } : {}),
-    ...(seeds(resolution, 'upDirection') ? { upDirection: resolution.after.upDirection } : {}),
+    ...leafCamera(resolution),
   };
 };
+
+/**
+ * What the live owners adopt while a view has no record (its file is missing or refused and none was read before):
+ * the ten inheritable leaves resolved with no view level, so Tau's values and the person's defaults still show.
+ *
+ * @param seeded - The resolution last seeded while the record was absent, or `undefined` when none was.
+ * @param levels - The levels above the view now.
+ * @returns The resolution now, and the adoptions of the leaves it moved.
+ */
+export function absentRecordChanges(
+  seeded: Readonly<ViewFieldValues> | undefined,
+  levels: ViewResolutionLevels,
+): Readonly<{ values: Readonly<ViewFieldValues>; graphics: ViewGraphicsAdoption[]; camera?: ViewCameraAdoption }> {
+  const resolution: Resolution = { before: seeded, after: resolvedViewFields(undefined, levels) };
+  const camera = leafCamera(resolution);
+  return {
+    values: resolution.after,
+    graphics: leafGraphics(resolution),
+    ...(Object.keys(camera).length > 0 ? { camera } : {}),
+  };
+}
 
 /** What a publication carried and the levels it resolves over (see {@link foreignChanges}). */
 export type ForeignChangeOptions = Readonly<{

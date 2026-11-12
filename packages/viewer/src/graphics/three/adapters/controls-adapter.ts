@@ -23,8 +23,13 @@
  * orthographic gesture the controls' own zoom is handed the presented zoom, since the rig presents the span through the
  * frustum and `camera-controls` forces its zoom on every update. Each
  * write is stamped with the change's revision so the `update` it causes is an echo the camera ignores.
+ *
+ * Each frame, at `tickPriority` (after the canvas reports its surface and before the render), the adapter follows the
+ * root's event source and steps the controls, unless they are disabled or the canvas's view cube holds its interaction
+ * lock.
  */
 import type { RootState } from '@react-three/fiber';
+import type { Mesh } from 'three';
 import CameraControlsImpl from 'camera-controls';
 import {
   Box3,
@@ -48,7 +53,9 @@ import type { RenderFrame } from '@taucad/spatial';
 import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
 import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import { attachCameraWheelRouter } from '#graphics/three/controls/camera-wheel-router.js';
-import { retargetCameraControls } from '#graphics/three/controls/tau-camera-controls.jsx';
+import type { CameraInputRouting, CameraPivotPicker } from '#graphics/three/controls/camera-wheel-router.js';
+import { hasSceneTagInHierarchy, sceneTag } from '#graphics/three/utils/scene-tags.js';
+import { raycastFirstVisibleMeshHit } from '#graphics/three/utils/bvh-raycast.js';
 import { syncControlsLookAt } from '#graphics/three/utils/camera-controls-adapter.js';
 import type { ControlsAdapterLogic } from '#machines/graphics.machine.js';
 
@@ -62,8 +69,13 @@ type FrameSubscribe = (
   store: Readonly<{ getState: () => RootState }>,
 ) => () => void;
 
-/** Before `camera-controls` updates (-1), so a resized canvas presents its new viewport in the frame that resized. */
-const viewportPriority = -2;
+/**
+ * The controls step where R3F's controls do (-1): after the canvas host reports a resize to the camera (its
+ * `surfacePriority`, -2), before the frame renders.
+ *
+ * @public
+ */
+export const tickPriority = -1;
 
 const upAxes = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] } as const satisfies Record<string, CameraVector>;
 
@@ -84,16 +96,105 @@ export type ControlsAdapterDependencies = Readonly<{
   consumersRef: Readonly<{ current: ReadonlySet<CameraUpdateHandler> }>;
   /** The world up axis the scene's objects take, read when the camera's up changes. */
   getUpAxis: () => keyof typeof upAxes;
+  /** Whether the view cube holds the canvas's interaction lock, read each frame: the controls then do not step. */
+  isInteractionLocked?: () => boolean;
+  /**
+   * The person's camera input, read at each gesture. Absent, or returning `undefined`, keeps today's bindings and the
+   * pinch fix alone.
+   */
+  getCameraRouting?: () => CameraInputRouting | undefined;
 }>;
 
-const getPixelRatio = (): number => {
-  const pixelRatio: unknown = Reflect.get(globalThis, 'devicePixelRatio');
-  return Math.min(typeof pixelRatio === 'number' && pixelRatio > 0 ? pixelRatio : 1, 2);
+/**
+ * The parts of a `camera-controls` instance that {@link retargetCameraControls} reads and writes.
+ *
+ * @public
+ */
+export type RetargetableCameraControls = Pick<CameraControlsImpl, 'cancel' | 'updateCameraUp'> & {
+  camera: ThreeCamera;
+  mouseButtons: { wheel: CameraControlsImpl['mouseButtons']['wheel'] };
+  touches: { two: CameraControlsImpl['touches']['two'] };
 };
 
-/** The viewport the camera presents for. */
-const selectViewport = (camera: ThreeCameraRig['actorRef']): CameraDriverSnapshot['view']['viewport'] =>
-  camera.getSnapshot().context.view.viewport;
+/**
+ * Points the controls at a new camera, swapping wheel and pinch between dolly and zoom to suit its projection.
+ *
+ * @param options - The controls and the camera they should drive.
+ * @returns Whether the camera changed.
+ * @public
+ */
+export const retargetCameraControls = ({
+  controls,
+  camera,
+}: Readonly<{ controls: RetargetableCameraControls; camera: ThreeCamera }>): boolean => {
+  if (controls.camera === camera) {
+    return false;
+  }
+  controls.cancel();
+  controls.camera = camera;
+  if (camera instanceof OrthographicCamera) {
+    if (controls.mouseButtons.wheel === CameraControlsImpl.ACTION.DOLLY) {
+      controls.mouseButtons.wheel = CameraControlsImpl.ACTION.ZOOM;
+    }
+    if (controls.touches.two === CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK) {
+      controls.touches.two = CameraControlsImpl.ACTION.TOUCH_ZOOM_TRUCK;
+    }
+  } else {
+    if (controls.mouseButtons.wheel === CameraControlsImpl.ACTION.ZOOM) {
+      controls.mouseButtons.wheel = CameraControlsImpl.ACTION.DOLLY;
+    }
+    if (controls.touches.two === CameraControlsImpl.ACTION.TOUCH_ZOOM_TRUCK) {
+      controls.touches.two = CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK;
+    }
+  }
+  controls.updateCameraUp();
+  return true;
+};
+
+const pivotBlockingSceneTags = new Set([
+  sceneTag.sectionViewHelper,
+  sceneTag.measurementUi,
+  sceneTag.gltfSurfacePresentation,
+]);
+
+/**
+ * Finds the first visible mesh surface under a screen position in an R3F scene: the pivot an orbit about the cursor
+ * turns about.
+ *
+ * @param root - The R3F root whose scene and surface are picked.
+ * @returns The picker, in the scene's render units.
+ * @public
+ */
+export const createScenePivotPicker = (root: RootState): CameraPivotPicker => {
+  const raycaster = new Raycaster();
+  const pointer = new Vector2();
+  return ({ clientX, clientY, camera }) => {
+    const state = root.get();
+    const rect = state.gl.domElement.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      return undefined;
+    }
+    pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    camera.updateMatrixWorld();
+    raycaster.setFromCamera(pointer, camera);
+    const meshes: Mesh[] = [];
+    state.scene.traverse((object) => {
+      if (
+        (object as Partial<Mesh>).isMesh === true &&
+        object.type !== 'LineSegments2' &&
+        !hasSceneTagInHierarchy(object, pivotBlockingSceneTags)
+      ) {
+        meshes.push(object as Mesh);
+      }
+    });
+    // The trees the model's own pick builds; a mesh whose tree is still building is a miss, so the orbit keeps its target.
+    const { hit, pending } = raycastFirstVisibleMeshHit({ raycaster, meshes });
+    if (hit !== undefined && !pending) {
+      return hit.point.clone();
+    }
+    return undefined;
+  };
+};
 
 let installed = false;
 const installCameraControls = (): void => {
@@ -201,6 +302,8 @@ export const createControlsAdapter = ({
   connectorRef,
   consumersRef,
   getUpAxis,
+  isInteractionLocked = () => false,
+  getCameraRouting,
 }: ControlsAdapterDependencies): ControlsAdapterLogic =>
   createCallbackLogic(({ sendBack }) => {
     installCameraControls();
@@ -342,7 +445,8 @@ export const createControlsAdapter = ({
      * reconnects them when the source changes, so each frame checks for a new one.
      */
     let surface: HTMLElement | undefined;
-    // The wheel router sits on the same surface, in the capture phase, so a trackpad pinch dollies like a wheel (PF1).
+    // The input router sits on the same surface, in the capture phase: a trackpad pinch dollies like a wheel (PF1), and
+    // with a camera input each press and wheel step takes its preset's binding.
     let detachWheelRouter: (() => void) | undefined;
     const followSurface = (state: RootState): void => {
       const next = (state.events.connected as HTMLElement | undefined) ?? gl.domElement;
@@ -353,22 +457,25 @@ export const createControlsAdapter = ({
         }
         surface = next;
         controls.connect(next);
-        detachWheelRouter = attachCameraWheelRouter({ controls, element: next });
+        detachWheelRouter = attachCameraWheelRouter({
+          controls,
+          element: next,
+          getRouting: getCameraRouting,
+          pickPivot: createScenePivotPicker(root),
+        });
       }
     };
 
-    // Viewport: the canvas's CSS size, read before the controls update in every frame.
-    const viewportObserver = {
-      current(state: RootState): void {
+    /*
+     * The tick: once per frame of this canvas's loop, the controls step by the frame's delta (their damping and
+     * transitions), unless they are disabled or the view cube holds the interaction lock while it turns the camera
+     * (another tool that re-enables the controls when its own drag ends must not let them step under the cube).
+     */
+    const ticker = {
+      current(state: RootState, delta: number): void {
         followSurface(state);
-        const { width, height } = state.size;
-        if (width <= 0 || height <= 0) {
-          return;
-        }
-        const pixelRatio = getPixelRatio();
-        const viewport = selectViewport(camera);
-        if (viewport.width !== width || viewport.height !== height || viewport.pixelRatio !== pixelRatio) {
-          camera.send({ type: 'setViewport', viewport: { width, height, pixelRatio } });
+        if (controls.enabled && !isInteractionLocked()) {
+          controls.update(delta);
         }
       },
     };
@@ -384,8 +491,8 @@ export const createControlsAdapter = ({
     for (const [type, listener] of listeners) {
       controls.addEventListener(type, listener);
     }
-    viewportObserver.current(root.get());
-    const unsubscribeFrame = (root.internal.subscribe as FrameSubscribe)(viewportObserver, viewportPriority, {
+    followSurface(root.get());
+    const unsubscribeFrame = (root.internal.subscribe as FrameSubscribe)(ticker, tickPriority, {
       getState: root.get,
     });
 

@@ -59,18 +59,23 @@ const ViewportGizmoInteractionLockContext = createContext<ViewportGizmoInteracti
 );
 
 /**
- * Provide one viewport gizmo interaction lock to its descendants.
+ * Provide one viewport gizmo interaction lock to its descendants: the given one (the canvas's, which its controls
+ * adapter also reads), else the one an enclosing provider gives, else a new one.
  *
- * @param props - The children that share the lock.
+ * @param props - The children that share the lock, and the lock to give them.
  * @returns The context provider element.
  * @public
  */
 export function ViewportGizmoInteractionLockProvider({
   children,
+  lock: given,
 }: {
   readonly children: React.ReactNode;
+  readonly lock?: ViewportGizmoInteractionLock;
 }): React.JSX.Element {
-  const [lock] = useState(createViewportGizmoInteractionLock);
+  const enclosing = useContext(ViewportGizmoInteractionLockContext);
+  const [own] = useState(createViewportGizmoInteractionLock);
+  const lock = given ?? (enclosing === defaultViewportGizmoInteractionLock ? own : enclosing);
 
   return (
     <ViewportGizmoInteractionLockContext.Provider value={lock}>{children}</ViewportGizmoInteractionLockContext.Provider>

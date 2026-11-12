@@ -140,6 +140,18 @@ export class TelemetryController {
         this.recordProjectOpen(entry);
         return;
       }
+      case IngestEntryName.KERNEL_AUTO_RESOLVED: {
+        this.recordKernelAutoResolved(entry);
+        return;
+      }
+      case IngestEntryName.KERNEL_OVERRIDE: {
+        this.recordKernelOverride(entry);
+        return;
+      }
+      case IngestEntryName.KERNEL_FIRST_OUTCOME: {
+        this.recordKernelFirstOutcome(entry);
+        return;
+      }
       default: {
         const exhaustive: never = entry;
         throw new Error(`Unhandled ingest entry: ${(exhaustive as { name: string }).name}`);
@@ -367,6 +379,50 @@ export class TelemetryController {
       cache,
       ...(transport === undefined ? {} : { [AttributeKey.LFS_TRANSPORT]: transport }),
     });
+  }
+
+  private recordKernelAutoResolved(
+    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.KERNEL_AUTO_RESOLVED }>,
+  ): void {
+    const { hostProfile, agentId, kernel, hadOwner, model, rubricVersion } = entry.detail;
+    const agent = recordedAgentId(agentId);
+    this.metrics.kernelAutoResolutions.add(1, {
+      'tau.host.profile': hostProfile,
+      [AttributeKey.AGENT_ID]: agent,
+      [AttributeKey.KERNEL_ID]: kernel ?? 'none',
+      'tau.kernel.had_owner': hadOwner ? 'true' : 'false',
+      /* Only Tau's own turns name a model: an ACP agent's model is the vendor's. */
+      ...(model === undefined || agent !== 'tau' ? {} : { [AttributeKey.GEN_AI_REQUEST_MODEL]: model }),
+      'tau.kernel.rubric_version': String(rubricVersion),
+    });
+  }
+
+  private recordKernelOverride(
+    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.KERNEL_OVERRIDE }>,
+  ): void {
+    const { hostProfile, resolved, manual, turnsSince, rubricVersion } = entry.detail;
+    const pair = { 'tau.kernel.resolved': resolved ?? 'none', 'tau.kernel.manual': manual } as const;
+    this.metrics.kernelOverrides.add(1, {
+      'tau.host.profile': hostProfile,
+      ...pair,
+      'tau.kernel.rubric_version': String(rubricVersion),
+    });
+    this.metrics.kernelOverrideTurns.record(turnsSince, pair);
+  }
+
+  private recordKernelFirstOutcome(
+    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.KERNEL_FIRST_OUTCOME }>,
+  ): void {
+    const { hostProfile, kernel, outcome, turnsToFirstRender, rubricVersion } = entry.detail;
+    this.metrics.kernelFirstOutcomes.add(1, {
+      'tau.host.profile': hostProfile,
+      [AttributeKey.KERNEL_ID]: kernel ?? 'none',
+      outcome,
+      'tau.kernel.rubric_version': String(rubricVersion),
+    });
+    if (outcome === 'ready' && kernel !== undefined) {
+      this.metrics.kernelTurnsToFirstRender.record(turnsToFirstRender, { [AttributeKey.KERNEL_ID]: kernel });
+    }
   }
 }
 

@@ -44,6 +44,11 @@ function createMockMetrics() {
     syncClientLfsBytes: { add: vi.fn() },
     projectOpenDuration: { record: vi.fn() },
     projectOpenSpanDuration: { record: vi.fn() },
+    kernelAutoResolutions: { add: vi.fn() },
+    kernelOverrides: { add: vi.fn() },
+    kernelOverrideTurns: { record: vi.fn() },
+    kernelFirstOutcomes: { add: vi.fn() },
+    kernelTurnsToFirstRender: { record: vi.fn() },
   };
 }
 
@@ -231,6 +236,94 @@ describe('TelemetryController', () => {
         [64 * 1024 * 1024 * 1024, { 'agent.placement': 'browser', source: 'network' }],
         [300, { 'agent.placement': 'browser', source: 'local' }],
       ]);
+    });
+
+    it('should record the kernel-selection events, naming a model only on Tau turns', () => {
+      ingestSignedIn({
+        entries: [
+          {
+            name: IngestEntryName.KERNEL_AUTO_RESOLVED,
+            duration: 0,
+            detail: {
+              hostProfile: 'web',
+              agentId: 'tau',
+              kernel: 'replicad',
+              hadOwner: false,
+              model: 'anthropic/claude-sonnet-5-5',
+              rubricVersion: 1,
+            },
+          },
+          {
+            name: IngestEntryName.KERNEL_AUTO_RESOLVED,
+            duration: 0,
+            detail: { hostProfile: 'desktop', agentId: 'claude', hadOwner: true, model: 'x/y', rubricVersion: 1 },
+          },
+          {
+            name: IngestEntryName.KERNEL_OVERRIDE,
+            duration: 0,
+            detail: { hostProfile: 'web', resolved: 'openscad', manual: 'replicad', turnsSince: 2, rubricVersion: 1 },
+          },
+          {
+            name: IngestEntryName.KERNEL_FIRST_OUTCOME,
+            duration: 0,
+            detail: {
+              hostProfile: 'web',
+              kernel: 'openscad',
+              outcome: 'ready',
+              turnsToFirstRender: 3,
+              rubricVersion: 1,
+            },
+          },
+          {
+            name: IngestEntryName.KERNEL_FIRST_OUTCOME,
+            duration: 0,
+            detail: { hostProfile: 'web', outcome: 'failed', turnsToFirstRender: 1, rubricVersion: 1 },
+          },
+        ],
+      });
+
+      expect(mockMetrics.kernelAutoResolutions.add.mock.calls).toEqual([
+        [
+          1,
+          {
+            'tau.host.profile': 'web',
+            'agent.id': 'tau',
+            'kernel.id': 'replicad',
+            'tau.kernel.had_owner': 'false',
+            'gen_ai.request.model': 'anthropic/claude-sonnet-5-5',
+            'tau.kernel.rubric_version': '1',
+          },
+        ],
+        [
+          1,
+          {
+            'tau.host.profile': 'desktop',
+            'agent.id': 'claude',
+            'kernel.id': 'none',
+            'tau.kernel.had_owner': 'true',
+            'tau.kernel.rubric_version': '1',
+          },
+        ],
+      ]);
+      expect(mockMetrics.kernelOverrides.add.mock.calls).toEqual([
+        [
+          1,
+          {
+            'tau.host.profile': 'web',
+            'tau.kernel.resolved': 'openscad',
+            'tau.kernel.manual': 'replicad',
+            'tau.kernel.rubric_version': '1',
+          },
+        ],
+      ]);
+      expect(mockMetrics.kernelOverrideTurns.record.mock.calls).toEqual([
+        [2, { 'tau.kernel.resolved': 'openscad', 'tau.kernel.manual': 'replicad' }],
+      ]);
+      expect(mockMetrics.kernelFirstOutcomes.add.mock.calls).toEqual([
+        [1, { 'tau.host.profile': 'web', 'kernel.id': 'openscad', outcome: 'ready', 'tau.kernel.rubric_version': '1' }],
+        [1, { 'tau.host.profile': 'web', 'kernel.id': 'none', outcome: 'failed', 'tau.kernel.rubric_version': '1' }],
+      ]);
+      expect(mockMetrics.kernelTurnsToFirstRender.record.mock.calls).toEqual([[3, { 'kernel.id': 'openscad' }]]);
     });
 
     it('should record a hosted project open by phase and cache state, in seconds, bounding a skewed clock', () => {

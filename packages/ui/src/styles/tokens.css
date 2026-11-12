@@ -125,6 +125,13 @@
   --chart-3: oklch(0.55 0.15 180deg);
   --chart-4: oklch(0.55 0.18 150deg);
   --chart-5: oklch(0.55 0.2 30deg);
+  /* Branch lanes in the History graph, by slot: aliases of the chart palette so History never reads a
+     chart token. Blue and green first; purple (--chart-2) is left out because it sits beside
+     --feature. `main` is drawn in --foreground, and a lane is never told apart by colour alone. */
+  --branch-1: var(--chart-1);
+  --branch-2: var(--chart-4);
+  --branch-3: var(--chart-5);
+  --branch-4: var(--chart-3);
 }
 
 :root[data-pointer-cursors='true'] {
@@ -748,4 +755,8 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-branch-1: var(--branch-1);
+  --color-branch-2: var(--branch-2);
+  --color-branch-3: var(--branch-3);
+  --color-branch-4: var(--branch-4);
 }

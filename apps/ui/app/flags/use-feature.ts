@@ -47,6 +47,15 @@ function refreshSnapshot(): void {
 subscribeRemoteFlags(refreshSnapshot);
 
 /**
+ * Hear of any flag change outside React (an override here, or a PostHog evaluation); read the value with
+ * `isFeatureEnabled`.
+ *
+ * @param listener - Called after the shared snapshot is refreshed.
+ * @returns The unsubscribe.
+ */
+export const subscribeFeatureFlags = (listener: () => void): (() => void) => flagStore.subscribe(listener);
+
+/**
  * Read a single feature flag. Re-renders when the flag value changes.
  */
 export function useFeature(flag: FeatureFlagName): boolean {

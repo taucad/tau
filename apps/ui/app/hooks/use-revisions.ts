@@ -21,6 +21,7 @@ import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RevisionDiffEntry, RevisionLine, RevisionRow, StartReading } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
+import { entryTitleOf } from '#lib/revision-entry-title.js';
 import type { RevisionWhoContext } from '#lib/revision-actor.js';
 import { holdRevisionGraph, refreshPushRecords } from '#lib/revision-pushes.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
@@ -157,39 +158,13 @@ type HeadLog = Readonly<{
 const headLog = (head: string | undefined, rows: readonly RevisionRow[], wanted: number): HeadLog =>
   head !== undefined && rows[0]?.revisionId !== head ? { head, rows, wanted, unheld: true } : { head, rows, wanted };
 
-/**
- * The title a person reads, never the generator's own string (C37).
- *
- * `RevisionRow.summary` is `edited ?? generated`, so a surface cannot tell a
- * human title from `revision-effects.ts`'s placeholder — but it can
- * *reconstruct* the placeholder from fields the row already carries and refuse
- * to render it. That is an equality check against known values, not a parse of
- * a sentence (I12). The generator itself is `packages/revisions`' to fix.
- *
- * @param row - One graph row.
- * @returns The headline every revision surface shows.
- */
-const titleOf = (row: RevisionRow): string => {
-  /* A5: a turn's base cut is the person's own edits, saved before the agent started. */
-  if (row.turnCut === 'base' && row.summary === `Agent turn ${row.turnId ?? ''}`) {
-    return 'Autosave';
-  }
-  if (row.turnId !== undefined && row.summary === `Agent turn ${row.turnId}`) {
-    return 'Agent change';
-  }
-  if (row.capture !== undefined && row.summary === `Saved changes (${row.capture})`) {
-    return row.capture === 'save' ? 'Saved changes' : 'Autosave';
-  }
-  return row.summary;
-};
-
 const cardOf = (row: RevisionRow, who: RevisionWhoContext): RevisionCard => {
   const { line, isYou } = revisionWho(row, who);
   return {
     revisionId: row.revisionId,
     n: row.revisionNumber,
     createdAt: row.createdAt,
-    summary: titleOf(row),
+    summary: entryTitleOf(row.summary),
     actor: line,
     ...(isYou ? { isYours: true } : {}),
     treeId: row.treeId,

@@ -180,6 +180,46 @@ describe('ChatMessageToolRevisions', () => {
     expectNoSaveNumber();
   });
 
+  /* C5 acceptance: the card reads the engine's placeholders the way History titles them (M6, Q9). */
+  it('titles an entry as History does, never with the engine’s placeholder', () => {
+    const agent = {
+      kind: 'recorded',
+      identity: { kind: 'agent', id: 'agent', runId: 'run-1', onBehalfOf: { kind: 'user', id: 'ada' } },
+    } as const;
+    render(
+      <ChatMessageToolRevisions
+        part={answered(
+          { action: 'log' },
+          {
+            where: 'main',
+            revisions: [
+              revision({ revisionId: 'a1', summary: 'Agent change', source: 'agent', who: agent }),
+              /* A turn's base cut: the person's own edits, saved before the agent started (A5). */
+              revision({ revisionId: 'a2', summary: 'Autosave', source: 'user' }),
+              revision({ revisionId: 'a3', summary: 'Saved changes (idle)' }),
+              revision({ revisionId: 'a4', summary: 'Saved changes (save)' }),
+              revision({ revisionId: 'a5', summary: 'Make the lid walls 2.4 mm', source: 'agent', who: agent }),
+            ],
+          },
+        )}
+      />,
+    );
+
+    expect(rows()).toEqual([
+      `${at()}Agent changeAgent`,
+      `${at()}Autosave`,
+      `${at()}Autosave`,
+      `${at()}Saved changes`,
+      `${at()}Make the lid walls 2.4 mmAgent`,
+    ]);
+    const text = document.body.textContent;
+    expect(text).not.toContain('Agent turn');
+    expect(text).not.toContain('Saved changes (');
+    expect(text).not.toContain('Tau agent');
+    /* The agent's who carries its glyph, as History's does. */
+    expect(document.querySelectorAll('[data-slot="entry-who"] svg')).toHaveLength(2);
+  });
+
   it('names who made an entry as History does, never by a model or account id (HQ4)', () => {
     render(
       <ChatMessageToolRevisions

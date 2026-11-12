@@ -16,12 +16,13 @@ import {
   useMemo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
-import { waitFor } from 'xstate';
+import { createCallbackLogic, waitFor } from 'xstate';
 import type { ActorRefFrom, InputFrom } from 'xstate';
 import type { Remote } from 'comlink';
 import { useQueryClient } from '@tanstack/react-query';
@@ -44,7 +45,11 @@ import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
 import { projectMachine } from '#machines/project.machine.js';
-import type { ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
+import type {
+  ProjectLoadInput,
+  ProjectRetrievedEvent,
+  ViewRecordSessionActorInput,
+} from '#machines/project.machine.js';
 import { editorMachine } from '#machines/editor.machine.js';
 import { disposeCadRuntime } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
@@ -64,6 +69,9 @@ import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils'
 import { isNotFound } from '@taucad/chat-ui/db/attachment-store';
 import { toast } from 'sonner';
 import type { EntryPathChange } from '#workbench-records/entries-store.js';
+import { createViewRecordPorts, startViewRecordSession } from '#workbench-records/view-record-session.js';
+import { deviceViewLevels } from '#workbench-records/view-levels.js';
+import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
 
 type ProjectContextType = {
   manifestObservationError: string | undefined;
@@ -88,6 +96,8 @@ type ProjectContextType = {
   changeEntryPaths: (operation: EntryPathChange) => Promise<boolean>;
   registerWorkbenchRecordProducer: (flush: () => Promise<void>) => () => void;
   flushWorkbenchRecordProducers: () => Promise<void>;
+  /** The ports every view's record session shares (charter G6b): the host flushes them on close. */
+  viewRecordPorts: ViewRecordPortsHandle;
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
@@ -498,7 +508,20 @@ export function ProjectProvider({
 
   // D-RT-03: read once, as the actor's input is fixed at creation.
   const [recycleHeapBytes] = useState(() => runtimeRecycleHeapBytes(isMemoryConstrainedDevice()));
-  const actorRef = useActorRef(projectMachine.provide({ actors: provide?.actors ?? projectActors }), {
+  /* Every view's record session runs beside its graphics actor in the project machine, over these ports (G6b). Only the
+   * editor writes view records: a project loaded from its own source (`provide`), an owned preview or a shared
+   * workbench shows the project without saving its views, as before G6b, when the record host was mounted by the
+   * editor's live sessions only. */
+  const viewRecordSession = createCallbackLogic<{ type: 'never' }, ViewRecordSessionActorInput>(({ input: session }) =>
+    startViewRecordSession({ viewId: session.viewId, graphics: session.graphics, ports: viewRecordPorts }),
+  );
+  const providedMachine =
+    provide === undefined
+      ? profile === 'editor'
+        ? projectMachine.provide({ actors: { ...projectActors, viewRecord: viewRecordSession } })
+        : projectMachine.provide({ actors: projectActors })
+      : projectMachine.provide({ actors: provide.actors });
+  const actorRef = useActorRef(providedMachine, {
     input: {
       projectId,
       fileManagerRef: fileManager.fileManagerRef,
@@ -688,6 +711,25 @@ export function ProjectProvider({
       return next;
     });
   }, []);
+  const viewRecordHost = useMemo(
+    () => ({ files: fileManager.parameterFiles, watch: fileManager.watchRecordFile }),
+    [fileManager.parameterFiles, fileManager.watchRecordFile],
+  );
+  const [viewRecordPorts] = useState(() =>
+    createViewRecordPorts({
+      projectId,
+      root: `/projects/${projectId}`,
+      host: viewRecordHost,
+      levels: deviceViewLevels(projectId),
+      setViewRecord,
+      setViewEntryPath,
+      setAppliedWorkbenchRevision,
+    }),
+  );
+  /* The filesystem's connections can be replaced (a new worker): each session reopens its store on the new ones. */
+  useLayoutEffect(() => {
+    viewRecordPorts.replaceHost(viewRecordHost);
+  }, [viewRecordHost, viewRecordPorts]);
   const modelInteractionRef = useSelector(actorRef, (state) => state.context.modelInteractionRef);
   const geometryUnits = useSelector(actorRef, (state) => state.context.geometryUnits);
   const mainEntryPath = useSelector(
@@ -1074,6 +1116,7 @@ export function ProjectProvider({
       changeEntryPaths,
       registerWorkbenchRecordProducer,
       flushWorkbenchRecordProducers,
+      viewRecordPorts,
       modelInteractionRef,
       geometryUnits,
       mainEntryPath,
@@ -1114,6 +1157,7 @@ export function ProjectProvider({
     changeEntryPaths,
     registerWorkbenchRecordProducer,
     flushWorkbenchRecordProducers,
+    viewRecordPorts,
     modelInteractionRef,
     geometryUnits,
     mainEntryPath,

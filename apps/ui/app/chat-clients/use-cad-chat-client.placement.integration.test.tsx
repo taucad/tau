@@ -88,6 +88,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   useActiveChatSession: vi.fn(),
   useChatComposer: () => ({
     execution: { setActiveExecution: () => undefined },
+    kernel: { preference: 'replicad' },
     model: {
       model: {
         id: 'openai-gpt-5.5',

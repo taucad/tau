@@ -14,6 +14,9 @@ export const IngestEntryName = {
   SYNC_ATTEMPT: 'observability.syncAttempt',
   LFS_FETCH: 'observability.lfsFetch',
   PROJECT_OPEN: 'observability.projectOpen',
+  KERNEL_AUTO_RESOLVED: 'kernel.autoResolved',
+  KERNEL_OVERRIDE: 'kernel.override',
+  KERNEL_FIRST_OUTCOME: 'kernel.firstOutcome',
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- end OTEL constants block */
 
@@ -435,6 +438,72 @@ const projectOpenEntrySchema = z.object({
   }),
 });
 
+/*
+ * Automatic kernel selection (blueprint D10): three categorical events, none carrying request text, a path or a
+ * project. The kernel is the runtime's binding of the project's main entry, so an ACP turn is observed without
+ * reading its transcript. They ride the anonymous telemetry the agent turn entry already rides.
+ */
+
+/** Where a kernel-selection event was observed: the web app or the desktop app. @public */
+export const kernelHostProfiles = ['web', 'desktop'] as const;
+
+/** A Tau model id as the chat stores it, `provider/model`; anything else is not sent. @public */
+export const kernelSelectionModelSchema = z.string().regex(/^[a-z][\da-z-]{0,23}\/[\da-z][\d.:_a-z-]{0,63}$/u);
+
+/** The routing rubric version, `kernelRoutingRubricVersion` in `@taucad/types`. */
+const rubricVersionSchema = z.number().int().positive().max(999);
+
+/** Turns in one chat; a longer chat reads as the ceiling. */
+const chatTurnCountSchema = clampedInt(1000);
+
+/** One settled turn that Auto ran: the kernel it ended bound to, absent when the project is still entry-less. */
+const kernelAutoResolvedEntrySchema = z.object({
+  name: z.literal(IngestEntryName.KERNEL_AUTO_RESOLVED),
+  duration: z.number().nonnegative(),
+  detail: z.strictObject({
+    hostProfile: z.enum(kernelHostProfiles),
+    agentId: agentIdSchema,
+    kernel: z.enum(kernelIds).optional(),
+    /** The project's main already bound a kernel when the turn was admitted. */
+    hadOwner: z.boolean(),
+    /** Tau's own model only; an ACP agent's model is its own and is not reported. */
+    model: kernelSelectionModelSchema.optional(),
+    rubricVersion: rubricVersionSchema,
+  }),
+});
+
+/** The person picked a kernel in a chat that was on Auto. */
+const kernelOverrideEntrySchema = z.object({
+  name: z.literal(IngestEntryName.KERNEL_OVERRIDE),
+  duration: z.number().nonnegative(),
+  detail: z.strictObject({
+    hostProfile: z.enum(kernelHostProfiles),
+    /** The kernel Auto had bound; absent when nothing was bound yet. */
+    resolved: z.enum(kernelIds).optional(),
+    manual: z.enum(kernelIds),
+    /** The chat's turns before the pick. */
+    turnsSince: chatTurnCountSchema,
+    rubricVersion: rubricVersionSchema,
+  }),
+});
+
+/**
+ * How an entry-less project's Auto chat first came out: `ready` once a turn left it with a main that binds a kernel,
+ * `failed` when its first turn evaluated but bound nothing, `none` when its first turn wrote no model at all.
+ */
+const kernelFirstOutcomeEntrySchema = z.object({
+  name: z.literal(IngestEntryName.KERNEL_FIRST_OUTCOME),
+  duration: z.number().nonnegative(),
+  detail: z.strictObject({
+    hostProfile: z.enum(kernelHostProfiles),
+    kernel: z.enum(kernelIds).optional(),
+    outcome: z.enum(['ready', 'failed', 'none']),
+    /** The chat's turns up to and including the one that rendered; 1 for a first-turn outcome. */
+    turnsToFirstRender: chatTurnCountSchema,
+    rubricVersion: rubricVersionSchema,
+  }),
+});
+
 /**
  * Discriminated union of all client metric entry shapes.
  * Used for validating individual entries in the ingest payload.
@@ -448,6 +517,9 @@ export const clientMetricEntrySchema = z.discriminatedUnion('name', [
   syncAttemptEntrySchema,
   lfsFetchEntrySchema,
   projectOpenEntrySchema,
+  kernelAutoResolvedEntrySchema,
+  kernelOverrideEntrySchema,
+  kernelFirstOutcomeEntrySchema,
 ]);
 
 /**

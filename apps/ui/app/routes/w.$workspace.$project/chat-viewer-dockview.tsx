@@ -11,7 +11,7 @@ import type {
 } from 'dockview-react';
 import { positionToDirection } from 'dockview-react';
 import { withViewField } from '@taucad/workbench';
-import type { ViewerNode, WorkbenchView } from '@taucad/workbench';
+import type { ViewerNode, ViewFieldPath, WorkbenchView } from '@taucad/workbench';
 import { Box } from 'lucide-react';
 import type { CapabilitiesManifest, Evaluation } from '@taucad/runtime';
 import { sourcePathMatchesExtensions } from '@taucad/utils/file';
@@ -20,7 +20,7 @@ import { idPrefix, tauFileDragMime, tauEditorPanelDragMime, tauViewerPanelDragMi
 import { generatePrefixedId } from '@taucad/utils/id';
 import { fromDockview, mintViewRecordId, toDockview } from '#workbench-records/converters.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
-import { viewExceptions } from '#workbench-records/view-exceptions.js';
+import { exceptionsForView, viewExceptions, viewExceptionsStore } from '#workbench-records/view-exceptions.js';
 import { readViewLevels } from '#workbench-records/view-levels.js';
 import { resolvedViewFields } from '#workbench-records/view-record-binding-changes.js';
 import { graphicsSettingsForView, newViewRecord } from '@taucad/workbench-panes/records/view-record';
@@ -546,12 +546,22 @@ export const newViewRecordFrom = (entryPath: string, source: WorkbenchView | und
   return withViewField(newViewRecord(entryPath, settings), 'grid.unit', source.grid.unit);
 };
 
+/* Put a view's exceptions back to `leaves`, as they were before a copy onto it. */
+const restoreViewExceptions = (projectId: string, viewId: string, leaves: readonly ViewFieldPath[]): void => {
+  viewExceptions.clearView(projectId, viewId);
+  for (const leaf of leaves) {
+    viewExceptions.add(projectId, viewId, leaf);
+  }
+};
+
 /**
  * Write the record of a view made from `source`: this device's exceptions for the source are copied to the new id
  * first, so the new view reads as set exactly where the source does, then the record is created if it is missing.
+ * When the copy is not saved, no record is written; when the record is not written after the copy saved, the new id's
+ * exceptions are put back as they were.
  *
  * @param input - The project, the new view, its entry, the view it is made from and the record store's edit.
- * @returns Whether the record store accepted the write.
+ * @returns Whether both the exceptions (when there is a source) and the record were saved.
  */
 export const recordNewView = async ({
   projectId,
@@ -566,10 +576,43 @@ export const recordNewView = async ({
   source: ViewSource | undefined;
   edit: (viewId: string, change: (current: WorkbenchView | undefined) => WorkbenchView) => Promise<boolean>;
 }>): Promise<boolean> => {
-  if (source) {
-    viewExceptions.copy(projectId, source.viewId, viewId);
+  const write = async (): Promise<boolean> =>
+    edit(viewId, (current) => current ?? newViewRecordFrom(entryPath, source?.record));
+  if (!source) {
+    return write();
   }
-  return edit(viewId, (current) => current ?? newViewRecordFrom(entryPath, source?.record));
+  const prior = exceptionsForView(viewExceptionsStore.read(), projectId, viewId);
+  if (viewExceptions.copy(projectId, source.viewId, viewId) !== 'saved') {
+    return false;
+  }
+  let saved = false;
+  try {
+    saved = await write();
+    return saved;
+  } finally {
+    if (!saved) {
+      restoreViewExceptions(projectId, viewId, prior);
+    }
+  }
+};
+
+/**
+ * The view a new view is made from: the active viewer panel's record. With no viewer panel tracked as active yet, the
+ * dock's active panel counts when it is a viewer, as it does for the active viewer's settings.
+ *
+ * @param panel - The active viewer panel, or the dock's active panel.
+ * @param viewRecords - The project's view records.
+ * @returns The source, when the panel is a viewer with a record.
+ */
+export const viewSourceOf = (
+  panel: Readonly<{ id: string; params?: unknown }> | undefined,
+  viewRecords: ReadonlyMap<string, WorkbenchView>,
+): ViewSource | undefined => {
+  if (panel === undefined || !isViewerPanelParameters(panel.params)) {
+    return undefined;
+  }
+  const record = viewRecords.get(panel.id);
+  return record ? { viewId: panel.id, record } : undefined;
 };
 
 function ViewerLeftActions(properties: IDockviewHeaderActionsProps): React.JSX.Element {
@@ -695,10 +738,10 @@ export const ViewerDockview = memo(function ({
    * to defaults. This gives new panels the same FOV, visibility toggles,
    * environment preset, etc. as what the user was just looking at.
    */
-  const getViewSource = useCallback((): ViewSource | undefined => {
-    const record = activeViewerPanelId ? viewRecords.get(activeViewerPanelId) : undefined;
-    return activeViewerPanelId && record ? { viewId: activeViewerPanelId, record } : undefined;
-  }, [activeViewerPanelId, viewRecords]);
+  const getViewSource = useCallback(
+    (): ViewSource | undefined => viewSourceOf(activeViewerPanel, viewRecords),
+    [activeViewerPanel, viewRecords],
+  );
 
   /* A new view's record, made from the active view: its file values and grid unit, and this device's exceptions for
    * it copied first, so the new view reads as set exactly where the source does (V8). */

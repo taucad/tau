@@ -431,6 +431,39 @@ describe('useViewerShortcuts', () => {
       ]);
     });
 
+    it('should toggle G from what graphics shows once a written value reached it and the settings menu changed it', async () => {
+      const actor = startGraphics();
+      const set = vi.fn(async () => true);
+      const user = userEvent.setup();
+      renderViewers(['Viewer', actor, { set, reset: vi.fn() }]);
+      hoverViewer('Viewer');
+      const isGridShown = actor.getSnapshot().context.enableGrid;
+      const fieldOfView = actor.getSnapshot().context.cameraRef.getSnapshot().context.view.requestedVerticalFieldOfView;
+
+      await user.keyboard('g');
+      await user.keyboard('p');
+      // The host's writes reach graphics (the record's seed), then the settings menu sets both back.
+      act(() => {
+        actor.send({ type: 'setGridVisibility', payload: !isGridShown });
+        actor.getSnapshot().context.cameraRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
+      });
+      act(() => {
+        actor.send({ type: 'setGridVisibility', payload: isGridShown });
+        actor
+          .getSnapshot()
+          .context.cameraRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: fieldOfView });
+      });
+      await user.keyboard('g');
+      await user.keyboard('p');
+
+      expect(set.mock.calls).toEqual([
+        ['display.grid', !isGridShown],
+        ['fieldOfView', 0],
+        ['display.grid', !isGridShown],
+        ['fieldOfView', 0],
+      ]);
+    });
+
     it('should keep a newer pending G when an older write with the same value fails', async () => {
       const actor = startGraphics();
       const writes: Array<PromiseWithResolvers<boolean>> = [];

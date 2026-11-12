@@ -11,20 +11,31 @@ import {
 import type { LfsIntegrityRow } from '#maintenance/lfs-integrity.js';
 
 /**
- * STO-17's existing-object inventory: what the store reports for each
- * tenant-key LFS object, against its `oid`. The store is a fake keyed by
- * location; nothing here writes.
+ * The existing-object inventory: what the store reports for each tenant-key
+ * LFS object, against its `oid`. The store is a fake keyed by location;
+ * nothing here writes.
  */
 
 const oidOf = (content: string): string => createHash('sha256').update(content).digest('hex');
 const base64Of = (hex: string): string => Buffer.from(hex, 'hex').toString('base64');
 
-const row = (content: string, size = 3): LfsIntegrityRow => ({
+const row = (content: string, size = 3, finalized = true): LfsIntegrityRow => ({
   ownerId: 'owner-a',
   projectId: 'project-a',
   oid: oidOf(content),
   size,
+  finalized,
 });
+
+const noExclusions = async () => ({ skippedOtherAccount: 0, deletedProjectRows: 0 });
+
+const collect = () => {
+  const lines: Array<Record<string, unknown>> = [];
+  const report = async (line: string): Promise<void> => {
+    lines.push(JSON.parse(line) as Record<string, unknown>);
+  };
+  return { lines, report };
+};
 
 const keyOf = (location: { namespace: string; key: string }): string => `${location.namespace}/${location.key}`;
 const tenantKey = (target: LfsIntegrityRow): string =>
@@ -76,12 +87,21 @@ describe('inspectLfsObject', () => {
   });
 
   it('should tell the four tenant outcomes apart', async () => {
-    await expect(inspectLfsObject(store, equal)).resolves.toEqual({ outcome: 'equal', sizeMismatch: false });
-    await expect(inspectLfsObject(store, absent)).resolves.toEqual({ outcome: 'absent', sizeMismatch: false });
-    await expect(inspectLfsObject(store, composite)).resolves.toEqual({ outcome: 'composite', sizeMismatch: false });
+    await expect(inspectLfsObject(store, equal)).resolves.toEqual({ outcome: 'equal' });
+    await expect(inspectLfsObject(store, absent)).resolves.toEqual({ outcome: 'absent' });
+    await expect(inspectLfsObject(store, composite)).resolves.toEqual({ outcome: 'composite' });
     await expect(inspectLfsObject(store, different)).resolves.toEqual({
       outcome: 'different',
-      sizeMismatch: true,
+      sizeMismatch: {
+        event: 'revisions_maintenance.lfs_integrity_size_mismatch',
+        ownerId: 'owner-a',
+        projectId: 'project-a',
+        oid: different.oid,
+        key: tenantKey(different),
+        outcome: 'different',
+        size: 3,
+        storedSize: 11,
+      },
       difference: {
         event: 'revisions_maintenance.lfs_integrity_different',
         ownerId: 'owner-a',
@@ -96,8 +116,13 @@ describe('inspectLfsObject', () => {
   });
 
   it('should fall back to the legacy key only when the tenant key is empty', async () => {
-    await expect(inspectLfsObject(store, legacy)).resolves.toEqual({ outcome: 'legacy', sizeMismatch: false });
-    await expect(inspectLfsObject(store, missing)).resolves.toEqual({ outcome: 'missing', sizeMismatch: false });
+    await expect(inspectLfsObject(store, legacy)).resolves.toEqual({ outcome: 'legacy' });
+    await expect(inspectLfsObject(store, missing)).resolves.toEqual({ outcome: 'missing' });
+  });
+
+  it('should tell an unfinished upload from lost bytes when neither key holds the object', async () => {
+    await expect(inspectLfsObject(store, row('missing', 3, false))).resolves.toEqual({ outcome: 'unfinalized' });
+    await expect(inspectLfsObject(store, row('missing', 3, true))).resolves.toEqual({ outcome: 'missing' });
   });
 });
 
@@ -111,7 +136,7 @@ describe('parseLfsIntegrityConcurrency', () => {
 });
 
 describe('inventoryLfsIntegrity', () => {
-  it('should count every object, list each different one and end with the summary', async () => {
+  it('should count every object, list each different, size-mismatched and failed one and end with the summary', async () => {
     const rows = ['a', 'b', 'c', 'd', 'e'].map((content) => row(content));
     const [equal, absent, composite, different, failing] = rows as [
       LfsIntegrityRow,
@@ -129,37 +154,52 @@ describe('inventoryLfsIntegrity', () => {
         [tenantKey(failing), { etag: 'boom' }],
       ]),
     );
-    const lines: Array<Record<string, unknown>> = [];
+    const { lines, report } = collect();
 
     const summary = await inventoryLfsIntegrity(
-      { pages: pagesOf(rows.slice(0, 2), rows.slice(2), [row('legacy-free')]), storage: store },
       {
-        concurrency: 2,
-        progressEvery: 3,
-        report: async (line) => {
-          lines.push(JSON.parse(line) as Record<string, unknown>);
-        },
+        pages: pagesOf(rows.slice(0, 2), rows.slice(2), [row('lost'), row('pending', 3, false)]),
+        storage: store,
+        exclusions: async () => ({ skippedOtherAccount: 2, deletedProjectRows: 5 }),
       },
+      { concurrency: 2, progressEvery: 3, report },
     );
 
     expect(summary).toEqual({
       event: 'revisions_maintenance.lfs_integrity',
+      scope: 'reservation rows of active projects in this storage account; no bucket listing',
       interrupted: false,
-      objects: 6,
+      objects: 7,
       tenant: { equal: 1, absent: 1, composite: 1, different: 1 },
       legacy: 0,
+      unfinalized: 1,
       missing: 1,
       sizeMismatch: 1,
       errors: 1,
+      skippedOtherAccount: 2,
+      deletedProjectRows: 5,
     });
-    expect(lines.filter((line) => line['event'] === 'revisions_maintenance.lfs_integrity_different')).toEqual([
+    const linesOf = (event: string) => lines.filter((line) => line['event'] === `revisions_maintenance.${event}`);
+    expect(linesOf('lfs_integrity_different')).toEqual([
       expect.objectContaining({ oid: different.oid, projectId: 'project-a', ownerId: 'owner-a' }),
     ]);
-    expect(lines.filter((line) => line['event'] === 'revisions_maintenance.lfs_integrity_progress')).toHaveLength(2);
+    expect(linesOf('lfs_integrity_size_mismatch')).toEqual([
+      expect.objectContaining({ oid: absent.oid, outcome: 'absent', size: 3, storedSize: 4 }),
+    ]);
+    expect(linesOf('lfs_integrity_error')).toEqual([
+      {
+        event: 'revisions_maintenance.lfs_integrity_error',
+        ownerId: 'owner-a',
+        projectId: 'project-a',
+        oid: failing.oid,
+        error: 'store unavailable',
+      },
+    ]);
+    expect(linesOf('lfs_integrity_progress')).toHaveLength(2);
     expect(lines.at(-1)).toEqual(summary);
   });
 
-  it('should stop between pages on the signal and say so', async () => {
+  it('should check the stop signal before each row and say it was interrupted', async () => {
     const stop = new AbortController();
     const store = {
       headBlob: vi.fn(async () => {
@@ -167,21 +207,51 @@ describe('inventoryLfsIntegrity', () => {
         return undefined;
       }),
     };
-
-    const lines: string[] = [];
+    const { lines, report } = collect();
 
     const summary = await inventoryLfsIntegrity(
-      { pages: pagesOf([row('one')], [row('two')]), storage: store },
       {
-        concurrency: 1,
-        report: async (line) => {
-          lines.push(line);
-        },
-        signal: stop.signal,
+        pages: pagesOf([row('one'), row('two'), row('three')], [row('four')]),
+        storage: store,
+        exclusions: noExclusions,
       },
+      { concurrency: 1, report, signal: stop.signal },
     );
 
+    // The first row's HEADs finish; no later row of the same page starts.
     expect(summary).toMatchObject({ interrupted: true, objects: 1, missing: 1 });
+    expect(store.headBlob).toHaveBeenCalledTimes(2);
     expect(lines).toHaveLength(1);
+  });
+
+  it('should count an object once and stop every worker when its line cannot be written', async () => {
+    const rows = ['a', 'b', 'c', 'd'].map((content) => row(content));
+    const store = fakeStore(
+      new Map<string, Partial<HeadBlobResult>>(
+        rows.map((each) => [tenantKey(each), { checksumSha256: base64Of(oidOf('x')) }]),
+      ),
+    );
+    const inspected: string[] = [];
+    store.headBlob.mockImplementation(async (args: HeadBlobArgs) => {
+      inspected.push(args.key);
+      await new Promise((resolve) => {
+        setTimeout(resolve, args.key.endsWith(rows[1]!.oid) ? 10 : 0);
+      });
+      return { contentType: '', size: 3, etag: 'e', cacheControl: '', checksumSha256: base64Of(oidOf('x')) };
+    });
+    const report = vi.fn(async (_line: string): Promise<void> => {
+      throw new Error('stdout closed');
+    });
+    const exclusions = vi.fn(noExclusions);
+
+    await expect(
+      inventoryLfsIntegrity({ pages: pagesOf(rows), storage: store, exclusions }, { concurrency: 2, report }),
+    ).rejects.toThrow('stdout closed');
+
+    // Row a's line failed; row b was in flight and settled; c and d never started; no summary.
+    expect(inspected).toHaveLength(2);
+    expect(report).toHaveBeenCalledTimes(2);
+    expect(report.mock.calls.every(([line]) => !String(line).includes('"errors"'))).toBe(true);
+    expect(exclusions).not.toHaveBeenCalled();
   });
 });

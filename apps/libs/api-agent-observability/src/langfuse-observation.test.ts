@@ -508,6 +508,89 @@ describe('langfuseObservation v5: one trace per run, one root, ids from the fact
   });
 });
 
+describe('langfuseObservation v5: host labels on every row (LW17, LI10)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const traceMetadata = (span: OtlpSpan, key: string): unknown => attribute(span, `langfuse.trace.metadata.${key}`);
+  const browserRun = async (): Promise<OtlpSpan> => {
+    const { evidence } = await projectRun(
+      hostRun({ invocations: [{ purpose: 'generation', modelId: 'anthropic-claude-test' }] }),
+      { ...hostContext, host: 'browser' },
+    );
+    return only(evidence.find((item) => item.semantic.kind === 'outcome')!);
+  };
+
+  it('should give a host fact and an API fact of one run the same tags and release', async () => {
+    vi.stubEnv('FLY_IMAGE_REF', 'registry.fly.io/tau-api-staging:0123456789abcdef0123456789abcdef01234567');
+    const root = await browserRun();
+    const call = only(
+      await generation({ labels: { host: 'browser', build: 'f61685bf3496', model: 'anthropic-claude-test' } }),
+    );
+
+    expect(attribute(root, 'langfuse.trace.tags')).toEqual(['plan:pro', 'host:browser', 'model:anthropic-claude-test']);
+    expect(attribute(call, 'langfuse.trace.tags')).toEqual(attribute(root, 'langfuse.trace.tags'));
+    expect(attribute(root, 'langfuse.release')).toBe('f61685bf3496');
+    expect(attribute(call, 'langfuse.release')).toBe('f61685bf3496');
+    for (const span of [root, call]) {
+      expect(traceMetadata(span, 'host')).toBe('browser');
+      expect(traceMetadata(span, 'model')).toBe('anthropic-claude-test');
+      expect(traceMetadata(span, 'kernel')).toBeUndefined();
+    }
+    /* The root keeps its own observation metadata from LW6, once. */
+    expect(root.attributes.filter((item) => item.key === 'langfuse.observation.metadata.host')).toHaveLength(1);
+  });
+
+  it('should tag the kernel and take the release from a full commit the host sent', async () => {
+    const call = only(
+      await generation({
+        labels: {
+          host: 'desktop',
+          build: 'f61685bf3496c0ffee0123456789abcdef012345',
+          kernel: 'replicad',
+          model: 'anthropic-claude-test',
+        },
+      }),
+    );
+
+    expect(attribute(call, 'langfuse.trace.tags')).toEqual([
+      'plan:pro',
+      'host:desktop',
+      'kernel:replicad',
+      'model:anthropic-claude-test',
+    ]);
+    expect(traceMetadata(call, 'kernel')).toBe('replicad');
+    expect(attribute(call, 'langfuse.release')).toBe('f61685bf3496');
+  });
+
+  it('should tag a label the gateway could not place as unknown, and an unknown build as an unknown release', async () => {
+    const call = only(await generation({ labels: { host: 'unknown', build: 'unknown' } }));
+
+    expect(attribute(call, 'langfuse.trace.tags')).toEqual(['plan:pro', 'host:unknown']);
+    expect(attribute(call, 'langfuse.release')).toBe('unknown');
+  });
+
+  it('should keep the API build and only the plan tag on a call that sent no labels', async () => {
+    vi.stubEnv('FLY_IMAGE_REF', 'registry.fly.io/tau-api-staging:0123456789abcdef0123456789abcdef01234567');
+    const helper = only(await generation({ surface: 'project_name', attemptKey: 'name-1', activity: 'title' }));
+
+    expect(attribute(helper, 'langfuse.trace.tags')).toEqual(['plan:pro']);
+    expect(attribute(helper, 'langfuse.release')).toBe('0123456789ab');
+    for (const key of ['host', 'kernel', 'model']) {
+      expect(traceMetadata(helper, key)).toBeUndefined();
+    }
+  });
+
+  it('should name a CLI host as the gateway names it, so a host fact and an API fact read the same', async () => {
+    const { evidence } = await projectRun(hostRun(), { ...hostContext, host: 'cli' });
+    const root = only(evidence.find((item) => item.semantic.kind === 'outcome')!);
+
+    expect(attribute(root, 'langfuse.trace.tags')).toEqual(['plan:pro', 'host:daemon']);
+    expect(traceMetadata(root, 'host')).toBe('daemon');
+  });
+});
+
 describe('langfuseObservation v5: generation content (LW3)', () => {
   const identity = { email: 'Jane.Fontaine@Example.com', name: 'Jane Fontaine' } as const;
   const withIdentity = { ...context, identity };

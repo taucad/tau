@@ -19,11 +19,14 @@ import { ownerOnlyFiles } from '@taucad/agent-observability/node-pending-files';
 import { filePendingStore } from '@taucad/agent-observability/pending-stores';
 
 /**
- * The commit this bundle was built from, as the build stamped it; a bundle stamped with none reports no build.
+ * The commit this bundle was built from, as the build stamped it; a bundle stamped with none reports no build. The
+ * gateway transport sends the same id with each model call (LW17), so the API's facts name the build the host's do.
  *
  * @returns The build id, or `undefined`.
+ * @internal
  */
-const desktopHostBuild = (): string | undefined => (tauDesktopHostBuild === '' ? undefined : tauDesktopHostBuild);
+export const desktopHostBuild = (): string | undefined =>
+  tauDesktopHostBuild === '' ? undefined : tauDesktopHostBuild;
 
 /** What one project's observer is composed from. @internal */
 export type DesktopEvidenceOptions = Readonly<{

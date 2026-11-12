@@ -195,8 +195,45 @@ export const releaseLabel = (build: Evidence['versions']['apiBuild']): string =>
   return commitDigits.exec(build)?.[0].slice(0, 12) ?? build;
 };
 
-const releaseOf = ({ versions }: Evidence): string =>
-  releaseLabel((versions.hostBuild === unreadBuild ? null : versions.hostBuild) ?? versions.apiBuild);
+type OutcomeTurn = (SummaryFact & { kind: 'outcome' })['turn'];
+
+/** The labels a fact carries about the host that ran its turn (LW17): host kind, host build, kernel and model. */
+type HostLabels = Readonly<{ host?: string; build?: string; kernel?: string; model?: string }>;
+
+/* The turn's host kinds, as the gateway names them: the root's `cli` is the gateway's `daemon`. */
+const turnHost = (host: NonNullable<OutcomeTurn>['host']): string | undefined =>
+  host === 'cli' ? 'daemon' : (host ?? undefined);
+
+/**
+ * The host labels one fact carries (LW17): a model call's as the host sent them with the call and the gateway admitted
+ * them, a run's outcome's as the host recorded its turn. A helper or direct call, a tool and every other fact carry
+ * none.
+ */
+const hostLabelsOf = (evidence: Evidence): HostLabels => {
+  const fact = evidence.payload.plane === 'feedback' ? undefined : evidence.payload.fact;
+  if (fact?.kind === 'provider') {
+    return fact.labels ?? {};
+  }
+  if (fact?.kind === 'outcome' && fact.turn !== undefined) {
+    const host = turnHost(fact.turn.host);
+    return {
+      ...(host === undefined ? {} : { host }),
+      ...(fact.turn.kernel === null ? {} : { kernel: fact.turn.kernel }),
+      ...(fact.turn.model === null ? {} : { model: fact.turn.model }),
+    };
+  }
+  return {};
+};
+
+/* The labels that are trace tags and trace metadata, in tag order. */
+const traceLabels = ['host', 'kernel', 'model'] as const;
+
+/*
+ * A host fact's release is its host build; a model call's is the build its host sent with it (LW17), so one run reads
+ * one release, and the API's build only for a call that sent none, such as a helper or direct call.
+ */
+const releaseOf = ({ versions }: Evidence, labels: HostLabels): string =>
+  releaseLabel(labels.build ?? (versions.hostBuild === unreadBuild ? null : versions.hostBuild) ?? versions.apiBuild);
 
 /* The phases whose closed time is a provider or tool fact's own span. */
 const timedPhases: Readonly<Partial<Record<Evidence['semantic']['kind'], ReadonlySet<string>>>> = {
@@ -251,6 +288,11 @@ const mappingOf = (evidence: Evidence, context: ObservationContext, pseudonym: U
   /* An API fact without a chat hint names its own call as its chat; it has none. */
   const chat = fact?.kind === 'provider' && evidence.run === fact.logicalCall ? undefined : group(evidence.run);
   const user = accountPseudonym(environment, principal, pseudonym);
+  const labels = hostLabelsOf(evidence);
+  const traced = traceLabels.flatMap((key) => {
+    const value = labels[key];
+    return value === undefined ? [] : [[key, value] as const];
+  });
   return {
     evidence,
     context,
@@ -265,9 +307,13 @@ const mappingOf = (evidence: Evidence, context: ObservationContext, pseudonym: U
         stringAttribute('langfuse.user.id', user),
         kind === 'run' && chat !== undefined ? stringAttribute('langfuse.session.id', chat) : undefined,
         stringAttribute('langfuse.environment', environment),
-        stringAttribute('langfuse.release', releaseOf(evidence)),
-        tagsAttribute('langfuse.trace.tags', [`plan:${context.protection}`]),
+        stringAttribute('langfuse.release', releaseOf(evidence, labels)),
+        tagsAttribute('langfuse.trace.tags', [
+          `plan:${context.protection}`,
+          ...traced.map(([key, value]) => `${key}:${value}`),
+        ]),
         stringAttribute('langfuse.trace.metadata.protection', context.protection),
+        ...traced.map(([key, value]) => stringAttribute(`langfuse.trace.metadata.${key}`, value)),
         stringAttribute(metadataKey('plane'), evidence.payload.plane),
         stringAttribute(metadataKey('coverage_input'), evidence.coverage.input),
         stringAttribute(metadataKey('coverage_output'), evidence.coverage.output),

@@ -4,7 +4,7 @@ import { clearRendererSpans, onViewerEvent, rendererSpans } from '#lib/renderer-
 import type { ViewerTelemetryEvent } from '#lib/viewer-events.js';
 import type { GeometryComponentManifest } from '@taucad/types';
 import type { Mechanism } from '@taucad/kinematics';
-import type { GltfPresentationTelemetry } from '#machines/graphics.machine.js';
+import type { GltfPresentationTelemetry, GraphicsEvent } from '#machines/graphics.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { deriveModelInteractionUnitId } from '#machines/model-interaction.machine.js';
 
@@ -209,7 +209,7 @@ describe('graphics GLTF presentation projection', () => {
  * G11b characterisation: the graphics side of the presentation actor's seams as they run today. Each row names what
  * the presentation actor keeps, or changes deliberately (charter D14).
  */
-describe('graphics presentation seams before the presentation actor (G11b characterisation)', () => {
+describe('graphics presentation seams the presentation actor keeps (G11b)', () => {
   const mechanism: Mechanism = {
     schemaVersion: 1,
     units: { length: 'm', angle: 'rad' },
@@ -218,7 +218,7 @@ describe('graphics presentation seams before the presentation actor (G11b charac
     joints: { hinge: { type: 'revolute', parent: 'base', child: 'arm', origin: [0, 0, 0], axis: [0, 0, 1] } },
   };
 
-  it('should stamp a completed measurement with the kinematics revision it reads at completion', () => {
+  it('should stamp a completed measurement with the kinematics revision current at completion', () => {
     const actor = createGraphicsActor();
     actor.start();
     try {
@@ -228,7 +228,8 @@ describe('graphics presentation seams before the presentation actor (G11b charac
       const { revision } = kinematics.getSnapshot().context;
       expect(revision).toBeGreaterThan(0);
 
-      // The joint moved before Measure was turned on: the measure tool was not mounted, so nothing reported it.
+      // The joint moved before Measure was turned on: the measure tool was not mounted, so only graphics' own
+      // subscription to its kinematics child saw it.
       actor.send({ type: 'setMeasureActive', payload: true });
       actor.send({ type: 'startMeasurement', payload: [0, 0, 0] });
       actor.send({ type: 'completeMeasurement', payload: [1, 0, 0] });
@@ -324,7 +325,7 @@ describe('graphics presentation seams before the presentation actor (G11b charac
       });
 
       // Same unit, other media: the view no longer presents the manifest, but the unit id does not change. The
-      // project learns this only from the media type (`reconcileViewManifest`), not from a unit change.
+      // project learns this only from the media type `presentedUnitChanged` carries, not from a unit change.
       const { context } = actor.getSnapshot();
       expect(context.modelInteractionUnitId).toBe(unitId);
       expect(context.artifact?.mimeType).toBe('image/svg+xml');
@@ -370,6 +371,120 @@ describe('graphics presentation seams before the presentation actor (G11b charac
       expect(version()).toBe(start + 3);
       actor.send({ type: 'clearArtifact' });
       expect(version()).toBe(start + 4);
+    } finally {
+      actor.stop();
+    }
+  });
+});
+
+/*
+ * G11b: the seams graphics now owns. The measurement folds the scene sphere, and the view reports the unit it
+ * presents to its project.
+ */
+describe('graphics presentation events (G11b)', () => {
+  const measurement = (
+    key: string,
+    min: [number, number, number],
+    max: [number, number, number],
+  ): Extract<GraphicsEvent, { type: 'geometryBoundsMeasured' }> => ({
+    type: 'geometryBoundsMeasured',
+    key,
+    bounds: { min, max },
+    radius: Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2,
+  });
+
+  it('should fold each measured sphere into the scene sphere, and emit its radius only when the sphere changes', () => {
+    const actor = createGraphicsActor();
+    const radii: number[] = [];
+    actor.on('geometryRadiusCalculated', (event) => radii.push(event.radius));
+    actor.start();
+    try {
+      const first = measurement('a', [9, -2, -3], [11, 2, 3]);
+      actor.send(first);
+      expect(actor.getSnapshot().context).toMatchObject({ geometryRadius: first.radius, geometryCenter: [10, 0, 0] });
+
+      // The same sphere measured again, as a settled pose or a new presentation of the same geometry is.
+      actor.send(measurement('b', [9, -2, -3], [11, 2, 3]));
+      expect(radii).toEqual([first.radius]);
+
+      // A moved centre with the same radius is a new sphere.
+      actor.send(measurement('b', [19, -2, -3], [21, 2, 3]));
+      expect(actor.getSnapshot().context.geometryCenter).toEqual([20, 0, 0]);
+      expect(radii).toEqual([first.radius, first.radius]);
+
+      // An empty measurement keeps the sphere.
+      actor.send({ ...measurement('c', [0, 0, 0], [0, 0, 0]), radius: 0 });
+      expect(actor.getSnapshot().context.geometryRadius).toBe(first.radius);
+      expect(radii).toHaveLength(2);
+
+      // A cleared artifact forgets the sphere, so the same geometry measured again sets it once more.
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'd' });
+      actor.send({ type: 'clearArtifact' });
+      expect(actor.getSnapshot().context.geometryRadius).toBe(0);
+      actor.send(measurement('b', [19, -2, -3], [21, 2, 3]));
+      expect(radii).toHaveLength(3);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should commit a presentation once when its scene is attached again, and again once it is prepared again', () => {
+    const actor = createGraphicsActor();
+    actor.start();
+    try {
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      const commit = { type: 'gltfPresentationCommitted', revision: 1, key: 'a', unitId: 'unit:a', manifest } as const;
+      actor.send(commit);
+      const version = actor.getSnapshot().context.pickableMeshesVersion;
+      const snapshot = actor.getSnapshot();
+      actor.send(commit);
+      expect(actor.getSnapshot().context.pickableMeshesVersion).toBe(version);
+      expect(actor.getSnapshot()).toBe(snapshot);
+
+      // A scene prepared again for the same request (a remounted canvas, a new backend) commits again.
+      actor.send({ type: 'gltfPreparationStarted', revision: 1, key: 'a' });
+      actor.send(commit);
+      expect(actor.getSnapshot().context.pickableMeshesVersion).toBe(version + 1);
+      expect(actor.getSnapshot().context.gltfPresentation.phase).toBe('presented');
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should report the presented unit and media type each time either changes, and only then', () => {
+    const actor = createGraphicsActor();
+    const reports: Array<{ unitId: string | undefined; mediaType: string | undefined }> = [];
+    actor.on('presentedUnitChanged', ({ unitId, mediaType }) => reports.push({ unitId, mediaType }));
+    actor.start();
+    try {
+      const fileUnit = deriveModelInteractionUnitId({ sourceFile: 'main.ts' });
+      const glb = 'model/gltf-binary';
+      // A GLB request names no unit until its commit lands; a newer request keeps the presented unit.
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a', sourceFile: 'main.ts' });
+      actor.send({ type: 'gltfPresentationCommitted', revision: 1, key: 'a', unitId: 'unit:a', manifest });
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'b', sourceFile: 'main.ts' });
+      actor.send({ type: 'gltfPresentationCommitted', revision: 2, key: 'b', unitId: 'unit:a', manifest });
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'c', sourceFile: 'main.ts' });
+      actor.send({ type: 'gltfPresentationFailed', revision: 3, key: 'c' });
+      // Other media of the same file, then nothing.
+      actor.send({
+        type: 'updateArtifact',
+        artifact: { mimeType: 'image/svg+xml', content: '<svg/>' },
+        hash: 'svg',
+        sourceFile: 'main.ts',
+      });
+      actor.send({ type: 'clearArtifact' });
+      actor.send({ type: 'clearArtifact' });
+      // A host that loads a manifest itself names the unit too.
+      actor.send({ type: 'loadModelComponentManifest', unitId: 'unit:host', manifest, source: 'viewer' });
+
+      expect(reports).toEqual([
+        { unitId: undefined, mediaType: glb },
+        { unitId: 'unit:a', mediaType: glb },
+        { unitId: fileUnit, mediaType: 'image/svg+xml' },
+        { unitId: undefined, mediaType: undefined },
+        { unitId: 'unit:host', mediaType: undefined },
+      ]);
     } finally {
       actor.stop();
     }

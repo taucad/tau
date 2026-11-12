@@ -8,18 +8,21 @@
  * must reproduce these traces, or change one deliberately and say so in its PR (charter D14).
  */
 import { useLayoutEffect } from 'react';
-import type { RenderFrame } from '@taucad/spatial';
+import type { RenderFrame, SpatialMatrix } from '@taucad/spatial';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { writeGlb } from '@taucad/geometry-core';
-import type { GlbMaterial } from '@taucad/geometry-core';
+import type { GlbMaterial, GlbPrimitive } from '@taucad/geometry-core';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import type { Mesh, Object3D } from 'three';
+import { Vector3 } from 'three';
+import type { InstancedMesh, Mesh, Object3D } from 'three';
 import * as sectionTopology from '#graphics/three/utils/section-surface-topology.js';
 import { awaitGeometryPresentation } from '#graphics/three/utils/geometry-presentation-admission.js';
 import { clearRendererSpans, markGeometryReceipt, rendererSpans } from '#lib/renderer-telemetry.js';
 import * as gltfEdges from '#graphics/three/materials/gltf-edges.js';
+import * as gltfMatcap from '#graphics/three/materials/gltf-matcap.js';
+import * as surfaceBatches from '#graphics/three/utils/gltf-surface-batches.js';
 import type { GltfPresentationTelemetry } from '#machines/graphics.machine.js';
 import type { GeometryComponentManifest } from '@taucad/types';
 
@@ -143,6 +146,26 @@ function buildGlb({ lift = 0, indices = [0, 1, 2], name = 'Part' } = {}): Uint8A
           { mode: 1, positions, indices: Uint32Array.from([0, 1, 1, 2]), material: surfaceMaterial },
         ],
       },
+    ],
+  });
+}
+
+/** Two placements of one shared surface mesh, which the viewer draws as one instanced batch. */
+function buildInstancedGlb({ lift = 0 } = {}): Uint8Array<ArrayBuffer> {
+  const primitives: GlbPrimitive[] = [
+    {
+      mode: 4,
+      positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, lift]),
+      normals: Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+      indices: Uint32Array.from([0, 1, 2]),
+      material: surfaceMaterial,
+    },
+  ];
+  const at = (x: number): SpatialMatrix => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, 0, 0, 1];
+  return writeGlb({
+    nodes: [
+      { name: 'Left', primitives, matrix: at(0) },
+      { name: 'Right', primitives, matrix: at(10) },
     ],
   });
 }
@@ -1218,7 +1241,9 @@ describe('GltfMesh presentation protocol', () => {
         'gltfDisplayReady 2:b display-ready',
         'gltfPresentationCommitted 2:b unit:b manifest=b',
       ]);
-      expect(errors).not.toHaveBeenCalled();
+      // React's one-time element warnings also reach console.error when this row renders first; only the loader's own
+      // failure report counts.
+      expect(errors).not.toHaveBeenCalledWith('Failed to load GLTF:', expect.anything());
     });
 
     it('should stay silent when a parse rejects after the viewer unmounts', async () => {
@@ -1240,7 +1265,9 @@ describe('GltfMesh presentation protocol', () => {
       await act(async () => undefined);
 
       expect(trace()).toEqual(['gltfPreparationStarted 1:a', 'setHoveredModelComponent unit:a none']);
-      expect(errors).not.toHaveBeenCalled();
+      // React's one-time element warnings also reach console.error when this row renders first; only the loader's own
+      // failure report counts.
+      expect(errors).not.toHaveBeenCalledWith('Failed to load GLTF:', expect.anything());
     });
   });
 
@@ -1328,6 +1355,120 @@ describe('GltfMesh presentation protocol', () => {
         'gltfPreparationStarted 1:a',
       ]);
       expect(parseAsync).toHaveBeenCalledOnce();
+    });
+  });
+  /*
+   * G11b characterisation, on top of G11.0's rows: the retirement order G11.0 left unlocked, and the work an in-place
+   * update skips, which is what keeps it inside the render that requested it.
+   */
+  describe('replaced presentation retirement (G11b)', () => {
+    it('should dispose the replaced scene only after the replacement is committed and attached', async () => {
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+      const view = render(
+        <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitForCommits(['a']);
+      const disposeA = await spyOnPresentedGeometryDispose(parseAsync);
+      const atDispose: string[][] = [];
+      disposeA.mockImplementation(() => {
+        atDispose.push(committedKeys());
+      });
+
+      view.rerender(
+        <GltfMesh
+          gltfFile={buildGlb({ indices: [0, 2, 1] })}
+          geometryHash='b'
+          presentationRevision={2}
+          enableMatcap={false}
+        />,
+      );
+      await waitForCommits(['a', 'b']);
+
+      // A's geometry is freed once, after B's commit reached graphics. The commit is sent only once React has
+      // attached B (G11.0's commit-timing row), so A is freed after B is attached.
+      expect(atDispose).toEqual([['a', 'b']]);
+    });
+  });
+
+  describe('in-place update work (G11b)', () => {
+    it('should expand no edges, rebuild no surface batches and apply no matcap for an in-place update', async () => {
+      const fatLines = vi.spyOn(gltfEdges, 'applyFatLineSegments');
+      const batches = vi.spyOn(surfaceBatches, 'createGltfSurfaceBatches');
+      const matcap = vi.spyOn(gltfMatcap, 'applyMatcap');
+      const view = render(<GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap />);
+      await waitForCommits(['a']);
+      const counts = [fatLines.mock.calls.length, batches.mock.calls.length, matcap.mock.calls.length];
+      expect(counts.every((count) => count > 0)).toBe(true);
+
+      view.rerender(
+        <GltfMesh gltfFile={buildGlb({ lift: 5 })} geometryHash='b' presentationRevision={2} enableMatcap />,
+      );
+      await waitForCommits(['a', 'b']);
+
+      expect([fatLines.mock.calls.length, batches.mock.calls.length, matcap.mock.calls.length]).toEqual(counts);
+    });
+
+    it('should keep the instanced batch of a shared mesh in place and recompute its box and sphere', async () => {
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+      const batches = vi.spyOn(surfaceBatches, 'createGltfSurfaceBatches');
+      const view = render(
+        <GltfMesh gltfFile={buildInstancedGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitForCommits(['a']);
+      const gltf = (await parseAsync.mock.results[0]?.value) as Awaited<ReturnType<GLTFLoader['parseAsync']>>;
+      const instanced: InstancedMesh[] = [];
+      gltf.scene.traverse((object) => {
+        if ((object as Partial<InstancedMesh>).isInstancedMesh) {
+          instanced.push(object as InstancedMesh);
+        }
+      });
+      expect(instanced).toHaveLength(1);
+      const [batch] = instanced;
+      const batchCount = batches.mock.calls.length;
+      const sphereBefore = batch!.boundingSphere?.clone();
+      const liftedCorner = new Vector3(10, 1, 5);
+
+      view.rerender(
+        <GltfMesh
+          gltfFile={buildInstancedGlb({ lift: 5 })}
+          geometryHash='b'
+          presentationRevision={2}
+          enableMatcap={false}
+        />,
+      );
+      await waitForCommits(['a', 'b']);
+
+      // The same batch follows the lifted prototype: its box and sphere cover both placements at the new height.
+      expect(parseAsync).toHaveBeenCalledOnce();
+      expect(batches.mock.calls.length).toBe(batchCount);
+      expect(batch!.boundingBox?.max.toArray().map((value) => Math.round(value))).toEqual(expect.arrayContaining([5]));
+      // The lifted corner of the far placement lies outside the old sphere and inside the recomputed one.
+      expect(sphereBefore?.containsPoint(liftedCorner)).toBe(false);
+      expect(batch!.boundingSphere?.containsPoint(liftedCorner)).toBe(true);
+    });
+
+    it('should keep and never free the committed scene across an in-place update, renaming the unit on commit', async () => {
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+      const view = render(
+        <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitForCommits(['a']);
+      const disposeA = await spyOnPresentedGeometryDispose(parseAsync);
+      const before = trace().length;
+
+      view.rerender(
+        <GltfMesh gltfFile={buildGlb({ lift: 5 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
+      );
+      await waitForCommits(['a', 'b']);
+
+      // One scene across the update: it is not parsed again, and nothing retires it while it stays on screen.
+      expect(parseAsync).toHaveBeenCalledOnce();
+      expect(disposeA).not.toHaveBeenCalled();
+      expect(trace(before).filter((line) => !line.startsWith('setHoveredModelComponent'))).toEqual([
+        'gltfPreparationStarted 2:b',
+        'gltfDisplayReady 2:b display-ready',
+        'gltfPresentationCommitted 2:b unit:b manifest=b',
+      ]);
     });
   });
 });

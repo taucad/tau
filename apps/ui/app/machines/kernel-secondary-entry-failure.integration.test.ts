@@ -11,7 +11,7 @@ import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { gltfEdgeDetection } from '@taucad/middleware';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
-import { cadMachine } from '#machines/cad.machine.js';
+import { cadMachine, closeCadRuntime } from '#machines/cad.machine.js';
 import type { CadContext } from '#machines/cad.machine.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -199,6 +199,12 @@ describe('kernel entry failure settlement', { timeout: 30_000 }, () => {
       expect(failedSecondary.context.latestRenderingOutcome).toBe('failure');
       await expect(secondarySettlement).resolves.toMatchObject({ context: { latestRenderingOutcome: 'failure' } });
     } finally {
+      /* Each unit's runtime shuts down before the file ends: a kernel still answering a stopped actor logs during
+       * the worker's teardown, which Vitest fails as an unhandled error. */
+      await closeCadRuntime(main);
+      if (secondary !== undefined) {
+        await closeCadRuntime(secondary);
+      }
       main.stop();
       secondary?.stop();
       fixture.dispose();
@@ -233,6 +239,7 @@ describe('kernel entry failure settlement', { timeout: 30_000 }, () => {
       expect(failedPrimary.context.latestRenderingOutcome).toBe('failure');
       await expect(primarySettlement).resolves.toMatchObject({ context: { latestRenderingOutcome: 'failure' } });
     } finally {
+      await closeCadRuntime(primary);
       primary.stop();
       fixture.dispose();
     }

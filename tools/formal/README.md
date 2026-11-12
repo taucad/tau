@@ -20,6 +20,12 @@ Run from the workspace root, usually through an owner's Nx target:
 
 A tool that is absent prints `SKIPPED` and exits 0 locally and 1 under `CI`.
 
+`tools/formal.plugin.ts` infers `formal` for every project whose `specs/` holds an `expected.json`
+without a `lean` section, and `formal:lean` for one with it; specs under a `fixtures` directory are
+ignored. An owner adds `"formal:nightly": {}` or `"formal:logs": {}` to its `project.json` to join
+those runs. Every tier's command, inputs, outputs and cache setting live in `nx.json`
+`targetDefaults`.
+
 ## Library
 
 Owner tests import `@taucad/formal/graph` (spec graphs, covering suites, the backward walk),

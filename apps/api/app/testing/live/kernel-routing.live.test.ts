@@ -107,6 +107,8 @@ const gateRun = inTurnCases !== kernelRoutingDevelopmentCases;
 const maxUsd = Number(process.env['TAU_KR_MAX_USD'] ?? 'Infinity');
 /** Milliseconds. */
 const caseTimeout = Number(process.env['TAU_KR_CASE_TIMEOUT_MS'] ?? '360000');
+/** This process's run, stamped on every row so a comparison can tell rows from an earlier run in `TAU_KR_OUT`. */
+const runId = new Date().toISOString();
 const outDirectory = resolve(
   process.env['TAU_KR_OUT'] ?? join(tmpdir(), 'tau-kernel-routing-runs', new Date().toISOString()),
 );
@@ -116,8 +118,9 @@ const examplesFile = process.env['TAU_KR_EXAMPLES'];
 if (arms.includes('examples') && examplesFile === undefined) {
   throw new Error('The examples arm reads its suggestions from TAU_KR_EXAMPLES; set it to a JSON file.');
 }
+// Read only when the arm runs, so other arms never depend on the file.
 const exampleCases: readonly KernelRoutingCase[] =
-  examplesFile === undefined
+  examplesFile === undefined || !arms.includes('examples')
     ? []
     : (JSON.parse(readFileSync(examplesFile, 'utf8')) as readonly ExampleSuggestion[]).map((example) =>
         exampleRoutingCase(example),
@@ -158,6 +161,7 @@ const casesFor = (arm: KernelRoutingArm): readonly KernelRoutingCase[] => {
 };
 
 type CaseRow = RoutingRunResult & {
+  readonly runId: string;
   readonly arm: KernelRoutingArm;
   readonly modelId: string;
   readonly repeat: number;
@@ -193,20 +197,24 @@ const personOption = (arm: KernelRoutingArm) => {
 };
 
 /** Each case's graded observations from an arm's JSONL rows; failed runs with no write are infrastructure misses. */
-const readObservations = async (file: string): Promise<Map<string, KernelRoutingObservation[]> | undefined> => {
+type ArmObservations = Readonly<{ byCase: Map<string, KernelRoutingObservation[]>; runIds: readonly string[] }>;
+
+const readObservations = async (file: string): Promise<ArmObservations | undefined> => {
   const text = await readFile(file, 'utf8').catch(() => undefined);
   if (text === undefined || text.trim() === '') {
     return undefined;
   }
   const byCase = new Map<string, KernelRoutingObservation[]>();
+  const runIds = new Set<string>();
   for (const line of text.split('\n').filter(Boolean)) {
-    const row = JSON.parse(line) as CaseRow;
+    const row = JSON.parse(line) as Partial<Pick<CaseRow, 'runId'>> & Omit<CaseRow, 'runId'>;
+    runIds.add(row.runId ?? 'unrecorded');
     if (row.state === 'failed' && row.bindingKind === undefined) {
       continue;
     }
     byCase.set(row.observation.caseId, [...(byCase.get(row.observation.caseId) ?? []), row.observation]);
   }
-  return byCase;
+  return { byCase, runIds: [...runIds] };
 };
 
 const emptyRegistry: ToolRegistry = {
@@ -375,6 +383,7 @@ describe.skipIf(runnable.length === 0)(
             const grade = gradeKernelRoutingCase(testCase, result.observation);
             const row: CaseRow = {
               ...result,
+              runId,
               arm,
               modelId,
               repeat,
@@ -427,7 +436,7 @@ describe.skipIf(runnable.length === 0)(
                 caseId: observation.caseId,
                 failure,
               })),
-            ...(arm === 'examples' ? { examples: summarizeExampleRuns(covered, byCase) } : {}),
+            ...(arm === 'examples' ? { examples: summarizeExampleRuns(cases, byCase) } : {}),
             ...(gateRun && arm === 'in-turn'
               ? summarizeKernelRoutingGate(covered, byCase)
               : repeats > 1
@@ -450,8 +459,26 @@ describe.skipIf(runnable.length === 0)(
             // oxlint-disable-next-line no-await-in-loop -- four small files, read in order
             const profile = await readObservations(join(outDirectory, `${arm}.${modelId}.jsonl`));
             if (baseline !== undefined && profile !== undefined) {
-              const both = kernelRoutingDevelopmentCases.filter(({ id }) => baseline.has(id) && profile.has(id));
-              comparisons[arm] = { cases: both.length, ...comparePersonArm(both, baseline, profile) };
+              // Every case this run selects for the arm must be graded on both sides, or the comparison measured a
+              // subset and says nothing about the whole set.
+              const intended = casesFor(arm);
+              const missing = intended
+                .filter(({ id }) => !baseline.byCase.has(id) || !profile.byCase.has(id))
+                .map(({ id }) => id);
+              // Rows from another run may differ in prompt, corpus or repeats: the comparison is labelled, not refused,
+              // since the baseline and an arm are often run separately into one TAU_KR_OUT.
+              const provenance = {
+                runs: { baseline: baseline.runIds, profile: profile.runIds },
+                crossRun: new Set([...baseline.runIds, ...profile.runIds]).size > 1,
+              };
+              comparisons[arm] =
+                missing.length === 0
+                  ? {
+                      cases: intended.length,
+                      ...provenance,
+                      ...comparePersonArm(intended, baseline.byCase, profile.byCase),
+                    }
+                  : { cases: intended.length - missing.length, ...provenance, inconclusive: true, missing, met: false };
             }
           }
           if (Object.keys(comparisons).length > 0) {

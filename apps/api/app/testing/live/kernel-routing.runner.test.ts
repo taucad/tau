@@ -429,10 +429,11 @@ describe('comparing a person-profile arm with the no-block arm', () => {
 });
 
 describe('the examples arm', () => {
-  it('should accept every browser kernel for a suggestion with no need and forbid the rest', () => {
+  it('should accept every browser 3D kernel for a suggestion with no need and forbid the rest', () => {
     const testCase = exampleRoutingCase({ id: 'wall-hook', prompt: 'A wall hook.', goals: ['printing'] });
     expect(testCase).toMatchObject({ id: 'example-wall-hook', host: 'web', preference: 'auto', kind: 'routing' });
-    expect(testCase.acceptable).toEqual(kernelRoutingHosts.web.available);
+    expect(testCase.acceptable).toEqual(kernelRoutingHosts.web.available.filter((kernel) => kernel !== 'tscircuit'));
+    expect(testCase.acceptable).not.toContain('tscircuit');
     expect(testCase.forbidden).toEqual(expect.arrayContaining(['zoo', 'build123d', 'smlibpy', 'picogk']));
     expect(testCase.forbidden).not.toEqual(expect.arrayContaining(['replicad']));
   });

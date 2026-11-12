@@ -656,15 +656,18 @@ const goalFamily: Readonly<Record<string, KernelRoutingZoneId>> = {
 
 /**
  * A Home suggestion as a routing case: sent under Auto on an entry-less web project, it passes when the bound kernel
- * is one the browser offers and provides what the suggestion needs. A kernel the browser does not offer is forbidden.
+ * is one the browser offers and provides what the suggestion needs. A suggestion with no `needs` is a 3D part, so a
+ * circuit kernel does not serve it. A kernel the browser does not offer is forbidden.
  *
  * @param example - The suggestion.
  * @returns The case the in-turn runner and the grader take.
  */
 export const exampleRoutingCase = (example: ExampleSuggestion): KernelRoutingCase => {
   const entitled = kernelRoutingHosts.web.available;
-  const provides = (kernel: KernelId): boolean =>
-    example.needs === undefined || resolveKernel(kernel).representation === example.needs;
+  const provides = (kernel: KernelId): boolean => {
+    const { representation } = resolveKernel(kernel);
+    return example.needs === undefined ? representation !== 'electronics' : representation === example.needs;
+  };
   return {
     id: `example-${example.id}`,
     prompt: example.prompt,

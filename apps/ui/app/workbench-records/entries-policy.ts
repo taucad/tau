@@ -506,6 +506,9 @@ export const coversFields = (carried: EntryFields | undefined, fields: EntryFiel
 export const carriesFields = (entry: Entry | undefined, fields: EntryFields): boolean =>
   entry !== undefined && Object.keys(diffEntry(entry, mergeEntry(entry, fields))).length === 0;
 
+/** The text of each record read from a file, for a record whose canonical form the file's limit cannot take. */
+const fileText = new WeakMap<WorkbenchEntries, string>();
+
 /**
  * The entries record's codec and patch algebra. `onDropped` hears of a person's fields a merge left out because another
  * party's change left the record no room for them.
@@ -513,6 +516,9 @@ export const carriesFields = (entry: Entry | undefined, fields: EntryFields): bo
 export const createEntriesPolicy = (onDropped?: DroppedFields): RecordPolicy<EntriesRecord, EntriesPatch> => ({
   read(bytes) {
     const result = workbenchRecords.entries.read(bytes);
+    if (result.status === 'current') {
+      fileText.set(result.record, new TextDecoder().decode(bytes));
+    }
     return result.status === 'current'
       ? { status: 'current', record: result.record }
       : {
@@ -521,7 +527,19 @@ export const createEntriesPolicy = (onDropped?: DroppedFields): RecordPolicy<Ent
           message: result.message,
         };
   },
-  serialize: (record) => serializeEntries(withoutMoves(record)),
+  serialize(record) {
+    try {
+      return serializeEntries(withoutMoves(record));
+    } catch (error) {
+      // A record read from a file whose canonical form is over the limit: the file's own text stands for it, which no
+      // writable record serializes to, so a change that brings it under the limit is still written.
+      const text = fileText.get(record);
+      if (text === undefined || !(error instanceof RangeError)) {
+        throw error;
+      }
+      return text;
+    }
+  },
   diff(base, next) {
     const moves = next.moves ?? [];
     const moved = movePaths(base?.entries ?? {}, moves);

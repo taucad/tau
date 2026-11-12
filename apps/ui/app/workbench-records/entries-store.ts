@@ -241,9 +241,17 @@ export function createWorkbenchEntriesStore(
       // Only what the person changed: on the entry they were shown, or over their own change the file lacks. A field
       // another party changed since keeps the file's value. A cycle took what was deferred when it formed.
       const { published, deferred, cycle, pending } = context();
-      const owed = authoredFields([...(cycle?.patch ?? []), ...(deferred ?? []), ...(pending?.patch ?? [])]);
+      const owedPatch = [...(cycle?.patch ?? []), ...(deferred ?? []), ...(pending?.patch ?? [])];
+      const owed = authoredFields(owedPatch);
+      // The entry as shown, at the path the person's owed path changes put it on: an edit made while its entry's rename
+      // is written was made on the renamed entry. A path change already on the file moves nothing there.
+      const shownEntries = published.record?.entries ?? {};
       const { entry, fields } = changedEntry({
-        shown: published.record?.entries[entryPath],
+        shown:
+          movePaths(
+            shownEntries,
+            owedPatch.flatMap((step) => step.moves),
+          )[entryPath] ?? shownEntries[entryPath],
         next,
         onto: from.entries[entryPath],
         owed: owed[entryPath],

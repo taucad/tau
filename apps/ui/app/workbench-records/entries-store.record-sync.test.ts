@@ -1076,4 +1076,75 @@ describe('workbench entries store over recordSync', () => {
       }
     });
   });
+
+  it('keeps another party’s change to a field the person left alone, on an entry edited while its rename is written', async () => {
+    const m = memory();
+    const components = (hidden: string[]) => ({ hidden, isolated: [], opacity: [] });
+    const write = (entries: WorkbenchEntries['entries']) => {
+      m.setBytes(encoder.encode(workbenchRecords.entries.serialize({ version: 1, entries })));
+    };
+    write({ 'x.ts': { renderTimeout: 1000, components: components(['h1']) } });
+    const onWrite: Array<() => void> = [];
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      editDebounce: 0,
+      files: {
+        ...m.files,
+        writeFileChecked: async (input) => {
+          onWrite.shift()?.();
+          return m.files.writeFileChecked(input);
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await entries.read();
+      let edited: Promise<boolean> | undefined;
+      onWrite.push(() => {
+        edited = entries.edit('y.ts', { renderTimeout: 2000, components: components(['h1']) });
+        write({ 'x.ts': { renderTimeout: 1000, components: components(['h2']) } });
+      });
+      expect(await entries.changePaths({ type: 'rename', oldPath: 'x.ts', newPath: 'y.ts' })).toBe(true);
+      expect(await edited).toBe(true);
+      expect(await entries.flush()).toBe(true);
+      expect(workbenchRecords.entries.read(m.get()!)).toMatchObject({
+        record: { entries: { 'y.ts': { renderTimeout: 2000, components: components(['h2']) } } },
+      });
+    } finally {
+      entries.dispose();
+    }
+  });
+
+  it('writes a change that brings a compact file over the canonical limit back under it', async () => {
+    const m = memory();
+    const many = Object.fromEntries(
+      Array.from({ length: 4 }, (_, index) => [
+        `f${index}.ts`,
+        { components: { hidden: Array.from({ length: 1000 }, (_, id) => `c${id}`), isolated: [], opacity: [] } },
+      ]),
+    );
+    m.setBytes(encoder.encode(JSON.stringify({ version: 1, entries: many })));
+    expect(() => workbenchRecords.entries.serialize({ version: 1, entries: many })).toThrow(RangeError);
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      editDebounce: 0,
+      files: m.files,
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await entries.read();
+      expect(await entries.changePaths({ type: 'delete', path: 'f0.ts' })).toBe(true);
+      expect(await entries.flush()).toBe(true);
+      const read = workbenchRecords.entries.read(m.get()!);
+      expect(read.status === 'current' ? Object.keys(read.record.entries).toSorted() : []).toEqual([
+        'f1.ts',
+        'f2.ts',
+        'f3.ts',
+      ]);
+    } finally {
+      entries.dispose();
+    }
+  });
 });

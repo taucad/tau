@@ -665,6 +665,52 @@ describe.runIf(enabled)('shell conformance', () => {
     },
   );
 
+  conformance(
+    'E17',
+    'a missing or corrupt shell or sandbox binary leaves the capability unavailable, never an unsandboxed substitute',
+    async () => {
+      /* Each broken install either refuses before starting, with a reason, or starts and fails without the workload
+       * ever running; the workload's file is the judge, and no other bubblewrap or shell is tried in its place. */
+      const corrupt = join(work, 'e17-corrupt');
+      writeFileSync(corrupt, 'not an executable\n', { mode: 0o755 });
+      const broken: Array<{ name: string; through: ShellProvider; executablePath: string }> = [
+        { name: 'missing shell', through: provider, executablePath: join(work, 'e17-missing-bash') },
+        { name: 'corrupt shell', through: provider, executablePath: corrupt },
+        ...(linux
+          ? [
+              {
+                name: 'missing bubblewrap',
+                through: createSandboxShellProvider({ bwrapPath: join(work, 'e17-missing-bwrap'), home }),
+                executablePath: shell.path,
+              },
+              {
+                name: 'corrupt bubblewrap',
+                through: createSandboxShellProvider({ bwrapPath: corrupt, home }),
+                executablePath: shell.path,
+              },
+            ]
+          : []),
+      ];
+      for (const { name, through, executablePath } of broken) {
+        const marker = join(work, `e17-ran-${name.replaceAll(' ', '-')}`);
+        const privateRoot = mkdtempSync(join(tmpdir(), 'tau-shell-'));
+        // oxlint-disable-next-line no-await-in-loop -- one broken install at a time, each judged by its own marker.
+        const { executionId } = await through.prepare({ privateRoot, resource: undefined });
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        const outcome = await through.launch({ ...launchOf(`printf ran > ${marker}`), executablePath, executionId });
+        if (outcome.status === 'started') {
+          // oxlint-disable-next-line no-await-in-loop -- as above.
+          const exit = await outcome.process.exited;
+
+          expect(exit, name).not.toStrictEqual({ exitCode: 0 });
+        } else {
+          expect(outcome.message.length, name).toBeGreaterThan(0);
+        }
+        expect(existsSync(marker), name).toBe(false);
+      }
+    },
+  );
+
   conformance('C07', 'abort stops a running command and settles once', async () => {
     const controller = new AbortController();
     const process_ = await start(launchOf('sleep 300', { signal: controller.signal }));

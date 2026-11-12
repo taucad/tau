@@ -1,0 +1,142 @@
+[
+  {
+    "schemaVersion": 1,
+    "status": "passed",
+    "tag": "desktop-staging@0.1.0-staging.889",
+    "channel": "staging",
+    "version": "1.8.89",
+    "sourceCommit": "0f54f34f1254b6429cf7bdaab605bf366c571263",
+    "target": "linux-x64",
+    "route": "linux-appimage",
+    "artifacts": [
+      {
+        "name": "tau-staging-appimage-runtime-1.8.89_1.8.89_amd64.deb",
+        "sha256": "12fc1721e3bc7ca549e36ea54c4abfecf243ae56962e75428d166b70b4f57b76"
+      },
+      {
+        "name": "tau-staging-appimage_1.8.89_amd64.deb",
+        "sha256": "90c3f574292bab096e2f26d370ff1006fd11f07ae04b452103d52c5c86d16c48"
+      },
+      {
+        "name": "Tau-linux-x64.AppImage",
+        "sha256": "840fe3b8a459200cf14480345f8ac3b59b049402a7a1e9a56095d2630ad086aa"
+      }
+    ],
+    "baseline": {
+      "version": "1.8.87",
+      "artifactSha256": "f7746753f10b3094470c3c43eafae719760ca215034e042276211badb1d05bab"
+    },
+    "installed": {
+      "version": "1.8.89",
+      "executableSha256": "840fe3b8a459200cf14480345f8ac3b59b049402a7a1e9a56095d2630ad086aa"
+    },
+    "environment": {
+      "os": "6.12.116+deb13-cloud-amd64 PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"13\"\nVERSION=\"13 (trixie)\"\nVERSION_CODENAME=trixie\nDEBIAN_VERSION_FULL=13.7\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\"",
+      "arch": "x64",
+      "kind": "vm",
+      "sandbox": "enabled",
+      "host": {
+        "platform": "linux",
+        "runner": "tau-q-42706520569-1-debian13-appimage",
+        "nativeArch": "x64",
+        "host": {
+          "provider": "gcp",
+          "template": "ci-gpu-debian13-20261108050137644200000002",
+          "instance": "tau-q-42706520569-1-debian13-appimage",
+          "zone": "us-central1-a"
+        },
+        "distribution": {
+          "id": "debian",
+          "versionId": "13"
+        },
+        "kernel": "6.12.116+deb13-cloud-amd64",
+        "appArmor": "enabled",
+        "usernsRestriction": "absent",
+        "graphics": {
+          "mode": "stock",
+          "glRenderer": "Tesla T4/PCIe/SSE2",
+          "webglRenderer": "ANGLE (NVIDIA Corporation, Tesla T4/PCIe/SSE2, OpenGL 4.5.0)"
+        },
+        "account": {
+          "name": "consumer",
+          "uid": 1001,
+          "administrator": false
+        },
+        "consent": {
+          "account": "tau",
+          "step": "apt-install-browser-downloads"
+        },
+        "downloads": [
+          {
+            "stage": "initial",
+            "name": "Tau-linux-x64.AppImage",
+            "sha256": "9087e1c8ecae72af60dd4cf6dcc5e4a991b793bc6156679f42ec16b31164559b",
+            "size": 324340134,
+            "urlPath": "/releases/desktop-staging%400.1.0-staging.887/Tau-linux-x64.AppImage",
+            "browser": "Chromium 156.0.8078.4",
+            "madeExecutable": true
+          },
+          {
+            "stage": "initial",
+            "name": "tau-staging-appimage-runtime-1.8.87_1.8.87_amd64.deb",
+            "sha256": "f7746753f10b3094470c3c43eafae719760ca215034e042276211badb1d05bab",
+            "size": 322371118,
+            "urlPath": "/releases/desktop-staging%400.1.0-staging.887/tau-staging-appimage-runtime-1.8.87_1.8.87_amd64.deb",
+            "browser": "Chromium 156.0.8078.4",
+            "madeExecutable": false
+          },
+          {
+            "stage": "initial",
+            "name": "tau-staging-appimage_1.8.87_amd64.deb",
+            "sha256": "00c10e0890418e6a82a0872e6ad99cf66363aae693a9cf037b01de5e5e733dca",
+            "size": 83250,
+            "urlPath": "/releases/desktop-staging%400.1.0-staging.887/tau-staging-appimage_1.8.87_amd64.deb",
+            "browser": "Chromium 156.0.8078.4",
+            "madeExecutable": false
+          },
+          {
+            "stage": "reinstall",
+            "name": "Tau-linux-x64.AppImage",
+            "sha256": "840fe3b8a459200cf14480345f8ac3b59b049402a7a1e9a56095d2630ad086aa",
+            "size": 324344896,
+            "urlPath": "/releases/desktop-staging%400.1.0-staging.889/Tau-linux-x64.AppImage",
+            "browser": "Chromium 156.0.8078.4",
+            "madeExecutable": true
+          },
+          {
+            "stage": "reinstall",
+            "name": "tau-staging-appimage-runtime-1.8.89_1.8.89_amd64.deb",
+            "sha256": "12fc1721e3bc7ca549e36ea54c4abfecf243ae56962e75428d166b70b4f57b76",
+            "size": 322371874,
+            "urlPath": "/releases/desktop-staging%400.1.0-staging.889/tau-staging-appimage-runtime-1.8.89_1.8.89_amd64.deb",
+            "browser": "Chromium 156.0.8078.4",
+            "madeExecutable": false
+          },
+          {
+            "stage": "reinstall",
+            "name": "tau-staging-appimage_1.8.89_amd64.deb",
+            "sha256": "90c3f574292bab096e2f26d370ff1006fd11f07ae04b452103d52c5c86d16c48",
+            "size": 83254,
+            "urlPath": "/releases/desktop-staging%400.1.0-staging.889/tau-staging-appimage_1.8.89_amd64.deb",
+            "browser": "Chromium 156.0.8078.4",
+            "madeExecutable": false
+          }
+        ],
+        "installedPath": "/usr/bin/tau-staging-appimage",
+        "desktopEntry": "/usr/share/applications/tau-staging-appimage.desktop",
+        "launch": "desktop-entry"
+      }
+    },
+    "trust": {
+      "kind": "release",
+      "identity": "tau-staging-appimage-2026-10-22"
+    },
+    "checks": {
+      "cleanInstall": true,
+      "upgrade": true,
+      "dataPreserved": true
+    },
+    "suite": "clean-host-route-a-b-c-v1",
+    "logs": "https://github.com/taucad/tau/actions/runs/42706520569"
+  }
+]

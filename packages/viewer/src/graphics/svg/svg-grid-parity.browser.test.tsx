@@ -27,7 +27,8 @@ function TopView(): undefined {
   const rig: Rig = useCameraRig();
   useEffect(() => {
     rig.actorRef.send({
-      type: 'setView',
+      type: 'poseObserved',
+      source: 'input',
       target: [0, 0, 0],
       direction: [0, 0, 1],
       up: [0, 1, 0],

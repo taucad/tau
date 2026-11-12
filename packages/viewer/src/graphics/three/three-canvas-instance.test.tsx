@@ -32,7 +32,7 @@ import type * as ViewerEnvironmentModule from '#environment/viewer-environment.j
 
 /**
  * Dispatches context-loss handlers registered via the latest stub `<Canvas>`
- * (`onCreated` runs in a microtask so `ThreeCanvasInstance` has a measurable `isCanvasReady` gap).
+ * (`onCreated` runs in a microtask so `ThreeCanvasInstance` has a measurable gap before it attaches the controls).
  */
 let fireLatestWebGlContextLost: (() => void) | undefined;
 let latestCanvasEventSource: ReactThreeFiber.CanvasProps['eventSource'] | undefined;
@@ -107,6 +107,8 @@ vi.mock('#graphics/three/render-fps-overlay.jsx', () => ({
 
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useCameraRig: () => cameraRig,
+  useCameraConnectorRef: () => adapters.connectorRef,
+  useCameraConsumersRef: () => adapters.consumersRef,
   useGraphics: () => graphicsHolder.current,
 }));
 
@@ -282,11 +284,29 @@ vi.mock('#graphics/three/webgpu-inspector-overlay.jsx', () => ({
   WebGpuInspectorOverlay: () => <div data-testid='gpu-inspector' />,
 }));
 
-vi.mock('#graphics/three/actor-bridge.jsx', () => ({
-  ActorBridge: () => <div data-testid='actor-bridge' />,
+/** The controls adapters graphics ran for this file's canvases: a stand-in that records its start and stop. */
+const adapters = vi.hoisted(() => ({
+  started: 0,
+  stopped: 0,
+  // Stable, as the provider's are: a new ref each render would re-bind the surface every commit.
+  connectorRef: { current: undefined },
+  consumersRef: { current: new Set<never>() },
 }));
+vi.mock('#graphics/three/adapters/controls-adapter.js', async () => {
+  const { createCallbackLogic } = await import('xstate');
+  return {
+    createControlsAdapter: () =>
+      createCallbackLogic(() => {
+        adapters.started++;
+        return () => {
+          adapters.stopped++;
+        };
+      }),
+  };
+});
 
 const canvas = () => graphicsHolder.current?.getSnapshot().context.canvas?.ref;
+const controlsAdapter = () => graphicsHolder.current?.getSnapshot().context.controlsAdapter;
 
 /** A canvas under a Suspense boundary that a test suspends (hiding the canvas) and then reveals. */
 const suspendable = () => {
@@ -337,6 +357,8 @@ function KeyedThreeCanvas({ canvasKey }: { readonly canvasKey: string }) {
 
 describe('ThreeCanvasInstance', () => {
   beforeEach(() => {
+    adapters.started = 0;
+    adapters.stopped = 0;
     enabledFeatures.clear();
     graphicsHolder.current = createActor(
       graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
@@ -411,9 +433,12 @@ describe('ThreeCanvasInstance', () => {
     });
     expect(canvas()).toBe(ref);
     expect(frameCallbacks.filter(({ priority }) => priority === 6)).toHaveLength(1);
+    // The replayed mount neither stops nor duplicates the controls adapter.
+    expect([adapters.started, adapters.stopped]).toEqual([1, 0]);
     view.unmount();
     expect(canvas()).toBeUndefined();
     expect(ref?.getSnapshot().status).toBe('stopped');
+    expect([adapters.started, adapters.stopped]).toEqual([1, 1]);
   });
 
   it('retains the renderer before scene layout effects can allocate environment targets', () => {
@@ -532,7 +557,7 @@ describe('ThreeCanvasInstance', () => {
     enabledFeatures.add('tauDebug');
     const view = render(<ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />);
     await waitFor(() => {
-      expect(screen.getByTestId('actor-bridge')).toBeInTheDocument();
+      expect(controlsAdapter()).toBeDefined();
     });
     expect(screen.queryByTestId('gpu-inspector')).not.toBeInTheDocument();
     enabledFeatures.add('webGpuInspector');
@@ -621,36 +646,41 @@ describe('ThreeCanvasInstance', () => {
     expect(screen.getByTestId('stub-canvas')).toBeInTheDocument();
   });
 
-  it('keeps ActorBridge gated until each key mount runs onCreated again', async () => {
+  it('attaches one controls adapter per key mount, once that mount runs onCreated', async () => {
     const { rerender } = render(<KeyedThreeCanvas canvasKey='a' />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('actor-bridge')).toBeInTheDocument();
+      expect(controlsAdapter()).toBeDefined();
     });
+    const first = controlsAdapter();
 
     rerender(<KeyedThreeCanvas canvasKey='b' />);
 
-    expect(screen.queryByTestId('actor-bridge')).not.toBeInTheDocument();
+    expect(controlsAdapter()).toBeUndefined();
+    expect([adapters.started, adapters.stopped]).toEqual([1, 1]);
 
     await waitFor(() => {
-      expect(screen.getByTestId('actor-bridge')).toBeInTheDocument();
+      expect(controlsAdapter()).toBeDefined();
     });
+    expect(controlsAdapter()?.canvasId).not.toBe(first?.canvasId);
+    expect([adapters.started, adapters.stopped]).toEqual([2, 1]);
   });
 
-  it('reveals ActorBridge only after deferred onCreated completes (stub microtask)', async () => {
+  it('attaches the controls adapter only after deferred onCreated completes (stub microtask)', async () => {
     render(
       <ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined}>
         {null}
       </ThreeCanvasInstance>,
     );
 
-    expect(screen.queryByTestId('actor-bridge')).not.toBeInTheDocument();
+    expect(controlsAdapter()).toBeUndefined();
 
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByTestId('actor-bridge')).toBeInTheDocument();
+    expect(controlsAdapter()).toBeDefined();
+    expect(adapters.started).toBe(1);
   });
 
   it('reports the first frame only once it has reached the screen, then observes no further frames', async () => {
@@ -707,6 +737,9 @@ describe('ThreeCanvasInstance', () => {
     expect(revealed).not.toBe(first);
     expect(revealed?.getSnapshot().value).toBe('ready');
     expect(backend()).toBe('webgl');
+    // The hidden surface's adapter stopped with it; the revealed surface runs a new one on the same root.
+    expect([adapters.started, adapters.stopped]).toEqual([2, 1]);
+    expect(controlsAdapter()).toBeDefined();
     const replacement = await waitForPresentationObserver();
     act(() => {
       replacement.callback({ size: stubSize });

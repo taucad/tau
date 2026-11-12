@@ -1,6 +1,6 @@
 import * as fc from 'fast-check';
-import { createActor, createCallbackLogic } from 'xstate';
-import type { EventRejection } from 'xstate';
+import { createActor, createCallbackLogic, setup } from 'xstate';
+import type { ActorRefFrom, EventRejection } from 'xstate';
 import { describe, expect, it } from 'vitest';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { recordEmitted } from '@taucad/xstate-testing/fakes';
@@ -12,6 +12,7 @@ import {
   cameraPoseSettleMilliseconds,
   cameraRefusedPayloadReason,
   createCameraActor as createRootCameraActor,
+  createCameraRefusalInspector,
   selectCameraDriverSnapshot,
   selectCameraProjection,
 } from '#camera.machine.js';
@@ -58,6 +59,7 @@ describe('cameraMachine', () => {
       'cameraPoseSettleMilliseconds',
       'cameraRefusedPayloadReason',
       'createCameraActor',
+      'createCameraRefusalInspector',
       'selectCameraDriverSnapshot',
       'selectCameraProjection',
     ]);
@@ -108,7 +110,14 @@ describe('cameraMachine', () => {
     actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
     const calibrated = actor.getSnapshot().context.handoffVerticalFieldOfView;
 
-    actor.send({ type: 'setView', target: [35, -20, 12], direction: [1, -1, 0.7], up: [0, 0, 1], verticalSpan: 1e-9 });
+    actor.send({
+      type: 'poseObserved',
+      source: 'input',
+      target: [35, -20, 12],
+      direction: [1, -1, 0.7],
+      up: [0, 0, 1],
+      verticalSpan: 1e-9,
+    });
     const snapshot = actor.getSnapshot();
     expect(snapshot.status).toBe('active');
     expect(snapshot.context.view.verticalSpan).toBe(1e-9);
@@ -152,7 +161,14 @@ describe('cameraMachine', () => {
 
   it('updates, frames and serializes canonical state', () => {
     const actor = createCameraActor().start();
-    actor.send({ type: 'setView', target: [1, 2, 3], direction: [2, -2, 1], up: [0, 0, 1], verticalSpan: 25 });
+    actor.send({
+      type: 'poseObserved',
+      source: 'input',
+      target: [1, 2, 3],
+      direction: [2, -2, 1],
+      up: [0, 0, 1],
+      verticalSpan: 25,
+    });
     actor.send({ type: 'frame', bounds: { min: [100, 200, 300], max: [200, 400, 500] } });
 
     const snapshot = actor.getSnapshot();
@@ -286,7 +302,7 @@ describe('cameraMachine provenance (charter I1, D2, D20)', () => {
       [{ type: 'frameBounds', bounds: { min: [0, 0, 0], max: [1, 1, 1] }, margin: 0.2, source: 'focus' }, 'focus'],
       [{ type: 'interactionStarted' }, 'focus'],
       [{ type: 'poseObserved', ...otherPose, source: 'gizmo' }, 'gizmo'],
-      [{ type: 'setView', ...pose }, 'input'],
+      [{ type: 'poseObserved', ...pose, source: 'input' }, 'input'],
       [{ type: 'frame', margin: 0.1 }, 'framing'],
     ];
 
@@ -321,15 +337,47 @@ describe('cameraMachine provenance (charter I1, D2, D20)', () => {
     actor.stop();
   });
 
-  it.each(['setView', 'frame'] as const)('should keep the deprecated %s alias on its mapped source', (type) => {
+  it('should keep the deprecated frame alias on its mapped source', () => {
     const { actor } = startCamera();
 
-    actor.send(type === 'setView' ? { type, ...pose } : { type, margin: 0.1 });
+    actor.send({ type: 'frame', margin: 0.1 });
 
-    expect(actor.getSnapshot().context.lastChange).toEqual({
-      source: type === 'setView' ? 'input' : 'framing',
-      revision: 1,
+    expect(actor.getSnapshot().context.lastChange).toEqual({ source: 'framing', revision: 1 });
+    actor.stop();
+  });
+
+  it('should take a render frame carried by a pose in the same change', () => {
+    const { actor, syncs, emitted } = startCamera();
+    const renderFrame = {
+      anchorFrameId: initialView.frameId,
+      originMeters: [5, 0, 0],
+      metersPerRenderUnit: 0.5,
+    } as const;
+
+    actor.send({ type: 'poseObserved', ...pose, source: 'input', renderFrame });
+
+    const { context } = actor.getSnapshot();
+    expect(context.renderFrame).toEqual(renderFrame);
+    expect(context.revision).toBe(1);
+    expect(syncs).toHaveLength(1);
+    expect(syncs[0]?.snapshot.renderFrame).toEqual(renderFrame);
+    expect(emitted.filter((event) => event.type === 'viewChanged')).toHaveLength(1);
+    actor.stop();
+  });
+
+  it('should refuse a pose whose render frame names another frame', () => {
+    const { actor, guard } = startCamera();
+    const before = actor.getSnapshot();
+
+    actor.send({
+      type: 'poseObserved',
+      ...pose,
+      source: 'input',
+      renderFrame: { anchorFrameId: 'other', originMeters: [0, 0, 0], metersPerRenderUnit: 1 },
     });
+
+    expect(actor.getSnapshot()).toBe(before);
+    expect(guard.take('unanswered')).toHaveLength(1);
     actor.stop();
   });
 });
@@ -908,6 +956,40 @@ describe('createCameraActor', () => {
 
     expect(rejections.map((rejection) => rejection.reason)).toEqual(['stopped']);
     expect(guard.take('deadLetter')).toHaveLength(1);
+  });
+
+  it("should report a refusal by a camera spawned as another actor's child", () => {
+    const rejections: EventRejection[] = [];
+    let child: ActorRefFrom<typeof cameraMachine> | undefined;
+    const parent = createActor(
+      setup({ actors: { camera: cameraMachine } }).createMachine({
+        context: ({ spawn, actors }) => {
+          child = spawn(actors.camera, { id: 'camera', input: { initialView } });
+          return {};
+        },
+      }),
+      { inspect: createCameraRefusalInspector({ onRejectedEvent: (rejection) => rejections.push(rejection) }) },
+    ).start();
+    if (!child) {
+      throw new Error('The parent spawned no camera.');
+    }
+    const event = { type: 'setVerticalFieldOfView', verticalFieldOfView: Number.NaN } as const;
+
+    child.send(event);
+    child.send({ type: 'interactionMoved' });
+
+    expect(rejections).toEqual([
+      {
+        event,
+        targetRef: child,
+        targetId: 'camera',
+        sourceRef: undefined,
+        eventOrigin: 'external',
+        reason: cameraRefusedPayloadReason,
+        error: expect.any(RangeError) as unknown,
+      },
+    ]);
+    parent.stop();
   });
 
   it('should forward an inspector given as an observer and run without any system option', () => {

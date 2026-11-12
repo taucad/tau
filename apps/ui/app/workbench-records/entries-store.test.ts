@@ -291,7 +291,7 @@ describe('workbench entries checked store', () => {
     await committed.promise;
     await entries.read();
     expect(onChange.mock.lastCall?.[1]).toBe('write');
-    expect(onChange.mock.lastCall?.[2]).toEqual({ path: 'a.ts', fields: { renderTimeout: 240_000 } });
+    expect(onChange.mock.lastCall?.[2]).toEqual({ fields: { 'a.ts': { renderTimeout: 240_000 } } });
     data.setBytes(
       encoder.encode(
         workbenchRecords.entries.serialize({
@@ -417,12 +417,12 @@ describe('workbench entries checked store', () => {
     }
   });
   /* Red first (graphics event-driven state charter G0.2, incident 2026-11-06-viewer-orbit-snap-back): the
-   * entries store carries the own-write attribution race that taucad/tau#1602 fixed only in the view store. This
+   * entries store carried the own-write attribution race that taucad/tau#1602 fixed only in the view store. This
    * is the view-store row "attributes its own write to a watch read that starts after the write reply and
-   * supersedes the refresh", ported. It fails today: once the reply clears the in-flight bytes, the superseding
-   * read publishes this store's own write as a foreign `read`. G2 moves the store onto `recordSync`, which
-   * attributes by digest (charter I5), and removes `.fails`; the row is never deleted. */
-  it.fails('attributes its own write to a watch read that starts after the write reply and supersedes the refresh', async () => {
+   * supersedes the refresh", ported. It failed while the store attributed by in-flight bytes: once the reply
+   * cleared them, the superseding read published this store's own write as a foreign `read`. G2a moved the store
+   * onto `recordSync`, which attributes by the written bytes (charter I5); the row is never deleted. */
+  it('attributes its own write to a watch read that starts after the write reply and supersedes the refresh', async () => {
     const data = memory();
     const acknowledgement = Promise.withResolvers<void>();
     const heldReads = Promise.withResolvers<void>();
@@ -472,7 +472,7 @@ describe('workbench entries checked store', () => {
       await entries.read();
       expect(onChange.mock.lastCall?.[0].record?.entries['a.ts']?.renderTimeout).toBe(240_000);
       expect(onChange.mock.lastCall?.[1]).toBe('write');
-      expect(onChange.mock.lastCall?.[2]).toEqual({ path: 'a.ts', fields: { renderTimeout: 240_000 } });
+      expect(onChange.mock.lastCall?.[2]).toEqual({ fields: { 'a.ts': { renderTimeout: 240_000 } } });
       heldReads.resolve();
       await inFlightWatch;
       expect(await saving).toBe(true);
@@ -676,7 +676,8 @@ describe('workbench entries checked store', () => {
         },
       });
       await vi.runOnlyPendingTimersAsync();
-      expect(m.writes).toHaveBeenCalledTimes(2);
+      // One checked write carries everything the flush owes (recordSync); the per-entry queue wrote one per entry.
+      expect(m.writes).toHaveBeenCalledOnce();
       expect(errors).toHaveBeenCalledTimes(2);
       entries.dispose();
     } finally {
@@ -790,8 +791,9 @@ describe('workbench entries checked store', () => {
     });
     await entries.read();
     expect(await entries.changePaths({ type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' })).toBe(false);
-    expect(await entries.edit('b.ts', { renderTimeout: 7000 })).toBe(false);
-    expect(await entries.changePaths({ type: 'delete', path: 'b.ts' })).toBe(false);
+    // The owed rename travels with the next change (recordSync), so the edit and the delete are each saved.
+    expect(await entries.edit('b.ts', { renderTimeout: 7000 })).toBe(true);
+    expect(await entries.changePaths({ type: 'delete', path: 'b.ts' })).toBe(true);
     expect(await entries.flush()).toBe(true);
     const read = workbenchRecords.entries.read(m.get()!);
     expect(read.status).toBe('current');

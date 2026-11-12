@@ -12,18 +12,23 @@ describe('portable camera authority ratchet', () => {
       'graphics/three/utils/camera.utils.ts',
       'graphics/three/controls/viewport-gizmo-axes.tsx',
       'graphics/three/controls/viewport-gizmo-onshape.tsx',
+      // The controls adapter is the one `camera-controls` listener (charter I9).
+      'graphics/three/actor-bridge.tsx',
+      'graphics/three/controls-listener-bridge.tsx',
+      'graphics/three/up-direction-handler.tsx',
+      'machines/controls-listener.machine.ts',
     ];
 
     expect(deletedFiles.filter((path) => existsSync(resolve(sourceRoot, path)))).toEqual([]);
   });
 
-  it('keeps camera snapshots out of graphics and controls-listener machines', () => {
-    const sources = [
-      readFileSync(resolve(sourceRoot, 'machines/graphics.machine.ts'), 'utf8'),
-      readFileSync(resolve(sourceRoot, 'machines/controls-listener.machine.ts'), 'utf8'),
-    ].join('\n');
+  it('keeps camera snapshots out of the graphics machine', () => {
+    const sources = readFileSync(resolve(sourceRoot, 'machines/graphics.machine.ts'), 'utf8');
     const deletedSymbols = [
       'cameraCapability',
+      'cameraInteracting',
+      'cameraInteractionHadMovement',
+      'controlsInteraction',
       'cameraFovAngleComputed',
       'cameraPosition',
       'cameraState',

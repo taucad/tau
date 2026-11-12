@@ -67,7 +67,12 @@ import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
-import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
+import {
+  ProjectCard,
+  ProjectCardCadPreview,
+  ProjectCardMedia,
+  projectCardVerticalFieldOfView,
+} from '#components/project-card.js';
 import { projectGridClassName } from '#components/project-grid-layout.js';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader, SectionHeader, usePhoneTopBar } from '#components/layout/page-header.js';
@@ -1134,7 +1139,11 @@ export function ProjectLibraryCard({
         {showPreview && mainFile !== undefined ? (
           <SharedWorkerGate>
             <HomeFileManagerProvider key={project.id} projectId={project.id} rootDirectory={`/projects/${project.id}`}>
-              <CadPreviewProvider projectId={project.id} mainFile={mainFile}>
+              <CadPreviewProvider
+                projectId={project.id}
+                mainFile={mainFile}
+                initialVerticalFieldOfView={projectCardVerticalFieldOfView}
+              >
                 <ProjectCardCadPreview />
               </CadPreviewProvider>
             </HomeFileManagerProvider>

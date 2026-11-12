@@ -1,11 +1,10 @@
 import { mkdir, mkdtemp, rm, writeFile, appendFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createNodeEventLog } from '@taucad/agent-host/node';
 import type { HostRunSnapshot, ToolRegistry } from '@taucad/agent-host';
-import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
-import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import type { BindingKernelRow } from '@taucad/chat/prompts';
 import { kernelRoutingDevelopmentCases, kernelRoutingRoutingCases } from '#testing/live/kernel-routing.cases.js';
 import type { KernelRoutingCase } from '#testing/live/kernel-routing.cases.js';
@@ -114,17 +113,22 @@ const casesFor = (arm: KernelRoutingArm): readonly KernelRoutingCase[] => {
   return limit > 0 ? selected.slice(0, limit) : selected;
 };
 
-const workspaceRuntimeModule = ['@taucad', 'tau-examples', 'runtime'].join('/');
+/**
+ * The workspace runtime's module, imported by path: a package edge to `@taucad/tau-examples` or `@taucad/runtime`
+ * would put every kernel in the API's project graph (`app/package-metadata.test.ts`).
+ */
+const workspaceRuntimeModule = pathToFileURL(
+  join(dirname(fileURLToPath(import.meta.url)), '../../../../../libs/tau-examples/scripts/runtime.ts'),
+).href;
 
 const loadKernelRows = async (): Promise<readonly BindingKernelRow[]> => {
   const loaded = (await import(workspaceRuntimeModule)) as {
-    readonly workspaceRuntime?: AnyRuntimeDefinition;
+    readonly workspaceKernelRows?: () => Promise<readonly BindingKernelRow[]>;
   };
-  if (!loaded.workspaceRuntime) {
-    throw new Error(`${workspaceRuntimeModule} exports no workspaceRuntime.`);
+  if (!loaded.workspaceKernelRows) {
+    throw new Error(`${workspaceRuntimeModule} exports no workspaceKernelRows.`);
   }
-  const resolved = await resolveRuntimeDefinition(loaded.workspaceRuntime, undefined);
-  return resolved.kernels;
+  return loaded.workspaceKernelRows();
 };
 
 type CaseRow = RoutingRunResult & {

@@ -4,6 +4,8 @@ import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ViewerSettings } from '#cad/viewer-settings.jsx';
+import { ViewerViewFieldsProvider } from '#cad/viewer-view-fields.jsx';
+import type { ViewerViewFields } from '#cad/viewer-view-fields.jsx';
 
 type GraphicsState = {
   readonly context: {
@@ -74,22 +76,27 @@ const nextTask = async (): Promise<void> => {
   });
 };
 
-const renderViewerSettings = (): void => {
+const renderViewerSettings = (viewFields?: ViewerViewFields): void => {
   render(
     <TooltipProvider>
-      <ViewerSettings
-        operationTimeout={{
-          value: 60_000,
-          defaultValue: 180_000,
-          onChange: mocks.setOperationTimeout,
-        }}
-      />
+      <ViewerViewFieldsProvider value={viewFields}>
+        <ViewerSettings
+          operationTimeout={{
+            value: 60_000,
+            defaultValue: 180_000,
+            onChange: mocks.setOperationTimeout,
+          }}
+        />
+      </ViewerViewFieldsProvider>
     </TooltipProvider>,
   );
 };
 
-const openViewerSettings = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
-  renderViewerSettings();
+const openViewerSettings = async (
+  user: ReturnType<typeof userEvent.setup>,
+  viewFields?: ViewerViewFields,
+): Promise<void> => {
+  renderViewerSettings(viewFields);
   await user.click(screen.getByRole('button', { name: 'Viewer settings' }));
 };
 
@@ -127,6 +134,43 @@ describe('ViewerSettings', () => {
     await user.click(screen.getByRole('switch', { name: 'Edges' }));
 
     expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'setLinesVisibility', payload: false });
+  });
+
+  describe('with the host view commands (T3.5)', () => {
+    it('should set each toggle, the up direction and the field of view in the view and send nothing live', async () => {
+      const user = userEvent.setup();
+      const set = vi.fn();
+      await openViewerSettings(user, { set, reset: vi.fn() });
+
+      await user.click(screen.getByRole('switch', { name: 'Edges' }));
+      await user.click(screen.getByRole('switch', { name: 'Surfaces' }));
+      await user.click(screen.getByRole('switch', { name: /Matcap/u }));
+      await user.click(screen.getByRole('switch', { name: 'Gizmo' }));
+      await user.click(screen.getByRole('switch', { name: 'Grid' }));
+      await user.click(screen.getByRole('switch', { name: 'Axes' }));
+      await user.click(screen.getByRole('radio', { name: 'Y-up' }));
+      act(() => {
+        screen.getByRole('menuitem', { name: `${fieldOfViewName}, 42°` }).focus();
+      });
+      await user.keyboard('{ArrowRight}');
+
+      // A press on the switch itself also selects its row, so a toggle may be issued twice with one value.
+      const issued = [...new Set(set.mock.calls.map((call) => JSON.stringify(call)))].map(
+        (call) => JSON.parse(call) as unknown,
+      );
+      expect(issued).toEqual([
+        ['display.lines', false],
+        ['display.surfaces', false],
+        ['display.matcap', true],
+        ['display.gizmo', false],
+        ['display.grid', false],
+        ['display.axes', false],
+        ['upDirection', 'y'],
+        ['fieldOfView', 43],
+      ]);
+      expect(mocks.graphicsSend).not.toHaveBeenCalled();
+      expect(mocks.cameraSend).not.toHaveBeenCalled();
+    });
   });
 
   describe('closing', () => {

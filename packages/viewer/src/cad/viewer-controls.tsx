@@ -1,3 +1,5 @@
+import { ViewerViewFieldsProvider } from '#cad/viewer-view-fields.jsx';
+import type { ViewerViewFields } from '#cad/viewer-view-fields.jsx';
 import { viewerTouchContext, useViewerControlSize } from '#cad/viewer-control-size.js';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { FlipHorizontal, Ruler } from 'lucide-react';
@@ -206,6 +208,11 @@ export type ViewerControlsProps = Readonly<{
   aboveControls?: React.ReactNode;
   /** The host's own actions, in their own section at the end of the controls line. */
   actions?: React.ReactNode;
+  /**
+   * The host's view commands. With them, the settings menu, the G and P keys and the grid unit call the command and
+   * leave the live graphics owner to the host; without them, they change the live owner as before.
+   */
+  viewFields?: ViewerViewFields;
 }>;
 
 /**
@@ -228,7 +235,9 @@ export type ViewerControlsProps = Readonly<{
 export function ViewerControls(props: ViewerControlsProps): React.JSX.Element {
   return (
     <viewerTouchContext.Provider value={props.enableTouchTargets}>
-      <ViewerControlsBody {...props} />
+      <ViewerViewFieldsProvider value={props.viewFields}>
+        <ViewerControlsBody {...props} />
+      </ViewerViewFieldsProvider>
     </viewerTouchContext.Provider>
   );
 }

@@ -13,8 +13,9 @@
  * Every write goes through the checked record store (`editViewFile`), so its conflict handling and issue states apply.
  */
 import { useMemo } from 'react';
-import { viewFieldPaths, viewRecordV1Defaults, withViewField } from '@taucad/workbench';
-import type { ViewFieldPath, ViewFieldValues, WorkbenchView } from '@taucad/workbench';
+import { lengthUnits, viewFieldPaths, viewRecordV1Defaults, withViewField } from '@taucad/workbench';
+import type { LengthUnit, ViewFieldPath, ViewFieldValues, WorkbenchView } from '@taucad/workbench';
+import type { ViewerViewFields } from '@taucad/viewer/cad/viewer-view-fields';
 import type { PersonalViewDefaults } from '@taucad/preferences';
 import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import { useProject } from '#hooks/use-project.js';
@@ -50,6 +51,16 @@ export type ViewFieldCommands = Readonly<{
   resetView: (view: ViewFieldTarget) => Promise<boolean>;
 }>;
 
+/* Runs `run` once `previous` settles; an earlier command's failure is its own caller's to report. */
+const runAfter = async (previous: Promise<unknown> | undefined, run: () => Promise<boolean>): Promise<boolean> => {
+  try {
+    await previous;
+  } catch {
+    // Reported to the earlier command's caller.
+  }
+  return run();
+};
+
 const hasPersonalDefault = (defaults: PersonalViewDefaults, leaf: ViewFieldPath): boolean =>
   leaf !== 'upDirection' && defaults[leaf] !== undefined;
 
@@ -63,28 +74,54 @@ export const createViewFieldCommands = (ports: ViewFieldCommandPorts): ViewField
   const write = async (view: ViewFieldTarget, change: (record: WorkbenchView) => WorkbenchView): Promise<boolean> =>
     ports.edit(view.viewId, (current) => change(current ?? newViewRecord(view.entryPath)));
 
+  /* A view's commands run one at a time, in order, so a later value is never overwritten by an earlier one still in
+   * flight. A command still waiting when a newer one for the same leaf arrives is skipped: a field of view scrub
+   * writes the value it settles on, not every step. */
+  const chains = new Map<string, Promise<unknown>>();
+  const tickets = new Map<string, number>();
+  const queued = async (viewId: string, key: string, run: () => Promise<boolean>): Promise<boolean> => {
+    const slot = `${viewId}/${key}`;
+    const ticket = (tickets.get(slot) ?? 0) + 1;
+    tickets.set(slot, ticket);
+    const next = runAfter(chains.get(viewId), async () => (tickets.get(slot) === ticket ? run() : true));
+    chains.set(viewId, next);
+    try {
+      return await next;
+    } finally {
+      if (chains.get(viewId) === next) {
+        chains.delete(viewId);
+      }
+    }
+  };
+
   return {
     async setViewField(view, leaf, value) {
-      if (value === viewRecordV1Defaults[leaf] && hasPersonalDefault(ports.personDefaults(), leaf)) {
-        // Added before the value, so the view never reads as inheriting while the write is in flight.
-        ports.addException(ports.projectId, view.viewId, leaf);
-      } else {
-        ports.removeException(ports.projectId, view.viewId, leaf);
-      }
-      return write(view, (record) => withViewField(record, leaf, value));
+      return queued(view.viewId, leaf, async () => {
+        if (value === viewRecordV1Defaults[leaf] && hasPersonalDefault(ports.personDefaults(), leaf)) {
+          // Added before the value, so the view never reads as inheriting while the write is in flight.
+          ports.addException(ports.projectId, view.viewId, leaf);
+        } else {
+          ports.removeException(ports.projectId, view.viewId, leaf);
+        }
+        return write(view, (record) => withViewField(record, leaf, value));
+      });
     },
     async resetViewField(view, leaf) {
-      ports.removeException(ports.projectId, view.viewId, leaf);
-      return write(view, (record) => withViewField(record, leaf, viewRecordV1Defaults[leaf]));
+      return queued(view.viewId, leaf, async () => {
+        ports.removeException(ports.projectId, view.viewId, leaf);
+        return write(view, (record) => withViewField(record, leaf, viewRecordV1Defaults[leaf]));
+      });
     },
     async resetView(view) {
-      ports.clearExceptions(ports.projectId, view.viewId);
-      return write(view, (record) => {
-        let next = record;
-        for (const leaf of viewFieldPaths) {
-          next = withViewField(next, leaf, viewRecordV1Defaults[leaf]);
-        }
-        return next;
+      return queued(view.viewId, 'view', async () => {
+        ports.clearExceptions(ports.projectId, view.viewId);
+        return write(view, (record) => {
+          let next = record;
+          for (const leaf of viewFieldPaths) {
+            next = withViewField(next, leaf, viewRecordV1Defaults[leaf]);
+          }
+          return next;
+        });
       });
     },
   };
@@ -110,4 +147,37 @@ export const useViewFieldCommands = (): ViewFieldCommands => {
       }),
     [edit, projectId],
   );
+};
+
+/**
+ * The view commands as the viewer bar takes them (`ViewerControls`' `viewFields`), for one view. A grid unit the
+ * record cannot hold is ignored.
+ *
+ * @param view - The view the bar shows, or `undefined` for a bar that keeps changing the live owner (a shared session).
+ * @returns The bar's commands.
+ */
+export const useViewerViewFieldCommands = (view: ViewFieldTarget | undefined): ViewerViewFields | undefined => {
+  const commands = useViewFieldCommands();
+  const viewId = view?.viewId;
+  const entryPath = view?.entryPath;
+  return useMemo(() => {
+    if (viewId === undefined || entryPath === undefined) {
+      return undefined;
+    }
+    const target = { viewId, entryPath };
+    return {
+      set: (leaf, value) => {
+        if (leaf === 'grid.unit') {
+          if (lengthUnits.includes(value as LengthUnit)) {
+            void commands.setViewField(target, 'grid.unit', value as LengthUnit);
+          }
+          return;
+        }
+        void commands.setViewField(target, leaf, value as ViewFieldValues[typeof leaf]);
+      },
+      reset: (leaf) => {
+        void commands.resetViewField(target, leaf);
+      },
+    } satisfies ViewerViewFields;
+  }, [commands, entryPath, viewId]);
 };

@@ -8,6 +8,8 @@ import type { Actor } from 'xstate';
 import { GraphicsProvider, useCameraSelector } from '#hooks/use-graphics.jsx';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { useViewerShortcuts } from '#hooks/use-viewer-shortcuts.js';
+import { ViewerViewFieldsProvider } from '#cad/viewer-view-fields.jsx';
+import type { ViewerViewFields } from '#cad/viewer-view-fields.jsx';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
 type GraphicsActor = Actor<typeof graphicsMachine>;
@@ -79,12 +81,14 @@ function Viewer({ label }: Readonly<{ label: string }>): React.JSX.Element {
   );
 }
 
-const renderViewers = (...viewers: ReadonlyArray<readonly [string, GraphicsActor]>): void => {
+const renderViewers = (...viewers: ReadonlyArray<readonly [string, GraphicsActor, ViewerViewFields?]>): void => {
   render(
     <KeyboardProvider>
-      {viewers.map(([label, actor]) => (
+      {viewers.map(([label, actor, viewFields]) => (
         <GraphicsProvider key={label} graphicsRef={actor}>
-          <Viewer label={label} />
+          <ViewerViewFieldsProvider value={viewFields}>
+            <Viewer label={label} />
+          </ViewerViewFieldsProvider>
         </GraphicsProvider>
       ))}
       <div role='menu'>
@@ -360,6 +364,43 @@ describe('useViewerShortcuts', () => {
 
       await user.keyboard('g');
       expect(actor.getSnapshot().context.enableGrid).toBe(isGridShown);
+    });
+
+    it('should set the grid and projection through the host view commands and send nothing live (V11)', async () => {
+      const actor = startGraphics();
+      const send = recordSends(actor);
+      const set = vi.fn();
+      const user = userEvent.setup();
+      renderViewers(['Viewer', actor, { set, reset: vi.fn() }]);
+      hoverViewer('Viewer');
+      const isGridShown = actor.getSnapshot().context.enableGrid;
+      const fieldOfView = actor.getSnapshot().context.cameraRef.getSnapshot().context.view.requestedVerticalFieldOfView;
+
+      await user.keyboard('g');
+      await user.keyboard('p');
+
+      expect(set.mock.calls).toEqual([
+        ['display.grid', !isGridShown],
+        ['fieldOfView', 0],
+      ]);
+      expect(pressedShortcuts(send)).toEqual([]);
+      expect(actor.getSnapshot().context.enableGrid).toBe(isGridShown);
+      expect(actor.getSnapshot().context.cameraRef.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(
+        fieldOfView,
+      );
+      expect(announcementsOf('Viewer')).toEqual([isGridShown ? 'Grid hidden' : 'Grid shown', 'Orthographic']);
+    });
+
+    it('should keep sending F, S and M to graphics with the host view commands', async () => {
+      const actor = startGraphics();
+      const send = recordSends(actor);
+      const user = userEvent.setup();
+      renderViewers(['Viewer', actor, { set: vi.fn(), reset: vi.fn() }]);
+      hoverViewer('Viewer');
+
+      await user.keyboard('f');
+
+      expect(pressedShortcuts(send)).toEqual(['fitView']);
     });
 
     it('should keep S, M and P off for 2D geometry, while F and G still work', async () => {

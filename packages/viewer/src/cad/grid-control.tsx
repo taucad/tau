@@ -17,6 +17,7 @@ import {
 import { formatNumberEngineeringNotation } from '#utils/number.js';
 import { gridUnitOptions, maxGridDigits } from '#cad/grid-unit-options.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
+import { useViewerViewFields } from '#cad/viewer-view-fields.jsx';
 
 /**
  * A one-line readout of the grid size from the per-view GraphicsMachine via GraphicsProvider, which opens the
@@ -43,14 +44,19 @@ export function GridSizeIndicator(): React.ReactNode {
     [graphicsRef],
   );
 
+  const viewFields = useViewerViewFields();
   const handleUnitChange = useCallback(
     (selectedUnit: string) => {
+      if (viewFields) {
+        viewFields.set('grid.unit', selectedUnit);
+        return;
+      }
       graphicsRef.send({
         type: 'setGridUnit',
         payload: { unit: selectedUnit },
       });
     },
-    [graphicsRef],
+    [graphicsRef, viewFields],
   );
 
   const preventClose = useCallback((event: Event) => {

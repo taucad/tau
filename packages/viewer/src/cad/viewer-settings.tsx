@@ -23,6 +23,8 @@ import {
 } from '@taucad/ui/components/menu-slider-item';
 import { useCameraRig, useCameraSelector, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import { clamp } from '@taucad/ui/utils/number';
+import { useViewerViewFields } from '#cad/viewer-view-fields.jsx';
+import type { ViewerViewFieldPath } from '#cad/viewer-view-fields.jsx';
 
 // Up direction options
 type UpDirection = 'x' | 'y' | 'z';
@@ -107,17 +109,20 @@ function SliderRowTrigger({
  */
 function FieldOfViewRow(): React.JSX.Element {
   const cameraRig = useCameraRig();
+  const viewFields = useViewerViewFields();
   const fieldOfView = useCameraSelector((state) => state.context.view.requestedVerticalFieldOfView);
 
   // The camera throws on an angle outside its range, so typed values are clamped as well as stepped ones.
   const setFieldOfView = useCallback(
     (value: number) => {
-      cameraRig.actorRef.send({
-        type: 'setVerticalFieldOfView',
-        verticalFieldOfView: clamp(Math.round(value), 0, maxVerticalFieldOfView),
-      });
+      const verticalFieldOfView = clamp(Math.round(value), 0, maxVerticalFieldOfView);
+      if (viewFields) {
+        viewFields.set('fieldOfView', verticalFieldOfView);
+        return;
+      }
+      cameraRig.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView });
     },
-    [cameraRig],
+    [cameraRig, viewFields],
   );
 
   const stepFieldOfView = useCallback(
@@ -186,54 +191,43 @@ export function ViewerSettings({
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
   const is2dGeometry = useGraphicsSelector((state) => state.context.artifact?.mimeType === 'image/svg+xml');
 
-  const handleMeshToggle = useCallback(
-    (checked: boolean) => {
-      graphicsRef.send({ type: 'setSurfaceVisibility', payload: checked });
-    },
-    [graphicsRef],
-  );
-
-  const handleLinesToggle = useCallback(
-    (checked: boolean) => {
-      graphicsRef.send({ type: 'setLinesVisibility', payload: checked });
-    },
-    [graphicsRef],
-  );
-
-  const handleGizmoToggle = useCallback(
-    (checked: boolean) => {
-      graphicsRef.send({ type: 'setGizmoVisibility', payload: checked });
-    },
-    [graphicsRef],
-  );
-
-  const handleGridToggle = useCallback(
-    (checked: boolean) => {
-      graphicsRef.send({ type: 'setGridVisibility', payload: checked });
-    },
-    [graphicsRef],
-  );
-
-  const handleAxesHelperToggle = useCallback(
-    (checked: boolean) => {
-      graphicsRef.send({ type: 'setAxesVisibility', payload: checked });
-    },
-    [graphicsRef],
-  );
-
-  const handleMatcapToggle = useCallback(
-    (checked: boolean) => {
-      graphicsRef.send({ type: 'setMatcapVisibility', payload: checked });
-    },
-    [graphicsRef],
-  );
-
-  const handleUpDirectionChange = useCallback(
-    (value: UpDirection) => {
-      graphicsRef.send({ type: 'setUpDirection', payload: value });
-    },
-    [graphicsRef],
-  );
+  const viewFields = useViewerViewFields();
+  /* With the host's view commands each control sets its leaf in the view; without them it changes the live owner. */
+  const handlers = useMemo(() => {
+    const toggle =
+      (
+        leaf: Extract<ViewerViewFieldPath, `display.${string}`>,
+        type:
+          | 'setSurfaceVisibility'
+          | 'setLinesVisibility'
+          | 'setGizmoVisibility'
+          | 'setGridVisibility'
+          | 'setAxesVisibility'
+          | 'setMatcapVisibility',
+      ) =>
+      (checked: boolean): void => {
+        if (viewFields) {
+          viewFields.set(leaf, checked);
+          return;
+        }
+        graphicsRef.send({ type, payload: checked });
+      };
+    return {
+      surfaces: toggle('display.surfaces', 'setSurfaceVisibility'),
+      lines: toggle('display.lines', 'setLinesVisibility'),
+      gizmo: toggle('display.gizmo', 'setGizmoVisibility'),
+      grid: toggle('display.grid', 'setGridVisibility'),
+      axes: toggle('display.axes', 'setAxesVisibility'),
+      matcap: toggle('display.matcap', 'setMatcapVisibility'),
+      upDirection: (value: UpDirection): void => {
+        if (viewFields) {
+          viewFields.set('upDirection', value);
+          return;
+        }
+        graphicsRef.send({ type: 'setUpDirection', payload: value });
+      },
+    };
+  }, [graphicsRef, viewFields]);
 
   const onOperationTimeoutChange = operationTimeout?.onChange;
   const handleOperationTimeoutChange = useCallback(
@@ -287,11 +281,11 @@ export function ViewerSettings({
         {!is2dGeometry && (
           <>
             <DropdownMenuLabel>Model</DropdownMenuLabel>
-            <DropdownMenuSwitchItem isChecked={enableSurfaces} onIsCheckedChange={handleMeshToggle}>
+            <DropdownMenuSwitchItem isChecked={enableSurfaces} onIsCheckedChange={handlers.surfaces}>
               <Box />
               Surfaces
             </DropdownMenuSwitchItem>
-            <DropdownMenuSwitchItem isChecked={enableLines} onIsCheckedChange={handleLinesToggle}>
+            <DropdownMenuSwitchItem isChecked={enableLines} onIsCheckedChange={handlers.lines}>
               <Spline />
               Edges
             </DropdownMenuSwitchItem>
@@ -299,7 +293,7 @@ export function ViewerSettings({
               icon={<Sparkles />}
               description={`Lighting effects are ${enableMatcap ? 'inactive' : 'active'}`}
               isChecked={enableMatcap}
-              onIsCheckedChange={handleMatcapToggle}
+              onIsCheckedChange={handlers.matcap}
             >
               Matcap{' '}
               <InfoTooltip>
@@ -314,16 +308,16 @@ export function ViewerSettings({
         <DropdownMenuSwitchItem
           className={cn(is2dGeometry && 'hidden')}
           isChecked={enableGizmo}
-          onIsCheckedChange={handleGizmoToggle}
+          onIsCheckedChange={handlers.gizmo}
         >
           <Rotate3D />
           Gizmo
         </DropdownMenuSwitchItem>
-        <DropdownMenuSwitchItem isChecked={enableGrid} onIsCheckedChange={handleGridToggle}>
+        <DropdownMenuSwitchItem isChecked={enableGrid} onIsCheckedChange={handlers.grid}>
           <Grid3X3 />
           Grid
         </DropdownMenuSwitchItem>
-        <DropdownMenuSwitchItem isChecked={enableAxes} onIsCheckedChange={handleAxesHelperToggle}>
+        <DropdownMenuSwitchItem isChecked={enableAxes} onIsCheckedChange={handlers.axes}>
           <Axis3D />
           Axes
         </DropdownMenuSwitchItem>
@@ -332,7 +326,7 @@ export function ViewerSettings({
             <DropdownMenuToggleGroupItem
               value={upDirection}
               options={upDirectionOptions}
-              onValueChange={handleUpDirectionChange}
+              onValueChange={handlers.upDirection}
             >
               <ArrowUp />
               Up Direction

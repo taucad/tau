@@ -1,7 +1,8 @@
 /* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { workbenchRecords } from '@taucad/workbench';
-import type { ViewFieldPath, WorkbenchView } from '@taucad/workbench';
+import type { ViewFieldPath, ViewFieldValues, WorkbenchView } from '@taucad/workbench';
+import type { ViewerViewFieldPath, ViewerViewFieldValues } from '@taucad/viewer/cad/viewer-view-fields';
 import type { PersonalViewDefaults } from '@taucad/preferences';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import { editViewFile } from '#workbench-records/view-actions.js';
@@ -168,5 +169,13 @@ describe('view field commands', () => {
     conflictNext = true;
     expect(await commands.setViewField(view, 'display.lines', false)).toBe(true);
     expect(record().display.lines).toBe(false);
+  });
+});
+
+describe("the viewer bar's leaf vocabulary", () => {
+  it('names the same leaves as the workbench record (BD12)', () => {
+    expectTypeOf<ViewerViewFieldPath>().toEqualTypeOf<ViewFieldPath>();
+    expectTypeOf<Omit<ViewerViewFieldValues, 'grid.unit'>>().toEqualTypeOf<Omit<ViewFieldValues, 'grid.unit'>>();
+    expectTypeOf<ViewFieldValues['grid.unit']>().toExtend<ViewerViewFieldValues['grid.unit']>();
   });
 });

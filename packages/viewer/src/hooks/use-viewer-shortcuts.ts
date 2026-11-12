@@ -1,4 +1,6 @@
 import { useId, useLayoutEffect, useMemo, useRef } from 'react';
+import { useViewerViewFields } from '#cad/viewer-view-fields.jsx';
+import type { ViewerViewFields } from '#cad/viewer-view-fields.jsx';
 import type { RefObject } from 'react';
 import { useActorRef } from '@xstate/react';
 import { createCallbackLogic } from 'xstate';
@@ -87,6 +89,30 @@ function selectShortcutApplies(graphicsRef: GraphicsActorRef, press: ViewerShort
   return graphicsRef.getSnapshot().can(press);
 }
 
+/** G or P with the host's view commands: the same decision graphics makes, issued as the view's command. */
+function setViewField({
+  viewFields,
+  graphicsRef,
+  shortcut,
+  announce,
+}: Readonly<{
+  viewFields: ViewerViewFields;
+  graphicsRef: GraphicsActorRef;
+  shortcut: 'grid' | 'projection';
+  announce: (phrase: string) => void;
+}>): void {
+  if (shortcut === 'grid') {
+    const isShown = !graphicsRef.getSnapshot().context.enableGrid;
+    viewFields.set('display.grid', isShown);
+    announce(outcomePhrases[isShown ? 'gridShown' : 'gridHidden']);
+    return;
+  }
+  const camera = selectShortcutCamera(graphicsRef);
+  const isOrthographic = camera.requestedVerticalFieldOfView === 0;
+  viewFields.set('fieldOfView', isOrthographic ? camera.lastPerspectiveVerticalFieldOfView : 0);
+  announce(outcomePhrases[isOrthographic ? 'perspective' : 'orthographic']);
+}
+
 /** What the keyboard adapter takes: one press for the graphics actor the bar shows. */
 type KeyboardAdapterEvent = Readonly<{ type: 'pressed'; graphicsRef: GraphicsActorRef; facts: ViewerShortcutFacts }>;
 
@@ -157,6 +183,7 @@ export const useViewerShortcuts = (
   announce: (phrase: string) => void,
 ): ViewerShortcutKeys => {
   const graphicsRef = useGraphics();
+  const viewFields = useViewerViewFields();
   const announceRef = useRef(announce);
   useLayoutEffect(() => {
     announceRef.current = announce;
@@ -183,6 +210,11 @@ export const useViewerShortcuts = (
     };
     const binding = (shortcut: ViewerShortcut): Readonly<{ press: () => void; options: KeybindingOptions }> => ({
       press: () => {
+        if (viewFields && (shortcut === 'grid' || shortcut === 'projection')) {
+          // G and P set their leaf in the view through the host's command; the record reaches graphics from there.
+          setViewField({ viewFields, graphicsRef, shortcut, announce: announceRef.current });
+          return;
+        }
         adapterRef.send({ type: 'pressed', graphicsRef, facts: factsFor(shortcut) });
       },
       options: {
@@ -201,7 +233,7 @@ export const useViewerShortcuts = (
       escape: binding('escape'),
       removeCut: binding('removeCut'),
     };
-  }, [adapterRef, barRef, graphicsRef]);
+  }, [adapterRef, barRef, graphicsRef, viewFields]);
 
   const { formattedKeyCombination: fitView } = useKeybinding(
     fitViewKey,

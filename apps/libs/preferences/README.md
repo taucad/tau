@@ -13,7 +13,7 @@ The record has four sections, each stored under its own key as a `StoredSection`
 
 `readSection` reads a stored section as its value, as empty, or as `newer` (written by a later build: never parsed, never overwritten). `prepareSectionWrite` reads, merges and serialises in one synchronous step, so a write merges into what is stored rather than into a stale copy. Storage itself belongs to the app (`apps/ui/app/preferences`).
 
-`suggestedPreset` and `suggestedGizmo` give the mouse preset and gizmo style a tool answer suggests (the onboarding blueprint's Finding 7). Suggestions are never stored: `effectivePreset` and `effectiveGizmoStyle` apply them while the person has chosen nothing.
+`suggestedPreset` and `suggestedGizmo` give the mouse preset and gizmo style a tool answer suggests (the onboarding blueprint's Finding 7). Suggestions are never stored: `effectivePreset` and `effectiveGizmoStyle` apply them while the person has chosen nothing. `toolSuggestions[tool].names` lists the products copy may give as the reason, only those whose vendor documents the matching orbit, pan and zoom (camera research R13): the NX or Creo answer names Creo alone, and the KiCad and slicer answers name none.
 
 `firstSignInMerge` is the account-sync merge for a device that has never synced. Launch has no caller.
 

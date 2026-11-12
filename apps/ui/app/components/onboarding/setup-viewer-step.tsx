@@ -88,7 +88,7 @@ export function BindingLegend({ mapping }: { readonly mapping: CameraMappingId }
 }
 
 /**
- * Step 3 (Finding 2, S4): the mouse preset and gizmo, preselected from the tool answer, the trackpad switch, the
+ * Step 3: the mouse preset and gizmo, preselected from the tool answer, the trackpad switch, the
  * binding legend and the preview. Choosing a preset stores `viewer.controls.preset`, a style `viewer.gizmo.style`,
  * None `viewDefaults['display.gizmo'] = false`, and the switch the device's `inputDevice`.
  *
@@ -109,7 +109,7 @@ export function SetupViewerStep({
   const gizmo = gizmoChoice(viewer, profile);
   const isTrackpad = device.inputDevice === 'trackpad';
   const mapping = resolveCameraMapping({ preset, inputDevice: device.inputDevice });
-  /* The preview moves as every open viewer will: the same resolution the project viewer uses (T4.9). */
+  /* The preview moves as every open viewer will: the same resolution the project viewer uses. */
   const navigation = resolveViewerCameraInput({ enabled: true, profile, viewer, device });
   return (
     <div className='grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]'>

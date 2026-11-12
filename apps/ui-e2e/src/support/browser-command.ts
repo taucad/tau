@@ -1234,7 +1234,7 @@ export type PostHogCapturedEvent = Readonly<{ event: string; properties: Readonl
 
 /**
  * The captured events named in `names`, in capture order, each with its decoded `properties`. A spec uses it to
- * assert an event's exact properties (onboarding M1), where the summary only says whether a string appeared.
+ * assert an event's exact properties, where the summary only says whether a string appeared.
  */
 export const uiReadPostHogEvents: BrowserCommand<[names: readonly string[]], readonly PostHogCapturedEvent[]> = (
   commandContext,

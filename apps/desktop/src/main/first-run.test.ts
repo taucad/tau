@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { isFirstRun } from '#main/first-run.js';
 
-describe('isFirstRun (DT1)', () => {
+describe('isFirstRun', () => {
   let directory: string;
   let windowStatePath: string;
 

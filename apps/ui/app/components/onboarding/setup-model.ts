@@ -1,5 +1,5 @@
 /**
- * Pure derivations behind setup (onboarding blueprint, Finding 2): which steps it has, the exclusivity rules of its
+ * Pure derivations behind setup: which steps it has, the exclusivity rules of its
  * answers, the rows of "What your answers change" and the key caps of the binding legend. Nothing here reads storage
  * or the host; the components pass in what they read.
  */
@@ -39,7 +39,7 @@ import type { GizmoChoiceId, SetupStepId } from '#components/onboarding/setup-co
 
 /**
  * The steps setup shows. Step 3 needs `viewerControls`: while it is off a viewer choice changes nothing, so the step
- * is left out (Finding 2, P2).
+ * is left out.
  *
  * @param isViewerControlsEnabled - The `viewerControls` flag.
  * @returns The steps, in order.
@@ -100,7 +100,7 @@ export type KernelLanguages = Readonly<{
 }>;
 
 /**
- * The host line for the chosen languages, or nothing when each has a kernel on this host (Finding 2). The second
+ * The host line for the chosen languages, or nothing when each has a kernel on this host. The second
  * sentence appears only in the browser and only when the desktop app has a kernel for every missing language.
  *
  * @param languages - The chosen languages.
@@ -181,7 +181,7 @@ export const viewerSummary = (viewer: ViewerPreferences, profile: PersonProfile,
 };
 
 /**
- * The rows of "What your answers change" (Finding 2).
+ * The rows of "What your answers change".
  *
  * @param input - The record and the host facts.
  * @returns The rows, in order.

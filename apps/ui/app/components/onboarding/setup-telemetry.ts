@@ -1,5 +1,5 @@
 /**
- * Setup's analytics (onboarding blueprint, Finding 12, M1 and M2): its events through T0.3's emitters, and the person
+ * Setup's analytics: its events through the shared onboarding emitters, and the person
  * properties it sets with `$set` when they change. Everything goes through `useAnalytics().capture`, so web consent
  * and the desktop opt-out apply. No property carries free text: goals and tool are closed ids.
  */

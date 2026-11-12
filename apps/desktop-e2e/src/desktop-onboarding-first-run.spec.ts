@@ -10,7 +10,7 @@ import { composerOf, expectNoDesktopAnalytics, expectVisible } from '#support/sc
 type Page = DesktopSession['page'];
 
 /*
- * The desktop first run (onboarding plan T6.6, DT1 and E1 on desktop). With all three onboarding flags on, a fresh
+ * The desktop first run. With all three onboarding flags on, a fresh
  * profile (no `window-state.json`, an empty project list, nothing in the launch) opens setup with no account. It does
  * not open when the window-state file exists, even if it does not parse; when the list has a project; on the next
  * launch; or with `onboardingAutoOpen` off. A launch that carries a `tau://` link or a file is covered by
@@ -48,7 +48,7 @@ const expectHomeStays = async (page: Page): Promise<void> => {
   expect(await setupHeading(page).count()).toBe(0);
 };
 
-test('opens setup on a first run with no account, and not on the next launch (DT1, E1)', async () => {
+test('opens setup on a first run with no account, and not on the next launch', async () => {
   const profileRoot = await newProfile();
   session = await launchDesktopApp({ token: 'unused', flagState: 'all-on', profileRoot, preserveProfile: true });
   const { page } = session;
@@ -56,7 +56,7 @@ test('opens setup on a first run with no account, and not on the next launch (DT
     timeout: 120_000,
   });
   await expectVisible(setupHeading(page), 60_000);
-  // Step 4 and Finish differ on desktop (DT2).
+  // Step 4 and Finish differ on desktop.
   const continueButton = page.getByRole('button', { name: 'Continue', exact: true });
   await continueButton.click();
   await continueButton.click();
@@ -71,14 +71,14 @@ test('opens setup on a first run with no account, and not on the next launch (DT
   await expectHomeStays(session.page);
 });
 
-test('does not open when the window-state file exists, even if it does not parse (DT1)', async () => {
+test('does not open when the window-state file exists, even if it does not parse', async () => {
   const profileRoot = await newProfile();
   await writeFile(join(profileRoot, 'window-state.json'), '{ not json');
   session = await launchDesktopApp({ token: 'unused', flagState: 'all-on', profileRoot, preserveProfile: true });
   await expectHomeStays(session.page);
 });
 
-test('does not open when the project list has a project (DT1)', async () => {
+test('does not open when the project list has a project', async () => {
   const profileRoot = await newProfile();
   const project = join(profileRoot, 'home/first-run-project');
   await mkdir(project, { recursive: true });
@@ -97,7 +97,7 @@ test('does not open when the project list has a project (DT1)', async () => {
   await expectHomeStays(session.page);
 });
 
-test('does not open with onboardingAutoOpen off, and the invite opens it (FL4)', async () => {
+test('does not open with onboardingAutoOpen off, and the invite opens it', async () => {
   const profileRoot = await newProfile();
   session = await launchDesktopApp({
     token: 'unused',

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isDesktopFirstRun } from '#components/onboarding/desktop-first-run.js';
 
-describe('isDesktopFirstRun (DT1)', () => {
+describe('isDesktopFirstRun', () => {
   it('is the first run when main says so and the workspace has no project', () => {
     expect(isDesktopFirstRun({ isFirstLaunch: true, isLoading: false, projectCount: 0 })).toBe(true);
   });

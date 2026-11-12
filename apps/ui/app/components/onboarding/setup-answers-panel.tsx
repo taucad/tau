@@ -7,7 +7,7 @@ import type { AnswerRow } from '#components/onboarding/setup-model.js';
 const rowIcons = { agent: Bot, viewer: Mouse, home: House } as const;
 
 /**
- * "What your answers change" (Finding 2, P2): each row says what an answer moves, as the person answers. Only the
+ * "What your answers change": each row says what an answer moves, as the person answers. Only the
  * rows an answer changed are announced, so a screen-reader user hears one line per answer, not the whole list.
  *
  * @param properties - The rows and the announcement for the last answer.

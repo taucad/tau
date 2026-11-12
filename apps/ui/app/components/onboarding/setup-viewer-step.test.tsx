@@ -28,7 +28,7 @@ const renderViewerStep = (): void => {
 
 const mouseControls = (): HTMLElement => screen.getByRole('group', { name: 'Mouse controls' });
 
-describe('setup step 3 (S4)', () => {
+describe('setup step 3', () => {
   beforeEach(() => {
     globalThis.localStorage.clear();
     capture.mockReset();
@@ -92,7 +92,7 @@ describe('setup step 3 (S4)', () => {
   });
 });
 
-describe('setup preview fallback (S5 f)', () => {
+describe('setup preview fallback', () => {
   beforeEach(() => {
     capture.mockReset();
   });

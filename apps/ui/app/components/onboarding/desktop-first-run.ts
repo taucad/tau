@@ -12,7 +12,7 @@ export type DesktopFirstRunInput = Readonly<{
 }>;
 
 /**
- * DT1: the first launch after install, with nothing to open and no project yet, trashed ones included.
+ * The first launch after install, with nothing to open and no project yet, trashed ones included.
  *
  * @param input - Main's verdict and the project listing.
  * @returns Whether setup opens before home.
@@ -21,7 +21,7 @@ export const isDesktopFirstRun = ({ isFirstLaunch, isLoading, projectCount }: De
   isFirstLaunch && !isLoading && projectCount === 0;
 
 /**
- * Whether this desktop launch is the first run (DT1), read from the bridge and the project listing.
+ * Whether this desktop launch is the first run, read from the bridge and the project listing.
  *
  * @returns Whether setup opens before home.
  */

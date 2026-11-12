@@ -79,7 +79,7 @@ const renderAt = (path: string, element = <Home />): ReturnType<typeof createMem
 
 const newAccount = (): { user: { createdAt: Date } } => ({ user: { createdAt: new Date(Date.now() - 60_000) } });
 
-describe('useSetupOffer (E1)', () => {
+describe('useSetupOffer', () => {
   beforeEach(() => {
     globalThis.localStorage.clear();
     flags.onboarding = true;
@@ -156,7 +156,7 @@ describe('useSetupOffer (E1)', () => {
   });
 });
 
-describe('SetupInvite (E2)', () => {
+describe('SetupInvite', () => {
   beforeEach(() => {
     globalThis.localStorage.clear();
     flags.onboarding = true;

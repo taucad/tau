@@ -129,8 +129,8 @@ export type DesktopBootstrap = {
   /** Capability advertisement used by the shared renderer's product catalog. */
   readonly runtimeKernelIds: readonly string[];
   /**
-   * The install's first run: no window-state file at startup and no `tau://` link or file in the launch (onboarding
-   * DT1). Only the first window of that launch carries it.
+   * The install's first run: no window-state file at startup and no `tau://` link or file in the launch. Only
+   * the setup offer reads it, and only the first window of that launch carries it.
    */
   readonly firstRun: boolean;
 };

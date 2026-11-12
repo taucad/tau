@@ -14,7 +14,7 @@ import type { Handle } from '#types/matches.types.js';
 
 /*
  * No server `loader`, `action` or `headers`: the desktop route manifest drops any module with one, and setup runs
- * there too (Finding 10).
+ * there too.
  */
 
 export const meta: MetaFunction = () => [{ title: `${setupChromeCopy.pageTitle} · ${metaConfig.name}` }];
@@ -64,7 +64,7 @@ const useOpenFolder = (): (() => Promise<void>) | undefined => {
 const isSetupStepId = (value: string | undefined): value is SetupStepId =>
   value !== undefined && (setupStepIds as readonly string[]).includes(value);
 
-/** Setup (onboarding blueprint, Finding 2), behind `onboarding`. With the flag off the route sends the person home. */
+/** Setup, behind `onboarding`. With the flag off the route sends the person home. */
 export default function WelcomeRoute(): React.JSX.Element {
   const isHydrated = useIsHydrated();
   const isOnboardingEnabled = useFeature('onboarding');

@@ -1,6 +1,5 @@
 /**
- * Setup copy, as data (onboarding blueprint, Finding 2 and Finding 9; ported from the canvas `model.ts`, `flow.tsx`,
- * `messaging.tsx` and `picker.tsx`). Every string setup shows lives here, so an audit (AU1) reads one module and a
+ * Setup copy, as data. Every string setup shows lives here, so an audit reads one module and a
  * later translation replaces one module. Nothing is built by concatenating fragments of a sentence.
  */
 import type { GizmoStyleId, GoalId, LanguageId, MousePresetId, ToolId } from '@taucad/preferences';
@@ -151,7 +150,7 @@ export const languageShortName: Readonly<Record<Exclude<LanguageId, 'none'>, str
 };
 
 /**
- * The host line: a chosen language with no kernel on this host (Finding 2). It states availability only.
+ * The host line: a chosen language with no kernel on this host. It states availability only.
  *
  * @param languages - The short names of the missing languages.
  * @param isDesktopAvailable - Whether the desktop app has a kernel for each of them.
@@ -174,8 +173,8 @@ export const hostLineText = (languages: readonly string[], isDesktopAvailable: b
 export const viewerRowText = (preset: string, gizmo: string): string => `${preset}, ${gizmo} gizmo`;
 
 /**
- * The Home row: the first suggestion home starts from. Each goal's first example (canvas `model.ts`); with none, the
- * general one. WP8 replaces this table with home's own suggestions.
+ * The Home row: the first suggestion home starts from. Each goal's first example; with none, the
+ * general one. Home's own suggestions replace this table once they exist.
  */
 export const homeRowExample: Readonly<Record<Exclude<GoalId, 'exploring'>, string>> & { general: string } = {
   printing: 'A wall hook that holds 5 kg and prints without supports',
@@ -215,8 +214,8 @@ const nameList = (names: readonly string[], conjunction: 'and' | 'or'): string =
   names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} ${conjunction} ${names.at(-1) ?? ''}`;
 
 /**
- * A preset's "Familiar from …" line, from the products the camera research documents for it
- * (`familiarProducts` in `@taucad/preferences`), or nothing when it documents none.
+ * A preset's "Familiar from …" line, from the products `familiarProducts` in `@taucad/preferences`
+ * lists for it, or nothing when it lists none.
  *
  * @param names - The products.
  * @returns The line, or `undefined`.
@@ -256,8 +255,8 @@ export const viewerStepCopy = {
 } as const;
 
 /**
- * Why a preset is preselected (Finding 2, Q27): a product is named only when the camera research documents it, so
- * the line names the tool answer's documented products (`toolSuggestions[tool].names`), never the answer itself.
+ * Why a preset is preselected: a product is named only when `@taucad/preferences` lists it
+ * for that preset, so the line names the tool answer's listed products (`toolSuggestions[tool].names`), never the answer itself.
  *
  * @param input - Whether there is a tool answer, the products it may name, and whether the suggestion is Tau's own
  *   default.
@@ -296,7 +295,7 @@ export const keyCapCopy = {
   pinch: 'Pinch',
 } as const;
 
-/** Step 4's cards (Finding 9). The three headline sentences are the marketing site's copy. */
+/** Step 4's cards. The three headline sentences are the marketing site's copy. */
 export const howTauWorksCopy = {
   design: {
     step: 'Design',
@@ -396,7 +395,7 @@ export const summaryMakesText = (goals: string): string => `You make: ${goals}`;
  */
 export const summaryViewerText = (viewer: string): string => `Viewer: ${viewer}`;
 
-/** The entries that open setup (E2, E3). */
+/** The entries that open setup. */
 export const setupEntryCopy = {
   setUpTau: 'Set up Tau',
   howTauWorks: 'How Tau works',

@@ -8,16 +8,16 @@ import { flagTest, runsInFlagStates } from '#support/flag-state-test.js';
 /* eslint-disable @typescript-eslint/naming-convention -- event and person properties are analytics wire names. */
 
 /*
- * Setup over the whole flow (onboarding plan T6.8): in each flag state the run is in, setup is reachable exactly where
+ * Setup over the whole flow: in each flag state the run is in, setup is reachable exactly where
  * it should be; with consent accepted every setup event and person property reaches analytics with exactly its listed
- * properties (M1, M2); with consent declined none does; and axe reports no violation on any step of `/welcome`
- * (QA1). Run it under each `ui-e2e:test:e2e` configuration.
+ * properties; with consent declined none does; and axe reports no violation on any step of `/welcome`.
+ * Run it under each `ui-e2e:test:e2e` configuration.
  */
 
 const consentCookieName = 'tau-cookie-consent';
 const composer = '[aria-label="Ask Tau to build anything..."]';
 
-/** The onboarding and viewer events setup sends (Finding 12). */
+/** The onboarding and viewer events setup sends. */
 const setupEvents = [
   'onboarding_setup_opened',
   'onboarding_step_completed',
@@ -130,7 +130,7 @@ describe.runIf(runsInFlagStates(['all-off', 'viewer-controls']))('setup with onb
 });
 
 describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setup with onboarding on', () => {
-  flagTest('captures every setup event and person property with exactly its properties (M1, M2)', async () => {
+  flagTest('captures every setup event and person property with exactly its properties', async () => {
     await target.installPostHogFixture('phc_test_key');
     await openHome();
     await decide('accepted');
@@ -203,7 +203,7 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setu
     expect(await setupStatuses()).toStrictEqual(['offered', 'skipped']);
   });
 
-  flagTest('sends nothing to analytics with consent declined (M1)', async () => {
+  flagTest('sends nothing to analytics with consent declined', async () => {
     await target.installPostHogFixture('phc_test_key');
     await openHome();
     await decide('declined');
@@ -217,7 +217,7 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setu
     expect(summary.requests).toStrictEqual([]);
   });
 
-  flagTest('reaches "How Tau works" from Help at step 4 (E3)', async () => {
+  flagTest('reaches "How Tau works" from Help at step 4', async () => {
     await openHome();
     await target.click(selectors.getByRole('button', { name: 'Help', exact: true }));
     await target.click(selectors.getByRole('menuitem', { name: 'How Tau works' }));
@@ -225,7 +225,7 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setu
     await target.expectVisible(stepHeading('Design, verify, build'), 30_000);
   });
 
-  flagTest('meets axe with no violation on every step of /welcome (QA1)', async () => {
+  flagTest('meets axe with no violation on every step of /welcome', async () => {
     await target.setViewport({ width: 1280, height: 800 });
     await target.navigate('/welcome?entry=help');
     await target.expectVisible(stepHeading('What do you want to make?'), 60_000);
@@ -256,7 +256,7 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setu
   });
 });
 
-describe.runIf(runsInFlagStates(['all-on']))('setup auto-open with onboardingAutoOpen on (E1)', () => {
+describe.runIf(runsInFlagStates(['all-on']))('setup auto-open with onboardingAutoOpen on', () => {
   flagTest('opens by itself once for a new account reaching home', async () => {
     await target.authenticateTauTestUser({
       email: `onboarding-setup-${globalThis.crypto.randomUUID()}@e2e.tau`,
@@ -277,7 +277,7 @@ describe.runIf(runsInFlagStates(['all-on']))('setup auto-open with onboardingAut
   });
 });
 
-describe.runIf(runsInFlagStates(['viewer-controls-onboarding']))('setup with onboardingAutoOpen off (FL4)', () => {
+describe.runIf(runsInFlagStates(['viewer-controls-onboarding']))('setup with onboardingAutoOpen off', () => {
   flagTest('does not open by itself; the invite on home opens it', async () => {
     await target.authenticateTauTestUser({
       email: `onboarding-invite-${globalThis.crypto.randomUUID()}@e2e.tau`,

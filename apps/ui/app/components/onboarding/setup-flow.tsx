@@ -97,7 +97,7 @@ export type SetupFlowProps = Readonly<{
 }>;
 
 /**
- * Setup at `/welcome` (Finding 2): three questions and one explainer, each optional, each showing what its answer
+ * Setup at `/welcome`: three questions and one explainer, each optional, each showing what its answer
  * changes, with Skip one press away. Every answer is written to the device record when it is given, so setup is an
  * editor for the record: opened again, it shows what is stored.
  *

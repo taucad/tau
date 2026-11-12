@@ -28,7 +28,7 @@ const events = (name: string): unknown[] =>
     .filter(([event]) => event === name)
     .map(([, properties]) => properties);
 
-describe('setup telemetry (M1, M2)', () => {
+describe('setup telemetry', () => {
   beforeEach(() => {
     globalThis.localStorage.clear();
     capture.mockReset();
@@ -89,7 +89,7 @@ describe('setup telemetry (M1, M2)', () => {
     expect(events('onboarding_setup_skipped')).toEqual([{ at_step: 'background' }]);
   });
 
-  it('sets goals, tool and setup status as person properties when they change (M2)', async () => {
+  it('sets goals, tool and setup status as person properties when they change', async () => {
     const user = userEvent.setup();
     renderSetup('/welcome?entry=help');
     await user.click(screen.getByRole('checkbox', { name: /Electronics/ }));

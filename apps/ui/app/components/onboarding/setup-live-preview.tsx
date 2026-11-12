@@ -1,5 +1,5 @@
 /**
- * Step 3's live preview (onboarding blueprint, S5): the viewer with a bundled sample model, loaded as its own chunk
+ * Step 3's live preview: the viewer with a bundled sample model, loaded as its own chunk
  * when step 3 opens so steps 1 and 2 never download three.js. It starts no kernel worker and reads no project: the
  * model is a 10 × 20 × 30 mm box (`setup-preview-sample.glb`, the `geospec-c2-box` e2e fixture) inlined in this
  * chunk, so the preview works offline. The camera input and gizmo are props, so a changed answer applies without

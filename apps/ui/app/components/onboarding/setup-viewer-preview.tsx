@@ -64,10 +64,10 @@ function PreviewPlaceholder(): React.JSX.Element {
 }
 
 /**
- * The preview area of step 3, at its final size so nothing shifts (S5). With WebGL it loads the live preview as its
+ * The preview area of step 3, at its final size so nothing shifts. With WebGL it loads the live preview as its
  * own chunk, showing a placeholder until it renders. Without WebGL, when the context is lost, or when the chunk does
- * not load, it shows the animated diagram for the current choice and reports the reason (S5 f). Leaving step 3
- * unmounts the viewer, which releases its WebGL context (S5 g).
+ * not load, it shows the animated diagram for the current choice and reports the reason. Leaving step 3
+ * unmounts the viewer, which releases its WebGL context.
  *
  * @param properties - The mapping, camera input and gizmo in effect.
  * @returns The preview area.

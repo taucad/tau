@@ -41,7 +41,7 @@ describe('findSsrFilesWithForbiddenDreiCoreImport', () => {
   });
 });
 
-describe('findWelcomeChunksWithThree (onboarding S5 a)', () => {
+describe('findWelcomeChunksWithThree', () => {
   const manifest = {
     'node_modules/@react-router/dev/dist/config/defaults/entry.client.tsx': {
       file: 'assets/entry.client-a.js',

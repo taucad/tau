@@ -11,7 +11,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ co
 const { default: WelcomeRoute } = await import('#routes/welcome/route.js');
 const { personRecordStores } = await import('#preferences/person-record.store.js');
 
-describe('setup when the device refuses the write (S8)', () => {
+describe('setup when the device refuses the write', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });

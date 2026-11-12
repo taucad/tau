@@ -9,7 +9,7 @@ import { readAccountCreatedAt, shouldOfferSetup } from '#components/onboarding/s
 import { setupEntryParameter } from '#components/onboarding/setup-entry.js';
 
 /**
- * Open setup from home when {@link shouldOfferSetup} says so (Finding 3, E1). It decides again whenever the location
+ * Open setup from home when {@link shouldOfferSetup} says so. It decides again whenever the location
  * or the session changes, so it sees the address after home removed its `?app` marker and a session that arrives
  * after the page. Before navigating it stores `setup.status = 'offered'`, so a reload or a second tab does nothing.
  * The decision reads the loaded session and the device only; it makes no request.

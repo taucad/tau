@@ -32,7 +32,7 @@ const renderPreview = () =>
     />,
   );
 
-describe('setup step 3 live preview (S5)', () => {
+describe('setup step 3 live preview', () => {
   beforeEach(() => {
     capture.mockReset();
     shown.props = [];

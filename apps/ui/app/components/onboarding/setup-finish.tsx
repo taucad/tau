@@ -23,7 +23,7 @@ export type SetupFinishProps = Readonly<{
 }>;
 
 /**
- * The screen after Finish (S7): a summary of three lines (two, and no Settings → Viewer link, while `viewerControls`
+ * The screen after Finish: a summary of three lines (two, and no Settings → Viewer link, while `viewerControls`
  * is off), Start building, and on the desktop Open a folder.
  *
  * @param properties - What to summarise and the leaving actions.

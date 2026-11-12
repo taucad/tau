@@ -7,9 +7,9 @@ import type { DesktopSession } from '#support/desktop-app.js';
 import { expectNoDesktopAnalytics, expectVisible } from '#support/scenario.js';
 
 /*
- * DT3: with the network off, setup runs to the end on desktop, its live preview included, and nothing is requested
+ * With the network off, setup runs to the end on desktop, its live preview included, and nothing is requested
  * from a remote origin. The renderer's own `app://tau` pages and assets are served by main and stay reachable; the
- * tour (PR 8) adds its own steps to this spec when it lands.
+ * tour adds its own steps to this spec when it lands.
  */
 
 let session: DesktopSession | undefined;
@@ -38,7 +38,7 @@ const isLocalRequest = (url: URL, pageOrigin: string): boolean =>
   url.protocol === 'devtools:' ||
   url.origin === pageOrigin;
 
-test('runs setup to the end, preview included, with the network off and no remote request (DT3)', async () => {
+test('runs setup to the end, preview included, with the network off and no remote request', async () => {
   profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-offline-setup-'));
   session = await launchDesktopApp({ token: 'unused', flagState: 'all-on', profileRoot, preserveProfile: true });
   const { application, page } = session;

@@ -1,6 +1,6 @@
 /**
  * Fails the target when SSR output exceeds byte budgets, and when the chunks setup's first two steps load hold
- * three.js (onboarding S5 a; run on the client build with `--client`).
+ * three.js (run on the client build with `--client`).
  *
  * Ratchet: lower `ssrBundleByteBudget` / `ssrIndexFileByteBudget` as the bundle
  * shrinks (see docs/research/ssr-bundle-audit.md).
@@ -95,7 +95,7 @@ export const staticChunkFiles = (
 };
 
 /**
- * S5 (a): the chunks setup's steps 1 and 2 load that hold three.js. The live preview of step 3 is a dynamic import,
+ * The chunks setup's steps 1 and 2 load that hold three.js. The live preview of step 3 is a dynamic import,
  * so it and the viewer stay out of this set.
  *
  * @param manifest - The client build manifest.
@@ -120,7 +120,7 @@ const checkWelcomeChunks = (): void => {
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, ClientManifestChunk>;
   const offenders = findWelcomeChunksWithThree(manifest, (file) => readFileSync(join(clientDirectory, file), 'utf8'));
   if (offenders.length > 0) {
-    console.error('Setup steps 1 and 2 load chunks that hold three.js (S5 a); move the import behind step 3:');
+    console.error('Setup steps 1 and 2 load chunks that hold three.js; move the import behind step 3:');
     for (const file of offenders) {
       console.error(`- ${file}`);
     }

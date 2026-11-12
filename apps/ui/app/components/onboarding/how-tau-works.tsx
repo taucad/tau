@@ -50,7 +50,7 @@ function ConceptCard({
 }
 
 /**
- * Design, Verify, Build (Finding 9): the three things a person does in Tau, in order, then the kernel card, the
+ * Design, Verify, Build: the three things a person does in Tau, in order, then the kernel card, the
  * warehouse card (with `partsWarehouse`) and, on the desktop, "Runs on your machine". Step 4 of setup and Help →
  * "How Tau works" show the same cards.
  *

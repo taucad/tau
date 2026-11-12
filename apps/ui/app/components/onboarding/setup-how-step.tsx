@@ -17,7 +17,7 @@ export type SetupHowStepProps = Readonly<{
 }>;
 
 /**
- * Step 4: Design, Verify, Build and the tour switch (Finding 2, S6). Finish stores the switch in `tour.wanted`. Once
+ * Step 4: Design, Verify, Build and the tour switch. Finish stores the switch in `tour.wanted`. Once
  * the tour has ended the switch is replaced by "You have taken the tour" and "Take it again".
  *
  * @param properties - The profile, the host facts and the tour switch.

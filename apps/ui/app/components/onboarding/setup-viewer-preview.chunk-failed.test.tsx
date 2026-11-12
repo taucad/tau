@@ -11,7 +11,7 @@ vi.mock('#components/onboarding/setup-live-preview.js', () => {
 
 const { SetupViewerPreview } = await import('#components/onboarding/setup-viewer-preview.js');
 
-describe('setup step 3 when the preview chunk does not load (S5 f)', () => {
+describe('setup step 3 when the preview chunk does not load', () => {
   it('shows the diagram with Try again and reports chunk_failed', async () => {
     render(<SetupViewerPreview mapping='alt' cameraInput={{ preset: 'alt' }} gizmoStyle='cube' isGizmoShown />);
     const fallback = await screen.findByTestId('setup-preview-fallback');

@@ -5,10 +5,10 @@ import * as target from '#support/external-target.js';
 import { flagTest, runsInFlagStates } from '#support/flag-state-test.js';
 
 /*
- * Step 3's live preview (onboarding plan T6.4, row S5). (a) Steps 1 and 2 download no chunk holding three.js; step 3
+ * Step 3's live preview. (a) Steps 1 and 2 download no chunk holding three.js; step 3
  * does, behind a placeholder of the preview's final size. (b) The preview starts no kernel worker and loads no kernel
  * WebAssembly. (c) Every binding the legend lists moves the preview's camera as the legend says, classified from the
- * camera state the way rows C1 to C7 are. (d) Changing the preset moves no camera. (f) Without WebGL, and with the
+ * camera state as the viewer navigation specs do. (d) Changing the preset moves no camera. (f) Without WebGL, and with the
  * context lost, the diagram shows and setup carries on; under reduced motion it does not animate. (g) Leaving step 3
  * leaves no viewer canvas. The chunk-failure fallback is a component test (`setup-viewer-step.test.tsx`): this
  * harness cannot fail one chunk request. Runs in the flag states where step 3 exists.
@@ -103,7 +103,7 @@ const settleCamera = async (): Promise<void> => {
 const subtract = (left: Vector, right: Vector): Vector => [left[0] - right[0], left[1] - right[1], left[2] - right[2]];
 const length = (vector: Vector): number => Math.hypot(...vector);
 
-/** Which gesture moved the camera between two readings, as rows C1 to C7 classify it. */
+/** Which gesture moved the camera between two readings, classified as the viewer navigation specs do. */
 const classify = (before: CameraReading, after: CameraReading): Gesture | 'none' | 'mixed' => {
   const scale = Math.max(before.controlsDistance, 1e-6);
   const directionBefore = subtract(before.position, before.target);
@@ -220,7 +220,7 @@ const expectPreviewRendered = async (): Promise<void> => {
   await settleCamera();
 };
 
-describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setup step 3 live preview (S5)', () => {
+describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setup step 3 live preview', () => {
   flagTest(
     'loads three.js only on step 3, behind a placeholder of the final size (a), with no kernel (b)',
     async () => {

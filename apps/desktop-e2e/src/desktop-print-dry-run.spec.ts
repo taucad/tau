@@ -176,7 +176,9 @@ const openPrintProject = async (
   const marker = page.getByRole('status', { name: 'Save status' }).last();
   await expect.poll(async () => (await marker.textContent()) ?? '', { timeout: 180_000 }).toMatch(/^Saved/u);
 
-  await page.keyboard.press('Meta+Comma');
+  /* Settings' chord is the platform's mod key (`useKeybinding({ key: ',', modKey: true })`): Ctrl on Linux,
+   * where the nightly runs, and Cmd on macOS. */
+  await page.keyboard.press('ControlOrMeta+Comma');
   const settings = page.getByRole('dialog').first();
   await settings.getByRole('button', { name: 'Machines', exact: true }).click();
   const add = settings.getByRole('button', { name: 'Add simulated X1C' });

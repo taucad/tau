@@ -2,10 +2,12 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import type { Page } from 'playwright';
 import { launchDesktopApp, removeDesktopRoot } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { composerOf, expectNoDesktopAnalytics, expectVisible } from '#support/scenario.js';
+
+/** The renderer page, typed through the launch helper so this spec owns no browser driver (browser ownership). */
+type Page = DesktopSession['page'];
 
 /*
  * The desktop first run (onboarding plan T6.6, DT1 and E1 on desktop). With all three onboarding flags on, a fresh

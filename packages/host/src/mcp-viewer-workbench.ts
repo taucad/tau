@@ -309,10 +309,10 @@ const plan = async (root: string, view: TauViewerViewState, changed: Changed): P
     (found === undefined || changed.settings) && view.settings !== undefined
       ? { section: view.settings.section, measurements: view.settings.measurements }
       : undefined;
-  const fields = found === undefined ? (view.viewFields ?? {}) : changed.fields;
+  /* Every leaf commanded since the last write, across the reports merged while it waited, new view or not. */
   const base: WorkbenchView = withViewFields(
     found?.record ?? workbenchRecords.view.schema.parse({ version: 1, entryPath }),
-    fields,
+    changed.fields,
   );
   const selected = base.selectedKernelView;
   const pose = camera === undefined ? undefined : poseOf(camera);

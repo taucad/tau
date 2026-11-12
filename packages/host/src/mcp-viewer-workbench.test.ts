@@ -404,6 +404,30 @@ describe('createMcpViewerWorkbench', () => {
         viewFieldValuesOf(workbenchRecords.view.schema.parse(await readRecord(root, workbenchPaths.view('front')))),
       ).toEqual({ ...viewRecordV1Defaults, 'display.grid': false, 'grid.unit': 'in' });
     });
+    it('should create a view with every leaf the reports merged while it waited commanded', async () => {
+      const keeper = createMcpViewerWorkbench({ settle: 10 });
+      keeper.report({ root, pageId: 'page-1', view: viewOf({ settings: shownOverTau, viewFields: {} }) });
+      keeper.report({ root, pageId: 'page-2', view: viewOf({ settings: shownOverTau, viewFields: {} }) });
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({ interactedAt: 4, settings: shownOverTau, viewFields: { 'display.grid': false } }),
+      });
+      keeper.report({
+        root,
+        pageId: 'page-2',
+        view: viewOf({ interactedAt: 4, settings: shownOverTau, viewFields: { 'display.axes': false } }),
+      });
+      await keeper.close();
+
+      const views = await readdir(join(root, '.tau/workbench/views'));
+      const record = workbenchRecords.view.schema.parse(await readRecord(root, `.tau/workbench/views/${views[0]}`));
+      expect(viewFieldValuesOf(record)).toEqual({
+        ...viewRecordV1Defaults,
+        'display.grid': false,
+        'display.axes': false,
+      });
+    });
   });
 
   it("should write the camera into the selected kernel view's camera, as the Tau app does", async () => {

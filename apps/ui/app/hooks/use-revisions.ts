@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { RevisionDiffEntry, RevisionLine, RevisionRow } from '@taucad/revisions';
+import type { RevisionDiffEntry, RevisionLine, RevisionRow, StartReading } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
 import type { RevisionWhoContext } from '#lib/revision-actor.js';
@@ -61,6 +61,8 @@ export type RevisionCard = {
   readonly turnCut?: RevisionRow['turnCut'];
   /** The revision this one follows, its first parent by id; absent on a branch's first revision. */
   readonly parent?: string;
+  /** How this entry reads as the Start version, V1, when it is one (A6). */
+  readonly start?: StartReading;
   /**
    * Paths the settling host attested, for a card whose revision is not in this
    * page's graph. Otherwise the diff is asked of the graph on demand.
@@ -189,6 +191,7 @@ const cardOf = (row: RevisionRow, who: RevisionWhoContext): RevisionCard => {
     ...(row.turnCut === undefined ? {} : { turnCut: row.turnCut }),
     ...(row.restoredFrom === undefined ? {} : { restoredFrom: row.restoredFrom }),
     ...(row.parent === undefined ? {} : { parent: row.parent }),
+    ...(row.start === undefined ? {} : { start: row.start }),
   };
 };
 

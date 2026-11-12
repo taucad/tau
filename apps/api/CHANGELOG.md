@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.9.0 (2026-11-11)
+
+### Features
+
+- feat(api-agent-observability): Count Langfuse units and alert at 70% of Hobby's allowance (LW24) (#1806) (f56bc5601)
+- feat(ui): Redesign billing screens, copy and shared components (#1786) (91ffe6243)
+- feat(api-llm-gateway): Carry host, build, kernel and model labels into the provider fact (Langfuse LW17) (#1798) (a5440ce14)
+- feat(revisions): Read and write a turn's base cut as the person's (#1767) (dbabc0025)
+- feat(api): Refuse pushed revisions that do not name the pusher (#1788) (665276e5f)
+- feat(api-agent-observability): Langfuse v5 mapping, one trace and root per run, and trust Langfuse's delete (LW1, LW2) (#1800) (87c6fc46e)
+- feat(api-email): Send each kind of email from its purpose's sender (#1797) (897a2c3b4)
+- feat(camera): Give the camera actor input states, provenance and atomic events (G3) (#1761) (5b14f8f52)
+- feat(agent-host): Keep the request prefix across a chat's settings (#1782) (560c9ffc9)
+
+### Fixes
+
+- fix(api-git-mirror): Cap blob collection and retire the unattended R2 writers (#1802) (0137fe33a)
+- fix(api-billing): Require the output field Together requests carry (#1763) (bcf3929e0)
+- fix(api-billing): Name the expected output field and record refusals before admission (#1792) (2584fb51f)
+- fix(agent-tools): Run the GeoSpec harness test on a valid BRep in the test shards (#1779) (aa1fb2edf)
+- fix(filesystem): Serialize native watcher subscribe and unsubscribe (#1776) (008728315)
+- fix(revisions): give every checkout its fill word, so a new project's viewer leaves "Downloading model files" (#1742) (d8581a532)
+
+### Other changes
+
+- ci(root): Select native hosts and viewer parity in the CI plan, merge queue only (#1773) (0dbd19d92)
+- chore(root): Apply the brand policy to names, one-liners and avatars (#1760) (ca9355b24)
+- refactor(revisions): Make revision identity changes events on the open client (#1707) (20abec4ff)
+- ci(api): Select the Docker smoke test by the API image's own Nx target (#1768) (fc735509b)
+- refactor(ui): Cut the ui-core app library from the app's lib, utils and constants (UI wave E, first slice) (#1686) (ead76cc3d)
+
 ## 0.8.0 (2026-11-10)
 
 ### Features

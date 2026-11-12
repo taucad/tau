@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { clearRendererSpans, onViewerEvent, rendererSpans } from '#lib/renderer-telemetry.js';
 import type { ViewerTelemetryEvent } from '#lib/viewer-events.js';
 import type { GeometryComponentManifest } from '@taucad/types';
+import type { Mechanism } from '@taucad/kinematics';
 import type { GltfPresentationTelemetry } from '#machines/graphics.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
@@ -199,6 +200,70 @@ describe('graphics GLTF presentation projection', () => {
       stopListening();
       actor.stop();
       clearRendererSpans();
+    }
+  });
+});
+
+/*
+ * G11b characterisation: the graphics side of the presentation actor's seams as they run today. Each row names what
+ * the presentation actor keeps, or changes deliberately (charter D14).
+ */
+describe('graphics presentation seams before the presentation actor (G11b characterisation)', () => {
+  const mechanism: Mechanism = {
+    schemaVersion: 1,
+    units: { length: 'm', angle: 'rad' },
+    root: 'base',
+    links: { base: { components: ['component:base'] }, arm: { components: ['component:arm'] } },
+    joints: { hinge: { type: 'revolute', parent: 'base', child: 'arm', origin: [0, 0, 0], axis: [0, 0, 1] } },
+  };
+
+  it('stamps a completed measurement with the pose revision current when it completes', () => {
+    const actor = createGraphicsActor();
+    actor.start();
+    try {
+      const kinematics = actor.getSnapshot().context.kinematicsRef;
+      kinematics.send({ type: 'loadMechanism', unitId: 'unit:a', mechanism });
+      kinematics.send({ type: 'setCoordinate', unitId: 'unit:a', id: 'hinge', value: 0.5 });
+      const { revision } = kinematics.getSnapshot().context;
+      expect(revision).toBeGreaterThan(0);
+
+      actor.send({ type: 'setMeasureActive', payload: true });
+      actor.send({ type: 'startMeasurement', payload: [0, 0, 0] });
+      // The pose moves between the two picks; no event tells graphics, and the measurement still carries it.
+      kinematics.send({ type: 'setCoordinate', unitId: 'unit:a', id: 'hinge', value: 1 });
+      actor.send({ type: 'completeMeasurement', payload: [1, 0, 0] });
+
+      expect(actor.getSnapshot().context.measurements.at(-1)?.poseRevision).toBe(
+        kinematics.getSnapshot().context.revision,
+      );
+      expect(actor.getSnapshot().context.measurements.at(-1)?.poseRevision).toBeGreaterThan(revision);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('names the presented unit only once its commit lands, and forgets it when the artifact clears', () => {
+    const actor = createGraphicsActor();
+    actor.start();
+    try {
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      // Requested but not presented: the view does not yet hold the unit's manifest.
+      expect(actor.getSnapshot().context.modelInteractionUnitId).toBeUndefined();
+
+      actor.send({ type: 'gltfPresentationCommitted', revision: 1, key: 'a', unitId: 'unit:a', manifest });
+      expect(actor.getSnapshot().context.modelInteractionUnitId).toBe('unit:a');
+
+      // A newer request keeps the unit on screen until its own commit.
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'b' });
+      expect(actor.getSnapshot().context.modelInteractionUnitId).toBe('unit:a');
+      actor.send({ type: 'gltfPresentationCommitted', revision: 2, key: 'b', unitId: 'unit:b', manifest });
+      expect(actor.getSnapshot().context.modelInteractionUnitId).toBe('unit:b');
+
+      actor.send({ type: 'clearArtifact' });
+      expect(actor.getSnapshot().context.modelInteractionUnitId).toBeUndefined();
+      expect(actor.getSnapshot().context.artifact).toBeUndefined();
+    } finally {
+      actor.stop();
     }
   });
 });

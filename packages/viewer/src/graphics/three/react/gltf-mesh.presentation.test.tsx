@@ -20,6 +20,8 @@ import * as sectionTopology from '#graphics/three/utils/section-surface-topology
 import { awaitGeometryPresentation } from '#graphics/three/utils/geometry-presentation-admission.js';
 import { clearRendererSpans, markGeometryReceipt, rendererSpans } from '#lib/renderer-telemetry.js';
 import * as gltfEdges from '#graphics/three/materials/gltf-edges.js';
+import * as gltfMatcap from '#graphics/three/materials/gltf-matcap.js';
+import * as surfaceBatches from '#graphics/three/utils/gltf-surface-batches.js';
 import type { GltfPresentationTelemetry } from '#machines/graphics.machine.js';
 import type { GeometryComponentManifest } from '@taucad/types';
 
@@ -1328,6 +1330,77 @@ describe('GltfMesh presentation protocol', () => {
         'gltfPreparationStarted 1:a',
       ]);
       expect(parseAsync).toHaveBeenCalledOnce();
+    });
+  });
+  /*
+   * G11b characterisation, on top of G11.0's rows: the retirement order G11.0 left unlocked, and the work an in-place
+   * update skips, which is what keeps it inside the render that requested it.
+   */
+  describe('replaced presentation retirement (G11b)', () => {
+    it('should dispose the replaced scene only after the replacement is committed and attached', async () => {
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+      const view = render(
+        <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitForCommits(['a']);
+      const disposeA = await spyOnPresentedGeometryDispose(parseAsync);
+      const atDispose: Array<{ commits: string[]; attached: number }> = [];
+      disposeA.mockImplementation(() => {
+        atDispose.push({ commits: committedKeys(), attached: document.querySelectorAll('primitive').length });
+      });
+
+      view.rerender(
+        <GltfMesh
+          gltfFile={buildGlb({ indices: [0, 2, 1] })}
+          geometryHash='b'
+          presentationRevision={2}
+          enableMatcap={false}
+        />,
+      );
+      await waitForCommits(['a', 'b']);
+
+      // A's geometry is freed once, after B's commit reached graphics, with one primitive (B's) attached.
+      expect(atDispose).toEqual([{ commits: ['a', 'b'], attached: 1 }]);
+    });
+  });
+
+  describe('in-place update work (G11b)', () => {
+    it('should expand no edges, rebuild no surface batches and apply no matcap for an in-place update', async () => {
+      const fatLines = vi.spyOn(gltfEdges, 'applyFatLineSegments');
+      const batches = vi.spyOn(surfaceBatches, 'createGltfSurfaceBatches');
+      const matcap = vi.spyOn(gltfMatcap, 'applyMatcap');
+      const view = render(<GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap />);
+      await waitForCommits(['a']);
+      const counts = [fatLines.mock.calls.length, batches.mock.calls.length, matcap.mock.calls.length];
+      expect(counts.every((count) => count > 0)).toBe(true);
+
+      view.rerender(
+        <GltfMesh gltfFile={buildGlb({ lift: 5 })} geometryHash='b' presentationRevision={2} enableMatcap />,
+      );
+      await waitForCommits(['a', 'b']);
+
+      expect([fatLines.mock.calls.length, batches.mock.calls.length, matcap.mock.calls.length]).toEqual(counts);
+    });
+
+    it('should keep the committed scene and its unit until the in-place commit renames the unit', async () => {
+      const view = render(
+        <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitForCommits(['a']);
+      const primitive = view.container.querySelector('primitive');
+
+      view.rerender(
+        <GltfMesh gltfFile={buildGlb({ lift: 5 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
+      );
+      await waitForCommits(['a', 'b']);
+
+      // One scene object across the update: React never detaches it, so nothing is retired.
+      expect(view.container.querySelector('primitive')).toBe(primitive);
+      expect(
+        sentEvents()
+          .filter((event) => event.type === 'gltfPresentationCommitted')
+          .map(({ unitId }) => unitId),
+      ).toEqual(['unit:a', 'unit:b']);
     });
   });
 });

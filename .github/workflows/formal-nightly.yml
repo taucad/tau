@@ -24,10 +24,11 @@ env:
   NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
 jobs:
-  # One job per project with a `formal:nightly` target, each with its own 60-minute budget: a single
-  # serial job ran out of its 60 minutes on every scheduled run of 2026-11-07 to 2026-11-11 (CI
-  # throughput review, Q-4). The per-project durations these jobs record size the queue lane and the
-  # release-gate matrix (RG-1) that follow.
+  # One job per project with a `formal:nightly` target, each with its own budget: a single serial job
+  # ran out of its 60 minutes on every scheduled run of 2026-11-07 to 2026-11-11 (CI throughput review,
+  # Q-4). The first split run (43156977022) finished six projects in 2 to 9 minutes; `agent-host` alone
+  # needs about 90 (its 74 Lean mutants take about 24 s each), so each job has 120. The per-project
+  # durations size the queue lane and the release-gate matrix (RG-1) that follow.
   projects:
     name: List the formal nightly projects
     runs-on: ubuntu-latest
@@ -60,7 +61,7 @@ jobs:
     name: Formal nightly tiers (${{ matrix.project }})
     needs: projects
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     permissions: # Required for nrwl/nx-set-shas (in setup-nx) to read workflow runs
       actions: 'read'
       contents: 'read'

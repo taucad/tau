@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest';
 
 /*
  * The formal nightly runs one job per project with a `formal:nightly` target, each with its own
- * 60-minute budget (CI throughput review, Q-4): one serial job of every project ran out of its 60
- * minutes on each scheduled run of 2026-11-07 to 2026-11-11. The project list comes from Nx, so a new
+ * 120-minute budget (CI throughput review, Q-4): one serial job of every project ran out of its 60
+ * minutes on each scheduled run of 2026-11-07 to 2026-11-11, and `agent-host` alone needs about 90. The project list comes from Nx, so a new
  * owner's target joins the matrix without a workflow edit, and an empty list fails rather than passes.
  */
 
@@ -51,9 +51,9 @@ describe('formal nightly workflow', () => {
     expect(list?.outputs?.['projects']).toBe(`\${{ steps.list.outputs.projects }}`);
   });
 
-  it('should run one job per project, each with its own 60-minute budget', () => {
+  it('should run one job per project, each with its own 120-minute budget', () => {
     expect(shard?.needs).toBe('projects');
-    expect(shard?.['timeout-minutes']).toBe(60);
+    expect(shard?.['timeout-minutes']).toBe(120);
     expect(shard?.strategy?.['fail-fast']).toBe(false);
     expect(shard?.strategy?.matrix?.['project']).toBe(`\${{ fromJSON(needs.projects.outputs.projects) }}`);
   });

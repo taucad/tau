@@ -238,7 +238,8 @@ jobs:
 
       # DC1: a storage deploy must leave tau-api's Machines untouched. Recorded
       # before and compared after: ids, instance ids (a new one per config or image
-      # update) and images; not state, which the proxy changes by autostop.
+      # update) and images; not state, which the proxy changes by autostop. The time
+      # lets the check tell this deploy's effect from an API release made meanwhile.
       - name: Snapshot the API Machines before a storage deploy
         if: inputs.app == 'storage' && steps.superseded.outputs.superseded != 'true'
         env:
@@ -246,6 +247,7 @@ jobs:
           API_APP: ${{ steps.targets.outputs.api_app }}
         run: |
           set -euo pipefail
+          date -u +%Y-%m-%dT%H:%M:%S > "$RUNNER_TEMP/api-machines-before.at"
           flyctl machines list --app "$API_APP" --json \
             | jq -S '[.[] | {id, instance_id, image: .config.image}] | sort_by(.id)' > "$RUNNER_TEMP/api-machines-before.json"
           echo "API Machines before: $(jq length "$RUNNER_TEMP/api-machines-before.json")"
@@ -370,6 +372,14 @@ jobs:
       # DC1 (review FR3): tau-storage is reached only through its Flycast address,
       # so any public address is a failure; and its deploy must not have replaced,
       # restarted or updated a tau-api Machine. Names, ids and counts only.
+      #
+      # Deploy queues are per app, so another push's API deploy (or a secrets change)
+      # can land on tau-api during this deploy: that failed 6 of 36 storage deploys
+      # (CI audit 2026-11-12, F17). The storage token cannot write tau-api, so a change
+      # this deploy could have made would put a non-API image on a tau-api Machine, or
+      # change a Machine with no tau-api release to account for it. A change that a
+      # tau-api release created since the snapshot accounts for, with every Machine on
+      # a tau-api image, passes with a notice naming the release.
       - name: Verify the storage app is private and the API untouched
         if: inputs.app == 'storage' && steps.superseded.outputs.superseded != 'true'
         env:
@@ -391,11 +401,24 @@ jobs:
           [ "$started" -ge 1 ] || { echo "::error::No ${FLY_APP} Machine is started."; exit 1; }
           FLY_API_TOKEN="$FLY_API_READ_TOKEN" flyctl machines list --app "$API_APP" --json \
             | jq -S '[.[] | {id, instance_id, image: .config.image}] | sort_by(.id)' > "$RUNNER_TEMP/api-machines-after.json"
-          if ! diff -u "$RUNNER_TEMP/api-machines-before.json" "$RUNNER_TEMP/api-machines-after.json"; then
-            echo "::error::The ${FLY_APP} deploy changed a ${API_APP} Machine (DC1: a storage deploy leaves tau-api untouched)."
+          if diff -u "$RUNNER_TEMP/api-machines-before.json" "$RUNNER_TEMP/api-machines-after.json"; then
+            echo "API Machines unchanged: $(jq length "$RUNNER_TEMP/api-machines-after.json")"
+            exit 0
+          fi
+          foreign=$(jq -r --arg repo "registry.fly.io/${API_APP}:" \
+            '[.[] | select((.image // "") | startswith($repo) | not) | .id] | join(" ")' "$RUNNER_TEMP/api-machines-after.json")
+          if [ -n "$foreign" ]; then
+            echo "::error::${API_APP} Machine(s) ${foreign} run an image from outside registry.fly.io/${API_APP} after the ${FLY_APP} deploy (DC1: a storage deploy leaves tau-api untouched)."
             exit 1
           fi
-          echo "API Machines unchanged: $(jq length "$RUNNER_TEMP/api-machines-after.json")"
+          since=$(cat "$RUNNER_TEMP/api-machines-before.at")
+          releases=$(FLY_API_TOKEN="$FLY_API_READ_TOKEN" flyctl releases --app "$API_APP" --json \
+            | jq -r --arg since "$since" '[.[] | select((.CreatedAt // "")[0:19] >= $since) | "v\(.Version) (\(.Status))"] | join(", ")')
+          if [ -z "$releases" ]; then
+            echo "::error::The ${FLY_APP} deploy changed a ${API_APP} Machine, and no ${API_APP} release since ${since}Z accounts for it (DC1: a storage deploy leaves tau-api untouched)."
+            exit 1
+          fi
+          echo "::notice::${API_APP} Machines changed during the ${FLY_APP} deploy, by ${API_APP} release(s) ${releases} made since ${since}Z; every Machine still runs a ${API_APP} image."
 
       # The plan of the next push to `main` diffs the app against this commit.
       - name: Record this staging deploy

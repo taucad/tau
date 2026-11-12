@@ -35,11 +35,20 @@ const prompts: ReadonlyArray<readonly [id: string, prompt: string]> = [
   ['cat', 'A chunky stylised sitting cat, about 50 mm tall, with a curled tail, smooth and blobby, one solid body.'],
   ['robot', 'A cute rounded robot toy, about 70 mm tall, with a big head, stubby arms and legs, all one piece.'],
   ['snowman', 'A stylised snowman ornament about 80 mm tall: three blended spheres, a carrot nose and a hat.'],
-  ['dino', 'A chibi dinosaur figure, about 60 mm long, with a big head, small arms and a thick tail, printable as one body.'],
-  ['bunny', 'A soft stylised bunny, about 55 mm tall, with long ears and a round body, blended smoothly into one solid.'],
+  [
+    'dino',
+    'A chibi dinosaur figure, about 60 mm long, with a big head, small arms and a thick tail, printable as one body.',
+  ],
+  [
+    'bunny',
+    'A soft stylised bunny, about 55 mm tall, with long ears and a round body, blended smoothly into one solid.',
+  ],
   ['penguin', 'A round cartoon penguin, about 50 mm tall, with flippers and feet blended into the body.'],
   ['ghost', 'A friendly cartoon ghost keychain charm, about 40 mm tall, with a wavy hem, eye holes and a loop on top.'],
-  ['frog', 'A stylised frog sitting on its haunches, about 45 mm wide, with bulging eyes, smooth organic shape, one body.'],
+  [
+    'frog',
+    'A stylised frog sitting on its haunches, about 45 mm wide, with bulging eyes, smooth organic shape, one body.',
+  ],
   ['astronaut', 'A chibi astronaut figurine about 70 mm tall with a big round helmet and a backpack, all one solid.'],
 ];
 

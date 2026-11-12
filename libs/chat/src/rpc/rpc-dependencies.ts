@@ -37,7 +37,7 @@ import type {
   StatContentMetadata,
 } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime';
-import type { WorkbenchView } from '@taucad/workbench';
+import type { ViewFieldValues, WorkbenchView } from '@taucad/workbench';
 
 /** Local execution metadata that never enters an RPC payload or durable record. @public */
 export type RpcInvocationContext = Readonly<{
@@ -220,9 +220,18 @@ export type RpcRuntimeClient = {
   evaluateModel(input: EvaluateModelRpcInput, context?: RpcInvocationContext): Promise<EvaluateModelRpcResult>;
 };
 
+/** The inheritable view leaves one `arrange_workbench` call named for a view, with the values it wrote. @public */
+export type ViewFieldsSet = Readonly<Partial<ViewFieldValues>>;
+
 /** Connected runtime's model-file predicate for workbench view entry paths. @public */
 export type RpcWorkbenchClient = {
   isModelFile(path: string): Promise<boolean>;
+  /**
+   * Record, on the person's device, that a written view sets these leaves (onboarding blueprint, BD7): a leaf written
+   * at the format value over a personal default is kept as an exception, as the view menu keeps it. Called after the
+   * view record is written. A host with no person (the CLI, MCP) leaves it absent and writes the value alone.
+   */
+  markViewFieldsSet?(viewId: string, fields: ViewFieldsSet): void | Promise<void>;
 };
 
 /** Shared semantic parameter client attached by a host with checked authority. @public */

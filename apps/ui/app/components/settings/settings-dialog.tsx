@@ -22,12 +22,14 @@ import {
   SidebarMenuSubItem,
 } from '#components/ui/sidebar.js';
 import type { SettingId } from '#components/settings/settings-registry.js';
-import { settingsSections, searchSettings } from '#components/settings/settings-registry.js';
+import { searchSettings, useSettingsSections } from '#components/settings/settings-registry.js';
 import { DeferredSettingsContent } from '#components/settings/deferred-settings-content.js';
 
 /** URL-backed settings navigation with a searchable catalogue of individual controls. */
 export function SettingsDialog(): React.JSX.Element {
   const { isOpen, section: activeSection, target, open, close } = useSettingsDialog();
+  // A section behind a flag that is off is absent: its deep link lands on General.
+  const sections = useSettingsSections();
   useKeybinding({ key: ',', modKey: true }, () => {
     open();
   });
@@ -59,7 +61,7 @@ export function SettingsDialog(): React.JSX.Element {
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       {isOpen ? (
         <SettingsSurface
-          activeSection={settingsSections.some(({ id }) => id === activeSection) ? activeSection : 'general'}
+          activeSection={sections.some(({ id }) => id === activeSection) ? activeSection : 'general'}
           openSection={open}
           close={close}
           linkedSetting={target}
@@ -148,9 +150,10 @@ export function SettingsSurface({
   const isReturning = useRef(false);
   const showsList = isMobile && isListShown;
   const showsDetail = !isMobile || !isListShown;
-  const results = useMemo(() => searchSettings(query), [query]);
+  const sections = useSettingsSections();
+  const results = useMemo(() => searchSettings(query, sections), [query, sections]);
   const isSearching = query.trim().length > 0;
-  const active = settingsSections.find((section) => section.id === activeSection)!;
+  const active = sections.find((section) => section.id === activeSection)!;
 
   // A deep link from outside the dialog (`?setting=`) reveals its control like a search result does.
   // Navigating inside the dialog drops the parameter, so a present link is always the latest request.
@@ -411,6 +414,7 @@ function SettingsNavigationItems({
   readonly isMobile: boolean;
   readonly navigate: (section: SettingsSection, id?: string) => void;
 }): React.JSX.Element {
+  const sections = useSettingsSections();
   const resultCount = results.reduce((total, group) => total + group.entries.length, 0);
   if (isSearching) {
     return (
@@ -471,11 +475,11 @@ function SettingsNavigationItems({
   }
   return (
     <div className={cn('flex', isMobile ? 'flex-col' : 'md:flex-col')}>
-      {[...new Set(settingsSections.map((section) => section.group))].map((group) => (
+      {[...new Set(sections.map((section) => section.group))].map((group) => (
         <SidebarGroup key={group} className='shrink-0 px-0'>
           <SidebarGroupLabel className={cn(!isMobile && 'max-md:hidden')}>{group}</SidebarGroupLabel>
           <SidebarMenu>
-            {settingsSections
+            {sections
               .filter((section) => section.group === group)
               .map((section) => (
                 <SidebarMenuItem key={section.id}>

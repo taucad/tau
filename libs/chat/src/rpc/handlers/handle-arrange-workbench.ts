@@ -14,7 +14,7 @@ import type {
   ArrangeWorkbenchErrorCode,
 } from '#schemas/tools/arrange-workbench.tool.schema.js';
 import type { RpcResult } from '#schemas/rpc.schema.js';
-import type { RpcFileSystem, RpcWorkbenchClient } from '#rpc/rpc-dependencies.js';
+import type { RpcFileSystem, RpcWorkbenchClient, ViewFieldsSet } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
 // oxlint-disable eslint/no-await-in-loop -- Ordered checked writes and conflict retries require sequential I/O.
 
@@ -22,7 +22,26 @@ type Failure = { success: false; errorCode: ArrangeWorkbenchErrorCode; message: 
 type Result = RpcResult<'arrange_workbench'>;
 type Group = { kind: 'group'; size?: number; tabs: WorkbenchTab[]; active?: number };
 type Node = Group | { kind: 'split'; size?: number; direction: 'row' | 'column'; children: Node[] };
-type Write = { path: string; text?: string; previous?: string };
+type Write = { path: string; text?: string; previous?: string; viewId?: string };
+type ViewInput = NonNullable<ArrangeWorkbenchInput['views']>[number];
+
+/* The inheritable leaves a view patch names, with the values written: these are set in that view (V8). */
+const namedViewFields = (patch: ViewInput, record: WorkbenchView): ViewFieldsSet => {
+  const fields: { -readonly [Leaf in keyof ViewFieldsSet]: ViewFieldsSet[Leaf] } = {};
+  if (patch.fieldOfView !== undefined) {
+    fields.fieldOfView = record.fieldOfView;
+  }
+  if (patch.upDirection !== undefined) {
+    fields.upDirection = record.upDirection;
+  }
+  for (const leaf of Object.keys(patch.display ?? {}) as Array<keyof WorkbenchView['display']>) {
+    fields[`display.${leaf}`] = record.display[leaf];
+  }
+  if (patch.grid !== undefined) {
+    fields['grid.unit'] = record.grid.unit;
+  }
+  return fields;
+};
 const encoder = new TextEncoder();
 const failure = (errorCode: ArrangeWorkbenchErrorCode, message: string): Failure => ({
   success: false,
@@ -237,6 +256,7 @@ export async function handleArrangeWorkbench(
       }
       const inputViews = new Set<string>();
       const viewWrites = new Map<string, string>();
+      const viewFieldsSet = new Map<string, ViewFieldsSet>();
       for (const [index, patch] of (input.views ?? []).entries()) {
         if (inputViews.has(patch.id)) {
           return failure('VALIDATION_ERROR', `views[${index}].id: duplicate view id ${patch.id}. Nothing was written.`);
@@ -284,6 +304,7 @@ export async function handleArrangeWorkbench(
         }
         viewRecords.set(patch.id, parsed.data);
         viewWrites.set(patch.id, workbenchRecords.view.serialize(parsed.data));
+        viewFieldsSet.set(patch.id, namedViewFields(patch, parsed.data));
         if (
           !tabs(viewer).some((tab) => tab.kind === 'view' && tab.view === patch.id) &&
           !input.close?.some((tab) => tab.kind === 'view' && tab.view === patch.id)
@@ -383,7 +404,7 @@ export async function handleArrangeWorkbench(
       const writes: Write[] = [];
       for (const [id, text] of viewWrites) {
         if (currentViewIds.has(id)) {
-          writes.push({ path: workbenchPaths.view(id), text, previous: viewTexts.get(id) });
+          writes.push({ path: workbenchPaths.view(id), text, previous: viewTexts.get(id), viewId: id });
         }
       }
       for (const tab of input.close ?? []) {
@@ -421,6 +442,16 @@ export async function handleArrangeWorkbench(
           digest: await digest(write.text),
           previousDigest: await digest(write.previous),
         });
+        /* As each view record lands, whatever a later write does: a view write a conflict cuts short still sets its
+         * leaves, and a call refused before any write sets nothing. */
+        const fields = write.viewId === undefined ? undefined : viewFieldsSet.get(write.viewId);
+        if (write.viewId !== undefined && fields !== undefined && Object.keys(fields).length > 0) {
+          try {
+            await workbench?.markViewFieldsSet?.(write.viewId, fields);
+          } catch {
+            // The record is written; a device that cannot keep the list still shows the value.
+          }
+        }
       }
       if (!conflict) {
         return {

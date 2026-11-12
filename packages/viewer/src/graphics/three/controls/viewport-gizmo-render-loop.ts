@@ -1,10 +1,5 @@
-import { useFrame } from '@react-three/fiber';
-import { createContext, useContext, useRef } from 'react';
-import type { RefObject } from 'react';
 import * as THREE from 'three';
-import { isViewportWebGpu } from '#graphics/three/viewport-cad-renderer.js';
 import type { ControlEventListener } from '#graphics/three/utils/camera-controls-adapter.js';
-import type { ViewportGizmoControlsBinding } from '#graphics/three/controls/viewport-gizmo-controls-adapter.js';
 import type { SectionPlanePicker, SectionPlanePickerRenderer } from '#graphics/three/controls/section-plane-picker.js';
 
 type ToneMappingRendererLike = {
@@ -22,9 +17,6 @@ type ViewportGizmoInvalidationTargetLike = {
   addEventListener: (type: ViewportGizmoInvalidationEventType, listener: ControlEventListener) => void;
   removeEventListener: (type: ViewportGizmoInvalidationEventType, listener: ControlEventListener) => void;
 };
-
-/** The section plane picker the view cube's loop draws beside the cube; provided only while Section is on. */
-export const SectionPlanePickerContext = createContext<SectionPlanePicker | undefined>(undefined);
 
 /**
  * The view cube's viewport `[x, y, width, height]` in CSS pixels, as the gizmo last placed it, in the renderer's
@@ -53,13 +45,11 @@ export const readGizmoViewport = (
 export const renderViewportGizmoFrame = ({
   gizmo,
   renderer,
-  controlsBinding,
   invalidate,
   planePicker,
 }: {
   readonly gizmo: ViewportGizmoRenderLoopGizmoLike;
   readonly renderer: ToneMappingRendererLike;
-  readonly controlsBinding?: ViewportGizmoControlsBinding;
   readonly invalidate: () => void;
   /** Drawn first, beside the cube, with the view camera it turns with. */
   readonly planePicker?: Readonly<{
@@ -79,7 +69,6 @@ export const renderViewportGizmoFrame = ({
       planePicker.picker.render({ renderer: planePicker.renderer, camera: planePicker.camera, cubeViewport });
     }
     gizmo.render();
-    controlsBinding?.afterGizmoRender?.();
   } finally {
     if (previousTone !== undefined) {
       renderer.toneMapping = previousTone;
@@ -113,48 +102,3 @@ export const bindViewportGizmoInvalidationEvents = ({
     }
   };
 };
-
-export function useViewportGizmoRenderLoop({
-  gizmoRef,
-  renderer,
-  controlsBindingRef,
-  invalidate,
-}: {
-  readonly gizmoRef: RefObject<ViewportGizmoRenderLoopGizmoLike | undefined>;
-  readonly renderer: ToneMappingRendererLike;
-  readonly controlsBindingRef: RefObject<ViewportGizmoControlsBinding | undefined>;
-  readonly invalidate: () => void;
-}): void {
-  const planePicker = useContext(SectionPlanePickerContext);
-  const savedViewport = useRef(new THREE.Vector4());
-  const savedScissor = useRef(new THREE.Vector4());
-  useFrame((state) => {
-    const gizmo = gizmoRef.current;
-    if (!gizmo) {
-      return;
-    }
-
-    const target = isViewportWebGpu(state.gl) ? state.gl.getRenderTarget() : null;
-    const viewport = readGizmoViewport(gizmo);
-    if (target && viewport) {
-      savedViewport.current.copy(target.viewport);
-      savedScissor.current.copy(target.scissor);
-      target.viewport.set(...viewport).multiplyScalar(state.gl.getPixelRatio());
-      target.scissor.copy(target.viewport);
-    }
-    try {
-      renderViewportGizmoFrame({
-        gizmo,
-        renderer,
-        controlsBinding: controlsBindingRef.current,
-        invalidate,
-        planePicker: planePicker ? { picker: planePicker, renderer: state.gl, camera: state.camera } : undefined,
-      });
-    } finally {
-      if (target && viewport) {
-        target.viewport.copy(savedViewport.current);
-        target.scissor.copy(savedScissor.current);
-      }
-    }
-  }, 3);
-}

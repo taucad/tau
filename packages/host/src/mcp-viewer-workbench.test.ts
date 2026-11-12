@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import type { TauViewerViewSettings, TauViewerViewState } from '@taucad/mcp/viewer-protocol';
-import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
+import { viewFieldValuesOf, viewRecordV1Defaults, workbenchPaths, workbenchRecords } from '@taucad/workbench';
+import type { WorkbenchView } from '@taucad/workbench';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createMcpViewerWorkbench } from '#mcp-viewer-workbench.js';
@@ -59,6 +60,9 @@ const layoutShowing = (view: string): string =>
     workbench: { kind: 'group', tabs: [] },
   });
 
+/** The display a view record holds by default. */
+const viewRecordDisplay = workbenchRecords.view.schema.parse({ version: 1, entryPath: 'plate.ts' }).display;
+
 const readRecord = async (root: string, path: string): Promise<unknown> =>
   JSON.parse(await readFile(join(root, path), 'utf8')) as unknown;
 
@@ -68,6 +72,16 @@ describe('createMcpViewerWorkbench', () => {
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'tau-viewer-workbench-'));
   });
+
+  /** Write the layout's view of the entry, `front`, as another writer left it. */
+  const writeFront = async (fields: Partial<WorkbenchView> = {}): Promise<void> => {
+    await mkdir(join(root, '.tau/workbench/views'), { recursive: true });
+    await writeFile(
+      join(root, workbenchPaths.view('front')),
+      workbenchRecords.view.serialize({ version: 1, entryPath: 'plate.ts', ...fields }),
+    );
+    await writeFile(join(root, workbenchPaths.layout), layoutShowing('front'));
+  };
 
   afterEach(async () => {
     beforeStaging.hook = undefined;
@@ -245,42 +259,223 @@ describe('createMcpViewerWorkbench', () => {
     expect(await readdir(join(root, '.tau/workbench/views'))).toEqual([]);
   });
 
-  it("should keep the page's display, grid, field of view, section and measurements in the view", async () => {
+  it("should keep the page's section and measurements and the leaves the person set in the view", async () => {
     const keeper = createMcpViewerWorkbench({ settle: 10 });
     keeper.report({ root, pageId: 'page-1', view: viewOf({ settings: settingsOf({ grid: { unit: 'mm' } }) }) });
-    keeper.report({ root, pageId: 'page-1', view: viewOf({ interactedAt: 4, settings: settingsOf() }) });
+    keeper.report({
+      root,
+      pageId: 'page-1',
+      view: viewOf({
+        interactedAt: 4,
+        settings: settingsOf(),
+        viewFields: { 'display.grid': false, 'grid.unit': 'cm' },
+      }),
+    });
     await keeper.close();
 
     const views = await readdir(join(root, '.tau/workbench/views'));
-    expect(await readRecord(root, `.tau/workbench/views/${views[0]}`)).toMatchObject({
+    const record = await readRecord(root, `.tau/workbench/views/${views[0]}`);
+    expect(record).toMatchObject({
       entryPath: 'plate.ts',
-      ...settingsOf(),
+      section: settingsOf().section,
+      measurements: settingsOf().measurements,
       camera: { kind: 'pose', direction: [1, 0, 0] },
+    });
+    /* The page shows a field of view of 45 but the person never set it: the view keeps the format value. */
+    expect(viewFieldValuesOf(workbenchRecords.view.schema.parse(record))).toEqual({
+      ...viewRecordV1Defaults,
+      'display.grid': false,
+      'grid.unit': 'cm',
     });
     await expect(readFile(join(root, workbenchPaths.entries))).rejects.toThrow();
   });
 
-  it('should write only the settings when the person changes them, keeping an arranged camera', async () => {
-    await mkdir(join(root, '.tau/workbench/views'), { recursive: true });
-    await writeFile(
-      join(root, workbenchPaths.view('front')),
-      workbenchRecords.view.serialize({
-        version: 1,
-        entryPath: 'plate.ts',
-        camera: { kind: 'preset', preset: 'front' },
-      }),
-    );
-    await writeFile(join(root, workbenchPaths.layout), layoutShowing('front'));
+  it('should write only the section when the person changes it, keeping an arranged camera', async () => {
+    await writeFront({ camera: { kind: 'preset', preset: 'front' } });
 
     const keeper = createMcpViewerWorkbench({ settle: 10 });
-    keeper.report({ root, pageId: 'page-1', view: viewOf({ settings: settingsOf({ fieldOfView: 60 }) }) });
+    keeper.report({
+      root,
+      pageId: 'page-1',
+      view: viewOf({ settings: settingsOf({ section: { active: false, cuts: [] } }) }),
+    });
     keeper.report({ root, pageId: 'page-1', view: viewOf({ interactedAt: 4, settings: settingsOf() }) });
     await keeper.close();
 
     expect(await readRecord(root, workbenchPaths.view('front'))).toMatchObject({
       camera: { kind: 'preset', preset: 'front' },
-      fieldOfView: 45,
+      fieldOfView: viewRecordV1Defaults.fieldOfView,
       section: { active: true },
+    });
+  });
+
+  describe('inheritable leaves', () => {
+    /* What the page shows when Tau's values differ from the format values, as a changed `tauViewDefaults` makes it. */
+    const shownOverTau = settingsOf({ fieldOfView: 30, upDirection: 'y' });
+
+    it('should write no inheritable leaf when the person moves the camera', async () => {
+      await writeFront();
+      const keeper = createMcpViewerWorkbench({ settle: 10 });
+      keeper.report({ root, pageId: 'page-1', view: viewOf({ settings: shownOverTau, viewFields: {} }) });
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({
+          interactedAt: 4,
+          camera: { ...viewOf().camera!, direction: [0, 1, 0] },
+          settings: shownOverTau,
+          viewFields: {},
+        }),
+      });
+      await keeper.close();
+
+      const record = workbenchRecords.view.schema.parse(await readRecord(root, workbenchPaths.view('front')));
+      expect(record.camera).toMatchObject({ kind: 'pose', direction: [0, 1, 0] });
+      expect(viewFieldValuesOf(record)).toEqual(viewRecordV1Defaults);
+    });
+
+    it('should write no inheritable leaf when the person changes the section', async () => {
+      await writeFront();
+      const keeper = createMcpViewerWorkbench({ settle: 10 });
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({ settings: { ...shownOverTau, section: { active: false, cuts: [] } }, viewFields: {} }),
+      });
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({ interactedAt: 4, settings: shownOverTau, viewFields: {} }),
+      });
+      await keeper.close();
+
+      const record = workbenchRecords.view.schema.parse(await readRecord(root, workbenchPaths.view('front')));
+      expect(record.section.active).toBe(true);
+      expect(viewFieldValuesOf(record)).toEqual(viewRecordV1Defaults);
+    });
+
+    it('should write a toggled display leaf and no other', async () => {
+      await writeFront({ fieldOfView: 30 });
+      const keeper = createMcpViewerWorkbench({ settle: 10 });
+      keeper.report({ root, pageId: 'page-1', view: viewOf({ settings: shownOverTau, viewFields: {} }) });
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({ interactedAt: 4, settings: shownOverTau, viewFields: { 'display.axes': false } }),
+      });
+      await keeper.close();
+
+      const record = workbenchRecords.view.schema.parse(await readRecord(root, workbenchPaths.view('front')));
+      expect(viewFieldValuesOf(record)).toEqual({ ...viewRecordV1Defaults, fieldOfView: 30, 'display.axes': false });
+    });
+
+    it('should write a reset as the format value, and a leaf commanded before another writer only once', async () => {
+      await writeFront({ display: { ...viewRecordDisplay, grid: false } });
+      const keeper = createMcpViewerWorkbench({ settle: 10 });
+      keeper.report({ root, pageId: 'page-1', view: viewOf({ viewFields: {} }) });
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({ interactedAt: 4, viewFields: { 'display.grid': true } }),
+      });
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({ interactedAt: 5, viewFields: { 'display.grid': true, 'grid.unit': 'in' } }),
+      });
+      await keeper.flush();
+      expect(
+        viewFieldValuesOf(workbenchRecords.view.schema.parse(await readRecord(root, workbenchPaths.view('front')))),
+      ).toEqual({ ...viewRecordV1Defaults, 'grid.unit': 'in' });
+
+      /* Another writer turns the grid off; the page's next report repeats its earlier command, which is not new. */
+      await writeFront({ display: { ...viewRecordDisplay, grid: false }, grid: { unit: 'in' } });
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({
+          interactedAt: 6,
+          hidden: ['gear'],
+          viewFields: { 'display.grid': true, 'grid.unit': 'in' },
+        }),
+      });
+      await keeper.close();
+      expect(
+        viewFieldValuesOf(workbenchRecords.view.schema.parse(await readRecord(root, workbenchPaths.view('front')))),
+      ).toEqual({ ...viewRecordV1Defaults, 'display.grid': false, 'grid.unit': 'in' });
+    });
+    it('should write a leaf commanded again with the same value after another writer changed it', async () => {
+      await writeFront();
+      const keeper = createMcpViewerWorkbench({ settle: 10 });
+      keeper.report({ root, pageId: 'page-1', view: viewOf({ viewFields: {}, viewFieldSequence: {} }) });
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({
+          interactedAt: 4,
+          viewFields: { 'display.grid': false },
+          viewFieldSequence: { 'display.grid': 1 },
+        }),
+      });
+      await keeper.flush();
+
+      /* Another writer turns the grid back on; a report repeating the command is no new command. */
+      await writeFront();
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({
+          interactedAt: 5,
+          hidden: ['gear'],
+          viewFields: { 'display.grid': false },
+          viewFieldSequence: { 'display.grid': 1 },
+        }),
+      });
+      await keeper.flush();
+      expect(
+        viewFieldValuesOf(workbenchRecords.view.schema.parse(await readRecord(root, workbenchPaths.view('front')))),
+      ).toEqual(viewRecordV1Defaults);
+
+      /* The person turns the grid off again: the same value, a new command. */
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({
+          interactedAt: 6,
+          hidden: ['gear'],
+          viewFields: { 'display.grid': false },
+          viewFieldSequence: { 'display.grid': 2 },
+        }),
+      });
+      await keeper.close();
+      expect(
+        viewFieldValuesOf(workbenchRecords.view.schema.parse(await readRecord(root, workbenchPaths.view('front')))),
+      ).toEqual({ ...viewRecordV1Defaults, 'display.grid': false });
+    });
+
+    it('should create a view with every leaf the reports merged while it waited commanded', async () => {
+      const keeper = createMcpViewerWorkbench({ settle: 10 });
+      keeper.report({ root, pageId: 'page-1', view: viewOf({ settings: shownOverTau, viewFields: {} }) });
+      keeper.report({ root, pageId: 'page-2', view: viewOf({ settings: shownOverTau, viewFields: {} }) });
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({ interactedAt: 4, settings: shownOverTau, viewFields: { 'display.grid': false } }),
+      });
+      keeper.report({
+        root,
+        pageId: 'page-2',
+        view: viewOf({ interactedAt: 4, settings: shownOverTau, viewFields: { 'display.axes': false } }),
+      });
+      await keeper.close();
+
+      const views = await readdir(join(root, '.tau/workbench/views'));
+      const record = workbenchRecords.view.schema.parse(await readRecord(root, `.tau/workbench/views/${views[0]}`));
+      expect(viewFieldValuesOf(record)).toEqual({
+        ...viewRecordV1Defaults,
+        'display.grid': false,
+        'display.axes': false,
+      });
     });
   });
 
@@ -362,7 +557,7 @@ describe('createMcpViewerWorkbench', () => {
       keeper.report({
         root,
         pageId: 'page-1',
-        view: viewOf({ interactedAt: 4, hidden: ['gear'], settings: settingsOf() }),
+        view: viewOf({ interactedAt: 4, hidden: ['gear'], settings: settingsOf(), viewFields: { fieldOfView: 45 } }),
       });
 
       await expect(keeper.state({ root, entryPath: 'plate.ts' })).resolves.toMatchObject({

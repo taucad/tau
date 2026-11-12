@@ -14,8 +14,11 @@ import { cn } from '@taucad/ui/utils/cn';
 /** One timeline list: rows 2 px apart, as sidebar items are. */
 export const timelineList = 'flex list-none flex-col gap-0.5';
 
-/** A row's grid: the markers' column, then the content. */
-export const timelineRow = 'grid grid-cols-[1rem_minmax(0,1fr)] gap-x-1 pl-2';
+/**
+ * A row's grid: the markers' column, then the content. The markers' column is
+ * 1rem, or `--timeline-gutter` where History draws more than one lane (D2).
+ */
+export const timelineRow = 'grid grid-cols-[var(--timeline-gutter,1rem)_minmax(0,1fr)] gap-x-1 pl-2';
 
 /** A row that is itself the disclosure: the whole row, gutter and marker included, is the button. */
 export const timelineRowButton = cn(
@@ -72,7 +75,7 @@ export const timelineMoreGutter =
  */
 export const timelineOpenBlock = (hasLine: boolean): string =>
   cn(
-    'relative pr-2 pl-8',
+    'relative pr-2 pl-[calc(var(--timeline-gutter,1rem)+1rem)]',
     hasLine && 'before:absolute before:inset-y-0 before:left-[15.5px] before:w-px before:bg-border',
   );
 

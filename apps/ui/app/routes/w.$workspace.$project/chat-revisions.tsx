@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type { KeyboardEvent } from 'react';
 import { ChevronDown, CircleAlert, CircleDashed, Cloud, GitBranch, History, Plus, Undo2, XIcon } from 'lucide-react';
 import { Link, useLocation } from 'react-router';
@@ -16,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { Skeleton } from '@taucad/ui/components/skeleton';
+import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import { cn } from '@taucad/ui/utils/cn';
 import {
   FloatingPanel,
@@ -31,6 +41,17 @@ import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { ActionButton, disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
 import { RevisionRegion } from '#components/revisions/revision-region.js';
+import { graphGeometry, gutterWidth, layoutRevisionGraph } from '#components/revisions/revision-graph-layout.js';
+import type { GraphNode, GraphRow, MarkerKind } from '#components/revisions/revision-graph-layout.js';
+import {
+  BranchSwatch,
+  HistoryGraph,
+  HistoryLanesContext,
+  useRowBoxes,
+} from '#components/revisions/revision-graph-view.js';
+import type { BranchSlot } from '#components/revisions/revision-graph-view.js';
+import { historyLanesOf } from '#routes/w.$workspace.$project/history-lanes.js';
+import type { HistoryFilter, HistoryLanes } from '#routes/w.$workspace.$project/history-lanes.js';
 import {
   timelineGutter,
   timelineList,
@@ -63,8 +84,8 @@ import {
   useBranchControlRequest,
   useReportHistoryPaneShown,
 } from '#routes/w.$workspace.$project/revision-pane-requests.js';
-import { useRevisions, useRevisionsOnLine, useWithRestoreTargets } from '#hooks/use-revisions.js';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import { useRevisionGraph, useRevisions, useRevisionsOnLine, useWithRestoreTargets } from '#hooks/use-revisions.js';
+import type { RevisionCard, RevisionsView } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import {
   useProjectRole,
@@ -457,7 +478,8 @@ function BranchChip({
   );
 }
 
-type HistoryGroup =
+/** One row or fold of History. @public */
+export type HistoryGroup =
   | Readonly<{ kind: 'revision'; revision: RevisionCard }>
   | Readonly<{ kind: 'autosaves'; revisions: readonly RevisionCard[] }>
   | Readonly<{ kind: 'setup'; revisions: readonly RevisionCard[] }>;
@@ -472,24 +494,30 @@ const isSetupCard = (revision: RevisionCard): boolean =>
  * them: Current never marks them ({@link currentRevisionOf}).
  *
  * The newest backed-up entry starts a group of its own, so *Backed up to here*
- * sits between groups and never inside a fold (D4).
+ * sits between groups and never inside a fold (D4). On History's lanes a fold
+ * never joins entries of two lines (D2).
  *
  * @param revisions - The line's history, newest first.
  * @param headRevisionId - The revision the checkout reflects, which never folds into autosaves.
- * @param backedUpTo - The newest entry the remote holds, which no newer entry folds with.
+ * @param options - `backedUpTo`, the newest entry the remote holds, which no newer entry folds with; `lineOf`, the line each entry is drawn on when History draws lanes.
  * @returns The rows and folds History renders.
  */
 export const groupRevisionHistory = (
   revisions: readonly RevisionCard[],
   headRevisionId: string | undefined,
-  backedUpTo?: string,
+  { backedUpTo, lineOf }: Readonly<{ backedUpTo?: string; lineOf?: ReadonlyMap<string, string> }> = {},
 ): readonly HistoryGroup[] => {
   const groups: HistoryGroup[] = [];
+  const isSameLine = (group: HistoryGroup | undefined, revision: RevisionCard): boolean =>
+    lineOf === undefined ||
+    group === undefined ||
+    lineOf.get(group.kind === 'revision' ? group.revision.revisionId : group.revisions[0]!.revisionId) ===
+      lineOf.get(revision.revisionId);
   for (const revision of revisions) {
     const startsGroup = revision.revisionId === backedUpTo;
     if (isSetupCard(revision)) {
       const previous = groups.at(-1);
-      if (previous?.kind === 'setup' && !startsGroup) {
+      if (previous?.kind === 'setup' && !startsGroup && isSameLine(previous, revision)) {
         groups[groups.length - 1] = { kind: 'setup', revisions: [...previous.revisions, revision] };
       } else {
         groups.push({ kind: 'setup', revisions: [revision] });
@@ -502,7 +530,7 @@ export const groupRevisionHistory = (
       !revision.conflicted &&
       isAutosave(revision);
     const previous = groups.at(-1);
-    if (foldable && previous?.kind === 'autosaves' && !startsGroup) {
+    if (foldable && previous?.kind === 'autosaves' && !startsGroup && isSameLine(previous, revision)) {
       groups[groups.length - 1] = { kind: 'autosaves', revisions: [...previous.revisions, revision] };
     } else if (foldable) {
       groups.push({ kind: 'autosaves', revisions: [revision] });
@@ -585,14 +613,24 @@ const clockOf = (revision: RevisionCard): string =>
  * @param props - The day, and whether the line passes through.
  * @returns The divider.
  */
-function DayDivider({ label, hasLine }: { readonly label: string; readonly hasLine: boolean }): React.JSX.Element {
+function DayDivider({
+  label,
+  hasLine,
+  graphKey,
+}: {
+  readonly label: string;
+  readonly hasLine: boolean;
+  readonly graphKey?: string;
+}): React.JSX.Element {
+  /* On History's lanes the graph's rails pass through the divider, and it is measured as one of the graph's rows. */
+  const isOnLanes = useContext(HistoryLanesContext);
   return (
-    <li className={timelineRow}>
+    <li className={timelineRow} data-graph-key={isOnLanes ? graphKey : undefined}>
       <span
         aria-hidden
         className={cn(
           'relative flex justify-center',
-          hasLine && 'before:absolute before:-top-0.5 before:bottom-0 before:w-px before:bg-border',
+          hasLine && !isOnLanes && 'before:absolute before:-top-0.5 before:bottom-0 before:w-px before:bg-border',
         )}
       />
       <span className='pt-1.5 pl-1 text-xs text-muted-foreground'>{label}</span>
@@ -605,14 +643,20 @@ function DayDivider({ label, hasLine }: { readonly label: string; readonly hasLi
  * under the entries that are not backed up yet. Nothing above it is at risk on
  * this device; it is simply not backed up yet.
  *
+ * @param props - The key it is measured by on History's lanes.
  * @returns The boundary row.
  */
-function BackupBoundary(): React.JSX.Element {
+function BackupBoundary({ graphKey }: { readonly graphKey?: string }): React.JSX.Element {
+  /* On History's lanes the graph's rails pass through the boundary, and it is measured as one of the graph's rows. */
+  const isOnLanes = useContext(HistoryLanesContext);
   return (
-    <li data-row='boundary' className={timelineRow}>
+    <li data-row='boundary' className={timelineRow} data-graph-key={isOnLanes ? graphKey : undefined}>
       <span
         aria-hidden
-        className='relative flex justify-center before:absolute before:-top-0.5 before:bottom-0 before:w-px before:bg-border'
+        className={cn(
+          'relative flex justify-center',
+          !isOnLanes && 'before:absolute before:-top-0.5 before:bottom-0 before:w-px before:bg-border',
+        )}
       />
       <span className='flex min-w-0 items-center gap-1.5 py-1 pr-2 pl-1 text-xs leading-5 text-muted-foreground'>
         <Cloud aria-hidden className='size-3.5 shrink-0' />
@@ -706,6 +750,7 @@ function SetupLine({
   const oldest = revisions.at(-1)!;
   const span = [...new Set([clockOf(oldest), clockOf(newest)].filter(Boolean))].join('–');
   const label = `Tau updated project setup${revisions.length > 1 ? ` · ${String(revisions.length)} changes` : ''}`;
+  const isOnLanes = useContext(HistoryLanesContext);
   return (
     <Collapsible asChild open={isOpen} onOpenChange={onOpenChange}>
       <li className='flex flex-col'>
@@ -716,17 +761,21 @@ function SetupLine({
             aria-label={`${label}${span === '' ? '' : ` · ${span}`}`}
             className={cn(timelineRowButton, timelineRowHover, 'h-6')}
           >
-            <span
-              aria-hidden
-              className={cn(
-                timelineGutter({ hasTop: !isFirst, hasBottom: !isLast || isOpen }),
-                'before:h-1.5 after:top-5',
-              )}
-            >
-              <span className='relative mt-1 flex size-4 items-center justify-center'>
-                <span className='size-1.5 rounded-full border border-muted-foreground' />
+            {isOnLanes ? (
+              <span aria-hidden />
+            ) : (
+              <span
+                aria-hidden
+                className={cn(
+                  timelineGutter({ hasTop: !isFirst, hasBottom: !isLast || isOpen }),
+                  'before:h-1.5 after:top-5',
+                )}
+              >
+                <span className='relative mt-1 flex size-4 items-center justify-center'>
+                  <span className='size-1.5 rounded-full border border-muted-foreground' />
+                </span>
               </span>
-            </span>
+            )}
             <span className={timelineRowContent}>
               <span className='min-w-0 flex-1 truncate text-xs leading-4 text-muted-foreground'>{label}</span>
               <span className='flex shrink-0 items-center gap-1.5 text-xs leading-4 text-muted-foreground'>
@@ -749,6 +798,364 @@ function SetupLine({
 }
 
 /**
+ * A branch's name, in the row above its newest entry, on History's lanes (D2).
+ * It draws no rail: the graph's markers and bends do. A branch with no entries
+ * yet has its open end on its lane, centred on this row.
+ *
+ * @param props - The branch, its slot and what it says beside its name.
+ * @returns The chip's row.
+ */
+function BranchChipRow({
+  branch,
+  slot,
+  note,
+  isCurrent,
+}: {
+  readonly branch: string;
+  readonly slot: BranchSlot | undefined;
+  readonly note: string;
+  readonly isCurrent: boolean;
+}): React.JSX.Element {
+  return (
+    <li data-graph-key={`chip:${branch}`} data-row='chip' className={timelineRow}>
+      <span aria-hidden />
+      <span className='flex min-h-7 min-w-0 flex-wrap items-center gap-x-2 py-1 pr-2 pl-1'>
+        <span
+          data-slot='branch-name'
+          className={cn(
+            'inline-flex h-5 max-w-full min-w-0 items-center gap-1.5 rounded-full border bg-background px-2 text-xs',
+            isCurrent && 'font-medium',
+          )}
+        >
+          <BranchSwatch slot={slot} />
+          <span className='truncate'>{branch}</span>
+        </span>
+        {note === '' ? null : (
+          <span data-slot='branch-note' className='text-xs leading-5 whitespace-nowrap text-muted-foreground'>
+            {note}
+          </span>
+        )}
+      </span>
+    </li>
+  );
+}
+
+/** One display step of the list: a day, *Backed up to here*, a branch's chip, or a row or fold. */
+type HistoryStep =
+  | Readonly<{ kind: 'day'; key: string; label: string }>
+  | Readonly<{ kind: 'backup'; key: string }>
+  | Readonly<{ kind: 'chip'; key: string; branch: string; startsFrom?: string }>
+  | Readonly<{ kind: 'group'; group: HistoryGroup; isLast: boolean }>;
+
+/** The list's frame on History's lanes: the gutter is as wide as the lanes in view. */
+type TimelineFrameStyle = React.CSSProperties & Record<'--timeline-gutter', string>;
+
+/**
+ * The chips that go above one row or fold: its line's, the first time the line
+ * shows, and each branch with no entries yet that starts from an entry it holds.
+ *
+ * @param group - The row or fold.
+ * @param lanes - What History shows of the graph.
+ * @param chipped - The branches already given a chip, which this adds to.
+ * @returns The chip steps, in order.
+ */
+const chipStepsBefore = (group: HistoryGroup, lanes: HistoryLanes, chipped: Set<string>): HistoryStep[] => {
+  const steps: HistoryStep[] = [];
+  const owner = lanes.lineOf.get(firstOf(group).revisionId) ?? '';
+  if (lanes.chips.has(owner) && !chipped.has(owner)) {
+    chipped.add(owner);
+    steps.push({ kind: 'chip', key: `chip:${owner}`, branch: owner });
+  }
+  /* A branch with no entries of its own: its chip and open end sit directly above the entry it starts from. */
+  const members = group.kind === 'revision' ? [group.revision] : group.revisions;
+  for (const member of members) {
+    const empties = (lanes.emptyAt.get(member.revisionId) ?? []).filter((empty) => !chipped.has(empty));
+    for (const empty of empties) {
+      chipped.add(empty);
+      steps.push({ kind: 'chip', key: `chip:${empty}`, branch: empty, startsFrom: member.revisionId });
+    }
+  }
+  return steps;
+};
+
+/* Where a row's marker sits, from the row's top: the centre of its first line. */
+const rowAnchor = 14;
+const setupAnchor = 12;
+
+/**
+ * The marker one row carries on History's lanes.
+ *
+ * @param revision - The entry.
+ * @param currentRevisionId - The entry that reads Current.
+ * @returns Its marker.
+ */
+const markerOf = (revision: RevisionCard, currentRevisionId: string | undefined): MarkerKind => {
+  if (revision.conflicted) {
+    return 'conflict';
+  }
+  if (revision.revisionId === currentRevisionId) {
+    return 'current';
+  }
+  if (revision.start !== undefined || (revision.tags?.length ?? 0) > 0) {
+    return 'version';
+  }
+  return isSetupCard(revision) ? 'setup' : 'entry';
+};
+
+/**
+ * The graph's rows for the steps History shows, in the order it renders them.
+ *
+ * @param input - The steps, which folds are open, the lines, Current and whether Show older follows.
+ * @returns One graph row per rendered row, keyed as the row's element is.
+ */
+const graphRowsOf = ({
+  steps,
+  openFolds,
+  lineOf,
+  currentRevisionId,
+  hasOlderRow,
+}: Readonly<{
+  steps: readonly HistoryStep[];
+  openFolds: ReadonlySet<string>;
+  lineOf: ReadonlyMap<string, string>;
+  currentRevisionId: string | undefined;
+  hasOlderRow: boolean;
+}>): GraphRow[] => {
+  const rows: GraphRow[] = [];
+  const entryRow = (revision: RevisionCard): GraphRow => {
+    const marker = markerOf(revision, currentRevisionId);
+    const isCompact = marker === 'setup';
+    const node: GraphNode = {
+      branch: lineOf.get(revision.revisionId) ?? '',
+      marker,
+      ids: [revision.revisionId],
+      parent: revision.parent,
+      otherParents: revision.otherParents,
+    };
+    return { key: revision.revisionId, node, anchor: isCompact ? setupAnchor : rowAnchor, height: isCompact ? 24 : 30 };
+  };
+  for (const step of steps) {
+    if (step.kind === 'day' || step.kind === 'backup') {
+      rows.push({ key: step.key, anchor: 12, height: step.kind === 'day' ? 26 : 28 });
+      continue;
+    }
+    if (step.kind === 'chip') {
+      rows.push({
+        key: step.key,
+        anchor: rowAnchor,
+        height: 30,
+        ...(step.startsFrom === undefined
+          ? {}
+          : { node: { branch: step.branch, marker: 'open', ids: [], startsFrom: step.startsFrom } }),
+      });
+      continue;
+    }
+    const { group } = step;
+    if (group.kind === 'revision') {
+      rows.push(entryRow(group.revision));
+      continue;
+    }
+    const key = keyOf(group);
+    const isOpen = openFolds.has(key);
+    const newest = group.revisions[0]!;
+    const oldest = group.revisions.at(-1)!;
+    const isSetup = group.kind === 'setup';
+    /* An open fold keeps its header and lists its entries; the header then stands for none of them. */
+    rows.push({
+      key,
+      anchor: isSetup ? setupAnchor : rowAnchor,
+      height: isSetup ? 26 : 30,
+      node: {
+        branch: lineOf.get(newest.revisionId) ?? '',
+        marker: isSetup ? 'setup' : 'fold',
+        ids: isOpen ? [] : group.revisions.map((revision) => revision.revisionId),
+        parent: isOpen ? newest.revisionId : oldest.parent,
+      },
+    });
+    if (isOpen) {
+      rows.push(...group.revisions.map(entryRow));
+    }
+  }
+  if (hasOlderRow) {
+    rows.push({ key: 'older', role: 'older', anchor: rowAnchor, height: 30 });
+  }
+  return rows;
+};
+
+/**
+ * An autosave fold's gutter: its dashed segments and marker, or nothing on
+ * History's lanes, where the graph draws them.
+ *
+ * @param props - Which segments to draw.
+ * @returns The gutter.
+ */
+function FoldGutter({
+  hasTop,
+  hasBottom,
+}: {
+  readonly hasTop: boolean;
+  readonly hasBottom: boolean;
+}): React.JSX.Element {
+  if (useContext(HistoryLanesContext)) {
+    return <span aria-hidden />;
+  }
+  return (
+    <span aria-hidden className={timelineGutter({ hasTop, hasBottom, isDashed: true })}>
+      <span className={timelineMarker}>
+        <span className='size-2.5 rounded-full border border-dashed border-muted-foreground' />
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Show older's row: the rest of the line, dashed, in its gutter; on History's
+ * lanes the graph fades each rail into it instead.
+ *
+ * @param props - The button.
+ * @returns The row.
+ */
+function OlderRow({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
+  const isOnLanes = useContext(HistoryLanesContext);
+  return (
+    <li className={timelineRow} data-graph-key={isOnLanes ? 'older' : undefined}>
+      <span aria-hidden className={isOnLanes ? undefined : timelineMoreGutter} />
+      <span className='py-0.5'>{children}</span>
+    </li>
+  );
+}
+
+/**
+ * The branch a row's line belongs to when that branch was merged into another
+ * in view and so has no chip: the row names it (D2).
+ *
+ * @param lanes - What History shows of the graph, when it draws lanes.
+ * @param revisionId - The row's entry.
+ * @returns The branch's name and slot, or nothing.
+ */
+const mergedBranchOf = (
+  lanes: HistoryLanes | undefined,
+  revisionId: string,
+): Readonly<{ name: string; slot: BranchSlot | undefined }> | undefined => {
+  const owner = lanes?.lineOf.get(revisionId);
+  return owner === undefined || lanes?.merged.has(owner) !== true
+    ? undefined
+    : { name: owner, slot: lanes.slots.get(owner) };
+};
+
+/**
+ * Where History's rows come from: the selected branch's log, or with a second
+ * branch every branch's graph when a fork is in view (D2), and the filter.
+ *
+ * @param view - The selected branch's history.
+ * @param branch - The branch the files are on.
+ * @returns The rows, how to read older ones, the lanes when drawn, and the filter.
+ */
+const useHistorySource = (
+  view: Pick<RevisionsView, 'revisions' | 'hasOlder' | 'loadOlder'>,
+  branch: string | undefined,
+): Readonly<{
+  filter: HistoryFilter;
+  setFilter: (filter: HistoryFilter) => void;
+  hasFilter: boolean;
+  lanes: HistoryLanes | undefined;
+  revisions: readonly RevisionCard[];
+  hasOlder: boolean;
+  loadOlder: () => Promise<void>;
+}> => {
+  const graph = useRevisionGraph();
+  const [filter, setFilter] = useState<HistoryFilter>('this');
+  const lanes = useMemo(
+    () => (graph === undefined ? undefined : historyLanesOf({ ...graph, current: branch, filter })),
+    [branch, filter, graph],
+  );
+  const hasFilter = graph !== undefined && graph.branches.length > 1;
+  const { loadOlder: loadOlderOnBranch } = view;
+  const pageBoth = useCallback(async (): Promise<void> => {
+    await Promise.all([loadOlderOnBranch(), graph?.hasOlder === true ? graph.loadOlder() : undefined]);
+  }, [graph, loadOlderOnBranch]);
+  if (graph === undefined) {
+    return { filter, setFilter, hasFilter, lanes: undefined, ...view };
+  }
+  if (lanes?.hasLanes !== true) {
+    /* One lane on this page so far: the branch's own list, but the graph keeps paging, so a fork further down still draws its lanes. */
+    return {
+      filter,
+      setFilter,
+      hasFilter,
+      lanes: undefined,
+      revisions: view.revisions,
+      hasOlder: view.hasOlder || graph.hasOlder,
+      loadOlder: pageBoth,
+    };
+  }
+  return {
+    filter,
+    setFilter,
+    hasFilter,
+    lanes,
+    revisions: lanes.revisions,
+    hasOlder: graph.hasOlder,
+    loadOlder: graph.loadOlder,
+  };
+};
+
+/**
+ * The list's frame. On History's lanes it widens the gutter to the lanes in
+ * view, measures the rows and lays the graph over them (D2); otherwise it is a
+ * plain wrapper and the rows draw their own line.
+ *
+ * @param props - The lanes when drawn, the steps shown, the open folds, Current, and whether Show older follows.
+ * @returns The frame around the list.
+ */
+function HistoryGraphFrame({
+  lanes,
+  steps,
+  openFolds,
+  currentRevisionId,
+  hasOlderRow,
+  children,
+}: {
+  readonly lanes: HistoryLanes | undefined;
+  readonly steps: readonly HistoryStep[];
+  readonly openFolds: ReadonlySet<string>;
+  readonly currentRevisionId: string | undefined;
+  readonly hasOlderRow: boolean;
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  const frameRef = useRef<HTMLDivElement>(null);
+  /* ponytail: laid out every render; a few lanes over one page of rows is a handful of drafts. */
+  const graphRows =
+    lanes === undefined ? [] : graphRowsOf({ steps, openFolds, lineOf: lanes.lineOf, currentRevisionId, hasOlderRow });
+  const layout = lanes === undefined ? undefined : layoutRevisionGraph(graphRows, lanes.lanePreference);
+  const boxes = useRowBoxes(
+    frameRef,
+    graphRows.map((row) => row.key),
+  );
+  const geometry =
+    layout !== undefined && boxes.length === graphRows.length && boxes.length > 0
+      ? graphGeometry(layout, graphRows, boxes)
+      : undefined;
+  const frameStyle: TimelineFrameStyle | undefined =
+    layout === undefined ? undefined : { '--timeline-gutter': `${String(gutterWidth(layout.lanes.length))}px` };
+  const lastBox = boxes.at(-1);
+  return (
+    <div
+      ref={frameRef}
+      data-slot='history-graph-frame'
+      data-lanes={layout?.lanes.join(',')}
+      className='relative'
+      style={frameStyle}
+    >
+      <HistoryLanesContext.Provider value={lanes !== undefined}>{children}</HistoryLanesContext.Provider>
+      {lanes === undefined || geometry === undefined ? null : (
+        <HistoryGraph geometry={geometry} slots={lanes.slots} height={(lastBox?.top ?? 0) + (lastBox?.height ?? 0)} />
+      )}
+    </div>
+  );
+}
+
+/**
  * History's rows: twelve, then Show older, with the row you are on, the one
  * opened for you and any conflicted row never behind it; consecutive autosaves
  * fold; days divide. The list is one Tab stop (A1 item 14).
@@ -758,23 +1165,39 @@ function SetupLine({
  * one opened for you from a chat — is read on its own and kept at the end of
  * the timeline, below Show older, until a page reaches it.
  *
+ * With a second branch, *This branch / All branches* appears, and where a fork
+ * is in view the list draws a lane per branch (D2): every branch's history in
+ * one read, a name chip above each lane, and the graph over the gutter. With one
+ * lane in view the list is exactly the one-branch list.
+ *
  * @returns The list.
  */
 function HistoryList(): React.JSX.Element {
   const { projectId } = useProject();
   const status = useRevisionStatus();
-  const { revisions, headRevisionId, line, isDirty, hasOlder, loadOlder } = useRevisions();
+  const view = useRevisions();
+  const { headRevisionId, line, isDirty } = view;
   const { restore, isBusy } = useRestoreToPoint();
   const revealed = useRevisionReveal(projectId);
   const branch = line.kind === 'unknown' ? undefined : line.name;
+  const {
+    filter,
+    setFilter,
+    hasFilter,
+    lanes: onLanes,
+    revisions,
+    hasOlder,
+    loadOlder,
+  } = useHistorySource(view, branch);
+  const lineOf = onLanes?.lineOf;
   /* D4: the newest entry any branch's remote head names; the entries above it are the ones not backed up. */
   const backedUpTo = useMemo(() => {
     const remoteHeads = new Set((status?.branches ?? []).flatMap((facet) => facet.remoteHead ?? []));
     return revisions.find((revision) => remoteHeads.has(revision.revisionId))?.revisionId;
   }, [revisions, status?.branches]);
   const groups = useMemo(
-    () => groupRevisionHistory(revisions, headRevisionId, backedUpTo),
-    [revisions, headRevisionId, backedUpTo],
+    () => groupRevisionHistory(revisions, headRevisionId, { backedUpTo, lineOf }),
+    [revisions, headRevisionId, backedUpTo, lineOf],
   );
   const currentRevisionId = useMemo(() => currentRevisionOf(revisions, headRevisionId), [revisions, headRevisionId]);
   const nextVersion = useMemo(() => nextVersionNumber(revisions), [revisions]);
@@ -793,11 +1216,11 @@ function HistoryList(): React.JSX.Element {
     }
   }
   /* B4: what must stay in view but the page does not hold — the head, a row opened for you, a conflict on this
-     line — read on its own and kept only if this line's head holds it; and the revisions restore rows name. */
+     line — read on its own and kept only if this line's head holds it; and the revisions restore rows name.
+     ponytail: on History's lanes only the graph's own page is drawn; a row below it waits for Show older. */
   const loaded = useMemo(() => new Set(revisions.map((revision) => revision.revisionId)), [revisions]);
-  const unloaded = (ids: ReadonlyArray<string | undefined>): string[] => [
-    ...new Set(ids.filter((id): id is string => id !== undefined && !loaded.has(id))),
-  ];
+  const unloaded = (ids: ReadonlyArray<string | undefined>): string[] =>
+    onLanes === undefined ? [...new Set(ids.filter((id): id is string => id !== undefined && !loaded.has(id)))] : [];
   const older = useRevisionsOnLine(
     unloaded([
       headRevisionId,
@@ -901,14 +1324,7 @@ function HistoryList(): React.JSX.Element {
                 aria-label={`${String(group.revisions.length)} autosaves${span === '' ? '' : ` · ${span}`}`}
                 className={cn(timelineRowButton, timelineRowHover)}
               >
-                <span
-                  aria-hidden
-                  className={timelineGutter({ hasTop: !isFirst, hasBottom: !isLast || isFoldOpen, isDashed: true })}
-                >
-                  <span className={timelineMarker}>
-                    <span className='size-2.5 rounded-full border border-dashed border-muted-foreground' />
-                  </span>
-                </span>
+                <FoldGutter hasTop={!isFirst} hasBottom={!isLast || isFoldOpen} />
                 <span className={timelineRowContent}>
                   <span className='min-w-0 flex-1 text-sm text-muted-foreground'>
                     {group.revisions.length} autosaves
@@ -936,6 +1352,7 @@ function HistoryList(): React.JSX.Element {
       );
     }
     const { revision } = group;
+    const mergedBranch = mergedBranchOf(onLanes, revision.revisionId);
     return (
       <RevisionRow
         key={revision.revisionId}
@@ -951,30 +1368,64 @@ function HistoryList(): React.JSX.Element {
         isLast={isLast}
         onOpenChange={toggle(setOpenRows, revision.revisionId)}
         onRestore={restore}
+        {...(mergedBranch === undefined ? {} : { mergedBranch })}
       />
     );
   };
 
-  const items: React.JSX.Element[] = [];
+  /* Days, chips and rows in the order they render; the graph's rows follow the same order. */
+  const steps: HistoryStep[] = [];
+  const chipped = new Set<string>();
   for (const [index, group] of shown.entries()) {
     const day = dayOf(firstOf(group));
     const previous = shown[index - 1];
     if (previous === undefined || dayOf(firstOf(previous)) !== day) {
-      items.push(<DayDivider key={`day-${day}`} label={day} hasLine={index > 0} />);
+      steps.push({ kind: 'day', key: `day-${day}`, label: day });
     }
     if (index > 0 && holds(group, backedUpTo)) {
-      items.push(<BackupBoundary key='backup-boundary' />);
+      steps.push({ kind: 'backup', key: 'backup-boundary' });
     }
-    items.push(
-      renderGroup(
-        group,
-        index === 0,
-        index === shown.length - 1 && hidden.length === 0 && !hasOlder && older.length === 0,
-      ),
-    );
+    if (onLanes !== undefined) {
+      steps.push(...chipStepsBefore(group, onLanes, chipped));
+    }
+    steps.push({
+      kind: 'group',
+      group,
+      isLast: index === shown.length - 1 && hidden.length === 0 && !hasOlder && older.length === 0,
+    });
   }
   const firstHidden = hidden[0];
   const canShowOlder = firstHidden === undefined && hasOlder;
+
+  const items: React.JSX.Element[] = [];
+  for (const step of steps) {
+    switch (step.kind) {
+      case 'day': {
+        items.push(<DayDivider key={step.key} label={step.label} hasLine={items.length > 0} graphKey={step.key} />);
+        break;
+      }
+      case 'backup': {
+        items.push(<BackupBoundary key={step.key} graphKey={step.key} />);
+        break;
+      }
+      case 'chip': {
+        items.push(
+          <BranchChipRow
+            key={step.key}
+            branch={step.branch}
+            slot={onLanes?.slots.get(step.branch)}
+            note={onLanes?.notes.get(step.branch) ?? ''}
+            isCurrent={step.branch === branch}
+          />,
+        );
+        break;
+      }
+      case 'group': {
+        items.push(renderGroup(step.group, step.group === shown[0], step.isLast));
+        break;
+      }
+    }
+  }
   /* Below Show older: kept rows older than the page, each under its own day. */
   const kept: React.JSX.Element[] = [];
   for (const [index, revision] of older.entries()) {
@@ -996,12 +1447,35 @@ function HistoryList(): React.JSX.Element {
         }
       }}
     >
-      <ol aria-label='History entries' className={timelineList}>
-        {items}
-        {firstHidden === undefined ? null : (
-          <li className={timelineRow}>
-            <span aria-hidden className={timelineMoreGutter} />
-            <span className='py-0.5'>
+      {hasFilter ? (
+        <ToggleGroup
+          type='single'
+          variant='outline'
+          size='xs'
+          aria-label='Which branches to show'
+          value={filter}
+          className='mx-3 mb-1'
+          onValueChange={(value) => {
+            if (value === 'this' || value === 'all') {
+              setFilter(value);
+            }
+          }}
+        >
+          <ToggleGroupItem value='this'>This branch</ToggleGroupItem>
+          <ToggleGroupItem value='all'>All branches</ToggleGroupItem>
+        </ToggleGroup>
+      ) : null}
+      <HistoryGraphFrame
+        lanes={onLanes}
+        steps={steps}
+        openFolds={openFolds}
+        currentRevisionId={currentRevisionId}
+        hasOlderRow={firstHidden !== undefined || canShowOlder}
+      >
+        <ol aria-label='History entries' className={timelineList}>
+          {items}
+          {firstHidden === undefined ? null : (
+            <OlderRow>
               <Button
                 variant='ghost'
                 size='xs'
@@ -1016,13 +1490,10 @@ function HistoryList(): React.JSX.Element {
                 <ChevronDown aria-hidden className='size-3' />
                 Show older
               </Button>
-            </span>
-          </li>
-        )}
-        {canShowOlder ? (
-          <li className={timelineRow}>
-            <span aria-hidden className={timelineMoreGutter} />
-            <span className='py-0.5'>
+            </OlderRow>
+          )}
+          {canShowOlder ? (
+            <OlderRow>
               <Button
                 variant='ghost'
                 size='xs'
@@ -1041,11 +1512,11 @@ function HistoryList(): React.JSX.Element {
                 )}
                 Show older
               </Button>
-            </span>
-          </li>
-        ) : null}
-        {kept}
-      </ol>
+            </OlderRow>
+          ) : null}
+          {kept}
+        </ol>
+      </HistoryGraphFrame>
     </div>
   );
 }

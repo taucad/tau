@@ -17,9 +17,10 @@
  *   same shape, dashed.
  * - A branch with no entries yet ends at its open end, and the fork ends on it.
  *
- * The rows come from the History graph read, which lands with its first consumer: a row's `line`
- * is the node's `branch` here, so a side no branch names takes a lane like any
- * other.
+ * The rows come from the History graph read (`readRevisionGraph`): a row's
+ * `line` is the node's `branch` here, so a side no branch names takes a lane like
+ * any other. {@link graphGeometry} turns a layout and the measured rows into
+ * pixels (D2).
  */
 
 /** Geometry in CSS px, for comparing lane orders. Lane spacing and origin are the timeline's 1rem gutter at `pl-2`. */
@@ -412,4 +413,128 @@ export const layoutRevisionGraph = (
     }
   }
   return best === undefined ? emptyLayout : { lanes: best.lanes, ...best.draft };
+};
+
+/** A row's measured place in the list, in the graph's coordinates. */
+export type RowBox = Readonly<{ top: number; height: number }>;
+
+/** A marker's centre. */
+export type GeometryMarker = LayoutNode & Readonly<{ x: number; y: number }>;
+
+/** One drawn rail segment. */
+export type GeometryLine = Readonly<{
+  lane: number;
+  branch: string;
+  x: number;
+  y1: number;
+  y2: number;
+  /** `fade` is the dotted tail above Show older. */
+  style: LineStyle | 'fade';
+}>;
+
+/** One drawn bend: a single cubic, `M x0 y0 C x0 ym, x1 ym, x1 y1`. */
+export type GeometryPath = Readonly<{
+  kind: LayoutBend['kind'];
+  branch: string;
+  style: LineStyle;
+  d: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}>;
+
+/** Markers, rails and bends in pixels, ready to draw. */
+export type GraphGeometry = Readonly<{
+  /** Width the lanes need, from the list's left edge to the content column. */
+  width: number;
+  markers: readonly GeometryMarker[];
+  lines: readonly GeometryLine[];
+  paths: readonly GeometryPath[];
+}>;
+
+/**
+ * The gutter's width for a number of lanes; the content column starts after it.
+ *
+ * @param laneCount - Lanes in view.
+ * @param metrics - Geometry.
+ * @returns The gutter column's width in px, without the row's left padding.
+ */
+export const gutterWidth = (laneCount: number, metrics: GraphMetrics = graphMetrics): number =>
+  Math.max(1, laneCount) * metrics.laneStep;
+
+/**
+ * Turn a layout into pixels (D2).
+ *
+ * Each bend is one cubic whose control points sit at mid-height, one above its
+ * start and one below its end, so both ends are vertical. It is as tall as its
+ * sideways distance plus {@link graphMetrics}' `bendPad`, and ends sooner when
+ * the marker it runs to is nearer. A rail that meets a bend ends exactly where
+ * the bend does.
+ *
+ * @param layout - From {@link layoutRevisionGraph}.
+ * @param rows - The same rows the layout was made from.
+ * @param boxes - Each row's measured top and height, in the graph's coordinates.
+ * @returns Marker centres, rail segments and bend paths, in {@link graphMetrics}' geometry.
+ */
+export const graphGeometry = (
+  layout: GraphLayout,
+  rows: readonly GraphRow[],
+  boxes: readonly RowBox[],
+): GraphGeometry => {
+  const metrics = graphMetrics;
+  const xOf = (lane: number): number => metrics.laneOrigin + lane * metrics.laneStep;
+  const yOf = (row: number): number => (boxes[row]?.top ?? 0) + (rows[row]?.anchor ?? 0);
+
+  const paths = layout.bends.map((bend): GeometryPath => {
+    const [x0, x1, y0] = [xOf(bend.originLane), xOf(bend.lane), yOf(bend.originRow)];
+    const height = Math.abs(x1 - x0) + metrics.bendPad;
+    const limit = yOf(bend.limitRow);
+    const y1 = bend.direction === 'up' ? Math.max(y0 - height, limit) : Math.min(y0 + height, limit);
+    const middle = (y0 + y1) / 2;
+    return {
+      kind: bend.kind,
+      branch: bend.branch,
+      style: bend.style,
+      d: `M${String(x0)} ${String(y0)}C${String(x0)} ${String(middle)} ${String(x1)} ${String(middle)} ${String(x1)} ${String(y1)}`,
+      x0,
+      y0,
+      x1,
+      y1,
+    };
+  });
+
+  const lines: GeometryLine[] = [];
+  for (const rail of layout.rails) {
+    const x = xOf(rail.lane);
+    const endY = (end: RailEnd): number => (end.at === 'bend' ? (paths[end.bend]?.y1 ?? 0) : yOf(end.row));
+    const y1 = endY(rail.upper);
+    if (rail.lower.at === 'fade') {
+      // Solid to the top of the Show older row, then dotted to its centre line.
+      const top = boxes[rail.lower.row]?.top ?? y1;
+      if (top > y1) {
+        lines.push({ lane: rail.lane, branch: rail.branch, x, y1, y2: top, style: rail.style });
+      }
+      lines.push({
+        lane: rail.lane,
+        branch: rail.branch,
+        x,
+        y1: Math.max(y1, top),
+        y2: endY(rail.lower),
+        style: 'fade',
+      });
+      continue;
+    }
+    const y2 = endY(rail.lower);
+    if (y2 > y1) {
+      lines.push({ lane: rail.lane, branch: rail.branch, x, y1, y2, style: rail.style });
+    }
+  }
+
+  return {
+    width: gutterWidth(layout.lanes.length, metrics),
+    markers: layout.nodes.map((node) => ({ ...node, x: xOf(node.lane), y: yOf(node.row) })),
+    lines,
+    paths,
+  };
 };

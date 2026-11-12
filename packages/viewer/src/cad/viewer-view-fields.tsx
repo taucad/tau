@@ -36,6 +36,24 @@ export type ViewerViewFieldValues = {
 export type ViewerViewFieldPath = keyof ViewerViewFieldValues;
 
 /**
+ * Every inheritable leaf path, in the order of `viewFieldPaths` in `@taucad/workbench`.
+ *
+ * @public
+ */
+export const viewerViewFieldPaths: readonly ViewerViewFieldPath[] = Object.freeze([
+  'upDirection',
+  'fieldOfView',
+  'display.surfaces',
+  'display.lines',
+  'display.gizmo',
+  'display.grid',
+  'display.axes',
+  'display.matcap',
+  'display.postProcessing',
+  'grid.unit',
+]);
+
+/**
  * The level a leaf's shown value comes from.
  *
  * @public
@@ -55,8 +73,15 @@ export type ViewerViewFields = Readonly<{
   set: <Leaf extends ViewerViewFieldPath>(leaf: Leaf, value: ViewerViewFieldValues[Leaf]) => void | Promise<boolean>;
   /** Reset a leaf in this view, so it inherits again. */
   reset: (leaf: ViewerViewFieldPath) => void;
-  /** Where a leaf's shown value comes from, for the menu's markers. */
+  /**
+   * Where a leaf's shown value comes from. With it the menu marks each leaf: "From my defaults" under a leaf the person
+   * sets and the view does not, and the modified dot beside a leaf the view sets. Without it the menu shows no marks.
+   */
   sourceOf?: (leaf: ViewerViewFieldPath) => ViewerViewFieldSource;
+  /** The level a leaf set in the view returns to on Reset, which the dot's tooltip names. Absent: Tau's default. */
+  inheritsFrom?: (leaf: ViewerViewFieldPath) => Exclude<ViewerViewFieldSource, 'view'>;
+  /** "Reset view": every leaf the view sets goes back to inheriting. With `sourceOf`, the menu offers it with a count. */
+  resetView?: () => void;
 }>;
 
 const viewerViewFieldsContext = createContext<ViewerViewFields | undefined>(undefined);

@@ -11,11 +11,15 @@ import {
   Settings2,
   Globe,
   FolderGit2,
+  Rotate3D,
   User,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { SettingsSection } from '#hooks/use-settings-dialog.js';
+import { useMemo } from 'react';
 import { experimentalFeatureFlagNames, flagRegistry, featureFlagDefaults } from '#flags/flag.constants.js';
+import type { FeatureFlagName } from '#flags/flag.constants.js';
+import { useFeature } from '#flags/use-feature.js';
 import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 
@@ -206,6 +210,119 @@ const settingsCatalog = [
         label: 'Close account',
         description: 'Close your account and delete your data',
         keywords: ['delete', 'remove'],
+      },
+    ],
+  },
+  {
+    /* How 3D views look and respond (onboarding blueprint, Finding 6). Shown only while `viewerControls` is on. */
+    id: 'viewer',
+    label: 'Viewer',
+    icon: Rotate3D,
+    group: 'Workspace',
+    entries: [
+      /* Navigation. */
+      {
+        id: 'viewer-mouse-controls',
+        label: 'Mouse controls',
+        description: 'Which buttons orbit, pan and zoom',
+        keywords: [
+          'mouse',
+          'orbit',
+          'pan',
+          'zoom',
+          'rotate',
+          'preset',
+          'navigation',
+          'camera',
+          'solidworks',
+          'blender',
+        ],
+      },
+      {
+        id: 'viewer-trackpad-gestures',
+        label: 'Trackpad gestures',
+        description: 'Two-finger scroll pans and pinch zooms, replacing mouse controls here',
+        keywords: ['trackpad', 'touchpad', 'pinch', 'scroll', 'laptop', 'this device'],
+      },
+      {
+        id: 'viewer-zoom-to-cursor',
+        label: 'Zoom to cursor',
+        description: 'Zoom toward the pointer instead of the view centre',
+        keywords: ['zoom', 'pointer', 'wheel', 'navigation'],
+      },
+      {
+        id: 'viewer-orbit-around-cursor',
+        label: 'Orbit around cursor',
+        description: 'Rotate about the point under the pointer',
+        keywords: ['orbit', 'rotate', 'pivot', 'pointer', 'navigation'],
+      },
+      {
+        id: 'viewer-invert-zoom',
+        label: 'Invert zoom',
+        description: 'Scroll up to zoom out',
+        keywords: ['zoom', 'reverse', 'wheel', 'scroll', 'direction'],
+      },
+      /* Gizmo. Show gizmo is the View defaults row. */
+      {
+        id: 'viewer-gizmo-style',
+        label: 'Gizmo style',
+        description: 'The orientation control you click to snap views',
+        keywords: ['view cube', 'cube', 'axis balls', 'axes', 'triad', 'orientation'],
+      },
+      /* View defaults: one entry per inheritable leaf the person can set (no up axis). */
+      {
+        id: 'viewer-projection',
+        label: 'Projection',
+        description: 'Perspective shows depth, orthographic keeps parallel edges parallel',
+        keywords: ['field of view', 'fov', 'orthographic', 'perspective', 'camera', 'view defaults'],
+      },
+      {
+        id: 'viewer-surfaces',
+        label: 'Surfaces',
+        description: 'Show the faces of every model',
+        keywords: ['faces', 'view defaults'],
+      },
+      {
+        id: 'viewer-edges',
+        label: 'Edges',
+        description: 'Outline the edges of every face',
+        keywords: ['lines', 'outline', 'view defaults'],
+      },
+      {
+        id: 'viewer-show-gizmo',
+        label: 'Show gizmo',
+        description: 'The orientation control in the corner of a view',
+        keywords: ['view cube', 'hide gizmo', 'none', 'view defaults'],
+      },
+      {
+        id: 'viewer-grid',
+        label: 'Grid',
+        description: 'A ground grid with a scale label',
+        keywords: ['ground', 'floor', 'view defaults'],
+      },
+      {
+        id: 'viewer-axes',
+        label: 'Axes',
+        description: 'The X, Y and Z axes at the origin',
+        keywords: ['origin', 'x y z', 'view defaults'],
+      },
+      {
+        id: 'viewer-matcap',
+        label: 'Matcap',
+        description: 'Shade surfaces with a studio material',
+        keywords: ['material', 'shading', 'lighting', 'view defaults'],
+      },
+      {
+        id: 'viewer-post-processing',
+        label: 'Post-processing',
+        description: 'Soften shadows and smooth edges on screen',
+        keywords: ['ambient occlusion', 'anti-aliasing', 'effects', 'view defaults'],
+      },
+      {
+        id: 'viewer-grid-unit',
+        label: 'Grid unit',
+        description: 'The length unit the grid shows',
+        keywords: ['millimetre', 'inch', 'units', 'metric', 'imperial', 'view defaults'],
       },
     ],
   },
@@ -433,6 +550,41 @@ export const settingsSections: readonly SettingsSectionDefinition[] = platformSe
     entries: section.entries.filter((entry) => entry.id !== 'automatic-reload' || featureFlagDefaults.automaticReload),
   }));
 
+/**
+ * Sections that exist only while a runtime flag is on. The flag is read at render (PostHog evaluates it after
+ * hydration), so these are filtered by {@link useSettingsSections} rather than at module load like the build-time
+ * gates above. With the flag off the section, its search results and its deep link are absent.
+ */
+const flaggedSections: Readonly<Partial<Record<SettingsSection, FeatureFlagName>>> = { viewer: 'viewerControls' };
+
+/**
+ * The sections this deployment shows for the given runtime flags.
+ *
+ * @param isOn - Whether a flag is on.
+ * @returns The sections, in catalogue order.
+ */
+export function availableSettingsSections(
+  isOn: (flag: FeatureFlagName) => boolean,
+): readonly SettingsSectionDefinition[] {
+  return settingsSections.filter((section) => {
+    const flag = flaggedSections[section.id];
+    return flag === undefined || isOn(flag);
+  });
+}
+
+/**
+ * The sections shown now, refreshed when a gating flag changes.
+ *
+ * @returns The sections, stable while the flags are.
+ */
+export function useSettingsSections(): readonly SettingsSectionDefinition[] {
+  const viewerControls = useFeature('viewerControls');
+  return useMemo(
+    () => availableSettingsSections((flag) => flag === 'viewerControls' && viewerControls),
+    [viewerControls],
+  );
+}
+
 function normalizeSearch(value: string): string {
   return value
     .normalize('NFKD')
@@ -445,13 +597,14 @@ function normalizeSearch(value: string): string {
 /** Match every query word, prioritizing setting names over descriptions and aliases. */
 export function searchSettings(
   query: string,
+  sections: readonly SettingsSectionDefinition[] = availableSettingsSections(() => false),
 ): Array<{ section: SettingsSectionDefinition; entries: SettingDefinition[] }> {
   const normalized = normalizeSearch(query);
   if (!normalized) {
     return [];
   }
   const tokens = normalized.split(/\s+/);
-  const groups = settingsSections.map((section) => {
+  const groups = sections.map((section) => {
     const ranked = section.entries
       .flatMap((entry) => {
         const label = normalizeSearch(entry.label);

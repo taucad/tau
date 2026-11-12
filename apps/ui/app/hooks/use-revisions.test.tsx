@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import type { RevisionLogRequest, RevisionRow } from '@taucad/revisions';
+import type { RevisionGraphRow, RevisionLogRequest, RevisionRow } from '@taucad/revisions';
 import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import {
   revisionPageSize,
@@ -20,6 +20,7 @@ import {
   useRevisionChanges,
   useRevisionChangesSince,
   useRevisionFileComparison,
+  useRevisionGraph,
   useRevisions,
   useTurnRevision,
 } from '#hooks/use-revisions.js';
@@ -1368,5 +1369,63 @@ describe('useRevisions with Tau Cloud push records (A3)', () => {
 
     expect(result.current.revisions.map((card) => card.actor)).toEqual(['', '', '']);
     expect(result.current.revisions[2]?.isYours).toBe(true);
+  });
+});
+
+describe('useRevisionGraph pages (D2)', () => {
+  /* A chain of `count` entries on `line`, newest first; the oldest has no parent. */
+  const chain = (line: string, count: number, newest: number): RevisionGraphRow[] =>
+    Array.from({ length: count }, (_, index) => ({
+      ...row({
+        revisionId: `${line}-${String(count - index)}`,
+        createdAt: newest - index,
+        ...(index === count - 1 ? {} : { parent: `${line}-${String(count - index - 1)}` }),
+      }),
+      line,
+      branch: line,
+    }));
+  const onTwoRoots = (side: number, main: number): void => {
+    /* `side` is newer than every entry on `main` and has a root of its own. */
+    const sideRows = chain('side', side, 2_000_000);
+    const mainRows = chain('main', main, 1_000_000);
+    revisionStatusHarness.graph = {
+      branches: [
+        { name: 'main', head: mainRows[0]!.revisionId },
+        { name: 'side', head: sideRows[0]!.revisionId },
+      ],
+      rows: [...sideRows, ...mainRows],
+    };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branches: revisionStatusHarness.graph.branches.map((branch) => ({
+        ...branch,
+        checkoutId: branch.name,
+        checkoutRoot: `/checkouts/${branch.name}`,
+        leaseChatIds: [],
+      })),
+    };
+  };
+
+  it('should say older entries remain when the page ends on one branch’s root and another branch goes on', async () => {
+    onTwoRoots(50, 3);
+
+    const { result } = renderHook(() => useRevisionGraph(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current?.revisions).toHaveLength(50);
+    });
+    expect(result.current?.revisions.at(-1)?.revisionId).toBe('side-1');
+    expect(result.current?.hasOlder).toBe(true);
+  });
+
+  it('should say nothing older remains when the graph holds exactly one page', async () => {
+    onTwoRoots(47, 3);
+
+    const { result } = renderHook(() => useRevisionGraph(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current?.revisions).toHaveLength(50);
+    });
+    expect(result.current?.hasOlder).toBe(false);
   });
 });

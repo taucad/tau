@@ -21,6 +21,8 @@ import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import type { PageTelemetryContext } from '#telemetry/page-telemetry.js';
 import { z } from 'zod';
+import { lengthUnits } from '@taucad/workbench';
+import type { ViewFieldsSet } from '@taucad/chat/rpc';
 import { skillMetadataSchema } from '@taucad/chat/schemas';
 import { readBuildIdentity } from '#lib/build-identity.js';
 
@@ -283,6 +285,10 @@ export type AgentHostWorkerProtocol = {
   };
   readonly notifies: {
     readonly rebridgeRequested: { readonly args: { readonly projectId: string; readonly hostId: string } };
+    /** `arrange_workbench` wrote these inheritable leaves in a view; the page records them as set (BD7). */
+    readonly viewFieldsSet: {
+      readonly args: { readonly projectId: string; readonly viewId: string; readonly fields: ViewFieldsSet };
+    };
     /** One finished runtime telemetry entry for the page reporter, fire-and-forget; the page validates it. */
     readonly telemetry: { readonly args: { readonly entry: unknown } };
   };
@@ -296,6 +302,21 @@ export type AgentHostWorkerConnect = {
 };
 
 const nonEmptyString = z.string().min(1);
+/* The leaves one `arrange_workbench` call set in a view, keyed by leaf path (`ViewFieldsSet`). */
+const viewFieldsSetSchema = z
+  .strictObject({
+    upDirection: z.enum(['x', 'y', 'z']),
+    fieldOfView: z.number().min(0).max(90),
+    'display.surfaces': z.boolean(),
+    'display.lines': z.boolean(),
+    'display.gizmo': z.boolean(),
+    'display.grid': z.boolean(),
+    'display.axes': z.boolean(),
+    'display.matcap': z.boolean(),
+    'display.postProcessing': z.boolean(),
+    'grid.unit': z.enum(lengthUnits),
+  })
+  .partial();
 const clientContextSchema = z.strictObject({
   // The canonical client-authored skill metadata wire shape — a local strict
   // relist here rejected real payloads (resourceUri/source/version/whenToUse/
@@ -504,6 +525,7 @@ export const agentHostWorkerProtocolSchemas = {
   },
   notifies: {
     rebridgeRequested: z.strictObject({ projectId: nonEmptyString, hostId: nonEmptyString }),
+    viewFieldsSet: z.strictObject({ projectId: nonEmptyString, viewId: nonEmptyString, fields: viewFieldsSetSchema }),
     telemetry: z.strictObject({ entry: z.unknown() }),
   },
   listens: {},

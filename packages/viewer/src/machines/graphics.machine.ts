@@ -1033,7 +1033,7 @@ const decideViewerShortcut = (
   const is2d = context.artifact?.mimeType === 'image/svg+xml';
   switch (shortcut) {
     case 'fitView': {
-      return context.geometryRadius > 0 || is2d
+      return is2d || (context.geometryRadius > 0 && selectFramingFits(context.framingRef))
         ? { outcome: 'fitted', event: { type: 'fitView' } }
         : { outcome: 'noModelToFit' };
     }
@@ -1065,6 +1065,15 @@ const decideViewerShortcut = (
       return decideRemoveCut(context, cutId);
     }
   }
+};
+
+/** Whether Fit view fits: framing has framed the entry and holds a measurement to fit (it ignores the request while
+ * an entry waits for its first presentation). */
+const selectFramingFits = (framingRef: GraphicsFramingRef): boolean => {
+  const framing = framingRef.getSnapshot();
+  return (
+    framing.matches('framed') && 'measuredBounds' in framing.context && framing.context.measuredBounds !== undefined
+  );
 };
 
 /** Whether the person is holding a camera gesture (pointer down on the controls). */

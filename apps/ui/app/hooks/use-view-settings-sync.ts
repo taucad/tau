@@ -60,6 +60,12 @@ const selectFramingActor = (
   graphicsRef: ActorRefFrom<typeof graphicsMachine>,
 ): ReturnType<typeof selectGraphicsFraming> => selectGraphicsFraming(graphicsRef.getSnapshot());
 
+/** Whether the record may name `entryPath`'s pending pose: framing waits for that entry, or names none yet. */
+const mayRefreshPendingPose = (graphicsRef: ActorRefFrom<typeof graphicsMachine>, entryPath: string): boolean => {
+  const identity = selectFramingIdentity(graphicsRef);
+  return !selectFramed(graphicsRef) && (identity === undefined || identity === entryPath);
+};
+
 /** Whether `entryPath` waits for its first frame: framing frames another entry, or none yet. */
 const isAwaitingFirstFrame = (graphicsRef: ActorRefFrom<typeof graphicsMachine>, entryPath: string): boolean =>
   !selectFramed(graphicsRef) || selectFramingIdentity(graphicsRef) !== entryPath;
@@ -273,9 +279,10 @@ export function useViewSettingsSync({
         (!localCameraReceipt && !sameRecordField(previous.camera, cameraRecord.camera)) ||
         Boolean(pendingCameraRecordRef.current));
     if (needsCamera && (!localCameraReceipt || !previous || selectedChanged)) {
-      /* Before the entry's first frame, framing applies the record's camera over that frame. An entry framing has not
-       * been told of yet (the provider has not rendered the switch) waits for its first frame too. */
-      if (session && entryPath !== undefined && isAwaitingFirstFrame(graphicsRef, entryPath)) {
+      /* Before the entry's first frame, framing applies the record's camera over that frame. The provider names the
+       * entry; the record only refreshes the pending pose of the entry framing already waits for (or names one when
+       * none is named), so a record for another entry never un-frames the one on screen. */
+      if (session && entryPath !== undefined && mayRefreshPendingPose(graphicsRef, entryPath)) {
         const pendingPose = pendingPoseOf(cameraRecord, `record:${viewId}`);
         graphicsRef.send({ type: 'entryChanged', identity: entryPath, ...(pendingPose ? { pendingPose } : {}) });
       }

@@ -10,7 +10,11 @@ import type { WorkbenchView } from '@taucad/workbench';
 import { GraphicsProvider } from '@taucad/viewer/hooks/use-graphics';
 import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
 import type { ViewRecordPatch } from '#workbench-records/view-store.js';
-import { graphicsMachine, selectGraphicsFramed } from '@taucad/viewer/machines/graphics.machine';
+import {
+  graphicsMachine,
+  selectGraphicsFramed,
+  selectGraphicsFramingIdentity,
+} from '@taucad/viewer/machines/graphics.machine';
 import { cadMachine } from '#machines/cad.machine.js';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
@@ -1017,6 +1021,35 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       expect(['framing', 'persisted']).toContain(harness.rig.getSnapshot().context.lastChange.source);
       advance(settle * 4);
       expect(poseWrites(harness.writeRecord)).toEqual([]);
+    });
+
+    it('should keep the entry on screen framed when a record for another entry arrives', () => {
+      const graphicsRef = graphics();
+      const editorRef = editor();
+      const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+      const record = initial();
+      const draw = (next: WorkbenchView) => (
+        <GraphicsProvider graphicsRef={graphicsRef}>
+          <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={next} writeRecord={writeRecord} />
+        </GraphicsProvider>
+      );
+      const view = render(draw(record));
+      disposers.push(() => {
+        view.unmount();
+        graphicsRef.stop();
+      });
+      advance(settle * 4);
+      // The pane shows another entry than the record names, and framing has framed it.
+      act(() => {
+        graphicsRef.send({ type: 'entryChanged', identity: 'src/other.ts' });
+      });
+      measure(graphicsRef, smallBounds, 'cube-other');
+      expect(isFramed(graphicsRef)).toBe(true);
+
+      view.rerender(draw({ ...record, camera: { kind: 'preset', preset: 'front' } }));
+      advance(settle * 4);
+      expect(isFramed(graphicsRef)).toBe(true);
+      expect(selectGraphicsFramingIdentity(graphicsRef.getSnapshot())).toBe('src/other.ts');
     });
 
     it('today saves an automatic refit after the bounds grow by more than 10 % (G6b flips, D20)', () => {

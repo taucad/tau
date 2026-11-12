@@ -38,6 +38,8 @@ export {
   agentPrefixBreakCauses,
   lfsTransports,
   workerTimingSpanNames,
+  kernelHostProfiles,
+  kernelSelectionModelSchema,
 } from '#ingest.js';
 export type { AgentTurnContext, ClientMetricEntry, IngestPayload } from '#ingest.js';
 export {

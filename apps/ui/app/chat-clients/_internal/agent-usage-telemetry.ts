@@ -34,6 +34,8 @@ import { agentPlacementOf } from '#lib/agent-host-placement.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
 import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
+import { reportAutoKernelTurn } from '#chat-clients/_internal/kernel-selection-telemetry.js';
+import type { AutoKernelTurn, SettledTurnFacts } from '#chat-clients/_internal/kernel-selection-telemetry.js';
 
 type AgentTurnDetail = Extract<ClientMetricEntry, { name: 'agent.turn' }>['detail'];
 type AgentSessionDetail = Extract<ClientMetricEntry, { name: 'agent.session' }>['detail'];
@@ -709,9 +711,11 @@ export const trackAgentTurn = (
     usageMetrics?: AgentTurnUsageMetrics;
     /** Called once, when the host has logged the run: the turn was accepted, not just composed. */
     onAccepted?: () => void;
+    /** Called once, after the settled turn is reported. */
+    onSettled?: (settled: SettledTurnFacts) => void;
   }>,
 ): void => {
-  const { runId, identity, source, usageMetrics, onAccepted } = options;
+  const { runId, identity, source, usageMetrics, onAccepted, onSettled } = options;
   if (tracked.has(runId)) {
     return;
   }
@@ -787,6 +791,11 @@ export const trackAgentTurn = (
               context: contextOf(facts, { kernelId: usageMetrics.kernelId, measuresBytes: identity.agentId === 'tau' }),
             }),
       },
+    });
+    onSettled?.({
+      agentId: identity.agentId,
+      turns: Math.max(1, Object.keys(projection.ledger.runs).length),
+      evaluated: facts.context.evaluations.size > 0,
     });
   };
 
@@ -875,8 +884,16 @@ export const createAgentSessionTracker = (report: AgentTelemetryReport = default
   };
 };
 
-/** What the admitting surface knows about consent and the kernel the turn runs on. @public */
-export type AgentTurnConsent = Readonly<{ kernelId: string; allowsUsageMetrics: boolean }>;
+/**
+ * What the admitting surface knows about consent and the kernel the turn runs on. `autoKernel` is present when Auto
+ * runs the turn, which then reports how it resolved (blueprint D10).
+ * @public
+ */
+export type AgentTurnConsent = Readonly<{
+  kernelId: string;
+  allowsUsageMetrics: boolean;
+  autoKernel?: Omit<AutoKernelTurn, 'execution'>;
+}>;
 
 /** One admission's telemetry: report it admitted under its run, or refused. @public */
 export type AgentTurnTelemetry = Readonly<{
@@ -904,6 +921,7 @@ export const createAgentUsageTelemetry = (
   return {
     begin(execution, consent) {
       const admittedAt = performance.now();
+      const { autoKernel } = consent;
       const usageMetrics: AgentTurnUsageMetrics | undefined =
         consent.allowsUsageMetrics && knownKernels.has(consent.kernelId)
           ? { kernelId: consent.kernelId as AgentTurnUsageMetrics['kernelId'] }
@@ -929,6 +947,15 @@ export const createAgentUsageTelemetry = (
                     session.admitted(admittedAs);
                   });
                 },
+                ...(autoKernel === undefined
+                  ? {}
+                  : {
+                      onSettled: (settled: SettledTurnFacts) => {
+                        quietly(() => {
+                          reportAutoKernelTurn({ ...autoKernel, execution }, settled, report);
+                        });
+                      },
+                    }),
               });
             }
           });

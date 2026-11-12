@@ -5,7 +5,7 @@ import { flushSync } from 'react-dom';
 import { useSelector } from '@xstate/react';
 import { ArrowLeftRight, FlipHorizontal, PieChart, Plus, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { SnapshotFrom } from 'xstate';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
@@ -32,6 +32,7 @@ import {
 import type { SectionAxis, SectionCut, SectionCutPatch, SectionPlane } from '#graphics/section-cuts.js';
 import { SliderInput } from '@taucad/ui/components/slider-input';
 import { axesColors } from '#constants/axes-colors.js';
+import { selectCameraViewDirection } from '#graphics/graphics-camera.js';
 import { useCameraRig, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import type { AddSectionCutPayload, graphicsMachine } from '#machines/graphics.machine.js';
 import { formatNumberEngineeringNotation } from '#utils/number.js';
@@ -40,6 +41,14 @@ type GraphicsState = SnapshotFrom<typeof graphicsMachine>;
 type GraphicsContext = GraphicsState['context'];
 type CutProps = Readonly<{ cutId: string }>;
 type CutPatcher = (cut: SectionCut, context: GraphicsContext) => SectionCutPatch | undefined;
+type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
+
+/** The context a cut's patch is computed against: its cuts, units and bounds as they are when the event fires. */
+const selectCutPatchContext = (graphicsRef: GraphicsActorRef): GraphicsContext => graphicsRef.getSnapshot().context;
+
+/** The cut a chip, handle or pointer is previewing now. */
+const selectHoveredSectionCutId = (graphicsRef: GraphicsActorRef): string | undefined =>
+  graphicsRef.getSnapshot().context.hoveredSectionCutId;
 
 // ---------------------------------------------------------------------------
 // Focus
@@ -167,7 +176,7 @@ const useCutUpdate = (cutId: string): ((toPatch: CutPatcher) => void) => {
   const graphicsRef = useGraphics();
   return useCallback(
     (toPatch: CutPatcher) => {
-      const { context } = graphicsRef.getSnapshot();
+      const context = selectCutPatchContext(graphicsRef);
       const cut = findCut(context.sectionCuts, cutId);
       const patch = cut ? toPatch(cut, context) : undefined;
       if (cut && patch && applySectionCutPatch(cut, patch, context.geometryCenter) !== cut) {
@@ -315,7 +324,7 @@ const SectionChip = memo(function SectionChip({ cutId }: CutProps): React.ReactN
         }}
         // Leaving clears only this chip's own preview, never a hover the pointer or a scene handle has set since.
         onBlur={() => {
-          if (graphicsRef.getSnapshot().context.hoveredSectionCutId === cutId) {
+          if (selectHoveredSectionCutId(graphicsRef) === cutId) {
             hover(undefined);
           }
         }}
@@ -359,7 +368,7 @@ const AddSectionMenu = memo(function AddSectionMenu(): React.JSX.Element {
   const addCut = (payload: AddSectionCutPayload): void => {
     graphicsRef.send({
       type: 'addSectionCut',
-      payload: { ...payload, viewDirection: cameraRig.actorRef.getSnapshot().context.view.direction },
+      payload: { ...payload, viewDirection: selectCameraViewDirection(cameraRig.actorRef) },
     });
   };
 
@@ -475,7 +484,7 @@ const PlaneToggle = memo(function PlaneToggle({ cutId }: CutProps): React.JSX.El
           cut.kind === 'plane' && cut.plane !== next
             ? {
                 plane: next,
-                isFlipped: resolveSectionPlaneFlip(next, cameraRig.actorRef.getSnapshot().context.view.direction),
+                isFlipped: resolveSectionPlaneFlip(next, selectCameraViewDirection(cameraRig.actorRef)),
               }
             : undefined,
         );

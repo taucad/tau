@@ -5,6 +5,7 @@ import { FlipHorizontal } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
+import { selectCameraViewDirection } from '#graphics/graphics-camera.js';
 import { useCameraRig, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 
 type ToolToggleProps = Readonly<{
@@ -95,7 +96,7 @@ export function SectionViewControl({ shortcut, onStart }: SectionViewControlProp
       graphicsRef.send({
         type: 'setSectionViewActive',
         payload: !isSectionViewActive,
-        viewDirection: cameraRig.actorRef.getSnapshot().context.view.direction,
+        viewDirection: selectCameraViewDirection(cameraRig.actorRef),
       });
     });
     if (!isSectionViewActive) {

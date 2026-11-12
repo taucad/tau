@@ -1,8 +1,8 @@
 // @vitest-environment node
 /*
  * Holds the React event layer in packages/ui/src: effects that send, subscribe or
- * run timers, and `getSnapshot()` reads outside `select*` helpers, move to actors. Today's sites are
- * held per file in react-event-layer.ceiling.json, which only goes down. Remove
+ * run timers, and `getSnapshot()` reads in components and hooks outside `select*` helpers,
+ * move to actors. Today's sites are held per file in react-event-layer.ceiling.json, which only goes down. Remove
  * a site and lower its line (delete it at 0); a file moved elsewhere carries
  * its line with it. The counter is `@taucad/oxlint/react-event-layer`.
  */

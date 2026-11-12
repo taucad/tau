@@ -15,8 +15,11 @@
  *   `subscribe(`), `setTimeout(`,
  *   `setInterval(` or `requestAnimationFrame(`, counted once however many
  *   such calls it holds; or
- * - one `getSnapshot()` call that is not inside a module-level `select*` helper
- *   (`function selectFoo` or `const selectFoo = (...) =>`).
+ * - one `getSnapshot()` call inside a React component or hook (a function named
+ *   `useFoo` or `Foo`, or one passed to `memo` or `forwardRef`) that is not inside a
+ *   module-level `select*` helper (`function selectFoo` or `const selectFoo = (...) =>`).
+ *   A read in actor logic, an adapter, a store factory or a callback-actor host is
+ *   outside React and is not a site.
  *
  * Tests, type tests, declarations and test-support modules are not counted.
  *
@@ -79,6 +82,59 @@ function moduleLevelFunctionName(node: ts.Node): string | undefined {
     return declaration.name.text;
   }
   return undefined;
+}
+
+/** Components are PascalCase and hooks are `useFoo`. */
+const reactFunctionNamePattern = /^(?:use[\dA-Z]|[A-Z])/;
+const componentWrappers = new Set(['forwardRef', 'memo']);
+
+/** The name a function is known by: its own, or the variable or property it initializes. */
+function functionName(node: ts.Node): string | undefined {
+  if ((ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)) && node.name !== undefined) {
+    return node.name.text;
+  }
+  if (ts.isMethodDeclaration(node) && ts.isIdentifier(node.name)) {
+    return node.name.text;
+  }
+  const { parent } = node;
+  if (
+    (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+    (ts.isVariableDeclaration(parent) || ts.isPropertyAssignment(parent)) &&
+    parent.initializer === node &&
+    ts.isIdentifier(parent.name)
+  ) {
+    return parent.name.text;
+  }
+  return undefined;
+}
+
+/** A function passed to `memo(...)`, `forwardRef(...)` or their `React.` forms. */
+function isWrappedComponent(node: ts.Node): boolean {
+  const { parent } = node;
+  if (!ts.isCallExpression(parent) || !parent.arguments.includes(node as ts.Expression)) {
+    return false;
+  }
+  const callee = parent.expression;
+  const name = ts.isIdentifier(callee)
+    ? callee.text
+    : ts.isPropertyAccessExpression(callee)
+      ? callee.name.text
+      : undefined;
+  return name !== undefined && componentWrappers.has(name);
+}
+
+/** Whether `node` lies, at any depth, inside a React component or hook. */
+function isInsideReactFunction(node: ts.Node): boolean {
+  for (let current = node.parent; !ts.isSourceFile(current); current = current.parent) {
+    if (!ts.isFunctionLike(current)) {
+      continue;
+    }
+    const name = functionName(current);
+    if ((name !== undefined && reactFunctionNamePattern.test(name)) || isWrappedComponent(current)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isInsideSelectHelper(node: ts.Node): boolean {
@@ -251,7 +307,7 @@ export function countReactEventLayerSites(fileName: string, sourceText: string):
         if (calls.length > 0) {
           sites.push({ kind: 'effect', ...position(node), calls });
         }
-      } else if (isGetSnapshotCall(node) && !isInsideSelectHelper(node)) {
+      } else if (isGetSnapshotCall(node) && isInsideReactFunction(node) && !isInsideSelectHelper(node)) {
         sites.push({ kind: 'getSnapshot', ...position(node), calls: [] });
       }
     }
@@ -316,6 +372,10 @@ export function measureReactEventLayer(
   return new Map([...measured].sort(([left], [right]) => (left < right ? -1 : 1)));
 }
 
+function isInScope(path: string, scope: readonly string[]): boolean {
+  return scope.some((entry) => path === entry || path.startsWith(`${entry}/`));
+}
+
 function describeSite(site: ReactEventLayerSite): string {
   const where = `${site.line}:${site.column}`;
   return site.kind === 'effect' ? `${where} effect calls ${site.calls.join(', ')}` : `${where} getSnapshot()`;
@@ -328,15 +388,17 @@ function describeSite(site: ReactEventLayerSite): string {
  *
  * @param measured - Output of {@link measureReactEventLayer}.
  * @param ceiling - The committed manifest.
- * @param manifestName - Manifest path shown in messages.
+ * @param manifest - Manifest path shown in messages, or that path with the workspace-relative POSIX paths held at
+ *   zero, which messages name as such.
  * @returns One message per file over its ceiling, naming each site.
  * @public
  */
 export function reactEventLayerViolations(
   measured: ReadonlyMap<string, readonly ReactEventLayerSite[]>,
   ceiling: ReactEventLayerCeiling,
-  manifestName: string,
+  manifest: string | Readonly<{ name: string; zeroScope: readonly string[] }>,
 ): string[] {
+  const { name: manifestName, zeroScope } = typeof manifest === 'string' ? { name: manifest, zeroScope: [] } : manifest;
   const violations: string[] = [];
   for (const [path, sites] of measured) {
     const listed = Object.hasOwn(ceiling, path);
@@ -344,9 +406,13 @@ export function reactEventLayerViolations(
     if (sites.length <= allowed) {
       continue;
     }
-    const hint = listed
-      ? `exceeds its ceiling of ${allowed} in ${manifestName}`
-      : `has no line in ${manifestName}, so its ceiling is 0 (a moved file carries its old line to its new path)`;
+    const hint = isInScope(path, zeroScope)
+      ? listed
+        ? `exceeds its named exception of ${allowed}`
+        : 'is held at zero; only a named exception may keep a site'
+      : listed
+        ? `exceeds its ceiling of ${allowed} in ${manifestName}`
+        : `has no line in ${manifestName}, so its ceiling is 0 (a moved file carries its old line to its new path)`;
     violations.push(
       [
         `${path}: ${sites.length} React event-layer site(s) ${hint}. Move the work into an actor.`,
@@ -402,6 +468,30 @@ function duplicateManifestKeys(manifestText: string): string[] {
   return problems;
 }
 
+/**
+ * A file inside a zero scope that may keep sites, with the reason it is a boundary rather than debt.
+ *
+ * @public
+ */
+export type ReactEventLayerException = Readonly<{
+  /** The exact number of sites the file holds. */
+  sites: number;
+  /** Why these sites stay, naming the ruling or inventory row. */
+  reason: string;
+}>;
+
+/**
+ * Paths held at zero: no ceiling line may name them, and only a named exception may keep a site.
+ *
+ * @public
+ */
+export type ReactEventLayerZero = Readonly<{
+  /** URLs of the files or directories held at zero. */
+  scope: readonly URL[];
+  /** Workspace-relative POSIX path to the one exception that file holds. */
+  exceptions?: Readonly<Record<string, ReactEventLayerException>>;
+}>;
+
 /** Options for {@link checkReactEventLayerCeiling}.
  *
  * @public
@@ -411,12 +501,51 @@ export type ReactEventLayerCheck = {
   readonly manifest: URL;
   /** URLs of the directories this project's ceiling covers. */
   readonly directories: readonly URL[];
+  /** Files and directories held at zero, with their named exceptions. */
+  readonly zero?: ReactEventLayerZero;
 };
+
+/**
+ * Checks the zero scope: no ceiling line inside it, and each named exception inside it, with a reason, holding
+ * exactly its stated sites. Sites over zero without an exception are reported by {@link reactEventLayerViolations}.
+ *
+ * @param measured - Output of {@link measureReactEventLayer}.
+ * @param ceiling - The committed manifest.
+ * @param zero - The workspace-relative POSIX paths held at zero and the named exceptions.
+ * @returns One message per problem.
+ * @public
+ */
+export function reactEventLayerZeroProblems(
+  measured: ReadonlyMap<string, readonly ReactEventLayerSite[]>,
+  ceiling: ReactEventLayerCeiling,
+  zero: Readonly<{ scope: readonly string[]; exceptions: Readonly<Record<string, ReactEventLayerException>> }>,
+): string[] {
+  const { scope, exceptions } = zero;
+  const problems: string[] = [];
+  for (const key of Object.keys(ceiling)) {
+    if (isInScope(key, scope)) {
+      problems.push(`${key}: held at zero, so it takes no ceiling line; a boundary that stays is a named exception`);
+    }
+  }
+  for (const [path, { sites, reason }] of Object.entries(exceptions)) {
+    if (!isInScope(path, scope)) {
+      problems.push(`${path}: a named exception must be inside the zero scope`);
+    }
+    if (reason.trim() === '') {
+      problems.push(`${path}: a named exception needs its reason`);
+    }
+    const count = measured.get(path)?.length ?? 0;
+    if (count < sites) {
+      problems.push(`${path}: holds ${count} site(s), below its exception of ${sites}; lower or remove the exception`);
+    }
+  }
+  return problems;
+}
 
 /**
  * Measures a project's directories against its committed ceiling manifest.
  *
- * @param check - The manifest and the directories it covers.
+ * @param check - The manifest, the directories it covers and any zero scope.
  * @returns Every manifest problem and ceiling violation; empty when the project passes.
  * @public
  */
@@ -428,9 +557,24 @@ export function checkReactEventLayerCeiling(check: ReactEventLayerCheck): string
   const manifestText = readFileSync(manifestPath, 'utf8');
   const ceiling = JSON.parse(manifestText) as ReactEventLayerCeiling;
   const prefixes = directories.map((directory) => toPosix(relative(workspaceRoot, directory)));
+  const measured = measureReactEventLayer(directories, workspaceRoot);
+  const scopePaths = (check.zero?.scope ?? []).map((entry) => fileURLToPath(entry).replace(/[/\\]$/, ''));
+  const scope = scopePaths.map((path) => toPosix(relative(workspaceRoot, path)));
+  const missingScope = scopePaths
+    .filter((path) => !existsSync(path))
+    .map(
+      (path) => `${toPosix(relative(workspaceRoot, path))}: a zero-scope path that does not exist; move or remove it`,
+    );
+  const exceptions = check.zero?.exceptions ?? {};
+  const allowed: Record<string, number> = { ...ceiling };
+  for (const [path, { sites }] of Object.entries(exceptions)) {
+    allowed[path] = sites;
+  }
   return [
     ...duplicateManifestKeys(manifestText),
     ...reactEventLayerManifestProblems(ceiling, prefixes),
-    ...reactEventLayerViolations(measureReactEventLayer(directories, workspaceRoot), ceiling, manifestName),
+    ...missingScope,
+    ...reactEventLayerZeroProblems(measured, ceiling, { scope, exceptions }),
+    ...reactEventLayerViolations(measured, allowed, { name: manifestName, zeroScope: scope }),
   ];
 }

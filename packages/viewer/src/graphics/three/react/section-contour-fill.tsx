@@ -66,6 +66,11 @@ export const sectionCapRenderPriority = 1.2;
 
 const noCuts: readonly SectionCut[] = [];
 
+/** The hover and selection the caps are emphasised by, read on each frame. */
+const selectCapEmphasisContext = (
+  modelInteractionRef: Pick<ReturnType<typeof useModelInteractionRef>, 'getSnapshot'>,
+): ModelInteractionContext => modelInteractionRef.getSnapshot().context;
+
 /** The hatch line width, in CSS pixels: constant on screen, as drafting keeps one pen weight for section lining. */
 export const sectionCapLineWidthCssPixels = 1;
 
@@ -330,7 +335,7 @@ export function SectionContourFills({
     if (!root || !enabled || !committed || committed.cutSet.pieces.length === 0 || records.length === 0) {
       return;
     }
-    const modelInteractionContext = modelInteractionRef.getSnapshot().context;
+    const modelInteractionContext = selectCapEmphasisContext(modelInteractionRef);
     const { gl, camera } = state;
     const loopFaces = records.some(({ grade }) => grade === 'per-loop')
       ? resolveLoopCapFaces(camera, committed.cutSet.pieces)

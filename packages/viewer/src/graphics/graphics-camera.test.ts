@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createActor, createAsyncLogic, setup, types } from 'xstate';
 import type { Actor, ActorRefFrom } from 'xstate';
 import type { CameraOwnedSettings } from '#graphics/graphics-settings.js';
-import { getGraphicsCameraState, selectGraphicsCamera } from '#services/graphics-camera-registry.js';
+import { getGraphicsCameraState, selectGraphicsCamera } from '#graphics/graphics-camera.js';
 import {
   graphicsMachine,
   selectGraphicsFramed,

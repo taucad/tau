@@ -17,6 +17,17 @@ describe('portable camera authority ratchet', () => {
       'graphics/three/controls-listener-bridge.tsx',
       'graphics/three/up-direction-handler.tsx',
       'machines/controls-listener.machine.ts',
+      // The camera is the graphics actor's `camera` child, so no session registry holds it (charter D5, I11; G12).
+      'services/graphics-camera-registry.ts',
+      // The kinematics drag is the kinematics actor's gesture around a callback adapter.
+      'graphics/three/react/kinematics-drag-controls.ts',
+      // Framing is the graphics actor's `framing` child (G5b).
+      'graphics/three/use-camera-framing.ts',
+      // The controls adapter steps camera-controls and the canvas presents the viewport (G7b).
+      'graphics/three/controls/tau-camera-controls.tsx',
+      // The view cube is a gesture machine around a callback adapter, its lock a state tag (G8).
+      'graphics/three/controls/viewport-gizmo-controls-adapter.ts',
+      'graphics/three/controls/viewport-gizmo-interaction-lock.tsx',
     ];
 
     expect(deletedFiles.filter((path) => existsSync(resolve(sourceRoot, path)))).toEqual([]);

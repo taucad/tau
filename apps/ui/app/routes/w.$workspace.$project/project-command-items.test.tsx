@@ -91,7 +91,7 @@ vi.mock('#hooks/use-project.js', () => ({
 
 vi.mock('#services/headless-capture.js', () => ({ captureCadImages, omittedSectionCutsNotice }));
 
-vi.mock('@taucad/viewer/services/graphics-camera-registry', () => ({
+vi.mock('@taucad/viewer/graphics/graphics-camera', () => ({
   getGraphicsCameraState: () => cameraState,
 }));
 

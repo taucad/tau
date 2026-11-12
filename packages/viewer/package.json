@@ -56,6 +56,7 @@
     "./constants/length-units": "./src/constants/length-units.ts",
     "./environment/viewer-environment": "./src/environment/viewer-environment.tsx",
     "./graphics/graphics-backend": "./src/graphics/graphics-backend.ts",
+    "./graphics/graphics-camera": "./src/graphics/graphics-camera.ts",
     "./graphics/graphics-settings": "./src/graphics/graphics-settings.ts",
     "./graphics/metadata/geometry-component-reference": "./src/graphics/metadata/geometry-component-reference.ts",
     "./graphics/metadata/gltf-component-manifest": "./src/graphics/metadata/gltf-component-manifest.ts",
@@ -126,7 +127,6 @@
     "./parameters/rjsf-theme": "./src/parameters/rjsf-theme.tsx",
     "./parameters/rjsf-utils": "./src/parameters/rjsf-utils.ts",
     "./parameters/rjsf-validator": "./src/parameters/rjsf-validator.ts",
-    "./services/graphics-camera-registry": "./src/services/graphics-camera-registry.ts",
     "./utils/inspect-glb": "./src/utils/inspect-glb.ts",
     "./package.json": "./package.json"
   },
@@ -237,6 +237,11 @@
         "types": "./dist/graphics/graphics-backend.d.mts",
         "import": "./dist/graphics/graphics-backend.mjs",
         "default": "./dist/graphics/graphics-backend.mjs"
+      },
+      "./graphics/graphics-camera": {
+        "types": "./dist/graphics/graphics-camera.d.mts",
+        "import": "./dist/graphics/graphics-camera.mjs",
+        "default": "./dist/graphics/graphics-camera.mjs"
       },
       "./graphics/graphics-settings": {
         "types": "./dist/graphics/graphics-settings.d.mts",
@@ -587,11 +592,6 @@
         "types": "./dist/parameters/rjsf-validator.d.mts",
         "import": "./dist/parameters/rjsf-validator.mjs",
         "default": "./dist/parameters/rjsf-validator.mjs"
-      },
-      "./services/graphics-camera-registry": {
-        "types": "./dist/services/graphics-camera-registry.d.mts",
-        "import": "./dist/services/graphics-camera-registry.mjs",
-        "default": "./dist/services/graphics-camera-registry.mjs"
       },
       "./utils/inspect-glb": {
         "types": "./dist/utils/inspect-glb.d.mts",

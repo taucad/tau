@@ -11,7 +11,7 @@ import { ViewportGizmoCube } from '#graphics/three/controls/viewport-gizmo-cube.
 import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
 import type { ViewportGizmoHost } from '#graphics/three/controls/viewport-gizmo-adapter.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
-import type { CameraUpdateHandler } from '#services/graphics-camera-registry.js';
+import type { CameraUpdateHandler } from '#graphics/graphics-camera.js';
 
 const mocks = vi.hoisted(() => {
   const perspectiveCamera = { kind: 'perspective' };

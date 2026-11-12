@@ -12,12 +12,8 @@ import { selectGraphicsFramingIdentity } from '#machines/graphics.machine.js';
 import type { GraphicsCameraRef, graphicsMachine } from '#machines/graphics.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { kinematicsMachine } from '#machines/kinematics.machine.js';
-import { asCameraActor } from '#services/graphics-camera-registry.js';
-import type {
-  CameraUpdateHandler,
-  RenderFrameUpdateHandler,
-  ViewCameraSeed,
-} from '#services/graphics-camera-registry.js';
+import { asCameraActor } from '#graphics/graphics-camera.js';
+import type { CameraUpdateHandler, RenderFrameUpdateHandler, ViewCameraSeed } from '#graphics/graphics-camera.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;

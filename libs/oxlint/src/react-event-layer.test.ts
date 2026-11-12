@@ -83,30 +83,56 @@ useEffect(idle, [idle]);
     ).toEqual(['4 effect .subscribe', '5 effect .send', '10 effect .send', '11 effect requestAnimationFrame']);
   });
 
-  it('should count getSnapshot() calls outside module-level select* helpers', () => {
+  it('should count getSnapshot() calls in components and hooks outside module-level select* helpers', () => {
+    expect(
+      summary(
+        `function Panel() { const value = actor.getSnapshot().context.value; }
+function selectValue(actor) { return actor.getSnapshot().context.value; }
+const selectOther = (actor) => actor.getSnapshot();
+const useTab = () => { const selectTab = () => actor.getSnapshot(); };
+function useValue() { return actor.getSnapshot(); }
+const Row = memo(function (props) { return actor.getSnapshot(); });
+const Field = React.forwardRef((props, ref) => actor.getSnapshot());
+function Panel2() { const selectFromPanel = selectValue(actor); }
+`,
+        'fixture.ts',
+      ),
+    ).toEqual(['1 getSnapshot', '4 getSnapshot', '5 getSnapshot', '6 getSnapshot', '7 getSnapshot']);
+  });
+
+  it('should classify reads by where they run', () => {
+    expect(
+      summary(
+        `import { useCallback, useEffect } from 'react';
+function ToolRow() { return actor.getSnapshot().context.label; }
+function useCutValue() { return actor.getSnapshot().context.cut; }
+function attachDrag(element, graphics) { return () => { if (graphics.getSnapshot().status === 'active') graphics.send({ type: 'end' }); }; }
+function useClock() { useFrame(() => { tick(actor.getSnapshot().context.playback); }); }
+function useFrameReader() { useFrame(() => { tick(selectPlayback(actor)); }); }
+function Chip() { const onBlur = useCallback(() => { if (actor.getSnapshot().context.hovered) hover(undefined); }, []); }
+function Chip2() { const onBlur = () => { if (selectHovered(actor)) hover(undefined); }; }
+const selectPlayback = (actor) => actor.getSnapshot().context.playback;
+`,
+        'fixture.tsx',
+      ),
+    ).toEqual(['2 getSnapshot', '3 getSnapshot', '5 getSnapshot', '7 getSnapshot']);
+  });
+
+  it('should not count getSnapshot() calls outside React', () => {
     expect(
       summary(
         `const value = actor.getSnapshot().context.value;
-function selectValue(actor) { return actor.getSnapshot().context.value; }
-const selectOther = (actor) => actor.getSnapshot();
 const helpers = { selectThird: (actor) => actor.getSnapshot() };
 class Store { getSnapshot() { return this.inner.getSnapshot(); } }
 const read = getSnapshot();
 const bridge = { selectSectionCut(id) { graphicsActor.getSnapshot(); } };
-function Panel() { const selectTab = () => actor.getSnapshot(); }
 function selection(actor) { return actor.getSnapshot(); }
+const createStore = (actor) => ({ context: () => actor.getSnapshot().context });
+const machine = setup({ actions: { read: ({ context }) => context.child.getSnapshot() } });
 `,
         'fixture.ts',
       ),
-    ).toEqual([
-      '1 getSnapshot',
-      '4 getSnapshot',
-      '5 getSnapshot',
-      '6 getSnapshot',
-      '7 getSnapshot',
-      '8 getSnapshot',
-      '9 getSnapshot',
-    ]);
+    ).toEqual([]);
   });
 
   it('should resolve a named effect callback in its own scope, not the first binding in the file', () => {
@@ -236,5 +262,61 @@ describe('checkReactEventLayerCeiling', () => {
         directories: [pathToFileURL(source)],
       }),
     ).toEqual(['pkg/src/nested/counted.tsx: listed more than once']);
+  });
+
+  it('should hold a zero scope at zero except its named exceptions', () => {
+    workspace = mkdtempSync(join(tmpdir(), 'react-event-layer-'));
+    writeFileSync(join(workspace, 'pnpm-workspace.yaml'), 'packages: []\n');
+    const source = join(workspace, 'pkg', 'src');
+    mkdirSync(join(source, 'graphics'), { recursive: true });
+    const effect = "import { useEffect } from 'react';\nuseEffect(() => actor.send({ type: 'a' }), []);\n";
+    writeFileSync(join(source, 'graphics', 'boundary.tsx'), effect);
+    writeFileSync(join(source, 'graphics', 'debt.tsx'), effect);
+    writeFileSync(join(source, 'other.tsx'), effect);
+    const manifest = join(source, 'react-event-layer.ceiling.json');
+    const check = (exceptions: Record<string, { sites: number; reason: string }>): string[] =>
+      checkReactEventLayerCeiling({
+        manifest: pathToFileURL(manifest),
+        directories: [pathToFileURL(source)],
+        zero: { scope: [pathToFileURL(join(source, 'graphics'))], exceptions },
+      });
+
+    writeFileSync(manifest, '{ "pkg/src/graphics/debt.tsx": 1, "pkg/src/other.tsx": 1 }\n');
+    expect(check({ 'pkg/src/graphics/boundary.tsx': { sites: 1, reason: 'the prop boundary' } })).toEqual([
+      'pkg/src/graphics/debt.tsx: held at zero, so it takes no ceiling line; a boundary that stays is a named exception',
+    ]);
+
+    writeFileSync(manifest, '{ "pkg/src/other.tsx": 1 }\n');
+    expect(
+      check({
+        'pkg/src/graphics/boundary.tsx': { sites: 2, reason: ' ' },
+        'pkg/src/other.tsx': { sites: 1, reason: 'outside' },
+      }),
+    ).toEqual([
+      'pkg/src/graphics/boundary.tsx: a named exception needs its reason',
+      'pkg/src/graphics/boundary.tsx: holds 1 site(s), below its exception of 2; lower or remove the exception',
+      'pkg/src/other.tsx: a named exception must be inside the zero scope',
+      [
+        'pkg/src/graphics/debt.tsx: 1 React event-layer site(s) is held at zero; only a named exception may keep a site. Move the work into an actor.',
+        '  2:1 effect calls .send',
+      ].join('\n'),
+    ]);
+
+    writeFileSync(join(source, 'graphics', 'debt.tsx'), 'export const quiet = 1;\n');
+    expect(check({ 'pkg/src/graphics/boundary.tsx': { sites: 1, reason: 'the prop boundary' } })).toEqual([]);
+
+    expect(
+      checkReactEventLayerCeiling({
+        manifest: pathToFileURL(manifest),
+        directories: [pathToFileURL(source)],
+        zero: { scope: [pathToFileURL(join(source, 'graphics')), pathToFileURL(join(source, 'gone.ts'))] },
+      }),
+    ).toEqual([
+      'pkg/src/gone.ts: a zero-scope path that does not exist; move or remove it',
+      [
+        'pkg/src/graphics/boundary.tsx: 1 React event-layer site(s) is held at zero; only a named exception may keep a site. Move the work into an actor.',
+        '  2:1 effect calls .send',
+      ].join('\n'),
+    ]);
   });
 });

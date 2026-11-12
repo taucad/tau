@@ -23,7 +23,7 @@
 import { pathTable, unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 import type { UnansweredEvent } from '@taucad/xstate-testing/paths';
 import { describe, expect, it } from 'vitest';
-import { createAsyncLogic, createCallbackLogic, matchesState, transition } from 'xstate';
+import { createActor, createAsyncLogic, createCallbackLogic, matchesState, transition } from 'xstate';
 import type { AnyMachineSnapshot, StateValue } from 'xstate';
 import { getShortestPaths } from 'xstate/graph';
 import type { GeometryComponentManifest } from '@taucad/types';
@@ -191,7 +191,6 @@ const samples: Samples = {
   measurementCutChanged: [{ type: 'measurementCutChanged' }],
   addMeasurementRecord: [{ type: 'addMeasurementRecord', record }],
   resolveMeasurementRecord: [{ type: 'resolveMeasurementRecord', id: 'missing', patch: {} }],
-  cancelPendingMeasurements: [{ type: 'cancelPendingMeasurements', reason: 'r' }],
   cancelCurrentMeasurement: [{ type: 'cancelCurrentMeasurement' }],
   clearMeasurement: [{ type: 'clearMeasurement', payload: 'missing' }],
   clearAllMeasurements: [{ type: 'clearAllMeasurements' }],
@@ -264,6 +263,11 @@ const machine = graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogi
 const events: readonly GraphicsEvent[] = Object.values(samples).flat();
 /** The probe's answer, which takes the `backend` region out of `probing`; built in, so never sampled as public. */
 const probeAnswered = { type: 'xstate.done.actor.probeWebGpuInvocation', output: true } as unknown as GraphicsEvent;
+const shortcutCamera = {
+  direction: [0, 0, 1],
+  requestedVerticalFieldOfView: 60,
+  lastPerspectiveVerticalFieldOfView: 60,
+} as const;
 const options = {
   input: {},
   events: [...events, probeAnswered],
@@ -451,21 +455,56 @@ describe('graphics machine totality baseline', () => {
     expect(unansweredEvents(machine, { ...options, ignore: graphicsIgnoredEvents })).toEqual([]);
   });
 
-  it('should claim F and G in every reachable state, which the blanket shortcut pair cannot check', () => {
-    const alwaysClaimed = (['fitView', 'grid'] as const).map(
-      (shortcut): GraphicsEvent => ({
-        type: 'viewerShortcutPressed',
-        shortcut,
-        pressId: 'bar:always',
-        camera: { direction: [0, 0, 1], requestedVerticalFieldOfView: 60, lastPerspectiveVerticalFieldOfView: 60 },
-      }),
+  it('should claim each shortcut exactly where its rule says, which the blanket shortcut pair cannot check', () => {
+    // The `['*', 'viewerShortcutPressed']` pair leaves the press unanswered wherever its key does nothing. This
+    // states each key's rule over every reachable state: F and G are always claimed, S, M and P unless the geometry is
+    // 2D, Escape while a tool is on, and Delete or Backspace for the selected cut of an open section.
+
+    const shortcuts = ['fitView', 'grid', 'section', 'measure', 'projection', 'escape', 'removeCut'] as const;
+    const press = (shortcut: (typeof shortcuts)[number]): GraphicsEvent => ({
+      type: 'viewerShortcutPressed',
+      shortcut,
+      pressId: `bar:${shortcut}`,
+      camera: shortcutCamera,
+    });
+    const expected = (snapshot: AnyMachineSnapshot): Record<(typeof shortcuts)[number], boolean> => {
+      const { selectedSectionCutId, sectionCuts, artifact } = snapshot.context as {
+        selectedSectionCutId?: string;
+        sectionCuts: ReadonlyArray<{ id: string }>;
+        artifact?: { mimeType: string };
+      };
+      const is3d = artifact?.mimeType !== 'image/svg+xml';
+      const sectionOn = snapshot.matches({ operational: { section: 'on' } });
+      const measureOn = snapshot.matches({ operational: { measure: 'on' } });
+      return {
+        fitView: true,
+        grid: true,
+        section: is3d,
+        measure: is3d,
+        projection: is3d,
+        escape: sectionOn || measureOn,
+        removeCut: sectionOn && sectionCuts.some(({ id }) => id === selectedSectionCutId),
+      };
+    };
+    const mismatched = getShortestPaths(machine, options).flatMap(({ state: snapshot }) => {
+      const want = expected(snapshot);
+      return shortcuts
+        .filter((shortcut) => snapshot.can(press(shortcut)) !== want[shortcut])
+        .map((shortcut) => `${dotted(snapshot.value)}: ${shortcut} ${want[shortcut] ? 'unclaimed' : 'claimed'}`);
+    });
+    expect(mismatched).toEqual([]);
+  });
+
+  it('should leave S, M and P unclaimed on 2D geometry and still claim F and G', () => {
+    const actor = createActor(machine, { input: {} });
+    actor.start();
+    actor.send(samples.updateArtifact[0]!);
+
+    const claimed = (['fitView', 'grid', 'section', 'measure', 'projection'] as const).filter((shortcut) =>
+      actor.getSnapshot().can({ type: 'viewerShortcutPressed', shortcut, pressId: 'bar:2d', camera: shortcutCamera }),
     );
-    const unclaimed = getShortestPaths(machine, options).flatMap(({ state: snapshot }) =>
-      alwaysClaimed
-        .filter((event) => !snapshot.can(event))
-        .map((event) => `${dotted(snapshot.value)}: ${(event as { shortcut: string }).shortcut}`),
-    );
-    expect(unclaimed).toEqual([]);
+    actor.stop();
+    expect(claimed).toEqual(['fitView', 'grid']);
   });
 
   it('should declare no baseline pair that the machine now answers', () => {

@@ -28,7 +28,7 @@ import type * as threeContextModule from '#graphics/three/three-context.jsx';
 import type { ThreeProvider } from '#graphics/three/three-context.jsx';
 import type * as rendererModule from '#graphics/three/renderer.js';
 import type * as softwareRasterizerModule from '#graphics/three/utils/software-rasterizer.js';
-import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
+import { getGraphicsCameraState } from '#graphics/graphics-camera.js';
 import { defaultPostProcessingSettings } from '#graphics/three/post-processing-settings.js';
 import { defaultViewerEnvironment, ViewerEnvironmentProvider } from '#environment/viewer-environment.jsx';
 

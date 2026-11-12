@@ -67,7 +67,7 @@ import type {
   ViewportGizmoAppearance,
   ViewportGizmoCommand,
 } from '#machines/viewport-gizmo-gesture.machine.js';
-import type { CameraUpdateHandler } from '#services/graphics-camera-registry.js';
+import type { CameraUpdateHandler } from '#graphics/graphics-camera.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 type GraphicsSnapshot = SnapshotFrom<typeof graphicsMachine>;

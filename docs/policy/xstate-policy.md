@@ -3,12 +3,14 @@ title: 'XState Policy'
 description: 'State machine design, actor lifecycle, and React integration using XState v6. setup() schemas, transition functions, enqueue effects, invoke/spawn, useActorRef, cleanup patterns.'
 status: active
 created: '2026-03-04'
-updated: '2026-09-25'
+updated: '2026-11-12'
 related:
   - docs/research/xstate-patterns.md
   - docs/research/xstate-v6-migration-blueprint.md
   - docs/research/verified-agent-substrate-charter.md
   - docs/research/agent-substrate-machine-contract-blueprint.md
+  - docs/research/graphics-event-driven-state-charter.md
+  - docs/policy/react-policy.md
   - docs/policy/typescript-policy.md
   - docs/research/typescript-overloads.md
 ---
@@ -233,6 +235,16 @@ These rules come from the XState v6 maximal-use review (`synthesis/xstate-v6-max
 **MC-R29 Typed outcomes.** An effect actor declares `schemas.output` as a tagged union of every expected outcome, refusals included, and `onDone` switches over it exhaustively. `onError` means a defect and enters a modelled fault state (MC-R12). Every emitted event is declared in `schemas.emitted`. (XV4; k5.)
 
 **MC-R30 Runtime schemas in tests.** In a package that already ships Zod (`@taucad/agent-host`, `@taucad/host`, `apps/ui`), owners declare runtime schemas, and `schemas.events` reuses the wire's payload schemas (D11). Reuse a wire payload schema as the value of an event's `payload` key, `{ commandId, payload }`, because alpha.59 makes a directly reused schema's optional keys required. Owner tests run the machine through the harness's `validated(machine)`, which checks events, context, per-state context, emitted events and output at every step. Product code never installs a validator (MC-R22). `packages/revisions` keeps `types<T>()`. (XV5; k6, k10.)
+
+## Graphics contract
+
+MC-R1 to MC-R25 also bind the graphics actors (graphics event-driven state charter, D4, D5 and G12). They are the camera (`packages/camera/src/camera.machine.ts`); in `packages/viewer/src/machines/`, graphics and its framing, canvas, section input, measure session, kinematics, presentation, model interaction, measure input, view cube gesture and WebGL context actors; and, in `apps/ui/app/workbench-records/`, the view-record binding and record sync. A rule written for the substrate's leases, runs or logs applies to a graphics actor through what it owns instead: a view's camera, canvas, cuts, measurements and presentation, and a record's reads and writes. React hands these actors host elements and events only as [React policy](react-policy.md) 5.5 allows.
+
+These gaps are accepted debt, each with the change that retires it:
+
+- **MC-R26.** The binding keeps `sectionPending` and `dropped` as root keys, and record sync keeps its region facts at the root. A change that narrows those states' context retires it.
+- **MC-R4 and MC-R25.** Inside the app, graphics is never a root: the project machine spawns each view's graphics as a child (G6b). The standalone `ModelViewer` creates its graphics root with `useActorRef`, because its artifact arrives as a prop. The same public API change that retires the C10 exception (an artifact feed outside props) retires this, and a factory that only moved the `createActor` call would not.
+- **MC-R12.** Of these actors, only record sync and the view-record binding declare a root `onError` today. G12's second change gives each of the others one that records the fault in context and stays in place.
 
 ## Machine Definition
 
@@ -582,7 +594,24 @@ The effect cleanup queues `actor.stop()` in a microtask; an effect re-run for th
 
 ### Input is read once at initialization
 
-`useActorRef(machine, { input })` reads `input` only when the actor is created. To react to external changes, send events from an effect.
+`useActorRef(machine, { input })` reads `input` only when the actor is created. To react to external changes, send events from an effect. In the graphics scope, that effect is a named exception with its reason ([React policy](react-policy.md) 5.5), allowed only where a prop or React context is the value's only source.
+
+### Hand a host element to an actor with a ref callback
+
+When an actor needs a DOM node, an R3F object or a renderer root, the component hands it over with a ref callback. The callback sends only an attach event with the element, and a detach event when React passes `null`. The actor spawns callback logic around the element, and that logic owns every listener, timer and teardown. The ref callback never subscribes and never keeps the element. Graphics' `controlsAttached`, `sectionInputAttached` and `viewportGizmoAttached`, and the canvas actor's `hostCreated`, follow this pattern (charter D4, ruled 2026-11-12).
+
+```typescript
+const attachInput = useCallback<RefCallback<THREE.Group>>(
+  (group) => {
+    graphics.send(
+      group
+        ? { type: 'sectionInputAttached', inputId, adapter: createSectionInputAdapter({ group, graphics }) }
+        : { type: 'sectionInputDetached', inputId },
+    );
+  },
+  [graphics, inputId],
+);
+```
 
 ### Use `key` prop for identity-based remounting
 

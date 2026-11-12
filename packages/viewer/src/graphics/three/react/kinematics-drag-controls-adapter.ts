@@ -48,6 +48,27 @@ type GraphicsActor = Pick<ReturnType<typeof useGraphics>, 'send' | 'getSnapshot'
 
 const escapeKeyCombination = { key: 'Escape' };
 
+type KinematicsRef = ReturnType<typeof useKinematicsRef>;
+
+/** Whether a drag is under way, read when Escape is pressed. */
+const selectDragInProgress = (kinematicsRef: KinematicsRef): boolean =>
+  selectKinematicsDragging(kinematicsRef.getSnapshot());
+
+/** The facts a press needs to start a drag on one unit: no press already held, and a draggable mechanism. */
+const selectDragStart = (
+  kinematicsRef: KinematicsRef,
+  unitId: string,
+): Readonly<{ pressHeld: boolean; draggable: boolean }> => {
+  const kinematics = kinematicsRef.getSnapshot();
+  const { mechanism, dragEnabled } = getKinematicsUnitState(kinematics.context, unitId);
+  return { pressHeld: selectKinematicsPressHeld(kinematics), draggable: dragEnabled && mechanism !== undefined };
+};
+
+/** The graphics context a press is hit-tested against: its click suppressions and section clipping. */
+const selectPressGraphicsContext = (
+  graphicsActor: GraphicsActor,
+): ReturnType<GraphicsActor['getSnapshot']>['context'] => graphicsActor.getSnapshot().context;
+
 /**
  * The viewer objects one press's drag adapter is built around.
  */
@@ -232,7 +253,7 @@ export function useKinematicsDragControls({
     () => {
       kinematicsRef.send({ type: 'cancelGesture' });
     },
-    { enabled: () => selectKinematicsDragging(kinematicsRef.getSnapshot()), priority: 1, scope: 'global' },
+    { enabled: () => selectDragInProgress(kinematicsRef), priority: 1, scope: 'global' },
   );
 
   return useCallback(
@@ -245,15 +266,9 @@ export function useKinematicsDragControls({
         return;
       }
       lastPressRef.current = nativeEvent;
-      const kinematics = kinematicsRef.getSnapshot();
-      const { mechanism, dragEnabled } = getKinematicsUnitState(kinematics.context, unitId);
-      const graphicsContext = graphicsActor.getSnapshot().context;
-      if (
-        selectKinematicsPressHeld(kinematics) ||
-        !dragEnabled ||
-        !mechanism ||
-        graphicsContext.modelPointerClickSuppressionReasons.length > 0
-      ) {
+      const { pressHeld, draggable } = selectDragStart(kinematicsRef, unitId);
+      const graphicsContext = selectPressGraphicsContext(graphicsActor);
+      if (pressHeld || !draggable || graphicsContext.modelPointerClickSuppressionReasons.length > 0) {
         return;
       }
 

@@ -42,9 +42,8 @@ describe('password-reset token storage', () => {
     const identifiers = store['verification']?.map((row) => String(row['identifier'])) ?? [];
     expect(identifiers.some((identifier) => identifier.includes(resetToken))).toBe(false);
 
-    expect((await post('reset-password', { token: resetToken, newPassword: 'second-password-strong-2' })).status).toBe(
-      200,
-    );
+    const reset = await post('reset-password', { token: resetToken, newPassword: 'second-password-strong-2' });
+    expect(reset.status).toBe(200);
     const signedIn = await post('sign-in/email', { email: 'owner@example.test', password: 'second-password-strong-2' });
     expect(signedIn.status).toBe(200);
   });

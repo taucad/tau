@@ -15,7 +15,13 @@ import {
   measureSessionIgnoredEvents,
   measureSessionMachine,
 } from '#machines/measure-session.machine.js';
-import type { MeasureSessionCommand, MeasureSessionEvent } from '#machines/measure-session.machine.js';
+import type {
+  MeasureCatalogRequest,
+  MeasureExactCommand,
+  MeasureExactRequest,
+  MeasureSessionCommand,
+  MeasureSessionEvent,
+} from '#machines/measure-session.machine.js';
 
 const at = { clientX: 10, clientY: 20 };
 const elsewhere = { clientX: 30, clientY: 20 };
@@ -41,6 +47,16 @@ const released = (awaitingTargets = false): MeasureSessionEvent => ({
   pointerId: 1,
 });
 
+const exactManifest: Partial<MeasureExactRequest['manifest']> = {};
+const exactRequest: MeasureExactRequest = {
+  id: 'measurement_1',
+  manifest: exactManifest as MeasureExactRequest['manifest'],
+  geometryKey: 'g',
+  occurrenceA: 'a',
+  occurrenceB: 'b',
+  poseRevision: 0,
+};
+
 const samples: Record<MeasureSessionEvent['type'], readonly MeasureSessionEvent[]> = {
   measureActiveChanged: [
     { type: 'measureActiveChanged', active: true },
@@ -62,10 +78,19 @@ const samples: Record<MeasureSessionEvent['type'], readonly MeasureSessionEvent[
   pressReady: [{ type: 'pressReady', generation: 1 }],
   pressSettled: [{ type: 'pressSettled', at }],
   inputDecided: [{ type: 'inputDecided', decision: 'ignored' }],
+  geometryChanged: [{ type: 'geometryChanged' }],
+  catalogSourceChanged: [{ type: 'catalogSourceChanged' }],
+  commitRequested: [{ type: 'commitRequested' }],
+  catalogRequested: [{ type: 'catalogRequested', append: false }],
+  committed: [{ type: 'committed' }, { type: 'committed', exact: exactRequest }],
 };
 
 const idleAdapter = createCallbackLogic<MeasureSessionCommand, undefined>(() => undefined);
-const testMachine = measureSessionMachine.provide({ actors: { follower: idleAdapter, pointer: idleAdapter } });
+const idleExact = createCallbackLogic<MeasureExactCommand, MeasureExactRequest>(() => undefined);
+const idleCatalog = createCallbackLogic<{ type: 'stop' }, MeasureCatalogRequest>(() => undefined);
+const testMachine = measureSessionMachine.provide({
+  actors: { follower: idleAdapter, pointer: idleAdapter, exact: idleExact, catalog: idleCatalog },
+});
 const pathOptions = {
   events: Object.values(samples).flat(),
   limit: 100,
@@ -86,14 +111,34 @@ const startSession = () => {
       pointerStops++;
     };
   });
+  /** What happened to each exact query and catalog scan, in order. */
+  const work: string[] = [];
+  const exact = createCallbackLogic<MeasureExactCommand, MeasureExactRequest>(({ input, receive }) => {
+    work.push(`exact ${input.id} started`);
+    receive((message) => {
+      work.push(`exact ${input.id} ${message.type === 'cancel' ? `cancelled: ${message.reason}` : 'dropped'}`);
+    });
+    return () => {
+      work.push(`exact ${input.id} stopped`);
+    };
+  });
+  const catalog = createCallbackLogic<{ type: 'stop' }, MeasureCatalogRequest>(({ input }) => {
+    work.push(`catalog ${input.append ? 'append' : 'fresh'} started`);
+    return () => {
+      work.push('catalog stopped');
+    };
+  });
   const guard = guardActors();
-  const actor = createActor(measureSessionMachine.provide({ actors: { follower: idleAdapter, pointer } }), {
-    inspect: guard.inspect,
-  }).start();
+  const actor = createActor(
+    measureSessionMachine.provide({ actors: { follower: idleAdapter, pointer, exact, catalog } }),
+    { inspect: guard.inspect },
+  ).start();
   actor.send({ type: 'measureActiveChanged', active: true });
   return {
     actor,
     commands,
+    /** The exact queries' and scans' lifecycle since the last call. */
+    work: (): string[] => work.splice(0),
     starts: () => pointerStarts,
     stops: () => pointerStops,
     /** The commands sent since the last call. */
@@ -216,6 +261,83 @@ describe('measure session', () => {
     session.actor.send({ type: 'pointerLeft' });
     session.actor.send({ type: 'cameraPresented' });
     expect(session.take()).toEqual([{ type: 'hoverCleared' }, { type: 'candidatesInvalidated' }]);
+    session.actor.stop();
+  });
+
+  it('should ask the pointer adapter to commit the chosen candidate on Use target', () => {
+    const session = startSession();
+    session.actor.send({ type: 'commitRequested' });
+    expect(session.take()).toEqual([{ type: 'commitChosen' }]);
+    session.actor.stop();
+  });
+
+  it('should run one exact query at a time, cancelling the one a new commit replaces', () => {
+    const session = startSession();
+    session.actor.send({ type: 'committed', exact: exactRequest });
+    session.actor.send({ type: 'committed', exact: { ...exactRequest, id: 'measurement_2' } });
+    // A commit that asks for none still replaces the running one.
+    session.actor.send({ type: 'committed' });
+    expect(session.work()).toEqual([
+      'exact measurement_1 started',
+      'exact measurement_1 cancelled: The exact query was replaced by a new selection.',
+      'exact measurement_1 stopped',
+      'exact measurement_2 started',
+      'exact measurement_2 cancelled: The exact query was replaced by a new selection.',
+      'exact measurement_2 stopped',
+    ]);
+    expect(session.actor.getSnapshot().context.exactRef).toBeUndefined();
+    session.actor.stop();
+  });
+
+  it.each([
+    ['a pose change', { type: 'poseChanged', revision: 2 }],
+    ['a cut change', { type: 'cutsChanged' }],
+    ['a geometry change', { type: 'geometryChanged' }],
+  ] as ReadonlyArray<readonly [string, MeasureSessionEvent]>)(
+    'should drop a running exact query after %s, whose record graphics marked',
+    (_name, event) => {
+      const session = startSession();
+      session.actor.send({ type: 'committed', exact: exactRequest });
+      session.work();
+      session.actor.send(event);
+      expect(session.work()).toEqual(['exact measurement_1 dropped', 'exact measurement_1 stopped']);
+      session.actor.stop();
+    },
+  );
+
+  it('should cancel a running exact query and stop a scan when Measure turns off, and only stop them with the session', () => {
+    const session = startSession();
+    session.actor.send({ type: 'committed', exact: exactRequest });
+    session.actor.send({ type: 'catalogRequested', append: false });
+    session.work();
+    session.actor.send({ type: 'measureActiveChanged', active: false });
+    expect(session.work()).toEqual([
+      'exact measurement_1 cancelled: Measurement closed before the exact query finished.',
+      'exact measurement_1 stopped',
+      'catalog stopped',
+    ]);
+
+    session.actor.send({ type: 'measureActiveChanged', active: true });
+    session.actor.send({ type: 'committed', exact: exactRequest });
+    session.actor.send({ type: 'catalogRequested', append: false });
+    session.work();
+    session.actor.stop();
+    // The view closing: the exact query's own cleanup cancels its record.
+    expect(session.work().toSorted()).toEqual(['catalog stopped', 'exact measurement_1 stopped']);
+  });
+
+  it.each([
+    ['a new request', { type: 'catalogRequested', append: true }],
+    ['the presented camera', { type: 'cameraPresented' }],
+    ['a pose change', { type: 'poseChanged', revision: 2 }],
+    ['a cut change', { type: 'cutsChanged' }],
+    ['its source', { type: 'catalogSourceChanged' }],
+  ] as ReadonlyArray<readonly [string, MeasureSessionEvent]>)('should stop a running scan after %s', (_name, event) => {
+    const session = startSession();
+    session.actor.send({ type: 'catalogRequested', append: false });
+    session.work();
+    session.actor.send(event);
+    expect(session.work()[0]).toBe('catalog stopped');
     session.actor.stop();
   });
 });

@@ -132,7 +132,7 @@ export const tourTipCopy = (step: TourStepId, input: TourCopyInput): TourTipCopy
         ],
         bindings: { orbit: bindings.orbit, pan: bindings.pan, zoom: bindings.zoom },
         link: 'Change controls',
-        ...tryIt('Drag in the view, or use the arrow buttons under it'),
+        ...tryIt('Drag in the view'),
       };
     }
     case 'adjust': {

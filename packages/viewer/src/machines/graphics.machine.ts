@@ -502,7 +502,7 @@ export type GraphicsEvent =
   // Camera events
   | { type: 'fitView' }
   /**
-   * One orbit, pan or zoom step from an arrow key, a plus or minus key or a single-click control (N1, N2). Graphics
+   * One orbit, pan or zoom step from an arrow key or a plus or minus key (N1). Graphics
    * hands it to the canvas's controls adapter, which moves the controls, so the pose reaches the camera as the
    * person's input. Unhandled while no canvas has its controls, so `snapshot.can(event)` says whether a key is claimed.
    */

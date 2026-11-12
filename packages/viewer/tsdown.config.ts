@@ -37,7 +37,6 @@ const baseConfig: UserConfig = {
     'src/cad/kernel-settings.tsx',
     'src/cad/material-swatch.tsx',
     'src/cad/measure-control.tsx',
-    'src/cad/navigation-controls.tsx',
     'src/cad/measure-tool-row.tsx',
     'src/cad/part-preview-image.tsx',
     'src/cad/part-properties-panel.tsx',

@@ -105,6 +105,18 @@ export const cookieName = {
   /* Docs */
   // Whether the docs sidebar is open.
   docsOpSidebar: 'docs-op-sidebar',
+
+  /* Person record: device-only sections, each a `StoredSection` (`@taucad/preferences`). Never server-visible. */
+  // What the person told setup: goals, last tool, languages.
+  personProfile: 'person-profile',
+  // Mouse preset, navigation toggles, gizmo style and personal view defaults.
+  viewerPreferences: 'viewer-preferences',
+  // Setup status and tour progress; it only grows.
+  onboarding: 'onboarding',
+  // This computer: input device, paused tour, dismissed invite. Never synced.
+  device: 'device',
+  // Leaves this person set, in one view, to the file format's own value (view commands).
+  viewExceptions: 'view-exceptions',
 } as const;
 
 /**

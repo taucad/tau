@@ -476,4 +476,26 @@ describe('entriesPolicy path changes', () => {
     expect(diff(current, next)).toEqual([{ moves: [], fields: { 'a.ts': { renderTimeout: 1000 } } }]);
     expect(serialize(next)).toBe(serialize(current));
   });
+
+  it('should not apply a landed path change again when another party changed the entry the same write made', () => {
+    const hidden = (ids: string[]) => ({ hidden: ids, isolated: [], opacity: [] });
+    const base: WorkbenchEntries = { version: 1, entries: {} };
+    const edited: EntriesRecord = { version: 1, entries: { 'b.ts': { components: hidden(['y']) } } };
+    const renamed: EntriesRecord = {
+      version: 1,
+      entries: { 'a.ts': { renderTimeout: 0 }, 'b.ts': { components: hidden(['y']) } },
+      moves: [{ type: 'rename', oldPath: 'a.ts', newPath: 'moved.ts' }],
+    };
+    const patch = combine(diff(base, edited), diff(edited, renamed));
+    const written = merge(base, renamed, patch);
+    // The write landed, its reply was lost, and another party then hid a component of the new a.ts.
+    const after = {
+      ...written,
+      entries: { ...written.entries, 'a.ts': { renderTimeout: 0, components: hidden(['q']) } },
+    };
+    expect(merge(after, renamed, patch).entries).toEqual({
+      'a.ts': { renderTimeout: 0, components: hidden(['q']) },
+      'b.ts': { components: hidden(['y']) },
+    });
+  });
 });

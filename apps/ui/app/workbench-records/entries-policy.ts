@@ -340,8 +340,20 @@ const replacedHeld = (before: Entry | undefined, after: Entry | undefined, now: 
 };
 
 /**
+ * Whether the file holds something the write wrote: the absence of an entry it removed, or a field it set on an entry
+ * it made or changed, whatever another party changed on that entry since.
+ */
+const writtenHeld = (before: Entry | undefined, after: Entry | undefined, now: Entry | undefined): boolean => {
+  if (after === undefined || now === undefined) {
+    return after === now;
+  }
+  const [replaced, wrote, held] = [fieldsOf(before ?? {}), fieldsOf(after), fieldsOf(now)];
+  return wrote.some((field, index) => field !== replaced[index] && held[index] === field);
+};
+
+/**
  * Whether the file holds the path changes of a write of `steps`: on the paths they touch, nothing the write replaced is
- * still there (an entry it made or removed, or a field it changed) and an entry is there as written. Fields elsewhere
+ * still there (an entry it made or removed, or a field it changed) and something it wrote is. Fields elsewhere
  * say nothing: they are applied again whatever the file holds. What another party changed since holds neither.
  */
 const holds = (current: WorkbenchEntries, write: Write, steps: readonly EntriesStep[]): boolean => {
@@ -357,7 +369,7 @@ const holds = (current: WorkbenchEntries, write: Write, steps: readonly EntriesS
     if (replacedHeld(before, after, now)) {
       return false;
     }
-    written ||= JSON.stringify(now) === JSON.stringify(after);
+    written ||= writtenHeld(before, after, now);
   }
   return written;
 };

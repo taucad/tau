@@ -243,7 +243,7 @@ MC-R1 to MC-R25 also bind the graphics actors (graphics event-driven state chart
 These gaps are accepted debt, each with the change that retires it:
 
 - **MC-R26.** The binding keeps `sectionPending` and `dropped` as root keys, and record sync keeps its region facts at the root. A change that narrows those states' context retires it.
-- **MC-R4 and MC-R25.** Inside the app, graphics is never a root: the project machine spawns each view's graphics as a child (G6b). The standalone `ModelViewer` creates its graphics root with `useActorRef`, because its artifact arrives as a prop. The same public API change that retires the C10 exception (an artifact feed outside props) retires this, and a factory that only moved the `createActor` call would not.
+- **MC-R4 and MC-R25.** A project view's graphics is never a root: the project machine spawns each view's graphics as a child (G6b). The standalone `ModelViewer` creates its graphics root with `useActorRef`, because its artifact arrives as a prop. The same public API change that retires the C10 exception (an artifact feed outside props) retires this, and a factory that only moved the `createActor` call would not. Three other hosts also create a graphics root with `useActorRef`, outside any project: the CAD preview provider (`apps/ui/app/hooks/use-cad-preview.tsx`), the Onshape render-profile end-to-end route and the agent plugin's viewer page (`packages/agent-plugin/app/viewer-page.tsx`). Each needs an owner machine of its own (a preview session), which no G-lane builds.
 - **MC-R12.** Of these actors, only record sync and the view-record binding declare a root `onError` today. G12's second change gives each of the others one that records the fault in context and stays in place.
 
 ## Machine Definition

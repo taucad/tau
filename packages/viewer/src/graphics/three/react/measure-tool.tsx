@@ -43,10 +43,12 @@ import type { MeasurePointerAt } from '#machines/measure-session.machine.js';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
 import { createMeasureToolAdapters } from '#graphics/three/react/measure-tool.adapter.js';
 import type {
+  MeasureCommitOutcome,
   MeasurePointerSnapshot,
   MeasureToolAdapters,
   MeasureToolHost,
 } from '#graphics/three/react/measure-tool.adapter.js';
+import type { GraphicsContext, KinematicsRef } from '#machines/graphics.machine.js';
 import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import { getKinematicsUnitState } from '#machines/kinematics.machine.js';
 import { useExactMeasurement } from '#graphics/three/react/exact-measurement.jsx';
@@ -230,6 +232,34 @@ const isSameMeasureHover = (a: MeasureHoverState, b: MeasureHoverState): boolean
 
 type MeasurePointerCoordinates = MeasurePointerAt;
 
+type GraphicsActorRef = ReturnType<typeof useGraphics>;
+
+/**
+ * The graphics context, read where the tool's host functions run: in the measure session's adapters, from a pointer
+ * event, a frame or a report, never while rendering.
+ */
+const selectGraphicsContext = (graphics: GraphicsActorRef): GraphicsContext => graphics.getSnapshot().context;
+
+/** The kinematic pose revision, read where the host functions run. */
+const selectPoseRevision = (kinematics: KinematicsRef): number => kinematics.getSnapshot().context.revision;
+
+/** The kinematics context, read where a commit runs. */
+const selectKinematicsContext = (kinematics: KinematicsRef): ReturnType<KinematicsRef['getSnapshot']>['context'] =>
+  kinematics.getSnapshot().context;
+
+/** The status a target list shows while it waits on a feature graph. */
+const catalogPreparingMessage = 'Preparing measurement features…';
+
+/** How many targets one page of the target list adds. */
+const catalogPageSize = 100;
+
+/** Gives the main thread back between slices of the target list scan, so input and frames run meanwhile. */
+const nextTask = async (): Promise<void> => {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+};
+
 /**
  * Settles once any of the waits has, however it ends: a press takes its snapshot again at each step of progress, as
  * the target under it may be ready long before a large mesh elsewhere in the scene is.
@@ -256,7 +286,15 @@ const settleAny = async (waits: ReadonlyArray<Promise<unknown>>): Promise<void> 
  */
 function MeasureSession({ adapters }: Readonly<{ adapters: MeasureToolAdapters }>): ReactNode {
   const logic = useMemo(
-    () => measureSessionMachine.provide({ actors: { follower: adapters.follower, pointer: adapters.pointer } }),
+    () =>
+      measureSessionMachine.provide({
+        actors: {
+          follower: adapters.follower,
+          pointer: adapters.pointer,
+          exact: adapters.exact,
+          catalog: adapters.catalog,
+        },
+      }),
     [adapters],
   );
   useActorRef(logic);
@@ -291,16 +329,12 @@ export function MeasureTool(): React.JSX.Element {
   const measureFilter = useGraphicsSelector((state) => state.context.measureFilter);
   const measureOperation = useGraphicsSelector((state) => state.context.measureOperation);
   const measureFrame = useGraphicsSelector((state) => state.context.measureFrame);
-  const chosenCandidateId = useGraphicsSelector((state) => state.context.measureActiveCandidateId);
   const explicitCandidateId = useGraphicsSelector((state) => state.context.measureChosenCandidateId);
   const lockedTargetId = useGraphicsSelector((state) => state.context.measureLockedTargetId);
-  const measureCommitRequest = useGraphicsSelector((state) => state.context.measureCommitRequest);
-  const measureCatalogRequest = useGraphicsSelector((state) => state.context.measureCatalogRequest);
   const metersPerDisplayUnit = useGraphicsSelector((state) => state.context.displayUnits.length.metersPerUnit);
   const lengthSymbol = useGraphicsSelector((state) => state.context.displayUnits.length.symbol);
   const hoveredMeasurementId = useGraphicsSelector((state) => state.context.hoveredMeasurementId);
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
-  const wasMeasureActiveRef = useRef(isMeasureActive);
 
   const [{ hoveredSnapPoints, activeSnapPoint, mousePosition }, dispatchHoverState] = useReducer(measureHoverReducer, {
     hoveredSnapPoints: [],
@@ -331,12 +365,6 @@ export function MeasureTool(): React.JSX.Element {
   );
   /** Failures per surface, so an unrelated graph cannot cancel a waiting press. */
   const pointerGraphFailuresRef = useRef(new WeakMap<THREE.Mesh, number>());
-  const exactAbortRef = useRef<AbortController | undefined>(undefined);
-  const exactTaskRef = useRef<Promise<void> | undefined>(undefined);
-  const exactRequestRef = useRef(0);
-  const committedCutsRef = useRef(graphicsActor.getSnapshot().context.committedSectionCuts);
-  const handledCommitRequestRef = useRef(0);
-  const handledCatalogRequestRef = useRef(measureCatalogRequest);
   const catalogVersionRef = useRef(0);
   const catalogScanRef = useRef<
     | {
@@ -350,18 +378,9 @@ export function MeasureTool(): React.JSX.Element {
       }
     | undefined
   >(undefined);
-  const candidateSourceRef = useRef<
-    | {
-        geometryKey: typeof geometryKey;
-        graphicsActor: typeof graphicsActor;
-        isMeasureActive: boolean;
-        measureFilter: typeof measureFilter;
-        measureMode: typeof measureMode;
-        modelDisplayRevision: typeof modelDisplayRevision;
-        pickableMeshesVersion: typeof pickableMeshesVersion;
-      }
-    | undefined
-  >(undefined);
+  // What the target list was last taken from, and the geometry the tool last measured on, as the follower reported.
+  const catalogSourceRef = useRef<string | undefined>(undefined);
+  const presentedGeometryRef = useRef<string | undefined>(undefined);
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
   // The tool's own work, as last rendered, for the measure session's adapters to call.
@@ -474,7 +493,7 @@ export function MeasureTool(): React.JSX.Element {
   ]);
 
   const getCachedMeshes = useCallback((): THREE.Mesh[] => {
-    const poseRevision = kinematicsActorRef.current.getSnapshot().context.revision;
+    const poseRevision = selectPoseRevision(kinematicsActorRef.current);
     const currentKey = `${geometryKeyRef.current}:${pickableMeshesVersionRef.current}:${modelDisplayRevisionRef.current}:${poseRevision}:${cameraRef.current.layers.mask}`;
     if (currentKey === cachedMeshKeyRef.current) {
       return cachedMeshesRef.current;
@@ -528,7 +547,7 @@ export function MeasureTool(): React.JSX.Element {
           }
           if (
             ready &&
-            graphicsActor.getSnapshot().context.measureMessage ===
+            selectGraphicsContext(graphicsActor).measureMessage ===
               'Measurement features could not be prepared. Move the pointer to retry.'
           ) {
             graphicsActor.send({ type: 'setMeasureMessage' });
@@ -542,7 +561,7 @@ export function MeasureTool(): React.JSX.Element {
           }
           const failures = pointerGraphFailuresRef.current;
           failures.set(surface, (failures.get(surface) ?? 0) + 1);
-          const { context } = graphicsActor.getSnapshot();
+          const context = selectGraphicsContext(graphicsActor);
           if (
             presentedKey === geometryKeyRef.current &&
             context.isMeasureActive &&
@@ -563,17 +582,6 @@ export function MeasureTool(): React.JSX.Element {
     [graphClient, graphSource, graphicsActor],
   );
 
-  useEffect(
-    () => () => {
-      exactAbortRef.current?.abort();
-      graphicsActor.send({
-        type: 'cancelPendingMeasurements',
-        reason: 'The measuring view closed before the exact query finished.',
-      });
-    },
-    [graphicsActor],
-  );
-
   const updatePointerSnapshot = useCallback(
     ({ clientX, clientY }: MeasurePointerCoordinates, coarsePointer = false): MeasurePointerSnapshot => {
       const rect = gl.domElement.getBoundingClientRect();
@@ -583,7 +591,7 @@ export function MeasureTool(): React.JSX.Element {
       setRaycasterFromCamera(raycasterRef.current, mouseRef.current, camera);
 
       // Read here, not selected: a section drag step must not re-render the tool or reset its pointer coalescer.
-      const clipping = resolveSectionViewRaycastClip(graphicsActor.getSnapshot().context, renderFrame);
+      const clipping = resolveSectionViewRaycastClip(selectGraphicsContext(graphicsActor), renderFrame);
       const firstPick = raycastFirstVisibleMeshHit({
         raycaster: raycasterRef.current,
         meshes: getCachedMeshes(),
@@ -686,7 +694,7 @@ export function MeasureTool(): React.JSX.Element {
         id: target.id,
         label: describeTarget(target, mesh),
       }));
-      const graphicsContext = graphicsActor.getSnapshot().context;
+      const graphicsContext = selectGraphicsContext(graphicsActor);
       if (
         graphicsContext.measureActiveCandidateId !== closest?.id ||
         graphicsContext.measureCandidates.length !== candidateSummaries.length ||
@@ -713,7 +721,7 @@ export function MeasureTool(): React.JSX.Element {
         const pointMeters = fromThreeRenderPoint({ renderFrame, point: hover.mousePosition });
         previewDistance = new THREE.Vector3(...currentStartRef.current).distanceTo(new THREE.Vector3(...pointMeters));
       }
-      if (graphicsActor.getSnapshot().context.measurePreviewDistance !== previewDistance) {
+      if (selectGraphicsContext(graphicsActor).measurePreviewDistance !== previewDistance) {
         graphicsActor.send({ type: 'setMeasurePreviewDistance', distance: previewDistance });
       }
       invalidate();
@@ -751,19 +759,12 @@ export function MeasureTool(): React.JSX.Element {
     ],
   );
   const commitTarget = useCallback(
-    (snapshot: MeasurePointerSnapshot): void => {
+    (snapshot: MeasurePointerSnapshot): MeasureCommitOutcome | undefined => {
       const { point } = snapshot;
       if (!point) {
-        return;
+        return undefined;
       }
-      if (exactAbortRef.current && !exactAbortRef.current.signal.aborted) {
-        exactAbortRef.current.abort();
-        exactRequestRef.current++;
-        graphicsActor.send({
-          type: 'cancelPendingMeasurements',
-          reason: 'The exact query was replaced by a new selection.',
-        });
-      }
+      // Any commit that places a point replaces a running exact query: the session cancels it on `committed`.
       const pointMeters = [...fromThreeRenderPoint({ renderFrame, point })] as [number, number, number];
       const { target } = snapshot;
       const source = target ? candidateReferences.current.get(target.id) : undefined;
@@ -833,13 +834,13 @@ export function MeasureTool(): React.JSX.Element {
               : 'Calculated from the rendered mesh; source deviation bound unknown.',
         anchors: [first ?? anchor, second],
         geometryKey,
-        poseRevision: kinematicsRef.getSnapshot().context.revision,
+        poseRevision: selectPoseRevision(kinematicsRef),
         status: 'current',
       });
       if (!currentStartRef.current) {
         if (measureFrame === 'selected-local' && !source) {
           graphicsActor.send({ type: 'setMeasureMessage', message: 'Select a feature to use its local frame.' });
-          return;
+          return {};
         }
         if (
           measureMode === 'auto' &&
@@ -894,24 +895,24 @@ export function MeasureTool(): React.JSX.Element {
                 [...fromThreeRenderPoint({ renderFrame, point: witnessEnd })],
               ),
             });
-            return;
+            return {};
           }
           if (measureOperation !== 'point-distance') {
             graphicsActor.send({
               type: 'setMeasureMessage',
               message: `${measureOperation} is unavailable for ${anchor.label}. Choose another target or operation.`,
             });
-            return;
+            return {};
           }
         }
         selectedTargetRef.current = source;
         graphicsActor.send({ type: 'startMeasurement', payload: pointMeters, anchor });
-        return;
+        return {};
       }
-      const firstAnchor = graphicsActor.getSnapshot().context.currentMeasurementAnchor;
+      const firstAnchor = selectGraphicsContext(graphicsActor).currentMeasurementAnchor;
       if (firstAnchor?.geometryKey !== geometryKey) {
         graphicsActor.send({ type: 'cancelCurrentMeasurement' });
-        return;
+        return {};
       }
       const first = selectedTargetRef.current?.target;
       if (
@@ -919,16 +920,7 @@ export function MeasureTool(): React.JSX.Element {
         first?.feature.kind === 'body' &&
         source?.target.feature.kind === 'body'
       ) {
-        exactAbortRef.current?.abort();
-        graphicsActor.send({
-          type: 'cancelPendingMeasurements',
-          reason: 'The exact query was replaced by a new selection.',
-        });
-        const controller = new AbortController();
-        exactAbortRef.current = controller;
-        const request = ++exactRequestRef.current;
-        const pose = kinematicsRef.getSnapshot().context.revision;
-        const cuts = committedCutsRef.current;
+        const pose = selectPoseRevision(kinematicsRef);
         const componentA = (
           selectedTargetRef.current?.mesh.userData['measurementFeatures'] as { componentId?: string } | undefined
         )?.componentId;
@@ -955,7 +947,7 @@ export function MeasureTool(): React.JSX.Element {
         };
         const asBuilt = modelInteractionUnitId
           ? Object.values(
-              getKinematicsUnitState(kinematicsRef.getSnapshot().context, modelInteractionUnitId).coordinates,
+              getKinematicsUnitState(selectKinematicsContext(kinematicsRef), modelInteractionUnitId).coordinates,
             ).every((value) => value === 0)
           : false;
         const id = generatePrefixedId(idPrefix.measurement);
@@ -986,58 +978,11 @@ export function MeasureTool(): React.JSX.Element {
         graphicsActor.send({ type: 'addMeasurementRecord', record });
         selectedTargetRef.current = undefined;
         if (record.status === 'unavailable' || !measureExact || !manifest || !componentA || !componentB) {
-          return;
+          return {};
         }
-        const resolveExact = async (): Promise<void> => {
-          try {
-            const answer = await measureExact({
-              manifest,
-              presentedGeometryHash: geometryKey,
-              occurrenceA: componentA,
-              occurrenceB: componentB,
-              signal: controller.signal,
-            });
-            const current = graphicsActor.getSnapshot();
-            if (
-              controller.signal.aborted ||
-              exactRequestRef.current !== request ||
-              selectPresentedGeometryKey(current) !== geometryKey ||
-              kinematicsRef.getSnapshot().context.revision !== pose ||
-              current.context.committedSectionCuts !== cuts
-            ) {
-              return;
-            }
-            graphicsActor.send({
-              type: 'resolveMeasurementRecord',
-              id,
-              patch:
-                answer.status === 'cad-geometry'
-                  ? {
-                      status: 'current',
-                      quality: 'cad',
-                      distance: answer.distanceMeters,
-                      startPoint: answer.pointAMeters,
-                      endPoint: answer.pointBMeters,
-                      evidenceDetails:
-                        'AP242 whole-shape minimum; unsigned, no interference classification; numerical tolerance not provided.',
-                    }
-                  : { status: 'unavailable', unavailableReason: answer.reason },
-            });
-          } catch (error) {
-            if (!controller.signal.aborted && exactRequestRef.current === request) {
-              graphicsActor.send({
-                type: 'resolveMeasurementRecord',
-                id,
-                patch: {
-                  status: 'unavailable',
-                  unavailableReason: error instanceof Error ? error.message : 'Exact geometry query failed.',
-                },
-              });
-            }
-          }
+        return {
+          exact: { id, manifest, geometryKey, occurrenceA: componentA, occurrenceB: componentB, poseRevision: pose },
         };
-        exactTaskRef.current = resolveExact();
-        return;
       }
       const pair = first && source ? measureTargetPair(first, source.target) : [];
       const wanted =
@@ -1056,7 +1001,7 @@ export function MeasureTool(): React.JSX.Element {
           type: 'setMeasureMessage',
           message: `${measureOperation} is unavailable for these targets. Choose another target or operation.`,
         });
-        return;
+        return {};
       }
       const witnessStart =
         result?.witnesses[0] ?? toThreeRenderPoint({ renderFrame, pointMeters: currentStartRef.current });
@@ -1081,6 +1026,7 @@ export function MeasureTool(): React.JSX.Element {
       });
       graphicsActor.send({ type: 'setMeasureMessage' });
       selectedTargetRef.current = undefined;
+      return {};
     },
     [
       geometryKey,
@@ -1097,284 +1043,268 @@ export function MeasureTool(): React.JSX.Element {
     ],
   );
 
-  useEffect(() => {
-    const wasActive = wasMeasureActiveRef.current;
-    wasMeasureActiveRef.current = isMeasureActive;
-    if (!isMeasureActive && wasActive) {
-      exactAbortRef.current?.abort();
-      exactRequestRef.current++;
-      graphicsActor.send({
-        type: 'cancelPendingMeasurements',
-        reason: 'Measurement closed before the exact query finished.',
-      });
-      candidateReferences.current.clear();
-      catalogReferences.current.clear();
-      selectedTargetRef.current = undefined;
-    }
-  }, [graphicsActor, isMeasureActive]);
-
-  useEffect(() => {
-    exactAbortRef.current?.abort();
-    exactRequestRef.current++;
-    graphicsActor.send({ type: 'measurementSourceChanged', geometryKey });
-    graphicsActor.send({ type: 'cancelCurrentMeasurement' });
-    selectedTargetRef.current = undefined;
-  }, [geometryKey, graphicsActor]);
-
-  useEffect(() => {
-    const previous = candidateSourceRef.current;
-    candidateSourceRef.current = {
-      geometryKey,
-      graphicsActor,
-      isMeasureActive,
-      measureFilter,
-      measureMode,
-      modelDisplayRevision,
-      pickableMeshesVersion,
-    };
-    catalogVersionRef.current++;
-    catalogScanRef.current = undefined;
-    if (!isMeasureActive) {
-      return;
-    }
-    if (
-      previous &&
-      previous.geometryKey === geometryKey &&
-      previous.graphicsActor === graphicsActor &&
-      previous.isMeasureActive === isMeasureActive &&
-      previous.measureFilter === measureFilter &&
-      previous.measureMode === measureMode &&
-      previous.modelDisplayRevision === modelDisplayRevision &&
-      previous.pickableMeshesVersion === pickableMeshesVersion
-    ) {
-      return;
-    }
-    const { context } = graphicsActor.getSnapshot();
-    if (previous && context.measureMessage === 'Preparing measurement features…') {
-      graphicsActor.send({ type: 'setMeasureMessage' });
-    }
-    if (catalogReferences.current.size === 0 && !context.measureChosenCandidateId && !context.measureLockedTargetId) {
-      return;
-    }
-    catalogReferences.current.clear();
+  /** Measure turned off: the candidates and the first target the tool held belong to the measuring that ended. */
+  const measureClosed = useCallback((): void => {
     candidateReferences.current.clear();
-    graphicsActor.send({ type: 'setMeasureCandidates', candidates: [] });
-  }, [
-    geometryKey,
-    graphicsActor,
-    isMeasureActive,
-    modelDisplayRevision,
-    measureFilter,
-    measureMode,
-    pickableMeshesVersion,
-  ]);
+    catalogReferences.current.clear();
+    selectedTargetRef.current = undefined;
+  }, []);
 
-  useEffect(() => {
-    if (!isMeasureActive || measureCatalogRequest === handledCatalogRequestRef.current) {
-      return;
-    }
-    handledCatalogRequestRef.current = measureCatalogRequest;
-    const append = graphicsActor.getSnapshot().context.measureCatalogAppend;
-    if (!append || !catalogScanRef.current) {
-      catalogScanRef.current = {
-        meshes: [...getCachedMeshes(), ...getCachedLines()],
-        meshIndex: 0,
-        featureIndex: 0,
-        targets: [],
-        targetIndex: 0,
-        catalog: new Map(),
-      };
-    }
-    const scan = catalogScanRef.current;
-    const version = catalogVersionRef.current;
-    const clipping = resolveSectionViewRaycastClip(graphicsActor.getSnapshot().context, renderFrame);
-    const isKept = createRaycastClipTest(clipping);
-    const catalogRaycaster = new THREE.Raycaster();
-    const cameraKey = `${camera.matrixWorld.elements.join(',')}:${camera.projectionMatrix.elements.join(',')}`;
-    const pageEnd = scan.catalog.size + 100;
-    const featureBatchSize = 32;
-    const preparingMessage = 'Preparing measurement features…';
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const publish = (hasMore: boolean): void => {
-      catalogReferences.current = new Map(scan.catalog);
-      candidateReferences.current = new Map(scan.catalog);
-      const candidates = [...scan.catalog.values()].map(({ target, mesh }) => ({
-        id: target.id,
-        label: describeTarget(target, mesh),
-      }));
-      graphicsActor.send({ type: 'setMeasureCandidates', candidates, activeId: candidates[0]?.id, hasMore });
-    };
-    /** Resumes the scan once a tree it waited on lands, unless the catalog moved on meanwhile. */
-    const resumeWhenTreesLand = async (ready: Promise<void>): Promise<void> => {
-      await ready;
-      if (!cancelled && version === catalogVersionRef.current) {
-        timer = setTimeout(step, 0);
-      }
-    };
-    const requestCatalogGraph = async (surface: THREE.Mesh, presentedKey: string | undefined): Promise<void> => {
-      graphicsActor.send({ type: 'setMeasureMessage', message: preparingMessage });
-      try {
-        const ready = await graphClient().prepare(surface);
-        if (
-          cancelled ||
-          graphSourceRef.current !== graphSource ||
-          version !== catalogVersionRef.current ||
-          presentedKey !== geometryKeyRef.current
-        ) {
-          return;
-        }
-        if (ready) {
-          scan.graph = ready;
-          if (graphicsActor.getSnapshot().context.measureMessage === preparingMessage) {
-            graphicsActor.send({ type: 'setMeasureMessage' });
-          }
-          timer = setTimeout(step, 0);
-        } else {
-          if (graphicsActor.getSnapshot().context.measureMessage === preparingMessage) {
-            graphicsActor.send({ type: 'setMeasureMessage' });
-          }
-          publish(false);
-        }
-      } catch {
-        if (!cancelled && graphSourceRef.current === graphSource && version === catalogVersionRef.current) {
-          graphicsActor.send({
-            type: 'setMeasureMessage',
-            message: 'Measurement features could not be prepared. Reopen the target list to retry.',
-          });
-          publish(false);
-        }
-      }
-    };
-    const step = (): void => {
-      if (cancelled || version !== catalogVersionRef.current) {
+  /**
+   * The follower reports the presented geometry when it starts and whenever it changes. Only a new one (including the
+   * first a newly mounted tool sees) marks what was measured on another out of date and drops the measurement started.
+   */
+  const presentGeometry = useCallback(
+    (presented: string): void => {
+      if (presentedGeometryRef.current === presented) {
         return;
       }
-      if (cameraKey !== `${camera.matrixWorld.elements.join(',')}:${camera.projectionMatrix.elements.join(',')}`) {
-        catalogScanRef.current = undefined;
+      presentedGeometryRef.current = presented;
+      graphicsActor.send({ type: 'measurementSourceChanged', geometryKey: presented });
+      graphicsActor.send({ type: 'cancelCurrentMeasurement' });
+      selectedTargetRef.current = undefined;
+    },
+    [graphicsActor],
+  );
+
+  /** What a target list is taken from moved: the presented model, its display, pickable meshes, mode or filter. */
+  const followCatalogSource = useCallback(
+    (key: string, isActive: boolean): void => {
+      const previous = catalogSourceRef.current;
+      catalogSourceRef.current = key;
+      catalogVersionRef.current++;
+      catalogScanRef.current = undefined;
+      if (!isActive || previous === key) {
         return;
       }
-      const start = performance.now();
-      let checked = 0;
-      while (scan.catalog.size < pageEnd && checked < 16 && performance.now() - start < 8) {
-        if (scan.targetIndex >= scan.targets.length) {
-          if (!scan.graph || scan.featureIndex >= scan.graph.features.length) {
-            if (scan.meshIndex >= scan.meshes.length) {
-              publish(false);
-              return;
-            }
-            const mesh = scan.meshes[scan.meshIndex++]!;
-            scan.featureIndex = 0;
-            scan.graph =
-              mesh.userData['measurementFeatures']?.kind === 'line'
-                ? getLineMeasurementFeatures(mesh)
-                : getCachedMeshMeasurementFeatures(mesh as THREE.Mesh);
-            if (!scan.graph) {
-              // async-iife: bootstrap -- The catalog's timer yields while this worker request is pending.
-              void requestCatalogGraph(mesh as THREE.Mesh, geometryKeyRef.current);
-              return;
-            }
-          }
-          const { graph } = scan;
-          const mesh = scan.meshes[scan.meshIndex - 1]!;
-          scan.targets = listMeasurementTargets(
-            { ...graph, features: graph.features.slice(scan.featureIndex, scan.featureIndex + featureBatchSize) },
-            {
-              mesh,
-              camera,
-              canvas: gl.domElement,
-              filter: measureMode === 'point' ? 'point' : measureFilter,
-              isKept: isKept ?? undefined,
-            },
-          );
-          scan.featureIndex += featureBatchSize;
-          scan.targetIndex = 0;
-          continue;
-        }
-        const target = scan.targets[scan.targetIndex++]!;
-        const mesh = target.sourceMesh as THREE.Object3D & { geometry: THREE.BufferGeometry };
-        checked++;
-        const supportPoints =
-          target.kind === 'center' || target.kind === 'centroid' || target.kind === 'body'
-            ? featureSupports(target.feature, target.position, mesh)
-            : [target.position];
-        let waitFor: Promise<void> | undefined;
-        const visible = supportPoints.some((support) => {
-          if (isKept && !isKept(support)) {
-            return false;
-          }
-          const projected = support.clone().project(camera);
-          if (projected.z < -1 || projected.z > 1) {
-            return false;
-          }
-          setRaycasterFromCamera(catalogRaycaster, new THREE.Vector2(projected.x, projected.y), camera);
-          const pick = raycastFirstVisibleMeshHit({ raycaster: catalogRaycaster, meshes: getCachedMeshes(), clipping });
-          waitFor ??= pick.whenReady;
-          return isSupportVisible(pick, catalogRaycaster.ray, support);
-        });
-        if (!visible && waitFor) {
-          // A tree is still building in the worker: check this target again once it lands, not never.
-          scan.targetIndex--;
-          // async-iife: bootstrap -- The catalog's timer yields while the tree builds in the worker.
-          void resumeWhenTreesLand(waitFor);
-          return;
-        }
-        if (visible) {
-          const id = `${mesh.uuid}:${target.id}`;
-          scan.catalog.set(id, { target: { ...target, id }, mesh });
-        }
-      }
-      if (scan.catalog.size >= pageEnd) {
-        publish(
-          scan.targetIndex < scan.targets.length ||
-            (scan.graph !== undefined && scan.featureIndex < scan.graph.features.length) ||
-            scan.meshIndex < scan.meshes.length,
-        );
-      } else {
-        timer = setTimeout(step, 0);
-      }
-    };
-    timer = setTimeout(step, 0);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-      if (graphicsActor.getSnapshot().context.measureMessage === preparingMessage) {
+      const context = selectGraphicsContext(graphicsActor);
+      if (previous !== undefined && context.measureMessage === catalogPreparingMessage) {
         graphicsActor.send({ type: 'setMeasureMessage' });
       }
-    };
-  }, [
-    camera,
-    describeTarget,
-    getCachedLines,
-    getCachedMeshes,
-    graphClient,
-    graphSource,
-    gl.domElement,
-    graphicsActor,
-    isMeasureActive,
-    measureCatalogRequest,
-    measureFilter,
-    measureMode,
-    renderFrame,
-  ]);
+      if (catalogReferences.current.size === 0 && !context.measureChosenCandidateId && !context.measureLockedTargetId) {
+        return;
+      }
+      catalogReferences.current.clear();
+      candidateReferences.current.clear();
+      graphicsActor.send({ type: 'setMeasureCandidates', candidates: [] });
+    },
+    [graphicsActor],
+  );
 
-  useEffect(() => {
-    if (!isMeasureActive || measureCommitRequest === handledCommitRequestRef.current) {
-      return;
+  /**
+   * Lists the targets in view, a page at a time, yielding the main thread between slices of the scan. The measure
+   * session runs it as its `catalog` child and aborts `signal` when it stops it; a scan the tool's catalog version
+   * moved past (the camera, pose, cuts or source changed) ends at its next slice.
+   */
+  const scanCatalog = useCallback(
+    async ({ append, signal }: Readonly<{ append: boolean; signal: AbortSignal }>): Promise<void> => {
+      if (!append || !catalogScanRef.current) {
+        catalogScanRef.current = {
+          meshes: [...getCachedMeshes(), ...getCachedLines()],
+          meshIndex: 0,
+          featureIndex: 0,
+          targets: [],
+          targetIndex: 0,
+          catalog: new Map(),
+        };
+      }
+      const scan = catalogScanRef.current;
+      const version = catalogVersionRef.current;
+      const clipping = resolveSectionViewRaycastClip(selectGraphicsContext(graphicsActor), renderFrame);
+      const isKept = createRaycastClipTest(clipping);
+      const catalogRaycaster = new THREE.Raycaster();
+      const cameraKeyOf = (): string =>
+        `${camera.matrixWorld.elements.join(',')}:${camera.projectionMatrix.elements.join(',')}`;
+      const cameraKey = cameraKeyOf();
+      const pageEnd = scan.catalog.size + catalogPageSize;
+      const featureBatchSize = 32;
+      const isLive = (): boolean => !signal.aborted && version === catalogVersionRef.current;
+      const publish = (hasMore: boolean): void => {
+        catalogReferences.current = new Map(scan.catalog);
+        candidateReferences.current = new Map(scan.catalog);
+        const candidates = [...scan.catalog.values()].map(({ target, mesh }) => ({
+          id: target.id,
+          label: describeTarget(target, mesh),
+        }));
+        graphicsActor.send({ type: 'setMeasureCandidates', candidates, activeId: candidates[0]?.id, hasMore });
+      };
+      /** Prepares a mesh's graph off the main thread; `true` when the scan goes on with it. */
+      const prepareCatalogGraph = async (surface: THREE.Mesh, presentedKey: string | undefined): Promise<boolean> => {
+        graphicsActor.send({ type: 'setMeasureMessage', message: catalogPreparingMessage });
+        try {
+          const ready = await graphClient().prepare(surface);
+          if (!isLive() || graphSourceRef.current !== graphSource || presentedKey !== geometryKeyRef.current) {
+            return false;
+          }
+          if (selectGraphicsContext(graphicsActor).measureMessage === catalogPreparingMessage) {
+            graphicsActor.send({ type: 'setMeasureMessage' });
+          }
+          if (!ready) {
+            publish(false);
+            return false;
+          }
+          scan.graph = ready;
+          return true;
+        } catch {
+          if (isLive() && graphSourceRef.current === graphSource) {
+            graphicsActor.send({
+              type: 'setMeasureMessage',
+              message: 'Measurement features could not be prepared. Reopen the target list to retry.',
+            });
+            publish(false);
+          }
+          return false;
+        }
+      };
+      type Slice =
+        | { type: 'yield' }
+        | { type: 'end' }
+        | { type: 'graph'; mesh: THREE.Mesh }
+        | { type: 'wait'; ready: Promise<void> };
+      /** One slice of the scan, bounded by a time and target budget. */
+      const slice = (): Slice => {
+        const start = performance.now();
+        let checked = 0;
+        while (scan.catalog.size < pageEnd && checked < 16 && performance.now() - start < 8) {
+          if (scan.targetIndex >= scan.targets.length) {
+            if (!scan.graph || scan.featureIndex >= scan.graph.features.length) {
+              if (scan.meshIndex >= scan.meshes.length) {
+                publish(false);
+                return { type: 'end' };
+              }
+              const mesh = scan.meshes[scan.meshIndex++]!;
+              scan.featureIndex = 0;
+              scan.graph =
+                mesh.userData['measurementFeatures']?.kind === 'line'
+                  ? getLineMeasurementFeatures(mesh)
+                  : getCachedMeshMeasurementFeatures(mesh as THREE.Mesh);
+              if (!scan.graph) {
+                return { type: 'graph', mesh: mesh as THREE.Mesh };
+              }
+            }
+            const { graph } = scan;
+            const mesh = scan.meshes[scan.meshIndex - 1]!;
+            scan.targets = listMeasurementTargets(
+              { ...graph, features: graph.features.slice(scan.featureIndex, scan.featureIndex + featureBatchSize) },
+              {
+                mesh,
+                camera,
+                canvas: gl.domElement,
+                filter: measureMode === 'point' ? 'point' : measureFilter,
+                isKept: isKept ?? undefined,
+              },
+            );
+            scan.featureIndex += featureBatchSize;
+            scan.targetIndex = 0;
+            continue;
+          }
+          const target = scan.targets[scan.targetIndex++]!;
+          const mesh = target.sourceMesh as THREE.Object3D & { geometry: THREE.BufferGeometry };
+          checked++;
+          const supportPoints =
+            target.kind === 'center' || target.kind === 'centroid' || target.kind === 'body'
+              ? featureSupports(target.feature, target.position, mesh)
+              : [target.position];
+          let waitFor: Promise<void> | undefined;
+          const visible = supportPoints.some((support) => {
+            if (isKept && !isKept(support)) {
+              return false;
+            }
+            const projected = support.clone().project(camera);
+            if (projected.z < -1 || projected.z > 1) {
+              return false;
+            }
+            setRaycasterFromCamera(catalogRaycaster, new THREE.Vector2(projected.x, projected.y), camera);
+            const pick = raycastFirstVisibleMeshHit({
+              raycaster: catalogRaycaster,
+              meshes: getCachedMeshes(),
+              clipping,
+            });
+            waitFor ??= pick.whenReady;
+            return isSupportVisible(pick, catalogRaycaster.ray, support);
+          });
+          if (!visible && waitFor) {
+            // A tree is still building in the worker: check this target again once it lands, not never.
+            scan.targetIndex--;
+            return { type: 'wait', ready: waitFor };
+          }
+          if (visible) {
+            const id = `${mesh.uuid}:${target.id}`;
+            scan.catalog.set(id, { target: { ...target, id }, mesh });
+          }
+        }
+        if (scan.catalog.size >= pageEnd) {
+          publish(
+            scan.targetIndex < scan.targets.length ||
+              (scan.graph !== undefined && scan.featureIndex < scan.graph.features.length) ||
+              scan.meshIndex < scan.meshes.length,
+          );
+          return { type: 'end' };
+        }
+        return { type: 'yield' };
+      };
+      for (;;) {
+        // oxlint-disable-next-line no-await-in-loop -- Each slice yields the main thread before the next one runs.
+        await nextTask();
+        if (!isLive()) {
+          return;
+        }
+        if (cameraKeyOf() !== cameraKey) {
+          catalogScanRef.current = undefined;
+          return;
+        }
+        const next = slice();
+        if (next.type === 'end') {
+          return;
+        }
+        if (next.type === 'wait') {
+          // oxlint-disable-next-line no-await-in-loop -- The scan waits on the pick tree before checking the target again.
+          await next.ready;
+        } else if (next.type === 'graph') {
+          // oxlint-disable-next-line no-await-in-loop -- The scan waits on this mesh's graph before listing its targets.
+          const goesOn = await prepareCatalogGraph(next.mesh, geometryKeyRef.current);
+          if (!goesOn) {
+            return;
+          }
+        }
+      }
+    },
+    [
+      camera,
+      describeTarget,
+      getCachedLines,
+      getCachedMeshes,
+      graphClient,
+      graphSource,
+      gl.domElement,
+      graphicsActor,
+      measureFilter,
+      measureMode,
+      renderFrame,
+    ],
+  );
+
+  /** A target list scan stopped: the status it showed while it waited on a graph is no longer true. */
+  const catalogStopped = useCallback((): void => {
+    if (selectGraphicsContext(graphicsActor).measureMessage === catalogPreparingMessage) {
+      graphicsActor.send({ type: 'setMeasureMessage' });
     }
-    handledCommitRequestRef.current = measureCommitRequest;
-    const entry = candidateReferences.current.get(chosenCandidateId ?? '');
-    if (entry) {
-      commitTarget({ hasTarget: true, hasActiveSnapTarget: true, point: entry.target.position, target: entry.target });
-    }
-  }, [chosenCandidateId, commitTarget, isMeasureActive, measureCommitRequest]);
+  }, [graphicsActor]);
+
+  /** Use target: commit the chosen candidate as a release on it would. */
+  const commitChosen = useCallback((): MeasureCommitOutcome | undefined => {
+    const entry = candidateReferences.current.get(selectGraphicsContext(graphicsActor).measureActiveCandidateId ?? '');
+    return entry
+      ? commitTarget({ hasTarget: true, hasActiveSnapTarget: true, point: entry.target.position, target: entry.target })
+      : undefined;
+  }, [commitTarget, graphicsActor]);
 
   /** The presented camera or the pose changed: the world-space targets the tool holds were taken under the old one. */
   const invalidateCandidates = useCallback((): void => {
     catalogVersionRef.current++;
     catalogScanRef.current = undefined;
-    const { context } = graphicsActor.getSnapshot();
-    if (context.measureMessage === 'Preparing measurement features…') {
+    const context = selectGraphicsContext(graphicsActor);
+    if (context.measureMessage === catalogPreparingMessage) {
       graphicsActor.send({ type: 'setMeasureMessage' });
     }
     if (catalogReferences.current.size === 0 && !context.measureChosenCandidateId && !context.measureLockedTargetId) {
@@ -1385,68 +1315,72 @@ export function MeasureTool(): React.JSX.Element {
     graphicsActor.send({ type: 'setMeasureCandidates', candidates: [] });
   }, [graphicsActor]);
 
-  // The measure session's adapters call the host functions this render made. Assigned in a layout effect, which runs
-  // before the session starts (its actor starts in a passive effect) and before any pointer event reaches it.
-  useLayoutEffect(() => {
-    hostRef.current = {
-      snapshot: updatePointerSnapshot,
-      commit: commitTarget,
-      clearHover: () => {
-        hoverRef.current = noMeasureHover;
-        dispatchHoverState({ type: 'clear' });
-      },
-      releaseChosenCandidate: () => {
-        if (!lockedTargetIdRef.current && chosenCandidateIdRef.current) {
-          chosenCandidateIdRef.current = undefined;
-          graphicsActor.send({ type: 'clearMeasureChosenCandidate' });
-        }
-      },
-      clearSelection: () => {
-        selectedTargetRef.current = undefined;
-      },
-      prioritize: prioritizePressSurface,
-      graphFailures: (surface) => pointerGraphFailuresRef.current.get(surface) ?? 0,
-      renderFrame: () => renderFrame,
-      currentStart: () => currentStartRef.current,
-      invalidateCandidates,
-      poseChanged: (revision, isActive) => {
-        graphicsActor.send({ type: 'measurementPoseChanged', revision });
-        if (!isActive) {
-          return;
-        }
-        exactAbortRef.current?.abort();
-        exactRequestRef.current++;
+  // The host functions this render made, for the measure session's adapters to call from their events.
+  const host: MeasureToolHost = {
+    snapshot: updatePointerSnapshot,
+    commit: commitTarget,
+    commitChosen,
+    measureExact,
+    scanCatalog,
+    catalogStopped,
+    presentGeometry,
+    followCatalogSource,
+    measureClosed,
+    clearHover: () => {
+      hoverRef.current = noMeasureHover;
+      dispatchHoverState({ type: 'clear' });
+    },
+    releaseChosenCandidate: () => {
+      if (!lockedTargetIdRef.current && chosenCandidateIdRef.current) {
+        chosenCandidateIdRef.current = undefined;
+        graphicsActor.send({ type: 'clearMeasureChosenCandidate' });
+      }
+    },
+    clearSelection: () => {
+      selectedTargetRef.current = undefined;
+    },
+    prioritize: prioritizePressSurface,
+    graphFailures: (surface) => pointerGraphFailuresRef.current.get(surface) ?? 0,
+    renderFrame: () => renderFrame,
+    currentStart: () => currentStartRef.current,
+    invalidateCandidates,
+    poseChanged: (revision, isActive) => {
+      graphicsActor.send({ type: 'measurementPoseChanged', revision });
+      if (!isActive) {
+        return;
+      }
+      graphicsActor.send({ type: 'cancelCurrentMeasurement' });
+      selectedTargetRef.current = undefined;
+      invalidateCandidates();
+    },
+    // A committed cut change (S adds a cut, Delete removes one): what was measured against the old cut is stale, and
+    // the session raycasts the resting pointer's snaps again.
+    cutsChanged: (context) => {
+      if (
+        context.currentMeasurementStart ??
+        context.measurements.some(
+          (measurement) =>
+            measurement.anchors?.length && (measurement.status === 'current' || measurement.status === 'pending'),
+        )
+      ) {
+        graphicsActor.send({ type: 'measurementCutChanged' });
         graphicsActor.send({ type: 'cancelCurrentMeasurement' });
-        selectedTargetRef.current = undefined;
-        invalidateCandidates();
-      },
-      // A committed cut change (S adds a cut, Delete removes one): what was measured against the old cut is stale, and
-      // the session raycasts the resting pointer's snaps again.
-      cutsChanged: (context) => {
-        committedCutsRef.current = context.committedSectionCuts;
-        exactAbortRef.current?.abort();
-        exactRequestRef.current++;
-        if (
-          context.currentMeasurementStart ??
-          context.measurements.some(
-            (measurement) =>
-              measurement.anchors?.length && (measurement.status === 'current' || measurement.status === 'pending'),
-          )
-        ) {
-          graphicsActor.send({ type: 'measurementCutChanged' });
-          graphicsActor.send({ type: 'cancelCurrentMeasurement' });
-        }
-        selectedTargetRef.current = undefined;
-        const hadCatalog = catalogReferences.current.size > 0 || catalogScanRef.current !== undefined;
-        catalogReferences.current.clear();
-        candidateReferences.current.clear();
-        catalogVersionRef.current++;
-        catalogScanRef.current = undefined;
-        if (hadCatalog || Boolean(context.measureLockedTargetId) || Boolean(context.measureChosenCandidateId)) {
-          graphicsActor.send({ type: 'setMeasureCandidates', candidates: [] });
-        }
-      },
-    };
+      }
+      selectedTargetRef.current = undefined;
+      const hadCatalog = catalogReferences.current.size > 0 || catalogScanRef.current !== undefined;
+      catalogReferences.current.clear();
+      candidateReferences.current.clear();
+      catalogVersionRef.current++;
+      catalogScanRef.current = undefined;
+      if (hadCatalog || Boolean(context.measureLockedTargetId) || Boolean(context.measureChosenCandidateId)) {
+        graphicsActor.send({ type: 'setMeasureCandidates', candidates: [] });
+      }
+    },
+  };
+  // Assigned in a layout effect, which runs before the session starts (its actor starts in a passive effect) and before
+  // any pointer event reaches it.
+  useLayoutEffect(() => {
+    hostRef.current = host;
   });
 
   // The session restarts when the adapters are rebuilt around a new surface or actor: a new generation keys it afresh.
@@ -1965,7 +1899,7 @@ function MeasurementLine({
       const labelVisible = projectedAxisLength >= (labelGroupRef.current.visible ? 0.5 : 0.55);
       if (!labelVisible && labelGroupRef.current.visible && isLabelHovered) {
         setIsLabelHovered(false);
-        if (id && graphicsActor.getSnapshot().context.hoveredMeasurementId === id) {
+        if (id && selectGraphicsContext(graphicsActor).hoveredMeasurementId === id) {
           graphicsActor.send({ type: 'setHoveredMeasurement', payload: undefined });
         }
       }

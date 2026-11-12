@@ -337,9 +337,6 @@ export interface GraphicsContext {
   measureCandidates: Array<{ id: string; label: string }>;
   measureActiveCandidateId?: string;
   measureChosenCandidateId?: string;
-  measureCommitRequest: number;
-  measureCatalogRequest: number;
-  measureCatalogAppend: boolean;
   measureCatalogHasMore: boolean;
   measureMessage?: string;
   measurePreviewDistance?: number;
@@ -794,7 +791,11 @@ export type GraphicsEmitted =
   | { type: 'viewFitRequested' }
   | { type: 'geometryRadiusCalculated'; radius: number }
   /** What the shortcut of `pressId` did, for the bar that heard it to announce. */
-  | { type: 'viewerShortcutApplied'; pressId: string; outcome: ViewerShortcutOutcome };
+  | { type: 'viewerShortcutApplied'; pressId: string; outcome: ViewerShortcutOutcome }
+  /** Use target: the measuring tool's session commits the chosen candidate. */
+  | { type: 'measureCandidateCommitRequested' }
+  /** List the targets in view: a fresh catalog, or with `append` the next page of the one listed. */
+  | { type: 'measureCatalogRequested'; append: boolean };
 
 /**
  * A viewer shortcut: F fits the view, S and M toggle Section and Measure, G the grid, P the projection, Escape steps
@@ -1334,9 +1335,6 @@ const graphicsMachineDefinition = setup({
       measureCandidates: [],
       measureActiveCandidateId: undefined,
       measureChosenCandidateId: undefined,
-      measureCommitRequest: 0,
-      measureCatalogRequest: 0,
-      measureCatalogAppend: false,
       measureCatalogHasMore: false,
       measureMessage: undefined,
       measurePreviewDistance: undefined,
@@ -2109,14 +2107,14 @@ const graphicsMachineDefinition = setup({
         clearMeasureChosenCandidate: {
           context: () => ({ measureChosenCandidateId: undefined }),
         },
-        requestMeasureCandidateCommit: {
-          context: ({ context }) => ({ measureCommitRequest: context.measureCommitRequest + 1 }),
+        // The measuring tool's session hears these and does the work; graphics keeps no request counter (G10b).
+        requestMeasureCandidateCommit: (_, enq) => {
+          enq.emit({ type: 'measureCandidateCommitRequested' });
+          return {};
         },
-        requestMeasureCatalog: {
-          context: ({ context, event }) => ({
-            measureCatalogRequest: context.measureCatalogRequest + 1,
-            measureCatalogAppend: event.append ?? false,
-          }),
+        requestMeasureCatalog: ({ event }, enq) => {
+          enq.emit({ type: 'measureCatalogRequested', append: event.append ?? false });
+          return {};
         },
         setMeasureMessage: { context: ({ event }) => ({ measureMessage: event.message }) },
         setMeasurePreviewDistance: { context: ({ event }) => ({ measurePreviewDistance: event.distance }) },

@@ -1,0 +1,7 @@
+---
+viewer: minor
+---
+
+Run Measure's exact CAD distance and target list scan as children of the measure session. A body-to-body minimum distance now starts an `exact` child that aborts its query through its signal when stopped, and the target list is a `catalog` child that yields between slices of its scan instead of a timer chain. Graphics no longer keeps request counters for them: `measureCommitRequest`, `measureCatalogRequest` and `measureCatalogAppend` leave the graphics context, and `requestMeasureCandidateCommit` and `requestMeasureCatalog` now emit `measureCandidateCommitRequested` and `measureCatalogRequested` (`append`), which the session hears. The measuring tool has no effect that sends, subscribes or times, and no snapshot read outside a selector.
+
+Named behaviour changes: an exact query reads the committed cuts it is taken against when it starts, so cuts changed while Measure was off no longer leave its record pending; replacing a running exact query cancels that query's own record rather than every pending one; a Use target or target list request made while Measure is off is dropped rather than run when Measure next turns on; an exact query running when the event source reconnects is cancelled with the old session, as when the view closes; and a target list scan carries on through a change of the unit manifest that names its targets rather than stopping without publishing.

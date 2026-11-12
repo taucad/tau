@@ -137,7 +137,12 @@ test('opens a named view through the desktop utility MCP endpoint and renders it
     expect(layout).toMatchObject({ viewer: { kind: 'group' } });
     const viewer = layout['viewer'] as { tabs: Array<{ kind: string; view?: string }> };
     expect(viewer.tabs.some((tab) => tab.kind === 'view' && tab.view === 'front')).toBe(true);
-    expect(JSON.stringify(layout)).not.toContain('parameters');
+    /* A new project opens Parameters in the workbench group (53b887367b), so the
+     * refused `basedOn: 'missing'` call, which asked to open Parameters, is
+     * proven to have written nothing by the digests above and by that group
+     * still holding exactly the seeded tab, with no pane among the views. */
+    expect(viewer.tabs.every((tab) => tab.kind === 'view')).toBe(true);
+    expect(layout['workbench']).toEqual({ kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }], active: 0 });
     const frontTab = page.locator('.dv-tab[data-tab-panel-id="front"]');
     await expectVisible(frontTab, 120_000);
     expect(await frontTab.locator('.dockview-tab-title').textContent()).toBe('main.scad');

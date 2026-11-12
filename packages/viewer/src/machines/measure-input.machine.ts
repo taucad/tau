@@ -12,7 +12,7 @@
  *   went down while the camera was moving, discards it.
  *
  * Each release answers with exactly one emitted decision, {@link MeasureInputEmitted}, which the measure session listens
- * to; nothing polls a result slot. A cancel (`cancel`) emits `cancelled`. A pointer cancel or a window blur drops the
+ * to; nothing polls a result slot. A pointer cancel or a window blur drops the
  * press silently.
  *
  * Every fact here is ephemeral: derived from the pointer and never persisted or seeded.
@@ -65,12 +65,11 @@ export type MeasureInputEvent =
       pointerId?: number;
     }
   | { type: 'cameraMoved' }
-  | { type: 'cancel' }
   | { type: 'pointerCancel'; pointerId?: number }
   | { type: 'blur' };
 
 /**
- * The decision a release (or a cancel) reaches: place the point, cancel the current measurement, do nothing, or wait
+ * The decision a release reaches: place the point, cancel the current measurement, do nothing, or wait
  * on the targets under it and decide again once they are ready.
  *
  * @public
@@ -147,10 +146,6 @@ const measureInputMachineDefinition = setup({
           enq.emit({ type: 'ignored' });
           return {};
         },
-        cancel: (_args, enq) => {
-          enq.emit({ type: 'cancelled' });
-          return {};
-        },
         // No press is held: a camera move, a pointer cancel or a blur has nothing to drop.
         cameraMoved: () => ({}),
         pointerCancel: () => ({}),
@@ -166,10 +161,6 @@ const measureInputMachineDefinition = setup({
           return { target: 'idle', context: released };
         },
         cameraMoved: () => ({ context: { discardGesture: true } }),
-        cancel: (_args, enq) => {
-          enq.emit({ type: 'cancelled' });
-          return { target: 'idle', context: released };
-        },
         pointerCancel: ({ context, event }) =>
           context.pointerId === undefined || context.pointerId === event.pointerId
             ? { target: 'idle', context: released }
@@ -197,7 +188,6 @@ export const measureInputEventTypes = [
   'pointerDown',
   'pointerUp',
   'cameraMoved',
-  'cancel',
   'pointerCancel',
   'blur',
 ] as const satisfies ReadonlyArray<MeasureInputEvent['type']>;

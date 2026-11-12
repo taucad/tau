@@ -31,7 +31,6 @@ const samples: Record<MeasureInputEvent['type'], readonly MeasureInputEvent[]> =
   pointerDown: [leftDown],
   pointerUp: [leftUp()],
   cameraMoved: [{ type: 'cameraMoved' }],
-  cancel: [{ type: 'cancel' }],
   pointerCancel: [{ type: 'pointerCancel' }],
   blur: [{ type: 'blur' }],
 };
@@ -142,8 +141,7 @@ describe('measureInputMachine', () => {
     input.actor.send(leftUp({ button: 2, hasTarget: false, hasCurrentStart: true }));
     input.actor.send({ type: 'pointerDown', button: 2, hasTarget: false, cameraMoving: false });
     input.actor.send(leftUp({ button: 2, hasTarget: false, hasCurrentStart: false }));
-    input.actor.send({ type: 'cancel' });
-    expect(input.take()).toEqual(['cancelled', 'ignored', 'cancelled']);
+    expect(input.take()).toEqual(['cancelled', 'ignored']);
     input.actor.stop();
   });
 

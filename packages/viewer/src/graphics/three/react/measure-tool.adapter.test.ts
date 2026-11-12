@@ -3,6 +3,7 @@
  * on a real graphics actor, a fake host and a plain surface. These rows hold the cross-actor orders the session's own
  * tests cannot see with a recording adapter.
  */
+import type { GeometryComponentManifest } from '@taucad/types';
 import * as THREE from 'three';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createAsyncLogic } from 'xstate';
@@ -11,6 +12,38 @@ import { createMeasureToolAdapters, restingPointerOver } from '#graphics/three/r
 import type { MeasurePointerSnapshot, MeasureToolHost } from '#graphics/three/react/measure-tool.adapter.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { measureSessionMachine } from '#machines/measure-session.machine.js';
+
+const capabilities = {
+  canHide: true,
+  canIsolate: true,
+  canFocus: true,
+  canAdjustOpacity: true,
+  hasDrawings: false,
+  hasPreciseTopology: false,
+  exports: [{ fidelity: 'mesh', formats: ['glb'], available: true }],
+} satisfies GeometryComponentManifest['capabilities'];
+const manifest: GeometryComponentManifest = {
+  schemaVersion: 1,
+  sourceFile: 'file:main.ts',
+  rootId: 'root',
+  nodeOrder: ['root'],
+  nodesById: {
+    root: {
+      id: 'root',
+      name: 'Model',
+      kind: 'model',
+      selector: 'root',
+      childIds: [],
+      depth: 0,
+      path: ['Model'],
+      meshNodeIndices: [],
+      primitiveIndices: [],
+      materialIndices: [],
+      capabilities,
+    },
+  },
+  capabilities,
+};
 
 type Deferred = Readonly<{ promise: Promise<void>; resolve: () => void }>;
 
@@ -171,6 +204,21 @@ describe('measure tool adapters', () => {
 
     expect(calls).toEqual(['snapshot']);
     expect(session.getSnapshot().context.hover).toEqual({ clientX: 40, clientY: 50 });
+    session.stop();
+  });
+
+  it('should hover again on the next frame when the unit manifest that names the candidates arrives', () => {
+    const session = startSession();
+    graphics.send({ type: 'setMeasureActive', payload: true });
+    dispatch('pointermove');
+    runFrames();
+    calls.length = 0;
+
+    graphics.send({ type: 'loadModelComponentManifest', unitId: 'file:main.ts', manifest });
+    expect(calls).toEqual([]);
+    runFrames();
+
+    expect(calls).toEqual(['snapshot']);
     session.stop();
   });
 

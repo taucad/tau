@@ -19,6 +19,7 @@ import type { MeasurementTarget } from '#graphics/three/utils/measurement-featur
 import { createRafCoalescer } from '#graphics/three/utils/raf-coalescer.js';
 import type { graphicsMachine, KinematicsRef } from '#machines/graphics.machine.js';
 import { selectCameraDragging, selectPresentedGeometryKey } from '#machines/graphics.machine.js';
+import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type {
   MeasurePointerAt,
   MeasureSessionAdapterLogic,
@@ -216,6 +217,13 @@ const selectPoseRevision = (kinematics: KinematicsRef): number => kinematics.get
 const selectDisplayRevision = (modelInteraction: GraphicsContext['modelInteractionRef']): number =>
   modelInteraction.getSnapshot().context.displayRevision;
 
+/** The manifest of the unit Measure works on, which names the hover's candidates. */
+const selectUnitManifest = (
+  modelInteraction: GraphicsContext['modelInteractionRef'],
+  unitId: string | undefined,
+): unknown =>
+  unitId ? getModelInteractionUnitState(modelInteraction.getSnapshot().context, unitId).manifest : undefined;
+
 /** What a pointer snapshot reads from graphics that, once changed, a waiting press no longer applies to. */
 const sourceOf = (snapshot: GraphicsSnapshot): string =>
   `${selectPresentedGeometryKey(snapshot)}:${snapshot.context.pickableMeshesVersion}`;
@@ -256,6 +264,21 @@ export const createMeasureToolAdapters = ({
     let settings = hoverSettingsOf(first);
     report({ type: 'measureActiveChanged', active: isActive });
 
+    // The hover's candidate labels name components from the unit's manifest. Either actor may change first: graphics
+    // names the unit, the model interaction actor holds its manifest.
+    const { modelInteractionRef } = first.context;
+    let manifest = selectUnitManifest(modelInteractionRef, first.context.modelInteractionUnitId);
+    const followManifest = (): void => {
+      const unitManifest = selectUnitManifest(
+        modelInteractionRef,
+        selectGraphics(graphics).context.modelInteractionUnitId,
+      );
+      if (unitManifest !== manifest) {
+        manifest = unitManifest;
+        report({ type: 'hoverSettingsChanged' });
+      }
+    };
+
     const graphicsSubscription = graphics.subscribe((snapshot) => {
       const { context } = snapshot;
       if (context.isMeasureActive !== isActive) {
@@ -284,10 +307,11 @@ export const createMeasureToolAdapters = ({
         settings = nextSettings;
         report({ type: 'hoverSettingsChanged' });
       }
+      followManifest();
     });
 
     // The view's camera child: a drag it reports steals a measuring press.
-    const { cameraRef, modelInteractionRef } = first.context;
+    const { cameraRef } = first.context;
     let isDragging = selectCameraDragging(cameraRef);
     const cameraSubscription = cameraRef.subscribe(() => {
       const dragging = selectCameraDragging(cameraRef);
@@ -309,11 +333,11 @@ export const createMeasureToolAdapters = ({
 
     let displayRevision = selectDisplayRevision(modelInteractionRef);
     const modelSubscription = modelInteractionRef.subscribe((snapshot) => {
-      if (snapshot.context.displayRevision === displayRevision) {
-        return;
+      if (snapshot.context.displayRevision !== displayRevision) {
+        ({ displayRevision } = snapshot.context);
+        report({ type: 'sourceChanged' });
       }
-      ({ displayRevision } = snapshot.context);
-      report({ type: 'sourceChanged' });
+      followManifest();
     });
 
     // The presented camera, followed in the frame it is drawn in: a pose, a resize, a render-frame rebase or a clip

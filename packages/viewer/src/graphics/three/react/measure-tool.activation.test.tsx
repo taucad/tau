@@ -416,7 +416,7 @@ describe('MeasureTool activation', () => {
     });
     dispatch('pointerdown', pixelOf(0, -1, 1));
     dispatch('pointerup', pixelOf(0, -1, 1));
-    // A settings change while the worker prepares the graph re-renders the tool and rebinds its listeners.
+    // A settings change while the worker prepares the graph re-renders the tool; the session and its listeners stay.
     act(() => {
       actor.send({ type: 'setMeasureFrame', frame: 'selected-local' });
     });
@@ -728,7 +728,7 @@ describe('MeasureTool activation', () => {
     }
   });
 
-  it('does not bring a hover back after a window blur when the tool rebinds', () => {
+  it('does not bring a hover back when the camera moves after a window blur', () => {
     getMeshMeasurementFeatures(model);
     dispatch('pointermove', pixelOf(0, -1, 1));
     act(() => {
@@ -740,7 +740,7 @@ describe('MeasureTool activation', () => {
       globalThis.dispatchEvent(new Event('blur'));
     });
     expect(measurementMarks()).toEqual(0);
-    // A camera drag starts: the tool rebinds its listeners.
+    // A camera drag presents a new camera: the blur left nothing hovering to take again.
     act(() => {
       actor.send({ type: 'interactionStarted' });
       actor.send({ type: 'interactionMoved' });

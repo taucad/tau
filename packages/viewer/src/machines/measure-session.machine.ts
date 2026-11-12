@@ -95,9 +95,9 @@ export type MeasureSessionEvent =
   | { type: 'cutsChanged' }
   /** A start was placed or cancelled. */
   | { type: 'startChanged' }
-  /** What a pointer snapshot reads changed: the presented model, its display or pickable meshes, or the filter. */
+  /** What a pointer snapshot reads changed: the presented model, its display or its pickable meshes. */
   | { type: 'sourceChanged' }
-  /** A setting a hover is taken with changed: the mode, filter, snapping or operation. */
+  /** A setting a hover is taken with changed: the mode, filter, snapping or operation, or the unit's manifest. */
   | { type: 'hoverSettingsChanged' }
   /** The targets under the press waiting under `generation` are ready, or one of them failed. */
   | { type: 'pressReady'; generation: number }

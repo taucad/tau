@@ -162,7 +162,7 @@ export const tourTimeouts = [
 ] as const;
 
 /**
- * The `[state, eventType]` pairs the tour machine takes without a transition, on purpose (MC-R17).
+ * The `[state, eventType]` pairs the tour machine takes without a transition, on purpose.
  *
  * @public
  */
@@ -401,7 +401,7 @@ export const tourMachine = setup({
     shown: undefined,
   }),
   initial: 'inactive',
-  /* A fault no transition modelled is recorded and the tour keeps answering (MC-R12). */
+  /* A fault no transition modelled is recorded and the tour keeps answering. */
   onError: ({ event }) => ({
     context: { fault: event.error instanceof Error ? event.error.message : 'tour fault' },
   }),
@@ -587,7 +587,7 @@ export const tourMachine = setup({
 });
 
 /**
- * Create an unstarted tour actor (MC-R4). Production passes no options; tests pass a `StepClock` and the harness
+ * Create an unstarted tour actor. Production passes no options; tests pass a `StepClock` and the harness
  * inspector.
  *
  * @param input - The stored tour, the device's pause and whether a replay starts at once.

@@ -6683,12 +6683,12 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
   };
 };
 
-/* The stream tail is a zero-wait GET; do not let it hold the active pull. */
 /**
  * The waits before a fill check that threw runs again on its own, by failures in a row; the last repeats (L7). A
  * check is a local scan, so the first wait is short; a transfer that fails has its own waits in the fill.
  */
 const fillCheckRetryMilliseconds: readonly [number, ...number[]] = [500, 2000, 5000, 15_000, 30_000, 60_000];
+/* The stream tail is a zero-wait GET; do not let it hold the active pull. */
 const streamTailWaitMilliseconds = 2000;
 const nestedBoundMarginMilliseconds = 2000;
 const closeTransferMilliseconds = 10_000;

@@ -27,7 +27,7 @@ const observed = <Snapshot>(initial: Snapshot): Observed<Snapshot> & { set: (nex
 type CameraInput = 'idle' | 'dragging' | 'settling';
 const cameraState = (input: CameraInput) => ({ matches: (value: { input: 'idle' }) => value.input === input });
 
-const userMessage = { id: 'm1', role: 'user', parts: [{ type: 'text', text: 'A bracket' }] } as MyUIMessage;
+const userMessage: MyUIMessage = { id: 'm1', role: 'user', parts: [{ type: 'text', text: 'A bracket' }] };
 
 /** One view, one geometry unit and one chat, each changed by the test as the editor would change it. */
 const editorFakes = () => {

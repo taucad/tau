@@ -178,8 +178,10 @@ const main = async (): Promise<void> => {
     throw new Error('Qualification artifact directories differ from the complete host matrix');
   }
   const kind = z.enum(['ci', 'vm']).parse(process.env['TAU_DESKTOP_ACCEPTANCE_KIND'] ?? 'ci');
+  // CI rows, and the staging Mac clean-host rows whose binding needs it, re-admit the candidate here; other clean-host
+  // collectors re-admit it in an earlier workflow step.
   const candidateProvenance =
-    kind === 'ci'
+    kind === 'ci' || usesQualificationBinding(scope, 'staging', kind)
       ? await fetchInstallerCandidate({
           runId: required('TAU_INSTALLER_CANDIDATE_RUN_ID'),
           workflowCommit: required('GITHUB_SHA'),
@@ -233,6 +235,7 @@ const main = async (): Promise<void> => {
     const binding = createQualificationBinding({
       manifest: candidate,
       candidate: candidateProvenance,
+      kind,
       workflowCommit: required('GITHUB_SHA'),
       runId: Number(required('GITHUB_RUN_ID')),
     });

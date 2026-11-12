@@ -8,6 +8,7 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import { createWorkbenchViewStore, fenceClosedView, finishClosedView } from '#workbench-records/view-store.js';
+import { viewExceptions } from '#workbench-records/view-exceptions.js';
 
 type ViewFiles = Readonly<{
   exists: (path: string) => Promise<boolean>;
@@ -66,14 +67,28 @@ export async function ensureViewFile(
   }
 }
 
-/** A person-closing a viewer deletes exactly the view bytes last observed. */
+/**
+ * A person-closing a viewer deletes exactly the view bytes last observed. Once the file is gone, this device's
+ * exceptions for the view go with it when `projectId` is given.
+ */
 export async function deleteViewFile(
   input: Readonly<{
     root: string;
     viewId: string;
     files: ViewFiles;
     onError: (error: unknown) => void;
+    projectId?: string;
   }>,
+): Promise<boolean> {
+  const deleted = await deleteViewBytes(input);
+  if (deleted && input.projectId !== undefined) {
+    viewExceptions.clearView(input.projectId, input.viewId);
+  }
+  return deleted;
+}
+
+async function deleteViewBytes(
+  input: Readonly<{ root: string; viewId: string; files: ViewFiles; onError: (error: unknown) => void }>,
 ): Promise<boolean> {
   const path = `${input.root}/${workbenchPaths.view(input.viewId)}`;
   await fenceClosedView(path);
@@ -121,8 +136,9 @@ export function useWorkbenchViewCommands(): Readonly<{
     [files, root, profile],
   );
   const remove = useCallback(
-    async (viewId: string) => (profile === 'shared' ? false : deleteViewFile({ root, viewId, files, onError })),
-    [files, root, profile],
+    async (viewId: string) =>
+      profile === 'shared' ? false : deleteViewFile({ root, viewId, files, onError, projectId }),
+    [files, projectId, root, profile],
   );
   return useMemo(() => ({ edit, remove }), [edit, remove]);
 }

@@ -22,6 +22,11 @@ export type DesktopUpdateSnapshot = {
   readonly releasePage?: string;
   /** Whether an already downloaded update also installs on ordinary quit (macOS only). */
   readonly installOnQuit?: boolean;
+  /**
+   * The user asked to restart before the download finished, so main saves and restarts as soon as it does.
+   * Only a user gesture sets it; a background download never does.
+   */
+  readonly installWhenReady?: boolean;
   /** Main-owned status for system policy and installation failures. */
   readonly detail?: string;
 };

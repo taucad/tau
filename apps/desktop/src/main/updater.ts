@@ -9,6 +9,17 @@ import { moveToApplicationsDetail } from '#main/app-location.js';
 export const updateRepository = 'taucad/tau';
 /** Milliseconds between background checks. */
 export const updateCheckInterval = 4 * 60 * 60 * 1000;
+/**
+ * Milliseconds before each automatic retry of a failed check or download. A launch or a wake from sleep often
+ * checks before the network is up; without these the failure stayed on screen until the next background check,
+ * four hours later, or until someone pressed Retry. After the last delay the background check takes over.
+ */
+export const updateRetryDelays: readonly number[] = [15_000, 60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
+
+/** One-shot timer for an automatic retry; never keeps the process alive on its own. */
+export const defaultUpdateRetry = (callback: () => void, retryDelay: number): void => {
+  setTimeout(callback, retryDelay).unref();
+};
 
 const updateFeedSchema = z.object({
   currentRelease: z.string(),
@@ -168,6 +179,8 @@ export type DesktopUpdaterOptions = {
   readonly log: (level: 'info' | 'warn' | 'error', event: string, detail?: unknown) => void;
   /** Milliseconds, defaults to setInterval. */
   readonly schedule?: (callback: () => void, checkInterval: number) => unknown;
+  /** One automatic retry after a failed check or download. Milliseconds, defaults to an unreferenced setTimeout. */
+  readonly retry?: (callback: () => void, retryDelay: number) => unknown;
   /** Diagnostic selector in the installed channel; never an arbitrary URL. */
   readonly candidateTag?: string;
   /** Diagnostic constraint; selects no URL and cannot bypass the shipping feed or signature checks. */
@@ -184,6 +197,10 @@ export type DesktopUpdater = {
   snapshot(): DesktopUpdateSnapshot;
   download(): Promise<void>;
   status(): string;
+  /**
+   * The user's request to restart into the update. Once it is downloaded this saves and restarts now; before that
+   * it records the request, starts a check if none is running, and restarts as soon as the download finishes.
+   */
   install(): Promise<void>;
 };
 
@@ -238,6 +255,11 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
   let downloading = false;
   let checking: Promise<AvailableUpdate | undefined> | undefined;
   let installing = false;
+  /* The user asked to restart before the download finished. Only `install` sets it, so a background download
+   * alone still never restarts Tau. */
+  let installWhenReady = false;
+  let failures = 0;
+  let retryPending = false;
   const squirrel = platform === 'darwin';
   /* Squirrel.Mac replaces the bundle in place, which a translocated or disk-image copy cannot allow. */
   let moveRequired = squirrel && options.appLocation?.blocksUpdates === true;
@@ -245,9 +267,28 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
     status = moveToApplicationsDetail;
     publish('move-required', moveToApplicationsDetail);
   };
+  const restartWhenReady = (wanted: boolean): void => {
+    installWhenReady = wanted;
+    const { installWhenReady: _previous, ...rest } = snapshot;
+    snapshot = wanted ? { ...rest, installWhenReady: true } : rest;
+  };
+  const retryLater = (): void => {
+    const retryDelay = updateRetryDelays[failures];
+    if (retryDelay === undefined || retryPending) {
+      return;
+    }
+    failures += 1;
+    retryPending = true;
+    (options.retry ?? defaultUpdateRetry)(() => {
+      retryPending = false;
+      void check();
+    }, retryDelay);
+  };
   const failed = (error: unknown): void => {
     downloading = false;
     downloaded = false;
+    /* A restart request does not outlive a failure: the retry that follows is a background download again. */
+    restartWhenReady(false);
     const message = error instanceof Error ? error.message : String(error);
     log('warn', 'updater.error', { message });
     /* The location check can miss a read-only volume; Squirrel's own refusal says the same thing. */
@@ -260,12 +301,26 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
     status = `Update failed: ${message}. Check again to retry.`;
     snapshot = { ...snapshot, version: undefined, releasePage: undefined };
     publish('error');
+    retryLater();
   };
   const install = async (): Promise<void> => {
-    if (!downloaded || installing) {
+    if (installing) {
+      return;
+    }
+    if (!downloaded) {
+      /* Asked before the update is here (while it downloads, or from a failed attempt): remember the request so
+       * the download's completion restarts Tau, instead of making the user come back and ask a second time. */
+      if (squirrel && !moveRequired && !installWhenReady) {
+        restartWhenReady(true);
+        publish(snapshot.phase, snapshot.detail);
+      }
+      if (!downloading) {
+        await check();
+      }
       return;
     }
     installing = true;
+    restartWhenReady(false);
     publish('saving');
     try {
       if (await options.prepareToRestart()) {
@@ -286,16 +341,25 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
     autoUpdater.on('update-not-available', () => {
       downloading = false;
       offered = undefined;
+      restartWhenReady(false);
       status = 'No update was downloaded. Check again to retry.';
+      /* Our own check validated a newer release, so Squirrel finding none at the pinned feed is a failure. */
+      log('warn', 'updater.error', { message: 'Squirrel found no update at the release feed' });
+      snapshot = { ...snapshot, version: undefined, releasePage: undefined };
       publish('error');
+      retryLater();
     });
     autoUpdater.on('update-downloaded', () => {
       downloading = false;
       downloaded = true;
+      failures = 0;
       status = `Tau ${offered?.version ?? ''} is ready. Restart to install.`;
       log('info', 'updater.downloaded', { version: offered?.version });
       publish('ready');
-      if (options.installForProbe && (options.candidateTag !== undefined || options.expectedUpdate !== undefined)) {
+      if (
+        installWhenReady ||
+        (options.installForProbe && (options.candidateTag !== undefined || options.expectedUpdate !== undefined))
+      ) {
         void install();
       }
     });
@@ -317,6 +381,8 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
       if (!update) {
         status = `Tau ${currentVersion} is up to date (${channel}).`;
         offered = undefined;
+        failures = 0;
+        restartWhenReady(false);
         snapshot = { ...snapshot, version: undefined, releasePage: undefined };
         publish('current');
         return undefined;

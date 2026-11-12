@@ -4,6 +4,7 @@ import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
 import type { EarlyChatInput, EarlyChatInputBarState } from '#components/chat/chat-early-input.js';
+import { hasUsedPageSince } from '#components/onboarding/home-interaction.js';
 import {
   chatComposerEditorTextClassName,
   chatComposerFrameClassName,
@@ -53,9 +54,12 @@ describe('Home early input', () => {
       input.focus();
     }
     const onRecoverableError = vi.fn();
+    const hydratedAt = performance.now();
     const root = hydrateRoot(container, content, { onRecoverableError });
     try {
       await within(container).findByText('Rich editor');
+      /* Keys typed before the bundle reached no listener; the adopted edit is what tells home it was used. */
+      expect(hasUsedPageSince(hydratedAt)).toBe(edited);
       expect(snapshot).toEqual({
         text,
         edited,

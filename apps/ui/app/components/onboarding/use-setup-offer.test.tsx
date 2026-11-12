@@ -3,7 +3,7 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryRouter, Link, RouterProvider, useSearchParams } from 'react-router';
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 
 const flags = vi.hoisted(() => ({ onboarding: true, onboardingAutoOpen: true }));
 vi.mock('#flags/use-feature.js', () => ({ useFeature: (flag: keyof typeof flags) => flags[flag] }));
@@ -61,6 +61,37 @@ function Home(): React.JSX.Element {
 function DesktopHome(): React.JSX.Element {
   useSetupOffer({ isDesktopFirstRun: true });
   return <p>Home</p>;
+}
+
+/** Whether the desktop's project listing has answered that this is the first run. */
+const firstRun = { isKnown: false, listeners: new Set<() => void>() };
+
+const learnFirstRun = (): void => {
+  act(() => {
+    firstRun.isKnown = true;
+    for (const listener of firstRun.listeners) {
+      listener();
+    }
+  });
+};
+
+/** The desktop's home as it mounts: its composer takes focus by itself before the first run is known. */
+function DesktopHomeDeciding(): React.JSX.Element {
+  const isDesktopFirstRun = useSyncExternalStore(
+    (listener: () => void) => {
+      firstRun.listeners.add(listener);
+      return () => firstRun.listeners.delete(listener);
+    },
+    () => firstRun.isKnown,
+  );
+  useSetupOffer({ isDesktopFirstRun });
+  return (
+    <>
+      <p>Home</p>
+      {/* oxlint-disable-next-line jsx-a11y/no-autofocus -- home's composer focuses itself; that is the case under test. */}
+      <textarea aria-label='Composer' autoFocus />
+    </>
+  );
 }
 
 const renderAt = (path: string, element = <Home />): ReturnType<typeof createMemoryRouter> => {
@@ -153,6 +184,18 @@ describe('useSetupOffer', () => {
       expect(router.state.location.pathname).toBe('/welcome');
     });
     expect(router.state.location.search).toBe('?entry=first_launch');
+  });
+
+  it('opens on the desktop first run although home’s composer focused itself while the projects loaded', async () => {
+    session.state = { data: undefined, isPending: false };
+    firstRun.isKnown = false;
+    const router = renderAt('/', <DesktopHomeDeciding />);
+    expect(screen.getByRole('textbox', { name: 'Composer' })).toHaveFocus();
+    expect(router.state.location.pathname).toBe('/');
+    learnFirstRun();
+    await vi.waitFor(() => {
+      expect(router.state.location.pathname).toBe('/welcome');
+    });
   });
 });
 

@@ -2,7 +2,7 @@ import type { RootState } from '@react-three/fiber';
 import { Canvas, flushSync as flushThreeSync } from '@react-three/fiber';
 import { useSelector } from '@xstate/react';
 import { flushSync } from 'react-dom';
-import type { ActorRefFrom } from 'xstate';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { RefCallback } from 'react';
 import type { Group } from 'three';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
@@ -31,12 +31,20 @@ import { viewerRendererCreated } from '#lib/viewer-events.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
 import { canvasHostCreated } from '#graphics/three/three-canvas-instance-host.js';
 import type { CanvasHostRoot } from '#graphics/three/three-canvas-instance-host.js';
-import type { CanvasEvent, CanvasFailure, CanvasSnapshot } from '#machines/canvas.machine.js';
+import type { CanvasEvent, CanvasFailure, CanvasRef, CanvasSnapshot } from '#machines/canvas.machine.js';
 import type { webglContextMachine } from '#machines/webgl-context.machine.js';
 
 /** The world up axis graphics keeps, read when the camera's up changes. */
-const selectUpDirection = (graphicsRef: ReturnType<typeof useGraphics>): 'x' | 'y' | 'z' =>
+const selectGraphicsUpDirection = (graphicsRef: ReturnType<typeof useGraphics>): 'x' | 'y' | 'z' =>
   graphicsRef.getSnapshot().context.upDirection;
+
+/** The world up axis in a graphics snapshot, which the grid lies across. */
+const selectUpDirection = (snapshot: SnapshotFrom<ReturnType<typeof useGraphics>>): 'x' | 'y' | 'z' =>
+  snapshot.context.upDirection;
+
+/** Whether this mount's canvas actor still takes events: a detached one stopped with its surface. */
+const selectCanvasRunning = (canvas: CanvasRef | undefined): canvas is CanvasRef =>
+  canvas?.getSnapshot().status === 'active';
 
 /**
  * Props for {@link ThreeCanvasInstance}: the Three.js context properties plus a retry callback for context loss.
@@ -161,7 +169,7 @@ export function ThreeCanvasInstance({
           rig: cameraRig,
           connectorRef: cameraConnectorRef,
           consumersRef: cameraConsumersRef,
-          getUpAxis: () => selectUpDirection(graphicsRef),
+          getUpAxis: () => selectGraphicsUpDirection(graphicsRef),
         }),
       });
     },
@@ -230,11 +238,7 @@ export function ThreeCanvasInstance({
   // its R3F root, live on without a second `onCreated`. The detach records how far the renderer got, and the
   // re-attached surface's new canvas actor resumes from there: lost again, or hosted on the root it already has.
   const detachedPhase = useRef<CanvasSnapshot['value'] | undefined>(undefined);
-  /**
-   * Whether the grid is in the R3F scene. A surface that attaches after the grid mounted (a Suspense reveal re-attaches
-   * the surface but not the scene, which lives on in its own root) tells its new canvas actor.
-   */
-  const isGridShown = useRef(false);
+
   const attachSurface = useCallback<RefCallback<HTMLDivElement>>(
     (element) => {
       if (!element) {
@@ -254,21 +258,25 @@ export function ThreeCanvasInstance({
         sendToCanvas(canvasHostCreated(held));
         attachControls(held);
       }
-      if (isGridShown.current) {
-        sendToCanvas({ type: 'gridShown', shown: true });
-      }
     },
     [admittedBytes, attachControls, canvasId, graphicsRef, sendToCanvas, webglContext],
   );
 
-  // The grid's place in the scene: the canvas actor pads the camera's clip planes while the grid is drawn, observed from
-  // the scene's own mount and unmount as the surface's attach is.
+  /*
+   * The grid's place in the scene: the canvas actor pads the camera's clip planes for the grid while it is drawn,
+   * reported from the scene's own mount and unmount as the surface's attach is. The marker lies across the axis `Grid`
+   * draws on (graphics' world up), and it re-reports to each canvas actor this mount attaches: a new axis or a Suspense
+   * reveal (which re-attaches the surface but not the scene, a separate root) gives the callback a new identity, so
+   * React detaches it and attaches it again.
+   */
+  const gridUpDirection = useSelector(graphicsRef, selectUpDirection);
   const presentGrid = useCallback<RefCallback<Group>>(
     (marker) => {
-      isGridShown.current = marker !== null;
-      sendToCanvas({ type: 'gridShown', shown: isGridShown.current });
+      if (selectCanvasRunning(canvasRef)) {
+        canvasRef.send({ type: 'gridChanged', grid: { enabled: marker !== null, upDirection: gridUpDirection } });
+      }
     },
-    [sendToCanvas],
+    [canvasRef, gridUpDirection],
   );
 
   const bindCanvas = useCallback<RefCallback<HTMLCanvasElement>>(

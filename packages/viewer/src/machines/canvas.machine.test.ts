@@ -53,8 +53,7 @@ const samples: Record<CanvasEvent['type'], readonly CanvasEvent[]> = {
   rendererFailed: [{ type: 'rendererFailed', failure: { kind: 'renderer', message: 'no context' } }],
   framePresented: [{ type: 'framePresented' }],
   contextLost: [{ type: 'contextLost' }],
-  gridShown: [{ type: 'gridShown', shown: true }],
-  upDirectionChanged: [{ type: 'upDirectionChanged', upDirection: 'y' }],
+  gridChanged: [{ type: 'gridChanged', grid: { enabled: true, upDirection: 'y' } }],
 };
 const pathOptions = {
   input: { canvasId: 'c', kind: 'canvas' } satisfies CanvasInput,
@@ -485,25 +484,22 @@ describe('canvas camera presentation', () => {
     const canvas = startCanvas({ ...defaultInput, camera });
     // No grid is in the scene until the scene mounts one.
     expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
-    canvas.send({ type: 'gridShown', shown: true });
+    canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'z' } });
     expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy('z'));
     canvas.stop();
     expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
     camera.stop();
   });
 
-  it('should follow the grid in and out of the scene and across the world up graphics keeps', () => {
+  it('should follow the grid in and out of the scene and across a new world up', () => {
     const camera = startCamera();
-    const canvas = startCanvas({ ...defaultInput, camera, upDirection: 'y' });
-    // A new world up with no grid changes no policy.
-    canvas.send({ type: 'upDirectionChanged', upDirection: 'x' });
-    expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
-    canvas.send(hostCreated());
-    canvas.send({ type: 'gridShown', shown: true });
+    const canvas = startCanvas({ ...defaultInput, camera });
+    canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'x' } });
     expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy('x'));
-    canvas.send({ type: 'upDirectionChanged', upDirection: 'z' });
+    canvas.send(hostCreated());
+    canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'z' } });
     expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy('z'));
-    canvas.send({ type: 'gridShown', shown: false });
+    canvas.send({ type: 'gridChanged', grid: { enabled: false, upDirection: 'z' } });
     expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
     canvas.stop();
     camera.stop();
@@ -514,12 +510,11 @@ describe('canvas camera presentation', () => {
       const camera = startCamera();
       const canvas = startCanvas({ ...defaultInput, camera });
       canvas.send(hostCreated());
-      canvas.send({ type: 'gridShown', shown: true });
+      canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'z' } });
       canvas.send(ending);
       expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
       const { revision } = camera.getSnapshot().context;
-      canvas.send({ type: 'upDirectionChanged', upDirection: 'y' });
-      canvas.send({ type: 'gridShown', shown: true });
+      canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'z' } });
       canvas.send({ type: 'surfaceResized', surface: { width: 320, height: 240, pixelRatio: 1 } });
       expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
       expect(camera.getSnapshot().context.revision).toBe(revision);
@@ -532,7 +527,7 @@ describe('canvas camera presentation', () => {
     const camera = startCamera();
     const placeholder = startCanvas({ canvasId: 'p', kind: 'placeholder', camera });
     placeholder.send(hostCreated());
-    placeholder.send({ type: 'gridShown', shown: true });
+    placeholder.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'z' } });
     expect(camera.getSnapshot().context.clipPolicy).toBeUndefined();
     expect(camera.getSnapshot().context.view.viewport).toEqual({ width: 1280, height: 720, pixelRatio: 1 });
     placeholder.stop();
@@ -542,7 +537,7 @@ describe('canvas camera presentation', () => {
   it('should leave the camera alone once graphics has stopped it', () => {
     const camera = startCamera();
     const canvas = startCanvas({ ...defaultInput, camera });
-    canvas.send({ type: 'gridShown', shown: true });
+    canvas.send({ type: 'gridChanged', grid: { enabled: true, upDirection: 'z' } });
     camera.stop();
     expect(() => {
       canvas.stop();

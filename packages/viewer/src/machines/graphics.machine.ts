@@ -1270,10 +1270,6 @@ const graphicsMachineDefinition = setup({
           }
           // The camera keeps its view direction and takes the new world up, unless the two are parallel.
           enq.sendTo(context.cameraRef, { type: 'setUpDirection', axis: event.payload });
-          // The grid turns with the world up, and the canvas's clip policy with it.
-          if (context.canvas) {
-            enq.sendTo(context.canvas.ref, { type: 'upDirectionChanged', upDirection: event.payload });
-          }
           return { context: { upDirection: event.payload } };
         },
         setGraphicsBackendPreference: {
@@ -1301,7 +1297,6 @@ const graphicsMachineDefinition = setup({
               admittedBytes: event.admittedBytes,
               reattached: event.reattached,
               camera: context.cameraRef,
-              upDirection: context.upDirection,
             },
           });
           return { context: { canvas: { canvasId: event.canvasId, ref }, ...adapter } };

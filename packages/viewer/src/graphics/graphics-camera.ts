@@ -85,5 +85,8 @@ export const getGraphicsCameraState = (graphicsRef: GraphicsActorRef | undefined
  * @returns The view direction.
  * @public
  */
-export const selectCameraViewDirection = (camera: Pick<Actor<CameraMachine>, 'getSnapshot'>): CameraVector =>
-  camera.getSnapshot().context.view.direction;
+export const selectCameraViewDirection = (
+  camera: Readonly<{
+    getSnapshot: () => Readonly<{ context: Readonly<{ view: Readonly<{ direction: CameraVector }> }> }>;
+  }>,
+): CameraVector => camera.getSnapshot().context.view.direction;

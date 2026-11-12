@@ -1158,6 +1158,66 @@ describe('placement and settlement per attempt (RA-S13)', () => {
     await host.close();
   });
 
+  /* Q9: placement is told the person's request, so the History entry the turn records is titled by it. */
+  it('should admit each attempt with the text of the request the run was admitted with', async () => {
+    const file = createMemoryLogFile();
+    const fake = fakePort(file, idle);
+    const requests: Array<string | undefined> = [];
+    let failing = true;
+    const flaky: ModelTransport = {
+      funding: { type: 'unfunded' },
+      async *stream(): AsyncGenerator<ModelStreamEvent> {
+        if (failing) {
+          failing = false;
+          throw Object.assign(new Error('Busy.'), { code: 'RATE_LIMITED' });
+        }
+        yield* done.stream();
+      },
+    };
+    const host = createTauAgentHost({
+      ...hostOptions({ openEventLog: file.open, transport: flaky, toolRegistry: idle, idPrefix: 'place-request' }),
+      placement: {
+        ...fake.port,
+        admit: async (input) => {
+          requests.push(input.request);
+          return fake.port.admit(input);
+        },
+      },
+    });
+
+    await host.command({
+      type: 'start',
+      commandId: key(),
+      payload: {
+        chatId: 'chat-request',
+        runId: 'run-1',
+        trigger: 'submit',
+        message: {
+          id: 'turn-run-1',
+          role: 'user',
+          content: [
+            { type: 'text', text: '  Make the lid walls 2.4 mm\n' },
+            { type: 'text', text: 'Keep the fillets.  ' },
+          ],
+        },
+      },
+    });
+    await vi.waitFor(async () => {
+      const log = await readLog(file);
+      expect(log).toContainEqual(expect.objectContaining({ type: 'run.lifecycle', state: 'failed' }));
+    });
+    await host.command({ type: 'resume', commandId: key(), payload: { chatId: 'chat-request', runId: 'run-1' } });
+    await vi.waitFor(() => {
+      expect(requests).toHaveLength(2);
+    });
+
+    expect(requests).toEqual([
+      'Make the lid walls 2.4 mm\nKeep the fillets.',
+      'Make the lid walls 2.4 mm\nKeep the fillets.',
+    ]);
+    await host.close();
+  });
+
   /* HD-3 (W8.a2): a refused placement's rows are written in the one settlement shape, attempt included (TS-S9). */
   it('should append a refused placement with its attempt, so the run ends with the refusal code', async () => {
     const file = createMemoryLogFile();

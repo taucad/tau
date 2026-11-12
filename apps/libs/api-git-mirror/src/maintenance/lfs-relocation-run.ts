@@ -1,14 +1,13 @@
-import { and, asc, eq, gt, isNull, or } from 'drizzle-orm';
-import type { Database } from '@taucad/api-database/owner-lock';
-import { project, projectDeletion, projectGitLfsObject } from '@taucad/api-database/schema';
 import type { ObjectStorageService } from '@taucad/api-object-storage';
 import { lfsObjectLocations } from '@taucad/api-git-core/lfs-keys';
+import type { LfsReservation } from '#maintenance/lfs-reservation-scope.js';
+import { parseConcurrency } from '#maintenance/lfs-reservation-scope.js';
 
 /*
- * The `relocate-lfs` operator run around `relocateLegacyLfsObjects` (go-live
- * STO-7): which projects to visit, a read-only survey of where each one's bytes
- * are, and a bounded pool that relocates only the projects that still hold a
- * legacy key. Dry run unless the operator confirms.
+ * The `relocate-lfs` operator run around `relocateLegacyLfsObjects`: which
+ * projects to visit, a read-only survey of where each one's bytes are, and a
+ * bounded pool that relocates only the projects that still hold a legacy key.
+ * Dry run unless the operator confirms.
  */
 
 /** One project that holds LFS reservations in this account. */
@@ -16,6 +15,9 @@ export type LfsRelocationProject = { readonly ownerId: string; readonly projectI
 
 /** One LFS reservation of a project, as the survey reads it. */
 export type LfsRelocationRow = { readonly oid: string; readonly size: number };
+
+/** One project to visit, with its reservations in `oid` order. */
+export type LfsRelocationTarget = LfsRelocationProject & { readonly rows: readonly LfsRelocationRow[] };
 
 /**
  * Where one project's reserved bytes are, read with HEADs only.
@@ -46,7 +48,11 @@ export type LfsRelocationOutcome = LfsRelocationSurvey & {
   readonly error?: string;
   /** Projects finished so far, this one included. */
   readonly done: number;
-  /** Pass as `--after` to resume: every project up to and including it finished without failing. */
+  /**
+   * Pass as `--after` to resume a confirmed run: every project up to and
+   * including it finished without failing. A dry run moves nothing, so it
+   * never carries one.
+   */
   readonly resumeAfter?: string;
 };
 
@@ -68,10 +74,10 @@ export type LfsRelocationSummary = {
 /** Worker bounds per mode: a survey only HEADs, a relocation buffers whole objects. */
 export const lfsRelocationConcurrency = {
   dryRun: { default: 4, max: 16 },
-  /* `relocateLegacyLfsObjects` buffers each object whole and copies it once
-     (`Uint8Array.from`), so a 100 MiB object costs about 200 MiB; the
-     tau-maintenance Machine has 512 MB. */
-  confirm: { default: 1, max: 2 },
+  /* `relocateLegacyLfsObjects` buffers each object whole (up to 100 MiB) and
+     the tau-maintenance Machine has 512 MB, so a confirmed run moves one
+     project at a time. */
+  confirm: { default: 1, max: 1 },
 } as const;
 
 /**
@@ -82,73 +88,37 @@ export const lfsRelocationConcurrency = {
  * @returns The worker count.
  * @throws RangeError - When the value is not a whole number within the bound.
  */
-export const parseLfsRelocationConcurrency = (value: string | undefined, confirm: boolean): number => {
-  const bound = confirm ? lfsRelocationConcurrency.confirm : lfsRelocationConcurrency.dryRun;
-  if (value === undefined) {
-    return bound.default;
-  }
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > bound.max) {
-    throw new RangeError(
-      `--concurrency must be a whole number from 1 to ${String(bound.max)}${confirm ? ' with --confirm' : ''}`,
-    );
-  }
-  return parsed;
-};
-
-const relocationPageSize = 500;
+export const parseLfsRelocationConcurrency = (value: string | undefined, confirm: boolean): number =>
+  confirm
+    ? parseConcurrency(value, lfsRelocationConcurrency.confirm, ' with --confirm')
+    : parseConcurrency(value, lfsRelocationConcurrency.dryRun);
 
 /**
- * Every active project in `accountId` (or Tau's default account) that holds an
- * LFS reservation, in `projectId` order and after `after`, in keyset pages.
+ * Groups reservation pages (in `(projectId, oid)` order) into one target per
+ * project; a project whose rows span a page boundary is yielded once, whole.
  *
- * @param database - The database the reservations live in.
- * @param args - The storage account the driver writes to, the resume cursor, and one project to limit it to.
- * @yields One project at a time.
+ * @param pages - The reservations, from `activeLfsReservationPages`.
+ * @yields One project with its reservations at a time.
  */
 export async function* lfsRelocationProjects(
-  database: Database,
-  args: { readonly accountId: string; readonly after?: string; readonly projectId?: string },
-): AsyncGenerator<LfsRelocationProject> {
-  let cursor = args.after;
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- keyset pages are sequential by cursor
-    const page = await database
-      .selectDistinct({ projectId: project.id, ownerId: project.ownerId })
-      .from(projectGitLfsObject)
-      .innerJoin(project, eq(project.id, projectGitLfsObject.projectId))
-      .leftJoin(projectDeletion, eq(projectDeletion.projectId, project.id))
-      .where(
-        and(
-          isNull(projectDeletion.projectId),
-          or(isNull(project.storageAccountId), eq(project.storageAccountId, args.accountId)),
-          cursor === undefined ? undefined : gt(project.id, cursor),
-          args.projectId === undefined ? undefined : eq(project.id, args.projectId),
-        ),
-      )
-      .orderBy(asc(project.id))
-      .limit(relocationPageSize);
-    yield* page;
-    if (page.length < relocationPageSize) {
-      return;
+  pages: AsyncIterable<readonly LfsReservation[]>,
+): AsyncGenerator<LfsRelocationTarget> {
+  let current: { ownerId: string; projectId: string; rows: LfsRelocationRow[] } | undefined;
+  for await (const page of pages) {
+    for (const row of page) {
+      if (current?.projectId !== row.projectId) {
+        if (current !== undefined) {
+          yield current;
+        }
+        current = { ownerId: row.ownerId, projectId: row.projectId, rows: [] };
+      }
+      current.rows.push({ oid: row.oid, size: row.size });
     }
-    cursor = page.at(-1)!.projectId;
+  }
+  if (current !== undefined) {
+    yield current;
   }
 }
-
-/**
- * One project's reservations, for the survey.
- *
- * @param database - The database the reservations live in.
- * @param projectId - The project.
- * @returns Each reserved `oid` with its declared size.
- */
-export const lfsRelocationRows = async (database: Database, projectId: string): Promise<LfsRelocationRow[]> =>
-  database
-    .select({ oid: projectGitLfsObject.oid, size: projectGitLfsObject.sizeBytes })
-    .from(projectGitLfsObject)
-    .where(eq(projectGitLfsObject.projectId, projectId))
-    .orderBy(asc(projectGitLfsObject.oid));
 
 /**
  * Where one project's reserved bytes are, without a lock or a write.
@@ -159,7 +129,7 @@ export const lfsRelocationRows = async (database: Database, projectId: string): 
  */
 export const surveyLegacyLfsObjects = async (
   storage: Pick<ObjectStorageService, 'headBlob'>,
-  target: LfsRelocationProject & { readonly rows: readonly LfsRelocationRow[] },
+  target: LfsRelocationTarget,
 ): Promise<LfsRelocationSurvey> => {
   let legacyOnly = 0;
   let both = 0;
@@ -203,20 +173,21 @@ const emptySurvey: LfsRelocationSurvey = {
  * the ones that still hold a legacy key, `concurrency` projects at a time.
  *
  * Resumable twice over. `relocateLegacyLfsObjects` is idempotent per object,
- * so a rerun finishes what an interrupted one left; and each line carries
- * `resumeAfter`, the last project up to which nothing is unfinished or failed,
- * for `--after` to skip the surveyed prefix. A failed project is reported and
- * the run goes on; it stays listed in the summary and holds `resumeAfter`
- * back. A stop signal lets in-flight projects finish and starts no more.
+ * so a rerun finishes what an interrupted one left; and each line of a
+ * confirmed run carries `resumeAfter`, the last project up to which nothing is
+ * unfinished or failed, for `--after` to skip that prefix. A failed project is
+ * reported and the run goes on; it stays listed in the summary and holds
+ * `resumeAfter` back. A stop signal lets in-flight projects finish and starts
+ * no more. If reporting a line throws, no worker takes another project, the
+ * ones in flight settle, and the error is rethrown without a summary.
  *
- * @param dependencies - The projects to visit (in `projectId` order), their rows, the driver and the relocation.
+ * @param dependencies - The projects to visit (in `projectId` order), the driver and the relocation.
  * @param options - Whether to move bytes, the worker count, the line sink and a stop signal.
  * @returns The run's summary, which is also reported as the last line.
  */
 export const relocateLegacyLfsInventory = async (
   dependencies: {
-    readonly projects: AsyncIterable<LfsRelocationProject>;
-    readonly rows: (projectId: string) => Promise<readonly LfsRelocationRow[]>;
+    readonly projects: AsyncIterable<LfsRelocationTarget>;
     readonly storage: Pick<ObjectStorageService, 'headBlob'>;
     readonly relocate: (target: LfsRelocationProject) => Promise<{ moved: readonly string[] }>;
   },
@@ -234,21 +205,20 @@ export const relocateLegacyLfsInventory = async (
   let resumeAfter: string | undefined;
   const totals = { projects: 0, withLegacy: 0, legacyObjects: 0, legacyBytes: 0, moved: 0, missing: 0 };
   const failed: string[] = [];
+  /** The first error a worker could not report as a project line; it stops every worker. */
+  let fault: { readonly error: unknown } | undefined;
 
-  const visit = async (target: LfsRelocationProject): Promise<void> => {
+  const visit = async (target: LfsRelocationTarget): Promise<void> => {
     let survey = emptySurvey;
     let moved = 0;
     let outcome: LfsRelocationOutcome['outcome'];
     let failure: string | undefined;
     try {
-      survey = await surveyLegacyLfsObjects(dependencies.storage, {
-        ...target,
-        rows: await dependencies.rows(target.projectId),
-      });
+      survey = await surveyLegacyLfsObjects(dependencies.storage, target);
       if (survey.legacyOnly + survey.both === 0) {
         outcome = 'clean';
       } else if (options.confirm) {
-        const relocated = await dependencies.relocate(target);
+        const relocated = await dependencies.relocate({ ownerId: target.ownerId, projectId: target.projectId });
         moved = relocated.moved.length;
         outcome = 'relocated';
       } else {
@@ -286,28 +256,39 @@ export const relocateLegacyLfsInventory = async (
       moved,
       ...(failure === undefined ? {} : { error: failure }),
       done: totals.projects,
-      ...(resumeAfter === undefined ? {} : { resumeAfter }),
+      ...(options.confirm && resumeAfter !== undefined ? { resumeAfter } : {}),
     };
     await options.report(JSON.stringify(line));
   };
 
+  const stopped = (): boolean => fault !== undefined || options.signal?.aborted === true;
+
   const worker = async (): Promise<void> => {
-    /* oxlint-disable no-await-in-loop -- each worker takes the next project when it is free; that is the bound */
-    while (options.signal?.aborted !== true) {
-      const next = await iterator.next();
-      if (next.done === true) {
-        return;
+    try {
+      /* oxlint-disable no-await-in-loop -- each worker takes the next project when it is free; that is the bound */
+      while (!stopped()) {
+        const next = await iterator.next();
+        // The stop may have come while the next page was read.
+        if (next.done === true || stopped()) {
+          return;
+        }
+        started.push(next.value.projectId);
+        await visit(next.value);
       }
-      started.push(next.value.projectId);
-      await visit(next.value);
+      /* oxlint-enable no-await-in-loop -- end of the worker loop */
+    } catch (error) {
+      fault ??= { error };
     }
-    /* oxlint-enable no-await-in-loop -- end of the worker loop */
   };
 
   try {
+    // Workers never reject: each records its fault and every other worker stops after its project in flight.
     await Promise.all(Array.from({ length: options.concurrency }, worker));
   } finally {
     await iterator.return?.();
+  }
+  if (fault !== undefined) {
+    throw fault.error;
   }
 
   const summary: LfsRelocationSummary = {
@@ -316,7 +297,7 @@ export const relocateLegacyLfsInventory = async (
     interrupted: options.signal?.aborted === true,
     ...totals,
     failed: failed.toSorted(),
-    ...(resumeAfter === undefined ? {} : { resumeAfter }),
+    ...(options.confirm && resumeAfter !== undefined ? { resumeAfter } : {}),
   };
   await options.report(JSON.stringify(summary));
   return summary;

@@ -119,6 +119,8 @@ posthog.featureFlags.getFlagVariants(); // inspect evaluated values with overrid
 
 In the desktop app, run the same commands in the renderer's developer tools console.
 
+**In tests.** Never set these flags through `tau:flags` or `window.ENV`. Component tests connect a stub client with `connectRemoteFlags` (see `remote-flags.test.ts`). The end-to-end suites name one of the four states that ship (blueprint FL4: `all-off`, `viewer-controls`, `all-on`, `viewer-controls-onboarding`, defined in [flag-state.ts](../apps/ui-e2e/src/support/flag-state.ts)): an init script seeds that state's PostHog variants on `__TAU_E2E_POSTHOG_FLAGS__` before the page's scripts run, and the flag source reads them in place of the PostHog client for the life of the page. Only an undeployed debug build (`TAU_DEBUG` on, no `TAU_DEPLOY_CONTEXT`, which is how both suites start the app) reads the seed, so a deployed build cannot be steered this way. `ui-e2e` takes the run's state from `TAU_E2E_FLAG_STATE` (`pnpm nx test:e2e ui-e2e -c <state>`) and a spec can change it with `useFlagState` before its first navigation; `desktop-e2e` takes it from the `flagState` launch option or `TAU_E2E_FLAG_STATE`. `src/flag-state.spec.ts` and `src/desktop-flag-state.spec.ts` are the smoke checks.
+
 ## CLI and desktop host controls
 
 [Serve options](../packages/cli/src/commands/serve.ts) are the detailed authority; CLI flags may override environment defaults.

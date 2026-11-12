@@ -26,11 +26,12 @@ import type { PrefixBreakCause, PrefixStamp } from '#log/prefix-stamp.js';
  * What a stamp depends on besides the request: pi-ai's codecs, which decide the bytes a context becomes, and this
  * module's own rules. Bump the suffix when {@link stampPrefix} changes what it digests, and whenever the transport
  * changes which reasoning a request replays: a row stamped under other rules was minted beside reasoning this build
- * might leave out, so its stamp must stop matching. `/1` stamped without the replay rule; `/2` obeys it.
+ * might leave out, so its stamp must stop matching. `/1` stamped without the replay rule; `/2` obeys it; `/3` also
+ * digests the effort markers a transcript carries (U14).
  *
  * @internal
  */
-export const prefixCodecEpoch = 'pi-ai@1.4.0/2';
+export const prefixCodecEpoch = 'pi-ai@1.4.0/3';
 
 /** One request, as {@link stampPrefix} reads it. @internal */
 export type PrefixStampInput = Readonly<{
@@ -46,6 +47,8 @@ export type PrefixStampInput = Readonly<{
   /** The stamp each message's durable row carries, by message index. */
   stamps: ReadonlyArray<PrefixStamp | undefined>;
   settings: string;
+  /** The level the request carries in its transcript (U14); `undefined` when a request field carries it instead. */
+  transcriptEffort?: string | undefined;
   release?: string | undefined;
   summary?: string | undefined;
   cleared: number;
@@ -112,6 +115,30 @@ const sameModel = (message: Message, model: PrefixStampInput['model']): boolean 
   message.provider === model.provider &&
   message.model === model.id;
 
+/**
+ * The effort marker the codecs write in front of a message when the request carries its level in the transcript:
+ * the level the reply was minted at, on a reply of this provider's wire that is sent at all.
+ *
+ * @param message - One message of the request.
+ * @param model - The model the request is sent to.
+ * @returns The reply's level, or `undefined` when no marker precedes the message.
+ */
+const effortMarkerOf = (message: Message, model: PrefixStampInput['model']): string | undefined =>
+  message.role === 'assistant' && isSent(message) && message.api === model.api && message.provider === model.provider
+    ? message.providerThinkingLevel
+    : undefined;
+
+/**
+ * One effort marker, digested into the chain where the wire carries it.
+ *
+ * @param chain - The chain before the marker.
+ * @param level - The level the marker carries; `undefined` when no marker sits here.
+ * @param carried - Whether the chain being built carries its effort in the transcript.
+ * @returns The chain after it.
+ */
+const afterEffortMarker = (chain: string, level: string | undefined, carried: boolean): string =>
+  carried && level !== undefined ? shortHash(`${chain}\n${canonicalJson({ effort: level })}`) : chain;
+
 const isNativeReasoning = (block: Extract<Message, { role: 'assistant' }>['content'][number]): boolean =>
   block.type === 'thinking' || (block.type === 'toolCall' && block.thoughtSignature !== undefined);
 
@@ -155,10 +182,15 @@ export const withoutNativeReasoning = (message: Message): Message =>
  *
  * @param now - This request's stamp, without its break.
  * @param then - The comparison row's stamp.
- * @param reproduced - Whether the chain at the row's position equals the digest the row recorded.
+ * @param reproduced - Whether the chain at the row's position equals the digest the row recorded (`sent`), and whether
+ *   it would had the request carried its effort the way the row's request did (`remarked`).
  * @returns The cause, or `undefined` when the prefix was reproduced with the same settings.
  */
-const causeOf = (now: PrefixStamp, then: PrefixStamp, reproduced: boolean): PrefixBreakCause | undefined => {
+const causeOf = (
+  now: PrefixStamp,
+  then: PrefixStamp,
+  reproduced: Readonly<{ sent: boolean; remarked: boolean }>,
+): PrefixBreakCause | undefined => {
   const released = now.release !== then.release;
   if (now.tools !== then.tools) {
     return released ? 'definitions' : 'tools';
@@ -166,7 +198,11 @@ const causeOf = (now: PrefixStamp, then: PrefixStamp, reproduced: boolean): Pref
   if (now.system !== then.system) {
     return released ? 'definitions' : 'instructions';
   }
-  if (!reproduced) {
+  if (!reproduced.sent) {
+    /* A chat that stopped carrying its effort in the transcript lost the markers its replies were minted behind. */
+    if (reproduced.remarked && now.settings !== then.settings) {
+      return 'settings';
+    }
     if (now.summary !== then.summary) {
       return 'compaction';
     }
@@ -208,17 +244,30 @@ export const stampPrefix = (input: PrefixStampInput): StampedPrefix => {
    * The whole request is digested on each call, attachments included: batch by message if that ever shows in a
    * profile. */
   let chain = shortHash(canonicalJson([input.model, system, tools]));
+  /* The same chain with the effort markers carried the other way: in the transcript when this request keeps its
+   * level in a request field, and the reverse. It tells a settings change from an unexplained edit. */
+  let remarked = chain;
   /* The newest stamped row, the chain everything before it produces now, and the reasoning it added to the chat. */
   let comparison:
-    | { readonly stamp: PrefixStamp; readonly native: boolean; readonly before: string; readonly minted: number }
+    | {
+        readonly stamp: PrefixStamp;
+        readonly native: boolean;
+        readonly before: string;
+        readonly remarked: string;
+        readonly minted: number;
+      }
     | undefined;
   const stale = new Set<number>();
   let replayed = 0;
   for (const [index, message] of input.messages.entries()) {
+    /* A reply's marker sits in front of it, so the reasoning the reply minted is bound to it (WP8b). */
+    const level = effortMarkerOf(message, input.model);
+    chain = afterEffortMarker(chain, level, input.transcriptEffort !== undefined);
+    remarked = afterEffortMarker(remarked, level, input.transcriptEffort === undefined);
     const stamp = message.role === 'assistant' ? input.stamps[index] : undefined;
     const native = sameModel(message, input.model);
     if (stamp !== undefined) {
-      comparison = { stamp, native, before: chain, minted: native ? nativeReasoningIn(message) : 0 };
+      comparison = { stamp, native, before: chain, remarked, minted: native ? nativeReasoningIn(message) : 0 };
     }
     /* P2. Another model's row is not this rule's: the transport already renders its reasoning as text. */
     if (native && stamp?.digest === chain) {
@@ -227,11 +276,15 @@ export const stampPrefix = (input: PrefixStampInput): StampedPrefix => {
       stale.add(index);
     }
     if (isSent(message)) {
-      chain = shortHash(`${chain}\n${canonicalJson(boundContent(message))}`);
+      const bound = canonicalJson(boundContent(message));
+      chain = shortHash(`${chain}\n${bound}`);
+      remarked = shortHash(`${remarked}\n${bound}`);
     }
   }
   const stamp: PrefixStamp = {
-    digest: chain,
+    /* The marker that closes the request is the one the reply is minted behind, and a later request writes it again
+     * in front of the reply from the level the reply records. */
+    digest: afterEffortMarker(chain, input.transcriptEffort, true),
     system,
     tools,
     settings: input.settings,
@@ -247,7 +300,10 @@ export const stampPrefix = (input: PrefixStampInput): StampedPrefix => {
         ? undefined
         : 'compaction'
       : comparison.native
-        ? causeOf(stamp, comparison.stamp, comparison.before === comparison.stamp.digest)
+        ? causeOf(stamp, comparison.stamp, {
+            sent: comparison.before === comparison.stamp.digest,
+            remarked: comparison.remarked === comparison.stamp.digest,
+          })
         : 'model';
   if (cause === undefined) {
     return { stamp, stale };

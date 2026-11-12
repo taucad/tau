@@ -898,6 +898,23 @@ describe('P1 typed prefix breaks on the durable log', () => {
     expect(run.breaks).toEqual([[undefined, undefined], ['settings', undefined], [undefined]]);
   });
 
+  it('should record one settings break and leave earlier reasoning out when a chat stops carrying its effort in the transcript', async () => {
+    /* The reverse of adoption: a client without the capability, a catalog flag removed or a rollback sends a chat
+     * whose replies were minted behind effort markers without them, so the prefix those replies were signed under
+     * no longer reaches the wire. `runChat` holds every request to the binding oracle. */
+    const run = await runChat([
+      { ...turnOne, effort: 'high', transcriptEffort: true },
+      { ...turnTwo, effort: 'high', replies: [readFile, done] },
+      { ...turnTwo, effort: 'high', runId: 'run-3', userText: 'Thicker' },
+    ]);
+
+    expect(run.breaks).toEqual([[undefined, undefined], ['settings', undefined], [undefined]]);
+    const [first, second] = run.turns[1]!;
+    expect(replayedSignatures(first!)).toEqual([]);
+    expect(replayedSignatures(second!)).toEqual(['sig-3']);
+    expect(replayedSignatures(run.turns[2]![0]!)).toEqual(['sig-3', 'sig-4']);
+  });
+
   it('should record a definitions break when the prompt text changes under another release', async () => {
     const run = await runChat([
       { ...turnOne, release: 'ui@1' },

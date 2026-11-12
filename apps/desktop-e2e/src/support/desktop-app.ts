@@ -19,6 +19,12 @@ import {
   desktopE2EPackagedExecutable,
 } from '#support/config.js';
 import { restorePreparedKernels, savePreparedKernels } from '#support/prepared-kernels.js';
+/* eslint-disable @nx/enforce-module-boundaries -- Both e2e harnesses share one definition of the FL4 flag states; no production dependency is introduced. */
+// oxlint-disable-next-line no-restricted-imports -- The flag states are harness-only data both hosts must agree on.
+import { flagStateInitScript, flagStateVariable, resolveFlagState } from '../../../ui-e2e/src/support/flag-state.ts';
+// oxlint-disable-next-line no-restricted-imports -- The flag-state name type is shared by the two harnesses only.
+import type { FlagStateName } from '../../../ui-e2e/src/support/flag-state.ts';
+/* eslint-enable @nx/enforce-module-boundaries -- Restore normal boundaries after the harness-only imports. */
 
 /**
  * Electron launch + diagnostics for the desktop smoke suite (work item Z1).
@@ -393,6 +399,11 @@ export const launchDesktopApp = async (options: {
    * (`prepared-kernels.ts`). `false` launches with the store as the profile left it: empty, for a first use.
    */
   readonly preparedKernels?: boolean | undefined;
+  /**
+   * FL4: open the renderer in this flag state (`apps/ui-e2e/src/support/flag-state.ts`). Defaults to the run's
+   * `TAU_E2E_FLAG_STATE`; with neither, the renderer is left exactly as it launched.
+   */
+  readonly flagState?: FlagStateName | undefined;
 }): Promise<DesktopSession> => {
   if (desktopE2ECompletedArtifact && options.packaged === false) {
     throw new Error('A completed-artifact run cannot launch the workspace desktop app.');
@@ -612,6 +623,18 @@ export const launchDesktopApp = async (options: {
       { waitUntil: 'load' },
     );
     recordStartupPhase('initial-app-load.after', page.url());
+    const flagState =
+      options.flagState ??
+      (process.env[flagStateVariable] ? resolveFlagState(process.env[flagStateVariable]) : undefined);
+    if (flagState !== undefined) {
+      /* The renderer reads its flag state once, when it loads, and the first window starts loading before Playwright
+       * can add an init script; so seed it and reload, as the specs that stub navigator APIs do. The build honours
+       * the seed only while `TAU_DEBUG` is on, which this launch sets. */
+      recordStartupPhase('flag-state.before', page.url());
+      await page.addInitScript({ content: flagStateInitScript(flagState) });
+      await page.reload({ waitUntil: 'load' });
+      recordStartupPhase('flag-state.after', page.url());
+    }
     if (options.windowTitle !== undefined) {
       const ownedWindow = await application.browserWindow(page);
       await ownedWindow.evaluate((window: BrowserWindow, title) => {

@@ -31,6 +31,16 @@ const prerenderConcurrency = 4;
 export default {
   ssr: true,
   /**
+   * Hands the dev dependency optimizer its crawl entries: the client entry and every route
+   * module. Without it React Router sets `optimizeDeps.entries` to `[]`, Vite's startup scan
+   * crawls nothing, and every dependency is found on first request instead, each batch an
+   * "optimized dependencies changed. reloading" full page reload: a cold dev server reloaded
+   * open pages eight times during e2e-nightly's development tier (2026-11-12).
+   * Worker entries, which no route reaches statically, are added in `vite.config.ts`.
+   */
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag name.
+  future: { unstable_optimizeDeps: true },
+  /**
    * Every route is known on boot, so no navigation waits on `/__manifest`.
    *
    * Lazy discovery only learns a route from a `<Link>` already in the DOM. On a phone the

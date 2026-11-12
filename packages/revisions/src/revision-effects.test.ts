@@ -1960,9 +1960,13 @@ describe('restore, through the machine that owns it', () => {
           return bound;
         },
       });
-    const { port, actors, filesystem, actorFilesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, held, {
-      onLargeObjects: (report) => reports.push(report),
-    });
+    const { port, actors, filesystem, actorFilesystem } = await fixture(
+      { 'main.ts': 'export const size = 1;\n' },
+      held,
+      {
+        onLargeObjects: (report) => reports.push(report),
+      },
+    );
     live.filesystem = filesystem;
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
     const first = await port.writeRevision({

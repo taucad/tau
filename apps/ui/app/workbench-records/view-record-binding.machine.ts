@@ -593,6 +593,10 @@ const followFraming = (
 /*
  * The entry's first frame: a pending pose framing did not hold when it framed never reaches the camera from framing,
  * so the camera adopts it now (the record's camera, shown over the first frame).
+ *
+ * This relies on xstate's synchronous delivery: framing's `sendTo` reaches the idle camera inside framing's own step,
+ * so the camera's `adoptionApplied` for a pose framing applied arrives before framing's observers report it framed.
+ * A runtime that delivered asynchronously would reissue that pose; the session rows would show it as a second write.
  */
 const rerouteDroppedPendingPoses = (context: BindingContext, enq: BindingEnqueue): BindingContext => {
   const lost = context.adoptions.filter(

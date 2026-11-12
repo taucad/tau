@@ -52,8 +52,11 @@ export type EntriesState = Readonly<{
   refusal: { code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string } | undefined;
 }>;
 
-/** An edit waiting on its write, at the path its entry is on now. */
-type WaitingEdit = { path: string; readonly fields: EntryFields; left: string | undefined; gone: boolean };
+/**
+ * An edit waiting on its write, with every path its entry has been on while it waited, the last being where it is now:
+ * a write formed before a path change names the entry at its earlier path.
+ */
+type WaitingEdit = { paths: string[]; readonly fields: EntryFields; left: string | undefined; gone: boolean };
 
 const emptyRecord: WorkbenchEntries = { version: 1, entries: {} };
 
@@ -136,9 +139,9 @@ export function createWorkbenchEntriesStore(
     machine: createRecordSyncMachine(
       createEntriesPolicy((left, carried, message) => {
         for (const edit of waiting) {
-          if (left.includes(edit.path)) {
+          if (edit.paths.some((path) => left.includes(path))) {
             edit.left = message;
-          } else if (coversFields(carried[edit.path], edit.fields)) {
+          } else if (edit.paths.some((path) => coversFields(carried[path], edit.fields))) {
             // Only a merge that carries this edit's own fields settles it: a later change of the entry may not.
             edit.left = undefined;
           }
@@ -252,7 +255,7 @@ export function createWorkbenchEntriesStore(
       if (refused.delete(entryPath)) {
         refusalChanged();
       }
-      const waits: WaitingEdit = { path: entryPath, fields, left: undefined, gone: false };
+      const waits: WaitingEdit = { paths: [entryPath], fields, left: undefined, gone: false };
       waiting.add(waits);
       try {
         if (!(await commands.edit(record))) {
@@ -267,10 +270,9 @@ export function createWorkbenchEntriesStore(
       if (
         waits.left !== undefined &&
         !waits.gone &&
-        !carriesFields(shown?.[entryPath], fields) &&
-        !carriesFields(shown?.[waits.path], fields)
+        !waits.paths.some((path) => carriesFields(shown?.[path], fields))
       ) {
-        return refuse(waits.path, new RangeError(waits.left));
+        return refuse(waits.paths.at(-1) ?? entryPath, new RangeError(waits.left));
       }
       return true;
     },
@@ -296,11 +298,11 @@ export function createWorkbenchEntriesStore(
       }
       // A refused change, and a waiting one, follows its entry, and goes when the entry is deleted or replaced.
       for (const edit of waiting) {
-        const [moved] = Object.keys(replacingMoves({ [edit.path]: true }, record.moves ?? []));
+        const [moved] = Object.keys(replacingMoves({ [edit.paths.at(-1) ?? '']: true }, record.moves ?? []));
         if (moved === undefined) {
           edit.gone = true;
-        } else {
-          edit.path = moved;
+        } else if (moved !== edit.paths.at(-1)) {
+          edit.paths.push(moved);
         }
       }
       const kept = replacingMoves(Object.fromEntries(refused), record.moves ?? []);

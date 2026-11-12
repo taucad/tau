@@ -979,15 +979,18 @@ describe('workbench entries store over recordSync', () => {
         onChange: () => undefined,
         onError: () => undefined,
       });
-      const crowd = async () => {
+      const crowdFile = () => {
         write({ 'b.ts': hidden('b', 190), 'c.ts': hidden('c', 95) });
+      };
+      const crowd = async () => {
+        crowdFile();
         await entries.read();
       };
       const held = () => {
         const read = workbenchRecords.entries.read(m.get()!);
         return read.status === 'current' ? read.record.entries : {};
       };
-      return { entries, crowd, held };
+      return { entries, crowd, crowdFile, held };
     };
 
     it('refuses every edit of the entry the write left out', async () => {
@@ -1047,6 +1050,27 @@ describe('workbench entries store over recordSync', () => {
         expect(entries.health().unconfirmed).toBe(true);
         expect(await entries.edit('e.ts', { renderTimeout: 20_000 })).toBe(true);
         expect(entries.health().unconfirmed).toBe(false);
+      } finally {
+        entries.dispose();
+      }
+    });
+
+    it('refuses a left-out change whose entry is renamed while the write that leaves it out is on the wire', async () => {
+      const onWrite: Array<() => void> = [];
+      const { entries, crowdFile, held } = crowded(onWrite);
+      try {
+        await entries.read();
+        const first = entries.edit('a.ts', hidden('a', 95));
+        let renamed: Promise<boolean> | undefined;
+        onWrite.push(() => {
+          crowdFile();
+          renamed = entries.changePaths({ type: 'rename', oldPath: 'a.ts', newPath: 'e.ts' });
+        });
+        expect(await first).toBe(false);
+        expect(await renamed).toBe(true);
+        expect(held()['e.ts']?.components?.hidden ?? []).toEqual([]);
+        expect(entries.health().unconfirmed).toBe(true);
+        expect(await entries.flush()).toBe(false);
       } finally {
         entries.dispose();
       }

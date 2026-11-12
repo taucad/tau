@@ -70,6 +70,11 @@ const cameraPose = (direction: [number, number, number], verticalSpan: number): 
   verticalSpan,
 });
 
+/* A pinned measurement, the owner change a person makes that the binding still writes. */
+const measured = (id: string): WorkbenchView['measurements'] => [
+  { id, frameId: 'tau:root', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 },
+];
+
 /* One guard per test over every actor the test starts (MC-R23). */
 let current: { test: string | undefined; guard: ReturnType<typeof guardActors> } | undefined;
 const testGuard = (): ReturnType<typeof guardActors> => {
@@ -203,7 +208,8 @@ const samples: Record<ViewRecordBindingEvent['type'], readonly ViewRecordBinding
     { type: 'recordPublished', record: initial(), origin: 'foreign', patch: undefined },
     { type: 'recordPublished', record: initial(), origin: 'own', patch: { camera: initial().camera } },
   ],
-  ownersChanged: [{ type: 'ownersChanged', owners: { gridUnit: 'in' } }],
+  ownersChanged: [{ type: 'ownersChanged', owners: { measurements: measured('m1') } }],
+  levelsChanged: [{ type: 'levelsChanged', levels: { person: { 'display.grid': false } } }],
   sectionEdited: [{ type: 'sectionEdited' }],
   sectionSettled: [{ type: 'sectionSettled', section: { active: false, cuts: [] } }],
   cameraChanged: [
@@ -277,7 +283,7 @@ describe('view record binding', () => {
       harness.clock.advance(settle * 4);
       expect(harness.edits).toEqual([]);
       // A later owner edit keeps the instruction, not the pose the camera made of it.
-      harness.binding.send({ type: 'ownersChanged', owners: { gridUnit: 'in' } });
+      harness.binding.send({ type: 'ownersChanged', owners: { measurements: measured('m-later') } });
       expect(harness.edits.map((next) => next.camera)).toEqual([foreign.camera]);
     });
 
@@ -404,8 +410,8 @@ describe('view record binding', () => {
         cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: false }],
       };
       harness.publish(workbenchRecords.view.schema.parse({ ...initial(), section }));
-      harness.binding.send({ type: 'ownersChanged', owners: { gridUnit: 'in' } });
-      expect(harness.edits.at(-1)).toMatchObject({ section, grid: { unit: 'in' } });
+      harness.binding.send({ type: 'ownersChanged', owners: { measurements: measured('m1') } });
+      expect(harness.edits.at(-1)).toMatchObject({ section, measurements: measured('m1') });
     });
 
     it('should keep waiting for a pose framing holds when a later record changes only the field of view', () => {
@@ -434,13 +440,14 @@ describe('view record binding', () => {
     it('should keep the person settings and pose across a file that went missing and came back', () => {
       const harness = mount();
       harness.binding.send({ type: 'recordPublished', record: undefined, origin: 'foreign', patch: undefined });
-      harness.binding.send({ type: 'ownersChanged', owners: { gridUnit: 'in' } });
+      harness.binding.send({ type: 'ownersChanged', owners: { measurements: measured('m1') } });
       harness.drag([1, 0, 0], 4);
       // The edits recreate the file over the last record.
-      expect(harness.edits.at(-1)).toMatchObject({ grid: { unit: 'in' }, camera: { direction: [1, 0, 0] } });
+      expect(harness.edits.at(-1)).toMatchObject({ measurements: measured('m1'), camera: { direction: [1, 0, 0] } });
       const sent = harness.graphicsSent().length;
       harness.clock.advance(settle * 4);
-      harness.publish(harness.edits.at(-1)!, 'own', { grid: { unit: 'in' } });
+      const recreated = harness.edits.at(-1)!;
+      harness.publish(recreated, 'own', { measurements: measured('m1'), camera: recreated.camera });
       expect(harness.graphicsSent()).toHaveLength(sent);
       expect(harness.view().direction).toEqual([1, 0, 0]);
     });
@@ -471,9 +478,9 @@ describe('view record binding', () => {
       };
       const foreign = workbenchRecords.view.schema.parse({ ...initial(), section });
       harness.publish(foreign);
-      harness.binding.send({ type: 'ownersChanged', owners: { gridUnit: 'in' } });
+      harness.binding.send({ type: 'ownersChanged', owners: { measurements: measured('m-waiting') } });
       // The edit made while the section waited lands as own, carrying the foreign section in its patch.
-      harness.publish(harness.edits.at(-1)!, 'own', { section, grid: { unit: 'in' } });
+      harness.publish(harness.edits.at(-1)!, 'own', { section, measurements: measured('m-waiting') });
       const sent = harness.graphicsSent().length;
       const edits = harness.edits.length;
       harness.binding.send({ type: 'sectionSettled', section: { active: false, cuts: [] } });
@@ -541,13 +548,13 @@ describe('view record binding', () => {
   });
 
   describe('review round 4 rows', () => {
-    it('should save a person field of view set before the first frame', () => {
+    it('should write no field of view set on the camera before the first frame: view commands write it (GP1)', () => {
       const harness = mount({ framed: false });
       harness.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 20 });
-      expect(harness.edits.at(-1)).toMatchObject({ fieldOfView: 20, camera: initial().camera });
+      expect(harness.edits).toEqual([]);
       harness.send({ type: 'frameGeometry', bounds: box(2), margin: 0.1, source: 'framing' });
-      harness.binding.send({ type: 'ownersChanged', owners: { gridUnit: 'in' } });
-      expect(harness.edits.at(-1)).toMatchObject({ fieldOfView: 20, grid: { unit: 'in' } });
+      harness.binding.send({ type: 'ownersChanged', owners: { measurements: measured('m1') } });
+      expect(harness.edits.at(-1)).toMatchObject({ fieldOfView: initial().fieldOfView, measurements: measured('m1') });
     });
 
     it('should not acknowledge a later record that keeps a camera the view dropped', () => {
@@ -589,9 +596,9 @@ describe('view record binding', () => {
 
     it('should not acknowledge an own write that leaves a dropped camera on file', () => {
       const { harness } = dropOverMachinePose();
-      harness.binding.send({ type: 'ownersChanged', owners: { gridUnit: 'in' } });
+      harness.binding.send({ type: 'ownersChanged', owners: { measurements: measured('m1') } });
       const written = harness.edits.at(-1)!;
-      harness.publish(written, 'own', { grid: { unit: 'in' } });
+      harness.publish(written, 'own', { measurements: measured('m1') });
       expect(harness.applied).toEqual([]);
       // A write that carries the camera puts the view's camera back on file, and that one is acknowledged.
       harness.press();
@@ -604,19 +611,20 @@ describe('view record binding', () => {
   });
 
   describe('review round 6 rows', () => {
-    it('should acknowledge again once the re-save after a field-only drop is on file', () => {
+    it('should resolve a field-only drop at once when the person pose is already on file', () => {
       const harness = mount();
       harness.press();
       harness.drag([1, 0, 0], 4);
       const posedEdit = harness.edits.at(-1)!;
       harness.publish(posedEdit, 'own', { camera: posedEdit.camera });
       harness.applied.length = 0;
-      harness.publish(workbenchRecords.view.schema.parse({ ...posedEdit, fieldOfView: 30 }));
-      expect(harness.applied).toEqual([]);
-      const resave = harness.edits.at(-1)!;
-      expect(resave.fieldOfView).toBe(posedEdit.fieldOfView);
-      harness.publish(resave, 'own', { fieldOfView: resave.fieldOfView });
-      expect(harness.applied).toEqual([resave]);
+      const edits = harness.edits.length;
+      const foreign = workbenchRecords.view.schema.parse({ ...posedEdit, fieldOfView: 30 });
+      harness.publish(foreign);
+      // The field of view is the record's to set, so nothing is written back over it.
+      expect(harness.edits).toHaveLength(edits);
+      harness.publish(workbenchRecords.view.schema.parse({ ...foreign, name: 'Again' }));
+      expect(harness.applied).toHaveLength(1);
       harness.release();
     });
 
@@ -639,12 +647,13 @@ describe('view record binding', () => {
       return { harness, posedEdit };
     };
 
-    it('should not acknowledge a field-only drop re-published before its re-save lands', () => {
+    it('should write nothing over a foreign field of view dropped mid-drag', () => {
       const { harness, posedEdit } = heldPose();
+      const edits = harness.edits.length;
       const foreign = workbenchRecords.view.schema.parse({ ...posedEdit, fieldOfView: 30 });
       harness.publish(foreign);
       harness.publish(structuredClone(foreign));
-      expect(harness.applied).toEqual([]);
+      expect(harness.edits).toHaveLength(edits);
       harness.release();
     });
 
@@ -711,10 +720,10 @@ describe('view record binding', () => {
       expect(harness.edits).toEqual([]);
     });
 
-    it('should write the person field of view with the pose', () => {
+    it('should write the pose of a field of view change and keep the record field of view (GP1)', () => {
       const harness = mount();
       harness.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 20 });
-      expect(harness.edits.at(-1)).toMatchObject({ fieldOfView: 20, camera: { kind: 'pose' } });
+      expect(harness.edits.at(-1)).toMatchObject({ fieldOfView: initial().fieldOfView, camera: { kind: 'pose' } });
     });
   });
 
@@ -730,18 +739,43 @@ describe('view record binding', () => {
 
     it('should edit the record when a person changes a setting, and not for an echo of the value held', () => {
       const harness = mount();
-      harness.binding.send({ type: 'ownersChanged', owners: { gridUnit: 'in' } });
-      expect(harness.edits.map((next) => next.grid.unit)).toEqual(['in']);
-      harness.binding.send({ type: 'ownersChanged', owners: { gridUnit: 'in' } });
+      harness.binding.send({ type: 'ownersChanged', owners: { measurements: measured('m1') } });
+      expect(harness.edits.map((next) => next.measurements)).toEqual([measured('m1')]);
+      harness.binding.send({ type: 'ownersChanged', owners: { measurements: measured('m1') } });
       expect(harness.edits).toHaveLength(1);
     });
 
     it('should keep a person setting not yet published when a foreign record changes another field', () => {
       const harness = mount();
-      harness.binding.send({ type: 'ownersChanged', owners: { display: { ...initial().display, grid: false } } });
-      harness.publish(workbenchRecords.view.schema.parse({ ...initial(), grid: { unit: 'in' } }));
-      harness.binding.send({ type: 'ownersChanged', owners: { gridUnit: 'cm' } });
-      expect(harness.edits.at(-1)).toMatchObject({ display: { grid: false }, grid: { unit: 'cm' } });
+      harness.binding.send({ type: 'ownersChanged', owners: { measurements: measured('m1') } });
+      const foreign = workbenchRecords.view.schema.parse({ ...initial(), grid: { unit: 'in' } });
+      harness.publish(foreign);
+      harness.drag([1, 0, 0], 4);
+      // The foreign unit stays as the record holds it; the person's measurements are written with the pose.
+      expect(harness.edits.at(-1)).toMatchObject({ measurements: measured('m1'), grid: { unit: 'in' } });
+    });
+
+    it('should seed the inheritable leaves from the resolution, and write none of them (V6, V9)', () => {
+      const harness = mount();
+      harness.binding.send({ type: 'levelsChanged', levels: { person: { 'display.grid': false, fieldOfView: 0 } } });
+      expect(harness.graphicsSent().at(-1)).toEqual({ type: 'setGridVisibility', payload: false });
+      expect(harness.camera.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(0);
+      harness.binding.send({ type: 'ownersChanged', owners: { measurements: measured('m1') } });
+      expect(harness.edits.at(-1)).toMatchObject({ display: initial().display, fieldOfView: initial().fieldOfView });
+      // A foreign record that sets the leaf in the view wins over the person.
+      harness.publish(
+        workbenchRecords.view.schema.parse({ ...initial(), display: { ...initial().display, axes: false } }),
+      );
+      expect(harness.graphicsSent().at(-1)).toEqual({ type: 'setAxesVisibility', payload: false });
+    });
+
+    it('should seed a view command write of an inheritable leaf, whatever its origin (GP1)', () => {
+      const harness = mount();
+      const before = harness.graphicsSent().length;
+      harness.publish(
+        workbenchRecords.view.schema.parse({ ...initial(), display: { ...initial().display, grid: false } }),
+      );
+      expect(harness.graphicsSent().slice(before)).toEqual([{ type: 'setGridVisibility', payload: false }]);
     });
 
     it('should not edit before the first record is published', () => {
@@ -761,11 +795,11 @@ describe('view record binding', () => {
         },
         inspect: testGuard().inspect,
       }).start();
-      binding.send({ type: 'ownersChanged', owners: { gridUnit: 'in' } });
+      binding.send({ type: 'ownersChanged', owners: { measurements: measured('m1') } });
       expect(edits).toEqual([]);
       binding.send({ type: 'recordPublished', record: initial(), origin: 'foreign', patch: undefined });
-      binding.send({ type: 'ownersChanged', owners: { gridUnit: 'cm' } });
-      expect(edits.map((next) => next.grid.unit)).toEqual(['cm']);
+      binding.send({ type: 'ownersChanged', owners: { measurements: measured('m2') } });
+      expect(edits.map((next) => next.measurements)).toEqual([measured('m2')]);
     });
 
     it('should keep a foreign section waiting while cuts are edited, until an own section supersedes it', () => {

@@ -29,6 +29,10 @@
  *   record asks for nothing again, and a dropped pose is not requested twice.
  * - **No time here (D3, I8).** The camera applies an adoption only in `input.idle` and drops it otherwise; the section
  *   quiet gate is graphics' (`sectionEdited` and `sectionSettled`). Edits are coalesced by `recordSync`'s debounce.
+ * - **The ten inheritable leaves (graphics charter ruling of 2026-11-12, amending D20, I6 and I7 for them).** Up
+ *   direction, field of view, the seven display flags and the grid unit are command-written and resolver-seeded: each
+ *   record (of any origin) and each `levelsChanged` seeds the owners from `resolveViewSettings` output, and no edit
+ *   writes them from the owners.
  * - Foreign field of view and up direction go through `adoptPersistedPose` with the pose, never through the camera's
  *   `setVerticalFieldOfView` or `setUpDirection`, whose person sources would be written back. Graphics' own up
  *   direction setting is adopted through `setUpDirection` on graphics. Known gap, ruled by programme control
@@ -55,16 +59,12 @@ import type {
 import type { PersistedCameraView, PersistedSectionView } from '@taucad/viewer/graphics/graphics-settings';
 import type { WorkbenchView } from '@taucad/workbench';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
-import {
-  foreignChanges,
-  nextRecord,
-  ownsCamera,
-  viewDisplayOwners,
-} from '#workbench-records/view-record-binding-changes.js';
+import { foreignChanges, nextRecord, ownsCamera } from '#workbench-records/view-record-binding-changes.js';
 import type {
   ViewCameraAdoption,
   ViewGraphicsAdoption,
   ViewOwners,
+  ViewResolutionLevels,
 } from '#workbench-records/view-record-binding-changes.js';
 import type { ViewRecordPatch } from '#workbench-records/view-record-policy.js';
 
@@ -100,11 +100,13 @@ export type ViewRecordBindingInput = Readonly<{
   /** The entry the view renders: framing's identity for the record's pending pose. */
   entryPath: string;
   /** The owners' values when the binding starts. */
-  owners: Omit<ViewOwners, 'camera' | 'fieldOfView'>;
+  owners: Omit<ViewOwners, 'camera'>;
+  /** The levels the record resolves over when the binding starts: the person's defaults and the view's exceptions. */
+  levels?: ViewResolutionLevels;
 }>;
 
 /** The owner fields graphics holds; a change carries the fields that changed. */
-export type ViewOwnerChange = Partial<Pick<ViewOwners, 'display' | 'upDirection' | 'gridUnit' | 'measurements'>>;
+export type ViewOwnerChange = Partial<Pick<ViewOwners, 'measurements'>>;
 
 /** The public event alphabet of {@link viewRecordBindingMachine}. */
 export type ViewRecordBindingEvent =
@@ -117,6 +119,8 @@ export type ViewRecordBindingEvent =
     }>
   /** A person changed graphics settings this record holds. */
   | Readonly<{ type: 'ownersChanged'; owners: ViewOwnerChange }>
+  /** The person's defaults or this view's exceptions changed: the owners are seeded from the new resolution. */
+  | Readonly<{ type: 'levelsChanged'; levels: ViewResolutionLevels }>
   /** The person is editing section cuts: graphics' section region left `settled`. */
   | Readonly<{ type: 'sectionEdited' }>
   /** The section settled; `section` is what the person left. */
@@ -146,6 +150,8 @@ type BindingContext = Readonly<{
   /** The latest published record: the base of the next edit and what the next foreign record is compared with. */
   record: WorkbenchView | undefined;
   owners: ViewOwners;
+  /** The levels the record resolves over. */
+  levels: ViewResolutionLevels;
   /** The camera's pose and the source of the change that produced it (CameraAuthority's `poseBy`). */
   pose: Readonly<{ view: PersistedCameraView; by: CameraSource }> | undefined;
   /** The camera's requested vertical field of view. */
@@ -293,13 +299,10 @@ const observeCamera = (
     // applies it after that frame, so a move of the empty canvas would put a pose on file the view then leaves. A field
     // of view is not part of that pose, so the person's is written now rather than lost (the hook, which built no camera
     // settings before the first frame, dropped it).
-    if (source !== 'fov') {
-      return { framed, context: observed };
-    }
-    const fovOwners: ViewOwners = { ...context.owners, fieldOfView: event.verticalFieldOfView };
-    return { framed, context: edited({ context: observed, editRecord, owners: fovOwners, revision }, enq) };
+    // The field of view is an inheritable leaf, written by view commands only, so nothing is written here.
+    return { framed, context: observed };
   }
-  const owners: ViewOwners = { ...context.owners, camera: event.pose, fieldOfView: event.verticalFieldOfView };
+  const owners: ViewOwners = { ...context.owners, camera: event.pose };
   return { framed, context: edited({ context: observed, editRecord, owners, revision }, enq) };
 };
 
@@ -320,10 +323,9 @@ const observeOwn = (
     patch?.section !== undefined &&
     context.sectionPending !== undefined &&
     !same(record.section, context.sectionPending);
-  // After a drop, only a write that carries the camera (or, after field-only drops, the field of view) puts the view's
-  // camera back on file (CameraAuthority README: the file keeps the foreign pose until this view's next write of it),
-  // so any other own write is not acknowledged.
-  const resolved = ownsCamera(record, patch) || (context.dropped?.turns === false && patch?.fieldOfView !== undefined);
+  // After a drop, only a write that carries the camera puts the view's camera back on file (CameraAuthority README: the
+  // file keeps the foreign pose until this view's next write of it), so any other own write is not acknowledged.
+  const resolved = ownsCamera(record, patch);
   const stillDropped = context.dropped !== undefined && !resolved;
   return acknowledged(
     {
@@ -352,7 +354,7 @@ const observeRecord = (
   if (event.origin === 'own') {
     return observeOwn({ context, record, patch: event.patch }, enq);
   }
-  const changes = foreignChanges(context.record, record, undefined);
+  const changes = foreignChanges(context.record, record, { levels: context.levels });
   let { owners } = context;
   for (const adoption of changes.graphics) {
     enq.sendTo(context.graphics, adoption);
@@ -393,12 +395,6 @@ const observeRecord = (
 /* The owner value a graphics adoption leaves; only the fields a foreign record changed are replaced. */
 const adoptedOwner = (owners: ViewOwners, adoption: ViewGraphicsAdoption): ViewOwners => {
   switch (adoption.type) {
-    case 'setGridUnit': {
-      return { ...owners, gridUnit: adoption.payload.unit };
-    }
-    case 'setUpDirection': {
-      return { ...owners, upDirection: adoption.payload };
-    }
     case 'adoptPinnedMeasurements': {
       return { ...owners, measurements: [...adoption.measurements] as WorkbenchView['measurements'] };
     }
@@ -406,8 +402,8 @@ const adoptedOwner = (owners: ViewOwners, adoption: ViewGraphicsAdoption): ViewO
       return { ...owners, section: adoption.section };
     }
     default: {
-      const recordKey = viewDisplayOwners.find((owner) => owner[2] === adoption.type)![1];
-      return { ...owners, display: { ...owners.display, [recordKey]: adoption.payload } };
+      // Display, grid unit and up direction are seeded from the resolution and never written back.
+      return owners;
     }
   }
 };
@@ -465,11 +461,7 @@ const requestCamera = (
     // orientation supersedes every earlier request, a field-only request only earlier field-only ones.
     adoptions: [...context.adoptions.filter((earlier) => !turns && earlier.turns), ...issued],
     // The record's camera now stands for what it changed; a drop writes the person's pose back.
-    owners: {
-      ...context.owners,
-      ...(turns ? { camera: undefined } : {}),
-      ...(verticalFieldOfView === undefined ? {} : { fieldOfView: undefined }),
-    },
+    owners: { ...context.owners, ...(turns ? { camera: undefined } : {}) },
   };
 };
 
@@ -512,6 +504,11 @@ const answerAdoption = (
     return acknowledged({ ...context, adoptions }, enq);
   }
   // A dropped adoption means the view never showed the record, so it is not acknowledged as applied.
+  if (!turns && context.dropped === undefined) {
+    // Field of view and up direction are the record's to set (ruling of 2026-11-12): a field-only drop has nothing to
+    // write back. The camera shows them again at the next change of their resolution.
+    return { ...context, adoptions, applying: undefined };
+  }
   // An earlier drop still unresolved keeps its pose: a field-only drop after it never lowers what must be written back.
   const dropped = { record: context.record!, turns: turns || context.dropped?.turns === true };
   const answered: BindingContext = { ...context, adoptions, applying: undefined, dropped };
@@ -521,9 +518,8 @@ const answerAdoption = (
     // Dropped over a machine-made pose, which is never saved (I7): the file keeps the foreign pose.
     return answered;
   }
-  const owners: ViewOwners = { ...context.owners, camera: pose.view, fieldOfView: context.fieldOfView };
-  // After a field-only drop the person's pose is already on file, so the re-save's field of view resolves it once it is
-  // published. A re-save equal to the file (an up direction the owners already hold) publishes nothing: nothing differs.
+  const owners: ViewOwners = { ...context.owners, camera: pose.view };
+  // A re-save equal to the file publishes nothing: nothing differs, so the drop is resolved at once.
   const unchanged = !dropped.turns && same(nextRecord(owners, context.record!), context.record);
   return edited({ context: unchanged ? { ...answered, dropped: undefined } : answered, editRecord, owners }, enq);
 };
@@ -551,6 +547,7 @@ const viewRecordBindingDefinition = setup({
     entryPath: input.entryPath,
     record: undefined,
     owners: { ...input.owners },
+    levels: input.levels ?? {},
     pose: undefined,
     fieldOfView: undefined,
     revision: 0,
@@ -574,6 +571,26 @@ const viewRecordBindingDefinition = setup({
         return {};
       }
       return { context: edited({ context, editRecord: actions.editRecord, owners }, enq) };
+    }),
+    levelsChanged: refines('Unmodelled', ({ context, event, value }, enq) => {
+      if (context.record === undefined) {
+        return { context: { levels: event.levels } };
+      }
+      // The same record over new levels: only the inheritable leaves whose resolution changed are seeded.
+      const changes = foreignChanges(context.record, context.record, {
+        levels: event.levels,
+        previousLevels: context.levels,
+      });
+      for (const adoption of changes.graphics) {
+        enq.sendTo(context.graphics, adoption);
+      }
+      const leveled: BindingContext = { ...context, levels: event.levels };
+      return {
+        context:
+          changes.camera === undefined
+            ? leveled
+            : requestCamera({ context: leveled, camera: changes.camera, value }, enq),
+      };
     }),
     adoptionApplied: refines('Observe', ({ context, event, actions, value }, enq) => {
       const next = answerAdoption({ context, event, editRecord: actions.editRecord, framed: isFramed(value) }, enq);
@@ -645,6 +662,7 @@ export const viewRecordBindingIgnoredEvents: ReadonlyArray<readonly [state: stri
 export const viewRecordBindingEventTypes = [
   'recordPublished',
   'ownersChanged',
+  'levelsChanged',
   'sectionEdited',
   'sectionSettled',
   'cameraChanged',

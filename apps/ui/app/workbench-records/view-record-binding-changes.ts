@@ -5,25 +5,58 @@
  * They are extracted from `useViewSettingsSync` (`#hooks/use-view-settings-sync.ts`), which stays until the wiring lane
  * (G6b) deletes it. Neither reads an actor's snapshot, a clock or React state: the binding machine holds every value
  * they read and calls them inside its transitions.
+ *
+ * The ten inheritable leaves (up direction, field of view, the seven display flags and the grid unit) are command-written
+ * and resolver-seeded (graphics charter ruling of 2026-11-12, amending D20, I6 and I7 for those leaves; onboarding
+ * blueprint Finding 6): the live owners adopt `resolveViewSettings` output whenever the record (of any origin), the
+ * person's defaults or the exceptions change, and {@link nextRecord} never writes them from the live owners. Camera,
+ * section and measurements keep the charter's rule.
  */
 import type { CameraOrientation, CameraPose, CameraUpAxis } from '@taucad/camera/machine';
 import type { PersistedCameraView, PersistedSectionView } from '@taucad/viewer/graphics/graphics-settings';
 import type { GraphicsEvent } from '@taucad/viewer/machines/graphics.machine';
-import { lengthUnits } from '@taucad/workbench';
-import type { WorkbenchView } from '@taucad/workbench';
+import { resolveViewSettings, tauViewDefaults } from '@taucad/workbench';
+import type { PersonViewFieldDefaults, ViewFieldPath, ViewFieldValues, WorkbenchView } from '@taucad/workbench';
 import { viewCameraOrientation } from '@taucad/workbench-panes/records/view-record';
 import type { ViewRecordPatch } from '#workbench-records/view-record-policy.js';
 
-/** The display toggles: the graphics context key, the record key and the graphics event that sets it. */
+/** The display toggles: the graphics context key, the leaf path and the graphics event that sets it. */
 export const viewDisplayOwners = [
-  ['enableSurfaces', 'surfaces', 'setSurfaceVisibility'],
-  ['enableLines', 'lines', 'setLinesVisibility'],
-  ['enableGizmo', 'gizmo', 'setGizmoVisibility'],
-  ['enableGrid', 'grid', 'setGridVisibility'],
-  ['enableAxes', 'axes', 'setAxesVisibility'],
-  ['enableMatcap', 'matcap', 'setMatcapVisibility'],
-  ['enablePostProcessing', 'postProcessing', 'setPostProcessingVisibility'],
+  ['enableSurfaces', 'display.surfaces', 'setSurfaceVisibility'],
+  ['enableLines', 'display.lines', 'setLinesVisibility'],
+  ['enableGizmo', 'display.gizmo', 'setGizmoVisibility'],
+  ['enableGrid', 'display.grid', 'setGridVisibility'],
+  ['enableAxes', 'display.axes', 'setAxesVisibility'],
+  ['enableMatcap', 'display.matcap', 'setMatcapVisibility'],
+  ['enablePostProcessing', 'display.postProcessing', 'setPostProcessingVisibility'],
 ] as const;
+
+/**
+ * The levels above a view that its inheritable leaves resolve over: the person's defaults (absent on a host with no
+ * person, or with `viewerControls` off) and this device's exceptions for the view.
+ */
+export type ViewResolutionLevels = Readonly<{
+  person?: PersonViewFieldDefaults;
+  exceptions?: readonly ViewFieldPath[];
+}>;
+
+/**
+ * What the live owners show for a view's ten inheritable leaves.
+ *
+ * @param record - The view record.
+ * @param levels - The levels above it.
+ * @returns The resolved values.
+ */
+export const resolvedViewFields = (
+  record: WorkbenchView,
+  levels: ViewResolutionLevels = {},
+): Readonly<ViewFieldValues> =>
+  resolveViewSettings({
+    tau: tauViewDefaults,
+    ...(levels.person ? { person: levels.person } : {}),
+    ...(levels.exceptions ? { exceptions: levels.exceptions } : {}),
+    view: record,
+  }).values;
 
 /** The graphics events a foreign record adopts through: display, grid unit, up direction and pinned measurements. */
 export type ViewGraphicsAdoption = Extract<
@@ -61,19 +94,15 @@ export type ViewForeignChanges = Readonly<{
 }>;
 
 /**
- * The live owners' values a view record holds. `camera` and `fieldOfView` are present only while this view's person
- * made the value the record should hold (D20, I7); absent, the record's own camera and field of view stand.
+ * The live owners' values a view record holds. `camera` is present only while this view's person made the pose the
+ * record should hold (D20, I7); absent, the record's own camera stands. The ten inheritable leaves are not here: they
+ * are written by view commands only.
  */
 export type ViewOwners = Readonly<{
-  display: WorkbenchView['display'];
-  upDirection: WorkbenchView['upDirection'];
-  /** The graphics grid unit's symbol; a symbol the record cannot hold keeps the record's unit. */
-  gridUnit: string;
   measurements: WorkbenchView['measurements'];
   section: WorkbenchView['section'];
   /** The pose a person made, for the selected kernel view when the record selects one. */
   camera?: PersistedCameraView;
-  fieldOfView?: number;
 }>;
 
 const same = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
@@ -120,26 +149,37 @@ export const ownsCamera = (record: WorkbenchView, patch: ViewRecordPatch | undef
   return change !== null && change !== undefined && Object.hasOwn(change, 'camera');
 };
 
-/* The graphics adoptions: display, grid unit, up direction and pinned measurements, each when it changed. */
-const graphicsChanges = (
-  previous: WorkbenchView | undefined,
-  next: WorkbenchView,
-  patch: ViewRecordPatch | undefined,
-): ViewGraphicsAdoption[] => {
+/* Resolved leaves before and after; a leaf adopts when there was no `previous` or its resolution changed. */
+type Resolution = Readonly<{
+  before: Readonly<ViewFieldValues> | undefined;
+  after: Readonly<ViewFieldValues>;
+}>;
+
+/* One publication as the adoption rules read it. */
+type Publication = Readonly<{
+  previous: WorkbenchView | undefined;
+  next: WorkbenchView;
+  patch: ViewRecordPatch | undefined;
+  resolution: Resolution;
+}>;
+
+const seeds = (resolution: Resolution, leaf: ViewFieldPath): boolean =>
+  resolution.before === undefined || resolution.before[leaf] !== resolution.after[leaf];
+
+/* The graphics adoptions: display, grid unit and up direction when their resolution changed, whatever wrote the
+ * record (a view command's write included), and pinned measurements when another view changed them. */
+const graphicsChanges = ({ previous, next, patch, resolution }: Publication): ViewGraphicsAdoption[] => {
   const graphics: ViewGraphicsAdoption[] = [];
-  for (const [, recordKey, type] of viewDisplayOwners) {
-    if (
-      !previous ||
-      (patch?.display?.[recordKey] === undefined && previous.display[recordKey] !== next.display[recordKey])
-    ) {
-      graphics.push({ type, payload: next.display[recordKey] });
+  for (const [, leaf, type] of viewDisplayOwners) {
+    if (seeds(resolution, leaf)) {
+      graphics.push({ type, payload: resolution.after[leaf] });
     }
   }
-  if (!previous || (patch?.grid?.unit === undefined && previous.grid.unit !== next.grid.unit)) {
-    graphics.push({ type: 'setGridUnit', payload: { unit: next.grid.unit } });
+  if (seeds(resolution, 'grid.unit')) {
+    graphics.push({ type: 'setGridUnit', payload: { unit: resolution.after['grid.unit'] } });
   }
-  if (upDirectionChanged(previous, next, patch)) {
-    graphics.push({ type: 'setUpDirection', payload: next.upDirection });
+  if (seeds(resolution, 'upDirection')) {
+    graphics.push({ type: 'setUpDirection', payload: resolution.after.upDirection });
   }
   if (!previous || (patch?.measurements === undefined && !same(previous.measurements, next.measurements))) {
     graphics.push({ type: 'adoptPinnedMeasurements', measurements: next.measurements });
@@ -147,48 +187,52 @@ const graphicsChanges = (
   return graphics;
 };
 
-const upDirectionChanged = (
-  previous: WorkbenchView | undefined,
-  next: WorkbenchView,
-  patch: ViewRecordPatch | undefined,
-): boolean => !previous || (patch?.upDirection === undefined && previous.upDirection !== next.upDirection);
-
-/* The camera adoption: the instruction when the view's camera changed, with field of view and up direction. */
-const cameraChanges = (
-  previous: WorkbenchView | undefined,
-  next: WorkbenchView,
-  patch: ViewRecordPatch | undefined,
-): ViewCameraAdoption => {
+/* The camera adoption: the instruction when the view's camera changed, with field of view and up direction when their
+ * resolution changed. */
+const cameraChanges = ({ previous, next, patch, resolution }: Publication): ViewCameraAdoption => {
   const cameraChanged =
     !previous ||
     previous.selectedKernelView !== next.selectedKernelView ||
     (!ownsCamera(next, patch) && !same(activeViewCamera(previous), activeViewCamera(next)));
-  const fovChanged = !previous || (patch?.fieldOfView === undefined && previous.fieldOfView !== next.fieldOfView);
   return {
     ...(cameraChanged ? cameraAdoptionOf(next) : {}),
-    ...(fovChanged ? { verticalFieldOfView: next.fieldOfView } : {}),
-    ...(upDirectionChanged(previous, next, patch) ? { upDirection: next.upDirection } : {}),
+    ...(seeds(resolution, 'fieldOfView') ? { verticalFieldOfView: resolution.after.fieldOfView } : {}),
+    ...(seeds(resolution, 'upDirection') ? { upDirection: resolution.after.upDirection } : {}),
   };
 };
+
+/** What a publication carried and the levels it resolves over (see {@link foreignChanges}). */
+export type ForeignChangeOptions = Readonly<{
+  patch?: ViewRecordPatch;
+  levels?: ViewResolutionLevels;
+  previousLevels?: ViewResolutionLevels;
+}>;
 
 /**
  * What `next` asks the live owners to adopt (the per-field logic of `useViewSettingsSync`'s record effect).
  *
  * @param previous - The record this binding last handled, or `undefined` before the first: then every field adopts.
  * @param next - The record just published.
- * @param patch - The fields this view's own write carried into `next`; they are never adopted. A foreign publication
- *   carries none.
+ * @param options - `patch`: the fields this view's own write carried into `next`; camera, section and measurements in
+ *   it are never adopted, and a foreign publication carries none. `levels`: the levels `next` resolves over.
+ *   `previousLevels`: the levels `previous` resolved over, the same as `levels` unless they changed.
  * @returns The adoptions, per owner.
  */
 export function foreignChanges(
   previous: WorkbenchView | undefined,
   next: WorkbenchView,
-  patch: ViewRecordPatch | undefined,
+  options: ForeignChangeOptions = {},
 ): ViewForeignChanges {
+  const { patch, levels = {}, previousLevels = levels } = options;
+  const resolution: Resolution = {
+    before: previous ? resolvedViewFields(previous, previousLevels) : undefined,
+    after: resolvedViewFields(next, levels),
+  };
+  const publication: Publication = { previous, next, patch, resolution };
   const sectionChanged = !previous || (patch?.section === undefined && !same(previous.section, next.section));
-  const camera = cameraChanges(previous, next, patch);
+  const camera = cameraChanges(publication);
   return {
-    graphics: graphicsChanges(previous, next, patch),
+    graphics: graphicsChanges(publication),
     ...(sectionChanged ? { section: next.section } : {}),
     ...(Object.keys(camera).length > 0 ? { camera } : {}),
   };
@@ -206,7 +250,8 @@ const poseCamera = (pose: PersistedCameraView): Extract<ViewCamera, { kind: 'pos
 
 /**
  * The record the live owners' values make over `base` (`useViewSettingsSync`'s `persist`). Fields no owner holds
- * (the name, the entry, kernel views other than the selected one) stay as `base` has them.
+ * (the name, the entry, kernel views other than the selected one) stay as `base` has them, and so do the ten
+ * inheritable leaves (`base.display`, `base.fieldOfView`, `base.upDirection`, `base.grid`): view commands write them.
  *
  * @param owners - The owners' current values.
  * @param base - The record the edit is made over: the latest published record.
@@ -217,14 +262,6 @@ export function nextRecord(owners: ViewOwners, base: WorkbenchView): WorkbenchVi
   const selected = base.selectedKernelView;
   return {
     ...base,
-    fieldOfView: owners.fieldOfView ?? base.fieldOfView,
-    upDirection: owners.upDirection,
-    display: { ...owners.display },
-    grid: {
-      unit: lengthUnits.includes(owners.gridUnit as WorkbenchView['grid']['unit'])
-        ? (owners.gridUnit as WorkbenchView['grid']['unit'])
-        : base.grid.unit,
-    },
     section: owners.section,
     measurements: owners.measurements,
     camera: !selected && camera ? camera : base.camera,
@@ -239,9 +276,6 @@ export function nextRecord(owners: ViewOwners, base: WorkbenchView): WorkbenchVi
 
 /** The owner values a record holds, for owners that have adopted it. */
 export const ownersOf = (record: WorkbenchView): ViewOwners => ({
-  display: record.display,
-  upDirection: record.upDirection,
-  gridUnit: record.grid.unit,
   measurements: record.measurements,
   section: record.section,
 });

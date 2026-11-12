@@ -19,6 +19,8 @@ import { idPrefix, tauFileDragMime, tauEditorPanelDragMime, tauViewerPanelDragMi
 import { generatePrefixedId } from '@taucad/utils/id';
 import { fromDockview, mintViewRecordId, toDockview } from '#workbench-records/converters.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
+import { readViewLevels } from '#workbench-records/view-levels.js';
+import { resolvedViewFields } from '#workbench-records/view-record-binding-changes.js';
 import { graphicsSettingsForView, newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import { viewTabTitle } from '#workbench-records/view-titles.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -616,7 +618,8 @@ export const ViewerDockview = memo(function ({
   /** Registers the same fresh-view action used by the desktop file picker; clears it on teardown. */
   readonly onFileActionsChange?: (actions: ViewerFileActions | undefined) => void;
 } = {}): React.JSX.Element {
-  const { projectRef, mainEntryPath, viewRecords, entriesRecord, geometryUnits, setViewEntryPath } = useProject();
+  const { projectId, projectRef, mainEntryPath, viewRecords, entriesRecord, geometryUnits, setViewEntryPath } =
+    useProject();
   const viewCommands = useWorkbenchViewCommands();
   // oxlint-disable-next-line typescript/no-unnecessary-condition -- The optional workspace is absent in shared-profile embeds.
   const layoutController = useProjectWorkspace({ enableNoContext: true })?.layoutController;
@@ -877,7 +880,10 @@ export const ViewerDockview = memo(function ({
       // Editor tabs need their record owner even when graphics rendering is hidden.
       if (profile === 'editor' || visible) {
         const settings = viewRecords.get(panelViewId);
-        const validatedSettings = settings ? graphicsSettingsForView(settings) : defaultGraphicsSettings;
+        // The live owner starts from what the view resolves to on this device, never from the file alone.
+        const validatedSettings = settings
+          ? graphicsSettingsForView(settings, resolvedViewFields(settings, readViewLevels(projectId, panelViewId)))
+          : defaultGraphicsSettings;
         if (!admittedGraphics.current.has(panelViewId)) {
           admittedGraphics.current.add(panelViewId);
           projectRef.send({ type: 'createViewGraphics', viewId: panelViewId, settings: validatedSettings });
@@ -955,6 +961,7 @@ export const ViewerDockview = memo(function ({
     api,
     projectIsReady,
     availability,
+    projectId,
     projectRef,
     mainEntryPath,
     viewRecords,

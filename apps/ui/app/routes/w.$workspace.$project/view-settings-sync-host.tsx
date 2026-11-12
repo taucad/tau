@@ -17,6 +17,7 @@ import { digestBytes } from '@taucad/ui-core/utils/crypto.utils';
 import type { ActorRefFrom } from 'xstate';
 import { useProject } from '#hooks/use-project.js';
 import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
+import { useViewLevels } from '#workbench-records/view-levels.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import type { projectMachine } from '#machines/project.machine.js';
@@ -238,6 +239,8 @@ function ViewSettingsSyncEntry({
     store,
   ]);
   usePublishRecordIssue(projectId, recordPath, issue);
+  /* The levels the view's inheritable leaves resolve over (Finding 6). */
+  const levels = useViewLevels(projectId, viewId);
   const cadRef = useSelector(projectRef, (state) =>
     entryPath === null || entryPath === undefined ? undefined : state.context.geometryUnits.get(entryPath),
   );
@@ -253,6 +256,7 @@ function ViewSettingsSyncEntry({
     writeRecord,
     onRecordApplied,
     recordReady: store.ready() && store.snapshot().refusal === undefined,
+    levels,
   });
 
   return null;

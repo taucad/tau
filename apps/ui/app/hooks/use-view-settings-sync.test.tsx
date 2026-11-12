@@ -10,6 +10,7 @@ import type { WorkbenchView } from '@taucad/workbench';
 import { GraphicsProvider } from '@taucad/viewer/hooks/use-graphics';
 import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
 import type { ViewRecordPatch } from '#workbench-records/view-store.js';
+import type { ViewResolutionLevels } from '#workbench-records/view-record-binding-changes.js';
 import {
   graphicsMachine,
   selectGraphicsFramed,
@@ -68,7 +69,9 @@ function Harness({
   recordLocalPatch,
   writeRecord,
   onRecordApplied,
+  levels,
 }: {
+  readonly levels?: ViewResolutionLevels;
   readonly graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   readonly cadRef?: ActorRefFrom<typeof cadMachine>;
   readonly editorRef: ActorRefFrom<typeof editorMachine>;
@@ -88,6 +91,7 @@ function Harness({
     recordReady: true,
     writeRecord,
     onRecordApplied,
+    levels,
   });
   return <div data-testid='view-sync' />;
 }
@@ -365,7 +369,7 @@ describe('view record owner synchronization', () => {
     graphicsRef.stop();
   });
 
-  it('writes the person-selected grid unit to the view record and never mirrors portable state to editor', async () => {
+  it('writes no grid unit from the live owner, and a unit the view command wrote shows after a reload (V13)', async () => {
     const graphicsRef = graphics();
     const editorRef = editor();
     const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
@@ -378,16 +382,19 @@ describe('view record owner synchronization', () => {
     await waitFor(() => expect(graphicsRef.getSnapshot().context.displayUnits.length.symbol).toBe('mm'));
     writeRecord.mockClear();
     act(() => graphicsRef.send({ type: 'setGridUnit', payload: { unit: 'ft' } }));
-    await waitFor(() => expect(writeRecord).toHaveBeenCalledWith(expect.objectContaining({ grid: { unit: 'ft' } })));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 300);
+    });
+    expect(writeRecord).not.toHaveBeenCalled();
     expect(editorRef.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'updateViewSettings' }));
-    const persisted = writeRecord.mock.lastCall?.[0];
-    expect(persisted).toBeDefined();
+    // `setViewField(view, 'grid.unit', 'ft')` wrote the record.
+    const persisted = workbenchRecords.view.schema.parse({ ...record, grid: { unit: 'ft' } });
     unmount();
     graphicsRef.stop();
     const reloaded = graphics();
     const replay = render(
       <GraphicsProvider graphicsRef={reloaded}>
-        <Harness graphicsRef={reloaded} editorRef={editorRef} record={persisted!} writeRecord={writeRecord} />
+        <Harness graphicsRef={reloaded} editorRef={editorRef} record={persisted} writeRecord={writeRecord} />
       </GraphicsProvider>,
     );
     await waitFor(() => expect(reloaded.getSnapshot().context.displayUnits.length.symbol).toBe('ft'));
@@ -512,7 +519,7 @@ describe('view record owner synchronization', () => {
     graphicsRef.stop();
   });
 
-  it('persists the settled pose after the same camera gesture changes field of view', async () => {
+  it('persists the settled pose after the same camera gesture changes field of view, and keeps the record field of view (V6)', async () => {
     const graphicsRef = graphics();
     const editorRef = editor();
     const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
@@ -537,21 +544,19 @@ describe('view record owner synchronization', () => {
       });
       rig.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 38 });
     });
-    await waitFor(() => expect(writeRecord.mock.calls.some(([next]) => next.fieldOfView === 38)).toBe(true));
     await waitFor(
       () =>
         expect(
-          writeRecord.mock.calls.some(
-            ([next]) => next.camera.kind === 'pose' && next.camera.verticalSpan === 4 && next.fieldOfView === 38,
-          ),
+          writeRecord.mock.calls.some(([next]) => next.camera.kind === 'pose' && next.camera.verticalSpan === 4),
         ).toBe(true),
       { timeout: 1000 },
     );
+    expect(writeRecord.mock.calls.every(([next]) => next.fieldOfView === record.fieldOfView)).toBe(true);
     unmount();
     graphicsRef.stop();
   });
 
-  it('should keep newer live fields on a local receipt while applying unrelated foreign fields', async () => {
+  it('should keep newer live camera and section on a local receipt, and seed the inheritable leaves from it', async () => {
     const graphicsRef = graphics();
     const editorRef = editor();
     const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
@@ -608,11 +613,13 @@ describe('view record owner synchronization', () => {
       }),
     );
     await waitFor(() => expect(rig.getSnapshot().context.view.direction).toEqual([0, -1, 0]));
-    expect(graphicsRef.getSnapshot().context.enableSurfaces).toBe(true);
+    // The ten inheritable leaves flow one way, from the record (GP1): a view command's write is how they change.
+    expect(graphicsRef.getSnapshot().context.enableSurfaces).toBe(false);
     expect(graphicsRef.getSnapshot().context.enableLines).toBe(false);
-    expect(graphicsRef.getSnapshot().context.displayUnits.length.symbol).toBe('cm');
+    expect(graphicsRef.getSnapshot().context.displayUnits.length.symbol).toBe('ft');
+    expect(rig.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(45);
+    // The section is still the live owner's newer value.
     expect(graphicsRef.getSnapshot().context.isSectionViewActive).toBe(false);
-    expect(rig.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(30);
     unmount();
     graphicsRef.stop();
   });
@@ -1144,4 +1151,144 @@ describe('useViewSettingsSync settle-window characterisation', () => {
       expect(poseWrites(harness.writeRecord).at(-1)).toMatchObject({ verticalSpan: fitted.verticalSpan });
     });
   });
+});
+
+describe('inheritable leaves flow one way (onboarding WP3)', () => {
+  const tenLeaves = (next: WorkbenchView) =>
+    JSON.stringify([next.fieldOfView, next.upDirection, next.display, next.grid]);
+
+  const mountWithLevels = (record: WorkbenchView, levels?: ViewResolutionLevels) => {
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const draw = (next: WorkbenchView, nextLevels?: ViewResolutionLevels) => (
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <Harness
+          graphicsRef={graphicsRef}
+          editorRef={editorRef}
+          record={next}
+          writeRecord={writeRecord}
+          levels={nextLevels}
+        />
+      </GraphicsProvider>
+    );
+    const view = render(draw(record, levels));
+    return { graphicsRef, writeRecord, rerender: view.rerender, unmount: view.unmount, draw };
+  };
+
+  it('should reach an open view that does not set the leaf when a personal default changes, and not one that does (V4, V9)', () => {
+    const inherits = initial();
+    const sets = workbenchRecords.view.schema.parse({ ...initial(), display: { ...initial().display, axes: false } });
+    const first = mountWithLevels(inherits, {});
+    const second = mountWithLevels(sets, {});
+    const person = { person: { 'display.grid': false, 'display.axes': true, 'grid.unit': 'in' } } as const;
+    first.rerender(first.draw(inherits, person));
+    second.rerender(second.draw(sets, person));
+    // In the same tick, as a toggle from the menu reaches its owner.
+    expect(first.graphicsRef.getSnapshot().context.enableGrid).toBe(false);
+    expect(first.graphicsRef.getSnapshot().context.displayUnits.length.symbol).toBe('in');
+    expect(second.graphicsRef.getSnapshot().context.enableGrid).toBe(false);
+    expect(second.graphicsRef.getSnapshot().context.enableAxes).toBe(false);
+    // An exception keeps the view's own format value over the person's default (V7).
+    first.rerender(first.draw(inherits, { ...person, exceptions: ['display.grid'] }));
+    expect(first.graphicsRef.getSnapshot().context.enableGrid).toBe(true);
+    first.unmount();
+    second.unmount();
+    first.graphicsRef.stop();
+    second.graphicsRef.stop();
+  });
+
+  it('should write no inheritable leaf while a camera move, a section change and a measurement persist and a personal default changes (V6)', async () => {
+    const record = workbenchRecords.view.schema.parse({
+      ...initial(),
+      display: { ...initial().display, postProcessing: true },
+      grid: { unit: 'cm' },
+    });
+    const harness = mountWithLevels(record, {});
+    const rig = getViewCameraSession(harness.graphicsRef).rig.actorRef;
+    measure(harness.graphicsRef);
+    await waitFor(() => expect(isFramed(harness.graphicsRef)).toBe(true));
+    act(() => {
+      rig.send({
+        type: 'poseObserved',
+        source: 'input',
+        target: [0, 0, 0],
+        direction: [1, 0, 0],
+        up: [0, 0, 1],
+        verticalSpan: 5,
+      });
+      harness.graphicsRef.send({ type: 'setSectionViewActive', payload: true });
+    });
+    // This tab changes a default, then another tab does (the section store's storage event re-renders the host).
+    harness.rerender(harness.draw(record, { person: { 'display.grid': false, fieldOfView: 0 } }));
+    harness.rerender(harness.draw(record, { person: { 'display.grid': false, 'display.surfaces': false } }));
+    await waitFor(
+      () => expect(harness.writeRecord.mock.calls.some(([next]) => next.camera.kind === 'pose')).toBe(true),
+      { timeout: 1000 },
+    );
+    expect(harness.writeRecord.mock.calls.length).toBeGreaterThan(0);
+    for (const [next] of harness.writeRecord.mock.calls) {
+      expect(tenLeaves(next)).toBe(tenLeaves(record));
+    }
+    // The live owner shows the resolution, which no write copied into the file.
+    expect(harness.graphicsRef.getSnapshot().context.enableGrid).toBe(false);
+    harness.unmount();
+    harness.graphicsRef.stop();
+  });
+
+  it.each([
+    [
+      'post-processing on, every other leaf at its format value',
+      { display: { ...initial().display, postProcessing: true } },
+    ],
+    ['post-processing off, every other leaf at its format value', {}],
+    [
+      'every leaf away from its format value',
+      {
+        fieldOfView: 0,
+        upDirection: 'y',
+        display: {
+          surfaces: false,
+          lines: false,
+          gizmo: false,
+          grid: false,
+          axes: false,
+          matcap: true,
+          postProcessing: true,
+        },
+        grid: { unit: 'in' },
+      },
+    ],
+  ])(
+    'should render an existing view file as it is written, and write it back unchanged, with no personal default (V11): %s',
+    async (_name, fields) => {
+      const record = workbenchRecords.view.schema.parse({ ...initial(), ...fields });
+      const harness = mountWithLevels(record);
+      const rig = getViewCameraSession(harness.graphicsRef).rig.actorRef;
+      await waitFor(() => {
+        const { context } = harness.graphicsRef.getSnapshot();
+        expect([
+          context.enableSurfaces,
+          context.enableLines,
+          context.enableGizmo,
+          context.enableGrid,
+          context.enableAxes,
+          context.enableMatcap,
+          context.enablePostProcessing,
+        ]).toEqual(Object.values(record.display));
+        expect(context.displayUnits.length.symbol).toBe(record.grid.unit);
+        expect(context.upDirection).toBe(record.upDirection);
+        expect(rig.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(record.fieldOfView);
+      });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 300);
+      });
+      // Opening the view writes nothing that differs from the file.
+      for (const [next] of harness.writeRecord.mock.calls) {
+        expect(workbenchRecords.view.serialize(next)).toBe(workbenchRecords.view.serialize(record));
+      }
+      harness.unmount();
+      harness.graphicsRef.stop();
+    },
+  );
 });

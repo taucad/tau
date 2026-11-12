@@ -19,8 +19,9 @@ import type { GraphicsPendingPose, graphicsMachine } from '@taucad/viewer/machin
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { useGraphicsCamera } from '@taucad/viewer/hooks/use-graphics';
-import { lengthUnits, workbenchRecords } from '@taucad/workbench';
-import type { WorkbenchView } from '@taucad/workbench';
+import { resolveViewSettings, tauViewDefaults, workbenchRecords } from '@taucad/workbench';
+import type { ResolvedViewSettings, ViewFieldValues, WorkbenchView } from '@taucad/workbench';
+import type { ViewResolutionLevels } from '#workbench-records/view-record-binding-changes.js';
 import {
   toPersistedSectionCut,
   toViewMeasurements,
@@ -113,6 +114,12 @@ const activeCameraRecord = (record: WorkbenchView): WorkbenchView => {
  * Synchronises a view's persistable settings from its live graphics and camera owners
  * into the checked workbench view record. Shared per-entry settings have their own owner.
  *
+ * The ten inheritable leaves (up direction, field of view, the seven display flags and the grid unit) flow one way
+ * (onboarding blueprint, Finding 6; graphics charter ruling of 2026-11-12): from the record, the person's defaults and
+ * the device's exceptions through `resolveViewSettings` to the live owners, whenever any of them changes. They are
+ * written only by view commands (`#workbench-records/view-field-commands.ts`); the persist path writes them exactly as
+ * the record already holds them, so it writes camera pose, section and measurements only.
+ *
  * Run by `ViewSettingsSyncHost` once per live view, outside the viewer tree: a pane that is closed,
  * unfocused or being dragged is not the owner of what its view persists (R6).
  *
@@ -136,6 +143,7 @@ export function useViewSettingsSync({
   recordReady,
   writeRecord,
   onRecordApplied,
+  levels,
 }: {
   viewId: string;
   /** Entry path this view renders; the key of the per-file durable record. */
@@ -149,9 +157,11 @@ export function useViewSettingsSync({
   recordReady: boolean;
   writeRecord: (next: WorkbenchView) => Promise<boolean>;
   onRecordApplied?: (record: WorkbenchView) => void;
+  /** The levels above the view: the person's defaults (absent with `viewerControls` off) and this view's exceptions. */
+  levels?: ViewResolutionLevels;
 }): void {
   const previousSettingsRef = useRef<Partial<GraphicsViewSettings> | undefined>(undefined);
-  const previousGridUnitRef = useRef<string | undefined>(undefined);
+  const appliedResolvedRef = useRef<ResolvedViewSettings['values'] | undefined>(undefined);
   const persistRef = useRef<(includePose: boolean) => void>(() => undefined);
   const adoptedPoseRef = useRef<PersistedCameraView | undefined>(undefined);
   const firstFrameReceiptRef = useRef<{ view: PersistedCameraView; consumed: boolean } | undefined>(undefined);
@@ -164,18 +174,19 @@ export function useViewSettingsSync({
   const pendingCameraRecordRef = useRef<WorkbenchView | undefined>(undefined);
   const pendingSectionRecordRef = useRef<WorkbenchView | undefined>(undefined);
 
-  // Select each persistable field individually so that each selector returns
-  // a stable primitive/reference value and only triggers re-renders when it
-  // actually changes.
-  const enableSurfaces = useSelector(graphicsRef, (s) => s.context.enableSurfaces);
-  const enableLines = useSelector(graphicsRef, (s) => s.context.enableLines);
-  const enableGizmo = useSelector(graphicsRef, (s) => s.context.enableGizmo);
-  const enableGrid = useSelector(graphicsRef, (s) => s.context.enableGrid);
-  const enableAxes = useSelector(graphicsRef, (s) => s.context.enableAxes);
-  const enableMatcap = useSelector(graphicsRef, (s) => s.context.enableMatcap);
-  const enablePostProcessing = useSelector(graphicsRef, (s) => s.context.enablePostProcessing);
-  const gridUnit = useSelector(graphicsRef, (s) => s.context.displayUnits.length.symbol);
-  const upDirection = useSelector(graphicsRef, (s) => s.context.upDirection);
+  /* What the live owners show for the ten inheritable leaves: the record resolved over the levels above it. Keyed on
+   * the values, so an unchanged resolution keeps its reference and the record effect does not re-run for it. */
+  const person = levels?.person;
+  const exceptions = levels?.exceptions;
+  const resolvedKey = JSON.stringify(
+    resolveViewSettings({
+      tau: tauViewDefaults,
+      ...(person ? { person } : {}),
+      ...(exceptions ? { exceptions } : {}),
+      view: record,
+    }).values,
+  );
+  const resolved = useMemo(() => JSON.parse(resolvedKey) as ViewFieldValues, [resolvedKey]);
   /* The camera's owner is the graphics actor, not this hook's host. It exists before any canvas mounts, so a pose is
    * persisted only once the view's framing has framed the entry (`framed`), never from the seeded default. The framing
    * state is read when it is needed, not rendered from. */
@@ -185,7 +196,6 @@ export function useViewSettingsSync({
   const firstFrameEntryRef = useRef<{ identity: string | undefined } | undefined>(undefined);
   /* The framed entry a person last changed the pose of: a pose read after that is the person's, not the first frame. */
   const personChangedEntryRef = useRef<{ identity: string | undefined } | undefined>(undefined);
-  const cameraFovAngle = useSelector(session?.rig.actorRef, (s) => s?.context.view.requestedVerticalFieldOfView);
   /* A viewer that is not rendering glTF has no pose to persist, so it clears the stale one. */
   const artifactMimeType = useSelector(graphicsRef, (s) => s.context.artifact?.mimeType);
   const graphicsBackendPreference = useSelector(graphicsRef, (s) => s.context.graphicsBackendPreference);
@@ -218,51 +228,43 @@ export function useViewSettingsSync({
     };
     const cameraRecord = activeCameraRecord(record);
     const previous = appliedSessionRef.current === camera ? appliedRecordRef.current : undefined;
+    const previousResolved = previous ? appliedResolvedRef.current : undefined;
     appliedSessionRef.current = camera;
     appliedRecordRef.current = cameraRecord;
+    appliedResolvedRef.current = resolved;
     let sectionTimer: ReturnType<typeof setTimeout> | undefined;
     const { context } = graphicsRef.getSnapshot();
+    /* The ten inheritable leaves: seeded from the resolution whenever it changes, whatever wrote the record (a view
+     * command included: its write is how the live owner learns of it), a personal default or the exceptions. */
     const visibility = [
-      ['enableSurfaces', 'surfaces', 'setSurfaceVisibility'],
-      ['enableLines', 'lines', 'setLinesVisibility'],
-      ['enableGizmo', 'gizmo', 'setGizmoVisibility'],
-      ['enableGrid', 'grid', 'setGridVisibility'],
-      ['enableAxes', 'axes', 'setAxesVisibility'],
-      ['enableMatcap', 'matcap', 'setMatcapVisibility'],
-      ['enablePostProcessing', 'postProcessing', 'setPostProcessingVisibility'],
+      ['enableSurfaces', 'display.surfaces', 'setSurfaceVisibility'],
+      ['enableLines', 'display.lines', 'setLinesVisibility'],
+      ['enableGizmo', 'display.gizmo', 'setGizmoVisibility'],
+      ['enableGrid', 'display.grid', 'setGridVisibility'],
+      ['enableAxes', 'display.axes', 'setAxesVisibility'],
+      ['enableMatcap', 'display.matcap', 'setMatcapVisibility'],
+      ['enablePostProcessing', 'display.postProcessing', 'setPostProcessingVisibility'],
     ] as const;
-    for (const [ownerKey, recordKey, type] of visibility) {
-      if (
-        (!previous ||
-          (recordLocalPatch?.display?.[recordKey] === undefined &&
-            previous.display[recordKey] !== record.display[recordKey])) &&
-        context[ownerKey] !== record.display[recordKey]
-      ) {
-        graphicsRef.send({ type, payload: record.display[recordKey] });
+    const seeds = (leaf: keyof ViewFieldValues): boolean =>
+      !previousResolved || previousResolved[leaf] !== resolved[leaf];
+    for (const [ownerKey, leaf, type] of visibility) {
+      if (seeds(leaf) && context[ownerKey] !== resolved[leaf]) {
+        graphicsRef.send({ type, payload: resolved[leaf] });
       }
     }
-    if (
-      (!previous || (recordLocalPatch?.upDirection === undefined && previous.upDirection !== record.upDirection)) &&
-      context.upDirection !== record.upDirection
-    ) {
-      graphicsRef.send({ type: 'setUpDirection', payload: record.upDirection });
+    if (seeds('upDirection') && context.upDirection !== resolved.upDirection) {
+      graphicsRef.send({ type: 'setUpDirection', payload: resolved.upDirection });
     }
-    if (
-      (!previous || (recordLocalPatch?.grid?.unit === undefined && previous.grid.unit !== record.grid.unit)) &&
-      context.displayUnits.length.symbol !== record.grid.unit
-    ) {
+    if (seeds('grid.unit') && context.displayUnits.length.symbol !== resolved['grid.unit']) {
       graphicsRef.send({
         type: 'setGridUnit',
-        payload: { unit: record.grid.unit },
+        payload: { unit: resolved['grid.unit'] },
       });
     }
-    if (
-      session &&
-      (!previous || (recordLocalPatch?.fieldOfView === undefined && previous.fieldOfView !== record.fieldOfView))
-    ) {
+    if (session && seeds('fieldOfView')) {
       session.rig.actorRef.send({
         type: 'setVerticalFieldOfView',
-        verticalFieldOfView: record.fieldOfView,
+        verticalFieldOfView: resolved.fieldOfView,
       });
     }
     const selected = cameraRecord.selectedKernelView;
@@ -413,7 +415,7 @@ export function useViewSettingsSync({
         clearTimeout(sectionTimer);
       }
     };
-  }, [entryPath, graphicsRef, onRecordApplied, record, recordLocalPatch, session, viewId]);
+  }, [entryPath, graphicsRef, onRecordApplied, record, recordLocalPatch, resolved, session, viewId]);
 
   // Rebuilt only when the measurements themselves change, so the shallow
   // comparison below can bail out on an unchanged settings object.
@@ -454,7 +456,7 @@ export function useViewSettingsSync({
           return {};
         }
         if (artifactMimeType !== undefined && artifactMimeType !== 'model/gltf-binary') {
-          return { cameraFovAngle, cameraView: undefined };
+          return { cameraView: undefined };
         }
         if (!selectFramed(graphicsRef)) {
           firstFrameEntryRef.current = undefined;
@@ -486,7 +488,6 @@ export function useViewSettingsSync({
         // A setting-only write must not consume the pending pose. The settle callback
         // will compare it against the last pose included in a camera write.
         return {
-          cameraFovAngle,
           cameraView: includePose
             ? previous?.cameraView && cameraViewEqual(previous.cameraView, next)
               ? previous.cameraView
@@ -500,15 +501,8 @@ export function useViewSettingsSync({
         cuts: graphicsRef.getSnapshot().context.sectionCuts.map((cut) => toPersistedSectionCut(cut)),
       };
 
+      /* The ten inheritable leaves are not read here: they are written by view commands only (Finding 6). */
       const newSettings: Partial<GraphicsViewSettings> = {
-        enableSurfaces,
-        enableLines,
-        enableGizmo,
-        enableGrid,
-        enableAxes,
-        enableMatcap,
-        enablePostProcessing,
-        upDirection,
         ...camera,
         pinnedMeasurements,
         sectionView:
@@ -519,12 +513,11 @@ export function useViewSettingsSync({
       };
 
       // Shallow comparison to avoid unnecessary writes
-      if (previous && shallowEqual(previous, newSettings) && previousGridUnitRef.current === gridUnit) {
+      if (previous && shallowEqual(previous, newSettings)) {
         return;
       }
 
       previousSettingsRef.current = newSettings;
-      previousGridUnitRef.current = gridUnit;
       // A missing file is not a creation command. Opening the pane creates it explicitly; a
       // later owner edit can recreate a file deleted by another window.
       if (!record && !previous) {
@@ -551,25 +544,10 @@ export function useViewSettingsSync({
             }
           : undefined;
       const selected = base.selectedKernelView;
+      // `fieldOfView`, `upDirection`, `display` and `grid` stay exactly as the record holds them.
       const next: WorkbenchView = {
         ...base,
         entryPath,
-        fieldOfView: cameraFovAngle ?? base.fieldOfView,
-        upDirection,
-        display: {
-          surfaces: enableSurfaces,
-          lines: enableLines,
-          gizmo: enableGizmo,
-          grid: enableGrid,
-          axes: enableAxes,
-          matcap: enableMatcap,
-          postProcessing: enablePostProcessing,
-        },
-        grid: {
-          unit: lengthUnits.includes(gridUnit as WorkbenchView['grid']['unit'])
-            ? (gridUnit as WorkbenchView['grid']['unit'])
-            : base.grid.unit,
-        },
         section: sectionAdoptionPendingRef.current ? base.section : sectionView,
         measurements: toViewMeasurements(pinnedMeasurements),
         camera: !selected && changedCamera ? changedCamera : base.camera,
@@ -587,16 +565,6 @@ export function useViewSettingsSync({
     persist(false);
   }, [
     graphicsRef,
-    enableSurfaces,
-    enableLines,
-    enableGizmo,
-    enableGrid,
-    enableAxes,
-    enableMatcap,
-    enablePostProcessing,
-    upDirection,
-    gridUnit,
-    cameraFovAngle,
     session,
     artifactMimeType,
     pinnedMeasurements,

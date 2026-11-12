@@ -2522,11 +2522,12 @@ describe('readiness liveness over every writer (INV)', () => {
             remote.head === undefined ? [] : [{ name: 'refs/heads/main', head: revisionId(remote.head) }],
           fetch: async () => {
             if (remote.head === undefined) {
-              return;
+              return { refs: [] };
             }
             const tracking = 'refs/remotes/origin/main';
-            const expectedHead = await port.readRef(tracking);
-            await port.updateRef({ name: tracking, expectedHead, head: revisionId(remote.head) });
+            const head = revisionId(remote.head);
+            await port.updateRef({ name: tracking, expectedHead: await port.readRef(tracking), head });
+            return { refs: [{ name: tracking, head }] };
           },
         };
       },
@@ -2552,8 +2553,8 @@ describe('readiness liveness over every writer (INV)', () => {
       await vi.waitFor(
         () => {
           const status = root.status();
-          expect(status?.readiness, label).toBe('filled');
-          expect(status?.largeObjects, label).toBeUndefined();
+          expect(status.readiness, label).toBe('filled');
+          expect(status.largeObjects, label).toBeUndefined();
         },
         { timeout: settleBound },
       );
@@ -2620,6 +2621,8 @@ describe('readiness liveness over every writer (INV)', () => {
         await vi.waitFor(
           async () => {
             expect(await project.exists('side.ts')).toBe(true);
+            /* The merge has landed and its verb is done: a restore sent while it runs is not taken. */
+            expect(root.status().branchVerb.busy).toBe(false);
           },
           { timeout: settleBound },
         );
@@ -2630,11 +2633,24 @@ describe('readiness liveness over every writer (INV)', () => {
     await writer(
       'restore',
       async () => {
+        /* A restore that lost its compare-and-swap to another mint says so and is asked again, as the person would. */
+        const lost = (): number =>
+          alpha.frames.filter(
+            (frame) =>
+              frame.type === 'toast' &&
+              frame.toast.type === 'error' &&
+              frame.toast.subject === 'restore' &&
+              frame.toast.code === 'CAS_LOST',
+          ).length;
+        let asked = lost();
         alpha.send({ command: 'restore', revisionId: saved ?? '' });
         await vi.waitFor(
           async () => {
             if (root.status().restore.asking) {
               alpha.send({ command: 'confirm' });
+            } else if (lost() > asked) {
+              asked = lost();
+              alpha.send({ command: 'restore', revisionId: saved ?? '' });
             }
             expect(await project.readFile('main.ts', 'utf8')).toBe('b');
           },

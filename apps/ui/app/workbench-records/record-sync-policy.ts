@@ -36,6 +36,16 @@ export type RecordPolicy<T, P> = Readonly<{
   merge: (current: T | undefined, next: T, patch: P) => T;
   /** A patch that changes nothing, so no write is owed for it. */
   isEmpty: (patch: P) => boolean;
+  /**
+   * `true` when the file's absence is not a record to adopt: the last record a publication showed, which the host
+   * keeps showing, stays the base of the person's next diff, so a later edit carries only the fields it changes. The
+   * machine applies it, through one helper (`baseOf`), wherever it sets that base from the record shown, and only
+   * while that record is absent: a foreign read (`CompleteRead`), a saved edit cycle in `settle` (a write that changed
+   * nothing, or an overlapped write whose refresh read found the file gone), a saved reset or restore in `settle`, and
+   * every restore that ended unsaved. For a kind whose `merge` onto an absent file needs every
+   * field, leave it unset.
+   */
+  keepsBaseOnAbsence?: true;
 }>;
 
 /** Whether two reads returned the same content. Absence (`null`) equals only absence. */

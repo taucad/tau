@@ -12,7 +12,7 @@ import {
   AlertDialogTitle,
 } from '@taucad/ui/components/alert-dialog';
 import { cn } from '@taucad/ui/utils/cn';
-import { SettingsGroup, SettingsItem, SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsItem, SettingsRow, SettingsRowsLoading } from '#components/settings/settings-item.js';
 import { GithubRepositoryWriteSettings } from '#components/github/github-repository-write-settings.js';
 import {
   configureGithubAccess,
@@ -23,20 +23,19 @@ import {
 import type { GithubConnection, GithubInstallation, GithubRepository } from '#lib/github-connections.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 
-/** A loading, failure or empty line inside a group, sized like a row. */
+/** A failure or empty line inside a group, sized like a row. Loading draws `SettingsRowsLoading`. */
 function StatusRow({
   kind,
   children,
   onRetry,
 }: {
-  readonly kind: 'pending' | 'error' | 'empty';
+  readonly kind: 'error' | 'empty';
   readonly children: React.ReactNode;
   readonly onRetry?: () => void;
 }): React.JSX.Element {
   return (
     <div
-      role={kind === 'pending' ? 'status' : kind === 'error' ? 'alert' : undefined}
-      aria-busy={kind === 'pending' ? true : undefined}
+      role={kind === 'error' ? 'alert' : undefined}
       className='flex min-h-12 items-center justify-between gap-4 py-3 text-xs text-muted-foreground'
     >
       <span className={cn(kind === 'error' && 'text-foreground')}>{children}</span>
@@ -139,7 +138,7 @@ const RepositoryList = memo(function RepositoryList({
           </span>
         }
       >
-        {repositories.isPending ? <StatusRow kind='pending'>Loading repositories…</StatusRow> : null}
+        {repositories.isPending ? <SettingsRowsLoading label='Loading repositories…' rows={3} /> : null}
         {repositories.error ? (
           <StatusRow
             kind='error'
@@ -198,7 +197,7 @@ const ConnectionRepositories = memo(function ConnectionRepositories({
     <section aria-label={`Repository connection ${connection.login}`} className='flex flex-col gap-6'>
       {installations.isPending || installations.error !== null || empty ? (
         <SettingsGroup title='Repositories'>
-          {installations.isPending ? <StatusRow kind='pending'>Checking installations…</StatusRow> : null}
+          {installations.isPending ? <SettingsRowsLoading label='Checking installations…' rows={1} /> : null}
           {installations.error ? (
             <StatusRow
               kind='error'
@@ -425,7 +424,7 @@ export function GithubRepositorySettings(): React.JSX.Element {
             </div>
           }
         >
-          {connections.isPending ? <StatusRow kind='pending'>Loading connections…</StatusRow> : null}
+          {connections.isPending ? <SettingsRowsLoading label='Loading connections…' rows={1} /> : null}
           {(error ?? connections.error) ? (
             <StatusRow kind='error'>{error ?? githubErrorMessage(connections.error)}</StatusRow>
           ) : null}

@@ -38,6 +38,8 @@ const createService = (
     decisions?: readonly SelectedDecision[];
     tier?: 'free' | 'pro' | 'enterprise';
     assured?: boolean;
+    /** The content capture setting; `on` unless a test says otherwise, so other rules are tested on their own. */
+    capture?: Readonly<{ mode: string | undefined; accounts?: readonly string[] }>;
   }> = {},
 ) => {
   const database = mockDeep<DatabaseService>();
@@ -46,7 +48,13 @@ const createService = (
   database.database.insert.mockReturnValue(mock<ReturnType<DatabaseService['database']['insert']>>({ values }));
 
   const configService = mock<ConfigService>();
-  configService.get.mockReturnValue(options.noticeVersion);
+  const capture = options.capture ?? { mode: 'on' };
+  const settings = new Map<string, unknown>([
+    ['TAU_OBSERVABILITY_NOTICE_VERSION', options.noticeVersion],
+    ['TAU_OBSERVABILITY_CONTENT_CAPTURE', capture.mode],
+    ['TAU_OBSERVABILITY_CONTENT_ACCOUNTS', capture.accounts ?? []],
+  ]);
+  configService.get.mockImplementation((key: string) => settings.get(key));
 
   const tierAssurance = mock<TierAssuranceSource>();
   tierAssurance.getTierAssurance.mockResolvedValue({
@@ -97,6 +105,40 @@ describe('TelemetryPurposeService', () => {
       expect(allowedPurposes(onFree.purposes)).toEqual(['summary', 'content', 'reuse', 'training']);
       expect(allowedPurposes(offFree.purposes)).toEqual([]);
       expect(allowedPurposes(onPaid.purposes)).toEqual([]);
+    });
+
+    it('refuses content for every account while the capture mode is unset or off (default deny)', async () => {
+      type UserRow = Awaited<ReturnType<DatabaseService['database']['query']['user']['findFirst']>>;
+      for (const mode of [undefined, 'off']) {
+        const { service, database } = createService({
+          noticeVersion: notice,
+          decisions: [row(1, 'summary', true), row(2, 'content', true)],
+          capture: { mode, accounts: ['user-a'] },
+        });
+        database.database.query.user.findFirst.mockResolvedValue({ allowsAiTraining: true } as UserRow);
+
+        // oxlint-disable-next-line no-await-in-loop -- two modes, one service each
+        const effective = await service.getEffectivePurposes('user-a');
+
+        /* The Free default still allows the other improvement purposes; only content waits for the mode. */
+        expect(allowedPurposes(effective.purposes)).toEqual(['summary', 'reuse', 'training']);
+        expect(effective.purposes.find((state) => state.purpose === 'content')?.refusal).toBe('capture-off');
+      }
+    });
+
+    it('allows content under the allowlist only for a listed account that granted it', async () => {
+      const decisions = [row(1, 'content', true)];
+      const capture = { mode: 'allowlist', accounts: ['staff-a'] };
+      const listed = createService({ noticeVersion: notice, decisions, capture });
+      const unlisted = createService({ noticeVersion: notice, decisions, capture });
+
+      const [staff, customer] = await Promise.all([
+        listed.service.getEffectivePurposes('staff-a'),
+        unlisted.service.getEffectivePurposes('customer-a'),
+      ]);
+
+      expect(allowedPurposes(staff.purposes)).toEqual(['content']);
+      expect(customer.purposes.find((state) => state.purpose === 'content')?.refusal).toBe('capture-off');
     });
 
     it('keeps every purpose unavailable while no notice is approved', async () => {

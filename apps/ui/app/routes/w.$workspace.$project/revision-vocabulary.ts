@@ -72,6 +72,29 @@ export const cloudUnavailableSentence =
 export const revisionName = (n: number | undefined): string | undefined =>
   n === undefined ? undefined : `Rev ${String(n)}`;
 
+/** The Start version's name (A6, blueprint Q8). @public */
+export const startTitle = 'Start';
+
+/** The Start version's number, in the column where other rows show their time (A6). @public */
+export const startVersionName = 'V1';
+
+const startFacts: Readonly<Record<NonNullable<RevisionCard['start']>, string>> = {
+  created: 'project created',
+  github: 'imported from GitHub',
+  folder: 'imported from a folder',
+  zip: 'imported from a zip',
+  imported: 'imported',
+};
+
+/**
+ * The Start version's second line: "Version · project created".
+ *
+ * @param start - How the entry reads as Start.
+ * @returns The line, in the words the blueprint's copy table gives.
+ * @public
+ */
+export const startFact = (start: NonNullable<RevisionCard['start']>): string => `Version · ${startFacts[start]}`;
+
 /**
  * A revision's title: its name when it has one; a restore's, what it restored
  * (A9), never its trigger; otherwise what it says.
@@ -82,6 +105,10 @@ export const revisionName = (n: number | undefined): string | undefined =>
  * @public
  */
 export const revisionTitle = (revision: RevisionCard, revisions: readonly RevisionCard[]): string => {
+  /* A6: the first entry is the Start version, V1, whatever its commit says. */
+  if (revision.start !== undefined) {
+    return startTitle;
+  }
   const named = revision.tags?.[0];
   if (named !== undefined) {
     return named;
@@ -89,7 +116,9 @@ export const revisionTitle = (revision: RevisionCard, revisions: readonly Revisi
   if (revision.restoredFrom === undefined) {
     return revision.summary;
   }
-  const restored = revisionName(revisions.find((entry) => entry.revisionId === revision.restoredFrom)?.n);
+  const target = revisions.find((entry) => entry.revisionId === revision.restoredFrom);
+  /* A6: the Start version is referred to by its number, as every version is (blueprint "Referring to an entry"). */
+  const restored = target?.start === undefined ? revisionName(target?.n) : startVersionName;
   return restored === undefined ? 'Restored an earlier revision' : `Restored ${restored}`;
 };
 
@@ -605,11 +634,18 @@ export const arrivedGlyph: LucideIcon = ArrowDownToLine;
 /**
  * What asked for a revision, in a person's words, for its Details.
  *
+ * A turn's base cut is recorded under the turn's trigger, but it holds the
+ * person's own edits, saved before the agent started (A5): it says so.
+ *
  * @param trigger - The recorded trigger, when the store recorded one.
+ * @param turnCut - Which of a turn's two entries it is, when a turn minted it.
  * @returns The label.
  * @public
  */
-export const revisionTriggerLabel = (trigger: string | undefined): string => {
+export const revisionTriggerLabel = (trigger: string | undefined, turnCut?: RevisionCard['turnCut']): string => {
+  if (turnCut === 'base') {
+    return 'Your edits, saved before the agent started';
+  }
   switch (trigger) {
     case 'turn': {
       return 'Agent turn';
@@ -630,6 +666,12 @@ export const revisionTriggerLabel = (trigger: string | undefined): string => {
     }
     case 'save': {
       return 'Save revision';
+    }
+    case 'create': {
+      return 'Project created';
+    }
+    case 'import': {
+      return 'Import';
     }
     default: {
       return 'Not recorded';

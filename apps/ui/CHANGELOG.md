@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.8.0 (2026-11-11)
+
+### Features
+
+- feat(api-agent-observability): Count Langfuse units and alert at 70% of Hobby's allowance (LW24) (#1806) (f56bc5601)
+- feat(ui): Redesign billing screens, copy and shared components (#1786) (91ffe6243)
+- feat(api-llm-gateway): Carry host, build, kernel and model labels into the provider fact (Langfuse LW17) (#1798) (a5440ce14)
+- feat(revisions): Read and write a turn's base cut as the person's (#1767) (dbabc0025)
+- feat(viewer): Add the framing actor that frames a view's geometry through its camera (G5a) (#1804) (63fc283be)
+- feat(ui): Build recordSync and make the view store its shim (#1772) (a6a17d752)
+- feat(host): Give the agent's shell read-only git through a branch view (#1799) (8dde02b3e)
+- feat(api-agent-observability): Langfuse v5 mapping, one trace and root per run, and trust Langfuse's delete (LW1, LW2) (#1800) (87c6fc46e)
+- feat(desktop): Report the build id and ratings like the browser host (Langfuse LW8) (#1801) (fa6ab384d)
+- feat(viewer): Move the section handles' pointer input into a gesture machine (#1796) (8806431a8)
+- feat(api-email): Send each kind of email from its purpose's sender (#1797) (897a2c3b4)
+- feat(viewer): Move the kinematics drag gesture into the kinematics actor (#1793) (4d2f46b3e)
+- feat(tscircuit): Give the 3D board a soft lacquer solder mask (#1795) (bddd8f330)
+- feat(ui): Lead an empty Home with community builds and give headings one owner (#1703) (314cd5924)
+- feat(camera): Give the camera actor input states, provenance and atomic events (G3) (#1761) (5b14f8f52)
+- feat(agent-host): Keep the request prefix across a chat's settings (#1782) (560c9ffc9)
+- feat(ui): Name who backed up each entry from Tau Cloud's push records (#1771) (222992c28)
+- feat(ui): Show update prompts only in the sidebar (#1745) (b2d3188f2)
+- feat(viewer): Move the renderer lifecycle into a canvas actor (#1746) (5b3ef73ec)
+
+### Fixes
+
+- fix(api-billing): Name the expected output field and record refusals before admission (#1792) (2584fb51f)
+- fix(ui): Accept website events behind the staging router (#1787) (079c7e2c7)
+- fix(agent-tools): Run the GeoSpec harness test on a valid BRep in the test shards (#1779) (aa1fb2edf)
+- fix(filesystem): Serialize native watcher subscribe and unsubscribe (#1776) (008728315)
+- fix(ui): Keep the composer still while a project opens on desktop (#1769) (d07c2a93c)
+- fix(ui): Build the content security policy per environment (#1774) (0e923d1d6)
+- fix(revisions): give every checkout its fill word, so a new project's viewer leaves "Downloading model files" (#1742) (d8581a532)
+
+### Other changes
+
+- ci(root): Run the desktop renderer payload check whenever ui is affected (#1777) (9b1c72804)
+- ci(root): Select native hosts and viewer parity in the CI plan, merge queue only (#1773) (0dbd19d92)
+- chore(root): Apply the brand policy to names, one-liners and avatars (#1760) (ca9355b24)
+- refactor(revisions): Make revision identity changes events on the open client (#1707) (20abec4ff)
+- ci(root): Restore the affected lanes' pinned downloads from a digest-keyed cache (#1775) (e9ff3a687)
+- refactor(ui): Cut the ui-core app library from the app's lib, utils and constants (UI wave E, first slice) (#1686) (ead76cc3d)
+- chore(picogk): Pin the PicoGK browser host to manifest 313d375b1617 (#1731) (c46169f1a)
+
 ## 0.7.0 (2026-11-10)
 
 ### Features

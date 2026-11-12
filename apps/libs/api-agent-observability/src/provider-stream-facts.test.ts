@@ -165,3 +165,48 @@ describe('ProviderStreamFacts', () => {
     });
   });
 });
+
+describe('ProviderStreamFacts capture', () => {
+  const anthropic = frames([
+    { type: 'message_start', message: { id: 'msg_1', model: 'claude-test', usage: { input_tokens: 4 } } },
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: secret } },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } },
+  ]);
+  const feed = (facts: ProviderStreamFacts, body: string): void => {
+    const bytes = new TextEncoder().encode(body);
+    for (let offset = 0; offset < bytes.byteLength; offset += 5) {
+      facts.accept(bytes.subarray(offset, offset + 5));
+    }
+  };
+
+  it('hands every data frame to a capture, including frames the facts do not read', () => {
+    const seen: unknown[] = [];
+    const facts = new ProviderStreamFacts('anthropic', 0, () => 1);
+    facts.capture({ accept: (frame) => seen.push(frame) });
+
+    feed(facts, anthropic);
+
+    expect(seen.map((frame) => (frame as { type: string }).type)).toEqual([
+      'message_start',
+      'content_block_start',
+      'content_block_delta',
+      'message_delta',
+    ]);
+  });
+
+  it('reads the same facts whether a capture is attached, absent or throwing', () => {
+    const plain = new ProviderStreamFacts('anthropic', 0, () => 1);
+    const throwing = new ProviderStreamFacts('anthropic', 0, () => 1);
+    throwing.capture({
+      accept: () => {
+        throw new Error('capture failed');
+      },
+    });
+
+    feed(plain, anthropic);
+    feed(throwing, anthropic);
+
+    expect(throwing.summary()).toEqual(plain.summary());
+  });
+});

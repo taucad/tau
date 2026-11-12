@@ -1,5 +1,5 @@
 /**
- * Agent-observability summaries from the browser project host (blueprint T10): the shared host composition over this
+ * Agent-observability evidence from the browser project host (blueprint T10, LW6): the shared host composition over this
  * worker's own rows, the page's session cookie and the project's IndexedDB queue. The renderer plays no part, so what
  * is reported does not depend on what a tab displayed. Anonymous Pi and runtime telemetry are untouched and are never
  * added to these facts.
@@ -52,5 +52,8 @@ export const createWorkerEvidence = (options: WorkerEvidenceOptions): HostEviden
     fetch: options.fetch ?? fetch.bind(globalThis),
     store: options.store ?? defaultStore(`tau-agent-evidence:${options.projectId}`),
     feedbackStore: options.feedbackStore ?? defaultStore(`tau-agent-evidence-feedback:${options.projectId}`),
-    observe: async (chatId) => observeOwnTurns(options.readEvents, chatId),
+    host: 'browser',
+    /* Content is read with the rows and leaves only while the server's answer allows it (LW6). The browser host has no
+     * revision read of its own, so its roots record no design source. */
+    observe: async (chatId) => observeOwnTurns(options.readEvents, chatId, { content: true }),
   });

@@ -85,8 +85,8 @@ const allowing = (allowed: readonly string[]) => (): Response =>
   );
 
 describe('createHostEvidence', () => {
-  /* The four permission modes (T03, T10): summaries follow the summary purpose alone, and this host never sends
-   * content, whatever the content purpose says; content capture is not this reporter's to start. */
+  /* The four permission modes (T03, T10): summaries follow the summary purpose alone. A run observed without content
+   * is sent as summaries whatever the content purpose says. */
   it.each([
     { summary: true, content: false, sends: true },
     { summary: true, content: true, sends: true },
@@ -103,6 +103,59 @@ describe('createHostEvidence', () => {
     expect(submitted.length > 0).toBe(sends);
     expect(planes.every((plane) => plane === 'summary')).toBe(true);
   });
+
+  it.each([
+    { content: true, planes: ['content'] },
+    { content: false, planes: ['summary'] },
+  ])(
+    'should send a run observed with content as content only while the server allows content: %o',
+    async ({ content, planes: expected }) => {
+      const bodies: unknown[] = [];
+      const design = vi.fn(async () => [{ path: 'main.ts', text: 'cube(10)', bytes: 8 }]);
+      const evidence = createHostEvidence({
+        apiBaseUrl: 'https://api.test',
+        principal: () => 'user-1',
+        project: 'project-1',
+        uploader: 'node-1',
+        hostBuild: undefined,
+        host: 'desktop',
+        design,
+        fetch: async (input, init) => {
+          const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          if (url.includes('/v1/telemetry-purposes')) {
+            return answering({ summary: true, content })();
+          }
+          bodies.push(JSON.parse(await new Response(init?.body).text()));
+          return new Response(JSON.stringify({ receipt: 'r-1', disposition: 'accepted', duplicate: false }), {
+            status: 200,
+          });
+        },
+        store: memoryPendingStore(),
+        observe: async () => ({
+          runs: [
+            {
+              ...run,
+              finalRevision: 'rev-1',
+              content: { prompt: 'SYNTHETIC_PROMPT', reply: 'SYNTHETIC_REPLY', changedPaths: ['main.ts'] },
+            },
+          ],
+          ownsEpoch: () => true,
+        }),
+      });
+
+      evidence.onChatQuiescent('chat-1', true);
+      await vi.waitFor(() => {
+        expect(bodies).toHaveLength(1);
+      });
+
+      expect(bodies).toMatchObject([
+        { payload: { plane: expected[0], fact: { kind: 'outcome', turn: { host: 'desktop' } } } },
+      ]);
+      expect(JSON.stringify(bodies).includes('SYNTHETIC_PROMPT')).toBe(content);
+      expect(design).toHaveBeenCalledTimes(content ? 1 : 0);
+      evidence.close();
+    },
+  );
 
   it('should report a quiescent chat’s settled facts over the host’s own transport', async () => {
     const { evidence, submitted } = setup(granted);

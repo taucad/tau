@@ -66,12 +66,12 @@ const ciTests = (proves: string): Oracle => ({
   proves,
 });
 
-/** The `ci.yml` lane that runs `cli-e2e:test:scenarios`, the CLI's end-to-end suites, when they are affected. */
+/** The `ci.yml` lane that runs `cli-e2e:test:scenarios`, the CLI's end-to-end suites, when they are affected: every shard. */
 const cliEndToEnd = (proves: string): Oracle => ({
   kind: 'job',
   workflow: 'ci.yml',
-  job: 'CLI end-to-end',
-  match: 'exact',
+  job: 'CLI end-to-end (',
+  match: 'prefix',
   scope: 'main',
   proves,
 });
@@ -138,7 +138,7 @@ export const consumers: readonly Consumer[] = [
   {
     name: 'CLI binary',
     oracles: [
-      cliEndToEnd('`cli-scenarios.integration.test.ts` T1–T12'),
+      cliEndToEnd('`cli-scenarios.integration.test.ts` and `examples-check.integration.test.ts` T1–T12'),
       ciTests('`check-pack-install` tests'),
       nativeDarwin('the built `tau` exports `main.cs` with no Tau variable set'),
       {

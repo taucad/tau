@@ -37,6 +37,8 @@ type Job = {
   readonly uses?: string;
   readonly with?: Record<string, string>;
   readonly env?: Record<string, string>;
+  readonly name?: string;
+  readonly strategy?: { readonly matrix?: Record<string, unknown> };
 };
 type Workflow = {
   readonly on?: {
@@ -412,6 +414,21 @@ describe('ci.yml affected-only lanes', () => {
     // A push that reuses the merge-queue verdict skips the lane, as it skips the shards: the flag is read
     // from the selection the reuse rule emptied.
     expect(planScript).toContain('cli_e2e=$(flag cli-e2e)');
+  });
+
+  it('should shard the CLI end-to-end lane and name each shard to the target through TAU_CI_SHARD', () => {
+    const lane = ci.jobs['cli-e2e'];
+    const shards = lane?.strategy?.matrix?.['shard'] as readonly number[] | undefined;
+    expect(shards).toEqual([1, 2]);
+    expect(lane?.name).toBe(`CLI end-to-end (${expression('matrix.shard')}/${String(shards?.length)})`);
+    expect(lane?.env?.['TAU_CI_SHARD']).toBe(`${expression('matrix.shard')}/${String(shards?.length)}`);
+    const target = (
+      JSON.parse(readFileSync(resolve(root, 'apps/cli-e2e/project.json'), 'utf8')) as {
+        targets: Record<string, { inputs?: unknown[] }>;
+      }
+    ).targets['test:scenarios'];
+    // Without the input both shards would share one cache entry and the second would replay the first.
+    expect(target?.inputs).toContainEqual({ env: 'TAU_CI_SHARD' });
   });
 });
 

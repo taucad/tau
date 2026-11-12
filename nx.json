@@ -145,6 +145,13 @@
       },
       "cache": false
     },
+    "formal:nightly:check": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node tools/formal/src/cli.ts check --tier nightly {projectRoot}"
+      },
+      "cache": false
+    },
     "formal:logs": {
       "executor": "nx:run-commands",
       "options": {

@@ -147,9 +147,14 @@ test('runs a turn in the services utility through the real Tau gateway', async (
 
     /* 5. D16 forwarded: one vocabulary, translated exactly once. */
     expect([...new Set(fixture.supplierModels)]).toStrictEqual([gatewayFixtureSupplierModelId]);
-    /* The admitted beta feature reaches the supplier normalized, never dropped:
-     * the one value pi sends on this wire today. */
-    expect([...new Set(fixture.supplierBetas)]).toStrictEqual(['interleaved-thinking-2025-05-14']);
+    /* The admitted beta features reach the supplier normalized, never dropped:
+     * the one value pi sends on this wire today. Since 8f3d37c538 (#1803) Haiku 5.5
+     * carries its effort in the transcript, so pi-ai asks for the transcript
+     * effort and thinking binding betas together, and no longer for interleaved
+     * thinking. */
+    expect([...new Set(fixture.supplierBetas)]).toStrictEqual([
+      'mid-conversation-output-config-2026-07-01,thinking-binding-controls-2026-08-01',
+    ]);
 
     /* 6. D16 inbound: the gateway takes catalog route ids and refuses the
      * supplier id it forwards. No `origin` header — this is a node caller,

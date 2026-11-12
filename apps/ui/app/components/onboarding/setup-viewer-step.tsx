@@ -1,6 +1,13 @@
 import { Fragment, useId } from 'react';
 import type { DeviceRecord, MousePresetId, PersonProfile, ViewerPreferences } from '@taucad/preferences';
-import { effectivePreset, familiarProducts, gizmoStyleIds, mousePresetIds, suggestedPreset } from '@taucad/preferences';
+import {
+  effectiveGizmoStyle,
+  effectivePreset,
+  familiarProducts,
+  gizmoStyleIds,
+  mousePresetIds,
+  suggestedPreset,
+} from '@taucad/preferences';
 import { resolveCameraMapping } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import type { CameraMappingId } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
@@ -16,6 +23,7 @@ import {
 import type { GizmoChoiceId } from '#components/onboarding/setup-copy.js';
 import { gizmoChoice, legendBindings, presetReason } from '#components/onboarding/setup-model.js';
 import { SetupViewerPreview } from '#components/onboarding/setup-viewer-preview.js';
+import { resolveViewerCameraInput } from '#routes/w.$workspace.$project/use-viewer-camera-input.js';
 
 /** What step 3 reads and writes. */
 export type SetupViewerStepProps = Readonly<{
@@ -101,6 +109,8 @@ export function SetupViewerStep({
   const gizmo = gizmoChoice(viewer, profile);
   const isTrackpad = device.inputDevice === 'trackpad';
   const mapping = resolveCameraMapping({ preset, inputDevice: device.inputDevice });
+  /* The preview moves as every open viewer will: the same resolution the project viewer uses (T4.9). */
+  const navigation = resolveViewerCameraInput({ enabled: true, profile, viewer, device });
   return (
     <div className='grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]'>
       <div className='flex min-w-0 flex-col gap-5'>
@@ -174,7 +184,12 @@ export function SetupViewerStep({
       </div>
 
       <div className='flex min-w-0 flex-col gap-4'>
-        <SetupViewerPreview mapping={mapping} />
+        <SetupViewerPreview
+          mapping={mapping}
+          cameraInput={navigation.cameraInput ?? { preset }}
+          gizmoStyle={navigation.gizmoStyle ?? effectiveGizmoStyle(viewer, profile)}
+          isGizmoShown={gizmo !== 'none'}
+        />
         <BindingLegend mapping={mapping} />
       </div>
     </div>

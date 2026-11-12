@@ -10,6 +10,10 @@ const capture = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture }) }));
 const webgl = vi.hoisted(() => ({ isAvailable: true }));
 vi.mock('#components/onboarding/webgl-support.js', () => ({ canCreateWebGl: () => webgl.isAvailable }));
+// The live preview is its own chunk with the real viewer; `setup-viewer-preview.test.tsx` covers its loading.
+vi.mock('#components/onboarding/setup-live-preview.js', () => ({
+  default: () => <div data-testid='setup-live-preview' />,
+}));
 
 const { default: WelcomeRoute } = await import('#routes/welcome/route.js');
 const { personRecordStores, deviceRecordStore } = await import('#preferences/person-record.store.js');

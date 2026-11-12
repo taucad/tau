@@ -1780,6 +1780,46 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
         expect(rewind.refs[0]?.reason).toContain('non-fast-forward');
         expect(await fixture.git(['rev-parse', x])).toBe(base);
       }, 180_000);
+
+      /* B3 (O5 inverted): a commit Tau did not write reads as its own git author, with no identity standing in. */
+      it('reads a commit Tau did not record as its git author', async () => {
+        const cwd = fixture.repositoryPath;
+        const env = {
+          ...process.env,
+          ...Object.fromEntries([
+            ['GIT_AUTHOR_NAME', 'Octo Dev'],
+            ['GIT_AUTHOR_EMAIL', 'octo@example.com'],
+            ['GIT_COMMITTER_NAME', 'Octo Dev'],
+            ['GIT_COMMITTER_EMAIL', 'octo@example.com'],
+          ]),
+        };
+        const emptyTree = execFileSync('git', ['mktree'], { cwd, input: '', encoding: 'utf8' }).trim();
+        const upstream = execFileSync('git', ['commit-tree', emptyTree, '-m', 'Upstream change'], {
+          cwd,
+          env,
+          encoding: 'utf8',
+        }).trim();
+        execFileSync('git', ['update-ref', 'refs/heads/upstream', upstream], { cwd, stdio: 'ignore' });
+        const second = await adapter.create();
+        try {
+          const reader = second.withTransport();
+          await reader.init({ author });
+          await reader.setRemote({ name: 'tau', url: fixture.url });
+          await reader.fetch({ remote: 'tau', refs: ['refs/heads/upstream'] });
+
+          const [entry] = await reader.log({ heads: [revisionId(upstream)] });
+          expect(entry?.authorName).toBe('Octo Dev');
+          expect(entry?.provenance.source).toBe('import');
+          expect(Object.keys(entry?.provenance ?? {}).toSorted()).toStrictEqual(['createdAt', 'source']);
+          const [row] = await readRevisionLog(reader, { from: revisionId(upstream), limit: 1 });
+          expect(row).toMatchObject({ source: 'import', who: { kind: 'unrecorded', authorName: 'Octo Dev' } });
+          /* A commit Tau recorded carries no git author name: its trailer names who made it. */
+          const [recorded] = await reader.log({ heads: [head] });
+          expect(recorded?.authorName).toBeUndefined();
+        } finally {
+          await second.dispose();
+        }
+      }, 180_000);
     });
   }
 });

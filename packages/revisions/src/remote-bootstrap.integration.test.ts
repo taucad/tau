@@ -15,7 +15,7 @@ import { recordedBy } from '#test/identity.js';
 const author = { name: 'Tau', email: 'noreply@tau.new' };
 const provenance = {
   source: 'import',
-  ...recordedBy('github:42'),
+  ...recordedBy('usr_importer'),
   createdAt: Date.UTC(2026, 8, 14),
 } as const;
 

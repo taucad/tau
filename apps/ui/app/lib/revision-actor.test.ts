@@ -259,7 +259,7 @@ describe('revisionWho', () => {
   it('names a commit Tau did not write by its author, and nothing else by a guess', () => {
     expect(revisionWho(entry({ kind: 'unrecorded', authorName: 'octo-dev' }, 'import'), solo).line).toBe('octo-dev');
     expect(revisionWho(entry({ kind: 'unrecorded' }, 'import'), solo).line).toBe('');
-    expect(revisionWho(entry('github:12345'), solo).line).toBe('');
+    expect(revisionWho(entry('usr_another_account'), solo).line).toBe('');
     /* A pseudonym is told by its flag: an id that only looks like one is a person's id. */
     expect(revisionWho(entry('anon:3fa9c1'), solo).line).toBe('');
   });

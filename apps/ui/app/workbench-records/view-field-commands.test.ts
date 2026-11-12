@@ -1,0 +1,172 @@
+/* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { workbenchRecords } from '@taucad/workbench';
+import type { ViewFieldPath, WorkbenchView } from '@taucad/workbench';
+import type { PersonalViewDefaults } from '@taucad/preferences';
+import type { CheckedFileWriteResult } from '@taucad/types';
+import { editViewFile } from '#workbench-records/view-actions.js';
+import { exceptionsForView, viewExceptions, viewExceptionsStore } from '#workbench-records/view-exceptions.js';
+import { createViewFieldCommands } from '#workbench-records/view-field-commands.js';
+
+const encoder = new TextEncoder();
+const root = '/projects/p';
+const viewId = 'v-abcd1234';
+const path = `${root}/.tau/workbench/views/${viewId}.json`;
+const view = { viewId, entryPath: 'main.ts' } as const;
+
+let content: Map<string, Uint8Array<ArrayBuffer>>;
+let defaults: PersonalViewDefaults;
+let conflictNext = false;
+
+const files = {
+  exists: async (filePath: string) => content.has(filePath),
+  readFile: async (filePath: string) => content.get(filePath)!,
+  writeFileChecked: async ({
+    path: filePath,
+    data,
+    preconditions,
+  }: {
+    path: string;
+    data: string;
+    preconditions: ReadonlyArray<{ path: string; expected: Uint8Array<ArrayBuffer> | null }>;
+  }): Promise<CheckedFileWriteResult> => {
+    const current = content.get(filePath) ?? null;
+    const expected = preconditions[0]?.expected ?? null;
+    const matches =
+      current === null || expected === null
+        ? current === expected
+        : current.length === expected.length && current.every((byte, index) => byte === expected[index]);
+    if (conflictNext || !matches) {
+      conflictNext = false;
+      return { status: 'conflict', conflicts: [{ path: filePath, actual: current }] };
+    }
+    const bytes = encoder.encode(data);
+    content.set(filePath, bytes);
+    return { status: 'applied', content: bytes };
+  },
+  deleteFileChecked: async (): Promise<CheckedFileWriteResult> => ({ status: 'applied', content: new Uint8Array() }),
+};
+
+const onError = vi.fn();
+const commands = createViewFieldCommands({
+  projectId: 'p',
+  edit: async (id, change) => editViewFile({ root, viewId: id, files, change, onError }),
+  personDefaults: () => defaults,
+  addException: viewExceptions.add,
+  removeException: viewExceptions.remove,
+  clearExceptions: viewExceptions.clearView,
+});
+
+const record = (): WorkbenchView => {
+  const read = workbenchRecords.view.read(content.get(path)!);
+  if (read.status !== 'current') {
+    throw new Error(read.message);
+  }
+  return read.record;
+};
+const exceptions = (): readonly ViewFieldPath[] => exceptionsForView(viewExceptionsStore.read(), 'p', viewId);
+
+beforeEach(() => {
+  globalThis.localStorage.clear();
+  content = new Map([
+    [
+      path,
+      encoder.encode(
+        workbenchRecords.view.serialize(workbenchRecords.view.schema.parse({ version: 1, entryPath: 'main.ts' })),
+      ),
+    ],
+  ]);
+  defaults = {};
+  conflictNext = false;
+  onError.mockClear();
+});
+
+afterEach(() => {
+  globalThis.localStorage.clear();
+});
+
+describe('view field commands', () => {
+  it('sets a value away from the format value with no exception', async () => {
+    expect(await commands.setViewField(view, 'display.grid', false)).toBe(true);
+    expect(record().display.grid).toBe(false);
+    expect(exceptions()).toEqual([]);
+  });
+
+  it('adds an exception when a format value is set over a personal default (V7)', async () => {
+    defaults = { 'display.grid': false };
+    expect(await commands.setViewField(view, 'display.grid', true)).toBe(true);
+    expect(record().display.grid).toBe(true);
+    expect(exceptions()).toEqual(['display.grid']);
+  });
+
+  it('records the exception whatever the flag, because the command never reads it (V15)', async () => {
+    // `viewerControls` off: there is no control that sets a default, but one saved earlier is still on the device.
+    defaults = { 'display.grid': false };
+    await commands.setViewField(view, 'display.grid', true);
+    expect(exceptions()).toEqual(['display.grid']);
+  });
+
+  it('writes a format value alone with no personal default for the leaf', async () => {
+    defaults = { 'display.axes': false };
+    await commands.setViewField(view, 'display.grid', true);
+    expect(exceptions()).toEqual([]);
+  });
+
+  it('removes the exception when a value away from the format value is set', async () => {
+    defaults = { 'display.grid': false };
+    await commands.setViewField(view, 'display.grid', true);
+    await commands.setViewField(view, 'display.grid', false);
+    expect(exceptions()).toEqual([]);
+    expect(record().display.grid).toBe(false);
+  });
+
+  it('never records an up axis exception: it has no personal level', async () => {
+    defaults = { 'display.grid': false };
+    await commands.setViewField(view, 'upDirection', 'z');
+    expect(exceptions()).toEqual([]);
+  });
+
+  it('writes the grid unit to the view (V13)', async () => {
+    await commands.setViewField(view, 'grid.unit', 'in');
+    expect(record().grid.unit).toBe('in');
+    expect(record().display).toEqual(workbenchRecords.view.schema.parse({ version: 1, entryPath: null }).display);
+  });
+
+  it('resets a leaf to its format value and removes the exception (V7)', async () => {
+    defaults = { 'display.grid': false };
+    await commands.setViewField(view, 'display.grid', true);
+    expect(await commands.resetViewField(view, 'display.grid')).toBe(true);
+    expect(record().display.grid).toBe(true);
+    expect(exceptions()).toEqual([]);
+  });
+
+  it('resets every leaf of a view and clears its exceptions', async () => {
+    defaults = { 'display.grid': false };
+    await commands.setViewField(view, 'display.grid', true);
+    await commands.setViewField(view, 'fieldOfView', 0);
+    await commands.setViewField(view, 'grid.unit', 'cm');
+    await commands.setViewField(view, 'upDirection', 'y');
+    expect(await commands.resetView(view)).toBe(true);
+    const reset = record();
+    expect([reset.fieldOfView, reset.upDirection, reset.grid.unit, reset.display.grid]).toEqual([60, 'z', 'mm', true]);
+    expect(exceptions()).toEqual([]);
+  });
+
+  it('creates the record for a missing view with the entry it names', async () => {
+    content.clear();
+    expect(await commands.setViewField(view, 'display.axes', false)).toBe(true);
+    expect(record()).toMatchObject({ entryPath: 'main.ts', display: { axes: false } });
+  });
+
+  it('passes a refused record through without writing it', async () => {
+    content.set(path, encoder.encode('{"version":2}'));
+    expect(await commands.setViewField(view, 'display.grid', false)).toBe(false);
+    expect(new TextDecoder().decode(content.get(path))).toBe('{"version":2}');
+  });
+
+  it('retries a conflicting write against the bytes it re-reads', async () => {
+    conflictNext = true;
+    expect(await commands.setViewField(view, 'display.lines', false)).toBe(true);
+    expect(record().display.lines).toBe(false);
+  });
+});

@@ -43,7 +43,8 @@
       }
     },
     "test": {
-      "dependsOn": ["build"]
+      "dependsOn": ["build"],
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
     },
     "test:e2e": {
       "executor": "nx:run-commands",
@@ -55,6 +56,9 @@
         "cwd": "{projectRoot}",
         "command": "vitest run -c vitest.hosts.config.ts"
       }
+    },
+    "typecheck": {
+      "inputs": ["default", "^production", "reactEventLayer"]
     }
   }
 }

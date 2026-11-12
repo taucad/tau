@@ -33,6 +33,12 @@
         "cwd": "{projectRoot}",
         "command": "../../node_modules/.bin/vitest run --config src/graphics/three/viewer-parity-capture.vitest.browser.config.ts"
       }
+    },
+    "test": {
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
+    },
+    "typecheck": {
+      "inputs": ["default", "^production", "reactEventLayer"]
     }
   }
 }

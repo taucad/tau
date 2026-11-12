@@ -5,6 +5,12 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:package"],
   "targets": {
-    "formal:nightly": {}
+    "formal:nightly": {},
+    "test": {
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
+    },
+    "typecheck": {
+      "inputs": ["default", "^production", "reactEventLayer"]
+    }
   }
 }

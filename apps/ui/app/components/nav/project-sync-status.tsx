@@ -11,8 +11,8 @@ type SyncIndicator = Readonly<{ label: string; detail: string; kind: 'busy' | 'o
 function syncFailureIndicator(sync: SyncFacet | undefined, isCloudPending: boolean): SyncIndicator | undefined {
   if (sync?.state === 'conflicted') {
     return {
-      label: 'Changes need review',
-      detail: 'Local and remote changes need review. Open Revisions to resolve them.',
+      label: 'Needs your decision',
+      detail: 'This device and the cloud copy changed the same files. Open History to choose.',
       kind: 'attention',
     };
   }
@@ -32,8 +32,8 @@ function syncFailureIndicator(sync: SyncFacet | undefined, isCloudPending: boole
           ? 'Sign in to continue'
           : sync.reason === 'forbidden' || sync.reason === 'notFound'
             ? 'Project unavailable'
-            : 'Sync needs attention',
-      detail: sync.error ?? 'Open Revisions to review sync and retry.',
+            : 'Couldn’t back up',
+      detail: sync.error ?? 'Open History to try again.',
       kind: 'attention',
     };
   }
@@ -55,7 +55,7 @@ export function projectSyncIndicator(sync: SyncFacet | undefined, isCloudPending
   if (sync?.chats === 'failed') {
     return {
       label: 'Chats need attention',
-      detail: 'Files are ready. Open Revisions to retry loading chats.',
+      detail: 'Files are ready. Open History to try loading chats again.',
       kind: 'attention',
     };
   }
@@ -69,7 +69,7 @@ export function projectSyncIndicator(sync: SyncFacet | undefined, isCloudPending
     return { label: 'Connecting to Tau Cloud…', detail: 'Your files will appear when they are ready.', kind: 'busy' };
   }
   if (sync?.state === 'checking') {
-    return { label: 'Checking synced files…', detail: 'Checking this project for remote changes.', kind: 'busy' };
+    return { label: 'Checking for changes…', detail: 'Checking the cloud copy for changes.', kind: 'busy' };
   }
   if (sync?.state === 'pending') {
     return {
@@ -126,7 +126,7 @@ export function ProjectSyncStatus({
         <p className='font-medium'>{indicator.label}</p>
         <p>{indicator.detail}</p>
         <Button variant='outline' size='sm' onClick={onOpenDetails}>
-          Open Revisions
+          Open History
         </Button>
       </PopoverContent>
     </Popover>

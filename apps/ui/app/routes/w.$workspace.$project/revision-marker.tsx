@@ -84,10 +84,11 @@ import { consumeRevisionReveal, useRevisionReveal } from '@taucad/project-worksp
 import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import type { AffectedPublication } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import {
-  revisionName,
+  entryReference,
   revisionTriggerLabel,
   startFact,
-  startVersionName,
+  versionLabel,
+  versionOf,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 
 /** Whether a revision is one of the autosaves History folds: a turn's base cut is one too (A5). */
@@ -130,14 +131,11 @@ function FileComparison({
   revisionId,
   path,
   compareAgainst,
-  n,
 }: {
   readonly id: string;
   readonly revisionId: string;
   readonly path: string;
   readonly compareAgainst: 'parent' | 'checkout';
-  /** The revision's number, which a comparison with the current files names. */
-  readonly n: number | undefined;
   // oxlint-disable-next-line typescript/no-restricted-types -- required by React
 }): React.JSX.Element | null {
   const { original, modified, comparison, isLoading, isLoaded, error, retry } = useRevisionFileComparison(
@@ -178,9 +176,7 @@ function FileComparison({
   if (comparison.change === 'unchanged') {
     return (
       <p id={id} role='note' aria-label={label} className='border-t px-2 py-1.5 text-xs text-muted-foreground'>
-        {compareAgainst === 'checkout'
-          ? `No changes since ${revisionName(n) ?? 'this revision'}.`
-          : 'No changes in this file.'}
+        {compareAgainst === 'checkout' ? 'No changes since then.' : 'No changes in this file.'}
       </p>
     );
   }
@@ -319,7 +315,6 @@ function FileList({
                 revisionId={revision.revisionId}
                 path={change.path}
                 compareAgainst={compareAgainst}
-                n={revision.n}
               />
             </CollapsibleContent>
           </li>
@@ -361,12 +356,14 @@ function CurrentComparison({
   readonly onStop: () => void;
 }): React.JSX.Element {
   const { changes, isLoaded, error, retry } = useRevisionChangesSince(revision);
-  const name = revisionName(revision.n) ?? 'this revision';
+  const name = entryReference(revision) ?? 'this point';
   const body =
     error === undefined ? (
       isLoaded ? (
         changes.length === 0 ? (
-          <p role='note' className='text-xs text-muted-foreground'>{`No changes since ${name}.`}</p>
+          <p role='note' className='text-xs text-muted-foreground'>
+            No changes since then.
+          </p>
         ) : (
           <FileList revision={revision} changes={changes} compareAgainst='checkout' label={`Changed since ${name}`} />
         )
@@ -407,7 +404,7 @@ const storedIdRows = (revision: RevisionCard): ReadonlyArray<readonly [string, R
   const parent =
     revision.parent === undefined ? (
       revision.n === 1 ? (
-        'None (first revision)'
+        'None (first entry)'
       ) : undefined
     ) : (
       <code key='parent' className='font-mono break-all'>
@@ -416,7 +413,7 @@ const storedIdRows = (revision: RevisionCard): ReadonlyArray<readonly [string, R
     );
   return [
     [
-      'Revision',
+      'ID',
       <code key='id' className='font-mono break-all'>
         {revision.revisionId}
       </code>,
@@ -471,7 +468,7 @@ export function RevisionDetails({
   return (
     <CollapsibleContent className={disclosureMotion}>
       <dl
-        aria-label={`Details for ${revisionName(revision.n) ?? 'this revision'}`}
+        aria-label={`Details for ${entryReference(revision) ?? 'this entry'}`}
         className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 px-1 pt-1 text-xs'
       >
         {rows.map(([term, value]) => (
@@ -600,7 +597,7 @@ function CopyRevisionId({ revisionId }: { readonly revisionId: string }): React.
         ) : (
           <Copy aria-hidden />
         )}
-        {isFailed ? 'Copy failed' : isCopied ? 'Copied' : 'Copy revision id'}
+        {isFailed ? 'Copy failed' : isCopied ? 'Copied' : 'Copy ID'}
       </DropdownMenuItem>
       {isFailed ? (
         <span role='alert' className='sr-only'>
@@ -644,7 +641,7 @@ function PublishRevisionDialog({
   const link = facet?.phase === 'success' ? facet.shareUrl : undefined;
   const error = facet?.phase === 'error' ? facet.error : undefined;
   const isBusy = facet?.phase === 'choosingVersion' || facet?.phase === 'working';
-  const title = `Publish ${revisionName(revision.n) ?? 'this revision'}`;
+  const title = `Publish ${entryReference(revision) ?? 'this point'}`;
   const close = (): void => {
     if (isSent) {
       commands.resetPublish();
@@ -778,7 +775,7 @@ export function RevisionMenu({
   const [form, setForm] = useState<'name' | 'branch'>('name');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isPublishOpen, setIsPublishOpen] = useState(false);
-  const name = revisionName(revision.n) ?? 'this revision';
+  const name = entryReference(revision) ?? 'this point';
   const named = revision.tags?.[0];
   const canWrite = role !== 'read' && role !== 'revoked';
   const isTauCloud = status?.remote.kind === 'tau' && status.remote.phase === 'connected';
@@ -788,10 +785,10 @@ export function RevisionMenu({
   const formCopy =
     form === 'name'
       ? {
-          label: `Name ${name}`,
+          label: 'Version name',
           placeholder: 'e.g. Ready for print',
-          note: 'A name makes this revision easy to find and to publish.',
-          saveLabel: named === undefined ? 'Save name' : 'Rename version',
+          note: 'A version is a fixed point you can return to, compare with and share.',
+          saveLabel: named === undefined ? 'Create version' : 'Rename',
           initial: named ?? '',
           onSave: async (value: string): Promise<void> => {
             if (value === named) {
@@ -805,7 +802,7 @@ export function RevisionMenu({
           },
         }
       : {
-          label: 'Name for the new branch',
+          label: 'Branch name',
           placeholder: 'enclosure-v2',
           note: `Starts from ${name}.${branch === undefined ? '' : ` ${branch} stays as it is.`}`,
           saveLabel: 'Create branch',
@@ -822,7 +819,7 @@ export function RevisionMenu({
         <NamePopover
           anchor={
             <DropdownMenuTrigger asChild>
-              <Button ref={moreRef} size='icon-xs' variant='outline' aria-label={`More actions for ${name}`}>
+              <Button ref={moreRef} size='icon-xs' variant='outline' aria-label='More'>
                 <EllipsisVertical aria-hidden />
               </Button>
             </DropdownMenuTrigger>
@@ -868,7 +865,7 @@ export function RevisionMenu({
               }}
             >
               <Tag aria-hidden />
-              {named === undefined ? 'Name version…' : 'Rename version…'}
+              {named === undefined ? 'Create version…' : 'Rename version…'}
             </DropdownMenuItem>
           ) : null}
           {/* The revision you are on publishes from the Share panel; an older one names and publishes itself here. */}
@@ -883,7 +880,7 @@ export function RevisionMenu({
               }}
             >
               <Link2 aria-hidden />
-              {isCurrent ? 'Publish…' : named === undefined ? 'Publish as a named version…' : `Publish ${named}…`}
+              {isCurrent ? 'Publish…' : named === undefined ? 'Publish as a version…' : `Publish ${named}…`}
             </DropdownMenuItem>
           ) : null}
           {canWrite ? (
@@ -893,7 +890,7 @@ export function RevisionMenu({
               }}
             >
               <GitBranch aria-hidden />
-              {`New branch from ${name}…`}
+              New branch from here…
             </DropdownMenuItem>
           ) : null}
           <CopyRevisionId revisionId={revision.revisionId} />
@@ -946,7 +943,7 @@ export function RevisionMenu({
               {removal?.publication === undefined
                 ? ''
                 : `“${removal.publication.title}” is published from this name. Removing the name also retires that publication, so its link stops opening. `}
-              The revision itself stays in History.
+              The entry itself stays in History.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {removal?.error === undefined ? null : (
@@ -993,7 +990,7 @@ function RevisionMarkerGlyph({
   if (revision.conflicted) {
     return (
       <span className={timelineMarker}>
-        <GitMerge aria-label='Conflicted revision' className='size-3.5 text-warning' />
+        <GitMerge aria-label='Needs your decision' className='size-3.5 text-warning' />
       </span>
     );
   }
@@ -1102,8 +1099,9 @@ export function RevisionRow({
   }, [isRevealed, projectId, revision.revisionId]);
 
   const { start } = revision;
-  /* A6: the Start version is named V1, in the column where other rows show their number and time. */
-  const name = start === undefined ? revisionName(revision.n) : startVersionName;
+  /* M11: an entry has no number; a version shows its `V3` in the column where other rows show their time (A6, B6). */
+  const version = versionOf(revision);
+  const name = version === undefined ? undefined : versionLabel(version.number);
   const time =
     revision.createdAt > 0
       ? new Date(revision.createdAt).toLocaleTimeString(undefined, { timeStyle: 'short' })
@@ -1133,7 +1131,7 @@ export function RevisionRow({
             ref={buttonRef}
             type='button'
             data-revision-row={revision.revisionId}
-            aria-label={`${name ?? 'Revision'} · ${title}`}
+            aria-label={name === undefined ? (time === undefined ? title : `${title} · ${time}`) : `${name} · ${title}`}
             className={cn(timelineRowButton, !isOpen && timelineRowHover)}
           >
             <span aria-hidden className={timelineGutter({ hasTop: !isFirst, hasBottom: !isLast })}>
@@ -1176,7 +1174,7 @@ export function RevisionRow({
                 {name === undefined ? null : (
                   <span className={cn('font-mono', start !== undefined && 'font-medium text-foreground')}>{name}</span>
                 )}
-                {time === undefined || start !== undefined ? null : (
+                {time === undefined || name !== undefined ? null : (
                   <time
                     dateTime={new Date(revision.createdAt).toISOString()}
                     className='hidden min-w-[8ch] text-right tabular-nums @[22rem]:inline'
@@ -1242,7 +1240,7 @@ export function RevisionRow({
                   <ActionButton
                     verb='Restore'
                     icon={RotateCcw}
-                    aria-label={name === undefined ? 'Restore this revision' : `Restore ${name}`}
+                    aria-label={`Restore ${entryReference(revision) ?? 'this point'}`}
                     disabled={isBusy}
                     onClick={() => {
                       onRestore(revision.revisionId);

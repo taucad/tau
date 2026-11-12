@@ -30,7 +30,7 @@ function ActorName({ revisionId, who, source }: RevisionWhoEntry): React.JSX.Ele
   return line === '' ? undefined : <span className='shrink-0 text-xs text-muted-foreground/70'>{line}</span>;
 }
 
-type RevisionsInvocation = ToolInvocation<typeof toolName.revisions>;
+type RevisionsInvocation = ToolInvocation<typeof toolName.history>;
 type RevisionsOutput = Extract<RevisionsInvocation, { state: 'output-available' }>['output'];
 type RevisionsAction = NonNullable<RevisionsInvocation['input']>['action'];
 
@@ -55,13 +55,22 @@ const countOf = (count: number, singular: string): string =>
   `${String(count)} ${count === 1 ? singular : `${singular}s`}`;
 
 /**
+ * An entry's time, in the column where a version shows its number (M11).
+ *
+ * @param createdAt - Milliseconds since the Unix epoch.
+ * @returns The short local time, or nothing for an entry with no time.
+ */
+const timeOf = (createdAt: number): string =>
+  createdAt > 0 ? new Date(createdAt).toLocaleTimeString(undefined, { timeStyle: 'short' }) : '';
+
+/**
  * What one read answers with, under the header.
  *
- * A revision is named the way a person names it — `Rev 12`, a branch, whoever
- * made it — and never by a commit id, which is the same rule the pane and
- * `tau revisions` follow. A changed path is plain text rather than a file link:
- * it is the path *that revision* touched, which today's tree need not still
- * hold.
+ * An entry is named the way History names it — its title, its time, whoever
+ * made it, and for a version its `V3` — and never by a number or a commit id,
+ * which is the same rule the pane and `tau history` follow (M11). A changed
+ * path is plain text rather than a file link: it is the path *that entry*
+ * touched, which today's tree need not still hold.
  *
  * @param output - The tool's own answer.
  * @returns The rows, or `undefined` when this answer has none.
@@ -85,16 +94,16 @@ const revisionRows = (output: RevisionsOutput): ReactNode => {
     return (
       <ChatToolCardList maxHeight='max-h-48'>
         {revisions.length === 0 ? (
-          <ChatToolCardListItem className='text-muted-foreground/70 italic'>(no revisions yet)</ChatToolCardListItem>
+          <ChatToolCardListItem className='text-muted-foreground/70 italic'>No history yet</ChatToolCardListItem>
         ) : (
           revisions.map((revision) => (
             <ChatToolCardListItem key={revision.revisionId} icon={History}>
               <span className='flex min-w-0 flex-1 flex-col items-start gap-0.5 @xs:flex-row @xs:gap-2'>
                 <span className='shrink-0 font-mono text-xs text-muted-foreground/70'>
-                  {revision.revisionNumber === undefined ? 'merged in' : `Rev ${String(revision.revisionNumber)}`}
+                  {revision.version === undefined ? timeOf(revision.createdAt) : `V${String(revision.version.number)}`}
                 </span>
                 <span className='min-w-0 truncate'>
-                  {revision.summary}
+                  {revision.version?.name ?? revision.summary}
                   {revision.conflicted ? ' · Needs your decision' : ''}
                 </span>
                 <ActorName revisionId={revision.revisionId} who={revision.who} source={revision.source} />
@@ -110,7 +119,7 @@ const revisionRows = (output: RevisionsOutput): ReactNode => {
     return (
       <ChatToolCardList maxHeight='max-h-48'>
         {changes.length === 0 ? (
-          <ChatToolCardListItem className='text-muted-foreground/70 italic'>(nothing changed)</ChatToolCardListItem>
+          <ChatToolCardListItem className='text-muted-foreground/70 italic'>No changes</ChatToolCardListItem>
         ) : (
           changes.map((change) => (
             <ChatToolCardListItem key={`${change.kind}-${change.path}`} icon={changeIcons[change.kind]}>
@@ -129,11 +138,9 @@ const revisionRows = (output: RevisionsOutput): ReactNode => {
         {branches.map((candidate) => (
           <ChatToolCardListItem key={candidate.name} icon={History}>
             <span className='min-w-0 truncate'>{candidate.name}</span>
-            <span className='ml-1 text-xs text-muted-foreground/70'>
-              {candidate.name === branch
-                ? `Rev ${String(candidate.revisionNumber)} · this one`
-                : `Rev ${String(candidate.revisionNumber)}`}
-            </span>
+            {candidate.name === branch ? (
+              <span className='ml-1 text-xs text-muted-foreground/70'>current</span>
+            ) : undefined}
           </ChatToolCardListItem>
         ))}
       </ChatToolCardList>
@@ -151,7 +158,7 @@ const revisionRows = (output: RevisionsOutput): ReactNode => {
  */
 const summaryOf = (output: RevisionsOutput): string => {
   if (output.revisions !== undefined) {
-    return countOf(output.revisions.length, 'revision');
+    return output.revisions.length === 1 ? '1 entry' : `${String(output.revisions.length)} entries`;
   }
   if (output.changes !== undefined) {
     return countOf(output.changes.length, 'file');
@@ -170,10 +177,10 @@ const summaryOf = (output: RevisionsOutput): string => {
  *
  * Read-only by construction, and the card says so by having nothing to press:
  * an agent can see where the project is and what changed, and branching,
- * restoring and discarding stay a person's verbs in the Revisions pane.
+ * restoring and discarding stay a person's verbs in the History pane.
  *
  * @param props - The tool part this message carries.
- * @param props.part - The `revisions` invocation, in whatever state it is in.
+ * @param props.part - The `history` invocation, in whatever state it is in.
  * @returns The card.
  */
 export function ChatMessageToolRevisions({ part }: { readonly part: RevisionsInvocation }): ReactNode {
@@ -201,7 +208,7 @@ export function ChatMessageToolRevisions({ part }: { readonly part: RevisionsInv
       const summary = summaryOf(output);
       const rows = revisionRows(output);
       /* The `where` line is the whole point of the answer — one line, the same
-       * one `tau revisions describe` prints and the pane renders (I3) — so the
+       * one `tau history describe` prints and the pane renders (I3) — so the
        * header carries it whether or not there are rows to disclose. */
       const header = (
         <ChatToolCardHeader>
@@ -234,13 +241,13 @@ export function ChatMessageToolRevisions({ part }: { readonly part: RevisionsInv
     }
 
     case 'output-error': {
-      return <ChatToolError errorText={part.errorText} icon={XCircle} noun='revision history' />;
+      return <ChatToolError errorText={part.errorText} icon={XCircle} noun='history' />;
     }
 
     case 'approval-requested':
     case 'approval-responded':
     case 'output-denied': {
-      throw new Error(`Unexpected ${toolName.revisions} state: ${part.state}`);
+      throw new Error(`Unexpected ${toolName.history} state: ${part.state}`);
     }
   }
 }

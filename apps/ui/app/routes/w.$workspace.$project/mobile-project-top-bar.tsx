@@ -43,7 +43,6 @@ import {
   cloudUnavailable,
   conflictSentence,
   hasRevisionConflict,
-  revisionName,
   useRevisionFacts,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
@@ -52,7 +51,7 @@ import type { RevisionFacts } from '#routes/w.$workspace.$project/revision-vocab
 const defaultBranch = 'main';
 
 /** The shared vocabulary's sentence for an unconfirmed write, which the status line keeps verbatim. */
-const saveNotConfirmed = 'Save not confirmed';
+const saveNotConfirmed = 'Couldn’t confirm the save';
 
 /** The shared vocabulary's clause for a viewer who may not write. */
 const viewOnly = 'View only';
@@ -70,9 +69,9 @@ export type ProjectStatusLine = Readonly<{
   tone: string;
   /** Whether the glyph turns while work is in flight. */
   isBusy: boolean;
-  /** The save state's word: *Saved*, *Saving…*, *Save not confirmed*, *Conflict*, or the shared sentence otherwise. */
+  /** The save state's word: *Saved*, *Saving…*, *Couldn’t confirm the save*, *Conflict*, or the shared sentence otherwise. */
   word: string;
-  /** The whole line: the word, then *on ⟨branch⟩*, the record issue count and *Follow chat* when they apply. */
+  /** The whole line: the word, then *on ⟨branch⟩*, the record issue count and *Switch to ⟨branch⟩* when they apply. */
   text: string;
 }>;
 
@@ -143,7 +142,7 @@ export const selectProjectStatusLine = ({
     parts.push(`${String(issues.count)} ${issues.count === 1 ? 'issue' : 'issues'}`);
   }
   if (followBranch !== undefined) {
-    parts.push('Follow chat');
+    parts.push(`Switch to ${followBranch}`);
   }
   return { ...status, text: parts.join(' · ') };
 };
@@ -301,7 +300,7 @@ function SheetRow({
 
 /**
  * The project sheet the title opens: the name and status line, the recovery a
- * status names (Follow chat, settings records), then Revisions, Export and
+ * status names (Switch to the chat's branch, settings records), then History, Export and
  * Details, each once. A waiting conflict moves the Revisions row first, as the
  * decision it opens (I5), rather than adding a second way there (I4). Share is
  * not here: it is the bar's own trailing control.
@@ -333,8 +332,8 @@ function ProjectSheet({
   const close = useCallback(() => {
     onOpenChange(false);
   }, [onOpenChange]);
-  const head = revisionName(status.head);
-  const revisionsMeta = [head, status.branch].filter(Boolean).join(' · ');
+  /* M11: an entry has no number, so the row names the branch alone. */
+  const revisionsMeta = status.branch ?? '';
   const revisionsRow = (
     <SheetRow
       icon={status.conflict === undefined ? History : GitMerge}
@@ -403,8 +402,8 @@ function ProjectSheet({
             <ul aria-label='Chat' className={sheetGroupClass}>
               <SheetRow
                 icon={GitBranch}
-                label='Follow chat'
-                meta={`${status.followChat.chatName} · on ${status.followChat.branch}`}
+                label={`Switch to ${status.followChat.branch}`}
+                meta={status.followChat.chatName}
                 onSelect={() => {
                   status.followChat?.follow();
                   close();

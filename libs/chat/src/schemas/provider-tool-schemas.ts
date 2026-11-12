@@ -36,7 +36,7 @@ export const cadProviderFacingToolNames = [
   toolName.globSearch,
   toolName.webSearch,
   toolName.webBrowser,
-  toolName.revisions,
+  toolName.history,
   toolName.updateTodos,
   toolName.askQuestions,
   toolName.installPackages,

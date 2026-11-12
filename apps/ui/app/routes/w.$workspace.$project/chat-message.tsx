@@ -520,7 +520,7 @@ function renderAssistantPart(
       return <ChatMessageToolScreenshot key={part.toolCallId} part={part} />;
     }
 
-    case 'tool-revisions': {
+    case 'tool-history': {
       return <ChatMessageToolRevisions key={part.toolCallId} part={part} />;
     }
 

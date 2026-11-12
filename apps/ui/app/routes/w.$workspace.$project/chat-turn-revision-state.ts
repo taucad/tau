@@ -127,13 +127,6 @@ export const deriveTurnRevisionState = (facts: TurnRevisionFacts): TurnRevisionS
   };
 };
 
-const baseName = (base: TurnRevisionBase): string | undefined => {
-  if (base.kind === 'first') {
-    return 'first revision';
-  }
-  return base.kind === 'revision' && base.n !== undefined ? `Rev ${String(base.n)}` : undefined;
-};
-
 /**
  * The collapsed summary text.
  *
@@ -146,32 +139,25 @@ export const turnRevisionLabel = (state: TurnRevisionState, fileCount: number): 
   switch (state.kind) {
     case 'working': {
       /* The dashed status icon already says the work is in progress, so only a
-       * pause adds a suffix (chat activity indicator closeout R11). */
-      const name = baseName(state.base);
-      if (name === undefined) {
-        return state.isWaiting ? 'Waiting for you' : 'New revision';
-      }
-      const start = state.base.kind === 'first' ? `Starting ${name}` : `Starting from ${name}`;
-      return state.isWaiting ? `${start} · Waiting for you` : start;
+       * pause adds a suffix (chat activity indicator closeout R11). No base is
+       * named: an entry has no number (M11). */
+      return state.isWaiting ? 'Waiting for you' : 'Working…';
     }
     case 'saving': {
-      return 'Saving revision';
+      return 'Saving…';
     }
     case 'saved': {
-      const name = state.revision.n === undefined ? 'Revision' : `Rev ${String(state.revision.n)}`;
       if (state.isInterrupted) {
-        return `${name} saved · Work interrupted`;
+        return 'Saved · stopped early';
       }
-      return fileCount === 0
-        ? `${name} saved`
-        : `${name} saved · ${String(fileCount)} file${fileCount === 1 ? '' : 's'}`;
+      return fileCount === 0 ? 'Saved' : `Saved · ${String(fileCount)} file${fileCount === 1 ? '' : 's'}`;
     }
     case 'conflicted': {
       /* HQ1: a decision waiting on the person is said one way everywhere. */
       return 'Needs your decision';
     }
     case 'unconfirmed': {
-      return 'Save not confirmed';
+      return 'Couldn’t confirm the save';
     }
     case 'hidden': {
       return '';
@@ -188,21 +174,14 @@ export const turnRevisionLabel = (state: TurnRevisionState, fileCount: number): 
  */
 export const turnRevisionDetail = (state: TurnRevisionState): string => {
   switch (state.kind) {
-    case 'working': {
-      return 'The new revision will appear here when it is saved.';
-    }
-    case 'saving': {
-      return 'The changes are ready. Waiting for the save to finish.';
-    }
     case 'unconfirmed': {
-      const name = baseName(state.base);
-      return `Tau could not reach the host to confirm this save.${name === undefined || state.base.kind === 'first' ? '' : ` ${name} is the last confirmed revision.`}`;
+      return 'Tau couldn’t reach your files to confirm this save.';
     }
     case 'saved': {
       return '';
     }
     case 'conflicted': {
-      return 'Two versions changed the same files. Choose one in Revisions.';
+      return 'Both branches changed the same files.';
     }
     default: {
       return '';

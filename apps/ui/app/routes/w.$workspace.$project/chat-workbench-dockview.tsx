@@ -2156,8 +2156,8 @@ export const WorkbenchDockview = memo(function ({
     const updateTitle = (): void => {
       const revisionsPanel = api.panels.find((panel) => panel.id === workbenchPanels.revisions.id);
       /* A layout saved while the retired *viewing an older revision* marker
-       * showed (RS5, RA4) still carries it; the tab is always *Revisions*. */
-      revisionsPanel?.api.setTitle('Revisions');
+       * showed (RS5, RA4) still carries it; the tab is always *History* (M11). */
+      revisionsPanel?.api.setTitle('History');
     };
 
     updateTitle();

@@ -356,7 +356,7 @@ export const createRoutingToolHandler = (input: {
       }
       case toolName.grep:
       case toolName.getParameters:
-      case toolName.revisions:
+      case toolName.history:
       case toolName.webSearch:
       case toolName.updateTodos: {
         return ok({

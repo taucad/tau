@@ -678,9 +678,9 @@ export const expectModelBuilt = async (options: {
    * whose only "Current" lives inside a `CollapsibleContent` that is closed —
    * and therefore unmounted — by default. The live region is the part that is
    * always rendered (`chat-revision-marker.tsx:246-253`). */
-  const turnMarker = page.getByRole('status', { name: 'Turn revision status' }).last();
+  const turnMarker = page.getByRole('status', { name: 'Save status' }).last();
   await expectVisible(turnMarker, 60_000);
-  await expect.poll(async () => (await turnMarker.textContent()) ?? '', { timeout: 60_000 }).toMatch(/^Rev \d+ saved/u);
+  await expect.poll(async () => (await turnMarker.textContent()) ?? '', { timeout: 60_000 }).toMatch(/^Saved/u);
   await expectCount(page.getByText(/ROOT_UNAVAILABLE/u), 0);
   await expectCount(page.getByText('File not found', { exact: true }), 0);
   await expectCount(page.getByRole('status', { name: 'Waiting for geometry' }), 0, 120_000);

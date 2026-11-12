@@ -206,21 +206,20 @@ The command runs in a fresh process in the project folder (or cwd) with stdin cl
 Use it for what the file tools cannot do: run a project's scripts, compilers and tests, or batch-rename and search with standard tools. Prefer read_file, edit_file and grep for single files, and evaluate_model, test_model and export_model for geometry: a command's output is never a geometry verdict.
 
 For more, set access with a one-sentence reason: exact absolute folders to read or write, or exact host names to reach. The person may be asked to allow it once; a denial means do not retry it. A nonzero exitCode is a completed command and returns as an error; timed-out, cancelled and not-started say why. Output beyond 64 KiB keeps each stream's tail, and log names the full output to read with read_file. An interrupted command may have changed files: check before running it again.`,
-  [toolName.revisions]: `Read this project's saved revisions. Read-only.
+  [toolName.history]: `Read this project's history. Read-only.
 
 Actions:
-- describe: which branch the project is on, its current revision number, and every branch it holds
-- log: that branch's revisions, newest first ({ action: 'log', limit: 10 })
-- diff: the files that changed between two revisions ({ action: 'diff', from, to })
+- describe: which branch the project is on, and every branch it holds
+- log: that branch's history entries, newest first ({ action: 'log', limit: 10 }); a version carries its number (V3) and name
+- diff: the files that changed between two entries ({ action: 'diff', from, to })
 - conflict: both sides of a conflict waiting for a decision ({ action: 'conflict', revision }); your files hold only "ours"
 
 Use this to find out what changed and when — before rewriting a file someone
 else just changed, when a user refers to "the last version", or to check whether
 your own turn's edits were recorded.
 
-Revisions are saved by Tau itself, never by you: there is no action here that
-creates a branch, merges, restores, discards or syncs anything. Ask the user to
-do those.`,
+Tau records history itself, never you: there is no action here that creates a
+branch, merges, restores, discards or syncs anything. Ask the user to do those.`,
   [toolName.webSearch]: `Search the web and return up to five results, each with its title, URL and a content excerpt. Use it for external facts the project files cannot answer: standards, part dimensions, datasheets, current events. Input is one search query.
 
 To read the full body of a result or a known URL, use \`${toolName.webBrowser}\`.`,

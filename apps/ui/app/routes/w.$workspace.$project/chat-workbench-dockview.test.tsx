@@ -1557,7 +1557,7 @@ describe('Workbench file reconciliation', () => {
     ]);
     expect(within(screen.getByRole('group', { name: 'Design' })).getByRole('button', { name: /Model/ })).toBeVisible();
     expect(
-      within(screen.getByRole('group', { name: 'Activity' })).getByRole('button', { name: /Revisions/ }),
+      within(screen.getByRole('group', { name: 'Activity' })).getByRole('button', { name: /History/ }),
     ).toBeVisible();
     expect(
       within(screen.getByRole('group', { name: 'Activity' })).getByRole('button', { name: /Agents/ }),
@@ -1711,7 +1711,7 @@ describe('Workbench file reconciliation', () => {
       within(screen.getByRole('group', { name: 'Design' })).getByRole('menuitem', { name: /Model/ }),
     ).toBeVisible();
     expect(
-      within(screen.getByRole('group', { name: 'Activity' })).getByRole('menuitem', { name: /Revisions/ }),
+      within(screen.getByRole('group', { name: 'Activity' })).getByRole('menuitem', { name: /History/ }),
     ).toBeVisible();
     expect(
       within(screen.getByRole('group', { name: 'Activity' })).getByRole('menuitem', { name: /Agents/ }),

@@ -32,6 +32,12 @@
     "test:native-darwin": {
       "executor": "nx:run-commands",
       "cache": false,
+      "inputs": [
+        "default",
+        "^default",
+        "{workspaceRoot}/.github/workflows/native-darwin.yml",
+        "{workspaceRoot}/.github/workflows/native-hosts.yml"
+      ],
       "dependsOn": [
         "^copy-assets",
         {

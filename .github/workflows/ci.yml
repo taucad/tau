@@ -77,6 +77,8 @@ jobs:
       geospec-examples: ${{ steps.plan.outputs.geospec-examples }}
       browser: ${{ steps.plan.outputs.browser }}
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
+      native-darwin: ${{ steps.plan.outputs.native-darwin }}
+      native-darwin-projects: ${{ steps.plan.outputs.native-darwin-projects }}
       native-hosts: ${{ steps.plan.outputs.native-hosts }}
       native-linux: ${{ steps.plan.outputs.native-linux }}
       viewer-parity: ${{ steps.plan.outputs.viewer-parity }}
@@ -127,10 +129,11 @@ jobs:
           # API image: the project with the `docker:smoke` target (`api`) or one it depends on
           # changed, so a change to another `scope:api` project (an end-to-end suite, `files`)
           # does not rebuild the production image.
-          # Native host rows (`native-hosts.yml`): a `tag:ci:native-hosts` project (Build123d, PicoGK,
-          # the CLI) or a `test:native-linux` project is affected; the latter are also the linux-x64
-          # native rows it runs. Viewer parity (`viewer-parity.yml`): the project that owns the gate
-          # (`test:viewer-parity`), or one it depends on, or the workflow its target lists, changed.
+          # Native rows: the affected `test:native-darwin` projects are the darwin-arm64 rows
+          # (`native-darwin.yml`) and start the darwin-x64 row; the affected `test:native-linux` projects
+          # are the linux-x64 native rows. Either starts the Linux host rows (`native-hosts.yml`).
+          # Viewer parity (`viewer-parity.yml`): the project that owns the gate (`test:viewer-parity`),
+          # or one it depends on, or the workflow its target lists, changed.
           # Desktop lane: a `tag:ci:desktop` project (the Electron app and, after the split, its services
           # host). No job here runs it: the packaged suite runs on every staging candidate instead
           # (operator decision D-DS1 (b), `desktop-packaged.yml`), so the lane is informational and
@@ -149,7 +152,7 @@ jobs:
              "formal": {"targets": ["formal"], "pr": "queue"},
              "geospec-examples": {"targets": ["test-geospec"], "pr": "queue"},
              "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"], "pr": "queue"},
-             "native-hosts": {"tags": ["ci:native-hosts"], "pr": "queue"},
+             "native-darwin": {"targets": ["test:native-darwin"], "pr": "queue"},
              "native-linux": {"targets": ["test:native-linux"], "pr": "queue"},
              "viewer-parity": {"targets": ["test:viewer-parity"], "pr": "queue"},
              "desktop": {"tags": ["ci:desktop"]}}
@@ -216,17 +219,13 @@ jobs:
           geospec_examples=$(flag geospec-examples)
           cli_e2e=$(flag cli-e2e)
           browser_projects=$(jq -c '.browser' <<< "$lanes")
+          native_darwin=$(flag native-darwin)
+          native_darwin_projects=$(jq -r '."native-darwin" | join(",")' <<< "$lanes")
           native_linux=$(jq -r '."native-linux" | join(",")' <<< "$lanes")
-          native_hosts=$(jq -r 'if .["native-hosts"] == [] and .["native-linux"] == [] then "false" else "true" end' <<< "$lanes")
+          native_hosts=$(jq -r 'if .["native-darwin"] == [] and .["native-linux"] == [] then "false" else "true" end' <<< "$lanes")
           viewer_parity=$(flag viewer-parity)
           desktop=$(flag desktop)
           desktop_projects=$(jq -c '.desktop' <<< "$lanes")
-          # A push to `main` runs the native host rows from `native-hosts.yml`'s own push trigger:
-          # every Linux row, and the Intel row when affected since its last successful push run.
-          if [ "$GITHUB_EVENT_NAME" = push ]; then
-            native_hosts=false
-            native_linux=''
-          fi
           # `api-image` keeps the PR-only Docker smoke test on the PRs that affect the API image.
           api_image=$(flag api-image)
           {
@@ -240,6 +239,8 @@ jobs:
             echo "formal=$formal"
             echo "browser=$browser"
             echo "geospec-examples=$geospec_examples"
+            echo "native-darwin=$native_darwin"
+            echo "native-darwin-projects=$native_darwin_projects"
             echo "native-hosts=$native_hosts"
             echo "native-linux=$native_linux"
             echo "viewer-parity=$viewer_parity"
@@ -611,21 +612,37 @@ jobs:
     uses: ./.github/workflows/standalone-projects.yml
     secrets: inherit
 
-  # The Linux native host rows (`native-hosts.yml`), in the merge queue when the plan finds a
-  # `tag:ci:native-hosts` or `test:native-linux` project affected, with the affected
-  # `test:native-linux` projects. Its plan job is skipped when called; a push to `main`, the
-  # nightly and a dispatch run that workflow on their own. The required check waits for it.
+  # The darwin-arm64 native rows (`native-darwin.yml`), in the merge queue and on a push the queue
+  # did not prove, when the plan finds a `test:native-darwin` project affected, with those projects.
+  # The required check waits for it (throughput program Q-2).
+  native-darwin:
+    name: Native darwin
+    needs: [plan]
+    if: needs.plan.outputs.native-darwin == 'true'
+    permissions:
+      contents: 'read'
+    uses: ./.github/workflows/native-darwin.yml
+    with:
+      projects: ${{ needs.plan.outputs.native-darwin-projects }}
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
+
+  # The native host rows (`native-hosts.yml`), in the merge queue and on a push the queue did not
+  # prove, when the plan finds a `test:native-darwin` or `test:native-linux` project affected: the
+  # Linux rows with the affected `test:native-linux` projects, and the darwin-x64 row when a
+  # `test:native-darwin` project is affected. The required check waits for it (Q-3).
   native-hosts:
     name: Native hosts
     needs: [plan]
     if: needs.plan.outputs.native-hosts == 'true'
-    permissions: # The called workflow's plan job declares these, though it is skipped here
+    permissions:
       contents: 'read'
-      actions: 'read'
-      pull-requests: 'read'
     uses: ./.github/workflows/native-hosts.yml
     with:
       native-linux: ${{ needs.plan.outputs.native-linux }}
+      darwin-x64: ${{ needs.plan.outputs.native-darwin == 'true' }}
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
   # The viewer parity gate (`viewer-parity.yml`), in the merge queue and on a push the queue did
   # not prove, when the plan finds a `test:viewer-parity` project affected. The required check
@@ -640,8 +657,8 @@ jobs:
 
   # The required check. It passes only when the plan and every affected lane passed, and every
   # lane the plan selects too when this run needed it (browser, GeoSpec example contracts, CLI
-  # end-to-end, native hosts, viewer parity, formal, API tests, billing contracts): a skip of a
-  # lane the plan selected fails it. It waits for every lane, so a merge-queue run whose gate
+  # end-to-end, native darwin, native hosts, viewer parity, formal, API tests, billing contracts):
+  # a skip of a lane the plan selected fails it. It waits for every lane, so a merge-queue run whose gate
   # passed proves every lane it selected, which is the one proof `queue-verdict` reuses on the
   # push (Brain ci-audit 2026-11-12, F1). API tests are a required check of their own as well,
   # so the queue already waited for them; in the ten latest queue runs that ran formal and
@@ -649,7 +666,19 @@ jobs:
   affected:
     name: Run affected tasks
     needs:
-      [plan, affected-lane, browser, geospec-examples, cli-e2e, native-hosts, viewer-parity, formal, api, billing-e2e]
+      [
+        plan,
+        affected-lane,
+        browser,
+        geospec-examples,
+        cli-e2e,
+        native-darwin,
+        native-hosts,
+        viewer-parity,
+        formal,
+        api,
+        billing-e2e,
+      ]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -663,6 +692,8 @@ jobs:
           GEOSPEC_EXAMPLES_RESULT: ${{ needs.geospec-examples.result }}
           CLI_E2E_REQUIRED: ${{ needs.plan.outputs.cli-e2e }}
           CLI_E2E_RESULT: ${{ needs.cli-e2e.result }}
+          NATIVE_DARWIN_REQUIRED: ${{ needs.plan.outputs.native-darwin }}
+          NATIVE_DARWIN_RESULT: ${{ needs.native-darwin.result }}
           NATIVE_HOSTS_REQUIRED: ${{ needs.plan.outputs.native-hosts }}
           NATIVE_HOSTS_RESULT: ${{ needs.native-hosts.result }}
           VIEWER_PARITY_REQUIRED: ${{ needs.plan.outputs.viewer-parity }}
@@ -689,6 +720,7 @@ jobs:
           if [ "$BROWSER_REQUIRED" = true ]; then test "$BROWSER_RESULT" = success; fi
           if [ "$GEOSPEC_EXAMPLES_REQUIRED" = true ]; then test "$GEOSPEC_EXAMPLES_RESULT" = success; fi
           if [ "$CLI_E2E_REQUIRED" = true ]; then test "$CLI_E2E_RESULT" = success; fi
+          if [ "$NATIVE_DARWIN_REQUIRED" = true ]; then test "$NATIVE_DARWIN_RESULT" = success; fi
           if [ "$NATIVE_HOSTS_REQUIRED" = true ]; then test "$NATIVE_HOSTS_RESULT" = success; fi
           if [ "$VIEWER_PARITY_REQUIRED" = true ]; then test "$VIEWER_PARITY_RESULT" = success; fi
           if [ "$FORMAL_REQUIRED" = true ]; then test "$FORMAL_RESULT" = success; fi

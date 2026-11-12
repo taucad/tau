@@ -38,11 +38,9 @@ const draftBranches = (value: unknown): { readonly draft: unknown; readonly read
   return { draft: literals[0], ready: literals[1] };
 };
 
-const workflows = [
-  '.github/workflows/native-darwin.yml',
-  '.github/workflows/desktop-packaging.yml',
-  '.github/workflows/build123d-native.yml',
-] as const;
+/** The workflows a pull request push starts; `native-darwin.yml` starts only on its label (Q-2). */
+const workflows = ['.github/workflows/desktop-packaging.yml', '.github/workflows/build123d-native.yml'] as const;
+const nativeDarwin = '.github/workflows/native-darwin.yml';
 
 describe.each(workflows)('the pull request trigger of %s', (path) => {
   const { on, concurrency } = workflow(path);
@@ -57,10 +55,16 @@ describe.each(workflows)('the pull request trigger of %s', (path) => {
 });
 
 describe('macOS jobs on draft pull requests', () => {
-  it('should skip the native-darwin row on a draft', () => {
-    const { jobs } = workflow('.github/workflows/native-darwin.yml');
+  it('should run the native-darwin row on a pull request only when its label is added to a ready one', () => {
+    const { on, jobs } = workflow(nativeDarwin);
+    expect(on.pull_request?.types).toEqual(['labeled']);
     expect(jobs['native-darwin']?.['runs-on']).toBe('macos-26');
-    expect(jobs['native-darwin']?.if).toBe("needs.plan.outputs.projects != '' && !github.event.pull_request.draft");
+    expect(jobs['native-darwin']?.if).toBe(
+      "inputs.projects != '' || inputs.rows == true || (github.event_name == 'pull_request' && " +
+        "github.event.label.name == 'native-darwin' && !github.event.pull_request.draft)",
+    );
+    // The benchmark gates never run on a pull request: on the candidate gate, nightly and on dispatch.
+    expect(jobs['benchmarks']?.if).toBe("inputs.benchmarks == true || github.event_name == 'schedule'");
   });
 
   it('should skip the DMG window preview on a draft and keep only the Linux and Windows assembly legs', () => {
@@ -92,18 +96,21 @@ describe('macOS jobs on draft pull requests', () => {
     });
   });
 
-  it.each(workflows)('should gate every macOS job of %s by job or matrix, never by the workflow', (path) => {
-    const { jobs } = workflow(path);
-    for (const [name, job] of Object.entries(jobs)) {
-      const matrix = JSON.stringify(job.strategy?.matrix ?? {});
-      const mac = /macos/u.test(job['runs-on'] ?? '') || /macos/u.test(matrix);
-      if (!mac || name === 'benchmarks') {
-        // The benchmark gates run only nightly and on dispatch, never on a pull request.
-        continue;
+  it.each([...workflows, nativeDarwin])(
+    'should gate every macOS job of %s by job or matrix, never by the workflow',
+    (path) => {
+      const { jobs } = workflow(path);
+      for (const [name, job] of Object.entries(jobs)) {
+        const matrix = JSON.stringify(job.strategy?.matrix ?? {});
+        const mac = /macos/u.test(job['runs-on'] ?? '') || /macos/u.test(matrix);
+        if (!mac || name === 'benchmarks') {
+          // The benchmark gates run on the candidate gate, nightly and on dispatch, never on a pull request.
+          continue;
+        }
+        expect(`${job.if ?? ''} ${matrix}`, `${path} ${name}`).toContain('github.event.pull_request.draft');
       }
-      expect(`${job.if ?? ''} ${matrix}`, `${path} ${name}`).toContain('github.event.pull_request.draft');
-    }
-  });
+    },
+  );
 });
 
 describe('outdated pull request runs', () => {
@@ -118,10 +125,12 @@ describe('outdated pull request runs', () => {
     },
   );
 
-  it('should never cancel a native-darwin push to main, nightly or dispatch', () => {
-    const { group } = workflow('.github/workflows/native-darwin.yml').concurrency ?? {};
-    // Each event has its own group; pull requests are keyed per pull request.
-    expect(group).toContain('github.event_name');
-    expect(group).toContain('github.event.pull_request.number || github.ref');
+  it('should cancel only an outdated native-darwin label run, never a call, the nightly or a dispatch', () => {
+    const { group, 'cancel-in-progress': cancel } = workflow(nativeDarwin).concurrency ?? {};
+    // Pull requests are keyed per pull request; every other run by its own run id, so no caller cancels another.
+    expect(group).toBe(
+      `native-darwin-${expression("github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id")}`,
+    );
+    expect(cancel).toBe(expression("github.event_name == 'pull_request'"));
   });
 });

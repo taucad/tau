@@ -234,10 +234,28 @@ jobs:
     secrets:
       NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
+  # Charter D23 (throughput program Q-2): the `benchmark-native` gates pass on the candidate's own commit
+  # before its tag exists, beside the shell gate, so a candidate never ships a kernel that misses its
+  # integrity, runtime or budget gate. A red gate means no candidate this time, as a red shell row does.
+  benchmarks:
+    name: Native benchmark gate
+    needs: [prerelease]
+    if: needs.prerelease.outputs.release == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/native-darwin.yml
+    with:
+      ref: ${{ needs.prerelease.outputs.sha }}
+      benchmarks: true
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
+
   tag:
     name: Tag the staging desktop candidate
-    needs: [prerelease, shell, packaged]
-    if: needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success'
+    needs: [prerelease, shell, packaged, benchmarks]
+    if: >-
+      needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' &&
+      needs.packaged.result == 'success' && needs.benchmarks.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

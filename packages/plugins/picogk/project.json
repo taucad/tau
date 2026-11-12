@@ -3,7 +3,7 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/plugins/picogk",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package", "ci:native-hosts"],
+  "tags": ["scope:shared", "type:package"],
   "targets": {
     "test": {
       "dependsOn": [
@@ -17,6 +17,17 @@
     "test:native-darwin": {
       "executor": "nx:run-commands",
       "cache": false,
+      "inputs": [
+        "default",
+        "^default",
+        "{workspaceRoot}/.github/workflows/native-darwin.yml",
+        "{workspaceRoot}/.github/workflows/native-hosts.yml",
+        "{workspaceRoot}/scripts/src/check-standalone-project.ts",
+        "{workspaceRoot}/scripts/src/standalone-geometry.ts",
+        "{workspaceRoot}/apps/ui/app/constants/project.constants.ts",
+        "{workspaceRoot}/apps/ui/app/utils/kernel-libraries.ts",
+        "{workspaceRoot}/libs/tau-examples/src/standalone/picogk/**/*"
+      ],
       "metadata": {
         "description": "Tier 3b of PicoGK on darwin-arm64 (charter D27, D30; the native-darwin CI job): with TAU_PICOGK_CLOSURE=pinned the native fixture prepares the checked-in manifest's closure from its pinned origins (Microsoft's runtime and the published Tau layer, about 58 MB) instead of building the layer, the closure must equal the golden receipt, and every native suite runs on it behind the global-fetch tripwire."
       },
@@ -31,6 +42,7 @@
     "test:native-linux": {
       "executor": "nx:run-commands",
       "cache": false,
+      "inputs": ["default", "^default", "{workspaceRoot}/.github/workflows/native-hosts.yml"],
       "metadata": {
         "description": "Tier 3b of PicoGK on linux-x64 (glibc), the counterpart of test:native-darwin: with TAU_PICOGK_CLOSURE=pinned the native fixture prepares the checked-in manifest's linux-x64 closure from its pinned origins (Microsoft's runtime and the published Tau layer) instead of building the layer, the closure must equal the golden receipt's linux-x64-glibc entry, and every native suite runs on it behind the global-fetch tripwire. Until the manifest pins linux-x64 the suites skip; a sealed closure without a golden entry fails and prints the entry to record."
       },

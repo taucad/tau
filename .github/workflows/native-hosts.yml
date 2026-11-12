@@ -5,30 +5,24 @@
 # - Linux x64 and arm64 (glibc): prepare, read `selection.host` from the receipt, run the Build123d
 #   suites; on x64 also glibc 2.28 target acceptance (offline cold-store miss) and
 #   Alpine refusal (`blocked`, axis `libc`), each in a container, and the runner with libGL moved aside
-#   (`blocked`, `missing-system-library`, ruling X6). These run on every push to `main` and, through
-#   `ci.yml`, in the merge queue when its plan finds a `tag:ci:native-hosts` project (Build123d, PicoGK,
-#   the CLI) or a `test:native-linux` project affected. Never on a pull request: the queue proves them
-#   on the exact commit that lands (2026-11-10).
+#   (`blocked`, `missing-system-library`, ruling X6).
 # - Linux x64 (glibc) also runs the projects with a `test:native-linux` target, as `native-darwin.yml`
 #   runs `test:native-darwin`: PicoGK's pinned closure, prepared from the checked-in manifest's origins,
-#   must equal its golden receipt's `linux-x64-glibc` entry, and the native suites run on it. Selected
-#   through Nx: every such project nightly and on dispatch, the affected ones in the merge queue (from
-#   `ci.yml`'s plan), and on a push to `main` the ones affected since the last successful push run of
-#   this workflow.
+#   must equal its golden receipt's `linux-x64-glibc` entry, and the native suites run on it.
 # - macOS Intel (darwin-x64): the same prepare and suites, PicoGK's typed refusal on the `arch` axis
-#   and a refused `TAU_DEPENDENCY_TARGET`. Nightly, on dispatch, and on a push to `main` that affects
-#   Build123d, PicoGK or the CLI since the last successful push run of this workflow; never in the
-#   merge queue, so it keeps one macOS job (ruling X40); `macos-26-intel`, GitHub-hosted (ruling X39).
+#   and a refused `TAU_DEPENDENCY_TARGET`; `macos-26-intel`, GitHub-hosted (ruling X39).
 #
-# Called from `ci.yml` in the merge queue (`workflow_call`), the plan job is skipped: `ci.yml`'s plan
-# already selected the Linux rows and passes the affected `test:native-linux` projects as
-# `native-linux`, and its required check fails when the Linux rows do. A push, the nightly and a
-# dispatch run the plan here, and are not a required check, like `native-darwin.yml`.
+# Selection (throughput program Q-3, 2026-11-12): `ci.yml`'s plan calls this workflow (`workflow_call`)
+# in the merge queue, and on a push to `main` the queue did not already prove, when a project with a
+# `test:native-linux` or `test:native-darwin` target is affected. The Linux rows then run, with the
+# affected `test:native-linux` projects as `native-linux`; the Intel row runs when a `test:native-darwin`
+# project is affected (`darwin-x64`), the same selection as the darwin-arm64 row. `ci.yml`'s required
+# check fails when a row does. A push the queue proved reuses that verdict and runs nothing here
+# (ruling R-C); there is no push trigger. Never on a pull request. The nightly and a dispatch run every
+# row: the nightly stays until the drift check (Q-7) takes it over.
 name: Native hosts
 
 on:
-  push:
-    branches: [main]
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
@@ -38,6 +32,14 @@ on:
         description: The affected `test:native-linux` projects, comma-separated, from `ci.yml`'s plan.
         type: string
         required: true
+      darwin-x64:
+        description: Run the darwin-x64 row (a `test:native-darwin` project is affected).
+        type: boolean
+        default: false
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN:
+        description: Read token of the Nx remote cache; without it every build dependency runs
+        required: false
 
 permissions:
   contents: read
@@ -53,107 +55,17 @@ env:
   NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
   NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
-# Pushes to `main` share one group and are never cancelled once running: a newer push replaces the
-# run still waiting for a runner, so `main` queues at most one run behind the running one (ruling
-# X60). The nightly and each dispatch keep groups of their own, so a push never cancels them. The
-# group names this workflow literally: called from `ci.yml`, `github.workflow` is `CI`, and a group
-# equal to the caller's would cancel the call. Each merge-queue entry has a ref of its own.
+# Every run is keyed by its own run id: called from `ci.yml`, whose own group already holds the run, a
+# group shared between pushes would let a newer push replace an older push's pending call. The group
+# names this workflow literally: called, `github.workflow` is `CI`, and a group equal to the caller's
+# would cancel the call.
 concurrency:
-  group: native-hosts-${{ github.event_name }}-${{ github.ref }}
+  group: native-hosts-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
-  plan:
-    name: Select the native host rows
-    # In the merge queue `ci.yml`'s plan selected the rows and called this workflow.
-    if: github.event_name != 'merge_group'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions: # Required for nrwl/nx-set-shas to read workflow runs
-      contents: read
-      actions: read
-      pull-requests: read
-    outputs:
-      linux: ${{ steps.plan.outputs.linux }}
-      intel: ${{ steps.plan.outputs.intel }}
-      native-linux: ${{ steps.plan.outputs.native-linux }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-        with:
-          save-pnpm-store: 'false'
-
-      # The base of a push to `main`: the newest successful push run of this workflow on `main` whose
-      # commit is an ancestor of this one. A failed run, or one a newer push replaced while it waited
-      # for a runner, never becomes the base, so its landings stay in the next push's range. Empty
-      # when none is found or the API is unreachable, and the plan then selects every row.
-      - name: Find the last successful push run of this workflow
-        id: push-base
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          WORKFLOW: native-hosts.yml
-        run: |
-          shas=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW/runs?branch=main&event=push&status=success&per_page=30" \
-            --jq '.workflow_runs[].head_sha') || shas=''
-          base=''
-          for sha in $shas; do
-            if [ "$sha" != "$GITHUB_SHA" ] && git merge-base --is-ancestor "$sha" "$GITHUB_SHA" 2> /dev/null; then
-              base=$sha
-              break
-            fi
-          done
-          echo "Last successful push run of $WORKFLOW on main: ${base:-none}"
-          echo "sha=$base" >> "$GITHUB_OUTPUT"
-
-      # Nightly and on dispatch, every row. On a push to `main` the Linux rows always run; the Intel
-      # row runs when Build123d, PicoGK or the CLI is affected since the push base, and `native-linux`
-      # lists the `test:native-linux` projects affected since it (every row when there is no base or
-      # the push changes this workflow). `tail -1` drops Nx's log lines.
-      - name: Select the rows
-        id: plan
-        env:
-          PUSH_BASE: ${{ steps.push-base.outputs.sha }}
-        run: |
-          set -o pipefail
-          every=true
-          if [ "$GITHUB_EVENT_NAME" = push ]; then
-            if [ -z "$PUSH_BASE" ]; then
-              echo '::notice title=native-hosts plan::No earlier successful push run on main; every row runs.'
-            elif ! git diff --quiet "$PUSH_BASE" "$GITHUB_SHA" -- .github/workflows/native-hosts.yml; then
-              echo '::notice title=native-hosts plan::The push changes this workflow; every row runs.'
-            else
-              every=false
-            fi
-          fi
-          if [ "$every" = true ]; then
-            native=$(pnpm nx show projects --with-target test:native-linux --json | tail -1)
-            echo "Native linux-x64 rows: $native"
-            echo "native-linux=$(jq -r 'join(",")' <<< "$native")" >> "$GITHUB_OUTPUT"
-            echo "linux=true" >> "$GITHUB_OUTPUT"
-            echo "intel=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          range=(--base="$PUSH_BASE" --head="$GITHUB_SHA")
-          projects=$(pnpm nx show projects --affected "${range[@]}" --projects tag:ci:native-hosts --json | tail -1)
-          echo "Affected native host projects: $projects"
-          native=$(pnpm nx show projects --affected "${range[@]}" --with-target test:native-linux --json | tail -1)
-          echo "Native linux-x64 rows: $native"
-          echo "native-linux=$(jq -r 'join(",")' <<< "$native")" >> "$GITHUB_OUTPUT"
-          echo "linux=true" >> "$GITHUB_OUTPUT"
-          echo "intel=$(jq -r 'length > 0' <<< "$projects")" >> "$GITHUB_OUTPUT"
-
   linux:
     name: Native kernels on ${{ matrix.target }}
-    needs: [plan]
-    # In the merge queue the plan is skipped and `ci.yml` called this workflow for these rows.
-    if: ${{ !cancelled() && (github.event_name == 'merge_group' || needs.plan.outputs.linux == 'true') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -169,8 +81,6 @@ jobs:
     env:
       TARGET: ${{ matrix.target }}
       ARCH: ${{ matrix.arch }}
-      # `ci.yml`'s selection when it called this workflow, this workflow's plan otherwise.
-      NATIVE_LINUX: ${{ inputs.native-linux || needs.plan.outputs.native-linux }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -181,6 +91,22 @@ jobs:
         uses: ./.github/actions/setup-nx
         with:
           save-pnpm-store: ${{ github.event_name == 'push' }}
+
+      # `ci.yml`'s affected `test:native-linux` projects when it called this workflow; every project
+      # with the target on the nightly and a dispatch. `tail -1` drops Nx's log lines.
+      - name: Select the linux-x64 native rows
+        if: matrix.arch == 'x64'
+        env:
+          CALLED: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
+          PLANNED: ${{ inputs.native-linux }}
+        run: |
+          set -o pipefail
+          native=$PLANNED
+          if [ "$CALLED" != true ]; then
+            native=$(pnpm nx show projects --with-target test:native-linux --json | tail -1 | jq -r 'join(",")')
+          fi
+          echo "Native linux-x64 rows: ${native:-none}"
+          echo "NATIVE_LINUX=$native" >> "$GITHUB_ENV"
 
       - name: Setup Linux sandbox prerequisites
         id: sandbox
@@ -366,8 +292,8 @@ jobs:
 
   intel:
     name: Native kernels on darwin-x64
-    needs: [plan]
-    if: needs.plan.outputs.intel == 'true'
+    # Called: when `ci.yml`'s plan found a `test:native-darwin` project affected. Every nightly and dispatch.
+    if: inputs.darwin-x64 == true || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: macos-26-intel
     timeout-minutes: 60
     env:
@@ -411,8 +337,9 @@ jobs:
       - name: Fill the seed from the pinned origins
         run: pnpm nx run build123d:seed --outputStyle=static
 
+      # A cache saved in the merge queue is scoped to the queue's ref and reaches no later run.
       - name: Save the seed
-        if: steps.seed.outputs.cache-hit != 'true'
+        if: steps.seed.outputs.cache-hit != 'true' && github.event_name != 'merge_group'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: out/cache/build123d-seed

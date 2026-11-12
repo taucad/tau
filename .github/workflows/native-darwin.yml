@@ -2,38 +2,60 @@
 # `tau mcp` and `tau serve` each prepare Build123d and PicoGK with real bytes and evaluate a
 # real `.py` and `.cs` model to geometry, with no egress from the workers; Build123d's closure
 # sealed from the digest-keyed seed and PicoGK's pinned closure each equal their golden receipt,
-# and the kernels' native suites run on them. The projects with a `test:native-darwin` target
-# select it through Nx, never a path filter: on every pull request that affects one, on every push
-# to `main` that affects one since the last successful push run of this workflow, and on every
-# dispatch. A consumer row (charter W22, tier 8) joins by declaring the target.
+# and the kernels' native suites run on them. A consumer row (charter W22, tier 8) joins by
+# declaring the `test:native-darwin` target.
 #
 # The same job then runs the nuget row of the standalone-project oracles (charter W23, D34, I14;
 # go-live row PRJ-1), whose other rows run in `ci.yml`: the PicoGK project Tau creates restores and
-# runs outside Tau with the .NET SDK alone and matches `tau export` of the same project. Its selection
-# was always this row's, so it shares the runner and a pull request keeps one macOS job (ruling X60).
+# runs outside Tau with the .NET SDK alone and matches `tau export` of the same project. The sources
+# it reads outside the native closure are inputs of `picogk:test:native-darwin`, so Nx counts a change
+# to them as affecting that target and the plan selects the row (ruling X60: one macOS job).
 #
-# Nightly, and on dispatch with `benchmarks`, the projects with a `benchmark-native` target run
-# it as a gate (D23): each script exits non-zero on an integrity, runtime or budget failure.
+# Selection (throughput program Q-2, 2026-11-12): `ci.yml`'s plan calls this workflow (`workflow_call`)
+# with the affected projects that have a `test:native-darwin` target, in the merge queue and on a push
+# to `main` the queue did not already prove; its required check fails when the row does. A push the
+# queue proved reuses that verdict and runs nothing here. Never on a pull request push: adding the
+# `native-darwin` label to a ready pull request runs every row once on its head, for an early macOS
+# signal; label it again after a later push. A dispatch runs every row.
 #
-# A workflow of its own so that `ci.yml` finishes with its Linux lanes: `release-desktop-staging.yml`
-# starts from a successful `ci.yml` push run, so a macOS queue here no longer delays a staging
-# candidate and a native failure no longer blocks one. The row still reports its own status on
-# `main` and on pull requests. Not a required check: the macOS queue must never hold a merge
-# (ruling X10). A pull request run that Dependabot itself triggered never requests a macOS runner.
+# The `benchmark-native` targets run as gates (D23): on every staging desktop candidate
+# (`release-desktop-staging.yml` calls this workflow with `benchmarks` and the candidate's commit),
+# nightly until two candidates have run them green (Q-2's retirement rule), and on dispatch with
+# `benchmarks`. Each script exits non-zero on an integrity, runtime or budget failure.
 name: Native darwin
 
 on:
-  push:
-    branches: [main]
+  workflow_call:
+    inputs:
+      projects:
+        description: The affected `test:native-darwin` projects, comma-separated, from `ci.yml`'s plan.
+        type: string
+        default: ''
+      benchmarks:
+        description: Run the benchmark-native gates (the staging candidate gate).
+        type: boolean
+        default: false
+      ref:
+        description: The commit to check out (a staging candidate's); the caller's commit when empty.
+        type: string
+        default: ''
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN:
+        description: Read token of the Nx remote cache; without it every build dependency runs
+        required: false
   pull_request:
-    # `ready_for_review` so a draft, which requests no macOS runner, gets its rows once it is ready.
-    types: [opened, synchronize, reopened, ready_for_review]
+    # The label alone: a pull request push starts nothing here (Brain ci-audit 2026-11-12, F6).
+    types: [labeled]
     branches-ignore:
       - production
   schedule:
-    - cron: '41 15 * * *' # 15:41 UTC, after the e2e nightly has its macOS runner
+    - cron: '41 15 * * *' # 15:41 UTC, the benchmark gates only; deleted after two green candidate gates (Q-2)
   workflow_dispatch:
     inputs:
+      rows:
+        description: 'Run every test:native-darwin row'
+        type: boolean
+        default: true
       benchmarks:
         description: 'Also run the benchmark-native gates'
         type: boolean
@@ -53,113 +75,22 @@ env:
   NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
   NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
-# A newer push to a pull request cancels its outdated run. Pushes to `main` share one group and are
-# never cancelled once running: a newer push replaces the run still waiting for a runner, so `main`
-# queues at most one run behind the running one (ruling X60). The nightly and each dispatch keep
-# groups of their own, so a push never cancels them.
+# A newer label run on a pull request cancels its outdated one. Every other run is keyed by its own
+# run id: called from `ci.yml` or the release workflow, a group shared with another caller's run would
+# let one cancel the other's call, and the caller's own group already orders its runs.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: native-darwin-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  plan:
-    name: Select the native rows
-    if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions: # Required for nrwl/nx-set-shas to read workflow runs
-      contents: read
-      actions: read
-      pull-requests: read
-    outputs:
-      projects: ${{ steps.plan.outputs.projects }}
-      benchmarks: ${{ steps.plan.outputs.benchmarks }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-        with:
-          save-pnpm-store: 'false'
-
-      # The base of a push to `main`: the newest successful push run of this workflow on `main` whose
-      # commit is an ancestor of this one. A failed run, or one a newer push replaced while it waited
-      # for a runner, never becomes the base, so its landings stay in the next push's range. Empty
-      # when none is found or the API is unreachable, and the plan then selects every project.
-      - name: Find the last successful push run of this workflow
-        id: push-base
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          WORKFLOW: native-darwin.yml
-        run: |
-          shas=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW/runs?branch=main&event=push&status=success&per_page=30" \
-            --jq '.workflow_runs[].head_sha') || shas=''
-          base=''
-          for sha in $shas; do
-            if [ "$sha" != "$GITHUB_SHA" ] && git merge-base --is-ancestor "$sha" "$GITHUB_SHA" 2> /dev/null; then
-              base=$sha
-              break
-            fi
-          done
-          echo "Last successful push run of $WORKFLOW on main: ${base:-none}"
-          echo "sha=$base" >> "$GITHUB_OUTPUT"
-
-      # On a push to `main`, the projects with the target affected since that base, and every one
-      # when there is none or the push changes a path of FULL_ROW_PATHS: this workflow, and the
-      # sources outside the native closure that the nuget standalone oracle (PRJ-1, the job's last
-      # steps) reads. Every project on a dispatch; the affected ones on a pull request; none on the
-      # nightly (it runs only the gates). `pipefail` so a failing `nx show projects` fails the step;
-      # `tail -1` drops Nx's log lines.
-      - name: Select the projects with a test:native-darwin target
-        id: plan
-        env:
-          BENCHMARKS: ${{ github.event_name == 'schedule' || inputs.benchmarks == true }}
-          PUSH_BASE: ${{ steps.push-base.outputs.sha }}
-          FULL_ROW_PATHS: >-
-            .github/workflows/native-darwin.yml
-            scripts/src/check-standalone-project.ts
-            scripts/src/standalone-geometry.ts
-            apps/ui/app/constants/project.constants.ts
-            apps/ui/app/utils/kernel-libraries.ts
-            libs/tau-examples/src/standalone/picogk
-        run: |
-          set -o pipefail
-          read -ra full_row_paths <<< "$FULL_ROW_PATHS"
-          case "$GITHUB_EVENT_NAME" in
-            push)
-              if [ -z "$PUSH_BASE" ]; then
-                echo '::notice title=native-darwin plan::No earlier successful push run on main; every row runs.'
-                projects=$(pnpm nx show projects --with-target test:native-darwin --json | tail -1)
-              elif ! git diff --quiet "$PUSH_BASE" "$GITHUB_SHA" -- "${full_row_paths[@]}"; then
-                echo '::notice title=native-darwin plan::The push changes this workflow or the nuget oracle; every row runs.'
-                projects=$(pnpm nx show projects --with-target test:native-darwin --json | tail -1)
-              else
-                projects=$(pnpm nx show projects --affected --base="$PUSH_BASE" --head="$GITHUB_SHA" --with-target test:native-darwin --json | tail -1)
-              fi
-              ;;
-            workflow_dispatch) projects=$(pnpm nx show projects --with-target test:native-darwin --json | tail -1) ;;
-            pull_request) projects=$(pnpm nx show projects --affected --with-target test:native-darwin --json | tail -1) ;;
-            *) projects='[]' ;;
-          esac
-          echo "Native darwin-arm64 rows: $projects"
-          echo "projects=$(jq -r 'join(",")' <<< "$projects")" >> "$GITHUB_OUTPUT"
-          benchmarks='[]'
-          if [ "$BENCHMARKS" = true ]; then
-            benchmarks=$(pnpm nx show projects --with-target benchmark-native --json | tail -1)
-          fi
-          echo "Benchmark gates: $benchmarks"
-          echo "benchmarks=$(jq -r 'join(",")' <<< "$benchmarks")" >> "$GITHUB_OUTPUT"
-
   native-darwin:
     name: Native kernels on darwin-arm64
-    needs: [plan]
-    # Not on a draft pull request: the row runs once it is marked ready for review.
-    if: needs.plan.outputs.projects != '' && !github.event.pull_request.draft
+    # The plan's projects when called, every row on a dispatch that asks for them or when the label is added
+    # to a ready pull request. Never on a draft, and never for another label.
+    if: >-
+      inputs.projects != '' || inputs.rows == true ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'native-darwin' &&
+      !github.event.pull_request.draft)
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -175,6 +106,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       # Restore-only on pull requests: saving a missed 1.1 GB macOS store adds about 2.5 minutes.
@@ -183,6 +115,21 @@ jobs:
         with:
           node-version: '24.10.0'
           save-pnpm-store: ${{ github.event_name == 'push' }}
+
+      # `ci.yml`'s plan when it called this workflow; otherwise every project with the target.
+      # `pipefail` so a failing `nx show projects` fails the step; `tail -1` drops Nx's log lines.
+      - name: Select the projects with a test:native-darwin target
+        env:
+          PLANNED: ${{ inputs.projects }}
+        run: |
+          set -o pipefail
+          projects=$PLANNED
+          if [ -z "$projects" ]; then
+            projects=$(pnpm nx show projects --with-target test:native-darwin --json | tail -1 | jq -r 'join(",")')
+          fi
+          test -n "$projects"
+          echo "Native darwin-arm64 rows: $projects"
+          echo "PROJECTS=$projects" >> "$GITHUB_ENV"
 
       # Build123d's pinned darwin-arm64 closure (about 230 MB of wheels and CPython) is the seed,
       # cached under its digests in the manifest and the runner's macOS major version, so a seed
@@ -218,8 +165,9 @@ jobs:
       - name: Fill the seed from the pinned origins
         run: pnpm nx run-many -t seed --outputStyle=static
 
+      # A cache saved in the merge queue is scoped to the queue's ref and reaches no later run.
       - name: Save the seed
-        if: steps.seed.outputs.cache-hit != 'true'
+        if: steps.seed.outputs.cache-hit != 'true' && github.event_name != 'merge_group'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: out/cache/build123d-seed
@@ -230,7 +178,6 @@ jobs:
       - name: Run the darwin-arm64 native rows
         id: rows
         env:
-          PROJECTS: ${{ needs.plan.outputs.projects }}
           TAU_TEST_FRAME_LOG_DIR: ${{ runner.temp }}/native-darwin-frames
           TAU_GOLDEN_SUMMARY_FILE: ${{ runner.temp }}/golden-receipts.md
           # Declaration bundling exceeds Node 24's default 2 GiB heap on this runner.
@@ -291,19 +238,19 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # The two benchmark-native scripts as gates (charter D23, W15): nightly and on dispatch, on a
-  # macos-26 runner of their own so a long soak never delays a pull request's row. Build123d's
-  # benchmark runs the closure sealed from the cached seed; PicoGK's builds its worker first.
+  # The benchmark-native scripts as gates (charter D23, W15): on the staging candidate gate, nightly
+  # and on dispatch, on a macos-26 runner of their own so a long soak never delays the native row.
+  # Build123d's benchmark runs the closure sealed from the cached seed; PicoGK's builds its worker first.
   benchmarks:
     name: Native benchmark gates on darwin-arm64
-    needs: [plan]
-    if: needs.plan.outputs.benchmarks != ''
+    if: inputs.benchmarks == true || github.event_name == 'schedule'
     runs-on: macos-26
     timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - name: Setup Nx Environment
@@ -312,14 +259,16 @@ jobs:
           node-version: '24.10.0'
           save-pnpm-store: 'false'
 
+      # Every project with a `benchmark-native` target; `tail -1` drops Nx's log lines.
       - name: Run the benchmark gates
-        env:
-          PROJECTS: ${{ needs.plan.outputs.benchmarks }}
         run: |
           set -o pipefail
+          projects=$(pnpm nx show projects --with-target benchmark-native --json | tail -1 | jq -r 'join(",")')
+          test -n "$projects"
+          echo "Benchmark gates: $projects"
           mkdir -p "$RUNNER_TEMP/benchmarks"
           status=0
-          for project in ${PROJECTS//,/ }; do
+          for project in ${projects//,/ }; do
             echo "::group::$project:benchmark-native"
             if pnpm nx run "$project:benchmark-native" --outputStyle=static | tee "$RUNNER_TEMP/benchmarks/$project.log"; then
               result=pass

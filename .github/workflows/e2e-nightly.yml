@@ -320,8 +320,9 @@ jobs:
   # Consumer parity (charter D33, W22, gate T16): one row per consumer of native dependency
   # resolution, in this run's summary. It runs no suite: each row reads the latest conclusion of
   # the jobs that already run its oracles, this run's for the nightly's own (or the latest nightly
-  # on `main` when this run skipped them), `main`'s for ci.yml and native-darwin.yml, and the latest
-  # on any ref for the path-filtered pull-request workflows. A consumer whose oracle runs nowhere
+  # on `main` when this run skipped them), `main`'s for ci.yml, the merge queue's for the darwin-arm64
+  # native row (`ci.yml` calls native-darwin.yml there), and the latest on any ref for the
+  # path-filtered pull-request workflows. A consumer whose oracle runs nowhere
   # is a failing row, and any failing row fails this job.
   consumer-parity:
     name: Consumer parity (W22)

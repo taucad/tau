@@ -36,6 +36,7 @@ type Job = {
   readonly steps?: readonly Step[];
   readonly uses?: string;
   readonly with?: Record<string, string>;
+  readonly secrets?: Record<string, string>;
   readonly env?: Record<string, string>;
 };
 type Workflow = {
@@ -51,6 +52,7 @@ type Workflow = {
 const ci = load(read('.github/workflows/ci.yml')) as Workflow;
 const staging = load(read('.github/workflows/staging.yml')) as Workflow;
 const nativeHosts = load(read('.github/workflows/native-hosts.yml')) as Workflow;
+const nativeDarwin = load(read('.github/workflows/native-darwin.yml')) as Workflow;
 const viewerParity = load(read('.github/workflows/viewer-parity.yml')) as Workflow;
 
 /** A GitHub Actions `${{ … }}` expression, built so the source holds no template-like string literal. */
@@ -153,7 +155,7 @@ describe('ci.yml affected-only lanes', () => {
       formal: { targets: ['formal'], pr: 'queue' },
       'geospec-examples': { targets: ['test-geospec'], pr: 'queue' },
       browser: { tags: ['ci:browser'], targets: ['verify-browser'], pr: 'queue' },
-      'native-hosts': { tags: ['ci:native-hosts'], pr: 'queue' },
+      'native-darwin': { targets: ['test:native-darwin'], pr: 'queue' },
       'native-linux': { targets: ['test:native-linux'], pr: 'queue' },
       'viewer-parity': { targets: ['test:viewer-parity'], pr: 'queue' },
       desktop: { tags: ['ci:desktop'] },
@@ -211,6 +213,7 @@ describe('ci.yml affected-only lanes', () => {
       'browser',
       'geospec-examples',
       'cli-e2e',
+      'native-darwin',
       'native-hosts',
       'viewer-parity',
       'formal',
@@ -419,6 +422,7 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
   const gateStep = ci.jobs['affected']?.steps?.[0];
 
   it.each([
+    ['native-darwin', './.github/workflows/native-darwin.yml'],
     ['native-hosts', './.github/workflows/native-hosts.yml'],
     ['viewer-parity', './.github/workflows/viewer-parity.yml'],
   ])('should call the %s workflow only when the plan selected its lane', (job, workflow) => {
@@ -426,23 +430,49 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     expect(definition?.uses).toBe(workflow);
     expect(definition?.needs).toEqual(['plan']);
     expect(definition?.if).toBe(`needs.plan.outputs.${job} == 'true'`);
-    expect(affectedPlanOutputs()).toContain(job);
+    expect(ci.jobs['plan']?.outputs?.[job]).toBe(expression(`steps.plan.outputs.${job}`));
   });
 
-  it('should pass the affected test:native-linux projects to the native host rows', () => {
-    expect(ci.jobs['native-hosts']?.with).toEqual({ 'native-linux': expression('needs.plan.outputs.native-linux') });
-    expect(ci.jobs['plan']?.outputs?.['native-linux']).toBe(expression('steps.plan.outputs.native-linux'));
-    expect(planScript).toContain(`native_linux=$(jq -r '."native-linux" | join(",")' <<< "$lanes")`);
-    // The Linux rows run when a native host project or a native-linux project is affected.
+  it('should select the native rows by target alone, never by tag or project', () => {
+    for (const lane of ['native-darwin', 'native-linux']) {
+      expect(laneSelectors[lane]?.tags, lane).toBeUndefined();
+      expect(laneSelectors[lane]?.pr, lane).toBe('queue');
+    }
+    expect(affectedPlanOutputs()).toContain('native-darwin');
+    // The host rows start when either native lane selected a project.
     expect(planScript).toContain(
-      `native_hosts=$(jq -r 'if .["native-hosts"] == [] and .["native-linux"] == [] then "false" else "true" end' <<< "$lanes")`,
+      `native_hosts=$(jq -r 'if .["native-darwin"] == [] and .["native-linux"] == [] then "false" else "true" end' <<< "$lanes")`,
     );
-    expect(planScript).toContain('echo "native-linux=$native_linux"');
   });
 
-  it('should fail the required check when a selected native-host, viewer-parity, formal or service lane did not pass', () => {
+  it('should pass each called native workflow its rows and the cache read token', () => {
+    const token = expression('secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN');
+    expect(ci.jobs['native-darwin']?.with).toEqual({
+      projects: expression('needs.plan.outputs.native-darwin-projects'),
+    });
+    expect(ci.jobs['native-hosts']?.with).toEqual({
+      'native-linux': expression('needs.plan.outputs.native-linux'),
+      'darwin-x64': expression("needs.plan.outputs.native-darwin == 'true'"),
+    });
+    for (const job of ['native-darwin', 'native-hosts']) {
+      expect(ci.jobs[job]?.secrets, job).toEqual({ NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: token });
+    }
+    expect(nativeDarwin.on?.workflow_call?.inputs?.['projects']?.type).toBe('string');
+    expect(nativeHosts.on?.workflow_call?.inputs?.['native-linux']?.type).toBe('string');
+    expect(nativeHosts.on?.workflow_call?.inputs?.['darwin-x64']?.type).toBe('boolean');
+    for (const [key, list] of [
+      ['native-darwin-projects', 'native-darwin'],
+      ['native-linux', 'native-linux'],
+    ] as const) {
+      expect(ci.jobs['plan']?.outputs?.[key]).toBe(expression(`steps.plan.outputs.${key}`));
+      expect(planScript).toContain(`=$(jq -r '."${list}" | join(",")' <<< "$lanes")`);
+    }
+  });
+
+  it('should fail the required check when a selected native, viewer-parity, formal or service lane did not pass', () => {
     const check = gateStep?.run ?? '';
     for (const [key, job, output] of [
+      ['NATIVE_DARWIN', 'native-darwin', 'native-darwin'],
       ['NATIVE_HOSTS', 'native-hosts', 'native-hosts'],
       ['VIEWER_PARITY', 'viewer-parity', 'viewer-parity'],
       ['FORMAL', 'formal', 'formal'],
@@ -455,11 +485,14 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     }
   });
 
-  it('should leave a push to the native-hosts workflow and skip viewer parity on a reused queue verdict', () => {
+  it('should leave the native rows of a push to the reused queue verdict, with no push trigger of their own', () => {
     expect(planScript).toContain('viewer_parity=$(flag viewer-parity)');
-    const push = planScript.slice(planScript.indexOf('if [ "$GITHUB_EVENT_NAME" = push ]; then'));
-    expect(push.slice(0, push.indexOf('\nfi\n'))).toMatch(/^\s*native_hosts=false$/mu);
-    expect(nativeHosts.on?.push).toBeDefined();
+    expect(planScript).toContain('native_darwin=$(flag native-darwin)');
+    // No event special-cases a native lane: a reused verdict empties every lane by one rule.
+    expect(planScript).not.toMatch(/^\s*native_(?:hosts|darwin|linux)=(?:false|'')$/mu);
+    for (const workflow of [nativeHosts, nativeDarwin, viewerParity]) {
+      expect(workflow.on?.push).toBeUndefined();
+    }
   });
 
   it.each([
@@ -470,6 +503,14 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     expect(workflow.on?.pull_request).toBeUndefined();
     // A group equal to the caller's (`github.workflow` is `CI` in a called workflow) would cancel the call.
     expect(workflow.concurrency?.group ?? '').not.toContain('github.workflow');
+  });
+
+  it('should start native-darwin on a pull request only by its label, and never cancel a caller', () => {
+    expect(nativeDarwin.on?.pull_request?.types).toEqual(['labeled']);
+    expect(nativeDarwin.jobs['plan']).toBeUndefined();
+    expect(nativeDarwin.concurrency?.group ?? '').not.toContain('github.workflow');
+    expect(nativeDarwin.concurrency?.group ?? '').toContain('github.run_id');
+    expect(nativeHosts.concurrency?.group).toBe(`native-hosts-${expression('github.run_id')}`);
   });
 
   it('should select viewer parity through the graph, not hand-kept paths', () => {
@@ -485,17 +526,43 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     ]);
   });
 
-  it('should skip the native-hosts plan in the merge queue and take the rows from ci.yml', () => {
-    expect(nativeHosts.on?.workflow_call?.inputs?.['native-linux']?.type).toBe('string');
-    expect(nativeHosts.jobs['plan']?.if).toBe("github.event_name != 'merge_group'");
-    expect(nativeHosts.jobs['linux']?.if).toBe(
-      expression("!cancelled() && (github.event_name == 'merge_group' || needs.plan.outputs.linux == 'true')"),
+  it('should make the native workflows and the nuget oracle sources inputs of the native targets', () => {
+    // Nx counts a change to a `{workspaceRoot}/` input as affecting the project, so the plan selects its row.
+    type Targets = Record<string, { readonly inputs?: readonly string[] }>;
+    const targets = (path: string): Targets =>
+      (JSON.parse(read(`${path}/project.json`)) as { readonly targets: Targets }).targets;
+    const workflows = [
+      '{workspaceRoot}/.github/workflows/native-darwin.yml',
+      '{workspaceRoot}/.github/workflows/native-hosts.yml',
+    ];
+    for (const path of ['packages/plugins/build123d', 'packages/plugins/picogk', 'apps/cli-e2e']) {
+      expect(targets(path)['test:native-darwin']?.inputs, path).toEqual(
+        expect.arrayContaining(['default', '^default', ...workflows]),
+      );
+    }
+    expect(targets('packages/plugins/picogk')['test:native-darwin']?.inputs).toEqual(
+      expect.arrayContaining([
+        '{workspaceRoot}/scripts/src/check-standalone-project.ts',
+        '{workspaceRoot}/scripts/src/standalone-geometry.ts',
+        '{workspaceRoot}/apps/ui/app/constants/project.constants.ts',
+        '{workspaceRoot}/apps/ui/app/utils/kernel-libraries.ts',
+        '{workspaceRoot}/libs/tau-examples/src/standalone/picogk/**/*',
+      ]),
     );
-    expect(nativeHosts.jobs['linux']?.env?.['NATIVE_LINUX']).toBe(
-      expression('inputs.native-linux || needs.plan.outputs.native-linux'),
+    expect(targets('packages/plugins/picogk')['test:native-linux']?.inputs).toEqual(
+      expect.arrayContaining(['{workspaceRoot}/.github/workflows/native-hosts.yml']),
     );
-    // The Intel row never runs in the queue: a skipped plan leaves its output empty.
-    expect(nativeHosts.jobs['intel']?.if).toBe("needs.plan.outputs.intel == 'true'");
+  });
+
+  it('should run the host rows the caller selected, and every row on the nightly and a dispatch', () => {
+    expect(nativeHosts.jobs['plan']).toBeUndefined();
+    expect(nativeHosts.jobs['linux']?.if).toBeUndefined();
+    expect(nativeHosts.jobs['intel']?.if).toBe(
+      "inputs.darwin-x64 == true || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+    );
+    const select = nativeHosts.jobs['linux']?.steps?.find((step) => step.name === 'Select the linux-x64 native rows');
+    expect(select?.env?.['PLANNED']).toBe(expression('inputs.native-linux'));
+    expect(select?.run).toContain('pnpm nx show projects --with-target test:native-linux --json');
   });
 });
 
@@ -795,9 +862,9 @@ describe('plan lane selection', () => {
     cli: {
       root: 'packages/cli',
       type: 'lib',
-      tags: ['ci:native-hosts'],
       targets: ['test:scenarios', 'test-geospec', 'test:native-linux'],
     },
+    kernel: { root: 'packages/plugins/kernel', type: 'lib', targets: ['test:native-darwin', 'test:native-linux'] },
   };
   const everything = Object.keys(nodes).filter((name) => name !== 'workspace');
 
@@ -927,12 +994,48 @@ describe('plan lane selection', () => {
     expect(outputs['api']).toBe('true');
     // A queue-rule lane stays in the queue even when the diff touches its project.
     expect(outputs['billing']).toBe('false');
-    for (const lane of ['formal', 'browser', 'geospec-examples', 'cli-e2e', 'native-hosts', 'viewer-parity']) {
+    for (const lane of [
+      'formal',
+      'browser',
+      'geospec-examples',
+      'cli-e2e',
+      'native-darwin',
+      'native-hosts',
+      'viewer-parity',
+    ]) {
       expect(outputs[lane], lane).toBe('false');
     }
     expect(outputs['native-linux']).toBe('');
+    expect(outputs['native-darwin-projects']).toBe('');
     expect(outputs['browser-projects']).toBe('[]');
   });
+
+  it.each(['merge_group', 'push'])(
+    'should select the native rows from the affected target owners on a %s the queue did not prove',
+    (event) => {
+      const darwin = plan(event, { affected: ['kernel', 'cli'], files: [] });
+      expect(darwin.status, darwin.stderr).toBe(0);
+      expect(darwin.outputs).toMatchObject({
+        'native-darwin': 'true',
+        'native-darwin-projects': 'kernel',
+        'native-hosts': 'true',
+        'native-linux': 'cli,kernel',
+      });
+      // A `test:native-linux` project alone starts the Linux host rows, not the macOS rows.
+      const linux = plan(event, { affected: ['cli'], files: [] });
+      expect(linux.status, linux.stderr).toBe(0);
+      expect(linux.outputs).toMatchObject({
+        'native-darwin': 'false',
+        'native-darwin-projects': '',
+        'native-hosts': 'true',
+        'native-linux': 'cli',
+      });
+      // A change that affects no native target owner (documentation) runs no native row.
+      const docs = plan(event, { affected: ['workspace'], files: ['docs/readme.md'] });
+      expect(docs.status, docs.stderr).toBe(0);
+      expect(docs.outputs).toMatchObject({ 'native-darwin': 'false', 'native-hosts': 'false', 'native-linux': '' });
+    },
+  );
 
   it('should own a file by the deepest project root above it, as Nx does', () => {
     // `apps/api-e2e/…` is not under `apps/api`; a root-level file belongs to the workspace project.

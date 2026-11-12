@@ -13,9 +13,8 @@
  * projects --projects tag:ci:<lane>`): a project may carry several, one per
  * lane, so it is the one dimension whose values are not exclusive. `ci:desktop`
  * marks the projects the packaged desktop gate keys on; `ci:shell` marks the
- * shell conformance lane's projects once the shell split tags them;
- * `ci:native-hosts` marks the projects whose change selects the Linux native
- * host rows (`native-hosts.yml`, which `ci.yml`'s plan calls in the merge queue).
+ * shell conformance lane's projects once the shell split tags them. The native
+ * rows select by target (`test:native-darwin`, `test:native-linux`), not by tag.
  *
  * @public
  */
@@ -46,5 +45,5 @@ export const projectTagVocabulary = {
     'projects',
   ],
   shell: ['sandbox', 'service', 'terminal'],
-  ci: ['browser', 'standalone', 'quarantined', 'shell', 'desktop', 'native-hosts'],
+  ci: ['browser', 'standalone', 'quarantined', 'shell', 'desktop'],
 } as const;

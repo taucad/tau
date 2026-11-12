@@ -76,12 +76,17 @@ const cliEndToEnd = (proves: string): Oracle => ({
   proves,
 });
 
+/**
+ * The darwin-arm64 native row, which `ci.yml`'s plan calls from the merge queue when a `test:native-darwin`
+ * project is affected (throughput program Q-2), so its runs are on the queue's refs, not `main`.
+ */
 const nativeDarwin = (proves: string): Oracle => ({
   kind: 'job',
-  workflow: 'native-darwin.yml',
-  job: 'Native kernels on darwin-arm64',
+  workflow: 'ci.yml',
+  job: 'Native darwin / Native kernels on darwin-arm64',
   match: 'exact',
-  scope: 'main',
+  scope: 'any',
+  event: 'merge_group',
   proves,
 });
 

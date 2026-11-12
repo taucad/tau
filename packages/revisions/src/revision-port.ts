@@ -691,6 +691,13 @@ export type RevisionPort = Readonly<{
   divergence(input: RevisionDivergenceInput): Promise<RevisionDivergence>;
   diff(input: RevisionDiffInput): Promise<readonly RevisionDiffEntry[]>;
   /**
+   * The paths each revision changed against its first parent, in one read: a
+   * page of History asks this for its automatic entries (A4), within rule 20's
+   * log cost. A revision that changed nothing, or names no parent, is absent.
+   * A port without it answers through {@link RevisionPort.diff}, one per revision.
+   */
+  firstParentChanges?(ids: readonly RevisionId[]): Promise<ReadonlyMap<string, readonly string[]>>;
+  /**
    * Every ref the remote advertises, without fetching an object.
    *
    * A name reads a remote in git's config. A {@link RevisionRemoteAddress}

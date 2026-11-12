@@ -110,7 +110,7 @@ import type { AddCheckoutActorOutput, CheckoutsActors, ListCheckoutsActorOutput 
 import { chatProjectionConcurrency, settleBounded } from '#chat-projection-pool.js';
 import { chatIdOfRef, chatRefName, chatRefPrefix, projectChats } from '#chat-ref.js';
 import { LfsQuotaError } from '#lfs-client.js';
-import { cleanLargeObjects, largeObjectBasisOf } from '#lfs.js';
+import { cleanLargeObjects, largeObjectBasisOf, withOwedAttributes } from '#lfs.js';
 import type { LargeObjectBasis } from '#lfs.js';
 import type { ObjectFormat } from '#object-hash.js';
 import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
@@ -939,7 +939,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return lastReading;
   };
 
-  const cuts = createHandles<{ tree: ImmutableRevisionTree; treeId: string }>('cut');
+  /* `owesAttributes`: the cut supplied Tau's attributes file, whose live copy its mint writes (A4). */
+  const cuts = createHandles<{ tree: ImmutableRevisionTree; treeId: string; owesAttributes?: true }>('cut');
   /**
    * The side chosen for each conflicted path, by conflicted revision.
    *
@@ -4273,22 +4274,39 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const place = await placeOf(input.checkoutId);
         const own = async (): Promise<ImmutableRevisionTree> =>
           captureCheckout(place, { bypassMemo: false, changed: { paths: input.changedPaths } });
-        const tree =
+        const captured =
           options.completeChanges === true && running !== undefined && running.generation === input.generation
             ? await running.tree.catch(own)
             : await own();
-        const treeId = await checkoutTreeId(place.id, tree);
+        const capturedTreeId = await checkoutTreeId(place.id, captured);
+        const head = await headOf(place);
         /* A cut taken before the open pull lands — a close, a hidden tab —
          * follows the same rule as the pull (W13c). Before any fetch, the
          * opener's own manifest is setup too (W13d); a project with no remote
          * has no pull to merge a root into, so its first cut is an ordinary one. */
-        if ((await headOf(place)) === undefined) {
+        if (head === undefined) {
           const arriving = await arrivingTree(place);
-          if (arriving === undefined ? await holdsOnlyUnfetchedScaffold(tree) : holdsNoWorkBeforePull(tree, arriving)) {
-            return { treeId, cutId: '', nothingToSave: true };
+          if (
+            arriving === undefined
+              ? await holdsOnlyUnfetchedScaffold(captured)
+              : holdsNoWorkBeforePull(captured, arriving)
+          ) {
+            return { treeId: capturedTreeId, cutId: '', nothingToSave: true };
           }
         }
-        return { treeId, cutId: cuts.put(input.checkoutId, { tree, treeId }) };
+        /* A4: opening wrote no attributes file (I4), so the cut that records
+         * something supplies the one the tree owes, and `writeRevision` writes
+         * its live copy in the same mint. A cut that records nothing owes
+         * nothing: Tau's own file never makes an entry of its own. */
+        const owed = withOwedAttributes(captured);
+        if (owed === undefined || capturedTreeId === (await treeIdOf(head))) {
+          return {
+            treeId: capturedTreeId,
+            cutId: cuts.put(input.checkoutId, { tree: captured, treeId: capturedTreeId }),
+          };
+        }
+        const treeId = await checkoutTreeId(place.id, owed);
+        return { treeId, cutId: cuts.put(input.checkoutId, { tree: owed, treeId, owesAttributes: true }) };
       }),
 
       /* D4's and I6's comparison: the same memoised capture a cut reads, and
@@ -4369,6 +4387,24 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             'ENGINE_FAILED',
             `The store recorded tree ${String(recorded)} for a cut computed as ${input.treeId}.`,
           );
+        }
+        /* A4: the attributes file this mint supplied gets its live copy now, as
+         * the store recorded it, so the checkout reads clean against the new
+         * head. A file that appeared since the cut is someone's and is kept.
+         * The revision is already minted, so a failed copy only warns: the next
+         * capture reads the file as removed and records that, never loses it. */
+        if (held.owesAttributes === true) {
+          try {
+            const recordedFiles = await recordedTree(held.tree, input.parents[0]);
+            const attributes = recordedFiles.get(generatedGitattributesPath);
+            await useFileSystem(await placeOf(input.checkoutId), async (rooted) => {
+              if (attributes !== undefined && !(await rooted.exists(generatedGitattributesPath))) {
+                await rooted.writeFile(generatedGitattributesPath, attributes);
+              }
+            });
+          } catch (error) {
+            console.warn('[revisions] the recorded attributes file could not be written to the checkout', error);
+          }
         }
         /* The revision's tree is the one just cut, so the next walk inherits
          * its modes without reading it back from the store. */

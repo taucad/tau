@@ -651,6 +651,18 @@ for (const row of ports) {
       read.mockRestore();
     }, 30_000);
 
+    it('reads the files a revision holds for agent observability, never the live checkout (LW6)', async () => {
+      const held = await harness(row.create);
+      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      const settlement = await held.settlementFor('run-1');
+      await writeFile(join(held.workspaceRoot, 'main.ts'), 'export const size = 99;\n');
+
+      expect(await held.revisions.history.files(String(settlement.revisionId), ['main.ts', 'missing.ts'])).toEqual([
+        { path: 'main.ts', text: 'export const size = 2;\n', bytes: 23 },
+      ]);
+      expect(await held.revisions.history.files('unknown-revision', ['main.ts'])).toEqual([]);
+    }, 30_000);
+
     it('serves the same revision graph and branch verbs over the host channel', async () => {
       const held = await harness(row.create);
       await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });

@@ -386,13 +386,13 @@ export function KernelSettings({
     const shown = options.find((option) => option.value === selected)?.label ?? selected;
     return (
       <DropdownMenuSub key={field.path.join('.')}>
-        <DropdownMenuSubTrigger aria-label={`${field.label}, ${shown}`}>
+        <DropdownMenuSubTrigger aria-label={`${field.label}, ${shown}`} textValue={field.label}>
           <span>{field.label}</span>
           <span className='ml-auto pl-3 text-muted-foreground'>{shown}</span>
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent>
+          {/* The sub-view is the group named for the setting; its radio rows need no second name. */}
           <DropdownMenuRadioGroup
-            aria-label={field.label}
             value={selected}
             onValueChange={(next) => {
               if (next !== selected) {

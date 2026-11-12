@@ -295,6 +295,9 @@ export const isLargeObjectPath = (projectRelativePath: string): boolean => {
 /** Project-relative path of the generated attributes file. @public */
 export const generatedGitattributesPath = '.gitattributes';
 
+/** The files Tau owns as project setup: what it generates at the project root (A4). @public */
+export const generatedSetupPaths: ReadonlySet<string> = new Set([generatedIgnorePath, generatedGitattributesPath]);
+
 const lfsAttributes = 'filter=lfs diff=lfs merge=lfs -text';
 
 /**

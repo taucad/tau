@@ -367,7 +367,8 @@ export const providerContentEvidence = async (
       payload,
       redactor: contentRedactor,
       input: input === null ? 'unsupported' : sectionCoverage(input, false),
-      output: sectionCoverage(output, content.truncated),
+      /* A relay that ended before the stream finished holds only part of the output. */
+      output: sectionCoverage(output, content.truncated || attempt.ended !== 'completed'),
     });
     if (new TextEncoder().encode(canonicalEvidence(evidence)).byteLength <= evidenceLimits.bytes) {
       return evidence;

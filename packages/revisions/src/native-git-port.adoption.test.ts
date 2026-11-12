@@ -128,7 +128,8 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
     expect(descriptor.largeObjects).toBe(true);
     expect(descriptor).not.toHaveProperty('largeObjectRule');
     expect(await readFile(join(root, generatedIgnorePath), 'utf8')).toContain('# BEGIN Tau generated');
-    expect(await readFile(join(root, generatedGitattributesPath), 'utf8')).toContain('# BEGIN Tau generated');
+    /* The attributes file arrives with the first revision that records something (A4), never at open. */
+    expect(await readdir(root)).not.toContain(generatedGitattributesPath);
     expect(await readFile(join(root, '.git', 'info', 'exclude'), 'utf8')).toContain('# BEGIN Tau generated');
   });
 
@@ -404,15 +405,19 @@ describe.runIf(gitToolchainOnPath)('a folder with its own setup files and no rep
     expect(await readFile(join(root, generatedGitattributesPath), 'utf8')).toBe('*.psd filter=lfs\n');
   });
 
-  it("is Tau's in both sessions once init gave it Tau's attributes file", async () => {
+  it("is the person's in both sessions when its own ignore file has no Tau block, and init writes nothing (A4)", async () => {
     const root = await folder({ [generatedIgnorePath]: 'dist/\n' });
+    await mkdir(join(root, 'dist'));
+    await writeFile(join(root, 'dist', 'out.js'), 'built\n');
 
     const first = await sessionOf(root);
     const second = await sessionOf(root);
 
     expect(first).toStrictEqual(second);
-    expect(first.ignored).toStrictEqual([]);
-    expect(await readFile(join(root, generatedGitattributesPath), 'utf8')).toContain('# BEGIN Tau generated');
+    expect(first.ignored).toStrictEqual(['dist/']);
+    expect(first.config).not.toContain('[filter "lfs"]');
+    expect(await readFile(join(root, generatedIgnorePath), 'utf8')).toBe('dist/\n');
+    expect(await readdir(root)).not.toContain(generatedGitattributesPath);
   });
 
   it('configures the LFS filters again on an open whose store lost them', async () => {

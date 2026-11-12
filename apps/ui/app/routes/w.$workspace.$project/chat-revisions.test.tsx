@@ -117,7 +117,7 @@ vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({
 const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
   revisionNumber: undefined,
   changeId: `change-${over.revisionId}`,
-  actor: 'You',
+  who: { kind: 'recorded', identity: { kind: 'user', id: 'usr_test' } },
   source: 'user',
   createdAt: 1_788_220_800_000,
   summary: 'Thicker base',
@@ -148,7 +148,7 @@ describe('Revisions pane', () => {
   it('folds only consecutive unnamed autosaves', () => {
     const card = (
       revisionId: string,
-      trigger: RevisionCard['trigger'],
+      capture: RevisionCard['capture'],
       tags: readonly string[] = [],
     ): RevisionCard => ({
       revisionId,
@@ -159,7 +159,7 @@ describe('Revisions pane', () => {
       turnId: undefined,
       conflicted: false,
       tags,
-      trigger,
+      capture,
     });
     const groups = groupRevisionHistory(
       [card('head', 'idle'), card('a', 'hidden'), card('b', 'close'), card('named', 'idle', ['v1'])],
@@ -180,7 +180,7 @@ describe('Revisions pane', () => {
       turnId: undefined,
       conflicted: false,
       tags: [],
-      trigger: isSetup ? 'idle' : 'save',
+      capture: isSetup ? 'idle' : 'save',
       ...(parent === undefined ? {} : { parent }),
       ...(isSetup ? { isSetup: true } : {}),
     });
@@ -967,7 +967,7 @@ describe('Revisions pane closeout', () => {
 
   it('asks for no diff it does not render, and shows twelve rows before Show more (C52)', async () => {
     const rows = Array.from({ length: 40 }, (_, index) =>
-      row({ revisionId: `rev-${String(index)}`, revisionNumber: 40 - index, trigger: 'save' }),
+      row({ revisionId: `rev-${String(index)}`, revisionNumber: 40 - index, capture: 'save' }),
     );
     revisionStatusHarness.rows = rows;
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-0' };
@@ -1023,12 +1023,19 @@ describe('Revisions pane closeout', () => {
   /* A5, fixture B4: a turn's base cut is the person's autosave; the agent's result beside it is unchanged. */
   it('reads a turn base cut as an autosave that folds with autosaves, under the agent’s result', async () => {
     const user = userEvent.setup();
-    const turn = { trigger: 'turn', turnId: 'u1', summary: 'Agent turn u1' } as const;
+    const turn = { capture: 'turn', turnId: 'u1', summary: 'Agent turn u1' } as const;
     revisionStatusHarness.rows = [
-      row({ ...turn, revisionId: 'rev-4', revisionNumber: 4, source: 'agent', actor: 'agent', turnCut: 'result' }),
+      row({
+        ...turn,
+        revisionId: 'rev-4',
+        revisionNumber: 4,
+        source: 'agent',
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'agent' } },
+        turnCut: 'result',
+      }),
       row({ ...turn, revisionId: 'rev-3', revisionNumber: 3, turnCut: 'base' }),
-      row({ revisionId: 'rev-2', revisionNumber: 2, trigger: 'idle' }),
-      row({ revisionId: 'rev-1', revisionNumber: 1, trigger: 'save' }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, capture: 'idle' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, capture: 'save' }),
     ];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
 
@@ -1149,7 +1156,7 @@ describe('History over a long line (B2)', () => {
         revisionId: 'rev-121',
         revisionNumber: 121,
         source: 'restore',
-        trigger: 'restore',
+        capture: 'restore',
         restoredFrom: 'rev-3',
         parent: 'rev-120',
       }),
@@ -1167,7 +1174,7 @@ describe('History over a long line (B2)', () => {
         revisionId: 'rev-121',
         revisionNumber: 121,
         source: 'restore',
-        trigger: 'restore',
+        capture: 'restore',
         restoredFrom: 'rev-3',
         parent: 'rev-120',
       }),
@@ -1287,8 +1294,14 @@ describe('Revisions pane vocabulary and History', () => {
     const openEverything = async (): Promise<HTMLElement> => {
       const user = userEvent.setup();
       revisionStatusHarness.rows = [
-        row({ revisionId: oid('a'), revisionNumber: 2, treeId: oid('b'), parent: oid('c'), trigger: 'save' }),
-        row({ revisionId: oid('c'), revisionNumber: 1, treeId: oid('d'), trigger: 'save', actor: 'anon:3fa9c1d2' }),
+        row({ revisionId: oid('a'), revisionNumber: 2, treeId: oid('b'), parent: oid('c'), capture: 'save' }),
+        row({
+          revisionId: oid('c'),
+          revisionNumber: 1,
+          treeId: oid('d'),
+          capture: 'save',
+          who: { kind: 'recorded', identity: { kind: 'user', id: 'anon:3fa9c1d2', anonymous: true } },
+        }),
       ];
       revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: oid('a') };
       renderPane();
@@ -1337,7 +1350,7 @@ describe('Revisions pane vocabulary and History', () => {
 
   it('keeps the revision you are on in view, however far down it is (round 4)', async () => {
     revisionStatusHarness.rows = Array.from({ length: 20 }, (_, index) =>
-      row({ revisionId: `rev-${String(20 - index)}`, revisionNumber: 20 - index, trigger: 'save' }),
+      row({ revisionId: `rev-${String(20 - index)}`, revisionNumber: 20 - index, capture: 'save' }),
     );
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-3' };
 
@@ -1350,10 +1363,10 @@ describe('Revisions pane vocabulary and History', () => {
   it('folds consecutive autosaves into one row that opens to them', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-4', revisionNumber: 4, trigger: 'save' }),
-      row({ revisionId: 'rev-3', revisionNumber: 3, trigger: 'idle' }),
-      row({ revisionId: 'rev-2', revisionNumber: 2, trigger: 'idle' }),
-      row({ revisionId: 'rev-1', revisionNumber: 1, trigger: 'save' }),
+      row({ revisionId: 'rev-4', revisionNumber: 4, capture: 'save' }),
+      row({ revisionId: 'rev-3', revisionNumber: 3, capture: 'idle' }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, capture: 'idle' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, capture: 'save' }),
     ];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
 
@@ -1369,10 +1382,10 @@ describe('Revisions pane vocabulary and History', () => {
   it("shows Tau's setup entries as one compact line, and Current on the newest entry that is not setup", async () => {
     const user = userEvent.setup();
     revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-4', revisionNumber: 4, trigger: 'idle', isSetup: true }),
-      row({ revisionId: 'rev-3', revisionNumber: 3, trigger: 'idle', isSetup: true }),
-      row({ revisionId: 'rev-2', revisionNumber: 2, trigger: 'save', summary: 'Add vent slots' }),
-      row({ revisionId: 'rev-1', revisionNumber: 1, trigger: 'save' }),
+      row({ revisionId: 'rev-4', revisionNumber: 4, capture: 'idle', isSetup: true }),
+      row({ revisionId: 'rev-3', revisionNumber: 3, capture: 'idle', isSetup: true }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, capture: 'save', summary: 'Add vent slots' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, capture: 'save' }),
     ].map((entry, index, all) => {
       const parent = all[index + 1]?.revisionId;
       return parent === undefined ? entry : { ...entry, parent };
@@ -1398,7 +1411,7 @@ describe('Revisions pane vocabulary and History', () => {
 
   it('lists Tau’s setup files last, under a plain Project setup label (A4)', async () => {
     const user = userEvent.setup();
-    revisionStatusHarness.rows = [row({ revisionId: 'rev-2', revisionNumber: 2, trigger: 'save' })];
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-2', revisionNumber: 2, capture: 'save' })];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
     revisionStatusHarness.diff = [
       { path: '.gitattributes', kind: 'added' },
@@ -1421,9 +1434,9 @@ describe('Revisions pane vocabulary and History', () => {
   it('is one Tab stop, on the row you are on, and moves by arrow keys (A1 item 14)', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-3', revisionNumber: 3, trigger: 'save' }),
-      row({ revisionId: 'rev-2', revisionNumber: 2, trigger: 'save' }),
-      row({ revisionId: 'rev-1', revisionNumber: 1, trigger: 'save' }),
+      row({ revisionId: 'rev-3', revisionNumber: 3, capture: 'save' }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, capture: 'save' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, capture: 'save' }),
     ];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
 
@@ -1473,7 +1486,7 @@ describe('Revisions pane vocabulary and History', () => {
     ['zip', 'Version · imported from a zip'],
   ] as const)('reads a new project’s first entry as V1 · Start, %s, before any turn', async (start, fact) => {
     revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-1', revisionNumber: 1, summary: 'Project created', trigger: 'create', start }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, summary: 'Project created', capture: 'create', start }),
     ];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-1' };
 
@@ -1488,8 +1501,8 @@ describe('Revisions pane vocabulary and History', () => {
 
   it('keeps Start under the agent’s first entry, and the agent’s entry its own Rev', async () => {
     revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-2', revisionNumber: 2, summary: 'Add vent slots', source: 'agent', trigger: 'turn' }),
-      row({ revisionId: 'rev-1', revisionNumber: 1, summary: 'Agent turn t1', trigger: 'turn', start: 'created' }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, summary: 'Add vent slots', source: 'agent', capture: 'turn' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, summary: 'Agent turn t1', capture: 'turn', start: 'created' }),
     ];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
 
@@ -1501,8 +1514,17 @@ describe('Revisions pane vocabulary and History', () => {
 
   it('never renders an actor id, and names the agent (HQ4)', async () => {
     revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-2', revisionNumber: 2, actor: 'claude-opus-4', source: 'agent' }),
-      row({ revisionId: 'rev-1', revisionNumber: 1, actor: 'user_2abc' }),
+      row({
+        revisionId: 'rev-2',
+        revisionNumber: 2,
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'claude-opus-4' } },
+        source: 'agent',
+      }),
+      row({
+        revisionId: 'rev-1',
+        revisionNumber: 1,
+        who: { kind: 'recorded', identity: { kind: 'user', id: 'user_2abc' } },
+      }),
     ];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
 

@@ -1,11 +1,14 @@
 import { useSyncExternalStore } from 'react';
 import type { MetaFunction } from 'react-router';
-import { Navigate, useSearchParams } from 'react-router';
+import { Navigate, useNavigate, useSearchParams } from 'react-router';
+import { toast } from '@taucad/ui/components/sonner';
 import { SetupFlow } from '#components/onboarding/setup-flow.js';
-import { setupChromeCopy, setupStepIds } from '#components/onboarding/setup-copy.js';
+import { setupChromeCopy, setupFinishCopy, setupStepIds } from '#components/onboarding/setup-copy.js';
 import type { SetupStepId } from '#components/onboarding/setup-copy.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { useFeature } from '#flags/use-feature.js';
+import { useProjectManager } from '#hooks/use-project-manager.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 import type { Handle } from '#types/matches.types.js';
 
 /*
@@ -35,6 +38,28 @@ const useIsHydrated = (): boolean =>
     () => false,
   );
 
+/**
+ * Desktop: the Finish screen's Open a folder, which connects a folder of projects and goes home.
+ *
+ * @returns The action on the desktop, or `undefined` in the browser.
+ */
+const useOpenFolder = (): (() => Promise<void>) | undefined => {
+  const navigate = useNavigate();
+  const { connectWorkspace } = useProjectManager();
+  if (!isDesktopTarget()) {
+    return undefined;
+  }
+  return async () => {
+    try {
+      if ((await connectWorkspace()) !== undefined) {
+        await navigate('/');
+      }
+    } catch {
+      toast.error(setupFinishCopy.openFolderFailed);
+    }
+  };
+};
+
 const isSetupStepId = (value: string | undefined): value is SetupStepId =>
   value !== undefined && (setupStepIds as readonly string[]).includes(value);
 
@@ -43,6 +68,7 @@ export default function WelcomeRoute(): React.JSX.Element {
   const isHydrated = useIsHydrated();
   const isOnboardingEnabled = useFeature('onboarding');
   const [searchParameters] = useSearchParams();
+  const onOpenFolder = useOpenFolder();
   if (!isHydrated) {
     return <div className='min-h-full' />;
   }
@@ -50,5 +76,5 @@ export default function WelcomeRoute(): React.JSX.Element {
     return <Navigate to='/' replace />;
   }
   const step = searchParameters.get('step') ?? undefined;
-  return <SetupFlow initialStep={isSetupStepId(step) ? step : undefined} />;
+  return <SetupFlow initialStep={isSetupStepId(step) ? step : undefined} onOpenFolder={onOpenFolder} />;
 }

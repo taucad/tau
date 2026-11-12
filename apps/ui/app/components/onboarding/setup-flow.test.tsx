@@ -16,6 +16,8 @@ const kernels = vi.hoisted(() => ({
 }));
 vi.mock('#components/onboarding/setup-kernel-languages.js', () => ({ readKernelLanguages: () => kernels }));
 
+vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ connectWorkspace: vi.fn() }) }));
+
 const { default: WelcomeRoute } = await import('#routes/welcome/route.js');
 const { personRecordStores, deviceRecordStore } = await import('#preferences/person-record.store.js');
 

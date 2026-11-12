@@ -6,7 +6,9 @@ import { resetLeaf } from '@taucad/preferences';
 import { Button } from '@taucad/ui/components/button';
 import { Heading } from '@taucad/ui/components/heading';
 import { cn } from '@taucad/ui/utils/cn';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import { useFeature } from '#flags/use-feature.js';
+import { settingsSectionSchema } from '#hooks/use-settings-dialog.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { deviceRecordStore, personRecordStores } from '#preferences/person-record.store.js';
 import type { SectionWriteResult } from '#preferences/section-store.js';
@@ -21,6 +23,9 @@ import { readKernelLanguages } from '#components/onboarding/setup-kernel-languag
 import { announceChangedRows, answerRows, hasTakenTour, setupSteps } from '#components/onboarding/setup-model.js';
 import { SetupBackgroundStep, SetupGoalsStep } from '#components/onboarding/setup-question-steps.js';
 import { SetupViewerStep } from '#components/onboarding/setup-viewer-step.js';
+
+/** Settings → Viewer, while the dialog has that section. */
+const viewerSettingsSection = settingsSectionSchema.safeParse('viewer');
 
 /** Where setup is: one of its steps, or the screen after Finish. */
 type Stage = SetupStepId | 'done';
@@ -84,7 +89,7 @@ export type SetupFlowProps = Readonly<{
   /** Start a replay of the tour, from step 4 once the tour has ended. */
   onReplayTour?: () => void;
   /** Desktop: open a folder of projects, from the screen after Finish. */
-  onOpenFolder?: () => void;
+  onOpenFolder?: () => Promise<void>;
 }>;
 
 /**
@@ -209,6 +214,13 @@ export function SetupFlow({ initialStep, onReplayTour, onOpenFolder }: SetupFlow
                 void navigate('/');
               }}
               onOpenFolder={onOpenFolder}
+              onOpenViewerSettings={
+                viewerSettingsSection.success
+                  ? () => {
+                      void navigate(`/?${searchParameterName.settings}=${viewerSettingsSection.data}`);
+                    }
+                  : undefined
+              }
               onChangeAnswers={() => {
                 goTo(steps[0] ?? 'goals');
               }}

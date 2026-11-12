@@ -349,6 +349,7 @@ export const setupFinishCopy = {
   skippedIntro: 'Tau uses its defaults. Finish setup any time from Help, or change one thing in Settings.',
   startBuilding: 'Start building',
   openFolder: 'Open a folder',
+  openFolderFailed: 'Tau could not open that folder.',
   viewerSettings: 'Open Viewer settings',
   changeAnswers: 'Change answers',
   nothingChosen: 'nothing chosen',

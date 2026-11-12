@@ -6,6 +6,8 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 
 vi.mock('#flags/use-feature.js', () => ({ useFeature: () => true }));
 
+vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ connectWorkspace: vi.fn() }) }));
+
 const { default: WelcomeRoute } = await import('#routes/welcome/route.js');
 const { personRecordStores } = await import('#preferences/person-record.store.js');
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HostRunSnapshot, HostToolInvocation, JsonValue, ProviderMessage } from '@taucad/agent-host';
 import { toolName } from '@taucad/chat/constants';
-import { kernelChoiceCondition } from '@taucad/chat/prompts';
+import { kernelChoiceCondition, renderPersonBlock } from '@taucad/chat/prompts';
 import { resolveKernel } from '@taucad/types/constants';
 import type { BindingKernelRow } from '@taucad/chat/prompts';
 import { liveCadSystemPrompt } from '#testing/live/live-gateway.harness.js';
@@ -9,15 +9,22 @@ import { kernelRoutingDevelopmentCases, kernelRoutingHosts } from '#testing/live
 import type { KernelRoutingCase } from '#testing/live/kernel-routing.cases.js';
 import {
   buildFixture,
+  comparePersonArm,
   createRoutingToolHandler,
+  exampleRoutingCase,
   kernelTextFor,
   observePromptOnly,
   observeRun,
+  personFor,
+  personProfileArms,
+  personProfiles,
   perturbedProfile,
   readKernelSkill,
   routingSkillName,
+  summarizeExampleRuns,
   withKernelText,
 } from '#testing/live/kernel-routing.runner.js';
+import type { KernelRoutingObservation } from '#testing/live/kernel-routing.grader.js';
 
 /** A small runtime table in the shape `resolveRuntimeDefinition` returns: OpenSCAD by extension, two `.ts` kernels. */
 const kernels: readonly BindingKernelRow[] = [
@@ -326,6 +333,145 @@ describe('kernel routing runner', () => {
       caseId: 'x',
       asked: true,
       declinedOutOfScope: false,
+    });
+  });
+});
+
+describe('the person-profile arms', () => {
+  const promptFor = (testCase: KernelRoutingCase, arm: (typeof personProfileArms)[number] | 'in-turn'): string => {
+    const person = personFor(arm);
+    return withKernelText(
+      liveCadSystemPrompt({
+        chatId: 'c',
+        modelId: 'anthropic-claude-sonnet-5.5',
+        kernel: 'replicad',
+        ...(person === undefined ? {} : { person }),
+      }),
+      kernelTextFor(testCase, arm),
+    );
+  };
+
+  it('should send the four setup profiles the comparison names', () => {
+    expect(personProfiles).toEqual({
+      'person-printing': { makes: ['printing'], reads: ['none'] },
+      'person-mechanical': { makes: ['mechanical'], reads: ['typescript'] },
+      'person-electronics': { makes: ['electronics'], reads: ['python'] },
+      'person-art': { makes: ['art'], reads: ['none'] },
+    });
+    expect(personFor('in-turn')).toBeUndefined();
+    expect(personFor('pointer')).toBeUndefined();
+  });
+
+  it.each(personProfileArms)('should change only the person option on the %s arm', (arm) => {
+    for (const testCase of [byId('u1-wall-hook'), byId('own-openscad-add-fillets'), byId('pick-jscad-gear')]) {
+      const block = renderPersonBlock(personProfiles[arm]);
+      const kernelText = kernelTextFor(testCase, arm);
+      expect(kernelText).toBe(kernelTextFor(testCase, 'in-turn'));
+      expect(buildFixture(testCase, arm)).toEqual(buildFixture(testCase, 'in-turn'));
+      const prompt = promptFor(testCase, arm);
+      expect(block).not.toBe('');
+      expect(prompt.replace(`\n\n${block}`, '')).toBe(promptFor(testCase, 'in-turn'));
+      expect(prompt.indexOf(block)).toBeGreaterThan(prompt.indexOf(kernelText));
+    }
+  });
+});
+
+describe('comparing a person-profile arm with the no-block arm', () => {
+  const narrow = byId('u1-customiser-box');
+  const broad = byId('u1-wall-hook');
+  const mustAsk = byId('ask-lattice-step');
+  const cases = [narrow, broad, mustAsk];
+  const wrote = (testCase: KernelRoutingCase, kernel: 'openscad' | 'replicad' | 'jscad'): KernelRoutingObservation => ({
+    caseId: testCase.id,
+    boundKernel: kernel,
+    asked: false,
+  });
+  const asked = (testCase: KernelRoutingCase): KernelRoutingObservation => ({ caseId: testCase.id, asked: true });
+  const runs = (entries: ReadonlyArray<readonly [KernelRoutingCase, readonly KernelRoutingObservation[]]>) =>
+    new Map(entries.map(([testCase, observations]) => [testCase.id, observations]));
+
+  const baseline = runs([
+    [narrow, Array.from({ length: 5 }, () => wrote(narrow, 'openscad'))],
+    [broad, Array.from({ length: 5 }, () => wrote(broad, 'replicad'))],
+    [mustAsk, Array.from({ length: 5 }, () => asked(mustAsk))],
+  ]);
+
+  it('should pass a profile arm that matches the no-block arm', () => {
+    const result = comparePersonArm(cases, baseline, baseline);
+    expect(result).toMatchObject({ met: true, regressions: [] });
+    expect(result.strata.narrow).toMatchObject({ baseline: { passed: 5, runs: 5 }, profile: { passed: 5, runs: 5 } });
+  });
+
+  it('should not meet a comparison with no runs', () => {
+    expect(comparePersonArm([], new Map(), new Map()).met).toBe(false);
+  });
+
+  it('should fail a tier whose pass rate drops by more than five points', () => {
+    const profile = runs([
+      [narrow, [...Array.from({ length: 4 }, () => wrote(narrow, 'openscad')), wrote(narrow, 'replicad')]],
+      [broad, Array.from({ length: 5 }, () => wrote(broad, 'openscad'))],
+      [mustAsk, Array.from({ length: 5 }, () => asked(mustAsk))],
+    ]);
+    const result = comparePersonArm(cases, baseline, profile);
+    expect(result.strata.narrow.met).toBe(false);
+    expect(result.strata.broad.met).toBe(true);
+    expect(result.met).toBe(false);
+  });
+
+  it('should list a must-ask case that always passed without the block and fails once with it', () => {
+    const profile = runs([
+      [narrow, Array.from({ length: 5 }, () => wrote(narrow, 'openscad'))],
+      [broad, Array.from({ length: 5 }, () => wrote(broad, 'replicad'))],
+      [mustAsk, [...Array.from({ length: 4 }, () => asked(mustAsk)), wrote(mustAsk, 'jscad')]],
+    ]);
+    expect(comparePersonArm(cases, baseline, profile)).toMatchObject({ met: false, regressions: [mustAsk.id] });
+  });
+});
+
+describe('the examples arm', () => {
+  it('should accept every browser kernel for a suggestion with no need and forbid the rest', () => {
+    const testCase = exampleRoutingCase({ id: 'wall-hook', prompt: 'A wall hook.', goals: ['printing'] });
+    expect(testCase).toMatchObject({ id: 'example-wall-hook', host: 'web', preference: 'auto', kind: 'routing' });
+    expect(testCase.acceptable).toEqual(kernelRoutingHosts.web.available);
+    expect(testCase.forbidden).toEqual(expect.arrayContaining(['zoo', 'build123d', 'smlibpy', 'picogk']));
+    expect(testCase.forbidden).not.toEqual(expect.arrayContaining(['replicad']));
+  });
+
+  it('should accept only the kernels that provide what a suggestion needs', () => {
+    const testCase = exampleRoutingCase({
+      id: '555-blinker',
+      prompt: 'A 555 blinker board.',
+      goals: ['electronics'],
+      needs: 'electronics',
+    });
+    expect(testCase.acceptable).toEqual(['tscircuit']);
+  });
+
+  it('should meet a suggestion that resolves in four of five runs and never misroutes', () => {
+    const testCase = exampleRoutingCase({
+      id: 'led',
+      prompt: 'An LED board.',
+      goals: ['electronics'],
+      needs: 'electronics',
+    });
+    const bound = (kernel?: 'tscircuit' | 'replicad'): KernelRoutingObservation => ({
+      caseId: testCase.id,
+      asked: kernel === undefined,
+      ...(kernel === undefined ? {} : { boundKernel: kernel }),
+    });
+    const verdict = (observations: readonly KernelRoutingObservation[]) =>
+      summarizeExampleRuns([testCase], new Map([[testCase.id, observations]]))[0];
+    expect(verdict([...Array.from({ length: 4 }, () => bound('tscircuit')), bound()])).toMatchObject({
+      resolved: 4,
+      misrouted: 0,
+      met: true,
+    });
+    expect(verdict([...Array.from({ length: 4 }, () => bound('tscircuit')), bound('replicad')])).toMatchObject({
+      misrouted: 1,
+      met: false,
+    });
+    expect(verdict([...Array.from({ length: 3 }, () => bound('tscircuit')), bound(), bound()])).toMatchObject({
+      met: false,
     });
   });
 });

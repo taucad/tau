@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile, appendFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile, appendFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -18,16 +19,22 @@ import { selectKernelRoutingCases } from '#testing/live/kernel-routing.heldout.j
 import type { KernelRoutingObservation } from '#testing/live/kernel-routing.grader.js';
 import {
   buildFixture,
+  comparePersonArm,
   createRoutingToolHandler,
+  exampleRoutingCase,
+  isPersonProfileArm,
   kernelTextFor,
   observePromptOnly,
   observeRun,
+  personFor,
+  personProfileArms,
   perturbedProfile,
   projectReminder,
   promptOnlySystemPrompt,
+  summarizeExampleRuns,
   withKernelText,
 } from '#testing/live/kernel-routing.runner.js';
-import type { KernelRoutingArm, RoutingRunResult } from '#testing/live/kernel-routing.runner.js';
+import type { ExampleSuggestion, KernelRoutingArm, RoutingRunResult } from '#testing/live/kernel-routing.runner.js';
 import { runUsage, textOf } from '#testing/live/live-assertions.js';
 import {
   createLiveSession,
@@ -52,7 +59,13 @@ import { loadWorkspaceKernelRows } from '#testing/live/workspace-modules.js';
  *
  * Environment:
  * - `TAU_KR_MODELS`: comma-separated catalog ids (default Sonnet 5.5, Opus 5.5 and Haiku 5.5).
- * - `TAU_KR_ARMS`: `in-turn,pointer,template,prompt-only` (default all; the pointer arm runs on Sonnet only).
+ * - `TAU_KR_ARMS`: `in-turn,pointer,template,prompt-only` (the default; the pointer arm runs on Sonnet only), and by
+ *   name only: `person-printing,person-mechanical,person-electronics,person-art`, the in-turn arm with that setup
+ *   profile's `<person>` block on the development set (never the held-out set), and `examples`. When the in-turn arm and
+ *   a person-profile arm have rows for a model in `TAU_KR_OUT`, from this run or an earlier one, the run writes
+ *   `person.<model>.comparison.json`, each profile against the no-block in-turn arm.
+ * - `TAU_KR_EXAMPLES`: a JSON array of Home suggestions (`id`, `prompt`, `goals`, `needs`) for the `examples` arm, which
+ *   sends each under Auto on the web host; its summary carries each suggestion's verdict.
  * - `TAU_KR_LIMIT`: run only the first N cases of each arm (the 10-case smoke sets the caps).
  * - `TAU_KR_CASES`: comma-separated case ids to run.
  * - `TAU_KR_CONCURRENCY`: parallel turns (default 4). `TAU_KR_MAX_USD`: stop scheduling past this spend.
@@ -67,9 +80,10 @@ const models = (process.env['TAU_KR_MODELS'] ?? `${gateModel},anthropic-claude-o
   .split(',')
   .map((id) => id.trim())
   .filter(Boolean);
-const supportedArms: readonly KernelRoutingArm[] = ['in-turn', 'pointer', 'template', 'prompt-only'];
+const defaultArms: readonly KernelRoutingArm[] = ['in-turn', 'pointer', 'template', 'prompt-only'];
+const supportedArms: readonly KernelRoutingArm[] = [...defaultArms, ...personProfileArms, 'examples'];
 const isArm = (arm: string): arm is KernelRoutingArm => (supportedArms as readonly string[]).includes(arm);
-const requestedArms = (process.env['TAU_KR_ARMS'] ?? supportedArms.join(','))
+const requestedArms = (process.env['TAU_KR_ARMS'] ?? defaultArms.join(','))
   .split(',')
   .map((arm) => arm.trim())
   .filter(Boolean);
@@ -97,6 +111,18 @@ const outDirectory = resolve(
   process.env['TAU_KR_OUT'] ?? join(tmpdir(), 'tau-kernel-routing-runs', new Date().toISOString()),
 );
 
+/** The Home suggestions the examples arm sends, read from `TAU_KR_EXAMPLES`. */
+const examplesFile = process.env['TAU_KR_EXAMPLES'];
+if (arms.includes('examples') && examplesFile === undefined) {
+  throw new Error('The examples arm reads its suggestions from TAU_KR_EXAMPLES; set it to a JSON file.');
+}
+const exampleCases: readonly KernelRoutingCase[] =
+  examplesFile === undefined
+    ? []
+    : (JSON.parse(readFileSync(examplesFile, 'utf8')) as readonly ExampleSuggestion[]).map((example) =>
+        exampleRoutingCase(example),
+      );
+
 /** Twenty routing cases spread over the families, for the pointer subset. */
 const pointerCases = kernelRoutingRoutingCases.filter((_, index) => index % 5 < 2);
 /** The routing cases replicad cannot serve: the fallback-template arm. */
@@ -107,13 +133,17 @@ const promptOnlyCases = kernelRoutingDevelopmentCases.filter(
 );
 
 const baseCasesFor = (arm: KernelRoutingArm): readonly KernelRoutingCase[] =>
-  arm === 'pointer'
-    ? pointerCases
-    : arm === 'template'
-      ? templateCases
-      : arm === 'prompt-only'
-        ? promptOnlyCases
-        : inTurnCases;
+  isPersonProfileArm(arm)
+    ? kernelRoutingDevelopmentCases
+    : arm === 'examples'
+      ? exampleCases
+      : arm === 'pointer'
+        ? pointerCases
+        : arm === 'template'
+          ? templateCases
+          : arm === 'prompt-only'
+            ? promptOnlyCases
+            : inTurnCases;
 
 /** An explicit `TAU_KR_CASES` id that no selected arm runs is a typo, not an empty run. */
 const unmatchedCases = [...onlyCases].filter((id) => !arms.some((arm) => baseCasesFor(arm).some((c) => c.id === id)));
@@ -155,6 +185,28 @@ const pool = async <T>(items: readonly T[], width: number, work: (item: T) => Pr
   if (rejected) {
     throw rejected.reason instanceof Error ? rejected.reason : new Error(String(rejected.reason));
   }
+};
+
+const personOption = (arm: KernelRoutingArm) => {
+  const person = personFor(arm);
+  return person === undefined ? {} : { person };
+};
+
+/** Each case's graded observations from an arm's JSONL rows; failed runs with no write are infrastructure misses. */
+const readObservations = async (file: string): Promise<Map<string, KernelRoutingObservation[]> | undefined> => {
+  const text = await readFile(file, 'utf8').catch(() => undefined);
+  if (text === undefined || text.trim() === '') {
+    return undefined;
+  }
+  const byCase = new Map<string, KernelRoutingObservation[]>();
+  for (const line of text.split('\n').filter(Boolean)) {
+    const row = JSON.parse(line) as CaseRow;
+    if (row.state === 'failed' && row.bindingKind === undefined) {
+      continue;
+    }
+    byCase.set(row.observation.caseId, [...(byCase.get(row.observation.caseId) ?? []), row.observation]);
+  }
+  return byCase;
 };
 
 const emptyRegistry: ToolRegistry = {
@@ -213,7 +265,7 @@ describe.skipIf(runnable.length === 0)(
           runId: `${chatId}-run-1`,
           leaderEpoch: `${chatId}-epoch-1`,
           systemPrompt: withKernelText(
-            liveCadSystemPrompt({ chatId, modelId, kernel: 'replicad' }),
+            liveCadSystemPrompt({ chatId, modelId, kernel: 'replicad', ...personOption(arm) }),
             kernelTextFor(testCase, arm),
           ),
           model: liveSessionModel(modelId),
@@ -375,6 +427,7 @@ describe.skipIf(runnable.length === 0)(
                 caseId: observation.caseId,
                 failure,
               })),
+            ...(arm === 'examples' ? { examples: summarizeExampleRuns(covered, byCase) } : {}),
             ...(gateRun && arm === 'in-turn'
               ? summarizeKernelRoutingGate(covered, byCase)
               : repeats > 1
@@ -387,6 +440,27 @@ describe.skipIf(runnable.length === 0)(
           );
           console.log(`[kernel-routing] summary ${JSON.stringify(summary)}`);
           expect(rows.length + skipped.length).toBe(runs.length);
+        });
+      }
+      if (!gateRun && arms.some((arm) => arm === 'in-turn' || isPersonProfileArm(arm))) {
+        it(`person-profile comparison on ${modelId}`, async () => {
+          const baseline = await readObservations(join(outDirectory, `in-turn.${modelId}.jsonl`));
+          const comparisons: Record<string, unknown> = {};
+          for (const arm of personProfileArms) {
+            // oxlint-disable-next-line no-await-in-loop -- four small files, read in order
+            const profile = await readObservations(join(outDirectory, `${arm}.${modelId}.jsonl`));
+            if (baseline !== undefined && profile !== undefined) {
+              const both = kernelRoutingDevelopmentCases.filter(({ id }) => baseline.has(id) && profile.has(id));
+              comparisons[arm] = { cases: both.length, ...comparePersonArm(both, baseline, profile) };
+            }
+          }
+          if (Object.keys(comparisons).length > 0) {
+            await writeFile(
+              join(outDirectory, `person.${modelId}.comparison.json`),
+              `${JSON.stringify(comparisons, undefined, 2)}\n`,
+            );
+            console.log(`[kernel-routing] person comparison ${JSON.stringify(comparisons)}`);
+          }
         });
       }
     }

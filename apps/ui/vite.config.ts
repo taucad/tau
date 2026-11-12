@@ -100,6 +100,22 @@ const uiOptimizeDepsOptions = {
 } as const satisfies UserConfig['optimizeDeps'];
 
 /**
+ * Worker modules the dev dependency optimizer crawls at startup, relative to `apps/ui`.
+ *
+ * React Router's `future.unstable_optimizeDeps` (`react-router.config.ts`) admits the client
+ * entry and the route modules; Vite merges these after them. The scanner does not follow
+ * `new Worker(new URL(...))`, so without them the kernels, GeoSpec and language servers reach
+ * the optimizer only when a worker first starts, and its re-bundle reloads every open page.
+ * `app/worker-optimize-deps-entries.node.test.ts` holds every worker the app starts to this list.
+ */
+export const uiWorkerOptimizeDepsEntries = [
+  'app/**/*.worker.ts',
+  'app/lib/kcl-language/lsp/kcl-lsp-worker.ts',
+  '../libs/*/src/**/*.worker.ts',
+  '../libs/lsp/src/typescript-worker/worker.entry.ts',
+] as const;
+
+/**
  * Module aliases shared with `desktop/vite.config.ts`.
  *
  * `@resvg/resvg-js`: `@taucad/tscircuit` (composed into the runtime worker)
@@ -633,7 +649,11 @@ export default defineConfig(({ command, mode }) => {
       ],
     },
     ssr: uiSsrOptions,
-    optimizeDeps: { exclude: [...uiOptimizeDepsOptions.exclude] },
+    optimizeDeps: {
+      exclude: [...uiOptimizeDepsOptions.exclude],
+      // Test mode (Vitest, the calibration preview) runs without React Router's entries; keep Vite's default crawl.
+      ...(isTest ? {} : { entries: [...uiWorkerOptimizeDepsEntries] }),
+    },
 
     server: {
       port: 3000,

@@ -1855,7 +1855,7 @@ describe.runIf(enabled)('shell qualification', () => {
       const mebibytes = 256;
       const bytes = mebibytes * 1024 * 1024;
       const receipts = mkdtempSync(join(root, 's01-supervisor-resources-'));
-      const shellModule = createRequire(import.meta.url).resolve('@taucad/native-process-core/shell');
+      const shellModule = createRequire(import.meta.url).resolve('@taucad/sandbox/shell');
       const shellDirectory = join(dirname(shellModule), 'shell');
       const preload = pathToFileURL(join(shellDirectory, 'qualification-resource.fixture.ts'));
       preload.searchParams.set('directory', receipts);

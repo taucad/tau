@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Run native-process-core:test:shell-conformance inside a disposable stock Linux guest (LNX-U, LNX-U26, LNX-D).
+# Run sandbox:test:shell-conformance (and the other shell rows) inside a disposable stock Linux guest (LNX-U, LNX-U26, LNX-D).
 # The guest keeps its shipped AppArmor policy and kernel.apparmor_restrict_unprivileged_userns value; the sandbox
 # reaches user namespaces only through the Tau-scoped bwrap profile the real APT selector installs.
 # Required env: TAU_VM_DISTRO (ubuntu, ubuntu2604 or debian), RUNNER_TEMP (disposable CI directory).
-# Usage: TAU_VM_DISTRO=ubuntu bash packages/core/native-process/scripts/shell-conformance-vm.sh
+# Usage: TAU_VM_DISTRO=ubuntu bash libs/sandbox/scripts/shell-conformance-vm.sh
 # Exit codes: 0 every row passed; 1 a row failed or an operation failed; 3 missing host prerequisite.
 set -euo pipefail
 umask 077
@@ -157,7 +157,7 @@ status=0
 # shellcheck disable=SC2029 # Shape-checked identity values, expanded on the host by design.
 ssh "${ssh_options[@]}" tau@127.0.0.1 \
   "GITHUB_SHA=$GITHUB_SHA GITHUB_RUN_ID=$GITHUB_RUN_ID GITHUB_REPOSITORY=$GITHUB_REPOSITORY GITHUB_SERVER_URL=https://github.com TAU_SHELL_CONFORMANCE_ROW=$row bash -s -- $TAU_VM_DISTRO" \
-  < "$REPO_ROOT/packages/core/native-process/scripts/shell-conformance-guest.sh" | tee "$output/guest.txt" || status=$?
+  < "$REPO_ROOT/libs/sandbox/scripts/shell-conformance-guest.sh" | tee "$output/guest.txt" || status=$?
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-conformance-receipt.json' > "$output/receipt.json" || true
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-service-conformance-receipt.json' > "$output/service-receipt.json" || true
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/terminal-conformance-receipt.json' > "$output/terminal-receipt.json" || true

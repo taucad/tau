@@ -72,7 +72,17 @@ LOG_SERVICE = 'fly'
 LOG_LEVEL = 'info'
 OTEL_METRICS_PORT = '9464'
 OTEL_EXPORTER_OTLP_COMPRESSION = 'gzip'
-DATABASE_POOL_MAX = '10'
+# Database connection audit R1/R3 (Tau Brain research/database-connection-audit.md): every `app`
+# Machine opens up to DATABASE_POOL_MAX request plus DATABASE_BACKGROUND_POOL_MAX background
+# connections, and `revisions-maintenance` up to 2, all on one pooler login. 2 × (4 + 1) + 2 = 12
+# of DATABASE_POOLER_POOL_SIZE = 15, three spare. `app/config/connection-budget.test.ts` refuses
+# a change that does not fit; a third `app` Machine needs a larger pool first.
+DATABASE_POOL_MAX = '4'
+DATABASE_BACKGROUND_POOL_MAX = '1'
+# The session pool Supavisor admits for this API's login, read from the refusal message
+# (`max clients are limited to pool_size: 15`). It mirrors the Supabase setting until
+# tau-cloud codifies it (database connection audit R6).
+DATABASE_POOLER_POOL_SIZE = '15'
 DATABASE_CONNECT_TIMEOUT_SECONDS = '10'
 DATABASE_IDLE_TIMEOUT_SECONDS = '60'
 DATABASE_STATEMENT_TIMEOUT_MS = '15000'

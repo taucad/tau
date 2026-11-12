@@ -20,8 +20,14 @@
  *      grows with its size (300 s plus 1 s per MiB), so a slow runner is not cut off mid-entry;
  *    - idle connections from Nx are never closed by the relay: Nx's client pools them for 90 s and a request written
  *      as Node's default 5 s keep-alive timer closed the socket failed the command ("Failed to send request").
+ *    - a 404 is remembered for the command's lifetime and a repeat GET of that hash is answered 404 locally. Nx asks
+ *      again for every still-scheduled task each time a task finishes, so a lane with n uncached tasks made about
+ *      n(n+1)/2 lookups (131 tasks, 8,706 GETs). An entry another job stores mid-command stays a miss for this
+ *      command. A PUT of the hash through this relay that the upstream answers 200 or 409 forgets the 404.
  *    The rerun in 2 stays as the fallback if the relay itself fails. A nested Nx call reuses its parent's relay.
  *    At exit the relay prints a tally line and a timing line (requests, bytes, seconds and the slowest entries).
+ *    In the tally, `hits` and `misses` count upstream answers only and `memoised` the repeats answered locally, so
+ *    hits / (hits + misses) is the hit rate of distinct lookups; the timing line counts upstream requests only.
  *
  * 4. Writes go behind once one has been accepted. Nx 22.7.12 waits for each PUT before it starts its next task, so a
  *    large entry stalled a `--parallel=1` lane for 45-100 s. The first write, and every write until one is answered
@@ -169,7 +175,17 @@ const relayHost = '127.0.0.1';
 const cachePath = /^\/v1\/cache\/[\dA-Za-z]{1,128}$/;
 
 type Tally = Record<
-  'hits' | 'misses' | 'stored' | 'multipart' | 'present' | 'oversize' | 'refused' | 'faults' | 'behind' | 'abandoned',
+  | 'hits'
+  | 'misses'
+  | 'memoised'
+  | 'stored'
+  | 'multipart'
+  | 'present'
+  | 'oversize'
+  | 'refused'
+  | 'faults'
+  | 'behind'
+  | 'abandoned',
   number
 >;
 
@@ -228,6 +244,7 @@ const startCacheRelay = async (
   const tally: Tally = {
     hits: 0,
     misses: 0,
+    memoised: 0,
     stored: 0,
     multipart: 0,
     present: 0,
@@ -255,6 +272,8 @@ const startCacheRelay = async (
   let pendingBytes = 0;
   // Background uploads that ended in neither 200 nor 409, although Nx was told 200.
   let lost = 0;
+  // Cache paths the upstream answered 404 for during this command (header, 3).
+  const knownMisses = new Set<string>();
   const base = upstream.replace(/\/+$/, '');
 
   const answer = (response: ServerResponse, status: number, body?: Uint8Array<ArrayBuffer>): void => {
@@ -381,6 +400,11 @@ const startCacheRelay = async (
   };
 
   const handleGet = async (request: IncomingMessage, path: string, response: ServerResponse): Promise<void> => {
+    if (knownMisses.has(path)) {
+      tally.memoised += 1;
+      answer(response, 404);
+      return;
+    }
     const started = performance.now();
     try {
       const reply = await forward(request, path, {
@@ -399,6 +423,7 @@ const startCacheRelay = async (
       record('GET', started, 0);
       if (reply.status === 404) {
         tally.misses += 1;
+        knownMisses.add(path);
       } else {
         tally.faults += 1;
       }
@@ -408,8 +433,12 @@ const startCacheRelay = async (
     answer(response, 404);
   };
 
-  /** Writes one entry upstream and keeps the tally; returns the status Nx gets for it. */
-  const upload = async (request: IncomingMessage, path: string, body: Uint8Array<ArrayBuffer>): Promise<number> => {
+  /** Writes one entry upstream and keeps the tally; returns its status. */
+  const uploadEntry = async (
+    request: IncomingMessage,
+    path: string,
+    body: Uint8Array<ArrayBuffer>,
+  ): Promise<number> => {
     const started = performance.now();
     if (body.byteLength > limits.singleRequestBytes) {
       let status = 403;
@@ -449,6 +478,16 @@ const startCacheRelay = async (
       tally.faults += 1;
     }
     return 403;
+  };
+
+  /** `uploadEntry`, and forgets a remembered 404 once the entry is upstream; returns the status Nx gets for it. */
+  const upload = async (request: IncomingMessage, path: string, body: Uint8Array<ArrayBuffer>): Promise<number> => {
+    const status = await uploadEntry(request, path, body);
+    if (status === 200 || status === 409) {
+      // Stored or already present: a 404 remembered while the upload ran is wrong now.
+      knownMisses.delete(path);
+    }
+    return status;
   };
 
   const handlePut = async (request: IncomingMessage, path: string, response: ServerResponse): Promise<void> => {

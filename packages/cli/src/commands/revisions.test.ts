@@ -308,7 +308,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
           identity  user usr_cli_a1
           capture   save
           via       cli
-        Rev 2     main  unknown  Revision 2
+        Rev 2     main  ada  Revision 2
           id        <oid 5>
           tree      <oid 6>
           parent    <oid 7>
@@ -316,7 +316,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
           identity  not recorded
           capture   not recorded
           via       not recorded
-        Rev 1     main  unknown  Revision 1
+        Rev 1     main  ada  Revision 1
           id        <oid 7>
           tree      <oid 8>
           parent    none

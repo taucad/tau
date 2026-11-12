@@ -165,7 +165,21 @@ export const environmentSchemaBase = z.object({
     .min(1)
     .max(100)
     .default(10)
-    .describe('Maximum PostgreSQL backends this API process may open; replicas multiply it against database capacity'),
+    .describe(
+      'Maximum PostgreSQL connections the request pool of this API process may open; replicas multiply it against the session pool',
+    ),
+  // Database connection audit R3: the pollers and gauges get their own pool, so they can
+  // never take more than this many connections from a Machine's share of the pooler.
+  DATABASE_BACKGROUND_POOL_MAX: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(10)
+    .default(1)
+    .describe('Maximum PostgreSQL connections the background pool (pollers and gauges) of this API process may open'),
+  DATABASE_POOLER_POOL_SIZE: unsetWhenEmpty(z.coerce.number().int().min(1).max(1000).optional()).describe(
+    'The session pool size the database pooler admits for the API login, reported as tau.db.pooler.capacity. Mirrors the Supabase setting; the fly.*.toml budget test checks the pools fit it',
+  ),
   DATABASE_CONNECT_TIMEOUT_SECONDS: z.coerce.number().int().min(1).max(60).default(10),
   DATABASE_IDLE_TIMEOUT_SECONDS: z.coerce
     .number()

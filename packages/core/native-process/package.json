@@ -75,8 +75,10 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@taucad/nx": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "@taucad/sandbox": "workspace:*",
     "zod": "catalog:"
   },
   "taucad": {

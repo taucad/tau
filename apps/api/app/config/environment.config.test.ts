@@ -351,6 +351,8 @@ describe('environmentSchema', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.DATABASE_POOL_MAX).toBe(10);
+      expect(result.data.DATABASE_BACKGROUND_POOL_MAX).toBe(1);
+      expect(result.data.DATABASE_POOLER_POOL_SIZE).toBeUndefined();
       expect(result.data.DATABASE_CONNECT_TIMEOUT_SECONDS).toBe(10);
       expect(result.data.DATABASE_IDLE_TIMEOUT_SECONDS).toBe(60);
       expect(result.data.DATABASE_STATEMENT_TIMEOUT_MS).toBe(15_000);
@@ -364,6 +366,10 @@ describe('environmentSchema', () => {
     ['DATABASE_POOL_MAX', '0'],
     ['DATABASE_POOL_MAX', 'unbounded'],
     ['DATABASE_POOL_MAX', '101'],
+    ['DATABASE_BACKGROUND_POOL_MAX', '0'],
+    ['DATABASE_BACKGROUND_POOL_MAX', '11'],
+    ['DATABASE_POOLER_POOL_SIZE', '0'],
+    ['DATABASE_POOLER_POOL_SIZE', 'fifteen'],
     ['DATABASE_CONNECT_TIMEOUT_SECONDS', '0'],
     ['DATABASE_IDLE_TIMEOUT_SECONDS', '0'],
     ['DATABASE_STATEMENT_TIMEOUT_MS', '99'],

@@ -246,7 +246,7 @@ let release: Promise<void> = Promise.resolve();
 /**
  * Hold the process-wide sandbox for one native session until {@link releaseNativeSandbox}.
  *
- * @internal
+ * @public
  */
 export const acquireNativeSandbox = (): void => {
   leases += 1;
@@ -259,7 +259,7 @@ export const acquireNativeSandbox = (): void => {
  * and only resets on `process.on('exit')`, which that child prevents. Without this release a
  * one-shot host such as the CLI never exits after its last native worker has stopped.
  *
- * @internal
+ * @public
  * @returns Once the sandbox runtime has stopped, when this was the last hold.
  */
 export const releaseNativeSandbox = async (): Promise<void> => {

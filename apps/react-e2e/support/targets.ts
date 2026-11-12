@@ -59,7 +59,7 @@ export const reactE2ETargets = [
     artifactInspection: { kind: 'runtime', root: resolve(nextRoot, '.next-isolated/static/media') },
     metadata: {
       deployment: 'isolated',
-      expectedVersions: { next: '15.5.22' },
+      expectedVersions: { next: '15.5.27' },
       framework: 'nextjs',
       mode: 'production',
       version: '15',
@@ -96,7 +96,7 @@ export const reactE2ETargets = [
     artifactInspection: { kind: 'runtime', root: resolve(nextRoot, '.next-non-isolated/static/media') },
     metadata: {
       deployment: 'non-isolated',
-      expectedVersions: { next: '15.5.22' },
+      expectedVersions: { next: '15.5.27' },
       framework: 'nextjs',
       mode: 'production',
       version: '15',
@@ -136,7 +136,7 @@ export const reactE2ETargets = [
     artifactInspection: { kind: 'runtime', root: resolve(reactRouterExampleRoot, 'build/client/assets') },
     metadata: {
       example: true,
-      expectedVersions: { 'react-router': '8.3.0', '@react-router/dev': '8.3.0', vite: '8.0.10' },
+      expectedVersions: { 'react-router': '8.3.0', '@react-router/dev': '8.3.0', vite: '8.0.16' },
       framework: 'react-router',
       mode: 'production',
       successMessage: runtimeSuccess['react-router'],
@@ -154,7 +154,7 @@ export const reactE2ETargets = [
     artifactInspection: { kind: 'runtime', root: resolve(nextExampleRoot, '.next/static/media') },
     metadata: {
       example: true,
-      expectedVersions: { next: '16.3.0' },
+      expectedVersions: { next: '16.4.0' },
       framework: 'nextjs',
       mode: 'production',
       successMessage: runtimeSuccess.nextjs,
@@ -190,7 +190,7 @@ export const reactE2ETargets = [
     workspaceEntry: resolve(electronExampleRoot, 'workspace/main.scad'),
     metadata: {
       example: true,
-      expectedVersions: { 'electron-vite': '6.0.0-beta.1', vite: '8.0.10' },
+      expectedVersions: { 'electron-vite': '6.0.0-beta.1', vite: '8.0.16' },
       framework: 'electron',
       mode: 'production',
       successMessage: 'OpenSCAD rendered through @taucad/runtime in an Electron utility process.',
@@ -227,7 +227,7 @@ export const reactE2ETargets = [
     },
     metadata: {
       example: true,
-      expectedVersions: { 'react-router': '8.3.0', '@react-router/dev': '8.3.0', vite: '8.0.10' },
+      expectedVersions: { 'react-router': '8.3.0', '@react-router/dev': '8.3.0', vite: '8.0.16' },
       framework: 'react-router',
       mode: 'development',
       successMessage: runtimeSuccess['react-router'],
@@ -243,7 +243,7 @@ export const reactE2ETargets = [
     serve: { file: bin(nextRoot, 'next'), args: ['dev', '-H', '127.0.0.1', '-p', '3113'] },
     metadata: {
       deployment: 'isolated',
-      expectedVersions: { next: '15.5.22' },
+      expectedVersions: { next: '15.5.27' },
       framework: 'nextjs',
       mode: 'development',
       version: '15',
@@ -261,7 +261,7 @@ export const reactE2ETargets = [
     },
     metadata: {
       example: true,
-      expectedVersions: { next: '16.3.0' },
+      expectedVersions: { next: '16.4.0' },
       framework: 'nextjs',
       mode: 'development',
       successMessage: runtimeSuccess.nextjs,
@@ -291,7 +291,7 @@ export const reactE2ETargets = [
     cdpPort: 9226,
     metadata: {
       example: true,
-      expectedVersions: { 'electron-vite': '6.0.0-beta.1', vite: '8.0.10' },
+      expectedVersions: { 'electron-vite': '6.0.0-beta.1', vite: '8.0.16' },
       framework: 'electron',
       mode: 'development',
       successMessage: 'OpenSCAD rendered through @taucad/runtime in an Electron utility process.',

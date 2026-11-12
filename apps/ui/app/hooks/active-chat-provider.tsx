@@ -166,6 +166,11 @@ export type ActiveChatKernel = {
    * wherever that kernel runs. Absent when the chat's kernel is the one used.
    */
   unavailableKernel?: KernelEntry;
+  /**
+   * The kernel the project's model is written in, once its entry binds (blueprint D8). The pill reads it to show
+   * `Auto · X` and to mark a manual pick that differs. Absent on Home and before the entry binds.
+   */
+  owner?: KernelId;
 };
 
 /**
@@ -754,6 +759,7 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
   const kernelId: KernelId = sessionKernel ?? cookieKernel;
   const kernel = resolveKernel(kernelId);
   const unavailableKernelId = sessionKernel === undefined ? chosenKernel : undefined;
+  const ownerKernel = owner?.kernel;
   const setActiveKernel = useCallback(
     (next: KernelId) => {
       if (!isAutoEnabled) {
@@ -784,8 +790,9 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
       preference: preference ?? kernelId,
       setActivePreference,
       ...(unavailableKernelId === undefined ? {} : { unavailableKernel: resolveKernel(unavailableKernelId) }),
+      ...(ownerKernel === undefined ? {} : { owner: ownerKernel }),
     }),
-    [kernelId, kernel, setActiveKernel, preference, setActivePreference, unavailableKernelId],
+    [kernelId, kernel, setActiveKernel, preference, setActivePreference, unavailableKernelId, ownerKernel],
   );
 }
 

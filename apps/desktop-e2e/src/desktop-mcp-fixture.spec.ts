@@ -155,7 +155,12 @@ test('serves the utility MCP endpoint to an agent it spawned', async () => {
     const testActivity = page.getByRole('button', { name: /(?:^|, )ran tests$/iu }).last();
     await expectVisible(testActivity, 60_000);
     await testActivity.click();
-    await expectVisible(page.getByText('Tested 1 requirement', { exact: true }), 60_000);
+    /* The card counts the requirements GeoSpec selected (`total`). Since
+     * 7409bf77af that is the runner's selected tests, not the failure rows, so
+     * `missing_geospec_file` alone is 0 requirements. */
+    expect(evidence).toMatch(/"failures":\[\{"id":"missing_geospec_file"/u);
+    expect(evidence).toMatch(/"total":0,/u);
+    await expectVisible(page.getByText('Tested 0 requirements', { exact: true }), 60_000);
     await expect.poll(() => readFileSync(eventsPath, 'utf8'), { timeout: 60_000 }).toContain('"state":"completed"');
 
     /* 4. The real desktop banner returns the exact standing option the user

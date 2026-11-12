@@ -844,13 +844,11 @@ describe('ObjectStorageService', () => {
 
     const headWith = async (checksum: string | undefined) => {
       /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK response fields use PascalCase */
-      const send = vi
-        .spyOn(sendable, 'send')
-        .mockResolvedValue({
-          ContentLength: 3,
-          ETag: '"e"',
-          ...(checksum === undefined ? {} : { ChecksumSHA256: checksum }),
-        });
+      const send = vi.spyOn(sendable, 'send').mockResolvedValue({
+        ContentLength: 3,
+        ETag: '"e"',
+        ...(checksum === undefined ? {} : { ChecksumSHA256: checksum }),
+      });
       /* eslint-enable @typescript-eslint/naming-convention -- end AWS SDK response fields */
       try {
         const head = await service.headBlob({ namespace: 'tenants', key: 'owner/lfs/project/oid', checksum: true });

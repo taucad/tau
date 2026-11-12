@@ -18,6 +18,10 @@ export type ThreeViewerProperties = {
   readonly enablePan?: boolean;
   readonly secondaryMouseButtonMode?: SecondaryMouseButtonMode;
   readonly enableDamping?: boolean;
+  /**
+   * Not read by the canvas: the grid, its clip plane and the camera's up follow the graphics actor's `upDirection`
+   * (`setUpDirection`).
+   */
   readonly upDirection?: 'x' | 'y' | 'z';
   readonly className?: string;
   readonly stageOptions?: StageOptions;

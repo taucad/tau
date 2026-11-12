@@ -354,7 +354,10 @@ export interface GraphicsContext {
   modelInteractionUnitId?: string;
   /** Per-view mechanism pose, keyed by the same unit ids as model interaction. */
   kinematicsRef: KinematicsRef;
-  /** The view's camera. Its pose, render frame and clip policy outlive every canvas and provider mount. */
+  /**
+   * The view's camera. Its pose and render frame outlive every canvas and provider mount; its clip policy is held by
+   * the canvas that draws the grid, and cleared when that canvas stops.
+   */
   cameraRef: GraphicsCameraRef;
   /**
    * The attached canvas's controls adapter: the only listener on its `camera-controls` instance (charter I9). It
@@ -1541,6 +1544,9 @@ const graphicsMachineDefinition = setup({
           }
           // The camera keeps its view direction and takes the new world up, unless the two are parallel.
           enq.sendTo(context.cameraRef, { type: 'setUpDirection', axis: event.payload });
+          if (context.canvas) {
+            enq.sendTo(context.canvas.ref, { type: 'upDirectionChanged', upDirection: event.payload });
+          }
           return { context: { upDirection: event.payload } };
         },
         setGraphicsBackendPreference: {
@@ -1567,6 +1573,8 @@ const graphicsMachineDefinition = setup({
               webglContext: event.webglContext,
               admittedBytes: event.admittedBytes,
               reattached: event.reattached,
+              camera: context.cameraRef,
+              upDirection: context.upDirection,
             },
           });
           return { context: { canvas: { canvasId: event.canvasId, ref }, ...adapter } };

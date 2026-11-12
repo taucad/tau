@@ -50,4 +50,26 @@ describe('ViewportGizmoInteractionLock', () => {
     expect(seenLocks).toHaveLength(2);
     expect(seenLocks[0]).toBe(seenLocks[1]);
   });
+
+  it('provides the given lock, and a nested provider reuses the enclosing lock', () => {
+    const given = createViewportGizmoInteractionLock();
+    const seenLocks: ViewportGizmoInteractionLock[] = [];
+
+    function Probe(): undefined {
+      seenLocks.push(useViewportGizmoInteractionLock());
+      return undefined;
+    }
+
+    render(
+      <ViewportGizmoInteractionLockProvider lock={given}>
+        <Probe />
+        <ViewportGizmoInteractionLockProvider>
+          <Probe />
+        </ViewportGizmoInteractionLockProvider>
+      </ViewportGizmoInteractionLockProvider>,
+    );
+
+    expect(seenLocks).toEqual([given, given]);
+    expect(seenLocks[1]).toBe(given);
+  });
 });

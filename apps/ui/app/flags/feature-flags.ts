@@ -21,7 +21,7 @@
 
 import type { FeatureFlagName, FeatureFlags, FlagDefinition } from '#flags/flag.constants.js';
 import type { RemoteFlagValues } from '#flags/remote-flags.js';
-import { readRemoteFlagValues } from '#flags/remote-flags.js';
+import { isSeededFlagSourceAllowed, readRemoteFlagValues } from '#flags/remote-flags.js';
 import {
   featureFlagsSchema,
   featureFlagDefaults,
@@ -148,4 +148,12 @@ export function setFlagOverrides(overrides: Partial<FeatureFlags>, storage?: Min
   const merged = { ...existing, ...overrides };
   store.setItem(featureFlagStorageKey, JSON.stringify({ ...merged, webGpuPreferenceVersion: 1 }));
   resetFlagCache();
+}
+
+/** The probe an end-to-end spec reads the resolved flags through (`apps/ui-e2e/src/support/flag-state.ts`). */
+export const flagProbeGlobal = '__tauFeatureFlags';
+
+/* Undeployed debug builds only (the e2e suites and local development), and only in a document. */
+if (isSeededFlagSourceAllowed && typeof document !== 'undefined') {
+  Object.defineProperty(globalThis, flagProbeGlobal, { configurable: true, value: () => getAllFlags() });
 }

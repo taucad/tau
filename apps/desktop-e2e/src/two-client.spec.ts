@@ -1266,12 +1266,16 @@ describe('a project on the browser client', () => {
     const before = required(await browserHead(client, slug), 'T10: the browser has no head before the restore.');
     await expect.poll(async () => gitHead(await tauRepository(projectId)), { timeout: 180_000 }).toBe(before);
 
-    /* The newest entry History offers to restore: the newest row that is not Current.
-     * The row opens, its *Restore …* restores it, and a restore that removes
-     * files or saves edits asks first (`restore.machine`'s `isRisky`). */
+    /* The newest of this browser's own saves. The rows above resolved a
+     * divergence with Keep theirs, so the newer entries (the decision, whose
+     * tree is theirs, and the peer's save) hold exactly the files the head
+     * has, and a restore to where you are mints nothing (A8). The browser's
+     * own save holds its side of that divergence, which the resolution set
+     * aside. The row opens, its *Restore …* restores it, and a restore that
+     * removes files or saves edits asks first (`restore.machine`'s `isRisky`). */
     await restoreFromHistory(
       client.page,
-      historyRows(client.page).filter({ hasNotText: 'Current' }).first(),
+      historyRows(client.page).filter({ hasNotText: 'Current' }).filter({ hasText: 'Saved changes' }).first(),
       currentRestoreRow(client.page),
     );
 

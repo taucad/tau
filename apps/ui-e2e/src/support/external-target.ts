@@ -401,6 +401,11 @@ export type UiBrowserCommands = {
     workerUrl: string,
   ): Promise<{ worker: ProjectionImportWork; reader: ProjectionImportWork }>;
   uiTargetWorkers(urlSubstring?: string, surface?: TargetSurface): Promise<readonly TargetWorker[]>;
+  uiAgentHostNestedWorkers(
+    install: boolean,
+    urlSubstring?: string,
+    surface?: TargetSurface,
+  ): Promise<readonly TargetWorker[]>;
   uiTypeTarget(selector: string, value: string, surface?: TargetSurface): Promise<void>;
   uiWaitForTarget(source: string, argument?: unknown, timeout?: number, surface?: TargetSurface): Promise<void>;
 };
@@ -558,6 +563,15 @@ export const collectGarbage = (surface?: TargetSurface): Promise<void> => server
 /** The dedicated workers the page is running, by stable instance identity and script URL (V21). */
 export const workers = (urlSubstring?: string, surface?: TargetSurface): Promise<readonly TargetWorker[]> =>
   server.commands.uiTargetWorkers(urlSubstring, surface);
+/**
+ * The live workers the resident agent-host workers started, observed in every engine (WebKit lists none of them).
+ * Install before the host starts any; a read throws unless every agent-host worker carries the probe.
+ */
+export const agentHostNestedWorkers = (
+  install: boolean,
+  urlSubstring?: string,
+  surface?: TargetSurface,
+): Promise<readonly TargetWorker[]> => server.commands.uiAgentHostNestedWorkers(install, urlSubstring, surface);
 export const cookies = (): Promise<TargetCookie[]> => server.commands.uiCookies();
 /** Save intrusive diagnostic heap snapshots through the active page/worker profiler sessions. */
 export const snapshotProjectionHeap = async (artifactName: string, surface?: TargetSurface): Promise<string> =>

@@ -5,6 +5,7 @@ import { BuiltWithTau } from '#routes/_index/built-with-tau.js';
 import { HomepageChatHero } from '#routes/_index/homepage-chat-hero.js';
 import { SetupInvite } from '#components/onboarding/setup-invite.js';
 import { useSetupOffer } from '#components/onboarding/use-setup-offer.js';
+import { useIsDesktopFirstRun } from '#components/onboarding/desktop-first-run.js';
 import type { Handle } from '#types/matches.types.js';
 import { metaConfig } from '#constants/meta.constants.js';
 
@@ -19,7 +20,8 @@ export const handle: Handle = {
 };
 
 export default function DesktopHome(): React.JSX.Element {
-  useSetupOffer({ isDesktopFirstRun: false });
+  const isDesktopFirstRun = useIsDesktopFirstRun();
+  useSetupOffer({ isDesktopFirstRun });
   return (
     <>
       <HomepageChatHero />

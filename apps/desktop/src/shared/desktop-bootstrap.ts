@@ -128,6 +128,11 @@ export type DesktopBootstrap = {
   readonly homeRoot: string;
   /** Capability advertisement used by the shared renderer's product catalog. */
   readonly runtimeKernelIds: readonly string[];
+  /**
+   * The install's first run: no window-state file at startup and no `tau://` link or file in the launch (onboarding
+   * DT1). Only the first window of that launch carries it.
+   */
+  readonly firstRun: boolean;
 };
 
 /**
@@ -139,7 +144,7 @@ export type DesktopBootstrap = {
 export const readBootstrap = (argv: readonly string[]): DesktopBootstrap => {
   const argument = argv.find((entry) => entry.startsWith(bootstrapArgumentPrefix));
   if (!argument) {
-    return { env: {}, homeRoot: '', runtimeKernelIds: [] };
+    return { env: {}, homeRoot: '', runtimeKernelIds: [], firstRun: false };
   }
   try {
     const parsed = JSON.parse(argument.slice(bootstrapArgumentPrefix.length)) as Partial<DesktopBootstrap>;
@@ -147,10 +152,11 @@ export const readBootstrap = (argv: readonly string[]): DesktopBootstrap => {
       env: parsed.env ?? {},
       homeRoot: parsed.homeRoot ?? '',
       runtimeKernelIds: parsed.runtimeKernelIds ?? [],
+      firstRun: parsed.firstRun === true,
     };
   } catch {
     /* A malformed payload is a shell bug, not a renderer input; boot with
      * nothing so the renderer's own `Missing TAU_API_URL` names the failure. */
-    return { env: {}, homeRoot: '', runtimeKernelIds: [] };
+    return { env: {}, homeRoot: '', runtimeKernelIds: [], firstRun: false };
   }
 };

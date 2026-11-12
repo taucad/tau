@@ -111,6 +111,7 @@ import {
 import { createQuickLookController, removeStaleQuickLookSessions } from '#main/quick-look.js';
 import type { QuickLookController } from '#main/quick-look.js';
 import { deepLinkArgument, parseDeepLink } from '#main/deep-links.js';
+import { isFirstRun } from '#main/first-run.js';
 import { createOpenFileQueue } from '#main/open-files.js';
 import { createImportGrants, importGrantCapacity } from '#main/import-grants.js';
 import type { ImportGrant } from '#main/import-grants.js';
@@ -640,6 +641,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const roots = createProjectRootRegistry({ storePath: join(app.getPath('userData'), 'granted-roots.json') });
   roots.admit(homeRoot);
   const windowStatePath = join(app.getPath('userData'), 'window-state.json');
+  /* Onboarding DT1: decided once at startup, before any window writes the file; only the first window carries it. */
+  let isFirstLaunchWindow = isFirstRun({
+    windowStatePath,
+    hasLaunchLink: queuedDeepLink !== undefined,
+    hasLaunchFiles: openFiles.hasPending(),
+  });
   const quickLookTemporaryRoot = join(app.getPath('temp'), 'tau-quick-look');
   removeStaleQuickLookSessions(quickLookTemporaryRoot);
   const quickLookControllers = new Map<number, QuickLookController>();
@@ -1835,10 +1842,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
             env: { ...clientEnvironment(environment), ...rendererErrorReportingEnvironment() },
             homeRoot,
             runtimeKernelIds: desktopNativeKernelIds(),
+            firstRun: isFirstLaunchWindow,
           })}`,
         ],
       },
     });
+    isFirstLaunchWindow = false;
     if (isQuickLookEnabled()) {
       quickLookControllers.set(
         window.id,

@@ -41,6 +41,8 @@ type DesktopShell = {
   readonly relayTag: string;
   readonly nodeFs: { readonly homeRoot: string };
   readonly runtimeKernelIds?: readonly string[];
+  /** Main found no window-state file and no launch link or file: the first launch after install (DT1). */
+  readonly firstRun?: boolean;
   readonly externalAgents?: () => Promise<unknown>;
   readonly compute?: DesktopBridge['compute'];
   readonly appIcon: { setTheme(theme: 'light' | 'dark'): void };
@@ -247,6 +249,8 @@ export type DesktopBridge = {
   /** Exact AP242 measurement in the desktop services utility. */
   readonly exactMeasurement: { connect(): Promise<MessagePort> };
   readonly runtimeKernelIds: readonly string[];
+  /** The first launch after install, with nothing to open (DT1). */
+  readonly firstRun: boolean;
   readonly nodeFs: {
     /**
      * Absolute host directory backing the node Home workspace
@@ -442,6 +446,7 @@ export const desktopBridge = (): DesktopBridge | undefined => {
       connect: async () => connectServices('exactMeasurement'),
     },
     runtimeKernelIds: shell.runtimeKernelIds ?? [],
+    firstRun: shell.firstRun === true,
     /* Parsed, not trusted: the names and model ids main put here came out of a
      * vendor adapter's own config options, and this page renders them. */
     externalAgents: async () =>

@@ -84,6 +84,41 @@ Stored under localStorage `tau:flags`; defaults come from [flag.constants.ts](..
 | `pluginsStore` | false               | Developing plugin/skill store.               |
 | `tauDebug`     | `TAU_DEBUG` default | Diagnostic panels; local override supported. |
 
+### PostHog-backed flags
+
+A registry entry with a `posthogKey` follows that PostHog feature flag, so a surface can merge to `main` hidden and be turned on for chosen people from PostHog. These flags are hidden (`showInExperimental: false`), so a stored `tau:flags` override is ignored for them. [remote-flags.ts](../apps/ui/app/flags/remote-flags.ts) is the source; the web and desktop analytics boundary ([posthog-analytics-provider.tsx](../apps/ui/app/providers/posthog-analytics-provider.tsx)) connects it.
+
+| Registry name        | PostHog key            | Default | Effective when                                 | Purpose                                                         |
+| -------------------- | ---------------------- | ------- | ---------------------------------------------- | --------------------------------------------------------------- |
+| `viewerControls`     | `viewer-controls`      | false   | PostHog evaluates it on                        | Control presets, gizmo styles and Settings → Viewer.            |
+| `onboarding`         | `onboarding`           | false   | PostHog evaluates it on                        | Setup route, product tour and home suggestions.                 |
+| `onboardingAutoOpen` | `onboarding-auto-open` | false   | PostHog evaluates it on and `onboarding` is on | Opens setup automatically for a person who has not finished it. |
+
+**Resolution.** PostHog's evaluated value (a variant counts as on) once the client has evaluated flags; otherwise the registry default. A flag with `requires` is off whenever the flag it names is off. `useFeature` re-renders when PostHog loads, reloads (for example after sign-in identifies the person) or overrides flags; `isFeatureEnabled` outside React reads the same values. Reading a flag never captures a `$feature_flag_called` event.
+
+**Consent.** The PostHog client starts only while the host admits analytics: accepted cookie consent on the web, the Data controls switch on the desktop. Evaluating flags sends PostHog a distinct id (and, once signed in, the identified person), which is the same optional analytics processing the consent covers, so Tau does not start PostHog for flags alone. Without consent (declined, Global Privacy Control, or no decision yet), every PostHog-backed flag resolves to its default; withdrawing consent returns them to defaults at once and clears PostHog's stored flags and overrides with the rest of its storage.
+
+**Without a key.** With no `POSTHOG_CLIENT_KEY` (self-host, local development) PostHog never starts and every PostHog-backed flag stays at its default. SSR and the hydration render always use the defaults, so a flagged surface never flashes on before PostHog answers.
+
+**Creating and targeting.** The PostHog flags are declared in tau-cloud Terraform (`posthog_feature_flag` resources), not created in the PostHog UI; a new PostHog-backed flag adds its key there in the same piece of work. To enable a flag for one person, give it a single release condition that matches that person at 100% rollout (their Tau user id, which is the PostHog distinct id after sign-in, or their `email` person property) and no condition for anyone else. That person must have accepted analytics on the web, or left Data controls on in the desktop app.
+
+**Console override.** While analytics are admitted, the client is reachable as `window.posthog` (as PostHog's own snippet makes it; it is removed on withdrawal). Overrides are PostHog's own, persist in PostHog's storage on that browser, apply live and replace any earlier override set:
+
+```js
+posthog.featureFlags.overrideFeatureFlags({
+  flags: {
+    onboarding: true,
+    'onboarding-auto-open': true,
+    'viewer-controls': true,
+  },
+});
+posthog.featureFlags.overrideFeatureFlags({ flags: { onboarding: false } }); // force one off
+posthog.featureFlags.overrideFeatureFlags(false); // clear all overrides, back to PostHog's evaluation
+posthog.featureFlags.getFlagVariants(); // inspect evaluated values with overrides applied
+```
+
+In the desktop app, run the same commands in the renderer's developer tools console.
+
 ## CLI and desktop host controls
 
 [Serve options](../packages/cli/src/commands/serve.ts) are the detailed authority; CLI flags may override environment defaults.

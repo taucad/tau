@@ -6,8 +6,10 @@
 # =============================================================================
 
 # -- Version control ----------------------------------------------------------
+# The root `.gitignore` stays: Nx hashes it (with `nx.json`) into every task, and builds by it which
+# files exist, so without it no task hashed here matched a CI cache entry (CI audit 2026-11-12, F5)
+# and the API targets, run after their dependencies, also hashed those dependencies' `dist` output.
 .git
-.gitignore
 .gitattributes
 
 # -- External dependency repos (86 GB locally, gitignored but not dockerignored) --
@@ -61,15 +63,16 @@ tools/git-hooks
 # -- Environment variables (secrets, never ship) ------------------------------
 **/.env
 **/.env.*
+# The tracked placeholder templates are inputs of `api:build` on CI, so the image hashes them too.
+# They hold no values, and only the build stage sees them: the runtime images copy `pnpm deploy`
+# output, which is each package's `files`.
+!**/.env.example
+!**/.env.test
 
-# -- Test files (not needed in production images) -----------------------------
-**/*.test.ts
-**/*.test.tsx
-**/*.spec.ts
-**/*.spec.tsx
-**/*.test-d.ts
-**/__tests__
-**/__mocks__
+# -- Test files stay in the context ------------------------------------------
+# Nx infers each project's npm dependencies from every source file, tests included, and hashes
+# them into the project's tasks, so a context without tests hashed a different graph than CI. The
+# runtime images never see them: they copy only `pnpm deploy` output.
 # -- Vite timestamp files ----------------------------------------------------
 **/vite.config.*.timestamp*
 

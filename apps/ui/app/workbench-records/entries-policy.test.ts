@@ -103,6 +103,120 @@ const entriesValue = (value: WorkbenchEntries): string =>
 
 const { diff, combine, merge, isEmpty, read, serialize } = entriesPolicy;
 
+/**
+ * Shrunk counterexamples of the whole-history law (CI seeds 428846482 and -315624478): an entry made with every field
+ * at its default, then renamed onto a path holding settings, replaces them; the patch of the first edit must carry it.
+ */
+const wholeHistoryRegressions: ReadonlyArray<{
+  base: WorkbenchEntries | undefined;
+  first: EntriesRecord;
+  second: EntriesRecord;
+  third: EntriesRecord;
+}> = [
+  {
+    base: {
+      version: 1,
+      entries: {
+        'src/d.ts': {
+          renderTimeout: 0,
+          components: { hidden: [], isolated: [], opacity: [{ id: 'y', opacity: 0.5 }] },
+        },
+        src: { renderTimeout: 15_000, components: { hidden: ['y'], isolated: ['y'], opacity: [] } },
+        'b.ts': { renderTimeout: 0, components: { hidden: [], isolated: ['x'], opacity: [{ id: 'x', opacity: 0 }] } },
+      },
+    },
+    first: {
+      version: 1,
+      entries: {
+        'src/d.ts': {
+          renderTimeout: 0,
+          components: { hidden: [], isolated: [], opacity: [{ id: 'y', opacity: 0.5 }] },
+        },
+        src: { renderTimeout: 15_000, components: { hidden: ['y'], isolated: ['y'], opacity: [] } },
+        'moved-3': {
+          renderTimeout: 0,
+          components: { hidden: [], isolated: ['x'], opacity: [{ id: 'x', opacity: 0 }] },
+        },
+        'b.ts': {},
+      },
+      moves: [{ type: 'rename', oldPath: 'b.ts', newPath: 'moved-3' }],
+    },
+    second: {
+      version: 1,
+      entries: {
+        'src/d.ts': {
+          renderTimeout: 0,
+          components: { hidden: [], isolated: [], opacity: [{ id: 'y', opacity: 0.5 }] },
+        },
+        src: { renderTimeout: 15_000, components: { hidden: ['y'], isolated: ['y'], opacity: [] } },
+        'moved-3': {},
+      },
+      moves: [{ type: 'rename', oldPath: 'b.ts', newPath: 'moved-3' }],
+    },
+    third: {
+      version: 1,
+      entries: {
+        'src/d.ts': {
+          renderTimeout: 0,
+          components: { hidden: [], isolated: [], opacity: [{ id: 'y', opacity: 0.5 }] },
+        },
+        src: { renderTimeout: 15_000, components: { hidden: ['y'], isolated: ['y'], opacity: [] } },
+        'moved-3': {},
+      },
+    },
+  },
+  {
+    base: {
+      version: 1,
+      entries: {
+        src: {
+          renderTimeout: 180_000,
+          components: { hidden: ['y', 'x'], isolated: [], opacity: [{ id: 'x', opacity: 0.5 }] },
+        },
+        'a.ts': { renderTimeout: 15_000, components: { hidden: ['y', 'x'], isolated: [], opacity: [] } },
+        'src/d.ts': { renderTimeout: undefined, components: { hidden: ['y'], isolated: [], opacity: [] } },
+        'src/c.ts': { renderTimeout: 180_000 },
+      },
+    },
+    first: {
+      version: 1,
+      entries: {
+        src: {
+          renderTimeout: 180_000,
+          components: { hidden: ['y', 'x'], isolated: [], opacity: [{ id: 'x', opacity: 0.5 }] },
+        },
+        'a.ts': { components: { hidden: ['x'], isolated: ['x'], opacity: [{ id: 'x', opacity: 0.5 }] } },
+        'src/d.ts': { renderTimeout: undefined, components: { hidden: ['y'], isolated: [], opacity: [] } },
+        'b.ts': { renderTimeout: undefined },
+      },
+      moves: [{ type: 'delete', path: 'src/c.ts' }],
+    },
+    second: {
+      version: 1,
+      entries: {
+        src: {
+          renderTimeout: 180_000,
+          components: { hidden: ['y', 'x'], isolated: [], opacity: [{ id: 'x', opacity: 0.5 }] },
+        },
+        'a.ts': { renderTimeout: undefined },
+        'src/d.ts': { renderTimeout: undefined, components: { hidden: ['y'], isolated: [], opacity: [] } },
+      },
+      moves: [{ type: 'rename', oldPath: 'b.ts', newPath: 'a.ts' }],
+    },
+    third: {
+      version: 1,
+      entries: {
+        src: {
+          renderTimeout: 180_000,
+          components: { hidden: ['y', 'x'], isolated: [], opacity: [{ id: 'x', opacity: 0.5 }] },
+        },
+        'a.ts': { renderTimeout: undefined },
+        'src/d.ts': { renderTimeout: undefined, components: { hidden: ['y'], isolated: [], opacity: [] } },
+      },
+    },
+  },
+];
+
 describe('entriesPolicy patch algebra', () => {
   it('should rebuild the next record from a base and the diff to it', () => {
     assert(
@@ -126,6 +240,7 @@ describe('entriesPolicy patch algebra', () => {
         const combined = combine(diff(base, first), diff(first, second));
         expect(entriesValue(merge(base, second, combined))).toBe(entriesValue(second));
       }),
+      { examples: wholeHistoryRegressions.map((history) => [history]) },
     );
   });
 

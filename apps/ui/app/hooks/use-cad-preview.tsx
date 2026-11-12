@@ -57,6 +57,8 @@ export type CadPreviewProviderProps = {
   /** Whether the rendering should be triggered (default: true) */
   readonly isEnabled?: boolean;
   readonly kernelOptionsFactory?: LazyKernelOptionsFactory;
+  /** The camera's opening field of view in degrees, seeded once into the preview's graphics actor. */
+  readonly initialVerticalFieldOfView?: number;
   readonly children: ReactNode;
 };
 
@@ -171,6 +173,7 @@ function CadPreviewPipeline({
   parameters,
   isEnabled = true,
   kernelOptionsFactory,
+  initialVerticalFieldOfView,
   children,
 }: CadPreviewPipelineProps): React.JSX.Element {
   'use no memo';
@@ -210,6 +213,7 @@ function CadPreviewPipeline({
       enablePostProcessing: defaultGraphicsSettings.enablePostProcessing,
       upDirection: defaultGraphicsSettings.upDirection,
       graphicsBackend: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
+      camera: { cameraFovAngle: initialVerticalFieldOfView },
     },
   });
 

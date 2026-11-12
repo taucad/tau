@@ -7,15 +7,11 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import CameraControlsImpl from 'camera-controls';
 import * as THREE from 'three';
 import { perspectiveVerticalSpan } from '@taucad/camera';
-import { ActorBridge } from '#graphics/three/actor-bridge.jsx';
+import { createControlsAdapter } from '#graphics/three/adapters/controls-adapter.js';
 import { Scene } from '#graphics/three/scene.jsx';
-import { GraphicsProvider } from '#hooks/use-graphics.jsx';
+import { GraphicsProvider, useCameraConnectorRef, useCameraConsumersRef, useCameraRig } from '#hooks/use-graphics.jsx';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
-
-vi.mock('#graphics/three/up-direction-handler.jsx', () => ({
-  UpDirectionHandler: () => undefined,
-}));
 
 vi.mock('#graphics/three/use-geometry-bounds.js', async () => {
   const three = await import('three');
@@ -73,6 +69,18 @@ function SceneProbe({ onSample }: { readonly onSample: (sample: SceneSample) => 
   return undefined;
 }
 
+type AdapterDependencies = Parameters<typeof createControlsAdapter>[0];
+
+/** Captures what a canvas hands its controls adapter, as `ThreeCanvasInstance` does once its root exists. */
+function AdapterProbe({ onReady }: { readonly onReady: (dependencies: AdapterDependencies) => void }): undefined {
+  const root = useThree();
+  const rig = useCameraRig();
+  const connectorRef = useCameraConnectorRef();
+  const consumersRef = useCameraConsumersRef();
+  onReady({ root, rig, connectorRef, consumersRef, getUpAxis: () => 'y' });
+  return undefined;
+}
+
 function createStubWebGlRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer {
   const renderer = Object.create(THREE.WebGLRenderer.prototype) as THREE.WebGLRenderer;
   Object.defineProperties(renderer, {
@@ -101,6 +109,7 @@ describe('Scene camera lifecycle', () => {
 
     const root = createRoot(canvas);
     const samples: SceneSample[] = [];
+    let dependencies: AdapterDependencies | undefined;
     const graphicsActor = createActor(
       graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
       { input: { graphicsBackend: 'webgl' } },
@@ -120,7 +129,11 @@ describe('Scene camera lifecycle', () => {
             <Scene enableZoom zoomSpeed={2}>
               <group />
             </Scene>
-            <ActorBridge />
+            <AdapterProbe
+              onReady={(next) => {
+                dependencies ??= next;
+              }}
+            />
             <SceneProbe
               onSample={(sample) => {
                 samples.push(sample);
@@ -130,6 +143,15 @@ describe('Scene camera lifecycle', () => {
         );
       });
 
+      await expect.poll(() => dependencies).toBeDefined();
+      await act(async () => {
+        graphicsActor.send({ type: 'canvasAttached', canvasId: 'scene', kind: 'canvas' });
+        graphicsActor.send({
+          type: 'controlsAttached',
+          canvasId: 'scene',
+          adapter: createControlsAdapter(dependencies!),
+        });
+      });
       await expect.poll(() => samples.at(-1)?.controls).toBeInstanceOf(CameraControlsImpl);
 
       const finalSample = samples.at(-1);

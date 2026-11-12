@@ -21,7 +21,7 @@
 import { pathTable, unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 import type { UnansweredEvent } from '@taucad/xstate-testing/paths';
 import { describe, expect, it } from 'vitest';
-import { createAsyncLogic, matchesState, transition } from 'xstate';
+import { createAsyncLogic, createCallbackLogic, matchesState, transition } from 'xstate';
 import type { AnyMachineSnapshot, StateValue } from 'xstate';
 import { getShortestPaths } from 'xstate/graph';
 import type { GeometryComponentManifest } from '@taucad/types';
@@ -114,6 +114,7 @@ const samples: Samples = {
   webGpuCanvasLost: [{ type: 'webGpuCanvasLost' }],
   canvasAttached: [{ type: 'canvasAttached', canvasId: 'c', kind: 'placeholder' }],
   canvasDetached: [{ type: 'canvasDetached', canvasId: 'c' }],
+  controlsAttached: [{ type: 'controlsAttached', canvasId: 'c', adapter: createCallbackLogic(() => undefined) }],
   setSectionViewActive: [
     { type: 'setSectionViewActive', payload: true },
     { type: 'setSectionViewActive', payload: false },
@@ -167,9 +168,9 @@ const samples: Samples = {
   setHoveredMeasurement: [{ type: 'setHoveredMeasurement', payload: undefined }],
   setMeasurementName: [{ type: 'setMeasurementName', id: 'missing', name: 'n' }],
   toggleMeasurementPinned: [{ type: 'toggleMeasurementPinned', id: 'missing' }],
-  controlsInteractionStart: [{ type: 'controlsInteractionStart' }],
-  controlsInteractionMoved: [{ type: 'controlsInteractionMoved' }],
-  controlsInteractionEnd: [{ type: 'controlsInteractionEnd' }],
+  interactionStarted: [{ type: 'interactionStarted' }],
+  interactionMoved: [{ type: 'interactionMoved' }],
+  interactionEnded: [{ type: 'interactionEnded' }],
   beginViewerModelHoverSuppression: [{ type: 'beginViewerModelHoverSuppression', reason: 'cameraControls' }],
   endViewerModelHoverSuppression: [{ type: 'endViewerModelHoverSuppression', reason: 'cameraControls' }],
   markModelPointerGestureMoved: [{ type: 'markModelPointerGestureMoved' }],
@@ -360,16 +361,17 @@ describe('graphics machine totality baseline', () => {
     const everywhere = [
       'cameraViewChanged',
       'canvasDetached',
+      'controlsAttached',
       'adoptSectionView',
       'updateSectionCut',
       'removeSectionCut',
       'hoverSectionCut',
       'adoptPinnedMeasurements',
-      'controlsInteractionMoved',
+      'interactionMoved',
       'clearArtifact',
       'gltfPresentationCommitted',
     ];
-    const withSelectSectionCut = [...everywhere.slice(0, 5), 'selectSectionCut', ...everywhere.slice(5)];
+    const withSelectSectionCut = [...everywhere.slice(0, 6), 'selectSectionCut', ...everywhere.slice(6)];
     expect(silent).toEqual([
       {
         state: 'operational.backend.probing | operational.section.off | operational.measure.off',

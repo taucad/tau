@@ -3,6 +3,7 @@ import { createActor } from 'xstate';
 import { createCameraView, resolveCameraState } from '@taucad/camera';
 import type { CameraVector, CameraView } from '@taucad/camera';
 import type { RenderFrame } from '@taucad/spatial';
+import { cameraMachine } from '@taucad/camera/machine';
 import { createThreeCameraRig } from '#camera.js';
 import { toThreeRenderPoint } from '#spatial.js';
 
@@ -476,4 +477,71 @@ describe('createThreeCameraRig mirror', () => {
       }
     },
   );
+});
+
+describe('createThreeCameraRig following a given actor', () => {
+  const startGiven = () => createActor(cameraMachine, { input: { initialView } }).start();
+
+  it('should present the given actor only while connected and never stop it', () => {
+    const camera = startGiven();
+    const updates: number[] = [];
+    const rig = createThreeCameraRig({ actorRef: camera, onUpdate: (_, snapshot) => updates.push(snapshot.revision) });
+    expect(rig.actorRef).toBe(camera);
+
+    camera.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 40 });
+    expect(updates).toEqual([]);
+    expect(rig.perspectiveCamera.fov).toBe(60);
+
+    const disconnect = rig.connect();
+    expect(updates).toEqual([1]);
+    expect(rig.perspectiveCamera.fov).toBe(40);
+    camera.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 30 });
+    expect(updates).toEqual([1, 2]);
+
+    disconnect();
+    camera.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 20 });
+    expect(updates).toEqual([1, 2]);
+    // An unfollowed rig still reads the actor as it is.
+    expect(rig.readState().projection).toMatchObject({ kind: 'perspective', verticalFieldOfView: 20 });
+
+    rig.dispose();
+    expect(camera.getSnapshot().status).toBe('active');
+    camera.stop();
+  });
+
+  it('should take the given actor frame and send it the rig frame once connected', () => {
+    const camera = startGiven();
+    camera.send({ type: 'setRenderFrame', renderFrame: frameAt(2) });
+    const rig = createThreeCameraRig({ actorRef: camera });
+    expect(rig.renderFrame).toEqual(frameAt(2));
+
+    rig.setRenderFrame(frameAt(4));
+    expect(camera.getSnapshot().context.renderFrame).toEqual(frameAt(2));
+    const disconnect = rig.connect();
+    expect(camera.getSnapshot().context.renderFrame).toEqual(frameAt(4));
+
+    // A frame the actor takes in a pose becomes the rig's, presented with that pose.
+    camera.send({ type: 'poseObserved', ...initialView, source: 'input', renderFrame: frameAt(8, [1, 0, 0]) });
+    expect(rig.renderFrame).toEqual(frameAt(8, [1, 0, 0]));
+    expectAgreement(rig);
+    disconnect();
+    camera.stop();
+  });
+
+  it('should connect once at a time', () => {
+    const camera = startGiven();
+    const updates: number[] = [];
+    const rig = createThreeCameraRig({ actorRef: camera, onUpdate: (_, snapshot) => updates.push(snapshot.revision) });
+    const first = rig.connect();
+    const second = rig.connect();
+    camera.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 40 });
+    expect(updates).toEqual([0, 1]);
+    second();
+    camera.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 30 });
+    expect(updates).toEqual([0, 1, 2]);
+    first();
+    camera.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 20 });
+    expect(updates).toEqual([0, 1, 2]);
+    camera.stop();
+  });
 });

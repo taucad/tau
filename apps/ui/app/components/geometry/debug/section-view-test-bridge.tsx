@@ -48,6 +48,10 @@ import {
   infiniteGridPresentationPlaneByUpDirection,
 } from '@taucad/viewer/graphics/three/utils/infinite-grid-frame';
 
+/** Whether the person is holding a camera gesture. */
+const selectGestureHeld = (cameraRef: GraphicsContext['cameraRef']): boolean =>
+  cameraRef.getSnapshot().matches({ gesture: 'held' });
+
 /**
  * A cut to add: what is left out takes the Add menu's default with no view (a plane through the bounds centre,
  * unflipped; a 90° cutaway from angle zero). A cutaway passes through the bounds centre.
@@ -188,7 +192,7 @@ export type SectionViewTestCapCompleteness = Readonly<{
 
 export type SectionViewTestMeasureState = Readonly<{
   isMeasureActive: boolean;
-  /** True while camera controls own the pointer; a measure gesture started here is discarded. */
+  /** True while camera controls hold a gesture (`gesture.held`); a measure gesture started here is discarded. */
   cameraInteracting: boolean;
   /** Meshes the measure tool has drawn into the scene: snap indicators, lines and labels. */
   measurementUiMeshCount: number;
@@ -1040,7 +1044,8 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
               })
             : currentView.verticalSpan / (nextCamera.zoom ?? 1);
         cameraRig.actorRef.send({
-          type: 'setView',
+          type: 'poseObserved',
+          source: 'input',
           target: [target.x, target.y, target.z],
           direction: [direction.x, direction.y, direction.z],
           up: [up.x, up.y, up.z],
@@ -1149,7 +1154,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         const { context } = graphicsActor.getSnapshot();
         return {
           isMeasureActive: context.isMeasureActive,
-          cameraInteracting: context.cameraInteracting,
+          cameraInteracting: selectGestureHeld(context.cameraRef),
           measurementUiMeshCount: getSectionViewTestMeasurementUiMeshCount(scene),
           rendererGeometryCount: get().gl.info.memory.geometries,
           snapDistancePx: context.measureSnapDistance,

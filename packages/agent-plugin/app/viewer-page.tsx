@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { Box, Maximize2, MessageSquarePlus } from 'lucide-react';
 import { tauViewerToolName } from '@taucad/mcp/viewer-protocol';
 import type {
@@ -34,9 +35,9 @@ import type { ViewerEnvironment } from '@taucad/viewer/environment/viewer-enviro
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
 import { GraphicsProvider } from '@taucad/viewer/hooks/use-graphics';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import type { GraphicsCameraRef } from '@taucad/viewer/machines/graphics.machine';
 import { buildGeometryComponentReference } from '@taucad/viewer/graphics/metadata/geometry-component-reference';
 import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
-import { getViewCameraSession } from '@taucad/viewer/services/graphics-camera-registry';
 import { ModelViewer } from '@taucad/viewer/model-viewer';
 import { ToolCallError } from '#app/host-bridge.js';
 import type { ChatRoute, HostBridge, HostView } from '#app/host-bridge.js';
@@ -409,6 +410,14 @@ const stageStatusOf = (
 /** The key the parts added to chat are kept under: the source, which a newer render keeps, else the drawn bytes. */
 const addedKeyOf = (model: TauViewerModel): string => model.sourceFile ?? model.sha256;
 
+/** The view camera's pose once it has framed the model, else `undefined`. */
+const selectFramedCameraView = (
+  graphicsRef: ActorRefFrom<typeof graphicsMachine>,
+): SnapshotFrom<GraphicsCameraRef>['context']['view'] | undefined => {
+  const { cameraRef, cameraFraming } = graphicsRef.getSnapshot().context;
+  return cameraFraming.initialized ? cameraRef.getSnapshot().context.view : undefined;
+};
+
 /**
  * The page.
  *
@@ -562,8 +571,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
         if (model === undefined || unit === undefined) {
           return undefined;
         }
-        const session = getViewCameraSession(graphicsRef);
-        const cameraView = session?.framing.initialized ? session.rig.actorRef.getSnapshot().context.view : undefined;
+        const cameraView = selectFramedCameraView(graphicsRef);
         const camera: TauViewerCamera | undefined =
           cameraView === undefined
             ? undefined

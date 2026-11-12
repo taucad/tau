@@ -107,7 +107,11 @@ import { releaseGltfBinaryChunk } from '#graphics/three/utils/gltf-binary-chunk.
 import { createSectionTopologyScheduler } from '#graphics/three/utils/section-topology-scheduler.js';
 import { releaseSectionTopologyWorker } from '#graphics/three/utils/section-surface-topology-worker-client.js';
 import { useKinematicsViewer } from '#graphics/three/react/kinematics-viewer.js';
-import type { GltfPresentationBarrier, GltfPresentationTelemetry } from '#machines/graphics.machine.js';
+import type {
+  GltfPresentationBarrier,
+  GltfPresentationTelemetry,
+  GraphicsCameraRef,
+} from '#machines/graphics.machine.js';
 import { useViewerEnvironment } from '#environment/viewer-environment.jsx';
 
 // Module-scoped GLTFLoader instance. GLTFLoader is stateless and fully reusable,
@@ -2028,6 +2032,10 @@ export function applyGltfEdgeThemeColor(scene: Group, edgeColor: number): void {
   }
 }
 
+/** Whether the person is dragging the view's camera, read at the moment a query needs it. */
+const selectCameraDragging = (cameraRef: GraphicsCameraRef): boolean =>
+  cameraRef.getSnapshot().matches({ input: 'dragging' });
+
 /**
  * This component renders a GLTF mesh.
  *
@@ -2166,7 +2174,7 @@ export function GltfMesh({
       // A press can reach camera controls before R3F: only movement gives the camera ownership.
       // Queries resume immediately on release, without waiting for a React render.
       if (
-        context.cameraInteractionHadMovement ||
+        selectCameraDragging(context.cameraRef) ||
         context.viewerHoverSuppressionReasons.includes('sectionViewTransform')
       ) {
         return false;

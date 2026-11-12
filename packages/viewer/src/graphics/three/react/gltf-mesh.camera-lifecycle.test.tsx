@@ -74,6 +74,9 @@ const mocks = vi.hoisted(() => {
       send: vi.fn(),
       getSnapshot: () => ({
         context: {
+          cameraRef: {
+            getSnapshot: () => ({ matches: (_state: { gesture?: string; input?: string }): boolean => false }),
+          },
           modelPointerClickSuppressionReasons: [],
           suppressNextModelPointerClick: false,
           viewerHoverSuppressionReasons: [],
@@ -223,6 +226,16 @@ const clipBeyond = (normal: Vector3, point: Vector3): RaycastClipState => {
     pieces: [{ cutId: 'cut', halfSpaces: [halfSpace], faces: [{ cutId: 'cut', plane: halfSpace, bounds: [] }] }],
   };
 };
+
+/** A camera whose gesture is held and whose input is dragging as the readers say. */
+const cameraStub = (
+  held: () => boolean,
+  dragging: () => boolean,
+): { getSnapshot: () => { matches: (state: { gesture?: string; input?: string }) => boolean } } => ({
+  getSnapshot: () => ({
+    matches: (state) => (state.input === 'dragging' ? dragging() : state.gesture === 'held' && held()),
+  }),
+});
 
 const createGltf = (): GLTF =>
   ({
@@ -759,7 +772,13 @@ describe('GltfMesh camera lifecycle', () => {
     let cameraInteracting = false;
     let cameraInteractionHadMovement = false;
     vi.spyOn(mocks.graphicsActor, 'getSnapshot').mockImplementation(() => ({
-      context: { ...snapshot.context, cameraInteracting, cameraInteractionHadMovement },
+      context: {
+        ...snapshot.context,
+        cameraRef: cameraStub(
+          () => cameraInteracting,
+          () => cameraInteractionHadMovement,
+        ),
+      },
     }));
     const query = vi.spyOn(bvhRaycast, 'raycastFirstVisibleMeshHit');
     const view = render(<GltfMesh gltfFile={new Uint8Array([1])} enableMatcap={false} />);
@@ -820,7 +839,13 @@ describe('GltfMesh camera lifecycle', () => {
     const snapshot = mocks.graphicsActor.getSnapshot();
     let cameraInteracting = false;
     vi.spyOn(mocks.graphicsActor, 'getSnapshot').mockImplementation(() => ({
-      context: { ...snapshot.context, cameraInteracting, cameraInteractionHadMovement: false },
+      context: {
+        ...snapshot.context,
+        cameraRef: cameraStub(
+          () => cameraInteracting,
+          () => false,
+        ),
+      },
     }));
     const gltf = createGltf();
     const near = new Mesh(new BoxGeometry(), new MeshBasicMaterial());

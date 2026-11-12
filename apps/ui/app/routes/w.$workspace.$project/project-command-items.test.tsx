@@ -14,7 +14,7 @@ let registeredItems: CommandPaletteItem[] = [];
 let isTauDebugEnabled = false;
 let geometryFormat: 'gltf' | 'svg' | undefined;
 let cameraState: Record<string, unknown> | undefined;
-let cameraRegistryVersion = 0;
+let cameraPresented = false;
 let hasProjectContext = true;
 const openPanel = vi.fn();
 const captureCadImages =
@@ -45,7 +45,8 @@ const cadActor = {
   on: () => ({ unsubscribe: vi.fn() }),
 };
 const graphicsActor = {
-  getSnapshot: () => ({ context: { cameraState } }),
+  // A canvas presents the camera once it attaches its controls adapter, and the flag outlives that canvas.
+  getSnapshot: () => ({ context: { cameraState, cameraPresented: cameraPresented || cameraState !== undefined } }),
 };
 
 vi.mock('#hooks/use-project-availability.js', () => ({
@@ -88,14 +89,7 @@ vi.mock('#hooks/use-project.js', () => ({
 
 vi.mock('#services/headless-capture.js', () => ({ captureCadImages, omittedSectionCutsNotice }));
 
-vi.mock('@taucad/viewer/hooks/use-graphics', () => ({
-  useGraphicsCameraRigQuery: () => {
-    const _version = cameraRegistryVersion;
-    return () => Boolean(cameraState) && _version >= 0;
-  },
-}));
 vi.mock('@taucad/viewer/services/graphics-camera-registry', () => ({
-  hasGraphicsCameraRig: () => Boolean(cameraState),
   getGraphicsCameraState: () => cameraState,
 }));
 
@@ -207,7 +201,7 @@ describe('ProjectCommandPaletteItems', () => {
     isTauDebugEnabled = false;
     geometryFormat = undefined;
     cameraState = undefined;
-    cameraRegistryVersion = 0;
+    cameraPresented = false;
     hasProjectContext = true;
     openPanel.mockClear();
     captureCadImages.mockReset();
@@ -493,19 +487,15 @@ describe('ProjectCommandPaletteItems', () => {
     expect(downloadBlob).not.toHaveBeenCalled();
   });
 
-  it('reacts to camera registration and unregistration for a stable graphics actor', () => {
+  /* A hidden viewer tab detaches its canvas, but the camera keeps its pose, so capture stays available. */
+  it('enables PNG capture once a canvas presents the camera, and keeps it after that canvas detaches', () => {
     geometryFormat = 'gltf';
+    cameraPresented = false;
     const view = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
     expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(true);
 
-    cameraState = { position: [1, 2, 3] };
-    cameraRegistryVersion += 1;
+    cameraPresented = true;
     view.rerender(<ProjectCommandPaletteItems match={match} />);
     expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(false);
-
-    cameraState = undefined;
-    cameraRegistryVersion += 1;
-    view.rerender(<ProjectCommandPaletteItems match={match} />);
-    expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(true);
   });
 });

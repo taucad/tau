@@ -102,6 +102,7 @@ export type ModelViewerProps = {
   readonly className?: string;
   readonly enablePan?: boolean;
   readonly enableZoom?: boolean;
+  /** The camera's opening field of view in degrees. It seeds the viewer's own graphics actor; a `graphicsRef` seeds its own. */
   readonly initialVerticalFieldOfView?: number;
   readonly stageOptions?: StageOptions;
   readonly graphicsOptions?: ModelViewerGraphicsOptions;
@@ -185,7 +186,6 @@ const ModelViewerCore = memo(function ModelViewerCore({
   className,
   enablePan,
   enableZoom,
-  initialVerticalFieldOfView,
   stageOptions,
   graphicsOptions,
   error,
@@ -259,7 +259,7 @@ const ModelViewerCore = memo(function ModelViewerCore({
   return (
     <div className='relative size-full'>
       <div role='img' aria-label='3D model preview' className={cn('size-full', className)}>
-        <GraphicsProvider graphicsRef={graphicsRef} initialVerticalFieldOfView={initialVerticalFieldOfView}>
+        <GraphicsProvider graphicsRef={graphicsRef}>
           <ReferencingCadViewer
             artifact={artifact}
             artifactHash={artifactHash}
@@ -310,6 +310,7 @@ const ModelViewerWithOwnGraphics = memo(function ModelViewerWithOwnGraphics(
       enablePostProcessing: defaultGraphicsSettings.enablePostProcessing,
       upDirection: defaultGraphicsSettings.upDirection,
       graphicsBackend: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
+      camera: { cameraFovAngle: props.initialVerticalFieldOfView },
     },
   });
 

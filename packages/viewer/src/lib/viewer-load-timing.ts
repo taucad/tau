@@ -21,7 +21,8 @@ import { Topic } from '@taucad/events';
  * - `canvas.mount`: the canvas component's first render to R3F's `onCreated`, which includes the renderer.
  * - `renderer.create`: the viewport renderer's construction and `init()`, inside the `gl` factory.
  * - `frame.first`: R3F's `onCreated` to the first frame the canvas presents; first-use shader compilation lands here.
- * - `gizmo.create`: the viewport gizmo's construction, surface, axes and control binding, in one effect run.
+ * - `gizmo.create`: the view cube's construction, surface and axes, once per start of its adapter. An in-place repaint
+ *   (theme, accent, contrast, a web font arriving, the up axis) is not timed.
  * - `canvas.2d`: one 2D context acquired and drawn by the viewer, tagged with its {@link ViewerCanvas2dSource}.
  *
  * @public
@@ -29,8 +30,9 @@ import { Topic } from '@taucad/events';
 export type ViewerLoadPhase = 'canvas.mount' | 'renderer.create' | 'frame.first' | 'gizmo.create' | 'canvas.2d';
 
 /**
- * Who acquired a 2D context. The gizmo package's own label canvases are not tagged: they are acquired inside
- * `gizmo.create`, so a host attributes an untagged context in that span to the package.
+ * Who acquired a 2D context. The gizmo package's own label canvases are not tagged: those acquired while the cube is
+ * built fall inside `gizmo.create`, so a host attributes an untagged context in that span to the package. An in-place
+ * repaint acquires them again outside any span.
  *
  * @public
  */

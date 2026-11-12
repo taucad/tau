@@ -2,6 +2,8 @@ import type {
   GitRemoteCredential,
   RevisionDiffEntry,
   RevisionDivergence,
+  RevisionGraph,
+  RevisionGraphRequest,
   RevisionLogRequest,
   RevisionRow,
   RevisionStatusProjection,
@@ -88,6 +90,8 @@ export type RevisionClient = Readonly<{
   subscribeToasts: (listener: (toast: RevisionToast) => void) => () => void;
   /** One branch's history, newest first, each row carrying its `Rev N` (I3). */
   log: (request?: RevisionLogRequest) => Promise<readonly RevisionRow[]>;
+  /** Every branch's history in one walk, each row naming the line History draws it on (D2). */
+  graph: (request?: RevisionGraphRequest) => Promise<RevisionGraph>;
   /** How far `head` and `base` have gone apart, counted by the port without listing either history. */
   divergence: (head: string, base: string) => Promise<RevisionDivergence>;
   /** Which paths one revision changed, against `from` or its own first parent. */

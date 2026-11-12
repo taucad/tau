@@ -59,6 +59,7 @@ import {
   generatedGitattributesPath,
   generatedIgnorePath,
   readRevisionDiff,
+  readRevisionGraph,
   readRevisionLog,
   readRevisionPlace,
   publishOverHttp,
@@ -387,6 +388,7 @@ const unrecordingCommands: ReadonlySet<string> = new Set([
   'flushKeepalive',
   'remoteCredential',
   'log',
+  'graph',
   'divergence',
   'diff',
   'compare',
@@ -1428,6 +1430,29 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           await readRevisionLog(port, {
             ...(optionalText(request, 'branch') === undefined ? {} : { branch: optionalText(request, 'branch') }),
             ...(optionalText(request, 'from') === undefined ? {} : { from: optionalText(request, 'from') }),
+            ...(limit === undefined ? {} : { limit }),
+          }),
+        );
+      }
+      case 'graph': {
+        const limit = request['limit'];
+        if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1)) {
+          throw Object.assign(new Error('Revision request limit must be a positive integer.'), {
+            code: 'INVALID_REVISION_REQUEST',
+          });
+        }
+        const branches = request['branches'];
+        if (
+          branches !== undefined &&
+          (!Array.isArray(branches) || !branches.every((name): name is string => typeof name === 'string'))
+        ) {
+          throw Object.assign(new Error('Revision graph branches must be a list of branch names.'), {
+            code: 'INVALID_REVISION_REQUEST',
+          });
+        }
+        return revisionJson(
+          await readRevisionGraph(port, {
+            ...(branches === undefined ? {} : { branches }),
             ...(limit === undefined ? {} : { limit }),
           }),
         );

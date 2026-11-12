@@ -1,35 +1,11 @@
-/* oxlint-disable @typescript-eslint/no-unnecessary-condition -- TODO: review these types, some are actually required */
-import { useThree } from '@react-three/fiber';
-import type { GizmoOptions } from 'three-viewport-gizmo';
-import { ViewportGizmo } from 'three-viewport-gizmo';
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
-import type { Object3D, Camera } from 'three';
-import type { CameraDriverSnapshot } from '@taucad/camera/machine';
-import type { ThreeCamera } from '@taucad/three/camera';
-import { createViewportGizmoCubeAxes } from '#graphics/three/controls/viewport-gizmo-cube-axes.js';
-import { bindViewportGizmoControls } from '#graphics/three/controls/viewport-gizmo-controls-adapter.js';
-import type { ViewportGizmoControlsBinding } from '#graphics/three/controls/viewport-gizmo-controls-adapter.js';
-import { useViewportGizmoInteractionLock } from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
-import {
-  bindViewportGizmoInvalidationEvents,
-  SectionPlanePickerContext,
-  useViewportGizmoRenderLoop,
-} from '#graphics/three/controls/viewport-gizmo-render-loop.jsx';
-import { useCameraRetarget, useCameraRig, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
+import { useStore } from '@react-three/fiber';
+import { useCallback, useId } from 'react';
+import type { ReactNode, RefCallback } from 'react';
+import type { Group } from 'three';
+import { createViewportGizmoAdapter } from '#graphics/three/controls/viewport-gizmo-adapter.js';
+import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
 import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
-import { resolveGizmoContainer, syncGizmoFov, useGizmoResizeSync } from '#graphics/three/utils/gizmo.utils.js';
-import { useViewerEnvironment } from '#environment/viewer-environment.jsx';
-import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
-import {
-  applyViewportGizmoNodeMaterials,
-  applyViewportGizmoSurface,
-} from '#graphics/three/controls/viewport-gizmo-cube-surface.js';
-import { beginViewerLoadSpan } from '#lib/viewer-load-timing.js';
-import {
-  hideViewportGizmoTargets,
-  resolveViewportGizmoStyleConfig,
-} from '#graphics/three/controls/viewport-gizmo-styles.js';
+import { useCameraConsumersRef, useCameraRig, useGraphics } from '#hooks/use-graphics.jsx';
 import type { GizmoStyleId } from '#graphics/three/controls/viewport-gizmo-styles.js';
 
 type ViewportGizmoCubeProps = {
@@ -40,256 +16,55 @@ type ViewportGizmoCubeProps = {
    * When provided, the gizmo will be appended to this container instead of the renderer's parent.
    */
   readonly container?: HTMLElement | string;
+  /** The section plane picker the cube draws beside it while Section is on, styled as the cube is. */
+  readonly planePicker?: SectionPlanePicker;
   /** The gizmo's style. Absent: the rounded cube. */
   readonly gizmoStyle?: GizmoStyleId;
 };
 
-const className = 'viewport-gizmo-cube';
-
-export function ViewportGizmoCube({ size = 96, container, gizmoStyle = 'cube' }: ViewportGizmoCubeProps): ReactNode {
-  const gl = useThree((state) => state.gl);
-  const controls = useThree((state) => state.controls);
-  const invalidate = useThree((state) => state.invalidate);
-  const interactionLock = useViewportGizmoInteractionLock();
-  const graphicsActor = useGraphics();
-  const cameraRig = useCameraRig();
-  // The gizmo orients its faces, drags and face clicks around its own up axis; the process-global
-  // THREE.Object3D.DEFAULT_UP is not written per view (persisted view settings blueprint, E3).
-  const upDirection = useGraphicsSelector((state) => state.context.upDirection);
-
-  const { accentColor } = useViewerEnvironment();
-  const { colorScheme, isHighContrast } = useViewerEnvironment();
-
-  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref
-  const gizmoRef = useRef<ViewportGizmo | undefined>(undefined);
-  const controlsBindingRef = useRef<ViewportGizmoControlsBinding | undefined>(undefined);
-  const initialCameraRef = useRef(cameraRig.activeCamera);
-  const [loadedFont, setLoadedFont] = useState('');
-
-  const retargetCamera = useCallback((camera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
-    initialCameraRef.current = camera;
-    const gizmo = gizmoRef.current;
-    if (!gizmo) {
-      return;
-    }
-    gizmo.camera = camera;
-    controlsBindingRef.current?.setCamera?.(camera);
-    syncGizmoFov(gizmo, snapshot.view.requestedVerticalFieldOfView);
-    gizmo.cameraUpdate();
-  }, []);
-  useCameraRetarget(retargetCamera);
-
-  const graphicsBackendThree = useThreeGraphicsBackend();
-
-  useViewportGizmoRenderLoop({ gizmoRef, renderer: gl, controlsBindingRef, invalidate });
-
-  // ViewportGizmo overlays into a sub-viewport of the shared R3F canvas (same pattern as three-viewport-gizmo docs).
-  useEffect(() => {
-    if (!gl || !controls) {
-      return;
-    }
-
-    const containerToUse = resolveGizmoContainer(container, gl.domElement);
-    if (!containerToUse) {
-      return;
-    }
-
-    // A rebuild (theme, accent, size, the web font arriving) is a second span, which is what a load profile counts.
-    const finishGizmoSpan = beginViewerLoadSpan('gizmo.create');
-    const style = readViewportGizmoStyle({ container: containerToUse, colorScheme, isHighContrast, accentColor });
-    const styleConfig = resolveViewportGizmoStyleConfig({
-      gizmoStyle,
-      colors: style,
-      radius: viewportGizmoMetrics.radius,
-    });
-    const gizmoConfig: GizmoOptions = {
-      up: upDirection,
-      placement: container ? 'top-right' : 'bottom-right',
-      size,
-      font: {
-        weight: 500,
-        family: style.font,
-      },
-      offset: {
-        bottom: 0,
-        right: 0,
-      },
-      className,
-      resolution: viewportGizmoMetrics.textureSize,
-      container: containerToUse,
-      background: {
-        enabled: false,
-      },
-      ...styleConfig.options,
-    };
-
-    const gizmo = new ViewportGizmo(initialCameraRef.current, gl, gizmoConfig);
-    if (styleConfig.surface === 'tau') {
-      applyViewportGizmoSurface(gizmo, style, graphicsBackendThree);
-    } else {
-      applyViewportGizmoNodeMaterials(gizmo, graphicsBackendThree);
-    }
-    if (!styleConfig.clickable) {
-      hideViewportGizmoTargets(gizmo);
-    }
-    gizmoRef.current = gizmo;
-
-    syncGizmoFov(gizmo, cameraRig.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView);
-
-    const removeInvalidationListeners = bindViewportGizmoInvalidationEvents({ gizmo, invalidate });
-
-    gizmo.scale.multiplyScalar(styleConfig.scale);
-    const gizmoAxes = createViewportGizmoCubeAxes({
-      axesSize: 2.1,
-      rendererSize: size,
-      xAxisColor: style.axes.x,
-      yAxisColor: style.axes.y,
-      zAxisColor: style.axes.z,
-      xLabelColor: style.axes.x,
-      yLabelColor: style.axes.y,
-      zLabelColor: style.axes.z,
-      lineWidth: 1.5,
-      lineOpacity: 1,
-      fontFamily: style.font,
-      renderingBackend: graphicsBackendThree,
-    });
-    if (styleConfig.triad) {
-      gizmo.add(gizmoAxes);
-    }
-
-    const controlsBinding = bindViewportGizmoControls({
-      camera: initialCameraRef.current,
-      controls,
-      gizmo,
-      interactionLock,
-      modelPointerInteraction: {
-        onStart: () => {
-          graphicsActor.send({
-            type: 'beginViewerModelHoverSuppression',
-            reason: 'viewportGizmo',
-            source: 'viewer',
-          });
-        },
-        onMove: () => {
-          graphicsActor.send({ type: 'markModelPointerGestureMoved' });
-        },
-        onEnd: () => {
-          graphicsActor.send({
-            type: 'endViewerModelHoverSuppression',
-            reason: 'viewportGizmo',
-            source: 'viewer',
-          });
-        },
-      },
-    });
-    if (!controlsBinding) {
-      gizmoRef.current = undefined;
-      removeInvalidationListeners();
-      gizmo.dispose();
-      finishGizmoSpan('cancelled');
-      return;
-    }
-    controlsBindingRef.current = controlsBinding;
-
-    // Pipeline pre-warm (Policy Rule 13): when the WebGPU backend is active the gizmo
-    // surface and axes need GPU pipelines, so the first `gizmo.render()` call would
-    // otherwise pay the `createRenderPipelineAsync` latency and skip frames until the
-    // pipeline resolves. `WebGPURenderer.compileAsync(scene, camera)` warms the pipeline
-    // off the critical path. Same warmup contract as `AxesWebGpuFatLine` and
-    // `post-processing-webgpu.tsx`.
-    const warmupCancellation = { cancelled: false };
-    const font = `500 ${viewportGizmoMetrics.fontSize}px ${style.font}`;
-    if (document.fonts && loadedFont !== style.font && !document.fonts.check(font)) {
-      // Canvas text does not repaint when a web font arrives. Rebuild both face and
-      // axis labels once it loads, keeping system-font labels usable in the meantime.
-      // async-iife: bootstrap — font readiness is asynchronous; teardown cancels the rebuild.
-      void (async () => {
-        try {
-          await document.fonts.load(font);
-        } catch {
-          return; // A failed font request keeps the system-font fallback.
-        }
-        if (!warmupCancellation.cancelled) {
-          setLoadedFont(style.font);
-        }
-      })();
-    }
-    const renderer = gl as unknown as {
-      compileAsync?: (scene: Object3D, camera: Camera) => Promise<unknown>;
-    };
-    const warmupCompile = renderer.compileAsync;
-    if (graphicsBackendThree === 'webgpu' && typeof warmupCompile === 'function') {
-      // async-iife: bootstrap — effects cannot be async; the cancellation flag ensures a
-      // teardown before resolution is a no-op.
-      void (async () => {
-        try {
-          await Promise.all([
-            warmupCompile.call(renderer, gizmo, cameraRig.perspectiveCamera),
-            warmupCompile.call(renderer, gizmo, cameraRig.orthographicCamera),
-          ]);
-        } catch (error) {
-          console.error('ViewportGizmoCube pipeline warm-up failed', error);
-          return;
-        }
-        if (warmupCancellation.cancelled) {
-          return;
-        }
-        invalidate();
-      })();
-    }
-
-    invalidate();
-    finishGizmoSpan();
-
-    return () => {
-      warmupCancellation.cancelled = true;
-
-      const existing = gizmoRef.current;
-      gizmoRef.current = undefined;
-      controlsBindingRef.current = undefined;
-
-      if (existing) {
-        controlsBinding.detach();
-        removeInvalidationListeners();
-        existing.dispose();
+/**
+ * The view cube. Graphics runs its gesture as the `viewportGizmo` child, around the DOM adapter built here from the
+ * canvas's store, the view's camera rig and the cube's placement. This mount hands graphics the adapter from its
+ * group's ref, the way the section handles hand over their input, and graphics stops the gesture when the ref is
+ * cleared. The theme, the accent, the web font and the up axis reach the adapter as events and repaint the cube in
+ * place, so none of them rebuilds it, and no effect here sends, subscribes or times. A new style is a new cube (other
+ * targets, surface and triad): the ref callback changes with it, so React hands graphics a new adapter.
+ */
+export function ViewportGizmoCube({
+  size = 96,
+  container,
+  planePicker,
+  gizmoStyle = 'cube',
+}: ViewportGizmoCubeProps): ReactNode {
+  const store = useStore();
+  const graphics = useGraphics();
+  const rig = useCameraRig();
+  const consumersRef = useCameraConsumersRef();
+  const backend = useThreeGraphicsBackend();
+  const gizmoId = useId();
+  const attachGizmo = useCallback<RefCallback<Group>>(
+    (group) => {
+      if (!group) {
+        graphics.send({ type: 'viewportGizmoDetached', gizmoId });
+        return;
       }
-    };
-  }, [
-    gl,
-    controls,
-    graphicsBackendThree,
-    accentColor,
-    colorScheme,
-    isHighContrast,
-    size,
-    container,
-    invalidate,
-    interactionLock,
-    graphicsActor,
-    cameraRig,
-    upDirection,
-    loadedFont,
-    gizmoStyle,
-  ]);
-
-  // The section plane picker beside the cube is printed in the cube's colours and font, so it follows the cube's
-  // style: the theme, the accent and the web font arriving.
-  const planePicker = useContext(SectionPlanePickerContext);
-  useEffect(() => {
-    if (!planePicker || !gl) {
-      return;
-    }
-    const containerToUse = resolveGizmoContainer(container, gl.domElement);
-    if (!containerToUse) {
-      return;
-    }
-    planePicker.setStyle(
-      readViewportGizmoStyle({ container: containerToUse, colorScheme, isHighContrast, accentColor }),
-    );
-    invalidate();
-  }, [planePicker, gl, container, colorScheme, isHighContrast, accentColor, loadedFont, invalidate]);
-
-  useGizmoResizeSync(gizmoRef);
-
-  return null;
+      graphics.send({
+        type: 'viewportGizmoAttached',
+        gizmoId,
+        adapter: createViewportGizmoAdapter({
+          store,
+          container,
+          size,
+          backend,
+          rig,
+          consumersRef,
+          graphics,
+          planePicker,
+          gizmoStyle,
+        }),
+      });
+    },
+    [backend, consumersRef, container, gizmoId, gizmoStyle, graphics, planePicker, rig, size, store],
+  );
+  return <group ref={attachGizmo} name='viewport-gizmo' />;
 }

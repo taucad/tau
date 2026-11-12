@@ -3,6 +3,7 @@ import {
   effectiveGizmoStyle,
   effectivePreset,
   emptyPersonProfile,
+  familiarProducts,
   emptyViewerPreferences,
   suggestedGizmo,
   suggestedPreset,
@@ -11,20 +12,22 @@ import {
 } from '@taucad/preferences';
 import type { GizmoStyleId, MousePresetId, PersonProfile, ToolId, ViewerPreferences } from '@taucad/preferences';
 
-/** Every tool answer: its preset, its gizmo, and whether copy may name the tool as the reason. */
-const expectedSuggestions: ReadonlyArray<readonly [ToolId, MousePresetId, GizmoStyleId, boolean]> = [
-  ['new', 'tau', 'cube', false],
-  ['other', 'tau', 'cube', false],
-  ['openscad', 'tau', 'cube', true],
-  ['slicer', 'tau', 'cube', false],
-  ['kicad', 'tau', 'cube', false],
-  ['tinkercad', 'right-orbit', 'cube', false],
-  ['onshape', 'right-orbit', 'cube', true],
-  ['solidworks', 'middle-ctrl', 'cube', true],
-  ['blender', 'middle-shift', 'axis-balls', true],
-  ['nx-creo', 'middle-shift', 'cube', true],
-  ['fusion', 'shift-middle', 'cube', true],
-  ['game-engine', 'alt', 'axis-balls', false],
+/** Every tool answer: its preset, its gizmo, and the products copy may name as the reason (camera research R13). */
+const expectedSuggestions: ReadonlyArray<readonly [ToolId, MousePresetId, GizmoStyleId, readonly string[]]> = [
+  ['new', 'tau', 'cube', []],
+  ['other', 'tau', 'cube', []],
+  ['openscad', 'tau', 'cube', ['OpenSCAD']],
+  ['slicer', 'tau', 'cube', []],
+  // KiCad is documented and matches P1, but the answer also covers Altium, which does not.
+  ['kicad', 'tau', 'cube', []],
+  ['tinkercad', 'right-orbit', 'cube', ['Tinkercad']],
+  ['onshape', 'right-orbit', 'cube', ['Onshape']],
+  ['solidworks', 'middle-ctrl', 'cube', ['SolidWorks']],
+  ['blender', 'middle-shift', 'axis-balls', ['Blender']],
+  // No Siemens page documents NX's mapping, so the shared answer names Creo alone.
+  ['nx-creo', 'middle-shift', 'cube', ['Creo']],
+  ['fusion', 'shift-middle', 'cube', ['Fusion', 'Inventor']],
+  ['game-engine', 'alt', 'axis-balls', ['Maya', 'Unity', 'Unreal']],
 ];
 
 describe('the suggestion table', () => {
@@ -33,11 +36,11 @@ describe('the suggestion table', () => {
     expect(expectedSuggestions.map(([tool]) => tool).toSorted()).toEqual([...toolIds].toSorted());
   });
 
-  it.each(expectedSuggestions)('suggests for %s the preset %s and the gizmo %s', (...row) => {
-    const [tool, preset, gizmo, named] = row;
+  it.each(expectedSuggestions)('suggests for %s the preset %s and the gizmo %s, naming %j', (...row) => {
+    const [tool, preset, gizmo, names] = row;
     expect(suggestedPreset(tool)).toBe(preset);
     expect(suggestedGizmo(tool)).toBe(gizmo);
-    expect(toolSuggestions[tool].named).toBe(named);
+    expect(toolSuggestions[tool].names).toEqual(names);
   });
 
   it("suggests Tau's defaults with no tool answer", () => {
@@ -63,5 +66,16 @@ describe('effective preset and gizmo style', () => {
     };
     expect(effectivePreset(chosen, blender)).toBe('tau');
     expect(effectiveGizmoStyle(chosen, blender)).toBe('axes');
+  });
+});
+
+describe('familiarProducts', () => {
+  it('lists, per preset, the products its answers may name (camera research R13)', () => {
+    expect(familiarProducts('tau')).toEqual(['OpenSCAD']);
+    expect(familiarProducts('right-orbit')).toEqual(['Tinkercad', 'Onshape']);
+    expect(familiarProducts('middle-ctrl')).toEqual(['SolidWorks']);
+    expect(familiarProducts('middle-shift')).toEqual(['Blender', 'Creo']);
+    expect(familiarProducts('shift-middle')).toEqual(['Fusion', 'Inventor']);
+    expect(familiarProducts('alt')).toEqual(['Maya', 'Unity', 'Unreal']);
   });
 });

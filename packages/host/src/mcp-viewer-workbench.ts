@@ -1,12 +1,14 @@
 /**
  * The viewer page's view, kept in the project's `.tau/workbench` records (agent plugin UI blueprint W10, Q14), so Tau
- * and the page open the project with the view the person left: the camera, the display, grid, field of view, up
- * direction, section and pinned measurements (the page's `settings`), and the component display. The page reads the
- * record back through {@link McpViewerWorkbench.state} and seeds its viewer from it, as the Tau app does.
+ * and the page open the project with the view the person left: the camera, the section and pinned measurements (the
+ * page's `settings`), the display, grid unit, field of view and up direction the person set (the page's `viewFields`),
+ * and the component display. An inheritable leaf the person never set is not written, so the view keeps following
+ * Tau's value for it. The page reads the record back through {@link McpViewerWorkbench.state} and seeds its viewer
+ * from it, as the Tau app does.
  *
  * Only the person's own interaction is kept: until a page's `interactedAt` moves past what it was when that page first
  * reported a model, its reports of that model are ignored, so opening a model or an agent's selection writes nothing.
- * Only what changed since the page's previous report is written, the camera, the settings or the component display, so a page that
+ * Only what changed since the page's previous report is written, the camera, the settings, a leaf the person set or the component display, so a page that
  * merely keeps polling never reverts what `arrange_workbench` or Tau wrote meanwhile. Writes settle for a moment,
  * then go out view first, then the layout that names a view this writer created, then entries. Each one replaces the
  * file only if it still holds the bytes it was computed from; a record another writer changed meanwhile wins, and the
@@ -18,9 +20,9 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import type { TauViewerViewState, TauViewerWorkbenchState } from '@taucad/mcp/viewer-protocol';
-import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
-import type { ViewerNode, WorkbenchEntries, WorkbenchLayout, WorkbenchView } from '@taucad/workbench';
+import type { TauViewerViewFields, TauViewerViewState, TauViewerWorkbenchState } from '@taucad/mcp/viewer-protocol';
+import { viewFieldPaths, withViewField, workbenchPaths, workbenchRecords } from '@taucad/workbench';
+import type { ViewFieldPath, ViewerNode, WorkbenchEntries, WorkbenchLayout, WorkbenchView } from '@taucad/workbench';
 
 /** The frame a page reports its camera in when it names none. */
 const rootFrame = 'tau:root';
@@ -53,8 +55,48 @@ type Read = Readonly<{ path: string; text: string | undefined }>;
 
 type Write = Read & Readonly<{ next: string }>;
 
-/** Which parts of a page's view changed since its previous report, and so are the person's to write. */
-type Changed = Readonly<{ camera: boolean; settings: boolean; components: boolean }>;
+/**
+ * Which parts of a page's view changed since its previous report, and so are the person's to write. `fields` holds the
+ * inheritable leaves the person set or reset on the page since then.
+ */
+type Changed = Readonly<{ camera: boolean; settings: boolean; components: boolean; fields: TauViewerViewFields }>;
+
+/* Whether the page commanded a leaf again since its previous report: by the command's sequence number when the page
+ * sends one, so the same value set again after another writer changed the record is still written; by value from a
+ * page older than the sequence. */
+const commandedAgain = (previous: TauViewerViewState, next: TauViewerViewState, leaf: ViewFieldPath): boolean => {
+  const sequence = next.viewFieldSequence?.[leaf];
+  return sequence === undefined
+    ? next.viewFields?.[leaf] !== previous.viewFields?.[leaf]
+    : sequence !== previous.viewFieldSequence?.[leaf];
+};
+
+/* The inheritable leaves the page commanded since its previous report, with the values commanded. */
+const fieldsChanged = (previous: TauViewerViewState, next: TauViewerViewState): TauViewerViewFields =>
+  Object.fromEntries(
+    viewFieldPaths.flatMap((leaf) =>
+      next.viewFields?.[leaf] !== undefined && commandedAgain(previous, next, leaf)
+        ? [[leaf, next.viewFields[leaf]]]
+        : [],
+    ),
+  );
+
+/* The record with each commanded leaf written; every other inheritable leaf stays as the record holds it. */
+const withViewFields = (record: WorkbenchView, fields: TauViewerViewFields): WorkbenchView => {
+  let next = record;
+  for (const leaf of viewFieldPaths) {
+    next = writeField(next, fields, leaf);
+  }
+  return next;
+};
+const writeField = <Leaf extends ViewFieldPath>(
+  record: WorkbenchView,
+  fields: TauViewerViewFields,
+  leaf: Leaf,
+): WorkbenchView => {
+  const value = fields[leaf];
+  return value === undefined ? record : withViewField(record, leaf, value);
+};
 
 const sameList = <Item>(left: readonly Item[], right: readonly Item[]): boolean =>
   left.length === right.length && left.every((item, index) => item === right[index]);
@@ -81,6 +123,7 @@ const changedBetween = (previous: TauViewerViewState, next: TauViewerViewState):
   /* A page older than the field reports no settings, which is no change. */
   settings: next.settings !== undefined && JSON.stringify(previous.settings) !== JSON.stringify(next.settings),
   components: !sameList(previous.hidden, next.hidden) || !sameList(previous.isolated, next.isolated),
+  fields: fieldsChanged(previous, next),
 });
 
 const readText = async (root: string, path: string): Promise<string | undefined> => {
@@ -269,8 +312,17 @@ const plan = async (root: string, view: TauViewerViewState, changed: Changed): P
   const id = found?.id ?? `v-${randomBytes(4).toString('hex')}`;
   const viewRead: Read = found?.read ?? { path: workbenchPaths.view(id), text: undefined };
   const camera = found === undefined || changed.camera ? view.camera : undefined;
-  const settings = found === undefined || changed.settings ? view.settings : undefined;
-  const base: WorkbenchView = found?.record ?? workbenchRecords.view.schema.parse({ version: 1, entryPath });
+  /* The page's section and measurements; an inheritable leaf is written only as the person's command (`fields`), so a
+   * camera move or a section change never writes a display, grid, field of view or up direction it merely shows. */
+  const settings =
+    (found === undefined || changed.settings) && view.settings !== undefined
+      ? { section: view.settings.section, measurements: view.settings.measurements }
+      : undefined;
+  /* Every leaf commanded since the last write, across the reports merged while it waited, new view or not. */
+  const base: WorkbenchView = withViewFields(
+    found?.record ?? workbenchRecords.view.schema.parse({ version: 1, entryPath }),
+    changed.fields,
+  );
   const selected = base.selectedKernelView;
   const pose = camera === undefined ? undefined : poseOf(camera);
   const nextView = workbenchRecords.view.serialize({
@@ -415,7 +467,11 @@ export const createMcpViewerWorkbench = (options: McpViewerWorkbenchOptions = {}
       }
       pages.set(page, { baseline: seen.baseline, previous: view });
       const changed = changedBetween(seen.previous, view);
-      if (view.interactedAt <= seen.baseline || (!changed.camera && !changed.settings && !changed.components)) {
+      const fieldsMoved = Object.keys(changed.fields).length > 0;
+      if (
+        view.interactedAt <= seen.baseline ||
+        (!changed.camera && !changed.settings && !changed.components && !fieldsMoved)
+      ) {
         return;
       }
       /* A report still waiting keeps the parts it changed; this one adds its own. */
@@ -427,6 +483,7 @@ export const createMcpViewerWorkbench = (options: McpViewerWorkbenchOptions = {}
           camera: changed.camera || (queued?.camera ?? false),
           settings: changed.settings || (queued?.settings ?? false),
           components: changed.components || (queued?.components ?? false),
+          fields: { ...queued?.fields, ...changed.fields },
         },
       });
       clearTimeout(timer);

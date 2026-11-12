@@ -137,6 +137,14 @@ describe('RevisionRow', () => {
     expect(when).not.toHaveClass('hidden');
   });
 
+  it('should name the merged branch a row came from in its accessible name, as its meta line does (D2)', () => {
+    renderRow({ mergedBranch: { name: 'enclosure-v2', slot: 1 } });
+
+    const button = screen.getByRole('button', { name: /^Thicker base · .* · on enclosure-v2$/u });
+    expect(button).toBeInTheDocument();
+    expect(screen.getByRole('listitem').querySelector('[data-slot="row-branch"]')).toHaveTextContent('enclosure-v2');
+  });
+
   it('shows no who line where the resolver gives none, nor a raw actor id (Q2, HQ4)', () => {
     renderRow({ revision: card({ actor: '', isYours: true }) });
     const item = screen.getByRole('listitem');

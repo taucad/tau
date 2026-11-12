@@ -15,16 +15,26 @@
  * Every write goes through the checked record store (`editViewFile`), so its conflict handling and issue states apply.
  */
 import { useMemo } from 'react';
-import { lengthUnits, viewFieldPaths, viewRecordV1Defaults, withViewField } from '@taucad/workbench';
+import {
+  lengthUnits,
+  resolveViewSettings,
+  tauViewDefaults,
+  viewFieldPaths,
+  viewRecordV1Defaults,
+  withViewField,
+} from '@taucad/workbench';
 import type { LengthUnit, ViewFieldPath, ViewFieldValues, WorkbenchView } from '@taucad/workbench';
 import type { ViewerViewFields } from '@taucad/viewer/cad/viewer-view-fields';
 import type { PersonalViewDefaults } from '@taucad/preferences';
 import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
+import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { personRecordStores } from '#preferences/person-record.store.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { exceptionsForView, viewExceptions, viewExceptionsStore } from '#workbench-records/view-exceptions.js';
 import type { SectionWriteResult } from '#preferences/section-store.js';
+import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
+import { useViewLevels } from '#workbench-records/view-levels.js';
 
 /** The view a command writes: its id, and the entry a new record names when the file is missing. */
 // oxlint-disable-next-line typescript/no-restricted-types -- A view record names no entry with `null` (the file picker).
@@ -207,30 +217,75 @@ export const useViewFieldCommands = (): ViewFieldCommands => {
  * The view commands as the viewer bar takes them (`ViewerControls`' `viewFields`), for one view. A grid unit the
  * record cannot hold is ignored.
  *
+ * With `viewerControls` on, the bar also learns where each leaf's value comes from (`sourceOf`, resolved over the view
+ * record, the person's defaults and this device's exceptions), what Reset returns a leaf to (`inheritsFrom`) and
+ * "Reset view", and each set or reset is reported with `level: 'view'`. With it off the bar shows no marks.
+ *
  * @param view - The view the bar shows, or `undefined` for a bar that keeps changing the live owner (a shared session).
  * @returns The bar's commands.
  */
 export const useViewerViewFieldCommands = (view: ViewFieldTarget | undefined): ViewerViewFields | undefined => {
   const commands = useViewFieldCommands();
+  const { projectId, viewRecords } = useProject();
+  const viewerControls = useFeature('viewerControls');
+  const telemetry = useOnboardingTelemetry();
   const viewId = view?.viewId;
   const entryPath = view?.entryPath;
+  const levels = useViewLevels(projectId, viewId ?? '');
+  const record = viewId === undefined ? undefined : viewRecords.get(viewId);
+  const sources = useMemo(() => {
+    if (!viewerControls || entryPath === undefined) {
+      return undefined;
+    }
+    return resolveViewSettings({ tau: tauViewDefaults, ...levels, view: record }).sources;
+  }, [entryPath, levels, record, viewerControls]);
   return useMemo(() => {
     if (viewId === undefined || entryPath === undefined) {
       return undefined;
     }
     const target = { viewId, entryPath };
-    return {
+    const reportSet = (leaf: ViewFieldPath): void => {
+      if (sources !== undefined) {
+        telemetry.viewerDefaultChanged({ level: 'view', field: leaf });
+      }
+    };
+    const reportReset = (leaf: ViewFieldPath): void => {
+      if (sources !== undefined) {
+        telemetry.viewerOverrideReset({ level: 'view', field: leaf });
+      }
+    };
+    const fields: ViewerViewFields = {
       set: async (leaf, value) => {
         if (leaf === 'grid.unit') {
-          return lengthUnits.includes(value as LengthUnit)
-            ? commands.setViewField(target, 'grid.unit', value as LengthUnit)
-            : false;
+          if (!lengthUnits.includes(value as LengthUnit)) {
+            return false;
+          }
+          reportSet(leaf);
+          return commands.setViewField(target, 'grid.unit', value as LengthUnit);
         }
+        reportSet(leaf);
         return commands.setViewField(target, leaf, value as ViewFieldValues[typeof leaf]);
       },
       reset: (leaf) => {
+        reportReset(leaf);
         void commands.resetViewField(target, leaf);
       },
+    };
+    if (sources === undefined) {
+      return fields;
+    }
+    return {
+      ...fields,
+      sourceOf: (leaf) => sources[leaf],
+      inheritsFrom: (leaf) => (leaf !== 'upDirection' && levels.person?.[leaf] !== undefined ? 'person' : 'tau'),
+      resetView: () => {
+        for (const leaf of viewFieldPaths) {
+          if (sources[leaf] === 'view') {
+            reportReset(leaf);
+          }
+        }
+        void commands.resetView(target);
+      },
     } satisfies ViewerViewFields;
-  }, [commands, entryPath, viewId]);
+  }, [commands, entryPath, levels.person, sources, telemetry, viewId]);
 };

@@ -166,6 +166,8 @@ export {
   startTrigger,
 } from '#start-version.js';
 export type { StartOrigin, StartReading } from '#start-version.js';
+export { readRevisionGraph } from '#revision-graph.js';
+export type { RevisionGraph, RevisionGraphRequest, RevisionGraphRow } from '#revision-graph.js';
 export {
   generatedGitattributesContent,
   generatedGitattributesPath,

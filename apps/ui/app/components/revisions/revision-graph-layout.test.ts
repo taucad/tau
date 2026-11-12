@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layoutRevisionGraph } from '#components/revisions/revision-graph-layout.js';
+import { graphGeometry, gutterWidth, layoutRevisionGraph } from '#components/revisions/revision-graph-layout.js';
 import type { GraphLayout, GraphNode, GraphRow } from '#components/revisions/revision-graph-layout.js';
 
 /** A row with a marker, 28 px tall with its marker on the first line. */
@@ -236,5 +236,51 @@ describe('layoutRevisionGraph', () => {
     expect(rows).toEqual(before);
     expect(first.lanes[0]).toBe('main');
     expect(new Set(first.lanes)).toEqual(new Set(['main', 'lid', 'vents', 'base']));
+  });
+});
+
+/** Rows stacked 30 px apart, as measured boxes. */
+const boxesOf = (rows: readonly GraphRow[]): Array<{ top: number; height: number }> =>
+  rows.map((_row, index) => ({ top: index * 30, height: 28 }));
+
+describe('graphGeometry', () => {
+  const forkRows = [
+    entry('b2', { branch: 'side', parent: 'b1' }),
+    entry('b1', { branch: 'side', parent: 'm3' }),
+    entry('m4', { branch: 'main', parent: 'm3' }),
+    entry('m3', { branch: 'main', parent: 'm2' }),
+    entry('m2', { branch: 'main' }),
+  ];
+
+  it('should draw a fork as one cubic, vertical at both ends, as tall as its sideways distance plus 12 px', () => {
+    const rows = [...forkRows.slice(0, 2), chip('gap'), chip('gap2'), ...forkRows.slice(2)];
+    const geometry = graphGeometry(layoutRevisionGraph(rows, ['main', 'side']), rows, boxesOf(rows));
+
+    const [bend] = geometry.paths;
+    // Row 5 holds m3, at 150 + 14. One lane is 16 px, so the bend is 28 px tall.
+    expect(bend).toMatchObject({ kind: 'fork', x0: 16, y0: 164, x1: 32, y1: 136 });
+    expect(bend?.d).toBe('M16 164C16 150 32 150 32 136');
+    // The branch's rail is cut to end exactly where the bend arrives.
+    expect(geometry.lines).toContainEqual({ lane: 1, branch: 'side', x: 32, y1: 44, y2: 136, style: 'solid' });
+  });
+
+  it('should shorten a bend that would pass the marker it runs to', () => {
+    const rows = [entry('b1', { branch: 'side', parent: 'm3' }), entry('m3', { branch: 'main', parent: 'm2' })];
+    // Rows 20 px apart: b1's marker is nearer than the full 28 px above m3's.
+    const boxes = [
+      { top: 0, height: 18 },
+      { top: 20, height: 18 },
+    ];
+
+    const geometry = graphGeometry(layoutRevisionGraph(rows, ['main', 'side']), rows, boxes);
+
+    expect(geometry.paths[0]).toMatchObject({ x0: 16, y0: 34, x1: 32, y1: 14 });
+    // The bend ends on b1's marker, so the branch's rail has no length left to draw.
+    expect(geometry.lines.filter((line) => line.lane === 1)).toEqual([]);
+  });
+
+  it('should size the gutter by lanes in view', () => {
+    expect(gutterWidth(1)).toBe(16);
+    expect(gutterWidth(4)).toBe(64);
   });
 });

@@ -1,13 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import CameraControlsImpl from 'camera-controls';
-import {
-  EventDispatcher,
-  OrthographicCamera,
-  PerspectiveCamera as ThreePerspectiveCamera,
-  Raycaster,
-  Scene,
-  Vector3,
-} from 'three';
+import { OrthographicCamera, PerspectiveCamera as ThreePerspectiveCamera, Raycaster, Scene, Vector3 } from 'three';
 import type { Camera, PerspectiveCamera } from 'three';
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { Actor, InspectionEvent } from 'xstate';
@@ -23,9 +16,8 @@ import {
 } from '#graphics/three/adapters/controls-adapter.js';
 import { surfacePriority } from '#graphics/three/three-canvas-instance-host.js';
 import type { RetargetableCameraControls } from '#graphics/three/adapters/controls-adapter.js';
-import { bindViewportGizmoControls } from '#graphics/three/controls/viewport-gizmo-controls-adapter.js';
-import { createViewportGizmoInteractionLock } from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
-import { graphicsMachine } from '#machines/graphics.machine.js';
+import { graphicsMachine, selectGraphicsViewportGizmoLocked } from '#machines/graphics.machine.js';
+import type { ViewportGizmoAdapterEvent, ViewportGizmoAdapterLogic } from '#machines/viewport-gizmo-gesture.machine.js';
 import type { GraphicsCameraRef } from '#machines/graphics.machine.js';
 import { asCameraActor } from '#services/graphics-camera-registry.js';
 
@@ -53,8 +45,6 @@ type Harness = {
   graphicsEvents: string[];
   cameraEvents: Array<Readonly<{ type: string; echoRevision?: number }>>;
   controls: () => CameraControlsImpl;
-  /** The canvas's view-cube interaction lock, which the adapter reads each frame. */
-  lock: ReturnType<typeof createViewportGizmoInteractionLock>;
   attach: () => void;
 };
 
@@ -99,7 +89,6 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
     },
   });
   const calls: string[] = [];
-  const lock = createViewportGizmoInteractionLock();
   const scene = new Scene();
   const state = {
     camera: rig.activeCamera as Camera,
@@ -129,7 +118,6 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
     graphicsEvents,
     cameraEvents,
     controls: () => state.controls as unknown as CameraControlsImpl,
-    lock,
     attach() {
       graphics.send({ type: 'canvasAttached', canvasId: 'canvas', kind: 'canvas' });
       // The canvas actor hands the camera the surface's viewport when its renderer exists, as `onCreated` does.
@@ -149,7 +137,8 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
           connectorRef,
           consumersRef: { current: consumers },
           getUpAxis: () => 'z',
-          isInteractionLocked: lock.isActive,
+          // As the canvas reads it: the view cube's gesture holds the lock as a state tag.
+          isInteractionLocked: () => selectGraphicsViewportGizmoLocked(graphics.getSnapshot()),
         }),
       });
     },
@@ -468,48 +457,94 @@ describe('controls adapter', () => {
   });
 
   it('moves no camera on a frame step while the view cube holds its interaction lock', () => {
-    vi.useFakeTimers();
-    try {
-      const harness = createHarness();
-      harness.attach();
-      const ticker = frameSubscriptions(harness)[0]!.ref;
-      const controls = harness.controls();
-      const { lock } = harness;
-      const gizmo = Object.assign(new EventDispatcher<Record<string, Record<string, unknown>>>(), {
-        target: new Vector3(),
-        update: vi.fn(),
-      });
-      const binding = bindViewportGizmoControls({
-        camera: harness.rig.activeCamera,
-        controls,
-        gizmo,
-        interactionLock: lock,
-      });
-      const update = vi.spyOn(controls, 'update');
+    const harness = createHarness();
+    harness.attach();
+    const ticker = frameSubscriptions(harness)[0]!.ref;
+    const controls = harness.controls();
+    // A scripted view cube: its adapter reports what the cube did, and graphics runs its gesture.
+    let report: ((event: ViewportGizmoAdapterEvent) => void) | undefined;
+    const adapter: ViewportGizmoAdapterLogic = createCallbackLogic(({ sendBack }) => {
+      report = sendBack;
+      return undefined;
+    });
+    harness.graphics.send({ type: 'viewportGizmoAttached', gizmoId: 'cube', adapter });
+    const update = vi.spyOn(controls, 'update');
+    const locked = (): boolean => selectGraphicsViewportGizmoLocked(harness.graphics.getSnapshot());
 
-      // The cube takes the camera: it holds the lock and the controls are disabled together.
-      gizmo.dispatchEvent({ type: 'start' });
-      expect(lock.isActive()).toBe(true);
-      const { revision } = harness.camera.getSnapshot().context;
-      ticker.current(harness.state, 1 / 60);
-      expect(update).not.toHaveBeenCalled();
-      expect(harness.camera.getSnapshot().context.revision).toBe(revision);
-      // Another tool's drag ends under the cube (a second pointer) and re-enables the controls: the lock still holds them.
-      controls.enabled = true;
-      ticker.current(harness.state, 1 / 60);
-      expect(update).not.toHaveBeenCalled();
-      expect(harness.camera.getSnapshot().context.revision).toBe(revision);
+    // The cube takes a press and turns the camera: its gesture holds the lock.
+    report?.({ type: 'gizmoPressed' });
+    report?.({ type: 'gizmoTurned' });
+    expect(locked()).toBe(true);
+    const { revision } = harness.camera.getSnapshot().context;
+    ticker.current(harness.state, 1 / 60);
+    expect(update).not.toHaveBeenCalled();
+    expect(harness.camera.getSnapshot().context.revision).toBe(revision);
+    // Another tool's drag ends under the cube (a second pointer) and re-enables the controls: the lock still holds them.
+    controls.enabled = true;
+    ticker.current(harness.state, 1 / 60);
+    expect(update).not.toHaveBeenCalled();
+    expect(harness.camera.getSnapshot().context.revision).toBe(revision);
 
-      // Released together: the next frame steps the controls again.
-      gizmo.dispatchEvent({ type: 'end' });
-      expect(lock.isActive()).toBe(false);
-      update.mockClear();
-      ticker.current(harness.state, 1 / 60);
-      expect(update).toHaveBeenCalledOnce();
-      binding?.detach();
-    } finally {
-      vi.useRealTimers();
-    }
+    // Released: the next frame steps the controls again.
+    report?.({ type: 'gizmoReleased' });
+    expect(locked()).toBe(false);
+    update.mockClear();
+    ticker.current(harness.state, 1 / 60);
+    expect(update).toHaveBeenCalledOnce();
+  });
+
+  /* N1 and N2: a navigation step graphics forwards moves the controls, and the next frame reports the pose to the
+   * camera as the person's input, as a drag does. */
+  it("moves the camera by a navigation step graphics forwards, as the person's input", () => {
+    const harness = createHarness();
+    harness.attach();
+    const controls = harness.controls();
+    const ticker = frameSubscriptions(harness)[0]!.ref;
+    const azimuth = controls.azimuthAngle;
+    const { distance } = controls;
+    const target = (): number[] => [...harness.camera.getSnapshot().context.view.target];
+    const startTarget = target();
+    const orbit = { type: 'navigateCamera', step: { kind: 'orbit', direction: 'left' } } as const;
+    harness.calls.length = 0;
+
+    expect(harness.graphics.getSnapshot().can(orbit)).toBe(true);
+    harness.graphics.send(orbit);
+    expect(harness.calls).toContain('invalidate');
+    ticker.current(harness.state, 1 / 60);
+    expect(controls.azimuthAngle).not.toBeCloseTo(azimuth, 6);
+    expect(harness.camera.getSnapshot().context.lastChange.source).toBe('input');
+    expect(target()).toEqual(startTarget);
+
+    harness.graphics.send({ type: 'navigateCamera', step: { kind: 'zoom', direction: 'in' } });
+    ticker.current(harness.state, 1 / 60);
+    expect(controls.distance).toBeLessThan(distance);
+
+    harness.graphics.send({ type: 'navigateCamera', step: { kind: 'pan', direction: 'right' } });
+    ticker.current(harness.state, 1 / 60);
+    expect(target()).not.toEqual(startTarget);
+  });
+
+  it('leaves a navigation step unhandled with no canvas controls, and moves nothing under the view cube lock', () => {
+    const harness = createHarness();
+    const step = { type: 'navigateCamera', step: { kind: 'orbit', direction: 'up' } } as const;
+    expect(harness.graphics.getSnapshot().can(step)).toBe(false);
+    harness.attach();
+    const controls = harness.controls();
+    const polar = controls.polarAngle;
+    // A view cube whose gesture holds the lock, as it does while it turns the camera.
+    let report: ((event: ViewportGizmoAdapterEvent) => void) | undefined;
+    const adapter: ViewportGizmoAdapterLogic = createCallbackLogic(({ sendBack }) => {
+      report = sendBack;
+      return undefined;
+    });
+    harness.graphics.send({ type: 'viewportGizmoAttached', gizmoId: 'cube', adapter });
+    report?.({ type: 'gizmoPressed' });
+    report?.({ type: 'gizmoTurned' });
+    expect(selectGraphicsViewportGizmoLocked(harness.graphics.getSnapshot())).toBe(true);
+    harness.graphics.send(step);
+    controls.update(0);
+    expect(controls.polarAngle).toBeCloseTo(polar, 9);
+    report?.({ type: 'gizmoReleased' });
   });
 
   it('stops stepping the controls when its canvas leaves', () => {

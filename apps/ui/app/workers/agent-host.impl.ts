@@ -9,6 +9,7 @@ import { ResourceQueue } from '@taucad/filesystem';
 import type { FileSystemProvider, IndexAdmits } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
+import type { ViewFieldsSet } from '@taucad/chat/rpc';
 import { geoSpecDefaultRunBudget } from '@taucad/chat/constants';
 import {
   createChatToolRegistry,
@@ -108,6 +109,8 @@ export type ResidentWorkerContext = Readonly<{
   requestRebridge?: (projectId: string, hostId: string) => void;
   /** Runtime telemetry: one finished entry back to the page reporter (FR-14), fire-and-forget. */
   forwardTelemetry?: ForwardEntry;
+  /** `arrange_workbench` set these leaves in a view: the page, which holds the device's storage, records them (BD7). */
+  viewFieldsSet?: (set: Readonly<{ projectId: string; viewId: string; fields: ViewFieldsSet }>) => void;
   visibility: NonNullable<BrowserChatStoreOptions['visibility']>;
   /** M1's timers; the worker leaves the defaults, and the browser tier shortens idle eviction (RH-A15). */
   delays?: AgentLauncherOptions['delays'];
@@ -803,7 +806,11 @@ const composeProjectHost = async (
         createProviderRpcFileSystem({ provider: record, mutations: fileSystemMutations, signal }),
       workbenchFileSystemFor: (signal) =>
         createProviderRpcFileSystem({ provider: workbenchRootView, mutations: fileSystemMutations, signal }),
-      workbench: createRuntimeWorkbenchClient(async () => runtimeClient),
+      workbench: createRuntimeWorkbenchClient(async () => runtimeClient, {
+        markViewFieldsSet: (viewId, fields) => {
+          worker.viewFieldsSet?.({ projectId: provide.projectId, viewId, fields });
+        },
+      }),
       skillResolver,
       /* The kernel reads the model's files itself, so it runs once every large object has landed. */
       ...guardLargeObjectKernel(

@@ -3,7 +3,7 @@ title: 'Settings Policy'
 description: 'How Tau designs, words, organizes and co-locates settings: one registry entry and one row per setting, short user-facing copy, detail in tooltips, and a fixed section taxonomy.'
 status: active
 created: '2026-10-29'
-updated: '2026-11-09'
+updated: '2026-11-12'
 related:
   - docs/policy/ux-policy.md
   - docs/policy/ui-policy.md
@@ -74,6 +74,7 @@ Put each setting in the section a user would open to answer their question. Each
 | Repositories  | Which code can Tau read and write?    | GitHub repository connection, repository access, per-repository write permission     |
 | Billing       | What do I pay and what do I get?      | Plan, plan limits, credits, automatic reload, cancel plan                            |
 | Data controls | What does Tau collect, keep and use?  | Usage and diagnostics, improving the service, cookie preferences, close account      |
+| Viewer        | How do 3D views look and respond?     | Mouse controls, trackpad, zoom and orbit, gizmo style, personal view defaults        |
 | Compute       | Where does work run?                  | Compute reuse, remote hosts                                                          |
 | Models        | Which models can I use?               | Model availability                                                                   |
 | Agents        | How does the agent behave?            | Context the agent receives, tools, permissions, chat display                         |

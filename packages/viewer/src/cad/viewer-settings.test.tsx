@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ViewerSettings } from '#cad/viewer-settings.jsx';
 import { ViewerViewFieldsProvider } from '#cad/viewer-view-fields.jsx';
-import type { ViewerViewFields } from '#cad/viewer-view-fields.jsx';
+import type { ViewerViewFieldPath, ViewerViewFieldSource, ViewerViewFields } from '#cad/viewer-view-fields.jsx';
 
 type GraphicsState = {
   readonly context: {
@@ -326,6 +326,87 @@ describe('ViewerSettings', () => {
       expect(mocks.cameraSend).toHaveBeenLastCalledWith(setFieldOfView(43));
       await user.keyboard('{Shift>}{ArrowRight}{/Shift}');
       expect(mocks.cameraSend).toHaveBeenLastCalledWith(setFieldOfView(47));
+    });
+  });
+
+  describe('where each leaf comes from (T5.3, V5)', () => {
+    const marked = (
+      sources: Partial<Record<ViewerViewFieldPath, ViewerViewFieldSource>>,
+      person: readonly ViewerViewFieldPath[] = [],
+    ) => {
+      const reset = vi.fn();
+      const resetView = vi.fn();
+      const viewFields: ViewerViewFields = {
+        set: vi.fn(),
+        reset,
+        sourceOf: (leaf) => sources[leaf] ?? 'tau',
+        inheritsFrom: (leaf) => (person.includes(leaf) ? 'person' : 'tau'),
+        resetView,
+      };
+      return { viewFields, reset, resetView };
+    };
+
+    it('shows no labels, no dots and no Reset view without the host’s sources (flag off)', async () => {
+      const user = userEvent.setup();
+      await openViewerSettings(user, { set: vi.fn(), reset: vi.fn(), resetView: vi.fn() });
+      expect(screen.queryByText('From my defaults')).not.toBeInTheDocument();
+      expect(screen.queryByText('Set in this view')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^Reset to/u })).not.toBeInTheDocument();
+      expect(screen.queryByRole('menuitem', { name: /Reset view/u })).not.toBeInTheDocument();
+    });
+
+    it('shows no marks for a leaf no level sets, and Reset view is disabled', async () => {
+      const user = userEvent.setup();
+      await openViewerSettings(user, marked({}).viewFields);
+      expect(screen.queryByText('From my defaults')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^Reset to/u })).not.toBeInTheDocument();
+      const resetView = screen.getByRole('menuitem', { name: /Reset view/u });
+      expect(resetView).toHaveAttribute('aria-disabled', 'true');
+      expect(resetView).toHaveTextContent('Follows the defaults');
+    });
+
+    it('labels a leaf the person sets and the view does not “From my defaults”', async () => {
+      const user = userEvent.setup();
+      await openViewerSettings(user, marked({ 'display.grid': 'person', fieldOfView: 'person' }).viewFields);
+      expect(screen.getByRole('switch', { name: 'Grid' })).toHaveAccessibleDescription('From my defaults');
+      expect(screen.getByRole('switch', { name: 'Axes' })).not.toHaveAccessibleDescription();
+      expect(screen.getAllByText('From my defaults')).toHaveLength(2);
+    });
+
+    it('shows the dot on a leaf the view sets, naming what Reset returns to, and resets it', async () => {
+      const user = userEvent.setup();
+      const { viewFields, reset } = marked({ 'display.grid': 'view', 'display.axes': 'view', upDirection: 'view' }, [
+        'display.grid',
+      ]);
+      await openViewerSettings(user, viewFields);
+      expect(screen.getByRole('switch', { name: 'Grid' })).toHaveAccessibleDescription(/Set in this view/u);
+      expect(screen.getByRole('button', { name: 'Reset to my default' })).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: 'Reset to Tau default' })).toHaveLength(2);
+      await user.click(screen.getByRole('button', { name: 'Reset to my default' }));
+      expect(reset).toHaveBeenCalledWith('display.grid');
+      // The press resets the leaf and does not toggle its switch.
+      expect(viewFields.set).not.toHaveBeenCalled();
+    });
+
+    it('counts the leaves the view sets in Reset view and clears them', async () => {
+      const user = userEvent.setup();
+      const { viewFields, resetView } = marked({
+        'display.grid': 'view',
+        'grid.unit': 'view',
+        'display.axes': 'person',
+      });
+      await openViewerSettings(user, viewFields);
+      const item = screen.getByRole('menuitem', { name: /Reset view/u });
+      expect(item).toHaveTextContent('2 changed in this view');
+      await user.click(item);
+      expect(resetView).toHaveBeenCalledOnce();
+    });
+
+    it('says “1 changed in this view” for a single leaf', async () => {
+      const user = userEvent.setup();
+      await openViewerSettings(user, marked({ fieldOfView: 'view' }).viewFields);
+      expect(screen.getByRole('menuitem', { name: /Reset view/u })).toHaveTextContent('1 changed in this view');
+      expect(screen.getByText('Set in this view')).toBeInTheDocument();
     });
   });
 });

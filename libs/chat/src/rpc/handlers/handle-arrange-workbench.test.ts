@@ -70,6 +70,118 @@ const harness = (initial: Record<string, string> = {}, directories: readonly str
 };
 
 describe('handleArrangeWorkbench', () => {
+  describe('inheritable view leaves (onboarding WP3, V8)', () => {
+    const setUp = () =>
+      harness({
+        'main.ts': 'model',
+        [workbenchPaths.layout]: layout({ kind: 'group', tabs: [{ kind: 'view', view: 'front' }] }),
+        [workbenchPaths.view('front')]: workbenchRecords.view.serialize({
+          version: 1,
+          entryPath: 'main.ts',
+          fieldOfView: 35,
+          upDirection: 'y',
+          display: { grid: false, postProcessing: true },
+          grid: { unit: 'in' },
+        }),
+      });
+    const record = (files: Map<string, string>) => {
+      const read = workbenchRecords.view.read(bytes(files.get(workbenchPaths.view('front'))!));
+      if (read.status !== 'current') {
+        throw new Error('unreadable view');
+      }
+      return read.record;
+    };
+
+    it('writes the leaves it names and leaves every other leaf as the record holds it', async () => {
+      const state = setUp();
+      const result = await handleArrangeWorkbench(
+        { views: [{ id: 'front', display: { grid: true }, fieldOfView: 60 }] },
+        state.fs,
+        state.workbench,
+      );
+
+      expect(result).toMatchObject({ success: true });
+      const written = record(state.files);
+      expect(written.display.grid).toBe(true);
+      expect(written.fieldOfView).toBe(60);
+      expect([written.upDirection, written.grid.unit, written.display.postProcessing]).toEqual(['y', 'in', true]);
+    });
+
+    it('tells the device which leaves this call set, with the values written', async () => {
+      const state = setUp();
+      const markViewFieldsSet = vi.fn();
+      await handleArrangeWorkbench(
+        { views: [{ id: 'front', display: { grid: true, axes: false }, upDirection: 'z', grid: { unit: 'mm' } }] },
+        state.fs,
+        { ...state.workbench, markViewFieldsSet },
+      );
+
+      expect(markViewFieldsSet).toHaveBeenCalledExactlyOnceWith('front', {
+        upDirection: 'z',
+        'display.grid': true,
+        'display.axes': false,
+        'grid.unit': 'mm',
+      });
+    });
+
+    it('marks nothing for a call that names no inheritable leaf, or that is refused', async () => {
+      const state = setUp();
+      const markViewFieldsSet = vi.fn();
+      await handleArrangeWorkbench({ views: [{ id: 'front', name: 'Front' }] }, state.fs, {
+        ...state.workbench,
+        markViewFieldsSet,
+      });
+      await handleArrangeWorkbench(
+        { views: [{ id: 'front', display: { grid: true } }], basedOn: 'sha256:stale' },
+        state.fs,
+        { ...state.workbench, markViewFieldsSet },
+      );
+
+      expect(markViewFieldsSet).not.toHaveBeenCalled();
+    });
+
+    it('marks a view whose record landed when a based call then conflicts on the layout', async () => {
+      const state = setUp();
+      const basedOn = digest(state.files.get(workbenchPaths.layout)!);
+      const checkedWrite = state.fs.writeFileChecked.getMockImplementation()!;
+      state.fs.writeFileChecked.mockImplementation(async (input) =>
+        input.path === workbenchPaths.layout
+          ? { status: 'conflict', conflicts: [{ path: workbenchPaths.layout, actual: bytes(layout()) }] }
+          : checkedWrite(input),
+      );
+      const markViewFieldsSet = vi.fn();
+
+      const result = await handleArrangeWorkbench(
+        { views: [{ id: 'front', display: { grid: true } }], basedOn },
+        state.fs,
+        { ...state.workbench, markViewFieldsSet },
+      );
+
+      expect(result).toMatchObject({ success: false, errorCode: 'RECORD_CONFLICT' });
+      expect(record(state.files).display.grid).toBe(true);
+      expect(markViewFieldsSet).toHaveBeenCalledExactlyOnceWith('front', { 'display.grid': true });
+    });
+
+    it('writes the value alone where the host has no person (CLI, MCP), and survives a failing port', async () => {
+      const state = setUp();
+      expect(
+        await handleArrangeWorkbench({ views: [{ id: 'front', display: { grid: true } }] }, state.fs, state.workbench),
+      ).toMatchObject({ success: true });
+      expect(record(state.files).display.grid).toBe(true);
+
+      const failing = vi.fn(async () => {
+        throw new Error('no device storage');
+      });
+      expect(
+        await handleArrangeWorkbench({ views: [{ id: 'front', display: { axes: false } }] }, state.fs, {
+          ...state.workbench,
+          markViewFieldsSet: failing,
+        }),
+      ).toMatchObject({ success: true });
+      expect(record(state.files).display.axes).toBe(false);
+    });
+  });
+
   it('creates a view, shows it immediately, and reports exact checked revisions', async () => {
     const state = harness({ 'main.ts': 'model' });
     const result = await handleArrangeWorkbench(

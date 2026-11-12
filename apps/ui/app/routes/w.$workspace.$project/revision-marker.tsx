@@ -8,7 +8,7 @@
  * and More, and one line of facts. `RevisionMenu` is that row's More, shared
  * with the chat marker so a person reaches the same verbs from either place.
  */
-import { useEffect, useId, useRef, useState } from 'react';
+import { useContext, useEffect, useId, useRef, useState } from 'react';
 import {
   Bot,
   ChevronDown,
@@ -39,6 +39,8 @@ import { DiffViewer } from '#components/code/diff-viewer.js';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
+import { BranchSwatch, HistoryLanesContext } from '#components/revisions/revision-graph-view.js';
+import type { BranchSlot } from '#components/revisions/revision-graph-view.js';
 import {
   timelineGutter,
   timelineMarker,
@@ -765,6 +767,8 @@ export type RevisionRowProps = {
   readonly isFirst?: boolean;
   /** The oldest row, with nothing hidden after it: the line ends at its marker. */
   readonly isLast?: boolean;
+  /** A branch merged into another one in view, which has no chip of its own: the row names it (D2). */
+  readonly mergedBranch?: Readonly<{ name: string; slot: BranchSlot | undefined }>;
 };
 
 /**
@@ -789,8 +793,11 @@ export function RevisionRow({
   onRestore,
   isFirst = false,
   isLast = false,
+  mergedBranch,
 }: RevisionRowProps): React.JSX.Element {
   const { projectId } = useProject();
+  /* On History's lanes the graph draws the marker and the line in the gutter this row leaves (D2). */
+  const isOnLanes = useContext(HistoryLanesContext);
   const role = useProjectRole();
   const isRevealed = useRevisionReveal(projectId) === revision.revisionId;
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -814,7 +821,9 @@ export function RevisionRow({
   const actor = start !== undefined || revision.actor === '' ? undefined : revision.actor;
   const canRestore = role !== 'revoked';
   const fact = entryFact(revision);
-  const label = name === undefined ? (when === '' ? title : `${title} · ${when}`) : `${name} · ${title}`;
+  const entryLabel = name === undefined ? (when === '' ? title : `${title} · ${when}`) : `${name} · ${title}`;
+  /* A merged branch's row names its branch, as its meta line does (D2). */
+  const label = mergedBranch === undefined ? entryLabel : `${entryLabel} · on ${mergedBranch.name}`;
   /* A version's second line says it is one; the time the right-hand column gives other rows follows where there is room (A6). */
   const versionFact = start === undefined ? 'Version' : startFact(start);
   const TitleIcon =
@@ -840,9 +849,13 @@ export function RevisionRow({
             aria-label={label}
             className={cn(timelineRowButton, timelineRowHover)}
           >
-            <span aria-hidden className={timelineGutter({ hasTop: !isFirst, hasBottom: !isLast })}>
-              <RevisionMarkerGlyph revision={revision} isCurrent={isCurrent} />
-            </span>
+            {isOnLanes ? (
+              <span aria-hidden />
+            ) : (
+              <span aria-hidden className={timelineGutter({ hasTop: !isFirst, hasBottom: !isLast })}>
+                <RevisionMarkerGlyph revision={revision} isCurrent={isCurrent} />
+              </span>
+            )}
             <span className={timelineRowContent}>
               <span className='flex min-w-0 flex-1 flex-col'>
                 {/* One run of text: the title wraps as words do and Current follows its last word (canvas decision 8). */}
@@ -870,11 +883,18 @@ export function RevisionRow({
                     </span>
                   ) : null}
                 </span>
-                {version !== undefined || actor !== undefined ? (
+                {version !== undefined || actor !== undefined || mergedBranch !== undefined ? (
                   <span
                     data-slot='row-meta'
                     className='flex min-w-0 flex-wrap items-center gap-x-1 text-xs leading-4 text-muted-foreground'
                   >
+                    {mergedBranch === undefined ? null : (
+                      <span data-slot='row-branch' className='inline-flex min-w-0 items-center gap-1'>
+                        <BranchSwatch slot={mergedBranch.slot} />
+                        <span className='truncate'>{mergedBranch.name}</span>
+                        {version !== undefined || actor !== undefined ? <span aria-hidden> · </span> : null}
+                      </span>
+                    )}
                     {version === undefined ? null : (
                       <span className='min-w-0'>
                         {versionFact}
@@ -912,7 +932,10 @@ export function RevisionRow({
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent className={disclosureMotion}>
-          <div data-slot='open-row' className={cn(timelineOpenBlock(!isLast), 'flex flex-col gap-2 pt-0.5 pb-2')}>
+          <div
+            data-slot='open-row'
+            className={cn(timelineOpenBlock(!isLast && !isOnLanes), 'flex flex-col gap-2 pt-0.5 pb-2')}
+          >
             {isComparing ? (
               <CurrentComparison
                 revision={revision}

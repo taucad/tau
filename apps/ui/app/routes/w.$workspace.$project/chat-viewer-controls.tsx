@@ -8,6 +8,7 @@ import { CaptureViewControl } from '#components/geometry/cad/capture-view-contro
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
 import { selectCadOperationTimeout } from '#machines/cad.machine.js';
 import { defaultOperationTimeout } from '@taucad/ui-core/constants/editor.constants';
+import { useFeature } from '#flags/use-feature.js';
 
 type ChatViewerControlsProps = Readonly<{
   /** Capture writes to the active chat draft and is unavailable in read-only shared sessions. */
@@ -26,7 +27,8 @@ type ChatViewerControlsProps = Readonly<{
 
 /**
  * The project viewer's bar: `@taucad/viewer`'s {@link ViewerControls} with the app's capture and the CAD actor's render
- * timeout.
+ * timeout. With `viewerControls` on, it adds the single-click camera controls beside the gizmo and the navigation keys
+ * (N1, N2).
  */
 export function ChatViewerControls({
   shouldEnableCapture = true,
@@ -38,6 +40,7 @@ export function ChatViewerControls({
   viewFields,
 }: ChatViewerControlsProps): React.JSX.Element {
   const cadRef = useCad();
+  const isViewerControlsEnabled = useFeature('viewerControls');
   const operationTimeoutValue = useCadSelector(selectCadOperationTimeout, defaultOperationTimeout);
   const setOperationTimeout = useCallback(
     (operationTimeout: number) => {
@@ -58,6 +61,8 @@ export function ChatViewerControls({
       leading={leading}
       aboveControls={aboveControls}
       viewFields={viewFields}
+      navigation={isViewerControlsEnabled}
+      navigationKeys={isViewerControlsEnabled}
     />
   );
 }

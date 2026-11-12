@@ -20,7 +20,7 @@ const auth = betterAuth({
   database: memoryAdapter(store),
   emailAndPassword: { enabled: true },
   rateLimit: { enabled: false },
-  plugins: [cliDeviceAuthorization('https://app.example.test'), bearer()],
+  plugins: [cliDeviceAuthorization('https://app.example.test'), bearer({ requireSignature: true })],
 });
 const call = async (path: string, body?: unknown, token?: string) =>
   auth.handler(
@@ -74,6 +74,11 @@ describe('CLI browser-approved sessions', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as { access_token: string };
     expect(body.access_token).not.toBe(browser);
+    const [rawToken, signature] = body.access_token.split('.');
+    expect(signature).toBeTruthy();
+    expect(store['session']).toContainEqual(expect.objectContaining({ token: rawToken }));
+    // A session row's raw token is not a credential: only the signed form authenticates.
+    expect(await jsonOf(call('get-session', undefined, rawToken))).toBeNull();
     expect(await jsonOf(call('get-session', undefined, body.access_token))).toMatchObject({
       user: { email: 'owner@example.test' },
     });

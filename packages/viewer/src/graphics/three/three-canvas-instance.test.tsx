@@ -29,6 +29,7 @@ import {
   infiniteGridPresentationPlaneByUpDirection,
 } from '#graphics/three/utils/infinite-grid-frame.js';
 import type * as ViewerEnvironmentModule from '#environment/viewer-environment.jsx';
+import type { ViewportGizmoInteractionLock } from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
 
 /**
  * Dispatches context-loss handlers registered via the latest stub `<Canvas>`
@@ -243,14 +244,28 @@ vi.mock('#environment/viewer-environment.jsx', async (importOriginal) => ({
   useViewerFeature: (key: string) => enabledFeatures.has(key),
 }));
 
-vi.mock('#graphics/three/scene.jsx', () => ({
-  Scene: ({ children, enableGizmo }: { readonly children: React.ReactNode; readonly enableGizmo: boolean }) => (
-    <div>
-      {enableGizmo ? <div role='img' aria-label='View cube' /> : null}
-      {children}
-    </div>
-  ),
-}));
+/** The interaction lock the view cube would take inside the scene, read through the scene's own provider. */
+const sceneLock = vi.hoisted((): { current: unknown } => ({ current: undefined }));
+vi.mock('#graphics/three/scene.jsx', async () => {
+  const { ViewportGizmoInteractionLockProvider, useViewportGizmoInteractionLock } =
+    await import('#graphics/three/controls/viewport-gizmo-interaction-lock.jsx');
+  function ViewCubeLockProbe(): undefined {
+    sceneLock.current = useViewportGizmoInteractionLock();
+    return undefined;
+  }
+  return {
+    // Like the real scene, it provides the view cube's lock to its children.
+    Scene: ({ children, enableGizmo }: { readonly children: React.ReactNode; readonly enableGizmo: boolean }) => (
+      <ViewportGizmoInteractionLockProvider>
+        <div>
+          {enableGizmo ? <div role='img' aria-label='View cube' /> : null}
+          <ViewCubeLockProbe />
+          {children}
+        </div>
+      </ViewportGizmoInteractionLockProvider>
+    ),
+  };
+});
 
 vi.mock('#graphics/three/post-processing.jsx', () => ({
   PostProcessing: () => null,
@@ -287,6 +302,7 @@ vi.mock('#graphics/three/webgpu-inspector-overlay.jsx', () => ({
 const adapters = vi.hoisted(() => ({
   started: 0,
   stopped: 0,
+  isInteractionLocked: undefined as (() => boolean) | undefined,
   // Stable, as the provider's are: a new ref each render would re-bind the surface every commit.
   connectorRef: { current: undefined },
   consumersRef: { current: new Set<never>() },
@@ -294,8 +310,9 @@ const adapters = vi.hoisted(() => ({
 vi.mock('#graphics/three/adapters/controls-adapter.js', async () => {
   const { createCallbackLogic } = await import('xstate');
   return {
-    createControlsAdapter: () =>
+    createControlsAdapter: (dependencies: { readonly isInteractionLocked?: () => boolean }) =>
       createCallbackLogic(() => {
+        adapters.isInteractionLocked = dependencies.isInteractionLocked;
         adapters.started++;
         return () => {
           adapters.stopped++;
@@ -669,6 +686,22 @@ describe('ThreeCanvasInstance', () => {
     });
     expect(controlsAdapter()?.canvasId).not.toBe(first?.canvasId);
     expect([adapters.started, adapters.stopped]).toEqual([2, 1]);
+  });
+
+  it('holds the controls step while the view cube in the scene holds its interaction lock', async () => {
+    render(<KeyedThreeCanvas canvasKey='a' />);
+
+    await waitFor(() => {
+      expect(controlsAdapter()).toBeDefined();
+    });
+    const lock = sceneLock.current as ViewportGizmoInteractionLock;
+    expect(adapters.isInteractionLocked?.()).toBe(false);
+
+    const release = lock.begin('cube');
+
+    expect(adapters.isInteractionLocked?.()).toBe(true);
+    release();
+    expect(adapters.isInteractionLocked?.()).toBe(false);
   });
 
   it('attaches the controls adapter only after deferred onCreated completes (stub microtask)', async () => {

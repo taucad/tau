@@ -23,6 +23,10 @@
  * orthographic gesture the controls' own zoom is handed the presented zoom, since the rig presents the span through the
  * frustum and `camera-controls` forces its zoom on every update. Each
  * write is stamped with the change's revision so the `update` it causes is an echo the camera ignores.
+ *
+ * Each frame, at `tickPriority` (after the canvas reports its surface and before the render), the adapter follows the
+ * root's event source and steps the controls, unless they are disabled or the canvas's view cube holds its interaction
+ * lock.
  */
 import type { RootState } from '@react-three/fiber';
 import CameraControlsImpl from 'camera-controls';

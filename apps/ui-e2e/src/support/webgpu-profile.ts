@@ -19,7 +19,13 @@ export const resolveRequiredWebGpuProfile = (value: string | undefined = 'hardwa
 
 export const webGpuLaunchArguments = (profile: WebGpuLaunchProfile): readonly string[] => {
   if (profile === 'software') {
-    return ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader'];
+    return [
+      '--enable-unsafe-webgpu',
+      '--use-webgpu-adapter=swiftshader',
+      '--use-angle=swiftshader',
+      '--enable-features=Vulkan',
+      '--use-vulkan=swiftshader',
+    ];
   }
   if (profile === 'hardware') {
     return ['--enable-unsafe-webgpu'];

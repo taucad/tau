@@ -7,11 +7,18 @@
  * the registry default applies. Values come from the client's evaluated variants, which already include
  * `posthog.featureFlags.overrideFeatureFlags(...)` overrides, and are read without `getFeatureFlag`, so reading a
  * flag never captures a `$feature_flag_called` event.
+ *
+ * End-to-end suites name a flag state instead (blueprint FL4): in an undeployed debug build (`TAU_DEBUG` on and no
+ * `TAU_DEPLOY_CONTEXT`, which is how `apps/ui-e2e` and `apps/desktop-e2e` start the app), PostHog flag variants
+ * seeded on {@link seededFlagStateGlobal} before the page's scripts run replace the PostHog client's values for the
+ * life of the page. A deployed build never reads the global, and nothing stores it, so no device can override a flag
+ * this way.
  */
 
 import { Topic } from '@taucad/events';
 import type { FeatureFlagName, FlagDefinition } from '#flags/flag.constants.js';
-import { featureFlagNames, flagRegistry } from '#flags/flag.constants.js';
+import { featureFlagNames, flagRegistry, resolveTauDebugDefault } from '#flags/flag.constants.js';
+import { ENV } from '#environment.config.js';
 
 /** Evaluated values of the PostHog-backed flags, by registry name. A flag PostHog did not return is absent. */
 export type RemoteFlagValues = Readonly<Partial<Record<FeatureFlagName, boolean>>>;
@@ -45,6 +52,36 @@ function project(variants: Record<string, string | boolean>): RemoteFlagValues {
   return projected;
 }
 
+/**
+ * The global an end-to-end init script seeds with PostHog flag variants, keyed by PostHog flag key
+ * (`apps/ui-e2e/src/support/flag-state.ts`).
+ */
+export const seededFlagStateGlobal = '__TAU_E2E_POSTHOG_FLAGS__';
+
+/** Whether this build honours a seeded flag state: an undeployed debug build only. */
+export const isSeededFlagSourceAllowed: boolean = resolveTauDebugDefault({
+  isDebugEnvironment: ENV.TAU_DEBUG,
+  deployContext: ENV.TAU_DEPLOY_CONTEXT,
+});
+
+/**
+ * Project a seeded flag state onto the registry, the same way PostHog's variants are.
+ *
+ * @param seed - The value an init script put on {@link seededFlagStateGlobal}.
+ * @returns The values, or `undefined` when nothing usable was seeded.
+ */
+export function projectSeededFlags(seed: unknown): RemoteFlagValues | undefined {
+  if (seed === null || typeof seed !== 'object' || Array.isArray(seed)) {
+    return undefined;
+  }
+  return project(seed as Record<string, string | boolean>);
+}
+
+/** Read once, when the module loads: a flag state is fixed for the life of the page. */
+const seededValues: RemoteFlagValues | undefined = isSeededFlagSourceAllowed
+  ? projectSeededFlags((globalThis as Record<string, unknown>)[seededFlagStateGlobal])
+  : undefined;
+
 function isSame(a: RemoteFlagValues | undefined, b: RemoteFlagValues | undefined): boolean {
   if (a === undefined || b === undefined) {
     return a === b;
@@ -60,9 +97,12 @@ function update(next: RemoteFlagValues | undefined): void {
   remoteFlagTopic.emit();
 }
 
-/** The evaluated PostHog values, or `undefined` while no client has evaluated flags. */
+/**
+ * The evaluated PostHog values, or `undefined` while no client has evaluated flags. A seeded end-to-end flag state,
+ * where the build honours one, takes their place.
+ */
 export function readRemoteFlagValues(): RemoteFlagValues | undefined {
-  return values;
+  return seededValues ?? values;
 }
 
 /** Listen for changes to the remote values; returns the unsubscribe. */

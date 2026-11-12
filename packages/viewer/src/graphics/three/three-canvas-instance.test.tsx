@@ -29,6 +29,7 @@ import {
   infiniteGridPresentationPlaneByUpDirection,
 } from '#graphics/three/utils/infinite-grid-frame.js';
 import type * as ViewerEnvironmentModule from '#environment/viewer-environment.jsx';
+import type { ViewportGizmoInteractionLock } from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
 
 /**
  * Dispatches context-loss handlers registered via the latest stub `<Canvas>`
@@ -66,8 +67,7 @@ type StubRootState = {
 };
 const rigCamera = new PerspectiveCamera();
 const orthographicCamera = new OrthographicCamera();
-const setClipPlanes = vi.fn();
-const cameraRig = { activeCamera: rigCamera, perspectiveCamera: rigCamera, orthographicCamera, setClipPlanes };
+const cameraRig = { activeCamera: rigCamera, perspectiveCamera: rigCamera, orthographicCamera };
 /** Frame callbacks registered inside the stub root, run by a test as R3F's loop would. */
 type StubFrameState = { size: { width: number; height: number } };
 const frameCallbacks = vi.hoisted(
@@ -244,14 +244,28 @@ vi.mock('#environment/viewer-environment.jsx', async (importOriginal) => ({
   useViewerFeature: (key: string) => enabledFeatures.has(key),
 }));
 
-vi.mock('#graphics/three/scene.jsx', () => ({
-  Scene: ({ children, enableGizmo }: { readonly children: React.ReactNode; readonly enableGizmo: boolean }) => (
-    <div>
-      {enableGizmo ? <div role='img' aria-label='View cube' /> : null}
-      {children}
-    </div>
-  ),
-}));
+/** The interaction lock the view cube would take inside the scene, read through the scene's own provider. */
+const sceneLock = vi.hoisted((): { current: unknown } => ({ current: undefined }));
+vi.mock('#graphics/three/scene.jsx', async () => {
+  const { ViewportGizmoInteractionLockProvider, useViewportGizmoInteractionLock } =
+    await import('#graphics/three/controls/viewport-gizmo-interaction-lock.jsx');
+  function ViewCubeLockProbe(): undefined {
+    sceneLock.current = useViewportGizmoInteractionLock();
+    return undefined;
+  }
+  return {
+    // Like the real scene, it provides the view cube's lock to its children.
+    Scene: ({ children, enableGizmo }: { readonly children: React.ReactNode; readonly enableGizmo: boolean }) => (
+      <ViewportGizmoInteractionLockProvider>
+        <div>
+          {enableGizmo ? <div role='img' aria-label='View cube' /> : null}
+          <ViewCubeLockProbe />
+          {children}
+        </div>
+      </ViewportGizmoInteractionLockProvider>
+    ),
+  };
+});
 
 vi.mock('#graphics/three/post-processing.jsx', () => ({
   PostProcessing: () => null,
@@ -288,6 +302,7 @@ vi.mock('#graphics/three/webgpu-inspector-overlay.jsx', () => ({
 const adapters = vi.hoisted(() => ({
   started: 0,
   stopped: 0,
+  isInteractionLocked: undefined as (() => boolean) | undefined,
   // Stable, as the provider's are: a new ref each render would re-bind the surface every commit.
   connectorRef: { current: undefined },
   consumersRef: { current: new Set<never>() },
@@ -295,8 +310,9 @@ const adapters = vi.hoisted(() => ({
 vi.mock('#graphics/three/adapters/controls-adapter.js', async () => {
   const { createCallbackLogic } = await import('xstate');
   return {
-    createControlsAdapter: () =>
+    createControlsAdapter: (dependencies: { readonly isInteractionLocked?: () => boolean }) =>
       createCallbackLogic(() => {
+        adapters.isInteractionLocked = dependencies.isInteractionLocked;
         adapters.started++;
         return () => {
           adapters.stopped++;
@@ -306,10 +322,12 @@ vi.mock('#graphics/three/adapters/controls-adapter.js', async () => {
 });
 
 const canvas = () => graphicsHolder.current?.getSnapshot().context.canvas?.ref;
+/** The view camera graphics holds, which the canvas presents on. */
+const camera = () => graphicsHolder.current!.getSnapshot().context.cameraRef.getSnapshot().context;
 const controlsAdapter = () => graphicsHolder.current?.getSnapshot().context.controlsAdapter;
 
 /** A canvas under a Suspense boundary that a test suspends (hiding the canvas) and then reveals. */
-const suspendable = () => {
+const suspendable = ({ enableGrid = false }: Readonly<{ enableGrid?: boolean }> = {}) => {
   let release: () => void = () => undefined;
   const pending = new Promise<void>((resolve) => {
     release = resolve;
@@ -323,7 +341,7 @@ const suspendable = () => {
   const tree = (hold: boolean) => (
     <Suspense fallback={null}>
       <Gate hold={hold} />
-      <ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined}>
+      <ThreeCanvasInstance enableGrid={enableGrid} graphicsBackend='webgl' onRetry={() => undefined}>
         {null}
       </ThreeCanvasInstance>
     </Suspense>
@@ -374,7 +392,6 @@ describe('ThreeCanvasInstance', () => {
     latestCanvasState = undefined;
     stubRootCamera = new PerspectiveCamera();
     stubCoordinateSystem = WebGLCoordinateSystem;
-    setClipPlanes.mockClear();
     rendererFailure.error = undefined;
     frameCallbacks.length = 0;
     stubInvalidate.mockClear();
@@ -433,7 +450,12 @@ describe('ThreeCanvasInstance', () => {
     });
     expect(canvas()).toBe(ref);
     expect(frameCallbacks.filter(({ priority }) => priority === 6)).toHaveLength(1);
-    // The replayed mount neither stops nor duplicates the controls adapter.
+    // One surface observer reports resizes to the camera, and one camera surface presents them.
+    expect(frameCallbacks.filter(({ priority }) => priority === -2)).toHaveLength(1);
+    expect(Object.keys(ref?.getSnapshot().children ?? {}).filter((id) => id === 'cameraSurface')).toEqual([
+      'cameraSurface',
+    ]);
+    // The replayed mount neither stops nor duplicates the controls adapter, so its one tick per frame.
     expect([adapters.started, adapters.stopped]).toEqual([1, 0]);
     view.unmount();
     expect(canvas()).toBeUndefined();
@@ -613,7 +635,7 @@ describe('ThreeCanvasInstance', () => {
     await waitFor(() => {
       expect(screen.getByText('Graphics context lost')).toBeInTheDocument();
     });
-    expect(setClipPlanes).toHaveBeenLastCalledWith(undefined);
+    expect(camera().clipPolicy).toBeUndefined();
   });
 
   it('preserves the lighting owner exposure when the canvas finishes mounting', async () => {
@@ -664,6 +686,22 @@ describe('ThreeCanvasInstance', () => {
     });
     expect(controlsAdapter()?.canvasId).not.toBe(first?.canvasId);
     expect([adapters.started, adapters.stopped]).toEqual([2, 1]);
+  });
+
+  it('holds the controls step while the view cube in the scene holds its interaction lock', async () => {
+    render(<KeyedThreeCanvas canvasKey='a' />);
+
+    await waitFor(() => {
+      expect(controlsAdapter()).toBeDefined();
+    });
+    const lock = sceneLock.current as ViewportGizmoInteractionLock;
+    expect(adapters.isInteractionLocked?.()).toBe(false);
+
+    const release = lock.begin('cube');
+
+    expect(adapters.isInteractionLocked?.()).toBe(true);
+    release();
+    expect(adapters.isInteractionLocked?.()).toBe(false);
   });
 
   it('attaches the controls adapter only after deferred onCreated completes (stub microtask)', async () => {
@@ -911,59 +949,98 @@ describe('ThreeCanvasInstance', () => {
     }
   });
 
-  it('installs and clears grid presentation clipping during the canvas layout lifecycle', () => {
+  it('presents the grid clip policy on the camera while the grid is in the scene', () => {
+    const grid = (upDirection: 'x' | 'y' | 'z') => ({
+      farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
+      presentationPlane: infiniteGridPresentationPlaneByUpDirection[upDirection],
+    });
     const { rerender, unmount } = render(
       <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
         {null}
       </ThreeCanvasInstance>,
     );
-
-    expect(setClipPlanes).toHaveBeenLastCalledWith({
-      farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
-      presentationPlane: infiniteGridPresentationPlaneByUpDirection.z,
-    });
-    const installedCallCount = setClipPlanes.mock.calls.length;
+    expect(camera().clipPolicy).toEqual(grid('z'));
 
     rerender(
       <ThreeCanvasInstance className='unchanged-policy' enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
         {null}
       </ThreeCanvasInstance>,
     );
-    expect(setClipPlanes).toHaveBeenCalledTimes(installedCallCount);
+    expect(camera().clipPolicy).toEqual(grid('z'));
+    // The grid lies across graphics' world up, as `Grid` draws it: the policy turns with the camera's up, in the
+    // macrostep graphics takes the new axis, before React renders again.
+    graphicsHolder.current?.send({ type: 'setUpDirection', payload: 'x' });
+    expect(camera().clipPolicy).toEqual(grid('x'));
 
-    rerender(
-      <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={() => undefined} upDirection='x'>
-        {null}
-      </ThreeCanvasInstance>,
-    );
-    expect(setClipPlanes).toHaveBeenCalledTimes(installedCallCount + 1);
-    expect(setClipPlanes).toHaveBeenLastCalledWith({
-      farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
-      presentationPlane: infiniteGridPresentationPlaneByUpDirection.x,
-    });
-
+    // The grid the canvas draws decides the policy, whatever graphics' own grid setting says.
     rerender(
       <ThreeCanvasInstance enableGrid={false} graphicsBackend='webgl' onRetry={() => undefined}>
         {null}
       </ThreeCanvasInstance>,
     );
-    expect(setClipPlanes).toHaveBeenLastCalledWith(undefined);
-
+    expect(graphicsHolder.current?.getSnapshot().context.enableGrid).toBe(true);
+    expect(camera().clipPolicy).toBeUndefined();
     rerender(
       <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
         {null}
       </ThreeCanvasInstance>,
     );
-    expect(setClipPlanes).toHaveBeenLastCalledWith({
+    expect(camera().clipPolicy).toEqual(grid('x'));
+
+    unmount();
+    expect(camera().clipPolicy).toBeUndefined();
+  });
+
+  it('hands a canvas that attaches after a new world up the axis graphics holds', () => {
+    graphicsHolder.current?.send({ type: 'setUpDirection', payload: 'y' });
+    const { unmount } = render(
+      <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
+        {null}
+      </ThreeCanvasInstance>,
+    );
+
+    expect(camera().clipPolicy).toEqual({
+      farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
+      presentationPlane: infiniteGridPresentationPlaneByUpDirection.y,
+    });
+    unmount();
+  });
+
+  it('re-reports the drawn grid to a new canvas actor while the scene stays mounted', async () => {
+    // As after a Suspense reveal in real R3F: the surface's canvas actor is replaced, but the scene (its own root) and
+    // the grid marker in it never unmount, so only the marker's new callback identity can tell the new actor.
+    const view = render(
+      <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
+        {null}
+      </ThreeCanvasInstance>,
+    );
+    await waitFor(() => {
+      expect(backend()).toBe('webgl');
+    });
+    const { canvasId } = graphicsHolder.current!.getSnapshot().context.canvas!;
+    const marker = screen.getByTestId('graphics-backend-provider').querySelector('group');
+    act(() => {
+      graphicsHolder.current?.send({ type: 'canvasDetached', canvasId });
+    });
+    expect(camera().clipPolicy).toBeUndefined();
+    act(() => {
+      graphicsHolder.current?.send({ type: 'canvasAttached', canvasId, kind: 'canvas', reattached: true });
+    });
+    // The same marker element: nothing in the scene re-mounted.
+    expect(screen.getByTestId('graphics-backend-provider').querySelector('group')).toBe(marker);
+    expect(camera().clipPolicy).toEqual({
       farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
       presentationPlane: infiniteGridPresentationPlaneByUpDirection.z,
     });
+    view.unmount();
+  });
 
-    const clearCallsBeforeUnmount = setClipPlanes.mock.calls.filter(([policy]) => policy === undefined).length;
-    unmount();
-    expect(setClipPlanes).toHaveBeenLastCalledWith(undefined);
-    expect(setClipPlanes.mock.calls.filter(([policy]) => policy === undefined)).toHaveLength(
-      clearCallsBeforeUnmount + 1,
-    );
+  it('presents the surface size on the camera from the renderer it creates', async () => {
+    const view = render(<KeyedThreeCanvas canvasKey='viewport' />);
+    await waitFor(() => {
+      expect(backend()).toBe('webgl');
+    });
+    expect(camera().view.viewport).toEqual({ width: 800, height: 600, pixelRatio: 1 });
+    view.unmount();
   });
 });

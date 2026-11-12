@@ -4,7 +4,7 @@
  *
  * ```text
  * measureSession: off ⇄ on
- * context: hover, pressGeneration, deferred, inputRef
+ * context: hover, pressGeneration, deferred, inputRef, exactRef, catalogRef
  * ```
  *
  * - **off**: Measure is off. Nothing hovers and no press is taken; a pose change still moves the press generation on.
@@ -20,11 +20,21 @@
  * A press waiting on its targets lands only while the press generation is the one it waited under. Any newer press,
  * a camera drag, a pose, cut, start or model change, or Measure turning off moves the generation on and drops it.
  *
+ * While Measure is on the session also runs, one at a time each, the two pieces of async work a commit or a target list
+ * starts (G10b), as children it spawns and stops:
+ *
+ * - **exact** (`exactRef`): the exact CAD distance a body-to-body minimum distance waits for. A new commit replaces it,
+ *   and Measure turning off cancels it, each with its reason; a pose, cut or model change stops it, since graphics has
+ *   already marked its record out of date. Stopping the session (the view closing) cancels it from its own cleanup.
+ * - **catalog** (`catalogRef`): the scan that lists the targets in view, a page at a time. A new request replaces it;
+ *   the camera, pose, cuts, the listed model or its filter changing, or Measure turning off, stops it.
+ *
  * Every fact here is ephemeral: derived from the pointer on the mounted surface and never persisted or seeded.
  *
  * @module
  */
 
+import type { GeometryComponentManifest } from '@taucad/types';
 import { createCallbackLogic, setup, types } from 'xstate';
 import type { ActorRefFrom, CallbackActorLogic, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import { eventSchemas } from '#machines/machine-schemas.js';
@@ -55,7 +65,59 @@ export type MeasureSessionCommand =
   /** The press waiting under `generation` is still current: take its snapshot again and land it. */
   | { type: 'pressLanded'; generation: number }
   /** The presented camera changed: targets the tool holds in world space under the old one are stale. */
-  | { type: 'candidatesInvalidated' };
+  | { type: 'candidatesInvalidated' }
+  /** Use target was asked for: commit the chosen candidate, and report `committed` if a point was placed. */
+  | { type: 'commitChosen' };
+
+/**
+ * The exact CAD distance a body-to-body minimum distance asks for: plain values only, so the session can carry it.
+ *
+ * @public
+ */
+export type MeasureExactRequest = Readonly<{
+  /** The pending record the answer resolves. */
+  id: string;
+  manifest: GeometryComponentManifest;
+  /** The presented geometry the record was taken on; an answer for any other is dropped. */
+  geometryKey: string;
+  occurrenceA: string;
+  occurrenceB: string;
+  /** The pose the record was taken in; an answer under any other is dropped. */
+  poseRevision: number;
+}>;
+
+/**
+ * What the session tells a running exact query.
+ *
+ * @public
+ */
+export type MeasureExactCommand =
+  /** Resolve the record as unavailable for `reason` and stop waiting for the answer. */
+  | { type: 'cancel'; reason: string }
+  /** Stop waiting for the answer: graphics already marked the record out of date. */
+  | { type: 'drop' };
+
+/**
+ * The exact query: callback logic the tool provides, which resolves one pending record and aborts its query when
+ * stopped.
+ *
+ * @public
+ */
+export type MeasureExactLogic = CallbackActorLogic<MeasureExactCommand, MeasureExactRequest>;
+
+/**
+ * A target list request: a fresh catalog, or with `append` the next page of the one listed.
+ *
+ * @public
+ */
+export type MeasureCatalogRequest = Readonly<{ append: boolean }>;
+
+/**
+ * The catalog scan: callback logic the tool provides, which lists the targets in view and aborts when stopped.
+ *
+ * @public
+ */
+export type MeasureCatalogLogic = CallbackActorLogic<{ type: 'stop' }, MeasureCatalogRequest>;
 
 /**
  * A DOM adapter: callback logic the tool builds around its host objects and provides as `follower` or `pointer`.
@@ -108,7 +170,17 @@ export type MeasureSessionEvent =
    */
   | { type: 'pressSettled'; at: MeasurePointerAt }
   /** The `measureInput` child decided a release. */
-  | { type: 'inputDecided'; decision: MeasureInputEmitted['type'] };
+  | { type: 'inputDecided'; decision: MeasureInputEmitted['type'] }
+  /** The presented geometry changed (not its display or pickable meshes): an exact query on the old one is stale. */
+  | { type: 'geometryChanged' }
+  /** What a target list is taken from changed: the presented model, its display, pickable meshes, mode or filter. */
+  | { type: 'catalogSourceChanged' }
+  /** Graphics asked for Use target. */
+  | { type: 'commitRequested' }
+  /** Graphics asked for the target list. */
+  | ({ type: 'catalogRequested' } & MeasureCatalogRequest)
+  /** A commit placed a point; `exact` is set when its record waits on an exact CAD distance. */
+  | { type: 'committed'; exact?: MeasureExactRequest };
 
 /**
  * The measure session's context.
@@ -125,6 +197,10 @@ export interface MeasureSessionContext {
   deferred: Readonly<{ generation: number; at: MeasurePointerAt }> | undefined;
   /** The release decision child. */
   inputRef: MeasureInputRef;
+  /** The exact query running for the last body-to-body minimum distance, while Measure is on. */
+  exactRef: ActorRefFrom<MeasureExactLogic> | undefined;
+  /** The target list scan running, while Measure is on. */
+  catalogRef: ActorRefFrom<MeasureCatalogLogic> | undefined;
 }
 
 /** The adapter slots are filled by the measuring tool; nothing starts them from the registry. */
@@ -132,7 +208,25 @@ const missingAdapter: MeasureSessionAdapterLogic = createCallbackLogic<MeasureSe
   throw new Error('The measure session adapters are provided by the measuring tool, with the surface it listens on.');
 });
 
-const measureSessionActors = { follower: missingAdapter, pointer: missingAdapter, input: measureInputMachine };
+const missingExact: MeasureExactLogic = createCallbackLogic<MeasureExactCommand, MeasureExactRequest>(() => {
+  throw new Error('The exact query is provided by the measuring tool, with the CAD source it asks.');
+});
+
+const missingCatalog: MeasureCatalogLogic = createCallbackLogic<{ type: 'stop' }, MeasureCatalogRequest>(() => {
+  throw new Error('The catalog scan is provided by the measuring tool, with the scene it lists.');
+});
+
+const measureSessionActors = {
+  follower: missingAdapter,
+  pointer: missingAdapter,
+  exact: missingExact,
+  catalog: missingCatalog,
+  input: measureInputMachine,
+};
+
+/** Why an exact query was cancelled, as its record then says. */
+const exactReplacedReason = 'The exact query was replaced by a new selection.';
+const exactClosedReason = 'Measurement closed before the exact query finished.';
 
 type MeasureSessionEnqueue = EnqueueObject<MeasureSessionEvent, never, SystemRegistry, typeof measureSessionActors>;
 
@@ -142,7 +236,31 @@ type TransitionArgs<Type extends MeasureSessionEvent['type'] = MeasureSessionEve
   context: MeasureSessionContext;
   event: Extract<MeasureSessionEvent, { type: Type }>;
   children: MeasureSessionChildren;
+  actors: typeof measureSessionActors;
 }>;
+
+/** Ends the running exact query: cancelled with `reason`, or dropped when graphics already marked its record. */
+const endExact = (
+  context: MeasureSessionContext,
+  enq: MeasureSessionEnqueue,
+  reason?: string,
+): Partial<MeasureSessionContext> => {
+  if (!context.exactRef) {
+    return {};
+  }
+  enq.sendTo(context.exactRef, reason === undefined ? { type: 'drop' } : { type: 'cancel', reason });
+  enq.stop(context.exactRef);
+  return { exactRef: undefined };
+};
+
+/** Stops the running target list scan. */
+const endCatalog = (context: MeasureSessionContext, enq: MeasureSessionEnqueue): Partial<MeasureSessionContext> => {
+  if (!context.catalogRef) {
+    return {};
+  }
+  enq.stop(context.catalogRef);
+  return { catalogRef: undefined };
+};
 
 const command = (
   children: MeasureSessionChildren,
@@ -235,7 +353,26 @@ const cameraPresented = ({ context, children }: TransitionArgs, enq: MeasureSess
     // The frame that presented the camera is the one the pointer snapshot is taken in.
     command(children, enq, { type: 'hover', at: context.hover, when: 'now' });
   }
-  return {};
+  // A list scanned under the old camera holds targets in view of it.
+  return { context: endCatalog(context, enq) };
+};
+
+const committed = ({ context, event, actors }: TransitionArgs<'committed'>, enq: MeasureSessionEnqueue) => {
+  const ended = endExact(context, enq, exactReplacedReason);
+  if (!event.exact) {
+    return { context: ended };
+  }
+  const exactRef = enq.spawn(actors.exact, { id: 'exact', input: event.exact });
+  return { context: { ...ended, exactRef } };
+};
+
+const catalogRequested = (
+  { context, event, actors }: TransitionArgs<'catalogRequested'>,
+  enq: MeasureSessionEnqueue,
+) => {
+  const ended = endCatalog(context, enq);
+  const catalogRef = enq.spawn(actors.catalog, { id: 'catalog', input: { append: event.append } });
+  return { context: { ...ended, catalogRef } };
 };
 
 const cameraDragChanged = ({ context, event }: TransitionArgs<'cameraDragChanged'>, enq: MeasureSessionEnqueue) => {
@@ -260,6 +397,8 @@ const measureSessionMachineDefinition = setup({
     pressGeneration: 0,
     deferred: undefined,
     inputRef: spawn(actors.input, { id: 'input' }),
+    exactRef: undefined,
+    catalogRef: undefined,
   }),
   entry: ({ context }, enq) => {
     enq.listen(
@@ -288,8 +427,20 @@ const measureSessionMachineDefinition = setup({
         enq.sendTo(context.inputRef, { type: 'blur' });
       },
       on: {
-        measureActiveChanged: ({ context, event }) =>
-          event.active ? {} : { target: 'off', context: { ...nextGeneration(context), hover: undefined } },
+        // Turning Measure off cancels here, in the transition, so a session stopped while on (the view closing) is
+        // cancelled by the exact query's own cleanup, with its own reason.
+        measureActiveChanged: ({ context, event }, enq) =>
+          event.active
+            ? {}
+            : {
+                target: 'off',
+                context: {
+                  ...nextGeneration(context),
+                  hover: undefined,
+                  ...endExact(context, enq, exactClosedReason),
+                  ...endCatalog(context, enq),
+                },
+              },
         pointerMoved: (args, enq) => pointerMoved(args, enq),
         pointerLeft: (args, enq) => pointerLeft(args, enq),
         pointerPressed: (args, enq) => pointerPressed(args, enq),
@@ -309,11 +460,23 @@ const measureSessionMachineDefinition = setup({
         cameraDragChanged: (args, enq) => cameraDragChanged(args, enq),
         poseChanged: (args, enq) => {
           rehover(args, enq);
-          return { context: nextGeneration(args.context) };
+          return {
+            context: {
+              ...nextGeneration(args.context),
+              ...endExact(args.context, enq),
+              ...endCatalog(args.context, enq),
+            },
+          };
         },
         cutsChanged: (args, enq) => {
           rehover(args, enq);
-          return { context: nextGeneration(args.context) };
+          return {
+            context: {
+              ...nextGeneration(args.context),
+              ...endExact(args.context, enq),
+              ...endCatalog(args.context, enq),
+            },
+          };
         },
         sourceChanged: (args, enq) => {
           rehover(args, enq);
@@ -324,6 +487,14 @@ const measureSessionMachineDefinition = setup({
           return {};
         },
         startChanged: ({ context }) => ({ context: nextGeneration(context) }),
+        geometryChanged: ({ context }, enq) => ({ context: endExact(context, enq) }),
+        catalogSourceChanged: ({ context }, enq) => ({ context: endCatalog(context, enq) }),
+        commitRequested: ({ children }, enq) => {
+          command(children, enq, { type: 'commitChosen' });
+          return {};
+        },
+        catalogRequested: (args, enq) => catalogRequested(args, enq),
+        committed: (args, enq) => committed(args, enq),
       },
     },
   },
@@ -353,6 +524,12 @@ export const measureSessionIgnoredEvents: ReadonlyArray<readonly [state: string,
   ['off', 'pressReady'],
   ['off', 'pressSettled'],
   ['off', 'inputDecided'],
+  // Nothing runs while Measure is off: no exact query or scan to stop, and no tool to commit or list for.
+  ['off', 'geometryChanged'],
+  ['off', 'catalogSourceChanged'],
+  ['off', 'commitRequested'],
+  ['off', 'catalogRequested'],
+  ['off', 'committed'],
 ];
 
 /**
@@ -378,6 +555,11 @@ export const measureSessionEventTypes = [
   'pressReady',
   'pressSettled',
   'inputDecided',
+  'geometryChanged',
+  'catalogSourceChanged',
+  'commitRequested',
+  'catalogRequested',
+  'committed',
 ] as const satisfies ReadonlyArray<MeasureSessionEvent['type']>;
 
 type MeasureSessionMachineDefinition = typeof measureSessionMachineDefinition;

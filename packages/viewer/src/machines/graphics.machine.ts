@@ -337,9 +337,6 @@ export interface GraphicsContext {
   measureCandidates: Array<{ id: string; label: string }>;
   measureActiveCandidateId?: string;
   measureChosenCandidateId?: string;
-  measureCommitRequest: number;
-  measureCatalogRequest: number;
-  measureCatalogAppend: boolean;
   measureCatalogHasMore: boolean;
   measureMessage?: string;
   measurePreviewDistance?: number;
@@ -357,7 +354,10 @@ export interface GraphicsContext {
   modelInteractionUnitId?: string;
   /** Per-view mechanism pose, keyed by the same unit ids as model interaction. */
   kinematicsRef: KinematicsRef;
-  /** The view's camera. Its pose, render frame and clip policy outlive every canvas and provider mount. */
+  /**
+   * The view's camera. Its pose and render frame outlive every canvas and provider mount; its clip policy is held by
+   * the canvas that draws the grid, and cleared when that canvas stops.
+   */
   cameraRef: GraphicsCameraRef;
   /**
    * The attached canvas's controls adapter: the only listener on its `camera-controls` instance (charter I9). It
@@ -794,7 +794,11 @@ export type GraphicsEmitted =
   | { type: 'viewFitRequested' }
   | { type: 'geometryRadiusCalculated'; radius: number }
   /** What the shortcut of `pressId` did, for the bar that heard it to announce. */
-  | { type: 'viewerShortcutApplied'; pressId: string; outcome: ViewerShortcutOutcome };
+  | { type: 'viewerShortcutApplied'; pressId: string; outcome: ViewerShortcutOutcome }
+  /** Use target: the measuring tool's session commits the chosen candidate. */
+  | { type: 'measureCandidateCommitRequested' }
+  /** List the targets in view: a fresh catalog, or with `append` the next page of the one listed. */
+  | { type: 'measureCatalogRequested'; append: boolean };
 
 /**
  * A viewer shortcut: F fits the view, S and M toggle Section and Measure, G the grid, P the projection, Escape steps
@@ -1334,9 +1338,6 @@ const graphicsMachineDefinition = setup({
       measureCandidates: [],
       measureActiveCandidateId: undefined,
       measureChosenCandidateId: undefined,
-      measureCommitRequest: 0,
-      measureCatalogRequest: 0,
-      measureCatalogAppend: false,
       measureCatalogHasMore: false,
       measureMessage: undefined,
       measurePreviewDistance: undefined,
@@ -1543,6 +1544,9 @@ const graphicsMachineDefinition = setup({
           }
           // The camera keeps its view direction and takes the new world up, unless the two are parallel.
           enq.sendTo(context.cameraRef, { type: 'setUpDirection', axis: event.payload });
+          if (context.canvas) {
+            enq.sendTo(context.canvas.ref, { type: 'upDirectionChanged', upDirection: event.payload });
+          }
           return { context: { upDirection: event.payload } };
         },
         setGraphicsBackendPreference: {
@@ -1569,6 +1573,8 @@ const graphicsMachineDefinition = setup({
               webglContext: event.webglContext,
               admittedBytes: event.admittedBytes,
               reattached: event.reattached,
+              camera: context.cameraRef,
+              upDirection: context.upDirection,
             },
           });
           return { context: { canvas: { canvasId: event.canvasId, ref }, ...adapter } };
@@ -2109,14 +2115,14 @@ const graphicsMachineDefinition = setup({
         clearMeasureChosenCandidate: {
           context: () => ({ measureChosenCandidateId: undefined }),
         },
-        requestMeasureCandidateCommit: {
-          context: ({ context }) => ({ measureCommitRequest: context.measureCommitRequest + 1 }),
+        // The measuring tool's session hears these and does the work; graphics keeps no request counter (G10b).
+        requestMeasureCandidateCommit: (_, enq) => {
+          enq.emit({ type: 'measureCandidateCommitRequested' });
+          return {};
         },
-        requestMeasureCatalog: {
-          context: ({ context, event }) => ({
-            measureCatalogRequest: context.measureCatalogRequest + 1,
-            measureCatalogAppend: event.append ?? false,
-          }),
+        requestMeasureCatalog: ({ event }, enq) => {
+          enq.emit({ type: 'measureCatalogRequested', append: event.append ?? false });
+          return {};
         },
         setMeasureMessage: { context: ({ event }) => ({ measureMessage: event.message }) },
         setMeasurePreviewDistance: { context: ({ event }) => ({ measurePreviewDistance: event.distance }) },

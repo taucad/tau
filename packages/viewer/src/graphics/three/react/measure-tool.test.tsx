@@ -44,9 +44,6 @@ const mocks = vi.hoisted(() => ({
       measureActiveCandidateId: undefined,
       measureChosenCandidateId: undefined,
       measureLockedTargetId: undefined,
-      measureCommitRequest: 0,
-      measureCatalogRequest: 0,
-      measureCatalogAppend: false,
       measureMessage: undefined as string | undefined,
       committedSectionCuts: [],
       displayUnits: { length: { metersPerUnit: 1, symbol: 'm' } },
@@ -73,8 +70,35 @@ vi.mock('#graphics/three/utils/measurement-features-worker-client.js', async (im
 /** Who follows the mocked graphics actor: the measure session's follower. */
 const graphicsListeners = new Set<(snapshot: typeof mocks.graphicsSnapshot) => void>();
 
+/** Who listens for what the mocked graphics actor emits: the follower hears Use target and the target list there. */
+const graphicsEmitListeners = new Map<string, Set<(event: { type: string; append?: boolean }) => void>>();
+
+/** Emits from the mocked graphics actor, as `requestMeasureCatalog` and `requestMeasureCandidateCommit` do. */
+const emitGraphics = (event: { type: string; append?: boolean }): void => {
+  for (const listener of graphicsEmitListeners.get(event.type) ?? []) {
+    listener(event);
+  }
+};
+
+/** Asks the mocked graphics actor for the target list, a fresh one or with `append` its next page. */
+const requestCatalog = (append = false): void => {
+  act(() => {
+    emitGraphics({ type: 'measureCatalogRequested', append });
+  });
+};
+
 const graphicsActorMock = {
   send: mocks.send,
+  on: (type: string, listener: (event: { type: string; append?: boolean }) => void) => {
+    const listeners = graphicsEmitListeners.get(type) ?? new Set();
+    listeners.add(listener);
+    graphicsEmitListeners.set(type, listeners);
+    return {
+      unsubscribe: () => {
+        listeners.delete(listener);
+      },
+    };
+  },
   getSnapshot: () => mocks.graphicsSnapshot,
   subscribe: (listener: (snapshot: typeof mocks.graphicsSnapshot) => void) => {
     graphicsListeners.add(listener);
@@ -166,8 +190,6 @@ describe('MeasureTool', () => {
     mocks.send.mockClear();
     mocks.graphicsSnapshot.context.gltfPresentation.presentedKey = 'geometry';
     mocks.graphicsSnapshot.context.pickableMeshesVersion = 0;
-    mocks.graphicsSnapshot.context.measureCatalogRequest = 0;
-    mocks.graphicsSnapshot.context.measureCatalogAppend = false;
     mocks.graphicsSnapshot.context.measureMessage = undefined;
     mocks.graphicsSnapshot.context.measurements = [];
     canvas = document.createElement('canvas');
@@ -414,10 +436,7 @@ describe('MeasureTool', () => {
         sourceMesh: mesh,
       })),
     );
-    act(() => {
-      mocks.graphicsSnapshot.context.measureCatalogRequest++;
-      renderTool();
-    });
+    requestCatalog();
     const published = () => {
       const event = mocks.send.mock.calls.findLast(
         ([sent]) => sent.type === 'setMeasureCandidates' && (sent.candidates?.length ?? 0) > 0,
@@ -428,23 +447,33 @@ describe('MeasureTool', () => {
       expect(published()?.candidates).toHaveLength(100);
     });
     expect(published()).toMatchObject({ hasMore: true });
-    act(() => {
-      mocks.graphicsSnapshot.context.measureCatalogAppend = true;
-      mocks.graphicsSnapshot.context.measureCatalogRequest++;
-      renderTool();
-    });
+    requestCatalog(true);
     await vi.waitFor(() => {
       expect(published()?.candidates).toHaveLength(200);
     });
-    act(() => {
-      mocks.graphicsSnapshot.context.measureCatalogRequest++;
-      renderTool();
-    });
+    requestCatalog(true);
     await vi.waitFor(() => {
       expect(published()?.candidates).toHaveLength(201);
     });
     expect(published()?.candidates?.at(-1)?.id).toBe(`${mesh.uuid}:late:200`);
     expect(published()?.hasMore).toBe(false);
+  });
+
+  it('lists targets with the filter chosen in the same handler that asked for the list', async () => {
+    getMeshMeasurementFeatures(mesh);
+    const lists = vi.spyOn(measurementFeatures, 'listMeasurementTargets');
+    act(() => {
+      // The target row sets the filter and asks for the list at once, before the tool renders again.
+      mocks.graphicsSnapshot.context.measureFilter = 'edge';
+      notifyGraphics();
+      emitGraphics({ type: 'measureCatalogRequested', append: false });
+      renderTool();
+    });
+    await vi.waitFor(() => {
+      expect(lists).toHaveBeenCalled();
+    });
+    expect(lists.mock.calls.map(([, options]) => options.filter)).toEqual(lists.mock.calls.map(() => 'edge'));
+    mocks.graphicsSnapshot.context.measureFilter = 'auto';
   });
 
   it('continues at the first feature of a smaller next mesh after the worker resolves', async () => {
@@ -477,9 +506,8 @@ describe('MeasureTool', () => {
     );
     act(() => {
       renderTool();
-      mocks.graphicsSnapshot.context.measureCatalogRequest++;
-      renderTool();
     });
+    requestCatalog();
     await vi.waitFor(() => {
       const published = mocks.send.mock.calls.findLast(
         ([sent]) => sent.type === 'setMeasureCandidates' && (sent.candidates?.length ?? 0) > 0,
@@ -489,10 +517,7 @@ describe('MeasureTool', () => {
   });
 
   it.each(['camera', 'geometry'] as const)('should cancel a pending catalog when %s changes', async (change) => {
-    act(() => {
-      mocks.graphicsSnapshot.context.measureCatalogRequest++;
-      renderTool();
-    });
+    requestCatalog();
     act(() => {
       if (change === 'camera') {
         camera.position.x = 1;
@@ -501,6 +526,7 @@ describe('MeasureTool', () => {
         mocks.graphicsSnapshot.context.gltfPresentation.presentedKey = 'replacement';
       }
       renderTool();
+      notifyGraphics();
     });
     await act(async () => {
       await new Promise<void>((resolve) => {
@@ -515,10 +541,7 @@ describe('MeasureTool', () => {
   });
 
   it('clears a preparing catalog status when geometry replacement invalidates its worker request', async () => {
-    act(() => {
-      mocks.graphicsSnapshot.context.measureCatalogRequest++;
-      renderTool();
-    });
+    requestCatalog();
     await vi.waitFor(() => {
       expect(mocks.send).toHaveBeenCalledWith({
         type: 'setMeasureMessage',
@@ -529,6 +552,7 @@ describe('MeasureTool', () => {
     act(() => {
       mocks.graphicsSnapshot.context.gltfPresentation.presentedKey = 'replacement';
       renderTool();
+      notifyGraphics();
     });
     await vi.waitFor(() => {
       expect(mocks.send).toHaveBeenCalledWith({ type: 'setMeasureMessage' });

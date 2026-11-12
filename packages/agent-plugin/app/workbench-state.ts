@@ -111,41 +111,21 @@ export const seedViewer = (
   const { context } = graphicsRef.getSnapshot();
   const view = saved?.view;
   const stored: WorkbenchView | undefined = view === undefined ? undefined : { ...view, version: 1, entryPath };
-  /* The page has no person: a leaf the view does not set shows Tau's value. */
-  const resolved = stored === undefined ? undefined : resolveViewSettings({ tau: tauViewDefaults, view: stored });
-  const record = stored === undefined || resolved === undefined ? undefined : rendered(stored, resolved.values);
+  /* The page has no person: a leaf the view does not set, or every leaf when there is no view, shows Tau's value. */
+  const resolved = resolveViewSettings({ tau: tauViewDefaults, view: stored });
+  const record = stored === undefined ? undefined : rendered(stored, resolved.values);
   /* A new entry is framed again, and the saved pose or side is applied over its first frame. */
   const pendingPose = pendingPoseOf(record, entryPath);
   graphicsRef.send({ type: 'entryChanged', identity: entryPath, ...(pendingPose ? { pendingPose } : {}) });
+  showResolved(graphicsRef, resolved.values);
   if (record === undefined) {
     /* Cuts and measurements belong to the geometry they were made on. */
     graphicsRef.send({ type: 'adoptSectionView', section: { active: false, cuts: [] } });
     graphicsRef.send({ type: 'adoptPinnedMeasurements', measurements: [] });
   } else {
     const settings = graphicsSettingsForView(record);
-    const visibility = [
-      ['enableSurfaces', 'setSurfaceVisibility'],
-      ['enableLines', 'setLinesVisibility'],
-      ['enableGizmo', 'setGizmoVisibility'],
-      ['enableGrid', 'setGridVisibility'],
-      ['enableAxes', 'setAxesVisibility'],
-      ['enableMatcap', 'setMatcapVisibility'],
-      ['enablePostProcessing', 'setPostProcessingVisibility'],
-    ] as const;
-    for (const [key, type] of visibility) {
-      if (context[key] !== settings[key]) {
-        graphicsRef.send({ type, payload: settings[key] });
-      }
-    }
-    if (context.upDirection !== settings.upDirection) {
-      graphicsRef.send({ type: 'setUpDirection', payload: settings.upDirection });
-    }
-    if (context.displayUnits.length.symbol !== record.grid.unit) {
-      graphicsRef.send({ type: 'setGridUnit', payload: { unit: record.grid.unit } });
-    }
     graphicsRef.send({ type: 'adoptSectionView', section: record.section });
     graphicsRef.send({ type: 'adoptPinnedMeasurements', measurements: settings.pinnedMeasurements ?? [] });
-    context.cameraRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: record.fieldOfView });
   }
   const components = saved?.components;
   if (components !== undefined) {
@@ -167,7 +147,7 @@ export const seedViewer = (
       },
     });
   }
-  return resolved?.sources ?? {};
+  return resolved.sources;
 };
 
 /** The page's camera actor. */
@@ -247,6 +227,34 @@ const show = <Leaf extends ViewerViewFieldPath>(
       graphicsRef.send({ type: displayEvents[path], payload: value as boolean });
     }
   }
+};
+
+/** The graphics context flag that shows each display leaf. */
+const displayFlags = [
+  ['display.surfaces', 'enableSurfaces'],
+  ['display.lines', 'enableLines'],
+  ['display.gizmo', 'enableGizmo'],
+  ['display.grid', 'enableGrid'],
+  ['display.axes', 'enableAxes'],
+  ['display.matcap', 'enableMatcap'],
+  ['display.postProcessing', 'enablePostProcessing'],
+] as const;
+
+/* Show each resolved inheritable leaf on the live graphics owner, so no value carries over from the entry before. */
+const showResolved = (graphicsRef: GraphicsActorRef, values: Readonly<ViewFieldValues>): void => {
+  const { context } = graphicsRef.getSnapshot();
+  for (const [leaf, flag] of displayFlags) {
+    if (context[flag] !== values[leaf]) {
+      show(graphicsRef, leaf, values[leaf]);
+    }
+  }
+  if (context.upDirection !== values.upDirection) {
+    show(graphicsRef, 'upDirection', values.upDirection);
+  }
+  if (context.displayUnits.length.symbol !== values['grid.unit']) {
+    show(graphicsRef, 'grid.unit', values['grid.unit']);
+  }
+  show(graphicsRef, 'fieldOfView', values.fieldOfView);
 };
 
 /**

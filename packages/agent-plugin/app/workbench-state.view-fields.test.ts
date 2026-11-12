@@ -108,4 +108,24 @@ describe('page view fields', () => {
     expect(viewFields.commanded()).toEqual({});
     expect(viewFieldPaths.map((leaf) => viewFields.sourceOf?.(leaf))).toEqual(viewFieldPaths.map(() => 'tau'));
   });
+
+  it("shows Tau's value for every leaf on an entry with no saved view, never the entry before's", () => {
+    const graphicsRef = createGraphicsActor();
+    const viewFields = createPageViewFields(graphicsRef);
+    viewFields.seed(seedViewer(graphicsRef, entryPath, saved()) ?? {});
+    void viewFields.set('display.lines', false);
+    void viewFields.set('grid.unit', 'in');
+    void viewFields.set('fieldOfView', 60);
+    expect(graphicsRef.getSnapshot().context.enableGrid).toBe(false);
+
+    viewFields.seed(seedViewer(graphicsRef, 'src/other.ts', { components: { hidden: [], isolated: [] } }) ?? {});
+
+    const { context } = graphicsRef.getSnapshot();
+    expect(context.enableGrid).toBe(viewRecordV1Defaults['display.grid']);
+    expect(context.enableLines).toBe(viewRecordV1Defaults['display.lines']);
+    expect(context.enableAxes).toBe(false);
+    expect(context.displayUnits.length.symbol).toBe(viewRecordV1Defaults['grid.unit']);
+    expect(fieldOfViewOf(graphicsRef)).toBe(30);
+    expect(viewFieldPaths.map((leaf) => viewFields.sourceOf?.(leaf))).toEqual(viewFieldPaths.map(() => 'tau'));
+  });
 });

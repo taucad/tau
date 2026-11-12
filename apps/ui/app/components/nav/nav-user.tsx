@@ -1,5 +1,18 @@
 import { useState } from 'react';
-import { BookOpen, Bug, CircleHelp, Files, FileText, Scale, Settings, Shield, WifiOff } from 'lucide-react';
+import {
+  BookOpen,
+  Bug,
+  CircleHelp,
+  Compass,
+  Files,
+  FileText,
+  Scale,
+  Settings,
+  Shield,
+  Sparkles,
+  WifiOff,
+} from 'lucide-react';
+import { Link } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
@@ -21,6 +34,9 @@ import { setEntryPreference } from '@taucad/ui-core/lib/entry-preference';
 import { pageOrigin, websiteOrigin } from '#lib/website-origin.js';
 import { CookiePreferencesDialog, CookiePreferencesMenuItem } from '#components/cookie-preferences.js';
 import { NavBillingItem, NavCreditsMeter } from '#cloud/nav-billing.js';
+import { useFeature } from '#flags/use-feature.js';
+import { setupEntryCopy } from '#components/onboarding/setup-copy.js';
+import { setupHref } from '#components/onboarding/setup-entry.js';
 
 /**
  * Nav user button: delegates avatar, sign-in/up/out chrome to the registry
@@ -40,7 +56,25 @@ export function NavUser(): React.JSX.Element {
      boundary and made every route carrying it answer 500. The menu this decides mounts only once a
      pointer opens it, long after hydration has given the browser's own origin. */
   const isWebsiteHere = !isDesktopTarget() && website === pageOrigin();
+  const isOnboardingEnabled = useFeature('onboarding');
   const helpItems = [
+    /* Setup and its explainer (onboarding E3), behind `onboarding`. */
+    ...(isOnboardingEnabled
+      ? [
+          <DropdownMenuItem key='set-up-tau' asChild>
+            <Link to={setupHref('help')}>
+              <Sparkles />
+              {setupEntryCopy.setUpTau}
+            </Link>
+          </DropdownMenuItem>,
+          <DropdownMenuItem key='how-tau-works' asChild>
+            <Link to={setupHref('help', 'how')}>
+              <Compass />
+              {setupEntryCopy.howTauWorks}
+            </Link>
+          </DropdownMenuItem>,
+        ]
+      : []),
     ...(isDesktopTarget()
       ? []
       : [

@@ -11,6 +11,9 @@ vi.mock('#components/project-library/project-library.js', () => ({
   ),
 }));
 
+// Setup's auto-open reads the session; its own tests cover it (`use-setup-offer.test.tsx`).
+vi.mock('#components/onboarding/use-setup-offer.js', () => ({ useSetupOffer: () => undefined }));
+
 vi.mock('#components/project-grid.js', () => ({ CommunityProjectGrid: () => <ul aria-label='examples' /> }));
 
 vi.mock('#routes/_index/homepage-chat-hero.js', () => ({

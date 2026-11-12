@@ -12,6 +12,8 @@ vi.mock('#hooks/use-auth-links.js', () => ({ useAuthLinks: () => ({ signIn: '/in
 vi.mock('#hooks/use-settings-dialog.js', () => ({
   useSettingsDialog: () => ({ isOpen: false, section: 'general', open: vi.fn(), close: vi.fn() }),
 }));
+const flags = vi.hoisted(() => ({ onboarding: false }));
+vi.mock('#flags/use-feature.js', () => ({ useFeature: (flag: string) => flag === 'onboarding' && flags.onboarding }));
 vi.mock('#components/layout/command-palette.js', () => ({
   useCommandPaletteItems: (_id: string, factory: () => CommandPaletteItem[]) => {
     registered = factory();
@@ -30,9 +32,22 @@ describe('RootCommandPaletteItems', () => {
       'new-project-from-code',
       'all-projects',
       'open-settings',
+      'set-up-tau',
       'sign-in',
       'sign-out',
     ]);
     expect(registered.some((item) => item.id.startsWith('recent-project-'))).toBe(false);
+  });
+
+  /* Onboarding E3: the palette lists Set up Tau only with onboarding on. */
+  it.each([
+    { isEnabled: true, visible: true },
+    { isEnabled: false, visible: false },
+  ])('lists Set up Tau when onboarding is $isEnabled', ({ isEnabled, visible }) => {
+    flags.onboarding = isEnabled;
+    render(<RootCommandPaletteItems match={{ id: 'root' } as UIMatch} />);
+
+    const item = registered.find(({ id }) => id === 'set-up-tau');
+    expect(item).toEqual(expect.objectContaining({ label: 'Set up Tau', link: '/welcome?entry=palette', visible }));
   });
 });

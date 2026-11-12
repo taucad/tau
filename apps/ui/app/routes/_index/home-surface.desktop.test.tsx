@@ -5,6 +5,12 @@ import { describe, expect, it, vi } from 'vitest';
 import DesktopHome, { handle } from '#routes/_index/home-surface.desktop.js';
 import { galleryProjects } from '#constants/project-examples.js';
 
+// Setup's auto-open reads the session; its own tests cover it (`use-setup-offer.test.tsx`).
+const setupOffer = vi.hoisted(() => vi.fn());
+vi.mock('#components/onboarding/use-setup-offer.js', () => ({ useSetupOffer: setupOffer }));
+const firstRun = vi.hoisted(() => ({ value: false }));
+vi.mock('#components/onboarding/desktop-first-run.js', () => ({ useIsDesktopFirstRun: () => firstRun.value }));
+
 vi.mock('#routes/_index/homepage-chat-hero.js', () => ({ HomepageChatHero: () => <div>desktop hero</div> }));
 vi.mock('#components/project-library/project-library.js', () => ({ ProjectLibrary: () => <div>project library</div> }));
 vi.mock('#components/project-grid.js', () => ({
@@ -40,5 +46,12 @@ describe('desktop home surface', () => {
     const examples = within(screen.getByRole('list', { name: 'examples' })).getAllByRole('listitem');
     expect(examples.map((item) => item.textContent)).toEqual(galleryProjects.slice(0, 10).map(({ name }) => name));
     expect(screen.getByRole('link', { name: 'View all' })).toHaveAttribute('href', '/community');
+  });
+
+  it.each([true, false])('should offer setup with the desktop first run %s (DT1)', (isFirstRun) => {
+    firstRun.value = isFirstRun;
+    render(<DesktopHome />, { wrapper: MemoryRouter });
+
+    expect(setupOffer).toHaveBeenLastCalledWith({ isDesktopFirstRun: isFirstRun });
   });
 });

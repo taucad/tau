@@ -38,6 +38,13 @@ describe('desktop route manifest', () => {
     expect(manifest).not.toContain('../../app/routes/auth.desktop/');
   });
 
+  /* Setup runs on the desktop too (onboarding blueprint, Finding 10): its module has no server export. */
+  it('should serve setup at /welcome', () => {
+    expect(routes.find((entry) => entry.path === 'welcome')).toEqual(
+      expect.objectContaining({ file: '../../app/routes/welcome/route.tsx' }),
+    );
+  });
+
   /* One route, one path: the desktop module replaces the web one rather than
      adding a second `/s/:slug`, and no sibling in that folder becomes a route
      of its own. */

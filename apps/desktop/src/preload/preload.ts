@@ -270,6 +270,7 @@ contextBridge.exposeInMainWorld('tau', {
   },
   nodeFs: { homeRoot: bootstrap.homeRoot },
   runtimeKernelIds: bootstrap.runtimeKernelIds,
+  firstRun: bootstrap.firstRun,
   /* A call, not a value (D17): main answers when ACP discovery settles, which no
    * longer blocks this window's creation. */
   externalAgents: async (): Promise<unknown> => ipcRenderer.invoke(externalAgentsChannel),

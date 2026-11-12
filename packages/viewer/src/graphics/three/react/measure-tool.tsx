@@ -1071,10 +1071,14 @@ export function MeasureTool(): React.JSX.Element {
   const followCatalogSource = useCallback(
     (key: string, isActive: boolean): void => {
       const previous = catalogSourceRef.current;
+      if (previous === key) {
+        // A session rebuilt around a new surface reports the source it starts on: the list taken from it still holds.
+        return;
+      }
       catalogSourceRef.current = key;
       catalogVersionRef.current++;
       catalogScanRef.current = undefined;
-      if (!isActive || previous === key) {
+      if (!isActive) {
         return;
       }
       const context = selectGraphicsContext(graphicsActor);
@@ -1110,7 +1114,11 @@ export function MeasureTool(): React.JSX.Element {
       }
       const scan = catalogScanRef.current;
       const version = catalogVersionRef.current;
-      const clipping = resolveSectionViewRaycastClip(selectGraphicsContext(graphicsActor), renderFrame);
+      const scanContext = selectGraphicsContext(graphicsActor);
+      // Read now, not from the last render: the target row changes the filter or mode and asks for the list in one
+      // handler, before the tool renders again.
+      const filter = scanContext.measureMode === 'point' ? 'point' : scanContext.measureFilter;
+      const clipping = resolveSectionViewRaycastClip(scanContext, renderFrame);
       const isKept = createRaycastClipTest(clipping);
       const catalogRaycaster = new THREE.Raycaster();
       const cameraKeyOf = (): string =>
@@ -1190,7 +1198,7 @@ export function MeasureTool(): React.JSX.Element {
                 mesh,
                 camera,
                 canvas: gl.domElement,
-                filter: measureMode === 'point' ? 'point' : measureFilter,
+                filter,
                 isKept: isKept ?? undefined,
               },
             );
@@ -1278,8 +1286,6 @@ export function MeasureTool(): React.JSX.Element {
       graphSource,
       gl.domElement,
       graphicsActor,
-      measureFilter,
-      measureMode,
       renderFrame,
     ],
   );

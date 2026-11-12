@@ -459,6 +459,23 @@ describe('MeasureTool', () => {
     expect(published()?.hasMore).toBe(false);
   });
 
+  it('lists targets with the filter chosen in the same handler that asked for the list', async () => {
+    getMeshMeasurementFeatures(mesh);
+    const lists = vi.spyOn(measurementFeatures, 'listMeasurementTargets');
+    act(() => {
+      // The target row sets the filter and asks for the list at once, before the tool renders again.
+      mocks.graphicsSnapshot.context.measureFilter = 'edge';
+      notifyGraphics();
+      emitGraphics({ type: 'measureCatalogRequested', append: false });
+      renderTool();
+    });
+    await vi.waitFor(() => {
+      expect(lists).toHaveBeenCalled();
+    });
+    expect(lists.mock.calls.map(([, options]) => options.filter)).toEqual(lists.mock.calls.map(() => 'edge'));
+    mocks.graphicsSnapshot.context.measureFilter = 'auto';
+  });
+
   it('continues at the first feature of a smaller next mesh after the worker resolves', async () => {
     const firstGraph = getMeshMeasurementFeatures(mesh);
     firstGraph.features = Array.from({ length: 300 }, (_, index) => ({

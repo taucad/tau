@@ -1880,7 +1880,7 @@ describe('restore, through the machine that owns it', () => {
    * L7: a check that throws on a linked checkout is tried again on its own, with backoff. Nothing else need meet
    * the checkout: no capture, pull or edit follows, and its readiness still gets the fill's word.
    */
-  it.fails('checks a linked checkout fill again on its own after the check throws (L7)', async () => {
+  it('checks a linked checkout fill again on its own after the check throws (L7)', async () => {
     let failReads = 0;
     const reports: LargeObjectsReport[] = [];
     const live: { filesystem?: RevisionFileSystem } = {};

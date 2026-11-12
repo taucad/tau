@@ -2107,12 +2107,34 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const answeredFills = new Map<string, number>();
   const checkingFills = new Set<string>();
   const resumeTimers = new Set<ReturnType<typeof setTimeout>>();
+  /* Checks in a row that threw, per checkout: the next one waits longer (L7). A check that answers clears it. */
+  const failedChecks = new Map<string, number>();
   let fillsStopped = false;
   const generationOf = (checkoutId: string): number => treeWrites.get(checkoutId) ?? 0;
   const unanswerFill = (checkoutId: string): void => {
     if (answeredFills.get(checkoutId) === generationOf(checkoutId)) {
       answeredFills.delete(checkoutId);
     }
+  };
+  /*
+   * A check that threw is tried again on its own, live or linked, with backoff (L7; blueprint T3): readiness never
+   * waits on another path happening to meet the checkout. A newer tree write owns the next word, so a retry for an
+   * older generation does nothing.
+   */
+  const checkFillLater = (place: Checkout, generation: number): void => {
+    if (fillsStopped) {
+      return;
+    }
+    const failures = (failedChecks.get(place.id) ?? 0) + 1;
+    failedChecks.set(place.id, failures);
+    const wait = fillCheckRetryMilliseconds[Math.min(failures, fillCheckRetryMilliseconds.length) - 1];
+    const timer = setTimeout(() => {
+      resumeTimers.delete(timer);
+      if (generationOf(place.id) === generation) {
+        checkFill(place);
+      }
+    }, wait); // Bound: fillCheckRetryMilliseconds.
+    resumeTimers.add(timer);
   };
   const checkFill = (place: Checkout): void => {
     if (fillsStopped || checkingFills.has(place.id) || answeredFills.get(place.id) === generationOf(place.id)) {
@@ -2133,11 +2155,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
           answeredFills.set(place.id, generation);
           await largeObjects.fill(place, head === undefined ? undefined : revisionId(head), placeholders);
+          failedChecks.delete(place.id);
         } catch (error) {
           if (answeredFills.get(place.id) === generation) {
             answeredFills.delete(place.id);
           }
           console.warn('[revisions] large-object placeholders could not be checked', error);
+          checkFillLater(place, generation);
         } finally {
           checkingFills.delete(place.id);
         }
@@ -2266,12 +2290,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             return;
           }
           await largeObjects.fill(place, head === undefined ? undefined : revisionId(head), placeholders);
+          failedChecks.delete(place.id);
         } catch (error) {
-          /* Unanswered, so the checkout's next capture checks again: readiness never waits on a word nobody gives. */
+          /* Unanswered, and checked again with backoff: readiness never waits on a word nobody gives (L7). */
           if (answeredFills.get(place.id) === (writes ?? 0)) {
             answeredFills.delete(place.id);
           }
           console.warn('[revisions] large-object placeholders could not be checked', error);
+          checkFillLater(place, writes ?? 0);
         }
       })();
     };
@@ -6624,6 +6650,11 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
 };
 
 /* The stream tail is a zero-wait GET; do not let it hold the active pull. */
+/**
+ * The waits before a fill check that threw runs again on its own, by failures in a row; the last repeats (L7). A
+ * check is a local scan, so the first wait is short; a transfer that fails has its own waits in the fill.
+ */
+const fillCheckRetryMilliseconds: readonly [number, ...number[]] = [500, 2000, 5000, 15_000, 30_000, 60_000];
 const streamTailWaitMilliseconds = 2000;
 const nestedBoundMarginMilliseconds = 2000;
 const closeTransferMilliseconds = 10_000;

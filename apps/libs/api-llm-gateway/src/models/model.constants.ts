@@ -919,6 +919,43 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         thinkingLevel: 'HIGH',
       },
     },
+    'gemini-4-carbon': {
+      enabled: true,
+      id: 'google-gemini-4-carbon',
+      providerKind: 'tau-hosted',
+      name: 'Gemini 4 Carbon',
+      slug: 'gemini-4-carbon',
+      recommended: false,
+      description: 'Deep reasoning for long CAD sessions, complex part code, and large multi-file project edits.',
+      provider: {
+        id: 'vertexai',
+        name: 'Google',
+      },
+      model: 'gemini-4-carbon',
+      support: {
+        tools: true,
+        toolChoice: false,
+        reasoning: lowToHighReasoning,
+        modalities: pdfInputModalities,
+      },
+      details: {
+        family: 'gemini',
+        families: ['gemini'],
+        contextWindow: 200_000, // Provider shares 1,048,576 tokens across input, thinking, and output.
+        maxTokens: 65_536, // Single-stream limit; longer output requires continuation support.
+        // Google's standard price; billing pins the introductory rate through November 30, 2026.
+        cost: {
+          inputTokens: 4,
+          outputTokens: 20,
+          cacheReadTokens: 0.2,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        thinkingLevel: 'HIGH',
+      },
+    },
     'gemini-3.1-pro': {
       id: 'google-gemini-3.1-pro',
       providerKind: 'tau-hosted',

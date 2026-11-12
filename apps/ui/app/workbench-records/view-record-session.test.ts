@@ -63,12 +63,17 @@ const settle = async (): Promise<void> => {
   }
 };
 
-async function mount(initial: WorkbenchView = view(), initialLevels: ViewResolutionLevels = {}) {
+async function mount(
+  initial: WorkbenchView = view(),
+  initialLevels: ViewResolutionLevels = {},
+  options: Readonly<{ missing?: boolean }> = {},
+) {
   const clock = new StepClock();
   /* The levels above the view, as `deviceViewLevels` gives them: read now, and a change heard by every session. */
   let levels = initialLevels;
   const levelListeners = new Set<() => void>();
-  let bytes: Uint8Array<ArrayBuffer> | undefined = encode(initial);
+  /* `missing`: the view's file does not exist yet (`initial` only seeds the graphics actor). */
+  let bytes: Uint8Array<ArrayBuffer> | undefined = options.missing === true ? undefined : encode(initial);
   const writes: WorkbenchView[] = [];
   const listeners = new Set<(event: WatchEvent) => void>();
   /* The connection's writes fail, as a replaced worker's do. */
@@ -497,6 +502,27 @@ describe('view record session: inheritable leaves flow one way (onboarding WP3)'
     inherits.setLevels({ ...person, exceptions: ['display.grid'] });
     expect(inherits.graphics.getSnapshot().context.enableGrid).toBe(true);
     expect(inherits.graphics.getSnapshot().context.displayUnits.length.symbol).toBe('in');
+  });
+
+  it("should show the person's defaults in a view whose file is missing, and follow a change of them, writing nothing", async () => {
+    const harness = await mount(
+      view(),
+      { person: { 'display.grid': false, 'grid.unit': 'in', fieldOfView: 30 } },
+      {
+        missing: true,
+      },
+    );
+    await harness.frame();
+    expect(harness.graphics.getSnapshot().context.enableGrid).toBe(false);
+    expect(harness.graphics.getSnapshot().context.displayUnits.length.symbol).toBe('in');
+    expect(fieldOfView(harness)).toBe(30);
+    harness.setLevels({ person: { 'display.grid': true, 'display.axes': false } });
+    expect(harness.graphics.getSnapshot().context.enableGrid).toBe(true);
+    expect(harness.graphics.getSnapshot().context.enableAxes).toBe(false);
+    expect(harness.graphics.getSnapshot().context.displayUnits.length.symbol).toBe(view().grid.unit);
+    expect(fieldOfView(harness)).toBe(view().fieldOfView);
+    await harness.quiet();
+    expect(harness.file()).toBeUndefined();
   });
 
   it('should seed a personal field of view through the camera without writing it, and keep the record field of view on a later pose (V6)', async () => {

@@ -64,9 +64,10 @@ import type {
   CameraSource,
 } from '@taucad/camera/machine';
 import type { PersistedCameraView, PersistedSectionView } from '@taucad/viewer/graphics/graphics-settings';
-import type { WorkbenchView } from '@taucad/workbench';
+import type { ViewFieldValues, WorkbenchView } from '@taucad/workbench';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import {
+  absentRecordChanges,
   cameraAdoptionOf,
   foreignChanges,
   nextRecord,
@@ -190,6 +191,8 @@ type BindingContext = Readonly<{
   owners: ViewOwners;
   /** The levels the record resolves over. */
   levels: ViewResolutionLevels;
+  /** The inheritable leaves seeded while the view has had no record, resolved with no view level. */
+  absentLeaves: Readonly<ViewFieldValues> | undefined;
   /** The camera's pose and the source of the change that produced it (CameraAuthority's `poseBy`). */
   pose: Readonly<{ view: PersistedCameraView; by: CameraSource }> | undefined;
   /** The camera's requested vertical field of view. */
@@ -395,6 +398,11 @@ const observeRecord = (
   enq: BindingEnqueue,
 ): BindingContext => {
   const { record } = event;
+  if (record === undefined && context.record === undefined) {
+    // No record was ever read: the owners show the leaves resolved with no view level (Tau's values and the person's
+    // defaults), as a view whose file holds the format values would.
+    return { ...seedAbsentLeaves({ context, levels: context.levels, value }, enq), applying: undefined };
+  }
   if (record === undefined) {
     // The file is gone or refused: nothing to adopt. The last record stays the base, so a person's later edit recreates a
     // file another window deleted (as the hook did), and the next record is compared with it, not adopted whole.
@@ -445,6 +453,21 @@ const observeRecord = (
         ),
     enq,
   );
+};
+
+/* The leaves of a view with no record, seeded from their resolution with no view level; only moved leaves adopt. */
+const seedAbsentLeaves = (
+  { context, levels, value }: Readonly<{ context: BindingContext; levels: ViewResolutionLevels; value: StateValue }>,
+  enq: BindingEnqueue,
+): BindingContext => {
+  const changes = absentRecordChanges(context.absentLeaves, levels);
+  for (const adoption of changes.graphics) {
+    enq.sendTo(context.graphics, adoption);
+  }
+  const seeded: BindingContext = { ...context, levels, absentLeaves: changes.values };
+  return changes.camera === undefined
+    ? seeded
+    : requestCamera({ context: seeded, camera: changes.camera, entryPath: undefined, value }, enq);
 };
 
 /* The owner value a graphics adoption leaves; only the fields a foreign record changed are replaced. */
@@ -697,6 +720,7 @@ const viewRecordBindingDefinition = setup({
     record: undefined,
     owners: { ...input.owners },
     levels: input.levels ?? {},
+    absentLeaves: undefined,
     pose: undefined,
     fieldOfView: undefined,
     revision: 0,
@@ -723,7 +747,13 @@ const viewRecordBindingDefinition = setup({
     }),
     levelsChanged: refines('Unmodelled', ({ context, event, value }, enq) => {
       if (context.record === undefined) {
-        return { context: { levels: event.levels } };
+        // Before any record, only a view already seeded with no view level moves; otherwise the first record seeds.
+        return {
+          context:
+            context.absentLeaves === undefined
+              ? { ...context, levels: event.levels }
+              : seedAbsentLeaves({ context, levels: event.levels, value }, enq),
+        };
       }
       // The same record over new levels: only the inheritable leaves whose resolution changed are seeded.
       const changes = foreignChanges(context.record, context.record, {

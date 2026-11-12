@@ -58,6 +58,8 @@ export class S3HealthIndicator {
       });
     } finally {
       clearTimeout(readinessTimer);
+      // A fast failure of one head must not leave the other holding a socket until its own timeout.
+      controller.abort(new Error('Storage readiness settled'));
     }
   }
 }

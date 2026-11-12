@@ -161,6 +161,36 @@ describe('S3HealthIndicator', () => {
     expect(result['s3']?.['message']).toContain('Private bucket missing');
   });
 
+  it('should abort the private bucket head when the probe head fails first', async () => {
+    mockHeadProbe.mockRejectedValue(new Error('Connection refused'));
+    mockHeadPrivateBucket.mockImplementation(
+      async (signal: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            reject(new Error('aborted', { cause: signal.reason }));
+          });
+        }),
+    );
+
+    const result = await indicator.isHealthy();
+
+    expect(result['s3']).toMatchObject({ status: 'down', message: 'Connection refused' });
+    const signal: unknown = mockHeadPrivateBucket.mock.calls[0]?.[0];
+    expect(signal).toBeInstanceOf(AbortSignal);
+    if (!(signal instanceof AbortSignal)) {
+      throw new Error('Expected transport cancellation signal');
+    }
+    expect(signal.aborted).toBe(true);
+  });
+
+  it('should report the missing probe before the missing private bucket', async () => {
+    mockHeadProbe.mockResolvedValue(undefined);
+    mockHeadPrivateBucket.mockResolvedValue(false);
+
+    const result = await indicator.isHealthy();
+    expect(result['s3']?.['message']).toContain('Probe object missing');
+  });
+
   it('should report down when headProbeObject throws', async () => {
     mockHeadProbe.mockRejectedValue(new Error('Connection refused'));
 

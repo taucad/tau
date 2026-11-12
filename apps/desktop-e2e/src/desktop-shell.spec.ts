@@ -1,6 +1,7 @@
 /* oxlint-disable no-template-curly-in-string -- These placeholders are expanded by Bash, never JavaScript. */
 import { access, readFile, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -89,6 +90,26 @@ describe('production Electron Terminal keyboard qualification', () => {
     await expectTerminalRunning(page);
     await typeTerminalCommand(page, 'printf \'%s|%s\' "$PWD" "${TAU_FIXTURE_VALUE-unset}" > fresh.txt');
     await expectTerminalFile(root, 'fresh.txt', `${root}|unset`);
+  });
+
+  /*
+   * DSK-19 specialist-tool boundary (U11-U38): the shell owns starting an installed program, streaming its output and
+   * letting it write in the project. tar and gzip stand in for any installed tool; T08 owns the missing-tool case.
+   */
+  it('should run an installed tool through to a file in the project and stream its output', async () => {
+    const { session: desktop, root } = await startTerminal();
+    const { page } = desktop;
+    await typeTerminalCommand(
+      page,
+      "printf 'tool input λ' > source.txt; tar -czf bundle.tgz source.txt && tar -tzf bundle.tgz | sed 's/^/listed:/'",
+    );
+    await expectTerminalScreen(page, 'listed:source.txt');
+    await expect
+      .poll(async () => readFile(join(root, 'bundle.tgz')).catch(() => undefined), { timeout: 30_000 })
+      .toBeDefined();
+    const archive = gunzipSync(await readFile(join(root, 'bundle.tgz')));
+    expect(archive.subarray(0, 10).toString('utf8')).toBe('source.txt');
+    expect(archive.subarray(512, 512 + Buffer.byteLength('tool input λ')).toString('utf8')).toBe('tool input λ');
   });
 
   it('should interrupt a foreground command without closing Tau and edit the next line', async () => {

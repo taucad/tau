@@ -269,13 +269,7 @@ const completedArtifactForbiddenEnvironment = ['NODE_OPTIONS', 'NODE_PATH', 'TAU
 const webGpuArguments = (): readonly string[] => {
   const profile = process.env['TAU_E2E_WEBGPU_PROFILE'] ?? 'hardware';
   if (profile === 'software') {
-    return [
-      '--enable-unsafe-webgpu',
-      '--use-webgpu-adapter=swiftshader',
-      '--use-angle=swiftshader',
-      '--enable-features=Vulkan',
-      '--use-vulkan=swiftshader',
-    ];
+    return ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader'];
   }
   if (profile === 'hardware') {
     return ['--enable-unsafe-webgpu'];

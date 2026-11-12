@@ -19,13 +19,7 @@ describe('WebGPU E2E profiles', () => {
   });
 
   it('maps every profile to the exact minimal managed-Chromium arguments', () => {
-    expect(webGpuLaunchArguments('software')).toEqual([
-      '--enable-unsafe-webgpu',
-      '--use-webgpu-adapter=swiftshader',
-      '--use-angle=swiftshader',
-      '--enable-features=Vulkan',
-      '--use-vulkan=swiftshader',
-    ]);
+    expect(webGpuLaunchArguments('software')).toEqual(['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader']);
     expect(webGpuLaunchArguments('hardware')).toEqual(['--enable-unsafe-webgpu']);
     expect(webGpuLaunchArguments('disabled')).toEqual(['--disable-features=WebGPUService']);
   });

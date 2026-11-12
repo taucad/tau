@@ -46,7 +46,7 @@ describe('reportRevisionToast', () => {
   );
 
   it('should not report a toast that is not an error', () => {
-    reportRevisionToast({ type: 'restored', revisionNumber: 2 });
+    reportRevisionToast({ type: 'restored', mode: 'restore', revisionId: 'rev-2', revisionNumber: 2 });
     reportRevisionToast({ type: 'notice', subject: 'remote', tone: 'error', message: 'The backup could not finish.' });
 
     expect(reportUiError).not.toHaveBeenCalled();

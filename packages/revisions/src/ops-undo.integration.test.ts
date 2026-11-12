@@ -200,8 +200,6 @@ const startTree = async (
     restore: async (revision) => {
       const from = await target.port.readRef('main');
       restoreChild().send({ type: 'restore', revisionId: revision });
-      await expect.poll(() => restoreChild().getSnapshot().value, { timeout: 20_000 }).toBe('confirming');
-      restoreChild().send({ type: 'confirm' });
       return settledOn(from);
     },
   };

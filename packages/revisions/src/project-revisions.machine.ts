@@ -33,7 +33,7 @@ import type { RemoteFacet, RemoteMachineEvent, RevisionChildToast } from '#remot
 import type { RemoteKind } from '#remotes.js';
 import { resolutionMachine, selectResolutionFacet } from '#resolution.machine.js';
 import type { ResolutionMachineEvent } from '#resolution.machine.js';
-import { restoreMachine, selectRestoreBusy, selectRestoreNeedsConfirmation } from '#restore.machine.js';
+import { restoreMachine, selectRestoreBusy } from '#restore.machine.js';
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
 import type { SyncMachineEvent } from '#sync.machine.js';
 import type { SyncFacet, SyncPushOutcome } from '#sync.types.js';
@@ -359,6 +359,8 @@ export type ProjectRevisionsMachineEmitted =
       /** `reroot` moves the workbench; `applyToLive` asks for head(branch) on live. */
       mode: 'reroot' | 'applyToLive';
       checkoutId: string;
+      /** The branch the selection was on: what an Undo switches back to (I11). */
+      from?: string;
     }>
   | Readonly<{ type: 'switchRefused'; requestId: string; branch: string; reason: string }>
   /**
@@ -1557,6 +1559,8 @@ const projectRevisionsMachineDefinition = setup({
         /* D10: one verb. Re-root when the branch has a checkout; otherwise apply
          * to the live checkout, but only while no lease holds it. */
         switch: ({ context, event }: RootArgs<'switch'>, enq: ProjectRevisionsEnqueue): RootTransition => {
+          const leaving = selectedRecord(context)?.branch;
+          const from = leaving === undefined ? {} : { from: leaving };
           const linked = viewsOf(context).find((checkout) => checkout.branch === event.branch);
           if (linked !== undefined) {
             const patch = {
@@ -1570,6 +1574,7 @@ const projectRevisionsMachineDefinition = setup({
               branch: event.branch,
               mode: 'reroot',
               checkoutId: linked.id,
+              ...from,
             });
             announceSelection({ ...context, ...patch }, enq);
             return { context: patch };
@@ -1595,6 +1600,7 @@ const projectRevisionsMachineDefinition = setup({
             branch: event.branch,
             mode: 'applyToLive',
             checkoutId: liveRecord.id,
+            ...from,
           });
           /* The resolution is not the application: `branch.machine` owns the
              verb's lifecycle, under the same request id (A38, I20; RM-R1). */
@@ -1604,6 +1610,7 @@ const projectRevisionsMachineDefinition = setup({
             branch: event.branch,
             mode: 'applyToLive',
             checkoutId: liveRecord.id,
+            ...from,
           });
           announceSelection({ ...context, ...patch }, enq);
           return { context: patch };
@@ -1790,9 +1797,7 @@ const selectBranchFacetOf = (
   snapshot: SnapshotFrom<typeof projectRevisionsMachine>,
 ): RevisionStatusProjection['branchVerb'] => {
   const branch = snapshot.children.branch?.getSnapshot();
-  return branch === undefined
-    ? { busy: false, asking: false, operation: undefined, branch: undefined, question: undefined }
-    : selectBranchFacet(branch);
+  return branch === undefined ? { busy: false, operation: undefined, branch: undefined } : selectBranchFacet(branch);
 };
 
 /**
@@ -1859,13 +1864,13 @@ const selectPublishFacetOf = (snapshot: SnapshotFrom<typeof projectRevisionsMach
 /**
  * The restore child's own state, read where it lives.
  *
- * `restore` is an invoked child, so its snapshot is the only place the computed
- * plan's two risk facts exist; the root does not copy them into its context,
- * because a copy would be a second truth to keep in step.
+ * `restore` is an invoked child, so its snapshot is the only place its undo
+ * target exists; the root does not copy it into its context, because a copy
+ * would be a second truth to keep in step.
  *
  * @param snapshot - Current root snapshot.
  * @param headRevisionId - The selected checkout's head, which an undo must still be on.
- * @returns The facts the restore confirmation and *Undo restore* render.
+ * @returns The facts *Restore*, *Undo restore* and *Undo* render.
  */
 const selectRestoreFacet = (
   snapshot: SnapshotFrom<typeof projectRevisionsMachine>,
@@ -1874,10 +1879,7 @@ const selectRestoreFacet = (
   const restore = snapshot.children.restore?.getSnapshot();
   if (restore === undefined) {
     return {
-      asking: false,
       busy: false,
-      removedPathCount: 0,
-      dirty: false,
       revisionNumber: undefined,
       undoable: false,
       canUndo: false,
@@ -1885,10 +1887,7 @@ const selectRestoreFacet = (
   }
   const undoTarget = restore.context.restoredRevisionId;
   return {
-    asking: selectRestoreNeedsConfirmation(restore),
     busy: selectRestoreBusy(restore),
-    removedPathCount: restore.context.removedPathCount,
-    dirty: restore.context.dirty,
     revisionNumber: restore.context.revisionNumber,
     /* The machine's own undo target, and only while it is still the line's
      * head: a reload, another device's restore and a save on top all read

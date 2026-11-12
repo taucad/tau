@@ -17,6 +17,7 @@ import type { ForwardRefExoticComponent, RefAttributes } from 'react';
 import { extend, useFrame, useThree } from '@react-three/fiber';
 import type { EventManager, ThreeElement } from '@react-three/fiber';
 import CameraControlsImpl from 'camera-controls';
+import { attachCameraWheelRouter } from '#graphics/three/controls/camera-wheel-router.js';
 import { useViewportGizmoInteractionLock } from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
 import type { ViewportGizmoInteractionLock } from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
 import type { SecondaryMouseButtonMode } from '#graphics/three/three-viewer-properties.js';
@@ -211,7 +212,9 @@ export const TauCameraControls: ForwardRefExoticComponent<TauCameraControlsProps
 
     useEffect(() => {
       controls.connect(resolvedDomElement);
+      const detachWheelRouter = attachCameraWheelRouter({ controls, element: resolvedDomElement });
       return () => {
+        detachWheelRouter();
         controls.disconnect();
       };
     }, [controls, resolvedDomElement]);

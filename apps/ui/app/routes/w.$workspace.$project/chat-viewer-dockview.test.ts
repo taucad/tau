@@ -18,6 +18,7 @@ import {
   replaceViewerNewTabWithFile,
   newViewRecordFrom,
   recordNewView,
+  viewSourceOf,
   adoptViewerRecordNode,
   ViewerEmptyFilePicker,
 } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
@@ -168,6 +169,64 @@ describe('viewer split launchers', () => {
     expect(edit).toHaveBeenCalledOnce();
     expect(written).toEqual([formatView]);
     globalThis.localStorage.clear();
+  });
+
+  it('writes no record when the copy of the exceptions is not saved', async () => {
+    globalThis.localStorage.clear();
+    viewExceptions.add('p', 'v-source', 'display.grid');
+    const refused = vi.spyOn(viewExceptions, 'copy').mockReturnValue('refused');
+    const edit = vi.fn(async () => true);
+    try {
+      await expect(
+        recordNewView({
+          projectId: 'p',
+          viewId: 'v-new',
+          entryPath: 'models/new.ts',
+          source: { viewId: 'v-source', record: workbenchRecords.view.schema.parse({ version: 1, entryPath: 'a.ts' }) },
+          edit,
+        }),
+      ).resolves.toBe(false);
+    } finally {
+      refused.mockRestore();
+    }
+    expect(edit).not.toHaveBeenCalled();
+    globalThis.localStorage.clear();
+  });
+
+  it.each([
+    ['refuses', async () => false],
+    [
+      'fails',
+      async () => {
+        throw new Error('The record store is closed.');
+      },
+    ],
+  ])('puts the new view id exceptions back when the record store %s the write after the copy', async (name, write) => {
+    globalThis.localStorage.clear();
+    viewExceptions.add('p', 'v-source', 'display.grid');
+    viewExceptions.add('p', 'v-new', 'display.axes');
+    const outcome = recordNewView({
+      projectId: 'p',
+      viewId: 'v-new',
+      entryPath: 'models/new.ts',
+      source: { viewId: 'v-source', record: workbenchRecords.view.schema.parse({ version: 1, entryPath: 'a.ts' }) },
+      edit: async () => {
+        expect(exceptionsForView(viewExceptionsStore.read(), 'p', 'v-new')).toEqual(['display.grid']);
+        return write();
+      },
+    });
+    await (name === 'fails' ? expect(outcome).rejects.toThrow('closed') : expect(outcome).resolves.toBe(false));
+    expect(exceptionsForView(viewExceptionsStore.read(), 'p', 'v-new')).toEqual(['display.axes']);
+    globalThis.localStorage.clear();
+  });
+
+  it("takes the source from the dock's active viewer panel, and none from another panel or a viewer with no record", () => {
+    const record = workbenchRecords.view.schema.parse({ version: 1, entryPath: 'a.ts' });
+    const records = new Map([['v1', record]]);
+    expect(viewSourceOf({ id: 'v1', params: { viewId: 'v1' } }, records)).toEqual({ viewId: 'v1', record });
+    expect(viewSourceOf({ id: 'editor', params: { path: 'a.ts' } }, records)).toBeUndefined();
+    expect(viewSourceOf({ id: 'v2', params: { viewId: 'v2' } }, records)).toBeUndefined();
+    expect(viewSourceOf(undefined, records)).toBeUndefined();
   });
 
   it('copies no exceptions with no active viewer', async () => {

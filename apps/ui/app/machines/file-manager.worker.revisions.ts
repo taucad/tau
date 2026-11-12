@@ -977,7 +977,15 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
          * answers, from the one ladder both hosts read (C6). */
         throw new Error(registerProjectFailureMessage(401));
       }
-      await registerProjectOverHttp(apiBaseUrl, { kind: 'cookie' }, { id, name });
+      /* B4c: a project its linked import tied to a GitHub repository says so, so
+       * the push check admits the commits Tau did not record (B4). */
+      const remotes = await options.port.listRemotes();
+      const linked = remotes.some((remote) => remote.provider === 'github');
+      await registerProjectOverHttp(
+        apiBaseUrl,
+        { kind: 'cookie' },
+        { id, name, ...(linked ? { origin: 'github' } : {}) },
+      );
     },
     publishPublication: async (input) => {
       const apiBaseUrl = options.apiBaseUrl?.();

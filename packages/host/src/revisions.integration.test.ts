@@ -1638,12 +1638,13 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
   /*
    * Review R3, corrected by the run: a device that already has work of its own.
    *
-   * The review expected `sync.state: 'conflicted'`. What actually happens one
-   * state earlier is that *Connect*'s own initial sync offers this machine's
-   * branch, the remote refuses it non-fast-forward, and `remote.phase` is
-   * `failed` — which this verb already answered. What the row pins is that the
-   * refusal is prompt and in the remote's own words, and is never the "did not
-   * answer in time" sentence the unhandled states used to produce.
+   * *Connect* offers only a branch that contains the remote's, so this
+   * machine's unrelated line is never pushed (a refused push used to fail the
+   * remote before the pull ran). The opening pull finds the two lines with
+   * work on both sides and the pull rests in `conflicted`, which this verb
+   * answers. What the row pins is that the refusal is prompt and says why, is
+   * never the "did not answer in time" sentence the unhandled states used to
+   * produce, and leaves this machine's work untouched.
    */
   it.runIf(gitToolchainOnPath)(
     'refuses an open that collides with work this machine already has',
@@ -1709,7 +1710,9 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
         const outcome = await revisions.openFromRemote();
 
         expect(outcome).toMatchObject({ status: 'refused' });
-        expect(outcome.status === 'refused' && outcome.reason).toMatch(/refused refs\/heads\/main/u);
+        expect(outcome.status === 'refused' && outcome.reason).toBe(
+          'This project has work of its own that Tau Cloud does not have.',
+        );
         expect(outcome.status === 'refused' && outcome.reason).not.toMatch(/did not answer in time/u);
         /* This machine's own work is untouched by the refusal. */
         expect(await readFile(join(second, 'part.ts'), 'utf8')).toBe('export const part = 2;\n');

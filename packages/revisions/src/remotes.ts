@@ -136,6 +136,8 @@ const hostLocalRefPrefixes: readonly string[] = Object.freeze([
   'refs/tau/head',
   /* Server-owned roots that keep revision ids embedded in record JSON alive. */
   'refs/tau/retention',
+  /* A line this device gave way on at connect, kept here and never offered. */
+  'refs/tau/superseded',
   /* Fetch's own half of the store: a remote-tracking ref is what this host
    * last saw *of* a remote, so offering one back is meaningless. */
   'refs/remotes',

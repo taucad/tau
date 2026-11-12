@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import { CloudOff, CircleAlert } from 'lucide-react';
-import type { LargeObjectsFacet } from '@taucad/revisions';
+import type { LargeObjectsFacet, RevisionStatusProjection } from '@taucad/revisions';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { Progress } from '@taucad/ui/components/progress';
@@ -143,6 +143,46 @@ export function ProjectSyncPlaceholder({ state }: { readonly state: ModelAvailab
   return <ProjectFilesPlaceholder state={state} />;
 }
 
+/**
+ * What the project placeholder says: the failure's own class where it names one, so a refused push or a conflicted
+ * pull never reads as a download that did not finish.
+ *
+ * @param state - The project's availability.
+ * @param status - The revision status the failure's class is read from.
+ * @returns The title and the description.
+ */
+export const projectFilesCopy = (
+  state: ProjectAvailability,
+  status: Pick<RevisionStatusProjection, 'remote' | 'sync'> | undefined,
+): readonly [string, string] => {
+  if (state !== 'failed') {
+    return messages[state];
+  }
+  const reason = status?.remote.reason ?? status?.sync.reason;
+  if (reason === 'forbidden' || reason === 'notFound') {
+    return ['Project unavailable', 'Your access may have changed. Open History to review the backup.'];
+  }
+  if (reason === 'unauthorized') {
+    return ['Sign in to continue', 'Your connection needs authorization before this project can download.'];
+  }
+  if (reason === 'rejected') {
+    return ['Couldn’t back up this project', 'Tau Cloud refused this device’s history. Open History to review it.'];
+  }
+  if (status?.sync.state === 'conflicted') {
+    return [
+      'This project needs a decision',
+      'This device and Tau Cloud both changed it. Open History to choose what to keep.',
+    ];
+  }
+  if (reason === 'quota') {
+    return [
+      'Storage needs attention',
+      'The download could not finish because a storage limit was reached. Open History for details.',
+    ];
+  }
+  return messages.failed;
+};
+
 function ProjectFilesPlaceholder({ state }: { readonly state: ProjectAvailability }): React.JSX.Element {
   const { connectRemote, syncNow } = useRevisionCommands();
   const status = useRevisionStatus();
@@ -153,7 +193,10 @@ function ProjectFilesPlaceholder({ state }: { readonly state: ProjectAvailabilit
   parameters.set('workbench', 'revisions');
   const detailsUrl = `${location.pathname}?${parameters.toString()}`;
   const reason = remote?.reason ?? status?.sync.reason;
-  const needsDetails = state === 'account' || (reason !== undefined && reason !== 'unknown' && reason !== 'offline');
+  const needsDetails =
+    state === 'account' ||
+    status?.sync.state === 'conflicted' ||
+    (reason !== undefined && reason !== 'unknown' && reason !== 'offline');
   const retry = (): void => {
     if (remote?.phase === 'reconnectRequired') {
       client?.send({ command: 'authorizeRemote' });
@@ -164,17 +207,7 @@ function ProjectFilesPlaceholder({ state }: { readonly state: ProjectAvailabilit
     }
   };
   const isFailure = state === 'failed' || state === 'offline' || state === 'account';
-  const [title, description] =
-    state === 'failed' && (reason === 'forbidden' || reason === 'notFound')
-      ? ['Project unavailable', 'Your access may have changed. Open History to review the backup.']
-      : state === 'failed' && reason === 'unauthorized'
-        ? ['Sign in to continue', 'Your connection needs authorization before this project can download.']
-        : state === 'failed' && reason === 'quota'
-          ? [
-              'Storage needs attention',
-              'The download could not finish because a storage limit was reached. Open History for details.',
-            ]
-          : messages[state];
+  const [title, description] = projectFilesCopy(state, status);
   return (
     <div
       className='flex size-full flex-col items-center justify-center gap-4 p-6 text-center'
@@ -221,6 +254,12 @@ function useModelWaitReporting(): void {
   }, []);
   const gated = model === 'files' || model === 'filesFailed' || model === 'filesChecking';
   const facet = status?.largeObjects;
+  /* The project's own gate failed: the open never reached the model's files, and the placeholder says so. */
+  const isOpenFailed = model === 'failed';
+  const reason = status?.remote.reason ?? status?.sync.reason ?? 'unknown';
+  const remotePhase = status?.remote.phase;
+  const syncState = status?.sync.state;
+  const error = status?.remote.error ?? status?.sync.error;
   useEffect(() => {
     reporter.current?.observe({
       gated,
@@ -228,17 +267,30 @@ function useModelWaitReporting(): void {
       checkoutId: status?.checkoutId,
       readiness: status?.readiness,
       facet,
+      openFailure: isOpenFailed ? { reason, remotePhase, syncState, error } : undefined,
     });
-  }, [gated, status?.projectId, status?.checkoutId, status?.readiness, facet]);
+  }, [
+    gated,
+    status?.projectId,
+    status?.checkoutId,
+    status?.readiness,
+    facet,
+    isOpenFailed,
+    reason,
+    remotePhase,
+    syncState,
+    error,
+  ]);
 }
 
 /** One live announcement per focused project, rather than one competing announcement per pane. */
 export function ProjectSyncAnnouncement(): React.JSX.Element {
   const state = useProjectAvailability();
+  const status = useRevisionStatus();
   useModelWaitReporting();
   return (
     <div className='sr-only' role='status' aria-live='polite' aria-atomic='true'>
-      {state === 'ready' ? '' : messages[state].join('. ')}
+      {state === 'ready' ? '' : projectFilesCopy(state, status).join('. ')}
     </div>
   );
 }

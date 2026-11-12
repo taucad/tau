@@ -7,7 +7,11 @@ import {
   ProjectSyncPlaceholder,
 } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 
-const mocks = vi.hoisted(() => ({ facet: undefined as LargeObjectsFacet | undefined, send: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  facet: undefined as LargeObjectsFacet | undefined,
+  send: vi.fn(),
+  status: undefined as unknown,
+}));
 
 vi.mock('react-router', () => ({ useLocation: () => ({ pathname: '/w/x/p', search: '' }), Link: () => null }));
 vi.mock('#hooks/use-project-availability.js', () => ({
@@ -17,7 +21,7 @@ vi.mock('#hooks/use-project-availability.js', () => ({
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionClient: () => ({ send: mocks.send }),
   useRevisionCommands: () => ({ connectRemote: vi.fn(), syncNow: vi.fn() }),
-  useRevisionStatus: () => undefined,
+  useRevisionStatus: () => mocks.status,
 }));
 
 const facet = (changes: Partial<LargeObjectsFacet> = {}): LargeObjectsFacet => ({
@@ -75,5 +79,37 @@ describe('model files placeholder', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('project files placeholder', () => {
+  const status = (
+    remote: Readonly<Record<string, unknown>>,
+    sync: Readonly<Record<string, unknown>> = {},
+  ): unknown => ({
+    remote: { phase: 'failed', reason: undefined, error: undefined, ...remote },
+    sync: { state: 'idle', reason: undefined, error: undefined, ...sync },
+  });
+
+  /* A refused connect-time push is not a download that did not finish. */
+  it('says a refused open could not be backed up, and offers History', () => {
+    mocks.status = status({ reason: 'rejected', error: 'The remote refused refs/heads/main.' });
+    render(<ProjectSyncPlaceholder state='failed' />);
+    expect(screen.getByRole('region', { name: 'Couldn’t back up this project' })).toBeInTheDocument();
+    expect(screen.queryByText('Couldn’t download this project')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
+  it('says a conflicted open needs a decision', () => {
+    mocks.status = status({ phase: 'connected' }, { state: 'conflicted' });
+    render(<ProjectSyncPlaceholder state='failed' />);
+    expect(screen.getByRole('region', { name: 'This project needs a decision' })).toBeInTheDocument();
+  });
+
+  it('keeps the download copy for a failure that names no class', () => {
+    mocks.status = status({ reason: 'unknown', error: 'The download stopped.' });
+    render(<ProjectSyncPlaceholder state='failed' />);
+    expect(screen.getByRole('region', { name: 'Couldn’t download this project' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 });

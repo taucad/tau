@@ -1,7 +1,6 @@
 import { readFile, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { desktopE2EFrontendUrl } from '#support/config.js';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { expectDesktopSurfaceBoundary, expectNoDesktopAnalytics, expectVisible } from '#support/scenario.js';
@@ -49,13 +48,16 @@ test('keeps fresh and returning desktop profiles free of web consent and analyti
   await expectDesktopSurfaceBoundary(session);
   await page.getByRole('button', { name: 'Help' }).click();
   await page.getByRole('menuitem', { name: 'Privacy' }).click();
+  /* Legal pages belong to the website (eed19f03cc). Only tau.new and taucad.dev
+   * serve it on their own origin; this suite's http://localhost:3014 build runs
+   * no website, so `websiteOrigin()` links to the public site instead. */
   await expect
     .poll(async () =>
       first.application.evaluate(
         () => (globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string }).__TAU_E2E_EXTERNAL_URL__,
       ),
     )
-    .toBe(`${new URL(desktopE2EFrontendUrl).origin}/legal/privacy`);
+    .toBe('https://tau.new/legal/privacy');
   await page.getByRole('button', { name: 'Help' }).click();
   await page.getByRole('menuitem', { name: 'Documentation' }).click();
   await expect

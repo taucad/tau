@@ -268,8 +268,8 @@ export function MeasureTool(): React.JSX.Element {
   useEffect(() => subscribeToMatcapLoad(invalidate), [invalidate]);
   const events = useThree((state) => state.events) as EventManager<HTMLElement>;
   // R3F binds pointer events to `eventSource` (the viewer region div), which covers the canvas.
-  // Listening on `gl.domElement` would never fire; see `tau-camera-controls.tsx` for the same
-  // resolution order.
+  // Listening on `gl.domElement` would never fire; `adapters/controls-adapter.ts` (`followSurface`)
+  // resolves the surface in the same order.
   const pointerTarget: HTMLElement = events.connected ?? gl.domElement;
   const graphicsActor = useGraphics();
   const measureExact = useExactMeasurement();

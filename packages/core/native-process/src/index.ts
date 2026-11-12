@@ -30,7 +30,7 @@ export {
   nativeSandboxPolicy,
   NativeRuntimeUnavailableError,
   spawnInNativeSandbox,
-} from '#native-sandbox.js';
-export type { NativeSandboxLaunch, NativeSandboxProfile } from '#native-sandbox.js';
+} from '@taucad/sandbox';
+export type { NativeSandboxLaunch, NativeSandboxProfile } from '@taucad/sandbox';
 export { createWorkspaceMirror } from '#workspace-mirror.js';
 export type { WorkspaceMirror, WorkspaceMirrorOptions } from '#workspace-mirror.js';

@@ -14,6 +14,9 @@ import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-
 import { WorkspaceSelectorPlaceholder } from '#components/filesystem/workspace-selector.js';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { directoryPicker } from '#constants/browser.constants.js';
+import { kernelPillFace } from '#components/chat/kernel-picker-layout.js';
+import { KernelPillContent, kernelPillStyles } from '#components/chat/kernel-pill.js';
+import { useFeature } from '#flags/use-feature.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { offeredReasoningLevels } from '#utils/model-reasoning.js';
@@ -89,6 +92,25 @@ function StaticModelTrigger(): React.JSX.Element {
   );
 }
 
+/** The kernel pill's resting face under the `autoKernel` flag: Auto or the device's manual pick, as the rich bar draws it. */
+function StaticKernelPill(): React.JSX.Element {
+  const {
+    kernel: { preference },
+  } = useChatComposer();
+  const face = kernelPillFace({ preference });
+  return (
+    <Button
+      variant={kernelPillStyles.variant}
+      size='sm'
+      data-slot='kernel-pill'
+      aria-label={face.label}
+      className={cn('min-w-0', kernelPillStyles.button)}
+    >
+      <KernelPillContent face={face} />
+    </Button>
+  );
+}
+
 const noop = (): void => undefined;
 
 /**
@@ -102,6 +124,7 @@ const noop = (): void => undefined;
  */
 export function ChatComposerStaticBar({ isEmpty }: { readonly isEmpty: boolean }): React.JSX.Element {
   const isLocationShown = useLocationChipShown();
+  const isAutoEnabled = useFeature('autoKernel');
   return (
     <div inert data-slot='composer-bar' className={chatComposerBarClassName}>
       <div data-slot='composer-left' className={chatComposerBarLeftClassName}>
@@ -113,6 +136,7 @@ export function ChatComposerStaticBar({ isEmpty }: { readonly isEmpty: boolean }
           className={cn(chatComposerCollapsibleControlsClassName, 'gap-0.5 pointer-coarse:gap-3')}
         >
           {isLocationShown ? <WorkspaceSelectorPlaceholder variant='toolbar' /> : null}
+          {isAutoEnabled ? <StaticKernelPill /> : null}
         </div>
       </div>
       <div data-slot='composer-right' className={chatComposerBarRightClassName}>

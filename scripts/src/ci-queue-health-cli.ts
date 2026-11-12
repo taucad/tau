@@ -1,13 +1,14 @@
 /**
  * Weekly merge-queue health report: the IO half (`ci-queue-health.ts` holds the logic).
  *
- * Reads the `merge_group` runs of `ci.yml` created in the window, their jobs, and the annotations of each failed
- * run's first failed job from the GitHub REST API, then writes the JSON report and appends the Markdown summary to
- * `--summary` (default `$GITHUB_STEP_SUMMARY`). `ci-queue-health.yml` runs it weekly; it is advisory and posts
- * nothing. Blueprint DC-21 (Brain `research/ci-decomposition-blueprint.md`, Part 5a, X7).
+ * Reads the `merge_group` runs of `ci.yml` created in the window, their jobs, the annotations of each failed run's
+ * first failed job and whether each cancelled run's commit landed on `--branch` from the GitHub REST API, then
+ * writes the JSON report and appends the Markdown summary to `--summary` (default `$GITHUB_STEP_SUMMARY`).
+ * `ci-queue-health.yml` runs it weekly; it is advisory and posts nothing. Blueprint DC-21 (Brain
+ * `research/ci-decomposition-blueprint.md`, Part 5a, X7).
  *
  * Usage: node scripts/src/ci-queue-health-cli.ts [--days 7] [--out <path>] [--summary <file>]
- *          [--workflow ci.yml] [--event merge_group] [--max-requests 900]
+ *          [--workflow ci.yml] [--event merge_group] [--max-requests 900] [--branch main]
  * Env: GITHUB_TOKEN (needs `actions: read`), GITHUB_REPOSITORY (default taucad/tau), GITHUB_API_URL.
  * Exit codes: 0 report written (it may be partial when the request budget ran out); 1 API failure; 2 usage.
  */
@@ -22,6 +23,7 @@ import {
   buildReport,
   fetchOrder,
   firstFailedJob,
+  landedFromCompare,
   renderMarkdown,
   reportWindow,
   splitWindow,
@@ -132,7 +134,25 @@ const listJobs = async (github: Client, runId: number): Promise<WorkflowJob[]> =
   }
 };
 
-const gather = async (github: Client, runs: readonly WorkflowRun[]): Promise<RunEvidence[]> => {
+/**
+ * Whether a cancelled run's commit is reachable from `branch`. Undefined when the run names no commit or GitHub
+ * refuses the compare (for example a commit it no longer has), so the report counts it as unchecked waste.
+ */
+const checkLanded = async (github: Client, run: WorkflowRun, branch: string): Promise<boolean | undefined> => {
+  if (run.conclusion !== 'cancelled' || !run.head_sha || github.budget() <= 0) {
+    return undefined;
+  }
+  try {
+    const { status } = await github.get<{ status?: string }>(
+      `/repos/${github.repository}/compare/${run.head_sha}...${encodeURIComponent(branch)}?per_page=1`,
+    );
+    return landedFromCompare(status);
+  } catch {
+    return undefined;
+  }
+};
+
+const gather = async (github: Client, runs: readonly WorkflowRun[], branch: string): Promise<RunEvidence[]> => {
   const evidence = new Map<number, RunEvidence>(runs.map((run) => [run.id, { run }]));
   const queue = fetchOrder(runs);
   let fetched = 0;
@@ -147,10 +167,13 @@ const gather = async (github: Client, runs: readonly WorkflowRun[]): Promise<Run
             `/repos/${github.repository}/check-runs/${culprit.id}/annotations?per_page=100`,
           )
         : undefined;
+      // oxlint-disable-next-line no-await-in-loop -- the landing check belongs to the run just fetched
+      const landed = await checkLanded(github, run, branch);
       evidence.set(run.id, {
         run,
         jobs,
         ...(annotations ? { annotations } : {}),
+        ...(landed === undefined ? {} : { landed }),
       });
       fetched += 1;
       if (fetched % 100 === 0) {
@@ -180,6 +203,7 @@ const main = async (args: readonly string[]): Promise<number> => {
         workflow: { type: 'string', default: 'ci.yml' },
         event: { type: 'string', default: 'merge_group' },
         'max-requests': { type: 'string', default: '900' },
+        branch: { type: 'string', default: 'main' },
       },
     }));
   } catch (error) {
@@ -202,7 +226,7 @@ const main = async (args: readonly string[]): Promise<number> => {
   // Split windows share their boundary second, so a run created then is listed twice.
   const listed = await listRuns(github, { workflow: values.workflow, event: values.event, ...window });
   const runs = [...new Map(listed.map((run) => [run.id, run])).values()];
-  const evidence = await gather(github, runs);
+  const evidence = await gather(github, runs, values.branch);
   const report = buildReport({
     repository,
     workflow: values.workflow,

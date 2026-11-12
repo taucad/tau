@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(203);
+    expect(metrics).toHaveLength(207);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -83,6 +83,28 @@ describe('TauMetrics', () => {
       tau_storage_accounting_passes_total: { type: 'counter', unit: '{pass}' },
       tau_storage_accounting_last_success: { type: 'gauge', unit: 's' },
     });
+  });
+
+  /* Database connection audit R4: the client-side pool series the pooler panel and alerts read. */
+  it('should declare the client-side pool instruments by the names the pooler rules read', () => {
+    const exported = Object.fromEntries(
+      [
+        TauMetrics.databaseClientConnections,
+        TauMetrics.databaseClientConnects,
+        TauMetrics.databaseClientRefusals,
+        TauMetrics.databasePoolerCapacity,
+      ].map((metric) => [toPrometheusName(metric.name, metric.type), metric.type]),
+    );
+    expect(exported).toEqual({
+      tau_db_client_connections: 'upDownCounter',
+      tau_db_client_connects_total: 'counter',
+      tau_db_client_refusals_total: 'counter',
+      tau_db_pooler_capacity: 'gauge',
+    });
+    expect(TauMetrics.databaseClientConnections.attributes.shape['tau.db.pool'].options).toEqual([
+      'request',
+      'background',
+    ]);
   });
 
   it('should bound the R2 bucket label to roles, so a bucket name never becomes a label value', () => {

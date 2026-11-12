@@ -18,6 +18,8 @@
 /** A workflow run (`GET /repos/{repo}/actions/workflows/{file}/runs`), only the fields the report reads. */
 export type WorkflowRun = {
   readonly id: number;
+  /** The merge-group commit the run tested; the queue moves the base branch to it when the group lands. */
+  readonly head_sha?: string;
   readonly status: string | undefined;
   readonly conclusion: string | undefined;
   readonly created_at: string;
@@ -57,6 +59,11 @@ export type RunEvidence = {
   readonly run: WorkflowRun;
   readonly jobs?: readonly WorkflowJob[];
   readonly annotations?: readonly Annotation[];
+  /**
+   * For a cancelled run: whether its `head_sha` is reachable from the base branch, so the group landed and the
+   * sweep cancelled the rest of its run after the merge. Absent when the CLI did not or could not check.
+   */
+  readonly landed?: boolean;
 };
 
 export type ConclusionCounts = {
@@ -107,11 +114,16 @@ export type RunWait = {
 };
 
 export type CancelledWaste = {
+  /** Cancelled runs whose commit did not land (or was not checked): rebuilt, evicted or abandoned groups. */
   readonly runs: number;
-  /** Jobs the cancelled runs had already dispatched (not skipped). */
+  /** Jobs those runs had already dispatched (not skipped). */
   readonly jobs: number;
   /** Runner minutes those jobs used before they were cancelled or finished. */
   readonly runnerMinutes: number;
+  /** Cancelled runs whose commit landed: the work merged, so it is not rebuild waste. */
+  readonly landed: { readonly runs: number; readonly runnerMinutes: number };
+  /** Cancelled runs counted as waste because their landing was not checked (no `head_sha`, budget or API refusal). */
+  readonly unchecked: number;
 };
 
 export type QueueHealthReport = {
@@ -380,22 +392,51 @@ export const runWaits = (evidence: readonly RunEvidence[]): RunWait => {
   };
 };
 
-/** What the cancelled runs had already spent: dispatched jobs and their runner minutes. */
+/**
+ * Whether a GitHub compare of `{head_sha}...{base branch}` shows the commit on the branch: the branch is level with
+ * it or ahead of it. `behind` or `diverged` means the group never landed.
+ */
+export const landedFromCompare = (status: string | undefined): boolean => status === 'identical' || status === 'ahead';
+
+const runnerMinutes = (seconds: number): number => Math.round(seconds / 6) / 10;
+
+/**
+ * What the cancelled runs had already spent: dispatched jobs and their runner minutes. A cancelled run whose commit
+ * landed is counted apart: the merge-queue sweep cancels the rest of a group's run once it merged (CI audit
+ * 2026-11-12, F14), so its minutes bought a merge, not a rebuild. An unchecked run stays waste.
+ */
 export const cancelledWaste = (evidence: readonly RunEvidence[]): CancelledWaste => {
   let runs = 0;
   let jobs = 0;
   let seconds = 0;
+  let landedRuns = 0;
+  let landedSeconds = 0;
+  let unchecked = 0;
   for (const entry of evidence) {
     if (entry.run.status !== 'completed' || entry.run.conclusion !== 'cancelled') {
       continue;
     }
-    runs += 1;
-    for (const job of ranJobs(entry.jobs ?? [])) {
-      jobs += 1;
-      seconds += secondsBetween(job.started_at, job.completed_at);
+    const spent = ranJobs(entry.jobs ?? []);
+    const used = spent.reduce((total, job) => total + secondsBetween(job.started_at, job.completed_at), 0);
+    if (entry.landed === true) {
+      landedRuns += 1;
+      landedSeconds += used;
+      continue;
     }
+    if (entry.landed === undefined) {
+      unchecked += 1;
+    }
+    runs += 1;
+    jobs += spent.length;
+    seconds += used;
   }
-  return { runs, jobs, runnerMinutes: Math.round(seconds / 6) / 10 };
+  return {
+    runs,
+    jobs,
+    runnerMinutes: runnerMinutes(seconds),
+    landed: { runs: landedRuns, runnerMinutes: runnerMinutes(landedSeconds) },
+    unchecked,
+  };
 };
 
 /**
@@ -463,7 +504,9 @@ export const renderMarkdown = (report: QueueHealthReport): string => {
     '| ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
     `| ${runs.total} | ${runs.success} | ${runs.failure} | ${runs.cancelled} | ${runs.other} | ${runs.unfinished} | ${percent(runs.cancelledShare)} |`,
     '',
-    `Cancelled runs had dispatched ${report.cancelled.jobs} jobs and used ${report.cancelled.runnerMinutes} runner minutes. ` +
+    `${report.cancelled.landed.runs} cancelled runs had landed (${report.cancelled.landed.runnerMinutes} runner minutes, not waste). ` +
+      `The other ${report.cancelled.runs} had dispatched ${report.cancelled.jobs} jobs and used ${report.cancelled.runnerMinutes} runner minutes` +
+      `${report.cancelled.unchecked > 0 ? ` (${report.cancelled.unchecked} not checked for landing)` : ''}. ` +
       `Over ${report.runWait.runs} finished, non-cancelled runs the median wall was ${Math.round(report.runWait.wallMedianSeconds / 6) / 10} min ` +
       `and runner wait was ${percent(report.runWait.criticalPathWaitShareMedian)} of the critical path (p90 ${percent(report.runWait.criticalPathWaitShareP90)}).`,
   ];

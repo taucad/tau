@@ -370,11 +370,40 @@ describe('createShellGitView', () => {
 });
 
 describe('shellGitEnvironment', () => {
-  it('should point git at the view and the checkout and take no optional lock', () => {
+  it('should point git at the view and the checkout, take no optional lock and read no system config', () => {
     expect(shellGitEnvironment({ directory: '/p/git', objects: '/c/.git/objects', workTree: '/c' })).toStrictEqual({
       GIT_DIR: '/p/git',
       GIT_WORK_TREE: '/c',
       GIT_OPTIONAL_LOCKS: '0',
+      GIT_CONFIG_NOSYSTEM: '1',
     });
+  });
+});
+
+describe('shellGitEnvironment over a machine system config', () => {
+  /* Xcode's git bundles a system config with a credential helper; the view must not surface it (shell E14). */
+  it('should read only the view config when the machine has a system config with a helper', async () => {
+    await seedRepository();
+    const system = join(base, 'system-gitconfig');
+    await writeFile(system, '[credential]\n\thelper = osxkeychain\n[init]\n\tdefaultBranch = main\n');
+    const view = await createShellGitView(checkout, privateRoot);
+    const listed = (environment: Readonly<Record<string, string>>): string =>
+      execFileSync('git', ['config', '--list', '--show-origin'], {
+        cwd: checkout,
+        encoding: 'utf8',
+        env: { PATH: process.env['PATH'] ?? '/usr/bin:/bin', HOME: base, GIT_CONFIG_SYSTEM: system, ...environment },
+      });
+
+    const { GIT_CONFIG_NOSYSTEM: _, ...withoutNoSystem } = shellGitEnvironment(view!);
+    expect(listed(withoutNoSystem)).toContain('credential.helper=osxkeychain');
+    const config = listed(shellGitEnvironment(view!));
+    expect(config).not.toMatch(/credential|helper|remote\.|extraheader|lfs\.|hookspath/iu);
+    const sources = new Set(
+      config
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.split('\t')[0]),
+    );
+    expect([...sources]).toStrictEqual([`file:${join(view!.directory, 'config')}`]);
   });
 });

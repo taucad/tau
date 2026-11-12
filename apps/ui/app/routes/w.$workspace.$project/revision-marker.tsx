@@ -94,7 +94,7 @@ import {
 export const isAutosave = (revision: RevisionCard): boolean =>
   revision.turnCut === 'base' ||
   (revision.turnId === undefined &&
-    (revision.trigger === 'idle' || revision.trigger === 'hidden' || revision.trigger === 'close'));
+    (revision.capture === 'idle' || revision.capture === 'hidden' || revision.capture === 'close'));
 
 /* The file's state is muted at 90%, the lightest step that keeps 4.5:1 on the
    file list in every theme; a hovered row returns it to the full muted colour. */
@@ -455,7 +455,7 @@ export function RevisionDetails({
   const rows: ReadonlyArray<readonly [string, React.ReactNode]> = [
     ...(isDebug ? storedIdRows(revision) : []),
     ...(branch === undefined ? [] : ([['Branch', branch]] as const)),
-    ['Trigger', revisionTriggerLabel(revision.trigger, revision.turnCut)],
+    ['Trigger', revisionTriggerLabel(revision.capture, revision.turnCut)],
     ...(revision.createdAt > 0
       ? ([
           [
@@ -480,6 +480,15 @@ export function RevisionDetails({
             <dd className='min-w-0'>{value}</dd>
           </div>
         ))}
+        {/* The trailer the entry records (B2, B5), under its label and across the pane: a diagnostic, debug only. */}
+        {isDebug && revision.trailer !== undefined ? (
+          <div className='col-span-2 flex min-w-0 flex-col gap-0.5'>
+            <dt className='text-muted-foreground'>Recorded trailer</dt>
+            <dd className='min-w-0'>
+              <code className='block font-mono break-all whitespace-pre-wrap'>{revision.trailer}</code>
+            </dd>
+          </div>
+        ) : null}
       </dl>
     </CollapsibleContent>
   );
@@ -995,7 +1004,7 @@ function RevisionMarkerGlyph({
       </span>
     );
   }
-  /* A9: a Restored row is named by what it restored, never by its trigger. */
+  /* A9: a Restored row is named by what it restored, never by its capture. */
   if (revision.restoredFrom !== undefined) {
     return (
       <span className={timelineMarker}>
@@ -1003,7 +1012,7 @@ function RevisionMarkerGlyph({
       </span>
     );
   }
-  if (revision.trigger === 'merge') {
+  if (revision.capture === 'merge') {
     return (
       <span className={timelineMarker}>
         <GitMerge aria-label='Merged' className='size-3.5 text-muted-foreground' />

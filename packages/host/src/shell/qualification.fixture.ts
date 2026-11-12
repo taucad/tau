@@ -56,7 +56,7 @@ export const controlledEndpoint = async (): Promise<
     server.listen(0, '127.0.0.1', resolve);
   });
   const { port } = server.address() as AddressInfo;
-  const shellModule = createRequire(import.meta.url).resolve('@taucad/native-process-core/shell');
+  const shellModule = createRequire(import.meta.url).resolve('@taucad/sandbox/shell');
   const directory = join(dirname(shellModule), 'shell');
   const preload = new URL(`file://${join(directory, 'controlled-endpoint.fixture.ts')}`);
   preload.search = new URLSearchParams({ port: String(port), names: `${grantedName},${otherName}` }).toString();

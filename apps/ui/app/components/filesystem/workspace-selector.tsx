@@ -65,8 +65,8 @@ export const useRememberedProjectLocation = (): readonly [
 const isReadyOption = (option: ProjectCreationLocationOption | undefined): boolean =>
   option?.status === 'ready' || option?.status === 'connected';
 
-/** The trigger's two finishes: the composer's ghost pill, and a form field. */
-const triggerStyles = {
+/** The trigger's two finishes: the composer's ghost pill, and a form field. The kernel pill shares the first. */
+export const triggerStyles = {
   /* The composer's ghost pill (D6): glyph first, its label the first to leave when the bar needs room. */
   toolbar: {
     variant: 'ghost',

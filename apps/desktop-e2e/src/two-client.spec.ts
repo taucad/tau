@@ -292,6 +292,9 @@ const revisionRowCount = async (client: BrowserClient): Promise<number> => histo
  * The header chip once the checkout is modified: `… Unsaved changes.` It
  * is always mounted, so it observes an edit whichever pane is in front.
  */
+/** The History trigger while work from elsewhere waits: its name is where you are and the arrival sentence (M11). */
+const arrivalTriggerName = /^Open History\. You are on .+\. (?:New changes|Changes from .+) are ready\.$/u;
+
 const modifiedChip = (page: Page): Locator =>
   page.getByRole('button', { name: /^Open History\..* Unsaved changes\.$/u });
 
@@ -1730,18 +1733,13 @@ describe('live and automatic', () => {
       const theirs = required(await gitHead(destinationRoot), 'Rule 9: the desktop minted nothing.');
       await expect.poll(remoteHead, { timeout: 180_000 }).toBe(theirs);
 
-      /* A has been told (the header's Arrived line) and has applied nothing. */
+      /* A has been told and has applied nothing. The History trigger's name carries the status sentence, which
+       * C1 (13ae1b6fab) words "… are ready" rather than "… arrived". */
       await expect
-        .poll(
-          async () =>
-            a()
-              .page.getByRole('button', { name: /arrived/u })
-              .count(),
-          {
-            message: 'D12: the browser must say a revision arrived while its turn holds the files',
-            timeout: 60_000,
-          },
-        )
+        .poll(async () => a().page.getByRole('button', { name: arrivalTriggerName }).count(), {
+          message: 'D12: the browser must say a revision arrived while its turn holds the files',
+          timeout: 60_000,
+        })
         .toBeGreaterThan(0);
       expect(await browserHead(a(), sourceSlug), 'Rule 9: a leased checkout is never re-based').toBe(before);
       expect(await readBrowserFile(a(), sourceSlug, ['during-turn.scad'])).toBeUndefined();
@@ -2758,16 +2756,19 @@ describe('a terminal as the third client', () => {
       theirs = String(record['revisionId']);
       expect(await remoteHead(), 'W15: the terminal’s save must reach Tau Cloud').toBe(theirs);
 
-      /* RV-W15 F7: the strip's own sentence for the terminal's save, rather than
-       * any control on the page that happens to say *ready*. An entry has no
-       * number (M11), so the sentence names who it came from. */
-      await openRevisionsPane(a());
+      /* RV-W15 F7: the status sentence for the terminal's save, rather than any
+       * control on the page that happens to say *ready*. An entry has no number
+       * (M11), so the sentence names who it came from. Since C2 (59f8f356a8) the
+       * pane's header says the agent is working while its run holds the files,
+       * so the sentence is read from the History trigger's name, which keeps it. */
       await expect
-        .poll(async () => revisionStatus(a().page).textContent(), {
+        .poll(async () => a().page.getByRole('button', { name: arrivalTriggerName }).count(), {
           message: 'W15: the browser must say the terminal’s revision arrived',
           timeout: 60_000,
         })
-        .toMatch(/^(?:New changes|Changes from .+) are ready\b/u);
+        .toBeGreaterThan(0);
+      await openRevisionsPane(a());
+      expect(await revisionStatus(a().page).textContent()).toBe('Agent is working · saves when it finishes');
       expect(await browserHead(a(), sourceSlug), 'Rule 9: a leased checkout is never re-based').toBe(before);
     } finally {
       release();

@@ -32,10 +32,10 @@ import { holdInStandby } from '@taucad/api-git-mirror/maintenance/standby';
 import { relocateLegacyLfsObjects } from '@taucad/api-git-mirror/maintenance/lfs-relocation';
 import {
   lfsRelocationProjects,
-  lfsRelocationRows,
   parseLfsRelocationConcurrency,
   relocateLegacyLfsInventory,
 } from '@taucad/api-git-mirror/maintenance/lfs-relocation-run';
+import { activeLfsReservationPages } from '@taucad/api-git-mirror/maintenance/lfs-reservation-scope';
 import { applicationNameOf } from '@taucad/api-database/application-name';
 
 /**
@@ -120,18 +120,22 @@ const usage = `Usage: revisions-maintenance <command>
       candidates and hydrates nothing.
 
   relocate-lfs [--confirm] [--project <id>] [--after <projectId>] [--concurrency <n>]
-      Move pre-D24 LFS objects from blobs/ to their owner's tenant key (go-live
-      STO-7). A dry run unless --confirm: every active project in this account
-      with an LFS reservation is surveyed with HEADs only and one
+      Move pre-D24 LFS objects from blobs/ to their owner's tenant key. A dry
+      run unless --confirm: every active project in this account with an LFS
+      reservation is surveyed with HEADs only and one
       revisions_maintenance.lfs_relocation line per project counts its
       legacyOnly, both, tenantOnly and missing objects. With --confirm each
-      project that still holds a legacy key is relocated (verify, copy, delete
-      the legacy key, under the owner lock). Projects run --concurrency at a
-      time (dry run 1-16, default 4; --confirm 1-2, default 1, since each
-      worker buffers a whole object). Safe to rerun; --after <projectId>, the
-      resumeAfter of the last line, skips the finished prefix. Ends with one
+      project that still holds a legacy key is relocated: each object is copied
+      and verified unlocked, under a deadline of 10 s plus 2 s per MiB, then
+      rechecked and its legacy key deleted under the owner lock. A tenant copy
+      an earlier run left is trusted only when its stored SHA-256 (or, without
+      one, its bytes) matches the oid. Projects run --concurrency at a time
+      (dry run 1-16, default 4; --confirm exactly 1, since the worker buffers a
+      whole object). Safe to rerun; with --confirm each line's resumeAfter,
+      passed as --after <projectId>, skips the finished prefix (a dry run gives
+      none). A flag given without its value is refused. Ends with one
       revisions_maintenance.lfs_relocation_summary line; exits 1 when any
-      project failed. Never scheduled.
+      project failed or the run was stopped. Never scheduled.
 
   collect-blobs [--confirm] [--dry-run]
       Delete publication blobs whose reference count is zero, in one bounded batch.
@@ -183,6 +187,10 @@ const required = (args: readonly string[], name: string): string => {
   }
   return value;
 };
+
+/** A flag whose operand is optional to give but required once the flag is: `--project` alone is refused. */
+const optionalOperand = (args: readonly string[], name: string): string | undefined =>
+  args.includes(`--${name}`) ? required(args, name) : undefined;
 
 const environmentValue = (name: string): string => {
   const value = process.env[name];
@@ -637,9 +645,9 @@ async function main(): Promise<void> {
       }
       case 'relocate-lfs': {
         const confirm = args.includes('--confirm');
-        const concurrency = parseLfsRelocationConcurrency(option(args, 'concurrency'), confirm);
-        const after = option(args, 'after');
-        const projectId = option(args, 'project');
+        const concurrency = parseLfsRelocationConcurrency(optionalOperand(args, 'concurrency'), confirm);
+        const after = optionalOperand(args, 'after');
+        const projectId = optionalOperand(args, 'project');
         const stop = new AbortController();
         const stopRelocation = (): void => {
           stop.abort();
@@ -649,12 +657,13 @@ async function main(): Promise<void> {
         try {
           const summary = await relocateLegacyLfsInventory(
             {
-              projects: lfsRelocationProjects(database, {
-                accountId: driver.account.id,
-                ...(after === undefined ? {} : { after: required(args, 'after') }),
-                ...(projectId === undefined ? {} : { projectId: required(args, 'project') }),
-              }),
-              rows: async (id) => lfsRelocationRows(database, id),
+              projects: lfsRelocationProjects(
+                activeLfsReservationPages(database, {
+                  accountId: driver.account.id,
+                  ...(after === undefined ? {} : { afterProjectId: after }),
+                  ...(projectId === undefined ? {} : { projectId }),
+                }),
+              ),
               storage: driver,
               relocate: async (target) => relocateLegacyLfsObjects({ database, storage: driver }, target),
             },

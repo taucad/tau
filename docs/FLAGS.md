@@ -76,7 +76,16 @@ Automatic reload, promotions and model rates remain policy/capability controls b
 
 ## Browser feature flags
 
-Stored under localStorage `tau:flags`; defaults come from [flag.constants.ts](../apps/ui/app/flags/flag.constants.ts). These change local UI, never server permissions.
+Stored under localStorage `tau:flags`; defaults come from [flag.constants.ts](../apps/ui/app/flags/flag.constants.ts). These change local UI, never server permissions. A stored override applies to hidden flags too, so a developer can turn one on from the browser console and reload:
+
+```js
+localStorage.setItem(
+  'tau:flags',
+  JSON.stringify({ ...JSON.parse(localStorage.getItem('tau:flags') ?? '{}'), autoKernel: true }),
+);
+```
+
+Two kinds of flag ignore `tau:flags`: those marked `localOverride: false` (`machines`, `automaticReload`), and PostHog-backed flags, which use PostHog's console override below.
 
 | Name           | Default             | Purpose                                      |
 | -------------- | ------------------- | -------------------------------------------- |
@@ -86,7 +95,7 @@ Stored under localStorage `tau:flags`; defaults come from [flag.constants.ts](..
 
 ### PostHog-backed flags
 
-A registry entry with a `posthogKey` follows that PostHog feature flag, so a surface can merge to `main` hidden and be turned on for chosen people from PostHog. These flags are hidden (`showInExperimental: false`), so a stored `tau:flags` override is ignored for them. [remote-flags.ts](../apps/ui/app/flags/remote-flags.ts) is the source; the web and desktop analytics boundary ([posthog-analytics-provider.tsx](../apps/ui/app/providers/posthog-analytics-provider.tsx)) connects it.
+A registry entry with a `posthogKey` follows that PostHog feature flag, so a surface can merge to `main` hidden and be turned on for chosen people from PostHog. These flags are hidden (`showInExperimental: false`), and a stored `tau:flags` override is ignored for them. [remote-flags.ts](../apps/ui/app/flags/remote-flags.ts) is the source; the web and desktop analytics boundary ([posthog-analytics-provider.tsx](../apps/ui/app/providers/posthog-analytics-provider.tsx)) connects it.
 
 | Registry name        | PostHog key            | Default | Effective when                                 | Purpose                                                         |
 | -------------------- | ---------------------- | ------- | ---------------------------------------------- | --------------------------------------------------------------- |

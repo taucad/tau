@@ -27,6 +27,11 @@ export type FlagDefinition = {
   readonly posthogKey?: string;
   /** Registry name of a flag that must also be on for this one to take effect. */
   readonly requires?: string;
+  /**
+   * `false` keeps the flag at its default whatever `tau:flags` stores. Otherwise a stored override applies to hidden
+   * flags too, so a developer can turn one on from the console. A PostHog-backed flag never reads `tau:flags`.
+   */
+  readonly localOverride?: false;
 };
 
 /**
@@ -58,12 +63,14 @@ export const flagRegistry = {
   machines: {
     schema: z.boolean().default(isMachinesFeatureEnabled(ENV.TAU_MACHINES_ENABLED)),
     showInExperimental: false,
+    localOverride: false,
     label: 'Machines',
     description: 'Connect machines and use the Print workbench',
   },
   automaticReload: {
     schema: z.boolean().default(false),
     showInExperimental: false,
+    localOverride: false,
     label: 'Automatic reload',
     description: 'Show automatic credit reload controls in Billing',
   },

@@ -57,6 +57,7 @@ const baseConfig: UserConfig = {
     'src/graphics/section-cuts.ts',
     'src/graphics/three/canvas-three-gl.ts',
     'src/graphics/three/controls/camera-controls-feel.ts',
+    'src/graphics/three/controls/camera-navigation.ts',
     'src/graphics/three/controls/camera-presets.ts',
     'src/graphics/three/controls/camera-wheel-router.ts',
     'src/graphics/three/controls/section-handles.ts',

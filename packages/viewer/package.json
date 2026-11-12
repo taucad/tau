@@ -62,6 +62,7 @@
     "./graphics/section-cuts": "./src/graphics/section-cuts.ts",
     "./graphics/three/canvas-three-gl": "./src/graphics/three/canvas-three-gl.ts",
     "./graphics/three/controls/camera-controls-feel": "./src/graphics/three/controls/camera-controls-feel.ts",
+    "./graphics/three/controls/camera-navigation": "./src/graphics/three/controls/camera-navigation.ts",
     "./graphics/three/controls/camera-presets": "./src/graphics/three/controls/camera-presets.ts",
     "./graphics/three/controls/camera-wheel-router": "./src/graphics/three/controls/camera-wheel-router.ts",
     "./graphics/three/controls/section-handles": "./src/graphics/three/controls/section-handles.ts",
@@ -265,6 +266,11 @@
         "types": "./dist/graphics/three/controls/camera-controls-feel.d.mts",
         "import": "./dist/graphics/three/controls/camera-controls-feel.mjs",
         "default": "./dist/graphics/three/controls/camera-controls-feel.mjs"
+      },
+      "./graphics/three/controls/camera-navigation": {
+        "types": "./dist/graphics/three/controls/camera-navigation.d.mts",
+        "import": "./dist/graphics/three/controls/camera-navigation.mjs",
+        "default": "./dist/graphics/three/controls/camera-navigation.mjs"
       },
       "./graphics/three/controls/camera-presets": {
         "types": "./dist/graphics/three/controls/camera-presets.d.mts",

@@ -1,12 +1,25 @@
 import { useViewerControlSize } from '#cad/viewer-control-size.js';
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
-import { Aperture, Axis3D, Box, Grid3X3, Rotate3D, Settings, Spline, Sparkles, ArrowUp, Timer } from 'lucide-react';
+import {
+  Aperture,
+  Axis3D,
+  Box,
+  Grid3X3,
+  Rotate3D,
+  RotateCcw,
+  Settings,
+  Spline,
+  Sparkles,
+  ArrowUp,
+  Timer,
+} from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSwitchItem,
@@ -14,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
+import { ModifiedIndicator } from '@taucad/ui/components/modified-indicator';
 import { AxisLabel } from '#cad/section-tool-row.jsx';
 import { InfoTooltip } from '@taucad/ui/components/info-tooltip';
 import {
@@ -23,8 +37,8 @@ import {
 } from '@taucad/ui/components/menu-slider-item';
 import { useCameraRig, useCameraSelector, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import { clamp } from '@taucad/ui/utils/number';
-import { useViewerViewFields } from '#cad/viewer-view-fields.jsx';
-import type { ViewerViewFieldPath } from '#cad/viewer-view-fields.jsx';
+import { useViewerViewFields, viewerViewFieldPaths } from '#cad/viewer-view-fields.jsx';
+import type { ViewerViewFieldPath, ViewerViewFields } from '#cad/viewer-view-fields.jsx';
 
 // Up direction options
 type UpDirection = 'x' | 'y' | 'z';
@@ -54,6 +68,85 @@ const upDirectionOptions: Array<{
   { value: 'y', label: <AxisLabel axis='y' />, ariaLabel: 'Y-up' },
   { value: 'z', label: <AxisLabel axis='z' />, ariaLabel: 'Z-up' },
 ];
+
+/** The line under a leaf the person sets and this view does not. */
+const fromMyDefaults = 'From my defaults';
+/** The line beside the dot of a leaf this view sets. */
+const setInThisView = 'Set in this view';
+
+/** What one leaf's marks show in the menu: none without the host's `sourceOf`. */
+type LeafMark = Readonly<{
+  /** The person sets the leaf and this view does not. */
+  isFromDefaults: boolean;
+  /** The view sets the leaf: the dot's tooltip and its reset. */
+  reset?: Readonly<{ tooltip: string; onReset: () => void }>;
+}>;
+
+const noMark: LeafMark = { isFromDefaults: false };
+
+/**
+ * One leaf's marks, from the host's view commands.
+ *
+ * @param viewFields - The host's view commands.
+ * @param leaf - The leaf.
+ * @returns The marks; none when the host gives no `sourceOf`.
+ */
+const leafMark = (viewFields: ViewerViewFields | undefined, leaf: ViewerViewFieldPath): LeafMark => {
+  const source = viewFields?.sourceOf?.(leaf);
+  if (viewFields === undefined || source === undefined || source === 'tau') {
+    return noMark;
+  }
+  if (source === 'person') {
+    return { isFromDefaults: true };
+  }
+  const tooltip = viewFields.inheritsFrom?.(leaf) === 'person' ? 'Reset to my default' : 'Reset to Tau default';
+  return {
+    isFromDefaults: false,
+    reset: {
+      tooltip,
+      onReset: () => {
+        viewFields.reset(leaf);
+      },
+    },
+  };
+};
+
+/**
+ * The dot beside a leaf this view sets; pressing it resets the leaf.
+ *
+ * @param props - The leaf's marks.
+ * @returns The dot, or nothing when the view does not set the leaf.
+ */
+function LeafDot({ mark }: { readonly mark: LeafMark }): React.JSX.Element | undefined {
+  return mark.reset ? (
+    <ModifiedIndicator tooltip={mark.reset.tooltip} tooltipSide='right' onReset={mark.reset.onReset} />
+  ) : undefined;
+}
+
+/**
+ * A switch row's second line: "From my defaults" when the person sets the leaf and this view does not, or the dot and
+ * "Set in this view" when the view sets it. The dot sits on this line, not in the title, so the switch's name stays its
+ * title.
+ *
+ * @param mark - The leaf's marks.
+ * @param otherwise - The row's own second line, if it has one.
+ * @returns The line, or `undefined` for none.
+ */
+const sourceLine = (mark: LeafMark, otherwise?: string): React.ReactNode => {
+  const own = otherwise === undefined ? '' : ` · ${otherwise}`;
+  if (mark.isFromDefaults) {
+    return `${fromMyDefaults}${own}`;
+  }
+  if (mark.reset) {
+    return (
+      <span className='flex items-center gap-1'>
+        <LeafDot mark={mark} />
+        {`${setInThisView}${own}`}
+      </span>
+    );
+  }
+  return otherwise;
+};
 
 /** The widest field of view in degrees; 0° is orthographic. */
 const maxVerticalFieldOfView = 90;
@@ -111,6 +204,7 @@ function FieldOfViewRow(): React.JSX.Element {
   const cameraRig = useCameraRig();
   const viewFields = useViewerViewFields();
   const fieldOfView = useCameraSelector((state) => state.context.view.requestedVerticalFieldOfView);
+  const mark = leafMark(viewFields, 'fieldOfView');
   /* The angle a view command is still writing, which the next step counts from until the camera shows it. `write`
    * names the command, so an older write that is refused never clears a newer angle. */
   const pendingRef = useRef<Readonly<{ angle: number; write: number }> | undefined>(undefined);
@@ -161,32 +255,43 @@ function FieldOfViewRow(): React.JSX.Element {
   );
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <SliderRowTrigger>
-          <DropdownMenuSliderItem
-            value={fieldOfView}
-            min={0}
-            max={maxVerticalFieldOfView}
-            step={1}
-            trailingAdornment='°'
-            aria-label='Field of view, 0° is orthographic'
-            onValueChange={setFieldOfView}
-            onStep={stepFieldOfView}
-          >
-            <Aperture />
-            {fieldOfView === 0 ? 'Orthographic' : 'Field of view'}
-          </DropdownMenuSliderItem>
-        </SliderRowTrigger>
-      </TooltipTrigger>
-      <TooltipContent side='right' sideOffset={12}>
-        Drag for field of view · 0° is orthographic
-        <br />
-        <span className='text-xs opacity-70'>
-          Click or Enter to type · ←→ step 1° · Shift 5° · P toggles orthographic
-        </span>
-      </TooltipContent>
-    </Tooltip>
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <SliderRowTrigger>
+            <DropdownMenuSliderItem
+              value={fieldOfView}
+              min={0}
+              max={maxVerticalFieldOfView}
+              step={1}
+              trailingAdornment='°'
+              aria-label='Field of view, 0° is orthographic'
+              onValueChange={setFieldOfView}
+              onStep={stepFieldOfView}
+            >
+              <Aperture />
+              {fieldOfView === 0 ? 'Orthographic' : 'Field of view'}
+            </DropdownMenuSliderItem>
+          </SliderRowTrigger>
+        </TooltipTrigger>
+        <TooltipContent side='right' sideOffset={12}>
+          Drag for field of view · 0° is orthographic
+          <br />
+          <span className='text-xs opacity-70'>
+            Click or Enter to type · ←→ step 1° · Shift 5° · P toggles orthographic
+          </span>
+        </TooltipContent>
+      </Tooltip>
+      {mark.isFromDefaults || mark.reset ? (
+        <div
+          data-slot='viewer-field-of-view-source'
+          className='flex items-center gap-2 px-3 pb-1.5 text-xs text-muted-foreground'
+        >
+          <LeafDot mark={mark} />
+          {mark.isFromDefaults ? fromMyDefaults : setInThisView}
+        </div>
+      ) : undefined}
+    </>
   );
 }
 
@@ -220,6 +325,16 @@ export function ViewerSettings({
   const is2dGeometry = useGraphicsSelector((state) => state.context.artifact?.mimeType === 'image/svg+xml');
 
   const viewFields = useViewerViewFields();
+  const marks = useMemo(
+    () =>
+      Object.fromEntries(viewerViewFieldPaths.map((leaf) => [leaf, leafMark(viewFields, leaf)])) as Record<
+        ViewerViewFieldPath,
+        LeafMark
+      >,
+    [viewFields],
+  );
+  const setInView = viewerViewFieldPaths.filter((leaf) => marks[leaf].reset !== undefined).length;
+  const resetView = viewFields?.sourceOf === undefined ? undefined : viewFields.resetView;
   /* With the host's view commands each control sets its leaf in the view; without them it changes the live owner. */
   const handlers = useMemo(() => {
     const toggle =
@@ -309,17 +424,28 @@ export function ViewerSettings({
         {!is2dGeometry && (
           <>
             <DropdownMenuLabel>Model</DropdownMenuLabel>
-            <DropdownMenuSwitchItem isChecked={enableSurfaces} onIsCheckedChange={handlers.surfaces}>
-              <Box />
+            <DropdownMenuSwitchItem
+              icon={<Box />}
+              description={sourceLine(marks['display.surfaces'])}
+              isChecked={enableSurfaces}
+              onIsCheckedChange={handlers.surfaces}
+            >
               Surfaces
             </DropdownMenuSwitchItem>
-            <DropdownMenuSwitchItem isChecked={enableLines} onIsCheckedChange={handlers.lines}>
-              <Spline />
+            <DropdownMenuSwitchItem
+              icon={<Spline />}
+              description={sourceLine(marks['display.lines'])}
+              isChecked={enableLines}
+              onIsCheckedChange={handlers.lines}
+            >
               Edges
             </DropdownMenuSwitchItem>
             <DropdownMenuSwitchItem
               icon={<Sparkles />}
-              description={`Lighting effects are ${enableMatcap ? 'inactive' : 'active'}`}
+              description={sourceLine(
+                marks['display.matcap'],
+                `Lighting effects are ${enableMatcap ? 'inactive' : 'active'}`,
+              )}
               isChecked={enableMatcap}
               onIsCheckedChange={handlers.matcap}
             >
@@ -335,18 +461,27 @@ export function ViewerSettings({
         <DropdownMenuLabel>Viewport</DropdownMenuLabel>
         <DropdownMenuSwitchItem
           className={cn(is2dGeometry && 'hidden')}
+          icon={<Rotate3D />}
+          description={sourceLine(marks['display.gizmo'])}
           isChecked={enableGizmo}
           onIsCheckedChange={handlers.gizmo}
         >
-          <Rotate3D />
           Gizmo
         </DropdownMenuSwitchItem>
-        <DropdownMenuSwitchItem isChecked={enableGrid} onIsCheckedChange={handlers.grid}>
-          <Grid3X3 />
+        <DropdownMenuSwitchItem
+          icon={<Grid3X3 />}
+          description={sourceLine(marks['display.grid'])}
+          isChecked={enableGrid}
+          onIsCheckedChange={handlers.grid}
+        >
           Grid
         </DropdownMenuSwitchItem>
-        <DropdownMenuSwitchItem isChecked={enableAxes} onIsCheckedChange={handlers.axes}>
-          <Axis3D />
+        <DropdownMenuSwitchItem
+          icon={<Axis3D />}
+          description={sourceLine(marks['display.axes'])}
+          isChecked={enableAxes}
+          onIsCheckedChange={handlers.axes}
+        >
           Axes
         </DropdownMenuSwitchItem>
         {!is2dGeometry && (
@@ -358,10 +493,26 @@ export function ViewerSettings({
             >
               <ArrowUp />
               Up Direction
+              <LeafDot mark={marks.upDirection} />
             </DropdownMenuToggleGroupItem>
             <FieldOfViewRow />
           </>
         )}
+        {resetView ? (
+          <DropdownMenuItem
+            disabled={setInView === 0}
+            onSelect={(event) => {
+              event.preventDefault();
+              resetView();
+            }}
+          >
+            <RotateCcw />
+            Reset view
+            <span className='ml-auto text-xs text-muted-foreground'>
+              {setInView === 0 ? 'Follows the defaults' : `${setInView} changed in this view`}
+            </span>
+          </DropdownMenuItem>
+        ) : undefined}
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Rendering</DropdownMenuLabel>
         {operationTimeout ? (

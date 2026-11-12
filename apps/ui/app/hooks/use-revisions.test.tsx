@@ -66,7 +66,7 @@ const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): Revi
   },
   source: 'agent',
   createdAt: 1_788_220_800_000,
-  summary: 'Agent turn u1',
+  summary: 'Agent change',
   conflicted: false,
   turnId: undefined,
   tags: [],
@@ -388,7 +388,7 @@ describe('useRevisions', () => {
       revisionNumber: 3,
       turnId: 'u3',
       createdAt: 1_788_307_200_000,
-      summary: 'Agent turn u3',
+      summary: 'Make the lid walls 2.4 mm',
     });
     revisionStatusHarness.rowsByBranch.set('isolated-run', [candidate]);
     revisionStatusHarness.status = {
@@ -413,8 +413,8 @@ describe('useRevisions', () => {
         revisionId: 'rev-3',
         n: 3,
         createdAt: 1_788_307_200_000,
-        /* The generator's `Agent turn <turnId>` is never product copy (C37). */
-        summary: 'Agent change',
+        /* Q9: the entry is titled by the request the generator recorded. */
+        summary: 'Make the lid walls 2.4 mm',
       });
     });
   });
@@ -495,13 +495,14 @@ describe('useRevisions', () => {
     expect(result.current.isDirty).toBe(true);
   });
 
-  /* A5, fixture B4: a turn's base cut reads as the person's autosave, old trailer and new; the result is unchanged. */
+  /* A5, fixture B4: a turn's base cut reads as the person's autosave; the result is titled by the request (Q9). */
   it('titles a turn base cut Autosave, by the person, and carries turnCut to its card', async () => {
     setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
-    const turn = { turnId: 'u1', capture: 'turn', summary: 'Agent turn u1' } as const;
+    const turn = { turnId: 'u1', capture: 'turn' } as const;
     revisionStatusHarness.rows = [
       row({
         ...turn,
+        summary: 'Agent change',
         revisionId: 'rev-2',
         revisionNumber: 2,
         source: 'agent',
@@ -511,6 +512,7 @@ describe('useRevisions', () => {
       /* `readRevisionLog` reads every base cut as `source: 'user'`, whatever an earlier build recorded. */
       row({
         ...turn,
+        summary: 'Autosave',
         revisionId: 'rev-1',
         revisionNumber: 1,
         source: 'user',
@@ -1071,7 +1073,7 @@ describe('useRevisionChanges', () => {
   /* C37/C45: no surface renders the generator's placeholder or a raw actor id. */
   it('formats the title and the actor a person reads', async () => {
     revisionStatusHarness.rows = [
-      row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1', summary: 'Agent turn u1' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1', summary: 'Agent change' }),
       row({
         revisionId: 'rev-2',
         revisionNumber: 2,

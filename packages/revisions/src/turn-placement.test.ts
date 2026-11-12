@@ -779,6 +779,29 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     expect(again).toMatchObject({ requestId: 'admit:run-1:1', status: 'replayed' });
   });
 
+  /* Q9: the request the host admitted is the result's title, recorded with the entry. */
+  it('should title the result by the request the attempt was admitted with', async () => {
+    const project = await createProject();
+    const { placement } = project.open();
+    const admitted = await placement.admit({
+      requestId: 'admit:run-1:1',
+      key,
+      request: 'Make the lid walls 2.4 mm\n\nKeep the fillets.',
+    });
+    if (admitted.status === 'refused') {
+      throw new Error(admitted.message);
+    }
+    await admitted.placement.tools.writeFile('main.ts', 'export const size = 2;\n');
+    await placement.complete({ requestId: 'complete:run-1:1', key, cut: true });
+    await firstSettlement(placement);
+
+    const [result] = await project.port.log({ heads: [revisionId((await project.port.readRef('main')) ?? '')] });
+    expect(result).toMatchObject({
+      provenance: { turnCut: 'result' },
+      summary: { generated: 'Make the lid walls 2.4 mm' },
+    });
+  });
+
   it('should derive the settlement from the existing result when complete follows a crash after the cut', async () => {
     const project = await createProject();
     const before = project.open();

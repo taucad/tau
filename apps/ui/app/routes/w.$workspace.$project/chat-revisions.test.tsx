@@ -1046,17 +1046,18 @@ describe('Revisions pane closeout', () => {
   /* A5, fixture B4: a turn's base cut is the person's autosave; the agent's result beside it is unchanged. */
   it('reads a turn base cut as an autosave that folds with autosaves, under the agent’s result', async () => {
     const user = userEvent.setup();
-    const turn = { capture: 'turn', turnId: 'u1', summary: 'Agent turn u1' } as const;
+    const turn = { capture: 'turn', turnId: 'u1' } as const;
     revisionStatusHarness.rows = [
       row({
         ...turn,
+        summary: 'Agent change',
         revisionId: 'rev-4',
         revisionNumber: 4,
         source: 'agent',
         who: { kind: 'recorded', identity: { kind: 'user', id: 'agent' } },
         turnCut: 'result',
       }),
-      row({ ...turn, revisionId: 'rev-3', revisionNumber: 3, turnCut: 'base' }),
+      row({ ...turn, summary: 'Autosave', revisionId: 'rev-3', revisionNumber: 3, turnCut: 'base' }),
       row({ revisionId: 'rev-2', revisionNumber: 2, capture: 'idle' }),
       row({ revisionId: 'rev-1', revisionNumber: 1, capture: 'save' }),
     ];
@@ -1500,7 +1501,7 @@ describe('Revisions pane vocabulary and History', () => {
   it('keeps Start under the agent’s first entry, and the agent’s entry its own Rev', async () => {
     revisionStatusHarness.rows = [
       row({ revisionId: 'rev-2', revisionNumber: 2, summary: 'Add vent slots', source: 'agent', capture: 'turn' }),
-      row({ revisionId: 'rev-1', revisionNumber: 1, summary: 'Agent turn t1', capture: 'turn', start: 'created' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, summary: 'Agent change', capture: 'turn', start: 'created' }),
     ];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
 

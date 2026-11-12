@@ -54,7 +54,7 @@ const row = (turnId: string, revisionId: string, parentOrdinal: number): Revisio
   },
   source: 'agent',
   createdAt: 1000 * parentOrdinal,
-  summary: `Agent turn ${turnId}`,
+  summary: 'Agent change',
   conflicted: false,
   turnId,
   tags: [],

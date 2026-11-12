@@ -133,7 +133,7 @@ describe('revision verbs', () => {
       tree: new ImmutableRevisionTree([['part.ts', 'mine']]),
       /* What a build before A5 recorded: source `agent`, the person as actor. */
       provenance: { ...turn, source: 'agent', actor: ada, turnCut: 'base' },
-      summary: { generated: 'Agent turn u1' },
+      summary: { generated: 'Agent change' },
     });
     const baseId = revisionId(base.commitId);
     const result = await port.writeRevision({
@@ -145,7 +145,7 @@ describe('revision verbs', () => {
         actor: { kind: 'agent', id: 'agent', runId: 'run-1', onBehalfOf: ada },
         turnCut: 'result',
       },
-      summary: { generated: 'Agent turn u1' },
+      summary: { generated: 'Agent change' },
     });
     const saved = await port.writeRevision({
       parents: [revisionId(result.commitId)],

@@ -23,6 +23,7 @@ import { useRevisionCards, useRevisions } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useProjectRole, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useRevisionSessionUser } from '#lib/revision-actor.js';
+import { entryTitleOf } from '#lib/revision-entry-title.js';
 import type { TurnRevisionState } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
 
 /** What a surface draws for one state: one glyph in one tone, the mark it stands for, and the sentence. @public */
@@ -253,34 +254,17 @@ export const revisionTitle = (revision: RevisionCard, revisions: readonly Revisi
   return restoredSentence(revisions.find((entry) => entry.revisionId === revision.restoredFrom));
 };
 
-/** An agent's entry with no title of its own (Q9). @public */
-export const agentChangeTitle = 'Agent change';
-
 /**
  * The title of an entry read as a bare row, as the agent's `history` tool
  * returns it: what {@link revisionTitle} shows for the same entry in History.
- * A version reads by its name; the engine's own placeholder titles never
- * reach the page (M6). A turn's placeholder is the agent's change, or, on a
- * turn's base cut, which the row reports as the person's, an autosave (A5).
+ * A version reads by its name; anything else by the one entry title rule (M6, Q9).
  *
- * @param entry - The row's title, what made it and its version.
+ * @param entry - The row's title and its version.
  * @returns The title.
  * @public
  */
-export const entryTitle = (
-  entry: Readonly<{ summary: string; source: string; version?: Readonly<{ name: string }> }>,
-): string => {
-  if (entry.version !== undefined) {
-    return entry.version.name;
-  }
-  if (/^Agent turn \S+$/u.test(entry.summary)) {
-    return entry.source === 'agent' ? agentChangeTitle : 'Autosave';
-  }
-  if (/^Saved changes \(\w+\)$/u.test(entry.summary)) {
-    return entry.summary === 'Saved changes (save)' ? 'Saved changes' : 'Autosave';
-  }
-  return entry.summary;
-};
+export const entryTitle = (entry: Readonly<{ summary: string; version?: Readonly<{ name: string }> }>): string =>
+  entry.version === undefined ? entryTitleOf(entry.summary) : entry.version.name;
 
 /**
  * Whether a credential refusal on this remote is GitHub's to fix (D18): a

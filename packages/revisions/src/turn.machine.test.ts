@@ -75,7 +75,9 @@ type Harness = Readonly<{
   clock: StepClock;
 }>;
 
-const start = (options?: Readonly<{ checkoutId?: string; adopt?: TurnMachineInput['adopt'] }>): Harness => {
+const start = (
+  options?: Readonly<{ checkoutId?: string; adopt?: TurnMachineInput['adopt']; request?: string }>,
+): Harness => {
   const guard = guardActors({ ignore: { turn: turnIgnoredEvents } });
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
@@ -100,6 +102,7 @@ const start = (options?: Readonly<{ checkoutId?: string; adopt?: TurnMachineInpu
         key,
         ...(options?.checkoutId === undefined ? {} : { checkoutId: options.checkoutId }),
         ...(options?.adopt === undefined ? {} : { adopt: options.adopt }),
+        ...(options?.request === undefined ? {} : { request: options.request }),
         parentRef: parent.ref,
       },
     },
@@ -352,6 +355,22 @@ describe('turnMachine', () => {
         turn: { key, turnCut: 'result' },
         leaseIds: ['run-1'],
       },
+    ]);
+    harness.actor.stop();
+  });
+
+  /* Q9: the request titles the result; the base is the person's edits, so it carries none. */
+  it('carries the admitted request on the result cut and never on the base', async () => {
+    const harness = start({ request: 'Make the lid walls 2.4 mm' });
+
+    await toHeld(harness, { dirty: true });
+    harness.actor.send({ type: 'revisionMinted', requestId: lastCutId(harness), revisionId: 'rev-base' });
+    await flush();
+    await toRequesting(harness);
+
+    expect(cutsOf(harness).map((cut): unknown => cut['turn'])).toEqual([
+      { key, turnCut: 'base' },
+      { key, turnCut: 'result', request: 'Make the lid walls 2.4 mm' },
     ]);
     harness.actor.stop();
   });

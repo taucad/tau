@@ -70,7 +70,7 @@ describe('model wait reporting', () => {
     expect(mocks.report).not.toHaveBeenCalled();
   });
 
-  it.fails('reports a model gate with no download that outlasts its bound, once for the wait', () => {
+  it('reports a model gate with no download that outlasts its bound, once for the wait', () => {
     mocks.model = 'filesChecking';
     mocks.status = { checkoutId: 'checkout-1', readiness: 'materialized' };
     const view = render(<ProjectSyncAnnouncement />);
@@ -88,7 +88,7 @@ describe('model wait reporting', () => {
     expect(mocks.report).toHaveBeenCalledOnce();
   });
 
-  it.fails('reports a download only once it stops making progress', () => {
+  it('reports a download only once it stops making progress', () => {
     mocks.model = 'files';
     mocks.status = { checkoutId: 'checkout-1', readiness: 'materialized' };
     mocks.facet = facet();
@@ -103,7 +103,7 @@ describe('model wait reporting', () => {
     expect(reports()).toEqual([['ModelWaitStalled', expect.objectContaining({ 'revisions.fill': 'fetching' })]]);
   });
 
-  it.fails('reports a failed fill once for the wait, and again for the next wait', () => {
+  it('reports a failed fill once for the wait, and again for the next wait', () => {
     mocks.model = 'filesFailed';
     mocks.status = { checkoutId: 'checkout-1', readiness: 'materialized' };
     mocks.facet = facet({ phase: 'failed', error: 'The remote https://tau.test/v1/git/p.git?x=1 did not answer.' });
@@ -129,7 +129,7 @@ describe('model wait reporting', () => {
     expect(reports().map(([name]) => name)).toEqual(['ModelFillFailure', 'ModelFillFailure']);
   });
 
-  it.fails('starts a new wait when another checkout is selected', () => {
+  it('starts a new wait when another checkout is selected', () => {
     mocks.model = 'filesChecking';
     mocks.status = { checkoutId: 'checkout-1', readiness: 'materialized' };
     const view = render(<ProjectSyncAnnouncement />);

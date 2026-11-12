@@ -300,7 +300,16 @@ Three reads during render predate this rule and are recorded debts, because the 
 
 Until G12's second change, the viewer's ceiling manifest also holds effects this rule forbids, which that change retires: `svg-viewer.tsx` and `use-panzoom-reset.tsx` (the panzoom reset and fit), and `kinematics-viewer.ts` and `kinematics-pose-composer.ts` (the mechanism load and clear, the pose subscription and the playback demand frame).
 
-A boundary where React context or a prop is the only source of a value may send that value as one event from one effect. It is a named exception, never a ceiling line. Each one names its boundary in a comment and is listed with its reason in its project's `react-event-layer.policy.node.test.ts`. `packages/viewer` is held at zero, with these exceptions, from G12's second change; until then its ceiling manifest lists them beside the debts above:
+Effects and handlers that subscribe or time through a helper the counter cannot see are recorded debts too:
+
+- `packages/viewer/src/graphics/three/react/gltf-mesh.tsx` subscribes to matcap loads, and starts a late section arm's analysis, which reports `gltfAnalysisReady`, from effects. G12's second change moves both into the presentation's host.
+- `packages/viewer/src/graphics/three/react/measure-tool.tsx` subscribes to matcap loads from an effect.
+- `packages/viewer/src/parameters/parameters-number.tsx` subscribes to the commit's drafts (`subscribeDrafts`) from an effect.
+- `packages/viewer/src/graphics/three/render-fps-overlay.tsx` starts its render-loop observer's timers from an effect.
+- `packages/viewer/src/hooks/use-viewer-shortcuts.ts` opens a subscription from a key handler (`watchShortcutWrite`) and keeps it until graphics shows the written value.
+- In `apps/ui`, `view-settings-sync-host.tsx` registers a producer and `workbench-records/record-issues.ts` publishes into a module store from effects.
+
+A boundary where React context or a prop is the only source of a value may send that value as one event from one effect. In a project held at zero it is a named exception, never a ceiling line. Each one names its boundary in a comment and is listed with its reason in its project's `react-event-layer.policy.node.test.ts`. `packages/viewer` is held at zero, with these exceptions, from G12's second change; until then its ceiling manifest lists them beside the debts above:
 
 | File                                                | Boundary                                                                                                    | Ruling                             |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------- |
@@ -308,7 +317,7 @@ A boundary where React context or a prop is the only source of a value may send 
 | `packages/viewer/src/hooks/use-graphics.tsx`        | The viewer environment's theme, accent and contrast, from React context, sent as `viewerEnvironmentChanged` | G8, 2026-11-12                     |
 | `packages/viewer/src/parameters/use-field-edits.ts` | A parameter field's authority prop sent as `observed`                                                       | Programme control, G12, 2026-11-12 |
 
-CORRECT:
+CORRECT (simplified from `section-handles.tsx`):
 
 ```typescript
 const attachInput = useCallback<RefCallback<THREE.Group>>(

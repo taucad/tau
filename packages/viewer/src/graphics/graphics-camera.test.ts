@@ -59,7 +59,7 @@ describe('the view camera as a graphics child', () => {
     expect(framing.value).toBe('awaitingGeometry');
     expect(framing.context).toMatchObject({ pendingPose: { pose: cameraView } });
     expect(getGraphicsCameraState(graphicsRef)?.target).toEqual(cameraView.target);
-    expect(selectCameraViewDirection(camera)).toEqual(camera.getSnapshot().context.view.direction);
+    expect(selectCameraViewDirection(camera)).toEqual(cameraView.direction);
   });
 
   it('should keep the framed entry until the entry identity changes', () => {

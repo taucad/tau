@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { HttpException, HttpStatus } from '@nestjs/common';
+import { HttpException, HttpStatus, Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { IncomingMessage } from 'node:http';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -12,7 +12,13 @@ import {
   gitRequestsPerWindow,
   quotaRefusalMarker,
 } from '@taucad/api-git-core/git.constants';
-import { GitController, receivePackOutcome, syncOutcomeOf } from '#api/git/git.controller.js';
+import {
+  GitController,
+  loggedPushRefLimit,
+  receivePackOutcome,
+  receivePackRefResults,
+  syncOutcomeOf,
+} from '#api/git/git.controller.js';
 import type { GitExecution } from '@taucad/api-git-core/forwarding/git-execution';
 import type { GitLfsService } from '#api/git/git-lfs.service.js';
 import type { GitAccess, GitRepositoryService } from '#api/git/git.service.js';
@@ -303,6 +309,28 @@ describe('receivePackOutcome', () => {
   ])('maps %s', (_label, body, outcome) => {
     expect(receivePackOutcome(body)).toBe(outcome);
   });
+
+  /* A refusal answered with HTTP 200 is named in the API's own log: each ref, `ok` or `ng` with its reason. */
+  it('reads every ref’s answer, plain or over side-band, and nothing for the flush-only probe', () => {
+    expect(
+      receivePackRefResults(
+        sideBand('unpack ok\n', 'ok refs/tau/ops/device-a\n', 'ng refs/heads/main non-fast-forward\n'),
+      ),
+    ).toStrictEqual([
+      { ref: 'refs/tau/ops/device-a', status: 'ok' },
+      { ref: 'refs/heads/main', status: 'ng', reason: 'non-fast-forward' },
+    ]);
+    expect(receivePackRefResults(report('unpack ok\n', 'ok refs/heads/main\n'))).toStrictEqual([
+      { ref: 'refs/heads/main', status: 'ok' },
+    ]);
+    expect(receivePackRefResults(Buffer.from('0000'))).toStrictEqual([]);
+  });
+
+  it('keeps control bytes out and bounds what it reads', () => {
+    const [refused] = receivePackRefResults(report(`ng refs/heads/main ${'x'.repeat(400)}\u0002\n`));
+    expect(refused?.reason).toBe('x'.repeat(160));
+    expect(loggedPushRefLimit).toBe(20);
+  });
 });
 
 describe('syncOutcomeOf', () => {
@@ -375,6 +403,49 @@ describe('GitController sync telemetry', () => {
       'tau.sync.operation': 'push',
       outcome: 'ref_rejected',
     });
+  });
+
+  /* The refused ref and its reason reach the log: a 200 in the request log is not a landed push. */
+  it('logs each ref’s answer, warning when one was refused', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const log = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    try {
+      const answers = [
+        Buffer.from('000eunpack ok\n0028ng refs/heads/main non-fast-forward\n0000'),
+        Buffer.from('000eunpack ok\n0017ok refs/heads/main\n0000'),
+      ];
+      const controller = controllerWith(
+        {
+          authorize: async () => access as unknown as GitAccess,
+          receivePack: async () => answers.shift() ?? Buffer.from('0000'),
+        },
+        metrics(),
+      );
+      const { reply: stub } = replyStub();
+      const reply = { header: stub.header, raw: { once: vi.fn() } } as unknown as FastifyReply;
+
+      await controller.receivePack('proj_d1.git', 'user-owner', push, reply);
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        {
+          projectId: 'proj_d1',
+          outcome: 'ref_rejected',
+          refs: [{ ref: 'refs/heads/main', status: 'ng', reason: 'non-fast-forward' }],
+        },
+        'A push was refused for some refs',
+      );
+      await controller.receivePack('proj_d1.git', 'user-owner', push, reply);
+      expect(log).toHaveBeenCalledWith(
+        { projectId: 'proj_d1', outcome: 'ok', refs: [{ ref: 'refs/heads/main', status: 'ok' }] },
+        'A push updated its refs',
+      );
+      /* The flush-only probe names no ref, and is not logged as a push. */
+      log.mockClear();
+      await controller.receivePack('proj_d1.git', 'user-owner', push, reply);
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+    }
   });
 
   /* DB1, W14 SLO-7: the advertisement is answered from the manifest, and its count and latency are its own. */

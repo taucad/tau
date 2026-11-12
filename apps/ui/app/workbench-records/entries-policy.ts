@@ -217,7 +217,8 @@ const surelyAuthoredFields = (patch: EntriesPatch): Record<string, EntryFields> 
 
 /**
  * Keyed values with their keys moved by path changes, where a rename also replaces whatever was keyed under its new
- * path, as it replaces the entry there; a deleted key is dropped.
+ * path, as it replaces the entry there; a deleted key is dropped. It differs from {@link movePaths} only for a rename
+ * onto a directory holding entries no moved entry lands on, which the host never sends.
  */
 export const replacingMoves = <V>(
   values: Readonly<Record<string, V>>,
@@ -356,9 +357,10 @@ const writtenHeld = (before: Entry | undefined, after: Entry | undefined, now: E
 };
 
 /**
- * Whether the file holds the path changes of a write of `steps`: on the paths they touch, nothing the write replaced is
- * still there (an entry it made or removed, or a field it changed) and something it wrote is. Fields elsewhere
- * say nothing: they are applied again whatever the file holds. What another party changed since holds neither.
+ * Whether the file holds the path changes of a write of `steps`: on the paths they touch, no path holds only what the
+ * write replaced (an entry it made or removed, or a field it changed), and some path holds only what it wrote. A path
+ * holding some of each was changed by another party since, so a field reverted there does not undo the write. Fields
+ * elsewhere say nothing: they are applied again whatever the file holds.
  */
 const holds = (current: WorkbenchEntries, write: Write, steps: readonly EntriesStep[]): boolean => {
   const paths = new Set([...Object.keys(write.base.entries), ...Object.keys(write.record.entries)]);
@@ -370,10 +372,12 @@ const holds = (current: WorkbenchEntries, write: Write, steps: readonly EntriesS
     if (!moves(steps, path) || JSON.stringify(before) === JSON.stringify(after)) {
       continue;
     }
-    if (replacedHeld(before, after, now)) {
+    const [replaced, wrote] = [replacedHeld(before, after, now), writtenHeld(before, after, now)];
+    if (replaced && !wrote) {
       return false;
     }
-    written ||= writtenHeld(before, after, now);
+    // A path holding both what the write replaced and what it wrote was changed by another party since: it says nothing.
+    written ||= wrote && !replaced;
   }
   return written;
 };

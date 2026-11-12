@@ -1619,6 +1619,82 @@
       }
     },
     {
+      "uid": "api-email-send-failed",
+      "title": "P1: Email Send Refused by Resend",
+      "condition": "email_failed_threshold",
+      "data": [
+        {
+          "refId": "email_failed_logs",
+          "queryType": "range",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
+          "datasourceUid": "loki",
+          "model": {
+            "expr": "sum(count_over_time({service_name=\"tau-api\"} | event_provider=\"app\" |= \"Resend failed\" [5m]))",
+            "intervalMs": 15000,
+            "maxDataPoints": 43200,
+            "queryType": "range",
+            "refId": "email_failed_logs"
+          }
+        },
+        {
+          "refId": "email_failed_reduce",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "reduce",
+            "reducer": "last",
+            "expression": "email_failed_logs",
+            "refId": "email_failed_reduce"
+          }
+        },
+        {
+          "refId": "email_failed_threshold",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "threshold",
+            "expression": "email_failed_reduce",
+            "conditions": [
+              {
+                "type": "query",
+                "evaluator": {
+                  "type": "gt",
+                  "params": [0]
+                },
+                "operator": {
+                  "type": "and"
+                }
+              }
+            ],
+            "refId": "email_failed_threshold"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "Error",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/email.md",
+        "summary": "The API logged `Resend failed` in the last 5 min: Resend refused an email (verification, sign-in, reset, invite or billing) and the person did not receive it. Refused sends are not retried. Read the error text on the line: an unverified domain, a revoked key or a rate limit each name themselves. See incident 2026-11-11-prod-email-domain-unverified."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "email"
+      }
+    },
+    {
       "uid": "db-pooler-clients-high",
       "title": "P1: Pooler Login at 80% of Its Session Pool",
       "condition": "db_pooler_clients_high",

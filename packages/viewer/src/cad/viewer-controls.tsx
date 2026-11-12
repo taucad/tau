@@ -11,6 +11,7 @@ import { FitViewControl } from '#cad/fit-view-control.jsx';
 import { FullscreenViewControl } from '#cad/fullscreen-view-control.jsx';
 import { GridSizeIndicator } from '#cad/grid-control.jsx';
 import { MeasureControl } from '#cad/measure-control.jsx';
+import { NavigationControls } from '#cad/navigation-controls.jsx';
 import { MeasurementList, MeasureOptions } from '#cad/measure-tool-row.jsx';
 import { SectionViewControl } from '#cad/section-view-control.jsx';
 import { SectionEditor, SectionOptions, focusFirstControl, useFocusHandOff } from '#cad/section-tool-row.jsx';
@@ -213,6 +214,13 @@ export type ViewerControlsProps = Readonly<{
    * leave the live graphics owner to the host; without them, they change the live owner as before.
    */
   viewFields?: ViewerViewFields;
+  /**
+   * The single-click camera controls beside the gizmo: orbit, the orbit and pan switch, zoom and fit (N2). Off by
+   * default; 3D geometry only.
+   */
+  navigation?: boolean;
+  /** The navigation keys: the arrow keys orbit, Shift with an arrow key pans, plus and minus zoom (N1). Off by default. */
+  navigationKeys?: boolean;
 }>;
 
 /**
@@ -285,6 +293,8 @@ function ViewerControlsBody({
   leading,
   aboveControls,
   actions,
+  navigation = false,
+  navigationKeys = false,
 }: ViewerControlsProps): React.JSX.Element {
   const controlSize = useViewerControlSize();
   const isMobile = useIsMobile();
@@ -313,7 +323,7 @@ function ViewerControlsBody({
   const announce = useCallback((phrase: string) => {
     setAnnouncement(({ count }) => ({ phrase, count: count + 1 }));
   }, []);
-  const keys = useViewerShortcuts(barRef, announce);
+  const keys = useViewerShortcuts(barRef, announce, { navigation: navigationKeys });
   const stopSection = useCallback(() => {
     graphicsRef.send({ type: 'setSectionViewActive', payload: false });
   }, [graphicsRef]);
@@ -439,6 +449,9 @@ function ViewerControlsBody({
           )}
         </div>
       </div>
+      {navigation && !is2dGeometry ? (
+        <NavigationControls keys={navigationKeys ? keys.navigation : undefined} fitViewShortcut={keys.fitView} />
+      ) : null}
       <span role='status' className='sr-only'>
         <span key={announcement.count}>{announcement.phrase}</span>
       </span>

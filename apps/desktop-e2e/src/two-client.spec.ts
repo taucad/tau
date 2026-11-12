@@ -1736,16 +1736,10 @@ describe('live and automatic', () => {
       /* A has been told and has applied nothing. The History trigger's name carries the status sentence, which
        * C1 (13ae1b6fab) words "… are ready" rather than "… arrived". */
       await expect
-        .poll(
-          async () =>
-            a()
-              .page.getByRole('button', { name: arrivalTriggerName })
-              .count(),
-          {
-            message: 'D12: the browser must say a revision arrived while its turn holds the files',
-            timeout: 60_000,
-          },
-        )
+        .poll(async () => a().page.getByRole('button', { name: arrivalTriggerName }).count(), {
+          message: 'D12: the browser must say a revision arrived while its turn holds the files',
+          timeout: 60_000,
+        })
         .toBeGreaterThan(0);
       expect(await browserHead(a(), sourceSlug), 'Rule 9: a leased checkout is never re-based').toBe(before);
       expect(await readBrowserFile(a(), sourceSlug, ['during-turn.scad'])).toBeUndefined();

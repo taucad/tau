@@ -78,7 +78,6 @@
     "./graphics/three/three-canvas-instance": "./src/graphics/three/three-canvas-instance.tsx",
     "./graphics/three/three-context": "./src/graphics/three/three-context.tsx",
     "./graphics/three/three-graphics-backend-context": "./src/graphics/three/three-graphics-backend-context.tsx",
-    "./graphics/three/use-camera-framing": "./src/graphics/three/use-camera-framing.ts",
     "./graphics/three/utils/camera-controls-adapter": "./src/graphics/three/utils/camera-controls-adapter.ts",
     "./graphics/three/utils/geometry-presentation-admission": "./src/graphics/three/utils/geometry-presentation-admission.ts",
     "./graphics/three/utils/infinite-grid-frame": "./src/graphics/three/utils/infinite-grid-frame.ts",
@@ -342,11 +341,6 @@
         "types": "./dist/graphics/three/three-graphics-backend-context.d.mts",
         "import": "./dist/graphics/three/three-graphics-backend-context.mjs",
         "default": "./dist/graphics/three/three-graphics-backend-context.mjs"
-      },
-      "./graphics/three/use-camera-framing": {
-        "types": "./dist/graphics/three/use-camera-framing.d.mts",
-        "import": "./dist/graphics/three/use-camera-framing.mjs",
-        "default": "./dist/graphics/three/use-camera-framing.mjs"
       },
       "./graphics/three/utils/camera-controls-adapter": {
         "types": "./dist/graphics/three/utils/camera-controls-adapter.d.mts",

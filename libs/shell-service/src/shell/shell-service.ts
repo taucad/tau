@@ -23,18 +23,16 @@ import {
   shellInteractiveArguments,
   shellVersionCommand,
   terminalZshArguments,
-} from '@taucad/native-process-core/shell';
+} from '@taucad/sandbox/shell/identity';
+import type { ShellExecutable, ShellKind, TerminalZsh } from '@taucad/sandbox/shell/identity';
 import type {
-  ShellExecutable,
   ShellExecution,
   ShellExit,
-  ShellKind,
   ShellLaunch,
   ShellLaunchOutcome,
   ShellProvider,
   ShellTerminalSize,
-  TerminalZsh,
-} from '@taucad/native-process-core/shell';
+} from '@taucad/sandbox/shell/provider';
 
 import { shellLimits } from '#shell/shell-contract.js';
 import type {

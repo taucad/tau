@@ -2387,7 +2387,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     ...(routeQualification?.candidateTag ? { candidateTag: routeQualification.candidateTag } : {}),
     ...(routeQualification?.expectedUpdate ? { expectedUpdate: routeQualification.expectedUpdate } : {}),
     fetchJson: async (url) => {
-      const response = await net.fetch(url);
+      /* Bounded: one check runs at a time, so a request that never settles would stop every later check. */
+      const response = await net.fetch(url, { signal: AbortSignal.timeout(30_000) });
       if (!response.ok) {
         throw new Error(`update feed answered ${response.status}`);
       }

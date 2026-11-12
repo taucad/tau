@@ -78,9 +78,9 @@ import type { ActorRefFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 
 import type { JsonObject, ToolRegistry } from '@taucad/agent-host';
+import type { HostShell } from '@taucad/shell-service';
 
 import type { ProjectRevisions } from '#revisions.js';
-import type { HostShell } from '#shell/shell-service.js';
 import { prepareKernelDescription, prepareKernelInputSchema, prepareKernelToolName } from '#prepare-kernel-tool.js';
 
 type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;

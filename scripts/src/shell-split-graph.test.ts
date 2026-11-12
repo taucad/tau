@@ -7,10 +7,11 @@ import { describe, expect, it } from 'vitest';
 
 /*
  * The shell split's graph guards (shell split blueprint). PR 1 extracted the sandbox into the private
- * `libs/sandbox` library that `@taucad/native-process-core` bundles, so its section is in the
- * project-level form: no workspace dependency, private, bundled by its one published owner. The
- * production files of `packages/host/src/shell` are still inside `host`; that section stays in its
- * pre-split form and pins the import surface `shell-service` will have, until PR 2 flips it.
+ * `libs/sandbox` library that `@taucad/native-process-core` bundles; PR 2 extracted the shell service into the
+ * private `libs/shell-service` library that `@taucad/host` bundles. Both sections are in the project-level form: the
+ * closure each library's rows test, private, bundled by its one published owner. The service reaches the sandbox only
+ * through its stateless `./shell/*` subpaths, so `@taucad/host` ships neither the SRT provider nor its native
+ * dependencies (blueprint F2.7).
  */
 
 const root = resolve(import.meta.dirname, '../..');
@@ -34,16 +35,34 @@ const isProduction = (path: string): boolean => !/\.(?:test|fixture)\.ts$/u.test
 const sandboxImportPath = (specifier: string): string =>
   `${sandboxRoot}/src/${specifier.slice(1).replace(/\.js$/u, '.ts')}`;
 
-/** The host's shell service (blueprint F1 rows 20–23): what becomes `libs/shell-service`. */
-const hostShellFiles = globSync('packages/host/src/shell/*.ts', { cwd: root }).toSorted();
-const hostShellProductionFiles = hostShellFiles.filter((file) => isProduction(file));
+const shellServiceRoot = 'libs/shell-service';
 
-/** The only workspace modules the service imports; `@taucad/sandbox` subpaths replace the third in PR 2. */
-const hostShellAllowedWorkspaceImports = new Set([
+/** Every source file of `libs/shell-service` (blueprint F1 rows 20–24), relative to the workspace root. */
+const shellServiceFiles = globSync(`${shellServiceRoot}/src/**/*.ts`, { cwd: root }).toSorted();
+const shellServiceProductionFiles = shellServiceFiles.filter((file) => isProduction(file));
+
+/** The only workspace modules the service's production files import: never the `@taucad/sandbox/shell` barrel. */
+const shellServiceAllowedWorkspaceImports = new Set([
   '@taucad/agent-host',
   '@taucad/filesystem/path-registry',
-  '@taucad/native-process-core/shell',
+  '@taucad/sandbox/shell/baseline',
+  '@taucad/sandbox/shell/environment',
+  '@taucad/sandbox/shell/identity',
+  '@taucad/sandbox/shell/provider',
 ]);
+
+/** Workspace modules no file of the service imports: the host's own wiring and the wire schema stay in `host`. */
+const shellServiceForbiddenImports = [
+  '@taucad/agent-tools',
+  '@taucad/chat',
+  '@taucad/host',
+  '@taucad/native-process-core',
+  '#agent-tools',
+  '#mcp-server',
+];
+
+/** What is left of the host's shell directory: tests and fixtures only. */
+const hostShellFiles = globSync('packages/host/src/shell/*.ts', { cwd: root }).toSorted();
 
 /** The workspace projects one project depends on directly. */
 const directDependencies = (projectGraphValue: ProjectGraph, project: string): readonly string[] =>
@@ -118,19 +137,32 @@ describe('shell split graph', () => {
     expect(directDependencies(await projectGraph(), 'native-process-core')).toContain('sandbox');
   });
 
-  it('finds the host shell service production files', () => {
-    expect(hostShellProductionFiles).toEqual([
-      'packages/host/src/shell/shell-contract.ts',
-      'packages/host/src/shell/shell-environment.ts',
-      'packages/host/src/shell/shell-git-view.ts',
-      'packages/host/src/shell/shell-grant.ts',
-      'packages/host/src/shell/shell-output.ts',
-      'packages/host/src/shell/shell-service.ts',
+  it('finds the shell service file set where the blueprint maps it', () => {
+    expect(shellServiceProductionFiles).toEqual([
+      'libs/shell-service/src/index.ts',
+      'libs/shell-service/src/shell/shell-contract.ts',
+      'libs/shell-service/src/shell/shell-environment.ts',
+      'libs/shell-service/src/shell/shell-git-view.ts',
+      'libs/shell-service/src/shell/shell-grant.ts',
+      'libs/shell-service/src/shell/shell-output.ts',
+      'libs/shell-service/src/shell/shell-service.ts',
     ]);
+    expect(shellServiceFiles).toContain('libs/shell-service/src/shell/shell-service.conformance.test.ts');
   });
 
-  it('imports only agent-host, the filesystem path registry and the sandbox barrel from the host shell service (pre-split)', () => {
-    const offenders = hostShellProductionFiles.flatMap((file) =>
+  it('leaves only tests and fixtures in the host shell directory', () => {
+    expect(hostShellFiles.filter((file) => isProduction(file))).toEqual([]);
+    expect(hostShellFiles).toEqual(
+      expect.arrayContaining([
+        'packages/host/src/shell/shell-contract.parity.test.ts',
+        'packages/host/src/shell/shell-qualification.conformance.test.ts',
+        'packages/host/src/shell/shell-service.host.conformance.test.ts',
+      ]),
+    );
+  });
+
+  it('imports only agent-host, the filesystem path registry and the stateless sandbox subpaths from the service', () => {
+    const offenders = shellServiceProductionFiles.flatMap((file) =>
       specifiers(read(file))
         .filter(
           (specifier) =>
@@ -138,12 +170,71 @@ describe('shell split graph', () => {
             (specifier.startsWith('#') && !specifier.startsWith('#shell/')) ||
             specifier.startsWith('..'),
         )
-        .filter((specifier) => !hostShellAllowedWorkspaceImports.has(specifier))
+        .filter((specifier) => !shellServiceAllowedWorkspaceImports.has(specifier))
         .map((specifier) => `${file} -> ${specifier}`),
     );
 
     expect(offenders).toEqual([]);
   });
+
+  it('imports neither the host wiring nor the chat wire from any file of the service', () => {
+    const offenders = shellServiceFiles.flatMap((file) =>
+      specifiers(read(file))
+        .filter((specifier) =>
+          shellServiceForbiddenImports.some(
+            (forbidden) =>
+              specifier === forbidden || specifier.startsWith(`${forbidden}/`) || specifier.startsWith(`${forbidden}.`),
+          ),
+        )
+        .map((specifier) => `${file} -> ${specifier}`),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('gives the shell service its three workspace dependencies and the tags of a private shell library', async () => {
+    const graph = await projectGraph();
+    const service = graph.nodes['shell-service'];
+
+    expect(service?.data.root).toBe(shellServiceRoot);
+    expect(service?.data.tags?.filter((tag) => !tag.startsWith('npm:')).toSorted()).toEqual([
+      'ci:shell',
+      'scope:shared',
+      'shell:service',
+      'type:lib',
+    ]);
+    expect(
+      directDependencies(graph, 'shell-service')
+        .filter((target) => !target.startsWith('npm:'))
+        .toSorted(),
+    ).toEqual(['agent-host', 'filesystem', 'sandbox']);
+    expect(JSON.parse(read(`${shellServiceRoot}/package.json`))).toMatchObject({
+      name: '@taucad/shell-service',
+      private: true,
+    });
+  });
+
+  it(
+    'bundles the shell service and the sandbox into host without its native dependencies',
+    { timeout: 60_000 },
+    async () => {
+      expect(bundledLibraries(await workspace(), 'host')).toEqual(
+        expect.arrayContaining(['@taucad/sandbox', '@taucad/shell-service']),
+      );
+      expect(directDependencies(await projectGraph(), 'host')).toEqual(
+        expect.arrayContaining(['sandbox', 'shell-service']),
+      );
+      const manifest = JSON.parse(read('packages/host/package.json')) as Record<
+        string,
+        Record<string, string> | undefined
+      >;
+      const declared = ['dependencies', 'optionalDependencies', 'peerDependencies'].flatMap((field) =>
+        Object.keys(manifest[field] ?? {}),
+      );
+      expect(declared).not.toContain('@anthropic-ai/sandbox-runtime');
+      expect(declared).not.toContain('node-pty');
+    },
+  );
 
   it('keeps every shell conformance and qualification target uncached', async () => {
     const graph = await projectGraph();
@@ -162,6 +253,7 @@ describe('shell split graph', () => {
         'host:test:shell-qualification',
         'native-process-core:test:native-sandbox-integration',
         'sandbox:test:shell-conformance',
+        'shell-service:test:shell-conformance',
       ]),
     );
     expect(targets.filter(({ cache }) => cache !== false)).toEqual([]);

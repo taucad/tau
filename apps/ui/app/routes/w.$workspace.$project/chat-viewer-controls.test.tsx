@@ -55,6 +55,13 @@ const startGraphics = (): GraphicsActor => {
     radius: 0.1,
     centerMeters: [0, 0, 0],
   });
+  // The model's first frame: framing holds its measurement, so Fit view fits it.
+  actor.send({
+    type: 'geometryBoundsMeasured',
+    key: 'model',
+    bounds: { min: [-0.1, -0.1, -0.1], max: [0.1, 0.1, 0.1] },
+    radius: 0.1,
+  });
   return actor;
 };
 

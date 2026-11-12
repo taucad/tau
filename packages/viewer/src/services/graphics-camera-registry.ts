@@ -5,7 +5,7 @@ import type { RenderFrame } from '@taucad/spatial';
 import { createThreeCameraRig } from '@taucad/three/camera';
 import type { ThreeCamera } from '@taucad/three/camera';
 import type { CameraOwnedSettings } from '#graphics/graphics-settings.js';
-import type { GraphicsCameraRef, graphicsMachine, ViewCameraFraming } from '#machines/graphics.machine.js';
+import type { GraphicsCameraRef, graphicsMachine } from '#machines/graphics.machine.js';
 
 /*
  * The view's camera is the graphics actor's `camera` child (charter D5, I11): its lifetime is structural, so there is
@@ -28,9 +28,9 @@ export type CameraUpdateHandler = (camera: ThreeCamera, snapshot: CameraDriverSn
 export type RenderFrameUpdateHandler = (renderFrame: RenderFrame) => void;
 
 /**
- * The provider's seed. `identity` names the entry whose geometry the view frames: a new identity re-latches the
- * framing record with `camera.cameraView` as its pending pose. The camera itself is seeded once, from the graphics
- * actor's `camera` input.
+ * The provider's seed. `identity` names the entry whose geometry the view frames: a new identity sends the graphics
+ * actor `entryChanged`, with `camera.cameraView` as the pose its framing applies after the entry's first frame. The
+ * camera itself is seeded once, from the graphics actor's `camera` input.
  *
  * @public
  */
@@ -59,36 +59,6 @@ export const asCameraActor = (cameraRef: GraphicsCameraRef): Actor<CameraMachine
  */
 export const selectGraphicsCamera = (snapshot: SnapshotFrom<typeof graphicsMachine>): GraphicsCameraRef =>
   snapshot.context.cameraRef;
-
-/**
- * Selects a graphics actor's framing record (a bridge until the framing actor, G5b).
- *
- * @param snapshot - The graphics snapshot.
- * @returns The framing record, mutated in place by the canvas framing hook.
- * @public
- */
-export const selectGraphicsCameraFraming = (snapshot: SnapshotFrom<typeof graphicsMachine>): ViewCameraFraming =>
-  snapshot.context.cameraFraming;
-
-/**
- * Re-latches a view's framing record when the provider names a new entry. A view can render before its entry path is
- * known (a panel seeded while the project loads), and that is not a file switch: a seed with no identity changes
- * nothing, so the persisted pose is not re-armed over the live one.
- *
- * @param framing - The graphics actor's framing record.
- * @param seed - The provider's seed.
- * @public
- */
-export const latchViewCameraFraming = (framing: ViewCameraFraming, seed: ViewCameraSeed): void => {
-  if (seed.identity === undefined || framing.identity === seed.identity) {
-    return;
-  }
-  framing.identity = seed.identity;
-  framing.pendingView = seed.camera?.cameraView;
-  framing.preserveOrientationOnFirstFrame = false;
-  framing.firstFrameView = undefined;
-  framing.initialized = false;
-};
 
 /**
  * Reads the latest complete camera state of a graphics actor's camera, as its native cameras present it.

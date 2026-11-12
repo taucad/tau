@@ -11,7 +11,7 @@ import { lstat, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, posix, relative, sep, win32 } from 'node:path';
 
 import { classify, pathRegistry, reservedTauDirectory } from '@taucad/filesystem/path-registry';
-import { shellBaselineDenied } from '@taucad/native-process-core/shell';
+import { shellBaselineDenied } from '@taucad/sandbox/shell/baseline';
 
 import { shellLimits } from '#shell/shell-contract.js';
 import type { ShellAccess } from '#shell/shell-contract.js';

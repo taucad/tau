@@ -10,8 +10,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { HostToolApproval, HostToolApprovalRecord, InterruptResolution } from '@taucad/agent-host';
-import { createFakeShellProvider } from '@taucad/native-process-core/shell';
-import type { FakeShellScript, ShellExecutable, ShellLaunch } from '@taucad/native-process-core/shell';
+import { createFakeShellProvider } from '@taucad/sandbox/shell';
+import type { FakeShellScript, ShellExecutable, ShellLaunch } from '@taucad/sandbox/shell';
 
 import { isShellError, shellLimits } from '#shell/shell-contract.js';
 import { createShellGitView } from '#shell/shell-git-view.js';

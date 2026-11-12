@@ -2,7 +2,7 @@
 import type { DesktopUpdateSnapshot } from '@taucad/types/desktop-updates';
 
 import type { AvailableUpdate, DesktopUpdater, DesktopUpdaterOptions } from '#main/updater.js';
-import { updateCheckInterval } from '#main/updater.js';
+import { defaultUpdateRetry, updateCheckInterval, updateRetryDelays } from '#main/updater.js';
 
 /** Preparation may reserve files/leases; only commit may change the installed executable. */
 export type PreparedDesktopInstallation = {
@@ -25,7 +25,10 @@ export type PlatformUpdateOptions = DesktopUpdaterOptions & {
   readonly prepareToInstall: (commit: () => void | Promise<void>) => Promise<boolean>;
 };
 
-/** Background download never grants install consent, and ordinary quit has no install callback. */
+/**
+ * Background download never grants install consent, and ordinary quit has no install callback. Consent is the
+ * user's `install`: given before the download finishes, it is held until then and installs without a second ask.
+ */
 export const startPlatformUpdateController = (
   options: PlatformUpdateOptions,
   backend: PlatformUpdateBackend,
@@ -42,25 +45,60 @@ export const startPlatformUpdateController = (
   let pending: Promise<AvailableUpdate | undefined> | undefined;
   let installing = false;
   let ready = false;
+  /* The user asked to restart before the download finished. Only `install` sets it. */
+  let installWhenReady = false;
+  let failures = 0;
+  let retryPending = false;
   let status = 'Checking for updates…';
   const publish = (phase: DesktopUpdateSnapshot['phase'], detail: string): void => {
     status = detail;
     snapshot = { ...snapshot, revision: snapshot.revision + 1, phase, detail };
     options.onState?.(snapshot);
   };
+  const restartWhenReady = (wanted: boolean): void => {
+    installWhenReady = wanted;
+    const { installWhenReady: _previous, ...rest } = snapshot;
+    snapshot = wanted ? { ...rest, installWhenReady: true } : rest;
+  };
+  const retryLater = (): void => {
+    const retryDelay = updateRetryDelays[failures];
+    if (retryDelay === undefined || retryPending) {
+      return;
+    }
+    failures += 1;
+    retryPending = true;
+    (options.retry ?? defaultUpdateRetry)(() => {
+      retryPending = false;
+      void check();
+    }, retryDelay);
+  };
   const failed = (error: unknown): void => {
     ready = false;
     offered = undefined;
+    /* A restart request does not outlive a failure: the retry that follows is a background download again. */
+    restartWhenReady(false);
     snapshot = { ...snapshot, version: undefined, releasePage: undefined };
     const message = error instanceof Error ? error.message : String(error);
     publish('error', `Update failed: ${message}. Check again to retry.`);
     options.log('warn', 'updater.error', { message });
+    retryLater();
   };
   const install = async (): Promise<void> => {
-    if (!ready || installing) {
+    if (installing) {
+      return;
+    }
+    if (!ready) {
+      /* Asked before the update is here (while it downloads, or from a failed attempt): remember the request so
+       * the download's completion restarts Tau, instead of making the user come back and ask a second time. */
+      if (!backend.systemManaged && !backend.disabledReason && !installWhenReady) {
+        restartWhenReady(true);
+        publish(snapshot.phase, status);
+      }
+      await check();
       return;
     }
     installing = true;
+    restartWhenReady(false);
     let prepared: PreparedDesktopInstallation | undefined;
     try {
       // Permission/space/hash/signature failures must happen before the save/quit owner is invoked.
@@ -114,6 +152,8 @@ export const startPlatformUpdateController = (
       publish('checking', 'Checking for updates…');
       offered = await backend.check();
       if (!offered) {
+        failures = 0;
+        restartWhenReady(false);
         snapshot = { ...snapshot, version: undefined, releasePage: undefined };
         publish(
           backend.systemManaged ? 'system-managed' : 'current',
@@ -135,13 +175,17 @@ export const startPlatformUpdateController = (
         await backend.download();
       }
       ready = true;
+      failures = 0;
       publish(
         'ready',
         backend.systemManaged
           ? 'APT installed a newer version. Save and restart to use it; this session keeps its original files.'
           : 'Saves your work, then restarts to install. Quitting normally leaves the update for later.',
       );
-      if (options.installForProbe && (options.candidateTag !== undefined || options.expectedUpdate !== undefined)) {
+      if (
+        installWhenReady ||
+        (options.installForProbe && (options.candidateTag !== undefined || options.expectedUpdate !== undefined))
+      ) {
         void install();
       }
       return offered;

@@ -1,27 +1,18 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 // @vitest-environment node
 /*
- * The shell service's conformance rows (testing contract, `host:test:shell-conformance`; A03–A05, A08, A09 at the
- * service layer, A20 in H10, and H08–H09 end to end: a scripted model drives a real Tau agent host, its tool registry and admission,
- * the service and the native shell). They extend the provider rows C01–C09 in `native-process-core`, never repeat them: each row drives
- * the real service over the real sandbox provider and the machine's own Bash, starts with a positive control, and
- * judges every negative by the bytes outside the sandbox, not by the command's own report.
+ * The host's shell conformance rows (testing contract, `host:test:shell-conformance`; H08–H09 end to end: a scripted
+ * model drives a real Tau agent host, the host's tool registry and admission, the service and the native shell; A20
+ * in H10). They extend the service rows H01–H07 in `shell-service` and the provider rows C01–C09 in `sandbox`, never
+ * repeat them: each row drives the real service over the real sandbox provider and the machine's own Bash, starts
+ * with a positive control, and judges every negative by the bytes outside the sandbox, not by the command's own report.
  *
  * Off unless `TAU_SHELL_CONFORMANCE=1`, which only the noncacheable Nx target sets. `TAU_SHELL_CONFORMANCE_ROW` names
  * the row, `TAU_SHELL_CONFORMANCE_RECEIPT` where the JSON receipt goes and, on Linux, `TAU_SHELL_CONFORMANCE_BWRAP`
  * the installed, profiled bubblewrap.
  */
 import { execFileSync } from 'node:child_process';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -33,12 +24,12 @@ import { createNodeEventLog } from '@taucad/agent-host/node';
 import { createSandboxShellProvider } from '@taucad/native-process-core/shell';
 import type { ShellProvider } from '@taucad/native-process-core/shell';
 
+import { probeHostShell } from '@taucad/shell-service';
+import type { HostShell, ShellCheckout, ShellInput, ShellOutput } from '@taucad/shell-service';
+
 import { createHostToolRegistry } from '#agent-tools.js';
-import type { ShellInput, ShellOutput } from '#shell/shell-contract.js';
 import { placementOver, scriptedTransport } from '#shell/tau-host.fixture.js';
 import type { ScriptedResponse } from '#shell/tau-host.fixture.js';
-import { probeHostShell } from '#shell/shell-service.js';
-import type { HostShell, ShellCheckout } from '#shell/shell-service.js';
 
 const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
 const row = process.env['TAU_SHELL_CONFORMANCE_ROW'] ?? 'unnamed';
@@ -58,11 +49,6 @@ const conformance = (id: string, title: string, body: () => Promise<void>): void
     }
   });
 };
-
-const delay = async (milliseconds: number): Promise<void> =>
-  new Promise((resolve) => {
-    setTimeout(resolve, milliseconds);
-  });
 
 let root = '';
 let project = '';
@@ -87,7 +73,7 @@ const completed = (output: ShellOutput): Extract<ShellOutput, { status: 'complet
   return output;
 };
 
-describe.runIf(enabled)('shell service conformance', () => {
+describe.runIf(enabled)('host shell conformance', () => {
   beforeAll(async () => {
     if (process.platform !== 'linux' && process.platform !== 'darwin') {
       throw new Error(`${process.platform} is not a row of this suite yet.`);
@@ -161,7 +147,7 @@ describe.runIf(enabled)('shell service conformance', () => {
         path,
         `${JSON.stringify(
           {
-            schema: 'tau.shell-service-conformance.receipt/1',
+            schema: 'tau.host-shell-conformance.receipt/1',
             row,
             recordedAt: new Date().toISOString(),
             source: {
@@ -181,134 +167,6 @@ describe.runIf(enabled)('shell service conformance', () => {
     }
   });
 
-  conformance('H01', 'runs in the exact checkout folder with a private HOME and no seeded secret', async () => {
-    const output = completed(await run({ command: 'pwd; printf WROTE > out.txt; env', cwd: 'models' }));
-
-    expect(output.exitCode, output.stderr.text).toBe(0);
-    const [cwd, ...environment] = output.stdout.text.trim().split('\n');
-    expect(cwd).toBe(join(project, 'models'));
-    expect(readFileSync(join(project, 'models', 'out.txt'), 'utf8')).toBe('WROTE');
-    expect(output.stdout.text).not.toContain('SEEDED-SECRET');
-    expect(environment.some((line) => line.startsWith('SSH_AUTH_SOCK='))).toBe(false);
-    expect(
-      environment
-        .find((line) => line.startsWith('HOME='))
-        ?.slice('HOME='.length)
-        .startsWith(sessions),
-    ).toBe(true);
-  });
-
-  conformance(
-    'H02',
-    'authored and unknown .tau names are writable; records, control data, other projects and app data are not',
-    async () => {
-      const positive = completed(await run({ command: 'printf \'{"a":1}\' > .tau/parameters/main.json' }));
-
-      expect(positive.exitCode, positive.stderr.text).toBe(0);
-      expect(readFileSync(join(project, '.tau', 'parameters', 'main.json'), 'utf8')).toBe('{"a":1}');
-      const unknown = completed(await run({ command: 'mkdir -p .tau/notes && printf NOTE > .tau/notes/a.txt' }));
-      expect(unknown.exitCode, unknown.stderr.text).toBe(0);
-      expect(readFileSync(join(project, '.tau', 'notes', 'a.txt'), 'utf8')).toBe('NOTE');
-
-      const probes = [
-        'cat .git/HEAD',
-        `cat ${join(other, 'canary.txt')}`,
-        `cat ${join(appData, 'granted-roots.json')}`,
-        'printf FORGED > .git/HEAD',
-        'printf FORGED > .tau/chats/forged.json',
-      ];
-      for (const command of probes) {
-        // oxlint-disable-next-line no-await-in-loop -- one probe at a time, each judged alone.
-        const output = await run({ command });
-        expect(output.status === 'completed' ? output.stdout.text : '', command).not.toMatch(
-          /refs\/heads|OTHER-PROJECT|APP-DATA/u,
-        );
-      }
-      expect(readFileSync(join(project, '.git', 'HEAD'), 'utf8')).toBe('ref: refs/heads/main\n');
-      expect(existsSync(join(project, '.tau', 'chats', 'forged.json'))).toBe(false);
-    },
-  );
-
-  conformance('H07', 'records read but cannot be written, deleted or moved (E03)', async () => {
-    const record = join(project, '.tau', 'chats', 'chat-1.json');
-    const positive = completed(await run({ command: 'cat .tau/chats/chat-1.json' }));
-
-    expect(positive.exitCode, positive.stderr.text).toBe(0);
-    expect(positive.stdout.text).toBe('{"record":"CHAT-RECORD"}\n');
-
-    for (const command of [
-      'printf FORGED > .tau/chats/chat-1.json',
-      'rm .tau/chats/chat-1.json',
-      'mv .tau/chats/chat-1.json models/stolen.json',
-      'mv .tau/chats .tau/chats-moved',
-    ]) {
-      // oxlint-disable-next-line no-await-in-loop -- one probe at a time, each judged alone.
-      const output = await run({ command });
-      expect(output.status === 'completed' ? output.exitCode : 0, command).not.toBe(0);
-    }
-    /* A move out of the read-only records falls back to copy-then-unlink: the copy a read allows may land, the unlink
-     * never does, so the record stays where it was, unchanged. */
-    expect(readFileSync(record, 'utf8')).toBe('{"record":"CHAT-RECORD"}\n');
-    expect(existsSync(join(project, '.tau', 'chats-moved'))).toBe(false);
-  });
-
-  conformance('H03', 'large output stays bounded and the full log lands in the records row', async () => {
-    const output = completed(await run({ command: "head -c 300000 /dev/zero | tr '\\0' a; printf END" }));
-
-    expect(output.stdout).toMatchObject({ bytes: 300_003, truncated: true });
-    expect(output.stdout.text.endsWith('END')).toBe(true);
-    expect(output.log).toMatchObject({ status: 'saved', bytes: 300_003, discardedBytes: 0 });
-    const path = output.log?.status === 'saved' ? output.log.path : '';
-    expect(statSync(join(project, ...path.split('/'))).size).toBe(300_003);
-  });
-
-  conformance('H04', 'a timeout stops the command and its background writer before the call settles', async () => {
-    const started = Date.now();
-    const output = await run({
-      command: '(while :; do date >> beat.txt; sleep 0.1; done) & sleep 300',
-      // oxlint-disable-next-line tau-lint/no-time-unit-suffix -- the Bash tool's wire field (blueprint API).
-      timeoutMs: 1500,
-    });
-
-    expect(output.status).toBe('timed-out');
-    expect(Date.now() - started).toBeLessThan(15_000);
-    const { size } = statSync(join(project, 'beat.txt'));
-    await delay(1000);
-    expect(statSync(join(project, 'beat.txt')).size).toBe(size);
-  });
-
-  conformance('H05', 'cancellation ends a running command once', async () => {
-    const controller = new AbortController();
-    const running = run({ command: 'sleep 300' }, controller.signal);
-    await delay(500);
-    const started = Date.now();
-    controller.abort();
-    await expect(running).resolves.toMatchObject({ status: 'cancelled' });
-    expect(Date.now() - started).toBeLessThan(10_000);
-  });
-
-  conformance('H06', 'an approved folder is readable and an unrelated one stays denied', async () => {
-    mode = 'bypass';
-    try {
-      const positive = completed(
-        await run({
-          command: `cat ${join(supplier, 'part.step')}`,
-          access: { reason: 'Read the part', read: [supplier] },
-        }),
-      );
-      expect(positive.exitCode, positive.stderr.text).toBe(0);
-      expect(positive.stdout.text).toBe('SUPPLIER\n');
-      expect(positive.approval).toEqual({ approvedBy: 'bypass', mode: 'bypass' });
-
-      const negative = await run({
-        command: `cat ${join(unrelated, 'canary.txt')}`,
-        access: { reason: 'Read the part', read: [supplier] },
-      });
-      expect(negative.status === 'completed' ? negative.stdout.text : '').not.toContain('UNRELATED');
-    } finally {
-      mode = 'ask';
-    }
-  });
   /**
    * A real Tau agent host over the host registry, offering this machine's shell from its own probe. The provider is the
    * real sandbox provider; it only notes, at each launch, what the run's event log already holds.

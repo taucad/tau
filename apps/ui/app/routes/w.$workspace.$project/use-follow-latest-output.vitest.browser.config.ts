@@ -6,6 +6,7 @@ import { defineConfig } from 'vitest/config';
 /** Chat follow-output acceptance against the real Virtuoso list in Chromium. */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
+  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
   plugins: [tailwindcss()],
   server: {
     host: '127.0.0.1',

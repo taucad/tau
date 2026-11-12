@@ -6,6 +6,7 @@ import { defineConfig } from 'vitest/config';
 /** Render the production menu/dialog with the shipped tokens at both viewport widths. */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
+  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
   plugins: [tailwindcss()],
   server: {
     host: '127.0.0.1',

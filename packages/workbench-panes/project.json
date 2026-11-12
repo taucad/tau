@@ -5,6 +5,9 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:package"],
   "targets": {
+    "build": {
+      "dependsOn": ["^build"]
+    },
     "validate-shell-parity": {
       "executor": "nx:run-commands",
       "cache": false,

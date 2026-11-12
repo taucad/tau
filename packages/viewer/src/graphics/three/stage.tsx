@@ -2,26 +2,17 @@ import React from 'react';
 import type { ReactNode } from 'react';
 import type * as THREE from 'three';
 import { flushSync } from '@react-three/fiber';
-import { resolveMetersPerRenderUnit } from '@taucad/spatial';
 import { createThreeRenderMatrix } from '@taucad/three/spatial';
 import { Lights } from '#graphics/three/react/lights.jsx';
 import type { SectionCut } from '#graphics/section-cuts.js';
 import { SectionClippingGroup } from '#graphics/three/react/section-clipping-group.jsx';
 import { useLiveSectionCutSet, useSectionPieces, useSectionStripes } from '#graphics/three/use-section-view.js';
 import { useGeometryBounds } from '#graphics/three/use-geometry-bounds.js';
-import { useCameraFraming } from '#graphics/three/use-camera-framing.js';
 import { defaultStageOptions } from '#graphics/three/stage-options.js';
 import type { StageOptions } from '#graphics/three/stage-options.js';
-import {
-  useGraphics,
-  useGraphicsSelector,
-  useRenderFrame,
-  useRenderFrameRetarget,
-  useSetRenderFrame,
-} from '#hooks/use-graphics.jsx';
+import { useGraphics, useGraphicsSelector, useRenderFrame, useRenderFrameRetarget } from '#hooks/use-graphics.jsx';
 import { createSectionViewSafeSnapshotStore } from '#graphics/three/utils/section-view-safe-snapshot.js';
 import type { SectionViewSafeSnapshotStore } from '#graphics/three/utils/section-view-safe-snapshot.js';
-import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
 import { useViewerEnvironment, useViewerFeature } from '#environment/viewer-environment.jsx';
 
 const SectionContourFills = React.lazy(async () => {
@@ -88,7 +79,8 @@ export function SectionViewScene({ innerRef, snapshotRef, children }: SectionVie
 }
 
 /**
- * The scene root around the model: it sets the render frame from the geometry's bounds, frames the camera, applies section clipping and caps, and adds the lights.
+ * The scene root around the model: it measures the geometry, which anchors the render frame and frames the camera
+ * through the graphics actor, follows the render frame, applies section clipping and caps, and adds the lights.
  *
  * @param props - The model as children, the stage options and the group's attributes.
  * @returns The stage group.
@@ -106,7 +98,6 @@ export function Stage({
   const sectionSnapshotRef = React.useRef(sectionSnapshot);
 
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
-  const geometryKey = useGraphicsSelector(selectPresentedGeometryKey);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
 
   // Gate the e2e test bridge behind the debug flag so it is never mounted or
@@ -116,14 +107,6 @@ export function Stage({
   const { debugStageBridge: DebugStageBridge } = useViewerEnvironment();
 
   const renderFrame = useRenderFrame();
-  const setRenderFrame = useSetRenderFrame();
-  const initializedGeometryRef = React.useRef<{
-    key: string | undefined;
-    initialized: boolean;
-  }>({
-    key: undefined,
-    initialized: false,
-  });
   const retargetScene = React.useCallback((nextRenderFrame: typeof renderFrame): void => {
     if (!outer.current) {
       return;
@@ -134,32 +117,7 @@ export function Stage({
   }, []);
   useRenderFrameRetarget(retargetScene);
 
-  const { geometryRadius, geometryCenter, geometryBounds, isPoseUpdate } = useGeometryBounds(innerRef, outer);
-
-  React.useLayoutEffect(() => {
-    if (
-      geometryRadius <= 0 ||
-      (initializedGeometryRef.current.initialized && initializedGeometryRef.current.key === geometryKey)
-    ) {
-      return;
-    }
-    initializedGeometryRef.current = { key: geometryKey, initialized: true };
-    setRenderFrame({
-      anchorFrameId: renderFrame.anchorFrameId,
-      originMeters: [geometryCenter.x, geometryCenter.y, geometryCenter.z],
-      metersPerRenderUnit: resolveMetersPerRenderUnit({
-        characteristicLengthMeters: geometryRadius * 2,
-      }),
-    });
-  }, [geometryCenter, geometryKey, geometryRadius, renderFrame.anchorFrameId, setRenderFrame]);
-
-  useCameraFraming({
-    geometryRadius,
-    geometryCenter,
-    geometryBounds,
-    isPoseUpdate,
-    stageOptions,
-  });
+  const { geometryRadius } = useGeometryBounds(innerRef, outer, stageOptions);
 
   return (
     <group {...properties}>

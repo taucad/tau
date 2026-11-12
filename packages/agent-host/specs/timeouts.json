@@ -4,6 +4,7 @@
     "packages/rpc/src",
     "packages/revisions/src",
     "packages/host/src",
+    "libs/shell-service/src",
     "packages/cli/src",
     "apps/desktop/src/main/main.ts",
     "apps/desktop/src/main/services-broker.ts",
@@ -289,6 +290,14 @@
       "class": "Peer",
       "owner": "GM",
       "fixedBy": "outside this charter: desktop geometry-runner port ceremony"
+    },
+    {
+      "id": "B19",
+      "bound": "Desktop update feed request (30 s): one update check runs at a time, so a feed request that never settles would stop every later check",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "AbortSignal.timeout(30_000)",
+      "class": "External edge",
+      "owner": "desktop updater"
     },
     {
       "id": "C1",
@@ -1122,7 +1131,7 @@
     {
       "id": "SHELL-COMMAND-TIMEOUT",
       "bound": "Agent shell command deadline: the call's timeoutMs clamped to 1 s..600 s (default 120 s); on expiry the provider stops the command and every descendant and the call returns timed-out",
-      "site": "packages/host/src/shell/shell-service.ts",
+      "site": "libs/shell-service/src/shell/shell-service.ts",
       "token": "admitted.commandTimeout",
       "class": "External edge",
       "owner": "desktop-bash-terminal W3"
@@ -1130,7 +1139,7 @@
     {
       "id": "SHELL-PROBE-TIMEOUT",
       "bound": "30-second bound on the shell availability probe's version command",
-      "site": "packages/host/src/shell/shell-service.ts",
+      "site": "libs/shell-service/src/shell/shell-service.ts",
       "token": "AbortSignal.timeout(30_000)",
       "class": "External edge",
       "owner": "desktop-bash-terminal W3"
@@ -1138,7 +1147,7 @@
     {
       "id": "SHELL-DRAIN-TIMEOUT",
       "bound": "2-second bound on waiting for output readers after an unconfirmed cleanup",
-      "site": "packages/host/src/shell/shell-service.ts",
+      "site": "libs/shell-service/src/shell/shell-service.ts",
       "token": "setTimeout(resolve, milliseconds)",
       "class": "External edge",
       "owner": "desktop-bash-terminal W3"

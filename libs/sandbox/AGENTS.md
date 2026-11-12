@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Tau's OS sandbox launcher, process tree and contained shell provider. Private library with zero workspace dependencies, bundled into `@taucad/native-process-core` (`dist/libs/sandbox/`), which re-exports its root and `./shell`.
+Tau's OS sandbox launcher, process tree and contained shell provider. Private library with zero workspace dependencies, bundled into `@taucad/native-process-core` (`dist/libs/sandbox/`), which re-exports its root and `./shell`, and, for its stateless shell modules only, into `@taucad/host` through `@taucad/shell-service`.
 
 - Nx project: `sandbox`
 - Project root: `libs/sandbox`
@@ -15,6 +15,7 @@ Tau's OS sandbox launcher, process tree and contained shell provider. Private li
 
 - `src/index.ts`: the native sandbox launcher, child-resident sampler and process-table reads
 - `src/shell.ts`: the contained shell seam (`./shell`)
+- `src/shell/{shell-baseline,shell-environment,shell-identity,shell-provider}.ts`: the stateless `./shell/baseline`, `./shell/environment`, `./shell/identity` and `./shell/provider` subpaths, which `@taucad/shell-service` imports instead of the `./shell` barrel so `@taucad/host`'s bundle carries neither the SRT provider nor its native dependencies
 - `src/shell/srt-supervisor.ts`: the supervisor entry (`./shell/srt-supervisor`), the one module with top-level side effects (`sideEffects` in `package.json`)
 - `scripts/shell-conformance-vm.sh`, `scripts/shell-conformance-guest.sh`: the Linux shell conformance guests
 - `specs/shell-custody/`: the `formal` model of shell custody

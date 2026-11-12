@@ -41,7 +41,7 @@ import type {
   RevisionFileRead,
   TurnCheckout,
 } from '#revisions.js';
-import type { ShellExecutionHolds, ShellHoldAnswer, ShellProjectExecutions } from '#shell/shell-service.js';
+import type { ShellExecutionHolds, ShellHoldAnswer, ShellProjectExecutions } from '@taucad/shell-service';
 
 /**
  * Admit a checkout's filesystem as the host tools' filesystem. Revision hosts type checkout filesystems loosely, so the

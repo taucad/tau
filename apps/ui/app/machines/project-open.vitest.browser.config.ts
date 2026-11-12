@@ -6,6 +6,7 @@ import { tauRuntime } from '@taucad/runtime/vite';
 
 export default defineConfig({
   root: fileURLToPath(new URL('../..', import.meta.url)),
+  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
   plugins: [
     tauRuntime(),
     {

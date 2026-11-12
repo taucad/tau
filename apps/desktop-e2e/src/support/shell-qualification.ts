@@ -41,7 +41,7 @@ export const reportShellDiagnostics = async (session: DesktopSession): Promise<v
  *
  * @param page - The desktop page showing the Terminal pane.
  */
-export const expectTerminalRunning = async (page: Page): Promise<void> => {
+export const expectTerminalRunning = async (page: Page, prompt = /\$\s*$/u): Promise<void> => {
   await page.getByRole('textbox', { name: 'Terminal', exact: true }).waitFor({ timeout: 60_000 });
   /*
    * A prompt alone is not the new session. An access replacement keeps the renderer and clears the old screen
@@ -54,7 +54,7 @@ export const expectTerminalRunning = async (page: Page): Promise<void> => {
     .waitFor({ state: 'detached', timeout: 60_000 });
   await expect
     .poll(async () => page.locator('[data-terminal-screen-mirror] > div').allTextContents(), { timeout: 60_000 })
-    .toEqual(expect.arrayContaining([expect.stringMatching(/\$\s*$/u)]));
+    .toEqual(expect.arrayContaining([expect.stringMatching(prompt)]));
 };
 
 /**

@@ -31,11 +31,29 @@ type TargetSession = OpenedTarget & {
 const sessions = new Map<string, TargetSession>();
 const outputRoot = resolve(import.meta.dirname, '../../out/test-results/vitest-browser/apps/react-e2e');
 
+/**
+ * Chromium switches for the renderer's GPU. A runner without a GPU (`TAU_E2E_WEBGPU_PROFILE=software`, as the nightly's
+ * browser lane sets) offers Electron only Mesa's llvmpipe under xvfb, whose WebGL2 Chromium blocklists, so the
+ * example's Three.js canvas cannot create a context and the page renders nothing. SwiftShader through ANGLE is the
+ * software GL the browser lanes already use (`apps/desktop-e2e/src/support/desktop-app.ts`).
+ */
+const rendererArguments = (): readonly string[] => {
+  const profile = process.env['TAU_E2E_WEBGPU_PROFILE'] ?? 'hardware';
+  if (profile === 'software') {
+    // Chromium deprecates silent fallback to software WebGL; the second switch opts in explicitly.
+    return ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+  }
+  if (profile === 'hardware') {
+    return [];
+  }
+  throw new Error(`TAU_E2E_WEBGPU_PROFILE must be 'software' or 'hardware'; received '${profile}'.`);
+};
+
 const electronSession = async (target: ReactE2ETarget): Promise<OpenedTarget> => {
   let application: ElectronApplication | undefined;
   try {
     application = await electron.launch({
-      args: [target.root],
+      args: [...rendererArguments(), target.root],
       cwd: target.root,
       env: reactE2EEnvironment(target),
     });

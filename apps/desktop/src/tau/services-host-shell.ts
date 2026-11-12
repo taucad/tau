@@ -13,7 +13,7 @@
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { probeHostShell } from '@taucad/host';
+import { probeHostShell } from '@taucad/shell-service';
 import type {
   HostShell,
   PermissionMode,
@@ -23,7 +23,7 @@ import type {
   ShellProbe,
   ShellRunRequest,
   ShellUnavailable,
-} from '@taucad/host';
+} from '@taucad/shell-service';
 import { createSandboxShellProvider } from '@taucad/native-process-core/shell';
 import type { SandboxShellProviderOptions, ShellProvider } from '@taucad/native-process-core/shell';
 

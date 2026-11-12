@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, inject, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { WebGPURenderer, WebGPUBackend } from 'three/webgpu';
 import { createRenderer } from '#graphics/three/renderer.js';
@@ -6,6 +6,15 @@ import { setRaycasterFromCamera } from '#graphics/three/utils/raycaster-from-cam
 import { createModelGpuPicker } from '#graphics/three/utils/model-gpu-pick.js';
 
 const executions = ['classic', 'webgpu', 'nodegl'] as const;
+
+/**
+ * The share of a CSS pixel footprint by which a rasterised fragment may sit from the reference ray's pixel centre.
+ * Hardware rasterisers snap to at least 8 subpixel bits (1/256). The software lane's SwiftShader, which every
+ * backend here shares, lands within 1/68 of a pixel at 73×51 (measured: 1.46e-2 at the far corner, against 1.2e-3 at
+ * 2560×1440). Vulkan guarantees only 4 subpixel bits, so the software bound is 1/32 of a pixel: still far below the
+ * one-pixel error a crop or sampling-grid mistake gives.
+ */
+const pixelCentreShare = inject('webGpuProfile') === 'software' ? 1 / 32 : 1 / 256;
 
 /** Exact object/depth oracle independent of crop math, including a detached camera rig. */
 describe.each(executions)('bounded model picking on %s', (execution) => {
@@ -91,13 +100,13 @@ describe.each(executions)('bounded model picking on %s', (execution) => {
             if (actual.status === 'hit' && expected) {
               expect(actual.intersection.object).toBe(expected.object);
               // Full-frame reference also has fixed-point raster interpolation error at 73×51.
-              // Bound it to 1/256 of a CSS pixel footprint plus Float32 world-position error.
+              // Bound it to the rasteriser's share of a CSS pixel footprint plus Float32 world-position error.
               const footprint =
                 camera instanceof THREE.PerspectiveCamera
                   ? (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * expected.distance) / height!
                   : 9 / height!;
               expect(Math.abs(actual.intersection.distance - expected.distance)).toBeLessThan(
-                40 * 2e-6 + footprint / 256,
+                40 * 2e-6 + footprint * pixelCentreShare,
               );
               ray.far = expected.distance * 0.5;
               expect(picker.pick(ray).status).toBe('miss');

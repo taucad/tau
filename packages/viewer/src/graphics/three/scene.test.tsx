@@ -15,15 +15,27 @@ import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 
 vi.mock('#graphics/three/use-geometry-bounds.js', async () => {
   const three = await import('three');
+  const { useLayoutEffect } = await import('react');
+  const { useGraphics } = await import('#hooks/use-graphics.jsx');
   const geometryCenter = new three.Vector3(10, 20, 30);
   const geometryBounds = new three.Box3().setFromCenterAndSize(geometryCenter, new three.Vector3(40, 20, 10));
+  const geometryRadius = geometryBounds.getBoundingSphere(new three.Sphere()).radius;
 
   return {
-    useGeometryBounds: () => ({
-      geometryRadius: geometryBounds.getBoundingSphere(new three.Sphere()).radius,
-      geometryCenter,
-      geometryBounds,
-    }),
+    // The measurement the hook reports once the committed geometry is in the scene.
+    useGeometryBounds: () => {
+      const graphics = useGraphics();
+      useLayoutEffect(() => {
+        graphics.send({
+          type: 'geometryBoundsMeasured',
+          key: 'scene',
+          bounds: { min: geometryBounds.min.toArray(), max: geometryBounds.max.toArray() },
+          radius: geometryRadius,
+          viewport: { width: 800, height: 600, pixelRatio: 1 },
+        });
+      }, [graphics]);
+      return { geometryRadius, geometryCenter, geometryBounds };
+    },
   };
 });
 

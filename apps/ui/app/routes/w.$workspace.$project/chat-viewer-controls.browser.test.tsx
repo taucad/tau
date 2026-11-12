@@ -210,11 +210,13 @@ describe('Viewer controls on phones in Chromium', () => {
     async ({ width, height }) => {
       await page.viewport(width, height);
       // A stage squeezed by the sheet: too short for both tool rows and the controls line.
-      renderStage({ height: 180, mobileAction: <ArControl onActivate={() => undefined} /> });
+      const actor = renderStage({ height: 180, mobileAction: <ArControl onActivate={() => undefined} /> });
       await userEvent.click(screen.getByRole('button', { name: 'Section view' }));
       await userEvent.click(screen.getByRole('button', { name: 'Measure' }));
+      // The stage draws no canvas, so stand in for the measure tool reporting its input ready, as the viewer's does.
+      actor.send({ type: 'setMeasureInputReady', ready: true });
       const sectionRow = screen.getByRole('group', { name: 'Section view options' });
-      const measuringRow = screen.getByRole('group', { name: 'Measuring options' });
+      const measuringRow = await screen.findByRole('group', { name: 'Measuring options' });
 
       const stage = box(frame());
       await expect.poll(() => box(bar()).top).toBeGreaterThanOrEqual(stage.top + 8 - 0.5);
@@ -292,7 +294,7 @@ describe('Viewer controls with the issues list on phones in Chromium', () => {
 });
 
 describe('Viewer controls on desktop in Chromium', () => {
-  it('keeps the compact controls and the real fullscreen, and no mobile AR', async () => {
+  it('keeps the compact controls and the real fullscreen, with the host action after it (D12)', async () => {
     await page.viewport(1280, 800);
     renderStage({ height: 480, mobileAction: <ArControl onActivate={() => undefined} /> });
 
@@ -302,6 +304,7 @@ describe('Viewer controls on desktop in Chromium', () => {
       'Measure',
       'Fit view',
       'Enter fullscreen',
+      'View in your space',
       'Capture view to chat',
       'Viewer settings',
     ]);

@@ -130,8 +130,7 @@ describe('prepareLinkedGithubImport', () => {
       revisionNumber: 1,
       revisionId: 'b'.repeat(40),
       changeId: '',
-      actor: 'unknown',
-      authorName: 'Octo Dev',
+      who: { kind: 'unrecorded', authorName: 'Octo Dev' },
       source: 'import',
       createdAt: 0,
       summary: 'Upstream change',
@@ -141,7 +140,6 @@ describe('prepareLinkedGithubImport', () => {
     };
     const context = {
       session: { id: 'tau-user-1', name: 'Ada' },
-      projectId: 'prj_1',
       pushRecord: undefined,
       showAnonymousId: false,
     };

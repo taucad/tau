@@ -53,12 +53,10 @@ import type { InterruptRequest, JsonValue } from '@taucad/agent-host';
 import { createNodeEventLog } from '@taucad/agent-host/node';
 import { createSandboxShellProvider } from '@taucad/native-process-core/shell';
 import type { ShellLaunch, ShellProvider } from '@taucad/native-process-core/shell';
+import { probeHostShell, shellLimits } from '@taucad/shell-service';
+import type { HostShell, PermissionMode, ShellCheckout, ShellInput, ShellOutput } from '@taucad/shell-service';
 
 import { createHostToolRegistry } from '#agent-tools.js';
-import { shellLimits } from '#shell/shell-contract.js';
-import type { PermissionMode, ShellInput, ShellOutput } from '#shell/shell-contract.js';
-import { probeHostShell } from '#shell/shell-service.js';
-import type { HostShell, ShellCheckout } from '#shell/shell-service.js';
 import { placementOver, scriptedTransport } from '#shell/tau-host.fixture.js';
 import type { ScriptedResponse } from '#shell/tau-host.fixture.js';
 import {

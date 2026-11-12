@@ -48,6 +48,7 @@
     "@taucad/rpc": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/sandbox": "workspace:*",
+    "@taucad/shell-service": "workspace:*",
     "@taucad/skills": "workspace:*",
     "@taucad/slicer": "workspace:*",
     "@taucad/smlib": "workspace:*",

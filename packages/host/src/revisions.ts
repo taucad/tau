@@ -21,7 +21,7 @@ import { hostname, userInfo } from 'node:os';
 import { join, sep } from 'node:path';
 import { z } from 'zod';
 import { resolveNodeProjectIdentity, openNodeProjectFileSystem } from '#project-identity.js';
-import type { ShellExecutionHolds } from '#shell/shell-service.js';
+import type { ShellExecutionHolds } from '@taucad/shell-service';
 
 import { jsonValueSchema } from '@taucad/agent-host';
 import type { JsonValue } from '@taucad/agent-host';

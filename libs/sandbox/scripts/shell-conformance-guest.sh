@@ -100,9 +100,13 @@ NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
 # 41865985263 ubuntu2604-*: build123d's bytecode compile exited 1 and no model rendered). CI=1 forbids a skip.
 PATH="$HOME/node/bin:/usr/local/bin:/usr/bin:/bin" CI=1 NX_NO_CLOUD=true NX_DAEMON=false TAU_NATIVE_SANDBOX_BWRAP="$bwrap" \
   pnpm nx run native-process-core:test:native-sandbox-integration --skip-nx-cache || status=$?
-# The host shell service's rows over the same provider and bwrap (H01-H06), with their own receipt.
+# The shell service's rows over the same provider and bwrap (H01-H07), with their own receipt.
 NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
   TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-service-conformance-receipt.json" \
+  pnpm nx run shell-service:test:shell-conformance --skip-nx-cache || status=$?
+# The service rows through a real Tau agent host and the host's tool registry (H08-H10), with their own receipt.
+NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
+  TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/host-shell-conformance-receipt.json" \
   pnpm nx run host:test:shell-conformance --skip-nx-cache || status=$?
 # The W7 qualification rows: the agent host over the same provider and bwrap, with their own receipt.
 sudo -u tau env PATH="$PATH" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \

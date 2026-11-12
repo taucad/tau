@@ -16,9 +16,8 @@ import {
 import type { ShellInput as ChatShellInput } from '@taucad/chat';
 import type { ShellClient } from '@taucad/agent-tools/registry';
 
-import { isShellError, shellLimits, shellNotStartedCodes } from '#shell/shell-contract.js';
-import type { ShellInput, ShellOutput } from '#shell/shell-contract.js';
-import type { HostShell } from '#shell/shell-service.js';
+import { isShellError, shellLimits, shellNotStartedCodes } from '@taucad/shell-service';
+import type { HostShell, ShellInput, ShellOutput } from '@taucad/shell-service';
 import { hostMcpAllowedTools } from '#mcp-server.js';
 
 const stream = { text: 'ok\n', bytes: 3, truncated: false, undecodable: false } as const;

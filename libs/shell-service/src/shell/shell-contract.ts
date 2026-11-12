@@ -8,7 +8,7 @@
  * @module
  */
 import type { HostToolInvocation, JsonObject } from '@taucad/agent-host';
-import type { ShellKind } from '@taucad/native-process-core/shell';
+import type { ShellKind } from '@taucad/sandbox/shell/identity';
 
 /**
  * Shared bounds for the `shell` tool. Output is counted in bytes; the command and reason in UTF-16 code units.

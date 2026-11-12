@@ -236,7 +236,13 @@ describe('bundled shell supervisor', () => {
         minify: false,
         rolldownOptions: {
           input: { 'services-host': entry, 'shell-supervisor': supervisor },
-          external: [/^node:/u, '@taucad/host', '@taucad/native-process-core/shell', '@taucad/sandbox/shell'],
+          external: [
+            /^node:/u,
+            '@taucad/host',
+            '@taucad/native-process-core/shell',
+            '@taucad/sandbox/shell',
+            '@taucad/shell-service',
+          ],
           treeshake: { moduleSideEffects: false },
           output: { entryFileNames: '[name].js', chunkFileNames: 'chunks/[name].js' },
         },

@@ -107,85 +107,84 @@ export const currentRestoreRow = (page: Page): Locator =>
     .filter({ hasText: 'Current' })
     .filter({ hasText: /Restored /u });
 
+/** The pane's last line: where the backup is, its chooser and Manage (C2, C4). */
+export const backupLine = (page: Page): Locator =>
+  page.getByRole('region', { name: 'Backup' }).filter({ visible: true }).first();
+
 /**
- * Open the Sync region's chooser through the pane's own offer (A29, canvas
- * round 16): the strip's *Back up*, or More's *Back up…* while the strip's
- * button is *Save*. Nothing offers a backup before the first
- * revision (S1), so a project with none saves one first: from the strip when
- * it has edits, with the save chord when it has none — a fresh, unedited
- * project reads *Nothing saved yet* and its strip offers no verb at all.
- * A project that already has a remote shows the region directly, and so
- * does one an entitled account backs up by default (D19): its first revision
- * connects Tau Cloud itself, so the region can replace *Back up* before the
- * strip ever draws it.
+ * Open the Backup line's chooser through the pane's own offer (C2, C4): the
+ * line's *Back up to Tau Cloud* while the project is on this device only.
+ * The helper keeps S1's order — a backup follows the first revision — so a
+ * project with none saves one first: from the strip when it has edits, with
+ * the save chord when it has none (a fresh, unedited project reads *Nothing
+ * saved yet* and its strip offers no verb at all). A project that already has
+ * a remote shows its connected line instead, and so does one an entitled
+ * account backs up by default (D19): its first revision connects Tau Cloud
+ * itself, so the line can leave *This device only* before the offer is read.
  *
  * @param page - The page, with the Revisions pane open.
  */
 export const openBackupChooser = async (page: Page): Promise<void> => {
-  const sync = page.getByRole('region', { name: 'Sync' }).filter({ visible: true }).first();
+  const line = backupLine(page);
   const strip = revisionStrip(page);
-  const backUp = strip.getByRole('button', { name: 'Back up', exact: true });
+  const chooser = line.getByRole('radiogroup', { name: 'Where to back up' });
+  const connected = line.getByRole('status', { name: /^Backup (?:status|connection progress)$/u });
+  const backUp = line.getByRole('button', { name: 'Back up to Tau Cloud', exact: true });
   const save = strip.getByRole('button', { name: 'Save', exact: true });
-  const nothingSaved = strip.getByRole('status', { name: 'History status' }).filter({ hasText: 'Nothing saved yet' });
-  type Offer = 'sync' | 'backUp' | 'save' | 'nothingSaved';
+  const nothingSaved = revisionStatus(page).filter({ hasText: 'Nothing saved yet' });
+  type Offer = 'chooser' | 'connected' | 'unsaved' | 'nothingSaved' | 'backUp';
   const offerAmong = async (accepted: readonly Offer[]): Promise<Offer> => {
     let offer: Offer | undefined;
     await expect
       .poll(
         async () => {
-          offer = (await sync.isVisible())
-            ? 'sync'
-            : (await backUp.isVisible())
-              ? 'backUp'
-              : (await save.isVisible())
-                ? 'save'
-                : (await nothingSaved.isVisible())
-                  ? 'nothingSaved'
+          offer = (await chooser.isVisible())
+            ? 'chooser'
+            : (await connected.first().isVisible())
+              ? 'connected'
+              : (await nothingSaved.isVisible())
+                ? (await save.isVisible())
+                  ? 'unsaved'
+                  : 'nothingSaved'
+                : (await backUp.isVisible())
+                  ? 'backUp'
                   : undefined;
           return offer !== undefined && accepted.includes(offer);
         },
         { timeout: 120_000 },
       )
       .toBe(true);
-    return offer ?? 'sync';
+    return offer ?? 'chooser';
   };
-  let offer = await offerAmong(['sync', 'backUp', 'save', 'nothingSaved']);
-  if (offer === 'nothingSaved') {
+  let offer = await offerAmong(['chooser', 'connected', 'unsaved', 'nothingSaved', 'backUp']);
+  if (offer === 'unsaved') {
+    await save.click();
+    offer = await offerAmong(['chooser', 'connected', 'backUp']);
+  } else if (offer === 'nothingSaved') {
     await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+KeyS`);
-    offer = await offerAmong(['sync', 'backUp']);
-  }
-  if (offer === 'save') {
-    // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- Playwright's own locator method.
-    const status = await strip.getByRole('status', { name: 'History status' }).innerText();
-    if (status.includes('Nothing saved yet')) {
-      await save.click();
-      offer = await offerAmong(['sync', 'backUp']);
-    } else {
-      await strip.getByRole('button', { name: 'More', exact: true }).click();
-      await page.getByRole('menuitem', { name: 'Back up…' }).first().click();
-    }
+    offer = await offerAmong(['chooser', 'connected', 'backUp']);
   }
   if (offer === 'backUp') {
-    /* D19's default connection can replace *Back up* with the region between
-     * the read and the click; the region below is the outcome either way. */
+    /* D19's default connection can replace the offer with the connected line
+     * between the read and the click; the outcome below holds either way. */
     await backUp.click({ timeout: 15_000 }).catch(() => undefined);
   }
-  await sync.waitFor({ state: 'visible', timeout: 60_000 });
+  await offerAmong(['chooser', 'connected']);
 };
 
 /**
- * Connect Tau Cloud from an open Sync region.
+ * Connect Tau Cloud from an open Backup chooser.
  *
  * An entitled new project connects itself once its first revision exists
  * (D19), so the chooser is driven only when it is still offered after that has
  * had its chance; racing the default connection with a hand-picked one would
- * click a *Connect backup* that is about to unmount.
+ * click a *Back up to Tau Cloud* that is about to unmount.
  *
- * @param page - The page, with the Sync region open.
+ * @param page - The page, with the Backup chooser open.
  */
 export const connectTauCloud = async (page: Page): Promise<void> => {
-  const region = page.getByRole('region', { name: 'Sync' }).filter({ visible: true }).first();
-  const choice = region.getByRole('radio', { name: 'Tau Cloud' });
+  const chooser = backupLine(page).getByRole('radiogroup', { name: 'Where to back up' });
+  const choice = chooser.getByRole('radio', { name: 'Tau Cloud' });
   const stillOffered = await expect
     .poll(async () => choice.isVisible(), { timeout: 30_000 })
     .toBe(false)
@@ -197,5 +196,7 @@ export const connectTauCloud = async (page: Page): Promise<void> => {
     return;
   }
   await choice.click();
-  await region.getByRole('button', { name: 'Connect backup', exact: true }).click();
+  await backupLine(page)
+    .getByRole('button', { name: /^(?:Back up to Tau Cloud|Change backup)$/u })
+    .click();
 };

@@ -431,6 +431,36 @@ describe('useViewerShortcuts', () => {
       ]);
     });
 
+    it('should keep a newer pending G when an older write with the same value fails', async () => {
+      const actor = startGraphics();
+      const writes: Array<PromiseWithResolvers<boolean>> = [];
+      const set = vi.fn(async () => {
+        const write = Promise.withResolvers<boolean>();
+        writes.push(write);
+        return write.promise;
+      });
+      const user = userEvent.setup();
+      renderViewers(['Viewer', actor, { set, reset: vi.fn() }]);
+      hoverViewer('Viewer');
+      const isGridShown = actor.getSnapshot().context.enableGrid;
+
+      // Three presses: the first and third write the same value.
+      await user.keyboard('ggg');
+      const [first] = writes;
+      first!.resolve(false);
+      await first!.promise;
+      await Promise.resolve();
+      // The third write is still pending, so the next press toggles from it.
+      await user.keyboard('g');
+
+      expect(set.mock.calls.map((call: unknown[]) => call[1])).toEqual([
+        !isGridShown,
+        isGridShown,
+        !isGridShown,
+        isGridShown,
+      ]);
+    });
+
     it('should keep sending F, S and M to graphics with the host view commands', async () => {
       const actor = startGraphics();
       const send = recordSends(actor);

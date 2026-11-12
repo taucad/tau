@@ -83,6 +83,30 @@ describe('PrinterCameraControls', () => {
     expect(root.frames).toEqual([]);
   });
 
+  it('dollies a trackpad pinch on its surface as the wheel does, and stops once unmounted', () => {
+    const { domElement } = createRoot();
+    const controls = createRef<CameraControlsImpl>();
+    const view = render(<PrinterCameraControls ref={controls} {...feel} />);
+    const dollyTo = vi.spyOn(controls.current!, 'dollyTo');
+    const zoomTo = vi.spyOn(controls.current!, 'zoomTo');
+    const pinch = (type: string, scale: number): Event => {
+      const event = Object.assign(new Event(type, { cancelable: true }), { scale });
+      domElement.dispatchEvent(event);
+      return event;
+    };
+
+    pinch('gesturestart', 1);
+    expect(pinch('gesturechange', 2).defaultPrevented).toBe(true);
+    pinch('gestureend', 2);
+    expect(dollyTo).toHaveBeenCalledOnce();
+    expect(zoomTo).not.toHaveBeenCalled();
+
+    view.unmount();
+    pinch('gesturestart', 1);
+    expect(pinch('gesturechange', 2).defaultPrevented).toBe(false);
+    expect(dollyTo).toHaveBeenCalledOnce();
+  });
+
   it('reports a person-driven move and asks for a frame', () => {
     const { state } = createRoot();
     const controls = createRef<CameraControlsImpl>();

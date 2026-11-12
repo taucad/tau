@@ -5,6 +5,7 @@ import type { EventManager, RootState } from '@react-three/fiber';
 import CameraControlsImpl from 'camera-controls';
 import * as THREE from 'three';
 import type { CameraControlsFeel } from '@taucad/viewer/graphics/three/controls/camera-controls-feel';
+import { attachCameraWheelRouter } from '@taucad/viewer/graphics/three/controls/camera-wheel-router';
 
 let installed = false;
 const installCameraControls = (): void => {
@@ -71,7 +72,10 @@ export function PrinterCameraControls({
   const domElement = events.connected ?? gl.domElement;
   useEffect(() => {
     controls.connect(domElement);
+    // A trackpad pinch moves the camera as the wheel does, as it does in the viewer's own controls.
+    const detachWheelRouter = attachCameraWheelRouter({ controls, element: domElement });
     return () => {
+      detachWheelRouter();
       controls.disconnect();
     };
   }, [controls, domElement]);

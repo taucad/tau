@@ -450,6 +450,11 @@ streamingFadeTest('presents sequential reasoning and semantic activity through c
   await target.expectVisible(reasoningBody, 30_000);
 
   await target.setViewport({ width: 430, height: 820 });
+  /* A phone opens a project on the model (`mobileActiveTab: 'viewer'`, 4ea155f0b), and opening the desktop chat lane
+   * does not choose the phone's surface, so the narrow tree reaches the transcript through its Chat destination. */
+  await target.click(
+    selectors.getByRole('navigation', { name: 'Workbench' }).getByRole('button', { name: 'Chat', exact: true }),
+  );
   const alignment = await target.evaluateLocator(activityTrigger, (element) => {
     const icon = element.querySelector('svg');
     const label = element.querySelector('span');

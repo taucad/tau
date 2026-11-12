@@ -8,6 +8,8 @@ import type { CheckedFileWriteResult } from '@taucad/types';
 import { editViewFile } from '#workbench-records/view-actions.js';
 import { exceptionsForView, viewExceptions, viewExceptionsStore } from '#workbench-records/view-exceptions.js';
 import { createViewFieldCommands } from '#workbench-records/view-field-commands.js';
+import type { ViewFieldCommandPorts } from '#workbench-records/view-field-commands.js';
+import type { SectionWriteResult } from '#preferences/section-store.js';
 
 const encoder = new TextEncoder();
 const root = '/projects/p';
@@ -49,14 +51,19 @@ const files = {
 };
 
 const onError = vi.fn();
-const commands = createViewFieldCommands({
+let addResult: SectionWriteResult | undefined;
+const ports = {
   projectId: 'p',
-  edit: async (id, change) => editViewFile({ root, viewId: id, files, change, onError }),
+  edit: async (id: string, change: (current: WorkbenchView | undefined) => WorkbenchView) =>
+    editViewFile({ root, viewId: id, files, change, onError }),
   personDefaults: () => defaults,
-  addException: viewExceptions.add,
+  exceptionsOf: (projectId: string, id: string) => exceptionsForView(viewExceptionsStore.read(), projectId, id),
+  addException: (projectId: string, id: string, leaf: ViewFieldPath): SectionWriteResult =>
+    addResult ?? viewExceptions.add(projectId, id, leaf),
   removeException: viewExceptions.remove,
   clearExceptions: viewExceptions.clearView,
-});
+} satisfies ViewFieldCommandPorts;
+const commands = createViewFieldCommands(ports);
 
 const record = (): WorkbenchView => {
   const read = workbenchRecords.view.read(content.get(path)!);
@@ -79,6 +86,7 @@ beforeEach(() => {
   ]);
   defaults = {};
   conflictNext = false;
+  addResult = undefined;
   onError.mockClear();
 });
 
@@ -163,6 +171,52 @@ describe('view field commands', () => {
     content.set(path, encoder.encode('{"version":2}'));
     expect(await commands.setViewField(view, 'display.grid', false)).toBe(false);
     expect(new TextDecoder().decode(content.get(path))).toBe('{"version":2}');
+  });
+
+  it('puts the exception back when the record write is refused', async () => {
+    defaults = { 'display.grid': false };
+    content.set(path, encoder.encode('{"version":2}'));
+    expect(await commands.setViewField(view, 'display.grid', true)).toBe(false);
+    expect(exceptions()).toEqual([]);
+  });
+
+  it('keeps the exception a failed reset would have removed', async () => {
+    defaults = { 'display.grid': false };
+    await commands.setViewField(view, 'display.grid', true);
+    content.set(path, encoder.encode('{"version":2}'));
+    expect(await commands.resetViewField(view, 'display.grid')).toBe(false);
+    expect(await commands.resetView(view)).toBe(false);
+    expect(exceptions()).toEqual(['display.grid']);
+  });
+
+  it('puts the exception back when the record edit throws', async () => {
+    defaults = { 'display.grid': false };
+    const throwing = createViewFieldCommands({
+      ...ports,
+      edit: async () => {
+        throw new Error('disk gone');
+      },
+    });
+    await expect(throwing.setViewField(view, 'display.grid', true)).rejects.toThrow('disk gone');
+    expect(exceptions()).toEqual([]);
+  });
+
+  it('writes nothing and reports failure when the device refuses the exception', async () => {
+    defaults = { 'display.grid': false };
+    const before = new TextDecoder().decode(content.get(path));
+    addResult = 'refused';
+    expect(await commands.setViewField(view, 'display.grid', true)).toBe(false);
+    expect(new TextDecoder().decode(content.get(path))).toBe(before);
+    addResult = 'newer';
+    expect(await commands.setViewField(view, 'display.grid', true)).toBe(false);
+    expect(new TextDecoder().decode(content.get(path))).toBe(before);
+  });
+
+  it('needs no exception write for a value away from the format value, so a newer section never blocks it', async () => {
+    defaults = { 'display.grid': false };
+    addResult = 'newer';
+    expect(await commands.setViewField(view, 'display.grid', false)).toBe(true);
+    expect(record().display.grid).toBe(false);
   });
 
   it('retries a conflicting write against the bytes it re-reads', async () => {

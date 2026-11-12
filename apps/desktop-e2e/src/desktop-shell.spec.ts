@@ -1,10 +1,11 @@
 /* oxlint-disable no-template-curly-in-string -- These placeholders are expanded by Bash, never JavaScript. */
 import { access, readFile, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { BrowserWindow } from 'electron';
+import type { Page } from 'playwright';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import {
@@ -28,6 +29,13 @@ import {
 } from '#support/shell-qualification.js';
 
 let session: DesktopSession | undefined;
+
+const workspaceRoot = resolve(import.meta.dirname, '../../..');
+
+/** DSK-16/DSK-20 evidence: the docked Terminal in the production workbench, collected with the row's application evidence. */
+const evidenceShot = async (page: Page, name: string): Promise<void> => {
+  await page.screenshot({ path: join(workspaceRoot, `out/test-results/desktop-e2e/terminal-${name}.png`) });
+};
 
 beforeEach(async () => {
   // These keyboard fixtures certify Linux only. A missing native row is not a skipped passing row.
@@ -257,6 +265,8 @@ describe('production Electron Terminal keyboard qualification', () => {
       .getByRole('button', { name: 'Request access', exact: true })
       .click();
     const decision = page.locator('[data-slot="terminal-access-decision"]');
+    await decision.waitFor({ state: 'visible' });
+    await evidenceShot(page, 'workbench-access-decision');
     await decision.getByRole('button', { name: 'Allow and restart', exact: true }).click();
     await expect
       .poll(async () => page.getByRole('status').allTextContents())
@@ -317,6 +327,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     await expectTerminalFile(root, 'flood.txt', 'flood-finished');
     await typeTerminalCommand(page, String.raw`printf 'after-focus-%s\n' 'visible'`);
     await expectTerminalScreen(page, 'after-focus-visible');
+    await evidenceShot(page, 'workbench-hostile-output');
     expect(await page.locator('[data-terminal-announcer] > div').count()).toBeLessThanOrEqual(100);
     await page.keyboard.press('Shift+Escape');
     await expect
@@ -347,6 +358,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     await typeTerminalCommand(page, String.raw`printf 'zoom-%s\n' visible; printf zoomed > zoom.txt`);
     await expectTerminalFile(root, 'zoom.txt', 'zoomed');
     await expectTerminalScreen(page, 'zoom-visible');
+    await evidenceShot(page, 'workbench-zoom-forced-colors');
     await page.keyboard.press('Shift+Escape');
     await expect
       .poll(async () => terminalRegion(page).evaluate((element) => element === document.activeElement))

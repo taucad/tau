@@ -12,7 +12,8 @@ import { lfsObjectLocations } from '@taucad/api-git-core/lfs-keys';
  * Moved out of `lfs-keys.ts` unchanged (north star DC4): that module is on the
  * API's request path, and this one deletes the legacy key. Kept here, the
  * delete is reachable only from the maintenance image
- * (`app/delete-reachability.test.ts`). It still has no subcommand
+ * (`app/delete-reachability.test.ts`). The `relocate-lfs` subcommand of
+ * `maintenance-command.ts` runs it through `lfs-relocation-run.ts`
  * (go-live STO-7).
  */
 

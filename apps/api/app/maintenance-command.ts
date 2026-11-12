@@ -29,6 +29,13 @@ import { freezeEverything, parseFreezeSeconds, thawEverything } from '@taucad/ap
 import { RedisInFlightRegistry } from '@taucad/api-git-core/routing/in-flight';
 import type { ScheduledMaintenanceCommand } from '@taucad/api-git-mirror/maintenance/liveness';
 import { holdInStandby } from '@taucad/api-git-mirror/maintenance/standby';
+import { relocateLegacyLfsObjects } from '@taucad/api-git-mirror/maintenance/lfs-relocation';
+import {
+  lfsRelocationProjects,
+  lfsRelocationRows,
+  parseLfsRelocationConcurrency,
+  relocateLegacyLfsInventory,
+} from '@taucad/api-git-mirror/maintenance/lfs-relocation-run';
 import { applicationNameOf } from '@taucad/api-database/application-name';
 
 /**
@@ -111,6 +118,20 @@ const usage = `Usage: revisions-maintenance <command>
       window and that a fresh walk of its repository still does not reach. One
       read-only lease per project that has a candidate; --dry-run lists the
       candidates and hydrates nothing.
+
+  relocate-lfs [--confirm] [--project <id>] [--after <projectId>] [--concurrency <n>]
+      Move pre-D24 LFS objects from blobs/ to their owner's tenant key (go-live
+      STO-7). A dry run unless --confirm: every active project in this account
+      with an LFS reservation is surveyed with HEADs only and one
+      revisions_maintenance.lfs_relocation line per project counts its
+      legacyOnly, both, tenantOnly and missing objects. With --confirm each
+      project that still holds a legacy key is relocated (verify, copy, delete
+      the legacy key, under the owner lock). Projects run --concurrency at a
+      time (dry run 1-16, default 4; --confirm 1-2, default 1, since each
+      worker buffers a whole object). Safe to rerun; --after <projectId>, the
+      resumeAfter of the last line, skips the finished prefix. Ends with one
+      revisions_maintenance.lfs_relocation_summary line; exits 1 when any
+      project failed. Never scheduled.
 
   collect-blobs [--confirm] [--dry-run]
       Delete publication blobs whose reference count is zero, in one bounded batch.
@@ -612,6 +633,40 @@ async function main(): Promise<void> {
             await writeLine(JSON.stringify(outcome));
           }
         });
+        break;
+      }
+      case 'relocate-lfs': {
+        const confirm = args.includes('--confirm');
+        const concurrency = parseLfsRelocationConcurrency(option(args, 'concurrency'), confirm);
+        const after = option(args, 'after');
+        const projectId = option(args, 'project');
+        const stop = new AbortController();
+        const stopRelocation = (): void => {
+          stop.abort();
+        };
+        process.once('SIGTERM', stopRelocation);
+        process.once('SIGINT', stopRelocation);
+        try {
+          const summary = await relocateLegacyLfsInventory(
+            {
+              projects: lfsRelocationProjects(database, {
+                accountId: driver.account.id,
+                ...(after === undefined ? {} : { after: required(args, 'after') }),
+                ...(projectId === undefined ? {} : { projectId: required(args, 'project') }),
+              }),
+              rows: async (id) => lfsRelocationRows(database, id),
+              storage: driver,
+              relocate: async (target) => relocateLegacyLfsObjects({ database, storage: driver }, target),
+            },
+            { confirm, concurrency, report: writeLine, signal: stop.signal },
+          );
+          if (summary.failed.length > 0 || summary.interrupted) {
+            process.exitCode = 1;
+          }
+        } finally {
+          process.removeListener('SIGTERM', stopRelocation);
+          process.removeListener('SIGINT', stopRelocation);
+        }
         break;
       }
       case 'collect-blobs': {

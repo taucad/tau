@@ -1,5 +1,9 @@
 /**
  * `exitNow` ends the process it runs in, so each case runs in its own Node child.
+ *
+ * The child loads `exit-now.ts` with Node's own type stripping, not `--import tsx`: tsx answers the `node:wasi`
+ * import from its loader thread, and libc `exit` racing that thread's teardown can end the child on a signal, a
+ * child no CLI build has (CI run 43163175760).
  */
 
 import { spawnSync } from 'node:child_process';
@@ -13,15 +17,15 @@ const exitNowUrl = pathToFileURL(new URL('exit-now.ts', import.meta.url).pathnam
  * Run a script that imports `exitNow` in a fresh Node.
  *
  * @param body - Statements run after the import.
- * @returns The child's exit status and its stderr.
+ * @returns The child's exit status, or the signal that ended it, and its stderr.
  */
-const run = (body: string): { readonly status: number | undefined; readonly stderr: string } => {
+const run = (body: string): { readonly status: number | string | undefined; readonly stderr: string } => {
   const result = spawnSync(
     process.execPath,
-    ['--import', 'tsx', '--input-type=module', '-e', `import { exitNow } from ${JSON.stringify(exitNowUrl)};\n${body}`],
+    ['--input-type=module', '-e', `import { exitNow } from ${JSON.stringify(exitNowUrl)};\n${body}`],
     { encoding: 'utf8', timeout: 30_000 },
   );
-  return { status: result.status ?? undefined, stderr: result.stderr };
+  return { status: result.status ?? result.signal ?? undefined, stderr: result.stderr };
 };
 
 describe('exitNow', () => {

@@ -350,4 +350,28 @@ describe('graphics presentation seams before the presentation actor (G11b charac
       actor.stop();
     }
   });
+  it('should raise the pickable mesh version on each commit and artifact change, but not on a GLB request', () => {
+    const actor = createGraphicsActor();
+    actor.start();
+    try {
+      const version = (): number => actor.getSnapshot().context.pickableMeshesVersion;
+      const start = version();
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      expect(version()).toBe(start);
+      actor.send({ type: 'gltfPresentationCommitted', revision: 1, key: 'a', unitId: 'unit:a', manifest });
+      expect(version()).toBe(start + 1);
+
+      // The same key and manifest at a new revision is a new scene: Measure must drop its picks of the old one.
+      actor.send({ type: 'updateArtifact', artifact: artifact(), hash: 'a' });
+      actor.send({ type: 'gltfPresentationCommitted', revision: 2, key: 'a', unitId: 'unit:a', manifest });
+      expect(version()).toBe(start + 2);
+
+      actor.send({ type: 'updateArtifact', artifact: { mimeType: 'image/svg+xml', content: '<svg/>' }, hash: 'svg' });
+      expect(version()).toBe(start + 3);
+      actor.send({ type: 'clearArtifact' });
+      expect(version()).toBe(start + 4);
+    } finally {
+      actor.stop();
+    }
+  });
 });

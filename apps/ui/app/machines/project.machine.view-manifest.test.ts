@@ -156,7 +156,7 @@ describe('project view manifest reconciliation (G11b characterisation)', () => {
     }
   });
 
-  it('should clear the manifest on request once the view that presented it shows something else', () => {
+  it('should clear the manifest on request once the view that presented it is cleared', () => {
     const project = createProjectActor().start();
     try {
       presentInView(project, 'v1', 'unit:a');

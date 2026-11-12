@@ -5,7 +5,6 @@ import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { BrowserWindow } from 'electron';
-import type { Page } from 'playwright';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import {
@@ -33,7 +32,7 @@ let session: DesktopSession | undefined;
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 
 /** DSK-16/DSK-20 evidence: the docked Terminal in the production workbench, collected with the row's application evidence. */
-const evidenceShot = async (page: Page, name: string): Promise<void> => {
+const evidenceShot = async (page: DesktopSession['page'], name: string): Promise<void> => {
   await page.screenshot({ path: join(workspaceRoot, `out/test-results/desktop-e2e/terminal-${name}.png`) });
 };
 

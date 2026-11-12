@@ -1,12 +1,23 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
+import type { SnapshotFrom } from 'xstate';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
+import type { CameraView } from '@taucad/camera';
+import type { ThreeCameraRig } from '@taucad/three/camera';
 import { fromThreeRenderBounds } from '@taucad/three/spatial';
-import { useGraphics, useGraphicsSelector, useKinematicsRef, useRenderFrame } from '#hooks/use-graphics.jsx';
+import {
+  useCameraRig,
+  useGraphics,
+  useGraphicsSelector,
+  useKinematicsSelector,
+  useRenderFrame,
+} from '#hooks/use-graphics.jsx';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
 import { sceneTag } from '#graphics/three/utils/scene-tags.js';
-import type { KinematicsMachineContext } from '#machines/kinematics.machine.js';
+import { resolveFramingStage } from '#graphics/three/framing-stage.js';
+import type { StageOptions } from '#graphics/three/stage-options.js';
+import type { KinematicsMachineContext, kinematicsMachine } from '#machines/kinematics.machine.js';
 
 /** Retains Three's default object bounds while omitting presentation-only subtrees. */
 class GeometryBoundsBox extends THREE.Box3 {
@@ -27,6 +38,17 @@ const _sphere = new THREE.Sphere();
 const isPoseMoving = ({ unitsById }: KinematicsMachineContext): boolean =>
   Object.values(unitsById).some((unit) => unit.drag !== undefined || unit.playback.status === 'playing');
 
+/**
+ * The pose revision once it has settled, and `undefined` while a drag or a clip still moves it. A settled revision
+ * covers every pose change: the drags `poseSettled` reports, and the slider edits, resets, seeks and finished clips it
+ * does not.
+ */
+const selectSettledPoseRevision = ({ context }: SnapshotFrom<typeof kinematicsMachine>): number | undefined =>
+  isPoseMoving(context) ? undefined : context.revision;
+
+/** The camera's view, which supplies the up a configured orientation keeps and the surface's pixel ratio. */
+const selectCameraView = (rig: ThreeCameraRig): CameraView => rig.actorRef.getSnapshot().context.view;
+
 type GeometryBoundsResult = {
   /** The bounding sphere radius of the geometry. */
   geometryRadius: number;
@@ -34,14 +56,13 @@ type GeometryBoundsResult = {
   geometryCenter: THREE.Vector3;
   /** Immutable snapshot of the geometry's world-space bounding box. */
   geometryBounds: THREE.Box3;
-  /** Whether these bounds came from posing existing geometry rather than loading new geometry. */
-  isPoseUpdate: boolean;
 };
 
 /**
  * Tracks the axis-aligned bounding box of the geometry inside `innerRef`,
- * exposes the bounding sphere radius and center as React state, and syncs
- * the radius to the graphics state machine.
+ * exposes the bounding sphere radius and center as React state, and reports
+ * each new measurement to the graphics actor as `geometryBoundsMeasured`,
+ * which anchors the render frame and frames the camera (charter G5).
  *
  * Integrates with the graphics machine's `geometryKey` to avoid expensive
  * scene traversals once bounds have stabilized — they are only recomputed
@@ -50,21 +71,26 @@ type GeometryBoundsResult = {
  *
  * Native render-local bounds are inverted through the current render frame;
  * callers therefore always receive physical metres.
+ *
+ * ponytail: the measuring half of the framing wiring until the presentation actor (G11b) measures on commit.
  */
 export function useGeometryBounds(
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React refs use null
   innerRef: RefObject<THREE.Group | null>,
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React refs use null
   outerRef: RefObject<THREE.Group | null>,
+  stageOptions?: StageOptions,
 ): GeometryBoundsResult {
   const geometryKey = useGraphicsSelector(selectPresentedGeometryKey);
   const renderFrame = useRenderFrame();
+  const graphicsActor = useGraphics();
+  const cameraRig = useCameraRig();
+  const get = useThree((state) => state.get);
 
-  const [{ geometryRadius, geometryCenter, geometryBounds, isPoseUpdate }, set] = useState<GeometryBoundsResult>({
+  const [{ geometryRadius, geometryCenter, geometryBounds }, set] = useState<GeometryBoundsResult>({
     geometryRadius: 0,
     geometryCenter: new THREE.Vector3(),
     geometryBounds: new THREE.Box3(),
-    isPoseUpdate: false,
   });
 
   // Track geometry key changes to avoid expensive per-frame scene traversal.
@@ -72,27 +98,12 @@ export function useGeometryBounds(
   // then skipped entirely during orbit/pan/zoom.
   const lastGeometryKeyRef = useRef<string | undefined>(undefined);
   const boundsStableRef = useRef(false);
-  const isPoseUpdateRef = useRef(false);
 
   // A pose moves parts without a new geometry key, so bounds are measured again once it settles. Measuring
-  // mid-drag would move the bounds under the pointer. Settled pose bounds keep the camera where the user put it.
-  const kinematicsRef = useKinematicsRef();
-  const invalidate = useThree((state) => state.invalidate);
-  useEffect(() => {
-    let measuredRevision = kinematicsRef.getSnapshot().context.revision;
-    const subscription = kinematicsRef.subscribe(({ context }) => {
-      if (context.revision === measuredRevision || isPoseMoving(context)) {
-        return;
-      }
-      measuredRevision = context.revision;
-      isPoseUpdateRef.current = true;
-      boundsStableRef.current = false;
-      invalidate();
-    });
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [invalidate, kinematicsRef]);
+  // mid-drag would move the bounds under the pointer. The same key re-measured only refreshes the camera's bounds,
+  // so settled pose bounds keep the camera where the person put it.
+  const settledPoseRevision = useKinematicsSelector(selectSettledPoseRevision);
+  const lastPoseRevisionRef = useRef(settledPoseRevision);
 
   const measureBounds = useCallback(() => {
     if (!innerRef.current) {
@@ -103,7 +114,10 @@ export function useGeometryBounds(
     if (geometryKey !== lastGeometryKeyRef.current) {
       lastGeometryKeyRef.current = geometryKey;
       boundsStableRef.current = false;
-      isPoseUpdateRef.current = false;
+    }
+    if (settledPoseRevision !== undefined && settledPoseRevision !== lastPoseRevisionRef.current) {
+      lastPoseRevisionRef.current = settledPoseRevision;
+      boundsStableRef.current = false;
     }
 
     // Skip expensive scene traversal and matrix updates once bounds have
@@ -154,7 +168,19 @@ export function useGeometryBounds(
     // to guard against cross-contamination if React batches updates across
     // multiple Canvas instances sharing the same module-level _sphere / _centerPoint.
     const snapshotRadius = _sphere.radius;
-    const snapshotIsPoseUpdate = isPoseUpdateRef.current;
+
+    // The graphics actor anchors the render frame on a new key's geometry and the framing actor frames the camera,
+    // before this frame draws. The stage is resolved now: the configured orientation keeps the camera's current up.
+    const { size } = get();
+    const view = selectCameraView(cameraRig);
+    graphicsActor.send({
+      type: 'geometryBoundsMeasured',
+      key: geometryKey,
+      bounds: { min: [...physicalBounds.min], max: [...physicalBounds.max] },
+      radius: snapshotRadius,
+      viewport: { ...view.viewport, width: size.width, height: size.height },
+      stage: resolveFramingStage(stageOptions, view.up),
+    });
 
     // Only update state when the measured bounds have actually changed.
     set((previous) => {
@@ -170,10 +196,9 @@ export function useGeometryBounds(
         geometryRadius: snapshotRadius,
         geometryCenter: centerChanged ? snapshotCenter : previous.geometryCenter,
         geometryBounds: boundsChanged ? snapshotBounds : previous.geometryBounds,
-        isPoseUpdate: snapshotIsPoseUpdate,
       };
     });
-  }, [geometryKey, innerRef, outerRef, renderFrame]);
+  }, [cameraRig, geometryKey, get, graphicsActor, innerRef, outerRef, renderFrame, settledPoseRevision, stageOptions]);
 
   // Committed geometry and saved pose are attached before layout effects. Fit the
   // active camera before its first draw; the frame callback handles settled poses.
@@ -183,7 +208,6 @@ export function useGeometryBounds(
   // Sync the real bounding-sphere radius to the graphics machine so other
   // components (and downstream consumers of geometryRadius) get the actual value
   // computed from the Three.js scene graph, not a placeholder.
-  const graphicsActor = useGraphics();
   useEffect(() => {
     if (geometryRadius > 0) {
       graphicsActor.send({
@@ -194,5 +218,5 @@ export function useGeometryBounds(
     }
   }, [geometryCenter, graphicsActor, geometryRadius]);
 
-  return { geometryRadius, geometryCenter, geometryBounds, isPoseUpdate };
+  return { geometryRadius, geometryCenter, geometryBounds };
 }

@@ -34,7 +34,7 @@ import { ViewerEnvironmentProvider, defaultViewerEnvironment } from '@taucad/vie
 import type { ViewerEnvironment } from '@taucad/viewer/environment/viewer-environment';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
 import { GraphicsProvider } from '@taucad/viewer/hooks/use-graphics';
-import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import { graphicsMachine, selectGraphicsFramed } from '@taucad/viewer/machines/graphics.machine';
 import type { GraphicsCameraRef } from '@taucad/viewer/machines/graphics.machine';
 import { buildGeometryComponentReference } from '@taucad/viewer/graphics/metadata/geometry-component-reference';
 import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
@@ -414,8 +414,8 @@ const addedKeyOf = (model: TauViewerModel): string => model.sourceFile ?? model.
 const selectFramedCameraView = (
   graphicsRef: ActorRefFrom<typeof graphicsMachine>,
 ): SnapshotFrom<GraphicsCameraRef>['context']['view'] | undefined => {
-  const { cameraRef, cameraFraming } = graphicsRef.getSnapshot().context;
-  return cameraFraming.initialized ? cameraRef.getSnapshot().context.view : undefined;
+  const snapshot = graphicsRef.getSnapshot();
+  return selectGraphicsFramed(snapshot) ? snapshot.context.cameraRef.getSnapshot().context.view : undefined;
 };
 
 /**

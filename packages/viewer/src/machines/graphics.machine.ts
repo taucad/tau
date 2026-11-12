@@ -19,13 +19,14 @@ import { getLengthUnit, metersPerLengthUnit } from '#constants/length-units.js';
 import type { LengthSymbol, UnitSystem } from '#constants/length-units.js';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { createCameraView } from '@taucad/camera';
+import type { CameraBounds } from '@taucad/camera';
 import { cameraMachine } from '@taucad/camera/machine';
 import type { CameraMachineEmitted } from '@taucad/camera/machine';
+import { resolveMetersPerRenderUnit } from '@taucad/spatial';
 import type {
   CameraOwnedSettings,
   GraphicsBackendPreference,
   GraphicsOwnedSettings,
-  PersistedCameraView,
   PersistedSectionView,
   PinnedMeasurement,
   ResolvedGraphicsBackend,
@@ -48,6 +49,11 @@ import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
 import { canvasMachine } from '#machines/canvas.machine.js';
+import { framingMachine } from '#machines/framing.machine.js';
+import type { FramingEvent, FramingPendingPose } from '#machines/framing.machine.js';
+import { sectionInputMachine } from '#machines/section-input.machine.js';
+import type { SectionInputAdapterLogic } from '#machines/section-input.machine.js';
+import { defaultFramingStage } from '#graphics/three/framing-stage.js';
 import type { CanvasRef, CanvasSurfaceKind } from '#machines/canvas.machine.js';
 import type { webglContextMachine } from '#machines/webgl-context.machine.js';
 import type { MeasurementAnchor, MeasurementRecord, MeasurementOperation } from '#constants/measurement.types.js';
@@ -86,25 +92,27 @@ export type ControlsAdapterLogic = CallbackActorLogic<
 >;
 
 /**
- * One-time framing record for an entry identity, mutated in place by the canvas framing hook.
- *
- * ponytail: a temporary bridge from the deleted camera-session registry, plain data only (charter D4). The framing
- * actor (G5b) replaces it and deletes this field.
+ * The record fields a view's framing applies once after its entry's first frame, as `entryChanged` carries them.
  *
  * @public
  */
-export type ViewCameraFraming = {
-  /** Entry path whose geometry this record describes; a change re-latches the other fields. */
-  identity: string | undefined;
-  /** Persisted pose to apply once the first geometry has been framed. */
-  pendingView: PersistedCameraView | undefined;
-  /** A record orientation already applied to the camera before first geometry; fit without configured angles. */
-  preserveOrientationOnFirstFrame: boolean;
-  /** The automatic first-frame result, so its fitted span and zoom are not mistaken for a person orbit. */
-  firstFrameView: PersistedCameraView | undefined;
-  /** Whether the first real geometry has already been framed for this identity. */
-  initialized: boolean;
-};
+export type GraphicsPendingPose = FramingPendingPose;
+
+/**
+ * Actor reference for the framing actor spawned by a graphics actor: it decides when the view's geometry is framed
+ * and sends the camera the event that does it (charter D2, D20; I7, I8).
+ *
+ * @public
+ */
+export type GraphicsFramingRef = ActorRefFrom<typeof framingMachine>;
+
+/**
+ * Actor reference for a section input a graphics actor runs: the gesture machine with the DOM adapter its section
+ * handles provided.
+ *
+ * @public
+ */
+export type GraphicsSectionInputRef = ActorRefFrom<typeof sectionInputMachine>;
 
 /**
  * A reason for ignoring pointer clicks on the model, such as an active measure tool.
@@ -361,8 +369,18 @@ export interface GraphicsContext {
    * the camera keeps its pose.
    */
   cameraPresented: boolean;
-  /** See {@link ViewCameraFraming}: a plain-data bridge the framing actor (G5b) deletes. */
-  cameraFraming: ViewCameraFraming;
+  /** The view's framing actor, beside its camera: it frames the entry's first geometry and refits on a large change. */
+  framingRef: GraphicsFramingRef;
+  /**
+   * The presentation key the camera's render frame is anchored for. A measurement of a new key re-anchors the frame on
+   * its geometry; a re-measured key (a settled pose, a remount) keeps it.
+   */
+  renderFrameKey: string | undefined;
+  /**
+   * The section input of the mounted section handles. It stops with them, so a remount or a new surface replaces it
+   * and never runs two.
+   */
+  sectionInput: Readonly<{ inputId: string; ref: GraphicsSectionInputRef }> | undefined;
 
   // Geometry data from CAD
   artifact: KnownArtifact | undefined;
@@ -423,6 +441,24 @@ export type GraphicsEvent =
    * re-delivery for the running adapter's surface changes nothing.
    */
   | { type: 'controlsAttached'; canvasId: string; adapter: ControlsAdapterLogic }
+  /**
+   * Section handles mounted around a surface: graphics starts their section input with this DOM adapter, replacing the
+   * one it ran. A re-delivery for the running input changes nothing.
+   */
+  | { type: 'sectionInputAttached'; inputId: string; adapter: SectionInputAdapterLogic }
+  /** The section handles left: their section input stops, and gives back whatever it held. */
+  | { type: 'sectionInputDetached'; inputId: string }
+  // Framing events
+  /**
+   * The view's entry: a new identity frames its first geometry again, with the record's pose applied after that
+   * frame. Before the first frame, the latest record for the same entry replaces the pending pose.
+   */
+  | { type: 'entryChanged'; identity: string; pendingPose?: FramingPendingPose }
+  /**
+   * The presented geometry was measured, in metres, with the host's resolved stage and surface. A new key anchors the
+   * render frame on it; the framing actor decides whether the camera frames, refits or only takes the bounds.
+   */
+  | Extract<FramingEvent, { type: 'geometryBoundsMeasured' }>
   // Section view events
   /** Turning the section on with no cuts adds the default plane, removing the side `viewDirection` faces. */
   | { type: 'setSectionViewActive'; payload: boolean; viewDirection?: SectionVector }
@@ -643,6 +679,10 @@ export const graphicsEventTypes = [
   'canvasAttached',
   'canvasDetached',
   'controlsAttached',
+  'sectionInputAttached',
+  'sectionInputDetached',
+  'entryChanged',
+  'geometryBoundsMeasured',
   'setSectionViewActive',
   'adoptSectionView',
   'addSectionCut',
@@ -735,6 +775,7 @@ export type AddSectionCutPayload =
  */
 export type GraphicsEmitted =
   | { type: 'gridUpdated'; sizes: GridSizes }
+  /** Fit view, for a viewer with no camera: the SVG pan-zoom resets on it. The 3D camera fits through framing. */
   | { type: 'viewFitRequested' }
   | { type: 'geometryRadiusCalculated'; radius: number };
 
@@ -858,6 +899,7 @@ const graphicsActors = {
   kinematics: kinematicsMachine,
   canvas: canvasMachine,
   camera: cameraMachine,
+  framing: framingMachine,
 };
 
 type GraphicsEnqueue = EnqueueObject<GraphicsEvent, GraphicsEmitted, SystemRegistry, typeof graphicsActors>;
@@ -991,6 +1033,16 @@ const webGpuOffContext = ({ context }: { context: GraphicsContext }): GraphicsPa
   resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
 });
 
+/** The frame every view's camera is placed in; the render frame anchors on it. */
+const cameraFrameId = 'tau:root';
+
+/** The centre of measured bounds, in metres. */
+const boundsCenter = ({ min, max }: CameraBounds): [number, number, number] => [
+  (min[0] + max[0]) / 2,
+  (min[1] + max[1]) / 2,
+  (min[2] + max[2]) / 2,
+];
+
 /** The camera's opening direction when the view has no persisted pose. */
 const initialCameraDirection = [Math.sqrt(3 / 8), -Math.sqrt(3 / 8), 0.5] as const;
 const upAxisVectors = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] } as const;
@@ -1009,7 +1061,7 @@ const cameraSeed = (input: GraphicsInput, upDirection: 'x' | 'y' | 'z') => {
         verticalSpan: 4,
         perspectiveZoom: 1,
       }),
-      frameId: 'tau:root',
+      frameId: cameraFrameId,
       // Matches `defaultGraphicsSettings.cameraFovAngle`.
       requestedVerticalFieldOfView: input.camera?.cameraFovAngle ?? 60,
       viewport: {
@@ -1045,6 +1097,8 @@ const graphicsMachineDefinition = setup({
         id: 'model-interaction',
         input: {},
       });
+    const seed = cameraSeed(input, input.upDirection ?? 'z');
+    const cameraRef = spawn(actors.camera, { id: 'camera', input: seed });
 
     return {
       // Grid state
@@ -1125,16 +1179,20 @@ const graphicsMachineDefinition = setup({
       ownsModelInteractionRef,
       modelInteractionUnitId: undefined,
       kinematicsRef: spawn(actors.kinematics, { id: 'kinematics', input: {} }),
-      cameraRef: spawn(actors.camera, { id: 'camera', input: cameraSeed(input, input.upDirection ?? 'z') }),
+      cameraRef,
+      framingRef: spawn(actors.framing, {
+        id: 'framing',
+        input: {
+          camera: cameraRef,
+          // The camera opens on the persisted pose, and framing applies it again over the entry's first frame.
+          pendingPose: input.camera?.cameraView && { requestId: 'seed', pose: input.camera.cameraView },
+          ...defaultFramingStage(seed.initialView.up),
+        },
+      }),
+      renderFrameKey: undefined,
+      sectionInput: undefined,
       controlsAdapter: undefined,
       cameraPresented: false,
-      cameraFraming: {
-        identity: undefined,
-        pendingView: input.camera?.cameraView,
-        preserveOrientationOnFirstFrame: false,
-        firstFrameView: undefined,
-        initialized: false,
-      },
 
       // Shapes
       artifact: undefined,
@@ -1157,6 +1215,10 @@ const graphicsMachineDefinition = setup({
     if (context.canvas) {
       enq.stop(context.canvas.ref);
     }
+    if (context.sectionInput) {
+      enq.stop(context.sectionInput.ref);
+    }
+    enq.stop(context.framingRef);
     enq.stop(context.cameraRef);
   },
   initial: 'operational',
@@ -1221,9 +1283,31 @@ const graphicsMachineDefinition = setup({
         },
 
         // Camera events
-        fitView: (_, enq) => {
+        fitView: ({ context }, enq) => {
+          // Fit view zooms and recentres the camera on the latest measurement; it never turns it (framing).
+          enq.sendTo(context.framingRef, { type: 'fitRequested' });
           enq.emit({ type: 'viewFitRequested' });
           return {};
+        },
+        entryChanged: ({ context, event }, enq) => {
+          enq.sendTo(context.framingRef, event);
+          return {};
+        },
+        geometryBoundsMeasured: ({ context, event }, enq) => {
+          const anchored = event.key === context.renderFrameKey || !(event.radius > 0);
+          if (!anchored) {
+            // A new presentation anchors the render frame on its geometry before the camera frames it, as the stage did.
+            enq.sendTo(context.cameraRef, {
+              type: 'setRenderFrame',
+              renderFrame: {
+                anchorFrameId: cameraFrameId,
+                originMeters: boundsCenter(event.bounds),
+                metersPerRenderUnit: resolveMetersPerRenderUnit({ characteristicLengthMeters: event.radius * 2 }),
+              },
+            });
+          }
+          enq.sendTo(context.framingRef, event);
+          return anchored ? {} : { context: { renderFrameKey: event.key } };
         },
         cameraViewChanged: ({ context, event, self }, enq) => {
           // Every camera change emits `viewChanged`; only a new span re-derives the grid.
@@ -1319,6 +1403,27 @@ const graphicsMachineDefinition = setup({
           }
           const ref = enq.spawn(event.adapter, { id: `controls:${event.canvasId}` });
           return { context: { controlsAdapter: { canvasId: event.canvasId, ref }, cameraPresented: true } };
+        },
+        sectionInputAttached: ({ context, event }, enq) => {
+          if (context.sectionInput?.inputId === event.inputId) {
+            // Idempotent re-delivery: these handles' input is already running.
+            return {};
+          }
+          if (context.sectionInput) {
+            enq.stop(context.sectionInput.ref);
+          }
+          const ref = enq.spawn(sectionInputMachine.provide({ actors: { adapter: event.adapter } }), {
+            id: `sectionInput:${event.inputId}`,
+          });
+          return { context: { sectionInput: { inputId: event.inputId, ref } } };
+        },
+        sectionInputDetached: ({ context, event }, enq) => {
+          if (context.sectionInput?.inputId !== event.inputId) {
+            // Stale: newer handles already took the slot.
+            return {};
+          }
+          enq.stop(context.sectionInput.ref);
+          return { context: { sectionInput: undefined } };
         },
 
         // Controls adapter events: the camera owns the gesture phase; graphics owns click and hover suppression.
@@ -2289,3 +2394,33 @@ export const selectPresentedGeometryKey = (snapshot: GraphicsSnapshot): string =
  */
 export const selectCameraDragging = (cameraRef: GraphicsCameraRef): boolean =>
   cameraRef.getSnapshot().matches({ input: 'dragging' });
+
+/**
+ * The view's framing actor.
+ *
+ * @param snapshot - The graphics machine snapshot.
+ * @returns The framing actor.
+ * @public
+ */
+export const selectGraphicsFraming = (snapshot: GraphicsSnapshot): GraphicsFramingRef => snapshot.context.framingRef;
+
+/**
+ * Whether the view's entry has had its first geometry framed: until then, the camera holds the seeded or default pose,
+ * which no person placed and nothing persists.
+ *
+ * @param snapshot - The graphics machine snapshot.
+ * @returns Whether the framing actor is `framed`.
+ * @public
+ */
+export const selectGraphicsFramed = (snapshot: GraphicsSnapshot): boolean =>
+  snapshot.context.framingRef.getSnapshot().matches('framed');
+
+/**
+ * The entry the view frames, once one was named with `entryChanged`.
+ *
+ * @param snapshot - The graphics machine snapshot.
+ * @returns The entry identity, or `undefined` before the view knows it.
+ * @public
+ */
+export const selectGraphicsFramingIdentity = (snapshot: GraphicsSnapshot): string | undefined =>
+  snapshot.context.framingRef.getSnapshot().context.identity;

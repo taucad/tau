@@ -1,4 +1,4 @@
-import { createContext, useContext, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { createContext, useContext, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
@@ -7,10 +7,11 @@ import type { CameraMachineSnapshot } from '@taucad/camera/machine';
 import type { RenderFrame } from '@taucad/spatial';
 import { createThreeCameraRig } from '@taucad/three/camera';
 import type { ThreeCameraRig } from '@taucad/three/camera';
-import type { GraphicsCameraRef, graphicsMachine, ViewCameraFraming } from '#machines/graphics.machine.js';
+import { selectGraphicsFramingIdentity } from '#machines/graphics.machine.js';
+import type { GraphicsCameraRef, graphicsMachine } from '#machines/graphics.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { kinematicsMachine } from '#machines/kinematics.machine.js';
-import { asCameraActor, latchViewCameraFraming } from '#services/graphics-camera-registry.js';
+import { asCameraActor } from '#services/graphics-camera-registry.js';
 import type {
   CameraUpdateHandler,
   RenderFrameUpdateHandler,
@@ -30,7 +31,6 @@ type GraphicsContextValue = {
   setRenderFrame: (renderFrame: RenderFrame) => void;
   subscribeRenderFrame: (listener: () => void) => () => void;
   renderFrameConsumersRef: RefObject<Set<RenderFrameUpdateHandler>>;
-  framing: ViewCameraFraming;
 };
 
 const GraphicsContext = createContext<GraphicsContextValue | undefined>(undefined);
@@ -50,14 +50,33 @@ export const useGraphicsCamera = (graphicsRef: GraphicsActorRef | undefined): Gr
 const selectViewCamera = (graphicsRef: GraphicsActorRef): GraphicsCameraRef =>
   graphicsRef.getSnapshot().context.cameraRef;
 
-/** The view's framing record, a plain-data bridge in graphics context. */
-const selectViewFraming = (graphicsRef: GraphicsActorRef): ViewCameraFraming =>
-  graphicsRef.getSnapshot().context.cameraFraming;
+/** The entry the view's framing actor frames now. */
+const selectViewFramingIdentity = (graphicsRef: GraphicsActorRef): string | undefined =>
+  selectGraphicsFramingIdentity(graphicsRef.getSnapshot());
+
+/**
+ * Names the seeded entry to the view's framing. A view can render before its entry path is known (a panel seeded
+ * while the project loads), and that is not a file switch: a seed with no identity changes nothing, so the persisted
+ * pose is not re-armed over the live one. The same identity again is a re-delivery and sends nothing.
+ *
+ * ponytail: sent while the provider renders, where the framing record was latched, until the view's binding (G6b)
+ * names the entry from its record. Nothing renders from the framing actor, so the send re-renders no component.
+ */
+const deliverSeedEntry = (graphicsRef: GraphicsActorRef, seed: ViewCameraSeed | undefined): void => {
+  const identity = seed?.identity;
+  if (identity === undefined || selectViewFramingIdentity(graphicsRef) === identity) {
+    return;
+  }
+  const pose = seed?.camera?.cameraView;
+  graphicsRef.send({
+    type: 'entryChanged',
+    identity,
+    ...(pose === undefined ? {} : { pendingPose: { requestId: `seed:${identity}`, pose } }),
+  });
+};
 
 /* The per-mount presentation of the view's camera: the native cameras, the publication slots and the render frame. */
-const createViewPresentation = (
-  graphicsRef: GraphicsActorRef,
-): Omit<GraphicsContextValue, 'graphicsRef' | 'framing'> => {
+const createViewPresentation = (graphicsRef: GraphicsActorRef): Omit<GraphicsContextValue, 'graphicsRef'> => {
   const connectorRef: RefObject<CameraUpdateHandler | undefined> = { current: undefined };
   const consumers = new Set<RenderFrameUpdateHandler>();
   const listeners = new Set<() => void>();
@@ -115,8 +134,8 @@ const createViewPresentation = (
  *
  * The view's camera is the graphics actor's child, so a remounted provider finds the camera the person left. The
  * provider builds the native cameras that present it on this mount; they hold no subscription until a canvas's
- * controls adapter connects them, so a discarded render leaves nothing behind. `seed.identity` re-latches the
- * framing record for a new entry.
+ * controls adapter connects them, so a discarded render leaves nothing behind. A new `seed.identity` names the entry
+ * the view's framing frames.
  * Placed in ChatViewer (and standalone viewers like hero-viewer, converter).
  * @public
  */
@@ -131,8 +150,7 @@ export function GraphicsProvider({
 }): React.JSX.Element {
   'use no memo';
 
-  const framing = selectViewFraming(graphicsRef);
-  latchViewCameraFraming(framing, seed ?? {});
+  deliverSeedEntry(graphicsRef, seed);
   let [presentation, setPresentation] = useState(() => ({ graphicsRef, ...createViewPresentation(graphicsRef) }));
   if (presentation.graphicsRef !== graphicsRef) {
     // A new graphics actor is a new view: present its camera on new native cameras.
@@ -140,9 +158,7 @@ export function GraphicsProvider({
     setPresentation(presentation);
   }
 
-  const value = useMemo((): GraphicsContextValue => ({ ...presentation, framing }), [framing, presentation]);
-
-  return <GraphicsContext.Provider value={value}>{children}</GraphicsContext.Provider>;
+  return <GraphicsContext.Provider value={presentation}>{children}</GraphicsContext.Provider>;
 }
 
 /**
@@ -264,19 +280,6 @@ export function useCameraConsumersRef(): RefObject<Set<CameraUpdateHandler>> {
     throw new Error('useCameraConsumersRef must be used within a GraphicsProvider');
   }
   return context.cameraConsumersRef;
-}
-
-/**
- * Returns the session-owned record that gates the one-time framing and persisted-view restore.
- *
- * @public
- */
-export function useViewCameraFraming(): ViewCameraFraming {
-  const context = useContext(GraphicsContext);
-  if (!context) {
-    throw new Error('useViewCameraFraming must be used within a GraphicsProvider');
-  }
-  return context.framing;
 }
 
 /**

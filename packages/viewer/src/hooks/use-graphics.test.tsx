@@ -12,12 +12,11 @@ import {
   useRenderFrame,
   useRenderFrameRetarget,
   useSetRenderFrame,
-  useViewCameraFraming,
 } from '#hooks/use-graphics.jsx';
 import type { CameraOwnedSettings } from '#graphics/graphics-settings.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
-import type { ViewCameraFraming } from '#machines/graphics.machine.js';
-import { graphicsMachine } from '#machines/graphics.machine.js';
+import { graphicsMachine, selectGraphicsFramed, selectGraphicsFraming } from '#machines/graphics.machine.js';
+import type { FramingPendingPose } from '#machines/framing.machine.js';
 
 const actors: Array<Actor<typeof graphicsMachine>> = [];
 
@@ -39,13 +38,23 @@ function RigProbe({ onRig }: { readonly onRig: (rig: ThreeCameraRig) => void }):
   return undefined;
 }
 
-function FramingProbe({ onFraming }: { readonly onFraming: (framing: ViewCameraFraming) => void }): undefined {
-  const framing = useViewCameraFraming();
-  useLayoutEffect(() => {
-    onFraming(framing);
-  }, [framing, onFraming]);
-  return undefined;
-}
+/** What the view's framing holds: the entry it frames, whether it is framed, and the pose pending for the entry. */
+const framingOf = (graphicsActor: Actor<typeof graphicsMachine>) => {
+  const snapshot = graphicsActor.getSnapshot();
+  const { context } = selectGraphicsFraming(snapshot).getSnapshot();
+  return {
+    identity: context.identity,
+    framed: selectGraphicsFramed(snapshot),
+    pendingPose: (context as { pendingPose?: FramingPendingPose }).pendingPose?.pose,
+  };
+};
+
+const measured = {
+  type: 'geometryBoundsMeasured',
+  key: 'a',
+  bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
+  radius: Math.sqrt(3),
+} as const;
 
 function RenderFrameProbe({
   onFrame,
@@ -240,7 +249,7 @@ describe('GraphicsProvider camera rig ownership', () => {
     expect(firstRig.actorRef.getSnapshot().status).toBe('stopped');
   });
 
-  it('should keep one framing record per entry identity without recreating the rig', () => {
+  it('should frame each entry identity once without recreating the rig', () => {
     const cameraView = {
       frameId: 'tau:root',
       target: [3, 4, 5],
@@ -250,11 +259,7 @@ describe('GraphicsProvider camera rig ownership', () => {
       perspectiveZoom: 1,
     } as const;
     const graphicsActor = createGraphicsActor({ cameraView });
-    let framing: ViewCameraFraming | undefined;
     let rig: ThreeCameraRig | undefined;
-    const onFraming = (value: ViewCameraFraming): void => {
-      framing = value;
-    };
     const mounted = render(
       <GraphicsProvider graphicsRef={graphicsActor} seed={{ identity: 'file-a', camera: { cameraView } }}>
         <RigProbe
@@ -262,22 +267,15 @@ describe('GraphicsProvider camera rig ownership', () => {
             rig = value;
           }}
         />
-        <FramingProbe onFraming={onFraming} />
       </GraphicsProvider>,
     );
     const firstRig = rig;
 
     expect(rig!.actorRef.getSnapshot().context.view).toMatchObject(cameraView);
-    expect(framing).toEqual({
-      identity: 'file-a',
-      pendingView: cameraView,
-      preserveOrientationOnFirstFrame: false,
-      firstFrameView: undefined,
-      initialized: false,
-    });
+    expect(framingOf(graphicsActor)).toEqual({ identity: 'file-a', framed: false, pendingPose: cameraView });
 
-    // The canvas frames the first geometry and consumes the pose.
-    framing!.initialized = true;
+    // The canvas measures the first geometry, which frames it and applies the pose.
+    graphicsActor.send(measured);
 
     mounted.rerender(
       <GraphicsProvider
@@ -289,17 +287,22 @@ describe('GraphicsProvider camera rig ownership', () => {
             rig = value;
           }}
         />
-        <FramingProbe onFraming={onFraming} />
       </GraphicsProvider>,
     );
     expect(rig).toBe(firstRig);
-    expect(framing).toEqual({
-      identity: 'file-a',
-      pendingView: cameraView,
-      preserveOrientationOnFirstFrame: false,
-      firstFrameView: undefined,
-      initialized: true,
-    });
+    expect(framingOf(graphicsActor)).toEqual({ identity: 'file-a', framed: true, pendingPose: undefined });
+
+    // A seed that names no entry (a panel rendered before its entry path is known) is not a file switch.
+    mounted.rerender(
+      <GraphicsProvider graphicsRef={graphicsActor} seed={{ camera: {} }}>
+        <RigProbe
+          onRig={(value) => {
+            rig = value;
+          }}
+        />
+      </GraphicsProvider>,
+    );
+    expect(framingOf(graphicsActor)).toEqual({ identity: 'file-a', framed: true, pendingPose: undefined });
 
     mounted.rerender(
       <GraphicsProvider graphicsRef={graphicsActor} seed={{ identity: 'file-b' }}>
@@ -308,17 +311,10 @@ describe('GraphicsProvider camera rig ownership', () => {
             rig = value;
           }}
         />
-        <FramingProbe onFraming={onFraming} />
       </GraphicsProvider>,
     );
     expect(rig).toBe(firstRig);
-    expect(framing).toEqual({
-      identity: 'file-b',
-      pendingView: undefined,
-      preserveOrientationOnFirstFrame: false,
-      firstFrameView: undefined,
-      initialized: false,
-    });
+    expect(framingOf(graphicsActor)).toEqual({ identity: 'file-b', framed: false, pendingPose: undefined });
   });
 
   it('keeps sibling viewer camera views isolated', () => {
@@ -341,17 +337,14 @@ describe('GraphicsProvider camera rig ownership', () => {
     const firstActor = createGraphicsActor({ cameraView: firstView });
     const secondActor = createGraphicsActor({ cameraView: secondView });
     const rigs = new Map<string, ThreeCameraRig>();
-    const framings = new Map<string, ViewCameraFraming>();
 
     render(
       <>
         <GraphicsProvider graphicsRef={firstActor} seed={{ identity: 'first', camera: { cameraView: firstView } }}>
           <RigProbe onRig={(rig) => rigs.set('first', rig)} />
-          <FramingProbe onFraming={(framing) => framings.set('first', framing)} />
         </GraphicsProvider>
         <GraphicsProvider graphicsRef={secondActor} seed={{ identity: 'second', camera: { cameraView: secondView } }}>
           <RigProbe onRig={(rig) => rigs.set('second', rig)} />
-          <FramingProbe onFraming={(framing) => framings.set('second', framing)} />
         </GraphicsProvider>
       </>,
     );
@@ -359,8 +352,8 @@ describe('GraphicsProvider camera rig ownership', () => {
     expect(rigs.get('first')).not.toBe(rigs.get('second'));
     expect(rigs.get('first')?.actorRef.getSnapshot().context.view).toMatchObject(firstView);
     expect(rigs.get('second')?.actorRef.getSnapshot().context.view).toMatchObject(secondView);
-    expect(framings.get('first')?.pendingView).toEqual(firstView);
-    expect(framings.get('second')?.pendingView).toEqual(secondView);
+    expect(framingOf(firstActor).pendingPose).toEqual(firstView);
+    expect(framingOf(secondActor).pendingPose).toEqual(secondView);
   });
 
   it('retargets one viewport scene and camera without changing its sibling', () => {

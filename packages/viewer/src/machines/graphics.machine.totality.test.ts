@@ -115,6 +115,12 @@ const samples: Samples = {
   canvasAttached: [{ type: 'canvasAttached', canvasId: 'c', kind: 'placeholder' }],
   canvasDetached: [{ type: 'canvasDetached', canvasId: 'c' }],
   controlsAttached: [{ type: 'controlsAttached', canvasId: 'c', adapter: createCallbackLogic(() => undefined) }],
+  sectionInputAttached: [{ type: 'sectionInputAttached', inputId: 's', adapter: createCallbackLogic(() => undefined) }],
+  sectionInputDetached: [{ type: 'sectionInputDetached', inputId: 's' }],
+  entryChanged: [{ type: 'entryChanged', identity: 'part.ts' }],
+  geometryBoundsMeasured: [
+    { type: 'geometryBoundsMeasured', key: 'k', bounds: { min: [-1, -1, -1], max: [1, 1, 1] }, radius: Math.sqrt(3) },
+  ],
   setSectionViewActive: [
     { type: 'setSectionViewActive', payload: true },
     { type: 'setSectionViewActive', payload: false },
@@ -362,6 +368,7 @@ describe('graphics machine totality baseline', () => {
       'cameraViewChanged',
       'canvasDetached',
       'controlsAttached',
+      'sectionInputDetached',
       'adoptSectionView',
       'updateSectionCut',
       'removeSectionCut',
@@ -371,7 +378,7 @@ describe('graphics machine totality baseline', () => {
       'clearArtifact',
       'gltfPresentationCommitted',
     ];
-    const withSelectSectionCut = [...everywhere.slice(0, 6), 'selectSectionCut', ...everywhere.slice(6)];
+    const withSelectSectionCut = [...everywhere.slice(0, 7), 'selectSectionCut', ...everywhere.slice(7)];
     expect(silent).toEqual([
       {
         state: 'operational.backend.probing | operational.section.off | operational.measure.off',

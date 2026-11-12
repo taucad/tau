@@ -1,7 +1,7 @@
 import { useFrame, useThree } from '@react-three/fiber';
-import { useActorRef } from '@xstate/react';
-import { useLayoutEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import { useCallback, useId, useLayoutEffect, useState } from 'react';
+import type { ReactNode, RefCallback } from 'react';
+import type * as THREE from 'three';
 import type { EventManager } from '@react-three/fiber';
 import { createSectionHandles } from '#graphics/three/controls/section-handles.js';
 import type { SectionHandles as SectionHandlesDrawing } from '#graphics/three/controls/section-handles.js';
@@ -10,7 +10,6 @@ import { SceneOverlay } from '#graphics/three/scene-overlay.jsx';
 import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
 import { useCameraRig, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import { createSectionInputAdapter } from '#machines/section-input.adapter.js';
-import { sectionInputMachine } from '#machines/section-input.machine.js';
 
 /**
  * After the grid and axes overlay (2) and before the view cube and plane picker (3): the handles draw over the
@@ -34,36 +33,43 @@ type SectionInputProperties = Readonly<{
 }>;
 
 /**
- * The section input for one surface: its gesture machine and the DOM adapter it invokes, built around the surface,
- * the drawing and the picker. It restarts only when one of those is replaced; the cuts, the bounds and the render
- * frame reach the adapter through its own subscriptions and never restart it, so none of them ends a drag.
+ * The section input for one surface: graphics runs its gesture machine as its `sectionInput` child, around the DOM
+ * adapter built here from the surface, the drawing and the picker. This mount hands graphics the adapter from its
+ * group's ref, the way a canvas hands graphics its controls adapter, and graphics stops the input when the ref is
+ * cleared; a new generation of host objects remounts it. The cuts, the bounds and the render frame reach the adapter
+ * through its own subscriptions and never restart it, so none of them ends a drag.
  */
 function SectionInput({ surface, canvas, drawing, planePicker }: SectionInputProperties): ReactNode {
   const graphics = useGraphics();
   const cameraRig = useCameraRig();
   const get = useThree((state) => state.get);
   const invalidate = useThree((state) => state.invalidate);
-  const logic = useMemo(
-    () =>
-      sectionInputMachine.provide({
-        actors: {
-          adapter: createSectionInputAdapter({
-            surface,
-            canvas,
-            get,
-            invalidate,
-            handles: drawing.handles,
-            isRetired: drawing.isRetired,
-            planePicker,
-            graphics,
-            cameraRig,
-          }),
-        },
-      }),
-    [cameraRig, canvas, drawing, get, graphics, invalidate, planePicker, surface],
+  const inputId = useId();
+  const attachInput = useCallback<RefCallback<THREE.Group>>(
+    (group) => {
+      if (!group) {
+        graphics.send({ type: 'sectionInputDetached', inputId });
+        return;
+      }
+      graphics.send({
+        type: 'sectionInputAttached',
+        inputId,
+        adapter: createSectionInputAdapter({
+          surface,
+          canvas,
+          get,
+          invalidate,
+          handles: drawing.handles,
+          isRetired: drawing.isRetired,
+          planePicker,
+          graphics,
+          cameraRig,
+        }),
+      });
+    },
+    [cameraRig, canvas, drawing, get, graphics, inputId, invalidate, planePicker, surface],
   );
-  useActorRef(logic);
-  return null;
+  return <group ref={attachInput} />;
 }
 
 /**

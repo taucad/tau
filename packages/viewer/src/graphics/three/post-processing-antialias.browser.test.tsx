@@ -29,8 +29,8 @@ import { createActor, createAsyncLogic } from 'xstate';
 import { afterEach, expect, inject, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { SceneOverlay, useOverlayDepthRestorer } from '#graphics/three/scene-overlay.jsx';
-import { GraphicsProvider, useCameraRig, useViewCameraFraming } from '#hooks/use-graphics.jsx';
-import { graphicsMachine } from '#machines/graphics.machine.js';
+import { GraphicsProvider, useCameraRig } from '#hooks/use-graphics.jsx';
+import { graphicsMachine, selectGraphicsFramed } from '#machines/graphics.machine.js';
 import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
 import { isViewportWebGpu } from '#graphics/three/viewport-cad-renderer.js';
 import { resolveSectionPieces } from '#graphics/section-cuts.js';
@@ -2342,11 +2342,9 @@ it.each(['webgpu', 'node-webgl2'] as const)(
     ).start();
     let state: RootState | undefined;
     let rig: ReturnType<typeof useCameraRig> | undefined;
-    let framing: ReturnType<typeof useViewCameraFraming> | undefined;
     const Probe = (): undefined => {
       state = useThree();
       rig = useCameraRig();
-      framing = useViewCameraFraming();
       return undefined;
     };
     // Crop only empty margins after a complete native 5K render/readback.
@@ -2391,7 +2389,7 @@ it.each(['webgpu', 'node-webgl2'] as const)(
         () => {
           expect(state?.scene.getObjectByName('Internal_Ring_Gear')).toBeDefined();
           expect(referenceMode.surfaceQuality).toBeDefined();
-          expect(framing?.initialized).toBe(true);
+          expect(selectGraphicsFramed(actor.getSnapshot())).toBe(true);
         },
         { timeout: 45_000 },
       );
@@ -2583,11 +2581,9 @@ it.each([
     }).start();
     let state: RootState | undefined;
     let rig: ReturnType<typeof useCameraRig> | undefined;
-    let framing: ReturnType<typeof useViewCameraFraming> | undefined;
     const Probe = (): undefined => {
       state = useThree();
       rig = useCameraRig();
-      framing = useViewCameraFraming();
       return undefined;
     };
     const capture = async (): Promise<Uint8ClampedArray> => {
@@ -2653,7 +2649,7 @@ it.each([
       await vi.waitFor(
         () => {
           expect(state?.scene.getObjectByName('Internal_Ring_Gear')).toBeDefined();
-          expect(framing?.initialized).toBe(true);
+          expect(selectGraphicsFramed(actor.getSnapshot())).toBe(true);
         },
         { timeout: 45_000 },
       );

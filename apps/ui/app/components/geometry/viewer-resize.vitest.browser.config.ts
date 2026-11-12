@@ -6,6 +6,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
+  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
   plugins: [tailwindcss()],
   cacheDir: '../../node_modules/.cache/viewer-resize-browser',
   resolve: { dedupe: ['react', 'react-dom', 'three'] },
@@ -42,7 +43,13 @@ export default defineConfig({
           channel: 'chromium',
           args:
             process.env['TAU_E2E_WEBGPU_PROFILE'] === 'software'
-              ? ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader']
+              ? [
+                  '--enable-unsafe-webgpu',
+                  '--use-webgpu-adapter=swiftshader',
+                  '--use-angle=swiftshader',
+                  '--enable-features=Vulkan',
+                  '--use-vulkan=swiftshader',
+                ]
               : ['--enable-unsafe-webgpu'],
         },
       }),

@@ -8,6 +8,7 @@ import { authoritativeGatewayWireFixtures } from '../../../../packages/agent-hos
 
 export default defineConfig({
   root: fileURLToPath(new URL('../..', import.meta.url)),
+  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
   plugins: [
     {
       name: 'agent-host-gateway-fixture',
@@ -102,7 +103,14 @@ export default defineConfig({
           channel: 'chromium',
           args: [
             '--enable-unsafe-webgpu',
-            ...(process.env['TAU_E2E_WEBGPU_PROFILE'] === 'software' ? ['--use-webgpu-adapter=swiftshader'] : []),
+            ...(process.env['TAU_E2E_WEBGPU_PROFILE'] === 'software'
+              ? [
+                  '--use-webgpu-adapter=swiftshader',
+                  '--use-angle=swiftshader',
+                  '--enable-features=Vulkan',
+                  '--use-vulkan=swiftshader',
+                ]
+              : []),
           ],
         },
       }),

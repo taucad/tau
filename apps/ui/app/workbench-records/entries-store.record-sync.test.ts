@@ -1225,4 +1225,36 @@ describe('workbench entries store over recordSync', () => {
       }
     });
   });
+
+  it('writes a value the person sets on an entry an owed rename replaces, even where the file holds that value', async () => {
+    const m = memory();
+    const components = (hidden: string[]) => ({ hidden, isolated: [], opacity: [] });
+    m.setBytes(
+      encoder.encode(workbenchRecords.entries.serialize({ version: 1, entries: { 'src/d.ts': { renderTimeout: 0 } } })),
+    );
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      editDebounce: 500,
+      files: m.files,
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await entries.read();
+      const answers = [entries.edit('src/d.ts', { renderTimeout: 15_000 })];
+      void entries.flush();
+      answers.push(
+        entries.edit('src/c.ts', { components: components(['x', 'y']) }),
+        entries.changePaths({ type: 'rename', oldPath: 'src/c.ts', newPath: 'src/d.ts' }),
+        entries.edit('src/d.ts', { renderTimeout: 0, components: components(['x', 'y']) }),
+      );
+      expect(await entries.flush()).toBe(true);
+      expect(await Promise.all(answers)).toEqual([true, true, true, true]);
+      expect(workbenchRecords.entries.read(m.get()!)).toMatchObject({
+        record: { entries: { 'src/d.ts': { renderTimeout: 0, components: components(['x', 'y']) } } },
+      });
+    } finally {
+      entries.dispose();
+    }
+  });
 });

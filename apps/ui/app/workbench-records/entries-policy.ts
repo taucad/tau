@@ -347,6 +347,10 @@ const writtenHeld = (before: Entry | undefined, after: Entry | undefined, now: E
   if (after === undefined || now === undefined) {
     return after === now;
   }
+  if (before === undefined && JSON.stringify(now) === JSON.stringify(after)) {
+    // A made entry whose every field is the default is written only as itself.
+    return true;
+  }
   const [replaced, wrote, held] = [fieldsOf(before ?? {}), fieldsOf(after), fieldsOf(now)];
   return wrote.some((field, index) => field !== replaced[index] && held[index] === field);
 };

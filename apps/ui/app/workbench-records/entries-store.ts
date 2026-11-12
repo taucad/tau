@@ -18,6 +18,7 @@ import {
   coversFields,
   owedMoves,
   entriesPolicy,
+  matchesPath,
   movePaths,
   withoutMoves,
 } from '#workbench-records/entries-policy.js';
@@ -248,8 +249,11 @@ export function createWorkbenchEntriesStore(
       const moves = [cycle?.patch, deferred, pending?.patch].flatMap((patch) =>
         patch === undefined ? [] : owedMoves(patch, published.record),
       );
+      // An owed rename onto the path replaces the entry there with one the file does not hold yet: the person was
+      // shown what they asked for.
+      const replaced = moves.some((move) => move.type === 'rename' && matchesPath(entryPath, move.newPath));
       const { entry, fields } = changedEntry({
-        shown: movePaths(published.record?.entries ?? {}, moves)[entryPath],
+        shown: replaced ? from.entries[entryPath] : movePaths(published.record?.entries ?? {}, moves)[entryPath],
         next,
         onto: from.entries[entryPath],
         owed: owed[entryPath],

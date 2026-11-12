@@ -36,13 +36,7 @@ const entryArbitrary: Arbitrary<Entry> = record(
     ),
   },
   { requiredKeys: [] },
-  // An entry with no settings is the defaults, which no entry means too: the store never writes one, and a path change
-  // of a path with no entry moves nothing, so an empty one would make the record mean what its file does not.
-).filter(
-  (entry) =>
-    entry.renderTimeout !== undefined ||
-    (entry.components !== undefined &&
-      entry.components.hidden.length + entry.components.isolated.length + entry.components.opacity.length > 0),
+  // An entry with no settings is the defaults, which a file and the store can hold as well.
 );
 
 const entriesArbitrary: Arbitrary<WorkbenchEntries> = record({
@@ -497,5 +491,20 @@ describe('entriesPolicy path changes', () => {
       'a.ts': { renderTimeout: 0, components: hidden(['q']) },
       'b.ts': { components: hidden(['y']) },
     });
+  });
+
+  it('should not apply a landed rename of an entry whose every field is the default again', () => {
+    const empty = { components: { hidden: [], isolated: [], opacity: [] } };
+    const base: WorkbenchEntries = { version: 1, entries: { 'a.ts': empty } };
+    const renamed: EntriesRecord = {
+      version: 1,
+      entries: { 'b.ts': empty },
+      moves: [{ type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' }],
+    };
+    const patch = diff(base, renamed);
+    const written = merge(base, renamed, patch);
+    // The rename landed, its reply was lost, and another party then set a timeout on a new a.ts.
+    const after = { ...written, entries: { ...written.entries, 'a.ts': { renderTimeout: 3 } } };
+    expect(merge(after, renamed, patch).entries).toEqual({ 'a.ts': { renderTimeout: 3 }, 'b.ts': empty });
   });
 });

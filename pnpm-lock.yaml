@@ -4566,6 +4566,9 @@ importers:
 
   examples/electron:
     dependencies:
+      '@parcel/watcher':
+        specifier: 'catalog:'
+        version: 2.6.0
       '@rjsf/core':
         specifier: 6.11.0
         version: 6.11.0(@rjsf/utils@6.11.0(react@19.3.1))(react@19.3.1)

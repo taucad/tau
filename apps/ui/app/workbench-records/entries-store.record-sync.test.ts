@@ -1297,6 +1297,85 @@ describe('workbench entries store over recordSync', () => {
         entries.dispose();
       }
     });
+
+    it('applies a swap that did not land when another party clears a field on each side and deletes a path it deletes', async () => {
+      const m = memory();
+      const held = () => {
+        const read = workbenchRecords.entries.read(m.get()!);
+        return read.status === 'current' ? read.record.entries : {};
+      };
+      m.setBytes(
+        encoder.encode(
+          workbenchRecords.entries.serialize({
+            version: 1,
+            entries: {
+              'a.ts': { renderTimeout: 1000, components: components(['y']) },
+              'c.ts': { renderTimeout: 3000, components: { hidden: [], isolated: ['z'], opacity: [] } },
+              'q.ts': { renderTimeout: 7 },
+              'z.ts': { renderTimeout: 5 },
+            },
+          }),
+        ),
+      );
+      let lost = false;
+      const entries = createWorkbenchEntriesStore({
+        root: '/root',
+        editDebounce: 60_000,
+        files: {
+          ...m.files,
+          writeFileChecked: async (input) => {
+            const swap = JSON.parse(input.data).entries['a.ts']?.renderTimeout === 3000;
+            if (!lost && swap) {
+              lost = true;
+              const { 'q.ts': _deleted, ...rest } = held();
+              m.setBytes(
+                encoder.encode(
+                  workbenchRecords.entries.serialize({
+                    version: 1,
+                    entries: {
+                      ...rest,
+                      'a.ts': { renderTimeout: 1000, components: components([]) },
+                      'c.ts': { renderTimeout: 3000, components: components([]) },
+                    },
+                  }),
+                ),
+              );
+              throw Object.assign(new Error('reply lost'), { applicationState: 'potentially-applied' });
+            }
+            return m.files.writeFileChecked(input);
+          },
+        },
+        onChange: () => undefined,
+        onError: () => undefined,
+      });
+      try {
+        await entries.read();
+        const release = m.delay();
+        const edited = entries.edit('z.ts', { renderTimeout: 6 });
+        const first = entries.flush();
+        await vi.waitFor(() => {
+          expect(m.writes).toHaveBeenCalledTimes(1);
+        });
+        const swap = [
+          entries.changePaths({ type: 'delete', path: 'q.ts' }),
+          entries.changePaths({ type: 'rename', oldPath: 'a.ts', newPath: 't.ts' }),
+          entries.changePaths({ type: 'rename', oldPath: 'c.ts', newPath: 'a.ts' }),
+          entries.changePaths({ type: 'rename', oldPath: 't.ts', newPath: 'c.ts' }),
+        ];
+        release();
+        await Promise.allSettled([edited, first, ...swap]);
+        let flushed = false;
+        for (let attempt = 0; attempt < 4 && !flushed; attempt++) {
+          flushed = await entries.flush();
+        }
+        expect(lost).toBe(true);
+        expect(held()['a.ts']?.renderTimeout).toBe(3000);
+        expect(held()['c.ts']?.renderTimeout).toBe(1000);
+        expect(held()['q.ts']).toBeUndefined();
+      } finally {
+        entries.dispose();
+      }
+    });
   });
 
   it('writes a value the person sets on an entry an owed rename replaces, even where the file holds that value', async () => {

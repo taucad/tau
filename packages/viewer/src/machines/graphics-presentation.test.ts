@@ -217,7 +217,7 @@ describe('graphics presentation seams before the presentation actor (G11b charac
     joints: { hinge: { type: 'revolute', parent: 'base', child: 'arm', origin: [0, 0, 0], axis: [0, 0, 1] } },
   };
 
-  it('stamps a completed measurement with the pose revision current when it completes', () => {
+  it('stamps a completed measurement with the pose revision the measure tool last reported', () => {
     const actor = createGraphicsActor();
     actor.start();
     try {
@@ -228,15 +228,30 @@ describe('graphics presentation seams before the presentation actor (G11b charac
       expect(revision).toBeGreaterThan(0);
 
       actor.send({ type: 'setMeasureActive', payload: true });
+      // The measure tool reports every pose revision, as `measure-tool.tsx` does when the kinematics revision moves.
+      actor.send({ type: 'measurementPoseChanged', revision });
       actor.send({ type: 'startMeasurement', payload: [0, 0, 0] });
-      // The pose moves between the two picks; no event tells graphics, and the measurement still carries it.
-      kinematics.send({ type: 'setCoordinate', unitId: 'unit:a', id: 'hinge', value: 1 });
       actor.send({ type: 'completeMeasurement', payload: [1, 0, 0] });
 
-      expect(actor.getSnapshot().context.measurements.at(-1)?.poseRevision).toBe(
-        kinematics.getSnapshot().context.revision,
-      );
-      expect(actor.getSnapshot().context.measurements.at(-1)?.poseRevision).toBeGreaterThan(revision);
+      expect(actor.getSnapshot().context.measurements.at(-1)?.poseRevision).toBe(revision);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('drops a half-placed measurement when the pose moves between its picks', () => {
+    const actor = createGraphicsActor();
+    actor.start();
+    try {
+      const kinematics = actor.getSnapshot().context.kinematicsRef;
+      kinematics.send({ type: 'loadMechanism', unitId: 'unit:a', mechanism });
+      actor.send({ type: 'setMeasureActive', payload: true });
+      actor.send({ type: 'startMeasurement', payload: [0, 0, 0] });
+      kinematics.send({ type: 'setCoordinate', unitId: 'unit:a', id: 'hinge', value: 1 });
+      actor.send({ type: 'measurementPoseChanged', revision: kinematics.getSnapshot().context.revision });
+      actor.send({ type: 'completeMeasurement', payload: [1, 0, 0] });
+
+      expect(actor.getSnapshot().context.measurements).toEqual([]);
     } finally {
       actor.stop();
     }

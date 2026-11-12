@@ -1344,9 +1344,9 @@ describe('GltfMesh presentation protocol', () => {
       );
       await waitForCommits(['a']);
       const disposeA = await spyOnPresentedGeometryDispose(parseAsync);
-      const atDispose: Array<{ commits: string[]; attached: number }> = [];
+      const atDispose: string[][] = [];
       disposeA.mockImplementation(() => {
-        atDispose.push({ commits: committedKeys(), attached: document.querySelectorAll('primitive').length });
+        atDispose.push(committedKeys());
       });
 
       view.rerender(
@@ -1359,8 +1359,9 @@ describe('GltfMesh presentation protocol', () => {
       );
       await waitForCommits(['a', 'b']);
 
-      // A's geometry is freed once, after B's commit reached graphics, with one primitive (B's) attached.
-      expect(atDispose).toEqual([{ commits: ['a', 'b'], attached: 1 }]);
+      // A's geometry is freed once, after B's commit reached graphics. The commit is sent only once React has
+      // attached B (G11.0's commit-timing row), so A is freed after B is attached.
+      expect(atDispose).toEqual([['a', 'b']]);
     });
   });
 
@@ -1382,25 +1383,28 @@ describe('GltfMesh presentation protocol', () => {
       expect([fatLines.mock.calls.length, batches.mock.calls.length, matcap.mock.calls.length]).toEqual(counts);
     });
 
-    it('should keep the committed scene and its unit until the in-place commit renames the unit', async () => {
+    it('should keep and never free the committed scene across an in-place update, renaming the unit on commit', async () => {
+      const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
       const view = render(
         <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
       );
       await waitForCommits(['a']);
-      const primitive = view.container.querySelector('primitive');
+      const disposeA = await spyOnPresentedGeometryDispose(parseAsync);
+      const before = trace().length;
 
       view.rerender(
         <GltfMesh gltfFile={buildGlb({ lift: 5 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
       );
       await waitForCommits(['a', 'b']);
 
-      // One scene object across the update: React never detaches it, so nothing is retired.
-      expect(view.container.querySelector('primitive')).toBe(primitive);
-      expect(
-        sentEvents()
-          .filter((event) => event.type === 'gltfPresentationCommitted')
-          .map(({ unitId }) => unitId),
-      ).toEqual(['unit:a', 'unit:b']);
+      // One scene across the update: it is not parsed again, and nothing retires it while it stays on screen.
+      expect(parseAsync).toHaveBeenCalledOnce();
+      expect(disposeA).not.toHaveBeenCalled();
+      expect(trace(before).filter((line) => !line.startsWith('setHoveredModelComponent'))).toEqual([
+        'gltfPreparationStarted 2:b',
+        'gltfDisplayReady 2:b display-ready',
+        'gltfPresentationCommitted 2:b unit:b manifest=b',
+      ]);
     });
   });
 });

@@ -9,7 +9,10 @@ import { createActor } from 'xstate';
 import type { GeometryComponentManifest } from '@taucad/types';
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
-import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
+import {
+  deriveModelInteractionUnitId,
+  getModelInteractionUnitState,
+} from '@taucad/viewer/machines/model-interaction.machine';
 import { projectMachine } from '#machines/project.machine.js';
 import type { ProjectContext, ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -32,6 +35,8 @@ const createProjectActor = () =>
           project: createProjectFixture({
             id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
             name: 'Test Project',
+            description: 'A test project',
+            tags: [],
             assets: { main: { entryPath: 'main.ts' } },
           }),
         })),
@@ -102,7 +107,7 @@ const manifestOf = (project: ProjectActor, unitId: string): GeometryComponentMan
     .manifest;
 
 describe('project view manifest reconciliation (G11b characterisation)', () => {
-  it('clears the manifest of a unit when the last view presenting it closes', () => {
+  it('should clear the manifest of a unit when the last view presenting it closes', () => {
     const project = createProjectActor().start();
     try {
       presentInView(project, 'v1', 'unit:a');
@@ -115,7 +120,7 @@ describe('project view manifest reconciliation (G11b characterisation)', () => {
     }
   });
 
-  it('keeps the manifest of a unit while another view still presents it', () => {
+  it('should keep the manifest of a unit while another view still presents it', () => {
     const project = createProjectActor().start();
     try {
       presentInView(project, 'v1', 'unit:a');
@@ -128,7 +133,7 @@ describe('project view manifest reconciliation (G11b characterisation)', () => {
     }
   });
 
-  it('clears the manifest on request once the view that presented it shows something else', () => {
+  it('should clear the manifest on request once the view that presented it shows something else', () => {
     const project = createProjectActor().start();
     try {
       presentInView(project, 'v1', 'unit:a');
@@ -146,7 +151,7 @@ describe('project view manifest reconciliation (G11b characterisation)', () => {
     }
   });
 
-  it('does not count a view whose newer artifact is still preparing as presenting a new unit', () => {
+  it('should not count a view whose newer artifact is still preparing as presenting a new unit', () => {
     const project = createProjectActor().start();
     try {
       presentInView(project, 'v1', 'unit:a');
@@ -159,6 +164,28 @@ describe('project view manifest reconciliation (G11b characterisation)', () => {
       project.send({ type: 'reconcileViewManifest', unitId: 'unit:a' });
       expect(manifestOf(project, 'unit:a')).toBe(manifest);
       expect(manifestOf(project, 'unit:b')).toBeUndefined();
+    } finally {
+      project.stop();
+    }
+  });
+  it('should not let a view showing a non-GLB artifact of the same file keep the manifest', () => {
+    const project = createProjectActor().start();
+    try {
+      const unitId = deriveModelInteractionUnitId({ sourceFile: 'main.ts' });
+      presentInView(project, 'v1', unitId);
+      project.send({ type: 'createViewGraphics', viewId: 'v2' });
+      const v2 = project.getSnapshot().context.viewGraphics.get('v2')!;
+      v2.send({
+        type: 'updateArtifact',
+        artifact: { mimeType: 'image/svg+xml', content: '<svg/>' },
+        hash: 'svg',
+        sourceFile: 'main.ts',
+      });
+      // Both views name the unit, but only the GLB view presents its manifest.
+      expect(v2.getSnapshot().context.modelInteractionUnitId).toBe(unitId);
+
+      project.send({ type: 'destroyViewGraphics', viewId: 'v1' });
+      expect(manifestOf(project, unitId)).toBeUndefined();
     } finally {
       project.stop();
     }

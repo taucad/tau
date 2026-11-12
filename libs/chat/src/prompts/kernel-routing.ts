@@ -1,4 +1,10 @@
-import { kernelConfigurations, kernelRoutingCopy, kernelRoutingRules, kernelRoutingZones, resolveKernel } from '@taucad/types/constants';
+import {
+  kernelConfigurations,
+  kernelRoutingCopy,
+  kernelRoutingRules,
+  kernelRoutingZones,
+  resolveKernel,
+} from '@taucad/types/constants';
 import { snapshotKernelUnavailableReason } from '#schemas/metadata.schema.js';
 import type { SnapshotKernel } from '#types/message-metadata.types.js';
 import type { KernelId, KernelPreference, KernelRepresentation, KernelRouting } from '@taucad/types/constants';

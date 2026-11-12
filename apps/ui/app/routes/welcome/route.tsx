@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { MetaFunction } from 'react-router';
-import { Navigate, useNavigate, useSearchParams } from 'react-router';
+import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { toast } from '@taucad/ui/components/sonner';
 import { SetupFlow } from '#components/onboarding/setup-flow.js';
 import { setupChromeCopy, setupFinishCopy, setupStepIds } from '#components/onboarding/setup-copy.js';
@@ -69,6 +69,7 @@ export default function WelcomeRoute(): React.JSX.Element {
   const isHydrated = useIsHydrated();
   const isOnboardingEnabled = useFeature('onboarding');
   const [searchParameters] = useSearchParams();
+  const location = useLocation();
   const onOpenFolder = useOpenFolder();
   if (!isHydrated) {
     return <div className='min-h-full' />;
@@ -78,7 +79,9 @@ export default function WelcomeRoute(): React.JSX.Element {
   }
   const step = searchParameters.get('step') ?? undefined;
   return (
+    /* Keyed by navigation: Help's "How Tau works" while setup is open changes only the query, and must open step 4. */
     <SetupFlow
+      key={location.key}
       entry={parseSetupEntry(searchParameters.get(setupEntryParameter) ?? undefined)}
       initialStep={isSetupStepId(step) ? step : undefined}
       onOpenFolder={onOpenFolder}

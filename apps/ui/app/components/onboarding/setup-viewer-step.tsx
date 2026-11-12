@@ -42,12 +42,18 @@ const isGizmoChoice = (value: string): value is GizmoChoiceId => (gizmoChoices a
 
 /**
  * The binding legend: orbit, pan and zoom as key caps rendered from the preset data, then the bindings every preset
- * shares.
+ * shares. The gizmo's line is left out while the gizmo is hidden.
  *
- * @param properties - The mapping in effect.
+ * @param properties - The mapping in effect and whether the gizmo shows.
  * @returns The legend.
  */
-export function BindingLegend({ mapping }: { readonly mapping: CameraMappingId }): React.JSX.Element {
+export function BindingLegend({
+  mapping,
+  isGizmoShown,
+}: {
+  readonly mapping: CameraMappingId;
+  readonly isGizmoShown: boolean;
+}): React.JSX.Element {
   const bindings = legendBindings(mapping);
   return (
     <dl
@@ -82,7 +88,9 @@ export function BindingLegend({ mapping }: { readonly mapping: CameraMappingId }
         </Fragment>
       ))}
       <dt className='font-medium'>{viewerStepCopy.legendAlways}</dt>
-      <dd className='text-muted-foreground'>{viewerStepCopy.legendAlwaysText}</dd>
+      <dd className='text-muted-foreground'>
+        {isGizmoShown ? viewerStepCopy.legendAlwaysText : viewerStepCopy.legendAlwaysTextWithoutGizmo}
+      </dd>
     </dl>
   );
 }
@@ -190,7 +198,7 @@ export function SetupViewerStep({
           gizmoStyle={navigation.gizmoStyle ?? effectiveGizmoStyle(viewer, profile)}
           isGizmoShown={gizmo !== 'none'}
         />
-        <BindingLegend mapping={mapping} />
+        <BindingLegend mapping={mapping} isGizmoShown={gizmo !== 'none'} />
       </div>
     </div>
   );

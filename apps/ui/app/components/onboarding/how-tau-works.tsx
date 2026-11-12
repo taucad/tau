@@ -100,9 +100,13 @@ export function HowTauWorks({
             {verify.checks.map((check) => (
               <li key={check.text} className='flex items-start gap-2'>
                 {check.state === 'pass' ? (
-                  <CircleCheck className='mt-0.5 size-3.5 shrink-0 text-success' aria-hidden='true' />
+                  <span className='flex h-lh shrink-0 items-center'>
+                    <CircleCheck className='size-3.5 text-success' aria-hidden='true' />
+                  </span>
                 ) : (
-                  <CircleHelp className='mt-0.5 size-3.5 shrink-0 text-warning' aria-hidden='true' />
+                  <span className='flex h-lh shrink-0 items-center'>
+                    <CircleHelp className='size-3.5 text-warning' aria-hidden='true' />
+                  </span>
                 )}
                 <span>
                   <span className='sr-only'>{check.state === 'pass' ? verify.passed : verify.unknown}</span>
@@ -120,7 +124,9 @@ export function HowTauWorks({
           body={build.body}
         >
           <span className='flex items-start gap-1.5 text-muted-foreground'>
-            <Download className='mt-0.5 size-3.5 shrink-0' aria-hidden='true' />
+            <span className='flex h-lh shrink-0 items-center'>
+              <Download className='size-3.5' aria-hidden='true' />
+            </span>
             {build.note}
           </span>
         </ConceptCard>

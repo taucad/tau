@@ -65,7 +65,9 @@ describe('setup step 3', () => {
     await user.click(screen.getByRole('radio', { name: 'None' }));
     expect(personRecordStores.viewer.read().viewDefaults['display.gizmo']).toBe(false);
     expect(screen.getByRole('radio', { name: 'None' })).toBeChecked();
+    expect(screen.getByTestId('setup-binding-legend')).not.toHaveTextContent('gizmo');
     await user.click(screen.getByRole('radio', { name: 'Axes' }));
+    expect(screen.getByTestId('setup-binding-legend')).toHaveTextContent('the gizmo snaps to standard views');
     expect(personRecordStores.viewer.read().viewDefaults).not.toHaveProperty('display.gizmo');
     expect(personRecordStores.viewer.read().gizmo.style).toBe('axes');
   });

@@ -40,10 +40,25 @@ const newProfile = async (): Promise<string> => {
 
 const setupHeading = (page: Page) => page.getByRole('heading', { level: 1, name: 'What do you want to make?' });
 
-/** Wait until home has settled with no setup: the composer shows and, a moment later, the page is still home. */
-const expectHomeStays = async (page: Page): Promise<void> => {
+/**
+ * Wait until home has decided and opened no setup: the composer shows, then whatever the decision waits on (the
+ * project listing, when the launch could be a first run), then two animation frames so the offer's effect has run.
+ */
+const expectHomeStays = async (page: Page, decisionInput?: Parameters<typeof expectVisible>[0]): Promise<void> => {
   await expectVisible(composerOf(page), 120_000);
-  await page.waitForTimeout(3000);
+  if (decisionInput !== undefined) {
+    await expectVisible(decisionInput, 60_000);
+  }
+  await page.evaluate(
+    async () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        });
+      }),
+  );
   expect(new URL(page.url()).pathname).toBe('/');
   expect(await setupHeading(page).count()).toBe(0);
 };
@@ -94,7 +109,7 @@ test('does not open when the project list has a project', async () => {
   );
   await writeFile(join(project, 'main.scad'), 'cube([3, 4, 5]);\n');
   session = await launchDesktopApp({ token: 'unused', flagState: 'all-on', profileRoot, preserveProfile: true });
-  await expectHomeStays(session.page);
+  await expectHomeStays(session.page, session.page.getByText('First run project', { exact: true }).first());
 });
 
 test('does not open with onboardingAutoOpen off, and the invite opens it', async () => {

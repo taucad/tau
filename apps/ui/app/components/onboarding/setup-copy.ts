@@ -247,6 +247,8 @@ export const viewerStepCopy = {
   legendAlways: 'Always',
   legendAlwaysText:
     'Click selects, F fits the view, the gizmo snaps to standard views. Arrow keys orbit and Shift with arrow keys pans, so nothing needs a drag',
+  legendAlwaysTextWithoutGizmo:
+    'Click selects and F fits the view. Arrow keys orbit and Shift with arrow keys pans, so nothing needs a drag',
   or: 'or',
   previewLabel: 'Viewer preview',
   previewLoading: 'Loading the preview',
@@ -377,6 +379,7 @@ export const setupFinishCopy = {
   nothingChosen: 'nothing chosen',
   tourOn: 'Tips will appear in the next project you open',
   tourOff: 'No tips. Start the tour from Help when you want it',
+  tourTaken: 'You have taken the tour',
 } as const;
 
 /**

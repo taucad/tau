@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import type { LanguageId } from '@taucad/preferences';
@@ -108,6 +108,13 @@ describe('setup', () => {
 
   it('opens at step 4 from How Tau works', () => {
     renderSetup('/welcome?step=how');
+    expect(screen.getByRole('heading', { level: 1, name: 'Design, verify, build' })).toBeInTheDocument();
+  });
+
+  it('opens step 4 when How Tau works is chosen while setup is already open', async () => {
+    const router = renderSetup('/welcome?entry=help');
+    expect(screen.getByRole('heading', { level: 1, name: 'What do you want to make?' })).toBeInTheDocument();
+    await act(async () => router.navigate('/welcome?entry=help&step=how'));
     expect(screen.getByRole('heading', { level: 1, name: 'Design, verify, build' })).toBeInTheDocument();
   });
 

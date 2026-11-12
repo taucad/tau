@@ -12,8 +12,9 @@ import type {
   SetupStatus,
   ViewerPreferences,
 } from '@taucad/preferences';
-import { suggestedGizmo, suggestedPreset } from '@taucad/preferences';
+import { mergeOnboarding, suggestedGizmo, suggestedPreset } from '@taucad/preferences';
 import { useAnalytics } from '#hooks/use-analytics.js';
+import { personRecordStores } from '#preferences/person-record.store.js';
 import { setViewerPersonProperties } from '#components/settings/viewer/viewer-person-properties.js';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
 import type { SetupEntry } from '#telemetry/onboarding-telemetry.js';
@@ -27,6 +28,16 @@ export const setupPersonPropertyNames = {
   tool: 'tool',
   setupStatus: 'setup_status',
 } as const;
+
+/**
+ * The status the device holds once this write merges in: a status only rises, so reopening setup after Finish still
+ * reads completed.
+ *
+ * @param next - The status this write sets.
+ * @returns The stored status after the write.
+ */
+const storedStatusAfter = (next: SetupStatus): SetupStatus =>
+  mergeOnboarding(personRecordStores.onboarding.read(), { setupStatus: next }).setup?.status ?? next;
 
 /* eslint-disable @typescript-eslint/naming-convention -- event properties are analytics wire names. */
 
@@ -70,7 +81,7 @@ export const useSetupTelemetry = (entry: SetupEntry): SetupTelemetry => {
     if (!isOpenedReported.current) {
       isOpenedReported.current = true;
       telemetry.setupOpened({ entry });
-      setPerson({ [setupPersonPropertyNames.setupStatus]: 'offered' satisfies SetupStatus });
+      setPerson({ [setupPersonPropertyNames.setupStatus]: storedStatusAfter('offered') });
     }
   }, [entry, setPerson, telemetry]);
 
@@ -85,11 +96,11 @@ export const useSetupTelemetry = (entry: SetupEntry): SetupTelemetry => {
           duration_ms: Math.round(performance.now() - openedAt),
           tour_wanted: isTourWanted,
         });
-        setPerson({ [setupPersonPropertyNames.setupStatus]: 'completed' satisfies SetupStatus });
+        setPerson({ [setupPersonPropertyNames.setupStatus]: storedStatusAfter('completed') });
       },
       skipped: (step) => {
         telemetry.setupSkipped({ at_step: step });
-        setPerson({ [setupPersonPropertyNames.setupStatus]: 'skipped' satisfies SetupStatus });
+        setPerson({ [setupPersonPropertyNames.setupStatus]: storedStatusAfter('skipped') });
       },
       presetSelected: (preset, profile) => {
         telemetry.viewerPresetSelected({

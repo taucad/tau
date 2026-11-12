@@ -87,6 +87,16 @@ describe('setup step 4 and Finish', () => {
     expect(screen.getByRole('button', { name: 'Take it again' })).toBeInTheDocument();
   });
 
+  it('says the tour was taken in the summary once it has ended, not that tips will appear', async () => {
+    personRecordStores.onboarding.write({ ended: 'dismissed' });
+    const user = userEvent.setup();
+    renderSetup();
+    await user.click(screen.getByRole('button', { name: 'Finish' }));
+    const summary = screen.getByTestId('setup-summary');
+    expect(summary).toHaveTextContent('You have taken the tour');
+    expect(summary).not.toHaveTextContent('Tips will appear');
+  });
+
   it('stores completed and shows a three-line summary with Start building', async () => {
     personRecordStores.profile.write({ goals: ['mechanical'], tool: 'solidworks' });
     const user = userEvent.setup();

@@ -120,7 +120,7 @@ export const arrangeWorkbenchDescription = `Show the person views: open views fr
 
 Keys you send replace; omitted keys stay. A lane (\`viewer\`, \`workbench\`) you send replaces that lane. New views show at once; \`open\` adds tabs to a lane's first group and activates them. Camera: a preset or \`look\` (a direction from the model toward the camera) frames the model. Lengths are metres.
 
-A display toggle, grid unit, field of view or up direction you send is set in that view over the person's default; omitted ones keep following it. Change view settings only here.
+Display toggles, grid unit, field of view or up direction you send are set in that view over the person's default; omitted ones keep their current state. Change view settings only here.
 
 Pass \`basedOn\` (the snapshot's layout digest) to refuse if the person rearranged since.
 

@@ -41,8 +41,8 @@ export const assertQualificationConsumerScope = (options: {
 };
 
 /**
- * Staging Mac CI and Linux may test trusted ancestors. Mac CI publication additionally authenticates a source/harness
- * binding; clean-host and all-platform runs retain exact-source admission.
+ * Staging Mac (CI and clean-host) and Linux may test trusted ancestors. Staging Mac publication additionally
+ * authenticates a source/harness binding; Windows clean-host and all-platform runs retain exact-source admission.
  */
 export const assertQualificationSource = (options: {
   sourceCommit: string;

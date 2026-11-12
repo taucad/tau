@@ -230,7 +230,7 @@ const main = async (): Promise<void> => {
   await mkdir('out/qualification-receipts', { recursive: false });
   if (usesQualificationBinding(scope, candidate.channel, kind)) {
     if (!candidateProvenance) {
-      throw new Error('Missing authenticated CI candidate');
+      throw new Error('Missing authenticated candidate for the qualification binding');
     }
     const binding = createQualificationBinding({
       manifest: candidate,

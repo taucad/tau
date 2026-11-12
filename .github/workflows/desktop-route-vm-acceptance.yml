@@ -281,7 +281,6 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate_c }}
-      DESKTOP_ASSETS_DIR: ${{ github.workspace }}/out/qualification-candidate
       TAU_QUALIFICATION_CHANNEL: staging
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
     steps:

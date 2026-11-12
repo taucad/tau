@@ -159,23 +159,6 @@ describe('framing machine', () => {
       expect(scripted.sent()).toEqual([{ type: 'setBounds', bounds: box(2) }]);
     });
 
-    it('should only refresh the bounds when a settled drag moves the same geometry far, and Fit view frames them', () => {
-      const scripted = scriptCamera();
-      const framing = startFraming({ camera: scripted.camera });
-      framing.send(measured('a', box(1, [10, 0, 0]), 2));
-      scripted.clear();
-
-      // A part dragged well past the refit ratio keeps its key, so the camera stays where the person put it.
-      framing.send(measured('a', box(1, [20, 0, 0]), 2));
-      expect(scripted.sent()).toEqual([{ type: 'setBounds', bounds: box(1, [20, 0, 0]) }]);
-      scripted.clear();
-
-      framing.send({ type: 'fitRequested' });
-      expect(scripted.sent()).toEqual([
-        { type: 'frameGeometry', bounds: box(1, [20, 0, 0]), margin: 0.1, source: 'fit' },
-      ]);
-    });
-
     it('should re-frame and apply the pending pose once when the entry identity changes', () => {
       const scripted = scriptCamera();
       const framing = startFraming({ camera: scripted.camera });
@@ -266,6 +249,23 @@ describe('framing machine', () => {
   });
 
   describe('refit and entry rules', () => {
+    it('should only refresh the bounds when a settled drag moves the same geometry far, and Fit view frames them', () => {
+      const scripted = scriptCamera();
+      const framing = startFraming({ camera: scripted.camera });
+      framing.send(measured('a', box(1, [10, 0, 0]), 2));
+      scripted.clear();
+
+      // A part dragged well past the refit ratio keeps its key, so the camera stays where the person put it.
+      framing.send(measured('a', box(1, [20, 0, 0]), 2));
+      expect(scripted.sent()).toEqual([{ type: 'setBounds', bounds: box(1, [20, 0, 0]) }]);
+      scripted.clear();
+
+      framing.send({ type: 'fitRequested' });
+      expect(scripted.sent()).toEqual([
+        { type: 'frameGeometry', bounds: box(1, [20, 0, 0]), margin: 0.1, source: 'fit' },
+      ]);
+    });
+
     it('should leave the camera alone under the refit ratio and refit once the drift adds up', () => {
       const scripted = scriptCamera();
       const framing = startFraming({ camera: scripted.camera });

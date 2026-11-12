@@ -12,6 +12,7 @@
  * path count (F9).
  */
 
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIsomorphicGitRevisionPort, lfsObjectPath, lfsPointerFor, RevisionPortError } from '@taucad/revisions';
 import type { Remote, RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
@@ -233,6 +234,13 @@ const turnFinalized = async (client: Client, turnId: string): Promise<void> =>
     },
     { timeout: 10_000 },
   );
+
+/**
+ * The id a linked checkout of `branch` has in this harness's SHA-1 repository: both git ports derive it from the
+ * branch (`@taucad/revisions` `checkout-id.ts`, XD4), so a chat synced from another device can name it first.
+ */
+const checkoutIdOfBranch = (branch: string): string =>
+  createHash('sha1').update(`tau-checkout\0${branch}`).digest('hex').slice(0, 16);
 
 /** Make a branch through the port and wait for the checkout the registry made for it. */
 const branchOff = async (
@@ -2431,6 +2439,44 @@ describe('readiness settles without a large-object download', () => {
     expect(root.status().checkoutId).toBe(linked.checkoutId);
     expect(root.status().largeObjects).toBeUndefined();
     expect(root.status().readiness).toBe('filled');
+  }, 30_000);
+
+  /*
+   * L2b: a chat placed on its own branch. Its intent names a branch this device has no checkout for, so the
+   * placement opens one (`turn-placement.ts`, XD4 `materialize`), and the page follows the chat onto it.
+   */
+  it('reaches filled when a chat is placed on its own branch and followed (L2b)', async () => {
+    const ports: RevisionPort[] = [];
+    const fixture = harness(['alpha'], (port) => {
+      ports.push(port);
+      return port;
+    });
+    const project = await seed(fixture);
+    const { alpha, root } = await openOnHead(fixture, project);
+    expect(root.status().readiness).toBe('filled');
+    const head = root.status().headRevisionId ?? '';
+    /* A branch recorded without a checkout on this device: one a synced chat names, as another device made it. */
+    await ports.at(-1)?.updateRef({ name: 'side', expectedHead: undefined, head: revisionId(head) });
+    const session = await root.placementSession();
+    const key = turnKey(2);
+    const answer = await session.admit({
+      requestId: `admit:${key.runId}:1`,
+      key,
+      checkoutId: checkoutIdOfBranch('side'),
+    });
+    if (answer.status === 'refused') {
+      expect.fail(answer.message);
+    }
+    expect(answer.placement.checkoutId).toBe(checkoutIdOfBranch('side'));
+    alpha.send({ command: 'followChat', chatId: key.chatId });
+    await vi.waitFor(
+      () => {
+        expect(root.status().checkoutId).toBe(answer.placement.checkoutId);
+        expect(root.status().largeObjects).toBeUndefined();
+        expect(root.status().readiness).toBe('filled');
+      },
+      { timeout: 10_000 },
+    );
   }, 30_000);
 
   it('reaches filled when the root starts on an existing revision (S3, control)', async () => {

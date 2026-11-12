@@ -139,7 +139,8 @@ type SettingsRowProps = {
 };
 
 /**
- * One setting: a title and a short description on the left, its control on the right.
+ * One setting: a title and a short description on the left, its control on the right. When the row is too narrow for
+ * both, the control wraps under the text.
  *
  * @param props - The setting's copy and control.
  * @returns The row, wrapped as a search destination when `settingId` is given.
@@ -162,8 +163,10 @@ export function SettingsRow({
       aria-describedby={description === undefined ? undefined : `${id}-description`}
       className={cn('flex flex-col gap-2 py-3.5', className)}
     >
-      <div className='flex items-center justify-between gap-4'>
-        <div className='flex min-w-0 flex-col gap-0.5'>
+      {/* The control wraps under the text and may shrink, so a 16 rem select fits a 320 px viewport (V12). */}
+      <div className='flex flex-wrap items-center justify-between gap-x-4 gap-y-2'>
+        {/* A 12 rem basis keeps a long description beside its control until the row is too narrow for both. */}
+        <div className='flex min-w-0 flex-1 basis-48 flex-col gap-0.5'>
           <div className='flex items-center gap-1.5 text-sm font-medium'>
             <span id={`${id}-title`} className='flex min-w-0 items-center gap-2'>
               {title}
@@ -178,7 +181,9 @@ export function SettingsRow({
             </div>
           )}
         </div>
-        {control === undefined ? undefined : <div className='flex shrink-0 items-center gap-2'>{control}</div>}
+        {control === undefined ? undefined : (
+          <div className='flex max-w-full min-w-0 items-center gap-2'>{control}</div>
+        )}
       </div>
       {children}
     </div>

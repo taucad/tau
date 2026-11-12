@@ -1045,7 +1045,11 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     const clone = path.join(workspace, 'version-numbers');
     await gitOk(['clone', remoteFor(callers.writer.token), clone], workspace);
     /** One annotated version tag on the clone's head: version `id`, named `name`, made at `date`. */
-    const version = async (number: number, name: string, id: string, date: string): Promise<void> => {
+    const version = async (
+      number: number,
+      tag: Readonly<{ name: string; id: string; date: string }>,
+    ): Promise<void> => {
+      const { name, id, date } = tag;
       const outcome = await runGit(
         [
           'tag',
@@ -1066,24 +1070,24 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     const ready = randomBytes(16).toString('hex');
     const lid = randomBytes(16).toString('hex');
 
-    await version(4, 'Ready for print', ready, '2026-11-12T10:00:00Z');
+    await version(4, { name: 'Ready for print', id: ready, date: '2026-11-12T10:00:00Z' });
     const first = await push(4);
     expect(first.code, first.stderr).toBe(0);
 
     /* Another device's version at the same number, made in the same second: another id. */
-    await version(4, 'Lid fit', lid, '2026-11-12T10:00:00Z');
+    await version(4, { name: 'Lid fit', id: lid, date: '2026-11-12T10:00:00Z' });
     const taken = await push(4);
     expect(taken.code).not.toBe(0);
     expect(taken.stderr).toContain(`${versionNumberTakenMarker} — refs/tags/v4 names V4`);
     expect(taken.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
 
     /* The device's renumbered version: the next free number is backed up. */
-    await version(5, 'Lid fit', lid, '2026-11-12T10:05:00Z');
+    await version(5, { name: 'Lid fit', id: lid, date: '2026-11-12T10:05:00Z' });
     const renumbered = await push(5);
     expect(renumbered.code, renumbered.stderr).toBe(0);
 
     /* A rename keeps the version's id: the same ref takes the new name. */
-    await version(4, 'Ready for print, final', ready, '2026-11-12T10:10:00Z');
+    await version(4, { name: 'Ready for print, final', id: ready, date: '2026-11-12T10:10:00Z' });
     const renamed = await push(4);
     expect(renamed.code, renamed.stderr).toBe(0);
 

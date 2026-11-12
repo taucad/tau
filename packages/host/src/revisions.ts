@@ -1485,14 +1485,16 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             code: 'INVALID_REVISION_REQUEST',
           });
         }
-        return revisionJson(
-          await port.tag({
-            name: text('name'),
-            revisionId: revisionId(text('revisionId')),
-            ...(optionalText(request, 'note') === undefined ? {} : { note: optionalText(request, 'note') }),
-            ...(number === undefined ? {} : { number }),
-          }),
-        );
+        const made = await port.tag({
+          name: text('name'),
+          revisionId: revisionId(text('revisionId')),
+          ...(optionalText(request, 'note') === undefined ? {} : { note: optionalText(request, 'note') }),
+          ...(number === undefined ? {} : { number }),
+        });
+        /* A version or a rename writes only its tag ref, which no branch head shows: tell sync, so the owed push
+         * carries it without waiting for a later revision (R9). */
+        actor.send({ type: 'sync', event: { type: 'recordsChanged' } });
+        return revisionJson(made);
       }
       case 'compare': {
         const requestedRevision = text('revisionId');

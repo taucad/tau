@@ -2115,3 +2115,75 @@ describe('explicit GitHub credential custody over the host channel', () => {
     }
   });
 });
+
+describe('a version rename on a disk host', () => {
+  it('should push a version rename by itself, with no revision after it (B6, R9)', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-version-rename-'));
+    roots.push(workspaceRoot);
+    const real = createIsomorphicGitRevisionPort({ filesystem: new NodeFsProvider(workspaceRoot) });
+    await real.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await real.setHead('main');
+    const receipt = await real.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['part.ts', 'export const part = 1;\n']]),
+      provenance: {
+        source: 'user',
+        actor: { kind: 'user', id: 'ada' },
+        capture: 'save',
+        via: 'desktop',
+        createdAt: Date.UTC(2026, 10, 12),
+      },
+      summary: { generated: 'First' },
+    });
+    const head = revisionId(receipt.commitId);
+    await real.updateRef({ name: 'refs/heads/main', expectedHead: undefined, head });
+    const offers: string[][] = [];
+    const port: RevisionPort = {
+      ...real,
+      listRemotes: async () => [{ name: 'tau', url: 'https://remote.test/project.git', kind: 'tau' }],
+      listRemoteRefs: async () => [],
+      fetch: async () => ({ refs: [] }),
+      push: async (input) => {
+        offers.push(input.refs.map((ref) => ref.name));
+        const held = [...(await real.listRefs('refs/heads')), ...(await real.listRefs('refs/tags'))];
+        return {
+          refs: input.refs.map((ref) => ({
+            name: ref.name,
+            status: 'updated',
+            head: held.find((entry) => entry.name === ref.name)?.head,
+          })),
+        };
+      },
+    };
+    const revisions = createProjectRevisions({
+      via: 'desktop',
+      workspaceRoot,
+      projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
+      port,
+      watchWorkspace: false,
+    });
+    try {
+      await revisions.channel.request({ command: 'open' });
+      const answer = await revisions.channel.request({ command: 'tag', name: 'Ready for print', revisionId: head });
+      const made = answer.result as { number: number };
+      await vi.waitFor(
+        () => {
+          expect(offers.some((names) => names.includes(`refs/tags/v${made.number}`))).toBe(true);
+        },
+        { timeout: 15_000 },
+      );
+
+      /* The rename writes the same ref, and on its own is enough to offer it again. */
+      const offered = offers.length;
+      await revisions.channel.request({ command: 'tag', name: 'Lid fit', revisionId: head, number: made.number });
+      await vi.waitFor(
+        () => {
+          expect(offers.slice(offered).some((names) => names.includes(`refs/tags/v${made.number}`))).toBe(true);
+        },
+        { timeout: 15_000 },
+      );
+    } finally {
+      await revisions.release();
+    }
+  }, 60_000);
+});

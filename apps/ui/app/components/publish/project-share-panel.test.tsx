@@ -780,7 +780,7 @@ describe('ProjectSharePanel', () => {
     await waitFor(() => {
       expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalled();
     });
-    expect(await screen.findByText('People with access')).toBeInTheDocument();
+    expect(await screen.findByText('Who can view this link')).toBeInTheDocument();
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
   });
 

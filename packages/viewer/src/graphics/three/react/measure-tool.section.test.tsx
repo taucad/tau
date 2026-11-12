@@ -292,13 +292,17 @@ describe('MeasureTool with section cuts', () => {
   });
 
   it('should retain chosen catalog targets across unchanged frames and invalidate them when the camera changes', async () => {
+    let catalogRequests = 0;
+    actor.on('measureCatalogRequested', () => {
+      catalogRequests++;
+    });
     act(() => {
       actor.send({ type: 'requestMeasureCatalog' });
     });
     await waitFor(() => {
       expect(actor.getSnapshot().context.measureCandidates.length).toBeGreaterThan(0);
     });
-    const { measureCandidates, measureCatalogRequest } = actor.getSnapshot().context;
+    const { measureCandidates } = actor.getSnapshot().context;
     expect(measureCandidates.length).toBeGreaterThan(0);
     const chosenId = measureCandidates[0]!.id;
     act(() => {
@@ -321,17 +325,21 @@ describe('MeasureTool with section cuts', () => {
     expect(afterMove.measureCandidates).toEqual([]);
     expect(afterMove.measureChosenCandidateId).toBeUndefined();
     expect(afterMove.measureLockedTargetId).toBeUndefined();
-    expect(afterMove.measureCatalogRequest).toBe(measureCatalogRequest);
+    expect(catalogRequests).toBe(1);
   });
 
   it('should clear a surviving actor selection as soon as active Measure remounts', async () => {
+    let catalogRequests = 0;
+    actor.on('measureCatalogRequested', () => {
+      catalogRequests++;
+    });
     act(() => {
       actor.send({ type: 'requestMeasureCatalog' });
     });
     await waitFor(() => {
       expect(actor.getSnapshot().context.measureCandidates.length).toBeGreaterThan(0);
     });
-    const { measureCandidates, measureCatalogRequest } = actor.getSnapshot().context;
+    const { measureCandidates } = actor.getSnapshot().context;
     expect(measureCandidates.length).toBeGreaterThan(0);
     const chosenId = measureCandidates[0]!.id;
     act(() => {
@@ -354,7 +362,7 @@ describe('MeasureTool with section cuts', () => {
     expect(afterRemount.measureCandidates).toEqual([]);
     expect(afterRemount.measureChosenCandidateId).toBeUndefined();
     expect(afterRemount.measureLockedTargetId).toBeUndefined();
-    expect(afterRemount.measureCatalogRequest).toBe(measureCatalogRequest);
+    expect(catalogRequests).toBe(1);
   });
 
   it('should refresh a resting pointer after camera motion, then stay settled on an unchanged frame', () => {

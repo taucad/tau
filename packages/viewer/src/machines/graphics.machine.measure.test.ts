@@ -75,6 +75,9 @@ describe('graphics machine measure', () => {
         activeId: 'near',
       });
       actor.send({ type: 'chooseMeasureCandidate', id: 'near' });
+      const emitted: unknown[] = [];
+      actor.on('measureCatalogRequested', (event) => emitted.push(event));
+      actor.on('measureCandidateCommitRequested', (event) => emitted.push(event));
       actor.send({ type: 'requestMeasureCatalog' });
       actor.send({
         type: 'setMeasureCandidates',
@@ -86,7 +89,12 @@ describe('graphics machine measure', () => {
       });
       expect(actor.getSnapshot().context.measureActiveCandidateId).toBe('near');
       actor.send({ type: 'requestMeasureCandidateCommit' });
-      expect(actor.getSnapshot().context.measureCommitRequest).toBe(1);
+      // Graphics keeps no request counter: the measuring tool's session hears each request once.
+      expect(emitted).toEqual([
+        { type: 'measureCatalogRequested', append: false },
+        { type: 'measureCandidateCommitRequested' },
+      ]);
+      expect(actor.getSnapshot().context).not.toHaveProperty('measureCommitRequest');
       expect(actor.getSnapshot().context.currentMeasurementStart).toBeUndefined();
       actor.send({ type: 'clearMeasureChosenCandidate' });
       actor.send({

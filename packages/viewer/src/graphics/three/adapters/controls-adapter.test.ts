@@ -1,15 +1,30 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import CameraControlsImpl from 'camera-controls';
-import { OrthographicCamera, Raycaster, Scene, Vector3 } from 'three';
+import {
+  EventDispatcher,
+  OrthographicCamera,
+  PerspectiveCamera as ThreePerspectiveCamera,
+  Raycaster,
+  Scene,
+  Vector3,
+} from 'three';
 import type { Camera, PerspectiveCamera } from 'three';
-import { createActor, createAsyncLogic } from 'xstate';
+import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { Actor, InspectionEvent } from 'xstate';
 import type { RootState } from '@react-three/fiber';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import { createThreeCameraRig } from '@taucad/three/camera';
 import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
 import type { CameraOwnedSettings } from '#graphics/graphics-settings.js';
-import { createControlsAdapter } from '#graphics/three/adapters/controls-adapter.js';
+import {
+  createControlsAdapter,
+  retargetCameraControls,
+  tickPriority,
+} from '#graphics/three/adapters/controls-adapter.js';
+import { surfacePriority } from '#graphics/three/three-canvas-instance-host.js';
+import type { RetargetableCameraControls } from '#graphics/three/adapters/controls-adapter.js';
+import { bindViewportGizmoControls } from '#graphics/three/controls/viewport-gizmo-controls-adapter.js';
+import { createViewportGizmoInteractionLock } from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { GraphicsCameraRef } from '#machines/graphics.machine.js';
 import { asCameraActor } from '#services/graphics-camera-registry.js';
@@ -38,10 +53,18 @@ type Harness = {
   graphicsEvents: string[];
   cameraEvents: Array<Readonly<{ type: string; echoRevision?: number }>>;
   controls: () => CameraControlsImpl;
+  /** The canvas's view-cube interaction lock, which the adapter reads each frame. */
+  lock: ReturnType<typeof createViewportGizmoInteractionLock>;
   attach: () => void;
 };
 
 const harnesses: Harness[] = [];
+
+/** The frame callbacks the adapter subscribed on the stub root, each with its priority, in subscription order. */
+const frameSubscriptions = (
+  harness: Harness,
+): Array<{ ref: Parameters<RootState['internal']['subscribe']>[0]; priority: number }> =>
+  vi.mocked(harness.state.internal.subscribe).mock.calls.map(([ref, priority]) => ({ ref, priority }));
 
 const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
   const camera = seed ?? { cameraView };
@@ -76,6 +99,7 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
     },
   });
   const calls: string[] = [];
+  const lock = createViewportGizmoInteractionLock();
   const scene = new Scene();
   const state = {
     camera: rig.activeCamera as Camera,
@@ -105,8 +129,17 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
     graphicsEvents,
     cameraEvents,
     controls: () => state.controls as unknown as CameraControlsImpl,
+    lock,
     attach() {
       graphics.send({ type: 'canvasAttached', canvasId: 'canvas', kind: 'canvas' });
+      // The canvas actor hands the camera the surface's viewport when its renderer exists, as `onCreated` does.
+      graphics.getSnapshot().context.canvas?.ref.send({
+        type: 'hostCreated',
+        backend: 'webgl',
+        surface: { width: 800, height: 600, pixelRatio: 1 },
+        domElement: document.createElement('canvas'),
+        host: createCallbackLogic(() => undefined),
+      });
       graphics.send({
         type: 'controlsAttached',
         canvasId: 'canvas',
@@ -116,6 +149,7 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
           connectorRef,
           consumersRef: { current: consumers },
           getUpAxis: () => 'z',
+          isInteractionLocked: lock.isActive,
         }),
       });
     },
@@ -125,10 +159,6 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
 };
 
 describe('controls adapter', () => {
-  beforeEach(() => {
-    vi.spyOn(globalThis, 'devicePixelRatio', 'get').mockReturnValue(1);
-  });
-
   afterEach(() => {
     for (const { graphics, rig } of harnesses.splice(0)) {
       graphics.stop();
@@ -414,5 +444,123 @@ describe('controls adapter', () => {
 
     expect(harness.graphics.getSnapshot().context.controlsAdapter).toBe(first);
     expect(harness.controls()).toBe(controls);
+  });
+
+  it('steps the controls by the frame delta once per frame, before the frame renders, while they are enabled', () => {
+    const harness = createHarness();
+    harness.attach();
+    const subscriptions = frameSubscriptions(harness);
+    // One tick for the canvas, where R3F's own controls step, after the canvas host reports a resize to the camera and
+    // before anything renders (positive priorities): the controls never step on a stale viewport.
+    expect(subscriptions.map(({ priority }) => priority)).toEqual([tickPriority]);
+    expect(surfacePriority).toBeLessThan(tickPriority);
+    expect(tickPriority).toBeLessThan(0);
+    const ticker = subscriptions[0]!.ref;
+    const update = vi.spyOn(harness.controls(), 'update');
+
+    ticker.current(harness.state, 1 / 60);
+    expect(update.mock.calls).toEqual([[1 / 60]]);
+
+    // The view cube disables the controls while it turns the camera.
+    harness.controls().enabled = false;
+    ticker.current(harness.state, 1 / 60);
+    expect(update).toHaveBeenCalledOnce();
+  });
+
+  it('moves no camera on a frame step while the view cube holds its interaction lock', () => {
+    vi.useFakeTimers();
+    try {
+      const harness = createHarness();
+      harness.attach();
+      const ticker = frameSubscriptions(harness)[0]!.ref;
+      const controls = harness.controls();
+      const { lock } = harness;
+      const gizmo = Object.assign(new EventDispatcher<Record<string, Record<string, unknown>>>(), {
+        target: new Vector3(),
+        update: vi.fn(),
+      });
+      const binding = bindViewportGizmoControls({
+        camera: harness.rig.activeCamera,
+        controls,
+        gizmo,
+        interactionLock: lock,
+      });
+      const update = vi.spyOn(controls, 'update');
+
+      // The cube takes the camera: it holds the lock and the controls are disabled together.
+      gizmo.dispatchEvent({ type: 'start' });
+      expect(lock.isActive()).toBe(true);
+      const { revision } = harness.camera.getSnapshot().context;
+      ticker.current(harness.state, 1 / 60);
+      expect(update).not.toHaveBeenCalled();
+      expect(harness.camera.getSnapshot().context.revision).toBe(revision);
+      // Another tool's drag ends under the cube (a second pointer) and re-enables the controls: the lock still holds them.
+      controls.enabled = true;
+      ticker.current(harness.state, 1 / 60);
+      expect(update).not.toHaveBeenCalled();
+      expect(harness.camera.getSnapshot().context.revision).toBe(revision);
+
+      // Released together: the next frame steps the controls again.
+      gizmo.dispatchEvent({ type: 'end' });
+      expect(lock.isActive()).toBe(false);
+      update.mockClear();
+      ticker.current(harness.state, 1 / 60);
+      expect(update).toHaveBeenCalledOnce();
+      binding?.detach();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops stepping the controls when its canvas leaves', () => {
+    const harness = createHarness();
+    const unsubscribe = vi.fn();
+    vi.mocked(harness.state.internal.subscribe).mockReturnValue(unsubscribe);
+    harness.attach();
+    harness.graphics.send({ type: 'canvasDetached', canvasId: 'canvas' });
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+});
+
+describe('retargetCameraControls', () => {
+  it('retargets one controls instance and projection-specific input mappings', () => {
+    const perspective = new ThreePerspectiveCamera();
+    const orthographic = new OrthographicCamera();
+    const controls: RetargetableCameraControls = {
+      camera: perspective,
+      cancel: vi.fn(),
+      mouseButtons: { wheel: CameraControlsImpl.ACTION.DOLLY },
+      touches: { two: CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK },
+      updateCameraUp: vi.fn(),
+    };
+
+    expect(retargetCameraControls({ controls, camera: orthographic })).toBe(true);
+    expect(controls.camera).toBe(orthographic);
+    expect(controls.mouseButtons.wheel).toBe(CameraControlsImpl.ACTION.ZOOM);
+    expect(controls.touches.two).toBe(CameraControlsImpl.ACTION.TOUCH_ZOOM_TRUCK);
+    expect(controls.cancel).toHaveBeenCalledOnce();
+    expect(controls.updateCameraUp).toHaveBeenCalledOnce();
+
+    expect(retargetCameraControls({ controls, camera: orthographic })).toBe(false);
+    expect(controls.cancel).toHaveBeenCalledOnce();
+
+    expect(retargetCameraControls({ controls, camera: perspective })).toBe(true);
+    expect(controls.mouseButtons.wheel).toBe(CameraControlsImpl.ACTION.DOLLY);
+    expect(controls.touches.two).toBe(CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK);
+  });
+
+  it('preserves a disabled wheel policy while retargeting to orthographic', () => {
+    const controls: RetargetableCameraControls = {
+      camera: new ThreePerspectiveCamera(),
+      cancel: vi.fn(),
+      mouseButtons: { wheel: CameraControlsImpl.ACTION.NONE },
+      touches: { two: CameraControlsImpl.ACTION.NONE },
+      updateCameraUp: vi.fn(),
+    };
+
+    retargetCameraControls({ controls, camera: new OrthographicCamera() });
+
+    expect(controls.mouseButtons.wheel).toBe(CameraControlsImpl.ACTION.NONE);
+    expect(controls.touches.two).toBe(CameraControlsImpl.ACTION.NONE);
   });
 });

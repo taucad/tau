@@ -6,6 +6,7 @@ import { locators, server as vitestServer } from 'vitest/browser';
 import type { ProjectionFixtureProof, ProjectionDirectoryReceipt } from '#support/projection-fixture-validation.js';
 import type { GatewayScriptTurn, GatewayTurnCount } from '#support/agent-host-gateway-script.js';
 import type { LinkedGithubFixtureDescription, LinkedGithubFixtureState } from '#support/linked-github-fixture.js';
+import type { FlagStateName } from '#support/flag-state.js';
 
 /** The GitHub-linked project's far side, as a spec names it (R15). */
 export type TargetLinkedGithub = LinkedGithubFixtureDescription;
@@ -237,6 +238,8 @@ declare module 'vitest' {
      * a value; an empty list means the row runs (`#support/github-identity.js`).
      */
     liveGithubMissing: Readonly<Record<'c10' | 'a4', readonly string[]>>;
+    /** FL4: the flag state this run opens every target in (`TAU_E2E_FLAG_STATE`, `#support/flag-state.js`). */
+    flagState: FlagStateName;
   }
 }
 
@@ -338,6 +341,7 @@ export type UiBrowserCommands = {
     readonly consentBanner?: boolean;
   }): Promise<void>;
   uiPressTarget(selector: string, key: string, surface?: TargetSurface): Promise<void>;
+  uiSetFlagState(state: FlagStateName): Promise<void>;
   uiQualifyWebGpu(profile: TargetWebGpuProfile): Promise<TargetWebGpuQualificationReport>;
   uiReadTarget(selector: string, options?: TargetReadOptions, surface?: TargetSurface): Promise<TargetState>;
   uiReadTauVertexOperations(email: string): Promise<TargetTauBillingOperation[]>;

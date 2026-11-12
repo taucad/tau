@@ -361,8 +361,9 @@ export function useViewSettingsSync({
         return;
       }
       if (adoption) {
-        /* Shown before the first frame without starting the camera's settle window, which would drop the adoption
-         * that frame sends: the same fields, applied in one automatic change. */
+        /* Shown before the entry's first frame, or over another entry's framed geometry while this one waits for it,
+         * without starting the camera's settle window, which would drop the adoption that frame sends: the same
+         * fields, applied in one automatic change. */
         actor.send({ type: 'adoptPersistedPose', ...adoption, ...(adoption.orientation ? { margin: 0.1 } : {}) });
         adoptedPoseRef.current = latest.camera.kind === 'pose' ? latest.camera : selectCameraView(actor);
       } else if (latest.camera.kind === 'pose') {

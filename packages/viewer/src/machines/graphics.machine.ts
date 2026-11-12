@@ -1067,14 +1067,15 @@ const decideViewerShortcut = (
   }
 };
 
-/** Whether Fit view fits: framing has framed the entry and holds a measurement to fit (it ignores the request while
- * an entry waits for its first presentation). */
-const selectFramingFits = (framingRef: GraphicsFramingRef): boolean => {
-  const framing = framingRef.getSnapshot();
-  return (
-    framing.matches('framed') && 'measuredBounds' in framing.context && framing.context.measuredBounds !== undefined
-  );
-};
+/**
+ * Whether Fit view fits a model: framing has framed the entry and holds a measurement to fit (it ignores the request
+ * while an entry waits for its first presentation). Read it from the framing actor, with `useSelector(framingRef, …)`.
+ * @public
+ */
+export const selectFramingFitsModel = (framing: SnapshotFrom<typeof framingMachine>): boolean =>
+  framing.matches('framed') && 'measuredBounds' in framing.context && framing.context.measuredBounds !== undefined;
+
+const selectFramingFits = (framingRef: GraphicsFramingRef): boolean => selectFramingFitsModel(framingRef.getSnapshot());
 
 /** Whether the person is holding a camera gesture (pointer down on the controls). */
 const selectGestureHeld = (cameraRef: GraphicsCameraRef): boolean =>

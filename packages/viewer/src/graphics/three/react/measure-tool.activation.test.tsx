@@ -728,6 +728,44 @@ describe('MeasureTool activation', () => {
     }
   });
 
+  it('hovers the snap points of a graph that lands after the event source was reconnected', async () => {
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+    });
+    dispatch('pointermove', pixelOf(0, -1, 1));
+    runFrames();
+    const region = document.createElement('div');
+    region.getBoundingClientRect = canvas.getBoundingClientRect;
+    document.body.append(region);
+    try {
+      await act(async () => {
+        getState().events.disconnect?.();
+        getState().events.connect?.(region);
+        await Promise.resolve();
+      });
+      const [x, y] = pixelOf(0, -1, 1);
+      const event = new MouseEvent('pointermove', { bubbles: true, clientX: x, clientY: y });
+      Object.defineProperties(event, {
+        pointerId: { value: 1 },
+        pointerType: { value: 'mouse' },
+        isPrimary: { value: true },
+      });
+      act(() => {
+        region.dispatchEvent(event);
+      });
+      runFrames();
+      const marksBeforeGraph = measurementMarks();
+
+      // The graph the old surface asked for lands under the new one: the resting pointer hovers its snap points.
+      await answerWorker();
+      runFrames();
+
+      expect(measurementMarks()).toBeGreaterThan(marksBeforeGraph);
+    } finally {
+      region.remove();
+    }
+  });
+
   it('does not bring a hover back when the camera moves after a window blur', () => {
     getMeshMeasurementFeatures(model);
     dispatch('pointermove', pixelOf(0, -1, 1));

@@ -379,6 +379,9 @@ export function MeasureTool(): React.JSX.Element {
       }),
     [getRootState, graphicsActor, kinematicsRef, pointerTarget],
   );
+  // The adapters as last rendered: a graph that lands after they were rebuilt around a new surface re-hovers through
+  // the current ones, whose session holds the resting pointer.
+  const adaptersRef = useRef(adapters);
   // Each mesh's feature graph request from a pointer, while it is in flight.
   const pointerGraphPendingRef = useRef(new WeakMap<THREE.Mesh, Promise<void>>());
   const graphSource = useMemo(
@@ -419,22 +422,19 @@ export function MeasureTool(): React.JSX.Element {
   }, [graphSource]);
   // A pick that waited on a tree still building in the worker asks again from the last pointer once it lands.
   const replayArmedRef = useRef(false);
-  const replayWhenReady = useCallback(
-    (pick: MeshPick): void => {
-      if (!pick.whenReady || replayArmedRef.current) {
-        return;
-      }
-      replayArmedRef.current = true;
-      const { whenReady } = pick;
-      // async-iife: bootstrap -- A pointer snapshot cannot await a tree building in the worker.
-      void (async () => {
-        await whenReady;
-        replayArmedRef.current = false;
-        adapters.rehover();
-      })();
-    },
-    [adapters],
-  );
+  const replayWhenReady = useCallback((pick: MeshPick): void => {
+    if (!pick.whenReady || replayArmedRef.current) {
+      return;
+    }
+    replayArmedRef.current = true;
+    const { whenReady } = pick;
+    // async-iife: bootstrap -- A pointer snapshot cannot await a tree building in the worker.
+    void (async () => {
+      await whenReady;
+      replayArmedRef.current = false;
+      adaptersRef.current.rehover();
+    })();
+  }, []);
 
   // Cache mesh list to avoid expensive scene.traverse() on every mouse event.
   // Invalidated when geometry, component display or a kinematic pose changes: a pose moves meshes, and the
@@ -450,6 +450,7 @@ export function MeasureTool(): React.JSX.Element {
   const modelDisplayRevisionRef = useRef(modelDisplayRevision);
   const kinematicsActorRef = useRef(kinematicsRef);
   useLayoutEffect(() => {
+    adaptersRef.current = adapters;
     currentStartRef.current = currentStart;
     chosenCandidateIdRef.current = explicitCandidateId;
     lockedTargetIdRef.current = lockedTargetId;
@@ -460,6 +461,7 @@ export function MeasureTool(): React.JSX.Element {
     modelDisplayRevisionRef.current = modelDisplayRevision;
     kinematicsActorRef.current = kinematicsRef;
   }, [
+    adapters,
     camera,
     currentStart,
     explicitCandidateId,
@@ -532,7 +534,7 @@ export function MeasureTool(): React.JSX.Element {
             graphicsActor.send({ type: 'setMeasureMessage' });
           }
           if (ready && presentedKey === geometryKeyRef.current) {
-            adapters.rehover();
+            adaptersRef.current.rehover();
           }
         } catch {
           if (graphSourceRef.current !== graphSource) {
@@ -558,7 +560,7 @@ export function MeasureTool(): React.JSX.Element {
       pending.set(surface, request);
       return request;
     },
-    [adapters, graphClient, graphSource, graphicsActor],
+    [graphClient, graphSource, graphicsActor],
   );
 
   useEffect(

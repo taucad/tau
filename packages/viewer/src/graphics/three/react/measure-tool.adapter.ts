@@ -77,7 +77,7 @@ export type MeasureToolHost = Readonly<{
   snapshot: (at: MeasurePointerAt, coarsePointer: boolean) => MeasurePointerSnapshot;
   /** Places the snapshot's point: a start, a feature measurement or the second point. */
   commit: (snapshot: MeasurePointerSnapshot) => void;
-  /** Clears the hover marks and the preview distance. */
+  /** Clears the hover marks; the preview distance is cleared only when the input is given back. */
   clearHover: () => void;
   /** Drops an unlocked chosen candidate as a press goes down, so the press snaps to what is under it. */
   releaseChosenCandidate: () => void;

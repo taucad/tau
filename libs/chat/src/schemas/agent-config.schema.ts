@@ -2,6 +2,7 @@
 import z from 'zod';
 import { kernelPreferences } from '@taucad/types/constants';
 import { chatModes } from '#constants/chat-mode.constants.js';
+import { personGoals, personLanguages } from '#constants/person.constants.js';
 import { reasoningLevels } from '#constants/model.constants.js';
 import { toolModes, toolNames } from '#constants/tool.constants.js';
 import { contextPayloadSchema } from '#schemas/context-payload.schema.js';
@@ -107,6 +108,21 @@ export const cadAgentExecutionSchema = z
   .meta({ id: 'CadAgentExecution' });
 
 /**
+ * What the person told setup about themselves, as Tau's own agent is told it: the goals they make and the languages
+ * they read. The prompt renders it as background after the kernel guidance;
+ * it never asks for a kernel. Only the app's own agent receives it: an external agent's context, the CLI and the MCP
+ * plugin carry none.
+ *
+ * @public
+ */
+export const agentPersonSchema = z
+  .strictObject({
+    makes: z.array(z.enum(personGoals)).max(personGoals.length),
+    reads: z.array(z.enum(personLanguages)).max(personLanguages.length),
+  })
+  .meta({ id: 'AgentPerson' });
+
+/**
  * Per-request configuration for the CAD agent profile.
  *
  * This is the single source of truth for "what does the CAD agent need to know
@@ -137,6 +153,8 @@ export const cadAgentConfigSchema = z
     testingEnabled: z.boolean(),
     snapshot: snapshotSchema.optional(),
     contextPayload: contextPayloadSchema.optional(),
+    /** Absent when the person has said nothing the agent can use, has turned the switch off, or the surface is off. */
+    person: agentPersonSchema.optional(),
   })
   .strict()
   .meta({ id: 'CadAgentConfig' });
@@ -189,6 +207,9 @@ export type CadAgentConfig = z.infer<typeof cadAgentConfigSchema>;
  * @public
  */
 export type CadAgentConfigInput = z.input<typeof cadAgentConfigSchema>;
+
+/** What the agent is told about the person. @public */
+export type AgentPerson = z.infer<typeof agentPersonSchema>;
 
 /** Parsed execution-substrate selection for a CAD turn. @public */
 export type CadAgentExecution = z.infer<typeof cadAgentExecutionSchema>;

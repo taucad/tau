@@ -128,6 +128,8 @@ const hostPrompt = (
 ): Pick<BrowserHostAdmissionConfig, 'systemPrompt' | 'systemPromptBlocks'> => {
   const prompt = getCadSystemPrompt(agent.kernel, 'agent', true, {
     ...kernelFacts(agent),
+    /* Only Tau's own agent is told about the person; an external agent's context below never carries it. */
+    ...(agent.person === undefined ? {} : { person: agent.person }),
     chatId,
     modelId: agent.execution.model,
     contextWindow: model?.details.contextWindow,

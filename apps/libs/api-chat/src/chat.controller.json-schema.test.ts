@@ -245,6 +245,9 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
               ],
               "type": "string",
             },
+            "person": {
+              "$ref": "#/$defs/AgentPerson",
+            },
             "profile": {
               "const": "cad",
               "type": "string",

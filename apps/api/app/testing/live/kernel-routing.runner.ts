@@ -11,10 +11,12 @@ import {
   renderKernelRoutingCard,
 } from '@taucad/chat/prompts';
 import type { BindingKernelRow, EntryBinding, KernelRoutingProfile } from '@taucad/chat/prompts';
-import { isKernelId, resolveKernel } from '@taucad/types/constants';
-import type { KernelId } from '@taucad/types/constants';
+import type { AgentPerson } from '@taucad/chat';
+import { isKernelId, kernelConfigurations, resolveKernel } from '@taucad/types/constants';
+import type { KernelId, KernelRepresentation, KernelRoutingZoneId } from '@taucad/types/constants';
 import { kernelRoutingHosts } from '#testing/live/kernel-routing.cases.js';
 import type { KernelRoutingCase } from '#testing/live/kernel-routing.cases.js';
+import { gradeKernelRoutingCase } from '#testing/live/kernel-routing.grader.js';
 import type { KernelRoutingObservation } from '#testing/live/kernel-routing.grader.js';
 import { textOf, toolCalls } from '#testing/live/live-assertions.js';
 
@@ -29,9 +31,49 @@ import { textOf, toolCalls } from '#testing/live/live-assertions.js';
  * The arms AKS-S1 runs. `in-turn` is the gate arm: the inline card on an entry-less project. `pointer` replaces the
  * card with a pointer to a `kernel-routing` skill that holds it. `template` puts an untouched replicad template under
  * the Auto text (D3's fallback scaffold). `prompt-only` is the Appendix B alternative: one tool-less call that names a
- * kernel from the card.
+ * kernel from the card. The person-profile arms are the in-turn arm with a `<person>` block. `examples` runs the Home
+ * suggestions, read from a file, under Auto on the web host.
  */
-export type KernelRoutingArm = 'in-turn' | 'pointer' | 'template' | 'prompt-only';
+export type KernelRoutingArm = 'in-turn' | 'pointer' | 'template' | 'prompt-only' | PersonProfileArm | 'examples';
+
+/**
+ * The person-profile arms: the in-turn arm with a `<person>` block from one setup profile, and nothing else changed.
+ * Each one is compared with the in-turn arm, which sends no block, on the development corpus.
+ */
+export type PersonProfileArm = 'person-printing' | 'person-mechanical' | 'person-electronics' | 'person-art';
+
+/** The profile each person-profile arm sends. */
+export const personProfiles: Readonly<Record<PersonProfileArm, AgentPerson>> = {
+  'person-printing': { makes: ['printing'], reads: ['none'] },
+  'person-mechanical': { makes: ['mechanical'], reads: ['typescript'] },
+  'person-electronics': { makes: ['electronics'], reads: ['python'] },
+  'person-art': { makes: ['art'], reads: ['none'] },
+};
+
+/** The person-profile arms in a fixed order. */
+export const personProfileArms: readonly PersonProfileArm[] = [
+  'person-printing',
+  'person-mechanical',
+  'person-electronics',
+  'person-art',
+];
+
+/**
+ * The person an arm's prompt is built with.
+ *
+ * @param arm - The arm.
+ * @returns The profile for a person-profile arm, otherwise nothing (no `<person>` block).
+ */
+export const personFor = (arm: KernelRoutingArm): AgentPerson | undefined =>
+  isPersonProfileArm(arm) ? personProfiles[arm] : undefined;
+
+/**
+ * Whether an arm is a person-profile arm.
+ *
+ * @param arm - The arm name.
+ * @returns True for one of {@link personProfileArms}.
+ */
+export const isPersonProfileArm = (arm: string): arm is PersonProfileArm => Object.hasOwn(personProfiles, arm);
 
 /** The skill the pointer arm points at. */
 export const routingSkillName = 'kernel-routing';
@@ -516,3 +558,164 @@ export const observePromptOnly = (caseId: string, text: string): KernelRoutingOb
     declinedOutOfScope: declined,
   };
 };
+
+/** A routing pass rate over every run of a stratum's cases. */
+export type StratumRate = { readonly passed: number; readonly runs: number };
+
+/** How a person-profile arm compares with the arm that sends no block. */
+export type PersonArmComparison = {
+  /** Routing cases by tier: the profile arm's rate may be at most {@link personArmMargin} lower than the no-block rate. */
+  readonly strata: Readonly<
+    Record<'narrow' | 'broad', { readonly baseline: StratumRate; readonly profile: StratumRate; readonly met: boolean }>
+  >;
+  /** Must-ask, entitlement and existing-project cases that pass in every no-block run and fail in a profile run. */
+  readonly regressions: readonly string[];
+  readonly met: boolean;
+};
+
+const rateOf = (
+  cases: readonly KernelRoutingCase[],
+  runs: ReadonlyMap<string, readonly KernelRoutingObservation[]>,
+): StratumRate => {
+  let passed = 0;
+  let total = 0;
+  for (const testCase of cases) {
+    for (const observation of runs.get(testCase.id) ?? []) {
+      total += 1;
+      passed += gradeKernelRoutingCase(testCase, observation).pass ? 1 : 0;
+    }
+  }
+  return { passed, runs: total };
+};
+
+/** The largest drop in a tier's pass rate a person-profile arm may show: 5 percentage points. */
+export const personArmMargin = 0.05;
+
+const share = ({ passed, runs }: StratumRate): number => (runs === 0 ? 0 : passed / runs);
+
+/**
+ * Compare a person-profile arm with the no-block arm on the same cases, in the grader's terms: the routing pass rate
+ * in each tier (narrow rule, broad zone) is no more than {@link personArmMargin} lower, and no must-ask, entitlement or
+ * existing-project case that passes in every no-block run fails in any profile run.
+ *
+ * @param cases - The development cases both arms ran.
+ * @param baseline - Each case's observations from the no-block arm.
+ * @param profile - Each case's observations from the profile arm.
+ * @returns The comparison.
+ */
+export const comparePersonArm = (
+  cases: readonly KernelRoutingCase[],
+  baseline: ReadonlyMap<string, readonly KernelRoutingObservation[]>,
+  profile: ReadonlyMap<string, readonly KernelRoutingObservation[]>,
+): PersonArmComparison => {
+  const stratum = (tier: 'narrow' | 'broad') => {
+    const inTier = cases.filter((testCase) => testCase.kind === 'routing' && testCase.tier === tier);
+    const before = rateOf(inTier, baseline);
+    const after = rateOf(inTier, profile);
+    return { baseline: before, profile: after, met: share(after) >= share(before) - personArmMargin - 1e-9 };
+  };
+  const strata = { narrow: stratum('narrow'), broad: stratum('broad') };
+  const guarded = cases.filter(({ kind }) => kind === 'must-ask' || kind === 'entitlement' || kind === 'existing');
+  const regressions = guarded
+    .filter((testCase) => {
+      const before = baseline.get(testCase.id) ?? [];
+      const after = profile.get(testCase.id) ?? [];
+      const passes = (observation: KernelRoutingObservation): boolean =>
+        gradeKernelRoutingCase(testCase, observation).pass;
+      return (
+        before.length > 0 &&
+        before.every((observation) => passes(observation)) &&
+        !after.every((observation) => passes(observation))
+      );
+    })
+    .map(({ id }) => id);
+  // A tier with no runs on either side has measured nothing, so the comparison is not met.
+  const measured = [strata.narrow, strata.broad].every(
+    ({ baseline: before, profile: after }) => before.runs > 0 && after.runs > 0,
+  );
+  return { strata, regressions, met: measured && strata.narrow.met && strata.broad.met && regressions.length === 0 };
+};
+
+/** A Home suggestion as the examples arm sends it: the prompt the person sends and what its result must be. */
+export type ExampleSuggestion = {
+  readonly id: string;
+  readonly prompt: string;
+  readonly goals: readonly string[];
+  readonly needs?: KernelRepresentation;
+};
+
+/** The use-case family each suggestion goal sits in, for the case's report fields. */
+const goalFamily: Readonly<Record<string, KernelRoutingZoneId>> = {
+  printing: 'U1',
+  mechanical: 'U3',
+  electronics: 'U9',
+  product: 'U6',
+  art: 'U7',
+  general: 'U11',
+};
+
+/**
+ * A Home suggestion as a routing case: sent under Auto on an entry-less web project, it passes when the bound kernel
+ * is one the browser offers and provides what the suggestion needs. A suggestion with no `needs` is a 3D part, so a
+ * circuit kernel does not serve it. A kernel the browser does not offer is forbidden.
+ *
+ * @param example - The suggestion.
+ * @returns The case the in-turn runner and the grader take.
+ */
+export const exampleRoutingCase = (example: ExampleSuggestion): KernelRoutingCase => {
+  const entitled = kernelRoutingHosts.web.available;
+  const provides = (kernel: KernelId): boolean => {
+    const { representation } = resolveKernel(kernel);
+    return example.needs === undefined ? representation !== 'electronics' : representation === example.needs;
+  };
+  return {
+    id: `example-${example.id}`,
+    prompt: example.prompt,
+    host: 'web',
+    preference: 'auto',
+    fixture: { kind: 'entry-less' },
+    family: goalFamily[example.goals[0] ?? 'general'] ?? 'U11',
+    tier: example.needs === undefined ? 'broad' : 'narrow',
+    kind: 'routing',
+    acceptable: entitled.filter((kernel) => provides(kernel)),
+    forbidden: kernelConfigurations.map(({ id }) => id).filter((kernel) => !entitled.includes(kernel)),
+    provenance: `Home suggestion ${example.id}`,
+  };
+};
+
+/** One suggestion's runs under Auto. */
+export type ExampleVerdict = {
+  readonly caseId: string;
+  /** Runs bound to an acceptable kernel. */
+  readonly resolved: number;
+  /** Runs bound to a kernel that is not acceptable. */
+  readonly misrouted: number;
+  readonly runs: number;
+  readonly met: boolean;
+};
+
+/**
+ * Check each suggestion's runs: it resolves to an acceptable kernel in at least four runs of five (the same share for
+ * other run counts) and never binds a kernel that is not acceptable. A run that asks or writes nothing is neither.
+ *
+ * @param cases - The suggestions' cases.
+ * @param runs - Each case's observations.
+ * @returns One verdict per case.
+ */
+export const summarizeExampleRuns = (
+  cases: readonly KernelRoutingCase[],
+  runs: ReadonlyMap<string, readonly KernelRoutingObservation[]>,
+): readonly ExampleVerdict[] =>
+  cases.map((testCase) => {
+    const observations = runs.get(testCase.id) ?? [];
+    const bound = observations.flatMap(({ boundKernel }) => (boundKernel === undefined ? [] : [boundKernel]));
+    const resolved = bound.filter((kernel) => testCase.acceptable.includes(kernel)).length;
+    const misrouted = bound.length - resolved;
+    return {
+      caseId: testCase.id,
+      resolved,
+      misrouted,
+      runs: observations.length,
+      met: observations.length > 0 && resolved >= Math.ceil(observations.length * 0.8 - 1e-9) && misrouted === 0,
+    };
+  });

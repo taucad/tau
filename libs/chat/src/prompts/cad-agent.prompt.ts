@@ -57,12 +57,15 @@
 // EVAL(test-model-responsive): pending benchmark-2026-10-23 — within one test_model run every load of the same model, format, parameters, mesh tolerance and region reuses one Runtime export while the files it read are unchanged (a failed export is never reused), and get_parameters answers from the resolved manifest without a runtime round-trip while every source it names keeps its digest (LRP-11). Validates GeoSpec runs that load main.ts many times finish sooner with the same rows, and that a parameter read right after an edit still reports the edited values.
 // EVAL(chat-state-note): measured 2026-11-10 (`chat-settings.live.test.ts`; passes of each row with the setting written into the system prompt and tool list, the composition before → with it said in the state note). Plan mode from the first turn, plan mode turned on mid-chat, testing off: 3/3 → 3/3 on anthropic-claude-fable-5.2, openai-gpt-6.1-terra, google-gemini-3.8-flash, together-kimi-k3.1-pro and xai-grok-4.7. Agent mode restored after a plan: 3/3 → 3/3 on Fable 5.2, Kimi K3.1 Pro and Grok 4.7; 1/3 → 3/3 on GPT 6.1 Terra; 9/9 → 8/9 on Gemini 3.8 Flash. Every tool off (note only; nothing to compare): 3/3 on all five. Moves plan mode, the testing switch and the tool mask out of the system prompt and the tool list into `getChatStateNote` (provider reasoning replay contract, WP6, rulings U10 and U16). Pending benchmark: every other catalog model, google-gemini-4-argon first (its stream stalled at the provider on most runs of both arms).
 // EVAL(auto-kernel-routing): pending AKS-S1 — the kernel_skill section renders one of the four D2 states from the preference, the owner and the host profile (automatic kernel selection blueprint D2, D4): under Auto with no entry file it carries the conditional sentence and the routing card in place of the retired /create-model skill; a manual pick that matches the owner, or a project with no entry, keeps the pin sentence byte for byte; a manual pick over another owner names both kernels. Validates an in-turn choice from an acceptable set, the announced trade-off and skill activation before the first write; AKS-S1 runs the arms when keys exist.
+// EVAL(person-block): pending a run of the person-profile arms of the kernel routing eval (TAU_KR_ARMS=in-turn,person-printing,person-mechanical,person-electronics,person-art with TAU_KR_REPEATS=5) — a <person> section after kernel_skill, in the dynamic block, carries the person's goals (Makes:) and languages (Reads:) from setup and one fixed closing sentence that makes it background, never a request. Absent with nothing to say, so the first block and every no-person prompt are byte-identical to before. Validates, on the kernel routing development corpus with five runs per case for the no-block arm and four profiles, that no stratum's pass rate drops more than 5 points, no must-ask, entitlement or migration case that passes in all five no-block runs fails in a profile run, and each agent eval's mean stays within 0.05.
 
 import { toolName } from '#constants/index.js';
 import type { ChatMode } from '#constants/index.js';
 import type { ToolSelection } from '#types/tool.types.js';
 import type { KernelPreference } from '@taucad/types/constants';
 import { renderKernelGuidance } from '#prompts/kernel-routing.js';
+import { renderPersonBlock } from '#prompts/person-block.js';
+import type { AgentPerson } from '#schemas/agent-config.schema.js';
 import type { KernelOwner, KernelRoutingProfile } from '#prompts/kernel-routing.js';
 import { createSectionRegistry } from '#prompts/prompt-section-registry.js';
 import type { ResolvedSection } from '#prompts/prompt-section-registry.js';
@@ -204,6 +207,11 @@ export function getCadSystemPrompt(
      * kernel is available, so an Auto turn fails closed rather than routing to a kernel the host never offered.
      */
     kernelProfile?: KernelRoutingProfile;
+    /**
+     * What the person told setup, rendered as a `<person>` block right after the kernel guidance. Absent, or with
+     * nothing to list, there is no block and the prompt is the same as without it.
+     */
+    person?: AgentPerson;
   } = {},
 ): CadSystemPrompt {
   const supportsImageInput = options.supportsImageInput ?? true;
@@ -469,6 +477,13 @@ For work with three or more steps, keep the person's task list at \`.tau/chats/<
         ...(options.kernelOwner === undefined ? {} : { owner: options.kernelOwner }),
         profile: options.kernelProfile ?? { available: [] },
       }),
+  });
+
+  // Background about the person, in the dynamic block beside the kernel guidance, so Block 1 never depends on it.
+  registry.register({
+    name: 'person',
+    cacheBreak: true,
+    compute: () => renderPersonBlock(options.person),
   });
 
   registry.register({

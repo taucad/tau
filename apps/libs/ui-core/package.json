@@ -66,6 +66,7 @@
     "./lib/module-preload-cap": "./src/lib/module-preload-cap.ts",
     "./lib/network-failure": "./src/lib/network-failure.ts",
     "./lib/page-visibility": "./src/lib/page-visibility.ts",
+    "./lib/pick-suggestions": "./src/lib/pick-suggestions.ts",
     "./lib/project-open-load-timing": "./src/lib/project-open-load-timing.ts",
     "./lib/project-open-performance": "./src/lib/project-open-performance.ts",
     "./lib/project.fixture": "./src/lib/project.fixture.ts",

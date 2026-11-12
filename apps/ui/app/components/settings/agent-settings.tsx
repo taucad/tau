@@ -7,6 +7,10 @@ import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
 import { DefaultPermissionsSetting } from '#components/settings/default-permissions-setting.js';
 import { desktopPermissions } from '#filesystem/desktop-permissions.js';
+import { SetupAnswersRow } from '#components/settings/setup-answers-row.js';
+import { setupAnswersCopy } from '#components/settings/setup-answers-copy.js';
+import { useFeature } from '#flags/use-feature.js';
+import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
 
 function SwitchSetting({
   settingId,
@@ -41,7 +45,30 @@ function SwitchSetting({
   );
 }
 
+/** The switch and the answers row, present only while the onboarding surface is on. */
+function SetupAnswersGroup(): React.JSX.Element {
+  const [isPersonShared, setIsPersonShared] = useCookie(cookieName.chatCtxPerson, true);
+  const telemetry = useOnboardingTelemetry();
+
+  return (
+    <SettingsGroup title={setupAnswersCopy.group}>
+      <SwitchSetting
+        settingId='use-setup-answers'
+        title={setupAnswersCopy.switchTitle}
+        description={setupAnswersCopy.switchDescription}
+        isChecked={isPersonShared}
+        onIsCheckedChange={(isChecked) => {
+          setIsPersonShared(isChecked);
+          telemetry.setupAnswersSwitchChanged({ enabled: isChecked });
+        }}
+      />
+      <SetupAnswersRow />
+    </SettingsGroup>
+  );
+}
+
 export function AgentSettings(): React.JSX.Element {
+  const isOnboardingEnabled = useFeature('onboarding');
   const [showCredits, setShowCredits] = useCookie(cookieName.chatModelCost, true);
   const [includeFileSystem, setIncludeFileSystem] = useCookie(cookieName.chatCtxFs, true);
   const [includeActiveFile, setIncludeActiveFile] = useCookie(cookieName.chatCtxActive, true);
@@ -92,6 +119,8 @@ export function AgentSettings(): React.JSX.Element {
           onIsCheckedChange={setIncludeOpenFiles}
         />
       </SettingsGroup>
+
+      {isOnboardingEnabled ? <SetupAnswersGroup /> : null}
 
       {desktopPermissions() === undefined ? null : (
         <SettingsItem settingId='default-permissions'>

@@ -1617,6 +1617,42 @@
         "service": "tau-api",
         "component": "lifecycle"
       }
+    },
+    {
+      "uid": "db-pooler-clients-high",
+      "title": "P1: Pooler Login at 80% of Its Session Pool",
+      "condition": "db_pooler_clients_high",
+      "data": [
+        {
+          "refId": "db_pooler_clients_high",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "sum(max_over_time(tau_db_client_connections{app=~\".*\",service_name=\"tau-api\",tau_db_pool=~\"request|background\"}[1m])) + 2 >= 12",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "db_pooler_clients_high"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "2m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/postgres-saturation.md",
+        "summary": "API pooled PostgreSQL clients are at 12 of the 15-client session pool for 2 minutes (database connection audit R4). The sum is every API instance's own request and background sockets plus the 2 of revisions-maintenance, which shares the login and exports no metrics. The prod-us login's Supavisor session pool is 15 and the declared budget is 2 × (4 + 1) + 2 = 12 (apps/api/app/config/connection-budget.test.ts); a third Machine or a raised pool cap is the usual cause."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "database"
+      }
     }
   ]
 }

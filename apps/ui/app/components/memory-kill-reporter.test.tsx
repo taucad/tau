@@ -198,6 +198,20 @@ describe('MemoryKillReporter (B-01, SB3)', () => {
       expect(reportDetectedKill).not.toHaveBeenCalled();
     });
 
+    it('sends nothing on desktop, where the minidump is the report, but still counts and settles the kill (D13)', async () => {
+      const signal = killedPage();
+      const consent = consentSource('granted');
+      render(
+        <MemoryKillReporter signal={signal} liveProjectCount={0} chatCount={0} consent={consent} sendsReport={false} />,
+      );
+
+      await vi.waitFor(() => {
+        expect(pendingInMarker()).toEqual([]);
+      });
+      expect(consent.count).toHaveBeenCalledTimes(1);
+      expect(reportDetectedKill).not.toHaveBeenCalled();
+    });
+
     it('offers nothing after a delivered kill: no prompt, only the report', async () => {
       const signal = killedPage();
       const { container } = render(

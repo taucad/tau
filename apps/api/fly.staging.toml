@@ -65,7 +65,16 @@ LOG_SERVICE = 'fly'
 LOG_LEVEL = 'info'
 OTEL_METRICS_PORT = '9464'
 OTEL_EXPORTER_OTLP_COMPRESSION = 'gzip'
-DATABASE_POOL_MAX = '10'
+# Database connection audit R1/R3 (Tau Brain research/database-connection-audit.md): every `app`
+# Machine opens up to DATABASE_POOL_MAX request plus DATABASE_BACKGROUND_POOL_MAX background
+# connections, and `revisions-maintenance` up to 2, all on one pooler login. 2 × (4 + 1) + 2 = 12
+# of DATABASE_POOLER_POOL_SIZE = 15, three spare. `app/config/connection-budget.test.ts` refuses
+# a change that does not fit; a third `app` Machine needs a larger pool first.
+DATABASE_POOL_MAX = '4'
+DATABASE_BACKGROUND_POOL_MAX = '1'
+# Staging's session pool size has not been read; 15 is prod-us's and the conservative floor
+# (database connection audit R1). Record the observed value when it is read.
+DATABASE_POOLER_POOL_SIZE = '15'
 DATABASE_CONNECT_TIMEOUT_SECONDS = '10'
 DATABASE_IDLE_TIMEOUT_SECONDS = '60'
 DATABASE_STATEMENT_TIMEOUT_MS = '15000'

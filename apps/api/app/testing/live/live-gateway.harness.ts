@@ -168,6 +168,7 @@ export const liveSessionModel = (modelId: string): AgentSessionModel => {
     }
     return configuration.reasoning;
   })();
+  const declared = entry.support?.reasoning;
   return {
     id: entry.id,
     providerKind: entry.provider.id,
@@ -179,7 +180,18 @@ export const liveSessionModel = (modelId: string): AgentSessionModel => {
       cacheRead: details.cost.cacheReadTokens,
       cacheWrite: details.cost.cacheWriteTokens,
     },
-    ...(reasoning === undefined ? {} : { reasoning }),
+    /* The forms the row declares, as a browser turn sends them, except that a live suite asks the provider to refuse
+     * a replayed block whose prefix changed where production asks it to drop the block: a miss by the replay rule
+     * fails the row instead of passing quietly. */
+    ...(reasoning === undefined
+      ? {}
+      : {
+          reasoning: {
+            ...reasoning,
+            ...(declared?.effortInTranscript === true ? { effortInTranscript: true } : {}),
+            ...(declared?.replayBinding === true ? ({ replayBinding: 'refuse' } as const) : {}),
+          },
+        }),
   };
 };
 

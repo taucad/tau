@@ -111,7 +111,8 @@ jobs:
             exit 1
           fi
           # Mac architectures: a production release packages both. A staging candidate packages Intel
-          # only when release-desktop-staging.yml annotated its tag with the line below (the nightly);
+          # only when release-desktop-staging.yml annotated its tag with the line below (a dispatch with `intel`,
+          # which the promotion gate requests for an Apple silicon-only candidate);
           # every other staging candidate is Apple silicon only.
           # Notarization likewise: production always, a staging candidate only when its tag carries
           # `Notarize: true` (a dispatch that asked for it).
@@ -656,7 +657,7 @@ jobs:
   # The same bytes under `blobs/sha256/<hex>` of the release channel's locked dependency
   # bucket, the digest-addressed mirror layout (D2, D25) its dependency host serves: a
   # production tag writes `tau-prod-dependencies` from environment `dependencies` (a required
-  # reviewer) and reads back from dependencies.tau.new; a staging tag, the nightly cron's
+  # reviewer) and reads back from dependencies.tau.new; a staging tag, a full candidate's
   # included, writes `tau-staging-au-dependencies` from `dependencies-staging` and reads back
   # from dependencies.taucad.dev. No staging run holds a production credential, and neither
   # credential reaches user content (Brain incident 2026-11-09-r2-shared-bucket-blast-radius,

@@ -287,6 +287,60 @@ groups:
           severity: critical
           service: tau-api
           component: billing
+      - uid: db-pooler-clients-near-cap
+        title: 'P0: Pooler Login Near Its Session Pool Cap'
+        condition: db_pooler_clients_near_cap
+        data:
+          - refId: db_pooler_clients_near_cap
+            queryType: ''
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              instant: true
+              range: false
+              expr: sum(max_over_time(tau_db_client_connections{app=~".*",service_name="tau-api",tau_db_pool=~"request|background"}[1m])) + 2 >= 14
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: db_pooler_clients_near_cap
+        noDataState: OK
+        execErrState: OK
+        for: 1m
+        annotations:
+          runbook_url: docs/handbooks/cloud/playbooks/postgres-saturation.md
+          summary: API pooled PostgreSQL clients reached 14 of the 15-client session pool; the next connection is refused and fails its query (database connection audit R4). The sum is every API instance's own request and background sockets plus the 2 of revisions-maintenance, which shares the login and exports no metrics. The prod-us login's Supavisor session pool is 15 and the declared budget is 2 × (4 + 1) + 2 = 12 (apps/api/app/config/connection-budget.test.ts).
+        labels:
+          severity: critical
+          service: tau-api
+          component: database
+      - uid: db-pool-refusals
+        title: 'P0: Database Refused API Connections'
+        condition: db_pool_refusals
+        data:
+          - refId: db_pool_refusals
+            queryType: ''
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              instant: true
+              range: false
+              expr: sum(increase(tau_db_client_refusals_total{app=~".*",service_name="tau-api"}[5m])) > 0
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: db_pool_refusals
+        noDataState: OK
+        execErrState: OK
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/playbooks/postgres-saturation.md
+          summary: A query on the API failed because the session pooler or PostgreSQL refused its connection (Supavisor EMAXCONN, SQLSTATE 53300). Each refused query fails, often as 500 Failed to get session (database connection audit R4).
+        labels:
+          severity: critical
+          service: tau-api
+          component: database
   - orgId: 1
     name: tau-warning
     folder: Tau Alerts
@@ -1496,6 +1550,33 @@ groups:
           severity: warning
           service: tau-api
           component: lifecycle
+      - uid: db-pooler-clients-high
+        title: 'P1: Pooler Login at 80% of Its Session Pool'
+        condition: db_pooler_clients_high
+        data:
+          - refId: db_pooler_clients_high
+            queryType: ''
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              instant: true
+              range: false
+              expr: sum(max_over_time(tau_db_client_connections{app=~".*",service_name="tau-api",tau_db_pool=~"request|background"}[1m])) + 2 >= 12
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: db_pooler_clients_high
+        noDataState: OK
+        execErrState: OK
+        for: 2m
+        annotations:
+          runbook_url: docs/handbooks/cloud/playbooks/postgres-saturation.md
+          summary: API pooled PostgreSQL clients are at 12 of the 15-client session pool for 2 minutes (database connection audit R4). The sum is every API instance's own request and background sockets plus the 2 of revisions-maintenance, which shares the login and exports no metrics. The prod-us login's Supavisor session pool is 15 and the declared budget is 2 × (4 + 1) + 2 = 12 (apps/api/app/config/connection-budget.test.ts); a third Machine or a raised pool cap is the usual cause.
+        labels:
+          severity: warning
+          service: tau-api
+          component: database
   - orgId: 1
     name: tau-storage-critical
     folder: Tau Alerts

@@ -55,6 +55,7 @@ const maintenanceDeleters = [
   '../libs/api-git-mirror/src/maintenance/purge.ts',
   '../libs/api-git-mirror/src/maintenance/project-purge.ts',
   '../libs/api-git-mirror/src/maintenance/blob-collector.ts',
+  '../libs/api-git-mirror/src/maintenance/lfs-relocation.ts',
   'app/api/git/lfs-retirement.ts',
 ];
 

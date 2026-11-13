@@ -2,6 +2,7 @@ import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { useEffect, useSyncExternalStore } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
+import type { NavigateOptions } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection, RemoteFacet, SyncFacet } from '@taucad/revisions';
@@ -1473,6 +1474,13 @@ const readyAt = (id: string, entryPath: string): ProjectRouteAccess => ({
   project: createProjectFixture({ id, name: id, description: '', tags: [], assets: { main: { entryPath } } }),
 });
 
+/** Render the gate and let its first access answer land inside `act`. */
+const renderAndSettle = async (): Promise<ReturnType<typeof renderRouteProvider>> => {
+  const rendered = renderRouteProvider();
+  await flushTasks();
+  return rendered;
+};
+
 /** Let settled promises and the commits they cause land, without waiting on time. */
 const flushTasks = async (): Promise<void> => {
   await act(async () => {
@@ -1482,7 +1490,7 @@ const flushTasks = async (): Promise<void> => {
   });
 };
 
-const navigateTo = async (target: string, options?: Parameters<ReturnType<typeof useNavigate>>[1]): Promise<void> => {
+const navigateTo = async (target: string, options?: NavigateOptions): Promise<void> => {
   await act(async () => {
     await router.navigate?.(target, options);
   });
@@ -1541,7 +1549,7 @@ describe('A0.2 route gate rows', () => {
       'resolving',
       async () => {
         getProjectRouteAccess.mockReturnValue(deferred<ProjectRouteAccess>().promise);
-        renderRouteProvider();
+        await renderAndSettle();
       },
       [],
     ],
@@ -1549,7 +1557,7 @@ describe('A0.2 route gate rows', () => {
       'editor',
       async () => {
         getProjectRouteAccess.mockResolvedValue(ready(projectA));
-        renderRouteProvider();
+        await renderAndSettle();
       },
       [projectA],
     ],
@@ -1557,8 +1565,7 @@ describe('A0.2 route gate rows', () => {
       'closed',
       async () => {
         getProjectRouteAccess.mockResolvedValue(ready(projectA));
-        renderRouteProvider();
-        await flushTasks();
+        await renderAndSettle();
         await act(async () => {
           sessionsActor.send({ type: 'close', projectId: projectA, reason: 'user' });
           await Promise.resolve();
@@ -1570,7 +1577,7 @@ describe('A0.2 route gate rows', () => {
       'trashed',
       async () => {
         getProjectRouteAccess.mockResolvedValue(trashed(projectA));
-        renderRouteProvider();
+        await renderAndSettle();
       },
       [],
     ],
@@ -1578,7 +1585,7 @@ describe('A0.2 route gate rows', () => {
       'missing',
       async () => {
         getProjectRouteAccess.mockResolvedValue({ status: 'missing' });
-        renderRouteProvider();
+        await renderAndSettle();
       },
       [],
     ],
@@ -1586,7 +1593,7 @@ describe('A0.2 route gate rows', () => {
       'conflict',
       async () => {
         getProjectRouteAccess.mockResolvedValue({ status: 'conflict' });
-        renderRouteProvider();
+        await renderAndSettle();
       },
       [],
     ],
@@ -1594,7 +1601,7 @@ describe('A0.2 route gate rows', () => {
       'unavailable',
       async () => {
         getProjectRouteAccess.mockResolvedValue({ status: 'unavailable' });
-        renderRouteProvider();
+        await renderAndSettle();
       },
       [],
     ],
@@ -1611,7 +1618,7 @@ describe('A0.2 route gate rows', () => {
             status: 'recovering',
           },
         });
-        renderRouteProvider();
+        await renderAndSettle();
       },
       [],
     ],
@@ -1629,7 +1636,7 @@ describe('A0.2 route gate rows', () => {
             reason: 'filesystem-error',
           },
         });
-        renderRouteProvider();
+        await renderAndSettle();
       },
       [],
     ],
@@ -1638,7 +1645,7 @@ describe('A0.2 route gate rows', () => {
       async () => {
         /* `main.py` needs the build123d runtime, which the web build does not carry. */
         getProjectRouteAccess.mockResolvedValue(readyAt(projectA, 'main.py'));
-        renderRouteProvider();
+        await renderAndSettle();
       },
       /* Today the gate still opens a ready project whose kernel this host cannot run: `open`
        * follows a ready answer (`project-route.tsx` 262 to 273), so its subtree mounts behind the
@@ -1649,7 +1656,7 @@ describe('A0.2 route gate rows', () => {
       'access-error',
       async () => {
         getProjectRouteAccess.mockRejectedValue(new Error('discovery failed'));
-        renderRouteProvider();
+        await renderAndSettle();
       },
       [],
     ],
@@ -1657,8 +1664,7 @@ describe('A0.2 route gate rows', () => {
       'flush-error',
       async () => {
         getProjectRouteAccess.mockImplementation(async (id) => ready(id));
-        const { Provider, view } = renderRouteProvider();
-        await flushTasks();
+        const { Provider, view } = await renderAndSettle();
         setEditorIdle(false);
         currentProjectId = projectB;
         view.rerender(<Provider>content</Provider>);

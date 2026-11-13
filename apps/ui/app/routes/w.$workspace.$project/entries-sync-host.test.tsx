@@ -10,6 +10,7 @@ import type { modelInteractionMachine } from '@taucad/viewer/machines/model-inte
 import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
 import type { EntryPathChange } from '#workbench-records/entries-store.js';
+import type * as EntriesStoreModule from '#workbench-records/entries-store.js';
 import { slowWriteMilliseconds } from '#workbench-records/record-health.js';
 import { readRecordIssues, subscribeRecordIssues } from '#workbench-records/record-issues.js';
 import { EntriesSyncHost, EntryOwner } from '#routes/w.$workspace.$project/entries-sync-host.js';
@@ -82,6 +83,26 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   }),
 }));
 vi.mock('#hooks/use-flush-on-close.js', () => ({ useFlushOnClose: () => undefined }));
+/** Every entries store the host builds, and whether it was disposed: one record session per file (I13). */
+const entriesStores = vi.hoisted((): Array<{ disposed: boolean }> => []);
+vi.mock('#workbench-records/entries-store.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof EntriesStoreModule>();
+  return {
+    ...actual,
+    createWorkbenchEntriesStore: (...input: Parameters<typeof actual.createWorkbenchEntriesStore>) => {
+      const store = actual.createWorkbenchEntriesStore(...input);
+      const tracked = { disposed: false };
+      entriesStores.push(tracked);
+      return {
+        ...store,
+        dispose: () => {
+          tracked.disposed = true;
+          store.dispose();
+        },
+      };
+    },
+  };
+});
 
 describe('entry owner reconciliation', () => {
   beforeEach(() => {
@@ -762,5 +783,100 @@ describe('entry owner reconciliation', () => {
       authority.resolve();
       view.unmount();
     }
+  });
+
+  describe('StrictMode double mount (A0.3)', () => {
+    const strictHost = () => {
+      hostFiles.set(
+        new TextEncoder().encode(
+          workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { renderTimeout: 30_000 } } }),
+        ),
+      );
+      hostFiles.writeFileChecked.mockClear();
+      hostContentService = { subscribe: () => () => undefined };
+      entriesStores.length = 0;
+      const cad = { state: { operationTimeout: 30_000 } };
+      const producers = new Set<() => Promise<unknown>>();
+      hostProject = {
+        projectId: 'p',
+        geometryUnits: new Map([['a.ts', { getSnapshot: () => ({ context: cad.state }), send: vi.fn() }]]),
+        modelInteractionRef: { getSnapshot: () => ({ context: { unitsById: {} } }), send: vi.fn() },
+        entriesRecord: undefined,
+        setEntriesRecord: (record: WorkbenchEntries) => {
+          hostProject['entriesRecord'] = record;
+        },
+        registerWorkbenchRecordProducer: (flush: () => Promise<unknown>) => {
+          producers.add(flush);
+          return () => producers.delete(flush);
+        },
+        registerEntryPathChange: () => () => undefined,
+        setAppliedEntryRevision: () => undefined,
+      };
+      const tree = () => (
+        <StrictMode>
+          <EntriesSyncHost />
+        </StrictMode>
+      );
+      const view = render(tree());
+      return { view, tree, cad, producers };
+    };
+
+    // A0.3 row 5, S25: one producer survives the double mount, and its flush settles an entries write in flight,
+    // which lands once with the person's value.
+    it('should keep one producer whose flush settles an entries write in flight', async () => {
+      const { view, tree, cad, producers } = strictHost();
+      const authority = Promise.withResolvers<void>();
+      try {
+        await waitFor(() => {
+          expect(hostProject['entriesRecord']).toBeDefined();
+        });
+        expect(producers.size).toBe(1);
+        view.rerender(tree());
+        const write = hostFiles.writeFileChecked.getMockImplementation()!;
+        hostFiles.writeFileChecked.mockImplementationOnce(async (input) => {
+          await authority.promise;
+          return write(input);
+        });
+        cad.state.operationTimeout = 45_000;
+        view.rerender(tree());
+        await waitFor(
+          () => {
+            expect(hostFiles.writeFileChecked).toHaveBeenCalledOnce();
+          },
+          { timeout: 1500 },
+        );
+        let settled = false;
+        const flushing = (async () => {
+          await [...producers][0]!();
+          settled = true;
+        })();
+        await act(async () => undefined);
+        expect(settled).toBe(false);
+        await act(async () => {
+          authority.resolve();
+          await flushing;
+        });
+        expect(hostFiles.writeFileChecked).toHaveBeenCalledOnce();
+        expect(workbenchRecords.entries.read(hostFiles.get()!)).toMatchObject({
+          status: 'current',
+          record: { entries: { 'a.ts': { renderTimeout: 45_000 } } },
+        });
+      } finally {
+        authority.resolve();
+        view.unmount();
+      }
+    });
+
+    // A0.3 row 5, S25/I13: one record session per record file. Today StrictMode's double render builds a second
+    // entries store (and starts its record actor) that is never disposed.
+    it.fails('I13: should hold one live entries record session', async () => {
+      const { view } = strictHost();
+      await waitFor(() => {
+        expect(hostProject['entriesRecord']).toBeDefined();
+      });
+      await act(async () => undefined);
+      expect(entriesStores.filter((store) => !store.disposed)).toHaveLength(1);
+      view.unmount();
+    });
   });
 });

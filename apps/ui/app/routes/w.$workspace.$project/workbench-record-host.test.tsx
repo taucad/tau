@@ -3,11 +3,13 @@
 import type { WatchEvent } from '@taucad/filesystem';
 // @vitest-environment jsdom
 import { act, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { workbenchRecords, workbenchPaths } from '@taucad/workbench';
 import type { WorkbenchLaneNode, WorkbenchLayout, WorkbenchView } from '@taucad/workbench';
 import type { PreviousWorkbenchLayout } from '@taucad/ui-core/types/editor.types';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
+import type * as LayoutControllerModule from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import { WorkbenchRecordHost } from '#routes/w.$workspace.$project/workbench-record-host.js';
 import { readRecordIssues } from '#workbench-records/record-issues.js';
 
@@ -29,6 +31,26 @@ vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
 vi.mock('#hooks/use-flush-on-close.js', () => ({
   useFlushOnClose: () => undefined,
 }));
+/** Every layout store the host builds, and whether it was disposed: one record session per file (I13). */
+const layoutStores = vi.hoisted((): Array<{ disposed: boolean }> => []);
+vi.mock('./workbench-layout-controller.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof LayoutControllerModule>();
+  return {
+    ...actual,
+    createWorkbenchLayoutStore: (...input: Parameters<typeof actual.createWorkbenchLayoutStore>) => {
+      const store = actual.createWorkbenchLayoutStore(...input);
+      const tracked = { disposed: false };
+      layoutStores.push(tracked);
+      return {
+        ...store,
+        dispose: () => {
+          tracked.disposed = true;
+          store.dispose();
+        },
+      };
+    },
+  };
+});
 
 const encoder = new TextEncoder();
 const first = (): WorkbenchLayout => ({
@@ -62,6 +84,8 @@ function mount(
     branchScenario?: boolean;
     pendingLayoutAck?: Promise<void>;
     onLayoutWriteStarted?: () => void;
+    strict?: boolean;
+    registerProducer?: (flush: () => Promise<unknown>) => () => void;
   } = {},
 ) {
   let bytes: Uint8Array<ArrayBuffer> | undefined = encoder.encode(
@@ -201,7 +225,7 @@ function mount(
       }),
     },
     viewRecords: options.viewExists === false ? new Map() : new Map([['v-abcd1234', viewSeed()]]),
-    registerWorkbenchRecordProducer: () => () => undefined,
+    registerWorkbenchRecordProducer: options.registerProducer ?? (() => () => undefined),
     setAppliedWorkbenchRevision,
   };
   workspace = {
@@ -212,7 +236,7 @@ function mount(
       };
     },
   };
-  const rendered = render(<WorkbenchRecordHost />);
+  const rendered = render(<WorkbenchRecordHost />, options.strict ? { wrapper: StrictMode } : undefined);
   return {
     ...rendered,
     get controller() {
@@ -1049,6 +1073,200 @@ describe('live workbench record host', () => {
       record: { entryPath: 'models/other.ts' },
     });
     expect(host.controller.snapshot()?.layout).toEqual(first());
+    host.unmount();
+  });
+});
+
+describe('layout host rows (A0.3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    layoutStores.length = 0;
+  });
+
+  const landAtOnce = () => vi.fn((_node: unknown, applied: () => void) => applied());
+  const restoreCommand = (host: ReturnType<typeof mount>) => ({
+    layoutDigest: host.controller.snapshot()!.layoutDigest,
+    target: host.controller.snapshot()!.restoreTarget!,
+    eligible: () => true,
+  });
+
+  // A0.3 row 2, Y3/I12: while no adapter is attached the applied revision reads as unknown, a publication is not
+  // acknowledged, and the adapter that attaches next is shown that publication and only then acknowledges it.
+  it('should read the applied revision as unknown while detached and acknowledge a detached publication on attach', async () => {
+    const host = mount();
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
+    const viewer = landAtOnce();
+    const workbench = landAtOnce();
+    let detachViewer = (): void => undefined;
+    let detachWorkbench = (): void => undefined;
+    act(() => {
+      detachViewer = host.controller.registerViewer(viewer);
+      detachWorkbench = host.controller.registerWorkbench(workbench);
+    });
+    expect(host.applied.get(workbenchPaths.layout)).toBe(host.controller.snapshot()?.layoutDigest);
+    act(() => {
+      detachWorkbench();
+    });
+    expect(host.applied.has(workbenchPaths.layout)).toBe(false);
+    act(() => {
+      detachViewer();
+    });
+    await host.set(encoder.encode(workbenchRecords.layout.serialize(second())));
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(second()));
+    expect(host.applied.has(workbenchPaths.layout)).toBe(false);
+    viewer.mockClear();
+    workbench.mockClear();
+    act(() => {
+      host.controller.registerViewer(viewer);
+      host.controller.registerWorkbench(workbench);
+    });
+    expect(viewer).toHaveBeenCalledExactlyOnceWith(second().viewer, expect.any(Function));
+    expect(workbench).toHaveBeenCalledExactlyOnceWith(second().workbench, expect.any(Function));
+    expect(host.applied.get(workbenchPaths.layout)).toBe(host.controller.snapshot()?.layoutDigest);
+    host.unmount();
+  });
+
+  // A0.3 row 3, Y2/I10: a foreign publication lands while the person's pane edit is not yet written. The person's
+  // arrangement wins: the workbench is never handed an arrangement without the person's edit.
+  it.fails('I10: should not show a foreign arrangement over an unwritten person edit', async () => {
+    const host = mount();
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
+    const shown: WorkbenchLaneNode[] = [];
+    act(() => {
+      host.controller.registerViewer(landAtOnce());
+      host.controller.registerWorkbench((node, applied) => {
+        shown.push(node);
+        applied();
+      });
+    });
+    const edited: WorkbenchLaneNode = { kind: 'group', tabs: [{ kind: 'pane', pane: 'revisions' }] };
+    act(() => {
+      host.controller.personWorkbenchChanged(edited);
+    });
+    shown.length = 0;
+    await host.set(encoder.encode(workbenchRecords.layout.serialize(second())));
+    await waitFor(() => expect(host.controller.snapshot()?.layout.lanes).toEqual(second().lanes));
+    expect(shown).toEqual([]);
+    host.unmount();
+  });
+
+  // A0.3 row 4, Y1/I14: a restore from the arrange-workbench card is written and shown on the attached adapters,
+  // then acknowledged.
+  it('should write a restore, show it on the attached adapters, and acknowledge it', async () => {
+    const host = mount({ layout: second(), previous: { layout: first(), views: { 'v-abcd1234': viewSeed() } } });
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(second()));
+    const viewer = landAtOnce();
+    const workbench = landAtOnce();
+    act(() => {
+      host.controller.registerViewer(viewer);
+      host.controller.registerWorkbench(workbench);
+    });
+    workbench.mockClear();
+    expect(await act(async () => host.controller.restorePreviousArrangement(restoreCommand(host)))).toBe(true);
+    expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({ status: 'current', record: first() });
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
+    expect(workbench).toHaveBeenLastCalledWith(first().workbench, expect.any(Function));
+    expect(host.applied.get(workbenchPaths.layout)).toBe(host.controller.snapshot()?.layoutDigest);
+    host.unmount();
+  });
+
+  // A0.3 row 4, Y1/I14: restore is a repeatable command. The same command again is refused and changes nothing; the
+  // card's refreshed command restores the arrangement the first restore replaced.
+  it('should refuse a repeated restore command and apply the refreshed one', async () => {
+    const host = mount({ layout: second(), previous: { layout: first(), views: { 'v-abcd1234': viewSeed() } } });
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(second()));
+    const command = restoreCommand(host);
+    expect(await act(async () => host.controller.restorePreviousArrangement(command))).toBe(true);
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
+    const restored = host.bytes;
+    expect(await act(async () => host.controller.restorePreviousArrangement(command))).toBe(false);
+    expect(host.bytes).toBe(restored);
+    expect(host.writes).toHaveBeenCalledOnce();
+    expect(host.previous?.layout).toEqual(second());
+    expect(await act(async () => host.controller.restorePreviousArrangement(restoreCommand(host)))).toBe(true);
+    expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({ status: 'current', record: second() });
+    expect(host.writes).toHaveBeenCalledTimes(2);
+    host.unmount();
+  });
+
+  // A0.3 row 4, Y1/I14: when the arrangement moved after the card read its command, the restore is refused and the
+  // arrangement is unchanged, whether the person's edit is still owed or already written.
+  it.each(['owed', 'written'] as const)(
+    'should refuse a restore when the arrangement moved and leave it unchanged (edit %s)',
+    async (edit) => {
+      const host = mount({ layout: second(), previous: { layout: first(), views: { 'v-abcd1234': viewSeed() } } });
+      await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(second()));
+      const command = restoreCommand(host);
+      const moved: WorkbenchLaneNode = { kind: 'group', tabs: [{ kind: 'pane', pane: 'details' }] };
+      act(() => {
+        host.controller.personWorkbenchChanged(moved);
+      });
+      if (edit === 'written') {
+        await waitFor(() => expect(host.controller.snapshot()?.layout.workbench).toEqual(moved));
+      }
+      expect(await act(async () => host.controller.restorePreviousArrangement(command))).toBe(false);
+      await waitFor(() => expect(host.controller.snapshot()?.layout.workbench).toEqual(moved));
+      expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({
+        status: 'current',
+        record: { ...second(), workbench: moved },
+      });
+      expect(host.writes).toHaveBeenCalledOnce();
+      host.unmount();
+    },
+  );
+
+  // A0.3 row 5, Y3/S25: under a StrictMode double mount the host registers one producer, and its flush settles a
+  // layout write in flight, which lands once.
+  it('should keep one producer under StrictMode whose flush settles a layout write in flight', async () => {
+    const started = Promise.withResolvers<void>();
+    const ack = Promise.withResolvers<void>();
+    const producers = new Set<() => Promise<unknown>>();
+    const host = mount({
+      strict: true,
+      pendingLayoutAck: ack.promise,
+      onLayoutWriteStarted: started.resolve,
+      registerProducer: (flush) => {
+        producers.add(flush);
+        return () => producers.delete(flush);
+      },
+    });
+    try {
+      await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
+      expect(producers.size).toBe(1);
+      const edited: WorkbenchLaneNode = { kind: 'group', tabs: [{ kind: 'pane', pane: 'details' }] };
+      await act(async () => {
+        host.controller.personWorkbenchChanged(edited);
+        await started.promise;
+      });
+      let settled = false;
+      const flushing = (async () => {
+        await [...producers][0]!();
+        settled = true;
+      })();
+      await act(async () => undefined);
+      expect(settled).toBe(false);
+      await act(async () => {
+        ack.resolve();
+        await flushing;
+      });
+      expect(host.writes).toHaveBeenCalledOnce();
+      expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({
+        status: 'current',
+        record: { ...first(), workbench: edited },
+      });
+    } finally {
+      ack.resolve();
+      host.unmount();
+    }
+  });
+
+  // A0.3 row 5, Y3/I13: one record session per record file. Today StrictMode's double render builds a second layout
+  // store (and starts its record actor) that is never disposed.
+  it.fails('I13: should hold one live layout record session under a StrictMode double mount', async () => {
+    const host = mount({ strict: true });
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
+    await act(async () => undefined);
+    expect(layoutStores.filter((store) => !store.disposed)).toHaveLength(1);
     host.unmount();
   });
 });

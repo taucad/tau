@@ -23,6 +23,8 @@ import type {
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import { tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import type { PendingFilePlacement } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
+import type { WorkbenchLaneNode } from '@taucad/workbench';
+import { fromDockview, toDockview } from '#workbench-records/converters.js';
 import { EditorDocument } from '#lib/editor-document.js';
 import type { DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
 import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -1386,6 +1388,77 @@ describe('mounted Workbench user activation handoff', () => {
 
     expect(currentEditorSnapshot).toBe(snapshot);
     expect(chosen?.api.setActive).toHaveBeenCalledOnce();
+  });
+});
+
+describe('workbench adapter record apply (A0.3)', () => {
+  // A0.3 row 3, Y7/I10: a record apply waits in `pendingRecordNodeRef` for its file to open. The person rearranges
+  // the panes before it lands; when the file opens, the late apply must not revert the person's arrangement.
+  it.fails("I10: should not land a record apply computed before the person's edit over that edit", () => {
+    const dockview = createTestDockview([panel('utility')]);
+    const subscribe = () => ({ dispose: vi.fn() });
+    const layoutChanged = new Set<() => void>();
+    let shown: SerializedDockview | undefined;
+    Object.assign(dockview.api, {
+      width: 900,
+      height: 600,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Dockview API spelling
+      toJSON: () => shown,
+      onDidLayoutChange: (listener: () => void) => {
+        layoutChanged.add(listener);
+        return { dispose: () => layoutChanged.delete(listener) };
+      },
+      onDidActivePanelChange: subscribe,
+      onDidRemovePanel: subscribe,
+      onWillDragPanel: subscribe,
+      onUnhandledDragOver: subscribe,
+      onDidAddPanel: subscribe,
+    });
+    dockview.restoreJson.mockImplementation((json: SerializedDockview) => {
+      shown = json;
+    });
+    readyDockviewApi = dockview.api;
+    type ApplyRecord = (node: WorkbenchLaneNode, applied: () => void) => void;
+    let applyRecord: ApplyRecord | undefined;
+    // The shared double declares its spy without parameters; the adapter registers its apply as the first argument.
+    mockLayoutController.registerWorkbench.mockImplementation((...registered: unknown[]) => {
+      applyRecord = registered[0] as ApplyRecord;
+      return () => undefined;
+    });
+    onTestFinished(() => {
+      readyDockviewApi = undefined;
+      currentEditorSnapshot = editorMachineSnapshot;
+      mockLayoutController.registerWorkbench.mockReset();
+      mockLayoutController.registerWorkbench.mockImplementation(() => () => undefined);
+      mockLayoutController.personWorkbenchChanged.mockClear();
+    });
+
+    render(<WorkbenchDockview />);
+    expect(applyRecord).toBeTypeOf('function');
+    const recorded: WorkbenchLaneNode = {
+      kind: 'group',
+      tabs: [
+        { kind: 'pane', pane: 'parameters' },
+        { kind: 'file', path: 'a.ts' },
+      ],
+    };
+    act(() => {
+      applyRecord!(recorded, vi.fn());
+    });
+    // The file is not open yet: the apply is held and the editor is asked to open it.
+    expect(dockview.restoreJson).not.toHaveBeenCalled();
+    const person: WorkbenchLaneNode = { kind: 'group', tabs: [{ kind: 'pane', pane: 'details' }] };
+    shown = toDockview('workbench', person, { dimensions: { width: 900, height: 600 }, files: {} });
+    act(() => {
+      for (const listener of layoutChanged) {
+        listener();
+      }
+    });
+    expect(mockLayoutController.personWorkbenchChanged).toHaveBeenCalledWith(person);
+    act(() => {
+      publishOpenFiles([openFile('pane-a', 'a.ts')]);
+    });
+    expect(fromDockview('workbench', shown)).toEqual(person);
   });
 });
 

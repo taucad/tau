@@ -325,6 +325,11 @@ describe('loading state ratchet', () => {
     return existsSync(file) ? readFileSync(file, 'utf8') : undefined;
   };
 
+  it('should scan only roots that exist', () => {
+    const missing = manifest.roots.filter((root) => !existsSync(join(workspaceRoot, root)));
+    expect(missing, 'a root that moved drops out of the ratchet; carry it to its new path').toEqual([]);
+  });
+
   it('should hold every file at its committed skeleton count', () => {
     const scannedFiles = manifest.roots.flatMap((root) => sourceFilesUnder(join(workspaceRoot, root), workspaceRoot));
     const problems = loadingStateRatchetProblems({ manifest, manifestText, readSource, scannedFiles });

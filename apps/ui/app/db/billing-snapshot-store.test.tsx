@@ -1,7 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import -- side-effect import polyfills IndexedDB for tests
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { wireUsageSnapshotSchema } from '@taucad/billing';
@@ -15,6 +15,7 @@ import {
   readSavedUsage,
   recordBillingRevisionMinimum,
   useBillingRevisionMinimum,
+  useSavedUsage,
   writeSavedUsage,
 } from '#db/billing-snapshot-store.js';
 import { FinancialSessionProvider, FinancialSessionScope } from '#providers/financial-session-provider.js';
@@ -97,7 +98,8 @@ const buildSnapshot = (
 
 const snapshotA = buildSnapshot();
 const session = { environment: 'development', ownerId: 'user-a' };
-const queryKey = canonicalUsageQueryKey({ range: 'last_30_days', models: [], activities: [], projects: [] });
+const usageQuery: UsageSnapshotQuery = { range: 'last_30_days', models: [], activities: [], projects: [] };
+const queryKey = canonicalUsageQueryKey(usageQuery);
 
 /** The record shape the store writes, read back without going through the store. */
 const rawRecords = async (): Promise<Array<{ key: string; ownerId: string }>> =>
@@ -365,5 +367,60 @@ describe('billing snapshot store', () => {
 
     expect(renders.filter((row) => row.userId === 'user-a' && row.minimumOwner === 'user-b')).toEqual([]);
     expect(requests.filter((url) => url.includes('minRevision'))).toEqual([]);
+  });
+
+  it('should never show a first owner the saved usage read while identity was unknown', async () => {
+    const snapshotB = buildSnapshot({ ownerId: 'user-b', subjectId: 'account-b' }, [
+      { ...receipt('op_b'), ownerId: 'user-b', subjectId: 'account-b' },
+    ]);
+    await writeSavedUsage(snapshotB, queryKey, 'b@example.test');
+    const renders: Array<{
+      readonly userId: string | undefined;
+      readonly savedOwner: string | undefined;
+      readonly label: string | undefined;
+    }> = [];
+    const Probe = (): undefined => {
+      const { userId } = useBillingSession();
+      const saved = useSavedUsage(usageQuery);
+      renders.push({ userId, savedOwner: saved?.snapshot.ownerId, label: saved?.label });
+      return undefined;
+    };
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = (userId: string | undefined): React.JSX.Element => (
+      <QueryClientProvider client={queryClient}>
+        <FinancialSessionProvider>
+          <FinancialSessionScope
+            identity={
+              userId === undefined
+                ? undefined
+                : { apiBaseUrl: 'https://api', environment: 'development', ownerId: userId }
+            }
+          >
+            <BillingSessionProvider value={{ apiBaseUrl: 'https://api', environment: 'development', userId }}>
+              <Probe />
+            </BillingSessionProvider>
+          </FinancialSessionScope>
+        </FinancialSessionProvider>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(tree(undefined));
+    await waitFor(() => {
+      expect(renders.at(-1)).toMatchObject({ savedOwner: 'user-b', label: 'b@example.test' });
+    });
+
+    rerender(tree('user-a'));
+    await waitFor(() => {
+      expect(renders.at(-1)?.userId).toBe('user-a');
+    });
+    // The store runs every read behind one lock, so this read settles only after the probe's own read for A.
+    await act(async () => {
+      await readSavedUsage(queryKey, { environment: 'development', ownerId: 'user-a' });
+    });
+
+    expect(
+      renders.filter(
+        (row) => row.userId === 'user-a' && (row.savedOwner === 'user-b' || row.label === 'b@example.test'),
+      ),
+    ).toEqual([]);
   });
 });

@@ -492,6 +492,16 @@ describe('libraryAccess', () => {
       expect(harness.verify.calls).toHaveLength(1);
     });
 
+    it('should let a later question share a bootstrap pass already asked for', () => {
+      const harness = start();
+      harness.send({ type: 'journalReady', pending: 1 });
+      harness.send({ type: 'discoveryFailed', message: 'boot failed' });
+      ask(harness, 'q1');
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+      ask(harness, 'q2', 'p2');
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+    });
+
     it('should skip verification while a current listing exists', () => {
       const harness = start();
       harness.send({ type: 'journalReady', pending: 0 });
@@ -762,6 +772,16 @@ describe('libraryAccess', () => {
       await resolve(harness.ensure, {});
       expect(harness.answers('q1')).toEqual([{ status: 'ready', project: project('p2') }]);
       expect(harness.discovery.calls).toHaveLength(0);
+    });
+
+    it('should stop the query it replaces or cancels', () => {
+      const harness = start();
+      settledLibrary(harness);
+      ask(harness, 'q1', 'p1');
+      ask(harness, 'q1', 'p2');
+      expect(Object.keys(harness.actor.getSnapshot().children)).toEqual(['query:q1:1']);
+      harness.send({ type: 'accessCancelled', requestId: 'q1' });
+      expect(Object.keys(harness.actor.getSnapshot().children)).toEqual([]);
     });
 
     it('should end the span of every open question when the machine stops', () => {

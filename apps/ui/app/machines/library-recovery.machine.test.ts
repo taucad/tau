@@ -519,6 +519,30 @@ describe('libraryRecovery', () => {
       expect(harness.of('discoveryWanted')).toHaveLength(0);
     });
 
+    it.each([
+      ['answers', (harness: ReturnType<typeof start>) => harness.check.calls[0]?.resolve([])],
+      ['fails', (harness: ReturnType<typeof start>) => harness.check.calls[0]?.reject(new Error('picker gone'))],
+    ] as const)(
+      'should re-arm a row that failed during a check when a retry asked during it %s',
+      async (_name, settleFirst) => {
+        const harness = start();
+        await ready(harness, [row('o1', 'p1', 'w1'), row('o2', 'p2', 'w1')]);
+        harness.replay.calls[0]?.resolve(workspaceGone);
+        await flush();
+        harness.send({ type: 'retryRequested' });
+        expect(harness.check.calls[0]?.input.rows.map((pending) => pending.operationId)).toEqual(['o1']);
+        await settleReplay(harness, workspaceGone);
+        harness.send({ type: 'retryRequested' });
+        settleFirst(harness);
+        await flush();
+        expect(harness.check.calls[1]?.input.rows.map((pending) => pending.operationId)).toEqual(['o1', 'o2']);
+        harness.check.calls[1]?.resolve(['o1', 'o2']);
+        await flush();
+        expect(harness.statusOf('o2')?.status).not.toBe('failed');
+        expect(harness.replay.calls).toHaveLength(3);
+      },
+    );
+
     it('should hold a mutation until the journal is read', async () => {
       const harness = start();
       harness.send({ type: 'mutationAsked', requestId: 'm1', projectId: 'p1' });

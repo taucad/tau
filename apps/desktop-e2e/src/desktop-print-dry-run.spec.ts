@@ -181,6 +181,9 @@ const openPrintProject = async (
   await page.keyboard.press('ControlOrMeta+Comma');
   const settings = page.getByRole('dialog').first();
   await settings.getByRole('button', { name: 'Machines', exact: true }).click();
+  /* Each simulator is a collapsed section under its own name since #444 (424896e7e3); its Add button renders only
+   * once the section is open. */
+  await settings.getByRole('button', { name: 'Simulated X1C', exact: true }).click();
   const add = settings.getByRole('button', { name: 'Add simulated X1C' });
   await expect.poll(async () => add.isEnabled(), { timeout: 60_000 }).toBe(true);
   await add.click();

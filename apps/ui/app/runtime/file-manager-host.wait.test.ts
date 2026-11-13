@@ -8,8 +8,10 @@ import { StepClock } from '@taucad/xstate-testing/clock';
 import { validated } from '@taucad/xstate-testing/inspect';
 import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import { describe, expect, it } from 'vitest';
-import { createActor, createMachine } from 'xstate';
-import type { AnyActor, AnyEventObject, Observer } from 'xstate';
+import { createActor } from 'xstate';
+import type { AnyEventObject, Observer } from 'xstate';
+import { mock } from 'vitest-mock-extended';
+import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-errors';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import {
@@ -21,31 +23,37 @@ import {
 } from '#runtime/file-manager-host.wait.js';
 import type { FileManagerSnapshot } from '#runtime/file-manager-host.wait.js';
 
-type FakeState = Readonly<{ value: 'connectingWorker' | 'ready' | 'error'; proxy?: unknown }>;
+/** The proxy a file manager's context holds. */
+type WorkerProxy = NonNullable<FileManagerSnapshot['context']['proxy']>;
+
+type FakeState = Readonly<{ value: 'connectingWorker' | 'ready' | 'error'; proxy?: WorkerProxy }>;
+
+/** A real file manager's context, before it connects anything. */
+const initialContext = createActor(fileManagerMachine, {
+  input: { rootDirectory: '/', initialBackend: 'indexeddb', shouldInitializeOnStart: false },
+}).getSnapshot().context;
 
 /** A file manager that only answers snapshots and subscriptions, which is all the wait reads. */
 const fakeFileManager = (initial: FakeState) => {
   let state = initial;
   const observers = new Set<Partial<Observer<FileManagerSnapshot>>>();
   const snapshotOf = (current: FakeState): FileManagerSnapshot =>
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the wait reads `matches`, `status` and these fields alone.
-    ({
-      status: 'active',
-      matches: (value: string) => value === current.value,
-      context: { proxy: current.proxy, contentService: undefined, treeService: undefined, viewClient: undefined },
-    }) as unknown as FileManagerSnapshot;
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the wait reads snapshots and subscribes, nothing more.
-  const ref = {
+    fileManagerMachine.resolveState({
+      value: current.value,
+      context: { ...initialContext, proxy: current.proxy },
+    });
+  const subscribe = (observer: Partial<Observer<FileManagerSnapshot>>) => {
+    observers.add(observer);
+    return {
+      unsubscribe: () => {
+        observers.delete(observer);
+      },
+    };
+  };
+  const ref = mock<FileManagerRef>({
     getSnapshot: () => snapshotOf(state),
-    subscribe: (observer: Partial<Observer<FileManagerSnapshot>>) => {
-      observers.add(observer);
-      return {
-        unsubscribe: () => {
-          observers.delete(observer);
-        },
-      };
-    },
-  } as unknown as FileManagerRef;
+    subscribe: subscribe as FileManagerRef['subscribe'],
+  });
   return {
     ref,
     observers,
@@ -63,19 +71,19 @@ const fakeFileManager = (initial: FakeState) => {
   };
 };
 
-/** A real actor in the wait's eyes: the wait reads its snapshots, status and observers, which every actor has. */
-const asFileManager = (actor: AnyActor): FileManagerRef =>
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the wait reads what every actor has.
-  actor as unknown as FileManagerRef;
-
-/** A file manager that never gets past connecting: only its stop can end a wait on it. */
-const connecting = () => createActor(createMachine({ initial: 'connectingWorker', states: { connectingWorker: {} } }));
+/** A real file manager that never initializes: only its stop can end a wait on it. */
+const connecting = () =>
+  createActor(fileManagerMachine, {
+    input: { rootDirectory: '/', initialBackend: 'indexeddb', shouldInitializeOnStart: false },
+  });
 
 describe('file manager ready wait', () => {
   it('should answer at once when the file manager is already there', async () => {
-    const files = fakeFileManager({ value: 'ready', proxy: {} });
+    const files = fakeFileManager({ value: 'ready', proxy: mock<WorkerProxy>() });
+
     const snapshot = await awaitFileManager(files.ref, 'proxy', { reason: 'proxy-timeout' });
-    expect(snapshot.context.proxy).toEqual({});
+    expect(snapshot.context.proxy).toBeDefined();
+    expect(snapshot.matches('ready')).toBe(true);
     expect(files.observers.size).toBe(0);
   });
 
@@ -141,7 +149,7 @@ describe('file manager ready wait', () => {
     stopped.start();
     stopped.stop();
     const clock = new StepClock();
-    const waiting = awaitFileManager(asFileManager(stopped), 'ready', {
+    const waiting = awaitFileManager(stopped, 'ready', {
       clock,
       reason: 'services-timeout',
     });
@@ -154,7 +162,7 @@ describe('file manager ready wait', () => {
     never.stop();
     expect(never.getSnapshot().status).toBe('active');
     const clock = new StepClock();
-    const waiting = awaitFileManager(asFileManager(never), 'ready', {
+    const waiting = awaitFileManager(never, 'ready', {
       clock,
       reason: 'services-timeout',
       isGone: () => true,
@@ -167,7 +175,7 @@ describe('file manager ready wait', () => {
     const files = connecting();
     files.start();
     const clock = new StepClock();
-    const waiting = awaitFileManager(asFileManager(files), 'ready', {
+    const waiting = awaitFileManager(files, 'ready', {
       clock,
       reason: 'services-timeout',
     });
@@ -177,8 +185,8 @@ describe('file manager ready wait', () => {
 
   it('should settle each readiness on its own condition, and on error', () => {
     const at = (state: FakeState) => fakeFileManager(state).ref.getSnapshot();
-    expect(selectReadinessSettled('proxy', at({ value: 'connectingWorker', proxy: {} }))).toBe(true);
-    expect(selectReadinessSettled('ready', at({ value: 'connectingWorker', proxy: {} }))).toBe(false);
+    expect(selectReadinessSettled('proxy', at({ value: 'connectingWorker', proxy: mock<WorkerProxy>() }))).toBe(true);
+    expect(selectReadinessSettled('ready', at({ value: 'connectingWorker', proxy: mock<WorkerProxy>() }))).toBe(false);
     expect(selectReadinessSettled('viewClient', at({ value: 'ready' }))).toBe(false);
     expect(selectReadinessSettled('services', at({ value: 'error' }))).toBe(true);
   });

@@ -6,10 +6,11 @@
  * worker is up, and keeps its first fault. Its composition builds actors with the backend as input and owns none.
  */
 import { flush, StepClock } from '@taucad/xstate-testing/clock';
-import { createFakeParent, recordEmitted } from '@taucad/xstate-testing/fakes';
+import { recordEmitted } from '@taucad/xstate-testing/fakes';
 import { validated } from '@taucad/xstate-testing/inspect';
 import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { AnyEventObject, EventObject } from 'xstate';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
@@ -39,14 +40,21 @@ vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
   },
 }));
 
-const parents: Array<ReturnType<typeof createFakeParent>> = [];
+const rootFilesActors: Array<{ stop: () => void }> = [];
 
-/** `rootFiles` as a recorder: the host only sends it the resolved backend. */
+/** `rootFiles` as a real file manager that never initializes, recording what the host sends it. */
 const fakeRootFiles = (): Readonly<{ ref: FileManagerRef; events: readonly AnyEventObject[] }> => {
-  const parent = createFakeParent();
-  parents.push(parent);
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a recorder stands in for the file manager the host only sends to.
-  return { ref: parent.ref as unknown as FileManagerRef, events: parent.events };
+  const events: AnyEventObject[] = [];
+  const ref = createActor(fileManagerMachine, {
+    input: { rootDirectory: '/', shouldInitializeOnStart: false },
+    inspect: (inspection) => {
+      if (inspection.type === '@xstate.transition' && inspection.event.type === 'resolveInitialBackend') {
+        events.push(inspection.event);
+      }
+    },
+  }).start();
+  rootFilesActors.push(ref);
+  return { ref, events };
 };
 
 /** A backend read that answers each call from the script, in order. */
@@ -75,8 +83,8 @@ const startHost = (read: ReturnType<typeof scriptedRead>['logic'], rootFiles: Fi
 };
 
 afterEach(() => {
-  for (const parent of parents.splice(0)) {
-    parent.stop();
+  for (const rootFiles of rootFilesActors.splice(0)) {
+    rootFiles.stop();
   }
   faults.reported.length = 0;
 });
@@ -172,11 +180,9 @@ describe('file-manager host', () => {
   });
 
   it('should read whether the shared worker is up from rootFiles itself', () => {
-    const at = (worker: unknown) =>
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the selector reads `context.worker` alone.
-      ({ context: { worker } }) as unknown as Parameters<typeof selectSharedWorkerPresent>[0];
-    expect(selectSharedWorkerPresent(at(undefined))).toBe(false);
-    expect(selectSharedWorkerPresent(at({}))).toBe(true);
+    type RootFilesSnapshot = Parameters<typeof selectSharedWorkerPresent>[0];
+    expect(selectSharedWorkerPresent(mock<RootFilesSnapshot>({ context: { worker: undefined } }))).toBe(false);
+    expect(selectSharedWorkerPresent(mock<RootFilesSnapshot>({ context: { worker: mock<Worker>() } }))).toBe(true);
   });
 
   it('should keep a watch that throws as its first fault and keep answering (D23)', () => {

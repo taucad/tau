@@ -7,8 +7,9 @@
  */
 import { flush } from '@taucad/xstate-testing/clock';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
-import type { EventObject } from 'xstate';
+import { createActor, createCallbackLogic } from 'xstate';
+import { mock } from 'vitest-mock-extended';
+import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { fileManagerMachine, releaseFileManagerResources } from '#machines/file-manager.machine.js';
 
 const faults = vi.hoisted(() => ({ reported: [] as unknown[] }));
@@ -33,33 +34,21 @@ afterEach(() => {
   faults.reported.length = 0;
 });
 
-/** The machine's effect slots; each stand-in below only settles or holds, which is all `ready` needs. */
-type Effects = NonNullable<NonNullable<Parameters<typeof fileManagerMachine.provide>[0]>['actors']>;
-
 /** A file manager that reaches `ready` with stand-in effects, and whose root observer fails the given number of times. */
 const readyFileManager = (observerFailures: readonly string[]) => {
   const failures = [...observerFailures];
   const machine = fileManagerMachine.provide({
     actors: {
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a stand-in that only settles.
-      connectWorkerActor: createAsyncLogic({ run: async () => ({}) }) as unknown as NonNullable<
-        Effects['connectWorkerActor']
-      >,
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a stand-in that only settles.
-      initializeServicesActor: createAsyncLogic({
-        run: async () => ({}),
-      }) as unknown as NonNullable<Effects['initializeServicesActor']>,
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a stand-in that only holds.
-      watchProxyClosedActor: createCallbackLogic<EventObject>(() => undefined) as unknown as NonNullable<
-        Effects['watchProxyClosedActor']
-      >,
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a stand-in that fails as scripted.
-      observeRootDirectoryActor: createCallbackLogic<EventObject>(() => {
+      /* Each stand-in only settles or holds, which is all `ready` needs. */
+      connectWorkerActor: fromSafeAsync(async () => undefined),
+      initializeServicesActor: fromSafeAsync(async () => undefined),
+      watchProxyClosedActor: fromSafeAsync(async (): Promise<never> => Promise.withResolvers<never>().promise),
+      observeRootDirectoryActor: createCallbackLogic(() => {
         const failure = failures.shift();
         if (failure !== undefined) {
           throw new Error(failure);
         }
-      }) as unknown as NonNullable<Effects['observeRootDirectoryActor']>,
+      }),
     },
   });
   return createActor(machine, { input: { rootDirectory: '/', initialBackend: 'indexeddb' } });
@@ -102,21 +91,22 @@ describe('file manager root onError (B2)', () => {
 
 describe('file manager resource release', () => {
   type Context = Parameters<typeof releaseFileManagerResources>[0];
-  const held = (sharedWorker: boolean) => {
-    const worker = { terminate: vi.fn() };
-    const proxy = { dispose: vi.fn() };
+  const held = (shared: boolean) => {
+    const worker = mock<Worker>();
+    const proxy = mock<NonNullable<Context['proxy']>>();
     const bridgeDispose = vi.fn();
-    const contentService = { dispose: vi.fn() };
-    const treeService = { dispose: vi.fn() };
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the release reads these fields alone.
-    const context = {
+    const contentService = mock<NonNullable<Context['contentService']>>();
+    const treeService = mock<NonNullable<Context['treeService']>>();
+    const context = mock<Context>({
       worker,
-      sharedWorker: sharedWorker ? worker : undefined,
+      sharedWorker: shared ? worker : undefined,
       proxy,
       bridgeDispose,
       contentService,
       treeService,
-    } as unknown as Context;
+      workerChangeChannel: undefined,
+      disposeComposedView: undefined,
+    });
     return { context, worker, proxy, bridgeDispose, contentService, treeService };
   };
 

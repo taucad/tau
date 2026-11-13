@@ -502,5 +502,10 @@ test('A0.1 I2 report-only (A5c): a fast round trip through B and the late B corr
   const unsettled = outcomes.filter((outcome) => outcome.ended === 'unsettled').length;
   await annotate(`I2 override: ${String(overridden)} of ${String(attempts)} (unsettled ${String(unsettled)})`);
   await annotate(`I2 attempts: ${JSON.stringify(outcomes)}`);
+  /* Annotations stay in the reporter; the reading is also kept as a run artifact for the PR's evidence. */
+  await target.writeArtifact(
+    `a01-i2-report-${String(Date.now())}.json`,
+    JSON.stringify({ overridden, unsettled, attempts, outcomes }),
+  );
   expect(outcomes).toHaveLength(attempts);
 });

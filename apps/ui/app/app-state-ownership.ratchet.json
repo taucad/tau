@@ -28,6 +28,7 @@
   },
   "modules": {
     "files": [
+      "apps/ui/app/flags/layout-flags.ts",
       "apps/ui/app/runtime/app-runtime-faults.ts",
       "apps/ui/app/runtime/app-runtime-holder.ts",
       "apps/ui/app/runtime/app-runtime.machine.ts",

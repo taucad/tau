@@ -9,6 +9,7 @@
       "apps/ui/app/hooks/use-projects.ts",
       "apps/ui/app/hooks/use-revision-status.ts",
       "apps/ui/app/hooks/use-sessions.tsx",
+      "apps/ui/app/hooks/use-wait-start.ts",
       "apps/ui/app/routes/w.$workspace.$project/chat-viewer-dockview.tsx",
       "apps/ui/app/routes/w.$workspace.$project/chat-workbench-dockview.tsx",
       "apps/ui/app/routes/w.$workspace.$project/entries-sync-host.tsx",

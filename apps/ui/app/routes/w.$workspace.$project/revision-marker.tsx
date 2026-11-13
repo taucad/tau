@@ -206,17 +206,22 @@ function ComparisonWait({
   readonly onRetry: () => void;
 }): React.JSX.Element {
   const { startedAt, restart } = useWaitStart(true);
+  const slot = useRef<HTMLSpanElement>(null);
   return (
-    <WaitIndicator
-      active
-      label={label}
-      slowLabel={`Still ${label.toLowerCase()}`}
-      startedAt={startedAt}
-      onRetry={() => {
-        restart();
-        onRetry();
-      }}
-    />
+    /* Focus lands here after Retry, which replaces the indicator's words and its button; it never falls to the page. */
+    <span ref={slot} tabIndex={-1} className='inline-flex rounded-md outline-none focus-visible:focus-outline'>
+      <WaitIndicator
+        active
+        label={label}
+        slowLabel={`Still ${label.toLowerCase()}`}
+        startedAt={startedAt}
+        onRetry={() => {
+          restart();
+          onRetry();
+          slot.current?.focus();
+        }}
+      />
+    </span>
   );
 }
 

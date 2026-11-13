@@ -1181,6 +1181,7 @@ function FileWorkbenchPane({
   presentation,
   shouldHandleReveal,
   onOpenFile,
+  waitSlot,
   children,
 }: {
   readonly paneId: string;
@@ -1193,6 +1194,8 @@ function FileWorkbenchPane({
   readonly presentation?: FileViewerPresentation;
   readonly shouldHandleReveal: () => boolean;
   readonly onOpenFile: (path: string, readOnly?: boolean) => void;
+  /** The pane's wait indicator, at the code area's top right, clear of the files sidecar. */
+  readonly waitSlot?: ReactNode;
   readonly children: ReactNode;
 }): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
@@ -1259,8 +1262,9 @@ function FileWorkbenchPane({
         </div>
       )}
       <div className='flex min-h-0 flex-1'>
-        <div className='min-h-0 min-w-0 flex-1'>
+        <div className='relative min-h-0 min-w-0 flex-1'>
           <EditorSymbolPathProvider onSymbolPath={setSymbolPath}>{children}</EditorSymbolPathProvider>
+          {waitSlot === undefined ? null : <div className='absolute top-2 right-3 z-20'>{waitSlot}</div>}
         </div>
         {paneState.filesOpen ? (
           <FilePaneFilesSidecar
@@ -1482,6 +1486,7 @@ export const FileEditor = memo(function ({
      own notice instead. */
   const isWaitingForText = availability === 'ready' && !isAwaitingLargeObject && result.kind === 'loading';
   const textWait = useWaitStart(isWaitingForText);
+  const waitSlotRef = useRef<HTMLDivElement>(null);
   switch (result.kind) {
     case 'loading': {
       const loadingLabel = `Loading ${filePath.split('/').pop() ?? filePath}`;
@@ -1616,6 +1621,26 @@ export const FileEditor = memo(function ({
       onOpenFile={(path, fileReadOnly) => {
         editorRef.send({ type: 'openFile', path, source: 'user', readOnly: fileReadOnly });
       }}
+      waitSlot={
+        /* Focus lands here after Retry, which replaces the indicator's words and its button (focus never falls to the
+           page). Live only for a pane a person opened: one restored with the route open is part of its announcement. */
+        <div ref={waitSlotRef} tabIndex={-1} className='rounded-lg outline-none focus-visible:focus-outline'>
+          <WaitIndicator
+            active={isWaitingForText}
+            label='Opening file'
+            slowLabel='Still opening file'
+            startedAt={textWait.startedAt}
+            live={textWait.isGesture}
+            variant='pill'
+            className='[&_[data-slot=wait-indicator-body]]:bg-popover'
+            onRetry={() => {
+              textWait.restart();
+              result.retry();
+              waitSlotRef.current?.focus();
+            }}
+          />
+        </div>
+      }
     >
       <div className='flex h-full min-h-0 flex-1 flex-col' onBlur={flushPaneSave}>
         {result.observation.status === 'closed' || result.observation.status === 'error' ? (
@@ -1631,37 +1656,29 @@ export const FileEditor = memo(function ({
     </FileWorkbenchPane>
   );
 
-  let content: ReactNode;
   if (availability !== 'ready') {
-    content = <ProjectSyncPlaceholder state={availability} />;
-  } else if (isAwaitingLargeObject) {
-    content = renderPane({ body: <LargeObjectPendingPlaceholder name={name} /> });
-  } else if (result.kind === 'binary' || result.kind === 'text') {
-    content = isPanelShown ? (
-      <RoutedFileViewer viewer={resolvedViewer!} request={viewerRequest!} renderPane={renderPane} />
-    ) : (
-      renderPane({ body: <EditorPanePlaceholder label={`Loading ${name}`} /> })
-    );
-  } else {
-    content = renderPane({ body });
+    return <ProjectSyncPlaceholder state={availability} />;
   }
 
-  /* The indicator's slot is a sibling of the pane, so it keeps its node, clock and minimum while the pane's body moves
-     from the loading branch to the routed viewer (which remounts the pane's header too, so it cannot live there). */
-  return (
-    <div className='relative size-full' data-slot='file-pane-frame'>
-      {content}
-      <div className='pointer-events-none absolute right-3 bottom-3 z-20'>
-        <WaitIndicator
-          active={isWaitingForText}
-          label='Opening file'
-          slowLabel='Still opening file'
-          startedAt={textWait.startedAt}
-          live={textWait.isGesture}
-        />
-      </div>
-    </div>
-  );
+  /* Every branch renders through one component type, so the pane (its header and its wait slot) stays the same node
+     when the content arrives and the body moves from the loading branch to its viewer. */
+  if (isAwaitingLargeObject) {
+    return (
+      <FilePaneContent render={(): ReactNode => renderPane({ body: <LargeObjectPendingPlaceholder name={name} /> })} />
+    );
+  }
+
+  if (result.kind === 'binary' || result.kind === 'text') {
+    return isPanelShown ? (
+      <FilePaneContent render={(): ReactNode => resolvedViewer!.render({ ...viewerRequest!, renderPane })} />
+    ) : (
+      <FilePaneContent
+        render={(): ReactNode => renderPane({ body: <EditorPanePlaceholder label={`Loading ${name}`} /> })}
+      />
+    );
+  }
+
+  return <FilePaneContent render={(): ReactNode => renderPane({ body })} />;
 });
 
 /** One file still downloading: the pane waits for its bytes, which replace the placeholder as they land. */
@@ -1680,16 +1697,15 @@ function LargeObjectPendingPlaceholder({ name }: { readonly name: string }): Rea
   );
 }
 
-function RoutedFileViewer({
-  viewer,
-  request,
-  renderPane,
-}: {
-  readonly viewer: ResolvedFileViewer;
-  readonly request: Omit<FileViewerRenderRequest, 'renderPane'>;
-  readonly renderPane: FileViewerRenderRequest['renderPane'];
-}): ReactNode {
-  return viewer.render({ ...request, renderPane });
+/**
+ * A file pane's content. A component boundary, as the routed viewer had, and one type for every branch of
+ * {@link FileEditor}, so React keeps the pane a viewer returns from `renderPane` when the branch changes.
+ *
+ * @param props - Renders the pane.
+ * @returns The pane.
+ */
+function FilePaneContent({ render }: { readonly render: () => ReactNode }): ReactNode {
+  return render();
 }
 
 const clampFilesWidth = (width: number): number => Math.min(maximumFilesWidth, Math.max(minimumFilesWidth, width));

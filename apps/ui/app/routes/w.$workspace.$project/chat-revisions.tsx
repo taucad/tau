@@ -329,6 +329,8 @@ function WhereYouAre(): React.JSX.Element {
         role='status'
         aria-label='History status'
         aria-busy={facts.mark === 'running' || sentence === 'Loading history…' ? true : undefined}
+        /* The History card's indicator is the one voice of a History wait (one announcement per group). */
+        aria-live={sentence === 'Loading history…' ? 'off' : undefined}
         className='flex items-start gap-1.5 text-xs'
       >
         <StatusIcon
@@ -1584,7 +1586,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const { projectId, projectRef } = useProject();
   const project = useSelector(projectRef, (snapshot) => snapshot.context.project);
   const { updateProject } = useProjectManager();
-  const { revisions, line, isLoading } = useRevisions();
+  const { revisions, line, isLoading, retry: retryHistory } = useRevisions();
   const status = useRevisionStatus();
   const commands = useRevisionCommands();
   const projectRole = useProjectRole();
@@ -1599,6 +1601,10 @@ export function RevisionsPanelBody(): React.JSX.Element {
   /* Remembered entries are content: the wait is shown only while History has none to show. */
   const isHistoryWaiting = isHistoryLoading && revisions.length === 0;
   const historyWait = useWaitStart(isHistoryWaiting);
+  /* S20 (I6): an empty History is never on screen with *Loading history…*, so a wait that ends empty ends its
+     indicator at once instead of holding it; a new key gives an idle slot. */
+  const isHistoryEmpty = !isHistoryWaiting && revisions.length === 0;
+  const historySlot = useRef<HTMLSpanElement>(null);
 
   return (
     <div data-slot='revisions-panel-body' className='@container flex size-full min-h-0 flex-col bg-sidebar'>
@@ -1644,16 +1650,33 @@ export function RevisionsPanelBody(): React.JSX.Element {
           /* Loading is not empty (DESIGN, I6, S20): the card itself is busy and its body empty, never *No history yet*,
              and nothing stands for rows that have not arrived (loading states UX blueprint, U17). */
           isBusy={isHistoryWaiting}
-          /* The header's trailing slot is always rendered, so the indicator never changes the header's height. Not live:
-             the strip's status line is the pane's one announcement and already says *Loading history…*. */
+          /* The header's trailing slot is always rendered, so the indicator never changes the header's height. It is the
+             wait's one voice: live for a History a person opened (the strip keeps its *Loading history…* quiet), and
+             seen but not announced for one restored with the route open. Focus lands on the slot after Retry. */
           action={
-            <WaitIndicator
-              active={isHistoryWaiting}
-              label='Loading history'
-              slowLabel='Still loading history'
-              startedAt={historyWait.startedAt}
-              live={false}
-            />
+            <span
+              ref={historySlot}
+              tabIndex={-1}
+              className='inline-flex rounded-md outline-none focus-visible:focus-outline'
+            >
+              <WaitIndicator
+                key={isHistoryEmpty ? 'empty' : 'history'}
+                active={isHistoryWaiting}
+                label='Loading history'
+                slowLabel='Still loading history'
+                startedAt={historyWait.startedAt}
+                live={historyWait.isGesture}
+                onRetry={
+                  retryHistory === undefined
+                    ? undefined
+                    : () => {
+                        historyWait.restart();
+                        retryHistory();
+                        historySlot.current?.focus();
+                      }
+                }
+              />
+            </span>
           }
         >
           {isHistoryWaiting ? null : revisions.length === 0 ? (

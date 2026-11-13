@@ -1251,6 +1251,70 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.queryByText('No history yet')).not.toBeInTheDocument();
   });
 
+  /* S20 (I6): a wait that ends in an empty History ends its indicator at once: *Loading history…* is never on screen
+     with *No history yet*, even after the indicator has shown. */
+  it('never shows Loading history with No history yet when a shown wait ends empty', async () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(0);
+    onTestFinished(() => {
+      now.mockRestore();
+    });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
+    const { rerender } = render(<RevisionsPanelBody />, { wrapper });
+    const card = await screen.findByRole('group', { name: 'History' });
+    expect(card).toHaveAttribute('aria-busy', 'true');
+
+    now.mockReturnValue(1200);
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'branch', name: 'main' } };
+    rerender(<RevisionsPanelBody />);
+
+    await waitFor(() => {
+      expect(card).toHaveTextContent('No history yet');
+    });
+    expect(card).not.toHaveTextContent('Loading history');
+  });
+
+  /* A History read that hangs offers Retry at the slow mark: a second read, timed from the Retry, with focus kept. */
+  it('reads History again on Retry while the first read is pending, keeping focus in the card', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.logRead = async () => Promise.withResolvers<never>().promise;
+    render(<RevisionsPanelBody />, { wrapper });
+    const card = await screen.findByRole('group', { name: 'History' });
+    await waitFor(() => {
+      expect(revisionStatusHarness.logRequests).toHaveLength(1);
+    });
+
+    const now = vi.spyOn(performance, 'now').mockReturnValue(30_000);
+    onTestFinished(() => {
+      now.mockRestore();
+    });
+    await user.click(within(card).getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => {
+      expect(revisionStatusHarness.logRequests).toHaveLength(2);
+    });
+    expect(document.activeElement).not.toBe(document.body);
+    expect(card).toContainElement(document.activeElement as HTMLElement);
+    const body = card.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+    expect(body?.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
+  });
+
+  /* One announcement per group: a History a person opens is announced by its card's indicator, not by the strip. */
+  it('announces a History a person opened through its card, keeping the strip quiet while it loads', async () => {
+    vi.stubGlobal(
+      'navigator',
+      Object.assign(Object.create(navigator) as Navigator, { userActivation: { isActive: true, hasBeenActive: true } }),
+    );
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
+    renderPane();
+
+    const card = await screen.findByRole('group', { name: 'History' });
+    expect(card.querySelector('[data-slot="wait-indicator"]')).toHaveAttribute('role', 'status');
+    expect(screen.getByRole('status', { name: 'History status' })).toHaveAttribute('aria-live', 'off');
+  });
+
   /* A later wait in the same mount (a branch switch, a reconnect) is timed from its own start, not the mount's. */
   it('times a later History wait from when it starts, not from when the pane mounted', async () => {
     revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];

@@ -5295,6 +5295,121 @@ for (const actorSet of actorSets) {
       });
     }, 30_000);
 
+    /**
+     * The Merged toast's Undo as the page runs it: the restore pipeline writes the files from before the merge, and
+     * the restore cut records them as a new entry on `main` that names what it restored (I11).
+     */
+    const undoMerge = async (context: Fixture, merged: string, before: string): Promise<string> => {
+      const { actors } = context;
+      const plan = await run<{ planId: string }>(actors.restore.computePlan, {
+        checkoutId: 'live',
+        target: before,
+        expectHead: merged,
+      });
+      await run(actors.restore.applyPlan, { checkoutId: 'live', planId: plan.planId });
+      return restoreCut(context, merged, before);
+    };
+
+    /** The restore cut alone: the live files, recorded on `main` over `head` as a restore of `restoredFrom`. */
+    const restoreCut = async ({ actors, port }: Fixture, head: string, restoredFrom: string): Promise<string> => {
+      const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+        checkoutId: 'live',
+        trigger: 'restore',
+      });
+      const written = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+        checkoutId: 'live',
+        cutId: cut.cutId,
+        treeId: cut.treeId,
+        parents: [head],
+        trigger: 'restore',
+        leaseIds: [],
+        restoredFrom,
+      });
+      await port.updateRef({ name: 'main', expectedHead: revisionId(head), head: revisionId(written.revisionId) });
+      return written.revisionId;
+    };
+
+    const mergeInto = async (context: Fixture, branch: string, into: string) =>
+      run<{ status: string; revisionId: string; before?: string }>(context.actors.branch.merge, {
+        projectId: 'project-1',
+        branch,
+        into,
+      });
+
+    /* M1: after an undone merge the base still says "merged"; a merge built on it refuses rather than mislead. */
+    it('refuses to merge the same branch again after its merge was undone, until a restore brings it back', async () => {
+      const context = await twoLines({ ours: 'base\n', theirs: 'theirs\n', extra: { 'b.txt': 'theirs only\n' } });
+      const { port, filesystem, ours } = context;
+      const merged = await mergeInto(context, 'feature', 'main');
+      const undone = await undoMerge(context, merged.revisionId, ours);
+
+      await expect(mergeInto(context, 'feature', 'main')).rejects.toMatchObject({
+        code: 'MERGE_UNDONE',
+        restoreId: undone,
+        restoredFrom: ours,
+      });
+      expect(await port.readRef('main')).toBe(undone);
+      expect(await filesystem.exists('b.txt')).toBe(false);
+
+      /* The way out the copy names: Restore of the merge entry. The newest restore holds the base again. */
+      const plan = await run<{ planId: string }>(context.actors.restore.computePlan, {
+        checkoutId: 'live',
+        target: merged.revisionId,
+      });
+      await run(context.actors.restore.applyPlan, { checkoutId: 'live', planId: plan.planId });
+      const redone = await restoreCut(context, undone, merged.revisionId);
+      expect(await filesystem.readFile('b.txt', 'utf8')).toBe('theirs only\n');
+      await expect(mergeInto(context, 'feature', 'main')).resolves.toStrictEqual({
+        status: 'upToDate',
+        revisionId: redone,
+      });
+    }, 30_000);
+
+    it('refuses to merge a branch that gained an entry after its merge was undone, moving nothing', async () => {
+      const context = await twoLines({ ours: 'base\n', theirs: 'theirs\n', extra: { 'b.txt': 'theirs only\n' } });
+      const { port, filesystem, ours, theirs, write } = context;
+      const merged = await mergeInto(context, 'feature', 'main');
+      const undone = await undoMerge(context, merged.revisionId, ours);
+      const more = await write({ 'a.txt': 'theirs\n', 'b.txt': 'theirs only\n', 'c.txt': 'new work\n' }, [theirs], 'More');
+      await port.updateRef({ name: 'feature', expectedHead: revisionId(theirs), head: revisionId(more) });
+
+      await expect(mergeInto(context, 'feature', 'main')).rejects.toMatchObject({ code: 'MERGE_UNDONE' });
+      expect(await port.readRef('main')).toBe(undone);
+      expect(await port.readRef('feature')).toBe(more);
+      expect(await filesystem.exists('c.txt')).toBe(false);
+      expect(await filesystem.readFile('a.txt', 'utf8')).toBe('base\n');
+    }, 30_000);
+
+    it('refuses to merge an undone update back, never fast-forwarding over the other line’s own entries', async () => {
+      /* `main` plays the branch updated from the trunk; `feature` plays the trunk it was updated from. */
+      const context = await twoLines({ ours: 'base\n', theirs: 'theirs\n', extra: { 'b.txt': 'theirs only\n' } });
+      const { port, ours, theirs } = context;
+      const merged = await mergeInto(context, 'feature', 'main');
+      const undone = await undoMerge(context, merged.revisionId, ours);
+
+      await expect(mergeInto(context, 'main', 'feature')).rejects.toMatchObject({
+        code: 'MERGE_UNDONE',
+        restoreId: undone,
+      });
+      expect(await port.readRef('feature')).toBe(theirs);
+      expect(await port.readRef('main')).toBe(undone);
+    }, 30_000);
+
+    it('still merges after an ordinary restore inside one line', async () => {
+      const context = await twoLines({ ours: 'base\n', theirs: 'theirs\n', extra: { 'b.txt': 'theirs only\n' } });
+      const { port, filesystem, ours, write } = context;
+      const later = await write({ 'a.txt': 'base\n', 'd.txt': 'later\n' }, [ours], 'Later');
+      await port.updateRef({ name: 'main', expectedHead: revisionId(ours), head: revisionId(later) });
+      await filesystem.writeFile('d.txt', 'later\n');
+      const plan = await run<{ planId: string }>(context.actors.restore.computePlan, { checkoutId: 'live', target: ours });
+      await run(context.actors.restore.applyPlan, { checkoutId: 'live', planId: plan.planId });
+      await restoreCut(context, later, ours);
+
+      await expect(mergeInto(context, 'feature', 'main')).resolves.toMatchObject({ status: 'merged' });
+      expect(await filesystem.readFile('b.txt', 'utf8')).toBe('theirs only\n');
+      expect(await filesystem.exists('d.txt')).toBe(false);
+    }, 30_000);
+
     it('restores the target checkout when publishing the merge loses its lease', async () => {
       const context = await twoLines({ ours: 'base\n', theirs: 'theirs\n', extra: { 'b.txt': 'theirs only\n' } });
       const refusingPort: RevisionPort = {
@@ -5373,8 +5488,9 @@ for (const actorSet of actorSets) {
       expect(await filesystem.readFile('b.txt', 'utf8')).toBe('theirs only\n');
     }, 30_000);
 
-    it('says a line already merged is merged, rather than failing', async () => {
-      const { port, actors, base, theirs } = await twoLines({ ours: 'base\n', theirs: 'theirs\n' });
+    /* M1: nothing to bring is its own settlement, so the page never says *Merged* over a merge that moved nothing. */
+    it('says a line already merged is already in, moving nothing, rather than failing', async () => {
+      const { port, actors, base, ours, theirs } = await twoLines({ ours: 'base\n', theirs: 'theirs\n' });
       await port.updateRef({ name: 'feature', expectedHead: revisionId(theirs), head: revisionId(base) });
 
       const outcome = await run<{ status: string }>(actors.branch.merge, {
@@ -5383,7 +5499,8 @@ for (const actorSet of actorSets) {
         into: 'main',
       });
 
-      expect(outcome.status).toBe('merged');
+      expect(outcome).toStrictEqual({ status: 'upToDate', revisionId: ours });
+      expect(await port.readRef('main')).toBe(ours);
     }, 30_000);
 
     /* The composition `finishMerge` performs is the subtlest code in the lane and

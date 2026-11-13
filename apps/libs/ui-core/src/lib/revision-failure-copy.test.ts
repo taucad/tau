@@ -141,6 +141,19 @@ describe('describeRevisionFailure', () => {
     );
   });
 
+  /* M1: a merge that moved nothing is never *Merged*, and one over undone history says where the work is. */
+  it('says a merge that moved nothing is already in, and a merge over undone history points to Restore', () => {
+    expect(describeRevisionFailure('branch', 'MERGE_UP_TO_DATE', { branch: 'enclosure-v2' })).toEqual({
+      title: 'Nothing to merge',
+      description: 'Everything on enclosure-v2 is already here. Nothing changed.',
+    });
+    expect(describeRevisionFailure('branch', 'MERGE_UNDONE')).toEqual({
+      title: 'Nothing was merged',
+      description:
+        'An Undo or a Restore took back part of what these branches share, so merging now would leave work out. Nothing changed. To bring the work back, open History and restore the entry that has it.',
+    });
+  });
+
   /* E5: a failure with no code is the common one — an engine `Error` such as
    * `Buffer is not defined`. A person cannot act on that sentence, so they get
    * the one thing they can do and a developer reads the console. */

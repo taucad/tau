@@ -2,7 +2,8 @@ import type { RevisionToast } from '#machines/file-manager.worker.revisions.js';
 import { reportUiError } from '#lib/error-reporting.js';
 
 /**
- * Refusal codes that lost nothing: files that are back, an undo with nothing here to undo (W0 N1, M1, D15). The page
+ * Refusal codes that lost nothing: files that are back, an undo with nothing here to undo, a merge that moved nothing
+ * (W0 N1, M1, D15). The page
  * shows them as warnings; they are not failures and are never reported.
  */
 export const revisionWarningCodes: ReadonlySet<string> = new Set([
@@ -11,6 +12,8 @@ export const revisionWarningCodes: ReadonlySet<string> = new Set([
   'NOTHING_TO_UNDO',
   'UNDO_PAST_MERGE',
   'UNDO_MERGE_MOVED',
+  'MERGE_UP_TO_DATE',
+  'MERGE_UNDONE',
 ]);
 
 /** A revision verb the tree could not carry out, as its error toast names it. */

@@ -96,11 +96,11 @@ it('should hold the indicator to 1,500 ms when content arrives at 1,100 ms', () 
   expect(isShown(find('wait-indicator-body'))).toBe(false);
 });
 
-it('should start a new wait hidden when a Retry moves startedAt past the slow mark', () => {
+it('should start a new wait hidden when a Retry comes after the indicator served its minimum', () => {
   const view = renderAt(11_000, { active: true, label: 'Loading chat', slowLabel: 'Still loading chat', startedAt: 0 });
   view.rerender(
-    <WaitClockProvider clock={clockAt(11_000)}>
-      <WaitIndicator active label='Loading chat' slowLabel='Still loading chat' startedAt={11_000} />
+    <WaitClockProvider clock={clockAt(11_600)}>
+      <WaitIndicator active label='Loading chat' slowLabel='Still loading chat' startedAt={11_600} />
     </WaitClockProvider>,
   );
 
@@ -110,4 +110,34 @@ it('should start a new wait hidden when a Retry moves startedAt past the slow ma
   expect(isShown(find('wait-indicator-body'))).toBe(true);
   expect(isShown(find('wait-indicator-label'))).toBe(true);
   expect(isShown(find('wait-indicator-slow'))).toBe(false);
+});
+
+it('should keep the slow words and Retry visible through a hold that starts after the slow mark', () => {
+  const props = { label: 'Loading chat', slowLabel: 'Still loading chat', onRetry: () => undefined, startedAt: 0 };
+  const view = renderAt(9800, { ...props, active: true });
+  view.rerender(
+    <WaitClockProvider clock={clockAt(10_100)}>
+      <WaitIndicator {...props} active={false} />
+    </WaitClockProvider>,
+  );
+
+  seek(100);
+  expect(isShown(find('wait-indicator-label'))).toBe(false);
+  expect(isShown(find('wait-indicator-slow'))).toBe(true);
+  seek(201);
+  expect(isShown(find('wait-indicator-body'))).toBe(false);
+});
+
+it('should keep a Retry indicator visible through the new wait start', () => {
+  const props = { label: 'Loading chat', slowLabel: 'Still loading chat', onRetry: () => undefined };
+  const view = renderAt(10_100, { ...props, active: true, startedAt: 0 });
+  view.rerender(
+    <WaitClockProvider clock={clockAt(10_300)}>
+      <WaitIndicator {...props} active startedAt={10_300} />
+    </WaitClockProvider>,
+  );
+
+  seek(0);
+  expect(isShown(find('wait-indicator-body'))).toBe(true);
+  expect(getComputedStyle(find('wait-indicator-body')).opacity).toBe('1');
 });

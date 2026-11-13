@@ -69,17 +69,34 @@ describe('the indicator timing', () => {
 
   it('should hold a shown indicator for the rest of its minimum, and no longer', () => {
     expect(settledTiming(600)).toEqual({ state: 'idle' });
-    expect(settledTiming(1000)).toEqual({ state: 'holding', hideDelay: '500ms' });
-    expect(settledTiming(1100)).toEqual({ state: 'holding', hideDelay: '400ms' });
+    expect(settledTiming(1000)).toEqual({ state: 'holding', hideDelay: '500ms', isSlow: false });
+    expect(settledTiming(1100)).toEqual({ state: 'holding', hideDelay: '400ms', isSlow: false });
     expect(settledTiming(1500)).toEqual({ state: 'idle' });
   });
 
   it('should count the minimum from when a late-mounted indicator became visible', () => {
     // Mounted 1,200 ms into the wait, so visible from 1,200 ms; content at 1,300 ms holds it to 1,700 ms.
-    expect(settledTiming(1300, 1200)).toEqual({ state: 'holding', hideDelay: '400ms' });
+    expect(settledTiming(1300, 1200)).toEqual({ state: 'holding', hideDelay: '400ms', isSlow: false });
     expect(waitPhaseAt(1699, 1300, 1200)).toBe('shown');
     expect(waitPhaseAt(1700, 1300, 1200)).toBe('hidden');
-    expect(settledTiming(1460, 1450)).toEqual({ state: 'holding', hideDelay: '490ms' });
+    expect(settledTiming(1460, 1450)).toEqual({ state: 'holding', hideDelay: '490ms', isSlow: false });
+  });
+
+  it('should keep the slow words through a hold that starts after the slow mark', () => {
+    // Mounted 9,800 ms in, slow from 10,000 ms, settled at 10,100 ms: held to 10,300 ms with the slow words.
+    expect(settledTiming(10_100, 9800)).toEqual({ state: 'holding', hideDelay: '200ms', isSlow: true });
+    expect(waitPhaseAt(10_200, 10_100, 9800)).toBe('slow');
+    expect(waitPhaseAt(10_300, 10_100, 9800)).toBe('hidden');
+  });
+
+  it('should hold an indicator that a new wait took over until the minimum it already owed', () => {
+    // Showing since 200 ms before this wait started: content 100 ms in holds it to 300 ms.
+    expect(waitPhaseAt(0, undefined, -200)).toBe('shown');
+    expect(settledTiming(100, -200)).toEqual({ state: 'holding', hideDelay: '200ms', isSlow: false });
+  });
+
+  it('should start a wait that takes over a showing indicator already revealed', () => {
+    expect(waitingTiming(10_300, 10_300, true)).toMatchObject({ revealDelay: '-150ms', slowDelay: '10000ms' });
   });
 });
 

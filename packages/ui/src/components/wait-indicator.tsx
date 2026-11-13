@@ -65,6 +65,26 @@ function timingStyle(timing: WaitIndicatorTiming): WaitTimingStyle | undefined {
 }
 
 /**
+ * Which set of words is drawn: the label until the slow mark, the slow words after it and through a hold that began
+ * after it. While waiting, CSS swaps them at the slow mark.
+ *
+ * @param timing - The indicator's current timing.
+ * @param hasSlowWords - Whether a slow label or Retry exists to swap in.
+ * @returns The extra classes for the label and for the slow words.
+ */
+function wordClasses(timing: WaitIndicatorTiming, hasSlowWords: boolean): { label?: string; slow?: string } {
+  if (!hasSlowWords) {
+    return {};
+  }
+  if (timing.state === 'waiting') {
+    return { label: 'wait-until-slow', slow: 'wait-after-slow' };
+  }
+  // A hold that began after the slow mark keeps the slow words, so the slot does not change its words while it holds.
+  const isHeldSlow = timing.state === 'holding' && timing.isSlow;
+  return isHeldSlow ? { label: 'invisible' } : { slow: 'invisible' };
+}
+
+/**
  * The one wait indicator for loading regions (UI Policy § 5 and § 6): a spinner and words in a slot the region's frame
  * already has, shown only once a wait passes 1,000 ms, kept at least 500 ms, and saying the wait is long, with Retry,
  * from 10,000 ms. It always carries words, because the spinner stops under reduced motion.
@@ -108,6 +128,11 @@ export function WaitIndicator({
   const { timing, wait } = useWaitClock({ active, startedAt });
   const isWaiting = timing.state === 'waiting';
   const hasSlowWords = slowLabel !== undefined || onRetry !== undefined;
+  const words = wordClasses(timing, hasSlowWords);
+  const percent =
+    progress !== undefined && Number.isFinite(progress)
+      ? Math.round(Math.min(Math.max(progress, 0), 1) * 100)
+      : undefined;
 
   return (
     <span
@@ -129,17 +154,14 @@ export function WaitIndicator({
           <span className='inline-grid items-center'>
             <span
               data-slot='wait-indicator-label'
-              className={cn('[grid-area:1/1] first-letter:uppercase', isWaiting && hasSlowWords && 'wait-until-slow')}
+              className={cn('[grid-area:1/1] first-letter:uppercase', words.label)}
             >
               {label}…
             </span>
             {hasSlowWords ? (
               <span
                 data-slot='wait-indicator-slow'
-                className={cn(
-                  'inline-flex items-center gap-1.5 [grid-area:1/1]',
-                  isWaiting ? 'wait-after-slow' : 'invisible',
-                )}
+                className={cn('inline-flex items-center gap-1.5 [grid-area:1/1]', words.slow)}
               >
                 <span className='first-letter:uppercase'>{slowLabel ?? label}…</span>
                 {onRetry === undefined ? null : (
@@ -150,11 +172,7 @@ export function WaitIndicator({
               </span>
             ) : null}
           </span>
-          {progress === undefined ? null : (
-            <span className='text-muted-foreground tabular-nums'>
-              {Math.round(Math.min(Math.max(progress, 0), 1) * 100)}%
-            </span>
-          )}
+          {percent === undefined ? null : <span className='text-muted-foreground tabular-nums'>{percent}%</span>}
         </span>
       )}
     </span>

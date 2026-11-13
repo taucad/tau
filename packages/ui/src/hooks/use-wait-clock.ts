@@ -1,5 +1,11 @@
 import { createContext, createElement, useContext, useState, useSyncExternalStore } from 'react';
-import { idleWaitTiming, indicatorDelayMilliseconds, settledTiming, waitingTiming } from '#utils/wait-timing.js';
+import {
+  idleWaitTiming,
+  indicatorDelayMilliseconds,
+  indicatorMinimumMilliseconds,
+  settledTiming,
+  waitingTiming,
+} from '#utils/wait-timing.js';
 import type { ReactNode } from 'react';
 import type { WaitIndicatorTiming } from '#utils/wait-timing.js';
 
@@ -110,31 +116,54 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
     };
   });
 
-  if (tracked.active === active && Object.is(tracked.startedAt, startedAt)) {
+  // While no wait runs, `startedAt` means nothing: a consumer that moves it after the wait ends must not cut a hold.
+  if (tracked.active === active && (!active || Object.is(tracked.startedAt, startedAt))) {
     return { timing: tracked.timing, wait: tracked.wait };
   }
 
   // A wait started or ended: read the clock once, as React's "information from previous renders" pattern.
   const now = clock.now();
-  const next: TrackedWait = active
-    ? {
-        active,
-        startedAt,
-        shownAt: shownAtFor(startedAt, now),
-        wait: tracked.wait + 1,
-        timing: waitingTiming(startedAt, now),
-      }
-    : {
-        ...tracked,
-        active,
-        startedAt,
-        timing: tracked.active ? settledTiming(now - tracked.startedAt, tracked.shownAt) : idleWaitTiming(),
-      };
+  let next: TrackedWait;
+  if (active) {
+    // A new wait that replaces an indicator still owing its minimum keeps it on screen until that minimum is served.
+    const isShowing = owesMinimum(tracked, now);
+    next = {
+      active,
+      startedAt,
+      shownAt: isShowing ? tracked.startedAt + tracked.shownAt - startedAt : shownAtFor(startedAt, now),
+      wait: tracked.wait + 1,
+      timing: waitingTiming(startedAt, now, isShowing),
+    };
+  } else {
+    next = { ...tracked, active, timing: settledTiming(now - tracked.startedAt, tracked.shownAt) };
+  }
   setTracked(next);
   return { timing: next.timing, wait: next.wait };
 }
 
-/** When an indicator activated at `now` becomes visible, measured from the wait's start. */
+/**
+ * When an indicator activated at `now` becomes visible, measured from its wait's start.
+ *
+ * @param startedAt - The wait's start on the performance timeline. Milliseconds.
+ * @param now - The activation time on the same timeline, or undefined before hydration. Milliseconds.
+ * @returns The delay, or the activation time for a region that activates after it. Milliseconds.
+ */
 function shownAtFor(startedAt: number, now: number | undefined): number {
   return now === undefined ? indicatorDelayMilliseconds : Math.max(indicatorDelayMilliseconds, now - startedAt);
+}
+
+/**
+ * Whether the tracked indicator is on screen at `now` and has not yet served its minimum.
+ *
+ * @param tracked - The wait as tracked so far.
+ * @param now - The current time on the performance timeline. Milliseconds.
+ * @returns True while hiding it would cut its minimum short.
+ */
+function owesMinimum(tracked: TrackedWait, now: number): boolean {
+  const elapsed = now - tracked.startedAt;
+  return (
+    tracked.timing.state !== 'idle' &&
+    elapsed >= tracked.shownAt &&
+    elapsed < tracked.shownAt + indicatorMinimumMilliseconds
+  );
 }

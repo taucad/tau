@@ -166,10 +166,12 @@ describe('WaitIndicator', () => {
   });
 
   it('should restart the animation on a new wait, such as a Retry that moves startedAt', () => {
+    // Shown since it mounted at 11,000 ms; a Retry at 11,600 ms comes after its minimum, so the new wait starts hidden.
     const clock = createTestClock(11_000);
     const view = renderWithClock(clock, { active: true, label: 'Loading chat', startedAt: 0 });
     const first = body();
-    view.rerenderWith({ startedAt: 11_000 });
+    clock.set(11_600);
+    view.rerenderWith({ startedAt: 11_600 });
 
     expect(body()).not.toBe(first);
     expect(body()!.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
@@ -195,5 +197,70 @@ describe('WaitIndicator', () => {
     renderWithClock(createTestClock(), { active: false, label: 'Checking model files', variant: 'pill' });
 
     expect(slot()).toHaveClass('min-h-7');
+  });
+
+  it('should keep a hold when startedAt moves after the wait ended', () => {
+    const clock = createTestClock(0);
+    const view = renderWithClock(clock, { active: true, label: 'Loading chat', startedAt: 0 });
+    clock.set(1100);
+    view.rerenderWith({ active: false, startedAt: 0 });
+    clock.set(1150);
+    view.rerenderWith({ active: false, startedAt: 1150 });
+
+    expect(slot().dataset['state']).toBe('holding');
+    expect(body()!.style.getPropertyValue('--wait-hide-delay')).toBe('400ms');
+  });
+
+  it('should keep a Retry indicator on screen for the rest of its minimum', () => {
+    const clock = createTestClock(10_100);
+    const view = renderWithClock(clock, {
+      active: true,
+      label: 'Loading chat',
+      slowLabel: 'Still loading chat',
+      onRetry: () => undefined,
+      startedAt: 0,
+    });
+    clock.set(10_300);
+    view.rerenderWith({ startedAt: 10_300 });
+
+    // Shown from 10,100 ms, so it may not leave before 10,600 ms: the new wait starts revealed.
+    expect(body()!.style.getPropertyValue('--wait-reveal-delay')).toBe('-150ms');
+    clock.set(10_400);
+    view.rerenderWith({ active: false, startedAt: 10_300 });
+    expect(body()!.style.getPropertyValue('--wait-hide-delay')).toBe('200ms');
+  });
+
+  it('should keep showing when a wait starts again during a hold', () => {
+    const clock = createTestClock(0);
+    const view = renderWithClock(clock, { active: true, label: 'Loading chat', startedAt: 0 });
+    clock.set(1100);
+    view.rerenderWith({ active: false });
+    clock.set(1200);
+    view.rerenderWith({ active: true, startedAt: 1200 });
+
+    expect(body()!.style.getPropertyValue('--wait-reveal-delay')).toBe('-150ms');
+  });
+
+  it('should keep the slow words and Retry through a hold that starts after the slow mark', () => {
+    const clock = createTestClock(9800);
+    const view = renderWithClock(clock, {
+      active: true,
+      label: 'Loading chat',
+      slowLabel: 'Still loading chat',
+      onRetry: () => undefined,
+      startedAt: 0,
+    });
+    clock.set(10_100);
+    view.rerenderWith({ active: false });
+
+    expect(document.querySelector('[data-slot=wait-indicator-label]')).toHaveClass('invisible');
+    expect(document.querySelector('[data-slot=wait-indicator-slow]')).not.toHaveClass('invisible');
+  });
+
+  it('should draw no percentage for a progress that is not a number', () => {
+    renderWithClock(createTestClock(), { active: true, label: 'Downloading model', progress: Number.NaN });
+
+    expect(slot()).toHaveTextContent('Downloading model…');
+    expect(slot()).not.toHaveTextContent('%');
   });
 });

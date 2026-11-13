@@ -14,6 +14,8 @@ import { isCanonicalProductionUrl } from '#lib/canonical-url.js';
 import { skewProtectionCookie, skewProtectionToken } from '#lib/skew-protection.server.js';
 import { createModulePreloadCap, criticalModuleHrefs, isNotFoundRender } from '@taucad/ui-core/lib/module-preload-cap';
 import { claimSsrErrors, leafRouteId, queueSsrError, reportSsrError } from '#lib/sentry.server.js';
+import { createAppRuntime } from '#runtime/app-runtime.js';
+import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 
 export const streamTimeout = 5000;
 
@@ -108,7 +110,13 @@ export default function handleRequest(
       abort();
     }, streamTimeout + 1000);
 
-    const { pipe, abort } = renderToPipeableStream(<ServerRouter context={routerContext} url={request.url} />, {
+    /* D5: one runtime per request, never started, so every reader renders the snapshot the client hydrates from. */
+    const app = (
+      <AppRuntimeProvider runtime={createAppRuntime()}>
+        <ServerRouter context={routerContext} url={request.url} />
+      </AppRuntimeProvider>
+    );
+    const { pipe, abort } = renderToPipeableStream(app, {
       [readyOption]() {
         shellRendered = true;
         const body = createModulePreloadCap(criticalModuleHrefs(routerContext));

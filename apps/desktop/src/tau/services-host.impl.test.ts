@@ -2144,7 +2144,8 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
 
   /* Field visibility for the revision engine: a failed `git worktree` reaches main with git's own words, for main's
    * error reporting to redact, and the local log keeps only the port's sentence. */
-  it.runIf(gitToolchainOnPath)(
+  /* POSIX only: the stand-in git is a `#!/bin/sh` script found through `which`. */
+  it.runIf(gitToolchainOnPath && process.platform !== 'win32')(
     'hands main a failed worktree command with its code and git stderr',
     async () => {
       const failures: TauHost.RevisionEngineFailure[] = [];

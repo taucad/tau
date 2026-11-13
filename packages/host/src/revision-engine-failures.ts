@@ -78,8 +78,28 @@ export const observeRevisionEngineFailures = (
       /* Reporting only. */
     }
   };
-  /* A copy, not a proxy: a port is frozen, and a proxy may not answer a frozen member with another function. */
-  const observed = Object.entries(port).map(([name, value]: [string, unknown]) => {
+  /*
+   * A copy, not a proxy: a port is frozen, and a proxy may not answer a frozen member with another function. The names
+   * come from the port and its prototypes, so a class instance keeps the methods it inherits.
+   */
+  const names = new Set<string>();
+  const owners: unknown[] = [port];
+  for (
+    let owner: unknown = Object.getPrototypeOf(port);
+    owner !== Object.prototype && owner instanceof Object;
+    owner = Object.getPrototypeOf(owner)
+  ) {
+    owners.push(owner);
+  }
+  for (const owner of owners) {
+    for (const name of Object.getOwnPropertyNames(owner)) {
+      if (name !== 'constructor') {
+        names.add(name);
+      }
+    }
+  }
+  const observed = [...names].map((name) => {
+    const value: unknown = Reflect.get(port, name, port);
     if (typeof value !== 'function') {
       return [name, value] as const;
     }

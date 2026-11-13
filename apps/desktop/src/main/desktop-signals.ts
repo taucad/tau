@@ -177,11 +177,39 @@ const gitErrorRedactions: ReadonlyArray<readonly [RegExp, string]> = [
 ];
 
 /**
+ * The words git and git-lfs use to describe a failure. After the redactions, any other word becomes `<text>`: an
+ * unquoted file, branch or remote name has no shape a pattern can catch (`unable to create file Customer Plans`), so
+ * only known wording leaves the machine.
+ */
+const gitErrorWords: ReadonlySet<string> = new Set(
+  `a about access already am an and any are as at author bad batch be been being branch but by cannot can't checked
+  checkout clean commit commits conflict connect connection could couldn't create current denied detached did
+  directory disk does doesn't download downloading empty error exist exists expected failed failure fatal fetch file
+  files filter for found from has have head hint host in index into invalid is isn't it key lfs local lock locked
+  match merge missing more no not object objects of on operation or out overwritten path pathspec permission please
+  pointer process pull push read reading ref reference refs refused rejected remote repository request resolve run see server
+  should smudge space status such the there this timed timeout to too tree unable unknown unmerged untracked update
+  upload uploading upstream valid was were will with without work working worktree would write writing you your`
+    .split(/\s+/u)
+    .filter((word) => word !== ''),
+);
+
+/** A word of a redacted line as it may leave: a placeholder, punctuation, a number, or a word git uses. */
+const keptGitWord = (token: string): string => {
+  const match = /^([^\p{L}\d<]*)(.*?)([^\p{L}\d>]*)$/u.exec(token);
+  const [, lead = '', core = '', trail = ''] = match ?? [];
+  if (core === '' || /^<[a-z]+>$/u.test(core) || /^\d+$/u.test(core) || gitErrorWords.has(core.toLowerCase())) {
+    return token;
+  }
+  return `${lead}<text>${trail}`;
+};
+
+/**
  * The first line of git's error, as an event may carry it.
  *
  * The line is git's first `fatal:` or `error:` line, else its first line at all, since git-lfs writes progress such
  * as `Downloading …` before its error. Paths, file and host names, remote addresses, headers, credentials and ids are
- * replaced by a placeholder, control characters are dropped, and the line is cut to {@link gitErrorLineLimit}.
+ * replaced by a placeholder, any word git does not use becomes `<text>`, control characters are dropped, and the line is cut to {@link gitErrorLineLimit}.
  *
  * @param stderr - Everything the git command wrote to its error stream.
  * @returns The redacted line, or an empty string when git wrote nothing.
@@ -196,7 +224,13 @@ export const redactGitErrorLine = (stderr: string): string => {
   for (const [pattern, replacement] of gitErrorRedactions) {
     redacted = redacted.replaceAll(pattern, replacement);
   }
-  return redacted.replaceAll(/\s+/gu, ' ').trim().slice(0, gitErrorLineLimit);
+  return redacted
+    .split(/\s+/u)
+    .filter((token) => token !== '')
+    .map((token) => keptGitWord(token))
+    .join(' ')
+    .replaceAll(/<text>(?: <text>)+/gu, '<text>')
+    .slice(0, gitErrorLineLimit);
 };
 
 /** The engine codes the services utility reports; anything else in a frame is ignored. */

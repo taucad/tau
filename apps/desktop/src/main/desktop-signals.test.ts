@@ -118,7 +118,7 @@ describe('redactGitErrorLine', () => {
   });
 
   it('should fall back to the first line when git names no fatal or error line', () => {
-    expect(redactGitErrorLine('\n  hint: see the docs  \nmore')).toBe('hint: see the docs');
+    expect(redactGitErrorLine('\n  hint: see the docs  \nmore')).toBe('hint: see the <text>');
     expect(redactGitErrorLine('')).toBe('');
   });
 
@@ -144,6 +144,15 @@ describe('redactGitErrorLine', () => {
     );
     expect(redactGitErrorLine('fatal: Could not resolve host: api.tau.new')).toBe(
       'fatal: Could not resolve host: <name>',
+    );
+  });
+
+  it('should keep only the words git uses, so an unquoted name never leaves', () => {
+    expect(redactGitErrorLine('error: unable to create file Customer Plans: Permission denied')).toBe(
+      'error: unable to create file <text>: Permission denied',
+    );
+    expect(redactGitErrorLine('fatal: invalid reference: Quarterly Review 7')).toBe(
+      'fatal: invalid reference: <text> 7',
     );
   });
 
@@ -173,8 +182,8 @@ describe('redactGitErrorLine', () => {
   });
 
   it('should drop control characters and cut a long line', () => {
-    expect(redactGitErrorLine('fatal: bad\u0007 thing')).toBe('fatal: bad thing');
-    expect(redactGitErrorLine(`fatal: ${'word '.repeat(80)}`)).toHaveLength(200);
+    expect(redactGitErrorLine('fatal: bad\u0007 object')).toBe('fatal: bad object');
+    expect(redactGitErrorLine(`fatal: ${'file '.repeat(80)}`)).toHaveLength(200);
   });
 });
 

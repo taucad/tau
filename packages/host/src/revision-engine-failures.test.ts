@@ -11,6 +11,7 @@ const worktreeFailure = (): RevisionPortError =>
   });
 
 /* Only the members a case calls; the rest of the port is never read. */
+// oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a test double carries only the members its case calls.
 const portWith = (members: Record<string, unknown>): RevisionPort => Object.freeze(members) as unknown as RevisionPort;
 
 describe('revisionEngineFailureOf', () => {
@@ -48,6 +49,7 @@ describe('observeRevisionEngineFailures', () => {
       (failure) => reported.push(failure),
     );
 
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a test double carries only the members its case calls.
     await expect((port as unknown as { addCheckout: () => Promise<void> }).addCheckout()).rejects.toBe(error);
     expect(reported).toEqual([
       {
@@ -71,6 +73,7 @@ describe('observeRevisionEngineFailures', () => {
       }),
       (failure) => reported.push(failure),
     );
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a test double carries only the members its case calls.
     const members = port as unknown as {
       readRef: (name: string) => Promise<string>;
       listRemotes: () => Promise<void>;
@@ -96,6 +99,29 @@ describe('observeRevisionEngineFailures', () => {
       },
     );
 
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a test double carries only the members its case calls.
     await expect((port as unknown as { setHead: () => Promise<void> }).setHead()).rejects.toBe(error);
+  });
+});
+
+describe('observeRevisionEngineFailures on a class instance', () => {
+  it('should keep the methods the port inherits and call them on the port', async () => {
+    class InheritedPort {
+      get label(): string {
+        return 'inherited';
+      }
+
+      async setHead(): Promise<string> {
+        return this.label;
+      }
+    }
+    const failures: RevisionEngineFailure[] = [];
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a test double carries only the members its case calls.
+    const port = observeRevisionEngineFailures(new InheritedPort() as unknown as RevisionPort, (failure) => {
+      failures.push(failure);
+    });
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a test double carries only the members its case calls.
+    await expect((port as unknown as { setHead: () => Promise<string> }).setHead()).resolves.toBe('inherited');
+    expect(failures).toStrictEqual([]);
   });
 });

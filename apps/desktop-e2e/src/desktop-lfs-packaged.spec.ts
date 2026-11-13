@@ -121,7 +121,7 @@ const head = async (root: string): Promise<string | undefined> => {
 const lfsObjectPath = (root: string, oid: string): string =>
   join(root, '.git', 'lfs', 'objects', oid.slice(0, 2), oid.slice(2, 4), oid);
 
-describe('packaged Git LFS round trip', () => {
+describe('[completed-artifact] packaged Git LFS round trip', () => {
   it('should save, back up and fetch again a large file with the packaged git payload and no git-lfs on PATH', async () => {
     /* The premise: nothing on the PATH the app is given can answer `git lfs`. */
     const reachableGitLfs = finderPath.split(delimiter).filter((entry) => existsSync(join(entry, 'git-lfs')));

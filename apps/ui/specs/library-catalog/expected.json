@@ -3,7 +3,7 @@
     "LibraryCatalog.target.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "I7, I8, I9: discovery, recovery and mutations at 2 projects, 1 journal row at start, 2 mutations, 1 crash and 1 write stop, with a quiet environment (no other tab, no invalidation without a change, the workspace available) and no retryable failure while it is"
+      "ref": "I7, I8, I9: discovery, recovery and mutations at 2 projects, 1 journal row at start, 2 mutations, 1 crash and 1 write stop, with a quiet environment (no other tab, no invalidation without a change, the workspace available)"
     },
     "LibraryCatalog.target-environment.cfg": {
       "tier": "pr",
@@ -13,12 +13,12 @@
     "LibraryCatalog.target-workspace.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "The same properties while the workspace goes away and returns once and a replay may also fail with a retryable reason, so a row reaches its third attempt: 2 projects, 1 row at start, 2 mutations, no crash, no write stop"
+      "ref": "The same properties while the workspace goes away and returns three times: a replay fails with workspace-unavailable, the row is failed until the return re-arms it, and a row that failed on its third attempt stays failed. 2 projects, 1 row at start, 2 mutations, no crash, no write stop"
     },
     "LibraryCatalog.liveness.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "RowEventuallySettled under LiveSpec (weak fairness of the replay and of discovery; the person, a crash and the workspace are not fair), no SYMMETRY: 2 projects, 1 row at start, 1 mutation, 1 crash, the workspace away once, retryable failures"
+      "ref": "RowEventuallySettled under LiveSpec (weak fairness of the replay and of discovery; the person, a crash and the workspace are not fair), no SYMMETRY: 2 projects, 1 row at start, 1 mutation, 1 crash, the workspace away once"
     },
     "LibraryCatalog.today-ref-epoch.cfg": {
       "tier": "pr",
@@ -28,18 +28,32 @@
       "kind": "witness",
       "ref": "Inventory L5: getProjectListing compares discoveryEpochRef after the pass settles and the listing lands in the query cache later; a pass started by a poll in between moves the epoch without cancelling the query, so a listing of the previous epoch replaces the catalog. Every invalidation after a storage change cancels the query, so the listing that lands still matches storage. 2 projects, 1 row at start, 1 mutation, 1 poll"
     },
+    "LibraryCatalog.today-ref-epoch-safe.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Companion of today-ref-epoch at its bounds: under CatalogFence = ref every other property holds, CatalogReflectsStorage among them, so the window today-ref-epoch reports breaks the epoch rule and not the catalog's contents"
+    },
     "LibraryCatalog.target-access.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "I4, I18, AccessAnswerFenced and AccessMatchedById: 2 questions about 2 projects, each resting on 2 reads, 1 invalidation with no change, and 1 mutation whose row starts recovering while a question reads; no row at start, no crash"
+      "ref": "I4, I18, AccessAnswerFenced and AccessMatchedById: 2 questions about 2 projects, each resting on 2 reads, 1 re-ask or cancel whose earlier replies complete late, 1 invalidation with no change, 1 mutation whose row starts recovering while a question reads, and 1 crash; no row at start, no write stop"
     },
     "LibraryCatalog.today-access-loop.cfg": {
       "tier": "pr",
       "expect": {
         "violated": "AccessAnswerFenced"
       },
-      "kind": "witness",
+      "kind": "defect",
+      "fixedBy": "app-state-orchestration-charter A3a",
       "ref": "Inventory L8: getProjectRouteAccess (use-project-manager.tsx lines 2419 to 2545) re-checks the epoch after every read but the recovery set only on the found path; a creation of the asked project journaled while the configuration read is pending moves no epoch, and the loop answers missing while the tab holds a recovering row for the project. Same bounds as target-access"
+    },
+    "LibraryCatalog.access-match-by-id.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AccessMatchedById"
+      },
+      "kind": "limit",
+      "ref": "I18 rules matching by id and generation: a reply matched by question id alone lets a read of a question asked again or cancelled complete the newer question. 1 question resting on 1 read, 1 re-ask or cancel, 2 projects, no row at start"
     },
     "LibraryCatalog.env-double-replay.cfg": {
       "tier": "pr",
@@ -65,12 +79,12 @@
     "LibraryCatalog.export.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "The target, labelled, at 1 project, 1 row at start, 1 mutation and 1 access question resting on 1 read, with no crash and no write stop, so the graph stays under 1 MB (graphs.LibraryCatalog)"
+      "ref": "The target, labelled, at 1 project, 1 row at start, 1 mutation and 1 access question resting on 1 read, with no crash, no write stop and no workspace loss, so the graph stays under 1 MB (graphs.LibraryCatalog); adding the write stop alone takes it to 47,362 states"
     },
     "LibraryCatalog.wide.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "The target at 3 projects, 1 row at start, 2 mutations and 1 crash, with no write stop and a quiet environment (550,228 distinct states, under 30 s). Narrowed from the formal plan's 3 projects, 3 mutations, 2 crashes, 2 environment steps and 2 access questions: every combination of those probed (3 mutations with 1 crash; 2 crashes with 2 environment steps; 2 environment steps with 2 questions) exhausts the runner's 1 GB heap or its 900 s watchdog, so programme control rules the wide bounds"
+      "ref": "Narrowed. The formal plan's wide bounds are 3 projects, 3 mutations, 2 crashes, 2 environment steps and 2 access questions; this configuration checks every property at 3 projects, 1 row at start, 2 mutations, 1 crash and 1 write stop, with a quiet environment (2,531,500 states, about 90 s). Adding one environment step to it, a journal row another tab writes or a root another tab changes, exhausts the runner's 1 GB heap"
     }
   },
   "graphs": {

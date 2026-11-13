@@ -25,9 +25,11 @@
 (*              before they touch a root                                   *)
 (*   workspace  available or not; it gates what a read of storage sees     *)
 (*              and is one failure reason of a replay                      *)
-(*   access     questions {id, project}. An answer rests on `Reads` reads, *)
-(*              and each read is two steps, so the epoch or the recovery   *)
-(*              set may move during any of them                            *)
+(*   access     questions {id, project}, each with a generation. An       *)
+(*              answer rests on `Reads` reads; each read is a reply tagged *)
+(*              {id, gen} that may complete late: after the epoch or the   *)
+(*              recovery set moved, after the question was asked again or  *)
+(*              cancelled, or after a crash                                *)
 (*                                                                         *)
 (* Epochs. The model keeps no epoch counter. Every value stamped with an   *)
 (* epoch (the pass in flight, an access question's reads) carries `cur`:   *)
@@ -66,23 +68,25 @@ CONSTANTS Projects,        \* project ids
           MaxEnvAdd,       \* journal rows another tab writes
           MaxEnvSettle,    \* journal rows another tab settles
           MaxWorkspaceLoss,\* times the workspace goes away
-          Transient,       \* a replay may fail with a retryable reason while the workspace is available
+          MaxAsks,         \* times a question is asked again or cancelled
           EnvSettlesReplaying, \* another tab may settle a row this tab is replaying
           CatalogFence,    \* "pass": a pass applies its listing in the step that checks its epoch;
                            \* "ref": the epoch is read when the pass settles and the listing lands in the
                            \* query cache a step later, as getProjectListing does today; "none": no check
           AccessLoop,      \* "target": every answer fenced; "today": getProjectRouteAccess as written
+          AccessMatch,     \* "gen": a reply counts only for its question's current generation; "id": by id alone
           Labelled         \* TRUE: `act` names each step, for the graph export
 
 ASSUME /\ InitRows \subseteq Rows
        /\ Ops \subseteq {"create", "delete"} /\ Ops # {}
        /\ Reads \in 1..3
        /\ \A b \in {MaxMutations, MaxCrashes, MaxStops, MaxBumps, MaxPolls, MaxEnvChange, MaxEnvAdd, MaxEnvSettle,
-                    MaxWorkspaceLoss} : b \in Nat
+                    MaxWorkspaceLoss, MaxAsks} : b \in Nat
        /\ Cardinality(InitRows) + MaxMutations + MaxEnvAdd <= Cardinality(Rows)
-       /\ Transient \in BOOLEAN /\ EnvSettlesReplaying \in BOOLEAN /\ Labelled \in BOOLEAN
+       /\ EnvSettlesReplaying \in BOOLEAN /\ Labelled \in BOOLEAN
        /\ CatalogFence \in {"pass", "ref", "none"}
        /\ AccessLoop \in {"target", "today"}
+       /\ AccessMatch \in {"gen", "id"}
        /\ AccessLoop = "today" => Reads = 2
 
 None == "none"
@@ -103,32 +107,36 @@ VARIABLES
   redo,        \* ghost: the stop ended after a skipped pass and no pass has started since
   rec,         \* this tab's state of each row: unseen, waiting, replaying, recovered, failed, discarded
   acc,         \* access questions
-  dlv,         \* ghost: answers delivered per question id
+  replies,     \* access reads in flight, each a reply tagged {id, gen}
+  delivered,   \* ghost: every answer delivered, with the generation of its question and of its reply
   n,           \* bounds: mutations, crashes, stops, bumps, env changes, env rows, env settles, losses
   act          \* the step's label, for the graph export; constant unless Labelled
 
-vars == <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, held, stopped, skipped, redo, rec, acc, dlv, n,
-          act>>
+vars == <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, held, stopped, skipped, redo, rec, acc, replies,
+          delivered, n, act>>
 
 Label(l) == IF Labelled THEN l ELSE "-"
 
 RowStates == {"unseen", "waiting", "replaying", "recovered", "failed", "discarded"}
 Active == {"waiting", "replaying"}
-Reasons == {"none", "terminal", "transient", "workspace"}
+Reasons == {"none", "terminal", "workspace"}
 Answers == {"recovering", "recovery-failed", "unavailable", "ready", "missing"}
 Open == {"asking", "reading", "between"}
 
-\* A row record: its state, the attempts this tab has made, why it failed, whether it waits for the
-\* workspace to return, and whether its replay is the recovery loop's or a mutation's own.
-Unseen == [st |-> "unseen", att |-> 0, why |-> "none", blocked |-> FALSE, via |-> "journal"]
+\* A row record: its state, the attempts this tab has made, why it failed, and whether its replay is the
+\* recovery loop's or a mutation's own.
+Unseen == [st |-> "unseen", att |-> 0, why |-> "none", via |-> "journal"]
 Loaded == [Unseen EXCEPT !.st = "waiting"]
 NoListing == [ok |-> FALSE, roots |-> {}]
 Idle == [st |-> "idle", cur |-> FALSE, seen |-> NoListing]
 NotHeld == [st |-> "none", cur |-> FALSE, seen |-> NoListing]
-\* A question: k reads started; cur: every read since the first was taken at the current epoch;
-\* rs: a recovery row for the project started since the first read; val: what the first read saw.
-NoQuestion == [st |-> "unasked", p |-> None, k |-> 0, cur |-> FALSE, rs |-> FALSE, val |-> None, ans |-> None]
-Bounds == [mut |-> 0, crash |-> 0, stop |-> 0, bump |-> 0, poll |-> 0, change |-> 0, add |-> 0, settle |-> 0, loss |-> 0]
+\* A question: gen, its generation, moves when it is asked again or cancelled; k reads started; cur: every
+\* read since the first was taken at the current epoch; rs: a recovery row for the project started since
+\* the first read; val: what the first read saw.
+NoQuestion == [st |-> "unasked", p |-> None, gen |-> 0, k |-> 0, cur |-> FALSE, rs |-> FALSE, val |-> None,
+               ans |-> None]
+Bounds == [mut |-> 0, crash |-> 0, stop |-> 0, bump |-> 0, poll |-> 0, change |-> 0, add |-> 0, settle |-> 0, loss |-> 0,
+           ask |-> 0]
 
 \* What a read of storage sees: nothing of the workspace's roots while it is away.
 Visible == IF ws = "available" THEN [ok |-> TRUE, roots |-> storage] ELSE NoListing
@@ -168,7 +176,8 @@ Init ==
   /\ redo = FALSE
   /\ rec = [r \in Rows |-> IF r \in InitRows THEN Loaded ELSE Unseen]
   /\ acc = [q \in Questions |-> NoQuestion]
-  /\ dlv = [q \in Questions |-> 0]
+  /\ replies = {}
+  /\ delivered = {}
   /\ n = Bounds
   /\ act = Label("Init")
 
@@ -188,7 +197,7 @@ PassStarted ==
   /\ owed' = FALSE
   /\ redo' = FALSE
   /\ act' = Label("PassStarted")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, stopped, skipped, rec, dlv>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, stopped, skipped, rec, replies, delivered>>
 
 \* The pass settles and publishes what it read. During a write stop it skips its writes (DF20) and says
 \* so.
@@ -206,7 +215,7 @@ PassSettled ==
             /\ catalog' = pass.seen
             /\ held' = held
   /\ act' = Label("PassSettled")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, stopped, redo, rec, acc, dlv, n>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, stopped, redo, rec, acc, replies, delivered, n>>
 
 \* CatalogFence = "ref" only: the listing the epoch check let through reaches the query cache.
 CatalogApplied ==
@@ -214,7 +223,7 @@ CatalogApplied ==
   /\ catalog' = held.seen
   /\ held' = NotHeld
   /\ act' = Label("CatalogApplied")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, stopped, skipped, redo, rec, acc, dlv, n>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, stopped, skipped, redo, rec, acc, replies, delivered, n>>
 
 \* An invalidation with no change behind it: a manifest event, a root-configuration broadcast.
 EpochBumped ==
@@ -222,7 +231,7 @@ EpochBumped ==
   /\ n' = [n EXCEPT !.bump = @ + 1]
   /\ Bump
   /\ act' = Label("EpochBumped")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, dlv>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, replies, delivered>>
 
 WriteStopBegan ==
   /\ ~stopped
@@ -231,7 +240,7 @@ WriteStopBegan ==
   /\ n' = [n EXCEPT !.stop = @ + 1]
   /\ act' = Label("WriteStopBegan")
   /\ UNCHANGED held
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, skipped, redo, rec, acc, dlv>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, skipped, redo, rec, acc, replies, delivered>>
 
 \* DF20: when the stop lifts after a skipped pass, invalidate and owe a fresh pass.
 WriteStopEnded ==
@@ -243,7 +252,7 @@ WriteStopEnded ==
             /\ Bump
        ELSE UNCHANGED <<skipped, redo, owed, pass, held, acc>>
   /\ act' = Label("WriteStopEnded")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, rec, dlv, n>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, rec, replies, delivered, n>>
 
 -----------------------------------------------------------------------------
 (* Mutations and recovery *)
@@ -264,38 +273,36 @@ MutationJournaled(p, o) ==
   /\ RecoveryStarts(p)
   /\ act' = Label("MutationJournaled")
   /\ UNCHANGED held
-  /\ UNCHANGED <<storage, ws, owed, pass, catalog, stopped, skipped, redo, dlv>>
+  /\ UNCHANGED <<storage, ws, owed, pass, catalog, stopped, skipped, redo, replies, delivered>>
 
 \* The recovery loop replays one journal row at a time.
 ReplayStarted(r) ==
   /\ rec[r].st = "waiting"
-  /\ ~rec[r].blocked
   /\ ~\E o \in Rows : rec[o].st = "replaying" /\ rec[o].via = "journal"
   /\ rec' = [rec EXCEPT ![r] = [@ EXCEPT !.st = "replaying", !.att = @ + 1]]
   /\ RecoveryStarts(rowProj[r])
   /\ act' = Label("ReplayStarted")
   /\ UNCHANGED held
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, dlv, n>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, replies, delivered, n>>
 
-Outcomes == IF ws = "unavailable" THEN {"workspace"}
-            ELSE {"ok", "terminal"} \cup (IF Transient THEN {"transient"} ELSE {})
+Outcomes == IF ws = "unavailable" THEN {"workspace"} ELSE {"ok", "terminal"}
 
-\* A replay, or a mutation applying its own row (MutationApplied), settles. `settleRecovery`: a terminal
-\* reason fails the row at once, a retryable one waits for another attempt up to the third; every settle
-\* invalidates.
+\* A replay, or a mutation applying its own row (MutationApplied), settles. `settleRecovery` and
+\* `commitPendingProjectOperation`: success removes the row; any failure marks it failed with its reason
+\* and keeps the attempt it made; every settle invalidates. A terminal reason stays failed; a row that
+\* failed with `workspace-unavailable` waits for WorkspaceReturned.
 ReplaySettled(r) ==
   /\ rec[r].st = "replaying"
   /\ \E out \in Outcomes :
        /\ rec' = [rec EXCEPT ![r] =
                     CASE out = "ok" -> [Unseen EXCEPT !.st = "recovered"]
                       [] out = "terminal" -> [Unseen EXCEPT !.st = "failed", !.why = "terminal"]
-                      [] rec[r].att >= MaxAttempts -> [Unseen EXCEPT !.st = "failed", !.why = out]
-                      [] OTHER -> [@ EXCEPT !.st = "waiting", !.blocked = (out = "workspace"), !.via = "journal"]]
+                      [] out = "workspace" -> [@ EXCEPT !.st = "failed", !.why = "workspace", !.via = "journal"]]
        /\ journal' = IF out = "ok" THEN journal \ {r} ELSE journal
        /\ storage' = IF out = "ok" THEN Apply(rowOp[r], rowProj[r], storage) ELSE storage
   /\ Bump
   /\ act' = Label(IF rec[r].via = "mutation" THEN "MutationApplied" ELSE "ReplaySettled")
-  /\ UNCHANGED <<rowProj, rowOp, ws, catalog, stopped, skipped, redo, dlv, n>>
+  /\ UNCHANGED <<rowProj, rowOp, ws, catalog, stopped, skipped, redo, replies, delivered, n>>
 
 PersonDiscarded(r) ==
   /\ rec[r].st = "failed"
@@ -303,7 +310,7 @@ PersonDiscarded(r) ==
   /\ journal' = journal \ {r}
   /\ Bump
   /\ act' = Label("PersonDiscarded")
-  /\ UNCHANGED <<storage, rowProj, rowOp, ws, catalog, stopped, skipped, redo, dlv, n>>
+  /\ UNCHANGED <<storage, rowProj, rowOp, ws, catalog, stopped, skipped, redo, replies, delivered, n>>
 
 \* The workspace's roots become unreadable; the watch reports it as an invalidation.
 WorkspaceLost ==
@@ -313,17 +320,18 @@ WorkspaceLost ==
   /\ n' = [n EXCEPT !.loss = @ + 1]
   /\ Bump
   /\ act' = Label("WorkspaceLost")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, catalog, stopped, skipped, redo, rec, dlv>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, catalog, stopped, skipped, redo, rec, replies, delivered>>
 
-\* A re-pick republishes the route configuration: an invalidation, and the rows that failed with
-\* `workspace-unavailable` may be replayed again.
+\* A re-pick republishes the route configuration: an invalidation, and `retryFailedRecoveries` settles
+\* every row that failed with `workspace-unavailable` again, unless it has made its third attempt.
 WorkspaceReturned ==
   /\ ws = "unavailable"
   /\ ws' = "available"
-  /\ rec' = [r \in Rows |-> [rec[r] EXCEPT !.blocked = FALSE]]
+  /\ rec' = [r \in Rows |-> IF rec[r].st = "failed" /\ rec[r].why = "workspace" /\ rec[r].att < MaxAttempts
+                             THEN [rec[r] EXCEPT !.st = "waiting", !.why = "none"] ELSE rec[r]]
   /\ Bump
   /\ act' = Label("WorkspaceReturned")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, catalog, stopped, skipped, redo, dlv, n>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, catalog, stopped, skipped, redo, replies, delivered, n>>
 
 \* This tab reloads: it keeps storage and the journal, reads every journal row again as waiting with no
 \* attempts, and loses its pass, catalog, write-stop flags and open questions.
@@ -338,10 +346,11 @@ Crash ==
   /\ skipped' = FALSE
   /\ redo' = FALSE
   /\ rec' = [r \in Rows |-> IF r \in journal THEN Loaded ELSE Unseen]
-  /\ acc' = [q \in Questions |-> IF acc[q].st \in Open THEN [NoQuestion EXCEPT !.st = "lost", !.p = acc[q].p]
+  /\ acc' = [q \in Questions |-> IF acc[q].st \in Open
+                                 THEN [NoQuestion EXCEPT !.st = "lost", !.p = acc[q].p, !.gen = acc[q].gen]
                                  ELSE acc[q]]
   /\ act' = Label("Crash")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, dlv>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, replies, delivered>>
 
 -----------------------------------------------------------------------------
 (* The environment: other tabs *)
@@ -352,7 +361,7 @@ EnvChangedStorage(p) ==
   /\ storage' = IF p \in storage THEN storage \ {p} ELSE storage \cup {p}
   /\ Bump
   /\ act' = Label("EnvChangedStorage")
-  /\ UNCHANGED <<journal, rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, dlv>>
+  /\ UNCHANGED <<journal, rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, replies, delivered>>
 
 EnvAddedRow(p, o) ==
   /\ n.add < MaxEnvAdd
@@ -364,7 +373,7 @@ EnvAddedRow(p, o) ==
        /\ journal' = journal \cup {r}
   /\ act' = Label("EnvAddedRow")
   /\ UNCHANGED held
-  /\ UNCHANGED <<storage, ws, owed, pass, catalog, stopped, skipped, redo, rec, acc, dlv>>
+  /\ UNCHANGED <<storage, ws, owed, pass, catalog, stopped, skipped, redo, rec, acc, replies, delivered>>
 
 EnvSettledRow(r) ==
   /\ n.settle < MaxEnvSettle
@@ -375,39 +384,60 @@ EnvSettledRow(r) ==
   /\ storage' = Apply(rowOp[r], rowProj[r], storage)
   /\ Bump
   /\ act' = Label("EnvSettledRow")
-  /\ UNCHANGED <<rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, dlv>>
+  /\ UNCHANGED <<rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, replies, delivered>>
 
 -----------------------------------------------------------------------------
 (* Route access *)
 
+\* A route asks about p. Asking again (a navigation, a retry) or cancelling (the route unmounts) replaces
+\* the question and moves its generation; the replies of the old one may still complete.
 AccessAsked(q, p) ==
-  /\ acc[q].st = "unasked"
-  /\ acc' = [acc EXCEPT ![q] = [NoQuestion EXCEPT !.st = "asking", !.p = p]]
+  /\ IF acc[q].st = "unasked"
+       THEN /\ acc' = [acc EXCEPT ![q] = [NoQuestion EXCEPT !.st = "asking", !.p = p]]
+            /\ n' = n
+       ELSE /\ n.ask < MaxAsks
+            /\ acc' = [acc EXCEPT ![q] = [NoQuestion EXCEPT !.st = "asking", !.p = p, !.gen = acc[q].gen + 1]]
+            /\ n' = [n EXCEPT !.ask = @ + 1]
   /\ act' = Label("AccessAsked")
   /\ UNCHANGED held
   /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, rec,
-                 dlv, n>>
+                 replies, delivered>>
 
-Deliver(q, a) ==
-  /\ acc' = [acc EXCEPT ![q] = [NoQuestion EXCEPT !.st = "answered", !.p = acc[q].p, !.ans = a]]
-  /\ dlv' = [dlv EXCEPT ![q] = @ + 1]
+AccessCancelled(q) ==
+  /\ acc[q].st \in Open
+  /\ n.ask < MaxAsks
+  /\ acc' = [acc EXCEPT ![q] = [NoQuestion EXCEPT !.st = "cancelled", !.p = acc[q].p, !.gen = acc[q].gen + 1]]
+  /\ n' = [n EXCEPT !.ask = @ + 1]
+  /\ act' = Label("AccessCancelled")
+  /\ UNCHANGED held
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, rec,
+                 replies, delivered>>
+
+\* Answer question q, on the reply of generation rg. The caller says what becomes of the replies.
+Deliver(q, a, rg) ==
+  /\ acc' = [acc EXCEPT ![q] = [NoQuestion EXCEPT !.st = "answered", !.p = acc[q].p, !.gen = acc[q].gen, !.ans = a]]
+  /\ delivered' = delivered \cup {[id |-> q, qgen |-> acc[q].gen, rgen |-> rg]}
   /\ act' = Label("AccessAnswered")
 
 \* Read again from the top of the loop.
 Reread(q) ==
-  /\ acc' = [acc EXCEPT ![q] = [NoQuestion EXCEPT !.st = "asking", !.p = acc[q].p]]
-  /\ dlv' = dlv
+  /\ acc' = [acc EXCEPT ![q] = [NoQuestion EXCEPT !.st = "asking", !.p = acc[q].p, !.gen = acc[q].gen]]
+  /\ delivered' = delivered
   /\ act' = Label("AccessReread")
+
+\* A read goes out, tagged with its question's id and generation.
+Send(q) == /\ replies' = replies \cup {[id |-> q, gen |-> acc[q].gen]}
+           /\ delivered' = delivered
 
 \* The top of the loop reads the recovery set, with no await: a held row answers at once. Otherwise
 \* the first read starts at the current epoch.
 AccessTop(q) ==
   /\ acc[q].st = "asking"
   /\ LET p == acc[q].p IN
-       IF HeldActive(p) THEN Deliver(q, "recovering")
-       ELSE IF HeldFailed(p) THEN Deliver(q, "recovery-failed")
+       IF HeldActive(p) THEN Deliver(q, "recovering", acc[q].gen) /\ replies' = replies
+       ELSE IF HeldFailed(p) THEN Deliver(q, "recovery-failed", acc[q].gen) /\ replies' = replies
        ELSE /\ acc' = [acc EXCEPT ![q] = [@ EXCEPT !.st = "reading", !.k = 1, !.cur = TRUE, !.rs = FALSE]]
-            /\ dlv' = dlv
+            /\ Send(q)
             /\ act' = Label("AccessRead")
   /\ UNCHANGED held
   /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, rec, n>>
@@ -416,44 +446,53 @@ AccessTop(q) ==
 AccessNextRead(q) ==
   /\ acc[q].st = "between"
   /\ acc' = [acc EXCEPT ![q] = [@ EXCEPT !.st = "reading", !.k = @ + 1]]
+  /\ Send(q)
   /\ act' = Label("AccessRead")
   /\ UNCHANGED held
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, rec,
-                 dlv, n>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, rec, n>>
 
 \* Target: an answer is delivered only after its last read, and only when every read was taken at the
 \* current epoch and no recovery row for the project started since the first; otherwise read again.
-TargetReadDone(q) ==
-  LET a == acc[q]
+TargetReadDone(m) ==
+  LET q == m.id
+      a == acc[q]
       v == IF a.k = 1 THEN Observe(a.p) ELSE a.val
   IN IF a.k < Reads
        THEN /\ acc' = [acc EXCEPT ![q] = [@ EXCEPT !.st = "between", !.val = v]]
-            /\ dlv' = dlv
+            /\ delivered' = delivered
             /\ act' = Label("AccessRead")
      ELSE IF a.cur /\ ~a.rs /\ ~HeldAny(a.p)
-       THEN Deliver(q, v)
+       THEN Deliver(q, v, m.gen)
        ELSE Reread(q)
 
 \* Today (`use-project-manager.tsx` getProjectRouteAccess): the first read is `verifyProjectRoute` or a
 \* discovery pass, the second `ensureProjectLibraryState` when the project was found and
 \* `getProjectFileSystemConfig` when it was not. Every read is followed by an epoch check against the
-\* epoch taken before the first; only the found path also checks the recovery set (`recoveryStarted()`).
-TodayReadDone(q) ==
-  LET a == acc[q]
+\* epoch the read observed; only the found path also checks the recovery set (`recoveryStarted()`).
+TodayReadDone(m) ==
+  LET q == m.id
+      a == acc[q]
       v == IF a.k = 1 THEN Observe(a.p) ELSE a.val
   IN IF a.k = 1
        THEN IF ~a.cur THEN Reread(q)
-            ELSE IF v = "unavailable" THEN Deliver(q, "unavailable")
+            ELSE IF v = "unavailable" THEN Deliver(q, "unavailable", m.gen)
             ELSE /\ acc' = [acc EXCEPT ![q] = [@ EXCEPT !.st = "between", !.val = v]]
-                 /\ dlv' = dlv
+                 /\ delivered' = delivered
                  /\ act' = Label("AccessRead")
      ELSE IF v = "ready"
-       THEN IF ~a.cur \/ HeldAny(a.p) THEN Reread(q) ELSE Deliver(q, "ready")
-       ELSE IF ~a.cur THEN Reread(q) ELSE Deliver(q, "missing")
+       THEN IF ~a.cur \/ HeldAny(a.p) THEN Reread(q) ELSE Deliver(q, "ready", m.gen)
+       ELSE IF ~a.cur THEN Reread(q) ELSE Deliver(q, "missing", m.gen)
 
-AccessReadDone(q) ==
-  /\ acc[q].st = "reading"
-  /\ IF AccessLoop = "target" THEN TargetReadDone(q) ELSE TodayReadDone(q)
+\* A reply counts for the question it answers: "gen" by id and generation, "id" by id alone.
+Matches(m) == acc[m.id].st = "reading" /\ (AccessMatch = "id" \/ m.gen = acc[m.id].gen)
+
+\* A read completes. A reply that matches no reading question is dropped.
+AccessReadDone(m) ==
+  /\ replies' = replies \ {m}
+  /\ IF Matches(m)
+       THEN IF AccessLoop = "target" THEN TargetReadDone(m) ELSE TodayReadDone(m)
+       ELSE /\ UNCHANGED <<acc, delivered>>
+            /\ act' = Label("AccessStaleReply")
   /\ UNCHANGED held
   /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, rec, n>>
 
@@ -465,7 +504,8 @@ TabNext ==
   \/ \E p \in Projects, o \in Ops : MutationJournaled(p, o)
   \/ \E r \in Rows : ReplayStarted(r) \/ ReplaySettled(r) \/ PersonDiscarded(r)
   \/ WorkspaceLost \/ WorkspaceReturned \/ Crash
-  \/ \E q \in Questions : AccessTop(q) \/ AccessNextRead(q) \/ AccessReadDone(q)
+  \/ \E q \in Questions : AccessTop(q) \/ AccessNextRead(q) \/ AccessCancelled(q)
+  \/ \E m \in replies : AccessReadDone(m)
   \/ \E q \in Questions, p \in Projects : AccessAsked(q, p)
 
 EnvNext ==
@@ -504,11 +544,12 @@ TypeOK ==
   /\ pass \in [st : {"idle", "reading"}, cur : BOOLEAN, seen : Listings]
   /\ held \in [st : {"none", "held"}, cur : BOOLEAN, seen : Listings]
   /\ catalog \in Listings
-  /\ rec \in [Rows -> [st : RowStates, att : 0..MaxAttempts, why : Reasons, blocked : BOOLEAN,
-                       via : {"journal", "mutation"}]]
-  /\ \A q \in Questions : acc[q].st \in {"unasked", "answered", "lost"} \cup Open
+  /\ rec \in [Rows -> [st : RowStates, att : 0..MaxAttempts, why : Reasons, via : {"journal", "mutation"}]]
+  /\ \A q \in Questions : acc[q].st \in {"unasked", "answered", "cancelled", "lost"} \cup Open
                           /\ acc[q].ans \in Answers \cup {None}
-  /\ dlv \in [Questions -> Nat]
+                          /\ acc[q].gen \in 0..MaxAsks
+  /\ replies \subseteq [id : Questions, gen : 0..MaxAsks]
+  /\ delivered \subseteq [id : Questions, qgen : 0..MaxAsks, rgen : 0..MaxAsks]
 
 \* I7. The catalog is replaced only by a pass whose epoch equals the current epoch. A reload, which
 \* forgets the catalog, replaces nothing.
@@ -522,28 +563,29 @@ RecoveryGatesMutation ==
                        => ~HeldActive(rowProj'[r])]_vars
 
 \* I8. Every row this tab has seen is in exactly one of waiting, replaying, recovered, failed or
-\* discarded (one field, so exactly one), and leaves them only when the tab reloads. It becomes failed
-\* only on a terminal reason or on its third settled attempt in this tab, and discarded only by
-\* PersonDiscarded.
+\* discarded (one field, so exactly one), and leaves them only when the tab reloads. A row becomes failed
+\* only on a terminal reason, on workspace-unavailable, or on its third settled attempt (in this tab), and
+\* discarded only by PersonDiscarded, which removes its journal row and nothing else.
 RowAccounted ==
   /\ [](\A r \in Rows : rec[r].st \in RowStates)
   /\ [][\A r \in Rows :
           /\ (rec[r].st # "unseen" /\ rec'[r].st = "unseen") => n'.crash > n.crash
           /\ (rec[r].st # "failed" /\ rec'[r].st = "failed")
-               => (rec'[r].why = "terminal" \/ rec[r].att = MaxAttempts)
+               => (rec'[r].why \in {"terminal", "workspace"} \/ rec[r].att = MaxAttempts)
           /\ (rec[r].st # "discarded" /\ rec'[r].st = "discarded")
-               => (rec[r].st = "failed" /\ r \notin journal' /\ UNCHANGED <<storage, rowProj>>)]_vars
+               => (r \notin journal' /\ UNCHANGED <<storage, rowProj>>)]_vars
 
 \* I8. No ReplayStarted(row) follows a terminal failure of that row, in this tab.
 TerminalStops ==
   [][\A r \in Rows : (rec[r].st = "failed" /\ rec[r].why = "terminal" /\ n'.crash = n.crash)
                        => rec'[r].st \in {"failed", "discarded"}]_vars
 
-\* I8. A row that failed with workspace-unavailable is replayed again only after WorkspaceReturned.
+\* I8. A row that failed with workspace-unavailable is replayed again only after WorkspaceReturned, in
+\* this tab.
 RetryOnlyWhenCleared ==
-  [][\A r \in Rows :
-       /\ (rec[r].blocked /\ ~rec'[r].blocked /\ n'.crash = n.crash) => (ws = "unavailable" /\ ws' = "available")
-       /\ (rec[r].st = "waiting" /\ rec'[r].st = "replaying") => ~rec[r].blocked]_vars
+  [][\A r \in Rows : (rec[r].st = "failed" /\ rec[r].why = "workspace" /\ rec'[r].st \in Active
+                        /\ n'.crash = n.crash)
+                       => (ws = "unavailable" /\ ws' = "available")]_vars
 
 \* I9. If a pass was skipped during a write stop, a pass starts after the stop ends and before the
 \* catalog is reported current.
@@ -573,10 +615,13 @@ Fenced(q) ==
 AccessAnswerFenced ==
   [][\A q \in Questions : (acc[q].st # "answered" /\ acc'[q].st = "answered") => Fenced(q)]_vars
 
-\* I18. An answer is delivered at most once per question id, and to that id.
+\* I18. An answer is delivered at most once per question {id, generation}, to the question that is open
+\* under that id, and only on a reply of that generation.
 AccessMatchedById ==
-  /\ [](\A q \in Questions : dlv[q] <= 1 /\ (dlv[q] = 1 <=> acc[q].st = "answered"))
-  /\ [][\A q \in Questions : dlv'[q] > dlv[q] => (acc[q].st \in {"asking", "reading"} /\ acc'[q].p = acc[q].p)]_vars
+  [][\A d \in delivered' \ delivered :
+       /\ d.rgen = d.qgen
+       /\ ~\E e \in delivered : e.id = d.id /\ e.qgen = d.qgen
+       /\ acc[d.id].st \in {"asking", "reading"} /\ acc'[d.id].p = acc[d.id].p /\ acc'[d.id].gen = acc[d.id].gen]_vars
 
 \* Witness of the inherited risk: a row this tab replays is still in the journal, so no other tab has
 \* settled it. Expected to be violated when the environment may settle a row this tab holds.

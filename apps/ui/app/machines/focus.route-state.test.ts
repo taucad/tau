@@ -10,7 +10,15 @@ import type { FocusHarness } from '#machines/focus.machine.test.fixture.js';
 import { accessErrorMessage, leaveFlushErrorMessage, selectProjectRouteState } from '#machines/focus.route-state.js';
 import type { CommittedProjectRoute, FocusRegistryView } from '#machines/focus.route-state.js';
 
-const live = { state: 'live', runs: 0, dirty: false, pushed: true, pending: 0 } as const;
+const live = {
+  state: 'live',
+  runs: 0,
+  dirty: false,
+  pushed: true,
+  pending: 0,
+  chatReady: true,
+  availability: 'settled',
+} as const;
 const registry = (status: FocusRegistryView['status'] = {}, closed: FocusRegistryView['closed'] = {}) => ({
   status,
   closed,

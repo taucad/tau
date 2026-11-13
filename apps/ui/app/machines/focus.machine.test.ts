@@ -21,7 +21,15 @@ import type { FocusHarness } from '#machines/focus.machine.test.fixture.js';
 import { selectProjectRouteState } from '#machines/focus.route-state.js';
 import type { FocusRegistryView } from '#machines/focus.route-state.js';
 
-const liveStatus = { state: 'live', runs: 0, dirty: false, pushed: true, pending: 0 } as const;
+const liveStatus = {
+  state: 'live',
+  runs: 0,
+  dirty: false,
+  pushed: true,
+  pending: 0,
+  chatReady: true,
+  availability: 'settled',
+} as const;
 
 /** The registry's view with `projectIds` live. */
 const registryWith = (...projectIds: string[]): FocusRegistryView => ({

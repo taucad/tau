@@ -286,7 +286,7 @@ const view = (harness: Harness): SpecView => {
     status: Object.fromEntries(
       Object.keys(harness.stub.sess).map((projectId) => [
         projectId,
-        { state: 'live', runs: 0, dirty: false, pushed: true, pending: 0 },
+        { state: 'live', runs: 0, dirty: false, pushed: true, pending: 0, chatReady: true, availability: 'settled' },
       ]),
     ),
     closed: {},

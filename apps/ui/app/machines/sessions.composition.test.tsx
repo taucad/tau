@@ -1766,12 +1766,17 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
     vi.resetModules();
     const freshSessions = await import('#hooks/use-sessions.js');
+    const freshRuntime = await import('#runtime/app-runtime.js');
+    const freshRuntimeProvider = await import('#runtime/app-runtime-provider.js');
 
+    /* The registry is the app runtime's (A1a): the provider reads it, and the runtime's boundary starts it. */
     const view = render(
       <QueryClientProvider client={queryClient}>
-        <freshSessions.SessionsProvider>
-          <span>app</span>
-        </freshSessions.SessionsProvider>
+        <freshRuntimeProvider.AppRuntimeProvider runtime={freshRuntime.createAppRuntime()}>
+          <freshSessions.SessionsProvider>
+            <span>app</span>
+          </freshSessions.SessionsProvider>
+        </freshRuntimeProvider.AppRuntimeProvider>
       </QueryClientProvider>,
     );
     await settle();

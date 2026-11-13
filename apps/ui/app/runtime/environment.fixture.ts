@@ -58,22 +58,19 @@ export const createFakeEnvironmentHost = (options: FakeEnvironmentOptions = {}):
     focused: options.focused ?? true,
     coarse: options.coarse ?? false,
   };
+  /* Getters, not `Object.assign`, which would copy each reading once. */
   const document = recorded(
     'document',
-    Object.assign(new EventTarget(), {
-      get visibilityState(): DocumentVisibilityState {
-        return state.visibilityState;
-      },
-      hasFocus: (): boolean => state.focused,
+    Object.defineProperties(new EventTarget() as EventTarget & EnvironmentHost['document'], {
+      visibilityState: { get: () => state.visibilityState },
+      hasFocus: { value: () => state.focused },
     }),
   );
   const window = recorded('window', new EventTarget());
   const coarsePointer = recorded(
     'coarsePointer',
-    Object.assign(new EventTarget(), {
-      get matches(): boolean {
-        return state.coarse;
-      },
+    Object.defineProperties(new EventTarget() as EventTarget & { readonly matches: boolean }, {
+      matches: { get: () => state.coarse },
     }),
   );
   return {

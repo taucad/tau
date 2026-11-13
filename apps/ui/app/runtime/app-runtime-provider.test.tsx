@@ -17,6 +17,7 @@ import { createAppRuntime, selectAppEnvironment, selectSessionsRegistry } from '
 import type { AppRuntime } from '#runtime/app-runtime.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import type { FakeEnvironmentHost } from '#runtime/environment.fixture.js';
+import type * as SessionsStore from '#services/sessions-store.js';
 import { SessionsProvider, useLiveProjectIds, useSessions } from '#hooks/use-sessions.js';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 
@@ -27,7 +28,7 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
 vi.mock('#services/sessions-store.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('#services/sessions-store.js')>();
+  const original = await importOriginal<typeof SessionsStore>();
   return {
     ...original,
     createSessionsActor: (...parameters: Parameters<typeof original.createSessionsActor>) => {
@@ -131,7 +132,7 @@ describe('AppRuntimeProvider start boundary', () => {
     /* No registry was made in render: the provider reads the runtime's. */
     expect(sessionsStore.created).toBe(0);
     expect(seen).toBe(registry);
-    /* environment started once: one listener per event, never a second set. */
+    /* The environment started once: one listener per event, never a second set. */
     expect(host.everAdded().toSorted()).toEqual([
       'coarsePointer:change',
       'document:visibilitychange',

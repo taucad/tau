@@ -63,7 +63,7 @@ function isTypeOnlyImport(statement: ts.ImportDeclaration): boolean {
   if (clause === undefined) {
     return false;
   }
-  if (clause.isTypeOnly) {
+  if (clause.phaseModifier === ts.SyntaxKind.TypeKeyword) {
     return true;
   }
   const bindings = clause.namedBindings;
@@ -110,8 +110,8 @@ function staticGraph(fromRoots: readonly string[]): Map<string, string | undefin
   for (const file of queue) {
     importerOf.set(file, undefined);
   }
-  for (let index = 0; index < queue.length; index += 1) {
-    const file = queue[index] ?? '';
+  // The iterator reads the queue's length each step, so it walks what the loop appends.
+  for (const file of queue) {
     for (const specifier of staticSpecifiers(file)) {
       for (const target of resolveSpecifier(specifier, file)) {
         if (!importerOf.has(target)) {

@@ -19,12 +19,15 @@ import {
   appRuntimeEventTypes,
   appRuntimeIgnoredEvents,
   appRuntimeMachine,
+} from '#runtime/app-runtime.machine.js';
+import type { AppRuntimeEvent } from '#runtime/app-runtime.machine.js';
+import type { sessionsMachine } from '#machines/sessions.machine.js';
+import {
   createAppRuntime,
   selectAppEnvironment,
   selectAppRuntimeFault,
   selectSessionsRegistry,
 } from '#runtime/app-runtime.js';
-import type { AppRuntimeEvent } from '#runtime/app-runtime.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
@@ -131,11 +134,19 @@ describe('app runtime root', () => {
     }).start();
     const registry = selectSessionsRegistry(runtime.getSnapshot());
 
-    expect(runtime.clock).toBe(clock);
-    expect(registry.clock).toBe(clock);
+    const registryRef: unknown = registry;
+
+    /* The session's start bound is an `after` on the runtime's clock. */
+    expect(clock.nextDue()).toBeUndefined();
     registry.send({ type: 'open', projectId: 'p1' });
-    expect(inspected.some((event) => event.type === '@xstate.transition' && event.actorRef === registry)).toBe(true);
+    expect(clock.nextDue()).toBeDefined();
+    expect(inspected.some((event) => event.type === '@xstate.transition' && event.actorRef === registryRef)).toBe(true);
     runtime.stop();
+
+    /* A send to the stopped registry is a dead letter the whole tree reports through the one hook. */
+    expect(onRejectedEvent).not.toHaveBeenCalled();
+    registry.send({ type: 'touch', projectId: 'p1' });
+    expect(onRejectedEvent).toHaveBeenCalledWith(expect.objectContaining({ reason: 'stopped', targetId: 'sessions' }));
   });
 
   it('should keep the first fault and keep answering (D23)', async () => {
@@ -148,16 +159,24 @@ describe('app runtime root', () => {
         throw new Error('sessions failed later');
       },
     });
+    const errors: string[] = [];
     const runtime = createActor(
       // A test double for each child: the root only sees that each one failed.
-      appRuntimeMachine.provide({ actors: { environment: first, sessions: later as never } }),
-      { input: { sessions: {} } },
+      appRuntimeMachine.provide({
+        actors: { environment: first, sessions: later as unknown as typeof sessionsMachine },
+      }),
+      {
+        input: { sessions: {} },
+        inspect: (inspection) => {
+          if (inspection.type === '@xstate.transition' && inspection.event.type === 'xstate.error.actor') {
+            errors.push(String((inspection.event as { actorId?: unknown }).actorId));
+          }
+        },
+      },
     ).start();
     await vi.waitFor(() => {
-      expect(selectAppRuntimeFault(runtime.getSnapshot())).toBe('environment failed first');
+      expect(errors).toEqual(['environment', 'sessions']);
     });
-    await Promise.resolve();
-    await Promise.resolve();
 
     expect(selectAppRuntimeFault(runtime.getSnapshot())).toBe('environment failed first');
     expect(runtime.getSnapshot().status).toBe('active');
@@ -194,7 +213,7 @@ describe('app runtime root totality', () => {
       unansweredEvents(appRuntimeMachine, {
         input: { sessions: {} },
         events,
-        limit: 50,
+        limit: 500,
         ignore: appRuntimeIgnoredEvents,
         serializeState: (snapshot) => JSON.stringify([snapshot.value, snapshot.context.environment]),
       }),

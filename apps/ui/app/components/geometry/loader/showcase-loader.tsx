@@ -126,6 +126,8 @@ export const useShowcaseLoader = <Controller extends ShowcaseController>(
     const isCancelled = (): boolean => lifecycle.cancelled;
     let controller: Controller | undefined;
     let backend: ResolvedGraphicsBackend | undefined;
+    /** Whether this run starts on the canvas mounted after a canvas loss. */
+    const isFreshCanvas = canvasKey > 0;
 
     const readSize = (): { width: number; height: number; pixelRatio: number } => {
       const rect = root.getBoundingClientRect();
@@ -159,9 +161,9 @@ export const useShowcaseLoader = <Controller extends ShowcaseController>(
         if (isCancelled()) {
           return;
         }
-        if (backend !== undefined && isWebGpuCanvasLossFailure(backend)) {
+        if (!isFreshCanvas && backend !== undefined && isWebGpuCanvasLossFailure(backend)) {
           // The cleanup releases this controller; the next run starts on a fresh canvas, where the backend resolves
-          // to WebGL, so this happens at most once.
+          // to WebGL. A start on that fresh canvas never asks for another.
           setCanvasKey((key) => key + 1);
           return;
         }

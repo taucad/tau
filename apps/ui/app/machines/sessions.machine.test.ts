@@ -814,6 +814,26 @@ describe('sessionsMachine — the open request carrier (A5c, R3-F2)', () => {
     actor.stop();
   });
 
+  it('should keep the request of an open that switch-closes an unpushed project on a one-project device (B-08)', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const { actor, started } = harness({ budget: constrainedLiveProjectBudget, closeFlush: closeFlush.promise });
+    actor.send({ type: 'open', projectId: 'projA' });
+    await settle();
+    report(actor, 'projA', { pushed: false });
+    const request = requestFor('projB');
+
+    actor.send({ type: 'open', projectId: 'projB', request });
+    await settle();
+    expect(actor.getSnapshot().context.status['projA']?.state).toBe('closing');
+    expect(actor.getSnapshot().context.pendingOpen).toEqual({ projectId: 'projB', request });
+
+    closeFlush.resolve();
+    await settle();
+    expect(started).toEqual(['projA', 'projB']);
+    expect(sessionRequest(actor, 'projB')).toEqual(request);
+    actor.stop();
+  });
+
   it('should replace a pending request with a newer open of the same project', async () => {
     const closeFlush = Promise.withResolvers<void>();
     const { actor } = harness({ budget: constrainedLiveProjectBudget, closeFlush: closeFlush.promise });
@@ -931,6 +951,38 @@ describe('sessionsMachine — the open request carrier (A5c, R3-F2)', () => {
     actor.send({ type: 'chatRequested', projectId: 'projA', chatId: 'chat-3' });
     await settle();
     expect(sessionRequest(actor, 'projA')?.chatId).toBe('chat-3');
+    actor.stop();
+  });
+
+  it('should forward chatRequested from the registry to a session that is closing', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const { actor } = harness({ closeFlush: closeFlush.promise });
+    actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { chatId: 'chat-1' }) });
+    await settle();
+    actor.send({ type: 'close', projectId: 'projA', reason: 'user' });
+    await settle();
+    expect(actor.getSnapshot().context.status['projA']?.state).toBe('closing');
+
+    actor.send({ type: 'chatRequested', projectId: 'projA', chatId: 'chat-3' });
+
+    expect(sessionRequest(actor, 'projA')?.chatId).toBe('chat-3');
+    closeFlush.resolve();
+    actor.stop();
+  });
+
+  it('should forward a chatRequested that names no chat, clearing both fields', async () => {
+    const { actor } = harness();
+    actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { createdChatId: 'chat-new' }) });
+    await settle();
+
+    actor.send({ type: 'chatRequested', projectId: 'projA' });
+
+    expect(sessionRequest(actor, 'projA')).toEqual({
+      workspace: 'ws-projA',
+      nativeKernelId: 'build123d',
+      chatId: undefined,
+      createdChatId: undefined,
+    });
     actor.stop();
   });
 

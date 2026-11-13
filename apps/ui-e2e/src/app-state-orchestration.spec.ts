@@ -171,9 +171,8 @@ const settledQuietMilliseconds = 3000;
 
 /**
  * Where a trip came to rest, read the same way for both projects: the pathname unchanged for
- * `settledQuietMilliseconds` and
- * that project's entry tab on screen. A navigation still in the route gate's pending state (`project-route.tsx`
- * `pending`: the resolved project is not yet the requested one) is not yet either.
+ * `settledQuietMilliseconds` and that project's entry tab on screen. A navigation still in the route gate's pending
+ * state (`project-route.tsx` `pending`: the resolved project is not yet the requested one) is not yet either.
  */
 const readSettledProject = async (routes: Readonly<{ a: RegExp; b: RegExp }>): Promise<Settled> => {
   const deadline = performance.now() + 30_000;

@@ -3,6 +3,7 @@ import type { ResolutionSide } from '#resolution.types.js';
 import type { PublishFacet } from '#publish.types.js';
 import type { RemoteFacet } from '#remote.types.js';
 import type { SyncFacet } from '#sync.types.js';
+import type { RevisionGitOperation } from '#revision-port.js';
 
 /**
  * The coalesced status one project publishes to its UI.
@@ -42,6 +43,12 @@ export type RevisionStatusProjection = Readonly<{
   projectDirty: boolean;
   dirty: boolean;
   minting: boolean;
+  /**
+   * The Git operation another process left in progress in the selected
+   * checkout, which every save there waits out: a merge or rebase the person
+   * is finishing in their own Git, or a detached head. Absent while saves go on.
+   */
+  waiting?: RevisionGitOperation;
   headRevisionId: string | undefined;
   follow: 'chat' | 'pinned';
   /** Checkouts that need a person: a failed cut or a head that lost its CAS. */

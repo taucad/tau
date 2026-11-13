@@ -453,6 +453,24 @@ export type Checkout = Readonly<{
 }>;
 
 /**
+ * A Git operation in progress in one checkout, which Tau waits out instead of recording over.
+ *
+ * - `merge`, `cherryPick`, `revert` and `rebase`: stock Git stopped part-way
+ *   (`MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `rebase-merge` or
+ *   `rebase-apply`), usually on a conflict the person is resolving.
+ * - `detached`: the checkout's `HEAD` names a commit rather than a branch, so
+ *   no branch could carry a revision. `branch` is the one Git left last, the
+ *   way back, when Git's own log names one.
+ * - `locked`: another Git process holds the checkout's `index.lock`.
+ *
+ * @public
+ */
+export type RevisionGitOperation = Readonly<{
+  kind: 'merge' | 'cherryPick' | 'revert' | 'rebase' | 'detached' | 'locked';
+  branch?: string;
+}>;
+
+/**
  * One checkout as a project's registry holds it: the port's record, plus the
  * two facts only a host knows.
  *
@@ -836,6 +854,19 @@ export type RevisionPort = Readonly<{
    * @returns A value that differs whenever those sources do.
    */
   ignoreContext?(root?: string): Promise<string>;
+  /**
+   * The Git operation another process left in progress in one checkout.
+   *
+   * A store shared with stock Git can be mid-merge, mid-rebase or on a
+   * detached head while Tau watches it. A revision cut then would record
+   * conflict markers or move the branch under the person's own operation, so
+   * a checkout waits while this answers anything. A port with no stock Git
+   * beside it leaves it out.
+   *
+   * @param root - A linked checkout's root, or `undefined` for the live checkout.
+   * @returns The operation, or `undefined` when nothing is in progress.
+   */
+  gitOperation?(root?: string): Promise<RevisionGitOperation | undefined>;
   /** Add one linked checkout on its own branch. */
   addCheckout?(input: AddCheckoutInput): Promise<Checkout>;
   /** Remove one linked checkout. Removing the live checkout is refused. */

@@ -100,6 +100,9 @@
     },
     "test:e2e:webgpu": {
       "executor": "nx:run-commands",
+      "metadata": {
+        "description": "The WebGPU hardware qualification tier: e2e-nightly.yml's webgpu-hardware job runs it with TAU_E2E_WEBGPU_PROFILE=hardware on a runner with a GPU. A software adapter (SwiftShader, the main suite's profile) cannot present a WebGPU canvas: the browser destroys the device at the first presented frame and every canvas falls back to WebGL (external-target.ts presentedGraphicsBackend). The rows that exist to prove the WebGPU backend itself (WGSL compile, WebGPU readback and presented pixels, WebGPU against WebGL parity) therefore run only where a WebGPU canvas presents, which is this tier; in the main suite the same specs run their WebGL rows and expect the presented backend wherever WebGPU was asked for."
+      },
       "options": {
         "cwd": "{workspaceRoot}",
         "parallel": false,
@@ -111,7 +114,7 @@
         },
         "commands": [
           "pnpm exec nx run ui:build",
-          "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/webgpu-qualification.spec.ts src/graphics-backend.spec.ts src/shader-fixture.spec.ts src/section-view-contour-fill.spec.ts src/section-view-control-restyle.spec.ts src/section-view-overlap-cap-shading.spec.ts src/section-view-overlap-performance-diagnostics.spec.ts src/user-project-thumbnail-generation.spec.ts src/headless-chat-image-capture.spec.ts src/headless-chat-image-capture.performance.spec.ts src/metal-morph-loader.spec.ts"
+          "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/webgpu-qualification.spec.ts src/graphics-backend.spec.ts src/shader-fixture.spec.ts src/section-view-contour-fill.spec.ts src/section-view-control-restyle.spec.ts src/section-view-overlap-cap-shading.spec.ts src/section-view-overlap-performance-diagnostics.spec.ts src/user-project-thumbnail-generation.spec.ts src/headless-chat-image-capture.spec.ts src/headless-chat-image-capture.performance.spec.ts src/metal-morph-loader.spec.ts src/glass-prism-loader.spec.ts"
         ]
       }
     },

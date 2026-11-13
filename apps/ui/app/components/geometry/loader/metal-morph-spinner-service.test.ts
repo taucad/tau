@@ -7,13 +7,25 @@ const hoisted = vi.hoisted(() => ({
   controllers: [] as MetalMorphLoaderController[],
   createOptions: [] as Array<{ canvas?: HTMLCanvasElement; onFrame?: () => void; theme?: string; quality?: string }>,
   probeResult: false,
+  loseNextWebGpuCanvas: false,
+  canvasLost: false,
 }));
 
 vi.mock('#components/geometry/loader/metal-morph-controller.js', () => ({
   createMetalMorphLoader: vi.fn((options: { onFrame?: () => void }) => {
     hoisted.createOptions.push(options);
+    const { backend } = options as { backend?: string };
+    const losesCanvas = hoisted.loseNextWebGpuCanvas && backend === 'webgpu';
+    if (losesCanvas) {
+      // What createRenderer does for a WebGPU canvas the browser cannot present: report the loss, then reject.
+      hoisted.loseNextWebGpuCanvas = false;
+      hoisted.canvasLost = true;
+      hoisted.probeResult = false;
+    }
     const controller = {
-      ready: Promise.resolve(),
+      ready: losesCanvas
+        ? Promise.reject(new Error('The WebGPU canvas could not present a frame: Device was destroyed.'))
+        : Promise.resolve(),
       play: vi.fn(),
       pause: vi.fn(),
       renderOnce: vi.fn(),
@@ -36,7 +48,10 @@ vi.mock('#components/geometry/loader/metal-morph-controller.js', () => ({
 
 vi.mock('@taucad/viewer/graphics/graphics-backend', () => ({
   probeWebGpuSupport: vi.fn(async (): Promise<boolean> => hoisted.probeResult),
-  resolveGraphicsBackendPreference: vi.fn((): string => 'webgl'),
+  resolveGraphicsBackendPreference: vi.fn((preference: string, isAvailable: boolean): string =>
+    preference === 'webgpu' && isAvailable ? 'webgpu' : 'webgl',
+  ),
+  webGpuFallbackReason: vi.fn(() => (hoisted.canvasLost ? 'canvas-loss' : undefined)),
 }));
 
 vi.mock('@taucad/ui-core/utils/graphics-backend-override', () => ({
@@ -103,6 +118,9 @@ describe('metalMorphSpinnerService', () => {
   beforeEach(() => {
     hoisted.controllers.length = 0;
     hoisted.createOptions.length = 0;
+    hoisted.probeResult = false;
+    hoisted.loseNextWebGpuCanvas = false;
+    hoisted.canvasLost = false;
     vi.useFakeTimers();
   });
 
@@ -121,6 +139,27 @@ describe('metalMorphSpinnerService', () => {
 
     expect(hoisted.controllers).toHaveLength(1);
     expect(service.getDiagnostics()).toMatchObject({ subscriberCount: 20, activeCount: 20, rendererCount: 1 });
+  });
+
+  it('should open the renderer again on a fresh canvas on WebGL when its WebGPU canvas cannot present', async () => {
+    hoisted.probeResult = true;
+    hoisted.loseNextWebGpuCanvas = true;
+    const service = createMetalMorphSpinnerService();
+    await service.warm('dark');
+
+    const [lost, started] = hoisted.createOptions as Array<{ backend: string; canvas: HTMLCanvasElement }>;
+    expect(lost).toMatchObject({ backend: 'webgpu' });
+    expect(started).toMatchObject({ backend: 'webgl' });
+    expect(started?.canvas).not.toBe(lost?.canvas);
+    expect(hoisted.controllers[0]?.dispose).toHaveBeenCalledOnce();
+    expect(service.getDiagnostics().rendererCount).toBe(1);
+
+    // The renderer that opened is the WebGL one, and it is what spinners draw from.
+    const target = createTarget();
+    service.subscribe(target);
+    hoisted.createOptions[1]?.onFrame?.();
+    expect(hoisted.controllers).toHaveLength(2);
+    expect(target.firstFrames).toBe(1);
   });
 
   it('should reuse the live renderer for a spinner that subscribes later', async () => {

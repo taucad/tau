@@ -91,7 +91,7 @@ export function waitPhaseAt({ elapsed, settledAt, shownAt = indicatorDelayMillis
     }
     return settledAt >= slowWaitMilliseconds ? 'slow' : 'shown';
   }
-  if (elapsed < Math.min(indicatorDelayMilliseconds, shownAt)) {
+  if (elapsed < shownAt) {
     return 'hidden';
   }
   return elapsed < slowWaitMilliseconds ? 'shown' : 'slow';

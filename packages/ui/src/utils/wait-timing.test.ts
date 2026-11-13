@@ -83,6 +83,10 @@ describe('the indicator timing', () => {
     });
     expect(waitPhaseAt({ elapsed: 1699, settledAt: 1300, shownAt: 1200 })).toBe('shown');
     expect(waitPhaseAt({ elapsed: 1700, settledAt: 1300, shownAt: 1200 })).toBe('hidden');
+    // Before it became visible it is hidden, while running and once content beat it.
+    expect(waitPhaseAt({ elapsed: 1100, shownAt: 1200 })).toBe('hidden');
+    expect(waitPhaseAt({ elapsed: 1100, settledAt: 1150, shownAt: 1200 })).toBe('hidden');
+    expect(waitPhaseAt({ elapsed: 1200, shownAt: 1200 })).toBe('shown');
     expect(settledTiming({ settledAt: 1460, shownAt: 1450 })).toEqual({
       state: 'holding',
       hideDelay: '490ms',

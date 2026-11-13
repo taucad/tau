@@ -1,5 +1,4 @@
 import { afterEach, expect, test } from 'vitest';
-import type { Locator, Page } from 'playwright';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { expectVisible } from '#support/scenario.js';
@@ -43,7 +42,10 @@ const readAppFlags = async (current: DesktopSession): Promise<OnboardingFlags> =
  * The screen a fresh launch opens on. `onboardingAutoOpen` sends a first run to setup at `/welcome` (#1925), which
  * has no composer; every other state opens Home. A reload stays on whichever it is.
  */
-const firstScreen = (page: Page, state: FlagStateName): Locator =>
+const firstScreen = (
+  page: DesktopSession['page'],
+  state: FlagStateName,
+): ReturnType<DesktopSession['page']['locator']> =>
   flagStateFlags[state].onboardingAutoOpen
     ? page.getByRole('heading', { level: 1, name: 'What do you want to make?' })
     : page.locator('[aria-label="Ask Tau to build anything..."]');

@@ -147,20 +147,10 @@ test('updates and retires decoded thumbnail URLs in the mounted project library'
   await target.openSecondary('/projects');
   const card = selectors.getByCss(`[data-slot="card"]:has(a:has-text("Open ${manifest.name}"))`);
   const thumbnail = card.getByCss('img');
-  await target.expectVisible(thumbnail, 30_000, 'secondary');
-  const imageIdentity = await target.evaluateLocator(
-    thumbnail,
-    (element) => {
-      const identity = crypto.randomUUID();
-      if (!(element instanceof HTMLElement)) {
-        throw new Error('The thumbnail is not an HTML element.');
-      }
-      element.dataset['projectionThumbnail'] = identity;
-      return identity;
-    },
-    undefined,
-    'secondary',
-  );
+  /* A card with no saved thumbnail draws a cube, not an image (#705), and a software adapter defers the automatic
+     preview, so the card may have no image until the fixture writes one. */
+  const noSavedPreview = card.getByCss('[aria-label="No saved preview"]');
+  await target.expectVisible(card, 30_000, 'secondary');
   const identity = await target.evaluate(
     () => ({ href: location.href, timeOrigin: performance.timeOrigin }),
     undefined,
@@ -192,6 +182,7 @@ test('updates and retires decoded thumbnail URLs in the mounted project library'
       'secondary',
     );
   await writeProjectionProjectFile(project, 'thumbnail.webp', await image('#c026d3'));
+  await target.expectVisible(thumbnail, 30_000, 'secondary');
   await expect
     .poll(
       async () => {
@@ -203,6 +194,19 @@ test('updates and retires decoded thumbnail URLs in the mounted project library'
     .toBe(16);
   const first = await current();
   expect(first.source.startsWith('blob:')).toBe(true);
+  const imageIdentity = await target.evaluateLocator(
+    thumbnail,
+    (element) => {
+      const identity = crypto.randomUUID();
+      if (!(element instanceof HTMLElement)) {
+        throw new Error('The thumbnail is not an HTML element.');
+      }
+      element.dataset['projectionThumbnail'] = identity;
+      return identity;
+    },
+    undefined,
+    'secondary',
+  );
   await writeProjectionProjectFile(project, 'thumbnail.webp', await image('#0891b2'));
   await expect
     .poll(
@@ -235,15 +239,8 @@ test('updates and retires decoded thumbnail URLs in the mounted project library'
   ).toBe(true);
   expect(await target.getAttribute(thumbnail, 'data-projection-thumbnail', 'secondary')).toBe(imageIdentity);
   await writeProjectionProjectFile(project, 'thumbnail.webp');
-  await expect
-    .poll(
-      async () => {
-        const state = await current();
-        return state.source;
-      },
-      { timeout: 30_000 },
-    )
-    .toContain('/placeholder.svg');
+  await target.expectVisible(noSavedPreview, 30_000, 'secondary');
+  await target.expectCount(thumbnail, 0, 30_000, 'secondary');
   expect(
     await target.evaluate(() => ({ href: location.href, timeOrigin: performance.timeOrigin }), undefined, 'secondary'),
   ).toEqual(identity);

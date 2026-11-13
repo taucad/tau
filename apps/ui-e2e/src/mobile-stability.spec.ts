@@ -58,7 +58,9 @@ import { waitForModelReady } from '#support/viewer-stage.js';
  * - Each circuit runs at 390×844 only: the workbench circuit alone takes about ten minutes at one width.
  */
 
-const seedRoute = '/__e2e/project-navigation';
+/* A new project opens no file (#1386), so the seed reopens each project with its entry file open in the Editor, the
+ * tab {@link expectEditorSource} brings forward. */
+const seedRoute = '/__e2e/project-navigation?openEntry=1';
 const projects = { a: 'Project Navigation A', b: 'Project Navigation B' } as const;
 /** Each seeded project's source, so the Editor proves it shows this project's file and not the other's. */
 const sources = { a: 'makeBaseBox(18, 12, 6)', b: 'makeBaseBox(28, 12, 6)' } as const;

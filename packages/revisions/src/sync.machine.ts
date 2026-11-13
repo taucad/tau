@@ -2060,6 +2060,11 @@ const syncMachineDefinition = setup({
           const refusedHistory = event.output.refs.find(
             (entry) => entry.status === 'rejected' && entry.name === historyRefOf(context.branch),
           );
+          /* A branch or tag refused for a commit it carries is terminal wherever it
+           * is: every retry offers that ref, and that commit, again. */
+          const commitRefused = event.output.refs.some(
+            (entry) => entry.status === 'rejected' && isHistoryRef(entry.name) && isCommitRefusal(entry.reason),
+          );
           /* The over-quota list is `remote.machine`'s, always (P19, A40): the
            * scheduler forwards it through the parent and keeps no copy. */
           if ((event.output.overQuota ?? []).length > 0 && context.parentRef !== undefined) {
@@ -2112,11 +2117,7 @@ const syncMachineDefinition = setup({
                * history refused for a commit it carries is terminal too: every
                * retry carries that commit again (see `isFatal`). */
               failure:
-                refusedHistory !== undefined && (quota || isCommitRefusal(refusedHistory.reason))
-                  ? 'fatal'
-                  : acknowledged
-                    ? 'none'
-                    : 'retry',
+                (refusedHistory !== undefined && quota) || commitRefused ? 'fatal' : acknowledged ? 'none' : 'retry',
               attempt: acknowledged ? 0 : context.attempt + 1,
               retryAfterMilliseconds: undefined,
               conflictRef: refusedHistory === undefined ? undefined : refusedHistory.name,
@@ -2490,8 +2491,10 @@ const syncMachineDefinition = setup({
               }
               enq(reportConflictLineFailure, 'refused', refused.name, refused.reason);
               const quota = (event.output.overQuota ?? []).length > 0 || isStorageRefusal(refused.reason ?? '');
+              /* A conflict line refused for a commit it carries is terminal, as the thrown form is. */
+              const terminal = quota || isCommitRefusal(refused.reason);
               return {
-                target: sessionPullOf(context) ?? (quota ? 'offered' : 'owed'),
+                target: sessionPullOf(context) ?? (terminal ? 'offered' : 'owed'),
                 context: { leases, attempt: context.attempt + 1, retryAfterMilliseconds: undefined },
               };
             },

@@ -792,6 +792,35 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  it('settles a commit refusal on a ref other than the current branch as terminal', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      output: pushResult(
+        { name: mainRef, status: 'updated', head: 'h1' },
+        {
+          name: 'refs/tags/v1',
+          status: 'rejected',
+          head: 'h1',
+          reason: `${commitRefusalMarker} 0123456789ab — it does not name the account pushing it.`,
+        },
+      ),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    harness.clock.advance(600_000);
+    expect(harness.effects.inputsFor('push')).toHaveLength(1);
+
+    harness.stop();
+  });
+
   it('settles a thrown commit refusal as terminal too', async () => {
     const harness = start();
     await openCleanly(harness);

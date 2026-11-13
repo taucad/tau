@@ -430,7 +430,8 @@ const madeWithGit = 'made with git';
  * account's when that account pushed it. A project linked to GitHub takes
  * commits without that check: one that another account pushed, or a push the
  * server withholds, reads as any pushed entry does. Not pushed yet, it is
- * made on this device, and reads as its address says.
+ * made on this device, and reads as its address says. Until the push record
+ * is read, it claims no account: it reads as its git author.
  *
  * @param who - The entry's typed who.
  * @param context - The session and push record.
@@ -445,14 +446,20 @@ const madeWithGitWho = (
   if (who.kind !== 'unrecorded' || who.authorAccountId === undefined) {
     return undefined;
   }
+  const lineOf = (name: string, viaDevice = false): string =>
+    [...(name === '' ? [] : [name]), madeWithGit, ...(viaDevice ? ['by a cloud agent host'] : [])].join(' · ');
+  /* Unread, the push record cannot say who pushed it, so the address claims no account yet. */
+  if (context.pushRecord === undefined) {
+    return { line: lineOf(who.authorName ?? ''), isYou: false, isAgent: false };
+  }
   const accountId = who.authorAccountId;
   if (pusher !== undefined && (pusher.kind !== 'account' || pusher.accountId !== accountId)) {
     return undefined;
   }
   const isYou = context.session?.id === accountId;
   const pushedName = pusher?.kind === 'account' && pusher.name !== '' ? pusher.name : undefined;
-  const name = isYou ? 'You' : (pushedName ?? context.pushRecord?.memberName(accountId) ?? who.authorName ?? '');
-  return { line: name === '' ? madeWithGit : `${name} · ${madeWithGit}`, isYou, isAgent: false };
+  const name = isYou ? 'You' : (pushedName ?? context.pushRecord.memberName(accountId) ?? who.authorName ?? '');
+  return { line: lineOf(name, pusher?.viaDevice === true), isYou, isAgent: false };
 };
 
 /**

@@ -269,8 +269,13 @@ describe('revisionWho', () => {
     const git = (authorAccountId: string, authorName = 'Ada Lovelace'): RevisionWhoEntry =>
       entry({ kind: 'unrecorded', authorName, authorAccountId }, 'import');
     /* Unlike Tau's own entries, a single-person project still names its person beside the mark. */
-    expect(revisionWho(git(ada.id), solo)).toEqual({ line: 'You · made with git', isYou: true, isAgent: false });
-    expect(revisionWho(git(ada.id), shared()).line).toBe('You · made with git');
+    expect(revisionWho(git(ada.id), shared())).toEqual({ line: 'You · made with git', isYou: true, isAgent: false });
+    /* The push record unread: the address claims no account yet, so the git author's name. */
+    expect(revisionWho(git(ada.id), solo)).toEqual({
+      line: 'Ada Lovelace · made with git',
+      isYou: false,
+      isAgent: false,
+    });
     /* Not backed up yet and not this session's: the directory's name, else the git author's. */
     expect(revisionWho(git('user-maya'), shared()).line).toBe('Maya · made with git');
     expect(revisionWho(git('user-sam', 'Sam'), solo)).toEqual({
@@ -285,6 +290,13 @@ describe('revisionWho', () => {
       isAgent: false,
     });
     expect(revisionWho(git(ada.id), shared(pushedBy(ada.id, 'Ada'))).isYou).toBe(true);
+    /* A host device pushed it: the placement stays beside the mark. */
+    expect(
+      revisionWho(
+        git('user-maya'),
+        shared(() => ({ kind: 'account', accountId: 'user-maya', name: 'Maya', viaDevice: true })),
+      ).line,
+    ).toBe('Maya · made with git · by a cloud agent host');
   });
 
   it('does not take a pushed commit’s address over the account that pushed it', () => {

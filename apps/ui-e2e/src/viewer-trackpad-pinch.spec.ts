@@ -4,10 +4,10 @@ import * as target from '#support/external-target.js';
 
 /*
  * PF1, the trackpad pinch fix (onboarding plan T4a.1): a pinch is a `ctrlKey` wheel in Chromium and Firefox. In
- * perspective it changes the camera's distance and leaves `camera.zoom` where framing put it, in the same direction and by the same
- * ratio as a plain wheel of the same sign; in orthographic both change the zoom (the span shown). This spec runs in the
- * chromium, firefox and webkit-smoke projects. Playwright's WebKit is not Safari, so real Safari, which sends gesture
- * events for a pinch, is the manual run RO9.
+ * perspective it changes the camera's distance and leaves `camera.zoom` where framing put it, in the same direction
+ * and by the same ratio as a plain wheel of the same sign; in orthographic both change the zoom (the span shown). This
+ * spec runs in the chromium, firefox and webkit-smoke projects. Playwright's WebKit is not Safari, so real Safari,
+ * which sends gesture events for a pinch, is the manual run RO9.
  */
 
 type CameraReading = Readonly<{
@@ -149,8 +149,8 @@ describe('Viewer trackpad pinch (PF1)', () => {
     expect(Math.sign(pinchRatio - 1), 'the pinch moves the camera the way the wheel does').toBe(Math.sign(deltaY));
     expect(pinchRatio).toBeCloseTo(plainRatio, 3);
     /*
-     * Framing sets the perspective zoom that fits the bounds (`frameCameraBounds` in `@taucad/camera`), which lands within an ulp of 1, not on
-     * it: the pinch and the wheel must leave that zoom exactly where framing put it.
+     * Framing sets the perspective zoom that fits the bounds (`frameCameraBounds` in `@taucad/camera`), which lands
+     * within an ulp of 1, not on it: the pinch and the wheel must leave that zoom exactly where framing put it.
      */
     expect(pinch.after.zoom).toBe(pinch.before.zoom);
     expect(pinch.after.requestedPerspectiveZoom).toBe(pinch.before.requestedPerspectiveZoom);

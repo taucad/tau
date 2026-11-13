@@ -1676,7 +1676,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     deviceMemory.constrained = false;
   });
 
-  it('closes a clean project being left through the memory release, then opens the next', async () => {
+  it('should close a clean project being left through the memory release, then open the next', async () => {
     const registry = createOneProjectRegistry();
     const view = await renderOn(registry, '/w/workspace/one-clean-a');
     expect(liveOn(registry)).toEqual(['one-clean-a']);
@@ -1693,7 +1693,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     expect(screen.getByTestId('route-state')).toHaveTextContent('editor');
   });
 
-  it('closes an unpushed project being left as the person’s close, flushes it, then opens the next from the pending slot', async () => {
+  it('should close an unpushed project being left as the person’s close, flush it, then open the next from the pending slot', async () => {
     const registry = createOneProjectRegistry();
     const view = await renderOn(registry, '/w/workspace/one-unpushed-a');
     await act(async () => {
@@ -1734,7 +1734,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     expect(registry.received).not.toContain('close');
   });
 
-  it('keeps a running project being left and refuses the next open, holding it in the pending slot', async () => {
+  it('should keep a running project being left and refuse the next open, holding it in the pending slot', async () => {
     const registry = createOneProjectRegistry();
     const view = await renderOn(registry, '/w/workspace/one-running-a');
     await act(async () => {

@@ -1356,7 +1356,7 @@ describe('use-sidebar-status — pin (A0.2 S39): the sidebar open', () => {
     );
   }
 
-  it('sends the registry an open that spawns a session for the project', () => {
+  it('should send the registry an open that spawns a session for the project', () => {
     const started = createActor(sessionsMachine, { input: {}, clock: new StepClock() }).start();
     registry = started;
     vi.mocked(useSessions).mockImplementation(() => started);

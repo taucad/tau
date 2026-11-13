@@ -25,7 +25,7 @@ import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
 import { projectSessionParkWindowMilliseconds } from '#machines/project-session.machine.js';
 import { SessionsProvider, useLiveProjectIds } from '#hooks/use-sessions.js';
-import { UnloadProvider } from '#hooks/use-flush-on-close.js';
+import { UnloadProvider, useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { createSessionsActor, forgetProjectRegions } from '#services/sessions-store.js';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import type { ProjectSessionFlushRegistration } from '#routes/w.$workspace.$project/project-live-sessions.js';
@@ -194,6 +194,8 @@ const fixtures = vi.hoisted(() => ({
   fileManagers: new Map<string, unknown>(),
   retryManifestObservation: new Map<string, unknown>(),
   chatProducers: new Map<string, () => Promise<void>>(),
+  /** The S40 rows give each project a second producer; other rows keep the one. */
+  secondProducer: false,
 }));
 
 const ProjectIdContext = createContext('');
@@ -473,6 +475,17 @@ vi.mock('#routes/w.$workspace.$project/entries-sync-host.js', async () => {
           }),
         [projectId, registerWorkbenchRecordProducer],
       );
+      /* A second member of the set, so the guard is seen walking every producer, not the first. */
+      useEffect(
+        () =>
+          fixtures.secondProducer
+            ? registerWorkbenchRecordProducer(async () => {
+                fixtures.order.push(`producer:${projectId}:second`);
+                await fixtures.chatProducers.get(`${projectId}:second`)?.();
+              })
+            : undefined,
+        [projectId, registerWorkbenchRecordProducer],
+      );
       return null;
     },
   };
@@ -558,10 +571,22 @@ function Sessions({ focus }: { readonly focus: Focus }): React.JSX.Element {
   );
 }
 
+/** A session-stage registration of its own, so a row can see when the session stage runs. */
+function SessionStageProbe(): undefined {
+  useFlushOnClose(
+    () => {
+      fixtures.order.push('session-stage');
+    },
+    { stage: 'session' },
+  );
+  return undefined;
+}
+
 /** The app's root composition around the live sessions: unload sequencer, query client, registry. */
-const tree = (focus: Focus, mounted = true): React.JSX.Element => (
+const tree = (focus: Focus, mounted = true, sessionProbe = false): React.JSX.Element => (
   <StrictMode>
     <UnloadProvider>
+      {sessionProbe ? <SessionStageProbe /> : null}
       <QueryClientProvider client={queryClient}>
         <SessionsProvider actor={registry}>{mounted ? <Sessions focus={focus} /> : null}</SessionsProvider>
       </QueryClientProvider>
@@ -627,6 +652,7 @@ beforeEach(() => {
   fixtures.fileManagers.clear();
   fixtures.retryManifestObservation.clear();
   fixtures.chatProducers.clear();
+  fixtures.secondProducer = false;
   flushRegistrations.length = 0;
   browserClientOptions.length = 0;
   browserLease.retained.length = 0;
@@ -1014,7 +1040,7 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
     expect(vi.mocked(chatSessions.setProjectSession).mock.calls.findLast(([id]) => id === projectA)?.[1]).toBe(session);
   });
 
-  it.fails('I5: should still flush its producers and take its close cut when it closes without a binding', async () => {
+  it.fails('I5, I6: should still flush its producers and take its close cut when it closes without a binding', async () => {
     const view = await openAndRender([projectA], { projectId: projectA });
     view.rerender(tree({ projectId: projectA }, false));
     await flushTasks();
@@ -1136,6 +1162,10 @@ describe("the chat request after open reaches the project's editor (A0.2 item 3,
 });
 
 describe("the persistence guard walks the project's producer set (A0.2 item 10, S40)", () => {
+  beforeEach(() => {
+    fixtures.secondProducer = true;
+  });
+
   it('should flush a producer of a live project nobody is on when the page hides', async () => {
     await openAndRender([projectA, projectB], { projectId: projectA });
     fixtures.order.length = 0;
@@ -1143,24 +1173,59 @@ describe("the persistence guard walks the project's producer set (A0.2 item 10, 
     await hide();
 
     expect(fixtures.order).toContain(`producer:${projectB}`);
+    expect(fixtures.order).toContain(`producer:${projectB}:second`);
     expect(fixtures.order.indexOf(`producer:${projectB}`)).toBeLessThan(
+      fixtures.order.indexOf(`editor:${projectB}:flushNow`),
+    );
+    expect(fixtures.order.indexOf(`producer:${projectB}:second`)).toBeLessThan(
       fixtures.order.indexOf(`editor:${projectB}:flushNow`),
     );
     expect(fixtures.order).toContain(`project:${projectB}:flushNow`);
   });
 
-  it('should hold the hidden flush of an unfocused project until its producer settles', async () => {
-    const producer = Promise.withResolvers<void>();
-    fixtures.chatProducers.set(projectB, async () => producer.promise);
+  it('should hold the hidden flush of an unfocused project until every producer in its set settles', async () => {
+    const first = Promise.withResolvers<void>();
+    const second = Promise.withResolvers<void>();
+    fixtures.chatProducers.set(projectB, async () => first.promise);
+    fixtures.chatProducers.set(`${projectB}:second`, async () => second.promise);
     await openAndRender([projectA, projectB], { projectId: projectA });
     fixtures.order.length = 0;
 
     await hide();
     expect(fixtures.order).toContain(`producer:${projectB}`);
+    expect(fixtures.order).toContain(`producer:${projectB}:second`);
     expect(fixtures.order).not.toContain(`editor:${projectB}:flushNow`);
 
-    producer.resolve();
+    first.resolve();
+    await flushTasks();
+    expect(fixtures.order).not.toContain(`editor:${projectB}:flushNow`);
+
+    second.resolve();
     await flushTasks();
     expect(fixtures.order).toContain(`editor:${projectB}:flushNow`);
+  });
+
+  it("should hold the session stage on hide until the guard's editor flush reaches storing idle (item 9)", async () => {
+    registry.send({ type: 'open', projectId: projectA });
+    render(tree({ projectId: projectA }, true, true));
+    await flushTasks();
+    const editor = actorFor(`editor:${projectA}`);
+    act(() => {
+      editor.set({ states: [JSON.stringify({ ready: { storing: 'saving' } })] });
+    });
+    fixtures.order.length = 0;
+
+    await hide();
+
+    expect(fixtures.order).toContain(`editor:${projectA}:flushNow`);
+    expect(fixtures.order).not.toContain('session-stage');
+
+    act(() => {
+      editor.set({ states: [storingIdle] });
+    });
+    await flushTasks();
+
+    expect(fixtures.order).toContain('session-stage');
+    expect(fixtures.order.at(-1)).toBe('session-stage');
   });
 });

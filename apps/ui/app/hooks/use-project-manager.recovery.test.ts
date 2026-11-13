@@ -488,9 +488,13 @@ describe('useProjectManager recovery (I8)', () => {
         };
       });
       const { result } = await bootstrap();
-      // The first attempt could not reach the folder; the row is still held. Its status is RowAccounted's question.
+      // The first attempt could not reach the folder: the row fails with workspace-unavailable and stays journaled.
       expect(mockCommitPendingProjectDirectory).not.toHaveBeenCalled();
-      expect(result.current.recoveries).toEqual([expect.objectContaining({ operationId, projectId: fakeProject.id })]);
+      expect(result.current.recoveries).toEqual([expect.objectContaining(failedRecovery('workspace-unavailable'))]);
+      await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+        status: 'recovery-failed',
+        recovery: { operationId, reason: 'workspace-unavailable' },
+      });
 
       // The folder's handle comes back, but a manifest change and a listing refresh do not replay the row.
       workspaceReturns();
@@ -518,16 +522,21 @@ describe('useProjectManager recovery (I8)', () => {
     });
   });
 
-  // ── Red rows: retryable failures ──────────────────────────────────────────
+  // ── Retryable failures: their status, and when they retry ───────────────────
 
-  describe('a retryable failure before its third attempt', () => {
-    it.fails('I8: should not read as failed after its first workspace-unavailable attempt', async () => {
+  describe('a workspace-unavailable failure while the workspace is gone', () => {
+    it('I8: should read as failed with workspace-unavailable after its first attempt, and keep its journal row', async () => {
       useWorkspaceRow();
       const { result } = await bootstrap();
-      expect(result.current.recoveries).toEqual([expect.objectContaining({ operationId, projectId: fakeProject.id })]);
 
-      // RowAccounted: a row becomes failed only on a terminal reason or on its third settled attempt.
-      expect(result.current.recoveries.map((recovery) => recovery.status)).not.toContain('failed');
+      // RowAccounted as ruled: workspace-unavailable fails the row at once; it retries when the workspace returns.
+      expect(result.current.recoveries).toEqual([expect.objectContaining(failedRecovery('workspace-unavailable'))]);
+      expect(journal).toEqual([pendingWorkspaceCreate]);
+      expect(mockCompletePending).not.toHaveBeenCalled();
+      await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+        status: 'recovery-failed',
+        recovery: { operationId, reason: 'workspace-unavailable' },
+      });
     });
 
     it.fails('I8: should not spend replay attempts on root changes while the workspace is still gone', async () => {

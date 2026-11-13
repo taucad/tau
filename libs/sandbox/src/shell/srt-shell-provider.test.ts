@@ -149,6 +149,17 @@ describe('createSandboxShellProvider admission', () => {
     }
   });
 
+  it('should refuse toolchain folders for the startup files on a launch without them', async () => {
+    const provider = createSandboxShellProvider({ supervisor });
+    const outcome = await provider.launch(launchOf({ arguments: ['-c', 'true'], toolchainBins: ['/opt/tau/git/bin'] }));
+
+    expect(outcome).toStrictEqual({
+      status: 'unsupported',
+      requirement: 'environment',
+      message: 'only the Terminal Zsh with its startup files takes toolchain folders.',
+    });
+  });
+
   it('should refuse a relative path', async () => {
     const outcome = await createSandboxShellProvider({ supervisor }).launch(
       launchOf({ arguments: ['-c', 'true'], workingDirectory: 'project' }),
@@ -862,6 +873,151 @@ describe('shellSandboxProfile on macOS', () => {
     expect(
       seatbeltDecision(literal, { operation: 'file-read-data', path: join(project, '.git', 'objects', 'x') }),
     ).toBe('deny');
+  });
+
+  /*
+   * The person's Terminal reads the real store (operator ruling 2026-11-12): `.git` is read-only and not denied. A
+   * read-only root is carved out of a denied one only when it lies strictly inside it, so naming `.git` in both lists
+   * would leave every read denied on macOS, while Linux binds it back readable: the two must never be combined.
+   */
+  const terminalLaunch = (
+    root: string,
+    lists: Readonly<{ readOnly: readonly string[]; denied: readonly string[] }>,
+  ): Parameters<typeof shellSandboxProfile>[0] => {
+    const project = join(root, 'project');
+    for (const directory of ['.git/objects/ab', '.git/refs/heads', '.git/hooks', '.git/lfs', 'src']) {
+      mkdirSync(join(project, directory), { recursive: true });
+    }
+    mkdirSync(join(root, 'home'));
+    return {
+      filesystem: { readable: [], writable: [project, join(root, 'home')], ...lists },
+      network: { domains: [] },
+    };
+  };
+
+  it('should let the Terminal read every file of a read-only .git and write, create or remove none of it', () => {
+    const root = fixtureRoot();
+    const project = join(root, 'project');
+    const store = join(project, '.git');
+    const profile = seatbeltProfileOf(
+      darwinProfile(terminalLaunch(root, { readOnly: [store], denied: [join(project, '.tau', 'binding.json')] })),
+    );
+    const decide = (operation: string, path: string): string => seatbeltDecision(profile, { operation, path });
+
+    for (const path of ['', 'HEAD', 'index', 'config', 'refs/heads/main', 'objects/ab/cdef', 'lfs/objects/x']) {
+      expect(decide('file-read-data', join(store, path)), path).toBe('allow');
+    }
+    for (const operation of ['file-write-data', 'file-write-create', 'file-write-unlink']) {
+      for (const path of ['', 'HEAD', 'index.lock', 'config', 'hooks/post-commit', 'objects/ab/new', 'lfs/tmp/x']) {
+        expect(decide(operation, join(store, path)), `${operation} ${path}`).toBe('deny');
+      }
+    }
+    expect(decide('file-read-data', join(project, '.tau', 'binding.json'))).toBe('deny');
+    expect(decide('file-write-data', join(project, 'src', 'main.scad'))).toBe('allow');
+  });
+
+  /*
+   * A Terminal whose store is writable: `.git` is in no list, so the checkout's write root covers it, and only the names
+   * through which git runs a program are read-only, each under its canonical spelling and as the caseless glob the
+   * shell service writes for it (a case-folding volume reads `.git/COMMONDIR` as `commondir`).
+   */
+  const executableNames = ['config', 'hooks', 'commondir', 'config.worktree', 'worktrees', 'modules'];
+  const caseless = (name: string): string =>
+    [...name]
+      .map((character) => (/[a-z]/u.test(character) ? `[${character}${character.toUpperCase()}]` : character))
+      .join('');
+
+  it('should let the Terminal write a store all but the names that run a program, under any spelling', () => {
+    const root = fixtureRoot();
+    const project = join(root, 'project');
+    const store = join(project, '.git');
+    const readOnly = executableNames.flatMap((name) => [join(store, name), join(store, caseless(name))]);
+    const profile = seatbeltProfileOf(
+      darwinProfile(terminalLaunch(root, { readOnly, denied: [join(project, '.tau', 'binding.json')] })),
+    );
+    const decide = (operation: string, path: string): string => seatbeltDecision(profile, { operation, path });
+
+    for (const path of ['', 'HEAD', 'index', 'config', 'hooks/pre-commit', 'objects/ab/cdef', 'lfs/objects/x']) {
+      expect(decide('file-read-data', join(store, path)), path).toBe('allow');
+    }
+    /* What add, commit, switch -c, stash and merge write, and the lock git renames into place. */
+    const written = [
+      'index.lock',
+      'index',
+      'HEAD.lock',
+      'HEAD',
+      'ORIG_HEAD',
+      'MERGE_HEAD',
+      'MERGE_MSG',
+      'AUTO_MERGE',
+      'COMMIT_EDITMSG',
+      'packed-refs.lock',
+      'objects/ab/new',
+      'objects/pack/pack-1.pack',
+      'refs/heads/side.lock',
+      'refs/stash',
+      'logs/HEAD',
+      'logs/refs/stash',
+      'lfs/objects/ab/cd/x',
+      'lfs/tmp/x',
+      'config.lock',
+    ];
+    for (const operation of ['file-write-data', 'file-write-create', 'file-write-unlink']) {
+      for (const path of written) {
+        expect(decide(operation, join(store, path)), `${operation} ${path}`).toBe('allow');
+      }
+    }
+    /*
+     * Every write to a protected name fails, including the rename of `config.lock` over `config`, a new top-level name
+     * created in any case, and a move of `.git` itself.
+     */
+    const refused = [
+      'config',
+      'CONFIG',
+      'hooks',
+      'hooks/post-commit',
+      'Hooks/post-commit',
+      'commondir',
+      'COMMONDIR',
+      'CommonDir',
+      'config.worktree',
+      'Config.Worktree',
+      'worktrees/linked/commondir',
+      'WorkTrees/linked/commondir',
+      'modules/vendor/config',
+      'modules/vendor/hooks/post-checkout',
+    ];
+    for (const operation of ['file-write-data', 'file-write-create', 'file-write-unlink']) {
+      for (const path of refused) {
+        expect(decide(operation, join(store, path)), `${operation} ${path}`).toBe('deny');
+      }
+    }
+    /* `.git` itself can be neither renamed away nor replaced. */
+    for (const operation of ['file-write-create', 'file-write-unlink']) {
+      expect(decide(operation, store), `${operation} .git`).toBe('deny');
+    }
+    expect(decide('file-read-data', join(project, '.tau', 'binding.json'))).toBe('deny');
+    expect(decide('file-write-data', join(project, 'src', 'main.scad'))).toBe('allow');
+  });
+
+  it('should leave an absent name creatable under another case with the canonical spelling alone, the gap the glob closes', () => {
+    const root = fixtureRoot();
+    const store = join(root, 'project', '.git');
+    const readOnly = executableNames.map((name) => join(store, name));
+    const profile = seatbeltProfileOf(darwinProfile(terminalLaunch(root, { readOnly, denied: [] })));
+
+    expect(seatbeltDecision(profile, { operation: 'file-write-create', path: join(store, 'commondir') })).toBe('deny');
+    expect(seatbeltDecision(profile, { operation: 'file-write-create', path: join(store, 'COMMONDIR') })).toBe('allow');
+  });
+
+  it('should deny every read of a .git named both read-only and denied, the shape that must not return', () => {
+    const root = fixtureRoot();
+    const store = join(root, 'project', '.git');
+    const profile = seatbeltProfileOf(darwinProfile(terminalLaunch(root, { readOnly: [store], denied: [store] })));
+
+    for (const path of ['', 'HEAD', 'index', 'refs/heads/main', 'objects/ab/cdef']) {
+      expect(seatbeltDecision(profile, { operation: 'file-read-data', path: join(store, path) }), path).toBe('deny');
+    }
   });
 });
 

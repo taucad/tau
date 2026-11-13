@@ -41,8 +41,8 @@ import {
   DrawerTrigger,
   useIsInsideDrawer,
 } from '@taucad/ui/components/drawer';
-import { menuItemVariants, menuViewBackClass } from '@taucad/ui/components/menu.variants';
-import { stepBackOnEmptySearch, ViewStackBackContent, viewStackEnterClass } from '@taucad/ui/components/view-stack';
+import { menuItemVariants } from '@taucad/ui/components/menu.variants';
+import { stepBackOnEmptySearch, ViewStackBack, viewStackEnterClass } from '@taucad/ui/components/view-stack';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { SwitchRow } from '@taucad/ui/components/switch';
 import { Tabs, TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
@@ -1422,24 +1422,7 @@ function Sheet({
         >
           {/* A full-width back row as tall as the list rows below it. */}
           <div className='flex shrink-0 border-b p-1'>
-            <button
-              type='button'
-              aria-label={view === 'models' && isFromAgents ? 'Back to agents' : 'Back to settings'}
-              className={cn(rowClass, menuViewBackClass)}
-              onClick={back}
-            >
-              <ViewStackBackContent
-                title={
-                  view === 'models' && isFromAgents
-                    ? 'Agents'
-                    : view === 'effort'
-                      ? 'Effort'
-                      : view === 'options'
-                        ? 'Settings'
-                        : sheetModel.name
-                }
-              />
-            </button>
+            <ViewStackBack parentLabel={view === 'models' && isFromAgents ? 'agents' : 'settings'} onBack={back} />
           </div>
           {view === 'options' ? (
             <SettingsPage settings={settings} />

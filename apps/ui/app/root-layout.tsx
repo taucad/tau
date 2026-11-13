@@ -10,6 +10,7 @@ import { Fragment, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
+import { ENV } from '#environment.config.js';
 import type { ClientEnvironment } from '#environment.config.js';
 import { buildClientEnvScript } from '#lib/client-env-script.js';
 import { Page } from '#components/layout/page.js';
@@ -25,7 +26,7 @@ import { useFavicon } from '#hooks/use-favicon.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ErrorPage } from '#components/error-page.js';
 import { ProjectManagerProvider } from '#hooks/use-project-manager.js';
-import { HomeFileManagerProvider } from '#hooks/use-file-manager.js';
+import { RootFileManagerProvider } from '#hooks/use-file-manager.js';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { RevisionActorIdentity } from '#components/revision-actor-identity.js';
@@ -39,6 +40,9 @@ import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
 import { authErrorMessage, betterFetchErrorBodyMessage } from '@taucad/ui-core/utils/auth-error.utils';
 import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
+import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
+import { selectRuntimeIdleFileManagers } from '#runtime/app-runtime.js';
+import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 
 export type RootLoaderData = {
   readonly env: ClientEnvironment;
@@ -143,12 +147,13 @@ export function RootLayout({
       </ProjectManagerProvider>
     </HeadlessImageProvider>
   );
-  const application =
-    data?.env.TAU_DEBUG && data.pathname === '/__e2e/remote-host' ? (
-      children
-    ) : (
-      <HomeFileManagerProvider rootDirectory='/'>{managedChildren}</HomeFileManagerProvider>
-    );
+  const isHarness = isRemoteHostHarness(data?.env.TAU_DEBUG, data?.pathname);
+  const application = isHarness ? (
+    children
+  ) : (
+    /* The runtime's `rootFiles`: the file manager for `/`, read in the first render and on the server (A1b). */
+    <RootFileManagerProvider>{managedChildren}</RootFileManagerProvider>
+  );
 
   /*
    * `QueryClientProvider` is outermost so `AuthConfigProvider`'s own
@@ -172,6 +177,7 @@ export function RootLayout({
                 <ColorProvider>
                   <AppViewerEnvironment>
                     <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
+                      <HarnessDocumentLoad />
                       {application}
                     </LayoutDocument>
                   </AppViewerEnvironment>
@@ -275,11 +281,30 @@ export function ProductApp(): React.JSX.Element {
   useCloudPaymentActionReturn();
   const data = useRouteLoaderData<RootLoaderData>('root');
   const page = <Page />;
-  return data?.env.TAU_DEBUG && data.pathname === '/__e2e/remote-host' ? (
+  return isRemoteHostHarness(data?.env.TAU_DEBUG, data?.pathname) ? (
     page
   ) : (
     <ProjectSessionsHost>{page}</ProjectSessionsHost>
   );
+}
+
+/**
+ * Load the page as a document when a client navigation crosses into or out of the remote-host harness: the runtime's
+ * file managers are idle for the harness's document only, and that is fixed when the runtime is created. It reads the
+ * same debug flag and path the client entry did (never the loader data, which an error boundary or a root with no
+ * loader lacks), so the reloaded document always agrees and never reloads again. Renders nothing, so the server render
+ * and hydration are unchanged.
+ */
+function HarnessDocumentLoad(): React.ReactNode {
+  const runtime = useOptionalAppRuntime();
+  const { pathname } = useLocation();
+  const isIdle = runtime === undefined ? undefined : selectRuntimeIdleFileManagers(runtime);
+  useEffect(() => {
+    if (isIdle !== undefined && isIdle !== isRemoteHostHarness(ENV.TAU_DEBUG, pathname)) {
+      globalThis.location.reload();
+    }
+  }, [pathname, isIdle]);
+  return undefined;
 }
 
 export function RootErrorBoundary(): React.JSX.Element {

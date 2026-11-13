@@ -1,7 +1,7 @@
 import * as Sentry from '@sentry/react';
 import type { Event } from '@sentry/react';
 import { readRouteId } from '#lib/sentry-context.lib.js';
-import { redactInvitationTokens } from '@taucad/ui-core/lib/invitation-token.lib';
+import { redactUrlCredentials } from '@taucad/ui-core/lib/url-credential.lib';
 import { scrubUrl } from '#lib/sentry-event.lib.js';
 
 /**
@@ -105,7 +105,7 @@ const embeddedQueryPattern = /[?#][^\s"'()<>[\]]*/gu;
  * @returns The scrubbed description.
  */
 const scrubDescription = (description: string): string =>
-  redactInvitationTokens(description.replaceAll(embeddedQueryPattern, ''));
+  redactUrlCredentials(description.replaceAll(embeddedQueryPattern, ''));
 
 /** The span data keys whose values can be URLs. */
 const urlDataKeys = ['url', 'http.url', 'url.full', 'http.request.url'] as const;

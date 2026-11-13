@@ -80,10 +80,15 @@ const selectCodex = async (): Promise<void> => {
   const trigger = selectors.getByRole('button', { name: /^Agent and model: /u });
   await target.expectVisible(trigger, 60_000);
   await target.click(trigger);
-  await target.click(selectors.getByRole('button', { name: /^Model: .*\. Change$/u }));
-  const tab = selectors.getByRole('tab', { name: /^Codex/u });
-  await target.expectVisible(tab, 60_000);
-  await target.click(tab);
+  /* The sheet lists agents behind its Agent row (a24159ec91), then the chosen agent's models. The
+   * row appears once the daemon's agents give the chat a choice. */
+  const agentRow = selectors.getByRole('button', { name: /^Agent: .*\. Change$/u });
+  await target.expectVisible(agentRow, 60_000);
+  await target.click(agentRow);
+  const agent = selectors.getByRole('option', { name: /^Codex/u });
+  await target.expectVisible(agent);
+  await target.click(agent);
+  await target.expectVisible(selectors.getByRole('button', { name: 'Back to agents', exact: true }));
   await target.click(selectors.getByRole('option').first());
   /* Choosing a model returns to the sheet, whose Model row now names the agent. */
   await target.expectVisible(selectors.getByRole('button', { name: /^Model: Codex, .+\. Change$/u }), 10_000);

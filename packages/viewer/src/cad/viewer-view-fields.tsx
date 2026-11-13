@@ -80,8 +80,6 @@ export type ViewerViewFields = Readonly<{
   sourceOf?: (leaf: ViewerViewFieldPath) => ViewerViewFieldSource;
   /** The level a leaf set in the view returns to on Reset, which the dot's tooltip names. Absent: Tau's default. */
   inheritsFrom?: (leaf: ViewerViewFieldPath) => Exclude<ViewerViewFieldSource, 'view'>;
-  /** "Reset view": every leaf the view sets goes back to inheriting. With `sourceOf`, the menu offers it with a count. */
-  resetView?: () => void;
 }>;
 
 const viewerViewFieldsContext = createContext<ViewerViewFields | undefined>(undefined);

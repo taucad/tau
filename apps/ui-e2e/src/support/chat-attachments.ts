@@ -29,8 +29,11 @@ export const editComposerSelector = 'article [aria-label="Edit your message"]';
 export const seededIdsStorageKey = 'tau:e2e:chat-attachments';
 /** The Anthropic-wire catalog row the gateway fixture speaks; it reads images and PDFs. */
 export const pdfModelName = 'Haiku 5.5';
-/** A catalog row that reads images but not PDFs (D20). */
-export const imageOnlyModelName = 'Gemini 3.1 Pro';
+/**
+ * An enabled catalog row that reads images but not PDFs (D20), with Low among its reasoning levels.
+ * Gemini 3.1 Pro reads PDFs since 267ac20ae1 (#1163).
+ */
+export const imageOnlyModelName = 'Grok 4.7';
 
 const fixtureRoot = '../desktop-e2e/fixtures';
 

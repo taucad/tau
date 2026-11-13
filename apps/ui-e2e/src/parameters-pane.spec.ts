@@ -3,6 +3,7 @@ import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { readProjectStorageState, readProjectTree } from '#support/project-storage-state.js';
+import type { StoredProjectConfig } from '#support/project-storage-state.js';
 
 const seedRoute = '/__e2e/project-file-tree';
 const seedProjectName = 'sgenoud/models file-tree e2e';
@@ -244,10 +245,17 @@ const fieldDiagnostic = async (input: Locator, surface?: target.TargetSurface): 
   return values.filter(Boolean).join(' ') || undefined;
 };
 
-const holdProjectMutationLock = async (projectId: string): Promise<string> => {
-  // MutationPipeline.mutationLockPaths includes the logical project root; withCrossTabLocks
-  // acquires sorted tokens. Native Web Locks share this namespace with the FM workers.
-  const name = `tau-fs-write:/projects/${projectId}`;
+const holdProjectMutationLock = async (config: StoredProjectConfig): Promise<string> => {
+  /* Since be2ffdbcca (#1581) a write under a physical mount holds no logical token: it holds its
+   * physical path exclusively, each physical ancestor up to the provider base path shared, and the
+   * project token shared (`MutationPipeline.lockClaims`). `withCrossTabLocks` acquires the sorted
+   * tokens one after another, and the provider base path sorts first, so holding it exclusively
+   * stops both tabs' writes at their first token. Native Web Locks share this namespace with the
+   * FM workers. */
+  if (config.backend !== 'opfs') {
+    throw new Error(`The stale-edit row holds the OPFS root token, but the project is on ${config.backend}.`);
+  }
+  const name = `tau-fs-write:opfs:origin:${config.providerBasePath}`;
   await target.evaluate(async (lockName) => {
     const acquired = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -465,7 +473,7 @@ test('rejects one of two stale browser-tab edits through the shared authority', 
       throw new Error('The shared mutation lock requires the actual project identity.');
     }
     const beforeWrites = await readProjectTree(config);
-    const lockName = await holdProjectMutationLock(config.projectId);
+    const lockName = await holdProjectMutationLock(config);
     await captureStaleParameterState('before-enter');
     await Promise.all([target.press(width, 'Enter'), target.press(width, 'Enter', 'secondary')]);
     await expect
@@ -628,8 +636,11 @@ test('uses inferred units through checked edits, scrubbing, reopen, reset, and d
   const geometryBeforeDisplayChange = await target.evaluateLocator(canvas, (element) =>
     (element as HTMLCanvasElement).toDataURL(),
   );
-  await target.click(selectors.getByRole('button', { name: /^Grid 1 mm, units and grid$/u }).first());
+  await target.click(selectors.getByRole('button', { name: 'Viewer settings' }).first());
+  await target.click(selectors.getByRole('menuitem', { name: 'Grid & units, 1 mm' }));
   await target.click(selectors.getByRole('menuitemradio', { name: /Centimeter\s+cm/u }));
+  // The first Escape steps back from the Grid & units sub-view; the second closes the menu.
+  await target.keyboardPress('Escape');
   await target.keyboardPress('Escape');
   const widthInCentimeters = selectors.getByLabelText('Input for Width').first();
   await expect.poll(async () => fieldNumber(widthInCentimeters)).toBe(2);

@@ -14,15 +14,27 @@ const hoisted = vi.hoisted(() => ({
   createOptions: [] as unknown[],
   reducedMotion: false,
   probeResult: false,
+  loseNextWebGpuCanvas: false,
+  canvasLost: false,
   observers: [] as Array<{ callback: IntersectionObserverCallback; element?: Element }>,
 }));
 
 vi.mock('#components/geometry/loader/metal-morph-controller.js', () => ({
   createMetalMorphLoader: vi.fn((options: unknown) => {
     hoisted.createOptions.push(options);
+    const { backend } = options as { backend?: string };
+    const losesCanvas = hoisted.loseNextWebGpuCanvas && backend === 'webgpu';
+    if (losesCanvas) {
+      // What createRenderer does for a WebGPU canvas the browser cannot present: report the loss, then reject.
+      hoisted.loseNextWebGpuCanvas = false;
+      hoisted.canvasLost = true;
+      hoisted.probeResult = false;
+    }
     // A plain object rather than `mock<T>()`: the proxy would wrap `ready` and break `await`.
     const controller: MetalMorphLoaderController = {
-      ready: Promise.resolve(),
+      ready: losesCanvas
+        ? Promise.reject(new Error('The WebGPU canvas could not present a frame: Device was destroyed.'))
+        : Promise.resolve(),
       play: vi.fn(),
       pause: vi.fn(),
       renderOnce: vi.fn(),
@@ -79,6 +91,7 @@ vi.mock('@taucad/viewer/graphics/graphics-backend', async (importOriginal) => {
   return {
     ...actual,
     probeWebGpuSupport: vi.fn(async () => hoisted.probeResult),
+    webGpuFallbackReason: vi.fn(() => (hoisted.canvasLost ? 'canvas-loss' : undefined)),
   };
 });
 
@@ -122,6 +135,8 @@ describe('MetalMorphLoader', () => {
     hoisted.observers.length = 0;
     hoisted.reducedMotion = false;
     hoisted.probeResult = false;
+    hoisted.loseNextWebGpuCanvas = false;
+    hoisted.canvasLost = false;
     vi.stubGlobal(
       'IntersectionObserver',
       class {
@@ -186,6 +201,43 @@ describe('MetalMorphLoader', () => {
       expect(image).toHaveAttribute('data-state', 'ready');
     });
     expect(hoisted.createOptions[0]).toMatchObject({ backend: 'webgpu' });
+  });
+
+  it('should start again on a fresh canvas on WebGL when its WebGPU canvas cannot present', async () => {
+    hoisted.probeResult = true;
+    hoisted.loseNextWebGpuCanvas = true;
+    const { MetalMorphLoader } = await import('#components/geometry/loader/metal-morph-loader.js');
+    const onStatusChange = vi.fn();
+
+    render(<MetalMorphLoader onStatusChange={onStatusChange} />);
+
+    const status = screen.getByRole('status');
+    await waitFor(() => {
+      expect(status).toHaveAttribute('data-state', 'ready');
+    });
+    expect(onStatusChange).not.toHaveBeenCalledWith('failed');
+    const [lost, started] = hoisted.createOptions as Array<{ backend: string; canvas: HTMLCanvasElement }>;
+    expect(lost).toMatchObject({ backend: 'webgpu' });
+    expect(started).toMatchObject({ backend: 'webgl' });
+    expect(started?.canvas).not.toBe(lost?.canvas);
+    expect(hoisted.controllers[0]?.dispose).toHaveBeenCalledOnce();
+    expect(status.querySelector('canvas')).toBe(started?.canvas);
+  });
+
+  it('should start a pooled renderer again on WebGL when its WebGPU canvas cannot present', async () => {
+    hoisted.probeResult = true;
+    hoisted.loseNextWebGpuCanvas = true;
+    const { MetalMorphLoader } = await import('#components/geometry/loader/metal-morph-loader.js');
+
+    render(<MetalMorphLoader poolKey='canvas-loss' />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveAttribute('data-state', 'ready');
+    });
+    expect(hoisted.createOptions.map((options) => (options as { backend: string }).backend)).toEqual([
+      'webgpu',
+      'webgl',
+    ]);
   });
 
   it('should play only while visible and pause with a still frame when it leaves the viewport', async () => {

@@ -184,6 +184,8 @@ catalog:
   '@xyflow/react': ^12.11.0
   axe-core: ^4.12.1
   better-auth: 1.7.7
+  # The version better-auth 1.7.7 resolves; api-auth tests its cookie parser against the boundary strip.
+  better-call: 1.4.0
   bowser: ^2.14.1
   cdn-resolve: ^2.1.2
   chrome-launcher: ^1.2.1

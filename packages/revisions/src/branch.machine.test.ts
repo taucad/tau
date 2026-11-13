@@ -707,6 +707,75 @@ describe('branchMachine', () => {
     parent.stop();
   });
 
+  /* I11: the Merged toast's Undo needs the entry the merge landed and the head it moved `<current>` from. */
+  it('carries what a merge moved the current branch from and to on its toast, for its Undo', async () => {
+    const { actor, promises, parent, emitted } = start();
+    promises.script('checkBranch', cleanCheck);
+    promises.script('merge', { output: { status: 'merged', revisionId: 'rev-13', before: 'rev-12' } });
+    promises.script('checkBranch', cleanCheck);
+    /* Already merged: nothing moved, so there is nothing to undo. */
+    promises.script('merge', { output: { status: 'merged', revisionId: 'rev-13', before: 'rev-13' } });
+
+    actor.send({ type: 'merge', requestId: 'req-1', branch: 'bracket-fillet' });
+    await flush();
+    actor.send({ type: 'merge', requestId: 'req-2', branch: 'bracket-fillet' });
+    await flush();
+
+    expect(emitted.filter((event) => event.type === 'toast.branch')).toEqual([
+      {
+        type: 'toast.branch',
+        requestId: 'req-1',
+        operation: 'merge',
+        branch: 'bracket-fillet',
+        revisionId: 'rev-13',
+        before: 'rev-12',
+      },
+      { type: 'toast.branch', requestId: 'req-2', operation: 'merge', branch: 'bracket-fillet' },
+    ]);
+    expect(actor.getSnapshot().context.merged).toBeUndefined();
+    actor.stop();
+    parent.stop();
+  });
+
+  /* M1: a merge that brings nothing is not *Merged*: no fact, no Merged toast, a refusal the page words as a warning. */
+  it('says a branch already in the current one is already in, emitting no merge', async () => {
+    const { actor, promises, parent, emitted } = start();
+    promises.script('checkBranch', cleanCheck);
+    promises.script('merge', { output: { status: 'upToDate', revisionId: 'rev-13' } });
+
+    actor.send({ type: 'merge', requestId: 'req-1', branch: 'bracket-fillet' });
+    await flush();
+
+    expect(emitted).toEqual([
+      {
+        type: 'toast.error',
+        requestId: 'req-1',
+        operation: 'merge',
+        branch: 'bracket-fillet',
+        message: 'bracket-fillet is already in main.',
+        code: 'MERGE_UP_TO_DATE',
+      },
+    ]);
+    expect(parent.events.some((event) => event.type === 'branchMerged')).toBe(false);
+    actor.stop();
+    parent.stop();
+  });
+
+  it('passes a merge refused over undone history on as its code', async () => {
+    const { actor, promises, parent, emitted } = start();
+    promises.script('checkBranch', cleanCheck);
+    promises.script('merge', {
+      error: Object.assign(new Error('Part of what these branches share was taken back.'), { code: 'MERGE_UNDONE' }),
+    });
+
+    actor.send({ type: 'merge', requestId: 'req-1', branch: 'bracket-fillet' });
+    await flush();
+
+    expect(emitted).toEqual([expect.objectContaining({ type: 'toast.error', code: 'MERGE_UNDONE' })]);
+    actor.stop();
+    parent.stop();
+  });
+
   it('emits mergeConflicted with the paths and moves no checkout', async () => {
     const { actor, promises, emitted } = start();
     promises.script('checkBranch', cleanCheck);

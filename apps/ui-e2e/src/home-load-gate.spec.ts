@@ -2,6 +2,7 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+<<<<<<< ours
 import type {
   HomeInspection,
   HomeLoadRecord,
@@ -22,6 +23,19 @@ import {
   firstDelayedRead,
   readWorkerReads,
 } from '#support/home-load-recorder.js';
+=======
+import type { HomeInspection, HomeLoadRecord } from '#support/home-load-recorder.js';
+import { inspectServerHtml, installHomeLoadRecorder, readHomeLoad } from '#support/home-load-recorder.js';
+import type { CloudLoadRecord, CloudStandInDelays } from '#support/cloud-stand-ins.js';
+import {
+  cloudDefectRow,
+  cloudLoadProbe,
+  cloudStandInCommands,
+  cloudStandInOwner,
+  readCloudLoadRecord,
+  recordCloudLoad,
+} from '#support/cloud-stand-ins.js';
+>>>>>>> theirs
 
 /**
  * R9 (home page loading audit): a load of Home is steady from its first frame. The target frame sequence's
@@ -175,6 +189,7 @@ test.each(
 );
 
 /*
+<<<<<<< ours
  * A0.10 (app state orchestration charter, D25): Home's loading defects for a returning visitor, frame by frame. Each
  * row forces its defect by answering a file-manager worker read late, so it is red on every run, and is written
  * `test.fails` so `main` stays green. The title names the defect; the failure names the frame and the node. The
@@ -301,5 +316,92 @@ knownDefect(
         `H5: after the chat listing was requested at ${since} ms, a sidebar project row moved between frames: ${moved.join(' | ')}`,
       ).toEqual([]);
     },
+=======
+ * N1 and H7 (lane A0.11), in the cloud-build tier only (`ui-e2e:test:e2e:cloud-load`): the self-host build has no
+ * billing fence, so these cases cannot show the defect there. The stand-ins sign the owner in with no API
+ * (`#support/cloud-stand-ins.js`). Each is an expected failure until side lane N1 flips it, by setting its
+ * `cloudDefectRow` `expectedFailure` to `false`. Each is a plain test: only its defect assertion's failure is
+ * recorded as the standing defect, and any other fault, or that assertion passing, fails the row.
+ */
+const cloud = cloudStandInCommands(target.commands);
+const cloudLoadTier = await cloud.uiIsCloudLoadTier();
+const cloudRow = test.runIf(cloudLoadTier);
+/** How long `get-session` is held for the wrapper case, so the shell is on screen before the session resolves. */
+const sessionHeld = 2000;
+
+/** Open Home as the signed-in stand-in owner with the cloud recorder; `release` runs before the session is awaited. */
+const loadSignedInHome = async (
+  label: string,
+  delays: CloudStandInDelays,
+  release?: () => Promise<void>,
+): Promise<CloudLoadRecord> => {
+  await target.setViewport(viewports.wide);
+  await cloud.uiInstallCloudStandIns(delays);
+  await target.addInitScript(recordCloudLoad, cloudLoadProbe);
+  await target.navigate('/');
+  await release?.();
+  await target.waitFor((name) => document.body.textContent.includes(name), cloudStandInOwner.name, {
+    timeout: 60_000,
+  });
+  await target.expectVisible(richComposer, 60_000);
+  await target.delay(settleWindow);
+  const record = await target.evaluate(readCloudLoadRecord);
+  await target.writeArtifact(`home-load-gate/cloud-${label}.json`, `${JSON.stringify(record, null, 2)}\n`);
+  return record;
+};
+
+cloudDefectRow(
+  { api: cloudRow, expectedFailure: false, title: 'N1: removes no child of body on a signed-in load of Home' },
+  async (defect) => {
+    const record = await loadSignedInHome('n1-body', {});
+    await defect(() => {
+      expect(record.bodyChildRemovals, 'N1: these children of body were removed').toEqual([]);
+    });
+  },
+);
+
+cloudDefectRow(
+  {
+    api: cloudRow,
+    expectedFailure: false,
+    title: `N1: keeps the sidebar wrapper on Home while get-session is held ${String(sessionHeld)} ms`,
+  },
+  async (defect) => {
+    const record = await loadSignedInHome('n1-wrapper', { session: sessionHeld });
+    await defect(() => {
+      expect(
+        record.wrapperRemovals,
+        `N1: the sidebar wrapper was removed at these times (ms); get-session was answered at ${JSON.stringify(record.sessionAnsweredAt)} ms`,
+      ).toEqual([]);
+    });
+  },
+);
+
+/* H7 is forced by holding the session until the rich composer has upgraded, not by a fixed delay: the session's
+   answer then always reaches a page whose composer is already rich. */
+cloudDefectRow(
+  {
+    api: cloudRow,
+    expectedFailure: false,
+    title:
+      'H7: never puts the plain textarea back after the rich composer upgraded, get-session held until the upgrade',
+  },
+  async (defect) => {
+    const record = await loadSignedInHome('h7-composer', { session: 'held' }, async () => {
+      await target.expectVisible(richComposer, 60_000);
+      await cloud.uiReleaseCloudStandIn('session');
+    });
+    expect(record.composerUpgradedAt, 'the rich composer never upgraded').toBeDefined();
+    expect(
+      record.sessionAnsweredAt.every((answered) => answered > (record.composerUpgradedAt ?? Infinity)),
+      `get-session was answered (${JSON.stringify(record.sessionAnsweredAt)} ms) before the upgrade`,
+    ).toBe(true);
+    await defect(() => {
+      expect(
+        record.composerReplacements,
+        `H7: the plain textarea replaced the rich composer (upgraded at ${String(record.composerUpgradedAt)} ms) at these times (ms)`,
+      ).toEqual([]);
+    });
+>>>>>>> theirs
   },
 );

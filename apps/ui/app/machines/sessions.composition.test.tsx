@@ -205,19 +205,24 @@ const {
   };
 });
 
+/* A0.2: a one-project device. Off by default, so the module registry below keeps the browser budget. */
+const deviceMemory = vi.hoisted(() => ({ constrained: false }));
+vi.mock('@taucad/ui-core/lib/device-memory-class', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  isMemoryConstrainedDevice: () => deviceMemory.constrained,
+}));
+
 workerRef.current = mock<Worker>({
   postMessage: (frame: { type: string; projectId?: string }) => {
     workerFrames.push(frame);
   },
 });
 
-/* The provider mirrors the app's shared worker into the store; in jsdom there
- * is no `SharedWorkerContext`, so the one hook it reads is the seam to stand
- * in for. Compute admission is then the real path, on a recording worker. */
+/* The registry reads the shared worker through its composition, as the runtime gives it the file-manager host's; the
+ * rows hand it this recording worker, so compute admission is the real path. */
 vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({ usePublishCloudProjectPreview: () => undefined }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useSharedFileManagerWorker: () => workerRef.current,
   SharedWorkerGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   /* This subtree *is* the project's resources: mounted means they exist. */
   HomeFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
@@ -495,7 +500,7 @@ const openChatRoot = (projectId: string, chatId: string) => {
 };
 
 /** The registry the rows share, composed as the app's root composes its own (MC-R4). */
-const sessionsActor = createSessionsActor().start();
+const sessionsActor = createSessionsActor({ sharedWorker: () => workerRef.current }).start();
 
 const emitted: SessionsMachineEmitted[] = [];
 
@@ -1566,6 +1571,190 @@ describe('sessions composition — the workbench follows the selection (S48(14))
   });
 });
 
+/*
+ * A0.2: the registry steps `ProjectFocus` assumes on a one-project device (B-08), and the only check of
+ * them: no conformance test is claimed for `sessions.machine`. Leaving a project closes it through the
+ * registry — the memory release the route binds (`project-route.tsx` 275 to 276) for a clean project, the
+ * switch close (`sessions.machine.ts` 396) for one the release refused — and the single `pendingOpen`
+ * slot opens the next project only once the close has finished. The route never sends `close` (I3).
+ */
+describe('sessions composition — a one-project device (A0.2 item 6, B-08)', () => {
+  type OneProjectRegistry = Readonly<{
+    actor: ReturnType<typeof createSessionsActor>;
+    /** Every event the registry root processed, by type. */
+    received: string[];
+    /** Every live set the registry announced. */
+    liveSets: Array<readonly string[]>;
+    budgetRefusals: string[];
+  }>;
+
+  const createOneProjectRegistry = (): OneProjectRegistry => {
+    const received: string[] = [];
+    const liveSets: Array<readonly string[]> = [];
+    const budgetRefusals: string[] = [];
+    const root: { current: ReturnType<typeof createSessionsActor> | undefined } = { current: undefined };
+    /* A child never sends `close` to the registry, so a `close` the root processes came from the app. */
+    const actor = createSessionsActor({
+      sharedWorker: () => workerRef.current,
+      inspect: (inspection) => {
+        if (
+          inspection.type === '@xstate.transition' &&
+          root.current !== undefined &&
+          inspection.actorRef === root.current
+        ) {
+          received.push(inspection.eventType);
+        }
+      },
+    });
+    root.current = actor;
+    actor.on('liveSetChanged', (event) => liveSets.push(event.projectIds));
+    actor.on('budgetRefused', (event) => budgetRefusals.push(event.projectId));
+    actor.start();
+    started.push(actor);
+    return { actor, received, liveSets, budgetRefusals };
+  };
+
+  const renderOn = async (
+    registry: OneProjectRegistry,
+    initialEntry: string,
+  ): Promise<{ navigate: (target: string) => Promise<void>; unmount: () => void }> => {
+    const quiet = (): boolean =>
+      Object.values(registry.actor.getSnapshot().context.refs).every((ref) => {
+        const snapshot = ref.getSnapshot();
+        return !snapshot.matches('opening') && !snapshot.matches('closing');
+      });
+    const view = render(
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <NavigationProbe />
+        <QueryClientProvider client={queryClient}>
+          <SessionsProvider actor={registry.actor}>
+            <routeModule.ProjectSessionsHost>
+              <Routes>
+                <Route path='/w/:workspace/:project' element={<RouteStateProbe />} />
+              </Routes>
+            </routeModule.ProjectSessionsHost>
+          </SessionsProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    unmounts.push(view.unmount);
+    await settle(quiet);
+    return {
+      navigate: async (target) => {
+        await act(async () => {
+          await navigateRoute?.(target);
+        });
+        await settle(quiet);
+        await settle(quiet);
+      },
+      unmount: view.unmount,
+    };
+  };
+
+  const liveOn = (registry: OneProjectRegistry): readonly string[] =>
+    Object.keys(registry.actor.getSnapshot().context.refs);
+
+  /* Torn down whether or not a row's assertions pass. */
+  const started: Array<ReturnType<typeof createSessionsActor>> = [];
+  const unmounts: Array<() => void> = [];
+  let restoreSpies: (() => void) | undefined;
+
+  beforeEach(() => {
+    deviceMemory.constrained = true;
+  });
+
+  afterEach(() => {
+    restoreSpies?.();
+    restoreSpies = undefined;
+    for (const unmount of unmounts.splice(0)) {
+      unmount();
+    }
+    for (const actor of started.splice(0)) {
+      actor.stop();
+    }
+    deviceMemory.constrained = false;
+  });
+
+  it('should close a clean project being left through the memory release, then open the next', async () => {
+    const registry = createOneProjectRegistry();
+    const view = await renderOn(registry, '/w/workspace/one-clean-a');
+    expect(liveOn(registry)).toEqual(['one-clean-a']);
+    mounted.length = 0;
+
+    await view.navigate('/w/workspace/one-clean-b');
+
+    expect(liveOn(registry)).toEqual(['one-clean-b']);
+    expect(registry.actor.getSnapshot().context.closed['one-clean-a']?.reason).toBe('memory');
+    expect(registry.liveSets.every((projectIds) => projectIds.length <= 1)).toBe(true);
+    expect(mounted).toEqual(['unmount:one-clean-a', 'mount:one-clean-b']);
+    expect(registry.received).toEqual(expect.arrayContaining(['open', 'releaseMemory']));
+    expect(registry.received).not.toContain('close');
+    expect(screen.getByTestId('route-state')).toHaveTextContent('editor');
+  });
+
+  it('should close an unpushed project being left as the person’s close, flush it, then open the next from the pending slot', async () => {
+    const registry = createOneProjectRegistry();
+    const view = await renderOn(registry, '/w/workspace/one-unpushed-a');
+    await act(async () => {
+      revision.setSync('checking');
+      await Promise.resolve();
+    });
+    expect(registry.actor.getSnapshot().context.status['one-unpushed-a']?.pushed).toBe(false);
+    mounted.length = 0;
+    serviceCalls.length = 0;
+    /* What had mounted when the close took its cut. */
+    let mountedAtCut: readonly string[] | undefined;
+    const push = serviceCalls.push.bind(serviceCalls);
+    const recordCut = vi.spyOn(serviceCalls, 'push').mockImplementation((...calls: string[]) => {
+      if (calls.includes('quiesce')) {
+        mountedAtCut ??= [...mounted];
+      }
+      return push(...calls);
+    });
+
+    restoreSpies = () => {
+      recordCut.mockRestore();
+    };
+
+    await view.navigate('/w/workspace/one-unpushed-b');
+    restoreSpies();
+    restoreSpies = undefined;
+
+    /* The memory release refused the unpushed project; the open then took the switch close. */
+    expect(registry.actor.getSnapshot().context.closed['one-unpushed-a']?.reason).toBe('user');
+    expect(liveOn(registry)).toEqual(['one-unpushed-b']);
+    expect(registry.actor.getSnapshot().context.pendingOpen).toBeUndefined();
+    expect(registry.liveSets.every((projectIds) => projectIds.length <= 1)).toBe(true);
+    /* The close took its cut before the next project's subtree mounted. */
+    expect(serviceCalls).toContain('quiesce');
+    expect(mountedAtCut).toEqual([]);
+    expect(mounted).toEqual(['unmount:one-unpushed-a', 'mount:one-unpushed-b']);
+    expect(registry.received).toContain('open');
+    expect(registry.received).not.toContain('close');
+  });
+
+  it('should keep a running project being left and refuse the next open, holding it in the pending slot', async () => {
+    const registry = createOneProjectRegistry();
+    const view = await renderOn(registry, '/w/workspace/one-running-a');
+    await act(async () => {
+      registry.actor.getSnapshot().context.refs['one-running-a']?.send({
+        type: 'projectedRunsChanged',
+        runs: ['chat-run'],
+        stoppableRuns: ['chat-run'],
+      });
+      await Promise.resolve();
+    });
+
+    await view.navigate('/w/workspace/one-running-b');
+
+    expect(liveOn(registry)).toEqual(['one-running-a']);
+    expect(registry.budgetRefusals).toEqual(['one-running-b']);
+    expect(registry.actor.getSnapshot().context.pendingOpen).toBe('one-running-b');
+    expect(registry.actor.getSnapshot().context.refusals['one-running-a']).toBe('running');
+    expect(registry.received).not.toContain('close');
+  });
+});
+
 /**
  * S48(17), the renderer half — the quit hold, painted and cut short.
  *
@@ -1640,7 +1829,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
       vi.resetModules();
       const freshSessions = await import('#hooks/use-sessions.js');
       const freshStore = await import('#services/sessions-store.js');
-      const freshActor = freshStore.createSessionsActor().start();
+      const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
       const view = render(
         <QueryClientProvider client={queryClient}>
           <freshSessions.SessionsProvider actor={freshActor}>
@@ -1713,7 +1902,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     vi.resetModules();
     const freshSessions = await import('#hooks/use-sessions.js');
     const freshStore = await import('#services/sessions-store.js');
-    const freshActor = freshStore.createSessionsActor().start();
+    const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
 
     const view = render(
       <QueryClientProvider client={queryClient}>
@@ -1766,12 +1955,19 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
     vi.resetModules();
     const freshSessions = await import('#hooks/use-sessions.js');
+    const freshRuntime = await import('#runtime/app-runtime.js');
+    const freshRuntimeProvider = await import('#runtime/app-runtime-provider.js');
 
+    /* The registry is the app runtime's (A1a): the provider reads it, and the runtime's boundary starts it. No page
+     * listeners: this row is about the quit ask. */
+    const runtime = freshRuntime.createAppRuntime({ environment: () => undefined });
     const view = render(
       <QueryClientProvider client={queryClient}>
-        <freshSessions.SessionsProvider>
-          <span>app</span>
-        </freshSessions.SessionsProvider>
+        <freshRuntimeProvider.AppRuntimeProvider runtime={runtime}>
+          <freshSessions.SessionsProvider>
+            <span>app</span>
+          </freshSessions.SessionsProvider>
+        </freshRuntimeProvider.AppRuntimeProvider>
       </QueryClientProvider>,
     );
     await settle();
@@ -1780,6 +1976,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     expect(answers).toEqual(['quiesced']);
     view.unmount();
     expect(ready).toBe(false);
+    runtime.stop();
   });
 
   it('paints what is being waited for, and Quit anyway answers main', async () => {
@@ -1803,7 +2000,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     vi.resetModules();
     const freshSessions = await import('#hooks/use-sessions.js');
     const freshStore = await import('#services/sessions-store.js');
-    const freshActor = freshStore.createSessionsActor().start();
+    const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
 
     const view = render(
       <QueryClientProvider client={queryClient}>
@@ -1884,7 +2081,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     vi.resetModules();
     const freshSessions = await import('#hooks/use-sessions.js');
     const freshStore = await import('#services/sessions-store.js');
-    const freshActor = freshStore.createSessionsActor().start();
+    const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
     const view = render(
       <QueryClientProvider client={queryClient}>
         <freshSessions.SessionsProvider actor={freshActor}>

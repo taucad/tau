@@ -345,6 +345,39 @@ describe('createRenderer showcase preset', () => {
     hoisted.initializationError = undefined;
     hoisted.nativeBackend = true;
     hoisted.destroyDevice.mockClear();
+    hoisted.presentationDestroysDevice = false;
+    hoisted.presentationThrows = false;
+    hoisted.workDoneStalls = false;
+    hoisted.presentedFrames = 0;
+  });
+
+  it('should present one frame on a presented WebGPU showcase canvas, and none on WebGL, offscreen or readback-only', async () => {
+    const { createRenderer } = await import('#graphics/three/renderer.js');
+    // The jsdom environment has no `OffscreenCanvas`; anything that is not an `HTMLCanvasElement` stands in for one.
+    const offscreenCanvasStub = { width: 1, height: 1 } as unknown as OffscreenCanvas;
+    await createRenderer('showcase', 'webgpu', { canvas: document.createElement('canvas'), presented: true });
+    expect(hoisted.presentedFrames).toBe(1);
+    await createRenderer('showcase', 'webgl', { canvas: document.createElement('canvas'), presented: true });
+    await createRenderer('showcase', 'webgpu', { canvas: offscreenCanvasStub, presented: true });
+    await createRenderer('showcase', 'webgpu', document.createElement('canvas'));
+    expect(hoisted.presentedFrames).toBe(1);
+    expect(hoisted.destroyDevice).not.toHaveBeenCalled();
+  });
+
+  it('should reject a presented WebGPU showcase canvas that cannot present and report the canvas loss', async () => {
+    const { createRenderer } = await import('#graphics/three/renderer.js');
+    const { webGpuFallbackReason } = await import('#graphics/graphics-backend.js');
+    hoisted.presentationDestroysDevice = true;
+    const creation = createRenderer('showcase', 'webgpu', {
+      canvas: document.createElement('canvas'),
+      powerPreference: 'low-power',
+      presented: true,
+    });
+    await expect(creation).rejects.toBeInstanceOf(WebGpuInitializationError);
+    await expect(creation).rejects.toThrow('The WebGPU canvas could not present a frame: Device was destroyed.');
+    expect(hoisted.createdRenderers[0]?.dispose).toHaveBeenCalledOnce();
+    expect(hoisted.destroyDevice).toHaveBeenCalledOnce();
+    expect(webGpuFallbackReason()).toBe('canvas-loss');
   });
 
   it('should build the node renderer on the WebGPU backend without forcing WebGL', async () => {

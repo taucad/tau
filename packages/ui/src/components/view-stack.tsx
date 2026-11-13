@@ -141,18 +141,18 @@ export const stepBackOnEmptySearch =
 export const viewStackBackRowClass = cn(menuItemVariants({ highlight: 'focus' }), menuViewBackClass);
 
 /**
- * The content of a Back row: a ChevronLeft and the title of the view it closes. Hosts wrap it in their own row
- * element (a button, a menu item, a command item), so the row keeps the host's role and focus model.
+ * The content of a Back row: a ChevronLeft and "Back". Hosts wrap it in their own row element (a button, a menu item, a
+ * command item), so the row keeps the host's role and focus model, and name the row `Back to <parent>` for assistive
+ * technology. The view's own name belongs to its group or heading, not to the Back row.
  *
- * @param props - The open view's title.
  * @returns The row's content.
  * @public
  */
-export function ViewStackBackContent({ title }: { readonly title: React.ReactNode }): React.JSX.Element {
+export function ViewStackBackContent(): React.JSX.Element {
   return (
     <>
       <ChevronLeft aria-hidden='true' className='size-3.5 shrink-0' />
-      <span className='truncate'>{title}</span>
+      <span className='truncate'>Back</span>
     </>
   );
 }
@@ -160,18 +160,16 @@ export function ViewStackBackContent({ title }: { readonly title: React.ReactNod
 /**
  * A plain Back row for a host whose rows are buttons (a popover or drawer body).
  *
- * @param props - The open view's title, the parent's name for assistive technology, and the step back.
+ * @param props - The parent's name for assistive technology, and the step back.
  * @returns The Back row.
  * @public
  */
 export function ViewStackBack({
-  title,
   parentLabel,
   onBack,
   className,
   ...properties
-}: Omit<React.ComponentProps<'button'>, 'title' | 'onClick'> & {
-  readonly title: React.ReactNode;
+}: Omit<React.ComponentProps<'button'>, 'onClick'> & {
   /** Names where Back goes, as `Back to <parentLabel>`. */
   readonly parentLabel: string;
   readonly onBack: () => void;
@@ -185,7 +183,7 @@ export function ViewStackBack({
       onClick={onBack}
       {...properties}
     >
-      <ViewStackBackContent title={title} />
+      <ViewStackBackContent />
     </button>
   );
 }

@@ -203,22 +203,123 @@ describe('RevisionRestore', () => {
     });
   });
 
-  /* Merge acts at once but has no Undo yet (D3): the toast says what happened and nothing more. */
-  it('says a merge landed, with no dialog before it', () => {
+  /* Merge acts at once and offers Undo (I11): one more entry with the files from before the merge. */
+  it('says a merge landed, with no dialog before it, and its Undo returns the branch to its head before the merge', () => {
+    render(<RevisionRestore />);
+
+    emit({ type: 'branch', operation: 'merge', branch: 'enclosure-v2', revisionId: 'rev-merge', before: 'rev-12' });
+
+    const [title, options] = toastSuccess.mock.calls[0] ?? [];
+    expect(title).toBe('Merged enclosure-v2');
+    pressUndo(options);
+    expect(revisionStatusHarness.commands.undoMerge).toHaveBeenCalledWith('rev-merge', 'rev-12');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
+  it('offers no Undo on a merge that moved nothing, and says the merge’s Undo landed without a second one', () => {
     render(<RevisionRestore />);
 
     emit({ type: 'branch', operation: 'merge', branch: 'enclosure-v2' });
+    emit({ type: 'restored', mode: 'undoMerge', revisionId: 'rev-12', revisionNumber: 12 });
 
-    expect(toastSuccess.mock.calls).toEqual([['Merged enclosure-v2']]);
+    expect(toastSuccess.mock.calls).toEqual([['Merged enclosure-v2', undefined], ['Undid the merge']]);
   });
 
-  /* A discarded branch reads as closed, the branch menu's word for it. */
-  it('says a discarded branch was closed', () => {
+  /* The lost race: the branch moved since the merge, so its Undo wrote nothing and says why. */
+  it('says a merge’s Undo refused over a newer entry, as a warning that lost nothing', () => {
+    render(<RevisionRestore />);
+
+    emit({
+      type: 'error',
+      subject: 'restore',
+      code: 'UNDO_MERGE_MOVED',
+      message: 'This branch changed after the merge, so the merge can’t be undone here.',
+    });
+
+    expect(toastWarning).toHaveBeenCalledWith('That merge can’t be undone', {
+      description:
+        'This branch changed after the merge, so the merge can’t be undone. Restore an earlier point instead.',
+    });
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  /* M1: a merge that brought nothing never says *Merged*; nor does one refused over undone history. */
+  it('says a branch already in is already in, and a merge over undone history merged nothing, as warnings', () => {
+    render(<RevisionRestore />);
+
+    emit({
+      type: 'error',
+      subject: 'branch',
+      operation: 'merge',
+      branch: 'enclosure-v2',
+      code: 'MERGE_UP_TO_DATE',
+      message: 'enclosure-v2 is already in main.',
+    });
+    emit({
+      type: 'error',
+      subject: 'branch',
+      operation: 'merge',
+      branch: 'enclosure-v2',
+      code: 'MERGE_UNDONE',
+      message: 'Part of what these branches share was taken back by an Undo or a Restore, so nothing was merged.',
+    });
+
+    expect(toastWarning.mock.calls).toEqual([
+      ['Nothing to merge', { description: 'Everything on enclosure-v2 is already here. Nothing changed.' }],
+      [
+        'Nothing was merged',
+        {
+          description:
+            'An Undo or a Restore took back part of what these branches share, so merging now would leave work out. Nothing changed. To bring the work back, open History and restore the entry that has it.',
+        },
+      ],
+    ]);
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  /* A discarded branch reads as closed, the branch menu's word for it; its Undo reopens it at the head it kept. */
+  it('says a discarded branch was closed, and its Undo reopens it at its head', async () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branches: [
+        ...revisionStatusHarness.status.branches,
+        { name: 'enclosure-v2', head: 'rev-8', checkoutId: undefined, checkoutRoot: undefined, leaseChatIds: [] },
+      ],
+    };
     render(<RevisionRestore />);
 
     emit({ type: 'branch', operation: 'discard', branch: 'enclosure-v2' });
 
-    expect(toastSuccess.mock.calls).toEqual([['Closed enclosure-v2']]);
+    const [title, options] = toastSuccess.mock.calls[0] ?? [];
+    expect(title).toBe('Closed enclosure-v2');
+    pressUndo(options);
+    expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('enclosure-v2', 'rev-8');
+    await Promise.resolve();
+
+    /* The reopen settles as a create; it reads as what it was. A later New branch reads as created. */
+    emit({ type: 'branch', operation: 'create', branch: 'enclosure-v2' });
+    emit({ type: 'branch', operation: 'create', branch: 'enclosure-v2' });
+    expect(toastSuccess.mock.calls.slice(1)).toEqual([['Reopened enclosure-v2'], ['Created enclosure-v2']]);
+  });
+
+  it('clears a refused reopen, so the next New branch of that name reads as created', async () => {
+    revisionStatusHarness.commands.createBranch.mockRejectedValueOnce(
+      Object.assign(new Error('taken'), { code: 'CHECKOUT_CONFLICT' }),
+    );
+    render(<RevisionRestore />);
+
+    emit({ type: 'branch', operation: 'discard', branch: 'enclosure-v2' });
+    pressUndo(toastSuccess.mock.calls[0]?.[1]);
+    await waitFor(() => {
+      expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('enclosure-v2', undefined);
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    emit({ type: 'branch', operation: 'create', branch: 'enclosure-v2' });
+
+    expect(toastSuccess.mock.calls.at(-1)).toEqual(['Created enclosure-v2']);
   });
 
   /* V5 A6, TS-R17: a save another run's lease held names that run, never "Nothing to save". */

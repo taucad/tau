@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { bearer } from 'better-auth/plugins';
+import { createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
 import { cliDeviceAuthorization } from '#config/cli-device-authorization.js';
 
 type DeviceRow = { deviceCode: string; expiresAt: Date; lastPolledAt?: Date; status: string };
@@ -138,4 +139,76 @@ describe('CLI browser-approved sessions', () => {
     row.expiresAt = new Date(0);
     expect(await jsonOf(redeem(expired.device_code))).toMatchObject({ error: 'expired_token' });
   });
+});
+
+describe('CLI approval against a cached session snapshot', () => {
+  const cachedStore: Record<string, unknown[]> = {
+    user: [],
+    session: [],
+    account: [],
+    verification: [],
+    deviceCode: [],
+  };
+  const create = (prepopulate: boolean) =>
+    betterAuth({
+      baseURL: 'https://api.example.test',
+      basePath: '/v1/auth',
+      secret: 'cli-auth-snapshot-test-secret-at-least-32',
+      database: memoryAdapter(cachedStore),
+      emailAndPassword: { enabled: true },
+      rateLimit: { enabled: false },
+      session: { cookieCache: { enabled: true, maxAge: 60, strategy: 'jwe' } },
+      plugins: [cliDeviceAuthorization('https://app.example.test'), bearer({ requireSignature: true })],
+      hooks: prepopulate
+        ? {
+            // A hook that reads the session first leaves the cached session on the context.
+            before: createAuthMiddleware(async (context) => {
+              if (context.path === '/device/approve') {
+                await getSessionFromCtx(context);
+              }
+            }),
+          }
+        : {},
+    });
+
+  it.each([false, true])(
+    'should refuse approval with a valid snapshot once the session row is gone (context pre-populated: %s)',
+    async (prepopulate) => {
+      for (const rows of Object.values(cachedStore)) {
+        rows.length = 0;
+      }
+      const cached = create(prepopulate);
+      const signUp = await cached.handler(
+        new Request('https://api.example.test/v1/auth/sign-up/email', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email: 'cached@example.test', password: 'test-password-strong-1234', name: 'Cached' }),
+        }),
+      );
+      const cookie = signUp.headers
+        .getSetCookie()
+        .map((entry) => entry.split(';')[0])
+        .join('; ');
+      expect(cookie).toContain('session_data=');
+      const code = await cached.handler(
+        new Request('https://api.example.test/v1/auth/device/code', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ client_id: 'tau-cli' }),
+        }),
+      );
+      const { user_code: userCode } = (await code.json()) as { user_code: string };
+      cachedStore['session']!.length = 0;
+
+      const approve = await cached.handler(
+        new Request('https://api.example.test/v1/auth/device/approve', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', cookie, origin: 'https://api.example.test' },
+          body: JSON.stringify({ userCode }),
+        }),
+      );
+
+      expect(approve.status).toBe(401);
+    },
+  );
 });

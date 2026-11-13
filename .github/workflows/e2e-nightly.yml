@@ -306,6 +306,45 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # The cloud-build load tier (app state orchestration A0.11): the loading rows a self-host
+  # build cannot show, on the cloud UI variant with stand-ins answering the API by
+  # interception, so it needs no API, database or secret. Each row pins a known defect: it
+  # is a plain test that passes while its defect assertion fails, and records that failure
+  # as a notice annotation naming the defect (`cloudDefectRow`). The job goes red when an
+  # assertion passes (its defect fixed without flipping the row) or when anything else in a
+  # row faults: a load, a precondition, the timeout, setup or teardown.
+  cloud-load:
+    name: Cloud-build load tier
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: [plan]
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    steps:
+      - *checkout
+      - *setup-nx
+
+      - name: Install Chromium for Vitest Browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run the cloud-build load tier
+        timeout-minutes: 45
+        env:
+          TAU_E2E_WEBGPU_PROFILE: software
+        run: xvfb-run --auto-servernum pnpm nx run-many -t test:e2e:cloud-load --parallel=1 --outputStyle=stream
+
+      - *root-hygiene
+
+      - name: Upload Vitest Browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vitest-browser-diagnostics-cloud-load
+          path: out/test-results/vitest-browser
+          if-no-files-found: ignore
+          retention-days: 7
+
   # Consumer parity (charter D33, W22, gate T16): one row per consumer of native dependency
   # resolution, in this run's summary. It runs no suite: each row reads the latest conclusion of
   # the jobs that already run its oracles, this run's for the nightly's own (or the latest nightly

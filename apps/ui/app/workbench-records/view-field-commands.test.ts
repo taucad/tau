@@ -61,7 +61,6 @@ const ports = {
   addException: (projectId: string, id: string, leaf: ViewFieldPath): SectionWriteResult =>
     addResult ?? viewExceptions.add(projectId, id, leaf),
   removeException: viewExceptions.remove,
-  clearExceptions: viewExceptions.clearView,
 } satisfies ViewFieldCommandPorts;
 const commands = createViewFieldCommands(ports);
 
@@ -149,18 +148,6 @@ describe('view field commands', () => {
     expect(exceptions()).toEqual([]);
   });
 
-  it('resets every leaf of a view and clears its exceptions', async () => {
-    defaults = { 'display.grid': false };
-    await commands.setViewField(view, 'display.grid', true);
-    await commands.setViewField(view, 'fieldOfView', 0);
-    await commands.setViewField(view, 'grid.unit', 'cm');
-    await commands.setViewField(view, 'upDirection', 'y');
-    expect(await commands.resetView(view)).toBe(true);
-    const reset = record();
-    expect([reset.fieldOfView, reset.upDirection, reset.grid.unit, reset.display.grid]).toEqual([60, 'z', 'mm', true]);
-    expect(exceptions()).toEqual([]);
-  });
-
   it('creates the record for a missing view with the entry it names', async () => {
     content.clear();
     expect(await commands.setViewField(view, 'display.axes', false)).toBe(true);
@@ -185,7 +172,6 @@ describe('view field commands', () => {
     await commands.setViewField(view, 'display.grid', true);
     content.set(path, encoder.encode('{"version":2}'));
     expect(await commands.resetViewField(view, 'display.grid')).toBe(false);
-    expect(await commands.resetView(view)).toBe(false);
     expect(exceptions()).toEqual(['display.grid']);
   });
 

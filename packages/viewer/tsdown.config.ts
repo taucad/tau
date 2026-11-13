@@ -33,7 +33,6 @@ const baseConfig: UserConfig = {
     'src/cad/cad-viewer.tsx',
     'src/cad/fit-view-control.tsx',
     'src/cad/fullscreen-view-control.tsx',
-    'src/cad/grid-control.tsx',
     'src/cad/kernel-settings.tsx',
     'src/cad/material-swatch.tsx',
     'src/cad/measure-control.tsx',

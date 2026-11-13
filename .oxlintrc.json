@@ -105,6 +105,7 @@
     "tau-lint/require-ignore-description": "error",
     "tau-lint/no-literal-const-assertion": "error",
     "tau-lint/no-useless-catch-unknown": "error",
+    "tau-lint/no-auth-instance-outside-api-auth": "error",
     "tau-lint/validate-jsdoc-codeblocks": "error",
     "tau-lint/require-public-export-jsdoc": "warn",
     "tau-lint/no-consecutive-jsdoc-blank-lines": "warn",

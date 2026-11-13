@@ -13,6 +13,7 @@ import type { Project, ProjectManifestParseIssue } from '@taucad/types';
 import { assertRootedPath, normalizePath } from '@taucad/utils/path';
 import { classify } from '@taucad/filesystem/path-registry';
 import { isBrowser } from '#constants/browser.constants.js';
+import { reportUiError } from '#lib/error-reporting.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { GraphicsOwnedSettings, GraphicsViewSettings } from '@taucad/viewer/graphics/graphics-settings';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
@@ -88,6 +89,11 @@ export type ProjectContext = {
   /** The main entry path from project.assets.main.entryPath. Set after project loads. */
   mainEntryPath: string;
   logRef: ActorRefFrom<typeof logMachine>;
+  /**
+   * The first defect the root `onError` caught (MC-R12, charter D23): a child that failed with no handler of its own,
+   * an effect that threw, or a send to no child. Later defects are usually its consequences, so they do not replace it.
+   */
+  fault: string | undefined;
 };
 
 /**
@@ -242,7 +248,115 @@ type ProjectEventInternal =
     }
   | { type: 'flushNow' };
 
-type ProjectEvent = ProjectEventInternal | ProjectRetrievedEvent;
+/**
+ * Every event the project machine accepts, its own and the load's report.
+ *
+ * @public
+ */
+export type ProjectEvent = ProjectEventInternal | ProjectRetrievedEvent;
+
+/**
+ * The project machine's public alphabet: every {@link ProjectEvent} type, in the union's order. The totality test
+ * samples each one and fails when this list and the union differ.
+ *
+ * @public
+ */
+export const projectEventTypes = [
+  'reloadProject',
+  'closeRuntime',
+  'geometryUnit.runtimeClosed',
+  'manifestIssueObserved',
+  'repairManifest',
+  'updateName',
+  'updateDescription',
+  'updateTags',
+  'loadModel',
+  'setMainFile',
+  'createGeometryUnit',
+  'setViewerGeometryDemand',
+  'claimGeometryUnit',
+  'releaseGeometryUnit',
+  'geometryUnit.kernelRefused',
+  'openInViewer',
+  'parkRuntime',
+  'resumeRuntime',
+  'destroyGeometryUnit',
+  'createViewGraphics',
+  'destroyViewGraphics',
+  'viewPresentationChanged',
+  'modelComponentFocusObserved',
+  'fileMoved',
+  'fileDeleted',
+  'directoryDeleted',
+  'projectFileActivity',
+  'flushNow',
+  'projectRetrieved',
+] as const satisfies ReadonlyArray<ProjectEvent['type']>;
+
+/** The states outside `ready` that a person or a participant can still reach with a `ready` verb. */
+const projectNotReadyStates = ['idle', 'loading', 'error', 'runtimeClosing', 'runtimeClosed', 'runtimeCloseFailed'];
+const projectRuntimeCloseStates = ['runtimeClosing', 'runtimeClosed', 'runtimeCloseFailed'];
+
+/** The verbs only `ready` answers: manifest, metadata, unit, viewer-demand, participant and flush events. */
+const projectReadyOnlyEvents = [
+  'manifestIssueObserved',
+  'repairManifest',
+  'updateName',
+  'updateDescription',
+  'updateTags',
+  'loadModel',
+  'setMainFile',
+  'createGeometryUnit',
+  'setViewerGeometryDemand',
+  'claimGeometryUnit',
+  'releaseGeometryUnit',
+  'openInViewer',
+  'destroyGeometryUnit',
+  'fileMoved',
+  'fileDeleted',
+  'directoryDeleted',
+  'projectFileActivity',
+  'flushNow',
+] as const;
+
+/**
+ * The (state, event) pairs this machine leaves unanswered today (MC-R17): the totality baseline. A pair names a state
+ * where some event of its type goes unanswered; a mixed pair's type is also answered there with other context (a
+ * pair cannot say which), and the totality test checks that answer with its own row. The view, focus, refusal and
+ * runtime-closed reports are answered at the root.
+ *
+ * - Outside `ready`, every verb only `ready` answers.
+ * - In `ready`, the metadata verbs return `undefined`: `updateName` to the current name, and all four (`updateName`,
+ *   `updateDescription`, `updateTags`, `setMainFile`) over a degraded manifest; `repairManifest` outside
+ *   `storing.idle`, or when the manifest is not repairable; `projectFileActivity` for metadata only; `flushNow` in
+ *   `storing.idle` unless a write failed over a writable manifest, and while a write or repair runs.
+ * - `projectRetrieved` outside `loading`: the load's report lands only while its invoke runs.
+ * - `reloadProject` while loading and once the runtime is closing, closed or close-failed.
+ * - The close states' static `{}` answers, which `can()` reads as refused: `closeRuntime` while closing or closed,
+ *   `parkRuntime` and `resumeRuntime` in all three.
+ * - `createViewGraphics` and `destroyViewGraphics` in `error` and the close states: a view's graphics actor created
+ *   before the load failed is not stopped when its pane closes.
+ *
+ * @public
+ */
+export const projectIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  ...projectNotReadyStates.flatMap((state) => projectReadyOnlyEvents.map((type) => [state, type] as const)),
+  ...(
+    ['repairManifest', 'updateName', 'updateDescription', 'updateTags', 'setMainFile', 'projectFileActivity'] as const
+  ).map((type) => ['ready', type] as const),
+  ...['ready.storing.idle', 'ready.storing.writing', 'ready.storing.repairing'].map(
+    (state) => [state, 'flushNow'] as const,
+  ),
+  ...['idle', 'ready', 'error', ...projectRuntimeCloseStates].map((state) => [state, 'projectRetrieved'] as const),
+  ...['loading', ...projectRuntimeCloseStates].map((state) => [state, 'reloadProject'] as const),
+  ['runtimeClosing', 'closeRuntime'],
+  ['runtimeClosed', 'closeRuntime'],
+  ...projectRuntimeCloseStates.flatMap((state) => [[state, 'parkRuntime'] as const, [state, 'resumeRuntime'] as const]),
+  ...['error', ...projectRuntimeCloseStates].flatMap((state) => [
+    [state, 'createViewGraphics'] as const,
+    [state, 'destroyViewGraphics'] as const,
+  ]),
+];
 
 /**
  * Project Machine Emitted Events
@@ -518,6 +632,17 @@ const reconcileUnitRuntime = (
 };
 
 /**
+ * Report the project's first fault through the app's error reporter, as the route error boundary reports what it
+ * catches. The project runtime's single fault hook replaces this (A6b).
+ *
+ * @param error - What the root `onError` was handed.
+ */
+export const reportProjectFault = (error: unknown): void => {
+  // async-iife: bootstrap -- an effect cannot await the report, and a report that fails is not retried.
+  void reportUiError(error);
+};
+
+/**
  * Project Machine
  *
  * Manages project lifecycle, storage operations, and filesystem coordination.
@@ -550,6 +675,18 @@ export const projectMachine = setup({
   },
 }).createMachine({
   id: 'project',
+  // A defect is recorded and the project stays in the state it was in, which still answers every public event (MC-R12,
+  // charter B2). The first is kept and reported once: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }, enq) => {
+    if (context.fault === undefined) {
+      enq(reportProjectFault, event.error);
+    }
+    return {
+      context: {
+        fault: context.fault ?? String((event.error as { message?: unknown } | undefined)?.message ?? event.error),
+      },
+    };
+  },
   context: ({ input, spawn, actors }) => {
     const {
       projectId,
@@ -601,6 +738,7 @@ export const projectMachine = setup({
       kernelRefusal: undefined,
       mainEntryPath: '',
       logRef,
+      fault: undefined,
     };
   },
   // The project owns the shared model interaction, so it observes the focus there and forwards it to each view.

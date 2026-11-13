@@ -713,4 +713,85 @@ describe('ProjectNavigation', () => {
     expect(screen.getByText('Earlier')).toBeInTheDocument();
     expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Two', 'One']);
   });
+
+  // ── Load defects (A0.9) ──
+
+  describe('remembered listing', () => {
+    /** The sidebar rows the project list draws: placeholders, projects and labels alike. */
+    const projectRowCount = (): number => document.querySelectorAll('section > ul > li').length;
+
+    const listing = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        ...firstProject,
+        id: `proj_${index + 1}`,
+        name: `Project ${index + 1}`,
+        lastActivityAt: index + 1,
+        slugs: { workspaceSlug: 'home', projectSlug: `project-${index + 1}` },
+      }));
+
+    /*
+     * U6/H5 for project rows while nothing is live: the rows are reserved from
+     * the remembered count (R5), so this is a guard, not an expected failure.
+     * It covers Home reloads, where no session is live; the sidebar is the root
+     * layout's, so the same row covers Home (H5).
+     */
+    it.each([2, 5, 7])(
+      'U6/H5: project row count is equal before and after the project listing resolves with %i remembered and nothing live',
+      (count) => {
+        rememberedShape = { count };
+        mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+        const view = render(<ProjectNavigation />);
+        const loadingRows = projectRowCount();
+
+        mockUseProjects.mockReturnValue({ ...projectsResult, projects: listing(count) });
+        view.rerender(<ProjectNavigation />);
+
+        expect(screen.getAllByRole('link')).toHaveLength(Math.min(count, 5));
+        expect(loadingRows).toBe(projectRowCount());
+      },
+    );
+
+    /*
+     * U6/H5 for project rows with a live project states the defect only. On a
+     * direct project load the session goes live before the listing resolves;
+     * once it resolves, the "Earlier" label row joins the list (a live and a
+     * non-live project are both visible), and the loading frame reserved no row
+     * for it, so the rows jump by one. It says nothing about how the frame
+     * should account for the label.
+     */
+    it.fails.each([2, 5, 7])(
+      'U6/H5: project row count is equal before and after the project listing resolves with %i remembered and a live project',
+      (count) => {
+        liveProjectIds = ['proj_1'];
+        rememberedShape = { count };
+        mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+        const view = render(<ProjectNavigation />);
+        const loadingRows = projectRowCount();
+
+        mockUseProjects.mockReturnValue({ ...projectsResult, projects: listing(count) });
+        view.rerender(<ProjectNavigation />);
+
+        expect(screen.getAllByRole('link')).toHaveLength(Math.min(count, 5));
+        expect(loadingRows).toBe(projectRowCount());
+      },
+    );
+
+    /*
+     * H1 states the defect only: with a persisted listing, the first client
+     * render already has the real rows. The seam is the remembered shape, the
+     * one input served before the worker lists (R5); today it carries only the
+     * count, and the fix (follow-up A15) serves a persisted listing snapshot
+     * through it or beside it. Nothing here says what, if anything, replaces
+     * the skeleton.
+     */
+    it.fails('H1: with a persisted listing the first client render has real project rows and no skeleton row', () => {
+      const persistedListing = { count: 2, projects: [firstProject, secondProject] };
+      rememberedShape = persistedListing;
+      mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+      render(<ProjectNavigation />);
+
+      expect(screen.queryAllByRole('link').map((link) => link.textContent)).toEqual(['Two', 'One']);
+      expect(screen.queryAllByTestId('project-navigation-skeleton')).toHaveLength(0);
+    });
+  });
 });

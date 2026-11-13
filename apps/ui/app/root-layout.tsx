@@ -3,10 +3,9 @@ import { onDesktopMachineNavigation } from '#filesystem/desktop-bridge.js';
 import { installLoopbackHandOff } from '#lib/agent-host-placement.js';
 import type { ComponentType, ReactNode } from 'react';
 import { Links, Meta, Scripts, ScrollRestoration, useNavigate, useRouteLoaderData, useLocation } from 'react-router';
-import { HydrationBoundary, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { HydrationBoundary, QueryClientProvider } from '@tanstack/react-query';
 import type { DehydratedState } from '@tanstack/react-query';
-import { authQueryKeys } from '@better-auth-ui/core';
-import { Fragment, useEffect, useMemo } from 'react';
+import { Fragment, useEffect } from 'react';
 import { toast } from 'sonner';
 import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
@@ -38,11 +37,10 @@ import { GlobalChatFlushGuard } from '#components/global-chat-flush-guard.js';
 import { DocumentMemoryKillReporter } from '#components/memory-kill-reporter.js';
 import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
-import { authErrorMessage, betterFetchErrorBodyMessage } from '@taucad/ui-core/utils/auth-error.utils';
 import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
 import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
-import { selectRuntimeIdleFileManagers } from '#runtime/app-runtime.js';
-import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
+import { selectRuntimeIdleFileManagers, selectRuntimeQueryClient } from '#runtime/app-runtime.js';
+import { useAppRuntime, useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 
 export type RootLoaderData = {
   readonly env: ClientEnvironment;
@@ -56,36 +54,7 @@ export type RootLoaderData = {
 
 const noPreferences: ServerPreferences = {};
 
-export const handleQueryError = (error: unknown, metadata: Readonly<Record<string, unknown>> | undefined): void => {
-  if (metadata?.['handlesErrorLocally'] === true) {
-    return;
-  }
-  const message = betterFetchErrorBodyMessage(error);
-  if (message !== undefined) {
-    toast.error(message);
-  }
-};
-
-const shouldRetrySessionQuery = (failureCount: number, error: unknown): boolean => {
-  const status =
-    error !== null && typeof error === 'object' && 'status' in error && typeof error.status === 'number'
-      ? error.status
-      : undefined;
-  return failureCount < 2 && (status === undefined || status < 400 || status >= 500);
-};
-
-/**
- * Applies the one shared session query's freshness and failure policy.
- *
- * @param client - The app's root query client.
- */
-export function configureSessionQueryDefaults(client: QueryClient): void {
-  client.setQueryDefaults(authQueryKeys.session, {
-    retry: shouldRetrySessionQuery,
-    retryOnMount: false,
-    staleTime: 30_000,
-  });
-}
+/* The query client's defaults moved with its creation into the runtime (A2); these stay importable from here. */
 
 export function RootLayout({
   analyticsBoundary: AnalyticsBoundary = Fragment,
@@ -99,31 +68,9 @@ export function RootLayout({
   const data = useRouteLoaderData<RootLoaderData>('root');
   // Preserve null so the theme provider can resolve the system preference before hydration.
   const ssrTheme = data?.theme ?? null;
-  const queryClient = useMemo(() => {
-    const client = new QueryClient({
-      defaultOptions: {
-        queries: { networkMode: 'offlineFirst' },
-        mutations: { networkMode: 'offlineFirst' },
-      },
-    });
-
-    // Surface unhandled better-auth-ui mutation/query errors as toasts. Inline
-    // `onError` handlers on individual `useMutation` calls (e.g. sign-in) take
-    // precedence and override this default, so we never double-toast.
-    client.setMutationDefaults([], {
-      onError: (error) => {
-        toast.error(authErrorMessage(error));
-      },
-    });
-
-    client.getQueryCache().config.onError = (error, query) => {
-      handleQueryError(error, query.meta);
-    };
-
-    configureSessionQueryDefaults(client);
-
-    return client;
-  }, []);
+  /* D9 (A2): the runtime creates the browser `QueryClient`, above the billing fence, and the project library writes
+   * into the same instance. Each server request's runtime has its own. */
+  const queryClient = selectRuntimeQueryClient(useAppRuntime());
 
   const managedChildren = (
     <HeadlessImageProvider>

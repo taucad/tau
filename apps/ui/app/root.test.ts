@@ -1,7 +1,7 @@
 import { authQueryKeys } from '@better-auth-ui/core';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { configureSessionQueryDefaults, handleQueryError } from '#root-layout.js';
+import { configureSessionQueryDefaults, handleQueryError } from '#runtime/root-query-client.js';
 
 const toastError = vi.hoisted(() => vi.fn());
 

@@ -579,6 +579,18 @@ vi.mock('#hooks/use-cookie.js', () => ({
 }));
 
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
+const { ProjectLibrary } = await import('#runtime/project-library.js');
+/* A2: the provider is over a library the runtime builds with its query client; each wrapper's client gets one here. */
+const libraries = new WeakMap<QueryClient, InstanceType<typeof ProjectLibrary>>();
+const libraryFor = (queryClient: QueryClient): InstanceType<typeof ProjectLibrary> => {
+  let library = libraries.get(queryClient);
+  if (library === undefined) {
+    library = new ProjectLibrary({ queryClient });
+    library.start();
+    libraries.set(queryClient, library);
+  }
+  return library;
+};
 const { useChatRecords } = await import('#hooks/use-chat-records.js');
 const { tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
 
@@ -588,7 +600,7 @@ const createWrapper = () => {
     return createElement(
       QueryClientProvider,
       { client: queryClient },
-      createElement(ProjectManagerProvider, undefined, children),
+      createElement(ProjectManagerProvider, { library: libraryFor(queryClient), children }),
     );
   };
 };
@@ -603,7 +615,7 @@ const createCountingWrapper = () => {
     return createElement(
       QueryClientProvider,
       { client: queryClient },
-      createElement(ProjectManagerProvider, undefined, children),
+      createElement(ProjectManagerProvider, { library: libraryFor(queryClient), children }),
     );
   };
   return { wrapper, projectsInvalidations };
@@ -615,7 +627,7 @@ const createInspectableWrapper = () => {
     return createElement(
       QueryClientProvider,
       { client: queryClient },
-      createElement(ProjectManagerProvider, undefined, children),
+      createElement(ProjectManagerProvider, { library: libraryFor(queryClient), children }),
     );
   };
   return { wrapper, queryClient };

@@ -67,8 +67,6 @@
 (*      fenced at arrival (`held`) and its apply never lands. The         *)
 (*      record's rebase of the edit (`recordSync`, not modelled) comes    *)
 (*      back as a later publication, which rule 3 applies.                *)
-(*   9. An attaching adapter is seeded with the intended arrangement,    *)
-(*      not the stored record (`AdapterAttaching` keeps `shown`).         *)
 (*                                                                         *)
 (* Environment assumptions (Dockview and the adapters, not the machine):  *)
 (*   A. An apply, and any adapter change event it causes, never counts as *)
@@ -297,7 +295,8 @@ PersonEdited ==
   /\ act' = Label("PersonEdited")
   /\ UNCHANGED <<applied, adapter, wbOpen, intent, restore, route>>
 
-\* Opening an adapter opens its lane; it is seeded with the arrangement.
+\* Opening an adapter opens its lane. An abstraction, not a rule: an attach never changes `shown`. Today's
+\* viewer is seeded from the stored record instead (workbench-record-host.tsx line 497), a risk for A8b.
 AdapterAttaching(a) ==
   /\ adapter[a] = "detached"
   /\ bound.attaches[a] < MaxAttaches
@@ -558,6 +557,9 @@ AckMeansApplied ==
 \* D14, as today's `acknowledge`: `Acknowledged(r)` only while every adapter of the device is attached.
 AckNeedsEveryAdapter ==
   [][(applied' = "latest" /\ applied # "latest") => \A a \in Adapters : adapter'[a] = "attached"]_vars
+
+\* I12 (rule 4, A0.3 row 2): while any adapter is not attached, the applied revision is `unknown`.
+AnyDetachUnknown == (\E a \in Adapters : adapter[a] # "attached") => applied = Unknown
 
 \* I12: while no adapter is attached, the applied revision is `unknown`.
 UnknownWhileDetached == ~AnyAttached => applied = Unknown

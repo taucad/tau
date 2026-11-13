@@ -3,7 +3,7 @@
     "LayoutApply.target.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "I10 to I14, D14 (an acknowledgement needs every adapter attached), A0.3 row 1c (a lane close keeps a handed-back pane intent), D18 and rule 8 on both adapters: 2 publications, 2 person edits, 2 intents, 1 restore command, 1 attach cycle per adapter (an attach cycle is one AdapterAttaching; detaches are not bounded, so either adapter can detach and stay detached), 1 route key change, 2 arrangements. Narrowed from the plan's 3, 2, 2, 2 and 2 attach cycles to fit the merge queue (programme control ruling); target-phone holds the plan's bounds on a phone. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier"
+      "ref": "I10 to I14, D14 (an acknowledgement needs every adapter attached), A0.3 row 1c (a lane close keeps a pane intent), D18 and rule 8 on both adapters: 2 publications, 2 person edits, 2 intents, 1 restore command, 1 attach cycle per adapter (an attach cycle is one AdapterAttaching; detaches are not bounded, so either adapter can detach and stay detached), 1 route key change, 2 arrangements. Narrowed from the plan's 3, 2, 2, 2 and 2 attach cycles to fit the merge queue (programme control ruling); target-phone holds the plan's bounds on a phone. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier"
     },
     "LayoutApply.target-detached.cfg": {
       "tier": "nightly",
@@ -13,7 +13,7 @@
     "LayoutApply.target-phone.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "A phone at the formal plan's target bounds: both adapters (the editor tab mounts the workbench Dockview, chat-interface-mobile.tsx and chat-editor-layout.tsx), no lane close, the workbench detaching and attaching again on a tab switch; a workbench intent switches to the editor tab and is applied on attach (project-workspace-context.tsx 535 to 543, 426 to 432): 3 publications, 2 person edits, 2 intents, 2 restore commands, 2 attach cycles per adapter, 1 route key change; 3,942,528 distinct states in about 235 s, close to the pr watchdog, so it stays nightly"
+      "ref": "A phone at the formal plan's target bounds: both adapters (the editor tab mounts the workbench Dockview, chat-interface-mobile.tsx and chat-editor-layout.tsx), no lane close, the workbench detaching and attaching again on a tab switch; a workbench intent switches to the editor tab and is applied on attach (project-workspace-context.tsx 535 to 543, 426 to 432): 3 publications, 2 person edits, 2 intents, 2 restore commands, 2 attach cycles per adapter, 1 route key change; 3,942,528 distinct states in about 250 s, close to the pr watchdog, so it stays nightly"
     },
     "LayoutApply.liveness.cfg": {
       "tier": "nightly",

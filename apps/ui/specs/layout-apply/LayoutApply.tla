@@ -16,8 +16,11 @@
 (*             attaches only while the editor tab shows (`Phone`)         *)
 (*   intents   pane requests (open a file, reveal a model) for one        *)
 (*             adapter, queued until applied or dropped with a reason;    *)
-(*             a workbench intent is a `file` or a `pane` intent (one the *)
-(*             record handed back), which a lane close keeps              *)
+(*             a workbench intent is, by source, a `file` intent (a held  *)
+(*             Files open or a person's file open), which a lane close    *)
+(*             drops, or a `pane` intent (any other workbench pane        *)
+(*             intent: handed back, held before the first read or written *)
+(*             to the record), which a lane close keeps                   *)
 (*   restore   commands from the arrange-workbench card, each with the    *)
 (*             arrangement it expects and the one it restores; the card   *)
 (*             may send any number of them, a stale one included          *)
@@ -387,7 +390,8 @@ RouteKeyChanged ==
 \* Rule 7 for the intents queued when the person closes the lane, whether its adapter is attached or
 \* detached: the queued `file` intents are dropped, as today's close clears the held Files and user-file
 \* intents (project-workspace-context.tsx lines 338 to 341); a queued `pane` intent stays queued (A0.3
-\* row 1c, project-workspace-context.test.tsx lines 1111 to 1137). Under `DetachGuard`, as for `AdapterDetached`, only while the workbench has an attach cycle left.
+\* row 1c, project-workspace-context.test.tsx lines 1111 to 1139). Under `DetachGuard`, as for
+\* `AdapterDetached`, only while the workbench has an attach cycle left.
 \* A phone has no lane close: leaving the editor tab is an `AdapterDetached` of the workbench.
 WorkbenchClosed ==
   /\ ~Phone

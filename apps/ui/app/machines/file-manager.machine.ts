@@ -251,7 +251,15 @@ let fileSystemBridgeModule: Promise<typeof FileSystemBridgeModule> | undefined;
  * resolution reaches) share one import instead of racing two.
  */
 const loadFileSystemBridge = async (): Promise<typeof FileSystemBridgeModule> => {
-  fileSystemBridgeModule ??= import('@taucad/fs-bridge');
+  /* A failed load is forgotten, so "Try again" fetches the chunk again instead of replaying the failure. */
+  fileSystemBridgeModule ??= (async () => {
+    try {
+      return await import('@taucad/fs-bridge');
+    } catch (error) {
+      fileSystemBridgeModule = undefined;
+      throw error;
+    }
+  })();
   return fileSystemBridgeModule;
 };
 
@@ -846,15 +854,28 @@ const disposeServices = (context: FileManagerContext): void => {
   context.disposeComposedView?.();
 };
 
+/**
+ * Release what a file manager's context holds: its services, proxy and bridge, and its worker unless it shares one.
+ *
+ * The machine's own teardown, and the lease store's after it stops a leased actor: `stop()` runs no `exit`, so a
+ * dropped lease releases its resources through this rather than through the root's `exit`.
+ *
+ * @param context - The file manager's context, read after it stopped.
+ * @public
+ */
+export const releaseFileManagerResources = (context: FileManagerContext): void => {
+  disposeServices(context);
+  safeDispose(() => context.proxy?.dispose());
+  safeDispose(context.bridgeDispose);
+
+  if (!context.sharedWorker) {
+    safeDispose(() => context.worker?.terminate());
+  }
+};
+
 const destroyWorkerAndServices = (context: FileManagerContext, enq: FileManagerEnqueue): FileManagerPatch => {
   enq(() => {
-    disposeServices(context);
-    safeDispose(() => context.proxy?.dispose());
-    safeDispose(context.bridgeDispose);
-
-    if (!context.sharedWorker) {
-      safeDispose(() => context.worker?.terminate());
-    }
+    releaseFileManagerResources(context);
   });
 
   return {

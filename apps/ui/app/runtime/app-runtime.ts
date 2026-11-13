@@ -69,7 +69,11 @@ export type AppRuntimeFiles = Readonly<{
   awaitFileManager: (
     fileManager: FileManagerRef,
     readiness: FileManagerReadiness,
-    reason: 'proxy-timeout' | 'services-timeout',
+    options: Readonly<{
+      reason: 'proxy-timeout' | 'services-timeout';
+      /** Whether the file manager's lease was dropped; `rootFiles` has none. */
+      isGone?: () => boolean;
+    }>,
   ) => Promise<FileManagerSnapshot>;
   /** The shared worker `rootFiles` holds, once it has one. */
   sharedWorker: () => Worker | undefined;
@@ -120,10 +124,10 @@ export const createAppRuntime = ({
   const buildOptions: FileManagerBuildOptions = options;
   runtimeFiles.set(runtime, {
     leaseFileManager: (key, spec) => store.get(key, () => host.build(fileManagerHost, spec, buildOptions)),
-    awaitFileManager: async (fileManager, readiness, reason) =>
+    awaitFileManager: async (fileManager, readiness, wait) =>
       awaitFileManager(fileManager, readiness, {
         ...(options.clock === undefined ? {} : { clock: options.clock }),
-        reason,
+        ...wait,
       }),
     sharedWorker: host.sharedWorker,
     idleFileManagers,

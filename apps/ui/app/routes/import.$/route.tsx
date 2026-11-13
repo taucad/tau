@@ -257,23 +257,27 @@ export default function ImportRoute(): React.JSX.Element {
   const navigate = useNavigate();
   const projectManager = useProjectManager();
   const fileManager = useOptionalFileManager();
+  /* Both are stable per file manager; the whole context value changes with its services and settings, which would
+   * re-run every preview read that depends on the session. */
+  const whenServicesReady = fileManager?.whenServicesReady;
+  const fileManagerRef = fileManager?.fileManagerRef;
   /* One import channel to the file-manager worker, opened on first use (W7). */
   const importSessionRef = useRef<ImportSession | undefined>(undefined);
   const importSession = useCallback(async (): Promise<ImportSession> => {
     if (importSessionRef.current === undefined) {
-      if (fileManager === undefined) {
+      if (whenServicesReady === undefined || fileManagerRef === undefined) {
         throw new Error('The file manager is not available to import.');
       }
       /* The scope's wait, on the runtime's clock (row S18). */
-      await fileManager.whenServicesReady();
-      const { worker } = fileManager.fileManagerRef.getSnapshot().context;
+      await whenServicesReady();
+      const { worker } = fileManagerRef.getSnapshot().context;
       if (worker === undefined) {
         throw new Error('The file manager is not ready to import.');
       }
       importSessionRef.current = openImportSession(worker);
     }
     return importSessionRef.current;
-  }, [fileManager]);
+  }, [whenServicesReady, fileManagerRef]);
   /* A linked import's run: leaving the route stops its stage in the worker, the fetch with it. */
   const linkedImportAbortRef = useRef<AbortController | undefined>(undefined);
   /*

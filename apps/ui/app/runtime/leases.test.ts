@@ -158,6 +158,22 @@ describe('lease store', () => {
     expect(disposed).toHaveBeenCalledOnce();
   });
 
+  it('should run every disposer when one of them throws', () => {
+    const { clock, store, build } = startLeases();
+    const entry = store.get('a', build);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const after = vi.fn();
+    entry.attach(() => {
+      throw new Error('dispose failed');
+    });
+    entry.attach(after);
+    clock.advance(leaseGraceMilliseconds);
+
+    expect(after).toHaveBeenCalledOnce();
+    expect(entry.isDropped()).toBe(true);
+    expect(error).toHaveBeenCalledWith("[leases] a disposer of 'a' failed", expect.any(Error));
+  });
+
   it('should drop every entry when the runtime stops', () => {
     const { leases, store, build } = startLeases();
     const kept = store.get('a', build);

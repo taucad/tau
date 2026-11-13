@@ -8,7 +8,8 @@ import { StepClock } from '@taucad/xstate-testing/clock';
 import { validated } from '@taucad/xstate-testing/inspect';
 import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import { describe, expect, it } from 'vitest';
-import type { AnyEventObject, Observer } from 'xstate';
+import { createActor, createMachine } from 'xstate';
+import type { AnyActor, AnyEventObject, Observer } from 'xstate';
 import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-errors';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import {
@@ -27,10 +28,13 @@ const fakeFileManager = (initial: FakeState) => {
   let state = initial;
   const observers = new Set<Partial<Observer<FileManagerSnapshot>>>();
   const snapshotOf = (current: FakeState): FileManagerSnapshot =>
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the wait reads `matches`, `status` and these fields alone.
     ({
+      status: 'active',
       matches: (value: string) => value === current.value,
       context: { proxy: current.proxy, contentService: undefined, treeService: undefined, viewClient: undefined },
     }) as unknown as FileManagerSnapshot;
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the wait reads snapshots and subscribes, nothing more.
   const ref = {
     getSnapshot: () => snapshotOf(state),
     subscribe: (observer: Partial<Observer<FileManagerSnapshot>>) => {
@@ -58,6 +62,14 @@ const fakeFileManager = (initial: FakeState) => {
     },
   };
 };
+
+/** A real actor in the wait's eyes: the wait reads its snapshots, status and observers, which every actor has. */
+const asFileManager = (actor: AnyActor): FileManagerRef =>
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the wait reads what every actor has.
+  actor as unknown as FileManagerRef;
+
+/** A file manager that never gets past connecting: only its stop can end a wait on it. */
+const connecting = () => createActor(createMachine({ initial: 'connectingWorker', states: { connectingWorker: {} } }));
 
 describe('file manager ready wait', () => {
   it('should answer at once when the file manager is already there', async () => {
@@ -116,12 +128,51 @@ describe('file manager ready wait', () => {
     await expect(waiting).rejects.toMatchObject({ code: 'services-timeout' });
   });
 
-  it('should end when the file manager stops before it is ready', async () => {
+  it('should end when the file manager completes its observers before it is ready', async () => {
     const files = fakeFileManager({ value: 'connectingWorker' });
     const waiting = awaitFileManager(files.ref, 'ready', { clock: new StepClock(), reason: 'services-timeout' });
     files.complete();
     await expect(waiting).rejects.toThrow('Actor terminated without satisfying predicate');
     expect(files.observers.size).toBe(0);
+  });
+
+  it('should end at once on a stopped file manager, which never answers a subscriber', async () => {
+    const stopped = connecting();
+    stopped.start();
+    stopped.stop();
+    const clock = new StepClock();
+    const waiting = awaitFileManager(asFileManager(stopped), 'ready', {
+      clock,
+      reason: 'services-timeout',
+    });
+    await expect(waiting).rejects.toThrow('Actor terminated without satisfying predicate');
+    expect(clock.nextDue()).toBeUndefined();
+  });
+
+  it('should end at once on a dropped lease whose actor never started, which still reads active', async () => {
+    const never = connecting();
+    never.stop();
+    expect(never.getSnapshot().status).toBe('active');
+    const clock = new StepClock();
+    const waiting = awaitFileManager(asFileManager(never), 'ready', {
+      clock,
+      reason: 'services-timeout',
+      isGone: () => true,
+    });
+    await expect(waiting).rejects.toThrow('Actor terminated without satisfying predicate');
+    expect(clock.nextDue()).toBeUndefined();
+  });
+
+  it('should end when a started file manager is stopped during the wait', async () => {
+    const files = connecting();
+    files.start();
+    const clock = new StepClock();
+    const waiting = awaitFileManager(asFileManager(files), 'ready', {
+      clock,
+      reason: 'services-timeout',
+    });
+    files.stop();
+    await expect(waiting).rejects.toThrow('Actor terminated without satisfying predicate');
   });
 
   it('should settle each readiness on its own condition, and on error', () => {

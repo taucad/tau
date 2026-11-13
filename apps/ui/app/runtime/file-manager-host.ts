@@ -15,7 +15,7 @@ import type { FileSystemBackend } from '@taucad/types';
 import { getHomeStorageBackend } from '#filesystem/handle-store.js';
 import type { HomeStorageBackend } from '#filesystem/handle-store.js';
 import type { Analytics } from '#hooks/use-analytics.js';
-import { fileManagerMachine } from '#machines/file-manager.machine.js';
+import { fileManagerMachine, releaseFileManagerResources } from '#machines/file-manager.machine.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { fileManagerHostMachine } from '#runtime/file-manager-host.machine.js';
 import type { HomeBackendOutcome } from '#runtime/file-manager-host.machine.js';
@@ -106,13 +106,9 @@ export function createFileManagerHost({
     },
   });
 
-  const watchSharedWorker = createCallbackLogic<EventObject, { rootFiles: FileManagerRef }>(({ input, sendBack }) => {
+  const watchSharedWorker = createCallbackLogic<EventObject, { rootFiles: FileManagerRef }>(({ input }) => {
     const observe = (snapshot: SnapshotFrom<typeof fileManagerMachine>): void => {
-      const { worker } = snapshot.context;
-      if (worker !== sharedWorker) {
-        sharedWorker = worker;
-        sendBack({ type: 'workerChanged', present: worker !== undefined });
-      }
+      sharedWorker = snapshot.context.worker;
     };
     const subscription = input.rootFiles.subscribe(observe);
     observe(input.rootFiles.getSnapshot());
@@ -146,8 +142,13 @@ export function createFileManagerHost({
     build: (host, spec, options) => {
       const resolved = spec.backend === 'home' ? selectHomeBackend(host.getSnapshot()) : spec.backend;
       const actor = createActor(fileManagerMachine, { ...options, input: inputFor(spec, resolved, sharedWorker) });
+      /* The store stops the actor before it disposes, and `stop()` runs no `exit`: release what the stopped actor's
+       * context still holds, its own worker among it. */
+      const release = (): void => {
+        releaseFileManagerResources(actor.getSnapshot().context);
+      };
       if (resolved !== undefined) {
-        return { actor, dispose: () => undefined };
+        return { actor, dispose: release };
       }
       /* Built while Home resolves: the host's emit is this actor's `resolveInitialBackend` (row S17). */
       const subscription = host.on('homeBackendResolved', ({ backend }) => {
@@ -158,6 +159,7 @@ export function createFileManagerHost({
         actor,
         dispose: () => {
           subscription.unsubscribe();
+          release();
         },
       };
     },
@@ -188,13 +190,14 @@ export const selectHomeBackendFailure = (snapshot: FileManagerHostSnapshot): str
   snapshot.matches('failed') ? snapshot.context.error : undefined;
 
 /**
- * Whether the shared file-manager worker is up.
+ * Whether the shared file-manager worker is up: `rootFiles`' own, never a report another actor could forge (MC-R15).
  *
- * @param snapshot - The host's snapshot.
+ * @param snapshot - `rootFiles`' snapshot.
  * @returns Whether `rootFiles` holds a worker.
  * @public
  */
-export const selectSharedWorkerPresent = (snapshot: FileManagerHostSnapshot): boolean => snapshot.context.workerPresent;
+export const selectSharedWorkerPresent = (snapshot: SnapshotFrom<typeof fileManagerMachine>): boolean =>
+  snapshot.context.worker !== undefined;
 
 /**
  * The host's first fault, if any (D23).

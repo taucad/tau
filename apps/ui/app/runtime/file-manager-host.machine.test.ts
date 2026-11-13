@@ -45,6 +45,7 @@ const parents: Array<ReturnType<typeof createFakeParent>> = [];
 const fakeRootFiles = (): Readonly<{ ref: FileManagerRef; events: readonly AnyEventObject[] }> => {
   const parent = createFakeParent();
   parents.push(parent);
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a recorder stands in for the file manager the host only sends to.
   return { ref: parent.ref as unknown as FileManagerRef, events: parent.events };
 };
 
@@ -154,28 +155,28 @@ describe('file-manager host', () => {
     host.stop();
   });
 
-  it('should know whether the shared worker is up through its watch child, which holds the worker (D4)', () => {
+  it('should hold the watch child for its life and take no worker report from anyone (D4, MC-R15)', () => {
     const rootFiles = fakeRootFiles();
-    const watch = { sendBack: undefined as ((event: AnyEventObject) => void) | undefined, stopped: 0 };
-    const sharedWorker = createCallbackLogic<EventObject, { rootFiles: FileManagerRef }>(({ sendBack }) => {
-      watch.sendBack = sendBack;
-      return () => {
-        watch.stopped += 1;
-      };
+    const watch = { stopped: 0 };
+    const sharedWorker = createCallbackLogic<EventObject, { rootFiles: FileManagerRef }>(() => () => {
+      watch.stopped += 1;
     });
     const host = createActor(
       validated(fileManagerHostMachine.provide({ actors: { loadHomeBackend: scriptedRead().logic, sharedWorker } })),
       { input: { rootFiles: rootFiles.ref } },
     ).start();
-    expect(selectSharedWorkerPresent(host.getSnapshot())).toBe(false);
-
-    watch.sendBack?.({ type: 'workerChanged', present: true });
-    expect(selectSharedWorkerPresent(host.getSnapshot())).toBe(true);
-    watch.sendBack?.({ type: 'workerChanged', present: false });
-    expect(selectSharedWorkerPresent(host.getSnapshot())).toBe(false);
-
+    // @ts-expect-error -- `workerChanged` was the watch's report; the host no longer takes one from any sender.
+    expect(host.getSnapshot().can({ type: 'workerChanged', present: true })).toBe(false);
     host.stop();
     expect(watch.stopped).toBe(1);
+  });
+
+  it('should read whether the shared worker is up from rootFiles itself', () => {
+    const at = (worker: unknown) =>
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the selector reads `context.worker` alone.
+      ({ context: { worker } }) as unknown as Parameters<typeof selectSharedWorkerPresent>[0];
+    expect(selectSharedWorkerPresent(at(undefined))).toBe(false);
+    expect(selectSharedWorkerPresent(at({}))).toBe(true);
   });
 
   it('should keep a watch that throws as its first fault and keep answering (D23)', () => {
@@ -199,10 +200,6 @@ describe('file-manager host totality', () => {
   type Samples = { [T in FileManagerHostEvent['type']]: ReadonlyArray<Extract<FileManagerHostEvent, { type: T }>> };
   const samples: Samples = {
     retry: [{ type: 'retry' }],
-    workerChanged: [
-      { type: 'workerChanged', present: true },
-      { type: 'workerChanged', present: false },
-    ],
   };
 
   it('should sample exactly the exported alphabet', () => {
@@ -216,7 +213,7 @@ describe('file-manager host totality', () => {
         events: Object.values(samples).flat(),
         limit: 200,
         ignore: fileManagerHostIgnoredEvents,
-        serializeState: (snapshot) => JSON.stringify([snapshot.value, snapshot.context.workerPresent]),
+        serializeState: (snapshot) => JSON.stringify(snapshot.value),
       }),
     ).toEqual([]);
   });

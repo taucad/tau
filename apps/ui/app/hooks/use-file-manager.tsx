@@ -524,10 +524,11 @@ export function useHomeStorageBackend(): HomeStorageBackend | undefined {
   return useSelector(host, selectHomeBackend);
 }
 
-/** Whether the shared worker is up; `false` outside a runtime, where no file manager can have one. */
+/** Whether the shared worker is up, read from `rootFiles`; `false` outside a runtime, where no file manager has one. */
 function useSharedWorkerPresent(): boolean {
-  const host = useOptionalFileManagerHost();
-  return useSelector(host, (snapshot) => (snapshot === undefined ? false : selectSharedWorkerPresent(snapshot)));
+  const runtime = useOptionalAppRuntime();
+  const rootFiles = runtime === undefined ? undefined : selectRuntimeRootFiles(runtime);
+  return useSelector(rootFiles, (snapshot) => (snapshot === undefined ? false : selectSharedWorkerPresent(snapshot)));
 }
 
 /** Home's backend failure, outside a runtime `undefined`. */
@@ -835,9 +836,12 @@ const selectBridgeOpener = (fileManagerRef: FileManagerRef) =>
 const readied = async (
   files: AppRuntimeFiles,
   fileManagerRef: FileManagerRef,
-  readiness: 'ready' | 'viewClient' | 'proxy',
+  wait: Readonly<{ readiness: 'ready' | 'viewClient' | 'proxy'; isGone: (() => boolean) | undefined }>,
 ): Promise<FileManagerSnapshot> => {
-  const snapshot = await files.awaitFileManager(fileManagerRef, readiness, 'proxy-timeout');
+  const snapshot = await files.awaitFileManager(fileManagerRef, wait.readiness, {
+    reason: 'proxy-timeout',
+    ...(wait.isGone === undefined ? {} : { isGone: wait.isGone }),
+  });
   assertNotErrorState(snapshot);
   return snapshot;
 };
@@ -860,6 +864,8 @@ function FileManagerScope({
   readonly lease?: LeaseEntry<FileManagerActor>;
 }): React.JSX.Element {
   const files = selectRuntimeFiles(useAppRuntime());
+  /* A scope that commits over a dropped lease (the late-commit case) answers its waits at once, not at the bound. */
+  const isGone = lease?.isDropped;
 
   const workspaceTelemetry = useWorkspaceTelemetry();
 
@@ -951,7 +957,7 @@ function FileManagerScope({
    * on the hook value.
    */
   const getReadiedProxy = useCallback(async (): Promise<FileManagerProxy> => {
-    const snapshot = await readied(files, fileManagerRef, 'ready');
+    const snapshot = await readied(files, fileManagerRef, { readiness: 'ready', isGone });
 
     const { proxy } = snapshot.context;
     if (!proxy) {
@@ -959,11 +965,11 @@ function FileManagerScope({
     }
 
     return proxy;
-  }, [files, fileManagerRef]);
+  }, [files, fileManagerRef, isGone]);
 
   /** The composed view client the FM machine builds once the services are up. */
   const getReadiedClient = useCallback(async (): Promise<ComposedViewClient> => {
-    const snapshot = await readied(files, fileManagerRef, 'viewClient');
+    const snapshot = await readied(files, fileManagerRef, { readiness: 'viewClient', isGone });
 
     const { viewClient } = snapshot.context;
     if (!viewClient) {
@@ -971,13 +977,18 @@ function FileManagerScope({
     }
 
     return viewClient;
-  }, [files, fileManagerRef]);
+  }, [files, fileManagerRef, isGone]);
 
   const whenServicesReady = useCallback(
     async () =>
       servicesBound(fileManagerRef) ??
-      servicesOf(await files.awaitFileManager(fileManagerRef, 'services', 'services-timeout')),
-    [files, fileManagerRef],
+      servicesOf(
+        await files.awaitFileManager(fileManagerRef, 'services', {
+          reason: 'services-timeout',
+          ...(isGone === undefined ? {} : { isGone }),
+        }),
+      ),
+    [files, fileManagerRef, isGone],
   );
 
   /* `setRoot` destroys the worker, so its opener identity releases old rooted ports. */
@@ -1545,7 +1556,7 @@ function FileManagerScope({
       },
       syncProjectRoots,
       replaceWorkspaceHandle: async (workspaceId, handle) => {
-        const snapshot = await readied(files, fileManagerRef, 'proxy');
+        const snapshot = await readied(files, fileManagerRef, { readiness: 'proxy', isGone });
         const { proxy } = snapshot.context;
         if (!proxy) {
           throw new FileManagerNotReadyError('proxy-timeout');
@@ -1598,7 +1609,7 @@ function FileManagerScope({
         };
       },
     };
-  }, [getReadiedProxy, files, fileManagerRef, whenServicesReady, workspaceTelemetry]);
+  }, [getReadiedProxy, files, fileManagerRef, isGone, whenServicesReady, workspaceTelemetry]);
 
   useLayoutEffect(() => activateRootSync(), [activateRootSync]);
 

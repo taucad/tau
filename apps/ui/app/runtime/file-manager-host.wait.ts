@@ -116,10 +116,11 @@ type WaitEnd = 'settled' | 'timedOut' | 'gone';
  *
  * @param fileManager - The file manager to wait for.
  * @param readiness - What to wait for.
- * @param options - The clock (the app runtime's; the default clock outside one), the bound, and the reason a
- *   timed-out wait throws.
+ * @param options - The clock (the app runtime's; the default clock outside one), the bound, the reason a timed-out
+ *   wait throws, and whether the owner let the file manager go.
  * @returns The snapshot that ended the wait: reached, or in `error` (the caller checks).
  * @throws {FileManagerNotReadyError} When the bound passes first.
+ * @throws {Error} When the file manager is stopped, or stops, before it settles.
  * @public
  */
 export async function awaitFileManager(
@@ -129,11 +130,18 @@ export async function awaitFileManager(
     clock?: ActorOptions<AnyActorLogic>['clock'];
     timeoutMilliseconds?: number;
     reason: 'proxy-timeout' | 'services-timeout';
+    /** Whether the file manager's owner has let it go (a dropped lease), which a never-started actor cannot say. */
+    isGone?: () => boolean;
   }>,
 ): Promise<FileManagerSnapshot> {
   const current = fileManager.getSnapshot();
   if (selectReadinessSettled(readiness, current)) {
     return current;
+  }
+  if (current.status === 'stopped' || options.isGone?.() === true) {
+    /* A stopped actor never answers a new subscriber, and one stopped before it started still reads `active`: end
+     * now, not at the bound. A started actor stopped during the wait completes its observers, which ends it. */
+    throw new Error('Actor terminated without satisfying predicate');
   }
   let reached: FileManagerSnapshot | undefined;
   const watch = createCallbackLogic<EventObject>(({ sendBack }) => {

@@ -87,7 +87,12 @@ export function createLeaseTable(): Readonly<{
     state.dropped = true;
     state.actor.stop();
     for (const dispose of state.disposers) {
-      dispose();
+      /* One failing disposer must not keep the rest from releasing what they hold. */
+      try {
+        dispose();
+      } catch (error) {
+        console.error(`[leases] a disposer of '${key}' failed`, error);
+      }
     }
     state.disposers.clear();
   };
@@ -147,7 +152,7 @@ export function createLeaseTable(): Readonly<{
           held.disposers.add(dispose);
         },
       };
-      entries.set(key, { entry: entry as unknown as LeaseEntry<AnyActor>, state: held });
+      entries.set(key, { entry, state: held });
       /* Queued until the runtime starts, so a server render's entries never start a grace. */
       leases.send({ type: 'created', key });
       return entry;

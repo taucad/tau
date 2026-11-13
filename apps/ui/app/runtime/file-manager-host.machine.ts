@@ -26,17 +26,13 @@ export type HomeBackendOutcome =
   | Readonly<{ status: 'failed'; message: string }>;
 
 /** Events the host accepts. @public */
-export type FileManagerHostEvent =
-  | { readonly type: 'retry' }
-  | { readonly type: 'workerChanged'; readonly present: boolean };
+export type FileManagerHostEvent = { readonly type: 'retry' };
 
 /** Events the host emits. @public */
 export type FileManagerHostEmitted = { readonly type: 'homeBackendResolved'; readonly backend: HomeStorageBackend };
 
 /** The host's public alphabet, in the union's order. @public */
-export const fileManagerHostEventTypes = ['retry', 'workerChanged'] as const satisfies ReadonlyArray<
-  FileManagerHostEvent['type']
->;
+export const fileManagerHostEventTypes = ['retry'] as const satisfies ReadonlyArray<FileManagerHostEvent['type']>;
 
 /**
  * The (state, event) pairs the host leaves unanswered (MC-R17): `retry` outside `failed`, where nothing failed.
@@ -56,8 +52,6 @@ export type FileManagerHostInput = Readonly<{
 
 type HostBase = {
   rootFiles: FileManagerRef;
-  /** Whether `rootFiles` has a worker; the worker itself is in the `sharedWorker` child's closure (D4). */
-  workerPresent: boolean;
   /** The first effect or child failure no transition modelled (D23). */
   fault: string | undefined;
 };
@@ -72,7 +66,6 @@ const backendSchema = z.enum(['indexeddb', 'opfs', 'node']);
 
 const hostEventSchemas = {
   retry: z.object({}),
-  workerChanged: z.object({ present: z.boolean() }),
 } satisfies Record<FileManagerHostEvent['type'], z.ZodType>;
 
 const hostEmittedSchemas = {
@@ -121,16 +114,15 @@ export const fileManagerHostMachine = setup({
   version: '1',
   /* A fault no transition modelled is recorded and reported once, and the host keeps answering (MC-R12, D23). */
   onError: keepFirstFault,
-  context: ({ input }) => ({ rootFiles: input.rootFiles, workerPresent: false, fault: undefined }),
-  /* The worker watch lives for the host's life: `rootFiles` replaces its worker on a restart. */
+  context: ({ input }) => ({ rootFiles: input.rootFiles, fault: undefined }),
+  /* The worker watch lives for the host's life: `rootFiles` replaces its worker on a restart. It holds the worker and
+   * reports nothing: whether there is one is `rootFiles`' own `worker`, so no sender can claim a worker that does not
+   * exist (MC-R15). */
   invoke: {
     id: 'sharedWorker',
     src: 'sharedWorker',
     input: ({ context }) => ({ rootFiles: context.rootFiles }),
     onError: keepFirstFault,
-  },
-  on: {
-    workerChanged: ({ event }) => ({ context: { workerPresent: event.present } }),
   },
   initial: 'resolving',
   states: {
@@ -167,7 +159,7 @@ export const fileManagerHostMachine = setup({
       on: {
         retry: ({ context }) => ({
           target: 'resolving',
-          context: { rootFiles: context.rootFiles, workerPresent: context.workerPresent, fault: context.fault },
+          context: { rootFiles: context.rootFiles, fault: context.fault },
         }),
       },
     },

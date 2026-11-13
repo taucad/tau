@@ -10,6 +10,7 @@ import { Fragment, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
+import { ENV } from '#environment.config.js';
 import type { ClientEnvironment } from '#environment.config.js';
 import { buildClientEnvScript } from '#lib/client-env-script.js';
 import { Page } from '#components/layout/page.js';
@@ -176,7 +177,7 @@ export function RootLayout({
                 <ColorProvider>
                   <AppViewerEnvironment>
                     <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
-                      <HarnessDocumentLoad isHarness={isHarness} />
+                      <HarnessDocumentLoad />
                       {application}
                     </LayoutDocument>
                   </AppViewerEnvironment>
@@ -289,17 +290,20 @@ export function ProductApp(): React.JSX.Element {
 
 /**
  * Load the page as a document when a client navigation crosses into or out of the remote-host harness: the runtime's
- * file managers are idle for the harness's document only, and that is fixed when the runtime is created. Renders
- * nothing, so the server render and hydration are unchanged.
+ * file managers are idle for the harness's document only, and that is fixed when the runtime is created. It reads the
+ * same debug flag and path the client entry did (never the loader data, which an error boundary or a root with no
+ * loader lacks), so the reloaded document always agrees and never reloads again. Renders nothing, so the server render
+ * and hydration are unchanged.
  */
-function HarnessDocumentLoad({ isHarness }: { readonly isHarness: boolean }): React.ReactNode {
+function HarnessDocumentLoad(): React.ReactNode {
   const runtime = useOptionalAppRuntime();
+  const { pathname } = useLocation();
   const isIdle = runtime === undefined ? undefined : selectRuntimeIdleFileManagers(runtime);
   useEffect(() => {
-    if (isIdle !== undefined && isIdle !== isHarness) {
+    if (isIdle !== undefined && isIdle !== isRemoteHostHarness(ENV.TAU_DEBUG, pathname)) {
       globalThis.location.reload();
     }
-  }, [isHarness, isIdle]);
+  }, [pathname, isIdle]);
   return undefined;
 }
 

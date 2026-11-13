@@ -1,0 +1,59 @@
+name: 'Release gate verdict'
+description: >-
+  Finds a green release gate verdict (`release-gate.yml`, CI throughput review RG-1) for one commit in a
+  trusted run, and, with `require`, fails with the way to get one when there is none.
+
+# The release gate records one verdict job per commit, named `Release gate verdict (<sha>)`. Only a run of
+# `main`'s copy of `release-gate.yml` counts: a run on `main` (a dispatch from `main`) or one started by
+# `workflow_run` (which always runs the default branch's file). A dispatch from another branch may run a
+# changed copy of the gate, so its verdict never counts. Reading a verdict never starts the gate: the gate
+# starts by itself when `release-build.yml` is requested for a tag, and an operator dispatches it from
+# `main` for a commit that has none.
+
+inputs:
+  sha:
+    description: 'Full commit sha'
+    required: true
+  github-token:
+    description: 'A token that may read Actions runs'
+    required: true
+  require:
+    description: "'true' fails the step when no green verdict exists; 'false' only reports"
+    required: false
+    default: 'false'
+outputs:
+  run-id:
+    description: 'The release gate run whose verdict passed for the commit, or empty'
+    value: ${{ steps.find.outputs.run-id }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Find a green release gate verdict
+      id: find
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+        SHA: ${{ inputs.sha }}
+        REQUIRE: ${{ inputs.require }}
+      run: |
+        set -euo pipefail
+        [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::A release gate verdict is looked up by a full commit sha, not '$SHA'."; exit 1; }
+        name="Release gate verdict ($SHA)"
+        for run in $(gh api "repos/${GH_REPO}/actions/workflows/release-gate.yml/runs?status=completed&per_page=50" \
+          --jq '.workflow_runs[] | select(.head_branch == "main" or .event == "workflow_run") | .id'); do
+          found=$(gh api --paginate "repos/${GH_REPO}/actions/runs/${run}/jobs?per_page=100" \
+            | jq -r --arg name "$name" '.jobs[] | select(.name == $name and .conclusion == "success") | .id' \
+            | head -n 1)
+          if [ -n "$found" ]; then
+            echo "Release gate passed on ${SHA} in run ${run}."
+            echo "run-id=${run}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+        done
+        if [ "$REQUIRE" = true ]; then
+          echo "::error::No green release gate on ${SHA}. The gate starts when release-build.yml runs for a tag of this commit: if its gate run is still in progress, run this again once it passes; otherwise dispatch release-gate.yml from main with ref ${SHA}."
+          exit 1
+        fi
+        echo "No green release gate on ${SHA}."

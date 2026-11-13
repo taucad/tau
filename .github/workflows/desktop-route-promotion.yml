@@ -181,6 +181,27 @@ jobs:
           fi
           echo "::error::No green shell conformance on ${sha} (${TAG}). Dispatch shell-conformance.yml on the tag, or cut a new candidate."
           exit 1
+      # The release gate (CI throughput review RG-1, `release-gate.yml`): a promotion on either channel
+      # needs a green gate verdict on the candidate's own commit (the uncached sweep, the formal matrix and the
+      # cross-root read lint). The gate started by itself when `release-build.yml` ran for the tag; this reads
+      # its verdict and never runs or waits for it. A renewal publishes nothing new and does not read it.
+      - name: Find the candidate's commit
+        id: candidate-commit
+        if: steps.selected.outputs.run == 'true' && inputs.operation == 'promote-routes'
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [ -n "$TAG" ] || { echo '::error::A promotion names its candidate tag.'; exit 1; }
+          echo "sha=$(gh api "repos/${GH_REPO}/commits/${TAG}" --jq .sha)" >> "$GITHUB_OUTPUT"
+      - name: Require a green release gate on the candidate's commit
+        if: steps.selected.outputs.run == 'true' && inputs.operation == 'promote-routes'
+        uses: ./.github/actions/release-gate-verdict
+        with:
+          sha: ${{ steps.candidate-commit.outputs.sha }}
+          github-token: ${{ github.token }}
+          require: 'true'
       - name: Load protected signing inputs
         if: steps.selected.outputs.run == 'true'
         env:

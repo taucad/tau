@@ -150,9 +150,13 @@ const owner = (ownerId: string): FinancialSessionIdentity => ({
 describe('FinancialSessionScope', () => {
   it('N1: keeps the children mounted when identity goes from none to an owner', () => {
     let mounts = 0;
+    let unmounts = 0;
     const Marker = (): undefined => {
       useEffect(() => {
         mounts += 1;
+        return () => {
+          unmounts += 1;
+        };
       }, []);
       return undefined;
     };
@@ -169,11 +173,12 @@ describe('FinancialSessionScope', () => {
       </FinancialSessionScope>,
     );
 
-    expect(mounts).toBe(1);
+    expect({ mounts, unmounts }).toEqual({ mounts: 1, unmounts: 0 });
   });
 
   it('H7: keeps a child upgraded state and its single mount when identity goes from none to an owner', () => {
     let mounts = 0;
+    let unmounts = 0;
     const seen: boolean[] = [];
     /** Stands in for the rich composer: it upgrades once after mount. */
     const Upgrading = (): undefined => {
@@ -183,6 +188,9 @@ describe('FinancialSessionScope', () => {
         mounts += 1;
         // oxlint-disable-next-line react/set-state-in-effect -- the stand-in upgrades once after mount, as the composer does
         setUpgraded(true);
+        return () => {
+          unmounts += 1;
+        };
       }, []);
       return undefined;
     };
@@ -201,7 +209,31 @@ describe('FinancialSessionScope', () => {
       </FinancialSessionScope>,
     );
 
-    expect({ mounts, seen: seen.every(Boolean) }).toEqual({ mounts: 1, seen: true });
+    expect({ mounts, unmounts, seen: seen.every(Boolean) }).toEqual({ mounts: 1, unmounts: 0, seen: true });
+  });
+
+  it('still binds a first owner when identity goes from none to an owner: purges billing state and other accounts saved usage', () => {
+    const queryClient = new QueryClient();
+    let session: ReturnType<typeof useFinancialSession> | undefined;
+    const Capture = (): undefined => {
+      session = useFinancialSession();
+      return undefined;
+    };
+    const tree = (identity: FinancialSessionIdentity | undefined): React.JSX.Element => (
+      <FinancialSessionScope identity={identity}>
+        <Capture />
+      </FinancialSessionScope>
+    );
+    const { rerender } = render(tree(undefined), { wrapper: wrap(queryClient) });
+    queryClient.setQueryData(['billing', 'credits'], { balance: 'device' });
+    const before = session?.capture();
+    purgeSavedUsage.mockClear();
+
+    rerender(tree(owner('a')));
+
+    expect(purgeSavedUsage).toHaveBeenCalledWith({ environment: 'development', ownerId: 'a' });
+    expect(queryClient.getQueryData(['billing', 'credits'])).toBeUndefined();
+    expect(before?.isCurrent()).toBe(false);
   });
 
   it.each([

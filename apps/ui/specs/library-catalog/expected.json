@@ -66,6 +66,11 @@
       "tier": "pr",
       "expect": "pass",
       "ref": "The target, labelled, at 1 project, 1 row at start, 1 mutation and 1 access question resting on 1 read, with no crash and no write stop, so the graph stays under 1 MB (graphs.LibraryCatalog)"
+    },
+    "LibraryCatalog.wide.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "The target at 3 projects, 1 row at start, 2 mutations and 1 crash, with no write stop and a quiet environment (550,228 distinct states, under 30 s). Narrowed from the formal plan's 3 projects, 3 mutations, 2 crashes, 2 environment steps and 2 access questions: every combination of those probed (3 mutations with 1 crash; 2 crashes with 2 environment steps; 2 environment steps with 2 questions) exhausts the runner's 1 GB heap or its 900 s watchdog, so programme control rules the wide bounds"
     }
   },
   "graphs": {

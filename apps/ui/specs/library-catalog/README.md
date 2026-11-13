@@ -67,9 +67,11 @@ The model specifies no lock. Two tabs may replay one row at once (OQ6); that is 
 | `env-double-replay-witness` | pr      | `SingleReplay` (witness)       | Two tabs replaying one row is reachable                                                                                                                          |
 | `no-epoch`                  | pr      | `NoStaleReconcile` (limit)     | Without the epoch check a pass an invalidation overtook replaces the catalog                                                                                     |
 | `export`                    | pr      | pass                           | The labelled graph for the covering suite                                                                                                                        |
-| `wide`                      | nightly | pass                           | Run by `ui:formal:wide`                                                                                                                                          |
+| `wide`                      | nightly | pass                           | 3 projects, 2 mutations, 1 crash. Run by `ui:formal:wide`. Narrower than the formal plan's wide bounds, which exceed the runner's 1 GB heap (see below)          |
 
-`expected.json` states each configuration's bounds. The `pr` configurations other than `target` leave out the crash, the write stop or both, to fit the queue; `wide` puts them together.
+`expected.json` states each configuration's bounds. The `pr` configurations other than `target` leave out the crash, the write stop or both, to fit the queue.
+
+**`wide` is narrowed, pending a ruling.** The formal plan states 3 projects, 3 mutations, 2 crashes, 2 environment steps and 2 access questions. Every combination of those probed (3 projects with 3 mutations and 1 crash; 3 projects with 2 crashes and 2 environment steps; 2 projects with the crash, the write stop and 2 environment steps; 3 projects with 2 environment steps and 2 questions) exhausts the runner's 1 GB heap or its 900 s watchdog. `wide` holds the largest probed configuration that finishes: 3 projects, 2 mutations and 1 crash.
 
 ### What the `today` configurations found
 

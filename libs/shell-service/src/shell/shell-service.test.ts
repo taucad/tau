@@ -757,7 +757,7 @@ describe('human Terminal sessions (D6, D21)', () => {
         launch.stdio.kind === 'terminal'
           ? { status: 'started', stdout: '$ ' }
           : { status: 'started', stdout: 'hi\n', exit: { exitCode: 0 } },
-      { terminalZsh },
+      { terminalZsh, toolchain: { roots: [], bins: ['/opt/tau/git/bin'] } },
     );
     const opened = await service.openTerminal({ projectRoot: project, size, signal: new AbortController().signal });
     if (opened.status !== 'opened') {
@@ -769,11 +769,13 @@ describe('human Terminal sessions (D6, D21)', () => {
       executablePath: '/bin/zsh',
       arguments: ['-l', '-i'],
       startupFiles: 'zsh',
+      toolchainBins: ['/opt/tau/git/bin'],
       environment: { SHELL: '/bin/zsh' },
     });
     expect(provider.launches[0]!.environment).not.toHaveProperty('ZDOTDIR');
     expect(provider.launches[1]).toMatchObject({ executablePath: executable.path });
     expect(provider.launches[1]).not.toHaveProperty('startupFiles');
+    expect(provider.launches[1]).not.toHaveProperty('toolchainBins');
     expect(provider.launches[1]!.arguments.slice(0, 2)).toStrictEqual(['--noprofile', '--norc']);
     await opened.session[Symbol.asyncDispose]();
   });

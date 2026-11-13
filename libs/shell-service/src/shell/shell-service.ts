@@ -1148,6 +1148,8 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         filesystem,
         network: { domains: access.domains },
         startupFiles: terminalZsh === undefined ? undefined : 'zsh',
+        /* A login Zsh's path_helper moves the system folders first; the provider puts these back in front. */
+        toolchainBins: terminalZsh === undefined ? undefined : (options.toolchain?.bins ?? []),
         environment: shellEnvironment({
           platform,
           executablePath: terminalZsh?.path ?? executable.path,

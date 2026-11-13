@@ -127,13 +127,13 @@ const listingOf = (roots: readonly string[]): ProjectDiscoveryResult =>
     roots: [],
   }) as unknown as ProjectDiscoveryResult;
 
-const rowInput = (operationId: string, projectId: string, kind: string): RecoveryRowInput =>
-  ({
-    operationId,
-    projectId,
-    kind,
-    storage: { backend: 'indexeddb', relativeDirectory: projectId },
-  }) as unknown as RecoveryRowInput;
+/** The model's `"create"` and `"delete"` rows, as the journal holds a create and a permanent delete. */
+const rowInput = (operationId: string, projectId: string, kind: string): RecoveryRowInput => ({
+  operationId,
+  projectId,
+  kind: kind === 'create' ? 'create' : 'permanent-delete',
+  storage: { backend: 'indexeddb', providerBasePath: projectId },
+});
 
 type Pending<O> = { resolve: (output: O) => void } | undefined;
 

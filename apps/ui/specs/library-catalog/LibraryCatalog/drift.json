@@ -2,8 +2,10 @@
   "actions": {
     "library-access-query.classifying.xstate.done.actor": "AccessReadDone",
     "library-access-query.classifying.xstate.error.actor": "AccessReadDone",
+    "library-access-query.discovering.gate.discoveryFailed": "AccessTop",
     "library-access-query.discovering.passing.xstate.done.actor": "AccessReadDone",
     "library-access-query.discovering.passing.xstate.error.actor": "AccessReadDone",
+    "library-access-query.discovering.retrying.discoveryFailed": "AccessTop",
     "library-access-query.discoveryFailed": "Unmodelled",
     "library-access-query.discoveryReady": "Unmodelled",
     "library-access-query.discoveryRetrying": "Unmodelled",
@@ -28,6 +30,7 @@
     "library-access.journalReady": "Unmodelled",
     "library-access.journalRetrying": "Unmodelled",
     "library-access.queryAnswered": "AccessReadDone",
+    "library-access.queryWantsDiscovery": "Unmodelled",
     "library-access.recoveriesChanged": "Unmodelled",
     "library-access.recoveryStarted": "Unmodelled",
     "library-access.xstate.error.*": "Unmodelled",
@@ -100,6 +103,7 @@
     "passRequested",
     "poll",
     "queryAnswered",
+    "queryWantsDiscovery",
     "recoveriesChanged",
     "recoveryStarted",
     "refreshObservations",
@@ -111,9 +115,9 @@
   ],
   "sources": {
     "apps/ui/app/hooks/use-project-manager.tsx": "ab3c6f2cd5043b5c2fa2b0f596a7811a7b51895d2bc73386bec89bb830ae8813",
-    "apps/ui/app/machines/library-access.machine.ts": "aef209a2c0b97efcbcb5bbbf025b470f7dfe19421f56fc25801a59d6ad29fa39",
+    "apps/ui/app/machines/library-access.machine.ts": "28406d52b709326917866b0dd2f97dee3abbeaf4183e9095a15479bda49dddc0",
     "apps/ui/app/machines/library-discovery.machine.ts": "714b3a34db66a3aa10f3d78dda143e66c1d3c197c3b832139096b2a77bc7874b",
-    "apps/ui/app/machines/library-recovery.machine.ts": "e5620220d4eaf2229d21f48b6a2e0ee9088f62e165a565663c7ff6ca64d09cde"
+    "apps/ui/app/machines/library-recovery.machine.ts": "b92dbc99e42dd3b34410d0824953bd4ca2faeed384233da9294d522087572ccb"
   },
   "specs": {
     "LibraryCatalog.tla": "fe8e3005ddd22de077ec5343af081c2a8be319e2d34c864ed8352ea59dc07d0c"

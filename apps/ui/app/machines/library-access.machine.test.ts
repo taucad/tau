@@ -63,15 +63,19 @@ const pass = (epoch: number, entries: readonly ProjectDiscoveryEntry[] = [], cac
   cached,
 });
 
-const recovery = (projectId: string, status: 'recovering' | 'failed', operationId = `o-${projectId}`) =>
-  ({
+const recovery = (
+  projectId: string,
+  status: 'recovering' | 'failed',
+  operationId = `o-${projectId}`,
+): PendingProjectRecovery => {
+  const base = {
     operationId,
     projectId,
     kind: 'create',
-    storage: {},
-    status,
-    ...(status === 'failed' ? { reason: 'workspace-unavailable' } : {}),
-  }) as unknown as PendingProjectRecovery;
+    storage: { backend: 'indexeddb', providerBasePath: projectId },
+  } as const;
+  return status === 'failed' ? { ...base, status, reason: 'workspace-unavailable' } : { ...base, status };
+};
 
 const start = () => {
   const guard = guardActors();
@@ -335,6 +339,32 @@ describe('libraryAccess', () => {
       expect(harness.discovery.calls).toEqual([expect.objectContaining({ input: { requestId: 'q2', gen: 0 } })]);
     });
 
+    it('should run the bootstrap pass again for a query that reaches its pass after the pass failed', async () => {
+      const harness = start();
+      harness.send({ type: 'journalReady', pending: 0 });
+      harness.send({ type: 'epochMoved', epoch: 1, current: false });
+      ask(harness);
+      harness.send({ type: 'discoveryFailed', message: 'scan failed' });
+      await resolve(harness.verify, { status: 'discovery-required' });
+      expect(harness.answers('q1')).toEqual([]);
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+      harness.send({ type: 'discoveryReady' });
+      expect(harness.discovery.calls).toHaveLength(1);
+      await resolve(harness.discovery, pass(1, [entry('route-blocked', 'p1')]));
+      expect(harness.answers('q1')).toEqual([{ status: 'unavailable' }]);
+    });
+
+    it('should answer error when the bootstrap pass run again for a query fails too', async () => {
+      const harness = start();
+      harness.send({ type: 'journalReady', pending: 0 });
+      harness.send({ type: 'epochMoved', epoch: 1, current: false });
+      ask(harness);
+      harness.send({ type: 'discoveryFailed', message: 'scan failed' });
+      await resolve(harness.verify, { status: 'discovery-required' });
+      harness.send({ type: 'discoveryFailed', message: 'still failing' });
+      expect(harness.answers('q1')).toEqual([{ status: 'error', message: 'still failing' }]);
+    });
+
     it('should skip verification while a current listing exists', () => {
       const harness = start();
       harness.send({ type: 'journalReady', pending: 0 });
@@ -366,6 +396,41 @@ describe('libraryAccess', () => {
       harness.send({ type: 'epochMoved', epoch: 2, current: false });
       await resolve(harness.verify, { status: 'verified', project: project('p1') });
       expect(harness.ensure.calls).toHaveLength(0);
+      expect(harness.verify.calls).toHaveLength(2);
+    });
+
+    it('should read again for a recovery that started during a verification that answered unavailable', async () => {
+      const harness = start();
+      settledLibrary(harness);
+      ask(harness);
+      harness.send({ type: 'recoveryStarted', projectId: 'p1' });
+      await resolve(harness.verify, { status: 'unavailable' });
+      expect(harness.answers('q1')).toEqual([]);
+      expect(harness.verify.calls).toHaveLength(2);
+    });
+
+    it.each(['route-blocked', 'duplicate-id'] as const)(
+      'should read again for a recovery that started during a pass that found a %s entry',
+      async (status) => {
+        const harness = start();
+        settledLibrary(harness);
+        ask(harness);
+        await resolve(harness.verify, { status: 'discovery-required' });
+        harness.send({ type: 'recoveryStarted', projectId: 'p1' });
+        await resolve(harness.discovery, pass(1, [entry(status, 'p1')]));
+        expect(harness.answers('q1')).toEqual([]);
+        expect(harness.verify.calls).toHaveLength(2);
+      },
+    );
+
+    it('should read again, not answer error, when a read that rejected no longer stands', async () => {
+      const harness = start();
+      settledLibrary(harness);
+      ask(harness);
+      harness.send({ type: 'epochMoved', epoch: 2, current: false });
+      harness.verify.calls[0]?.reject(new Error('worker gone'));
+      await flush();
+      expect(harness.answers('q1')).toEqual([]);
       expect(harness.verify.calls).toHaveLength(2);
     });
 
@@ -626,6 +691,7 @@ const samples: Record<LibraryAccessEvent['type'], readonly LibraryAccessEvent[]>
   queryAnswered: [
     { type: 'queryAnswered', requestId: 'q', gen: 0, epoch: 0, answer: { status: 'missing' }, cacheHits: 0 },
   ],
+  queryWantsDiscovery: [{ type: 'queryWantsDiscovery', requestId: 'q', gen: 0 }],
 };
 
 const serializeState = (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value);

@@ -41,14 +41,16 @@ const heldPort = <I, O>() => {
   return { calls, port };
 };
 
-const row = (operationId: string, projectId: string, workspaceId?: string): RecoveryRowInput =>
-  ({
-    operationId,
-    projectId,
-    kind: 'create',
-    storage: { backend: 'webaccess', storageRootKey: 'root', relativeDirectory: projectId },
-    ...(workspaceId === undefined ? {} : { workspaceId }),
-  }) as unknown as RecoveryRowInput;
+/** A row on Home storage, or on a picked folder when `workspaceId` is given (cited by its storage, as the journal holds it). */
+const row = (operationId: string, projectId: string, workspaceId?: string): RecoveryRowInput => ({
+  operationId,
+  projectId,
+  kind: 'create',
+  storage:
+    workspaceId === undefined
+      ? { backend: 'indexeddb', providerBasePath: projectId }
+      : { backend: 'webaccess', workspaceId, providerBasePath: projectId },
+});
 
 const recovered: ReplayOutcome = { status: 'recovered' };
 const workspaceGone: ReplayOutcome = { status: 'failed', reason: 'workspace-unavailable' };
@@ -402,6 +404,36 @@ describe('libraryRecovery', () => {
       expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'waiting' }));
       await ready(harness, [row('o1', 'p1', 'w1')]);
       expect(harness.replay.calls.map((call) => call.input.operationId)).toEqual(['o1']);
+    });
+
+    it("should hold a mutation while a person's replay of its project is queued, and admit it once answered", async () => {
+      const harness = start();
+      await ready(harness, [row('o1', 'p1'), row('o2', 'p2')]);
+      await settleReplay(harness, { status: 'failed', reason: 'identity-conflict' });
+      // The loop replays o2; the person asks for o1 again (terminal) and for o3, a row another tab journaled.
+      harness.send({ type: 'replayAsked', requestId: 'c1', row: row('o1', 'p1') });
+      harness.send({ type: 'replayAsked', requestId: 'c3', row: row('o3', 'p3') });
+      harness.send({ type: 'mutationAsked', requestId: 'm1', projectId: 'p1' });
+      harness.send({ type: 'mutationAsked', requestId: 'm3', projectId: 'p3' });
+      expect(harness.of('mutationAdmitted')).toEqual([]);
+      await settleReplay(harness, recovered);
+      // The person's c1 is answered at once and releases p1; c3 starts and still holds p3.
+      expect(harness.of('replaySettled')).toEqual([{ type: 'replaySettled', requestId: 'c1', held: true }]);
+      expect(harness.of('mutationAdmitted')).toEqual([{ type: 'mutationAdmitted', requestId: 'm1' }]);
+      expect(harness.replay.calls.map((call) => call.input.operationId)).toEqual(['o1', 'o2', 'o3']);
+      await settleReplay(harness, recovered);
+      expect(harness.of('mutationAdmitted').map((event) => event.requestId)).toEqual(['m1', 'm3']);
+    });
+
+    it('should drop the ask of a caller that journaled before its admission, so it never gates its project', async () => {
+      const harness = start();
+      harness.send({ type: 'mutationAsked', requestId: 'm1', projectId: 'p1' });
+      harness.send({ type: 'mutationJournaled', requestId: 'm1', row: row('o1', 'p1') });
+      harness.send({ type: 'mutationSettled', operationId: 'o1', outcome: recovered });
+      await ready(harness, []);
+      expect(harness.of('mutationAdmitted')).toEqual([]);
+      harness.send({ type: 'mutationAsked', requestId: 'm2', projectId: 'p1' });
+      expect(harness.of('mutationAdmitted')).toEqual([{ type: 'mutationAdmitted', requestId: 'm2' }]);
     });
 
     it('should hold a mutation until the journal is read', async () => {

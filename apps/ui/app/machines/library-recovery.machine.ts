@@ -230,10 +230,18 @@ export const recoveriesOf = (context: Context): PendingProjectRecovery[] =>
     ];
   });
 
-/** Rule 4: a mutation on `projectId` waits while an active row or another admitted mutation holds it. */
+/**
+ * Rule 4: a mutation on `projectId` waits while an active row or another admitted mutation holds it. A person's replay
+ * still queued holds it too: its row may be one this tab has not read yet, and it must not run after a newer mutation.
+ */
 const gated = (context: Context, projectId: string): boolean =>
   Object.values(context.rows).some((row) => row.projectId === projectId && isActive(row)) ||
+  context.personReplays.some((replay) => replay.row.projectId === projectId) ||
   Object.values(context.admitted).includes(projectId);
+
+/** The workspace a row's storage cites: the top-level field the host gave, else a `webaccess` storage's own. */
+const workspaceOf = (row: RecoveryRowInput): string | undefined =>
+  row.workspaceId ?? (row.storage.backend === 'webaccess' ? row.storage.workspaceId : undefined);
 
 /** Announce what this tab holds, when that changed. */
 const changed = (before: Context, patch: Patch, enq: Emit): Patch => {
@@ -462,7 +470,9 @@ export const libraryRecoveryMachine = setup({
           return (
             row !== undefined &&
             rearmable(row) &&
-            (event.workspaceId === undefined || row.workspaceId === undefined || row.workspaceId === event.workspaceId)
+            (event.workspaceId === undefined ||
+              workspaceOf(row) === undefined ||
+              workspaceOf(row) === event.workspaceId)
           );
         }),
         enq,
@@ -563,11 +573,13 @@ export const libraryRecoveryMachine = setup({
                   (row.status === 'failed' && (row.discarding || terminalRecoveryReasons.has(row.reason)))
                 ) {
                   answerPerson(next.context, enq, next);
+                  // The person's replay no longer holds its project.
                   return {
                     context: {
                       personReplays: next.context.personReplays,
                       rows: next.context.rows,
                       order: next.context.order,
+                      ...admitWaiting(next.context, enq),
                     },
                   };
                 }
@@ -639,7 +651,8 @@ export const libraryRecoveryMachine = setup({
                     if (row === undefined || !rearmable(row)) {
                       return [];
                     }
-                    const { operationId: id, projectId, kind, storage, workspaceId } = row;
+                    const { operationId: id, projectId, kind, storage } = row;
+                    const workspaceId = workspaceOf(row);
                     return [
                       {
                         operationId: id,
@@ -768,6 +781,8 @@ function journaled(
   enq: Emit,
 ): { context: Patch } {
   const { [event.requestId]: _admission, ...admitted } = context.admitted;
+  // A caller that journaled without waiting for its admission is no longer asking.
+  const asked = context.asked.filter((ask) => ask.requestId !== event.requestId);
   const known = context.rows[event.row.operationId] !== undefined;
   enq.emit({ type: 'rowStarted', operationId: event.row.operationId, projectId: event.row.projectId });
   return {
@@ -775,6 +790,7 @@ function journaled(
       context,
       {
         admitted,
+        asked,
         rows: {
           ...context.rows,
           [event.row.operationId]: { ...event.row, status: 'replaying', attempts: 0, via: 'mutation' },

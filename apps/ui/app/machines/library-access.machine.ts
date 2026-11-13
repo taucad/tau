@@ -107,6 +107,8 @@ export type LibraryAccessEvent =
   | { type: 'accessCancelled'; requestId: string }
   /** A query's report; matched by `requestId` and `gen` (rule 9). */
   | { type: 'queryAnswered'; requestId: string; gen: number; epoch: number; answer: AccessAnswer; cacheHits: number }
+  /** A query reached its pass after the bootstrap pass failed: run that pass again, as today's next call does. */
+  | { type: 'queryWantsDiscovery'; requestId: string; gen: number }
   | AccessFactEvent;
 
 /** Events a `libraryAccess` actor emits. */
@@ -142,6 +144,7 @@ export const libraryAccessEventTypes = [
   'accessAsked',
   'accessCancelled',
   'queryAnswered',
+  'queryWantsDiscovery',
   'epochMoved',
   'discoveryReady',
   'discoveryFailed',
@@ -379,13 +382,13 @@ const getProjectFileSystemConfig = createAsyncLogic<
   },
 });
 
-/** A port rejected: the question is answered `error`, as today's rejection is. */
+/** A port rejected: the question is answered `error`, as today's rejection is, unless the reads no longer stand. */
 const portFailed = settles(
   'AccessReadDone',
   (
     { context, event, children }: Readonly<{ context: QueryContext; event: { error: unknown }; children: Children }>,
     enq,
-  ) => answer(context, ioOf(enq, children), { status: 'error', message: messageOf(event.error) }),
+  ) => fencedAnswer(context, ioOf(enq, children), { status: 'error', message: messageOf(event.error) }),
 );
 
 /** One request's query. Its ports throw until `createLibraryAccess` provides them. */
@@ -487,16 +490,45 @@ export const libraryAccessQueryMachine = setup({
     discovering: {
       initial: 'gate',
       states: {
+        /*
+         * The bootstrap pass has not run. A failure it reports while the query waits here answers `error`, as today's
+         * rejection does; one that came before the query got here is run again first, as today's next
+         * `ensureDiscoveryReady` call does.
+         */
         gate: {
-          always: refines('AccessTop', ({ context, children }, enq) => {
+          always: refines('AccessTop', ({ context }, enq) => {
             if (context.facts.discoveryReady) {
               return { target: 'passing' };
             }
-            const { discoveryError } = context.facts;
-            return discoveryError === undefined
-              ? undefined
-              : answer(context, ioOf(enq, children), { status: 'error', message: discoveryError });
+            if (context.facts.discoveryError === undefined) {
+              return undefined;
+            }
+            enq.sendTo(context.parentRef, {
+              type: 'queryWantsDiscovery',
+              requestId: context.requestId,
+              gen: context.gen,
+            });
+            return { target: 'retrying' };
           }),
+          on: {
+            discoveryFailed: refines('AccessTop', ({ context, event, children }, enq) =>
+              answer(context, ioOf(enq, children), { status: 'error', message: event.message }),
+            ),
+          },
+        },
+        /** Waiting for the parent to run the failed bootstrap pass again (`discoveryRetrying`). */
+        retrying: {
+          always: refines('AccessTop', ({ context }) => {
+            if (context.facts.discoveryReady) {
+              return { target: 'passing' };
+            }
+            return context.facts.discoveryError === undefined ? { target: 'gate' } : undefined;
+          }),
+          on: {
+            discoveryFailed: refines('AccessTop', ({ context, event, children }, enq) =>
+              answer(context, ioOf(enq, children), { status: 'error', message: event.message }),
+            ),
+          },
         },
         passing: {
           invoke: {
@@ -704,6 +736,19 @@ export const libraryAccessMachine = setup({
       });
       const { [event.requestId]: _answered, ...questions } = context.questions;
       return { context: { questions } };
+    }),
+    /* The question's query reached its pass after the bootstrap pass failed: run it again for every open question. */
+    queryWantsDiscovery: refines('Unmodelled', ({ context, event }, enq: Emit & SendTo) => {
+      const question = context.questions[event.requestId];
+      if (question?.gen !== event.gen || context.facts.discoveryError === undefined) {
+        return {};
+      }
+      const retry = { type: 'discoveryRetrying' } as const;
+      for (const open of Object.values(context.questions)) {
+        enq.sendTo(open.ref, retry);
+      }
+      enq.emit({ type: 'discoveryWanted' });
+      return { context: { facts: withFact(context.facts, retry) } };
     }),
     epochMoved: foldFact,
     discoveryReady: foldFact,

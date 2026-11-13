@@ -5,7 +5,7 @@ import type { EditorView } from '@codemirror/view';
 import type { DocumentChange, DocumentTransaction, EditorDocument } from '#lib/editor-document.js';
 import type { EditorDiagnostics } from '#lib/editor-diagnostics.js';
 import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
-import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
+import { EditorPanePlaceholder, EditorPaneText } from '#components/code/editor-pane-placeholder.js';
 import { loadEditorSyntax } from '#lib/editor-syntax.js';
 import { Button } from '@taucad/ui/components/button';
 import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
@@ -184,6 +184,14 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
         {...props}
         document={props.document}
         syntaxExtension={syntax?.languageId === props.languageId ? syntax.extension : undefined}
+      />
+    ) : props.document ? (
+      // The document is in hand before the runtime: show its text, read-only, in the editor's box.
+      <EditorPaneText
+        document={props.document}
+        label={`Loading ${props.document.path.split('/').pop() ?? props.document.path}`}
+        hasLineNumbers={props.showLineNumbers}
+        className={props.className}
       />
     ) : (
       (props.loading ?? <EditorPanePlaceholder label='Loading editor' />)

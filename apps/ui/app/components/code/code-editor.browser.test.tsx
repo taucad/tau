@@ -1342,3 +1342,53 @@ it('draws real TypeScript diagnostics with gutter markers on their underlined ro
     service.dispose();
   }
 }, 60_000);
+
+it.each([
+  [1000, 600],
+  [390, 720],
+])('keeps every line in its box when CodeMirror replaces the read-only text at %spx', async (width, height) => {
+  await page.viewport(width, height);
+  await document.fonts.ready;
+  const source = Array.from({ length: 14 }, (_, index) =>
+    index === 4 ? '' : `${'\t'.repeat(index % 3)}const line${index + 1} = ${index};`,
+  ).join('\n');
+  const sourceDocument = new EditorDocument('main.geospec.ts', source);
+  const { container } = render(
+    <div style={{ position: 'fixed', top: 0, left: 0, width: Math.min(width, 800), height: 400 }}>
+      <CodeEditor document={sourceDocument} viewId='pane-metrics' languageId='typescript' />
+    </div>,
+  );
+  const origin = container.firstElementChild!.getBoundingClientRect();
+  const boxes = (lines: Element[], numbers: Element[]) =>
+    [0, 1, 4, 9, 13].map((index) => {
+      const line = lines[index]!;
+      const range = document.createRange();
+      range.selectNodeContents(line);
+      const text = range.getClientRects()[0] ?? line.getBoundingClientRect();
+      const number = numbers[index]!.getBoundingClientRect();
+      return {
+        index,
+        top: Math.round(line.getBoundingClientRect().top - origin.top),
+        textLeft: Math.round(text.left - origin.left),
+        numberRight: Math.round(number.right - origin.left),
+      };
+    });
+  // Before the runtime arrives: the document's own text, read-only, in the editor's box.
+  const standIn = container.querySelector('[data-slot="editor-pane-text"]');
+  expect(standIn).not.toBeNull();
+  expect(container.querySelector('.cm-editor')).toBeNull();
+  const contentLines = [...standIn!.querySelectorAll('[data-slot="editor-pane-text-content"] > div')];
+  const gutterLines = [...standIn!.querySelectorAll('[aria-hidden="true"] > div > div:not(.invisible)')];
+  const before = boxes(contentLines, gutterLines);
+
+  await expect.poll(() => container.querySelectorAll('.cm-content .cm-line').length).toBe(14);
+  expect(container.querySelector('[data-slot="editor-pane-text"]')).toBeNull();
+  const after = boxes(
+    [...container.querySelectorAll('.cm-content .cm-line')],
+    [...container.querySelectorAll('.cm-lineNumbers .cm-gutterElement')].filter(
+      (element) => element.textContent !== '' && element.getBoundingClientRect().height > 0,
+    ),
+  );
+  expect(after).toEqual(before);
+  expect(sourceDocument.text).toBe(source);
+});

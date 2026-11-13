@@ -19,7 +19,8 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/compon
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { KernelCommercialBadge } from '#cloud/kernel-commerce.js';
 
-/* The glyph and check sit on the name's line (h-5), not the middle of the two-line row. */
+/* The glyph and check sit on the name's line (h-5), not the middle of the two-line row.
+   Badges on that line are h-4 like the Pro badge: the line clips, so a taller badge loses its borders. */
 function KernelRowBody({
   row,
   isSelected,
@@ -38,7 +39,10 @@ function KernelRowBody({
             {row.name}
             {row.id === 'auto' ? null : <KernelCommercialBadge kernelId={row.id} />}
             {row.unavailable ? (
-              <Badge variant='outline' className='font-normal text-muted-foreground'>
+              <Badge
+                variant='outline'
+                className='h-4 px-1.5 text-[10px] leading-none font-normal text-muted-foreground'
+              >
                 {row.unavailable.badge}
               </Badge>
             ) : null}

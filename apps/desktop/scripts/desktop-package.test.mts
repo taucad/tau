@@ -210,12 +210,15 @@ console.log('✓ every payload a target leaves out is named');
     await mkdir(dirname(layout.gitLfs), { recursive: true });
     await writeFile(layout.git, '#!/bin/sh\n', { mode: 0o755 });
     await writeFile(layout.gitLfs, '#!/bin/sh\n', { mode: 0o644 });
-    assert.deepEqual(await gitPayloadExecutables(resourceRoot, 'linux-x64'), { git: true, gitLfs: false });
-    assert.ok(
+    /* Windows has no execute bit (any file passes X_OK), so a non-executable file is only refused on POSIX hosts. */
+    const executeBit = process.platform !== 'win32';
+    assert.deepEqual(await gitPayloadExecutables(resourceRoot, 'linux-x64'), { git: true, gitLfs: !executeBit });
+    assert.equal(
       desktopGitPayloadRefusal(linux, true, {
         ...(await gitPayloadExecutables(resourceRoot, 'linux-x64')),
         gitResourceRoot,
-      }),
+      }) !== undefined,
+      executeBit,
     );
     await rm(layout.gitLfs);
     await mkdir(layout.gitLfs, { mode: 0o755 });

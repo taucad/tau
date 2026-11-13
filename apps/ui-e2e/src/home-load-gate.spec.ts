@@ -209,14 +209,19 @@ const measureReturningReload = async (
   viewport: ViewportName,
   delays: readonly WorkerReadDelay[],
   label: string,
+  prepare?: () => Promise<void>,
 ): Promise<ProjectLoadRecord> => {
   await target.setViewport(viewports.wide);
+  await target.installModelCatalogFixture(catalogLatency);
+  await target.startModelCatalogApi();
+  await installHomeLoadRecorder();
   await installProjectLoadRecorder();
   await installWorkerReadDelay();
   await seedReturningVisitor();
   await target.setViewport(viewports[viewport]);
   await target.navigate('/');
   await waitForSettledHome(seededProjects, 1);
+  await prepare?.();
   await armWorkerReadDelay(delays);
   await target.reload();
   await target.expectVisible(richComposer, 60_000);
@@ -253,10 +258,22 @@ for (const viewport of ['wide', 'phone'] as const) {
 }
 
 knownDefect(
-  'H5: no sidebar project row moves on a returning reload of Home with the chat listing 3 s late',
+  'H5: no sidebar project row moves on a returning reload of Home with a project expanded and the chat listing 3 s late',
   'h5-wide',
   async () => {
-    const record = await measureReturningReload('wide', [chatListingRead], 'h5-wide');
+    /* The visitor left the newest project expanded: Home's sidebar then lists its chats, as the audit's sidebar did. */
+    const expanded = seededProjects.at(-1)!;
+    const record = await measureReturningReload('wide', [chatListingRead], 'h5-wide', async () => {
+      const disclosure = selectors.getByRole('button', { name: `Expand ${expanded}`, exact: true });
+      await target.click(disclosure);
+      await target.expectAttribute(
+        selectors.getByRole('button', { name: `Collapse ${expanded}`, exact: true }),
+        'aria-expanded',
+        'true',
+      );
+      /* The disclosure is persisted before the measured load. */
+      await target.delay(settleWindow);
+    });
     expect(record.projectRows.length, 'H5: no sidebar project row was on screen').toBeGreaterThan(0);
     const moved = projectRowMoves(record);
     expect(moved, `H5: a sidebar project row moved between frames: ${moved.join(' | ')}`).toEqual([]);

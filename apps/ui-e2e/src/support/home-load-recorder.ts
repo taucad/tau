@@ -1,6 +1,7 @@
 /* oxlint-disable typescript/consistent-type-definitions -- The recorder's record crosses the page boundary as plain JSON shapes. */
 import { test } from 'vitest';
 import { commands } from 'vitest/browser';
+import { cloudDefectRow } from '#support/cloud-stand-ins.js';
 import * as target from '#support/external-target.js';
 
 /**
@@ -686,7 +687,17 @@ export type WorkerReadLog = ReadonlyArray<{
   readonly delayed: boolean;
 }>;
 
-type WorkerReadGlobal = typeof globalThis & { __TAU_WORKER_READS__: { log: WorkerReadLog } };
+/** The held replies as they reached the page, each with when its request was sent. */
+export type WorkerReadDeliveries = ReadonlyArray<{
+  readonly t: number;
+  readonly sentAt: number;
+  readonly method: string;
+  readonly path: string | undefined;
+}>;
+
+type WorkerReadGlobal = typeof globalThis & {
+  __TAU_WORKER_READS__: { log: WorkerReadLog; delivered: WorkerReadDeliveries };
+};
 
 /**
  * Installed before any page script. Reads its rules from `sessionStorage` under `key`, so a spec arms a delay for
@@ -706,8 +717,10 @@ export const delayWorkerReads = (key: string): void => {
     rules = [];
   }
   const log: Array<{ t: number; method: string; path: string | undefined; delayed: boolean }> = [];
-  Object.defineProperty(globalThis, '__TAU_WORKER_READS__', { value: { log } });
-  const held = new Map<string, number>();
+  /* Each held reply as it reached the page's listener: proof the late answer was late, not only that it was held. */
+  const delivered: Array<{ t: number; sentAt: number; method: string; path: string | undefined }> = [];
+  Object.defineProperty(globalThis, '__TAU_WORKER_READS__', { value: { log, delivered } });
+  const held = new Map<string, { milliseconds: number; sentAt: number; method: string; path: string | undefined }>();
 
   const { postMessage } = MessagePort.prototype;
   MessagePort.prototype.postMessage = function (this: MessagePort, message: unknown, ...rest: unknown[]): void {
@@ -728,7 +741,7 @@ export const delayWorkerReads = (key: string): void => {
       const method = String(frame.n);
       const rule = rules.find((candidate) => candidate.method === method && candidate.path.test(path ?? ''));
       if (rule) {
-        held.set(frame.i, rule.milliseconds);
+        held.set(frame.i, { milliseconds: rule.milliseconds, sentAt: Math.round(performance.now()), method, path });
       }
       if (log.length < 2000) {
         log.push({ t: Math.round(performance.now()), method, path, delayed: rule !== undefined });
@@ -762,8 +775,16 @@ export const delayWorkerReads = (key: string): void => {
         return;
       }
       setTimeout(() => {
+        if (delivered.length < 2000) {
+          delivered.push({
+            t: Math.round(performance.now()),
+            sentAt: late.sentAt,
+            method: late.method,
+            path: late.path,
+          });
+        }
         deliver(this, event);
-      }, late);
+      }, late.milliseconds);
     };
     wrappers.set(listener, wrapper);
     return wrapper;
@@ -809,16 +830,29 @@ export const readWorkerReads = async (): Promise<WorkerReadLog> =>
   target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.log);
 
 /**
- * When the first read that `rule` itself held was sent, so a row checks that its own delay was forced rather than
- * any delay armed beside it.
+ * The held replies the page has received so far.
  *
- * @param reads - The worker read log.
- * @param rule - One armed delay rule.
- * @returns Milliseconds from navigation start, or `undefined` when no read matching the rule was held.
+ * @returns Each delivery, with its request's send time.
  */
-export const firstDelayedRead = (reads: WorkerReadLog, rule: WorkerReadDelay): number | undefined => {
+export const readWorkerDeliveries = async (): Promise<WorkerReadDeliveries> =>
+  target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.delivered);
+
+/**
+ * When the first read that `rule` itself held was sent, counting only a read whose reply then reached the page at
+ * least the rule's delay later. A row checks that its own delay was forced, rather than any delay armed beside it,
+ * and that the late answer was delivered late rather than only held.
+ *
+ * @param deliveries - The held replies the page received.
+ * @param rule - One armed delay rule.
+ * @returns Milliseconds from navigation start, or `undefined` when no reply matching the rule was delivered late.
+ */
+export const firstDelayedRead = (deliveries: WorkerReadDeliveries, rule: WorkerReadDelay): number | undefined => {
   const path = new RegExp(rule.path, 'u');
-  return reads.find((read) => read.delayed && read.method === rule.method && path.test(read.path ?? ''))?.t;
+  const late = deliveries.filter(
+    (entry) =>
+      entry.method === rule.method && path.test(entry.path ?? '') && entry.t - entry.sentAt >= rule.milliseconds - 20,
+  );
+  return late.length === 0 ? undefined : Math.min(...late.map((entry) => entry.sentAt));
 };
 
 /* A0.10's request delay: the commands `browser-command.ts` registers, declared here so the lane adds nothing to
@@ -843,12 +877,14 @@ export const delayRequests = async (pattern: string, milliseconds: number): Prom
 /** The URLs {@link delayRequests} held in this target context so far. */
 export const readDelayedRequests = async (): Promise<readonly string[]> => commands.uiReadDelayedTargetRequests();
 
+/** How long an overrun measure is given to settle before its row fails, so it cannot act on the next row's target. */
+const overrunGrace = 60_000;
+
 /**
- * Run `measure` with a bound: past it the returned promise rejects, and the work still running is left to the
- * target's teardown.
+ * Run `measure` with a bound. Past it the work still running is awaited for `overrunGrace` more, so it settles
+ * before the row's teardown and the next row; then the returned promise rejects with the overrun.
  */
 const withinBudget = async <Measured>(measure: () => Promise<Measured>, milliseconds: number): Promise<Measured> => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
   /* Settled into a value either way, so a measure that fails after the bound is never an unhandled rejection. */
   const running = (async (): Promise<{ readonly value: Measured } | { readonly error: unknown }> => {
     try {
@@ -857,28 +893,40 @@ const withinBudget = async <Measured>(measure: () => Promise<Measured>, millisec
       return { error };
     }
   })();
-  const deadline = new Promise<{ readonly error: unknown }>((resolve) => {
-    timer = setTimeout(() => {
-      resolve({ error: new Error(`the measure phase did not finish within ${milliseconds} ms`) });
-    }, milliseconds);
-  });
-  const outcome = await Promise.race([running, deadline]);
-  clearTimeout(timer);
-  if ('error' in outcome) {
-    throw outcome.error;
+  const after = async (wait: number): Promise<'late'> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = await new Promise<'late'>((resolve) => {
+      timer = setTimeout(() => {
+        resolve('late');
+      }, wait);
+    });
+    clearTimeout(timer);
+    return late;
+  };
+  const outcome = await Promise.race([running, after(milliseconds)]);
+  if (outcome !== 'late') {
+    if ('error' in outcome) {
+      throw outcome.error;
+    }
+    return outcome.value;
   }
-  return outcome.value;
+  const settled = await Promise.race([running, after(overrunGrace)]);
+  throw new Error(
+    `the measure phase did not finish within ${milliseconds} ms${settled === 'late' ? `, and was still running ${overrunGrace} ms later` : ''}`,
+  );
 };
 
 /**
- * Define the known-defect rows of one spec (A0.10, D25). Each row is an expected failure until its fix flips it to
- * `test`. It runs in two phases so that only the defect can make it pass as expected:
+ * Define the known-defect rows of one spec (A0.10, D25), on A0.11's `cloudDefectRow`. Each row is a plain test, so
+ * a fault anywhere in it (a load, a wait, a precondition, the budget, setup or teardown) fails it. It runs in two
+ * phases:
  *
- * - `measure` seeds, loads, checks the forcing happened and checks every precondition. Any error in it, a wait that
- *   runs out included, is kept as an artifact and the body returns normally, so `test.fails` reports the row red.
- *   It is bounded by `budget`, and the test's own timeout is above that, so a test timeout never ends a row.
- * - `assert` is the defect's own assertion and the only thing that may throw out of the body. Its message is kept
- *   as an artifact, so a run shows which assertion failed and in which frame.
+ * - `measure` seeds, loads, checks the forcing happened and checks every precondition, within `budget`. An error in
+ *   it is kept as a `measure-failure` artifact and fails the row.
+ * - `assert` is the defect's own assertion. While `expectedFailure` is true its assertion error passes the row,
+ *   recorded as an `<id> stands` notice and a `failure` artifact naming the frame; its passing fails the row with
+ *   `<id>: defect no longer reproduces`. The fixing lane sets `expectedFailure: false`, and the row then measures
+ *   and asserts as a plain passing test.
  *
  * @param directory - The artifact directory of the spec.
  * @returns The row definer.
@@ -889,35 +937,48 @@ export const knownDefectRows =
     title: string,
     row: {
       readonly artifact: string;
+      /** Whether the defect still stands. The fixing lane sets it to false. */
+      readonly expectedFailure: boolean;
       /** The measure phase's bound. Milliseconds. */
       readonly budget: number;
       readonly measure: () => Promise<Measured>;
       readonly assert: (measured: Measured) => void;
     },
   ): void => {
-    test.fails(title, { timeout: row.budget + 60_000 }, async () => {
-      const keep = async (kind: string, error: unknown): Promise<void> => {
-        const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-        await target.writeArtifact(`${directory}/${row.artifact}/${kind}-${Date.now()}.txt`, `${message}\n`);
-      };
-      let measured: Measured;
-      try {
-        measured = await withinBudget(row.measure, row.budget);
-      } catch (error) {
-        await keep('measure-failure', error).catch(() => undefined);
-        return;
-      }
-      try {
-        row.assert(measured);
-      } catch (error) {
-        await keep('failure', error);
-        throw error;
-      }
-    });
+    const keep = async (kind: string, error: unknown): Promise<void> => {
+      const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      await target.writeArtifact(`${directory}/${row.artifact}/${kind}-${Date.now()}.txt`, `${message}\n`);
+    };
+    cloudDefectRow(
+      {
+        api: (name, body) => {
+          test(name, { timeout: row.budget + overrunGrace + 60_000 }, body);
+        },
+        expectedFailure: row.expectedFailure,
+        title,
+      },
+      async (defect) => {
+        let measured: Measured;
+        try {
+          measured = await withinBudget(row.measure, row.budget);
+        } catch (error) {
+          await keep('measure-failure', error).catch(() => undefined);
+          throw error;
+        }
+        await defect(async () => {
+          try {
+            row.assert(measured);
+          } catch (error) {
+            await keep('failure', error);
+            throw error;
+          }
+        });
+      },
+    );
   };
 
 /**
- * A measure-phase precondition: throws a plain error, which the row keeps as a measure failure, never as the defect.
+ * A measure-phase precondition: throws a plain error, which fails the row as a measure failure, never as the defect.
  *
  * @param condition - What must hold for the row to measure its defect.
  * @param message - What did not hold.

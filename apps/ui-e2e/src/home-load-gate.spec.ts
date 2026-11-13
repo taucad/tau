@@ -20,6 +20,7 @@ import {
   readHomeLoad,
   readProjectLoad,
   firstDelayedRead,
+  readWorkerDeliveries,
   readWorkerReads,
 } from '#support/home-load-recorder.js';
 import type { CloudLoadRecord, CloudStandInDelays } from '#support/cloud-stand-ins.js';
@@ -185,10 +186,10 @@ test.each(
 
 /*
  * A0.10 (app state orchestration charter, D25): Home's loading defects for a returning visitor, frame by frame. Each
- * row forces its defect by answering a file-manager worker read late, so it is red on every run, and is written
- * `test.fails` so `main` stays green. The title names the defect; the failure names the frame and the node. The
- * fixing lane flips the row to `test`. A row measures first and asserts after; an error while measuring never
- * passes as the defect (`knownDefectRows`).
+ * row forces its defect by delivering a file-manager worker reply late, so its defect shows on every run. The title
+ * names the defect; the defect assertion names the frame and the node. Each is a plain test that stands as an
+ * expected failure until the fixing lane sets `expectedFailure: false`. A row measures first and asserts after: an
+ * error while measuring, in setup or teardown, or the defect assertion passing fails the row (`knownDefectRows`).
  */
 
 /** How late a delayed worker read answers. Milliseconds. */
@@ -237,13 +238,17 @@ const measureReturningReload = async ({
   await waitForSettledHome(seededProjects, 1);
   const record = await readProjectLoad();
   const reads = await readWorkerReads();
+  const deliveries = await readWorkerDeliveries();
   await target.writeArtifact(
     `home-load-gate/${label}.json`,
-    `${JSON.stringify({ record, workerReads: reads }, null, 2)}\n`,
+    `${JSON.stringify({ record, workerReads: reads, workerDeliveries: deliveries }, null, 2)}\n`,
   );
-  const held = delays.map((rule) => firstDelayedRead(reads, rule));
+  const held = delays.map((rule) => firstDelayedRead(deliveries, rule));
   for (const [index, rule] of delays.entries()) {
-    precondition(held[index] !== undefined, `${label}: no ${rule.method} read matching /${rule.path}/ was delayed`);
+    precondition(
+      held[index] !== undefined,
+      `${label}: no ${rule.method} reply matching /${rule.path}/ was delivered late`,
+    );
   }
   return { record, since: Math.min(...held.map((t) => t!)) };
 };
@@ -253,6 +258,7 @@ for (const viewport of ['wide', 'phone'] as const) {
     `H1: Home shows no skeleton after hydration for a returning visitor on a ${viewport} viewport, with the project listing 3 s late`,
     {
       artifact: `h1-${viewport}`,
+      expectedFailure: true,
       budget: homeBudget,
       measure: async () => {
         const { record } = await measureReturningReload({
@@ -279,6 +285,7 @@ knownDefect(
   'H5: no sidebar project row moves on a returning reload of Home with a project expanded and the chat listing 3 s late',
   {
     artifact: 'h5-wide',
+    expectedFailure: true,
     budget: homeBudget,
     measure: async () => {
       /* The visitor left the newest project expanded: Home's sidebar then lists its chats, as the audit's did. */

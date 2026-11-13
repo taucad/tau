@@ -17,6 +17,7 @@ import {
   readDelayedRequests,
   readProjectLoad,
   firstDelayedRead,
+  readWorkerDeliveries,
   readWorkerReads,
 } from '#support/home-load-recorder.js';
 
@@ -25,13 +26,13 @@ import {
  * self-host tier. The recorder (`recordProjectLoad`) is installed before any page script and samples every
  * animation frame, so a state painted once is caught.
  *
- * Every row that pins a known defect forces it — a delayed workspace chunk, or a file-manager worker read
- * answered late — so it is red on every run, and is written `test.fails` so `main` stays green. Its title names
- * the defect; its failure is the defect's own assertion (a removed node, a mount count, a frame), and names the
- * frame. The fixing lane flips the row to `test` and never deletes it. A row measures first (seeding, the load,
- * the check that the forcing happened, its preconditions) and asserts after; an error while measuring never
- * passes as the defect (`knownDefectRows`). A row that cannot be forced is report-only: it records k of n with
- * every sample in n and asserts nothing about k.
+ * Every row that pins a known defect forces it — a delayed workspace chunk, or a file-manager worker reply
+ * delivered late — so its defect shows on every run. Its title names the defect; its defect assertion (a removed
+ * node, a mount count, a frame) names the frame. Each is a plain test that stands as an expected failure until the
+ * fixing lane sets `expectedFailure: false`; it is never deleted. A row measures first (seeding, the load, the check
+ * that the forcing happened, its preconditions) and asserts after: an error while measuring, in setup or teardown,
+ * or the defect assertion passing fails the row (`knownDefectRows`). A row that cannot be forced is report-only: it
+ * records k of n with every sample in n and asserts nothing about k.
  *
  * Shell rows assert on `[data-slot=sidebar-wrapper]`: on a phone the sidebar is a sheet, and
  * `[data-slot=sidebar]` leaves the DOM by design.
@@ -86,10 +87,11 @@ const settleProject = async (): Promise<void> => {
 const keepRecord = async (name: string, extra: Readonly<Record<string, unknown>> = {}): Promise<ProjectLoadRecord> => {
   const record = await readProjectLoad();
   const reads = await readWorkerReads();
+  const deliveries = await readWorkerDeliveries();
   const delayed = await readDelayedRequests();
   await target.writeArtifact(
     `project-load-frames/${name}.json`,
-    `${JSON.stringify({ ...extra, delayedRequests: delayed, record, workerReads: reads }, null, 2)}\n`,
+    `${JSON.stringify({ ...extra, delayedRequests: delayed, record, workerReads: reads, workerDeliveries: deliveries }, null, 2)}\n`,
   );
   return record;
 };
@@ -206,14 +208,15 @@ const requireChunkDelayed = async (row: string): Promise<void> => {
 
 /** The forcing happened: a read matching the row's own `rule` was answered late. Returns when the first was sent. */
 const requireReadDelayed = async (row: string, rule: WorkerReadDelay): Promise<number> => {
-  const since = firstDelayedRead(await readWorkerReads(), rule);
-  precondition(since !== undefined, `${row}: no ${rule.method} read matching /${rule.path}/ was delayed`);
+  const since = firstDelayedRead(await readWorkerDeliveries(), rule);
+  precondition(since !== undefined, `${row}: no ${rule.method} reply matching /${rule.path}/ was delivered late`);
   return since!;
 };
 
 for (const viewport of ['wide', 'phone'] as const) {
   knownDefect(`U1: the sidebar wrapper is never removed on a ${viewport} reload with the workspace chunk 3 s late`, {
     artifact: `u1-${viewport}`,
+    expectedFailure: true,
     budget: loadBudget,
     measure: async () => {
       await seedProjects(viewport);
@@ -237,6 +240,7 @@ for (const viewport of ['wide', 'phone'] as const) {
 
   knownDefect(`U2: the sidebar wrapper is not removed after its first mount on a ${viewport} reload`, {
     artifact: `u2-${viewport}`,
+    expectedFailure: true,
     budget: loadBudget,
     measure: async () => {
       await seedProjects(viewport);
@@ -255,6 +259,7 @@ for (const viewport of ['wide', 'phone'] as const) {
 
 knownDefect('U22: a click on a project row from Home removes the sidebar wrapper zero times', {
   artifact: 'u22-wide',
+  expectedFailure: true,
   budget: loadBudget,
   measure: async () => {
     await seedProjects('wide');
@@ -285,6 +290,7 @@ knownDefect(
   'U3: a direct load with the sidebar open has the wrapper and sidebar in the server HTML and in every frame',
   {
     artifact: 'u3-wide',
+    expectedFailure: true,
     budget: loadBudget,
     measure: async () => {
       const { path } = await seedProjects('wide');
@@ -316,6 +322,7 @@ knownDefect(
 
 knownDefect('U4: the workspace placeholder node is created at most once per load with the workspace chunk 3 s late', {
   artifact: 'u4-wide',
+  expectedFailure: true,
   budget: loadBudget,
   measure: async () => {
     await seedProjects('wide');
@@ -354,6 +361,7 @@ knownDefect(
   'U5: a workbench-closed project never paints a third lane border in any frame with the workspace chunk 3 s late',
   {
     artifact: 'u5-wide',
+    expectedFailure: true,
     budget: loadBudget,
     measure: async () => {
       await seedProjects('wide', { laneBorders: true });
@@ -387,6 +395,7 @@ knownDefect(
 
 knownDefect('U6: no sidebar project row moves on a reload with the chat listing 3 s late', {
   artifact: 'u6-wide',
+  expectedFailure: true,
   budget: loadBudget,
   measure: async () => {
     await seedProjects('wide');
@@ -411,6 +420,7 @@ knownDefect('U6: no sidebar project row moves on a reload with the chat listing 
 
 knownDefect('U7: the largest contentful paint is not the empty-chat state with the transcript read 3 s late', {
   artifact: 'u7-wide',
+  expectedFailure: true,
   budget: turnBudget,
   measure: async () => {
     const { chatId } = await seedProjects('wide');
@@ -438,6 +448,7 @@ knownDefect(
   'U10: the composer keeps its height in every frame for a chat with a tray, with the transcript read 3 s late',
   {
     artifact: 'u10-wide',
+    expectedFailure: true,
     budget: turnBudget,
     measure: async () => {
       const { chatId } = await seedProjects('wide');
@@ -467,6 +478,7 @@ knownDefect(
   'M1: on a 390 by 844 reload with the workspace chunk 3 s late, first contentful paint is within 100 ms of first paint',
   {
     artifact: 'm1-phone',
+    expectedFailure: true,
     budget: loadBudget,
     measure: async () => {
       await seedProjects('phone');
@@ -532,7 +544,20 @@ test(
     const k = samples.filter((entry) => (entry.mounts ?? 0) > 1).length;
     const rebuilt = samples.filter((entry) => (entry.mounts ?? 0) > Math.max(entry.settled ?? 0, 1)).length;
     const failed = samples.filter((entry) => entry.error !== undefined).length;
-    const report = { defect: 'U16', k, rebuilt, failed, n: samples.length, samples };
+    const perSample = samples.map((entry) => ({
+      ...entry,
+      /* This load mounted more headers than its settled page holds: one was built, removed and built again. */
+      rebuilt: entry.mounts !== undefined && entry.mounts > Math.max(entry.settled ?? 0, 1),
+    }));
+    const statement = [
+      `U16: ${k} of ${samples.length} warm opens mounted a viewer dock header more than once, ${rebuilt} of them rebuilt one the settled page holds, ${failed} failed to sample`,
+      ...perSample.map((entry) =>
+        entry.error === undefined
+          ? `sample ${entry.sample}: ${String(entry.mounts)} mounts in frames ${(entry.frames ?? []).join(', ') || 'none'}, ${String(entry.settled)} settled, rebuilt ${String(entry.rebuilt)}`
+          : `sample ${entry.sample}: not sampled (${entry.error})`,
+      ),
+    ];
+    const report = { defect: 'U16', k, rebuilt, failed, n: samples.length, statement, samples: perSample };
     await target.writeArtifact('project-load-frames/u16-report.json', `${JSON.stringify(report, null, 2)}\n`);
     expect(samples).toHaveLength(warmOpens);
   },

@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Ref, RefCallback, RefObject } from 'react';
-import { probeWebGpuSupport, resolveGraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-backend';
-import { readGraphicsBackendQueryOverride } from '@taucad/ui-core/utils/graphics-backend-override';
 import {
   useDocumentHidden,
   useIsIntersecting,
   useReducedMotion,
 } from '#components/geometry/loader/metal-morph-playback-gates.js';
+import { isWebGpuCanvasLossFailure, resolveShowcaseBackend } from '#components/geometry/loader/showcase-backend.js';
 import type { ResolvedGraphicsBackend } from '@taucad/viewer/graphics/graphics-settings';
 import { useTheme } from '#hooks/use-theme.js';
 
 /**
- * The React lifecycle every showcase loader shares: resolve a backend, build a controller on the canvas,
- * size it from the root box, steer theme, speed and playback through the controller, and hold a still frame
- * whenever the surface is offscreen, hidden, paused, or the visitor prefers reduced motion.
+ * The React lifecycle every showcase loader shares: resolve a backend, build a controller on the canvas (once
+ * more, on a fresh canvas, when a WebGPU canvas could not present), size it from the root box, steer theme,
+ * speed and playback through the controller, and hold a still frame whenever the surface is offscreen, hidden,
+ * paused, or the visitor prefers reduced motion.
  */
 
 export type ShowcaseLoaderStatus = 'pending' | 'ready' | 'failed';
@@ -62,6 +62,11 @@ export type ShowcaseLoaderBinding<Controller extends ShowcaseController> = Reado
   attachRoot: RefCallback<HTMLDivElement>;
   /** Ref for the canvas the controller draws on. */
   canvasRef: Ref<HTMLCanvasElement>;
+  /**
+   * Key for that canvas. It changes when a WebGPU canvas could not present, so React mounts a fresh canvas for the
+   * WebGL start that follows: a canvas cannot change its GPU context type.
+   */
+  canvasKey: number;
   controllerRef: RefObject<Controller | undefined>;
 }>;
 
@@ -87,6 +92,7 @@ export const useShowcaseLoader = <Controller extends ShowcaseController>(
   const onReadyRef = useRef(onReady);
   const onStatusChangeRef = useRef(onStatusChange);
   const [status, setStatus] = useState<ShowcaseLoaderStatus>('pending');
+  const [canvasKey, setCanvasKey] = useState(0);
   const { theme } = useTheme();
   const reducedMotion = useReducedMotion();
   const isDocumentHidden = useDocumentHidden();
@@ -119,6 +125,7 @@ export const useShowcaseLoader = <Controller extends ShowcaseController>(
     const lifecycle = { cancelled: false };
     const isCancelled = (): boolean => lifecycle.cancelled;
     let controller: Controller | undefined;
+    let backend: ResolvedGraphicsBackend | undefined;
 
     const readSize = (): { width: number; height: number; pixelRatio: number } => {
       const rect = root.getBoundingClientRect();
@@ -130,17 +137,10 @@ export const useShowcaseLoader = <Controller extends ShowcaseController>(
     };
 
     const start = async (): Promise<void> => {
-      const override = readGraphicsBackendQueryOverride();
-      const gpuAvailable = await probeWebGpuSupport();
+      backend = await resolveShowcaseBackend();
       if (isCancelled()) {
         return;
       }
-      // A showcase surface runs on the node renderer: WebGPU whenever an adapter exists, otherwise Three's
-      // WebGL 2 backend. The public viewport keeps its own WebGL baseline; see the graphics policy.
-      const backend =
-        override === undefined
-          ? resolveGraphicsBackendPreference('webgpu', gpuAvailable)
-          : resolveGraphicsBackendPreference(override, gpuAvailable);
       controller = create({ canvas, backend, theme: theme === 'dark' ? 'dark' : 'light' });
       controllerRef.current = controller;
       controller.setSize(readSize());
@@ -156,10 +156,17 @@ export const useShowcaseLoader = <Controller extends ShowcaseController>(
       try {
         await start();
       } catch (error) {
-        console.error(`${name} failed to initialise`, { error });
-        if (!isCancelled()) {
-          publishStatus('failed');
+        if (isCancelled()) {
+          return;
         }
+        if (backend !== undefined && isWebGpuCanvasLossFailure(backend)) {
+          // The cleanup releases this controller; the next run starts on a fresh canvas, where the backend resolves
+          // to WebGL, so this happens at most once.
+          setCanvasKey((key) => key + 1);
+          return;
+        }
+        console.error(`${name} failed to initialise`, { error });
+        publishStatus('failed');
       }
     };
 
@@ -176,9 +183,9 @@ export const useShowcaseLoader = <Controller extends ShowcaseController>(
       controllerRef.current = undefined;
       controller?.dispose();
     };
-    // Theme, speed and playback are steered through the controller by the effects below; only `create` and
-    // the pixel-ratio bound rebuild the renderer.
-  }, [create, maxPixelRatio, name, publishStatus]);
+    // Theme, speed and playback are steered through the controller by the effects below; only `create`, the
+    // pixel-ratio bound and a fresh canvas rebuild the renderer.
+  }, [canvasKey, create, maxPixelRatio, name, publishStatus]);
 
   useEffect(() => {
     if (status !== 'ready') {
@@ -209,5 +216,5 @@ export const useShowcaseLoader = <Controller extends ShowcaseController>(
     controller.renderOnce();
   }, [shouldPlay, status]);
 
-  return { status, shouldPlay, attachRoot, canvasRef, controllerRef };
+  return { status, shouldPlay, attachRoot, canvasRef, canvasKey, controllerRef };
 };

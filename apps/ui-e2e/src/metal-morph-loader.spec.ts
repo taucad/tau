@@ -9,10 +9,26 @@ import * as target from '#support/external-target.js';
  * backends through the `?graphicsBackend=` override, reads the generated shader stages, reads a frame back
  * through each backend for a chrome signature (independent of canvas presentation, which headless WebGPU
  * adapters may not provide), samples the presented WebGL canvas, and checks the loop keeps advancing without
- * WebGPU validation noise.
+ * WebGPU validation noise. A WebGPU request on an adapter that cannot present a WebGPU canvas falls back to WebGL; the
+ * rows that prove WebGPU itself run in the WebGPU hardware qualification tier (see `presentsWebGpu`).
  */
 
 type LoaderBackend = 'webgl' | 'webgpu';
+
+/**
+ * Whether a WebGPU canvas presents in this run, which it does in the WebGPU hardware qualification tier
+ * (`ui-e2e:test:e2e:webgpu` with `TAU_E2E_WEBGPU_PROFILE=hardware`). On the software adapter the browser destroys the
+ * device at the first presented frame, and the loader starts again on WebGL, as it would for a user on that browser
+ * (`target.presentedGraphicsBackend`). The rows that exist to prove the WebGPU backend run where it presents.
+ */
+const presentsWebGpu = target.presentedGraphicsBackend('webgpu') === 'webgpu';
+
+/** The loader state's name for the backend a canvas that asked for `backend` draws on in this run. */
+const presentedLoaderBackend = (backend: LoaderBackend): LoaderState['backend'] =>
+  target.presentedGraphicsBackend(backend) === 'webgpu' ? 'webgpu' : 'webgl2';
+
+/** `test` for a row that proves `backend` itself: a WebGPU row runs where a WebGPU canvas presents. */
+const backendProofTest = (backend: LoaderBackend): typeof test => test.runIf(backend === 'webgl' || presentsWebGpu);
 
 type LoaderState = Readonly<{
   adaptiveLevel: number;
@@ -279,7 +295,7 @@ const expectNoRendererNoise = async (pageErrorStart: number, consoleStart: numbe
 
 test.describe('metal morph loader', () => {
   for (const backend of ['webgpu', 'webgl'] as const satisfies readonly LoaderBackend[]) {
-    test(`compiles the liquid metal body through Three ${backend}`, async () => {
+    backendProofTest(backend)(`compiles the liquid metal body through Three ${backend}`, async () => {
       const initial = await target.events();
       await target.navigate(`/loader?graphicsBackend=${backend}`);
       const state = await waitForReady();
@@ -301,7 +317,7 @@ test.describe('metal morph loader', () => {
       await expectNoRendererNoise(initial.pageErrors.length, initial.consoleMessages.length);
     });
 
-    test(`renders a chrome body with highlights and dark facets through ${backend}`, async () => {
+    backendProofTest(backend)(`renders a chrome body with highlights and dark facets through ${backend}`, async () => {
       await target.navigate(`/loader?graphicsBackend=${backend}`);
       const state = await waitForReady();
       expect(state.backend).toBe(backend === 'webgpu' ? 'webgpu' : 'webgl2');
@@ -322,31 +338,35 @@ test.describe('metal morph loader', () => {
       ).toBeGreaterThan(0.05);
     });
 
-    test(`keeps the transparent canvas clear outside the body silhouette through ${backend}`, async () => {
-      await target.navigate(`/loader?graphicsBackend=${backend}`);
-      await waitForReady();
+    backendProofTest(backend)(
+      `keeps the transparent canvas clear outside the body silhouette through ${backend}`,
+      async () => {
+        await target.navigate(`/loader?graphicsBackend=${backend}`);
+        await waitForReady();
 
-      const capture = await captureStage(`corners-${backend}`);
-      expect(
-        capture.cornerAlpha,
-        `${backend}: the readback corners must stay clear of the body and its halo`,
-      ).toBeLessThan(0.05);
-      if (backend === 'webgl') {
-        // The presented canvas composites over the page; WebGL always presents, headless WebGPU may not.
-        await target.delay(300);
-        const { png, region } = await screenshotStage(`metal-morph-page-corners-${backend}.png`);
-        const stage = await analyseStage(png, region);
-        expect(stage.cornerSpread, 'the page surface must show through the canvas corners').toBeLessThan(0.08);
-        expect(stage.distinctBuckets, 'the presented canvas must carry the chrome').toBeGreaterThan(40);
-        expect(stage.centreContrast, 'the presented canvas must alternate highlights and shadows').toBeGreaterThan(
-          0.08,
-        );
-      }
-    });
+        const capture = await captureStage(`corners-${backend}`);
+        expect(
+          capture.cornerAlpha,
+          `${backend}: the readback corners must stay clear of the body and its halo`,
+        ).toBeLessThan(0.05);
+        if (backend === 'webgl') {
+          // The presented canvas composites over the page; WebGL always presents, headless WebGPU may not.
+          await target.delay(300);
+          const { png, region } = await screenshotStage(`metal-morph-page-corners-${backend}.png`);
+          const stage = await analyseStage(png, region);
+          expect(stage.cornerSpread, 'the page surface must show through the canvas corners').toBeLessThan(0.08);
+          expect(stage.distinctBuckets, 'the presented canvas must carry the chrome').toBeGreaterThan(40);
+          expect(stage.centreContrast, 'the presented canvas must alternate highlights and shadows').toBeGreaterThan(
+            0.08,
+          );
+        }
+      },
+    );
 
     test(`advances the sequence under the pair rule and holds when paused through ${backend}`, async () => {
       await target.navigate(`/loader?graphicsBackend=${backend}`);
-      await waitForReady();
+      const state = await waitForReady();
+      expect(state.backend).toBe(presentedLoaderBackend(backend));
       await expect
         .poll(async () => readField('transitionCount'), { timeout: sequenceTimeout })
         .toBeGreaterThanOrEqual(2);
@@ -371,6 +391,7 @@ test.describe('metal morph loader', () => {
   test('renders one body of 40,962 vertices with the bloom chain enabled', async () => {
     await target.navigate('/loader?graphicsBackend=webgpu');
     const state = await waitForReady();
+    expect(state.backend).toBe(presentedLoaderBackend('webgpu'));
     expect(state.vertexCount).toBe(expectedVertexCount);
     expect(state.isBloomEnabled).toBe(true);
     expect(state.history).toHaveLength(1);
@@ -411,6 +432,7 @@ test.describe('metal morph loader', () => {
         framesPerSecond: state?.framesPerSecond,
       }),
     );
+    expect(state?.backend).toBe(presentedLoaderBackend('webgpu'));
     expect(median, 'median frame interval in milliseconds').toBeLessThan(400);
   });
 
@@ -443,6 +465,7 @@ test.describe('metal morph loader', () => {
         .toEqual({ rendererCount: 1, subscriberCount: chatRowSpinnerCount + 2 });
       const diagnostics = await readSpinnerDiagnostics();
       expect(diagnostics?.sourceSize).toBeGreaterThanOrEqual(32);
+      expect(diagnostics?.backend).toBe(presentedLoaderBackend(backend));
 
       // Pixel evidence read from a spinner's own 2D canvas, which needs no adapter that can present.
       await expect.poll(async () => sampleSpinnerCoverage(), { timeout: readyTimeout }).toBeGreaterThan(0.02);
@@ -453,7 +476,7 @@ test.describe('metal morph loader', () => {
     });
   }
 
-  test('renders the same resting silhouette on both backends', async () => {
+  test.runIf(presentsWebGpu)('renders the same resting silhouette on both backends', async () => {
     await target.emulateReducedMotion('reduce');
     try {
       const webgpu = await captureRestingStage('webgpu');

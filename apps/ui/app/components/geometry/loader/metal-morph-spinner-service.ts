@@ -1,5 +1,4 @@
-import { probeWebGpuSupport, resolveGraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-backend';
-import { readGraphicsBackendQueryOverride } from '@taucad/ui-core/utils/graphics-backend-override';
+import { startShowcaseRenderer } from '#components/geometry/loader/showcase-backend.js';
 import { metalMorphSpinnerSpeed } from '#components/geometry/loader/metal-morph-sequence.js';
 import { createMetalMorphLoader } from '#components/geometry/loader/metal-morph-controller.js';
 import type {
@@ -273,20 +272,15 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
     if (creation !== undefined) {
       return creation;
     }
-    creation = (async () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = sourceSize;
-      canvas.height = sourceSize;
-      const override = readGraphicsBackendQueryOverride();
-      const isWebGpuAvailable = await probeWebGpuSupport();
-      const backend =
-        override === undefined
-          ? resolveGraphicsBackendPreference('webgpu', isWebGpuAvailable)
-          : resolveGraphicsBackendPreference(override, isWebGpuAvailable);
+    // A WebGPU canvas that cannot present starts once more on a fresh canvas, on WebGL (`startShowcaseRenderer`).
+    creation = startShowcaseRenderer(async (backend) => {
       if (registrations.size === 0 && !isWarming) {
         // Everything unsubscribed while the adapter was being probed; do not open a context for nobody.
         return;
       }
+      const canvas = document.createElement('canvas');
+      canvas.width = sourceSize;
+      canvas.height = sourceSize;
       source = canvas;
       const created = createMetalMorphLoader({
         canvas,
@@ -302,14 +296,24 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
         created.tune(tuning);
       }
       applySourceSize();
-      await created.ready;
+      try {
+        await created.ready;
+      } catch (error) {
+        // A renderer that never started holds no frame; release it so the next start builds afresh.
+        if (controller === created) {
+          controller = undefined;
+          source = undefined;
+        }
+        created.dispose();
+        throw error;
+      }
       if (controller !== created) {
         // Disposed while warming up.
         created.dispose();
         return;
       }
       refreshPlayback();
-    })();
+    });
     try {
       await creation;
     } finally {

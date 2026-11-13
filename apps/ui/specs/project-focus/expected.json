@@ -1,0 +1,134 @@
+{
+  "configs": {
+    "ProjectFocus.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Target focus at 3 projects and Home, 3 requests, 1 library change, budget 2, 1 failed leave flush, 1 retry; every safety property holds. The plan's 4 requests run in wide, which keeps the pr tier short."
+    },
+    "ProjectFocus.target-one-project.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Budget 1 at the target bounds: the registry closes the session being left through its close flush, focus never closes, and every safety property holds."
+    },
+    "ProjectFocus.target-idle-expiry.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Idle expiry at any step at the target bounds; every safety property holds."
+    },
+    "ProjectFocus.target-person-commands.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Two person opens and two closes interleaved with 3 requests over 3 projects, no Home, no library change; OpenCarriesRequest and every other safety property hold."
+    },
+    "ProjectFocus.target-same-project.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "2 projects, 2 chats, 4 requests, 1 library change, budget 2; a same-project commit keeps the editor with at most one ChatForwarded, and every safety property holds."
+    },
+    "ProjectFocus.target-open-facts.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Facts in any order over 2 projects, 3 requests, 1 library change, 1 person open and close; EditorOnlyWhenReady, FirstCheckBeforeEditor and every other safety property hold."
+    },
+    "ProjectFocus.liveness.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "LiveSpec over 2 projects and Home, 3 requests, 1 library change, budget 1; RequestEventuallySettles holds."
+    },
+    "ProjectFocus.today-late-effect.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "FlushBeforeLeave"
+      },
+      "kind": "witness",
+      "ref": "Today with the late registration at the target bounds: an edit before ProjectPersistenceGuard registers the flush, then a navigation, leaves without a flush. A witness of the registration window, not of the request fence."
+    },
+    "ProjectFocus.today-superseded-open.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Today at 3 projects and Home, 3 requests, no library change; a request superseded during the leave flush is fenced and the today safety properties hold."
+    },
+    "ProjectFocus.today-superseded-open-reachable.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SupersededFlushUnreached"
+      },
+      "kind": "witness",
+      "ref": "Today, no library change: the superseded-during-flush interleaving is reachable, so today-superseded-open is not vacuous."
+    },
+    "ProjectFocus.today-stale-return.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OpenOnlyOnCurrentAccess"
+      },
+      "kind": "witness",
+      "ref": "Today at the target bounds: returning to the resolved project after a library change opens it on the stale answer. A witness for A5a, whose open needs a ready answer for the current epoch."
+    },
+    "ProjectFocus.today-library-retry.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "FailedFlushBlocks"
+      },
+      "kind": "witness",
+      "ref": "Today at the target bounds: a library change re-runs the access effect after a failed leave flush and leaves flushFailed without Retry. A witness; whether the target keeps that retry is open for A5a."
+    },
+    "ProjectFocus.today-module-race.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EditorOnlyWhenReady"
+      },
+      "kind": "defect",
+      "ref": "U1 at the target bounds: today derives editor while the project runtime import is still loading.",
+      "fixedBy": "A5b"
+    },
+    "ProjectFocus.today-first-check.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "FirstCheckBeforeEditor"
+      },
+      "kind": "defect",
+      "ref": "U13 and U20 at the target bounds: today derives editor before the first file check settles and before the open bound.",
+      "fixedBy": "A14"
+    },
+    "ProjectFocus.no-request-id.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "FocusFollowsLatestRequest"
+      },
+      "kind": "limit",
+      "ref": "At the target bounds without the id fence, the answer for an older request focuses its project under a newer request: the id is necessary."
+    },
+    "ProjectFocus.no-route-in-selector.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EditorOnlyForCommittedProject"
+      },
+      "kind": "limit",
+      "ref": "At the target bounds a selector without the committed route shows the previous request's state for a route focus has not taken: the selector needs the route."
+    },
+    "ProjectFocus.match-by-request-id.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SameProjectKeepsEditor"
+      },
+      "kind": "limit",
+      "ref": "At the target bounds with two chats, matching by request id tears the editor down on a chat switch: the comparison must be by project."
+    },
+    "ProjectFocus.export.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "The labelled export at 2 projects and Home, 3 requests, no library change or failure; every safety property holds."
+    },
+    "ProjectFocus.wide.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "Nightly: 4 projects and Home, 4 requests, 1 library change, budget 2, 1 failed leave flush, 1 retry; every safety property holds. The plan named 6 requests and 2 library changes; 4 requests with 2 library changes already take about 15 minutes (10.9M distinct states), the nightly watchdog, so wide keeps 1 library change."
+    }
+  },
+  "graphs": {
+    "ProjectFocus": {
+      "config": "ProjectFocus.export.cfg",
+      "phase": "f.st"
+    }
+  }
+}

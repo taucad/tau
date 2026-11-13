@@ -677,6 +677,8 @@ describe('phone viewer box while the focused chat is ensured (A0.7)', () => {
     facts.isMobile = true;
     facts.isRealViewerBox = true;
     layoutRecord.viewer = mainViewer;
+    // Files are already filled, so availability does not hold the open and the row isolates the chat-session fact.
+    revisionStatus.set(statusAt('filled'));
     editorFact.set({ value: editor, focusedChatId: 'chat-1' });
     const emptyStates = recordAdditions(emptyState, isInViewerBoxAt);
     try {

@@ -2469,4 +2469,53 @@ describe('Terminal sessions for quit (T15)', () => {
       await rm(sandbox, { recursive: true, force: true });
     }
   });
+  it('should open the Terminal as the signed-in account main names, and as nobody once it signs out', async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-terminal-account-'));
+    const root = realpathSync(sandbox);
+    const authorityDirectory = join(root, 'authority');
+    await mkdir(authorityDirectory);
+    const requests: TauHost.TerminalSessionRequest[] = [];
+    const shell: TauHost.HostShell = {
+      identity: { platform: 'linux', kind: 'bash', shellVersion: '5.2', shellDigest: 'sha256:0', provider: 'fake' },
+      run: async () => {
+        throw new Error('not under test');
+      },
+      openTerminal: async (request) => {
+        requests.push(request);
+        return { status: 'refused', code: 'sandbox-unavailable', message: 'Not under test.', recovery: 'None.' };
+      },
+    };
+    const host = createServicesHost({
+      authorityDirectory,
+      log: vi.fn(),
+      terminalShell: async (): Promise<TauHost.ShellProbe> => ({ status: 'available', shell }),
+    });
+    const open = async (windowId: string): Promise<void> => {
+      const port = terminalPort();
+      host.handleMessage(
+        frame({ type: 'concern', concern: 'terminal', context: { projectRoot: root, windowId } }, [
+          port.port as unknown as UtilityPort,
+        ]),
+      );
+      port.send({ type: 'open', size: { columns: 80, rows: 24 } });
+      await vi.waitFor(() => {
+        expect(port.received.map(({ type }) => type)).toContain('refused');
+      });
+      port.disconnect();
+    };
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [root] }));
+      host.handleMessage(
+        frame({ type: 'authToken', token: 'bearer-1', principal: 'user_1', principalName: 'Ada Lovelace' }),
+      );
+      await open('window-1');
+      expect(requests.at(-1)?.account).toEqual({ id: 'user_1', name: 'Ada Lovelace' });
+
+      host.handleMessage(frame({ type: 'authToken', token: undefined, principalName: 'Ada Lovelace' }));
+      await open('window-2');
+      expect(requests.at(-1)).not.toHaveProperty('account');
+    } finally {
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
 });

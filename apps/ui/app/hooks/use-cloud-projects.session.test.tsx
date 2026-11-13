@@ -44,6 +44,10 @@ const settle = async (): Promise<void> => {
       // oxlint-disable-next-line eslint/no-await-in-loop -- each turn lets one more continuation run.
       await Promise.resolve();
     }
+    /* The gate's cache listener is batched onto react-query's scheduler, a macrotask. */
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
   });
 };
 
@@ -108,6 +112,28 @@ describe('N2: the cloud listing on a load', () => {
     });
     await settle();
     expect(listings(), 'N2: requests per load of Home').toBe(1);
+  });
+
+  it('should not update Home while a sibling creates the session query in its render', async () => {
+    const { wrapper: Wrapper, answer } = createWrapper();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    function Session(): undefined {
+      useQuery({ queryKey: authQueryKeys.session, queryFn: async () => answer.promise });
+      return undefined;
+    }
+    function Home(): undefined {
+      useCloudProjects();
+      return undefined;
+    }
+    const view = render(createElement(Wrapper, undefined, createElement(Home)));
+    await settle();
+    view.rerender(createElement(Wrapper, undefined, createElement(Home), createElement(Session)));
+    await settle();
+    const renderPhaseUpdates = consoleError.mock.calls.filter(([message]) =>
+      String(message).includes('while rendering a different component'),
+    );
+    consoleError.mockRestore();
+    expect(renderPhaseUpdates).toEqual([]);
   });
 
   it('N2: requests /v1/projects once for a signed-out session', async () => {

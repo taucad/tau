@@ -220,7 +220,7 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
     const { service, provider } = harness();
     const output = await service.run(call({ command: 'true' }));
 
-    expect(createShellGitView).toHaveBeenCalledWith(project, expect.any(String));
+    expect(createShellGitView).toHaveBeenCalledWith(project, expect.any(String), expect.any(String));
     expect(output).toMatchObject({ status: 'completed', exitCode: 0 });
     expect(provider.launches[0]!.environment).not.toHaveProperty('GIT_DIR');
   });
@@ -697,6 +697,57 @@ describe('human Terminal sessions (D6, D21)', () => {
     expect(provider.resized[0]).toEqual([{ columns: 120, rows: 40 }]);
     await opened.session[Symbol.asyncDispose]();
     await expect(opened.session.exited).resolves.toEqual({ signal: 'SIGKILL' });
+  });
+
+  it("reads the project's real git store read-only in the Terminal, while the agent's launch still denies it", async () => {
+    const { service, provider } = harness((launch) =>
+      launch.stdio.kind === 'terminal'
+        ? { status: 'started', stdout: '$ ' }
+        : { status: 'started', stdout: 'ok\n', exit: { exitCode: 0 } },
+    );
+    const opened = await service.openTerminal({ projectRoot: project, size, signal: new AbortController().signal });
+    if (opened.status !== 'opened') {
+      throw new Error(`expected opened, got ${opened.code}`);
+    }
+    const [terminal] = provider.launches;
+    const store = join(project, '.git');
+    const nested = join(project, 'vendor', 'lib', '.git');
+
+    expect(terminal!.filesystem.denied).not.toContain(store);
+    expect(terminal!.filesystem.denied).not.toContain(nested);
+    expect(terminal!.filesystem.readOnly).toStrictEqual(expect.arrayContaining([store, nested]));
+    expect(terminal!.filesystem.denied).toStrictEqual(
+      expect.arrayContaining([join(project, '.tau', 'binding.json'), other, appData]),
+    );
+    expect(terminal!.environment).toMatchObject({ GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1' });
+    expect(terminal!.environment).not.toHaveProperty('GIT_DIR');
+    expect(terminal!.environment).not.toHaveProperty('GIT_WORK_TREE');
+    /* Git-lfs keeps its working copies in the session's own temporary folder, never the read-only store. */
+    expect(await readFile(join(terminal!.environment['HOME']!, '.gitconfig'), 'utf8')).toBe(
+      `[lfs]\n\tstorage = "${join(terminal!.environment['TMPDIR']!, 'git-lfs')}"\n`,
+    );
+
+    await service.run(call({ command: 'true' }));
+    const agent = provider.launches[1]!;
+    expect(agent.filesystem.denied).toStrictEqual(expect.arrayContaining([store, nested]));
+    expect(agent.filesystem.readOnly).not.toContain(store);
+    expect(agent.filesystem.readOnly).not.toContain(nested);
+    await opened.session[Symbol.asyncDispose]();
+  });
+
+  it("still refuses a Terminal grant that names a version-control directory, the checkout's own included", async () => {
+    const { service, provider } = harness(() => ({ status: 'started', stdout: '$ ' }));
+    for (const folder of [join(project, '.git'), join(outside, '.git')]) {
+      // oxlint-disable-next-line no-await-in-loop -- one refusal per folder.
+      const outcome = await service.openTerminal({
+        projectRoot: project,
+        size,
+        access: { read: [], write: [folder], domains: [] },
+        signal: new AbortController().signal,
+      });
+      expect(outcome, folder).toMatchObject({ status: 'refused', code: 'access-unsupported' });
+    }
+    expect(provider.launches).toStrictEqual([]);
   });
 
   it('runs the verified macOS Zsh with the startup files for the Terminal only, never for an agent', async () => {

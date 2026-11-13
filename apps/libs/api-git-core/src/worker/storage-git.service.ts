@@ -15,7 +15,12 @@ import {
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import type { GitCommitAttemptAttributes, HotProjectRank } from '@taucad/api-observability/metrics';
-import { isRemovableRef, negotiationInputLimitBytes, quotaOverrunSlackBytes } from '#git.constants.js';
+import {
+  isRemovableRef,
+  negotiationInputLimitBytes,
+  notRemovableMessage,
+  quotaOverrunSlackBytes,
+} from '#git.constants.js';
 import type { GitService as GitSmartService } from '#git.constants.js';
 import { pushQuarantineBound } from '#admission/reservation.js';
 import type { AdvertisementDialect } from '#advertisement.js';
@@ -473,10 +478,10 @@ export class StorageGitService extends GitLeaseHost {
   }
 
   /**
-   * The audited ref removal's commit (D24). The API has already decided, under
-   * its publication lock, that the removal goes ahead and retired the
-   * publication it confirmed; this lease removes the ref and commits like a
-   * push, and the API's transaction commits only once this answered.
+   * The audited ref removal's commit (D24): a conflict line only. The API has
+   * already decided, under the project's lock, that the removal goes ahead;
+   * this lease removes the ref and commits like a push, and the API's
+   * transaction commits only once this answered.
    *
    * @param grant - The verified grant, naming the ref.
    * @returns The ref, the tip it held, the generation that removed it and the commit's receipt.
@@ -490,10 +495,7 @@ export class StorageGitService extends GitLeaseHost {
   }> {
     const { ref } = grant;
     if (ref === undefined || !isRemovableRef(ref)) {
-      throw new BadRequestException({
-        code: 'GIT_REF_NOT_REMOVABLE',
-        message: 'Only a named version (refs/tags/*) or a conflict line (refs/heads/conflicts/*) can be removed.',
-      });
+      throw new BadRequestException({ code: 'GIT_REF_NOT_REMOVABLE', message: notRemovableMessage });
     }
     const removal = this.#writerStarted(grant.project);
     return this.runLease('remove_ref', this.leaseRequest(grant), async (lease) => {
@@ -501,7 +503,7 @@ export class StorageGitService extends GitLeaseHost {
       if (held === undefined) {
         throw new NotFoundException({ code: 'GIT_REF_NOT_FOUND', message: `This repository has no ${ref}.` });
       }
-      /* The API decided under its publication lock against the tip it read; a
+      /* The API decided under the project's lock against the tip it read; a
          ref that moved since is a lost race, retried against the new tip. */
       if (grant.tip !== undefined && grant.tip !== held) {
         throw new ServiceUnavailableException({
@@ -510,7 +512,7 @@ export class StorageGitService extends GitLeaseHost {
         });
       }
       /* The push's stop gate: a removal that has not started to commit when the
-         process begins to stop is refused, and the API rolls its retirement back. */
+         process begins to stop is refused, and the API's transaction rolls back. */
       this.refuseWhenStopping('This server is restarting; retry the removal.');
       await this.runGit(['update-ref', '-d', ref, held], lease.directory);
       const result = await this.commit(grant, {

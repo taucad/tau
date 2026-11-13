@@ -280,8 +280,11 @@ knownDefect(
       const server = await inspectServerShell(path);
       await target.reload();
       await settleProject();
-      const isOpen = await target.evaluate(
-        () => document.querySelector('[data-slot="sidebar"][data-state="expanded"]') !== null,
+      /* The shell's sidebar carries no open state of its own: it is open when it is shown with a width. */
+      const isOpen = await target.evaluate(() =>
+        [...document.querySelectorAll('[data-slot="sidebar"]')].some(
+          (node) => node.getBoundingClientRect().width > 0 && node.checkVisibility(),
+        ),
       );
       precondition(isOpen, 'U3: the sidebar is not open on the settled page');
       return { server, record: await keepRecord('u3-wide', { server }) };

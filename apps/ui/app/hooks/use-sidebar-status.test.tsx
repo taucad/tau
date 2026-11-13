@@ -15,6 +15,8 @@ import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/cha
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import type { SessionsActorRef, SessionsProjectStatus } from '#machines/sessions.machine.js';
+import { sessionsMachine } from '#machines/sessions.machine.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
@@ -1323,5 +1325,54 @@ describe('use-sidebar-status — pin (P66): every row reads its value from the s
     expect(screen.getByTestId('project').textContent).toBe('busy');
     expect(screen.getByTestId('chat').textContent).toBe('queued');
     expect(screen.getByTestId('header').textContent).toBe('2 live · gearbox');
+  });
+});
+
+/*
+ * A0.2 (row S39): the sidebar's `openProject` is one of the two other senders of `open`. It sends a bare
+ * project id, so the session the registry spawns for it has no open request: no native kernel id, no chat.
+ * I4 wants every open to carry the request focus kept for that project.
+ */
+describe('use-sidebar-status — pin (A0.2 S39): the sidebar open and the reopened session', () => {
+  const reopened = 'proj_sidebar_open_aaaaaaa';
+
+  function Open(): React.JSX.Element {
+    const { openProject } = useSidebarCommands();
+    return (
+      <button
+        type='button'
+        onClick={() => {
+          openProject(reopened);
+        }}
+      >
+        Open
+      </button>
+    );
+  }
+
+  const openThroughRegistry = (): ReturnType<typeof createActor<typeof sessionsMachine>> => {
+    const registry = createActor(sessionsMachine, { input: {}, clock: new StepClock() }).start();
+    vi.mocked(useSessions).mockImplementation(() => registry);
+    render(<Open />);
+    act(() => {
+      screen.getByRole('button', { name: 'Open' }).click();
+    });
+    return registry;
+  };
+
+  it('sends the registry an open that spawns a session for the project', () => {
+    const registry = openThroughRegistry();
+
+    expect(registry.getSnapshot().context.refs[reopened]?.getSnapshot().context.projectId).toBe(reopened);
+    registry.stop();
+  });
+
+  it.fails('I4: hands the reopened session the open request, with the native kernel id and chat it was opened with', () => {
+    const registry = openThroughRegistry();
+
+    expect(registry.getSnapshot().context.refs[reopened]?.getSnapshot().context).toMatchObject({
+      request: { nativeKernelId: 'build123d', chatId: 'chat-1' },
+    });
+    registry.stop();
   });
 });

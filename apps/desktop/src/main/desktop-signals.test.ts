@@ -109,81 +109,67 @@ describe('scrubFailureText', () => {
 });
 
 describe('redactGitErrorLine', () => {
-  it('should keep only the first fatal or error line, after git-lfs progress', () => {
+  it('should read the first fatal or error line, after git-lfs progress', () => {
     expect(
       redactGitErrorLine(
         'Downloading parts/bracket.step (5.0 MB)\nError downloading object: bracket (a1b2c3d): Smudge error\nfatal: later',
       ),
-    ).toBe('Error downloading object: <file> (<id>): Smudge error');
+    ).toBe('error: git-lfs smudge failed');
   });
 
-  it('should fall back to the first line when git names no fatal or error line', () => {
-    expect(redactGitErrorLine('\n  hint: see the docs  \nmore')).toBe('hint: see the <text>');
+  it('should fall back to the first line, and say nothing when git wrote nothing', () => {
+    expect(redactGitErrorLine('\n  hint: see the docs  \nmore')).toBe('unclassified');
     expect(redactGitErrorLine('')).toBe('');
   });
 
-  it('should strip absolute, relative, home and Windows paths', () => {
+  it('should name the failure with a fixed sentence and none of the paths in it', () => {
     expect(redactGitErrorLine('fatal: /Users/someone/Library/Tau/checkouts/p1 already exists')).toBe(
-      'fatal: <path> already exists',
+      'fatal: path already exists',
     );
-    expect(redactGitErrorLine('error: unable to create file models/part: Permission denied')).toBe(
-      'error: unable to create file <path> Permission denied',
+    expect(redactGitErrorLine(String.raw`fatal: C:\Users\someone\project is not a git repository`)).toBe(
+      'fatal: not a git repository',
     );
-    expect(redactGitErrorLine(String.raw`fatal: C:\Users\someone\project is not a repository`)).toBe(
-      'fatal: <path> is not a repository',
-    );
-    expect(redactGitErrorLine('fatal: ~/projects/p1 is not empty')).toBe('fatal: <path> is not empty');
-  });
-
-  it('should strip quoted names, file names and host names', () => {
     expect(redactGitErrorLine("fatal: 'feature-x' is already checked out at '/tmp/wt'")).toBe(
-      'fatal: <redacted> is already checked out at <redacted>',
+      'fatal: branch is already checked out in another worktree',
     );
-    expect(redactGitErrorLine('error: bracket.step: smudge filter lfs failed')).toBe(
-      'error: <name> smudge filter lfs failed',
-    );
-    expect(redactGitErrorLine('fatal: Could not resolve host: api.tau.new')).toBe(
-      'fatal: Could not resolve host: <name>',
-    );
+    expect(redactGitErrorLine('error: bracket.step: smudge filter lfs failed')).toBe('error: git-lfs smudge failed');
+    expect(redactGitErrorLine('fatal: Could not resolve host: api.tau.new')).toBe('fatal: could not resolve host');
   });
 
-  it('should keep only the words git uses, so an unquoted name never leaves', () => {
+  it('should never forward an unquoted name, even one made of git words or digits', () => {
     expect(redactGitErrorLine('error: unable to create file Customer Plans: Permission denied')).toBe(
-      'error: unable to create file <text>: Permission denied',
+      'error: unable to create a file: permission denied',
     );
-    expect(redactGitErrorLine('fatal: invalid reference: Quarterly Review 7')).toBe(
-      'fatal: invalid reference: <text> 7',
+    expect(redactGitErrorLine('error: unable to create file work tree: Permission denied')).toBe(
+      'error: unable to create a file: permission denied',
     );
+    expect(redactGitErrorLine('fatal: invalid reference: 2026 plans')).toBe('fatal: reference not found');
+    expect(redactGitErrorLine('fatal: Quarterly Review 7 went wrong')).toBe('fatal: unclassified');
   });
 
-  it('should strip remote addresses and URLs with their credentials', () => {
+  it('should never forward a remote, credential, header or id', () => {
     expect(redactGitErrorLine('fatal: repository https://user:secret@git.example.com/o/r.git/ not found')).toBe(
-      'fatal: repository <url> not found',
+      'fatal: remote repository not found',
     );
     expect(redactGitErrorLine('fatal: could not read from git@github.com:owner/repo.git')).toBe(
-      'fatal: could not read from <remote>',
+      'fatal: remote could not be reached',
     );
-    expect(redactGitErrorLine('error: author someone@example.com refused')).toBe('error: author <remote> refused');
-  });
-
-  it('should strip headers, credentials and long tokens', () => {
     expect(redactGitErrorLine('error: batch request failed. Authorization: Bearer abc.def.ghi')).toBe(
-      'error: batch request failed. <header>',
-    );
-    expect(redactGitErrorLine('error: rejected token ghp_abcdefghijklmnopqrstuvwxyz0123')).toBe(
-      'error: rejected <credential>',
-    );
-    expect(redactGitErrorLine('error: key opaque-value-abcdefghijklmnopqrstuvwxyz was refused')).toBe(
-      'error: key <id> was refused',
+      'error: git-lfs batch request failed',
     );
     expect(redactGitErrorLine('error: object 4b825dc642cb6eb9a060e54bf8d69288fbee4904 missing')).toBe(
-      'error: object <id> missing',
+      'error: unclassified',
+    );
+    expect(redactGitErrorLine('fatal: bad object 4b825dc642cb6eb9a060e54bf8d69288fbee4904')).toBe(
+      'fatal: object missing or corrupt',
     );
   });
 
-  it('should drop control characters and cut a long line', () => {
-    expect(redactGitErrorLine('fatal: bad\u0007 object')).toBe('fatal: bad object');
-    expect(redactGitErrorLine(`fatal: ${'file '.repeat(80)}`)).toHaveLength(200);
+  it('should read a line with control characters', () => {
+    expect(redactGitErrorLine('fatal: not a git\u0007 repository')).toBe('fatal: unclassified');
+    expect(redactGitErrorLine('fatal: Unable to create /p/.git/index.lock: File exists.')).toBe(
+      'fatal: unable to write a file',
+    );
   });
 });
 
@@ -211,12 +197,12 @@ describe('revisionEngineFailureSignal', () => {
 
   it('should report a forced worktree failure with its code, subcommand and redacted line', () => {
     expect(revisionEngineFailureSignal(worktreeFailure('/home/someone/.tau/checkouts/p1/b1'))).toEqual({
-      message: 'Revision engine ENGINE_FAILED (git worktree): fatal: <path> already exists',
+      message: 'Revision engine ENGINE_FAILED (git worktree): fatal: path already exists',
       level: 'error',
       fingerprint: ['desktop-revision-engine-failed', 'ENGINE_FAILED', 'worktree'],
       tags: { error_code: 'ENGINE_FAILED', git_subcommand: 'worktree' },
       contexts: {
-        revision_engine: { code: 'ENGINE_FAILED', subcommand: 'worktree', git_error: 'fatal: <path> already exists' },
+        revision_engine: { code: 'ENGINE_FAILED', subcommand: 'worktree', git_error: 'fatal: path already exists' },
       },
     });
   });

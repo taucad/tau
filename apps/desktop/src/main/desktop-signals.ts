@@ -147,90 +147,67 @@ export const updaterFailureSignal = (
   };
 };
 
-/** Longest line of git's error an event carries. */
-const gitErrorLineLimit = 200;
-
 /**
- * The redactions a line of git's error goes through, in order. Each removes a kind of text that can name the person,
- * their machine, their project or a credential; what is left is git's own wording, which is what groups and explains
- * the failure.
+ * The git and git-lfs failures an event can name, each as a fixed sentence. A line of git's error is matched against
+ * them and only the sentence leaves the machine: a file, branch, remote or host name in git's error has no shape a
+ * pattern can reliably remove (`unable to create file work tree`), so none of git's own text is forwarded.
  */
-const gitErrorRedactions: ReadonlyArray<readonly [RegExp, string]> = [
-  // A header, with everything after its name: `Authorization: Bearer …`, `Cookie: …`, `X-Request-Id: …`.
-  [/\b(?:proxy-)?authorization\s*[:=].*$|\b(?:set-)?cookie\s*[:=].*$|\bx-[a-z\d-]+\s*[:=].*$/giu, '<header>'],
-  // A credential named by its scheme.
-  [/\b(?:bearer|basic|token)\s+\S+/giu, '<credential>'],
-  // Quoted text: git and git-lfs quote paths, refs, remotes and filter commands.
-  [/'[^']*'|"[^"]*"|`[^`]*`/gu, '<redacted>'],
-  // A URL, with any userinfo, host, path or query it carries.
-  [/\b[a-z][a-z\d+.-]*:\/\/\S*/giu, '<url>'],
-  // An scp-style remote or an address: `git@host:owner/repo`, `someone@example.com`.
-  [/\S*@\S+/gu, '<remote>'],
-  // The object git-lfs names right after it says what it is moving.
-  [/\b(downloading|uploading)(\s+object)?(:?)\s+(?!<)\S+/giu, '$1$2$3 <file>'],
-  // Anything with a path separator, absolute or relative, POSIX or Windows.
-  [/\S*[\\/]\S*/gu, '<path>'],
-  // A file or host name: a dot between two name characters.
-  [/\S*[\p{L}\d_-]\.[\p{L}\d_-]\S*/gu, '<name>'],
-  // Object ids, LFS oids, and long tokens that could be a key.
-  [/\b[\da-f]{7,}\b|\b[\w+=-]{24,}/giu, '<id>'],
+const gitErrorTemplates: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\bnot a git repository\b/iu, 'not a git repository'],
+  [/\bgitfile does not point to a valid repository\b/iu, 'gitfile does not point to a valid repository'],
+  [/\bis already checked out at\b/iu, 'branch is already checked out in another worktree'],
+  [/\balready exists\b/iu, 'path already exists'],
+  [/\bis not (?:an )?empty\b/iu, 'path is not empty'],
+  [/\b(?:unable to create|could not create)\b.*\bpermission denied\b/iu, 'unable to create a file: permission denied'],
+  [/\bno space left on device\b/iu, 'no space left on device'],
+  [/\bpermission denied\b/iu, 'permission denied'],
+  [/\bunable to (?:create|write)\b|\bcould not (?:create|write)\b/iu, 'unable to write a file'],
+  [/\bindex\.lock\b|\bunable to create .*\.lock\b|\bcould not lock\b|\bcannot lock ref\b/iu, 'a git lock file is held'],
+  [/\bsmudge (?:filter|error)\b/iu, 'git-lfs smudge failed'],
+  [/\bclean filter\b/iu, 'git-lfs clean filter failed'],
+  [/\berror downloading object\b|\bobject does not exist on the server\b/iu, 'git-lfs could not download an object'],
+  [/\berror uploading object\b|\bbatch (?:request|response)\b/iu, 'git-lfs batch request failed'],
+  [/\bgit-lfs\b.*\b(?:not found|command not found)\b|\bis not a git command\b/iu, 'git-lfs is not available'],
+  [/\bcould not resolve host\b/iu, 'could not resolve host'],
+  [/\bauthentication failed\b|\b(?:401|403)\b/iu, 'remote refused the credentials'],
+  [/\brepository\b.*\bnot found\b|\b404\b/iu, 'remote repository not found'],
+  [
+    /\bunable to access\b|\bcould not read from\b|\bfailed to connect\b|\bconnection (?:reset|refused|timed out)\b|\btimed out\b/iu,
+    'remote could not be reached',
+  ],
+  [/\b(?:rejected|non-fast-forward)\b/iu, 'push was rejected'],
+  [/\b(?:invalid reference|not a valid (?:object|ref)|unknown revision|bad revision)\b/iu, 'reference not found'],
+  [
+    /\b(?:bad object|missing object|loose object .* is corrupt|object file .* is empty|did not receive expected object)\b/iu,
+    'object missing or corrupt',
+  ],
+  [/\bconflict\b|\bunmerged\b|\bwould be overwritten\b/iu, 'local changes or conflicts block the operation'],
+  [/\bdetached head\b|\bnot on a branch\b/iu, 'detached head'],
+  [/\bout of memory\b|\bcannot allocate\b/iu, 'out of memory'],
 ];
 
 /**
- * The words git and git-lfs use to describe a failure. After the redactions, any other word becomes `<text>`: an
- * unquoted file, branch or remote name has no shape a pattern can catch (`unable to create file Customer Plans`), so
- * only known wording leaves the machine.
- */
-const gitErrorWords: ReadonlySet<string> = new Set(
-  `a about access already am an and any are as at author bad batch be been being branch but by cannot can't checked
-  checkout clean commit commits conflict connect connection could couldn't create current denied detached did
-  directory disk does doesn't download downloading empty error exist exists expected failed failure fatal fetch file
-  files filter for found from has have head hint host in index into invalid is isn't it key lfs local lock locked
-  match merge missing more no not object objects of on operation or out overwritten path pathspec permission please
-  pointer process pull push read reading ref reference refs refused rejected remote repository request resolve run see server
-  should smudge space status such the there this timed timeout to too tree unable unknown unmerged untracked update
-  upload uploading upstream valid was were will with without work working worktree would write writing you your`
-    .split(/\s+/u)
-    .filter((word) => word !== ''),
-);
-
-/** A word of a redacted line as it may leave: a placeholder, punctuation, a number, or a word git uses. */
-const keptGitWord = (token: string): string => {
-  const match = /^([^\p{L}\d<]*)(.*?)([^\p{L}\d>]*)$/u.exec(token);
-  const [, lead = '', core = '', trail = ''] = match ?? [];
-  if (core === '' || /^<[a-z]+>$/u.test(core) || /^\d+$/u.test(core) || gitErrorWords.has(core.toLowerCase())) {
-    return token;
-  }
-  return `${lead}<text>${trail}`;
-};
-
-/**
- * The first line of git's error, as an event may carry it.
+ * The failure a git error names, as one fixed sentence an event may carry.
  *
- * The line is git's first `fatal:` or `error:` line, else its first line at all, since git-lfs writes progress such
- * as `Downloading …` before its error. Paths, file and host names, remote addresses, headers, credentials and ids are
- * replaced by a placeholder, any word git does not use becomes `<text>`, control characters are dropped, and the line is cut to {@link gitErrorLineLimit}.
+ * The line read is git's first `fatal:` or `error:` line, else its first line at all, since git-lfs writes progress
+ * such as `Downloading …` before its error. It is matched against {@link gitErrorTemplates}, and only the matching
+ * sentence is returned, prefixed by git's own `fatal` or `error`; a line no template matches gives `unclassified`.
  *
  * @param stderr - Everything the git command wrote to its error stream.
- * @returns The redacted line, or an empty string when git wrote nothing.
+ * @returns The sentence, or an empty string when git wrote nothing.
  */
 export const redactGitErrorLine = (stderr: string): string => {
   const lines = stderr
     .split(/\r?\n/u)
     .map((line) => line.replaceAll(/\p{Cc}/gu, ' ').trim())
     .filter((line) => line !== '');
-  const line = lines.find((candidate) => /^(?:fatal|error)\b/iu.test(candidate)) ?? lines[0] ?? '';
-  let redacted = line;
-  for (const [pattern, replacement] of gitErrorRedactions) {
-    redacted = redacted.replaceAll(pattern, replacement);
+  const line = lines.find((candidate) => /^(?:fatal|error)\b/iu.test(candidate)) ?? lines[0];
+  if (line === undefined) {
+    return '';
   }
-  return redacted
-    .split(/\s+/u)
-    .filter((token) => token !== '')
-    .map((token) => keptGitWord(token))
-    .join(' ')
-    .replaceAll(/<text>(?: <text>)+/gu, '<text>')
-    .slice(0, gitErrorLineLimit);
+  const prefix = /^(fatal|error)\b/iu.exec(line)?.[1]?.toLowerCase();
+  const sentence = gitErrorTemplates.find(([pattern]) => pattern.test(line))?.[1] ?? 'unclassified';
+  return prefix === undefined ? sentence : `${prefix}: ${sentence}`;
 };
 
 /** The engine codes the services utility reports; anything else in a frame is ignored. */

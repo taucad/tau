@@ -166,13 +166,13 @@ it('sends a revision-engine failure redacted, once per window for the same failu
   expect(reportRevisionEngineFailure(frame('/home/two/b'), 1000)).toBe(true);
   expect(captureMessage).toHaveBeenCalledTimes(1);
   expect(captureMessage).toHaveBeenCalledWith(
-    'Revision engine ENGINE_FAILED (git worktree): fatal: <path> already exists',
+    'Revision engine ENGINE_FAILED (git worktree): fatal: path already exists',
     {
       level: 'error',
       fingerprint: ['desktop-revision-engine-failed', 'ENGINE_FAILED', 'worktree'],
       tags: { error_code: 'ENGINE_FAILED', git_subcommand: 'worktree' },
       contexts: {
-        revision_engine: { code: 'ENGINE_FAILED', subcommand: 'worktree', git_error: 'fatal: <path> already exists' },
+        revision_engine: { code: 'ENGINE_FAILED', subcommand: 'worktree', git_error: 'fatal: path already exists' },
       },
     },
   );

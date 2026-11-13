@@ -1583,6 +1583,15 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       case 'undoOperation':
         actor.getSnapshot().children.restore?.send({ type: request.command });
         break;
+      /* The *Merged* toast's *Undo*, as the browser worker routes it: a new entry with `before`'s files, while the
+       * merge is still the head (I11). */
+      case 'undoMerge':
+        actor.getSnapshot().children.restore?.send({
+          type: 'undoMerge',
+          revisionId: text('revisionId'),
+          before: text('before'),
+        });
+        break;
       case 'switch':
         actor.send({ type: 'switch', requestId: requestIdOf(request), branch: text('branch') });
         break;

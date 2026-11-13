@@ -105,6 +105,10 @@ const noEnvironment = createCallbackLogic<EventObject>(() => undefined);
 
 const faultMessage = (error: unknown): string => (error instanceof Error ? error.message : 'app runtime fault');
 
+/** Record a fault only if none is recorded yet: the first is kept, later ones are its consequences (D23). */
+const keepFirstFault = ({ context, event }: { context: AppRuntimeContext; event: { error: unknown } }) =>
+  context.fault === undefined ? { context: { fault: faultMessage(event.error) } } : {};
+
 /**
  * The app runtime root.
  *
@@ -122,14 +126,14 @@ export const appRuntimeMachine = setup({
 }).createMachine({
   id: 'appRuntime',
   /* A fault no transition modelled is recorded once and the root keeps answering: the first is kept (D23). */
-  onError: ({ context, event }) =>
-    context.fault === undefined ? { context: { fault: faultMessage(event.error) } } : {},
+  onError: keepFirstFault,
   context: ({ input, spawn, actors }) => ({
     environment: { visible: undefined, focused: undefined, constrained: undefined },
     sessions: spawn(actors.sessions, { id: 'sessions', input: input.sessions }),
     fault: undefined,
   }),
-  invoke: { id: 'environment', src: 'environment' },
+  /* The invoke's own `onError` (MC-R12) records through the same first-fault rule. */
+  invoke: { id: 'environment', src: 'environment', onError: keepFirstFault },
   on: {
     visibilityChanged: ({ context, event }, enq) => {
       enq.emit({ type: 'visibilityChanged', visible: event.visible });

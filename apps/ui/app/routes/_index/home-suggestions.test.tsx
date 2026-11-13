@@ -1,15 +1,25 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- analytics wire names. */
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { chatExamples } from '@taucad/ui-core/constants/chat-prompt-examples';
 import { resetLeaf } from '@taucad/preferences';
+import type * as UseFeatureModule from '#flags/use-feature.js';
 
 const harness = vi.hoisted(() => ({
   onboarding: true,
+  layoutFlag: true as boolean | undefined | 'real',
+  listeners: new Set<() => void>(),
+  subscribe(listener: () => void): () => void {
+    harness.listeners.add(listener);
+    return () => {
+      harness.listeners.delete(listener);
+    };
+  },
+  readLayoutFlag: (): boolean | undefined | 'real' => harness.layoutFlag,
   preference: 'auto' as string,
   send: vi.fn(),
   setKernel: vi.fn(),
@@ -17,10 +27,17 @@ const harness = vi.hoisted(() => ({
   homeSuggestionSelected: vi.fn(),
 }));
 vi.mock('#flags/use-feature.js', async (importOriginal) => {
-  const original: Record<string, unknown> = await importOriginal();
+  const original = await importOriginal<typeof UseFeatureModule>();
+  const { useSyncExternalStore } = await import('react');
   return {
     ...original,
     useFeature: (flag: string) => (flag === 'onboarding' ? harness.onboarding : false),
+    /* `real` reads the root loader's cookie value, as a server render and hydration do. */
+    useLayoutFlag: (flag: 'onboarding') => {
+      const real = original.useLayoutFlag(flag);
+      const mocked = useSyncExternalStore(harness.subscribe, harness.readLayoutFlag, harness.readLayoutFlag);
+      return mocked === 'real' ? real : mocked;
+    },
   };
 });
 vi.mock('#hooks/use-kernel.js', () => ({
@@ -52,6 +69,15 @@ const renderRow = (): ReturnType<typeof createMemoryRouter> => {
   render(<RouterProvider router={router} />);
   return router;
 };
+/** Settle the flag while the row is mounted, as PostHog answering would. */
+const settleLayoutFlag = (value: boolean): void => {
+  act(() => {
+    harness.layoutFlag = value;
+    for (const listener of harness.listeners) {
+      listener();
+    }
+  });
+};
 const row = (): HTMLElement => screen.getByRole('list', { name: 'Suggestions' });
 const shown = (): readonly string[] =>
   within(row())
@@ -64,6 +90,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   states.length = 0;
   harness.onboarding = true;
+  harness.layoutFlag = true;
   harness.preference = 'auto';
   personRecordStores.profile.write({ goals: [], languages: [], tool: resetLeaf });
 });
@@ -114,7 +141,7 @@ describe('Home suggestions', () => {
   });
 
   it('should be absent with onboarding off', () => {
-    harness.onboarding = false;
+    harness.layoutFlag = false;
     renderRow();
 
     expect(screen.queryByRole('list', { name: 'Suggestions' })).not.toBeInTheDocument();
@@ -170,6 +197,7 @@ describe('C16: the server render of the suggestions row', () => {
   const renderOnServer = (layoutFlags: Readonly<Record<string, boolean>>): string => {
     /* What the real flag hook gives on the server: the registry default. */
     harness.onboarding = false;
+    harness.layoutFlag = 'real';
     const router = createMemoryRouter([{ id: 'root', path: '/', element: <HomeSuggestions /> }], {
       initialEntries: ['/'],
       hydrationData: { loaderData: { root: { layoutFlags } } },
@@ -178,7 +206,7 @@ describe('C16: the server render of the suggestions row', () => {
   };
   const box = '<div data-slot="home-suggestions"';
 
-  it.fails('holds the row box with the flag unknown, and renders the box and its list with the cookie on', () => {
+  it('holds the row box with the flag unknown, and renders the box and its list with the cookie on', () => {
     const unknown = renderOnServer({});
     expect(unknown, 'H2: the server render with the flag unknown holds no box for the row').toContain(box);
 
@@ -187,5 +215,49 @@ describe('C16: the server render of the suggestions row', () => {
     expect(on, 'H2: the server render with the cookie on renders no list for the row').toContain(
       'aria-label="Suggestions"',
     );
+  });
+
+  it('renders no button on the server: the order and the goals are read on the client', () => {
+    expect(renderOnServer({ onboarding: true })).not.toContain('<button');
+    expect(renderOnServer({})).not.toContain('aria-label="Suggestions"');
+  });
+
+  it('renders nothing on the server with the cookie off', () => {
+    expect(renderOnServer({ onboarding: false })).toBe('');
+  });
+});
+
+describe('the suggestions row box, decided once per mount', () => {
+  const box = (): Element | undefined => document.querySelector('[data-slot="home-suggestions"]') ?? undefined;
+
+  it('holds the box while the flag is unknown and fills it in place when the flag turns on', () => {
+    harness.layoutFlag = undefined;
+    renderRow();
+    const held = box();
+    expect(held).toBeDefined();
+    expect(screen.queryByRole('list', { name: 'Suggestions' })).not.toBeInTheDocument();
+
+    settleLayoutFlag(true);
+
+    expect(box()).toBe(held);
+    expect(within(held as HTMLElement).getByRole('list', { name: 'Suggestions' })).toBeInTheDocument();
+  });
+
+  it('keeps an empty box for the mount when a held flag settles off', () => {
+    harness.layoutFlag = undefined;
+    renderRow();
+    settleLayoutFlag(false);
+
+    expect(box()).toBeDefined();
+    expect(box()?.childElementCount).toBe(0);
+  });
+
+  it('renders nothing for the mount when the flag starts off, even if it turns on', () => {
+    harness.layoutFlag = false;
+    renderRow();
+    settleLayoutFlag(true);
+
+    expect(box()).toBeUndefined();
+    expect(screen.queryByRole('list', { name: 'Suggestions' })).not.toBeInTheDocument();
   });
 });

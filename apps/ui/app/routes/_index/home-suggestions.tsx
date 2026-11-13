@@ -1,10 +1,10 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useState, useSyncExternalStore } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { chatExamples } from '@taucad/ui-core/constants/chat-prompt-examples';
 import type { ChatExample } from '@taucad/ui-core/constants/chat-prompt-examples';
 import { pickSuggestions } from '@taucad/ui-core/lib/pick-suggestions';
 import { Button } from '@taucad/ui/components/button';
-import { useFeature } from '#flags/use-feature.js';
+import { useLayoutFlag } from '#flags/use-feature.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { useRoutingKernelProfile } from '#hooks/use-routing-kernel-profile.js';
@@ -20,8 +20,22 @@ const suggestionCount = 4;
 /** The row's accessible name. */
 export const homeSuggestionsLabel = 'Suggestions';
 
+const subscribeToNothing = (): (() => void) => () => undefined;
+
+/**
+ * Whether this render is past hydration. The buttons are never server-rendered: their order follows a per-module
+ * random seed, and the person's goals come from storage on this device, so server text would not match.
+ */
+const useIsHydrated = (): boolean =>
+  useSyncExternalStore(
+    subscribeToNothing,
+    () => true,
+    () => false,
+  );
+
 /** The row itself, mounted only while onboarding is on. */
 const HomeSuggestionRow = memo(function (): React.JSX.Element | undefined {
+  const isHydrated = useIsHydrated();
   const { profile } = usePersonRecord();
   const { preference } = useKernel();
   const { available } = useRoutingKernelProfile();
@@ -41,7 +55,7 @@ const HomeSuggestionRow = memo(function (): React.JSX.Element | undefined {
     [profile.goals, preference, available],
   );
 
-  if (suggestions.length === 0) {
+  if (isHydrated && suggestions.length === 0) {
     return undefined;
   }
 
@@ -62,7 +76,7 @@ const HomeSuggestionRow = memo(function (): React.JSX.Element | undefined {
 
   return (
     <ul className='flex flex-wrap justify-center gap-2' aria-label={homeSuggestionsLabel}>
-      {suggestions.map((example) => (
+      {(isHydrated ? suggestions : []).map((example) => (
         <li key={example.id}>
           <Button
             variant='outline'
@@ -84,9 +98,23 @@ const HomeSuggestionRow = memo(function (): React.JSX.Element | undefined {
  * The suggestions under Home's composer, while onboarding is on. A click fills the composer with the example's prompt
  * and moves focus there; it sends nothing and leaves the kernel selection, and the one this device remembers, alone.
  *
- * @returns The row, or nothing while onboarding is off or nothing fits.
+ * Whether the row has a box is decided once per mount, so a late flag never moves a painted page (H2). With the flag
+ * on, or not yet known, the box is held at the row's height for the whole mount, and the row fills it in place when
+ * the flag is on. With the flag off nothing is rendered, even if it turns on later: the `layout-flags` cookie makes
+ * the next load agree. During hydration the value is the request cookie's, so the server and the client hold the same
+ * box. A box held for a flag that settles off stays empty until the next load.
+ *
+ * @returns The row's box, or nothing while onboarding is off.
  */
 export function HomeSuggestions(): React.JSX.Element | undefined {
-  const isOnboardingEnabled = useFeature('onboarding');
-  return isOnboardingEnabled ? <HomeSuggestionRow /> : undefined;
+  const isOnboardingEnabled = useLayoutFlag('onboarding');
+  const [isBoxHeld] = useState(isOnboardingEnabled !== false);
+  if (!isBoxHeld) {
+    return undefined;
+  }
+  return (
+    <div data-slot='home-suggestions' className='min-h-38 md:min-h-18'>
+      {isOnboardingEnabled === true ? <HomeSuggestionRow /> : undefined}
+    </div>
+  );
 }

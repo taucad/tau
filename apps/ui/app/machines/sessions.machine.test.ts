@@ -924,6 +924,37 @@ describe('sessionsMachine — the open request carrier (A5c, R3-F2)', () => {
     actor.stop();
   });
 
+  it('should forward both chat fields of chatRequested to a live session', async () => {
+    const { actor } = harness();
+    actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA') });
+    await settle();
+
+    actor.send({ type: 'chatRequested', projectId: 'projA', chatId: 'chat-2', createdChatId: 'chat-3' });
+    await settle();
+
+    expect(sessionRequest(actor, 'projA')).toEqual(requestFor('projA', { chatId: 'chat-2', createdChatId: 'chat-3' }));
+    actor.stop();
+  });
+
+  it('should keep the open facts a session reports on its status', async () => {
+    const { actor } = harness();
+    await openIdle(actor, 'projA');
+
+    actor.send({
+      type: 'sessionState',
+      projectId: 'projA',
+      state: 'live',
+      runs: 0,
+      dirty: false,
+      pushed: true,
+      chatReady: false,
+      availability: 'pending',
+    });
+
+    expect(actor.getSnapshot().context.status['projA']).toMatchObject({ chatReady: false, availability: 'pending' });
+    actor.stop();
+  });
+
   it('should change nothing on chatRequested for a project that is not live (MC-R18)', async () => {
     const { actor, started, emitted } = harness();
     await openIdle(actor, 'projA');

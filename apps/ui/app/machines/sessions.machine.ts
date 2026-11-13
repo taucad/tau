@@ -200,7 +200,7 @@ export type SessionsMachineEmitted =
    * The registry dropped a resumed open whose request's library epoch is stale, instead of spawning it. Focus
    * clears its open and sends it again from its fresh answer (spec-pf `PendingOpenDropped`).
    */
-  | { readonly type: 'pendingOpenDropped'; readonly projectId: string; readonly epoch: number | undefined };
+  | { readonly type: 'pendingOpenDropped'; readonly projectId: string; readonly epoch: number };
 
 /** The app's sessions registry actor. @public */
 export type SessionsActorRef = ActorRefFrom<typeof sessionsMachine>;
@@ -287,16 +287,17 @@ const carriesChat = (request: ProjectSessionOpenRequest | undefined): request is
   request?.chatId !== undefined || request?.createdChatId !== undefined;
 
 /**
- * A waiting open whose request was not built at the library epoch the registry last heard of (A5c).
+ * The epoch of a waiting open whose request was not built at the library epoch the registry last heard of (A5c), or
+ * `undefined` when the open stands.
  *
  * The model drops a request whose epoch is not the library's (`RegistryChecksEpoch`). The registry's copy of that
  * epoch arrives by event and can lag, so when the two differ, or the registry has heard of none, it cannot know the
  * request is current, and it fails safe: it drops the open and says so, and focus re-sends from its fresh answer
  * (`liveness-registry-epoch`). An open whose request names no epoch (a bare open, until A5b) resumes as today.
  */
-const isStalePendingOpen = (context: SessionsMachineContext, pending: SessionsPendingOpen): boolean => {
+const staleEpochOf = (context: SessionsMachineContext, pending: SessionsPendingOpen): number | undefined => {
   const epoch = pending.request?.epoch;
-  return epoch !== undefined && epoch !== context.libraryEpoch;
+  return epoch !== undefined && epoch !== context.libraryEpoch ? epoch : undefined;
 };
 
 const withoutKey = <T>(record: Readonly<Record<string, T>>, key: string): Record<string, T> =>
@@ -432,8 +433,9 @@ export const sessionsMachine = setup({
        * told, so it re-sends from a fresh answer (spec-pf, A5c). */
       if (context.pendingOpen !== undefined) {
         const pending = context.pendingOpen;
-        if (isStalePendingOpen(context, pending)) {
-          enq.emit({ type: 'pendingOpenDropped', projectId: pending.projectId, epoch: pending.request?.epoch });
+        const staleEpoch = staleEpochOf(context, pending);
+        if (staleEpoch !== undefined) {
+          enq.emit({ type: 'pendingOpenDropped', projectId: pending.projectId, epoch: staleEpoch });
         } else {
           enq.raise({ type: 'open', projectId: pending.projectId, request: pending.request });
         }

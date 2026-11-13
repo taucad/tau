@@ -742,6 +742,8 @@ describe('ChatHistory — transcript load (I21)', () => {
     );
 
     expect(commits[0]?.emptyState).toBe(true);
+    // A truly empty chat is out of `loading` from its first commit, not marked by its turn count.
+    expect(commits.filter((frame) => frame.loading)).toEqual([]);
     expect(document.querySelector('[data-slot="panel-empty-state"]')).toBeInTheDocument();
   });
 

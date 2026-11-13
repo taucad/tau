@@ -5534,13 +5534,14 @@ describe('ChatSessionStore', () => {
       store.release('chat_verified_empty');
     });
 
-    it.fails('reports a loading transcript, never an empty one, before the host log answers for a chat with history (U7)', async () => {
+    it.fails('reports a loading transcript, never an empty one, before the load settles for a chat with history (U7)', async () => {
       const chatId = 'chat_deferred_transcript';
       const projectId = 'project_deferred_transcript';
       const runId = 'run_deferred_transcript';
+      const emptyChatId = 'chat_deferred_transcript_empty';
       const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
-      deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies(deps);
       /* I21: A12 makes the session report `transcript: loading | loaded | empty`, and this reads it once it exists.
        * Until then the session reports only its chat-row load and its messages, and a session out of that load with
@@ -5583,6 +5584,19 @@ describe('ChatSessionStore', () => {
         await vi.waitFor(() => {
           expect(reportedTranscript(session)).toBe('loaded');
         });
+        // Nor between the host's answer and the turns appearing: never `empty` across the whole load.
+        expect(reports).not.toContain('empty');
+
+        // A chat with no history still settles to `empty` once its log answers that it has none.
+        const emptySession = store.acquire(emptyChatId, projectId);
+        try {
+          publishLogPage(store, emptyChatId, [], { cursor: 0, endCursor: 0 });
+          await vi.waitFor(() => {
+            expect(reportedTranscript(emptySession)).toBe('empty');
+          });
+        } finally {
+          store.release(emptyChatId);
+        }
       } finally {
         unsubscribeChat();
         unsubscribeProjection();

@@ -294,6 +294,8 @@ describe('chat composer across the transcript load', () => {
     const textarea = screen.getByTestId('chat-textarea').getBoundingClientRect();
     expect(tray.top).toBeGreaterThanOrEqual(after.composerTop);
     expect(tray.bottom).toBeLessThanOrEqual(textarea.top);
+    // The region holds the whole textarea: it is not clipped to a fixed height that the textarea overflows.
+    expect(textarea.bottom).toBeLessThanOrEqual(after.composerTop + after.composer);
   });
 
   it('keeps the composer region height when the transcript resolves, for a chat without a tray (U10)', async () => {
@@ -307,6 +309,8 @@ describe('chat composer across the transcript load', () => {
     expect(after.composerTop).toBe(before.composerTop);
     expect(after.history).toBe(before.history);
     // Nothing is reserved for a tray this chat does not have: the region is the textarea alone.
-    expect(after.composer).toBe(screen.getByTestId('chat-textarea').getBoundingClientRect().height);
+    const textarea = screen.getByTestId('chat-textarea').getBoundingClientRect();
+    expect(after.composer).toBe(textarea.height);
+    expect(textarea.bottom).toBeLessThanOrEqual(after.composerTop + after.composer);
   });
 });

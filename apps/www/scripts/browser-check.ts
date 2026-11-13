@@ -257,10 +257,13 @@ try {
     .click();
   assert.ok(nojsPage.url().endsWith('/pricing/'));
   await nojsPage.goto(origin + '/download/');
-  for (const file of ['Tau-macos-arm64.zip', 'Tau-macos-x64.zip', 'Tau-win32-x64.zip', 'Tau-linux-x64.tar.gz']) {
-    // oxlint-disable-next-line eslint/no-await-in-loop -- Inspect all four SSR archive links in this one browser document.
+  for (const file of ['Tau-win32-x64.zip', 'Tau-linux-x64.tar.gz']) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Inspect both SSR archive links in this one browser document.
     assert.equal(await nojsPage.locator(`#downloads a[href="https://downloads.tau.new/latest/${file}"]`).count(), 1);
   }
+  // A Mac has no archive fallback: without the catalog no Mac file is linked and the Mac entries stay hidden.
+  assert.equal(await nojsPage.locator('a[href*="Tau-macos"]').count(), 0);
+  assert.equal(await nojsPage.locator('[data-mac-route]:visible').count(), 0);
   await nojsPage.goto(origin + '/privacy/');
   assert.equal(await nojsPage.getByRole('button', { name: 'Reset analytics preference' }).isDisabled(), true);
   await nojs.close();

@@ -40,6 +40,41 @@ export const tauCommitter = Object.freeze({ name: 'Tau', email: 'noreply@tau.new
 /** Email domain for a person who chose anonymity, in GitHub's `noreply` shape. @public */
 export const anonymousActorEmailDomain = 'users.noreply.tau.new';
 
+/**
+ * The Tau account a Tau no-reply address names: `<id>@users.noreply.tau.new`.
+ *
+ * What a commit made with git under the identity Tau gives a person carries
+ * instead of a Tau record. A pseudonym's address names no account, and
+ * any other address is not Tau's, so both answer `undefined`.
+ *
+ * @param email - A commit's author address.
+ * @returns The account id, or `undefined` when the address is not one account's Tau no-reply address.
+ * @public
+ */
+export const tauNoreplyAccountOf = (email: string): string | undefined => {
+  const suffix = `@${anonymousActorEmailDomain}`;
+  const id = email.endsWith(suffix) ? email.slice(0, -suffix.length) : '';
+  return id === '' || id.startsWith('anon:') || /[@\s<>]/u.test(id) ? undefined : id;
+};
+
+/**
+ * Who a commit Tau did not record names: its git author's name, and the
+ * Tau account its author address names when it is one person's no-reply
+ * address (a commit made with git under the identity Tau gives them).
+ *
+ * @param commit - The decoded commit.
+ * @returns The log entry's author fields.
+ * @public
+ */
+export const unrecordedAuthorOf = (
+  commit: Readonly<{ author: Readonly<{ name: string; email: string }> }>,
+): Readonly<{ authorName: string; authorAccountId?: string }> => {
+  const account = tauNoreplyAccountOf(commit.author.email);
+  return account === undefined
+    ? { authorName: commit.author.name }
+    : { authorName: commit.author.name, authorAccountId: account };
+};
+
 const textEncoder = new TextEncoder();
 
 const userActorSchema = z.object({

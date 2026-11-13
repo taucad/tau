@@ -1884,9 +1884,48 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
           expect(Object.keys(entry?.provenance ?? {}).toSorted()).toStrictEqual(['createdAt', 'source']);
           const [row] = await readRevisionLog(reader, { from: revisionId(upstream), limit: 1 });
           expect(row).toMatchObject({ source: 'import', who: { kind: 'unrecorded', authorName: 'Octo Dev' } });
+          expect(entry?.authorAccountId).toBeUndefined();
           /* A commit Tau recorded carries no git author name: its trailer names who made it. */
           const [recorded] = await reader.log({ heads: [head] });
           expect(recorded?.authorName).toBeUndefined();
+          expect(recorded?.authorAccountId).toBeUndefined();
+        } finally {
+          await second.dispose();
+        }
+      }, 180_000);
+
+      /* A commit made with stock git under the identity Tau gives a person names that person's account. */
+      it('reads a commit made with git under a Tau no-reply address as that account', async () => {
+        const cwd = fixture.repositoryPath;
+        const address = 'usr_git@users.noreply.tau.new';
+        const env = {
+          ...process.env,
+          ...Object.fromEntries([
+            ['GIT_AUTHOR_NAME', 'Git Person'],
+            ['GIT_AUTHOR_EMAIL', address],
+            ['GIT_COMMITTER_NAME', 'Git Person'],
+            ['GIT_COMMITTER_EMAIL', address],
+          ]),
+        };
+        const emptyTree = execFileSync('git', ['mktree'], { cwd, input: '', encoding: 'utf8' }).trim();
+        const made = execFileSync('git', ['commit-tree', emptyTree, '-m', 'Edited with git'], {
+          cwd,
+          env,
+          encoding: 'utf8',
+        }).trim();
+        execFileSync('git', ['update-ref', 'refs/heads/made-with-git', made], { cwd, stdio: 'ignore' });
+        const second = await adapter.create();
+        try {
+          const reader = second.withTransport();
+          await reader.init({ author });
+          await reader.setRemote({ name: 'tau', url: fixture.url });
+          await reader.fetch({ remote: 'tau', refs: ['refs/heads/made-with-git'] });
+
+          const [row] = await readRevisionLog(reader, { from: revisionId(made), limit: 1 });
+          expect(row).toMatchObject({
+            source: 'import',
+            who: { kind: 'unrecorded', authorName: 'Git Person', authorAccountId: 'usr_git' },
+          });
         } finally {
           await second.dispose();
         }

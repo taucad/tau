@@ -119,6 +119,12 @@ export type RevisionLogEntry = Readonly<{
   provenance: RecordedProvenance;
   /** The commit's own git author name, on a commit Tau did not record (B3); absent on one it did. */
   authorName?: string;
+  /**
+   * The Tau account the commit's author address names, on a commit Tau did not
+   * record: one made with git under that person's Tau no-reply address. Absent
+   * on a recorded commit and on any other address.
+   */
+  authorAccountId?: string;
   conflicted: boolean;
 }>;
 

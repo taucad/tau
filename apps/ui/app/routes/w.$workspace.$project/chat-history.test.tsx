@@ -272,7 +272,10 @@ vi.mock('react-virtuoso', () => ({
     readonly itemContent: (index: number, item: unknown) => React.ReactNode;
     readonly followOutput: () => 'auto' | false;
     readonly ref?: React.Ref<{ scrollToIndex: typeof scrollToIndexMock }>;
-    readonly components?: { readonly EmptyPlaceholder?: React.ComponentType };
+    readonly components?: {
+      readonly EmptyPlaceholder?: React.ComponentType;
+      readonly Scroller?: React.ComponentType<{ readonly children?: React.ReactNode }>;
+    };
     readonly 'data-transcript-state'?: string;
   }) => {
     capturedVirtuoso.initialTopMostItemIndex = properties.initialTopMostItemIndex;
@@ -288,11 +291,13 @@ vi.mock('react-virtuoso', () => ({
         </div>,
       );
     }
-    // Like Virtuoso, the root takes the list's own attributes and shows the empty placeholder for no data.
+    /* Like Virtuoso, the root takes the list's own attributes, the list's Scroller holds its rows, and the empty
+     * placeholder shows for no data. */
     const EmptyPlaceholder = properties.components?.EmptyPlaceholder;
+    const Scroller = properties.components?.Scroller ?? 'div';
     return (
       <div data-testid='virtuoso' data-transcript-state={properties['data-transcript-state']}>
-        {items.length === 0 && EmptyPlaceholder ? <EmptyPlaceholder /> : items}
+        <Scroller>{items.length === 0 && EmptyPlaceholder ? <EmptyPlaceholder /> : items}</Scroller>
       </div>
     );
   },
@@ -649,15 +654,26 @@ describe('ChatHistory — composer refocus', () => {
   });
 });
 
-/** The list's own container marks a transcript that is still loading. Lane A12 renders it; it does not exist yet. */
+/**
+ * The list's own container marks its transcript's load state: lane A12 renders `data-transcript-state` on the
+ * Virtuoso root (passed as a Virtuoso prop) or on its Scroller, and the mock renders both. It does not exist yet.
+ */
 const transcriptLoadingMarker = '[data-transcript-state="loading"]';
+/** The same marker once the list has left `loading` with the chat's turns. */
+const transcriptLoadedMarker = '[data-transcript-state="loaded"]';
 
-type CommitFrame = { readonly emptyState: boolean; readonly loading: boolean; readonly turns: number };
+type CommitFrame = {
+  readonly emptyState: boolean;
+  readonly loading: boolean;
+  readonly loaded: boolean;
+  readonly turns: number;
+};
 
-/** What the document holds now: the empty-chat state, the list's loading marker, and the turns shown. */
+/** What the document holds now: the empty-chat state, the list's load markers, and the turns shown. */
 const readFrame = (): CommitFrame => ({
   emptyState: document.querySelector('[data-slot="panel-empty-state"]') !== null,
   loading: document.querySelector(transcriptLoadingMarker) !== null,
+  loaded: document.querySelector(transcriptLoadedMarker) !== null,
   turns: document.querySelectorAll('[data-testid="chat-message"]').length,
 });
 
@@ -735,6 +751,7 @@ describe('ChatHistory — transcript load (I21)', () => {
 
     expect(load.commits.length).toBeGreaterThan(1);
     expect(load.commits.filter((frame) => !frame.loading && frame.turns === 0)).toEqual([]);
-    expect(load.commits.at(-1)?.turns).toBe(2);
+    // The list leaves `loading` once the load settles, so the filter above holds that commit to its turns.
+    expect(load.commits.at(-1)).toMatchObject({ loading: false, loaded: true, turns: 2 });
   });
 });

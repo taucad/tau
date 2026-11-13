@@ -289,6 +289,11 @@ describe('chat composer across the transcript load', () => {
     // The transcript above does not move either: the tray is not drawn outside the region instead.
     expect(after.composerTop).toBe(before.composerTop);
     expect(after.history).toBe(before.history);
+    // The tray stays in the composer region, above the textarea, rather than overlaying the transcript.
+    const tray = screen.getByRole('button', { name: /Tasks:/u }).getBoundingClientRect();
+    const textarea = screen.getByTestId('chat-textarea').getBoundingClientRect();
+    expect(tray.top).toBeGreaterThanOrEqual(after.composerTop);
+    expect(tray.bottom).toBeLessThanOrEqual(textarea.top);
   });
 
   it('keeps the composer region height when the transcript resolves, for a chat without a tray (U10)', async () => {

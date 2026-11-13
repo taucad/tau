@@ -42,7 +42,6 @@
   "apps/ui/app/hooks/use-composer-record-toasts.ts": 1,
   "apps/ui/app/hooks/use-draft-image-error-toast.ts": 1,
   "apps/ui/app/hooks/use-editor-document-session.tsx": 2,
-  "apps/ui/app/hooks/use-file-manager.tsx": 7,
   "apps/ui/app/hooks/use-jobs.ts": 1,
   "apps/ui/app/hooks/use-kernel-diagnostics.ts": 1,
   "apps/ui/app/hooks/use-machine-control.ts": 2,

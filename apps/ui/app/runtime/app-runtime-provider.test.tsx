@@ -25,7 +25,6 @@ import type { SessionsMachineEvent } from '#machines/sessions.machine.js';
 
 const sessionsStore = vi.hoisted(() => ({ created: 0 }));
 
-vi.mock('#hooks/use-file-manager.js', () => ({ useSharedFileManagerWorker: () => undefined }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));

@@ -3,11 +3,13 @@ import { createCallbackLogic, setup, types } from 'xstate';
 import type { EnqueueObject, EventObject, SystemRegistry } from 'xstate';
 import type { FileSystemBackend } from '@taucad/types';
 import type { FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/fs-bridge';
+import type * as FileSystemBridgeModule from '@taucad/fs-bridge';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime';
 import { fromComputeStoreChannel } from '@taucad/runtime/host';
 import { safeDispose } from '@taucad/utils/dispose';
 import FileManagerWorker from '#machines/file-manager.worker.js?worker';
 import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
+import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import {
   getProjectFileSystemConfig,
   getWorkspace,
@@ -194,6 +196,8 @@ type FileManagerContext = {
   onRootSkipped: ((skip: WorkspaceRootSkip) => void) | undefined;
   /** Explicit local diagnostic recorder; absent in ordinary project opens. */
   openPerformance: ProjectOpenPerformance | undefined;
+  /** The first effect or child failure no transition modelled; later ones are usually its consequences (D23). */
+  fault: string | undefined;
 };
 
 // ============ Lifecycle Actors ============
@@ -240,6 +244,17 @@ type WebAccessUnavailableEvent = {
   activeWorkspaceName: string | undefined;
 };
 
+let fileSystemBridgeModule: Promise<typeof FileSystemBridgeModule> | undefined;
+
+/**
+ * The bridge module, loaded once: file managers that connect together (`rootFiles` and a lease the same backend
+ * resolution reaches) share one import instead of racing two.
+ */
+const loadFileSystemBridge = async (): Promise<typeof FileSystemBridgeModule> => {
+  fileSystemBridgeModule ??= import('@taucad/fs-bridge');
+  return fileSystemBridgeModule;
+};
+
 const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileManagerContext }>(
   async ({ input, signal }) => {
     const { context } = input;
@@ -252,7 +267,7 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     context.disposeComposedView?.();
 
     const { createFileSystemBridge, createFileSystemBridgeProxy, openFileSystemBridge, waitForWorkerReady } =
-      await import('@taucad/fs-bridge');
+      await loadFileSystemBridge();
 
     if (context.worker && !context.sharedWorker) {
       safeDispose(() => context.worker?.terminate());
@@ -501,7 +516,7 @@ const initializeServicesActor = fromSafeAsync<
    * project roots, discovery — stay on the workspace surface, which owns no
    * content.
    */
-  const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+  const { createFileSystemBridgeProxy } = await loadFileSystemBridge();
   signal.throwIfAborted();
   const viewConnection = context.openFileSystemBridge!(context.rootDirectory, 'user');
   const viewProxy = createFileSystemBridgeProxy(viewConnection);
@@ -967,7 +982,20 @@ export const fileManagerMachine = setup({
     onExternalPollTelemetry: input.onExternalPollTelemetry,
     onRootSkipped: input.onRootSkipped,
     openPerformance: input.openPerformance ?? readLocalProjectOpenPerformance(),
+    fault: undefined,
   }),
+  /* A fault no transition modelled is recorded and reported once, and the machine keeps answering in the state it was
+   * in: the first is kept, later ones are its consequences (MC-R12, D23; B2). Today's modelled failures still enter
+   * `error` through their invokes' own `onError`. */
+  onError: ({ context, event }, enq) => {
+    if (context.fault !== undefined) {
+      return {};
+    }
+    enq(() => {
+      reportAppRuntimeFault(event.error);
+    });
+    return { context: { fault: faultMessage(event.error, 'file manager fault') } };
+  },
   initial: 'initializing',
   exit: ({ context }, enq) => {
     stopPolling(context, enq);

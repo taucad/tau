@@ -25,7 +25,7 @@ import { useFavicon } from '#hooks/use-favicon.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ErrorPage } from '#components/error-page.js';
 import { ProjectManagerProvider } from '#hooks/use-project-manager.js';
-import { HomeFileManagerProvider } from '#hooks/use-file-manager.js';
+import { RootFileManagerProvider } from '#hooks/use-file-manager.js';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { RevisionActorIdentity } from '#components/revision-actor-identity.js';
@@ -147,7 +147,8 @@ export function RootLayout({
     data?.env.TAU_DEBUG && data.pathname === '/__e2e/remote-host' ? (
       children
     ) : (
-      <HomeFileManagerProvider rootDirectory='/'>{managedChildren}</HomeFileManagerProvider>
+      /* The runtime's `rootFiles`: the file manager for `/`, read in the first render and on the server (A1b). */
+      <RootFileManagerProvider>{managedChildren}</RootFileManagerProvider>
     );
 
   /*

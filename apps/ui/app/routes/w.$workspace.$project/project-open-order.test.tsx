@@ -238,7 +238,6 @@ vi.mock('#cloud/commercial-features.js', () => ({
 }));
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => projectManager }));
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useSharedFileManagerWorker: () => undefined,
   SharedWorkerGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   HomeFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => (
     <div data-testid='project-session' data-project-id={projectId}>

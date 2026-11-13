@@ -25,6 +25,7 @@
   },
   "modules": {
     "files": [
+      "apps/ui/app/runtime/app-runtime-faults.ts",
       "apps/ui/app/runtime/app-runtime-holder.ts",
       "apps/ui/app/runtime/app-runtime.machine.ts",
       "apps/ui/app/runtime/app-runtime.ts",
@@ -34,9 +35,14 @@
       "apps/ui/app/runtime/converter-client-options.ts",
       "apps/ui/app/runtime/environment.fixture.ts",
       "apps/ui/app/runtime/environment.ts",
+      "apps/ui/app/runtime/file-manager-host.machine.ts",
+      "apps/ui/app/runtime/file-manager-host.ts",
+      "apps/ui/app/runtime/file-manager-host.wait.ts",
       "apps/ui/app/runtime/host-connector.ts",
       "apps/ui/app/runtime/image-runtime.definition.ts",
       "apps/ui/app/runtime/image-runtime.worker.ts",
+      "apps/ui/app/runtime/leases.machine.ts",
+      "apps/ui/app/runtime/leases.ts",
       "apps/ui/app/runtime/observability/observability.middleware.ts",
       "apps/ui/app/runtime/observability/report-to-api.ts",
       "apps/ui/app/runtime/picogk-browser-assets.ts",
@@ -52,9 +58,6 @@
     ]
   },
   "counts": {
-    "apps/ui/app/hooks/use-file-manager.tsx#queueMicrotask": 1,
-    "apps/ui/app/hooks/use-file-manager.tsx#setTimeout": 1,
-    "apps/ui/app/hooks/use-file-manager.tsx#useActorRef": 1,
     "apps/ui/app/hooks/use-project-manager.tsx#useActorRef": 2,
     "apps/ui/app/hooks/use-project.tsx#useActorRef": 2,
     "apps/ui/app/hooks/use-revision-status.ts#.start()": 1,

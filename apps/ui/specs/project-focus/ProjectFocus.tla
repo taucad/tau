@@ -122,7 +122,7 @@ VARIABLES
   asks,         \* access questions the library has not answered yet
   lib,          \* the library: its epoch and each project's access answer
   mod,          \* the project runtime import
-  sess,         \* the registry: each project's session, "none" when not in the live set
+  sess,         \* the registry: each project's session, "none" when not in the live set; "failed" holds its slot
   sreq,         \* the request each live session was opened with, its input
   fact,         \* each session's two facts and the open bound
   dirty,        \* sessions with unsaved work
@@ -152,15 +152,19 @@ OpenReqs == {None} \cup [project : Projects, epoch : 0..MaxLibraryChanges]
 NoPending == [project |-> None, req |-> None]
 NoKeep == [proj |-> None, fwd |-> 0, work |-> FALSE]
 FocusStates == {"idle", "resolving", "leaving", "opening", "focused", "held", "flushFailed"}
-SessionStates == {"none", "live", "closing"}
+SessionStates == {"none", "live", "closing", "failed"}
 FactStates == {"pending", "chatOnly", "checkOnly", "settled", "bound"}
 Label(l) == IF Labelled THEN l ELSE "-"
 Labels == {"Init", "RouteCommitted", "RouteHeard", "ChatForwarded", "AccessAsked", "AccessAnswered",
            "LibraryChanged", "LeaveFlushStarted", "LeaveFlushSettled", "Retry", "ModuleLoaded", "OpenAsked",
-           "OpenJoined", "OpenLost", "ChatReady", "FirstCheckSettled", "OpenBoundPassed", "Edit", "PersonOpenAsked",
+           "OpenJoined", "OpenLost", "OpenOnFailed", "ChatReady", "FirstCheckSettled", "OpenBoundPassed", "Edit", "PersonOpenAsked",
            "PersonClosed", "PersonDiscarded", "CloseFlushFailed", "CloseFailed", "IdleExpired", "BudgetSwitchClose", "SessionClosed", "FlushRegistered"}
 
 InLive(p) == p \in Projects /\ sess[p] # "none"
+\* A session the person can work in: live, not closing and not failed.
+Live(p) == p \in Projects /\ sess[p] = "live"
+\* A session the person or the budget may close: live, or failed after a close that did not finish.
+Closeable(p) == sess[p] \in {"live", "failed"}
 LiveCount == Cardinality({p \in Projects : sess[p] # "none"})
 FactsOk(p) == p \in Projects /\ fact[p] \in {"settled", "bound"}
 CheckOk(p) == p \in Projects /\ fact[p] \in {"checkOnly", "settled", "bound"}
@@ -200,7 +204,7 @@ TargetView ==
   ELSE IF SelectorRoute /\ Mismatch THEN "resolving"
   ELSE CASE f.st = "flushFailed" -> "flushError"
          [] f.st = "held" -> "held"
-         [] f.st = "focused" -> IF InLive(f.ansProj) THEN "editor" ELSE "closed"
+         [] f.st = "focused" -> IF Live(f.ansProj) THEN "editor" ELSE "closed"
          [] OTHER -> "resolving"
 
 \* deriveProjectRouteState over `resolved` (project-route.tsx 319 to 335).
@@ -273,7 +277,7 @@ Init ==
 \* (351), whose start may fail; otherwise a wait in the single pendingOpen slot, latest destination
 \* only (377 to 409), until BudgetSwitchClose or the person frees a slot.
 Outcomes(p) ==
-  CASE sess[p] = "live" -> {"touch"}
+  CASE sess[p] \in {"live", "failed"} -> {"touch"}
     [] sess[p] = "closing" -> {"wait"}
     [] LiveCount < Budget -> {"spawn"} \cup (IF cnt.openFails < MaxOpenFails THEN {"failed"} ELSE {})
     [] OTHER -> {"wait"}
@@ -292,7 +296,7 @@ NoOpen == UNCHANGED <<sess, sreq, fact, pendingOpen>>
 \* (380 to 390).
 BudgetSwitchClose(v) ==
   /\ pendingOpen # NoPending /\ \A p \in Projects : sess[p] # "closing"
-  /\ sess[v] = "live" /\ v # pendingOpen.project
+  /\ Closeable(v) /\ v # pendingOpen.project
   /\ Budget = 1 \/ v \notin dirty
   /\ sess' = [sess EXCEPT ![v] = "closing"]
   /\ keep' = IF keep.proj = v THEN NoKeep ELSE keep
@@ -325,11 +329,11 @@ SessionClosed(v) ==
           ELSE /\ sess' = s1
                /\ sreq' = [sreq EXCEPT ![v] = NoOpenReq]
                /\ fact' = [fact EXCEPT ![v] = "pending"]
-               /\ pendingOpen' = IF pendingOpen # NoPending /\ (s1[q] = "live" \/ stale) THEN NoPending ELSE pendingOpen
+               /\ pendingOpen' = IF pendingOpen # NoPending /\ (Closeable(q) \/ stale) THEN NoPending ELSE pendingOpen
   \* The registry's reply about focus's own waiting open: resumed (or already live), or dropped as stale,
   \* which sends focus back to OpenAsked from its fresh answer (PendingOpenDropped, A5c).
   /\ f' = IF ~FocusPending THEN f
-          ELSE IF sess'[pendingOpen.project] = "live" THEN [f EXCEPT !.live = TRUE]
+          ELSE IF sess'[pendingOpen.project] \in {"live", "failed"} THEN [f EXCEPT !.live = TRUE]
           ELSE IF pendingOpen' = NoPending THEN [f EXCEPT !.opened = FALSE]
           ELSE f
   /\ keep' = IF keep.proj = v THEN NoKeep ELSE keep
@@ -357,16 +361,19 @@ CloseFlushFailed(v) ==
 
 \* CloseFailed: cancelRuns, flushSync or releaseAgentHost fails and the session goes to `failed`
 \* (project-session.machine.ts closeFailed). The failed child stays in the registry's refs and holds its
-\* slot, which the model keeps in the live set. The registry keeps pendingOpen and emits budgetRefused
-\* for it (sessions.machine.ts 281 to 289). A5a rule: on budgetRefused for its own waiting open of a
-\* project still in the live set, focus clears its open and sends it again; as built that open is a
-\* touch, which clears pendingOpen.
+\* slot: an open of it is a touch, the person or the budget may close it again, and idle expiry does
+\* not (only `live.idle` has the timer). The registry keeps pendingOpen and emits budgetRefused for it
+\* (sessions.machine.ts 281 to 289). A5a rule: on budgetRefused for its own waiting open of a project
+\* still in the live set, focus withdraws that open (cancelPendingOpen) in the same step and sends it
+\* again; as built that open is a touch, and focus then settles on the failed session (TOpenOnFailed).
+\* A person's open waiting for v stays in pendingOpen: the registry asks the person (budgetRefused).
 CloseFailed(v) ==
   /\ sess[v] = "closing" /\ v \in dirty /\ cnt.closeFails < MaxCloseFails
-  /\ sess' = [sess EXCEPT ![v] = "live"]
+  /\ sess' = [sess EXCEPT ![v] = "failed"]
+  /\ pendingOpen' = IF FocusPending /\ pendingOpen.project = v THEN NoPending ELSE pendingOpen
   /\ f' = IF FocusPending /\ pendingOpen.project = v THEN [f EXCEPT !.opened = FALSE] ELSE f
   /\ cnt' = [cnt EXCEPT !.closeFails = @ + 1]
-  /\ UNCHANGED <<route, nreq, asks, lib, mod, sreq, fact, dirty, pendingOpen, reg, keep>>
+  /\ UNCHANGED <<route, nreq, asks, lib, mod, sreq, fact, dirty, reg, keep>>
   /\ act' = Label("CloseFailed")
 
 (* The opening session's facts. They move only for the project focus holds an answer for: a session
@@ -494,7 +501,7 @@ TAnswered(a) ==
 
 TLeaveFlushStarted ==
   /\ Focus = "target"
-  /\ f.st = "leaving" /\ f.lf = "none" /\ f.from # None /\ sess[f.from] = "live"
+  /\ f.st = "leaving" /\ f.lf = "none" /\ f.from # None /\ Closeable(f.from)
   /\ f' = [f EXCEPT !.lf = "running", !.lfp = f.from]
   /\ keep' = KeepWork
   /\ UNCHANGED <<route, nreq, asks, lib, mod, sess, sreq, fact, dirty, pendingOpen, reg, cnt>>
@@ -549,6 +556,18 @@ TOpenLost ==
   /\ f' = [f EXCEPT !.st = "focused", !.on = f.ansProj, !.from = None, !.lf = "none", !.lfp = None]
   /\ UNCHANGED <<route, nreq, asks, lib, mod, sess, sreq, fact, dirty, pendingOpen, reg, keep, cnt>>
   /\ act' = Label("OpenLost")
+
+\* Focus's open landed on a failed session: the touch after budgetRefused, or an open of a project whose
+\* close failed earlier. The session holds its slot but cannot be worked in, so focus does not join:
+\* it settles on the project, whose state derives `closed` with the reopen offer, as TOpenLost does.
+\* A failed start (nothing in the slot) gives `held` instead (TOpenAsked).
+TOpenOnFailed ==
+  /\ Focus = "target"
+  /\ f.st = "opening" /\ f.opened /\ f.live /\ f.ans = "ready"
+  /\ sess[f.ansProj] = "failed" /\ pendingOpen.project # f.ansProj
+  /\ f' = [f EXCEPT !.st = "focused", !.on = f.ansProj, !.from = None, !.lf = "none", !.lfp = None]
+  /\ UNCHANGED <<route, nreq, asks, lib, mod, sess, sreq, fact, dirty, pendingOpen, reg, keep, cnt>>
+  /\ act' = Label("OpenOnFailed")
 
 TRetry ==
   /\ Focus = "target"
@@ -712,7 +731,7 @@ PersonOpenAsked(p) ==
 \* A close goes to the registry, whose session runs its close flush.
 PersonClosed(p) ==
   /\ cnt.pCloses < MaxPersonCloses
-  /\ sess[p] = "live"
+  /\ Closeable(p)
   /\ sess' = [sess EXCEPT ![p] = "closing"]
   /\ keep' = IF keep.proj = p THEN NoKeep ELSE keep
   /\ cnt' = [cnt EXCEPT !.pCloses = @ + 1]
@@ -722,7 +741,7 @@ PersonClosed(p) ==
 \* The person discards a retained session's unsaved work explicitly; its close then runs clean.
 PersonDiscarded(p) ==
   /\ cnt.discards < MaxDiscards
-  /\ sess[p] = "live" /\ p \in dirty
+  /\ Closeable(p) /\ p \in dirty
   /\ sess' = [sess EXCEPT ![p] = "closing"]
   /\ dirty' = dirty \ {p}
   /\ keep' = IF keep.proj = p THEN NoKeep ELSE keep
@@ -734,7 +753,7 @@ PersonDiscarded(p) ==
 
 FocusStep ==
   \/ TRouteHeard \/ TAccessAsked \/ TLeaveFlushStarted \/ TLeft \/ TOpenAsked \/ TOpenJoined \/ TRetry
-  \/ TOpenLost
+  \/ TOpenLost \/ TOpenOnFailed
   \/ DRerun \/ DRetry \/ RegSync
   \/ \E a \in asks : AccessAnswered(a)
   \/ \E ok \in BOOLEAN : LeaveFlushSettled(ok)
@@ -747,7 +766,7 @@ Next ==
   \/ \E ok \in BOOLEAN : LeaveFlushSettled(ok)
   \/ ModuleLoaded
   \/ TRouteHeard \/ TAccessAsked \/ TLeaveFlushStarted \/ TLeft \/ TOpenAsked \/ TOpenJoined \/ TRetry
-  \/ TOpenLost
+  \/ TOpenLost \/ TOpenOnFailed
   \/ DRerun \/ DRetry \/ RegSync
   \/ \E p \in Projects :
        \/ ChatReady(p) \/ FirstCheckSettled(p) \/ OpenBoundPassed(p) \/ Edit(p)
@@ -760,7 +779,7 @@ Spec == Init /\ [][Next]_vars
 LiveSpec ==
   /\ Spec
   /\ WF_vars(TRouteHeard) /\ WF_vars(TAccessAsked) /\ WF_vars(TLeaveFlushStarted) /\ WF_vars(TLeft)
-  /\ WF_vars(TOpenAsked) /\ WF_vars(TOpenJoined) /\ WF_vars(TOpenLost)
+  /\ WF_vars(TOpenAsked) /\ WF_vars(TOpenJoined) /\ WF_vars(TOpenLost) /\ WF_vars(TOpenOnFailed)
   /\ WF_vars(\E a \in asks : AccessAnswered(a))
   /\ WF_vars(\E ok \in BOOLEAN : LeaveFlushSettled(ok))
   /\ WF_vars(ModuleLoaded)
@@ -789,7 +808,7 @@ FailedFlushBlocks == f.blocked => f.st = "flushFailed"
 
 \* I3. No step of focus starts a session's close; only PersonClosed, PersonDiscarded, IdleExpired and
 \* BudgetSwitchClose do.
-FocusNeverCloses == [][FocusStep => \A p \in Projects : sess[p] = "live" => sess'[p] = "live"]_vars
+FocusNeverCloses == [][FocusStep => \A p \in Projects : Closeable(p) => sess'[p] = sess[p]]_vars
 
 \* I4. A step that opens a session or fills pendingOpen for a route request does so from a ready answer
 \* for the current request's project at the library's current epoch. Ruled: compared by project and by
@@ -800,13 +819,19 @@ RouteOpen == (\E p \in Projects : sess[p] = "none" /\ sess'[p] = "live") \/ (pen
 \* Extended to the registry's resume of a request focus sent (SessionClosed spawning pendingOpen's
 \* project with its request): focus has not withdrawn it, so it is still opening that project from a
 \* ready answer, or keeps a ready request for it (a person's open). Focus withdraws when it moves, when
-\* it is held and when it re-asks after a library change. Between LibraryChanged and that re-ask the
+\* it is held, when it re-asks after a library change and on budgetRefused for the session it is opening
+\* (CloseFailed). It covers a resume into a freed slot and a session resumed by its own close. Between LibraryChanged and that re-ask the
 \* registry, which cannot see the epoch, may still resume; focus then does not join (TOpenJoined needs
 \* a fresh answer). target-resume-window shows that window.
 Resumed(q) == pendingOpen.project = q /\ pendingOpen.req # NoOpenReq /\ sess[q] = "none" /\ sess'[q] = "live"
 \* Only SessionClosed takes a session from closing to none, so this names its steps cheaply.
 Closed == \E v \in Projects : sess[v] = "closing" /\ sess'[v] = "none"
-ResumeStep(q) == Closed /\ Resumed(q)
+\* The registry's resume of a request waiting for the session that is closing itself: that session's
+\* close frees its own slot and SessionClosed respawns it from pendingOpen, closing to live in one step
+\* with its unsaved work flushed (a close that failed keeps it dirty instead).
+SelfResumed(q) ==
+  pendingOpen.project = q /\ pendingOpen.req # NoOpenReq /\ sess[q] = "closing" /\ sess'[q] = "live" /\ q \notin dirty'
+ResumeStep(q) == (Closed /\ Resumed(q)) \/ SelfResumed(q)
 ResumeStands(q) ==
   \/ f.st = "opening" /\ f.opened /\ f.ans = "ready" /\ f.ansProj = q /\ pendingOpen.req.epoch = f.ansEpoch
   \/ f.kept[q] = pendingOpen.req.epoch
@@ -857,7 +882,7 @@ OpeningWaitsOrWentLive == (f.st = "opening" /\ f.opened /\ ~f.live) => pendingOp
 \* fact settled or the open bound passed.
 EditorOnlyWhenReady ==
   View = "editor" =>
-    /\ f.ans = "ready" /\ mod = "loaded" /\ f.ansProj \in Projects /\ sess[f.ansProj] # "none"
+    /\ f.ans = "ready" /\ mod = "loaded" /\ Live(f.ansProj)
     /\ fact[f.ansProj] \in {"settled", "bound"}
 
 \* I20. Focus enters `focused` with the editor shown only from a ready answer for the library's
@@ -913,7 +938,7 @@ RequestEventuallySettles == <>[]Settled
    session being left is retained after its close failed *)
 RetainedUnreached ==
   ~(f.st = "flushFailed" /\ pendingOpen # NoPending /\ cnt.closeFails > 0
-    /\ \E p \in dirty : sess[p] = "live" /\ p = f.from)
+    /\ \E p \in dirty : Closeable(p) /\ p = f.from)
 
 (* Witness: today, an edit in the window before ProjectPersistenceGuard registers the flush *)
 EditBeforeRegistrationUnreached == ~(\E p \in dirty : reg # p /\ RegTarget = p)

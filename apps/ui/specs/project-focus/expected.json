@@ -74,7 +74,7 @@
     "ProjectFocus.liveness-retained-reopen.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "LiveSpec over 2 projects, 3 requests, no library change, budget 1, 1 person close, 1 failed close (back to live or to failed), no person open, Home or leave-flush failure; focus's open for a retained session goes live through the reopen or is re-sent on budgetRefused, and RequestEventuallySettles, FailedFlushSendsNoOpen and OpeningWaitsOrWentLive hold."
+      "ref": "LiveSpec over 2 projects, 3 requests, no library change, budget 1, 1 person close, 1 failed close (back to live or to failed), no person open, Home or leave-flush failure; focus's open for a retained session goes live through the reopen or is withdrawn and re-sent on budgetRefused and settles on the failed session as closed, and RequestEventuallySettles, FailedFlushSendsNoOpen and OpeningWaitsOrWentLive hold."
     },
     "ProjectFocus.liveness-registry-epoch.cfg": {
       "tier": "nightly",

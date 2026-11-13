@@ -30,6 +30,7 @@ const alphabet = [
   'OpenBoundPassed',
   'OpenJoined',
   'OpenLost',
+  'OpenOnFailed',
   'PersonClosed',
   'PersonDiscarded',
   'PersonOpenAsked',

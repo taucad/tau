@@ -16,7 +16,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
-import { AuthGuard, PublicAuth, UseAuth, User } from '@taucad/api-auth';
+import { AuthGuard, AuthoritativeSession, PublicAuth, UseAuth, User } from '@taucad/api-auth';
 import { HostsService } from '@taucad/api-hosts';
 import {
   CancelJobDto,
@@ -343,6 +343,8 @@ export class JobsController {
 
   @Get(':jobId/artifacts/:artifactId')
   @UseAuth()
+  // Returns a presigned download URL valid 900 s: never from a session snapshot.
+  @AuthoritativeSession()
   public async getArtifact(
     @Param('jobId') jobId: string,
     @Param('artifactId') artifactId: string,

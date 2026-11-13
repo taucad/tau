@@ -2,10 +2,10 @@ import type { IncomingMessage } from 'node:http';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { Auth } from 'better-auth';
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyRequest } from 'fastify';
-import { authInstanceKey, isOptionalAuth, isPublicAuth } from '#auth.constant.js';
+import { isAuthoritativeSession, isOptionalAuth, isPublicAuth } from '#auth.constant.js';
+import { SessionResolver } from '#session-resolver.js';
+import type { SessionResolution } from '#session-resolver.js';
 
 /** A cloud host acting for its owner on one project's git routes (D21). */
 export type HostDevicePrincipal = {
@@ -42,11 +42,19 @@ export const attachHostDevice = (rawRequest: IncomingMessage, principal: HostDev
 export const hostDeviceOf = (rawRequest: IncomingMessage): HostDevicePrincipal | undefined =>
   hostDevicePrincipals.get(rawRequest);
 
+/*
+ * One resolution per request. Nest runs a class-level and a method-level guard
+ * both, so a second run for the same request reads this entry and does no
+ * lookup, appends no cookie and counts nothing. Keyed by the raw request, like
+ * the host principals above.
+ */
+const resolutions = new WeakMap<IncomingMessage, SessionResolution>();
+
 @Injectable()
 export class AuthGuard implements CanActivate {
   public constructor(
     @Inject(Reflector) private readonly reflector: Reflector,
-    @Inject(authInstanceKey) private readonly auth: Auth,
+    @Inject(SessionResolver) private readonly sessions: SessionResolver,
   ) {}
 
   /**
@@ -77,9 +85,11 @@ export class AuthGuard implements CanActivate {
       return true;
     }
 
-    const session = await this.auth.api.getSession({
-      headers: fromNodeHeaders(request.headers),
-    });
+    const resolution = await this.resolutionOf(context, request);
+    const session =
+      resolution.session === null || resolution.user === null
+        ? null
+        : { session: resolution.session, user: resolution.user };
 
     // @ts-expect-error -- request.session is not typed
     request.session = session;
@@ -103,5 +113,26 @@ export class AuthGuard implements CanActivate {
     }
 
     return true;
+  }
+
+  private async resolutionOf(context: ExecutionContext, request: FastifyRequest): Promise<SessionResolution> {
+    const raw = request.raw as IncomingMessage | undefined;
+    const memoized = raw === undefined ? undefined : resolutions.get(raw);
+    if (memoized !== undefined) {
+      return memoized;
+    }
+    const authoritative = this.reflector.getAllAndOverride<boolean | undefined>(isAuthoritativeSession, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    const resolution = await this.sessions.resolve({
+      headers: request.headers,
+      method: request.method,
+      authoritative: authoritative === true,
+    });
+    if (raw !== undefined) {
+      resolutions.set(raw, resolution);
+    }
+    return resolution;
   }
 }

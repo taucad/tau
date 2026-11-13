@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { Auth } from 'better-auth';
+import type { SessionResolver } from '@taucad/api-auth';
+import { fakeSessionResolver } from '@taucad/api-auth/testing';
 import type { HttpAdapterHost } from '@nestjs/core';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { RawData } from 'ws';
@@ -49,7 +50,7 @@ describe('HostsGateway session routes', () => {
       }),
       ensureStarted: vi.fn(async () => undefined),
     } as unknown as DevWebSocketService;
-    const gateway = new HostsGateway(hostsService, devWebSocketService, {} as Auth, {} as HttpAdapterHost);
+    const gateway = new HostsGateway(hostsService, devWebSocketService, {} as SessionResolver, {} as HttpAdapterHost);
 
     await gateway.onModuleInit();
     expect(prefix).toBe('/v1/agents/sessions/');
@@ -86,7 +87,7 @@ describe('HostsGateway session routes', () => {
     const gateway = new HostsGateway(
       hostsService,
       devWebSocketService,
-      { api: { getSession: vi.fn(async () => null) } } as unknown as Auth,
+      fakeSessionResolver(() => null),
       {} as HttpAdapterHost,
       undefined,
       undefined,
@@ -240,7 +241,7 @@ describe('HostsGateway control admission', () => {
       registerPrefixHandler: vi.fn(),
       ensureStarted: vi.fn(async () => undefined),
     } as unknown as DevWebSocketService;
-    const gateway = new HostsGateway(service, devWebSocketService, {} as Auth, {} as HttpAdapterHost);
+    const gateway = new HostsGateway(service, devWebSocketService, {} as SessionResolver, {} as HttpAdapterHost);
     await gateway.onModuleInit();
 
     const sockets = new WebSocketServer({ noServer: true });
@@ -422,7 +423,7 @@ describe('HostsGateway control message failures', () => {
       registerPrefixHandler: vi.fn(),
       ensureStarted: vi.fn(async () => undefined),
     } as unknown as DevWebSocketService;
-    const gateway = new HostsGateway(hostsService, devWebSocketService, {} as Auth, {} as HttpAdapterHost);
+    const gateway = new HostsGateway(hostsService, devWebSocketService, {} as SessionResolver, {} as HttpAdapterHost);
     const started = gateway.onModuleInit();
 
     return {
@@ -527,7 +528,7 @@ describe('HostsGateway in production', () => {
     const gateway = new HostsGateway(
       hostsService,
       {} as DevWebSocketService,
-      {} as Auth,
+      {} as SessionResolver,
       { httpAdapter: { getInstance: () => ({ server }) } } as unknown as HttpAdapterHost,
       new UpgradeRouter(shutdown),
       shutdown,
@@ -569,7 +570,7 @@ describe('HostsGateway in production', () => {
     const gateway = new HostsGateway(
       hostsService,
       {} as DevWebSocketService,
-      {} as Auth,
+      {} as SessionResolver,
       { httpAdapter: { getInstance: () => ({ server }) } } as unknown as HttpAdapterHost,
       new UpgradeRouter(shutdown),
       shutdown,

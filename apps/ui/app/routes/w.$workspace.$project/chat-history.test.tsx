@@ -265,6 +265,9 @@ const capturedVirtuoso: {
   initialTopMostItemIndex?: { index: string; align: string };
 } = {};
 const scrollToIndexMock = vi.fn();
+const DefaultScroller = ({ children }: { readonly children?: React.ReactNode }): React.JSX.Element => (
+  <div>{children}</div>
+);
 vi.mock('react-virtuoso', () => ({
   Virtuoso: (properties: {
     readonly data: readonly unknown[];
@@ -273,9 +276,10 @@ vi.mock('react-virtuoso', () => ({
     readonly followOutput: () => 'auto' | false;
     readonly ref?: React.Ref<{ scrollToIndex: typeof scrollToIndexMock }>;
     readonly components?: {
-      readonly EmptyPlaceholder?: React.ComponentType;
-      readonly Scroller?: React.ComponentType<{ readonly children?: React.ReactNode }>;
+      readonly EmptyPlaceholder?: React.ComponentType<{ readonly context?: unknown }>;
+      readonly Scroller?: React.ComponentType<{ readonly children?: React.ReactNode; readonly context?: unknown }>;
     };
+    readonly context?: unknown;
     readonly 'data-transcript-state'?: string;
   }) => {
     capturedVirtuoso.initialTopMostItemIndex = properties.initialTopMostItemIndex;
@@ -291,13 +295,15 @@ vi.mock('react-virtuoso', () => ({
         </div>,
       );
     }
-    /* Like Virtuoso, the root takes the list's own attributes, the list's Scroller holds its rows, and the empty
-     * placeholder shows for no data. */
+    /* Like Virtuoso, the root takes the list's own attributes, the list's Scroller holds its rows, the empty
+     * placeholder shows for no data, and both custom components receive the list's `context`. */
     const EmptyPlaceholder = properties.components?.EmptyPlaceholder;
-    const Scroller = properties.components?.Scroller ?? 'div';
+    const Scroller = properties.components?.Scroller ?? DefaultScroller;
     return (
       <div data-testid='virtuoso' data-transcript-state={properties['data-transcript-state']}>
-        <Scroller>{items.length === 0 && EmptyPlaceholder ? <EmptyPlaceholder /> : items}</Scroller>
+        <Scroller context={properties.context}>
+          {items.length === 0 && EmptyPlaceholder ? <EmptyPlaceholder context={properties.context} /> : items}
+        </Scroller>
       </div>
     );
   },
@@ -656,7 +662,8 @@ describe('ChatHistory — composer refocus', () => {
 
 /**
  * The list's own container marks its transcript's load state: lane A12 renders `data-transcript-state` on the
- * Virtuoso root (passed as a Virtuoso prop) or on its Scroller, and the mock renders both. It does not exist yet.
+ * Virtuoso root (passed as a Virtuoso prop), or on its Scroller from the list's `context`. The mock renders both and
+ * passes `context` to the Scroller and the empty placeholder, as Virtuoso does. It does not exist yet.
  */
 const transcriptLoadingMarker = '[data-transcript-state="loading"]';
 /** The same marker once the list has left `loading` with the chat's turns. */

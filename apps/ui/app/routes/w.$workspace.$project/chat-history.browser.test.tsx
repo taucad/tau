@@ -313,4 +313,15 @@ describe('chat composer across the transcript load', () => {
     expect(after.composer).toBe(textarea.height);
     expect(textarea.bottom).toBeLessThanOrEqual(after.composerTop + after.composer);
   });
+
+  it('releases a remembered tray the chat no longer has once the transcript resolves (U10)', async () => {
+    // The chat remembers its task-list tray, but the list is gone: once loaded, nothing is held for it.
+    const { after } = await laneLayoutAcrossLoad({
+      rememberedComposerTrays: taskListTray,
+      todoList: { kind: 'orphaned' },
+    });
+
+    expect(screen.queryByRole('button', { name: /Tasks:/u })).toBeNull();
+    expect(after.composer).toBe(screen.getByTestId('chat-textarea').getBoundingClientRect().height);
+  });
 });

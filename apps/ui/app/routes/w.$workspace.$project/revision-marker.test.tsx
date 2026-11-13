@@ -394,6 +394,23 @@ describe('RevisionRow', () => {
     expect(await screen.findByTestId('diff')).toHaveTextContent('a|b');
   });
 
+  /* U17: a comparison that has not arrived is its row's frame, never bars. */
+  it.fails('draws no Skeleton while a comparison loads', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.comparisonRead = async () => Promise.withResolvers<never>().promise;
+    renderRow();
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
+
+    const frame = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>('[aria-label="Comparison for bracket.scad"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    expect(frame).toHaveAttribute('aria-busy', 'true');
+    expect(document.querySelectorAll('[data-slot="skeleton"]'), 'Skeleton shapes in the comparison').toHaveLength(0);
+  });
+
   it('restores an entry the files are not at, naming it in the button’s accessible name', async () => {
     const user = userEvent.setup();
     onRestore.mockClear();

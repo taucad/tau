@@ -324,7 +324,15 @@ const view = (harness: Harness): SpecView => {
   };
 };
 
-const project = (spec: SpecView): SpecView => fields(closure(spec as unknown as SpecState));
+/**
+ * The suite's states are the model's records. `tools/formal` types them as generic TLA values, and this file's types
+ * restate `ProjectFocus.tla`'s variables, so the one place the two meet is this assertion: the replay diverges on any
+ * state whose shape it misreads.
+ */
+// oxlint-disable-next-line typescript/consistent-type-assertions -- generic TLA values to this file's model types.
+const asModel = <T>(value: unknown): T => value as T;
+
+const project = (spec: SpecView): SpecView => fields(closure(asModel<SpecState>(spec)));
 
 const machine = createFocusMachine({ nativeKernelOf: () => undefined });
 
@@ -333,7 +341,7 @@ describe('focus conforms to ProjectFocus.tla', () => {
     ['before and after', true],
     ['after', false],
   ])('should replay the covering suite without divergence, facts reported %s the reply', async (_order, factsFirst) => {
-    const behaviours = suiteBehaviours(graph, suite) as unknown as SpecState[][];
+    const behaviours = asModel<SpecState[][]>(suiteBehaviours(graph, suite));
     const divergences = [];
     for (const [index, behaviour] of behaviours.entries()) {
       let step = 0;
@@ -353,7 +361,7 @@ describe('focus conforms to ProjectFocus.tla', () => {
         },
       };
       // oxlint-disable-next-line no-await-in-loop -- each behaviour replays on its own actor, in order.
-      const found = await replaySuite([behaviour as unknown as SpecView[]], adapter, (state) => [state]);
+      const found = await replaySuite([asModel<SpecView[]>(behaviour)], adapter, (state) => [state]);
       divergences.push(
         ...found.map((divergence) => ({ ...divergence, behaviour: index, action: behaviour[divergence.step]?.act })),
       );

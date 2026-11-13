@@ -41,7 +41,12 @@
         "violated": "RetainedUnreached"
       },
       "kind": "witness",
-      "ref": "At the target-retained-session bounds the ruled case is reached: flushFailed, a person's open waiting, and the dirty session being left retained after its close flush failed."
+      "ref": "At the target-retained-session bounds the ruled case is reached: flushFailed, a person's open waiting, and the dirty session being left retained after its close failed."
+    },
+    "ProjectFocus.target-failed-close-withdraw.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "Budget 1 over 2 projects, 4 requests, no library change, 2 person closes, 1 failed close, no person open, Home, failed leave flush or retry: on a close that fails to failed, focus withdraws its waiting open, so no later close of that session respawns it from focus's request, and OpenOnlyOnCurrentAccess and every target safety property hold."
     },
     "ProjectFocus.target-resume-window.cfg": {
       "tier": "nightly",

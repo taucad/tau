@@ -366,7 +366,8 @@ CloseFlushFailed(v) ==
 \* (sessions.machine.ts 281 to 289). A5a rule: on budgetRefused for its own waiting open of a project
 \* still in the live set, focus withdraws that open (cancelPendingOpen) in the same step and sends it
 \* again; as built that open is a touch, and focus then settles on the failed session (TOpenOnFailed).
-\* A person's open waiting for v stays in pendingOpen: the registry asks the person (budgetRefused).
+\* No other open waits for v here: a person's open needs v out of the live set (PersonOpenAsked), and
+\* focus withdraws its open when it moves, so in the target pendingOpen names v only as FocusPending.
 CloseFailed(v) ==
   /\ sess[v] = "closing" /\ v \in dirty /\ cnt.closeFails < MaxCloseFails
   /\ sess' = [sess EXCEPT ![v] = "failed"]

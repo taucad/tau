@@ -10,7 +10,6 @@ import { setLogarithmicDepthOverride } from '#graphics/three/logarithmic-depth.j
 import {
   abs,
   add,
-  cameraPosition,
   cameraProjectionMatrix,
   cameraViewMatrix,
   clamp,
@@ -137,6 +136,8 @@ export function createInfiniteGridNodeMaterial(
   const uSmallPhase = uniform(new Vector2(...smallPhase));
   const uLargePhase = uniform(new Vector2(...largePhase));
   const uAlphaThreshold = uniform(alphaThreshold);
+  // The view target's foot on the grid plane, not the camera's: the camera's foot drifts from the model as FOV falls.
+  const uGridCenter = uniform(new Vector2());
 
   const material = new MeshBasicNodeMaterial({
     side: DoubleSide,
@@ -156,19 +157,7 @@ export function createInfiniteGridNodeMaterial(
   setLogarithmicDepthOverride(material, logarithmicDepthBehindGltfSurface(gridViewZ));
 
   material.vertexNode = Fn(() => {
-    const cameraPlane = vec2().toVar('tauGridCameraPlane');
-
-    If(axesIndexUniform.equal(float(0)), () => {
-      cameraPlane.assign(cameraPosition.xy);
-    })
-      .ElseIf(axesIndexUniform.equal(float(1)), () => {
-        cameraPlane.assign(cameraPosition.xz);
-      })
-      .Else(() => {
-        cameraPlane.assign(cameraPosition.zy);
-      });
-
-    renderPlanePosition.assign(add(cameraPlane, mul(positionLocal.xy, uGridDistance)));
+    renderPlanePosition.assign(add(uGridCenter, mul(positionLocal.xy, uGridDistance)));
 
     const posWorld = vec3().toVar('tauGridWorld');
 
@@ -255,6 +244,10 @@ export function createInfiniteGridNodeMaterial(
 
     if (overrides.largePhase !== undefined) {
       uLargePhase.value.set(...overrides.largePhase);
+    }
+
+    if (overrides.gridCenter !== undefined) {
+      uGridCenter.value.set(...overrides.gridCenter);
     }
   };
 

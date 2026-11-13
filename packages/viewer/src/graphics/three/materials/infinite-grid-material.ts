@@ -112,6 +112,10 @@ export function createInfiniteGridGlMaterial(
       uAxes: {
         value: axesIndex,
       },
+      // The view target's foot on the grid plane, not the camera's: the camera's foot drifts from the model as FOV falls.
+      uGridCenter: {
+        value: new THREE.Vector2(),
+      },
     },
 
     vertexShader: `
@@ -122,20 +126,12 @@ export function createInfiniteGridGlMaterial(
 
       uniform float uGridDistance;
       uniform float uPlaneOffset;
+      uniform vec2 uGridCenter;
       uniform int uAxes;
       
       void main() {
         gridProxyPosition = position.xy;
-        vec2 cameraPlane;
-        if (uAxes == 0) {
-          cameraPlane = cameraPosition.xy;
-        } else if (uAxes == 1) {
-          cameraPlane = cameraPosition.xz;
-        } else {
-          cameraPlane = cameraPosition.zy;
-        }
-
-        renderPlanePosition = cameraPlane + position.xy * uGridDistance;
+        renderPlanePosition = uGridCenter + position.xy * uGridDistance;
 
         vec3 renderPosition;
         if (uAxes == 0) {
@@ -287,6 +283,10 @@ export function createInfiniteGridGlMaterial(
 
     if (overrides.largePhase !== undefined) {
       (material.uniforms['uLargePhase']!.value as THREE.Vector2).set(...overrides.largePhase);
+    }
+
+    if (overrides.gridCenter !== undefined) {
+      (material.uniforms['uGridCenter']!.value as THREE.Vector2).set(...overrides.gridCenter);
     }
   };
 

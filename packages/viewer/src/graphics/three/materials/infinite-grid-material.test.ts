@@ -41,6 +41,7 @@ describe('createInfiniteGridGlMaterial', () => {
       planeOffset: -42,
       smallPhase: [0.25, 0.75],
       largePhase: [0.125, 0.625],
+      gridCenter: [12, -7],
     });
 
     expect(material.uniforms['uSmallSize']!.value).toBe(2);
@@ -52,6 +53,7 @@ describe('createInfiniteGridGlMaterial', () => {
     expect(material.uniforms['uPlaneOffset']!.value).toBe(-42);
     expect((material.uniforms['uSmallPhase']!.value as THREE.Vector2).toArray()).toEqual([0.25, 0.75]);
     expect((material.uniforms['uLargePhase']!.value as THREE.Vector2).toArray()).toEqual([0.125, 0.625]);
+    expect((material.uniforms['uGridCenter']!.value as THREE.Vector2).toArray()).toEqual([12, -7]);
   });
 
   it('uses backend depth bias instead of displacing the physical plane', () => {
@@ -64,10 +66,12 @@ describe('createInfiniteGridGlMaterial', () => {
     expect(material.vertexShader).not.toContain('uNormalOffset');
   });
 
-  it('centres the proxy in one render-world coordinate frame', () => {
+  it('centres the proxy on the view target uniform, not the camera position, in one render-world frame', () => {
     const { material } = createInfiniteGridGlMaterial();
 
-    expect(material.vertexShader).toContain('renderPlanePosition = cameraPlane + position.xy * uGridDistance');
+    expect((material.uniforms['uGridCenter']!.value as THREE.Vector2).toArray()).toEqual([0, 0]);
+    expect(material.vertexShader).toContain('renderPlanePosition = uGridCenter + position.xy * uGridDistance');
+    expect(material.vertexShader).not.toContain('cameraPosition');
     expect(material.vertexShader).toContain('projectionMatrix * viewMatrix * vec4(renderPosition, 1.0)');
     expect(material.fragmentShader).not.toContain('distance(cameraPlane, renderPlanePosition)');
     expect(material.vertexShader).not.toContain('modelViewMatrix');

@@ -360,7 +360,7 @@ for (const viewport of ['wide', 'phone'] as const) {
   cloudDefectRow(
     {
       api: test,
-      expectedFailure: true,
+      expectedFailure: false,
       title: `H-a: keeps everything under the composer in place with onboarding on, on a ${viewport} viewport, on a first visit and its reload`,
     },
     async (defect) => {
@@ -379,3 +379,82 @@ for (const viewport of ['wide', 'phone'] as const) {
     },
   );
 }
+
+/** What the server's HTML for Home holds of the suggestions row, fetched with the page's cookies. */
+const serverSuggestionsRow = async (): Promise<{ box: boolean; list: boolean; buttons: number }> =>
+  target.evaluate(
+    async ({ box, list }) => {
+      const response = await fetch('/', { credentials: 'same-origin' });
+      const html = new DOMParser().parseFromString(await response.text(), 'text/html');
+      return {
+        box: html.querySelector(box) !== null,
+        list: html.querySelector(list) !== null,
+        buttons: html.querySelectorAll(`${box} button`).length,
+      };
+    },
+    { box: underComposer.suggestionsBox, list: '[aria-label="Suggestions"]' },
+  );
+
+/** The layout-flags cookie this browser holds, if any. */
+const layoutFlagsCookie = async (): Promise<string | undefined> => {
+  const cookies = await target.cookies();
+  return cookies.find((cookie) => cookie.name === 'tau-layout-flags')?.value;
+};
+
+/*
+ * H-a guard: the `layout-flags` cookie decides the row on the server. With no cookie the box is held empty from the
+ * first frame and the row fills that same box; once the flag has settled on, the server renders the box and its empty
+ * list (the buttons are the client's); with the flag settled off, the server renders no box and neither does the page.
+ */
+test('H-a guard: the layout-flags cookie decides the suggestions row on the server, and an unknown flag holds its box', async () => {
+  await useFlagState('viewer-controls-onboarding');
+  await target.addInitScript(dismissSetupInvite, 'tau-device');
+  await target.setViewport(viewports.wide);
+  await target.addInitScript(recordSuggestionsRow, underComposer);
+
+  const firstVisit = await measureSuggestionsRow(async () => target.navigate('/'), 'h-a-guard-first-visit');
+  const boxTops = firstVisit.tops['suggestionsBox'] ?? [];
+  expect(boxTops, 'the held box never moved and was there from the first frame').toHaveLength(1);
+  expect(boxTops[0]?.t, 'the box was painted with the first frame of the page below the composer').toBe(
+    firstVisit.tops['buildFromCode']?.[0]?.t,
+  );
+  expect(await layoutFlagsCookie(), 'the settled flag rides the next request').toBe('onboarding.1');
+  expect(await serverSuggestionsRow(), 'with the cookie on, the server renders the box and its empty list').toEqual({
+    box: true,
+    list: true,
+    buttons: 0,
+  });
+
+  await target.evaluate(async () => {
+    await cookieStore.delete({ name: 'tau-layout-flags', path: '/' });
+  });
+  expect(await serverSuggestionsRow(), 'with no cookie, the server holds the box empty').toEqual({
+    box: true,
+    list: false,
+    buttons: 0,
+  });
+
+  await useFlagState('all-off');
+  await target.reload();
+  await target.expectVisible(richComposer, 60_000);
+  await target.waitFor(
+    async () => {
+      const cookie = await cookieStore.get('tau-layout-flags');
+      return cookie?.value === 'onboarding.0';
+    },
+    undefined,
+    { timeout: 60_000 },
+  );
+  expect(await serverSuggestionsRow(), 'with the cookie off, the server renders no box').toEqual({
+    box: false,
+    list: false,
+    buttons: 0,
+  });
+  await target.reload();
+  await target.expectVisible(richComposer, 60_000);
+  await target.delay(settleWindow);
+  expect(
+    await target.evaluate((box) => document.querySelector(box) === null, underComposer.suggestionsBox),
+    'with the flag off and the cookie off, the page renders no box',
+  ).toBe(true);
+});

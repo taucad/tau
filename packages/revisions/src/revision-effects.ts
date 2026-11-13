@@ -146,7 +146,7 @@ import { restoreMachine } from '#restore.machine.js';
 import { readRevisionLog } from '#revision-verbs.js';
 import type { RevisionRow } from '#revision-verbs.js';
 import { isVersionNumberRefusal } from '#refusal-markers.js';
-import { renumberUnpushedVersions, versionNumberOfTag } from '#version-numbers.js';
+import { isNumberedTagNotVersion, renumberUnpushedVersions, versionNumberOfTag } from '#version-numbers.js';
 import { syncMachine } from '#sync.machine.js';
 import {
   generatedGitattributesContent,
@@ -5886,9 +5886,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const own = await devicesOrNone();
         const current = await devicesOrNone(opsLog.currentDevices);
         const trackedTags = remoteTrackingRef(input.remote, 'refs/tags');
-        const [heads, tags, trackedTagReferences, chats, evidence, logs] = await Promise.all([
+        const [heads, tags, versions, trackedTagReferences, chats, evidence, logs] = await Promise.all([
           port.listRefs('refs/heads'),
           port.listRefs('refs/tags'),
+          configured?.kind === 'tau' ? port.listTags() : Promise.resolve([]),
           port.listRefs(trackedTags),
           syncChats ? port.listRefs(chatRefPrefix) : Promise.resolve([]),
           syncLargeExports ? port.listRefs('refs/tau/evidence') : Promise.resolve([]),
@@ -5900,9 +5901,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         /* Another device's conflict line is that device's to push: offering a
          * copy this host fetched earlier would only sink the atomic set when
          * the owner has moved it on since (D14). */
+        /* A `refs/tags/v<n>` that is not a version (`git tag v2` in a terminal)
+         * stays here: Tau Cloud refuses it, and the atomic set with it (M2). */
         const history = [...heads, ...tags]
           .map((entry) => entry.name)
-          .filter((name) => offered(name) && pushOffers(name, own));
+          .filter(
+            (name) =>
+              offered(name) &&
+              pushOffers(name, own) &&
+              !(configured?.kind === 'tau' && isNumberedTagNotVersion(name, versions)),
+          );
         const records = [...chats, ...evidence, ...ops]
           .map((entry) => entry.name)
           .filter((name) => offered(name) && !failedPreparation.has(name));

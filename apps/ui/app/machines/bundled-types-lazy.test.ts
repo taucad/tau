@@ -109,7 +109,7 @@ describe('lazy bundled types reads', () => {
     const refusal = Object.assign(new Error('EACCES'), { code: 'EACCES' });
     const install = vi.fn(async () => undefined);
     const lazy = createLazyBundledTypesReads(install)({
-      stat: vi.fn(async () => {
+      stat: vi.fn<(path: string) => Promise<never>>(async () => {
         throw refusal;
       }),
     });

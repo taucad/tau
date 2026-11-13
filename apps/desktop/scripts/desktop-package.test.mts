@@ -19,10 +19,12 @@ import { createPackageWithOptions, statFile } from '@electron/asar';
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import {
   desktopArchiveCommand,
+  desktopGitPayloadRefusal,
   desktopPackageOmissions,
   desktopPackagePlans,
   parseDesktopPackageArguments,
 } from './desktop-package-target.mjs';
+import { gitPayloadExecutables, gitPayloadLayout } from './git-payload.mjs';
 import {
   desktopManifestFields,
   desktopPackageChannel,
@@ -184,6 +186,55 @@ assert.ok(
 assert.equal(linux.gitPayloadSupported, true);
 assert.equal(windows.gitPayloadSupported, false);
 console.log('✓ every payload a target leaves out is named');
+
+/* The Linux release guard: a distribution archive ships an executable git and git-lfs, as a macOS release does. */
+{
+  const gitResourceRoot = '/r/git/linux-x64';
+  const complete = { git: true, gitLfs: true, gitResourceRoot };
+  assert.equal(desktopGitPayloadRefusal(linux, true, complete), undefined);
+  assert.equal(desktopGitPayloadRefusal(linux, false, { git: false, gitLfs: false, gitResourceRoot }), undefined);
+  assert.equal(desktopGitPayloadRefusal(windows, true, { git: false, gitLfs: false, gitResourceRoot }), undefined);
+  assert.equal(
+    desktopGitPayloadRefusal(linux, true, { git: false, gitLfs: false, gitResourceRoot }),
+    'A linux-x64 release package must ship an executable bundled git and git-lfs; git and git-lfs missing at /r/git/linux-x64 (OQ3). Run prepare-git first.',
+  );
+  assert.match(desktopGitPayloadRefusal(linux, true, { ...complete, gitLfs: false }) ?? '', /; git-lfs missing at /u);
+  assert.match(desktopGitPayloadRefusal(linux, true, { ...complete, git: false }) ?? '', /; git missing at /u);
+
+  /* What the script reads: a binary counts only as an executable regular file. */
+  const resourceRoot = await mkdtemp(join(tmpdir(), 'tau-git-payload-'));
+  try {
+    const layout = gitPayloadLayout(resourceRoot, 'linux-x64');
+    assert.deepEqual(await gitPayloadExecutables(resourceRoot, 'linux-x64'), { git: false, gitLfs: false });
+    await mkdir(dirname(layout.git), { recursive: true });
+    await mkdir(dirname(layout.gitLfs), { recursive: true });
+    await writeFile(layout.git, '#!/bin/sh\n', { mode: 0o755 });
+    await writeFile(layout.gitLfs, '#!/bin/sh\n', { mode: 0o644 });
+    assert.deepEqual(await gitPayloadExecutables(resourceRoot, 'linux-x64'), { git: true, gitLfs: false });
+    assert.ok(
+      desktopGitPayloadRefusal(linux, true, {
+        ...(await gitPayloadExecutables(resourceRoot, 'linux-x64')),
+        gitResourceRoot,
+      }),
+    );
+    await rm(layout.gitLfs);
+    await mkdir(layout.gitLfs, { mode: 0o755 });
+    assert.deepEqual(await gitPayloadExecutables(resourceRoot, 'linux-x64'), { git: true, gitLfs: false });
+    await rm(layout.gitLfs, { recursive: true });
+    await writeFile(layout.gitLfs, '#!/bin/sh\n', { mode: 0o755 });
+    assert.deepEqual(await gitPayloadExecutables(resourceRoot, 'linux-x64'), { git: true, gitLfs: true });
+    assert.equal(
+      desktopGitPayloadRefusal(linux, true, {
+        ...(await gitPayloadExecutables(resourceRoot, 'linux-x64')),
+        gitResourceRoot,
+      }),
+      undefined,
+    );
+  } finally {
+    await rm(resourceRoot, { recursive: true, force: true });
+  }
+}
+console.log('✓ a Linux release refuses to assemble without an executable git and git-lfs');
 
 /* Archives: GNU/bsd tar on Linux; the inbox bsdtar on Windows, which writes ZIP. */
 assert.deepEqual(desktopArchiveCommand(linux, '/out', undefined), {

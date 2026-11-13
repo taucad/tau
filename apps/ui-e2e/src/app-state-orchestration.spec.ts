@@ -212,9 +212,9 @@ test('A0.1 row 1 (I10): project A keeps its arrangement across a round trip that
 
   /* The round trip leaves B as soon as B's own `?chat=` correction lands. The time on B, from B's path
    * committing to the click back to A, is that correction's wait and is recorded, not bounded: it measured
-   * 248–2122 ms over 20 runs at `4ff549a9`, most under 0.5 s and one above 2 s, so a one-second bound would
-   * not hold every run. Going back before the correction is the I2 report-only row's subject, which is not
-   * this row's claim. */
+   * 198–885 ms over 20 runs at `279a3a30` (median 332 ms, 16 under 0.5 s) and 248–2122 ms over 20 runs at
+   * `4ff549a9` (one above 2 s), so a one-second bound would not hold every run. Going back before the
+   * correction is the I2 report-only row's subject, which is not this row's claim. */
   const trip = await roundTripThroughB(true);
   await annotate(
     `dwell on B ${String(Math.round(trip.dwell))} ms (chat correction ${String(Math.round(trip.chatWait ?? -1))} ms)`,
@@ -250,10 +250,10 @@ test('A0.1 row 1 (I10): project A keeps its arrangement across a round trip that
  * the pane mostly never opens: before the layout record's first read, `openPanel` defers it through
  * `layoutController.personWorkbenchChanged`, whose callback drops it when the route key moved
  * (`project-workspace-context.tsx`), and the intent's own parameter cleanup and the `?chat=` correction
- * both move it. It is a race, not a rule: Print opened in 3 of the 20 runs at `4ff549a9`, so as `test.fails` it could not
- * be red every run (D25), and it cannot be forced from here: the record's first read and the route
- * corrections are both local, with no network request to hold. So the row records whether Print opened
- * and never fails on it. The fix direction is to keep the intent across those route-key moves; A8b turns
+ * both move it. It is a race, not a rule: Print opened in 2 of the 20 runs at `279a3a30` (3 of 20 at
+ * `4ff549a9`), so as `test.fails` it could not be red every run (D25), and it cannot be forced from here:
+ * the record's first read and the route corrections are both local, with no network request to hold. So
+ * the row records whether Print opened and never fails on it. The fix direction is to keep the intent across those route-key moves; A8b turns
  * this row into an asserting `test` once the pane always opens.
  */
 test('A0.1 row 2 (I11 report-only, A8b): the Print pane intent of a cold project link, opened or lost once the workbench is ready', async ({
@@ -631,9 +631,9 @@ const editViewArrangeAndReload = async (isAtOnce: boolean): Promise<EditedAndRel
  * three changes' local survival is report-only (S26 local loss; owner A7c, after A5b's unload sequencer;
  * the arrangement's close producer is A8b's `workbench-record-host.tsx:416`). Each was lost in some runs and
  * kept in others (over 20 runs at `4ff549a9` the edit was lost in 7, the view setting in 12 and the
- * arrangement in 8), so none can be an expected failure (D25). Forcing was tried: with the reload in the very
- * task of the changes, all three were lost, but the editor had not yet read the input, so that loss was the
- * harness's, not the app's. A7c moves the three reads into assertions once the unload settles every
+ * arrangement in 8; at `279a3a30`, in 7, 9 and 8), so none can be an expected failure (D25). Forcing was
+ * tried: with the reload in the very task of the changes, all three were lost, but the editor had not yet
+ * read the input, so that loss was the harness's, not the app's. A7c moves the three reads into assertions once the unload settles every
  * producer.
  */
 test('A0.1 row 5a (S26 report-only, D26, A7c): an arrangement, a view setting and an edit made just before a reload, kept or lost', async ({

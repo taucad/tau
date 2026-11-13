@@ -3001,6 +3001,12 @@ export function ProjectManagerProvider({
       new Promise<ConnectedWorkspace>((resolve, reject) => {
         const settle = (snapshot: ReturnType<typeof workspaceConnectionRef.getSnapshot>): void => {
           if (snapshot.context.operationId !== operationId) {
+            /* Only a later `beginSelection` sets another id: this operation was superseded, so it settles. The
+             * library's connection outlives a provider remount, which clears the in-flight promise (A2). */
+            if (snapshot.context.operationId !== undefined) {
+              subscription.unsubscribe();
+              reject(new Error('Workspace connection was superseded.'));
+            }
             return;
           }
           if (snapshot.matches('ready')) {

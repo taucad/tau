@@ -199,6 +199,10 @@ export class ProjectLibrary {
   public stop(): void {
     this.projectManager.stop();
     this.workspaceConnection.stop();
+    /* `stop()` runs no `exit`: release the worker the stopped actor's context still holds, as the file-manager host
+     * does for its actors. */
+    const { worker } = this.projectManager.getSnapshot().context;
+    worker?.terminate();
   }
 
   /** Subscribe to the snapshot. @returns The unsubscribe. */
@@ -227,10 +231,8 @@ export class ProjectLibrary {
     this.#readiedWorker('Projct manager worker');
 
   // Chat-record ports (R1-F2): the same worker-backed methods the provider implements.
-  public readonly getChat: ProjectLibraryChatPorts['getChat'] = async (chatId, projectId) => {
-    const { chats } = await this.#current();
-    return chats.getChat(chatId, projectId);
-  };
+  public readonly getChat: ProjectLibraryChatPorts['getChat'] = async (chatId, projectId) =>
+    this.#read(async (chats) => chats.getChat(chatId, projectId));
 
   public readonly patchChat: ProjectLibraryChatPorts['patchChat'] = async (chatId, key, value) => {
     const { chats } = await this.#current();
@@ -270,10 +272,7 @@ export class ProjectLibrary {
   public readonly getChatRecordsForResource: ProjectLibraryChatPorts['getChatRecordsForResource'] = async (
     resourceId,
     options,
-  ) => {
-    const { chats } = await this.#current();
-    return chats.getChatRecordsForResource(resourceId, options);
-  };
+  ) => this.#read(async (chats) => chats.getChatRecordsForResource(resourceId, options));
 
   public readonly createNavigationRepairChat: ProjectLibraryChatPorts['createNavigationRepairChat'] = async (
     resourceId,
@@ -320,6 +319,24 @@ export class ProjectLibrary {
   async #current(): Promise<ProjectLibraryBinding> {
     await this.#bound.promise;
     return this.#binding!;
+  }
+
+  /**
+   * A read through the current binding. A provider that unmounts disposes its reads, so a read that fails after its
+   * binding was replaced (a billing-fence remount, B9) is asked once more of the replacement: the chat store outlives
+   * the provider and would otherwise keep a session whose history never loaded. Only reads are asked again.
+   */
+  async #read<T>(call: (chats: ProjectLibraryChatPorts) => Promise<T>): Promise<T> {
+    const binding = await this.#current();
+    try {
+      return await call(binding.chats);
+    } catch (error) {
+      const replacement = this.#binding;
+      if (replacement === undefined || replacement === binding) {
+        throw error;
+      }
+      return call(replacement.chats);
+    }
   }
 
   async #readiedWorker(label: string): Promise<Remote<ObjectStoreWorker>> {

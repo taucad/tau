@@ -2,7 +2,7 @@
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { render, renderHook, act, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, QueryObserver, useQuery } from '@tanstack/react-query';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ReactNode } from 'react';
 import { createElement, useEffect, useState } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
@@ -588,9 +588,17 @@ const libraryFor = (queryClient: QueryClient): InstanceType<typeof ProjectLibrar
     library = new ProjectLibrary({ queryClient });
     library.start();
     libraries.set(queryClient, library);
+    startedLibraries.push(library);
   }
   return library;
 };
+/* A wrapper's library outlives its tree, as the runtime's does: stop it with the case. */
+const startedLibraries: Array<InstanceType<typeof ProjectLibrary>> = [];
+afterEach(() => {
+  for (const library of startedLibraries.splice(0)) {
+    library.stop();
+  }
+});
 const { useChatRecords } = await import('#hooks/use-chat-records.js');
 const { tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
 

@@ -2,7 +2,7 @@
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
 import { consumableBytes } from '@taucad/fs-bridge';
@@ -187,9 +187,17 @@ const libraryFor = (queryClient: QueryClient): InstanceType<typeof ProjectLibrar
     library = new ProjectLibrary({ queryClient });
     library.start();
     libraries.set(queryClient, library);
+    startedLibraries.push(library);
   }
   return library;
 };
+/* A wrapper's library outlives its tree, as the runtime's does: stop it with the case. */
+const startedLibraries: Array<InstanceType<typeof ProjectLibrary>> = [];
+afterEach(() => {
+  for (const library of startedLibraries.splice(0)) {
+    library.stop();
+  }
+});
 const { tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
 
 const createWrapper = () => {

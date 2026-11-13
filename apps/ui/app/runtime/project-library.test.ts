@@ -100,8 +100,11 @@ describe('ProjectLibrary', () => {
     expect(selectLibraryIsLoading(library.getSnapshot())).toBe(false);
     expect(selectLibraryError(library.getSnapshot())).toBeUndefined();
 
+    const { worker: started } = library.projectManager.getSnapshot().context;
     library.stop();
     expect(library.projectManager.getSnapshot().status).toBe('stopped');
+    /* `stop()` runs no `exit`, so the library releases the worker itself. */
+    expect(started?.terminate).toHaveBeenCalledOnce();
     expect(library.workspaceConnection.getSnapshot().status).toBe('stopped');
   });
 
@@ -150,7 +153,7 @@ describe('ProjectLibrary', () => {
     await expect(library.touchChatRecency('c2', 2)).resolves.toMatchObject({ id: 'remounted:c2' });
   });
 
-  it('should hand a call already running on a binding the remount replaced its own outcome, not a hang', async () => {
+  it('should ask a read again of the binding that replaced the one whose provider disposed it (B9)', async () => {
     const library = createLibrary();
     const running = Promise.withResolvers<Chat | undefined>();
     library.bind(
@@ -163,8 +166,40 @@ describe('ProjectLibrary', () => {
     library.bind(bindingNamed('new'));
     running.reject(new Error('Chat observation was disposed.'));
 
+    await expect(call).resolves.toMatchObject({ id: 'new:c1' });
+  });
+
+  it('should hand a write running on a replaced binding its own outcome, never repeat it', async () => {
+    const library = createLibrary();
+    const running = Promise.withResolvers<Chat | undefined>();
+    const replacementPatch = vi.fn(notCalled);
+    library.bind(
+      bindingNamed('old', { chats: { ...bindingNamed('old').chats, patchChat: async () => running.promise } }),
+    );
+    const call = library.patchChat('c1', 'name', 'renamed');
+    await flush();
+
+    library.bind(bindingNamed('new', { chats: { ...bindingNamed('new').chats, patchChat: replacementPatch } }));
+    running.reject(new Error('Chat observation was disposed.'));
+
     await expect(call).rejects.toThrow('Chat observation was disposed.');
-    await expect(library.getChat('c1')).resolves.toMatchObject({ id: 'new:c1' });
+    expect(replacementPatch).not.toHaveBeenCalled();
+  });
+
+  it('should keep the failure of a read whose binding no other replaced', async () => {
+    const library = createLibrary();
+    library.bind(
+      bindingNamed('only', {
+        chats: {
+          ...bindingNamed('only').chats,
+          getChat: async () => {
+            throw new Error('unreadable');
+          },
+        },
+      }),
+    );
+
+    await expect(library.getChat('c1')).rejects.toThrow('unreadable');
   });
 
   it('should notify its file facade only when the record client or the watch changes', () => {

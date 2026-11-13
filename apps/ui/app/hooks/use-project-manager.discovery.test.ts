@@ -248,9 +248,17 @@ const libraryFor = (queryClient: QueryClient): InstanceType<typeof ProjectLibrar
     library = new ProjectLibrary({ queryClient });
     library.start();
     libraries.set(queryClient, library);
+    startedLibraries.push(library);
   }
   return library;
 };
+/* A wrapper's library outlives its tree, as the runtime's does: stop it with the case. */
+const startedLibraries: Array<InstanceType<typeof ProjectLibrary>> = [];
+afterEach(() => {
+  for (const library of startedLibraries.splice(0)) {
+    library.stop();
+  }
+});
 
 const createHarness = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

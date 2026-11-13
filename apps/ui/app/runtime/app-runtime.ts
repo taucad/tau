@@ -128,9 +128,10 @@ const warnRejectedChatEvent = (rejection: EventRejection): void => {
  */
 const createChatSessions = (
   library: ProjectLibrary,
-  options: Pick<ActorOptions<AnyActorLogic>, 'inspect' | 'onRejectedEvent'>,
+  options: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>,
 ): ChatSessionStore =>
   new ChatSessionStore({
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined
       ? import.meta.env.DEV

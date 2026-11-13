@@ -1,10 +1,10 @@
 {
   "alphabet": [],
   "sources": {
-    "apps/ui/app/hooks/use-project-manager.tsx": "e82760b5a3f38c41c60beeb9b8ebc60c634c5916fec2192baa4843a31a6ed79b"
+    "apps/ui/app/hooks/use-project-manager.tsx": "7951f96dcd7bb0a8565b14bc662f1df1455a4828c0a070867587d7401872ceb8"
   },
   "specs": {
-    "LibraryCatalog.tla": "9ff9d1d2c2a649389574a504921e4203ee7e49f83400b360633928c2d2737bb6"
+    "LibraryCatalog.tla": "3b2fa39bfc2217a63fbbbbbe87190cfa68a1657437167732a36091454df9792f"
   },
   "tables": {
     "LibraryCatalog.access-match-by-id.cfg": "fa8c2041269d69be90b1366264d3d52b207f03d852ffa0b5928fa52d3ab2821e",

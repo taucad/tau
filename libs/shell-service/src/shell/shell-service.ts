@@ -44,7 +44,8 @@ import type {
   ShellRunRequest,
 } from '#shell/shell-contract.js';
 import { shellEnvironment } from '#shell/shell-environment.js';
-import { createShellGitView, shellLfsStorageConfig } from '#shell/shell-git-view.js';
+import { createShellGitView, shellGitIdentityConfig, shellLfsStorageConfig } from '#shell/shell-git-view.js';
+import type { ShellGitAccount } from '#shell/shell-git-view.js';
 import {
   compileShellFilesystem,
   projectProtected,
@@ -52,6 +53,7 @@ import {
   resolveShellAccess,
   resolveShellCwd,
   rootIdentity,
+  terminalGitAccess,
 } from '#shell/shell-grant.js';
 import type { ShellGrantHost, ShellProjectProtected, ShellResolvedAccess } from '#shell/shell-grant.js';
 import { createShellCapture } from '#shell/shell-output.js';
@@ -160,6 +162,11 @@ export type TerminalSessionRequest = Readonly<{
   size: ShellTerminalSize;
   /** Extra access, passed only by the services host after the person allowed its own pending request. */
   access?: TerminalAccess | undefined;
+  /**
+   * The signed-in Tau account, which git in the session commits as (its name and no-reply address). Absent while signed
+   * out: git then asks who the person is, as it does anywhere without an identity.
+   */
+  account?: ShellGitAccount | undefined;
   signal: AbortSignal;
 }>;
 
@@ -1075,8 +1082,12 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       return refuse('session-limit', 'Too many Terminal sessions are open.', 'Close another Terminal, then try again.');
     }
     const root = identity.real;
-    /* The person reads the project's real git store, read-only (operator ruling 2026-11-12). */
-    const checkoutProtected = await projectProtected(root, { readableGit: true });
+    /*
+     * The person reaches the project's real git store: writable except the names that run a program where the sandbox
+     * can protect them ({@link terminalGitAccess}), read-only elsewhere.
+     */
+    const terminalGit = terminalGitAccess(platform);
+    const checkoutProtected = await projectProtected(root, { terminalGit });
     const requested = request.access;
     const access =
       requested === undefined
@@ -1122,13 +1133,23 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     let outcome: ShellLaunchOutcome;
     try {
       /*
-       * The session HOME's git config sends git-lfs's working copies to the session's own temporary folder: the store
-       * is read-only here, and its clean filter otherwise fails every `git status` on a project with a large file. A
-       * HOME that cannot take it leaves the Terminal as it was.
+       * The session HOME's git config names who commits: the signed-in person's Tau name and no-reply address. Over a
+       * read-only store it also sends git-lfs's working copies to the session's own temporary folder, since the clean
+       * filter otherwise fails every `git status` on a project with a large file. A writable store keeps them in its
+       * own `lfs` folder, so a large file committed here keeps its object and `git lfs ls-files` reads the store as it
+       * is. A HOME that cannot take the file leaves the Terminal without it.
        */
-      const lfsStorage = platform === 'win32' ? undefined : shellLfsStorageConfig(session.temporary);
-      if (lfsStorage !== undefined) {
-        await writeFile(join(session.home, '.gitconfig'), lfsStorage, { mode: 0o600 }).catch(() => undefined);
+      const sessionGitConfig =
+        platform === 'win32'
+          ? ''
+          : [
+              shellGitIdentityConfig(request.account),
+              terminalGit === 'read' ? shellLfsStorageConfig(session.temporary) : undefined,
+            ]
+              .filter((section) => section !== undefined)
+              .join('');
+      if (sessionGitConfig !== '') {
+        await writeFile(join(session.home, '.gitconfig'), sessionGitConfig, { mode: 0o600 }).catch(() => undefined);
       }
       const filesystem = await compileShellFilesystem({
         checkout: root,
@@ -1158,6 +1179,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           toolchainBins: options.toolchain?.bins ?? [],
           host: environment,
           terminal: true,
+          terminalGit,
         }),
         stdio: { kind: 'terminal', size: request.size },
         signal: request.signal,

@@ -17,7 +17,7 @@ const replyScript: readonly GatewayScriptTurn[] = [{ text: replyText, usage: { i
 const editComposer = '[data-chat-composer="edit"]';
 
 const surfaces = [
-  { label: 'kernel selector', control: '[aria-label^="Select kernel"]' },
+  { label: 'kernel selector', control: '[aria-label^="Kernel: "]' },
   { label: 'agent and model sheet', control: '[aria-label^="Agent and model"]' },
   { label: 'add menu', control: '[aria-label="Add"]' },
 ] as const;

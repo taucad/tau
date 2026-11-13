@@ -28,7 +28,6 @@ import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
 import { isKernelId, isKernelPreference } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
-import { useFeature } from '#flags/use-feature.js';
 import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
 import { RevisionConflictChat } from '#routes/w.$workspace.$project/revision-conflict-chat.js';
 import { RevisionRestore } from '#routes/w.$workspace.$project/revision-restore.js';
@@ -155,21 +154,19 @@ export async function flushProjectSessionPersistence({
 const noFlushRegistration = (): void => undefined;
 
 /**
- * The concrete kernel a live session runs. A stored preference rides the flag; a row without one keeps its concrete
+ * The concrete kernel a live session runs: a stored manual preference wins; a row without one keeps its concrete
  * kernel, which behaves as Auto with that owner would, since this connector carries no snapshot facts to route on
  * (blueprint D2).
  */
 const liveSessionKernel = ({
   stored,
-  isAutoEnabled,
   fallback,
 }: Readonly<{
   stored: Readonly<{ activeKernel?: string; kernelPreference?: string }> | undefined;
-  isAutoEnabled: boolean;
   fallback: KernelId;
 }>): KernelId => {
   const preference = stored?.kernelPreference;
-  if (isAutoEnabled && isKernelPreference(preference) && preference !== 'auto' && isKernelAvailable(preference)) {
+  if (isKernelPreference(preference) && preference !== 'auto' && isKernelAvailable(preference)) {
     return preference;
   }
   const legacy = stored?.activeKernel;
@@ -194,14 +191,13 @@ function ProjectSessionBinding({
   const { fileManagerRef, workerChangeChannel, workspace } = useFileManager();
   const { defaultExecution, resolveModel } = useModels();
   const { kernel: defaultKernel } = useKernel();
-  const isAutoEnabled = useFeature('autoKernel');
   const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
   const computeMode = useComputeReuseMode();
   const browserHostRelease = useRef<{ projectId: string; release: () => void } | undefined>(undefined);
-  const choices = useRef({ defaultExecution, defaultKernel, isAutoEnabled, testingEnabled, computeMode, resolveModel });
+  const choices = useRef({ defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel });
   useEffect(() => {
-    choices.current = { defaultExecution, defaultKernel, isAutoEnabled, testingEnabled, computeMode, resolveModel };
-  }, [defaultExecution, defaultKernel, isAutoEnabled, testingEnabled, computeMode, resolveModel]);
+    choices.current = { defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel };
+  }, [defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel]);
   const { parameterService, projectRef, editorRef, flushWorkbenchRecordProducers, retryManifestObservation } =
     useProject();
   const client = useRevisionClientLifecycle();
@@ -251,7 +247,6 @@ function ProjectSessionBinding({
       const {
         defaultExecution: fallback,
         defaultKernel: kernelFallback,
-        isAutoEnabled: autoEnabled,
         testingEnabled: tests,
         computeMode: reuse,
         resolveModel: resolve,
@@ -267,7 +262,7 @@ function ProjectSessionBinding({
       if (execution.kind !== 'tau') {
         throw new Error(`Chat ${chatId} has no readable host placement.`);
       }
-      const kernel = liveSessionKernel({ stored, isAutoEnabled: autoEnabled, fallback: kernelFallback });
+      const kernel = liveSessionKernel({ stored, fallback: kernelFallback });
       const config = await getProjectFileSystemConfig(projectId);
       if (config === undefined) {
         throw new Error(`Project ${projectId} has no filesystem configuration.`);

@@ -38,9 +38,6 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
     );
   },
 }));
-vi.mock('#components/chat/kernel-selector.js', () => ({
-  NewProjectKernelChips: () => <div>Kernel selector</div>,
-}));
 vi.mock('#components/filesystem/workspace-selector.js', () => ({
   WorkspaceSelector: ({
     variant,
@@ -54,7 +51,10 @@ vi.mock('#components/filesystem/workspace-selector.js', () => ({
     </div>
   ),
 }));
-vi.mock('#hooks/use-kernel.js', () => ({ useKernel: () => ({ kernel: 'openscad', setKernel: vi.fn() }) }));
+const remembered = vi.hoisted(() => ({ preference: 'openscad' as string }));
+vi.mock('#hooks/use-kernel.js', () => ({
+  useKernel: () => ({ kernel: 'openscad', preference: remembered.preference }),
+}));
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({ withCatalogDefaultModel: async (execution: unknown) => execution }),
 }));
@@ -101,6 +101,7 @@ const readyLocation = (): ProjectCreationLocationState => ({
 
 describe('NewProjectChatComposer', () => {
   beforeEach(() => {
+    remembered.preference = 'openscad';
     vi.clearAllMocks();
     capturedTextarea = undefined;
     locationState = readyLocation();
@@ -175,16 +176,13 @@ describe('NewProjectChatComposer', () => {
     expect(mockConsumeDraft.mock.invocationCallOrder[0]).toBeLessThan(mockNavigate.mock.invocationCallOrder[0]!);
   });
 
-  it('leaves the kernel chips to a host that already serves them, and still creates with the chosen kernel', async () => {
-    const { rerender } = render(<NewProjectChatComposer />);
-    expect(screen.getByText('Kernel selector')).toBeInTheDocument();
-
-    rerender(<NewProjectChatComposer enableKernelChips={false} />);
-    expect(screen.queryByText('Kernel selector')).not.toBeInTheDocument();
+  it('creates an entry-less Auto project when the remembered choice is Auto (blueprint D3)', async () => {
+    remembered.preference = 'auto';
+    render(<NewProjectChatComposer />);
     await act(async () => {
       await capturedTextarea?.onSubmit({ content: 'Build a bracket', attachments: [] });
     });
-    expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({ kernel: 'openscad' }));
+    expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({ kernel: 'auto' }));
   });
 
   // New (W6, P39): a surface with its own directory names it, so resume copies from there.

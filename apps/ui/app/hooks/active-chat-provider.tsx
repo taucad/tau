@@ -53,7 +53,6 @@ import { isKernelId, resolveKernel } from '@taucad/types/constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
 import { chatKernelPreference } from '#hooks/chat-kernel-preference.js';
 import { useProjectKernelOwner } from '#hooks/use-project-kernel-owner.js';
-import { useFeature } from '#flags/use-feature.js';
 import { draftMachine } from '#hooks/draft.machine.js';
 import { resizeImageActor } from '@taucad/chat-ui/hooks/resize-image.actor';
 import { useDraftImageErrorToast } from '#hooks/use-draft-image-error-toast.js';
@@ -151,13 +150,12 @@ export type ActiveChatKernel = {
   kernel: KernelEntry;
   setActiveKernel: (kernelId: KernelId) => void;
   /**
-   * The chat's kernel preference, what a turn sends (blueprint D2): Auto or one kernel. With the `autoKernel` flag off
-   * it is always {@link ActiveChatKernel.kernelId}.
+   * The chat's kernel preference, what a turn sends (blueprint D2): Auto or one kernel.
    */
   preference: KernelPreference;
   /**
-   * Choose Auto or a kernel. On Home it is remembered on the device; in a chat, with the `autoKernel` flag on, it
-   * changes that chat only and no longer moves the device default (E4). With the flag off it is `setActiveKernel`.
+   * Choose Auto or a kernel. On Home it is remembered on the device; in a chat it changes that chat only and does not
+   * move the device default (E4).
    */
   setActivePreference: (preference: KernelPreference) => void;
   /**
@@ -747,16 +745,16 @@ function useSessionExecution(session: ChatSession): ActiveChatExecution {
 function useSessionKernel(session: ChatSession): ActiveChatKernel {
   const chatActiveKernel = useSelector(session.persistenceActorRef, (state) => state.context.activeKernel);
   const storedPreference = useSelector(session.persistenceActorRef, (state) => state.context.kernelPreference);
-  const { kernel: cookieKernel, setKernel: setCookieKernel } = useKernel();
-  const isAutoEnabled = useFeature('autoKernel');
+  const { kernel: cookieKernel } = useKernel();
   const owner = useProjectKernelOwner();
   const store = useChatSessionStore();
-  const knownKernel = isKernelId(chatActiveKernel) ? chatActiveKernel : undefined;
-  /* With the flag on the row's preference decides, under the legacy-row rule; Auto runs the owner when there is one. */
-  const preference: KernelPreference | undefined = isAutoEnabled
-    ? chatKernelPreference({ stored: storedPreference, legacyKernel: chatActiveKernel, ownerKernel: owner?.kernel })
-    : undefined;
-  const chosenKernel = preference === undefined ? knownKernel : preference === 'auto' ? owner?.kernel : preference;
+  /* The row's preference decides, under the legacy-row rule; Auto runs the owner when there is one. */
+  const preference: KernelPreference = chatKernelPreference({
+    stored: storedPreference,
+    legacyKernel: chatActiveKernel,
+    ownerKernel: owner?.kernel,
+  });
+  const chosenKernel = preference === 'auto' ? owner?.kernel : preference;
   const sessionKernel = chosenKernel !== undefined && isKernelAvailable(chosenKernel) ? chosenKernel : undefined;
   const kernelId: KernelId = sessionKernel ?? cookieKernel;
   const kernel = resolveKernel(kernelId);
@@ -764,41 +762,36 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
   const ownerKernel = owner?.kernel;
   const setActiveKernel = useCallback(
     (next: KernelId) => {
-      if (!isAutoEnabled) {
-        setCookieKernel(next);
-      }
       session.persistenceActorRef.send({ type: 'setActiveKernel', kernel: next });
-      if (isAutoEnabled) {
-        session.persistenceActorRef.send({ type: 'setKernelPreference', preference: next });
-      }
+      session.persistenceActorRef.send({ type: 'setKernelPreference', preference: next });
     },
-    [session.persistenceActorRef, setCookieKernel, isAutoEnabled],
+    [session.persistenceActorRef],
   );
   const setActivePreference = useCallback(
     (next: KernelPreference) => {
-      if (next !== 'auto') {
-        /* Override after Auto (blueprint D10): which kernel Auto had bound, which one the person picked. */
-        if (preference === 'auto') {
-          const runs = store.getProjection(session.chatId)?.ledger.runs;
-          reportKernelOverride({
-            resolved: ownerKernel,
-            manual: next,
-            turnsSince: runs === undefined ? 0 : Object.keys(runs).length,
-          });
-        }
-        setActiveKernel(next);
-      } else if (isAutoEnabled) {
+      if (next === 'auto') {
         session.persistenceActorRef.send({ type: 'setKernelPreference', preference: 'auto' });
+        return;
       }
+      /* Override after Auto (blueprint D10): which kernel Auto had bound, which one the person picked. */
+      if (preference === 'auto') {
+        const runs = store.getProjection(session.chatId)?.ledger.runs;
+        reportKernelOverride({
+          resolved: ownerKernel,
+          manual: next,
+          turnsSince: runs === undefined ? 0 : Object.keys(runs).length,
+        });
+      }
+      setActiveKernel(next);
     },
-    [session.persistenceActorRef, session.chatId, setActiveKernel, isAutoEnabled, preference, ownerKernel, store],
+    [session.persistenceActorRef, session.chatId, setActiveKernel, preference, ownerKernel, store],
   );
   return useMemo<ActiveChatKernel>(
     () => ({
       kernelId,
       kernel,
       setActiveKernel,
-      preference: preference ?? kernelId,
+      preference,
       setActivePreference,
       ...(unavailableKernelId === undefined ? {} : { unavailableKernel: resolveKernel(unavailableKernelId) }),
       ...(ownerKernel === undefined ? {} : { owner: ownerKernel }),

@@ -110,12 +110,6 @@ export const flagRegistry = {
     label: 'Plugin store',
     description: 'Browse plugins and skills',
   },
-  autoKernel: {
-    showInExperimental: false,
-    schema: z.boolean().default(false),
-    label: 'Automatic kernel',
-    description: 'Let the agent choose the kernel for a new model, and remember Auto as a kernel choice',
-  },
   zooCloudDispatch: {
     showInExperimental: false,
     schema: z.boolean().default(false),

@@ -80,11 +80,7 @@ vi.mock('#components/chat/chat-agent-sheet.js', async (importOriginal) => ({
 }));
 
 vi.mock('#components/chat/chat-kernel-selector.js', () => ({
-  ChatKernelSelector: ({
-    children,
-  }: {
-    readonly children: (props: { selectedKernel: typeof manifoldKernel }) => React.ReactNode;
-  }) => <div>{children({ selectedKernel: manifoldKernel })}</div>,
+  KernelPreferenceSelector: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({
@@ -183,7 +179,7 @@ describe('ChatTextareaBar', () => {
     const right = container.querySelector('[data-slot=composer-right]')!;
     expect([...left.querySelectorAll('button')].map((button) => button.getAttribute('aria-label'))).toEqual([
       'Add',
-      'Select kernel (Manifold)',
+      'Kernel: Manifold',
     ]);
     expect([...right.querySelectorAll('button')].map((button) => button.textContent || button.ariaLabel)).toEqual([
       'Agent and model',
@@ -197,7 +193,7 @@ describe('ChatTextareaBar', () => {
   it('lets the kernel label leave first when the bar needs the room', () => {
     renderBar();
 
-    const kernel = screen.getByRole('button', { name: 'Select kernel (Manifold)' });
+    const kernel = screen.getByRole('button', { name: 'Kernel: Manifold' });
     expect(kernel.querySelector('span:not([data-testid])')!.className).toContain('group-data-[hide-kernel]/bar:hidden');
   });
 
@@ -1045,7 +1041,7 @@ describe('composer bar measurement lifecycle', () => {
       label === 'model'
         ? bar.querySelector('[data-slot=trigger-model]')
         : label === 'kernel'
-          ? screen.getByRole('button', { name: 'Select kernel (Manifold)' })
+          ? screen.getByRole('button', { name: 'Kernel: Manifold' })
           : screen.getByRole('button', { name: 'Mode: Ask for approval' });
     if (!target) {
       throw new Error('The actual composer label is missing.');

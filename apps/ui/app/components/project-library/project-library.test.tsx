@@ -147,10 +147,6 @@ vi.mock('#components/chat/new-project-chat-composer.js', () => ({
   NewProjectChatComposer: () => <div data-testid='new-project-chat-composer' />,
 }));
 
-vi.mock('#components/chat/kernel-selector.js', () => ({
-  KernelSelector: () => <div data-testid='kernel-selector' />,
-}));
-
 vi.mock('#hooks/active-chat-provider.js', () => ({
   ChatComposerProvider: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
 }));

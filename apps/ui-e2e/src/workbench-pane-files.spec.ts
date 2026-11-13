@@ -252,7 +252,7 @@ test('should share modern command search chrome across command, model, kernel, a
   await target.keyboardPress('Escape');
   await target.expectCount(modelChange, 0);
 
-  await target.click(chatComposer.getByRole('button', { name: /^Select kernel/u }));
+  await target.click(chatComposer.getByRole('button', { name: /^Kernel: /u }));
   const kernelFilter = selectors.getByPlaceholder('Search kernels…');
   await expectModernCommandInput(kernelFilter);
   await target.screenshot(selectors.getByCss('body'), 'workbench-command-search-light.png');
@@ -283,7 +283,7 @@ test('should share modern command search chrome across command, model, kernel, a
   await target.expectCount(modelChange, 0);
 
   // Closing the sheet returns focus to the editor, so the bar stays unfolded with its kernel control.
-  await target.click(selectors.getByRole('button', { name: /^Select kernel/u }).first());
+  await target.click(selectors.getByRole('button', { name: /^Kernel: /u }).first());
   const mobileKernelFilter = selectors.getByPlaceholder('Search kernels…');
   await expectModernCommandInput(mobileKernelFilter, 'drawer');
   await target.emulateColorScheme('dark');

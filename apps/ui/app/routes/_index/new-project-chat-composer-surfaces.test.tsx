@@ -42,10 +42,11 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
       effort: undefined,
     },
     execution: { execution: { kind: 'tau' } },
+    kernel: { preference: 'auto' },
   }),
 }));
 vi.mock('#hooks/use-kernel.js', () => ({
-  useKernel: () => ({ kernel: 'openscad', setKernel: vi.fn() }),
+  useKernel: () => ({ kernel: 'openscad', preference: 'auto', setKernel: vi.fn() }),
 }));
 
 const { HomepageChatHero } = await import('#routes/_index/homepage-chat-hero.js');

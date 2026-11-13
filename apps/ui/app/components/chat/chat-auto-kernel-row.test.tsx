@@ -10,8 +10,6 @@ const composer = vi.hoisted(() => ({
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({ kernel: { preference: composer.preference, owner: composer.owner } }),
 }));
-const flags = vi.hoisted(() => ({ autoKernel: true }));
-vi.mock('#flags/use-feature.js', () => ({ useFeature: (flag: string) => flag === 'autoKernel' && flags.autoKernel }));
 vi.mock('#components/chat/chat-kernel-selector.js', () => ({
   KernelPreferenceSelector: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
@@ -22,7 +20,6 @@ describe('ChatAutoKernelRow', () => {
   beforeEach(() => {
     composer.preference = 'auto';
     composer.owner = undefined;
-    flags.autoKernel = true;
   });
 
   it('says which kernel Auto is using once one binds, with a way to change it (D2)', () => {
@@ -33,13 +30,11 @@ describe('ChatAutoKernelRow', () => {
   });
 
   it.each([
-    { name: 'before a kernel binds', preference: 'auto', owner: undefined, isEnabled: true },
-    { name: 'for a manual pick', preference: 'openscad', owner: 'replicad', isEnabled: true },
-    { name: 'with the flag off', preference: 'auto', owner: 'replicad', isEnabled: false },
-  ] as const)('stays out of the transcript $name', ({ preference, owner, isEnabled }) => {
+    { name: 'before a kernel binds', preference: 'auto', owner: undefined },
+    { name: 'for a manual pick', preference: 'openscad', owner: 'replicad' },
+  ] as const)('stays out of the transcript $name', ({ preference, owner }) => {
     composer.preference = preference;
     composer.owner = owner;
-    flags.autoKernel = isEnabled;
     const { container } = render(<ChatAutoKernelRow />);
     expect(container).toBeEmptyDOMElement();
   });

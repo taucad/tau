@@ -81,7 +81,7 @@ Stored under localStorage `tau:flags`; defaults come from [flag.constants.ts](..
 ```js
 localStorage.setItem(
   'tau:flags',
-  JSON.stringify({ ...JSON.parse(localStorage.getItem('tau:flags') ?? '{}'), autoKernel: true }),
+  JSON.stringify({ ...JSON.parse(localStorage.getItem('tau:flags') ?? '{}'), pluginsStore: true }),
 );
 ```
 

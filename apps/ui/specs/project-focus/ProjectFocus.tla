@@ -96,6 +96,8 @@ CONSTANTS Projects,          \* the projects the person can navigate to
           MaxRetries,        \* the person's retries of a held answer or a failed flush
           MaxPersonOpens,    \* opens from the sidebar or a notice
           MaxPersonCloses,   \* closes by the person
+          MaxCloseFails,     \* close flushes that may fail (the session is then retained)
+          MaxDiscards,       \* explicit discards of a retained session's unsaved work by the person
           AllowHome,         \* the router may commit Home
           IdleExpiry,        \* the registry may close any clean session focus is not on
           Focus, IdFence, SelectorRoute, SelectorMatch, LateRegistration, ModuleAtStart,
@@ -103,7 +105,7 @@ CONSTANTS Projects,          \* the projects the person can navigate to
 
 ASSUME /\ MaxRequests \in Nat /\ MaxLibraryChanges \in Nat /\ Budget \in Nat \ {0}
        /\ MaxFlushFails \in Nat /\ MaxOpenFails \in Nat /\ MaxRetries \in Nat
-       /\ MaxPersonOpens \in Nat /\ MaxPersonCloses \in Nat
+       /\ MaxPersonOpens \in Nat /\ MaxPersonCloses \in Nat /\ MaxCloseFails \in Nat /\ MaxDiscards \in Nat
        /\ AllowHome \in BOOLEAN /\ IdleExpiry \in BOOLEAN
        /\ Focus \in {"target", "today"}
        /\ IdFence \in BOOLEAN /\ SelectorRoute \in BOOLEAN
@@ -156,7 +158,7 @@ Label(l) == IF Labelled THEN l ELSE "-"
 Labels == {"Init", "RouteCommitted", "RouteHeard", "ChatForwarded", "AccessAsked", "AccessAnswered",
            "LibraryChanged", "LeaveFlushStarted", "LeaveFlushSettled", "Retry", "ModuleLoaded", "OpenAsked",
            "OpenJoined", "OpenLost", "ChatReady", "FirstCheckSettled", "OpenBoundPassed", "Edit", "PersonOpenAsked",
-           "PersonClosed", "IdleExpired", "BudgetSwitchClose", "SessionClosed", "FlushRegistered"}
+           "PersonClosed", "PersonDiscarded", "CloseFlushFailed", "IdleExpired", "BudgetSwitchClose", "SessionClosed", "FlushRegistered"}
 
 InLive(p) == p \in Projects /\ sess[p] # "none"
 LiveCount == Cardinality({p \in Projects : sess[p] # "none"})
@@ -174,6 +176,13 @@ FocusPending == pendingOpen # NoPending /\ pendingOpen.req # NoOpenReq /\ pendin
 PendingAfter(g) ==
   IF FocusPending /\ ~(g.st = "opening" /\ g.opened /\ g.ans = "ready" /\ g.ansProj = pendingOpen.project)
     THEN NoPending ELSE pendingOpen
+\* After an answer, focus also withdraws a person's open waiting in pendingOpen whose kept request it
+\* just dropped (a held answer for that project).
+StandingAfter(g) ==
+  LET po == PendingAfter(g)
+  IN IF po # NoPending /\ po.req # NoOpenReq
+        /\ ~(g.st = "opening" /\ g.opened /\ g.ansProj = po.project) /\ g.kept[po.project] # po.req.epoch
+       THEN NoPending ELSE po
 \* The session being left owes no leave flush: there is none, it flushed, or its close flush ran.
 LeaveDone == f.from = None \/ f.lf = "ok" \/ sess[f.from] = "none"
 Warm == IF mod = "unloaded" THEN "loading" ELSE mod
@@ -252,7 +261,8 @@ Init ==
   /\ pendingOpen = NoPending
   /\ reg = None
   /\ keep = NoKeep
-  /\ cnt = [flushFails |-> 0, openFails |-> 0, retries |-> 0, pOpens |-> 0, pCloses |-> 0]
+  /\ cnt = [flushFails |-> 0, openFails |-> 0, retries |-> 0, pOpens |-> 0, pCloses |-> 0,
+         closeFails |-> 0, discards |-> 0]
   /\ act = Label("Init")
 
 -----------------------------------------------------------------------------
@@ -298,7 +308,7 @@ IdleExpired(v) ==
   /\ act' = Label("IdleExpired")
 
 \* The session's own `closing`: producers and sync flush, or a failure is recorded (I6); then
-\* `sessionClosed` frees the slot and resumes pendingOpen with the request it kept (315 to 334). With
+\* SessionClosed is the close flush succeeding (or a clean session's close): `sessionClosed` frees the slot and resumes pendingOpen with the request it kept (315 to 334). With
 \* RegistryChecksEpoch it drops instead a request of focus's whose epoch is stale (A5c).
 SessionClosed(v) ==
   /\ sess[v] = "closing"
@@ -325,6 +335,16 @@ SessionClosed(v) ==
   /\ keep' = IF keep.proj = v THEN NoKeep ELSE keep
   /\ UNCHANGED <<route, nreq, asks, lib, mod, reg, cnt>>
   /\ act' = Label("SessionClosed")
+
+\* The close flush of a dirty session fails (I6): the session is not discarded. It returns to the live set
+\* with its unsaved work, retained until a later close's flush succeeds or the person discards it. The
+\* open waiting in pendingOpen keeps waiting: the registry has no room for it.
+CloseFlushFailed(v) ==
+  /\ sess[v] = "closing" /\ v \in dirty /\ cnt.closeFails < MaxCloseFails
+  /\ sess' = [sess EXCEPT ![v] = "live"]
+  /\ cnt' = [cnt EXCEPT !.closeFails = @ + 1]
+  /\ UNCHANGED <<route, nreq, f, asks, lib, mod, sreq, fact, dirty, pendingOpen, reg, keep>>
+  /\ act' = Label("CloseFlushFailed")
 
 (* The opening session's facts. They move only for the project focus holds an answer for: a session
    nobody is opening stays as it was until focus opens it, which still reaches every value it could
@@ -621,7 +641,7 @@ AccessAnswered(a) ==
   /\ a \in asks
   /\ asks' = asks \ {a}
   /\ IF Focus = "target"
-       THEN TAnswered(a) /\ pendingOpen' = PendingAfter(f') /\ UNCHANGED <<sess, sreq, fact>> /\ cnt' = cnt
+       THEN TAnswered(a) /\ pendingOpen' = StandingAfter(f') /\ UNCHANGED <<sess, sreq, fact>> /\ cnt' = cnt
        ELSE DAnswered(a)
   /\ UNCHANGED <<route, nreq, lib, mod, dirty, reg, keep>>
   /\ act' = Label("AccessAnswered")
@@ -657,9 +677,10 @@ PersonOpenAsked(p) ==
        /\ RegistryOpen(p, Req(p, f.kept[p]), out, [cnt EXCEPT !.pOpens = @ + 1])
        /\ f' = CASE f.st = "focused" /\ f.ansProj = p /\ out # "failed" ->
                        [f EXCEPT !.st = "opening", !.opened = TRUE, !.live = out = "spawn"]
-                  \* The single slot keeps the latest destination; the registry tells focus its own
-                  \* waiting open was superseded, and focus asks again.
-                  [] out = "wait" /\ FocusPending /\ p # pendingOpen.project -> [f EXCEPT !.opened = FALSE]
+                  \* Any outcome displaces the single slot: a wait keeps only the latest destination, and a
+                  \* spawn or a failed start into the room clears it (sessions.machine.ts hasRoom). The
+                  \* registry tells focus its own waiting open was displaced, and focus asks again.
+                  [] FocusPending /\ p # pendingOpen.project -> [f EXCEPT !.opened = FALSE]
                   [] OTHER -> f
   /\ UNCHANGED <<route, nreq, asks, lib, mod, dirty, reg, keep>>
   /\ act' = Label("PersonOpenAsked")
@@ -673,6 +694,17 @@ PersonClosed(p) ==
   /\ cnt' = [cnt EXCEPT !.pCloses = @ + 1]
   /\ UNCHANGED <<route, nreq, f, asks, lib, mod, sreq, fact, dirty, pendingOpen, reg>>
   /\ act' = Label("PersonClosed")
+
+\* The person discards a retained session's unsaved work explicitly; its close then runs clean.
+PersonDiscarded(p) ==
+  /\ cnt.discards < MaxDiscards
+  /\ sess[p] = "live" /\ p \in dirty
+  /\ sess' = [sess EXCEPT ![p] = "closing"]
+  /\ dirty' = dirty \ {p}
+  /\ keep' = IF keep.proj = p THEN NoKeep ELSE keep
+  /\ cnt' = [cnt EXCEPT !.discards = @ + 1]
+  /\ UNCHANGED <<route, nreq, f, asks, lib, mod, sreq, fact, pendingOpen, reg>>
+  /\ act' = Label("PersonDiscarded")
 
 -----------------------------------------------------------------------------
 
@@ -696,7 +728,7 @@ Next ==
   \/ \E p \in Projects :
        \/ ChatReady(p) \/ FirstCheckSettled(p) \/ OpenBoundPassed(p) \/ Edit(p)
        \/ PersonOpenAsked(p) \/ PersonClosed(p) \/ IdleExpired(p)
-       \/ BudgetSwitchClose(p) \/ SessionClosed(p)
+       \/ BudgetSwitchClose(p) \/ SessionClosed(p) \/ CloseFlushFailed(p) \/ PersonDiscarded(p)
 
 Spec == Init /\ [][Next]_vars
 
@@ -792,6 +824,11 @@ OpenCarriesRequest ==
   /\ \A p \in Projects : sess[p] # "none" => FromReadyAnswer(p, sreq[p])
   /\ pendingOpen # NoPending => FromReadyAnswer(pendingOpen.project, pendingOpen.req)
 
+\* The registry answers every displacement of focus's waiting open (resume, stale drop, another open
+\* taking the single slot by a wait, a spawn or a failed start): while focus has an open out that has
+\* not gone live, it is still waiting in pendingOpen.
+OpeningWaitsOrWentLive == (f.st = "opening" /\ f.opened /\ ~f.live) => pendingOpen.project = f.ansProj
+
 \* I20. The editor only when access is ready, the import loaded, the session live and each session
 \* fact settled or the open bound passed.
 EditorOnlyWhenReady ==
@@ -823,6 +860,17 @@ SameProjectKeepsEditor == keep.proj # None => (View = "editor" /\ ~keep.work /\ 
 CloseAfterFlush ==
   [][\A p \in Projects : (sess[p] # "none" /\ sess'[p] = "none") => (sess[p] = "closing" /\ p \notin dirty')]_vars
 
+\* I6 (ruled): a dirty session never leaves the live set unless its flush succeeded or the person
+\* discarded it. A step where the close flush failed (the environment's failure count moves) never
+\* takes a dirty session out of the live set, and unsaved work leaves the dirty set only by a
+\* successful flush (leave or close) or the person's discard.
+DirtyNeverDiscarded ==
+  [][/\ \A p \in Projects : (p \in dirty /\ sess[p] # "none" /\ sess'[p] = "none") => cnt'.closeFails = cnt.closeFails
+     /\ \A p \in dirty \ dirty' :
+          \/ cnt'.discards > cnt.discards
+          \/ sess[p] = "closing" /\ sess'[p] # "closing" /\ cnt'.closeFails = cnt.closeFails
+          \/ f.lf = "running" /\ f.lfp = p /\ f'.lf = "ok"]_vars
+
 \* I18. An answer for another request changes no focus state.
 Stale(a) == IF Focus = "target" THEN a.id # f.req.id ELSE ~(a.id = f.req.id /\ a.epoch = f.effEpoch)
 StaleReplyIgnored == [][\A a \in asks : (asks' = asks \ {a} /\ Stale(a)) => f' = f]_vars
@@ -836,6 +884,12 @@ Settled ==
 
 \* I2. Once requests stop, focus settles on the last one: focused, held, or a failed leave flush.
 RequestEventuallySettles == <>[]Settled
+
+(* Witness: the fifth ruled statement's case. In flushFailed, a person's open waits while the dirty
+   session being left is retained after its close flush failed *)
+RetainedUnreached ==
+  ~(f.st = "flushFailed" /\ pendingOpen # NoPending /\ cnt.closeFails > 0
+    /\ \E p \in dirty : sess[p] = "live" /\ p = f.from)
 
 (* Witness: today, an edit in the window before ProjectPersistenceGuard registers the flush *)
 EditBeforeRegistrationUnreached == ~(\E p \in dirty : reg # p /\ RegTarget = p)

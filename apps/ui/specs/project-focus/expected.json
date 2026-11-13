@@ -30,6 +30,19 @@
       "expect": "pass",
       "ref": "Facts in any order over 2 projects, 3 requests, 1 library change, 1 person open and close; EditorOnlyWhenReady, FirstCheckBeforeEditor and every other safety property hold."
     },
+    "ProjectFocus.target-retained-session.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "Budget 1 over 2 projects, 3 requests, 1 library change, 2 person opens, 1 person close, 1 failed leave flush, 1 retry, 1 failed close flush, 1 discard, no Home: a session whose close flush fails is retained with its unsaved work, and DirtyNeverDiscarded and every target safety property hold."
+    },
+    "ProjectFocus.target-retained-session-reachable.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "RetainedUnreached"
+      },
+      "kind": "witness",
+      "ref": "At the target-retained-session bounds the ruled case is reached: flushFailed, a person's open waiting, and the dirty session being left retained after its close flush failed."
+    },
     "ProjectFocus.target-resume-window.cfg": {
       "tier": "nightly",
       "expect": {
@@ -52,6 +65,11 @@
       "tier": "nightly",
       "expect": "pass",
       "ref": "LiveSpec over 2 projects, 3 requests, 1 library change, budget 1, 1 person open and 1 person close, no Home or flush failure; RequestEventuallySettles and FailedFlushSendsNoOpen hold."
+    },
+    "ProjectFocus.liveness-person-budget.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "LiveSpec over 2 projects, 3 requests, no library change, budget 2, 2 person opens and 2 person closes, no Home or flush failure; RequestEventuallySettles, FailedFlushSendsNoOpen and OpeningWaitsOrWentLive hold."
     },
     "ProjectFocus.liveness-registry-epoch.cfg": {
       "tier": "nightly",

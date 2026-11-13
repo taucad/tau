@@ -131,7 +131,7 @@
       [{ "epoch": 0, "id": 3, "project": "p1" }],
       [{ "epoch": 0, "id": 3, "project": "p2" }]
     ],
-    [{ "flushFails": 0, "openFails": 0, "pCloses": 0, "pOpens": 0, "retries": 0 }],
+    [{ "closeFails": 0, "discards": 0, "flushFails": 0, "openFails": 0, "pCloses": 0, "pOpens": 0, "retries": 0 }],
     [["p1"], ["p2"], []],
     [
       {

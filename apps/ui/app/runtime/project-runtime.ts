@@ -211,6 +211,14 @@ export const projectRuntimeActors = {
 const describeFault = (error: unknown): string =>
   String(typeof error === 'object' && error !== null && 'message' in error ? error.message : error);
 
+/** Each invoked child's own `onError` (MC-R12): the runtime records the fault, keeps the first and keeps running. */
+const recordChildFault = ({
+  context,
+  event,
+}: Readonly<{ context: Readonly<{ fault: string | undefined }>; event: Readonly<{ error: unknown }> }>) => ({
+  context: { fault: context.fault ?? describeFault(event.error) },
+});
+
 /**
  * The project runtime's root. Its children are the project and editor actors (spawned with the root, so their refs
  * are in context from the first snapshot) and four callback actors that live as long as it does.
@@ -254,21 +262,34 @@ export const projectRuntimeMachine = setup({
   initial: 'running',
   states: {
     running: {
-      // The owner stops first, so a file-manager change during the root's stop cannot rebuild after the shared close.
+      // The project and editor actors spawned in context stop first; of the invoked children the owner stops first,
+      // so a file-manager change during the root's stop cannot rebuild after the shared close.
       invoke: [
-        { id: 'parameterServiceOwner', src: 'parameterServiceOwner' },
+        { id: 'parameterServiceOwner', src: 'parameterServiceOwner', onError: recordChildFault },
         {
           id: 'parameterObservers',
           src: 'parameterObservers',
           input: ({ context }) => ({ project: context.projectRef }),
+          onError: recordChildFault,
         },
         {
           id: 'manifestObservation',
           src: 'manifestObservation',
           input: ({ context }) => ({ project: context.projectRef }),
+          onError: recordChildFault,
         },
-        { id: 'libraryEvents', src: 'libraryEvents', input: ({ context }) => ({ project: context.projectRef }) },
-        { id: 'resources', src: 'resources', input: ({ context }) => ({ project: context.projectRef }) },
+        {
+          id: 'libraryEvents',
+          src: 'libraryEvents',
+          input: ({ context }) => ({ project: context.projectRef }),
+          onError: recordChildFault,
+        },
+        {
+          id: 'resources',
+          src: 'resources',
+          input: ({ context }) => ({ project: context.projectRef }),
+          onError: recordChildFault,
+        },
       ],
     },
   },

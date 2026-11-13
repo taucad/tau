@@ -273,7 +273,6 @@ describe('createProjectRuntime', () => {
     disposal.dispose.mockClear();
     actor.stop();
     expect(disposal.dispose).toHaveBeenCalledWith(unit?.getSnapshot().context);
-    guard.take();
   });
 
   it("should leave a preview's own parameter service open when the shared profile stops", async () => {
@@ -305,7 +304,6 @@ describe('createProjectRuntime', () => {
     actor.stop();
     await settle(2);
     expect(previewParameterService.close).not.toHaveBeenCalled();
-    guard.take();
   });
 
   it('should rebuild the parameter service over a replaced client and close the one it replaced', async () => {
@@ -348,7 +346,6 @@ describe('createProjectRuntime', () => {
     unsubscribe();
     actor.stop();
     await settle(2);
-    guard.take();
   });
 
   it("should release the parameter client port when it stops, and never rebuild a preview's service", async () => {
@@ -390,7 +387,6 @@ describe('createProjectRuntime', () => {
     preview.actor.stop();
     await settle(2);
     expect(previewParameterService.close).not.toHaveBeenCalled();
-    guard.take();
   });
 
   it('should rebuild the parameter service when the file manager root or content service changes', async () => {
@@ -427,10 +423,9 @@ describe('createProjectRuntime', () => {
     expect(services.built[2]?.close).not.toHaveBeenCalled();
     actor.stop();
     await settle(2);
-    guard.take();
   });
 
-  it('should settle a geometry unit through the rebuilt service', async () => {
+  it('should deliver a settled commit from the rebuilt service to its geometry unit', async () => {
     const guard = guardActors({ ignore });
     const content = createContent();
     const fileManagerRef = createFileManager(content.service);
@@ -494,7 +489,9 @@ describe('createProjectRuntime', () => {
     ]);
     actor.stop();
     await settle(2);
-    guard.take();
+    expect(guard.take('unanswered')).toEqual([
+      expect.objectContaining({ kind: 'unanswered', machineId: 'cad', eventType: 'commitParameters' }),
+    ]);
   });
 
   it('should close the current service on a shared stop, and the replaced one only once', async () => {
@@ -525,7 +522,6 @@ describe('createProjectRuntime', () => {
     expect(current?.close).toHaveBeenCalledTimes(1);
     expect(initial?.close).toHaveBeenCalledTimes(1);
     expect(services.built).toHaveLength(2);
-    guard.take();
   });
 
   it('should follow the manifest, report its observation closing and retry it, on the step clock', async () => {

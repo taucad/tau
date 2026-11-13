@@ -169,6 +169,42 @@ describe('ProjectLibrary', () => {
     await expect(call).resolves.toMatchObject({ id: 'new:c1' });
   });
 
+  it('should ask a read again when its provider disposed it before the replacement bound (B9)', async () => {
+    const library = createLibrary();
+    const running = Promise.withResolvers<Chat | undefined>();
+    library.bind(
+      bindingNamed('old', { chats: { ...bindingNamed('old').chats, getChat: async () => running.promise } }),
+    );
+    const call = library.getChat('c1');
+    await flush();
+
+    /* The provider's cleanup releases its binding, then fails its reads; the remount binds later. */
+    library.release();
+    running.reject(new Error('Chat observation was disposed.'));
+    await flush();
+    library.bind(bindingNamed('new'));
+
+    await expect(call).resolves.toMatchObject({ id: 'new:c1' });
+  });
+
+  it('should hold ports while released, and deliver them on the same binding once its provider resumes', async () => {
+    const library = createLibrary();
+    library.bind(bindingNamed('only'));
+    library.release();
+    let settled = false;
+    const call = (async () => {
+      const chat = await library.touchChatRecency('c1', 1);
+      settled = true;
+      return chat;
+    })();
+    await flush();
+    expect(settled).toBe(false);
+
+    library.resume();
+
+    await expect(call).resolves.toMatchObject({ id: 'only:c1' });
+  });
+
   it('should hand a write running on a replaced binding its own outcome, never repeat it', async () => {
     const library = createLibrary();
     const running = Promise.withResolvers<Chat | undefined>();

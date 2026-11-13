@@ -129,7 +129,9 @@ export class ProjectLibrary {
   public readonly files: ProjectLibraryObservable<ProjectLibraryFiles | undefined>;
 
   #binding: ProjectLibraryBinding | undefined;
-  readonly #bound = Promise.withResolvers<void>();
+  #bound = Promise.withResolvers<void>();
+  /** The current binding's provider disposed its reads and has not bound again. */
+  #released = false;
   readonly #changed = new Topic<void>({ name: 'project-library' });
   readonly #filesChanged = new Topic<void>({ name: 'project-library-files' });
   #snapshot: ProjectLibrarySnapshot;
@@ -220,10 +222,32 @@ export class ProjectLibrary {
   public bind(binding: ProjectLibraryBinding): void {
     const previous = this.#binding?.files;
     this.#binding = binding;
+    this.#released = false;
     this.#bound.resolve();
     if (previous?.client !== binding.files.client || previous.watchRecordFile !== binding.files.watchRecordFile) {
       this.#filesChanged.emit();
     }
+  }
+  /**
+   * The provider disposed the reads its binding serves (its observation effect's cleanup): ports wait for it to
+   * {@link ProjectLibrary.resume} or for the next {@link ProjectLibrary.bind}, and a read that failed meanwhile is
+   * asked again of that binding.
+   */
+  public release(): void {
+    if (this.#released) {
+      return;
+    }
+    this.#released = true;
+    this.#bound = Promise.withResolvers<void>();
+  }
+
+  /** The provider's observation runs again over the binding it already supplied (an effect re-run, StrictMode). */
+  public resume(): void {
+    if (!this.#released || this.#binding === undefined) {
+      return;
+    }
+    this.#released = false;
+    this.#bound.resolve();
   }
 
   /** The worker once the project-manager actor is ready; refuses when it failed to start. */
@@ -322,20 +346,23 @@ export class ProjectLibrary {
   }
 
   /**
-   * A read through the current binding. A provider that unmounts disposes its reads, so a read that fails after its
-   * binding was replaced (a billing-fence remount, B9) is asked once more of the replacement: the chat store outlives
-   * the provider and would otherwise keep a session whose history never loaded. Only reads are asked again.
+   * A read through the current binding. A provider that unmounts disposes its reads, so a read that fails once its
+   * binding was released or replaced (a billing-fence remount, B9) is asked once more of the binding that serves
+   * next, whichever came first: the chat store outlives the provider and would otherwise keep a session whose
+   * history never loaded. Only reads are asked again.
    */
   async #read<T>(call: (chats: ProjectLibraryChatPorts) => Promise<T>): Promise<T> {
     const binding = await this.#current();
     try {
       return await call(binding.chats);
     } catch (error) {
-      const replacement = this.#binding;
-      if (replacement === undefined || replacement === binding) {
+      /* Failed while its provider still serves it: the read's own failure. */
+      if (this.#binding === binding && !this.#released) {
         throw error;
       }
-      return call(replacement.chats);
+      /* Released or replaced, in either order: ask the binding that serves reads next. */
+      const { chats } = await this.#current();
+      return call(chats);
     }
   }
 

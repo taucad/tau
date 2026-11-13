@@ -1342,6 +1342,8 @@ export function ProjectManagerProvider({
     const unsubscribeDiscovery = discovery.subscribe(updateDiscoveryHealth);
     const unsubscribeMetadata = metadata.subscribe(updateMetadataHealth);
     metadataReadOwner.hold();
+    /* The library's reads run through this observation again (A2). */
+    library.resume();
     const discoveryLease = discovery.acquire();
     const metadataLease = metadata.acquire();
     updateDiscoveryHealth();
@@ -1363,9 +1365,11 @@ export function ProjectManagerProvider({
       disconnect();
       projectMetadata.clear();
       setMetadataObservationErrors((previous) => (previous.size === 0 ? previous : new Map()));
+      /* Released first, so a read the next line fails waits for the binding that serves next (B9). */
+      library.release();
       metadataReadOwner.fail(new Error('Chat observation was disposed.'));
     };
-  }, [fileManager.workerChangeChannel, fileManager.watchRecordFile, metadataReadOwner, queryClient]);
+  }, [fileManager.workerChangeChannel, fileManager.watchRecordFile, library, metadataReadOwner, queryClient]);
 
   /* What the library publishes, read through its module-level selectors (MC-R25). The library starts its actor and
    * the worker with the runtime (row L3). */

@@ -8,6 +8,8 @@ import {
   revisionCommitterSignature,
   revisionTagMessage,
   tagTrailerPrefix,
+  tauNoreplyAccountOf,
+  unrecordedAuthorOf,
 } from '#revision-headers.js';
 import type { RevisionTrailer } from '#revision-headers.js';
 
@@ -204,6 +206,32 @@ describe('the commit signatures', () => {
     expect(revisionAuthorSignature(provenance)).toMatchObject({
       name: 'Anonymous',
       email: 'anon:3fa9c1d2@users.noreply.tau.new',
+    });
+  });
+});
+
+describe('a commit made with git', () => {
+  it('reads the account a Tau no-reply author address names, and nothing from any other address', () => {
+    expect(tauNoreplyAccountOf('usr_ada@users.noreply.tau.new')).toBe('usr_ada');
+    for (const email of [
+      'ada@example.com',
+      'noreply@tau.new',
+      '@users.noreply.tau.new',
+      'anon:3fa9c1d2@users.noreply.tau.new',
+      'a@b@users.noreply.tau.new',
+      'usr_ada@users.noreply.tau.new.example.com',
+    ]) {
+      expect(tauNoreplyAccountOf(email), email).toBeUndefined();
+    }
+  });
+
+  it('names the git author, and the account only for a Tau no-reply address', () => {
+    expect(unrecordedAuthorOf({ author: { name: 'Ada', email: 'usr_ada@users.noreply.tau.new' } })).toStrictEqual({
+      authorName: 'Ada',
+      authorAccountId: 'usr_ada',
+    });
+    expect(unrecordedAuthorOf({ author: { name: 'Octo', email: 'octo@example.com' } })).toStrictEqual({
+      authorName: 'Octo',
     });
   });
 });

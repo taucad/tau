@@ -154,7 +154,9 @@ export const useOptionalFinancialSession = (): FinancialSessionController | unde
  * financial scope is purged. Only a previous owner is gated, for one commit:
  * owner A to owner B, or an owner to none, remounts the children, which resets
  * the billing consumers' own React state. A first owner after no identity has
- * nothing to purge, so its children stay mounted and the layout effect binds it.
+ * no previous owner's React state to reset by remount, so its children stay
+ * mounted. The layout effect still binds it, which purges billing query state
+ * and other accounts' saved usage and tells the other tabs.
  */
 export function FinancialSessionScope({
   identity,

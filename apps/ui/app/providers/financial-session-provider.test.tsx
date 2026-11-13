@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { Fragment, StrictMode, useEffect, useState } from 'react';
 import { act, render, renderHook, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   FinancialSessionProvider,
@@ -203,6 +203,50 @@ describe('FinancialSessionScope', () => {
 
     expect({ mounts, seen: seen.every(Boolean) }).toEqual({ mounts: 1, seen: true });
   });
+
+  it.each([
+    { mode: 'plain', Wrapper: Fragment },
+    { mode: 'StrictMode', Wrapper: StrictMode },
+  ])(
+    'fetches a first owner billing query once and stays on its live cache entry, $mode (pass-through relies on TanStack starting the fetch in its passive setOptions, after the layout bind purges; a double fetch fails this row)',
+    async ({ Wrapper }) => {
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const fetched: string[] = [];
+      /** A billing consumer keyed by owner, enabled only once an owner is known. */
+      const Consumer = ({ ownerId }: { readonly ownerId: string | undefined }): React.ReactNode => {
+        const { data } = useQuery({
+          queryKey: ['billing', 'balance', ownerId],
+          async queryFn() {
+            fetched.push(ownerId ?? 'none');
+            return { owner: ownerId };
+          },
+          enabled: ownerId !== undefined,
+        });
+        return data?.owner ?? 'empty';
+      };
+      const tree = (identity: FinancialSessionIdentity | undefined): React.JSX.Element => (
+        <Wrapper>
+          <FinancialSessionScope identity={identity}>
+            <Consumer ownerId={identity?.ownerId} />
+          </FinancialSessionScope>
+        </Wrapper>
+      );
+      const { container, rerender } = render(tree(undefined), { wrapper: wrap(queryClient) });
+      expect(container.textContent).toBe('empty');
+
+      rerender(tree(owner('a')));
+      await waitFor(() => {
+        expect(container.textContent).toBe('a');
+      });
+      expect(fetched).toEqual(['a']);
+
+      await act(async () => {
+        await queryClient.invalidateQueries({ queryKey: ['billing'] });
+      });
+      expect(fetched).toEqual(['a', 'a']);
+      expect(container.textContent).toBe('a');
+    },
+  );
 
   it('never renders a new identity with the previous owner billing state', () => {
     type Seen = {

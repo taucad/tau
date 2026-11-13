@@ -233,14 +233,15 @@ test('should render download CTAs and every archive before JavaScript', () => {
   expect(html).not.toContain('data-placement="hero-agent"');
   expect(html).toContain('class="agent-prompt-slot"');
   const downloads = renderToStaticMarkup(<MemoryRouter>{download()}</MemoryRouter>);
-  for (const platform of ['mac', 'macIntel', 'windows', 'linux'] as const) {
+  for (const platform of ['windows', 'linux'] as const) {
     expect(downloads).toContain(desktopDownloadHref(platform));
   }
-  // Intel Macs are unlisted without a qualified catalog: both entries render hidden.
-  expect(downloads).toContain('data-mac-intel="hero" hidden=""');
-  expect(downloads).toContain('data-mac-intel="list" hidden=""');
-  expect(downloads).toContain('Download ZIP for Apple silicon');
-  expect(downloads).toContain('Download ZIP for Intel Mac');
+  // Mac entries render hidden with no file URL until a qualified catalog publishes their DMG: no ZIP fallback.
+  expect(downloads).toContain('data-mac-route="macIntel" data-mac-hero="true" hidden=""');
+  expect(downloads).toContain('data-mac-route="mac" hidden=""');
+  expect(downloads).toContain('data-mac-route="macIntel" hidden=""');
+  expect(downloads).not.toContain('Tau-macos');
+  expect(downloads).not.toContain('ZIP for');
   // The icon is the link's own child, as the client renders the Apple silicon button, so both get the same padding.
   expect(downloads).toMatch(/<a\b[^>]*data-download-platform="macIntel"[^>]*><svg/u);
   expect(downloads).toContain('Download for Windows');

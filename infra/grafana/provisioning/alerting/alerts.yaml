@@ -1633,7 +1633,7 @@ groups:
           service: tau-api
           component: email
       - uid: db-pooler-clients-high
-        title: 'P1: Pooler Login at 80% of Its Session Pool'
+        title: 'P1: Pooler Login Over Its Connection Budget'
         condition: db_pooler_clients_high
         data:
           - refId: db_pooler_clients_high
@@ -1645,7 +1645,7 @@ groups:
             model:
               instant: true
               range: false
-              expr: sum(max_over_time(tau_db_client_connections{app=~".*",service_name="tau-api",tau_db_pool=~"request|background"}[1m])) + 2 >= 12
+              expr: sum(max_over_time(tau_db_client_connections{app=~".*",service_name="tau-api",tau_db_pool=~"request|background"}[1m])) + 2 > 12
               intervalMs: 15000
               maxDataPoints: 20
               refId: db_pooler_clients_high
@@ -1654,7 +1654,7 @@ groups:
         for: 2m
         annotations:
           runbook_url: docs/handbooks/cloud/playbooks/postgres-saturation.md
-          summary: API pooled PostgreSQL clients are at 12 of the 15-client session pool for 2 minutes (database connection audit R4). The sum is every API instance's own request and background sockets plus the 2 of revisions-maintenance, which shares the login and exports no metrics. The prod-us login's Supavisor session pool is 15 and the declared budget is 2 × (4 + 1) + 2 = 12 (apps/api/app/config/connection-budget.test.ts); a third Machine or a raised pool cap is the usual cause.
+          summary: API pooled PostgreSQL clients have exceeded the declared budget of 12 (at least 13 of the 15-client session pool) for 2 minutes, so more pools are open than the budget allows (database connection audit R4). The sum is every API instance's own request and background sockets plus the 2 of revisions-maintenance, which shares the login and exports no metrics. The prod-us login's Supavisor session pool is 15 and the declared budget is 2 × (4 + 1) + 2 = 12 (apps/api/app/config/connection-budget.test.ts). A sum of exactly 12 is normal, because postgres.js pools stay full after a burst and recycle only after 30–60 minutes. Above it, a deploy overlap, a third Machine or a raised pool cap is the usual cause; db-pooler-clients-near-cap pages at 14.
         labels:
           severity: warning
           service: tau-api

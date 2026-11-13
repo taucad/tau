@@ -463,11 +463,16 @@ export type Checkout = Readonly<{
  *   way back, when Git's own log names one.
  * - `locked`: another Git process holds the checkout's `index.lock`.
  *
+ * `runsCommands`, on a `rebase` only: its todo still holds an `exec` or `x`
+ * line, so `git rebase --continue` will run commands. Tau warns rather than
+ * refusing the rebase (LP7, OD4).
+ *
  * @public
  */
 export type RevisionGitOperation = Readonly<{
   kind: 'merge' | 'cherryPick' | 'revert' | 'rebase' | 'detached' | 'locked';
   branch?: string;
+  runsCommands?: true;
 }>;
 
 /**

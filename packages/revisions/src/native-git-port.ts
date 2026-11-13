@@ -218,6 +218,8 @@ const tagRefPrefix = 'refs/tags';
 const tagWriteAttempts = 8;
 
 const symbolicRefPrefix = 'ref: ';
+/** A rebase todo line Git runs as a command: `exec` or `x`, after blanks, with an argument (git's `parse_insn_line`). */
+const rebaseExecLine = /^[ \t]*(?:exec|x)[ \t]+\S/mu;
 const stagingRefPrefix = 'refs/tau/transactions/port';
 const initialBranch = 'main';
 /** The store this port owns, relative to the project directory. */
@@ -3301,6 +3303,12 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           return false;
         }
       };
+      /* A todo that will run commands outranks every other marker, so a
+       * planted `MERGE_HEAD` cannot hide the warning (LP7, OD4). */
+      const todo = await readFile(join(admin, 'rebase-merge', 'git-rebase-todo'), 'utf8').catch(() => undefined);
+      if (todo !== undefined && rebaseExecLine.test(todo)) {
+        return Object.freeze({ kind: 'rebase', runsCommands: true });
+      }
       const markers: ReadonlyArray<readonly [string, RevisionGitOperation['kind']]> = [
         ['MERGE_HEAD', 'merge'],
         ['CHERRY_PICK_HEAD', 'cherryPick'],

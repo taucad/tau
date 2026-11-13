@@ -91,12 +91,14 @@ test('keeps History, the chip and the next save on main after restoring an older
   await target.expectVisible(chipOnMain(), 60_000);
   expect(await chipLabel()).not.toContain('Setting up');
 
-  /* History still lists every entry, plus the restore row on top, named by what it restored (A9). */
+  /* History still lists every entry, plus the restore row on top, named by what it restored (A9). A row is named
+   * `<title> · <time>` (`revision-marker.tsx` `RevisionRow`), so the name ends at its title or at ` · `: a word
+   * boundary cannot follow a closing quote. */
   await target.expectVisible(historyRow(0), 30_000);
   const after = await historyRowNames();
   expect(after).toHaveLength(before.length + 1);
   expect(after.slice(1)).toEqual(before);
-  expect(after[0]).toMatch(/^Restored (?:V\d+|“.*”|the .* autosave|an autosave|an earlier point)\b/u);
+  expect(after[0]).toMatch(/^Restored (?:V\d+|“.*”|the .* autosave|an autosave|an earlier point)(?: · |$)/u);
 
   /* The next save lands on top of the restore, on main (the lost-CAS path, L1-F2).
    * The editor and the History pane share one workbench slot, so the file is

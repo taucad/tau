@@ -6,9 +6,10 @@
  * library has mounted, so the listing ran keyed by no account and ran again once the account was published: two
  * requests. It now waits for the session's answer, and for the published account to agree with it.
  */
-import { act, cleanup, renderHook } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, cleanup, render, renderHook } from '@testing-library/react';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { authQueryKeys } from '@better-auth-ui/core';
+import { createElement } from 'react';
 import type { PropsWithChildren } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setRevisionSessionUser } from '#lib/revision-actor.js';
@@ -76,6 +77,32 @@ describe('N2: the cloud listing on a load', () => {
     expect(listings(), 'N2: no listing keyed by no account once the session named one').toBe(0);
 
     /* `RevisionActorIdentity` publishes the account in its effect. */
+    act(() => {
+      setRevisionSessionUser({ id: 'owner' });
+    });
+    await settle();
+    expect(listings(), 'N2: requests per load of Home').toBe(1);
+  });
+
+  it('N2: requests /v1/projects once when the fence above Home starts the session fetch in its own effect', async () => {
+    const { client, wrapper: Wrapper, answer } = createWrapper();
+    /* As the billing fence's `useSession`: an ancestor observer, whose fetch starts after its children's effects. */
+    function Fence({ children }: PropsWithChildren): React.ReactNode {
+      useQuery({ queryKey: authQueryKeys.session, queryFn: async () => answer.promise });
+      return children;
+    }
+    function Home(): undefined {
+      useCloudProjects();
+      return undefined;
+    }
+    render(createElement(Wrapper, undefined, createElement(Fence, undefined, createElement(Home))));
+    await settle();
+    expect(listings(), 'N2: no listing before the session answers').toBe(0);
+
+    await act(async () => {
+      answer.resolve({ user: { id: 'owner' } });
+      await client.getQueryCache().find({ queryKey: authQueryKeys.session })?.promise;
+    });
     act(() => {
       setRevisionSessionUser({ id: 'owner' });
     });

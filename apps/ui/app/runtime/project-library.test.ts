@@ -150,7 +150,7 @@ describe('ProjectLibrary', () => {
     await expect(library.touchChatRecency('c2', 2)).resolves.toMatchObject({ id: 'remounted:c2' });
   });
 
-  it('should settle a call already running on a binding the remount replaced', async () => {
+  it('should hand a call already running on a binding the remount replaced its own outcome, not a hang', async () => {
     const library = createLibrary();
     const running = Promise.withResolvers<Chat | undefined>();
     library.bind(
@@ -159,10 +159,12 @@ describe('ProjectLibrary', () => {
     const call = library.getChat('c1');
     await flush();
 
+    /* The provider unmounts, which disposes its metadata reads, and the remount binds again. */
     library.bind(bindingNamed('new'));
-    running.resolve(chatOf('old:c1'));
+    running.reject(new Error('Chat observation was disposed.'));
 
-    await expect(call).resolves.toMatchObject({ id: 'old:c1' });
+    await expect(call).rejects.toThrow('Chat observation was disposed.');
+    await expect(library.getChat('c1')).resolves.toMatchObject({ id: 'new:c1' });
   });
 
   it('should notify its file facade only when the record client or the watch changes', () => {

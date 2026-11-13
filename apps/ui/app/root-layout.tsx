@@ -54,8 +54,6 @@ export type RootLoaderData = {
 
 const noPreferences: ServerPreferences = {};
 
-/* The query client's defaults moved with its creation into the runtime (A2); these stay importable from here. */
-
 export function RootLayout({
   analyticsBoundary: AnalyticsBoundary = Fragment,
   children,

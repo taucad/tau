@@ -434,12 +434,20 @@ const sessionAnswerOf = (state: QueryState | undefined): Readonly<{ account: str
  * @returns Whether to hold the listing.
  */
 const useListingAwaitsSession = (queryClient: QueryClient, account: string | undefined): boolean => {
-  const session = useSyncExternalStore(
+  const session = useSyncExternalStore<QueryState | undefined | 'hydrating'>(
     (listener) => queryClient.getQueryCache().subscribe(listener),
     () => readSessionState(queryClient),
-    () => undefined,
+    () => 'hydrating',
   );
-  if (session?.status === 'pending' && session.fetchStatus === 'fetching') {
+  /* A hydration render holds the listing: its observer would otherwise fetch in the hydration commit. */
+  if (session === 'hydrating') {
+    return true;
+  }
+  /*
+   * An unanswered session holds it whether or not its fetch has started: the fence's `useSession` is an ancestor, and
+   * its observer starts the fetch in its effect, after this child's. Only a paused (offline) fetch lets the listing go.
+   */
+  if (session?.status === 'pending' && session.fetchStatus !== 'paused') {
     return true;
   }
   const answer = sessionAnswerOf(session);

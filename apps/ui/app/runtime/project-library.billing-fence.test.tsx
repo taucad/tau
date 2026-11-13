@@ -101,7 +101,11 @@ describe('B9: the library and the chat store survive an owner change below the b
       await flush();
     });
     expect(seen.mounts).toBe(1);
-    expect(seen.owner).toBe('owner-a');
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(seen.owner).toBe('owner-a');
+      });
+    });
     const projectManagerA = seen.projectManagerRef;
     const storeA = seen.store;
     const connectionA = library.workspaceConnection;

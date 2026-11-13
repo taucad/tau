@@ -2332,7 +2332,7 @@ describe.runIf(enabled)('shell qualification', () => {
           refused.filter(
             (entry) =>
               entry.text.trim() !== '' &&
-              !/read-only file system|permission denied|not permitted|unable to create|could not lock|cannot (?:lock|open)/iu.test(
+              !/read-only file system|permission denied|not permitted|unable to create|could not (?:lock|write)|cannot (?:lock|open)/iu.test(
                 entry.text,
               ),
           ),

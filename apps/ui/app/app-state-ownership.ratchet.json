@@ -18,7 +18,9 @@
       "apps/ui/app/routes/w.$workspace.$project/workbench-checkout-root.tsx",
       "apps/ui/app/routes/w.$workspace.$project/workbench-record-host.tsx",
       "apps/ui/app/runtime/app-runtime-provider.tsx",
-      "apps/ui/app/runtime/app-runtime-spa-entry.server.tsx"
+      "apps/ui/app/runtime/app-runtime-spa-entry.server.tsx",
+      "apps/ui/desktop/app/entry.server.tsx",
+      "apps/ui/serve/app/entry.server.tsx"
     ]
   },
   "modules": {

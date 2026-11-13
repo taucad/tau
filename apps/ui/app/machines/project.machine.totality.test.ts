@@ -12,7 +12,10 @@
  * before it completes) and its error, the write, repair and runtime-close invokes' done or error events while they run,
  * and `pendingToWriting` in `ready.storing.pending`. The host loads on demand (`shouldAutoLoad` false), so `idle` is
  * reached and `reloadProject` reaches the rest; an auto-loading browser starts at row 2. The cad, graphics and model
- * interaction children are the real logics, never started.
+ * interaction children are the real logics, never started. No retained snapshot holds a geometry unit or a view
+ * graphics actor (the graph keeps the last snapshot per vertex), so the branches of `createGeometryUnit`,
+ * `destroyGeometryUnit`, `createViewGraphics`, `destroyViewGraphics` and `loadModel` that run when one exists are not
+ * sampled; those handlers answer either way today.
  *
  * Two alpha.59 limits shape the harness, and neither changes what is claimed. `xstate/graph` steps the machine on a
  * bare scope, which has no actor sources for a spawn by name and no snapshot for `runtimeClosing`'s invoke input, so

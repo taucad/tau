@@ -320,12 +320,12 @@ const projectReadyOnlyEvents = [
  * runtime-closed reports are answered at the root.
  *
  * - Outside `ready`, every verb only `ready` answers.
- * - In `ready`, the metadata verbs return `undefined` when they would change nothing or the manifest is degraded
- *   (`updateName` to the current name, `updateDescription`, `updateTags`, `setMainFile`); `repairManifest` outside
+ * - In `ready`, the metadata verbs return `undefined`: `updateName` to the current name, and all four (`updateName`,
+ *   `updateDescription`, `updateTags`, `setMainFile`) over a degraded manifest; `repairManifest` outside
  *   `storing.idle`, or when the manifest is not repairable; `projectFileActivity` for metadata only; `flushNow` in
  *   `storing.idle` unless a write failed over a writable manifest, and while a write or repair runs.
  * - `projectRetrieved` outside `loading`: the load's report lands only while its invoke runs.
- * - `reloadProject` while loading and once the runtime is closing or closed.
+ * - `reloadProject` while loading and once the runtime is closing, closed or close-failed.
  * - The close states' static `{}` answers, which `can()` reads as refused: `closeRuntime` while closing or closed,
  *   `parkRuntime` and `resumeRuntime` in all three.
  * - `createViewGraphics` and `destroyViewGraphics` in `error` and the close states: a view's graphics actor created

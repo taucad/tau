@@ -353,7 +353,8 @@ const startupRegion = (region: ProjectSessionRegion) =>
     },
   }) as const;
 
-/* The close steps an event can arrive in. `closing.stopping` is transient (its `always` leaves at once), so no pair
+/* The close steps after `closing.asking` (which answers the dialog's `confirmClose` and `cancelClose`), where those
+ * answers go unanswered. `closing.stopping` is transient (its `always` leaves at once), so no pair
  * names it: the totality test fails on a pair that names a state no event reaches. */
 const closingSteps = [
   'closing.cancellingRuns',

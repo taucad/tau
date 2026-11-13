@@ -773,8 +773,8 @@ const fileManagerStatesExcept = (...answered: ReadonlyArray<(typeof fileManagerS
  * - `resolveInitialBackend` once started: the engine was chosen before the worker connected.
  * - `setRoot` to the current root, after `initializing` and outside `error`: nothing moves.
  * - `setBackendType` outside `ready`.
- * - `reloadWorkspace` while an init runs (`initializing`, `connectingWorker`, `initializingServices`): the running init
- *   reads the persistent binding itself.
+ * - `reloadWorkspace` before an init settles: `initializing` waits for `initialize`, and in `connectingWorker` and
+ *   `initializingServices` the running init reads the persistent binding itself.
  * - `workerConnected` outside `connectingWorker`, `workerInitialized` and `webAccessUnavailable` outside
  *   `initializingServices`: an effect's report lands only while its invoke runs.
  *

@@ -242,5 +242,10 @@
       "commitMessage": "chore(root): Release the npm packages as v{version}"
     }
   },
+  "pluginsConfig": {
+    "@nx/js": {
+      "projectsAffectedByDependencyUpdates": "auto"
+    }
+  },
   "analytics": true
 }

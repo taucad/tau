@@ -5,6 +5,7 @@ import * as target from '#support/external-target.js';
 import type { HomeInspection, HomeLoadRecord } from '#support/home-load-recorder.js';
 import { inspectServerHtml, installHomeLoadRecorder, readHomeLoad } from '#support/home-load-recorder.js';
 import type { CloudLoadRecord, CloudStandInDelays } from '#support/cloud-stand-ins.js';
+import { useFlagState } from '#support/flag-state-test.js';
 import {
   cloudDefectRow,
   cloudLoadProbe,
@@ -253,3 +254,128 @@ cloudDefectRow(
     });
   },
 );
+
+/*
+ * H-a (loading-states blueprint, H2; lane S-flags): with `onboarding` on, Home's suggestions row is decided or held by
+ * the server, so nothing under the composer moves when the flag resolves. Measured on a first visit (no
+ * `layout-flags` cookie: the row's box is held and filled in place) and on the reload that follows (the cookie says
+ * on: the server renders the box). The setup invite, which `onboarding` also shows, is dismissed on this device so
+ * the row is the only flagged surface on Home. A self-host row, so `cloudDefectRow` runs under plain `test`.
+ */
+type SuggestionsRowRecord = {
+  readonly shifts: ReadonlyArray<{ readonly t: number; readonly value: number; readonly sources: readonly string[] }>;
+  /** Every distinct top of each element under the composer, from the first frame it was on screen. */
+  readonly tops: Readonly<Record<string, ReadonlyArray<{ readonly t: number; readonly y: number }>>>;
+  /** Every distinct height of the row's list, from the first frame it was on screen. */
+  readonly rowHeights: ReadonlyArray<{ readonly t: number; readonly height: number }>;
+};
+
+/** The elements under the composer whose tops H-a follows, by name. */
+const underComposer = {
+  buildFromCode: 'main a[href="/projects/new"]',
+  suggestionsBox: '[data-slot="home-suggestions"]',
+} as const;
+
+/** Installed before any page script: layout shifts, and the tops of the elements under the composer every frame. */
+const recordSuggestionsRow = (watched: Readonly<Record<string, string>>): void => {
+  const record: {
+    shifts: Array<{ t: number; value: number; sources: string[] }>;
+    tops: Record<string, Array<{ t: number; y: number }>>;
+    rowHeights: Array<{ t: number; height: number }>;
+  } = { shifts: [], tops: {}, rowHeights: [] };
+  Object.defineProperty(globalThis, '__TAU_SUGGESTIONS_ROW__', { value: record });
+  new PerformanceObserver((list) => {
+    for (const entry of list.getEntries() as Array<
+      PerformanceEntry & {
+        value: number;
+        hadRecentInput: boolean;
+        sources?: Array<{ node?: Node; previousRect: DOMRectReadOnly; currentRect: DOMRectReadOnly }>;
+      }
+    >) {
+      if (entry.hadRecentInput) {
+        continue;
+      }
+      record.shifts.push({
+        t: Math.round(entry.startTime),
+        value: entry.value,
+        sources: (entry.sources ?? []).map(
+          (source) =>
+            `${source.node instanceof HTMLElement ? source.node.outerHTML.slice(0, 80) : (source.node?.nodeName ?? 'unknown')} y ${Math.round(source.previousRect.y)} -> ${Math.round(source.currentRect.y)}`,
+        ),
+      });
+    }
+  }).observe({ type: 'layout-shift', buffered: true });
+  const sample = (): void => {
+    const t = Math.round(performance.now());
+    for (const [name, selector] of Object.entries(watched)) {
+      const element = document.querySelector(selector);
+      if (element) {
+        const y = Math.round(element.getBoundingClientRect().y);
+        record.tops[name] ??= [];
+        const seen = record.tops[name];
+        if (seen.at(-1)?.y !== y) {
+          seen.push({ t, y });
+        }
+      }
+    }
+    const row = document.querySelector('[aria-label="Suggestions"]');
+    if (row) {
+      const height = Math.round(row.getBoundingClientRect().height);
+      if (record.rowHeights.at(-1)?.height !== height) {
+        record.rowHeights.push({ t, height });
+      }
+    }
+    requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
+};
+
+/** Load Home, wait until the row holds its suggestions and the page has settled, and keep the record as evidence. */
+const measureSuggestionsRow = async (load: () => Promise<unknown>, label: string): Promise<SuggestionsRowRecord> => {
+  await load();
+  await target.expectVisible(richComposer, 60_000);
+  await target.expectVisible(selectors.getByRole('list', { name: 'Suggestions' }).getByRole('button').first(), 60_000);
+  await target.delay(settleWindow);
+  const record = await target.evaluate(
+    () => (globalThis as typeof globalThis & { __TAU_SUGGESTIONS_ROW__: SuggestionsRowRecord }).__TAU_SUGGESTIONS_ROW__,
+  );
+  await target.writeArtifact(`home-load-gate/${label}.json`, `${JSON.stringify(record, null, 2)}\n`);
+  return record;
+};
+
+/** The setup invite stays dismissed on this device, so `onboarding` adds only the suggestions row to Home. */
+const dismissSetupInvite = (key: string): void => {
+  globalThis.localStorage.setItem(key, JSON.stringify({ value: { version: 1, inviteDismissed: true } }));
+};
+
+/** No shift above 0.001, and every element under the composer kept the first top it was painted at. */
+const expectRowInPlace = (label: string, record: SuggestionsRowRecord): void => {
+  const shifts = record.shifts.filter((shift) => shift.value > 0.001);
+  expect(shifts, `H2 (${label}): the page shifted when the suggestions row resolved`).toEqual([]);
+  const moved = Object.fromEntries(Object.entries(record.tops).filter(([, tops]) => tops.length > 1));
+  expect(moved, `H2 (${label}): these elements under the composer moved (top, ms)`).toEqual({});
+};
+
+for (const viewport of ['wide', 'phone'] as const) {
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: true,
+      title: `H-a: keeps everything under the composer in place with onboarding on, on a ${viewport} viewport, on a first visit and its reload`,
+    },
+    async (defect) => {
+      await useFlagState('viewer-controls-onboarding');
+      await target.addInitScript(dismissSetupInvite, 'tau-device');
+      await target.setViewport(viewports[viewport]);
+      await target.installModelCatalogFixture(catalogLatency);
+      await target.startModelCatalogApi();
+      await target.addInitScript(recordSuggestionsRow, underComposer);
+      const firstVisit = await measureSuggestionsRow(async () => target.navigate('/'), `h-a-${viewport}-first-visit`);
+      const reload = await measureSuggestionsRow(async () => target.reload(), `h-a-${viewport}-reload`);
+      await defect(() => {
+        expectRowInPlace(`${viewport} first visit`, firstVisit);
+        expectRowInPlace(`${viewport} reload`, reload);
+      });
+    },
+  );
+}

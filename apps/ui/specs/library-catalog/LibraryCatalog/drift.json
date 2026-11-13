@@ -19,6 +19,8 @@
     "library-access-query.recoveryStarted": "Unmodelled",
     "library-access-query.verifying.xstate.done.actor": "AccessReadDone",
     "library-access-query.verifying.xstate.error.actor": "AccessReadDone",
+    "library-access-query.waiting.discoveryFailed": "AccessTop",
+    "library-access-query.waitingForBootstrap.discoveryFailed": "AccessTop",
     "library-access-query.xstate.error.*": "Unmodelled",
     "library-access.accessAsked": "AccessAsked",
     "library-access.accessCancelled": "AccessCancelled",
@@ -116,7 +118,7 @@
   ],
   "sources": {
     "apps/ui/app/hooks/use-project-manager.tsx": "ab3c6f2cd5043b5c2fa2b0f596a7811a7b51895d2bc73386bec89bb830ae8813",
-    "apps/ui/app/machines/library-access.machine.ts": "3ca8c36b892b6a812ad26e621477a7152f1e52250234dcdbb3dd13968ea1c4bd",
+    "apps/ui/app/machines/library-access.machine.ts": "a7eb942dafb1bcc230365f81acd501d0058029d75fb2379a9daae741905fff33",
     "apps/ui/app/machines/library-discovery.machine.ts": "714b3a34db66a3aa10f3d78dda143e66c1d3c197c3b832139096b2a77bc7874b",
     "apps/ui/app/machines/library-recovery.machine.ts": "6438b8c506b04707b3fabcae6906d8671bfe22ccbdba117b1b303992222d8f7e"
   },

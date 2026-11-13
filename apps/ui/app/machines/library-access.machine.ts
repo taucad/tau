@@ -413,29 +413,41 @@ const passFailed = settles(
  * The bootstrap pass the query waits for failed: `error`, as today's rejection is, unless a recovery started or a row is
  * now held, which reads again (rule 8, as for the query's own pass).
  */
-const bootstrapFailed = refines(
+type BootstrapFailedArgs = Readonly<{
+  context: QueryContext;
+  event: Extract<AccessFactEvent, { type: 'discoveryFailed' }>;
+  children: Children;
+}>;
+
+const onBootstrapFailed = ({ context, event, children }: BootstrapFailedArgs, enq: SendTo): QueryStep => {
+  const io = ioOf(enq, children);
+  const facts = withFact(context.facts, event);
+  if (!context.started && heldRow({ ...context, facts }) === undefined) {
+    return answer(context, io, { status: 'error', message: event.message });
+  }
+  const step = top({ ...context, facts }, io);
+  return { ...step, context: { ...step.context, facts } };
+};
+
+const bootstrapFailed = refines('AccessTop', onBootstrapFailed);
+
+/**
+ * Step 1's bootstrap pass failed. Once the journal is read the question needs it, so this is the failure of the pass it
+ * waits for; before that it is only recorded, and the pass is asked for again when the question comes to need it.
+ */
+const waitingFailed = refines(
   'AccessTop',
-  (
-    {
-      context,
-      event,
-      children,
-    }: Readonly<{
-      context: QueryContext;
-      event: Extract<AccessFactEvent, { type: 'discoveryFailed' }>;
-      children: Children;
-    }>,
-    enq: SendTo,
-  ): QueryStep => {
-    const io = ioOf(enq, children);
-    const facts = withFact(context.facts, event);
-    if (!context.started && heldRow({ ...context, facts }) === undefined) {
-      return answer(context, io, { status: 'error', message: event.message });
-    }
-    const step = top({ ...context, facts }, io);
-    return { ...step, context: { ...step.context, facts } };
-  },
+  (args: BootstrapFailedArgs, enq: SendTo): QueryStep | { context: QueryPatch } =>
+    args.context.facts.journal.status === 'ready'
+      ? onBootstrapFailed(args, enq)
+      : { context: { facts: withFact(args.context.facts, args.event) } },
 );
+
+/** The query needs the bootstrap pass, which failed before it did: ask for it again, as today's next call does. */
+const wantBootstrap = (context: QueryContext, enq: SendTo, target: string): QueryStep => {
+  enq.sendTo(context.parentRef, { type: 'queryWantsDiscovery', requestId: context.requestId, gen: context.gen });
+  return { target };
+};
 
 /** One request's query. Its ports throw until `createLibraryAccess` provides them. */
 export const libraryAccessQueryMachine = setup({
@@ -505,14 +517,22 @@ export const libraryAccessQueryMachine = setup({
         if (mayStart(facts)) {
           return top(context, io);
         }
-        if (facts.journal.status !== 'ready' || facts.discoveryError === undefined) {
-          return undefined;
-        }
-        // Rows were pending and the bootstrap pass failed: `error`, as today's rejection is, unless a row is held (rule 8).
-        return heldRow(context) === undefined
-          ? answer(context, io, { status: 'error', message: facts.discoveryError })
-          : top(context, io);
+        // Rows are pending and the bootstrap pass failed before the journal was read: run it again.
+        return facts.journal.status === 'ready' && facts.discoveryError !== undefined
+          ? wantBootstrap(context, enq, 'waitingForBootstrap')
+          : undefined;
       }),
+      on: { discoveryFailed: waitingFailed },
+    },
+    /** Waiting for the parent to run the failed bootstrap pass again (`discoveryRetrying`). */
+    waitingForBootstrap: {
+      always: refines('AccessTop', ({ context, children }, enq) => {
+        if (mayStart(context.facts)) {
+          return top(context, ioOf(enq, children));
+        }
+        return context.facts.discoveryError === undefined ? { target: 'waiting' } : undefined;
+      }),
+      on: { discoveryFailed: bootstrapFailed },
     },
     verifying: {
       invoke: {
@@ -552,12 +572,7 @@ export const libraryAccessQueryMachine = setup({
             if (context.facts.discoveryError === undefined) {
               return undefined;
             }
-            enq.sendTo(context.parentRef, {
-              type: 'queryWantsDiscovery',
-              requestId: context.requestId,
-              gen: context.gen,
-            });
-            return { target: 'retrying' };
+            return wantBootstrap(context, enq, 'retrying');
           }),
           on: { discoveryFailed: bootstrapFailed },
         },

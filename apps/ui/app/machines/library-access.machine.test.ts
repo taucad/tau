@@ -403,6 +403,36 @@ describe('libraryAccess', () => {
       expect(harness.answers('q1')).toEqual([{ status: 'recovering', recovery: recovery('p1', 'recovering') }]);
     });
 
+    it('should ask for a bootstrap pass that failed before the journal was read, and wait for it', () => {
+      const harness = start();
+      ask(harness);
+      harness.send({ type: 'discoveryFailed', message: 'boot failed' });
+      harness.send({ type: 'journalReady', pending: 1 });
+      expect(harness.answered()).toEqual([]);
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+      harness.send({ type: 'discoveryReady' });
+      expect(harness.discovery.calls).toHaveLength(1);
+    });
+
+    it('should answer error when the bootstrap pass asked for again fails too', () => {
+      const harness = start();
+      ask(harness);
+      harness.send({ type: 'discoveryFailed', message: 'boot failed' });
+      harness.send({ type: 'journalReady', pending: 1 });
+      harness.send({ type: 'discoveryFailed', message: 'still failing' });
+      expect(harness.answers('q1')).toEqual([{ status: 'error', message: 'still failing' }]);
+    });
+
+    it('should read again when the bootstrap pass fails after a recovery started while it waited', () => {
+      const harness = start();
+      harness.send({ type: 'journalReady', pending: 1 });
+      ask(harness, 'q1', 'p2');
+      harness.send({ type: 'recoveryStarted', projectId: 'p2' });
+      harness.send({ type: 'discoveryFailed', message: 'boot failed' });
+      expect(harness.answers('q1')).toEqual([]);
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+    });
+
     it('should skip verification while a current listing exists', () => {
       const harness = start();
       harness.send({ type: 'journalReady', pending: 0 });
@@ -750,7 +780,10 @@ const facts: Record<AccessFactEvent['type'], readonly AccessFactEvent[]> = {
   discoveryFailed: [{ type: 'discoveryFailed', message: 'x' }],
   discoveryRetrying: [{ type: 'discoveryRetrying' }],
   journalRetrying: [{ type: 'journalRetrying' }],
-  journalReady: [{ type: 'journalReady', pending: 0 }],
+  journalReady: [
+    { type: 'journalReady', pending: 0 },
+    { type: 'journalReady', pending: 1 },
+  ],
   journalFailed: [{ type: 'journalFailed', message: 'x' }],
   recoveriesChanged: [
     { type: 'recoveriesChanged', recoveries: [recovery('p1', 'recovering')] },

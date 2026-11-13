@@ -46,12 +46,14 @@ A loading region follows [UI Policy](ui-policy.md) §5 Loading and draws no skel
 | Targets and contrast       | Retry is at least 24 by 24 px; indicator text meets 4.5:1 on its surface                                                                                                                                                                                                                                    |
 
 ```tsx
-<ul aria-busy={isLoading} aria-labelledby='projects-heading'>
-  {projects.map((project) => (
-    <ProjectRow key={project.id} project={project} />
-  ))}
-</ul>
-<WaitIndicator active={isLoading} label='Loading projects' slowLabel='Still loading projects' onRetry={retry} />
+<>
+  <WaitIndicator active={isLoading} label='Loading projects' slowLabel='Still loading projects' onRetry={retry} />
+  <ul aria-busy={isLoading} aria-labelledby='projects-heading'>
+    {projects.map((project) => (
+      <ProjectRow key={project.id} project={project} />
+    ))}
+  </ul>
+</>
 ```
 
 An icon that carries meaning beside text (the coming-soon icon in a feature list) is `aria-hidden`, and the meaning is given in words: a visually hidden prefix on the item ("Coming soon: ") and a visible legend.

@@ -1,5 +1,14 @@
 {
-  "roots": ["apps/libs", "apps/ui/app", "packages/ui/src", "packages/workbench-panes/src"],
+  "roots": [
+    "apps/libs",
+    "apps/ui/app",
+    "apps/ui/desktop/app",
+    "apps/ui/serve/app",
+    "packages/agent-plugin/app",
+    "packages/ui/src",
+    "packages/viewer/src",
+    "packages/workbench-panes/src"
+  ],
   "loadPath": [
     "apps/libs/chat-ui/src/components/chat-textarea-skeleton.tsx",
     "apps/libs/project-workspace/src/components/chat-pane-skeleton.tsx",

@@ -143,6 +143,11 @@ function loadingStateRatchetProblems(input: {
       problems.push(`${path}: not a scanned source file under ${manifest.roots.join(', ')}`);
     }
   }
+  for (const path of manifest.loadPath) {
+    if (readSource(path) === undefined) {
+      problems.push(`loadPath: ${path} does not exist; carry it to the moved path, or delete it with its file`);
+    }
+  }
 
   for (const [path, line] of Object.entries(manifest.counts)) {
     if (!Number.isInteger(line) || line < 1) {
@@ -288,12 +293,15 @@ describe('loadingStateRatchetProblems', () => {
   it('should fail a line for a file that does not exist, and a malformed manifest', () => {
     const fixture = fixtureManifest(
       { 'app/frame.tsx': 5, 'app/gone.tsx': 1, 'app/clean.tsx': 0 },
-      { loadPath: ['app/frame.tsx', 'app/clean.tsx', 'lib/elsewhere.tsx'] },
+      { loadPath: ['app/frame.tsx', 'app/clean.tsx', 'lib/elsewhere.tsx', 'app/moved.tsx'] },
     );
     expect(check(fixture)).toEqual([
       'loadPath: app/clean.tsx must be listed once, in sorted order',
+      'loadPath: app/moved.tsx must be listed once, in sorted order',
       'counts: app/clean.tsx must be listed once, in sorted order',
       'lib/elsewhere.tsx: not a scanned source file under app',
+      'loadPath: lib/elsewhere.tsx does not exist; carry it to the moved path, or delete it with its file',
+      'loadPath: app/moved.tsx does not exist; carry it to the moved path, or delete it with its file',
       'app/gone.tsx: has a line but does not exist; delete the line, or carry it to the moved path',
       'counts: app/clean.tsx must be a positive integer; delete the line at 0',
     ]);
@@ -323,8 +331,8 @@ describe('loading state ratchet', () => {
     expect(problems, problems.join('\n')).toEqual([]);
   }, 60_000);
 
-  // C1, expected to fail until the A13 and A15b–A15g lanes have landed; the lane that brings the set to zero flips it.
-  it.fails('C1: no Home or editor load-path file draws a skeleton', () => {
+  // Blueprint row C1, expected to fail until the A13 and A15b–A15g lanes have landed; the lane that brings the set to zero flips it.
+  it.fails('should draw no skeleton in any Home or editor load-path file (H1, U3, U4, U5, U6, U17, U18, M1)', () => {
     const remaining = loadPathSkeletons(manifest, readSource);
     expect(remaining, `load-path files that still draw a skeleton:\n${remaining.join('\n')}`).toEqual([]);
   });

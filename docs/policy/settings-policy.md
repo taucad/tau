@@ -135,7 +135,7 @@ Data controls hold one switch per question a user would ask ("may Tau use my cha
 
 Give every control an accessible name equal to the row title. Status text that changes after an action uses `role='status'`; errors use `role='alert'`. Tests query by role and name, so renaming a title is a test change, not a selector hunt.
 
-### 12. Load as the Page's Shape
+### 12. Load in Place
 
 Settings loads as [UI Policy](ui-policy.md) §5 Loading says: the page's frame and its groups in their final geometry, with real rows whenever they are known, the row's control visible and disabled with a reason while its value arrives, and `WaitIndicator` in the group's header slot after 1,000 ms. Never show a centred spinner, an empty card or a "Loading…" line in a settings page, and never draw a new skeleton.
 

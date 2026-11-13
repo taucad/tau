@@ -164,7 +164,7 @@ A piece of UI that appears on more than one surface has one implementation, and 
 | Plan catalogue (names, prices, features)                                         | `@taucad/billing/plan-catalog`                                          |
 | Money formatting                                                                 | `formatUsd*`, `formatMonthlyPrice` in `@taucad/billing`                 |
 | Billing badge, notice, inline error, summary rows, billing date, first-line icon | `apps/ui/app/components/billing/billing-primitives.tsx`                 |
-| Settings rows, groups and their loading placeholders                             | `apps/ui/app/components/settings/settings-item.tsx`                     |
+| Settings rows and groups                                                         | `apps/ui/app/components/settings/settings-item.tsx`                     |
 
 **Why**: the billing surfaces carried three card-brand formatters, four money formats and two plan grids that disagreed with the pricing page; one owner makes a wording or styling change a one-file change.
 

@@ -523,7 +523,7 @@ export const readPhysicalDatabasePrefix = async (required: boolean): Promise<str
     return name?.slice(0, -suffix.length) ?? 'tau-';
   }, required);
 
-/** The library journal row a permanent delete writes first (`object-store.worker.ts` `beginPermanentDeleteProject`). */
+/** The library journal row a permanent delete writes first (`db/indexeddb-storage.ts:224` `beginPermanentDeleteProject`). */
 export type PendingPermanentDeleteRow = {
   readonly projectId: string;
   readonly storage: { readonly backend: 'indexeddb' | 'opfs'; readonly providerBasePath: string };
@@ -600,7 +600,8 @@ export const readProjectLibraryEvidence = async (projectId: string): Promise<Pro
 /**
  * Leave a permanent delete half done, as a document that unloads between its journal write and its commit leaves it:
  * the row `beginPermanentDeleteProject` adds, in the same transaction shape and under the same Trash check, and
- * nothing after it.
+ * nothing after it. It omits the app's refusal of a second pending delete for the same project
+ * (`db/indexeddb-storage.ts:247–255`), so the caller writes one row per project.
  *
  * @param row - The project and the storage its directory is on.
  * @returns The journal row's operation id.

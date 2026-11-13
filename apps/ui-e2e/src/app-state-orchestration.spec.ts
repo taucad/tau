@@ -164,7 +164,8 @@ type Settled = 'A' | 'B' | 'unsettled';
 
 /**
  * Where a trip came to rest, read the same way for both projects: the pathname unchanged for a second and
- * that project's entry tab on screen. A navigation still waiting on its loaders is not yet either.
+ * that project's entry tab on screen. A navigation still in the route gate's pending state (`project-route.tsx`
+ * `pending`: the resolved project is not yet the requested one) is not yet either.
  */
 const readSettledProject = async (routes: Readonly<{ a: RegExp; b: RegExp }>): Promise<Settled> => {
   const deadline = performance.now() + 30_000;
@@ -210,9 +211,10 @@ test('A0.1 row 1 (I10): project A keeps its arrangement across a round trip that
   const routeB = await routeOf(projectNames.b);
 
   /* The round trip leaves B as soon as B's own `?chat=` correction lands. The time on B, from B's path
-   * committing to the click back to A, is that correction's wait and is recorded, not bounded: it sits
-   * close to a second (see the run evidence), so a one-second bound would not hold every run. Going back
-   * before the correction is the I2 report-only row's subject, which is not this row's claim. */
+   * committing to the click back to A, is that correction's wait and is recorded, not bounded: it measured
+   * 248–2122 ms over 20 runs at `4ff549a9`, most under 0.5 s and one above 2 s, so a one-second bound would
+   * not hold every run. Going back before the correction is the I2 report-only row's subject, which is not
+   * this row's claim. */
   const trip = await roundTripThroughB(true);
   await annotate(
     `dwell on B ${String(Math.round(trip.dwell))} ms (chat correction ${String(Math.round(trip.chatWait ?? -1))} ms)`,
@@ -248,7 +250,7 @@ test('A0.1 row 1 (I10): project A keeps its arrangement across a round trip that
  * the pane mostly never opens: before the layout record's first read, `openPanel` defers it through
  * `layoutController.personWorkbenchChanged`, whose callback drops it when the route key moved
  * (`project-workspace-context.tsx`), and the intent's own parameter cleanup and the `?chat=` correction
- * both move it. It is a race, not a rule: Print opened in 2 of the 20 runs at `bd655661`, so as `test.fails` it could not
+ * both move it. It is a race, not a rule: Print opened in 3 of the 20 runs at `4ff549a9`, so as `test.fails` it could not
  * be red every run (D25), and it cannot be forced from here: the record's first read and the route
  * corrections are both local, with no network request to hold. So the row records whether Print opened
  * and never fails on it. The fix direction is to keep the intent across those route-key moves; A8b turns
@@ -626,9 +628,10 @@ const editViewArrangeAndReload = async (isAtOnce: boolean): Promise<EditedAndRel
  * the edit, then `location.reload()` on the first frame on which the editor's own document holds the edit
  * and the lane shows closed, under 200 ms after the lane change. The layout record's 500 ms debounce
  * cannot have written the lane by then, so only the unload can. The row asserts those preconditions; the
- * three changes' local survival is report-only (S26 local loss; owner A7c, after A5b's unload sequencer).
- * Each was lost in some runs and kept in others (the arrangement too, in 1 of 6 runs at `90a90f80`), so
- * none can be an expected failure (D25). Forcing was tried: with the reload in the very
+ * three changes' local survival is report-only (S26 local loss; owner A7c, after A5b's unload sequencer;
+ * the arrangement's close producer is A8b's `workbench-record-host.tsx:416`). Each was lost in some runs and
+ * kept in others (over 20 runs at `4ff549a9` the edit was lost in 7, the view setting in 12 and the
+ * arrangement in 8), so none can be an expected failure (D25). Forcing was tried: with the reload in the very
  * task of the changes, all three were lost, but the editor had not yet read the input, so that loss was the
  * harness's, not the app's. A7c moves the three reads into assertions once the unload settles every
  * producer.
@@ -690,7 +693,9 @@ test('A0.1 row 5a (S26 report-only, D26, A7c): an arrangement, a view setting an
  * holds only V1 Start (`Tau-Trigger: create`) and the strip says *Unsaved changes*. The fix is that cut
  * reaching History, before the document goes or once the next one opens. A7c flips this row to `test`.
  */
-test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure, A7c): no close revision holding the edit is cut on an immediate reload', async () => {
+test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure, A7c): no close revision holding the edit is cut on an immediate reload', async ({
+  annotate,
+}) => {
   await editViewArrangeAndReload(false);
   await target.click(revisionChip());
   const panel = selectors.getByCss(visibleRevisionsPanel);
@@ -710,6 +715,9 @@ test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure, A7c): no close revisi
     return (await target.isVisible(trailerOf())) ? ((await target.textContent(trailerOf())) ?? '') : '';
   };
   const trailer = await readWithin(newestTrailer, (text) => /Tau-Trigger: close\b/u.test(text), 30_000);
+  /* The trailer is kept, so the run shows the row failing on its own assertion, not on a wait. */
+  await annotate(`I6 newest History trailer: ${trailer || '(none)'}`);
+  await target.writeArtifact(`a01-row5b-report-${String(Date.now())}.json`, JSON.stringify({ trailer }));
 
   /* The defect's own assertion: History's newest entry was cut at close, and it changed the file. */
   expect(trailer, 'I6: the newest History entry is the close cut').toMatch(/Tau-Trigger: close\b/u);
@@ -721,8 +729,8 @@ test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure, A7c): no close revisi
  * path commits sometimes settles on B: B's `?chat=` correction (`project-route.tsx`
  * `handleFocusedChatResolved`, a `navigate(replace)`) fires once B's editor reaches
  * `ready.operation.idle` (`use-project.tsx`), and can land after the person's click to A. Each trip is
- * read only once it has settled (`readSettledProject`), so a navigation still waiting on its loaders is not
- * counted as B. Forcing was tried: holding every `Worker` and `MessagePort` message from the click on B
+ * read only once it has settled (`readSettledProject`), so a navigation still in the route gate's pending
+ * state is not counted as B. Forcing was tried: holding every `Worker` and `MessagePort` message from the click on B
  * until A's path committed did not delay the correction past the click (5 of 5 trips settled on A), and no
  * network request gates it. So the row records k of n and never fails on it; every attempt counts.
  */

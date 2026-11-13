@@ -1,6 +1,6 @@
 ---
 taucad-ui: minor
-viewer: patch
+viewer: minor
 ---
 
 On a phone, Viewer settings open as the responsive menu's bottom drawer, titled "Viewer settings", instead of a popover clipped behind the viewer bar. Grid & units, Timeout and Kernel settings open in the same drawer under its Back row; the desktop menu and its beside-the-bar placement are unchanged. The settings' Back rows are now named `Back to Viewer settings` (they read `Back to Options`).

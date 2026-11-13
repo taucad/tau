@@ -42,7 +42,8 @@ const isServer = (): boolean => false;
 
 /**
  * One wait as the hook tracks it. `shownAt` is when its indicator became, or becomes, visible, measured from
- * `startedAt`: the delay, or the activation time for a region that activates after the delay.
+ * `startedAt`: the delay, the activation time for a region that activates after the delay, or a negative time for a
+ * wait that took over an indicator already showing.
  */
 type TrackedWait = Readonly<{
   active: boolean;
@@ -112,7 +113,7 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
       startedAt,
       shownAt: shownAtFor(startedAt, now),
       wait: 0,
-      timing: active ? waitingTiming(startedAt, now) : idleWaitTiming(),
+      timing: active ? waitingTiming(now === undefined ? { startedAt } : { startedAt, now }) : idleWaitTiming(),
     };
   });
 
@@ -132,10 +133,14 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
       startedAt,
       shownAt: isShowing ? tracked.startedAt + tracked.shownAt - startedAt : shownAtFor(startedAt, now),
       wait: tracked.wait + 1,
-      timing: waitingTiming(startedAt, now, isShowing),
+      timing: waitingTiming({ startedAt, now, isShowing }),
     };
   } else {
-    next = { ...tracked, active, timing: settledTiming(now - tracked.startedAt, tracked.shownAt) };
+    next = {
+      ...tracked,
+      active,
+      timing: settledTiming({ settledAt: now - tracked.startedAt, shownAt: tracked.shownAt }),
+    };
   }
   setTracked(next);
   return { timing: next.timing, wait: next.wait };

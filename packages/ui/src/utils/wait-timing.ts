@@ -52,13 +52,26 @@ export const indicatorEntranceMilliseconds = 150;
 export type WaitPhase = 'hidden' | 'shown' | 'slow';
 
 /**
- * The phase of a wait indicator `elapsed` milliseconds after its wait started.
+ * Input for {@link waitPhaseAt}. Every time is measured from the wait's start.
  *
- * @param elapsed - Time since the wait started. Milliseconds.
- * @param settledAt - When the wait ended, measured from the same start; omit while it is still running. Milliseconds.
- * @param shownAt - When the indicator became visible, measured from the same start: the delay, later for a region
- *   that mounted after it, or earlier (even negative) for a wait that took over an indicator already showing. Defaults
- *   to the delay. Milliseconds.
+ * @public
+ */
+export type WaitPhaseInput = Readonly<{
+  /** Time since the wait started. Milliseconds. */
+  elapsed: number;
+  /** When the wait ended; omit while it is still running. Milliseconds. */
+  settledAt?: number;
+  /**
+   * When the indicator became visible: the delay (the default), later for a region that mounted after it, or earlier,
+   * even negative, for a wait that took over an indicator already showing. Milliseconds.
+   */
+  shownAt?: number;
+}>;
+
+/**
+ * The phase of a wait indicator at one moment of its wait.
+ *
+ * @param input - The elapsed time, and when the wait settled and the indicator showed.
  * @returns `hidden` before the indicator shows, and after a settled wait's indicator has served its minimum; `shown`
  *   from when it shows; `slow` from the slow mark, which a hold that starts after the mark keeps.
  * @public
@@ -67,14 +80,10 @@ export type WaitPhase = 'hidden' | 'shown' | 'slow';
  * ```typescript
  * import { waitPhaseAt } from '@taucad/ui/utils/wait-timing';
  *
- * export const phases = [waitPhaseAt(1200, 1100), waitPhaseAt(1500, 1100)]; // ['shown', 'hidden']
+ * export const phases = [waitPhaseAt({ elapsed: 1200, settledAt: 1100 }), waitPhaseAt({ elapsed: 1500, settledAt: 1100 })];
  * ```
  */
-export function waitPhaseAt(
-  elapsed: number,
-  settledAt?: number,
-  shownAt: number = indicatorDelayMilliseconds,
-): WaitPhase {
+export function waitPhaseAt({ elapsed, settledAt, shownAt = indicatorDelayMilliseconds }: WaitPhaseInput): WaitPhase {
   if (settledAt !== undefined && elapsed >= settledAt) {
     const isHeld = settledAt >= shownAt && elapsed < shownAt + indicatorMinimumMilliseconds;
     if (!isHeld) {
@@ -111,18 +120,43 @@ export type WaitIndicatorTiming =
 const idleTiming: WaitIndicatorTiming = { state: 'idle' };
 
 /**
+ * Input for {@link waitingTiming}. `isShowing` needs `now`: before hydration there is no clock to take over with.
+ *
+ * @public
+ */
+export type WaitingTimingInput =
+  | Readonly<{
+      /** When the wait started, on the performance timeline. Milliseconds. */
+      startedAt: number;
+      /** The current time on the same timeline. Milliseconds. */
+      now: number;
+      /**
+       * The wait takes over an indicator that is showing and still owes its minimum (a wait that starts again during
+       * a hold, or a Retry soon after a late-mounted indicator showed), so it starts revealed, with no entrance.
+       */
+      isShowing?: boolean;
+    }>
+  | Readonly<{
+      /** When the wait started, on the performance timeline. Milliseconds. */
+      startedAt: number;
+      /**
+       * Omitted before hydration, where the page has no script clock: the delays are taken from navigation start
+       * through the `--wait-offset` variable (the elapsed time, negated, that the pre-paint script writes on the root
+       * element; `0ms` when it is absent).
+       */
+      now?: undefined;
+      isShowing?: never;
+    }>;
+
+/**
  * The timing of a running wait.
  *
- * @param startedAt - When the wait started, on the performance timeline. Milliseconds.
- * @param now - The current time on the same timeline, in milliseconds; omit before hydration, where the page has no script clock and
- *   the delays are taken from navigation start through the `--wait-offset` variable (the elapsed time, negated, that
- *   the pre-paint script writes on the root element; `0ms` when it is absent).
- * @param isShowing - The wait takes over an indicator that is showing and still owes its minimum (a Retry, or a wait
- *   that starts again during a hold), so it starts revealed, with no entrance.
+ * @param input - When the wait started, the current time, and whether it takes over a showing indicator.
  * @returns Reveal and slow delays measured from now, or from navigation start before hydration.
  * @public
  */
-export function waitingTiming(startedAt: number, now?: number, isShowing = false): WaitIndicatorTiming {
+export function waitingTiming(input: WaitingTimingInput): WaitIndicatorTiming {
+  const { startedAt, now } = input;
   const revealAt = startedAt + indicatorDelayMilliseconds;
   const slowAt = startedAt + slowWaitMilliseconds;
   const entrance = `${indicatorEntranceMilliseconds}ms`;
@@ -134,22 +168,35 @@ export function waitingTiming(startedAt: number, now?: number, isShowing = false
       entrance,
     };
   }
-  const revealDelay = isShowing ? -indicatorEntranceMilliseconds : revealAt - now;
+  const revealDelay = input.isShowing === true ? -indicatorEntranceMilliseconds : revealAt - now;
   return { state: 'waiting', revealDelay: `${revealDelay}ms`, slowDelay: `${slowAt - now}ms`, entrance };
 }
 
 /**
- * The timing once a wait ends `settledAt` milliseconds after it started.
+ * Input for {@link settledTiming}. Both times are measured from the wait's start.
  *
- * @param settledAt - Time from the wait's start to its end. Milliseconds.
- * @param shownAt - When the indicator became visible, measured from the same start. Defaults to the delay.
- *   Milliseconds.
+ * @public
+ */
+export type SettledTimingInput = Readonly<{
+  /** When the wait ended. Milliseconds. */
+  settledAt: number;
+  /** When the indicator became visible, as for {@link WaitPhaseInput}. Defaults to the delay. Milliseconds. */
+  shownAt?: number;
+}>;
+
+/**
+ * The timing once a wait ends.
+ *
+ * @param input - When the wait ended and when its indicator showed.
  * @returns `holding` while a shown indicator still owes part of its minimum, with the slow words when it settled after
  *   the slow mark; otherwise `idle`.
  * @public
  */
-export function settledTiming(settledAt: number, shownAt: number = indicatorDelayMilliseconds): WaitIndicatorTiming {
-  if (waitPhaseAt(settledAt, settledAt, shownAt) === 'hidden') {
+export function settledTiming({
+  settledAt,
+  shownAt = indicatorDelayMilliseconds,
+}: SettledTimingInput): WaitIndicatorTiming {
+  if (waitPhaseAt({ elapsed: settledAt, settledAt, shownAt }) === 'hidden') {
     return idleTiming;
   }
   const holdsUntil = shownAt + indicatorMinimumMilliseconds;

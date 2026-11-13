@@ -7,12 +7,13 @@ import { load } from 'js-yaml';
 import { afterAll, describe, expect, it } from 'vitest';
 
 /*
- * The push-to-`main` native rows run only for affected work (Wave 0M, AF-1): the plan selects the
- * projects affected since the newest successful push run of the same workflow on `main`, and every
- * project when there is none. Dispatches (and native-hosts' nightly) keep every row; native-darwin's
- * pull requests keep Nx affected against the base `nrwl/nx-set-shas` exported. native-hosts has no push
- * or pull request trigger (Q-3): `ci.yml` calls it with its own plan's rows. The scripts run here with `gh`,
- * `git` and `pnpm` stubbed, so each event's selection is pinned by behaviour, not by text.
+ * The native rows' own row selection. Neither workflow has a push trigger any more (CI throughput review
+ * Q-2, Q-3): `ci.yml` calls each in the merge queue and on a push the queue did not prove, with its own
+ * plan's rows. native-darwin's plan takes those rows from the caller, runs every row on a dispatch, the
+ * affected ones on a labelled pull request (Nx affected against the base `nrwl/nx-set-shas` exported) and
+ * none on the nightly, which runs only the benchmark gates; native-hosts' plan serves its nightly and a
+ * dispatch with every row. The scripts run here with `pnpm` stubbed, so each event's selection is pinned by
+ * behaviour, not by text.
  */
 
 const root = resolve(import.meta.dirname, '../..');
@@ -126,96 +127,78 @@ const run = (script: string, env: ReadonlyArray<readonly [string, string]>): Run
   }
 };
 
-describe.each([darwinPath])('the push base of %s', (path) => {
-  const base = step(path, 'push-base');
-
-  it('should look up only on a push, through this workflow file', () => {
-    expect(base.if).toBe("github.event_name == 'push'");
-    expect(base.env?.['WORKFLOW']).toBe(basename(path));
-    expect(base.env?.['GH_TOKEN']).toBe(expression('github.token'));
-    expect(step(path, 'plan').env?.['PUSH_BASE']).toBe(expression('steps.push-base.outputs.sha'));
-  });
-
-  it('should query successful push runs of this workflow on main', () => {
-    const { calls } = run(base.run!, [
-      ['WORKFLOW', basename(path)],
-      ['RUNS', ''],
-      ['ANCESTORS', ''],
-    ]);
-    expect(calls).toContain(`actions/workflows/${basename(path)}/runs?branch=main&event=push&status=success`);
-  });
-
-  it.each([
-    {
-      name: 'the newest ancestor',
-      runs: 'gone older oldest',
-      ancestors: 'older oldest',
-      expected: 'older',
-    },
-    {
-      name: 'not this commit itself (a re-run)',
-      runs: 'head older',
-      ancestors: 'head older',
-      expected: 'older',
-    },
-    {
-      name: 'none when no run is an ancestor',
-      runs: 'gone',
-      ancestors: '',
-      expected: '',
-    },
-    {
-      name: 'none when there is no successful run',
-      runs: '',
-      ancestors: '',
-      expected: '',
-    },
-  ])('should pick $name', ({ runs, ancestors, expected }) => {
-    const result = run(base.run!, [
-      ['WORKFLOW', basename(path)],
-      ['RUNS', runs],
-      ['ANCESTORS', ancestors],
-    ]);
-    expect(result.status).toBe(0);
-    expect(result.outputs['sha']).toBe(expected);
-  });
-
-  it('should fall back to no base when the API fails', () => {
-    const result = run(base.run!, [
-      ['WORKFLOW', basename(path)],
-      ['RUNS', 'older'],
-      ['ANCESTORS', 'older'],
-      ['GH_FAIL', '1'],
-    ]);
-    expect(result.status).toBe(0);
-    expect(result.outputs['sha']).toBe('');
-  });
-});
-
 describe('native-darwin row selection', () => {
   const planStep = step(darwinPath, 'plan');
   const plan = planStep.run ?? '';
-  const fullRowPaths = planStep.env?.['FULL_ROW_PATHS'] ?? '';
-  const select = (event: string, pushBase = '', diffExit = '0') =>
+  const select = (event: string, called: readonly [string, string] = ['', '']) =>
     run(plan, [
       ['GITHUB_EVENT_NAME', event],
-      ['PUSH_BASE', pushBase],
+      ['CALLED_REF', called[0]],
+      ['CALLED_PROJECTS', called[1]],
       ['BENCHMARKS', 'false'],
-      ['FULL_ROW_PATHS', fullRowPaths],
-      ['DIFF_EXIT', diffExit],
       ['ALL', '["build123d","cli","picogk"]'],
       ['AFFECTED', '["cli"]'],
     ]);
 
-  it('should run every row when a push changes this workflow or a nuget oracle source', () => {
-    const result = select('push', 'older', '1');
+  it('should take the rows from the caller when ci.yml or the candidate gate calls it (Q-2)', () => {
+    const queue = select('merge_group', ['head', 'cli,picogk']);
+    expect(queue.status).toBe(0);
+    expect(queue.outputs['projects']).toBe('cli,picogk');
+    expect(queue.calls).not.toContain('test:native-darwin');
+    // The candidate gate passes no rows, only the benchmarks.
+    const candidate = run(plan, [
+      ['GITHUB_EVENT_NAME', 'workflow_run'],
+      ['CALLED_REF', 'candidate'],
+      ['CALLED_PROJECTS', ''],
+      ['BENCHMARKS', 'true'],
+      ['ALL', '["build123d","picogk"]'],
+    ]);
+    expect(candidate.outputs).toMatchObject({ projects: '', benchmarks: 'build123d,picogk' });
+    expect(candidate.calls).toContain('nx show projects --with-target benchmark-native --json');
+    expect(planStep.env?.['CALLED_REF']).toBe(expression('inputs.ref'));
+    expect(planStep.env?.['CALLED_PROJECTS']).toBe(expression('inputs.projects'));
+  });
+
+  it('should run every row on a dispatch', () => {
+    const result = select('workflow_dispatch');
     expect(result.outputs['projects']).toBe('build123d,cli,picogk');
-    expect(result.calls).toContain(`git diff --quiet older head -- ${fullRowPaths}`);
     expect(result.calls).not.toContain('--affected');
   });
 
-  it('should list this workflow and every oracle source outside the native closure as full-row paths', () => {
-    const paths = fullRowPaths.split(' ');
+  it('should keep Nx affected against the exported base on a labelled pull request', () => {
+    const result = select('pull_request');
+    expect(result.outputs['projects']).toBe('cli');
+    expect(result.calls).toContain('nx show projects --affected --with-target test:native-darwin --json');
+    expect(result.calls).not.toContain('--base=');
+  });
+
+  it('should select no row on the nightly, which runs only the gates', () => {
+    expect(select('schedule').outputs['projects']).toBe('');
+  });
+
+  it('should run on no push, and on a pull request only while it carries the native-darwin label', () => {
+    const workflow = load(readFileSync(resolve(root, darwinPath), 'utf8')) as {
+      readonly on: Record<string, unknown>;
+      readonly jobs: Record<string, { readonly if?: string; readonly steps?: readonly Step[] }>;
+    };
+    expect(Object.keys(workflow.on).sort()).toEqual(['pull_request', 'schedule', 'workflow_call', 'workflow_dispatch']);
+    expect(workflow.jobs['plan']?.if).toBe(
+      "github.event_name != 'pull_request' || " +
+        "(contains(github.event.pull_request.labels.*.name, 'native-darwin') && " +
+        "(github.event.action != 'labeled' || github.event.label.name == 'native-darwin') && " +
+        "github.triggering_actor != 'dependabot[bot]')",
+    );
+    expect(workflow.jobs['plan']?.steps?.some((candidate) => candidate.id === 'push-base')).toBe(false);
+  });
+
+  it("should list this workflow and every oracle source outside the native closure as ci.yml's lane paths", () => {
+    const ci = load(readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8')) as {
+      readonly jobs: Record<string, { readonly steps?: readonly Step[] }>;
+    };
+    const lanePaths = ci.jobs['plan']?.steps?.find((candidate) => candidate.id === 'plan')?.env?.[
+      'NATIVE_DARWIN_LANE_PATHS'
+    ];
+    const paths = JSON.parse(lanePaths ?? '[]') as readonly string[];
     expect(paths).toContain(darwinPath);
     expect(paths).toContain('libs/tau-examples/src/standalone/picogk');
     const oracle = readFileSync(resolve(root, 'scripts/src/check-standalone-project.ts'), 'utf8');
@@ -226,46 +209,6 @@ describe('native-darwin row selection', () => {
     ];
     // `libs/types` is in the closure of every native project, so Nx affected already covers it.
     expect(sources.filter((path) => !path.startsWith('libs/types/') && !paths.includes(path))).toEqual([]);
-  });
-
-  it('should run only the rows affected since the last successful push run on a push to main', () => {
-    const result = select('push', 'older');
-    expect(result.outputs['projects']).toBe('cli');
-    expect(result.calls).toContain(
-      'nx show projects --affected --base=older --head=head --with-target test:native-darwin --json',
-    );
-  });
-
-  it('should run no row when a push to main affects none', () => {
-    const result = run(plan, [
-      ['GITHUB_EVENT_NAME', 'push'],
-      ['PUSH_BASE', 'older'],
-      ['BENCHMARKS', 'false'],
-      ['ALL', '["build123d","cli","picogk"]'],
-      ['AFFECTED', '[]'],
-    ]);
-    expect(result.status).toBe(0);
-    expect(result.outputs['projects']).toBe('');
-  });
-
-  it.each([
-    ['push', ''],
-    ['workflow_dispatch', ''],
-  ])('should run every row on %s with base %j', (event, pushBase) => {
-    const result = select(event, pushBase);
-    expect(result.outputs['projects']).toBe('build123d,cli,picogk');
-    expect(result.calls).not.toContain('--affected');
-  });
-
-  it('should keep Nx affected against the exported base on a pull request', () => {
-    const result = select('pull_request');
-    expect(result.outputs['projects']).toBe('cli');
-    expect(result.calls).toContain('nx show projects --affected --with-target test:native-darwin --json');
-    expect(result.calls).not.toContain('--base=');
-  });
-
-  it('should select no row on the nightly, which runs only the gates', () => {
-    expect(select('schedule').outputs['projects']).toBe('');
   });
 });
 

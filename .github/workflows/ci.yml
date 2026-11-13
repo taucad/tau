@@ -82,6 +82,8 @@ jobs:
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
       native-hosts: ${{ steps.plan.outputs.native-hosts }}
       native-intel: ${{ steps.plan.outputs.native-intel }}
+      native-darwin: ${{ steps.plan.outputs.native-darwin }}
+      native-darwin-projects: ${{ steps.plan.outputs.native-darwin-projects }}
       native-linux: ${{ steps.plan.outputs.native-linux }}
       viewer-parity: ${{ steps.plan.outputs.viewer-parity }}
       desktop: ${{ steps.plan.outputs.desktop }}
@@ -135,7 +137,11 @@ jobs:
           # does not rebuild the production image.
           # Native host rows (`native-hosts.yml`): a `tag:ci:native-hosts` project (Build123d, PicoGK,
           # the CLI) or a `test:native-linux` project is affected; the latter are also the linux-x64
-          # native rows it runs, and the former start its Intel row (`native-intel`). Viewer parity (`viewer-parity.yml`): the project that owns the gate
+          # native rows it runs, and the former start its Intel row (`native-intel`).
+          # Native darwin rows (`native-darwin.yml`): a `test:native-darwin` project (Build123d, PicoGK, the
+          # CLI) is affected; `native-darwin-projects` names the rows. NATIVE_DARWIN_LANE_PATHS select every
+          # such project: that workflow and the nuget standalone oracle's sources outside the native closure,
+          # which its row's last steps read (go-live PRJ-1). Viewer parity (`viewer-parity.yml`): the project that owns the gate
           # (`test:viewer-parity`), or one it depends on, or the workflow its target lists, changed.
           # Desktop lane: a `tag:ci:desktop` project (the Electron app and, after the split, its services
           # host). No job here runs it: the packaged suite runs on every staging candidate instead
@@ -165,6 +171,7 @@ jobs:
              "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"], "pr": "queue"},
              "native-hosts": {"tags": ["ci:native-hosts"], "pr": "queue"},
              "native-linux": {"targets": ["test:native-linux"], "pr": "queue"},
+             "native-darwin": {"targets": ["test:native-darwin"], "pr": "queue"},
              "viewer-parity": {"targets": ["test:viewer-parity"], "pr": "queue"},
              "desktop": {"tags": ["ci:desktop"]},
              "shell": {"tags": ["ci:shell"], "pr": "queue"}}
@@ -173,6 +180,13 @@ jobs:
              "apps/desktop/scripts/hosted-linux-bwrap-fixture.mts",
              "apps/desktop/scripts/linux-apt-package.mts",
              "apps/desktop/scripts/runtime-stage.mts"]
+          NATIVE_DARWIN_LANE_PATHS: >-
+            [".github/workflows/native-darwin.yml",
+             "scripts/src/check-standalone-project.ts",
+             "scripts/src/standalone-geometry.ts",
+             "apps/ui/app/constants/project.constants.ts",
+             "apps/ui/app/utils/kernel-libraries.ts",
+             "libs/tau-examples/src/standalone/picogk"]
         run: |
           # `pipefail` so a failing `nx` call fails the step instead of leaving an empty
           # output behind `tail`. `tail -1` keeps the JSON array and drops Nx's log lines.
@@ -203,6 +217,16 @@ jobs:
               || { echo "::error::the shell lane path check names sandbox, which is not a tag:ci:shell project"; exit 1; }
             lanes=$(jq -c '.shell |= (. + ["sandbox"] | unique)' <<< "$lanes")
             echo "Shell lane paths changed: $shell_paths"
+          fi
+          # The native darwin lane's path check: a change to its workflow or to a nuget oracle source outside
+          # the graph selects every `test:native-darwin` project (a path names a file or a directory).
+          darwin_paths=$(git diff --name-only --no-renames "$NX_BASE" "${NX_HEAD:-HEAD}" \
+            | jq -cRn --argjson paths "$NATIVE_DARWIN_LANE_PATHS" \
+                '[inputs | select(. as $file | any($paths[] as $path | $file == $path or ($file | startswith($path + "/")); .))]')
+          if [ "$darwin_paths" != '[]' ]; then
+            lanes=$(jq -c --slurpfile graph "$RUNNER_TEMP/graph.json" \
+              '."native-darwin" = ([$graph[0].graph.nodes[] | select(.data.targets // {} | has("test:native-darwin")) | .name] | sort)' <<< "$lanes")
+            echo "Native darwin lane paths changed: $darwin_paths"
           fi
           jq -r 'to_entries[] | "Affected \(.key): \(.value | tojson)"' <<< "$lanes"
           # What `nx affected` selected, for `lanes.json` below.
@@ -251,6 +275,8 @@ jobs:
           native_linux=$(jq -r '."native-linux" | join(",")' <<< "$lanes")
           native_hosts=$(jq -r 'if .["native-hosts"] == [] and .["native-linux"] == [] then "false" else "true" end' <<< "$lanes")
           native_intel=$(flag native-hosts)
+          native_darwin=$(flag native-darwin)
+          native_darwin_projects=$(jq -r '."native-darwin" | join(",")' <<< "$lanes")
           viewer_parity=$(flag viewer-parity)
           desktop=$(flag desktop)
           desktop_projects=$(jq -c '.desktop' <<< "$lanes")
@@ -273,6 +299,8 @@ jobs:
             echo "geospec-examples=$geospec_examples"
             echo "native-hosts=$native_hosts"
             echo "native-intel=$native_intel"
+            echo "native-darwin=$native_darwin"
+            echo "native-darwin-projects=$native_darwin_projects"
             echo "native-linux=$native_linux"
             echo "viewer-parity=$viewer_parity"
             echo "desktop=$desktop"
@@ -674,6 +702,26 @@ jobs:
       native-linux: ${{ needs.plan.outputs.native-linux }}
       intel: ${{ needs.plan.outputs.native-intel }}
 
+  # The darwin-arm64 native rows (`native-darwin.yml`), in the merge queue and on a push the queue did
+  # not prove, when the plan finds a `test:native-darwin` project affected or a native darwin lane path
+  # changed (CI throughput review Q-2). A pull request keeps the `native-darwin` label for early signal;
+  # the desktop candidate gate runs the benchmarks. The required check waits for it.
+  native-darwin:
+    name: Native darwin
+    needs: [plan]
+    if: needs.plan.outputs.native-darwin == 'true'
+    permissions: # The called workflow's plan job declares these
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
+    uses: ./.github/workflows/native-darwin.yml
+    with:
+      ref: ${{ github.sha }}
+      projects: ${{ needs.plan.outputs.native-darwin-projects }}
+      benchmarks: false
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
+
   # The viewer parity gate (`viewer-parity.yml`), in the merge queue and on a push the queue did
   # not prove, when the plan finds a `test:viewer-parity` project affected. The required check
   # waits for it.
@@ -745,6 +793,7 @@ jobs:
         geospec-examples,
         cli-e2e,
         native-hosts,
+        native-darwin,
         viewer-parity,
         formal,
         api,
@@ -767,6 +816,8 @@ jobs:
           CLI_E2E_RESULT: ${{ needs.cli-e2e.result }}
           NATIVE_HOSTS_REQUIRED: ${{ needs.plan.outputs.native-hosts }}
           NATIVE_HOSTS_RESULT: ${{ needs.native-hosts.result }}
+          NATIVE_DARWIN_REQUIRED: ${{ needs.plan.outputs.native-darwin }}
+          NATIVE_DARWIN_RESULT: ${{ needs.native-darwin.result }}
           VIEWER_PARITY_REQUIRED: ${{ needs.plan.outputs.viewer-parity }}
           VIEWER_PARITY_RESULT: ${{ needs.viewer-parity.result }}
           FORMAL_REQUIRED: ${{ needs.plan.outputs.formal }}
@@ -797,6 +848,7 @@ jobs:
           if [ "$GEOSPEC_EXAMPLES_REQUIRED" = true ]; then test "$GEOSPEC_EXAMPLES_RESULT" = success; fi
           if [ "$CLI_E2E_REQUIRED" = true ]; then test "$CLI_E2E_RESULT" = success; fi
           if [ "$NATIVE_HOSTS_REQUIRED" = true ]; then test "$NATIVE_HOSTS_RESULT" = success; fi
+          if [ "$NATIVE_DARWIN_REQUIRED" = true ]; then test "$NATIVE_DARWIN_RESULT" = success; fi
           if [ "$VIEWER_PARITY_REQUIRED" = true ]; then test "$VIEWER_PARITY_RESULT" = success; fi
           if [ "$FORMAL_REQUIRED" = true ]; then test "$FORMAL_RESULT" = success; fi
           if [ "$API_REQUIRED" = true ]; then test "$API_RESULT" = success; fi

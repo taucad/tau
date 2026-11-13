@@ -409,6 +409,34 @@ const passFailed = settles(
   },
 );
 
+/**
+ * The bootstrap pass the query waits for failed: `error`, as today's rejection is, unless a recovery started or a row is
+ * now held, which reads again (rule 8, as for the query's own pass).
+ */
+const bootstrapFailed = refines(
+  'AccessTop',
+  (
+    {
+      context,
+      event,
+      children,
+    }: Readonly<{
+      context: QueryContext;
+      event: Extract<AccessFactEvent, { type: 'discoveryFailed' }>;
+      children: Children;
+    }>,
+    enq: SendTo,
+  ): QueryStep => {
+    const io = ioOf(enq, children);
+    const facts = withFact(context.facts, event);
+    if (!context.started && heldRow({ ...context, facts }) === undefined) {
+      return answer(context, io, { status: 'error', message: event.message });
+    }
+    const step = top({ ...context, facts }, io);
+    return { ...step, context: { ...step.context, facts } };
+  },
+);
+
 /** One request's query. Its ports throw until `createLibraryAccess` provides them. */
 export const libraryAccessQueryMachine = setup({
   schemas: {
@@ -528,11 +556,7 @@ export const libraryAccessQueryMachine = setup({
             });
             return { target: 'retrying' };
           }),
-          on: {
-            discoveryFailed: refines('AccessTop', ({ context, event, children }, enq) =>
-              answer(context, ioOf(enq, children), { status: 'error', message: event.message }),
-            ),
-          },
+          on: { discoveryFailed: bootstrapFailed },
         },
         /** Waiting for the parent to run the failed bootstrap pass again (`discoveryRetrying`). */
         retrying: {
@@ -542,11 +566,7 @@ export const libraryAccessQueryMachine = setup({
             }
             return context.facts.discoveryError === undefined ? { target: 'gate' } : undefined;
           }),
-          on: {
-            discoveryFailed: refines('AccessTop', ({ context, event, children }, enq) =>
-              answer(context, ioOf(enq, children), { status: 'error', message: event.message }),
-            ),
-          },
+          on: { discoveryFailed: bootstrapFailed },
         },
         passing: {
           invoke: {

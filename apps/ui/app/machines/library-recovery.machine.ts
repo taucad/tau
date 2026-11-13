@@ -94,6 +94,8 @@ export type LibraryRecoveryContext = Readonly<{
   order: readonly string[];
   /** The bootstrap discovery pass has run: the loop may replay (discovery before replay, as today). */
   allowed: boolean;
+  /** The bootstrap pass failed and no caller has asked for it again since. */
+  bootstrapFailed: boolean;
   /** The loop's replay in flight. */
   replay: Replay | undefined;
   /** Mutations admitted and not yet journaled, by request id. */
@@ -120,6 +122,8 @@ export type LibraryRecoveryEvent =
   | { type: 'load' }
   /** The bootstrap discovery pass has run: the loop may start. */
   | { type: 'discoveryReady' }
+  /** The bootstrap discovery pass failed: the next replay or mutation asks for it again (`discoveryWanted`). */
+  | { type: 'discoveryFailed' }
   /** A mutation on `projectId` asks the gate (rule 4); answered `mutationAdmitted`. */
   | { type: 'mutationAsked'; requestId: string; projectId: string }
   /** The admitted mutation wrote its journal row and starts applying it. */
@@ -144,6 +148,11 @@ export type LibraryRecoveryEvent =
 export type LibraryRecoveryEmitted =
   | { type: 'journalReady'; pending: number }
   | { type: 'journalFailed'; message: string }
+  /**
+   * A replay or a mutation arrived after the bootstrap pass failed: run it again, as today's `createProject(id)` and
+   * mutations do through `ensureDiscoveryReady`.
+   */
+  | { type: 'discoveryWanted' }
   /** A row for `projectId` started a replay or a mutation's apply: the access fence's `rs`. */
   | { type: 'rowStarted'; operationId: string; projectId: string }
   /** A row settled or was discarded: storage may have changed, so the listing owes a pass. */
@@ -159,6 +168,7 @@ export type LibraryRecoveryEmitted =
 export const libraryRecoveryEventTypes = [
   'load',
   'discoveryReady',
+  'discoveryFailed',
   'mutationAsked',
   'mutationJournaled',
   'mutationAbandoned',
@@ -241,6 +251,15 @@ const gated = (context: Context, projectId: string): boolean =>
   Object.values(context.rows).some((row) => row.projectId === projectId && isActive(row)) ||
   context.personReplays.some((replay) => replay.row.projectId === projectId) ||
   Object.values(context.admitted).includes(projectId);
+
+/** Ask for the failed bootstrap pass again, once per failure, for a caller that needs it (today's next call). */
+const wantDiscovery = (context: Context, enq: Emit): Patch => {
+  if (!context.bootstrapFailed) {
+    return {};
+  }
+  enq.emit({ type: 'discoveryWanted' });
+  return { bootstrapFailed: false };
+};
 
 /** The workspace a row's storage cites: the top-level field the host gave, else a `webaccess` storage's own. */
 const workspaceOf = (row: RecoveryRowInput): string | undefined =>
@@ -428,6 +447,7 @@ export const libraryRecoveryMachine = setup({
     rows: {},
     order: [],
     allowed: false,
+    bootstrapFailed: false,
     replay: undefined,
     admitted: {},
     asked: [],
@@ -439,17 +459,28 @@ export const libraryRecoveryMachine = setup({
     fault: undefined,
   },
   on: {
-    discoveryReady: refines('Unmodelled', ({ context }) => (context.allowed ? {} : { context: { allowed: true } })),
+    discoveryReady: refines('Unmodelled', ({ context }) =>
+      context.allowed ? {} : { context: { allowed: true, bootstrapFailed: false } },
+    ),
+    discoveryFailed: refines('Unmodelled', ({ context }) =>
+      context.allowed ? {} : { context: { bootstrapFailed: true } },
+    ),
     /* Until the journal is read the gate cannot tell, so a mutation waits; `ready` admits it. */
-    mutationAsked: refines('Unmodelled', ({ context, event }) => ({
-      context: { asked: [...context.asked, { requestId: event.requestId, projectId: event.projectId }] },
+    mutationAsked: refines('Unmodelled', ({ context, event }, enq) => ({
+      context: {
+        asked: [...context.asked, { requestId: event.requestId, projectId: event.projectId }],
+        ...wantDiscovery(context, enq),
+      },
     })),
     /* Before the journal is read nothing is admitted: an abandoned mutation only leaves the queue. */
     mutationAbandoned: refines('Unmodelled', ({ context, event }) => ({
       context: { asked: context.asked.filter((ask) => ask.requestId !== event.requestId) },
     })),
-    replayAsked: refines('Unmodelled', ({ context, event }) => ({
-      context: { personReplays: [...context.personReplays, { requestId: event.requestId, row: event.row }] },
+    replayAsked: refines('Unmodelled', ({ context, event }, enq) => ({
+      context: {
+        personReplays: [...context.personReplays, { requestId: event.requestId, row: event.row }],
+        ...wantDiscovery(context, enq),
+      },
     })),
     /* Nothing is known about a row until the journal is read: a discard is refused. */
     discardAsked: refines('Unmodelled', ({ event }, enq) => {
@@ -512,13 +543,19 @@ export const libraryRecoveryMachine = setup({
       on: {
         load: refines('Unmodelled', () => ({ target: 'loading' })),
         /* As today's `ensureJournalReady`, which drops a failed read: the next caller that needs the journal reads it again. */
-        mutationAsked: refines('Unmodelled', ({ context, event }) => ({
+        mutationAsked: refines('Unmodelled', ({ context, event }, enq) => ({
           target: 'loading',
-          context: { asked: [...context.asked, { requestId: event.requestId, projectId: event.projectId }] },
+          context: {
+            asked: [...context.asked, { requestId: event.requestId, projectId: event.projectId }],
+            ...wantDiscovery(context, enq),
+          },
         })),
-        replayAsked: refines('Unmodelled', ({ context, event }) => ({
+        replayAsked: refines('Unmodelled', ({ context, event }, enq) => ({
           target: 'loading',
-          context: { personReplays: [...context.personReplays, { requestId: event.requestId, row: event.row }] },
+          context: {
+            personReplays: [...context.personReplays, { requestId: event.requestId, row: event.row }],
+            ...wantDiscovery(context, enq),
+          },
         })),
       },
     },
@@ -527,7 +564,10 @@ export const libraryRecoveryMachine = setup({
         mutationAsked: refines('Unmodelled', ({ context, event }, enq) => {
           if (gated(context, event.projectId)) {
             return {
-              context: { asked: [...context.asked, { requestId: event.requestId, projectId: event.projectId }] },
+              context: {
+                asked: [...context.asked, { requestId: event.requestId, projectId: event.projectId }],
+                ...wantDiscovery(context, enq),
+              },
             };
           }
           enq.emit({ type: 'mutationAdmitted', requestId: event.requestId });
@@ -546,8 +586,11 @@ export const libraryRecoveryMachine = setup({
         mutationSettled: refines('ReplaySettled', ({ context, event }, enq) =>
           mutationSettled(context, enq, { event, admit: true }),
         ),
-        replayAsked: refines('Unmodelled', ({ context, event }) => ({
-          context: { personReplays: [...context.personReplays, { requestId: event.requestId, row: event.row }] },
+        replayAsked: refines('Unmodelled', ({ context, event }, enq) => ({
+          context: {
+            personReplays: [...context.personReplays, { requestId: event.requestId, row: event.row }],
+            ...wantDiscovery(context, enq),
+          },
         })),
       },
       type: 'parallel',

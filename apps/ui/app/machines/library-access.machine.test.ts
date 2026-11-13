@@ -365,6 +365,44 @@ describe('libraryAccess', () => {
       expect(harness.answers('q1')).toEqual([{ status: 'error', message: 'still failing' }]);
     });
 
+    it('should read again, not answer error, when the bootstrap pass fails after a recovery started', async () => {
+      const harness = start();
+      harness.send({ type: 'journalReady', pending: 0 });
+      harness.send({ type: 'epochMoved', epoch: 1, current: false });
+      ask(harness);
+      await resolve(harness.verify, { status: 'discovery-required' });
+      harness.send({ type: 'recoveryStarted', projectId: 'p1' });
+      harness.send({ type: 'recoveriesChanged', recoveries: [recovery('p1', 'recovering')] });
+      harness.send({ type: 'discoveryFailed', message: 'boot failed' });
+      expect(harness.answers('q1')).toEqual([{ status: 'recovering', recovery: recovery('p1', 'recovering') }]);
+    });
+
+    it('should ask for the bootstrap pass again when it fails after a recovery started and settled', async () => {
+      const harness = start();
+      harness.send({ type: 'journalReady', pending: 0 });
+      harness.send({ type: 'epochMoved', epoch: 1, current: false });
+      ask(harness);
+      await resolve(harness.verify, { status: 'discovery-required' });
+      harness.send({ type: 'recoveryStarted', projectId: 'p1' });
+      harness.send({ type: 'discoveryFailed', message: 'boot failed' });
+      expect(harness.answers('q1')).toEqual([]);
+      expect(harness.verify.calls).toHaveLength(2);
+      await resolve(harness.verify, { status: 'discovery-required' });
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+      harness.send({ type: 'discoveryReady' });
+      expect(harness.discovery.calls).toHaveLength(1);
+    });
+
+    it('should wait for the bootstrap pass when rows were pending, even with a row held, and answer its failure', () => {
+      const harness = start();
+      harness.send({ type: 'recoveriesChanged', recoveries: [recovery('p1', 'recovering')] });
+      harness.send({ type: 'journalReady', pending: 1 });
+      ask(harness);
+      expect(harness.answered()).toEqual([]);
+      harness.send({ type: 'discoveryFailed', message: 'scan failed' });
+      expect(harness.answers('q1')).toEqual([{ status: 'error', message: 'scan failed' }]);
+    });
+
     it('should skip verification while a current listing exists', () => {
       const harness = start();
       harness.send({ type: 'journalReady', pending: 0 });
@@ -458,6 +496,17 @@ describe('libraryAccess', () => {
       await flush();
       expect(harness.answers('q1')).toEqual([]);
       expect(harness.verify.calls).toHaveLength(2);
+    });
+
+    it('should answer a row held when a pass that rejects ends, though no start was seen', async () => {
+      const harness = start();
+      settledLibrary(harness);
+      ask(harness);
+      await resolve(harness.verify, { status: 'discovery-required' });
+      harness.send({ type: 'recoveriesChanged', recoveries: [recovery('p1', 'failed')] });
+      harness.discovery.calls[0]?.reject(new Error('scan failed'));
+      await flush();
+      expect(harness.answers('q1')).toEqual([{ status: 'recovery-failed', recovery: recovery('p1', 'failed') }]);
     });
 
     it('should read again on superseded', async () => {

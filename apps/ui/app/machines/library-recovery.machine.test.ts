@@ -446,6 +446,28 @@ describe('libraryRecovery', () => {
       expect(harness.of('mutationAdmitted')).toEqual([{ type: 'mutationAdmitted', requestId: 'm2' }]);
     });
 
+    it("should ask for a failed bootstrap pass again for a person's replay or a mutation, once per failure", async () => {
+      const harness = start();
+      harness.readJournal.calls[0]?.resolve([row('o1', 'p2')]);
+      await flush();
+      harness.send({ type: 'discoveryFailed' });
+      harness.send({ type: 'replayAsked', requestId: 'c1', row: row('x1', 'p1') });
+      harness.send({ type: 'mutationAsked', requestId: 'm1', projectId: 'p2' });
+      expect(harness.of('discoveryWanted')).toHaveLength(1);
+      harness.send({ type: 'discoveryFailed' });
+      harness.send({ type: 'mutationAsked', requestId: 'm2', projectId: 'p2' });
+      expect(harness.of('discoveryWanted')).toHaveLength(2);
+      harness.send({ type: 'discoveryReady' });
+      await settleReplay(harness, recovered);
+      expect(harness.of('mutationAdmitted').map((event) => event.requestId)).toEqual(['m1']);
+      await settleReplay(harness, recovered);
+      expect(harness.of('replaySettled')).toEqual([{ type: 'replaySettled', requestId: 'c1', held: false }]);
+      // Once the pass has run, a failure later is not the bootstrap's.
+      harness.send({ type: 'discoveryFailed' });
+      harness.send({ type: 'replayAsked', requestId: 'c2', row: row('x1', 'p1') });
+      expect(harness.of('discoveryWanted')).toHaveLength(2);
+    });
+
     it('should hold a mutation until the journal is read', async () => {
       const harness = start();
       harness.send({ type: 'mutationAsked', requestId: 'm1', projectId: 'p1' });
@@ -597,6 +619,7 @@ type Samples = { [T in LibraryRecoveryEvent['type']]: ReadonlyArray<Extract<Libr
 const samples: Samples = {
   load: [{ type: 'load' }],
   discoveryReady: [{ type: 'discoveryReady' }],
+  discoveryFailed: [{ type: 'discoveryFailed' }],
   mutationAsked: [{ type: 'mutationAsked', requestId: 'm', projectId: 'p1' }],
   mutationJournaled: [{ type: 'mutationJournaled', requestId: 'm', row: row('o9', 'p1') }],
   mutationAbandoned: [{ type: 'mutationAbandoned', requestId: 'm' }],

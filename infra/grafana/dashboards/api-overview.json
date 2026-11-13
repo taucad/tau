@@ -265,7 +265,7 @@
     },
     {
       "title": "Pooled client connections by process",
-      "description": "PostgreSQL connections each API process holds open, by Machine (instance), Fly process group and client pool (database connection audit R4). Each process counts only its own sockets, so the stack sums across instances, unlike tau_db_connections. The red dashed series is the session pooler's capacity for the login (tau_db_pooler_capacity, from DATABASE_POOLER_POOL_SIZE). The dashed threshold lines mark 12 (db-pooler-clients-high, warning) and 14 (db-pooler-clients-near-cap, critical): those rules add 2 to this stack for revisions-maintenance, which holds up to 2 more on the same login and exports no metrics.",
+      "description": "PostgreSQL connections each API process holds open, by Machine (instance), Fly process group and client pool (database connection audit R4). Each process counts only its own sockets, so the stack sums across instances, unlike tau_db_connections. The red dashed series is the session pooler's capacity for the login (tau_db_pooler_capacity, from DATABASE_POOLER_POOL_SIZE). The dashed threshold lines mark the declared budget of 12, 13 (db-pooler-clients-high, warning: over budget) and 14 (db-pooler-clients-near-cap, critical): those rules add 2 to this stack for revisions-maintenance, which holds up to 2 more on the same login and exports no metrics. Pools stay full after a burst, so sitting at the budget is normal.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 16, "x": 0, "y": 134 },
       "targets": [
@@ -288,7 +288,8 @@
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "orange", "value": 12 },
+              { "color": "yellow", "value": 12 },
+              { "color": "orange", "value": 13 },
               { "color": "red", "value": 14 }
             ]
           }

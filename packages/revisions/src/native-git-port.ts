@@ -62,6 +62,7 @@ import type {
   RevisionDivergence,
   RevisionDivergenceInput,
   RevisionEngineDescriptor,
+  RevisionGitOperation,
   RevisionHead,
   RevisionLogEntry,
   RevisionLogInput,
@@ -1765,6 +1766,146 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   };
 
   /**
+   * One environment with one more variable.
+   *
+   * @param environment - The environment to extend.
+   * @param name - The variable's name.
+   * @param value - Its value.
+   * @returns A copy of the environment with it set.
+   */
+  const withVariable = (
+    environment: Record<string, string | undefined>,
+    name: string,
+    value: string,
+  ): Record<string, string | undefined> => {
+    const extended = { ...environment };
+    // Environment names, not identifiers: assigned rather than spelled as keys.
+    extended[name] = value;
+    return extended;
+  };
+
+  /** The head a branch move replaced; `head` is `undefined` when the branch was unborn. */
+  type ReplacedHead = Readonly<{ head: string | undefined }>;
+
+  /**
+   * One worktree's admin directory: the store for the live checkout, its own
+   * `worktrees/<name>` for a linked one.
+   *
+   * @param root - A linked checkout's root, or `undefined` for the live checkout.
+   * @returns The absolute directory, or `undefined` when Git cannot name one.
+   */
+  const adminDirectoryOf = async (root: string | undefined): Promise<string | undefined> => {
+    if (root === undefined) {
+      return join(repositoryPath, gitDirectoryName);
+    }
+    const result = await run(['-C', root, 'rev-parse', '--absolute-git-dir'], { env: clearedGitEnvironment() });
+    return result.exitCode === 0 ? textDecoder.decode(result.stdout).trim() : undefined;
+  };
+
+  /**
+   * Point one worktree's index at the tree its branch now names, unless the
+   * person staged something.
+   *
+   * An index that differs from the tree of the head it replaced holds the
+   * person's own staging (`git add -p`, a resolved conflict), and is left
+   * alone: the work tree already carries those bytes, so the next capture
+   * records them either way, while the index is the one place Git keeps which
+   * of them the person meant to commit.
+   *
+   * The comparison and the write happen under Git's own `index.lock`, taken
+   * here, so the person's Git cannot stage between them. The new index is
+   * written beside it and renamed through the lock, which is how Git itself
+   * writes one. A lock someone else holds means their Git is mid-operation,
+   * and the refresh is skipped.
+   *
+   * @param root - A linked checkout's root, or `undefined` for the live checkout.
+   * @param head - The commit the branch now names, or `undefined` on an unborn branch.
+   * @param replaced - The head the move replaced, whose `head` is `undefined`
+   *   when the branch was unborn; absent, the index is replaced without
+   *   comparing (an open that found none).
+   * @returns Once the index was refreshed or left.
+   */
+  const refreshIndex = async (
+    root: string | undefined,
+    head: string | undefined,
+    replaced: ReplacedHead | undefined,
+  ): Promise<void> => {
+    /* A linked worktree finds its own admin directory from its `.git` file. */
+    const prefix = root === undefined ? [] : ['-C', root];
+    const environment = root === undefined ? gitEnvironment() : clearedGitEnvironment();
+    const readTree = head === undefined ? ['read-tree', '--empty'] : ['read-tree', head];
+    if (replaced === undefined) {
+      await run([...prefix, ...readTree], { env: environment });
+      return;
+    }
+    const admin = await adminDirectoryOf(root);
+    if (admin === undefined) {
+      return;
+    }
+    const index = join(admin, 'index');
+    const lock = `${index}.lock`;
+    const held = await open(lock, 'wx').then(
+      async (handle) => {
+        await handle.close();
+        return true;
+      },
+      () => false,
+    );
+    if (!held) {
+      return;
+    }
+    let locked = true;
+    const temporary = `${index}.tau-${randomUUID()}`;
+    try {
+      const indexed = await access(index).then(
+        () => true,
+        () => false,
+      );
+      if (indexed && (await stagedSince(prefix, environment, replaced.head)) !== 0) {
+        return;
+      }
+      const written = await run([...prefix, ...readTree], {
+        env: withVariable(environment, 'GIT_INDEX_FILE', temporary),
+      });
+      if (written.exitCode !== 0) {
+        return;
+      }
+      await rename(temporary, lock);
+      await rename(lock, index);
+      locked = false;
+    } finally {
+      await rm(temporary, { force: true });
+      if (locked) {
+        await rm(lock, { force: true });
+      }
+    }
+  };
+
+  /**
+   * Whether a worktree's index differs from the tree of one head.
+   *
+   * @param prefix - The arguments that select the worktree.
+   * @param environment - The environment its commands run under.
+   * @param replaced - The head, or `undefined` for an unborn one (the empty tree).
+   * @returns `0` when the index is that tree, `1` when someone staged into it,
+   *   any other value when Git could not compare (and the index is not Tau's to replace).
+   */
+  const stagedSince = async (
+    prefix: readonly string[],
+    environment: Record<string, string | undefined>,
+    replaced: string | undefined,
+  ): Promise<number> => {
+    const reading = { env: withVariable(environment, 'GIT_OPTIONAL_LOCKS', '0') };
+    if (replaced === undefined) {
+      /* Against an unborn head, any entry at all was staged by someone. */
+      const listed = await run([...prefix, 'ls-files', '--cached', '-z'], reading);
+      return listed.exitCode === 0 ? (listed.stdout.length > 0 ? 1 : 0) : listed.exitCode;
+    }
+    const compared = await run([...prefix, 'diff-index', '--cached', '--quiet', replaced, '--'], reading);
+    return compared.exitCode;
+  };
+
+  /**
    * Point each worktree's index at the tree its branch names (R14).
    *
    * Tau never reads the index: it applies trees through the filesystem provider
@@ -1773,8 +1914,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * reversed and `git commit -a` record it undone. So after a branch moves,
    * every worktree that has it checked out gets `read-tree` of the new head:
    * the state `git reset` leaves, with stat data zero for Git to fill in on
-   * its own next refresh. Anything the person staged is already in the working
-   * copy the next capture records.
+   * its own next refresh. An index the person staged into is kept (see
+   * `refreshIndex`).
    *
    * One queue so the last refresh reads the last head, and every failure is
    * swallowed: the ref has already moved, and a held `index.lock` means the
@@ -1782,9 +1923,10 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    *
    * @param moved - The fully-qualified branch that moved, or `undefined` for
    *   the live worktree alone (an open that found no index).
+   * @param replaced - The head the move replaced; absent, each index is replaced without comparing.
    * @returns Once every matching worktree's index was refreshed or skipped.
    */
-  const syncIndexes = async (moved: string | undefined): Promise<void> =>
+  const syncIndexes = async (moved: string | undefined, replaced?: ReplacedHead): Promise<void> =>
     refQueue.queueFor(`${repositoryPath}:index`, async () => {
       const listing = await run(['worktree', 'list', '--porcelain']);
       if (listing.exitCode !== 0) {
@@ -1801,12 +1943,10 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         if (root === undefined || !wanted) {
           continue;
         }
-        const readTree = head === undefined || head === zero ? ['read-tree', '--empty'] : ['read-tree', head];
         // oxlint-disable-next-line no-await-in-loop -- at most one worktree holds a branch.
-        await (index === 0
-          ? run(readTree)
-          : // A linked worktree finds its own admin directory from its `.git` file.
-            run(['-C', root, ...readTree], { env: clearedGitEnvironment() }));
+        await refreshIndex(index === 0 ? undefined : root, head === zero ? undefined : head, replaced).catch(
+          () => undefined,
+        );
       }
     });
 
@@ -2483,7 +2623,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         });
       });
       if (result.status === 'updated' && ref.startsWith(`${branchRefPrefix}/`)) {
-        await syncIndexes(ref);
+        await syncIndexes(ref, { head: input.expectedHead });
       }
       return result;
     },
@@ -2503,8 +2643,13 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     },
 
     setHead: async (branch: string): Promise<void> => {
-      await refQueue.queueFor(`${repositoryPath}:HEAD`, async () => output(['symbolic-ref', 'HEAD', refOf(branch)]));
-      await syncIndexes(refOf(branch));
+      /* The head the live worktree's index was read from, so staging into it survives the switch. */
+      const replaced = await refQueue.queueFor(`${repositoryPath}:HEAD`, async () => {
+        const previous = await run(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
+        await output(['symbolic-ref', 'HEAD', refOf(branch)]);
+        return previous.exitCode === 0 ? textDecoder.decode(previous.stdout).trim() : undefined;
+      });
+      await syncIndexes(refOf(branch), { head: replaced });
     },
 
     listRefs: async (prefix?: string): Promise<readonly RevisionRef[]> => {
@@ -3005,6 +3150,54 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     },
 
     listCheckouts: async (): Promise<readonly Checkout[]> => listWorktrees(),
+
+    /*
+     * The files stock Git leaves in a worktree's admin directory while an
+     * operation is stopped part-way, read without running Git so a poll costs
+     * a few stats. An operation outranks a detached head, since a rebase
+     * detaches one, and a held `index.lock` comes last: it is the shortest.
+     */
+    gitOperation: async (root?: string): Promise<RevisionGitOperation | undefined> => {
+      const admin = await adminDirectoryOf(root);
+      if (admin === undefined) {
+        return undefined;
+      }
+      const exists = async (name: string): Promise<boolean> => {
+        try {
+          await access(join(admin, name));
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const markers: ReadonlyArray<readonly [string, RevisionGitOperation['kind']]> = [
+        ['MERGE_HEAD', 'merge'],
+        ['CHERRY_PICK_HEAD', 'cherryPick'],
+        ['REVERT_HEAD', 'revert'],
+        ['rebase-merge', 'rebase'],
+        ['rebase-apply', 'rebase'],
+      ];
+      for (const [name, kind] of markers) {
+        // oxlint-disable-next-line no-await-in-loop -- in order: the first marker names the operation.
+        if (await exists(name)) {
+          return Object.freeze({ kind });
+        }
+      }
+      const head = await readFile(join(admin, 'HEAD'), 'utf8').catch(() => undefined);
+      if (head !== undefined && !head.startsWith(symbolicRefPrefix)) {
+        /* The way back: the branch Git's own log says this worktree left last. */
+        const previous = await run(
+          [...(root === undefined ? [] : ['-C', root]), 'rev-parse', '--symbolic-full-name', '@{-1}'],
+          root === undefined ? {} : { env: clearedGitEnvironment() },
+        );
+        const left = previous.exitCode === 0 ? textDecoder.decode(previous.stdout).trim() : '';
+        return Object.freeze({
+          kind: 'detached',
+          ...(left.startsWith(`${branchRefPrefix}/`) ? { branch: left.slice(branchRefPrefix.length + 1) } : {}),
+        });
+      }
+      return (await exists('index.lock')) ? Object.freeze({ kind: 'locked' }) : undefined;
+    },
 
     /**
      * One checkout per branch — the rule Git already enforces, refused here with

@@ -1,5 +1,4 @@
 {
-  "apps/ui/app/chat-clients/debug-probes.tsx": 4,
   "apps/ui/app/cloud/root-billing.cloud.tsx": 2,
   "apps/ui/app/components/animate-ui/effects/motion-highlight.tsx": 1,
   "apps/ui/app/components/auth/check-email.tsx": 1,
@@ -18,7 +17,6 @@
   "apps/ui/app/components/code/diff-viewer.tsx": 1,
   "apps/ui/app/components/files/use-export-to-disk.ts": 1,
   "apps/ui/app/components/geometry/cad/capture-view-control.tsx": 1,
-  "apps/ui/app/components/geometry/debug/section-view-test-bridge.tsx": 17,
   "apps/ui/app/components/geometry/loader/metal-morph-spinner.tsx": 1,
   "apps/ui/app/components/machines/machine-controls.tsx": 1,
   "apps/ui/app/components/machines/machine-section.tsx": 1,
@@ -58,7 +56,6 @@
   "apps/ui/app/hooks/use-sessions.tsx": 3,
   "apps/ui/app/hooks/use-sidebar-status.ts": 2,
   "apps/ui/app/hooks/use-thumbnail-generator.ts": 3,
-  "apps/ui/app/routes/[__e2e].onshape-render-profile/route.tsx": 9,
   "apps/ui/app/routes/auth.$/route.tsx": 1,
   "apps/ui/app/routes/community/route.tsx": 1,
   "apps/ui/app/routes/convert/route.tsx": 2,

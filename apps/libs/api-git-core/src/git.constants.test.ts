@@ -9,6 +9,7 @@ import {
   authorshipRefusals,
   ceilingRefusalMarker,
   gitLfsObjectKey,
+  isRemovableRef,
   pktLine,
   preReceiveHookScript,
   projectIdFromRepository,
@@ -1224,5 +1225,28 @@ describe('pre-receive version-number check (B6)', () => {
 
   it('spells the taken-number marker the way packages/revisions matches it', () => {
     expect(versionNumberTakenMarker).toBe('Tau: version number taken');
+  });
+});
+
+/* D24, F2: the audited removal verb takes a conflict line and nothing else. A
+   version is never removed, so its tag is refused like every other ref. */
+describe('isRemovableRef', () => {
+  it.each(['refs/heads/conflicts/main/device-b', 'refs/heads/conflicts/feature.x/laptop-2'])(
+    'should admit the conflict line %s',
+    (ref) => {
+      expect(isRemovableRef(ref)).toBe(true);
+    },
+  );
+
+  it.each([
+    'refs/tags/v4',
+    'refs/tags/v1.0.0',
+    'refs/heads/main',
+    'refs/heads/conflicts',
+    'refs/heads/conflicts/',
+    'refs/heads/conflicts/../main',
+    'refs/tau/chats/chat_1',
+  ])('should refuse %s', (ref) => {
+    expect(isRemovableRef(ref)).toBe(false);
   });
 });

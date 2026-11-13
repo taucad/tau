@@ -12,6 +12,8 @@ describe('package exports', () => {
       './config/auth-static': './src/config/auth-static.config.ts',
       './config/better-auth': './src/config/better-auth.config.ts',
       './module': './src/auth.module.ts',
+      './testing': './src/testing.ts',
+      './testing/session-cache': './src/testing/session-cache.fixture.ts',
       './package.json': './package.json',
     });
   });

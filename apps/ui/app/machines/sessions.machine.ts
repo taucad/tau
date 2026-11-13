@@ -126,6 +126,25 @@ export type SessionsMachineEvent =
   | { readonly type: 'quit' }
   | { readonly type: 'quitAnyway' };
 
+/**
+ * The sessions machine's public alphabet: every {@link SessionsMachineEvent} type, in the union's order. The totality
+ * test samples each one and fails when this list and the union differ.
+ *
+ * @public
+ */
+export const sessionsEventTypes = [
+  'open',
+  'close',
+  'touch',
+  'idleExpired',
+  'releaseMemory',
+  'sessionState',
+  'sessionClosed',
+  'cancelPendingOpen',
+  'quit',
+  'quitAnyway',
+] as const satisfies ReadonlyArray<SessionsMachineEvent['type']>;
+
 /** What the registry tells the app. @public */
 export type SessionsMachineEmitted =
   | { readonly type: 'liveSetChanged'; readonly projectIds: readonly string[] }

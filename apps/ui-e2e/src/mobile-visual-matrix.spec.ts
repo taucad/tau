@@ -1055,9 +1055,15 @@ test('reselects same-file saved views through All after reload without changing 
     // oxlint-disable-next-line no-await-in-loop -- wait for the selected record's geometry.
     await waitForModelReady();
     // oxlint-disable-next-line no-await-in-loop -- its saved settings must be applied to the live viewer.
+    await target.click(selectors.getByRole('button', { name: 'Viewer settings' }).last(), { touch: true });
+    // oxlint-disable-next-line no-await-in-loop -- the saved grid unit reads on the Grid & units row.
     await target.expectVisible(
-      selectors.getByRole('button', { name: new RegExp(`Grid .* ${unit}, units and grid`, 'u') }),
+      selectors.getByRole('menuitem', { name: new RegExp(`^Grid & units, .* ${unit}(?:,|$)`, 'u') }),
     );
+    // oxlint-disable-next-line no-await-in-loop -- close the menu before the camera and screenshot.
+    await target.keyboardPress('Escape');
+    // oxlint-disable-next-line no-await-in-loop -- the menu must be gone from the screenshot.
+    await target.expectCount(selectors.getByRole('menu'), 0);
     // oxlint-disable-next-line no-await-in-loop -- capture the rendered camera, not only the authored record.
     cameras.push(
       // oxlint-disable-next-line no-await-in-loop -- capture each selected live camera before switching away.

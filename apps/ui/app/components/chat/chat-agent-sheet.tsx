@@ -1428,17 +1428,7 @@ function Sheet({
               className={cn(rowClass, menuViewBackClass)}
               onClick={back}
             >
-              <ViewStackBackContent
-                title={
-                  view === 'models' && isFromAgents
-                    ? 'Agents'
-                    : view === 'effort'
-                      ? 'Effort'
-                      : view === 'options'
-                        ? 'Settings'
-                        : sheetModel.name
-                }
-              />
+              <ViewStackBackContent />
             </button>
           </div>
           {view === 'options' ? (

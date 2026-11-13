@@ -131,14 +131,46 @@ export type ShellProjectProtected = Readonly<{
 }>;
 
 /**
+ * Whether a protected path is a git directory the person's Terminal may read: named `.git` under any spelling, outside
+ * Tau's own `.tau` directory, and not a link, which would open whatever it names. An absent one stays read-only too, so
+ * no session can create it.
+ */
+const readableGitDirectory = async (root: string, path: string): Promise<boolean> => {
+  if (basename(path).toLowerCase() !== '.git') {
+    return false;
+  }
+  const [first = ''] = relative(root, path).split(sep);
+  if (first.toLowerCase() === reservedTauDirectory) {
+    return false;
+  }
+  try {
+    const status = await lstat(path);
+    return !status.isSymbolicLink();
+  } catch {
+    return true;
+  }
+};
+
+/**
  * The checkout's own control and record paths: every registry row the agent may not write, and every existing name
  * the classifier hides or protects, under any spelling the filesystem resolves (D20, A04). Read-only rows stay
  * readable (E03); every other protected name is denied.
  *
+ * The person's Terminal reads the project's real git store (operator ruling 2026-11-12, "Real .git, read-only"):
+ * with `readableGit`, every `.git` directory, the checkout's own and nested ones, is read-only instead of denied, so
+ * git there reads live history and can write none of it. The store is moved out of the denied set rather than also
+ * listed read-only, because Seatbelt opens a read-only root inside a denied one only when it lies strictly inside,
+ * never when the two are the same path. `.jj`, `.hg`, `.svn`, `.tau/binding.json` and the staging directory stay
+ * denied, and a grant that names a version-control directory is still refused. The agent's launch never passes it.
+ *
  * @param root - The checkout's real root.
+ * @param options - `readableGit` for the person's Terminal.
  * @returns The read-only and denied absolute paths.
  */
-export const projectProtected = async (root: string): Promise<ShellProjectProtected> => {
+export const projectProtected = async (
+  root: string,
+  options: Readonly<{ readableGit?: boolean | undefined }> = {},
+): Promise<ShellProjectProtected> => {
   const denied = new Set<string>();
   const readOnly = new Set<string>();
   const directories = new Set<string>();
@@ -181,6 +213,15 @@ export const projectProtected = async (root: string): Promise<ShellProjectProtec
   }
   for (const path of await nestedControlDirectories(root)) {
     denied.add(path);
+  }
+  if (options.readableGit === true) {
+    for (const path of denied) {
+      // oxlint-disable-next-line no-await-in-loop -- one lstat per protected `.git`, a handful at most.
+      if (await readableGitDirectory(root, path)) {
+        denied.delete(path);
+        readOnly.add(path);
+      }
+    }
   }
   return {
     readOnly: [...readOnly].filter((path) => !denied.has(path)),

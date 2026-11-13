@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(212);
+    expect(metrics).toHaveLength(213);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -105,6 +105,15 @@ describe('TauMetrics', () => {
       'request',
       'background',
     ]);
+  });
+
+  it('should export the session resolution counter with bounded attributes', () => {
+    const metric = TauMetrics.authSessionResolutions;
+    expect(toPrometheusName(metric.name, metric.type)).toBe('tau_auth_session_resolutions_total');
+    expect(metric.attributes.shape.mode.options).toEqual(['cached', 'authoritative']);
+    expect(metric.attributes.shape.credential.options).toEqual(['cookie', 'authorization', 'none']);
+    expect(metric.attributes.shape.outcome.options).toEqual(['authenticated', 'unauthenticated', 'error']);
+    expect(metric.attributes.shape.coalesced.options).toEqual(['true', 'false']);
   });
 
   it('should bound the R2 bucket label to roles, so a bucket name never becomes a label value', () => {

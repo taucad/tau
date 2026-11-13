@@ -76,6 +76,18 @@ export const undoLabel = 'Undo';
 /** What an *Undo restore* says: one more entry on top that put the files back. @public */
 export const undidRestoreSentence = 'Undid the restore';
 
+/** What the *Merged* toast's Undo says: one more entry on top with the files from before the merge (I11). @public */
+export const undidMergeSentence = 'Undid the merge';
+
+/**
+ * What the *Closed* toast's Undo says: the branch has its files on this device again, at the head it kept.
+ *
+ * @param branch - The branch reopened.
+ * @returns The toast's sentence.
+ * @public
+ */
+export const reopenedSentence = (branch: string): string => `Reopened ${branch}`;
+
 /**
  * What a *Switch* says once it has moved: whether it saved unsaved work first,
  * and on which branch, because that is where its Undo goes back to (I11).

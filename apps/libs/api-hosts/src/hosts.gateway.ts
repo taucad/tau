@@ -3,13 +3,11 @@ import type { IncomingMessage } from 'node:http';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
-import type { Auth } from 'better-auth';
-import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { RawData } from 'ws';
 
-import { authInstanceKey } from '@taucad/api-auth';
+import { SessionResolver } from '@taucad/api-auth';
 import { asBuffer, hostFrameMaxPayload } from '#host-frame-relay.js';
 import { HostsService } from '#hosts.service.js';
 import { absorbSocketErrors, DevWebSocketService, trackSocket, UpgradeRouter } from '@taucad/api-lifecycle';
@@ -27,7 +25,7 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
   public constructor(
     private readonly hostsService: HostsService,
     private readonly devWebSocketService: DevWebSocketService,
-    @Inject(authInstanceKey) private readonly auth: Auth,
+    @Inject(SessionResolver) private readonly sessions: SessionResolver,
     @Inject(HttpAdapterHost) private readonly httpAdapterHost: HttpAdapterHost,
     // oxlint-disable-next-line new-cap -- NestJS decorator
     @Optional() private readonly upgradeRouter: UpgradeRouter = new UpgradeRouter(),
@@ -200,8 +198,9 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
       });
       return;
     }
-    const session = await this.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
-    if (!session) {
+    // One check admits a long-lived socket, so the upgrade always reads the store.
+    const { user } = await this.sessions.resolve({ headers: request.headers, method: 'GET', authoritative: true });
+    if (user === null) {
       this.metrics.wsUpgradeRejections.add(1, {
         'ws.gateway': 'hosts',
         reason: 'unauthenticated',
@@ -209,6 +208,6 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
       socket.close(4401, 'browser session required');
       return;
     }
-    await this.hostsService.acceptBrowserRoute({ sessionId, route, userId: session.user.id, socket });
+    await this.hostsService.acceptBrowserRoute({ sessionId, route, userId: user.id, socket });
   }
 }

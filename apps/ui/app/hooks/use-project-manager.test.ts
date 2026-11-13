@@ -600,7 +600,7 @@ const createWrapper = () => {
     return createElement(
       QueryClientProvider,
       { client: queryClient },
-      createElement(ProjectManagerProvider, { library: libraryFor(queryClient), children }),
+      createElement(ProjectManagerProvider, { library: libraryFor(queryClient) }, children),
     );
   };
 };
@@ -615,7 +615,7 @@ const createCountingWrapper = () => {
     return createElement(
       QueryClientProvider,
       { client: queryClient },
-      createElement(ProjectManagerProvider, { library: libraryFor(queryClient), children }),
+      createElement(ProjectManagerProvider, { library: libraryFor(queryClient) }, children),
     );
   };
   return { wrapper, projectsInvalidations };
@@ -627,7 +627,7 @@ const createInspectableWrapper = () => {
     return createElement(
       QueryClientProvider,
       { client: queryClient },
-      createElement(ProjectManagerProvider, { library: libraryFor(queryClient), children }),
+      createElement(ProjectManagerProvider, { library: libraryFor(queryClient) }, children),
     );
   };
   return { wrapper, queryClient };

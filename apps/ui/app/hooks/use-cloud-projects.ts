@@ -439,7 +439,7 @@ const useListingAwaitsSession = (queryClient: QueryClient, account: string | und
     () => readSessionState(queryClient),
     () => undefined,
   );
-  if (session?.status === 'pending' && session.fetchStatus === 'fetching') {
+  if (session?.status === 'pending' && session.fetchStatus !== 'paused') {
     return true;
   }
   const answer = sessionAnswerOf(session);

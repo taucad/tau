@@ -885,7 +885,7 @@ export function ProjectManagerProvider({
   children,
   library: composed,
 }: {
-  readonly children: ReactNode;
+  readonly children?: ReactNode;
   readonly library?: ProjectLibrary;
 }): React.JSX.Element {
   const runtime = useOptionalAppRuntime();

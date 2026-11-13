@@ -350,7 +350,7 @@ const createHarness = () => {
     return createElement(
       QueryClientProvider,
       { client: queryClient },
-      createElement(ProjectManagerProvider, { library: libraryFor(queryClient), children }),
+      createElement(ProjectManagerProvider, { library: libraryFor(queryClient) }, children),
     );
   };
   return renderHook(() => useProjectManager(), { wrapper });

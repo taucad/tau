@@ -55,7 +55,8 @@
 \* A2 (app state orchestration): the project-manager and workspace-connection actors moved into the
 \* `ProjectLibrary` service, which the runtime starts. Discovery, recovery and route access still run in
 \* `ProjectManagerProvider` against them, with the same refs and reads, so every action is unchanged.
-\* The provider hands the library its binding in render; a port called before it waits for it.
+\* The provider hands the library its binding in render; a port called before it waits for it, and
+\* its children are optional, which changes no action.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

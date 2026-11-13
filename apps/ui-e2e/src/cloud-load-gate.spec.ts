@@ -227,7 +227,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
-      expectedFailure: true,
+      expectedFailure: false,
       title: `U24: paints the usage shell within ${String(shellPaintBound)} ms while its document is stalled ${String(documentStall)} ms, the service worker installed`,
     },
     async (defect) => {

@@ -343,7 +343,7 @@ const held = (scope: FakeScope): HeldAnswer => {
   return answer;
 };
 
-it.fails('U24: a navigation with no response for 3,000 ms is answered with the cached neutral shell', async () => {
+it('U24: a navigation with no response for 3,000 ms is answered with the cached neutral shell', async () => {
   const { scope, cached } = await stalledNavigation();
 
   const response = respondFromOfflineShell(scope, manifest, navigation(usageUrl));
@@ -388,4 +388,57 @@ it('clears the navigation timer when the network wins', async () => {
   await response;
 
   expect(scope.pendingTimers()).toBe(0);
+});
+
+it('keeps waiting for the network at 3,000 ms when no document is cached', async () => {
+  const { scope } = await stalledNavigation();
+  const cache = scope.caches.stores.get(offlineShellCacheName('v1'));
+  cache?.entries.delete('/usage');
+
+  const response = respondFromOfflineShell(scope, manifest, navigation(usageUrl));
+  await settle();
+  scope.advance(3000);
+  const atBound = await peek(response);
+  expect(atBound.settled).toBe(false);
+  held(scope).resolve(new Response('network:/usage'));
+
+  const served = await response;
+  expect(await served?.text()).toBe('network:/usage');
+});
+
+it('leaves no unhandled rejection when the network fails after the fallback', async () => {
+  const { scope, cached } = await stalledNavigation();
+  const unhandled: unknown[] = [];
+  const record = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  process.on('unhandledRejection', record);
+  try {
+    const response = respondFromOfflineShell(scope, manifest, navigation(usageUrl));
+    await settle();
+    scope.advance(3000);
+    expect(await response).toBe(cached);
+
+    held(scope).reject(new TypeError('Failed to fetch'));
+    await settle();
+    await settle();
+  } finally {
+    process.off('unhandledRejection', record);
+  }
+
+  expect(unhandled).toStrictEqual([]);
+});
+
+it('discards a late network answer instead of storing it', async () => {
+  const { scope, cached } = await stalledNavigation();
+
+  const response = respondFromOfflineShell(scope, manifest, navigation(usageUrl));
+  await settle();
+  scope.advance(3000);
+  expect(await response).toBe(cached);
+  held(scope).resolve(new Response('session-rendered:/usage'));
+  await settle();
+
+  const cache = await scope.caches.open(offlineShellCacheName('v1'));
+  expect(await cache.match('/usage')).toBe(cached);
 });

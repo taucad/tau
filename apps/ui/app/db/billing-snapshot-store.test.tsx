@@ -1,8 +1,12 @@
 // oxlint-disable-next-line import/no-unassigned-import -- side-effect import polyfills IndexedDB for tests
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
+import { render, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { wireUsageSnapshotSchema } from '@taucad/billing';
+import { BillingSessionProvider, useBillingSession } from '@taucad/billing/hooks/billing-session';
+import { useCredits } from '@taucad/billing/hooks/use-credits';
 import type { UsageSnapshotQuery } from '@taucad/billing/hooks/use-usage-snapshot';
 import {
   canonicalUsageQueryKey,
@@ -10,8 +14,10 @@ import {
   readBillingRevisionMinimum,
   readSavedUsage,
   recordBillingRevisionMinimum,
+  useBillingRevisionMinimum,
   writeSavedUsage,
 } from '#db/billing-snapshot-store.js';
+import { FinancialSessionProvider, FinancialSessionScope } from '#providers/financial-session-provider.js';
 
 const timestamp = '2026-09-12T00:00:00.000Z';
 const groupTotals = { accountDeltaCreditAtoms: '-12345', netUsedCreditAtoms: '12345', eventCount: '1' };
@@ -303,5 +309,61 @@ describe('billing snapshot store', () => {
     await expect(writeSavedUsage(snapshotA, queryKey)).resolves.toBe('unavailable');
     await expect(readSavedUsage(queryKey, session)).resolves.toBeUndefined();
     await expect(purgeSavedUsage()).resolves.toBeUndefined();
+  });
+
+  // ── React view across a first sign-in ────────────────────────────────────
+  it('should never fence a first owner with the saved minimum read while identity was unknown', async () => {
+    await recordBillingRevisionMinimum({
+      environment: 'development',
+      ownerId: 'user-b',
+      subjectId: 'account-b',
+      revision: '9',
+    });
+    const requests: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        requests.push(url);
+        return new Response('{}', { status: 503 });
+      }),
+    );
+    const renders: Array<{ readonly userId: string | undefined; readonly minimumOwner: string | undefined }> = [];
+    const Probe = (): undefined => {
+      const { userId } = useBillingSession();
+      const minimum = useBillingRevisionMinimum();
+      useCredits(minimum);
+      renders.push({ userId, minimumOwner: minimum?.ownerId });
+      return undefined;
+    };
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = (userId: string | undefined): React.JSX.Element => (
+      <QueryClientProvider client={queryClient}>
+        <FinancialSessionProvider>
+          <FinancialSessionScope
+            identity={
+              userId === undefined
+                ? undefined
+                : { apiBaseUrl: 'https://api', environment: 'development', ownerId: userId }
+            }
+          >
+            <BillingSessionProvider value={{ apiBaseUrl: 'https://api', environment: 'development', userId }}>
+              <Probe />
+            </BillingSessionProvider>
+          </FinancialSessionScope>
+        </FinancialSessionProvider>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(tree(undefined));
+    await waitFor(() => {
+      expect(renders.at(-1)?.minimumOwner).toBe('user-b');
+    });
+
+    rerender(tree('user-a'));
+    await waitFor(() => {
+      expect(requests.length).toBeGreaterThan(0);
+    });
+
+    expect(renders.filter((row) => row.userId === 'user-a' && row.minimumOwner === 'user-b')).toEqual([]);
+    expect(requests.filter((url) => url.includes('minRevision'))).toEqual([]);
   });
 });

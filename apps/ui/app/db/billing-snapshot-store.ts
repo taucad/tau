@@ -517,6 +517,18 @@ export const purgeSavedUsage = async (keep?: SavedUsageScope): Promise<void> => 
   });
 };
 
+/** A read held in React state, tagged with the billing session it was read for. */
+type SessionRead<T> = { readonly session: string; readonly value: T | undefined };
+
+/**
+ * Identifies the billing session a read answers. While identity is unknown the
+ * device's saved profile, possibly another owner's, is readable; once an owner
+ * signs in the children stay mounted, so a read tagged for the unknown session
+ * must not be shown or sent for the new owner.
+ */
+const sessionReadKey = (environment: string | undefined, userId: string | undefined): string =>
+  JSON.stringify([environment ?? null, userId ?? null]);
+
 /**
  * The saved usage this device can show for `query`, including on a cold
  * offline start where the session is still indeterminate.
@@ -526,8 +538,9 @@ export const purgeSavedUsage = async (keep?: SavedUsageScope): Promise<void> => 
  */
 export function useSavedUsage(query: UsageSnapshotQuery): SavedUsage | undefined {
   const { environment, userId } = useBillingSession();
+  const session = sessionReadKey(environment, userId);
   const queryKey = useMemo(() => canonicalUsageQueryKey(query), [query]);
-  const [saved, setSaved] = useState<SavedUsage | undefined>(undefined);
+  const [saved, setSaved] = useState<SessionRead<SavedUsage> | undefined>(undefined);
 
   useEffect(() => {
     const cancelled = new AbortController();
@@ -535,28 +548,29 @@ export function useSavedUsage(query: UsageSnapshotQuery): SavedUsage | undefined
     void (async () => {
       const next = await readSavedUsage(queryKey, { environment, ownerId: userId });
       if (!cancelled.signal.aborted) {
-        setSaved(next);
+        setSaved({ session, value: next });
       }
     })();
     return () => {
       cancelled.abort();
     };
-  }, [environment, queryKey, userId]);
+  }, [environment, queryKey, session, userId]);
 
-  return saved;
+  return saved?.session === session ? saved.value : undefined;
 }
 
 /** React view of the durable account-revision fence, refreshed across tabs. */
 export function useBillingRevisionMinimum(): BillingRevisionMinimum | undefined {
   const { environment, userId } = useBillingSession();
-  const [minimum, setMinimum] = useState<BillingRevisionMinimum | undefined>(undefined);
+  const session = sessionReadKey(environment, userId);
+  const [minimum, setMinimum] = useState<SessionRead<BillingRevisionMinimum> | undefined>(undefined);
 
   useEffect(() => {
     const cancelled = new AbortController();
     const refresh = async (): Promise<void> => {
       const next = await readBillingRevisionMinimum({ environment, ownerId: userId });
       if (!cancelled.signal.aborted) {
-        setMinimum(next);
+        setMinimum({ session, value: next });
       }
     };
     const refreshFromEvent = (): void => {
@@ -571,9 +585,9 @@ export function useBillingRevisionMinimum(): BillingRevisionMinimum | undefined 
       globalThis.removeEventListener(revisionChangedEvent, refreshFromEvent);
       channel?.close();
     };
-  }, [environment, userId]);
+  }, [environment, session, userId]);
 
-  return minimum;
+  return minimum?.session === session ? minimum.value : undefined;
 }
 
 /**

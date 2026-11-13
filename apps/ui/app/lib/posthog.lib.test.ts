@@ -128,9 +128,9 @@ it('redacts recorder Meta and network URLs before replay compression', () => {
 
 it('redacts sign-in tokens from event URLs', () => {
   const sent = redactEventProperties({
-    properties: { $current_url: 'https://tau.new/auth/reset-password?token=abc.DEF-123' },
+    properties: { href: 'https://tau.new/auth/reset-password?token=abc.DEF-123' },
   });
-  expect(sent.properties).toStrictEqual({ $current_url: 'https://tau.new/auth/reset-password?token=[redacted]' });
+  expect(sent.properties).toStrictEqual({ href: 'https://tau.new/auth/reset-password?token=[redacted]' });
 });
 
 it('records replay text, masks inputs and still blocks invitation links', () => {

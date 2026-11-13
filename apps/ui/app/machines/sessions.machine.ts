@@ -341,7 +341,7 @@ export const sessionsMachine = setup({
   },
 }).createMachine({
   id: 'sessions',
-  version: '3',
+  version: '4',
   /* A fault no transition modelled is recorded and the registry keeps answering (MC-R12). */
   onError: ({ event }) => ({
     context: { fault: event.error instanceof Error ? event.error.message : 'sessions fault' },

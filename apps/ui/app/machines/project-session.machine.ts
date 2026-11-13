@@ -462,7 +462,7 @@ export const projectSessionMachine = setup({
   },
 }).createMachine({
   id: 'project-session',
-  version: '1',
+  version: '2',
   /* A fault no transition modelled is recorded and the session keeps answering (MC-R12). */
   onError: ({ event }) => ({
     context: { fault: event.error instanceof Error ? event.error.message : 'project-session fault' },

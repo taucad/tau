@@ -2,8 +2,23 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import type { HomeInspection, HomeLoadRecord } from '#support/home-load-recorder.js';
-import { inspectServerHtml, installHomeLoadRecorder, readHomeLoad } from '#support/home-load-recorder.js';
+import type {
+  HomeInspection,
+  HomeLoadRecord,
+  ProjectLoadRecord,
+  WorkerReadDelay,
+} from '#support/home-load-recorder.js';
+import {
+  armWorkerReadDelay,
+  inspectServerHtml,
+  installHomeLoadRecorder,
+  installProjectLoadRecorder,
+  installWorkerReadDelay,
+  projectRowMoves,
+  readHomeLoad,
+  readProjectLoad,
+  readWorkerReads,
+} from '#support/home-load-recorder.js';
 
 /**
  * R9 (home page loading audit): a load of Home is steady from its first frame. The target frame sequence's
@@ -153,5 +168,97 @@ test.each(
       `${label} reload`,
       await measure(async () => target.reload(), { label: `${label}-reload`, projects, rate }),
     );
+  },
+);
+
+/*
+ * A0.10 (app state orchestration charter, D25): Home's loading defects for a returning visitor, frame by frame. Each
+ * row forces its defect by answering a file-manager worker read late, so it is red on every run, and is written
+ * `test.fails` so `main` stays green. The title names the defect; the failure names the frame and the node. The
+ * fixing lane flips the row to `test`. On each failure the row writes its message as an artifact.
+ */
+
+/** How late a delayed worker read answers. Milliseconds. */
+const readDelay = 3000;
+/** The project listing Home's library and sidebar wait for. */
+const projectListingRead: WorkerReadDelay = { method: 'listProjectManifests', path: '', milliseconds: readDelay };
+/** Every project's chat listing. */
+const chatListingRead: WorkerReadDelay = {
+  method: 'readdir',
+  path: String.raw`^\.tau/chats$`,
+  milliseconds: readDelay,
+};
+
+/**
+ * A row that pins a known defect: an expected failure until its fix flips it, its failure message kept as evidence.
+ */
+const knownDefect = (title: string, artifact: string, body: () => Promise<void>): void => {
+  test.fails(title, async () => {
+    try {
+      await body();
+    } catch (error) {
+      const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      await target.writeArtifact(`home-load-gate/${artifact}/failure-${Date.now()}.txt`, `${message}\n`);
+      throw error;
+    }
+  });
+};
+
+/** The returning visitor, then one reload of Home with `delays` armed, watched until the late reads answered. */
+const measureReturningReload = async (
+  viewport: ViewportName,
+  delays: readonly WorkerReadDelay[],
+  label: string,
+): Promise<ProjectLoadRecord> => {
+  await target.setViewport(viewports.wide);
+  await installProjectLoadRecorder();
+  await installWorkerReadDelay();
+  await seedReturningVisitor();
+  await target.setViewport(viewports[viewport]);
+  await target.navigate('/');
+  await waitForSettledHome(seededProjects, 1);
+  await armWorkerReadDelay(delays);
+  await target.reload();
+  await target.expectVisible(richComposer, 60_000);
+  await target.delay(readDelay + settleWindow);
+  await waitForSettledHome(seededProjects, 1);
+  const record = await readProjectLoad();
+  const reads = await readWorkerReads();
+  await target.writeArtifact(
+    `home-load-gate/${label}.json`,
+    `${JSON.stringify({ record, workerReads: reads }, null, 2)}\n`,
+  );
+  expect(
+    reads.some((read) => read.delayed),
+    `${label}: no worker read was delayed`,
+  ).toBe(true);
+  return record;
+};
+
+for (const viewport of ['wide', 'phone'] as const) {
+  knownDefect(
+    `H1: Home shows no skeleton after hydration for a returning visitor on a ${viewport} viewport, with the project listing 3 s late`,
+    `h1-${viewport}`,
+    async () => {
+      const record = await measureReturningReload(viewport, [projectListingRead], `h1-${viewport}`);
+      const hydrated = record.hydratedFirstFrame;
+      expect(hydrated, 'H1: the rich composer never mounted').toBeDefined();
+      const after = record.skeletonFrames.filter((frame) => frame.frame >= (hydrated?.frame ?? 0));
+      expect(
+        after.map((frame) => `frame ${frame.frame} (${frame.t} ms): ${frame.count}`).slice(0, 5),
+        `H1: hydrated by frame ${hydrated?.frame ?? 0} (${hydrated?.t ?? 0} ms), then [data-slot=skeleton] blocks in ${after.length} frames`,
+      ).toEqual([]);
+    },
+  );
+}
+
+knownDefect(
+  'H5: no sidebar project row moves on a returning reload of Home with the chat listing 3 s late',
+  'h5-wide',
+  async () => {
+    const record = await measureReturningReload('wide', [chatListingRead], 'h5-wide');
+    expect(record.projectRows.length, 'H5: no sidebar project row was on screen').toBeGreaterThan(0);
+    const moved = projectRowMoves(record);
+    expect(moved, `H5: a sidebar project row moved between frames: ${moved.join(' | ')}`).toEqual([]);
   },
 );

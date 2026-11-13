@@ -386,6 +386,8 @@ export type UiBrowserCommands = {
   uiSampleCameraDuringClick(selector: string, frameCount: number): Promise<unknown[]>;
   uiScrollTarget(selector: string, surface?: TargetSurface): Promise<void>;
   uiSetTargetOffline(offline: boolean): Promise<void>;
+  uiDelayTargetRequests(pattern: string, milliseconds: number): Promise<void>;
+  uiReadDelayedTargetRequests(): Promise<readonly string[]>;
   uiSetViewport(viewport: TargetViewport, surface?: TargetSurface): Promise<void>;
   uiStartHostFixture(): Promise<string>;
   uiStartLinkedGithubFixture(): Promise<TargetLinkedGithub>;
@@ -1011,3 +1013,8 @@ export const startObservedRequests = (): Promise<void> => server.commands.uiStar
 /** Drain the request paths the target started since the last read, by default after its network settles. */
 export const readObservedRequests = (settle?: boolean): Promise<readonly string[]> =>
   server.commands.uiReadObservedRequests(settle);
+/** Hold every request whose URL matches `pattern` (a regular expression source) for `milliseconds` (A0.10). */
+export const delayRequests = (pattern: string, milliseconds: number): Promise<void> =>
+  server.commands.uiDelayTargetRequests(pattern, milliseconds);
+/** The URLs {@link delayRequests} held in this target context so far. */
+export const readDelayedRequests = (): Promise<readonly string[]> => server.commands.uiReadDelayedTargetRequests();

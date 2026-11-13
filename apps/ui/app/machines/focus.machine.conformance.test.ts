@@ -186,6 +186,7 @@ const answerOpens = (harness: Harness): void => {
     if (spawned) {
       stub.sess[open.projectId] = 'live';
     }
+    // A spawn's facts may come before its answer too; the harness reports them again after it (the wiring contract).
     if (spawned && stub.factsFirst) {
       focus.facts(open.projectId, 'live', { chatReady: false, availability: 'pending' });
     }
@@ -329,7 +330,7 @@ const machine = createFocusMachine({ nativeKernelOf: () => undefined });
 
 describe('focus conforms to ProjectFocus.tla', () => {
   it.each([
-    ['before', true],
+    ['before and after', true],
     ['after', false],
   ])('should replay the covering suite without divergence, facts reported %s the reply', async (_order, factsFirst) => {
     const behaviours = suiteBehaviours(graph, suite) as unknown as SpecState[][];

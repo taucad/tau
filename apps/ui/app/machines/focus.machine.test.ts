@@ -363,7 +363,13 @@ describe('focus: the registry answers an open', () => {
     harness.settleFlush(true);
     const own = harness.lastOpen();
     harness.send({ type: 'openRequested', projectId: 'b' });
+    const person = harness.lastOpen();
     harness.settleOpen('waiting', own.requestId);
+
+    expect(harness.opens()).toHaveLength(3);
+
+    // The person's touch answers after focus's wait on the ordered channel: that wait was displaced.
+    harness.settleOpen('live', person.requestId);
 
     expect(harness.context().pending).toBeUndefined();
     expect(harness.lastOpen()).toMatchObject({ projectId: 'a' });
@@ -1034,10 +1040,10 @@ describe('focus: a session that leaves before the join, and person opens around 
     harness.route('r1', 'a');
     harness.ready('r1', 'a');
     harness.settleFlush(true);
-    harness.settleOpen('waiting');
-    harness.settleOpen('live');
     harness.facts('a', 'closing');
+    harness.settleOpen('waiting');
     harness.facts('a', 'absent');
+    harness.settleOpen('live');
 
     expect(harness.state()).toEqual({ opening: 'pending' });
 
@@ -1272,7 +1278,6 @@ describe('focus: touches the close outran, displaced waits and the slot focus mi
   it('should settle on the closed project when the touch replies live while the session closes', () => {
     const harness = touchingA();
     const touch = harness.lastOpen();
-    harness.facts('a', 'closing');
     harness.settleOpen('live', touch.requestId);
     harness.facts('a', 'closing');
     harness.facts('a', 'absent');
@@ -1281,16 +1286,56 @@ describe('focus: touches the close outran, displaced waits and the slot focus mi
     expect(routeState(harness, 'a', { live: [] })).toBe('closed');
   });
 
-  it('should settle on the closed project when the touch replies live after the close finished', () => {
-    const harness = touchingA();
-    const touch = harness.lastOpen();
+  it('should open again when a new session of the project it is focused on starts behind a stale record', () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r0', 'a');
+    // The record still says live when the person opens `a`, so focus takes the open for a touch and stays.
+    harness.send({ type: 'openRequested', projectId: 'a' });
     harness.facts('a', 'closing');
     harness.facts('a', 'absent');
-    harness.settleOpen('live', touch.requestId);
-    harness.facts('a', 'absent');
+    harness.settleOpen('live', harness.lastOpen().requestId);
+    harness.facts('a', 'starting', unsettled);
+
+    expect(harness.state()).toEqual({ opening: 'pending' });
+    expect(routeState(harness, 'a', { live: ['a'] })).toBe('resolving');
+
+    harness.settleOpen('live', harness.lastOpen().requestId);
+    harness.facts('a', 'live');
 
     expect(harness.state()).toBe('focused');
-    expect(routeState(harness, 'a', { live: [] })).toBe('closed');
+  });
+
+  it('should withdraw its open on a move when a record from before the open arrives after it was sent', () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r0', 'b');
+    harness.route('r1', 'a');
+    harness.ready('r1', 'a');
+    harness.settleFlush(true);
+    // Emitted before the registry took the open, delivered after focus sent it.
+    harness.facts('a', 'live');
+    harness.facts('a', 'closing');
+    harness.route('r2', 'c');
+
+    expect(harness.ofType('registry', 'cancelPendingOpen')).toHaveLength(1);
+  });
+
+  it('should open again when a person open displaced its wait behind a record from before the open', () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r0', 'b');
+    harness.route('r1', 'a');
+    harness.ready('r1', 'a');
+    harness.settleFlush(true);
+    const own = harness.lastOpen();
+    harness.facts('a', 'live');
+    harness.facts('a', 'closing');
+    harness.send({ type: 'openRequested', projectId: 'b' });
+    const person = harness.lastOpen();
+    harness.settleOpen('waiting', own.requestId);
+    harness.settleOpen('live', person.requestId);
+
+    expect(harness.lastOpen()).toMatchObject({ projectId: 'a' });
+    expect(harness.lastOpen().requestId).not.toBe(own.requestId);
+    expect(harness.context().open.openId).toBe(harness.lastOpen().requestId);
   });
 
   it('should withdraw its open when it moves before the wait reply arrives', () => {
@@ -1353,9 +1398,11 @@ describe('focus: touches the close outran, displaced waits and the slot focus mi
     const own = harness.lastOpen();
     harness.facts('a', 'starting', unsettled);
     harness.send({ type: 'openRequested', projectId: 'b' });
-    harness.settleOpen('waiting', harness.lastOpen().requestId);
+    const person = harness.lastOpen();
+    // In the registry's order: the wait, the resume, then the person's open.
     harness.settleOpen('waiting', own.requestId);
     harness.settleOpen('live', own.requestId);
+    harness.settleOpen('waiting', person.requestId);
 
     expect(harness.opens().filter((open) => open.projectId === 'a')).toHaveLength(1);
   });
@@ -1370,9 +1417,10 @@ describe('focus: touches the close outran, displaced waits and the slot focus mi
     const own = harness.lastOpen();
     // A person's touch of `b` displaces the slot before `c`'s close fails and leaves it live.
     harness.send({ type: 'openRequested', projectId: 'b' });
-    harness.facts('c', 'live');
-    harness.settleOpen('live', harness.lastOpen().requestId);
+    const person = harness.lastOpen();
     harness.settleOpen('waiting', own.requestId);
+    harness.settleOpen('live', person.requestId);
+    harness.facts('c', 'live');
 
     expect(harness.lastOpen()).toMatchObject({ projectId: 'c' });
     expect(harness.lastOpen().requestId).not.toBe(own.requestId);

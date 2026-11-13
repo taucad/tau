@@ -115,7 +115,12 @@ export const createFocusHarness = (options: HarnessOptions = {}): FocusHarness =
   const emitted = recordEmitted(focus);
   focus.start();
 
+  /** The last facts reported for each project, which the wiring reports again after each live answer. */
+  const reported = new Map<string, Extract<FocusEvent, { type: 'sessionFacts' }>>();
   const send = (event: FocusEvent): void => {
+    if (event.type === 'sessionFacts') {
+      reported.set(event.projectId, event);
+    }
     focus.send(event);
   };
   const ofType = (name: PortName, type: string): Sent[] => sent[name].filter((event) => event.type === type);
@@ -146,6 +151,17 @@ export const createFocusHarness = (options: HarnessOptions = {}): FocusHarness =
   };
   const ready = (requestId: string, projectId: string, epoch = 0): void => {
     send({ type: 'accessAnswered', requestId, epoch, answer: { status: 'ready', project: projectFixture(projectId) } });
+  };
+  const settleOpen = (result: FocusOpenResult, requestId?: string): void => {
+    const id = requestId ?? lastOpen().requestId;
+    send({ type: 'openSettled', requestId: id, result });
+    /* The wiring contract: the registry's channel is ordered, and facts follow every live answer. A spawn's first
+     * facts are the test's to report, so facts are echoed only for a session already in the live set. */
+    const projectId = opens().find((open) => open.requestId === id)?.projectId;
+    const last = projectId === undefined ? undefined : reported.get(projectId);
+    if ((result === 'live' || result === 'on-failed') && last !== undefined && last.status !== 'absent') {
+      send(last);
+    }
   };
 
   return {
@@ -184,9 +200,7 @@ export const createFocusHarness = (options: HarnessOptions = {}): FocusHarness =
     facts: (projectId, status, { chatReady = true, availability = 'settled' } = {}) => {
       send({ type: 'sessionFacts', projectId, status, chatReady, availability });
     },
-    settleOpen: (result, requestId) => {
-      send({ type: 'openSettled', requestId: requestId ?? lastOpen().requestId, result });
-    },
+    settleOpen,
     settleFlush: (ok, requestId) => {
       send({ type: 'leaveFlushSettled', requestId: requestId ?? lastFlush().requestId, ok });
     },
@@ -197,7 +211,7 @@ export const createFocusHarness = (options: HarnessOptions = {}): FocusHarness =
       send({ type: 'sessionFacts', projectId, status: 'live', chatReady: true, availability: 'settled' });
       const open = opens().at(-1);
       if (open?.projectId === projectId) {
-        send({ type: 'openSettled', requestId: open.requestId, result: 'live' });
+        settleOpen('live', open.requestId);
       }
     },
   };

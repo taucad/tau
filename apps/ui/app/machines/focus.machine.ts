@@ -26,6 +26,12 @@
  *   its opens waits there. It withdraws its own waiting open (`cancelPendingOpen`) when it moves, takes a held answer
  *   or re-asks after a library change, and re-sends it when another open displaces it, when the registry drops it,
  *   or after `budgetRefused`.
+ * - **The registry's channel is ordered** (the wiring contract A5b keeps). Open answers and session facts reach focus
+ *   in the order the registry produced them, facts are reported on every change, and the wiring reports the session's
+ *   facts after every live answer. Facts carry no incarnation, so only facts after an open's live answer describe the
+ *   session it reached: focus joins on those, and an open's wait is displaced when a later open answers first. The
+ *   registry answers `dropped` for a resume whose request is from an older library epoch. Other ports are not ordered
+ *   against the registry or each other.
  *
  * The selector reads focus's tags (MC-R28). The answer, the open, the pending open and the leave record are root keys,
  * not per-state context (MC-R26), because each one crosses state boundaries by rule: the leave record stays through
@@ -110,8 +116,8 @@ export type FocusSessionStatus = 'absent' | 'starting' | 'live' | 'closing' | 'f
 /**
  * How the registry answered one `open` focus sent, matched by the open's id. The wiring reads it off the registry's
  * snapshot after the send, and again when the open waiting in `pendingOpen` is resumed, dropped or refused. With a
- * `live` answer it also reports the session's facts: focus joins only on facts reported since its open, because a
- * record from before the open may belong to a session that is going away.
+ * `live` answer it then reports the session's facts: focus joins only on facts reported after that answer, because a
+ * record from before it may belong to a session that is going away.
  *
  * - `live`: a spawn, a touch of a live session, or the resume of the waiting open (also `reopenRetained`);
  * - `waiting`: the open waits in `pendingOpen`;
@@ -277,22 +283,16 @@ export type FocusOpen = Readonly<{
   /** A person's reopen of the project focus was on. */
   person: boolean;
   /**
-   * The session reported starting or live since this open was sent: only then does `absent` or `failed` mean the
-   * session went away (rule 11, "an open that never went live is not a close").
+   * The registry reported the session's facts since this open's `live` answer. The registry's channel is ordered and
+   * the wiring reports facts after every live answer, so only these facts describe the session the open reached: a
+   * join needs them, and only then does `absent` or `failed` mean the session went away (rule 11).
    */
   seenLive: boolean;
   /** The library epoch of the request the open carries. */
   epoch?: number;
-  /** The registry said the open waits: a later `live` is a resume, and only facts reported since count. */
-  waited?: boolean;
   /**
-   * The session reported closing or failed since this open was sent: a `live` reply that finds it absent is a touch
-   * the close outran.
-   */
-  seenClose?: boolean;
-  /**
-   * Focus sent another open while this one was unanswered and had not seen its session start: a later `waiting` for
-   * it is a wait that open displaced, not one its own resume already answered.
+   * Focus sent another open before this one's reply. On the ordered channel this open's replies come before the later
+   * open's, so if this one has not gone live when the later open's reply arrives, its wait was displaced.
    */
   displaced?: boolean;
 }>;
@@ -514,7 +514,6 @@ const unanswered = (context: Context, state: State): boolean =>
   context.open.openId !== undefined &&
   context.open.openId === context.lastSent?.openId &&
   !context.open.live &&
-  !context.open.seenLive &&
   context.pending === undefined;
 
 /** The session being left owes no leave flush: there is none, it flushed, or it is gone (the model's `LeaveDone`). */
@@ -589,7 +588,7 @@ const sendOpen = (
     }
     context.pending = undefined;
   }
-  if (context.open.openId !== undefined && !context.open.live && !context.open.seenLive) {
+  if (context.open.openId !== undefined && !context.open.live) {
     context.open = { ...context.open, displaced: true };
   }
   sendRegistry(effects, context, { type: 'open', projectId, request, requestId: openId });
@@ -973,8 +972,6 @@ export const createFocusMachine = (policy: FocusPolicy) => {
         patience: false,
         seenLive: false,
         epoch: request.epoch,
-        waited: false,
-        seenClose: false,
         displaced: false,
       };
       if (context.pending?.projectId === projectId) {
@@ -1210,13 +1207,10 @@ export const createFocusMachine = (policy: FocusPolicy) => {
             patch.pending = undefined;
           }
           if ((event.result === 'waiting' || event.result === 'refused') && !latest) {
-            if (own && (context.open.live || (context.open.seenLive && context.open.displaced !== true))) {
-              // The same open's `live` reply arrived first: it went live, and nothing displaced it.
-              return {};
-            }
             if (own) {
-              patch.open = { ...context.open, openId: undefined };
-              return result(value, patch, advance(patch, state, effects));
+              /* The resume that may follow comes before the later open's reply: focus decides at that reply whether
+               * this wait was displaced (`displaced`). */
+              return {};
             }
             return personProject === undefined
               ? {}
@@ -1257,40 +1251,20 @@ export const createFocusMachine = (policy: FocusPolicy) => {
             } else if (event.result === 'waiting' && personProject !== undefined) {
               patch.pending = { openId: event.requestId, projectId: personProject, epoch, person: true };
             }
+            if (latest && context.open.openId !== undefined && context.open.displaced === true && !context.open.live) {
+              /* The later open's reply: focus's own open had no live answer before it, so the later open displaced its
+               * wait, and focus opens again (rule 9). */
+              patch.open = { ...context.open, openId: undefined, displaced: false };
+              return result(value, patch, advance(patch, state, effects));
+            }
             return result(value, patch, state);
           }
           let next = state;
           switch (event.result) {
             case 'live': {
-              /* A spawn or a touch: the facts the reply carries are this session's, so a session in the live set
-               * counts as live since the open. A resume after a wait counts only facts reported since (rule 11). */
-              const target = context.answer?.projectId;
-              const status = target === undefined ? undefined : context.facts[target]?.status;
-              const inLiveSet = status !== undefined && status !== 'absent';
-              if (
-                state === 'opening' &&
-                target !== undefined &&
-                status === 'absent' &&
-                context.open.seenClose === true &&
-                !context.open.seenLive
-              ) {
-                /* A touch of a session that closed before the reply reached focus: the open went live and the session
-                 * left since, so focus settles on the closed project (`TOpenLost`). */
-                patch.open = { ...context.open, live: true, seenLive: true };
-                return result(value, patch, advance(patch, settleOn(patch, target), effects));
-              }
-              patch.open = {
-                ...context.open,
-                live: true,
-                seenLive: context.open.seenLive || (context.open.waited !== true && inLiveSet),
-              };
-              // A chat the route switched to while the open was out reaches the session now it is live (rule 2).
-              if (
-                context.answer?.projectId !== undefined &&
-                context.facts[context.answer.projectId]?.status === 'live'
-              ) {
-                forwardChat(patch, effects, context.answer.projectId);
-              }
+              /* A spawn, a touch or a resume: the facts reported after this reply describe the session it reached, and
+               * facts reported before it may not (rule 11). */
+              patch.open = { ...context.open, live: true, seenLive: false, displaced: false };
               break;
             }
             case 'waiting': {
@@ -1310,7 +1284,6 @@ export const createFocusMachine = (policy: FocusPolicy) => {
                   epoch: sent.epoch,
                   person: false,
                 };
-                patch.open = { ...context.open, waited: true };
               }
               break;
             }
@@ -1358,6 +1331,7 @@ export const createFocusMachine = (policy: FocusPolicy) => {
           { context, event, value }: TransitionArgs & { event: Extract<FocusEvent, { type: 'sessionFacts' }> },
           enq: Enq,
         ) => {
+          const effects = effectsOf(enq);
           const patch: Patch = {
             ...context,
             facts: {
@@ -1365,21 +1339,28 @@ export const createFocusMachine = (policy: FocusPolicy) => {
               [event.projectId]: { status: event.status, chatReady: event.chatReady, availability: event.availability },
             },
           };
+          const state = stateOf(value);
           if (
-            context.open.openId !== undefined &&
-            context.answer?.projectId === event.projectId &&
-            (event.status === 'starting' || event.status === 'live')
+            state === 'focused' &&
+            event.status === 'starting' &&
+            context.on === event.projectId &&
+            context.request?.projectId === event.projectId
           ) {
-            // In the live set since the open was sent (the model's `live`): a later `absent` or `failed` is a close.
-            patch.open = { ...context.open, seenLive: true };
-          } else if (
-            context.open.openId !== undefined &&
-            context.answer?.projectId === event.projectId &&
-            (event.status === 'closing' || event.status === 'failed')
-          ) {
-            patch.open = { ...context.open, seenClose: true };
+            /* A new session of the project focus is on: an open focus judged a touch from facts the ordered channel had
+             * not yet brought up to date started it. Focus opens it as it would a person's reopen (`PersonOpenAsked`),
+             * with a touch of its own that the facts after its reply join. */
+            patch.open = noOpen;
+            return result(value, patch, advance(patch, 'opening', effects));
           }
-          return result(value, patch, advance(patch, stateOf(value), effectsOf(enq)));
+          if (context.open.openId !== undefined && context.open.live && context.answer?.projectId === event.projectId) {
+            // Facts after the open's live answer: the session it reached (the model's `live`).
+            patch.open = { ...context.open, seenLive: true };
+            if (event.status === 'live') {
+              // A chat the route switched to while the open was out reaches the session now it is live (rule 2).
+              forwardChat(patch, effects, event.projectId);
+            }
+          }
+          return result(value, patch, advance(patch, state, effects));
         },
       ),
       focusedChatResolved: refines(

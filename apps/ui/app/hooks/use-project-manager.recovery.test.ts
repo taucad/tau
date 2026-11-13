@@ -29,7 +29,6 @@ import type {
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { Project } from '@taucad/types';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
-import { WorkspaceDirectoryRequiredError } from '@taucad/ui-core/filesystem/workspace-errors';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
@@ -98,7 +97,10 @@ const useWorkspaceRow = (): void => {
   journal = [pendingWorkspaceCreate];
   mockListWorkspaces.mockResolvedValue([{ workspaceId }]);
 };
+/** Whether the folder's handle is held; the handle store mounts a workspace root only then. */
+let workspaceConnected = false;
 const workspaceReturns = (): void => {
+  workspaceConnected = true;
   mockGetWorkspace.mockResolvedValue(returnedWorkspace);
 };
 /** The journal's rows: completing an operation deletes its row, as the worker does. */
@@ -192,6 +194,8 @@ const mockGetWorkspace =
   vi.fn<
     (workspaceId: string) => Promise<{ workspace: { workspaceId: string; name: string }; handle: unknown } | undefined>
   >();
+/** Whether this tab may write through a held folder handle; `prompt` means the person must grant it again. */
+const mockCheckHandlePermission = vi.fn<(handle: unknown) => Promise<'granted' | 'prompt' | 'denied'>>();
 let projectRootConfigurationListener: (() => void) | undefined;
 vi.mock('#filesystem/handle-store.js', () => ({
   requestHomeStoragePersistence: vi.fn(async () => undefined),
@@ -207,7 +211,7 @@ vi.mock('#filesystem/handle-store.js', () => ({
   getProjectCreationLocation: vi.fn(async () => ({ location: { kind: 'home' }, repaired: undefined })),
   setProjectCreationLocation: vi.fn(async () => undefined),
   getWorkspace: mockGetWorkspace,
-  checkHandlePermission: vi.fn(async () => 'granted'),
+  checkHandlePermission: mockCheckHandlePermission,
   requestHandlePermission: vi.fn(async () => true),
   deleteProjectFileSystemConfig: mockDeleteProjectFileSystemConfig,
   getAllProjectFileSystemConfigs: vi.fn(async () => [...routeConfigs.values()]),
@@ -360,6 +364,7 @@ describe('useProjectManager recovery (I8)', () => {
       mockPrepareProjectCreation,
       mockListWorkspaces,
       mockGetWorkspace,
+      mockCheckHandlePermission,
     ]) {
       mock.mockReset();
     }
@@ -377,6 +382,8 @@ describe('useProjectManager recovery (I8)', () => {
     });
     mockListWorkspaces.mockResolvedValue([]);
     mockGetWorkspace.mockResolvedValue(undefined);
+    mockCheckHandlePermission.mockResolvedValue('granted');
+    workspaceConnected = false;
     mockWebAccessAvailable = false;
     mockBeginPermanentDeleteProject.mockResolvedValue('req_bbbbbbbbbbbbbbbbbbbbb');
     mockPrepareProjectCreation.mockRejectedValue(new Error('No creation is prepared in these rows'));
@@ -419,12 +426,13 @@ describe('useProjectManager recovery (I8)', () => {
     });
 
     it('I8: should stop replaying a retryable failure at its third attempt', async () => {
-      // The folder's handle is there, but every commit into it still reports the workspace unavailable.
+      /* The folder's handle is held, but write permission on it has lapsed: each attempt stops on the UI thread
+       * before it reaches storage, as resolveWorkspaceForWrite raises workspace-unavailable there. */
       useWorkspaceRow();
       workspaceReturns();
-      mockCommitPendingProjectDirectory.mockRejectedValue(new WorkspaceDirectoryRequiredError('disconnected'));
+      mockCheckHandlePermission.mockResolvedValue('prompt');
       const { result } = await bootstrap();
-      expect(mockCommitPendingProjectDirectory).toHaveBeenCalledOnce();
+      expect(mockCheckHandlePermission).toHaveBeenCalledOnce();
 
       for (const attempts of [2, 3, 3, 3]) {
         act(() => {
@@ -432,8 +440,9 @@ describe('useProjectManager recovery (I8)', () => {
         });
         // oxlint-disable-next-line no-await-in-loop -- each change settles before the next is announced
         await settle();
-        expect(mockCommitPendingProjectDirectory).toHaveBeenCalledTimes(attempts);
+        expect(mockCheckHandlePermission).toHaveBeenCalledTimes(attempts);
       }
+      expect(mockCommitPendingProjectDirectory).not.toHaveBeenCalled();
 
       // After its third settled attempt the row is failed, with its reason, and still in the journal.
       expect(result.current.recoveries).toEqual([expect.objectContaining(failedRecovery('workspace-unavailable'))]);
@@ -451,22 +460,32 @@ describe('useProjectManager recovery (I8)', () => {
   describe('a workspace-unavailable failure', () => {
     it('I8: should be replayed when the workspace returns, and not before', async () => {
       useWorkspaceRow();
-      // Discovery finds the project in its workspace folder, where the replay roots it.
-      mockListProjectManifests.mockResolvedValue({
-        roots: [
-          {
-            status: 'complete',
-            root: { backend: 'webaccess', workspaceId, directoryHandle: returnedWorkspace.handle },
-          },
-        ],
-        entries: [
-          {
-            status: 'valid',
-            projectId: fakeProject.id,
-            manifest: projectToManifest(fakeProject),
-            locator: { ...fakeLocator, backend: 'webaccess', storageRootKey: `webaccess:${workspaceId}`, workspaceId },
-          },
-        ],
+      // Discovery sees the workspace folder only while its handle is held; the replay roots the project there.
+      mockListProjectManifests.mockImplementation(async () => {
+        if (!workspaceConnected) {
+          return { roots: [], entries: [] };
+        }
+        return {
+          roots: [
+            {
+              status: 'complete',
+              root: { backend: 'webaccess', workspaceId, directoryHandle: returnedWorkspace.handle },
+            },
+          ],
+          entries: [
+            {
+              status: 'valid',
+              projectId: fakeProject.id,
+              manifest: projectToManifest(fakeProject),
+              locator: {
+                ...fakeLocator,
+                backend: 'webaccess',
+                storageRootKey: `webaccess:${workspaceId}`,
+                workspaceId,
+              },
+            },
+          ],
+        };
       });
       const { result } = await bootstrap();
       // The first attempt could not reach the folder; the row is still held. Its status is RowAccounted's question.

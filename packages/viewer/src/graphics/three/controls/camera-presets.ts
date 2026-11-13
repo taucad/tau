@@ -1,6 +1,6 @@
 /**
  * Camera presets as data: which button and modifiers orbit, pan and zoom under each mouse preset (P1 to P6 of the
- * camera research) and under the trackpad mapping (P7), and the pure resolvers the input router applies.
+ * camera research), and the pure resolvers the input router applies.
  *
  * A binding matches only its exact modifier set, so a button and modifier combination a preset does not list does not
  * move the camera (C8). The wheel is not a drag: under every mouse preset it zooms, whatever modifiers it carries, so a
@@ -8,7 +8,7 @@
  */
 
 /**
- * The mouse presets, P1 to P6 in the camera research's order. Trackpad gestures are an input device, not a preset.
+ * The mouse presets, P1 to P6 in the camera research's order.
  *
  * @public
  */
@@ -20,27 +20,6 @@ export const cameraPresetIds = ['tau', 'right-orbit', 'middle-ctrl', 'middle-shi
  * @public
  */
 export type CameraPresetId = (typeof cameraPresetIds)[number];
-
-/**
- * What the person navigates with on this device. `trackpad` replaces the mouse preset with the trackpad mapping (P7).
- *
- * @public
- */
-export const cameraInputDevices = ['mouse', 'trackpad'] as const;
-
-/**
- * One of {@link cameraInputDevices}.
- *
- * @public
- */
-export type CameraInputDevice = (typeof cameraInputDevices)[number];
-
-/**
- * The mapping the router applies: a mouse preset, or the trackpad mapping.
- *
- * @public
- */
-export type CameraMappingId = CameraPresetId | 'trackpad';
 
 /**
  * What a gesture does to the camera. `none` leaves it where it is.
@@ -86,12 +65,12 @@ export type CameraDragBinding = Readonly<{
 }>;
 
 /**
- * One wheel binding. `pinch` is a trackpad pinch: a `ctrlKey` wheel, or a Safari gesture.
+ * One wheel binding.
  *
  * @public
  */
 export type CameraWheelBinding = Readonly<{
-  input: 'scroll' | 'pinch';
+  input: 'scroll';
   modifiers: readonly CameraModifier[];
   gesture: Exclude<CameraGesture, 'none'>;
 }>;
@@ -102,9 +81,9 @@ export type CameraWheelBinding = Readonly<{
  * @public
  */
 export type CameraMapping = Readonly<{
-  id: CameraMappingId;
+  id: CameraPresetId;
   /** The camera research's preset number, kept for cross-reference. */
-  ref: 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7';
+  ref: 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
   drag: readonly CameraDragBinding[];
   wheel: readonly CameraWheelBinding[];
 }>;
@@ -116,7 +95,7 @@ const mouseWheel: readonly CameraWheelBinding[] = [{ input: 'scroll', modifiers:
  *
  * @public
  */
-export const cameraMappings: Readonly<Record<CameraMappingId, CameraMapping>> = Object.freeze({
+export const cameraMappings: Readonly<Record<CameraPresetId, CameraMapping>> = Object.freeze({
   tau: {
     id: 'tau',
     ref: 'P1',
@@ -177,19 +156,6 @@ export const cameraMappings: Readonly<Record<CameraMappingId, CameraMapping>> = 
     ],
     wheel: mouseWheel,
   },
-  trackpad: {
-    id: 'trackpad',
-    ref: 'P7',
-    drag: [
-      { button: 'left', modifiers: [], gesture: 'orbit' },
-      { button: 'left', modifiers: ['shift'], gesture: 'pan' },
-    ],
-    wheel: [
-      { input: 'scroll', modifiers: [], gesture: 'pan' },
-      { input: 'scroll', modifiers: ['alt'], gesture: 'orbit' },
-      { input: 'pinch', modifiers: [], gesture: 'zoom' },
-    ],
-  },
 });
 
 const modifierNames: readonly CameraModifier[] = ['shift', 'ctrl', 'alt'];
@@ -209,21 +175,6 @@ const dragButtons: readonly CameraDragButton[] = ['left', 'middle', 'right'];
 export const toCameraDragButton = (button: number): CameraDragButton | undefined => dragButtons[button];
 
 /**
- * The mapping in effect: the trackpad mapping on a trackpad device, else the mouse preset (Tau's default when absent).
- *
- * @param input - The stored or suggested preset and this device's input device.
- * @returns The mapping the router applies.
- * @public
- */
-export const resolveCameraMapping = ({
-  preset,
-  inputDevice,
-}: Readonly<{
-  preset?: CameraPresetId;
-  inputDevice?: CameraInputDevice;
-}>): CameraMappingId => (inputDevice === 'trackpad' ? 'trackpad' : (preset ?? 'tau'));
-
-/**
  * What a drag with this button and these modifiers does under a mapping. A combination the mapping does not list does
  * nothing (C8).
  *
@@ -240,32 +191,10 @@ export const resolveCameraMapping = ({
  * ```
  */
 export const resolveDrag = (
-  mapping: CameraMappingId,
+  mapping: CameraPresetId,
   button: CameraDragButton,
   modifiers: CameraModifiers,
 ): CameraGesture =>
   cameraMappings[mapping].drag.find(
     (binding) => binding.button === button && matchesModifiers(binding.modifiers, modifiers),
   )?.gesture ?? 'none';
-
-/**
- * What a wheel step does under a mapping. Under a mouse preset the wheel zooms with any modifiers, a pinch included.
- * Under the trackpad mapping a pinch zooms, an Alt scroll orbits and every other scroll pans.
- *
- * @param mapping - The mapping in effect.
- * @param input - Whether the step is a pinch, and the modifiers it carries (a pinch's own `ctrlKey` excluded).
- * @returns The gesture.
- * @public
- */
-export const resolveWheel = (
-  mapping: CameraMappingId,
-  input: Readonly<{ pinch: boolean; modifiers: CameraModifiers }>,
-): CameraGesture => {
-  if (mapping !== 'trackpad') {
-    return 'zoom';
-  }
-  if (input.pinch) {
-    return 'zoom';
-  }
-  return input.modifiers.alt ? 'orbit' : 'pan';
-};

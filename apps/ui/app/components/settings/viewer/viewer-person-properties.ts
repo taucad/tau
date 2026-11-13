@@ -1,6 +1,6 @@
 /**
  * The person properties Settings → Viewer keeps current in analytics (onboarding blueprint, Finding 12, M2): the mouse
- * preset, the gizmo style and the input device, each set with `$set` when it changes, to the value now in effect. They
+ * preset and the gizmo style, each set with `$set` when it changes, to the value now in effect. They
  * go through `useAnalytics().capture`, so web consent and the desktop opt-out apply. Setup (WP6) sets the same names.
  */
 import type { GizmoStyleId, MousePresetId } from '@taucad/preferences';
@@ -11,7 +11,6 @@ export type ViewerPersonProperties = Partial<
   Readonly<{
     mousePreset: MousePresetId;
     gizmoStyle: GizmoStyleId;
-    inputDevice: 'mouse' | 'trackpad';
   }>
 >;
 
@@ -19,7 +18,6 @@ export type ViewerPersonProperties = Partial<
 export const viewerPersonPropertyNames = {
   mousePreset: 'mouse_preset',
   gizmoStyle: 'gizmo_style',
-  inputDevice: 'input_device',
 } as const satisfies Record<keyof ViewerPersonProperties, string>;
 
 /**

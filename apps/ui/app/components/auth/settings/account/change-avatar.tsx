@@ -102,7 +102,7 @@ export function ChangeAvatar({ className }: ChangeAvatarProps): React.JSX.Elemen
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant='outline' size='sm' disabled={!session || isPending}>
+          <Button size='control' variant='outline' disabled={!session || isPending}>
             {isPending && <Spinner />}
 
             {localization.settings.changeAvatar}

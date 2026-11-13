@@ -8,8 +8,14 @@ import type { GizmoStyleId, MousePresetId, PersonalViewDefaults } from '@taucad/
 /** One row's copy. */
 export type ViewerRowCopy = Readonly<{ title: string; description: string }>;
 
-/** The leaves of the View defaults group: the nine inheritable leaves a person can set (no up axis). */
+/** The inheritable leaves a person's defaults can hold (no up axis). */
 export type ViewDefaultLeaf = keyof Required<PersonalViewDefaults>;
+
+/** The rows of the View defaults group. Surfaces, edges and post-processing are view leaves with no row here. */
+export type ShownViewDefaultLeaf = Exclude<
+  ViewDefaultLeaf,
+  'display.surfaces' | 'display.lines' | 'display.postProcessing'
+>;
 
 /** What the section answers, under its title. */
 export const viewerSectionDescription = 'How 3D views look and respond';
@@ -41,36 +47,26 @@ export const gizmoStyleCopy: Readonly<Record<GizmoStyleId, Readonly<{ name: stri
 /** Navigation and Gizmo rows. */
 export const viewerControlCopy = {
   mouseControls: { title: 'Mouse controls', description: 'Which buttons orbit, pan and zoom' },
-  trackpadGestures: {
-    title: 'Trackpad gestures',
-    description: 'Two-finger scroll pans and pinch zooms, replacing mouse controls here',
-  },
   zoomToCursor: { title: 'Zoom to cursor', description: 'Zoom toward the pointer instead of the view centre' },
   orbitAroundCursor: { title: 'Orbit around cursor', description: 'Rotate about the point under the pointer' },
   invertZoom: { title: 'Invert zoom', description: 'Scroll up to zoom out' },
   gizmoStyle: { title: 'Gizmo style', description: 'The orientation control you click to snap views' },
 } as const satisfies Record<string, ViewerRowCopy>;
 
-/** The badge on a setting kept for this computer only. */
-export const thisDeviceLabel = 'This device';
-
 /** The Alt preset's hazard on Linux (camera research, C14). */
 export const linuxAltNote =
   'Some Linux desktops use Alt-drag to move windows. Choose another preset if the view does not move';
 
 /** The View defaults rows, one per leaf, in the order the group lists them. */
-export const viewDefaultCopy: Readonly<Record<ViewDefaultLeaf, ViewerRowCopy>> = {
+export const viewDefaultCopy: Readonly<Record<ShownViewDefaultLeaf, ViewerRowCopy>> = {
   fieldOfView: {
     title: 'Projection',
     description: 'Perspective shows depth, orthographic keeps parallel edges parallel',
   },
-  'display.surfaces': { title: 'Surfaces', description: 'Show the faces of every model' },
-  'display.lines': { title: 'Edges', description: 'Outline the edges of every face' },
   'display.gizmo': { title: 'Show gizmo', description: 'The orientation control in the corner of a view' },
   'display.grid': { title: 'Grid', description: 'A ground grid with a scale label' },
   'display.axes': { title: 'Axes', description: 'The X, Y and Z axes at the origin' },
   'display.matcap': { title: 'Matcap', description: 'Shade surfaces with a studio material' },
-  'display.postProcessing': { title: 'Post-processing', description: 'Soften shadows and smooth edges on screen' },
   'grid.unit': { title: 'Grid unit', description: 'The length unit the grid shows' },
 };
 

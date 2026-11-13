@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button } from '@taucad/ui/components/button';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { createPaymentRequestId, createPortalAction, followPaymentRedirect } from '#lib/billing-payment-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
 import { BillingInlineError, formatBillingDate } from '#components/billing/billing-primitives.js';
+import { Button } from '@taucad/ui/components/button';
 
 /** One message for every way the cancellation page can fail to open: the customer's next step is the same. */
 const cancellationNotOpenedMessage = 'Couldn’t open the cancellation page. Try again.';
@@ -78,8 +78,8 @@ export function CancelPlanSettings({
         }
         control={
           <Button
+            size='control'
             variant='destructive'
-            size='sm'
             disabled={binding === undefined || isRedirecting}
             onClick={async () => {
               await cancelPlan();

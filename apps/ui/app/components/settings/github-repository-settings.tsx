@@ -40,7 +40,7 @@ function StatusRow({
     >
       <span className={cn(kind === 'error' && 'text-foreground')}>{children}</span>
       {onRetry ? (
-        <Button variant='outline' size='sm' onClick={onRetry}>
+        <Button size='control' variant='outline' onClick={onRetry}>
           Try again
         </Button>
       ) : null}
@@ -60,7 +60,7 @@ function MoreRow({
 }): React.JSX.Element {
   return (
     <div className='flex justify-center py-2'>
-      <Button variant='ghost' size='sm' disabled={isDisabled} onClick={onClick}>
+      <Button size='control' variant='ghost' disabled={isDisabled} onClick={onClick}>
         {label}
       </Button>
     </div>
@@ -91,7 +91,7 @@ const RepositoryRow = memo(function RepositoryRow({
       description={repositoryAccess(repository, installation)}
       control={
         <Button
-          size='sm'
+          size='control'
           variant='ghost'
           aria-expanded={open}
           aria-label={`Manage ${repository.fullName}`}
@@ -262,7 +262,7 @@ const ConnectionRow = memo(function ConnectionRow({
       control={
         <>
           <Button
-            size='sm'
+            size='control'
             variant='outline'
             aria-label={`Disconnect @${connection.login}`}
             onClick={() => {
@@ -288,6 +288,7 @@ const ConnectionRow = memo(function ConnectionRow({
               <AlertDialogFooter>
                 <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
                 <Button
+                  size='control'
                   variant='destructive'
                   disabled={busy}
                   onClick={() => {
@@ -401,8 +402,8 @@ export function GithubRepositorySettings(): React.JSX.Element {
             <div className='flex items-center gap-1'>
               {connected && !pending ? (
                 <Button
+                  size='control'
                   variant='ghost'
-                  size='sm'
                   onClick={() => {
                     void connect();
                   }}
@@ -437,8 +438,8 @@ export function GithubRepositorySettings(): React.JSX.Element {
               description='Choose which repositories Tau can use'
               control={
                 <Button
+                  size='control'
                   variant='outline'
-                  size='sm'
                   onClick={() => {
                     void configure();
                   }}
@@ -459,8 +460,8 @@ export function GithubRepositorySettings(): React.JSX.Element {
                 <>
                   {pending ? (
                     <Button
+                      size='control'
                       variant='ghost'
-                      size='sm'
                       onClick={() => {
                         void cancel();
                       }}
@@ -469,7 +470,7 @@ export function GithubRepositorySettings(): React.JSX.Element {
                     </Button>
                   ) : null}
                   <Button
-                    size='sm'
+                    size='control'
                     disabled={pending}
                     onClick={() => {
                       void connect();

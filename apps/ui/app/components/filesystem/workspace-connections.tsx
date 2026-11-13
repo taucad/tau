@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Plus } from 'lucide-react';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
-import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { WorkspaceDirectoryPanel } from '#components/filesystem/workspace-directory-panel.js';
@@ -26,6 +25,7 @@ import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { Button } from '@taucad/ui/components/button';
 
 type WorkspaceRow = {
   workspace: Workspace;
@@ -326,7 +326,7 @@ export function WorkspaceConnections({
         title='Workspaces'
         action={
           <Button
-            size='sm'
+            size='control'
             variant='outline'
             disabled={isAddingWorkspace || busyWorkspaceId !== undefined}
             onClick={handleAddWorkspace}
@@ -345,8 +345,8 @@ export function WorkspaceConnections({
             </div>
             {workspaceConnection.phase === 'failed' ? (
               <Button
+                size='control'
                 className='ml-auto'
-                size='sm'
                 variant='outline'
                 onClick={() => {
                   void handleRetryWorkspace();

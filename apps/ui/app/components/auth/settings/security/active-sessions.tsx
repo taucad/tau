@@ -1,11 +1,11 @@
 import { useAuth, useListSessions, useSession } from '@better-auth-ui/react';
-import { Button } from '@taucad/ui/components/button';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { CircleAlert, LogIn, RefreshCw } from 'lucide-react';
 import { ActiveSession } from '#components/auth/settings/security/active-session.js';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
+import { Button } from '@taucad/ui/components/button';
 
 export type ActiveSessionsProps = {
   className?: string;
@@ -54,8 +54,8 @@ export function ActiveSessions({ className }: ActiveSessionsProps): React.JSX.El
 
   const retry = (
     <Button
+      size='control'
       variant='outline'
-      size='sm'
       disabled={isFetching}
       onClick={async () => {
         await refetch();
@@ -86,7 +86,7 @@ export function ActiveSessions({ className }: ActiveSessionsProps): React.JSX.El
             }
             control={
               sessionIsNotFresh ? (
-                <Button asChild size='sm'>
+                <Button size='control' asChild>
                   <Link href={signIn}>
                     <LogIn aria-hidden='true' />
                     Sign in again

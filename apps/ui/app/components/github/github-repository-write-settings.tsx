@@ -93,7 +93,7 @@ export function GithubRepositoryWriteSettings({
                   </p>
                 </div>
                 <Button
-                  size='sm'
+                  size='control'
                   variant='outline'
                   disabled={busy || (!enabled && !access.data.canWrite)}
                   onClick={() => {
@@ -120,7 +120,7 @@ export function GithubRepositoryWriteSettings({
                 Review your history and what is included before pushing. Enabling writes does not upload anything.
               </p>
               <Button
-                size='sm'
+                size='control'
                 disabled={!enabled || busy || pushUnavailable !== undefined}
                 onClick={() => {
                   push.mutate();

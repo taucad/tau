@@ -23,11 +23,11 @@ const electronics: TourCopyInput = {
   gizmo: 'axes',
 };
 
-/** A product designer on a laptop trackpad, in the desktop app. */
+/** A product designer who orbits with the right button, in the desktop app. */
 const product: TourCopyInput = {
   ...printer,
   goals: ['product', 'mechanical'],
-  mapping: 'trackpad',
+  mapping: 'right-orbit',
   gizmo: 'axis-balls',
   host: 'desktop',
 };
@@ -77,9 +77,9 @@ describe('tourTipCopy', () => {
     expect(middle.bindings?.orbit[0]).not.toEqual(tau.bindings?.orbit[0]);
     expect(middle.text).toEqual(['Press F to fit the model in view.']);
 
-    const trackpad = tourTipCopy('look', product);
-    expect(trackpad.bindings?.pan.flat().join(' ')).toMatch(/scroll/iu);
-    expect(trackpad.text).toEqual(['Click the axis balls in the corner to snap to a standard view.']);
+    const rightOrbit = tourTipCopy('look', product);
+    expect(rightOrbit.bindings?.orbit.flat().join(' ')).toMatch(/right drag/iu);
+    expect(rightOrbit.text).toEqual(['Click the axis balls in the corner to snap to a standard view.']);
     expect(tourTipCopy('look', { ...printer, gizmo: 'none' }).text).toEqual(['Press F to fit the model in view.']);
   });
 

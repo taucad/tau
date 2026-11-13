@@ -63,11 +63,20 @@ describe('prepareSectionWrite', () => {
   });
 
   it('starts from the empty section when nothing is stored', () => {
-    const write = prepareSectionWrite(deviceSection, undefined, { inputDevice: 'trackpad' });
+    const write = prepareSectionWrite(deviceSection, undefined, { tourPaused: true });
     expect(write).toEqual({
       status: 'write',
-      value: { version: 1, inputDevice: 'trackpad' },
-      raw: '{"value":{"version":1,"inputDevice":"trackpad"}}',
+      value: { version: 1, tourPaused: true },
+      raw: '{"value":{"version":1,"tourPaused":true}}',
+    });
+  });
+
+  it('drops the retired trackpad key and keeps the rest of the device record', () => {
+    const stored = JSON.stringify({ value: { version: 1, inputDevice: 'trackpad', tourPaused: true } });
+    expect(readSection(deviceSection, stored).value).toEqual({ version: 1, tourPaused: true });
+    const write = prepareSectionWrite(deviceSection, stored, { inviteDismissed: true });
+    expect(write.status === 'write' && JSON.parse(write.raw)).toEqual({
+      value: { version: 1, tourPaused: true, inviteDismissed: true },
     });
   });
 

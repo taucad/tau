@@ -2,16 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   cameraMappings,
   cameraPresetIds,
-  resolveCameraMapping,
   resolveDrag,
-  resolveWheel,
   toCameraDragButton,
 } from '#graphics/three/controls/camera-presets.js';
 import type {
   CameraDragButton,
   CameraGesture,
-  CameraMappingId,
   CameraModifier,
+  CameraPresetId,
   CameraModifiers,
 } from '#graphics/three/controls/camera-presets.js';
 
@@ -21,10 +19,10 @@ const toModifiers = (names: readonly CameraModifier[]): CameraModifiers => ({
   alt: names.includes('alt'),
 });
 
-/** Blueprint C1 to C7: every listed drag, by preset. */
+/** Blueprint C1 to C6: every listed drag, by preset. */
 const listedDrags: ReadonlyArray<
   Readonly<{
-    mapping: CameraMappingId;
+    mapping: CameraPresetId;
     button: CameraDragButton;
     modifiers: CameraModifier[];
     gesture: CameraGesture;
@@ -89,12 +87,9 @@ const listedDrags: ReadonlyArray<
   { mapping: 'alt', button: 'left', modifiers: ['alt'], gesture: 'orbit' },
   { mapping: 'alt', button: 'middle', modifiers: ['alt'], gesture: 'pan' },
   { mapping: 'alt', button: 'right', modifiers: ['alt'], gesture: 'zoom' },
-  // C7, P7 Trackpad.
-  { mapping: 'trackpad', button: 'left', modifiers: [], gesture: 'orbit' },
-  { mapping: 'trackpad', button: 'left', modifiers: ['shift'], gesture: 'pan' },
 ];
 
-const mappingIds: readonly CameraMappingId[] = [...cameraPresetIds, 'trackpad'];
+const mappingIds: readonly CameraPresetId[] = cameraPresetIds;
 const buttons: readonly CameraDragButton[] = ['left', 'middle', 'right'];
 const modifierSets: ReadonlyArray<readonly CameraModifier[]> = [
   [],
@@ -113,11 +108,7 @@ describe('resolveDrag', () => {
   });
 
   // C8: every combination a preset's row does not list leaves the camera alone.
-  const isListed = (
-    mapping: CameraMappingId,
-    button: CameraDragButton,
-    modifiers: readonly CameraModifier[],
-  ): boolean =>
+  const isListed = (mapping: CameraPresetId, button: CameraDragButton, modifiers: readonly CameraModifier[]): boolean =>
     listedDrags.some(
       (row) =>
         row.mapping === mapping &&
@@ -127,7 +118,7 @@ describe('resolveDrag', () => {
     );
   const unlisted: Array<
     Readonly<{
-      mapping: CameraMappingId;
+      mapping: CameraPresetId;
       button: CameraDragButton;
       modifiers: readonly CameraModifier[];
     }>
@@ -161,41 +152,6 @@ describe('resolveDrag', () => {
     );
     expect(fromData).toEqual(expect.arrayContaining([...listedDrags]));
     expect(fromData).toHaveLength(listedDrags.length);
-  });
-});
-
-describe('resolveWheel', () => {
-  it.each(
-    cameraPresetIds.flatMap((mapping) =>
-      modifierSets.flatMap((modifiers) => [
-        { mapping, pinch: false, modifiers },
-        { mapping, pinch: true, modifiers },
-      ]),
-    ),
-  )('$mapping: a wheel (pinch $pinch) with $modifiers zooms', ({ mapping, pinch, modifiers }) => {
-    expect(resolveWheel(mapping, { pinch, modifiers: toModifiers(modifiers) })).toBe('zoom');
-  });
-
-  it.each([
-    { pinch: false, modifiers: [], gesture: 'pan' },
-    { pinch: false, modifiers: ['shift'], gesture: 'pan' },
-    { pinch: false, modifiers: ['alt'], gesture: 'orbit' },
-    { pinch: true, modifiers: [], gesture: 'zoom' },
-    { pinch: true, modifiers: ['alt'], gesture: 'zoom' },
-  ] as const)('trackpad: a wheel (pinch $pinch) with $modifiers → $gesture', ({ pinch, modifiers, gesture }) => {
-    expect(resolveWheel('trackpad', { pinch, modifiers: toModifiers(modifiers) })).toBe(gesture);
-  });
-});
-
-describe('resolveCameraMapping', () => {
-  it.each([
-    { preset: undefined, inputDevice: undefined, mapping: 'tau' },
-    { preset: 'alt', inputDevice: undefined, mapping: 'alt' },
-    { preset: 'alt', inputDevice: 'mouse', mapping: 'alt' },
-    { preset: 'alt', inputDevice: 'trackpad', mapping: 'trackpad' },
-    { preset: undefined, inputDevice: 'trackpad', mapping: 'trackpad' },
-  ] as const)('preset $preset on $inputDevice → $mapping', ({ preset, inputDevice, mapping }) => {
-    expect(resolveCameraMapping({ preset, inputDevice })).toBe(mapping);
   });
 });
 

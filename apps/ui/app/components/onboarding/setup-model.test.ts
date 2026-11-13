@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LanguageId } from '@taucad/preferences';
-import { emptyDeviceRecord, emptyPersonProfile, emptyViewerPreferences, familiarProducts } from '@taucad/preferences';
+import { emptyPersonProfile, emptyViewerPreferences, familiarProducts } from '@taucad/preferences';
 import { familiarFromText } from '#components/onboarding/setup-copy.js';
 import {
   announceChangedRows,
@@ -76,18 +76,12 @@ describe('setup model', () => {
       pan: [['Ctrl', 'Middle drag']],
       zoom: [['Shift', 'Middle drag'], ['Scroll']],
     });
-    expect(legendBindings('trackpad')).toEqual({
-      orbit: [['Click drag'], ['Alt', 'Two-finger scroll']],
-      pan: [['Shift', 'Click drag'], ['Two-finger scroll']],
-      zoom: [['Pinch']],
-    });
   });
 
   it('announces only the rows whose text changed', () => {
     const input = {
       profile: emptyPersonProfile,
       viewer: emptyViewerPreferences,
-      device: emptyDeviceRecord,
       kernels: browser,
       isViewerControlsEnabled: true,
     };

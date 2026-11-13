@@ -1,11 +1,11 @@
 import { Heading } from '@taucad/ui/components/heading';
 import { useState } from 'react';
 import type { BrowserCommand, BrowserSettings } from '@taucad/types/browser';
-import { Button } from '@taucad/ui/components/button';
 import { Switch } from '@taucad/ui/components/switch';
 import { Label } from '@taucad/ui/components/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { getBrowserBridge, useBrowserSession } from '#components/browser/browser-bridge.js';
+import { Button } from '@taucad/ui/components/button';
 
 /** Compact preferences shared by app settings and the review Canvas. */
 export function BrowserSettingsSurface({
@@ -27,6 +27,7 @@ export function BrowserSettingsSurface({
           <div className='flex flex-wrap items-center justify-between gap-4 p-4'>
             <Label htmlFor='browser-search-engine'>Search engine</Label>
             <Select
+              size='sm'
               value={settings.searchEngine}
               onValueChange={(value) => {
                 if (value === 'duckduckgo' || value === 'google' || value === 'bing') {
@@ -47,6 +48,7 @@ export function BrowserSettingsSurface({
           <div className='flex flex-wrap items-center justify-between gap-4 p-4'>
             <Label htmlFor='browser-default-zoom'>Default page zoom</Label>
             <Select
+              size='sm'
               value={String(settings.defaultZoom)}
               onValueChange={(value) => {
                 void command({ kind: 'settings', settings: { ...settings, defaultZoom: Number(value) } });
@@ -96,8 +98,8 @@ export function BrowserSettingsSurface({
           <div className='flex flex-wrap items-center justify-between gap-4 p-4'>
             <span>Browsing history</span>
             <Button
+              size='control'
               variant='outline'
-              size='sm'
               onClick={() => {
                 setClearScope('history');
               }}
@@ -110,8 +112,8 @@ export function BrowserSettingsSurface({
               Cookies and site data<p className='mt-1 text-xs text-muted-foreground'>Separate from your Tau account.</p>
             </div>
             <Button
+              size='control'
               variant='outline'
-              size='sm'
               onClick={() => {
                 setClearScope('all');
               }}
@@ -130,8 +132,8 @@ export function BrowserSettingsSurface({
           </p>
           <div className='flex flex-wrap gap-2'>
             <Button
+              size='control'
               variant='destructive'
-              size='sm'
               disabled={isClearing}
               onClick={async () => {
                 setIsClearing(true);
@@ -146,8 +148,8 @@ export function BrowserSettingsSurface({
               {isClearing ? 'Clearing…' : 'Clear data'}
             </Button>
             <Button
+              size='control'
               variant='outline'
-              size='sm'
               disabled={isClearing}
               onClick={() => {
                 setClearScope(undefined);

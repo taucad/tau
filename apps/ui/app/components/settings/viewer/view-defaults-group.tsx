@@ -1,6 +1,6 @@
 /**
- * The View defaults group (onboarding blueprint, Finding 6, V4): the person's own value for each of the nine
- * inheritable leaves. Every view that does not set a leaf shows this value; no view file is written. A set leaf shows
+ * The View defaults group (onboarding blueprint, Finding 6, V4): the person's own value for the inheritable leaves a
+ * person picks a default for. Surfaces, edges and post-processing are view leaves without a personal default here. Every view that does not set a leaf shows this value; no view file is written. A set leaf shows
  * the modified dot, which removes it; "Reset all" removes every leaf and is disabled when none is set.
  */
 import { useState } from 'react';
@@ -21,24 +21,21 @@ import {
   viewDefaultCopy,
   viewDefaultsInfo,
 } from '#components/settings/viewer/viewer-settings-copy.js';
-import type { ViewDefaultLeaf } from '#components/settings/viewer/viewer-settings-copy.js';
+import type { ShownViewDefaultLeaf, ViewDefaultLeaf } from '#components/settings/viewer/viewer-settings-copy.js';
 import type { SectionWriteResult } from '#preferences/section-store.js';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
 
 /** The rows in order, with their registry ids. */
 const rows = [
   ['fieldOfView', 'viewer-projection'],
-  ['display.surfaces', 'viewer-surfaces'],
-  ['display.lines', 'viewer-edges'],
   ['display.gizmo', 'viewer-show-gizmo'],
   ['display.grid', 'viewer-grid'],
   ['display.axes', 'viewer-axes'],
   ['display.matcap', 'viewer-matcap'],
-  ['display.postProcessing', 'viewer-post-processing'],
   ['grid.unit', 'viewer-grid-unit'],
-] as const satisfies ReadonlyArray<readonly [ViewDefaultLeaf, SettingId]>;
+] as const satisfies ReadonlyArray<readonly [ShownViewDefaultLeaf, SettingId]>;
 
-type SwitchLeaf = Extract<ViewDefaultLeaf, `display.${string}`>;
+type SwitchLeaf = Extract<ShownViewDefaultLeaf, `display.${string}`>;
 
 /** The perspective angle Perspective returns to: the last one held in this session, or Tau's 60°. */
 let sessionPerspectiveAngle: number | undefined;
@@ -182,7 +179,7 @@ export function ViewDefaultsGroup({
     }
   };
 
-  const controlOf = (leaf: ViewDefaultLeaf): React.ReactNode => {
+  const controlOf = (leaf: ShownViewDefaultLeaf): React.ReactNode => {
     if (leaf === 'fieldOfView') {
       return (
         <ProjectionControl

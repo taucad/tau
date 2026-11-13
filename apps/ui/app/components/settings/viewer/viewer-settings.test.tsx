@@ -9,7 +9,7 @@ import { resolveViewSettings, tauViewDefaults, workbenchRecords } from '@taucad/
 import type { WorkbenchView } from '@taucad/workbench';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { metaConfig } from '#constants/meta.constants.js';
-import { deviceRecordStore, personRecordStores } from '#preferences/person-record.store.js';
+import { personRecordStores } from '#preferences/person-record.store.js';
 import { useViewLevels } from '#workbench-records/view-levels.js';
 import { viewExceptions } from '#workbench-records/view-exceptions.js';
 
@@ -71,22 +71,14 @@ afterEach(() => {
 });
 
 describe('View defaults (V4)', () => {
-  it('lists nine rows, one per leaf, and no up axis', () => {
+  it('lists six rows, and no up axis, surfaces, edges or post-processing', () => {
     renderSection();
-    for (const title of [
-      'Projection',
-      'Surfaces',
-      'Edges',
-      'Show gizmo',
-      'Grid',
-      'Axes',
-      'Matcap',
-      'Post-processing',
-      'Grid unit',
-    ]) {
+    for (const title of ['Projection', 'Show gizmo', 'Grid', 'Axes', 'Matcap', 'Grid unit']) {
       expect(row(title)).toBeInTheDocument();
     }
-    expect(screen.queryByRole('group', { name: 'Up axis' })).not.toBeInTheDocument();
+    for (const title of ['Up axis', 'Surfaces', 'Edges', 'Post-processing']) {
+      expect(screen.queryByRole('group', { name: title })).not.toBeInTheDocument();
+    }
   });
 
   it('shows Tau’s values with no dot, and Reset all is disabled while nothing is set', () => {
@@ -198,16 +190,16 @@ describe('View defaults (V4)', () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('Quota exceeded', 'QuotaExceededError');
     });
-    await userEvent.click(within(row('Edges')).getByRole('switch', { name: 'Edges' }));
+    await userEvent.click(within(row('Grid')).getByRole('switch', { name: 'Grid' }));
     expect(screen.getByRole('status')).toHaveTextContent(
       'Tau could not save this on this device. It applies until you close Tau',
     );
-    expect(within(row('Edges')).getByRole('switch', { name: 'Edges' })).not.toBeChecked();
+    expect(within(row('Grid')).getByRole('switch', { name: 'Grid' })).not.toBeChecked();
     // Nothing is blocked; a later write that saves stores both.
     setItem.mockRestore();
     await userEvent.click(within(row('Axes')).getByRole('switch', { name: 'Axes' }));
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
-    expect(viewDefaults()).toEqual({ 'display.lines': false, 'display.axes': false });
+    expect(viewDefaults()).toEqual({ 'display.grid': false, 'display.axes': false });
   });
 });
 
@@ -290,22 +282,13 @@ describe('Navigation and Gizmo (V2, V3, M2)', () => {
   });
 
   it('names the person properties as setup and analytics do', () => {
-    expect(viewerPersonPropertyNames).toEqual({
-      mousePreset: 'mouse_preset',
-      gizmoStyle: 'gizmo_style',
-      inputDevice: 'input_device',
-    });
+    expect(viewerPersonPropertyNames).toEqual({ mousePreset: 'mouse_preset', gizmoStyle: 'gizmo_style' });
   });
 
-  it('keeps trackpad gestures in this device’s record, with a This device badge', async () => {
+  it('has no trackpad gestures row', () => {
     renderSection();
-    expect(within(row('Trackpad gestures')).getByText('This device')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('switch', { name: 'Trackpad gestures' }));
-    expect(deviceRecordStore.read().inputDevice).toBe('trackpad');
-    expect(personRecordStores.viewer.read().controls).toEqual({});
-    expect(events('$set')).toEqual([personProperties('inputDevice', 'trackpad')]);
-    await userEvent.click(screen.getByRole('switch', { name: 'Trackpad gestures' }));
-    expect(deviceRecordStore.read().inputDevice).toBe('mouse');
+    expect(screen.queryByRole('group', { name: 'Trackpad gestures' })).not.toBeInTheDocument();
+    expect(screen.queryByText('This device')).not.toBeInTheDocument();
   });
 
   it('lists the four gizmo styles with the suggestion marked', async () => {

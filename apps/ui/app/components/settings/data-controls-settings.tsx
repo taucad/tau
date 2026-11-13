@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useParams } from 'react-router';
-import { Button } from '@taucad/ui/components/button';
 import { Switch } from '@taucad/ui/components/switch';
 import { useSession } from '@better-auth-ui/react';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
@@ -15,6 +14,7 @@ import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { legalUrl } from '#lib/legal-url.js';
 import { setAnonymousRevisions, useAnonymousRevisions } from '#lib/revision-actor.js';
+import { Button } from '@taucad/ui/components/button';
 
 function LearnMore(): React.JSX.Element {
   return (
@@ -195,8 +195,8 @@ export function DataControlsSettings(): React.JSX.Element {
           description='Choose whether Tau uses optional analytics'
           control={
             <Button
+              size='control'
               variant='outline'
-              size='sm'
               onClick={() => {
                 setIsCookiePreferencesOpen(true);
               }}

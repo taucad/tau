@@ -442,11 +442,11 @@ const BoundMachine = memo(function BoundMachine({
               </p>
             )}
             <div className='flex flex-wrap gap-2'>
-              <Button type='button' size='sm' variant='destructive' disabled={isRemoving} onClick={remove}>
+              <Button size='control' type='button' variant='destructive' disabled={isRemoving} onClick={remove}>
                 {isRemoving ? <Loader /> : null}
                 Remove
               </Button>
-              <Button type='button' size='sm' variant='outline' disabled={isRemoving} autoFocus onClick={cancel}>
+              <Button size='control' type='button' variant='outline' disabled={isRemoving} autoFocus onClick={cancel}>
                 Cancel
               </Button>
             </div>
@@ -769,20 +769,20 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
         <UnavailableMachines providers={unavailable} />
         <div className='flex flex-wrap gap-2'>
           <Button
+            size='control'
             type='button'
-            size='sm'
             variant='outline'
-            className='h-auto min-h-8 max-w-full whitespace-normal'
+            className='h-auto min-h-7 max-w-full whitespace-normal'
             disabled={busy || finding || physicalProviders.length === 0}
             onClick={onFind}
           >
             {finding ? <Loader /> : null}Find machines
           </Button>
           <Button
+            size='control'
             type='button'
-            size='sm'
             variant='ghost'
-            className='h-auto min-h-8 max-w-full whitespace-normal'
+            className='h-auto min-h-7 max-w-full whitespace-normal'
             disabled={busy || physicalProviders.length === 0}
             onClick={() => {
               setIsBinding(true);
@@ -909,12 +909,12 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
             )
           ) : null}
           <div className='lg:col-span-2'>
-            <Button ref={bindButton} type='submit' size='sm' disabled={busy}>
+            <Button size='control' ref={bindButton} type='submit' disabled={busy}>
               {busy ? 'Connecting…' : 'Bind'}
             </Button>
             <Button
+              size='control'
               type='button'
-              size='sm'
               variant='ghost'
               disabled={busy}
               onClick={() => {
@@ -960,7 +960,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
                 />
                 <div>
                   <Button
-                    size='sm'
+                    size='control'
                     variant='outline'
                     disabled={busy}
                     onClick={async () => run(name, { providerId: simulator.id, name, fields })}

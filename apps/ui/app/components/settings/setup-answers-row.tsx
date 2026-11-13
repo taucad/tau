@@ -2,12 +2,12 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import { resetLeaf } from '@taucad/preferences';
 import type { PersonProfile } from '@taucad/preferences';
-import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { SettingsRow } from '#components/settings/settings-item.js';
 import { setupAnswersCopy } from '#components/settings/setup-answers-copy.js';
 import { goalCopy, languageCopy, toolCopy } from '#components/onboarding/setup-copy.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
+import { Button } from '@taucad/ui/components/button';
 
 /** Setup's address. Opened from here it counts as Help, as any address without an entry does. */
 const setupAddress = '/welcome';
@@ -68,10 +68,10 @@ export function SetupAnswersRow(): React.JSX.Element | undefined {
       }
       control={
         <>
-          <Link to={setupAddress} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
-            {setupAnswersCopy.edit}
-          </Link>
-          <Button variant='outline' size='sm' disabled={!hasAnswers(profile)} onClick={handleClear}>
+          <Button size='control' asChild variant='outline'>
+            <Link to={setupAddress}>{setupAnswersCopy.edit}</Link>
+          </Button>
+          <Button size='control' variant='outline' disabled={!hasAnswers(profile)} onClick={handleClear}>
             {setupAnswersCopy.clear}
           </Button>
         </>

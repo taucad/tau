@@ -1,5 +1,4 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { Button } from '@taucad/ui/components/button';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import {
   bypassConfirmation,
@@ -10,6 +9,7 @@ import {
 import { toast } from '@taucad/ui/components/sonner';
 import type { PermissionMode } from '#filesystem/desktop-permissions.js';
 import { useDefaultPermissionMode } from '#hooks/use-permission-mode.js';
+import { Button } from '@taucad/ui/components/button';
 
 /**
  * Settings → Agents → Default permissions (blueprint D19, RQ2a, RQ4): the mode new desktop chats copy when they are
@@ -135,18 +135,18 @@ export function DefaultPermissionsSetting(): React.JSX.Element | undefined {
           </span>
           <div className='flex justify-end gap-2'>
             <Button
+              size='control'
               ref={cancelRef}
               type='button'
               variant='outline'
-              size='sm'
               title={bypassConfirmation.cancelDescription}
               onClick={cancel}
             >
               {bypassConfirmation.cancel}
             </Button>
             <Button
+              size='control'
               type='button'
-              size='sm'
               title={bypassConfirmation.confirmDefault}
               onClick={() => {
                 setIsConfirming(false);

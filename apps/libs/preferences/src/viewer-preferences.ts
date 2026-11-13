@@ -3,8 +3,7 @@ import { lengthUnits } from '@taucad/workbench';
 import type { ViewFieldValues } from '@taucad/workbench';
 
 /**
- * The six mouse presets: which button and modifier orbit, pan and zoom. Trackpad gestures are the device's
- * `inputDevice`, never a preset.
+ * The six mouse presets: which button and modifier orbit, pan and zoom.
  *
  * @public
  */

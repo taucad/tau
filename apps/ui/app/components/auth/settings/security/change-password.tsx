@@ -12,7 +12,6 @@ import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { toast } from 'sonner';
 
-import { Button } from '@taucad/ui/components/button';
 import { Field, FieldError } from '@taucad/ui/components/field';
 import { Input } from '@taucad/ui/components/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@taucad/ui/components/input-group';
@@ -21,6 +20,7 @@ import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { authErrorMessage } from '@taucad/ui-core/utils/auth-error.utils';
+import { Button } from '@taucad/ui/components/button';
 
 export type ChangePasswordProps = {
   className?: string;
@@ -78,7 +78,7 @@ function SetPassword({ className }: { className?: string }) {
         title={localization.settings.setPassword}
         description={localization.settings.setPasswordDescription}
         control={
-          <Button variant='outline' size='sm' disabled={isPending || !session} onClick={handleSetPassword}>
+          <Button size='control' variant='outline' disabled={isPending || !session} onClick={handleSetPassword}>
             {isPending && <Spinner />}
             {localization.auth.sendResetLink}
           </Button>
@@ -306,7 +306,7 @@ function ChangePasswordForm({
           </Field>
         )}
         <div className='flex justify-end'>
-          <Button type='submit' size='sm' disabled={isPending || !session}>
+          <Button size='control' type='submit' disabled={isPending || !session}>
             {isPending && <Spinner />}
 
             {localization.settings.updatePassword}

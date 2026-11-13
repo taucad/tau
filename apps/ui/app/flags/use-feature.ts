@@ -138,3 +138,15 @@ export function useLayoutFlag(flag: LayoutFlagName): boolean | undefined {
   const getServerSnapshot = useCallback(() => remembered, [remembered]);
   return useSyncExternalStore(flagStore.subscribe, getSnapshot, getServerSnapshot);
 }
+
+/**
+ * Whether this document's layout flags came from a server render: the root loader read the request's `layout-flags`
+ * cookie, so the server HTML already decided or held each flagged surface and the client must agree with it. The
+ * desktop and SPA builds have no root loader, so nothing on screen depends on a server decision there.
+ *
+ * @returns Whether the root loader supplied `layoutFlags`.
+ */
+export function useHasLayoutFlagsSnapshot(): boolean {
+  const rootData = useContext(DataRouterStateContext)?.loaderData['root'] as LayoutFlagsLoaderData | undefined;
+  return rootData?.layoutFlags !== undefined;
+}

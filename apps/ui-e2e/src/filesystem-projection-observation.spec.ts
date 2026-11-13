@@ -917,10 +917,11 @@ test('refreshes an unchanged open skill query and refuses withdrawn selection in
     await target.click(selectors.getByRole('button', { name: /^Agent and model:/u }).last());
     await target.click(selectors.getByRole('button', { name: /^Model: .*\. Change$/u }));
     await target.expectVisible(selectors.getByPlaceholder('Search models…'));
-    await target.click(selectors.getByCss('[role="option"][data-value="anthropic-claude-haiku-4.5"]'));
+    /* Haiku 5.5 replaced Haiku 4.5 in the catalog (34431b7756, #453); its effort level may follow the name. */
+    await target.click(selectors.getByCss('[role="option"][data-value="anthropic-claude-haiku-5.5"]'));
     await target.keyboardPress('Escape');
     await target.expectCount(selectors.getByPlaceholder('Search models…'), 0);
-    await target.expectVisible(selectors.getByRole('button', { name: 'Agent and model: Haiku 4.5', exact: true }));
+    await target.expectVisible(selectors.getByRole('button', { name: /^Agent and model: Haiku 5\.5(?:,|$)/u }));
     await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
     await target.expectVisible(selectors.getByText('Withdrawn selection excluded.', { exact: true }), 120_000);
     const requests = await target.readAgentHostGatewayRequests();
@@ -959,10 +960,11 @@ test('includes only the settled available skill in actual gateway system prompts
     await target.click(selectors.getByRole('button', { name: /^Agent and model:/u }).last());
     await target.click(selectors.getByRole('button', { name: /^Model: .*\. Change$/u }));
     await target.expectVisible(selectors.getByPlaceholder('Search models…'));
-    await target.click(selectors.getByCss('[role="option"][data-value="anthropic-claude-haiku-4.5"]'));
+    /* Haiku 5.5 replaced Haiku 4.5 in the catalog (34431b7756, #453); its effort level may follow the name. */
+    await target.click(selectors.getByCss('[role="option"][data-value="anthropic-claude-haiku-5.5"]'));
     await target.keyboardPress('Escape');
     await target.expectCount(selectors.getByPlaceholder('Search models…'), 0);
-    await target.expectVisible(selectors.getByRole('button', { name: 'Agent and model: Haiku 4.5', exact: true }));
+    await target.expectVisible(selectors.getByRole('button', { name: /^Agent and model: Haiku 5\.5(?:,|$)/u }));
     await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
     await target.expectVisible(selectors.getByText('Skill context received.', { exact: true }), 120_000);
     const acquiredValue13 = await target.readAgentHostGatewayRequests();

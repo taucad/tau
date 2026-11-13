@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ComponentType, ReactNode } from 'react';
+import type { ComponentType, UIEvent } from 'react';
 import type { Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type { DocumentChange, DocumentTransaction, EditorDocument } from '#lib/editor-document.js';
@@ -18,7 +18,8 @@ import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-per
 const runtimeIdleLimit = 2000;
 
 /**
- * Run `start` once the main thread is idle, or after `runtimeIdleLimit`, whichever comes first.
+ * Run `start` once the main thread is idle, or after `runtimeIdleLimit`, whichever comes first. Only a pane that is not
+ * on screen as it opens waits for this gap; a pane on screen requests the runtime at once ({@link whenShown}).
  *
  * The runtime and its syntax were requested in a microtask, which runs inside the task that mounted
  * the pane. Opening a project mounts this pane as soon as the project's file services publish, and
@@ -43,6 +44,46 @@ const whenIdle = (start: () => void): (() => void) => {
   };
 };
 
+/**
+ * Run `start` in a microtask of the mounting task: the pane is on screen and its file's text already is, so the
+ * editor is the next thing the person will use (loading states UX blueprint, P-i; audit R10). A microtask, not a
+ * direct call, so the language effect that runs after the mount effect still finds the runtime unrequested and leaves
+ * the syntax to this one request.
+ *
+ * @param start - Called once, after the mounting effects.
+ * @returns Cancels a start that has not run yet.
+ */
+const whenShown = (start: () => void): (() => void) => {
+  let isPending = true;
+  queueMicrotask(() => {
+    if (isPending) {
+      start();
+    }
+  });
+  return () => {
+    isPending = false;
+  };
+};
+
+/**
+ * Whether the pane is on screen as it opens. The workbench mounts a source pane only while its Dockview panel is shown
+ * (`isPanelShown`), so the remaining cases are a page in a background tab and a pane whose host is out of the layout
+ * (a hidden surface, a collapsed lane): the document's visibility and the pane's own layout box at mount answer both,
+ * without a prop every caller would have to thread. Read once, at mount; a pane that becomes visible later is already
+ * in its idle gap, which is bounded.
+ *
+ * @param element - The pane's placeholder frame.
+ * @returns True when the pane is visible now.
+ */
+function isShownAtMount(element: HTMLElement | undefined): boolean {
+  if (element === undefined || globalThis.document.visibilityState !== 'visible') {
+    return false;
+  }
+  return typeof element.checkVisibility === 'function'
+    ? element.checkVisibility()
+    : element.getClientRects().length > 0;
+}
+
 /** Browser timing marks carry pane identity but never document text or paths. */
 export function markCodeEditorMilestone(name: string, viewId: string): void {
   if (typeof performance.mark === 'function') {
@@ -56,7 +97,8 @@ export type CodeEditorProps = Readonly<{
   languageId: string;
   className?: string;
   readOnly?: boolean;
-  loading?: ReactNode;
+  /** The placeholder's accessible name until the editor mounts, such as "Loading main.ts". */
+  loadingLabel?: string;
   extensions?: Extension;
   syntaxExtension?: Extension;
   diagnostics?: EditorDiagnostics;
@@ -120,11 +162,13 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
    * view mounts reconfigures it under whatever the user has already started, such as a completion. */
   const runtimeRequested = useRef(false);
   const languageId = useRef(props.languageId);
+  const placeholderRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     markCodeEditorMilestone('code-pane-admission', props.viewId);
     let active = true;
     runtimeRequested.current = false;
-    const cancel = whenIdle(() => {
+    const schedule = isShownAtMount(placeholderRef.current ?? undefined) ? whenShown : whenIdle;
+    const cancel = schedule(() => {
       if (active) {
         runtimeRequested.current = true;
         void loadRuntime();
@@ -157,6 +201,33 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
       markCodeEditorMilestone('document-ready', props.viewId);
     }
   }, [props.document, props.viewId]);
+  /* Where the person scrolled the file's text before the editor mounted; the mounted view starts there, once. */
+  const placeholderScroll = useRef<{ path: string; top: number; left: number } | undefined>(undefined);
+  const documentPath = props.document?.path;
+  const handlePlaceholderScroll = (event: UIEvent<HTMLDivElement>): void => {
+    if (documentPath !== undefined) {
+      const { scrollTop, scrollLeft } = event.currentTarget;
+      placeholderScroll.current = { path: documentPath, top: scrollTop, left: scrollLeft };
+    }
+  };
+  const { onMount } = props;
+  const handleMount = useCallback(
+    (view: EditorView, path: string): void | (() => void) => {
+      const scrolled = placeholderScroll.current;
+      placeholderScroll.current = undefined;
+      if (scrolled?.path === path) {
+        const scrollTo = (): void => {
+          view.scrollDOM.scrollTop = scrolled.top;
+          view.scrollDOM.scrollLeft = scrolled.left;
+        };
+        // Now, so the first frame is already there, and after the view's first measure, which settles its height.
+        scrollTo();
+        view.requestMeasure({ read: () => undefined, write: scrollTo });
+      }
+      return onMount?.(view, path);
+    },
+    [onMount],
+  );
   if (failure && !View) {
     return (
       <div
@@ -178,15 +249,24 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
       </div>
     );
   }
+  const { loadingLabel, ...viewProps } = props;
   const body =
     View && props.document ? (
       <View
-        {...props}
+        {...viewProps}
         document={props.document}
         syntaxExtension={syntax?.languageId === props.languageId ? syntax.extension : undefined}
+        onMount={handleMount}
       />
     ) : (
-      (props.loading ?? <EditorPanePlaceholder label='Loading editor' />)
+      <EditorPanePlaceholder
+        ref={placeholderRef}
+        label={loadingLabel ?? 'Loading editor'}
+        text={props.document?.text}
+        hasLineNumbers={props.showLineNumbers}
+        className={props.className}
+        onScroll={props.document ? handlePlaceholderScroll : undefined}
+      />
     );
   return syntaxFailure && View && props.document ? (
     <div className='relative size-full'>

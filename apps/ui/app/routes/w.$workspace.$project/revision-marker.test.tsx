@@ -395,7 +395,7 @@ describe('RevisionRow', () => {
   });
 
   /* U17: a comparison that has not arrived is its row's frame, never bars. */
-  it.fails('draws no Skeleton while a comparison loads', async () => {
+  it('draws no Skeleton while a comparison loads', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.comparisonRead = async () => Promise.withResolvers<never>().promise;
     renderRow();

@@ -29,13 +29,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { Skeleton } from '@taucad/ui/components/skeleton';
+import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { cn } from '@taucad/ui/utils/cn';
 import { generatedSetupPaths } from '@taucad/revisions';
 import type { RevisionDiffEntry } from '@taucad/revisions';
 import type { RevisionComparisonNotice } from '@taucad/revisions/algorithms';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { DiffViewer } from '#components/code/diff-viewer.js';
+import { useWaitStart } from '#components/code/editor-pane-placeholder.js';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
@@ -119,8 +120,8 @@ function FileComparison({
   const label = `Comparison for ${path}`;
   if (isLoading) {
     return (
-      <div id={id} role='status' aria-label={label} aria-busy='true' className='border-t px-2 py-1.5'>
-        <ComparisonSkeleton />
+      <div id={id} role='group' aria-label={label} aria-busy='true' className='border-t px-2 py-1.5'>
+        <ComparisonWait label='Loading comparison' />
       </div>
     );
   }
@@ -186,19 +187,17 @@ function FileComparison({
 }
 
 /**
- * A comparison that has not arrived: two skeleton lines, with the words kept
- * for screen readers only (M7).
+ * A comparison that has not arrived: its row's frame, holding the one line its
+ * words or its Try again take, with the wait's words in it once the wait passes
+ * 1,000 ms (loading states UX blueprint, U17; M7). Compare is a gesture after the
+ * route opened, so the wait is its own group and its slot is live.
  *
- * @returns The skeleton.
+ * @param props - What is being waited for.
+ * @returns The indicator slot.
  */
-function ComparisonSkeleton(): React.JSX.Element {
-  return (
-    <span className='flex flex-col gap-1.5 py-0.5'>
-      <span className='sr-only'>Loading comparison…</span>
-      <Skeleton aria-hidden className='h-3 w-3/4' />
-      <Skeleton aria-hidden className='h-3 w-1/2' />
-    </span>
-  );
+function ComparisonWait({ label }: { readonly label: string }): React.JSX.Element {
+  const startedAt = useWaitStart();
+  return <WaitIndicator active label={label} slowLabel={`Still ${label.toLowerCase()}`} startedAt={startedAt} />;
 }
 
 /**
@@ -353,9 +352,9 @@ function CurrentComparison({
           <FileList revision={revision} changes={changes} compareAgainst='checkout' label={`Changed since ${name}`} />
         )
       ) : (
-        <p role='status' aria-busy='true'>
-          <ComparisonSkeleton />
-        </p>
+        <div aria-busy='true'>
+          <ComparisonWait label='Loading changes' />
+        </div>
       )
     ) : (
       <div role='alert' className='flex flex-wrap items-center gap-2 text-xs'>

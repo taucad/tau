@@ -1218,13 +1218,19 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.queryByRole('region', { name: 'History' })).not.toBeInTheDocument();
   });
 
-  /* M2 (I6, S20): an unlocated line is loading geometry, never *No revisions yet*, never `main`. */
-  it('renders History’s loading geometry while the line is unknown', async () => {
+  /* M2 (I6, S20): an unlocated line is History's busy frame, never *No revisions yet*, never `main`. */
+  it('renders History’s busy frame while the line is unknown', async () => {
     revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
 
     renderPane();
 
-    expect(await screen.findByRole('status', { name: 'Loading history' })).toHaveAttribute('aria-busy', 'true');
+    const card = await screen.findByRole('group', { name: 'History' });
+    expect(card.querySelector('[data-slot="history-loading"]')).toHaveAttribute('aria-busy', 'true');
+    /* The header's trailing slot holds the wait; the strip's status line is the pane's one announcement. */
+    const indicator = card.querySelector('[data-slot="wait-indicator"]');
+    expect(indicator).toHaveAttribute('data-state', 'waiting');
+    expect(indicator).toHaveTextContent('Loading history…');
+    expect(indicator).not.toHaveAttribute('role');
     expect(screen.queryByText('No history yet')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'History' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Where you are' })).not.toHaveTextContent('main');
@@ -1234,7 +1240,7 @@ describe('Revisions pane vocabulary and History', () => {
   });
 
   /* Blueprint row C13 (U17): History while it loads is its frame, never bars (frames 9/11). */
-  it.fails('draws no Skeleton in History or the branch chip while History loads (C13)', async () => {
+  it('draws no Skeleton in History or the branch chip while History loads (C13)', async () => {
     revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
 
     renderPane();

@@ -1477,7 +1477,7 @@ export const FileEditor = memo(function ({
   const availability = useProjectAvailability();
   switch (result.kind) {
     case 'loading': {
-      const placeholder = <EditorPanePlaceholder label={`Loading ${filePath.split('/').pop() ?? filePath}`} />;
+      const loadingLabel = `Loading ${filePath.split('/').pop() ?? filePath}`;
       const language = getEditorLanguage(filePath);
       const isSourcePane =
         language !== undefined &&
@@ -1486,9 +1486,9 @@ export const FileEditor = memo(function ({
         (!filePath.toLowerCase().endsWith('.md') || paneParameters.viewId === 'source');
       body =
         isPanelShown && isSourcePane ? (
-          <CodeEditor viewId={paneId} languageId={language} loading={placeholder} />
+          <CodeEditor viewId={paneId} languageId={language} loadingLabel={loadingLabel} />
         ) : (
-          placeholder
+          <EditorPanePlaceholder label={loadingLabel} />
         );
       break;
     }

@@ -28,6 +28,7 @@ const cappedModelIds = [
   'openai-gpt-5.6-luna',
   'openai-gpt-5.5',
   'google-gemini-4-argon',
+  'google-gemini-4-carbon',
   'google-gemini-3.1-pro',
   'google-gemini-3.8-flash',
   'google-gemini-3.5-flash-lite',
@@ -64,6 +65,7 @@ const pdfInputModelIds = [
   'openai-gpt-5.6-luna',
   'openai-gpt-5.5',
   'google-gemini-4-argon',
+  'google-gemini-4-carbon',
   'google-gemini-3.1-pro',
   'google-gemini-3.8-flash',
   'google-gemini-3.5-flash-lite',
@@ -214,6 +216,7 @@ describe('modelList', () => {
   it('should offer PDF input on every Gemini catalog model', () => {
     const geminiModelIds = [
       'google-gemini-4-argon',
+      'google-gemini-4-carbon',
       'google-gemini-3.1-pro',
       'google-gemini-3.8-flash',
       'google-gemini-3.5-flash-lite',
@@ -417,21 +420,24 @@ describe('ModelService', () => {
     expect(modelList.openai['gpt-6-astra']?.recommended).toBe(true);
   });
 
-  it('should list Gemini 4 Argon with image and PDF input and selectable reasoning', async () => {
-    const listedModels = await createModelService().getModels();
-    const argon = listedModels.find((model) => model.id === 'google-gemini-4-argon');
+  it.each(['gemini-4-argon', 'gemini-4-carbon'])(
+    'should list %s with image and PDF input and selectable reasoning',
+    async (model) => {
+      const listedModels = await createModelService().getModels();
+      const entry = listedModels.find((listed) => listed.id === `google-${model}`);
 
-    expect(argon).toMatchObject({
-      model: 'gemini-4-argon',
-      provider: { id: 'vertexai', name: 'Google' },
-      support: {
-        tools: true,
-        toolChoice: false,
-        modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
-        reasoning: { levels: ['low', 'medium', 'high'] },
-      },
-    });
-  });
+      expect(entry).toMatchObject({
+        model,
+        provider: { id: 'vertexai', name: 'Google' },
+        support: {
+          tools: true,
+          toolChoice: false,
+          modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
+          reasoning: { levels: ['low', 'medium', 'high'] },
+        },
+      });
+    },
+  );
 
   it('recommends Gemini 3.8 Flash instead of the Gemini 3.5 models', async () => {
     const service = createModelService();

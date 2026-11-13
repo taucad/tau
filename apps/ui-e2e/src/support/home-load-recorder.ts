@@ -808,6 +808,19 @@ export const armWorkerReadDelay = async (rules: readonly WorkerReadDelay[]): Pro
 export const readWorkerReads = async (): Promise<WorkerReadLog> =>
   target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.log);
 
+/**
+ * When the first read that `rule` itself held was sent, so a row checks that its own delay was forced rather than
+ * any delay armed beside it.
+ *
+ * @param reads - The worker read log.
+ * @param rule - One armed delay rule.
+ * @returns Milliseconds from navigation start, or `undefined` when no read matching the rule was held.
+ */
+export const firstDelayedRead = (reads: WorkerReadLog, rule: WorkerReadDelay): number | undefined => {
+  const path = new RegExp(rule.path, 'u');
+  return reads.find((read) => read.delayed && read.method === rule.method && path.test(read.path ?? ''))?.t;
+};
+
 /* A0.10's request delay: the commands `browser-command.ts` registers, declared here so the lane adds nothing to
  * `external-target.ts`. */
 declare module 'vitest/browser' {

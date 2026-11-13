@@ -19,6 +19,7 @@ import {
   projectRowMoves,
   readHomeLoad,
   readProjectLoad,
+  firstDelayedRead,
   readWorkerReads,
 } from '#support/home-load-recorder.js';
 
@@ -231,9 +232,11 @@ const measureReturningReload = async ({
     `home-load-gate/${label}.json`,
     `${JSON.stringify({ record, workerReads: reads }, null, 2)}\n`,
   );
-  const delayed = reads.filter((read) => read.delayed);
-  precondition(delayed.length > 0, `${label}: no worker read was delayed`);
-  return { record, since: delayed[0]!.t };
+  const held = delays.map((rule) => firstDelayedRead(reads, rule));
+  for (const [index, rule] of delays.entries()) {
+    precondition(held[index] !== undefined, `${label}: no ${rule.method} read matching /${rule.path}/ was delayed`);
+  }
+  return { record, since: Math.min(...held.map((t) => t!)) };
 };
 
 for (const viewport of ['wide', 'phone'] as const) {

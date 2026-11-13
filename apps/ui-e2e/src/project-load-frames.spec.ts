@@ -16,6 +16,7 @@ import {
   projectLoadProbe,
   readDelayedRequests,
   readProjectLoad,
+  firstDelayedRead,
   readWorkerReads,
 } from '#support/home-load-recorder.js';
 
@@ -153,11 +154,22 @@ const seedTranscriptWithTray = async (chatId: string): Promise<void> => {
   await target.delay(settleWindow);
 };
 
+/** The transcript stream's page read for one chat. */
+const transcriptRead = (chatId: string): WorkerReadDelay => ({
+  method: 'read',
+  path: `"chatId":"${chatId}"`,
+  milliseconds: readDelay,
+});
+
+/** The tray's file for one chat. */
+const trayRead = (chatId: string): WorkerReadDelay => ({
+  method: 'readFileWithDigest',
+  path: String.raw`^\.tau/chats/${chatId}/todo\.yaml$`,
+  milliseconds: readDelay,
+});
+
 /** The transcript stream's page read and the tray's file, for one chat. */
-const transcriptReads = (chatId: string): WorkerReadDelay[] => [
-  { method: 'read', path: `"chatId":"${chatId}"`, milliseconds: readDelay },
-  { method: 'readFileWithDigest', path: String.raw`^\.tau/chats/${chatId}/todo\.yaml$`, milliseconds: readDelay },
-];
+const transcriptReads = (chatId: string): WorkerReadDelay[] => [transcriptRead(chatId), trayRead(chatId)];
 
 /** The project chat listing: every project's `.tau/chats` directory read. */
 const chatListingRead: WorkerReadDelay = {
@@ -192,12 +204,11 @@ const requireChunkDelayed = async (row: string): Promise<void> => {
   precondition(delayed.length > 0, `${row}: the workspace chunk was never delayed`);
 };
 
-/** The forcing happened: at least one worker read was answered late. Returns when the first was sent. */
-const requireReadDelayed = async (row: string): Promise<number> => {
-  const reads = await readWorkerReads();
-  const delayed = reads.filter((read) => read.delayed);
-  precondition(delayed.length > 0, `${row}: no worker read was delayed`);
-  return delayed[0]!.t;
+/** The forcing happened: a read matching the row's own `rule` was answered late. Returns when the first was sent. */
+const requireReadDelayed = async (row: string, rule: WorkerReadDelay): Promise<number> => {
+  const since = firstDelayedRead(await readWorkerReads(), rule);
+  precondition(since !== undefined, `${row}: no ${rule.method} read matching /${rule.path}/ was delayed`);
+  return since!;
 };
 
 for (const viewport of ['wide', 'phone'] as const) {
@@ -385,7 +396,7 @@ knownDefect('U6: no sidebar project row moves on a reload with the chat listing 
     /* The delayed reads answer after the workspace is up; the row they move is watched until then. */
     await target.delay(readDelay);
     await target.expectVisible(selectors.getByRole('link', { name: projectNames.b }).first(), 60_000);
-    const since = await requireReadDelayed('U6');
+    const since = await requireReadDelayed('U6', chatListingRead);
     return { record: await keepRecord('u6-wide', { since }), since };
   },
   assert: ({ record, since }) => {
@@ -409,7 +420,7 @@ knownDefect('U7: the largest contentful paint is not the empty-chat state with t
     await settleProject();
     await target.delay(readDelay);
     await target.expectVisible(selectors.getByText(finalReply, { exact: true }), 60_000);
-    await requireReadDelayed('U7');
+    await requireReadDelayed('U7', transcriptRead(chatId));
     const record = await keepRecord('u7-wide');
     precondition(record.largestPaints.length > 0, 'U7: no largest-contentful-paint entry');
     return record;
@@ -436,7 +447,7 @@ knownDefect(
       await settleProject();
       await target.delay(readDelay);
       await target.expectVisible(traySummary, 60_000);
-      await requireReadDelayed('U10');
+      await requireReadDelayed('U10', trayRead(chatId));
       const record = await keepRecord('u10-wide');
       precondition(record.composer.length > 0, 'U10: the composer was never on screen');
       return record;

@@ -647,6 +647,52 @@
   }
 }
 
+/* The wait ladder (UI Policy § 6; `utils/wait-timing.ts`). `WaitIndicator` reveals its words with an animation delay
+   rather than a script timer, so the server-rendered indicator keeps time before hydration. The delays are set per
+   wait as `--wait-reveal-delay`, `--wait-slow-delay` and `--wait-hide-delay`, and may be negative for a wait that is
+   already under way. Reduced motion collapses the 150ms entrance to nothing; the delays still hold. */
+@utility wait-reveal {
+  animation: wait-reveal 150ms ease-out var(--wait-reveal-delay, 1000ms) both;
+}
+
+@utility wait-hold {
+  animation: wait-conceal 0.01ms linear var(--wait-hide-delay, 0ms) both;
+}
+
+@utility wait-until-slow {
+  animation: wait-conceal 0.01ms linear var(--wait-slow-delay, 10000ms) both;
+}
+
+@utility wait-after-slow {
+  animation: wait-appear 0.01ms linear var(--wait-slow-delay, 10000ms) both;
+}
+
+@keyframes wait-reveal {
+  from {
+    opacity: 0;
+    visibility: hidden;
+  }
+
+  to {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+/* One-sided keyframes: the open end is the element's own value, so a label nested in a still-hidden indicator stays
+   hidden instead of declaring itself visible. */
+@keyframes wait-conceal {
+  to {
+    visibility: hidden;
+  }
+}
+
+@keyframes wait-appear {
+  from {
+    visibility: hidden;
+  }
+}
+
 /* AlertDialogAction composes primary classes with a consumer's destructive button variant. */
 @utility destructive-action {
   --focus-outline-color: var(--destructive-foreground);

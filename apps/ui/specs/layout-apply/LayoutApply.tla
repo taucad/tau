@@ -15,7 +15,9 @@
 (*             attaching or attached. A phone has both: its workbench     *)
 (*             attaches only while the editor tab shows (`Phone`)         *)
 (*   intents   pane requests (open a file, reveal a model) for one        *)
-(*             adapter, queued until applied or dropped with a reason     *)
+(*             adapter, queued until applied or dropped with a reason;    *)
+(*             a workbench intent is a `file` or a `pane` intent (one the *)
+(*             record handed back), which a lane close keeps              *)
 (*   restore   commands from the arrange-workbench card, each with the    *)
 (*             arrangement it expects and the one it restores; the card   *)
 (*             may send any number of them, a stale one included          *)
@@ -60,8 +62,10 @@
 (*   6. A route key change drops every queued intent in the same step.    *)
 (*   7. A workbench intent opens its lane, or on a phone switches to the *)
 (*      editor tab, and is applied once the workbench attaches. Closing   *)
-(*      the lane drops the queued workbench intents (`workbenchClosed`);  *)
-(*      a phone has no lane to close.                                     *)
+(*      the lane drops the queued workbench `file` intents                *)
+(*      (`workbenchClosed`); a queued `pane` intent survives and is       *)
+(*      applied once on the next workbench attach (A0.3 row 1c). A phone  *)
+(*      has no lane to close.                                             *)
 (*   8. A publication that arrives while a local edit is unwritten does   *)
 (*      not hold the edit, whatever edit count it arrived at: it is       *)
 (*      fenced at arrival (`held`) and its apply never lands. The         *)
@@ -75,6 +79,8 @@
 (*      phone, the workbench attaches while a workbench intent is queued  *)
 (*      (the intent switched to the editor tab). Liveness only:           *)
 (*      `Reattach`, with `DetachGuard`.                                   *)
+(*   C. A closed lane holding a queued pane intent is reopened eventually *)
+(*      (liveness only: `Reopen`).                                        *)
 (*                                                                         *)
 (* Switches. The first value of each is the target.                       *)
 (*   EditCount  TRUE: rule 2's count. FALSE: an apply lands whatever was  *)
@@ -158,7 +164,7 @@ IntentIds == 1..MaxIntents
 RestoreIds == 1..MaxRestores
 NoApply == [state |-> "none", bytes |-> InitialBytes, fresh |-> TRUE, held |-> FALSE, latest |-> FALSE, same |-> FALSE,
               over |-> FALSE]
-NoIntent == [state |-> "unsent", target |-> "viewer"]
+NoIntent == [state |-> "unsent", target |-> "viewer", kind |-> "file"]
 NoRestore == [state |-> "unsent", expected |-> InitialBytes, to |-> InitialBytes]
 
 Attached == {a \in Adapters : adapter[a] = "attached"}
@@ -177,7 +183,7 @@ TypeOK ==
   /\ applied \in {Unknown, "latest", "older"}
   /\ adapter \in [Adapters -> {"detached", "attaching", "attached"}]
   /\ wbOpen \in BOOLEAN
-  /\ intent \in [IntentIds -> [state : {"unsent", "queued"} \cup Settled, target : Targets]]
+  /\ intent \in [IntentIds -> [state : {"unsent", "queued"} \cup Settled, target : Targets, kind : {"file", "pane"}]]
   /\ restore \in [RestoreIds -> [state : {"unsent", "asked", "applied", "refused"}, expected : Bytes, to : Bytes]]
   /\ route \in Nat
   /\ sessions \in [live : Nat, oldWriting : BOOLEAN, lingering : Nat, writing : BOOLEAN]
@@ -333,11 +339,14 @@ Settle(x, s) == [NoIntent EXCEPT !.state = s]
 \* Rule 7: a workbench intent opens the workbench lane, as `openPanel` and the `fileOpened` listener call
 \* `setWorkbenchOpen(true)` today; on a phone it switches to the editor tab (project-workspace-context.tsx,
 \* `mobileActiveTab: 'editor'`), where the lane is always open. An intent targets an adapter the device has.
+\* A workbench intent's kind matters only at a lane close, so it is a `pane` intent only on a desktop.
+Kinds(t) == IF t = "workbench" /\ ~Phone THEN {"file", "pane"} ELSE {"file"}
+
 IntentSent(i) ==
   /\ intent[i].state = "unsent"
   /\ \A j \in IntentIds : j < i => intent[j].state # "unsent"
-  /\ \E t \in Adapters :
-       /\ intent' = [intent EXCEPT ![i] = [state |-> "queued", target |-> t]]
+  /\ \E t \in Adapters : \E k \in Kinds(t) :
+       /\ intent' = [intent EXCEPT ![i] = [state |-> "queued", target |-> t, kind |-> k]]
        /\ wbOpen' = (wbOpen \/ t = "workbench")
   /\ edited' = FALSE
   /\ act' = Label("IntentSent")
@@ -376,7 +385,9 @@ RouteKeyChanged ==
   /\ UNCHANGED <<rec, shown, pending, applied, adapter, wbOpen, restore, sessions, bound, gh>>
 
 \* Rule 7 for the intents queued when the person closes the lane, whether its adapter is attached or
-\* detached. Under `DetachGuard`, as for `AdapterDetached`, only while the workbench has an attach cycle left.
+\* detached: the queued `file` intents are dropped, as today's close clears the held Files and user-file
+\* intents (project-workspace-context.tsx lines 338 to 341); a queued `pane` intent stays queued (A0.3
+\* row 1c, project-workspace-context.test.tsx lines 1111 to 1137). Under `DetachGuard`, as for `AdapterDetached`, only while the workbench has an attach cycle left.
 \* A phone has no lane close: leaving the editor tab is an `AdapterDetached` of the workbench.
 WorkbenchClosed ==
   /\ ~Phone
@@ -386,7 +397,7 @@ WorkbenchClosed ==
   /\ wbOpen' = FALSE
   /\ Leave({"workbench"})
   /\ intent' = [i \in IntentIds |->
-                  IF intent[i].state = "queued" /\ intent[i].target = "workbench"
+                  IF intent[i].state = "queued" /\ intent[i].target = "workbench" /\ intent[i].kind = "file"
                   THEN Settle(intent[i], "workbenchClosed") ELSE intent[i]]
   /\ edited' = FALSE
   /\ act' = Label("WorkbenchClosed")
@@ -486,10 +497,16 @@ Reattach(a) ==
   /\ a = "viewer" \/ (~Phone /\ wbOpen) \/ (Phone /\ WorkbenchQueued)
   /\ AdapterAttaching(a)
 
-\* Weak fairness of the adapters (an adapter with an open lane attaches) and of the intent queue (an
-\* intent its adapter can take is taken).
+\* Environment assumption C: a closed lane holding a queued pane intent is reopened eventually. Today
+\* nothing reopens it; the person does, by opening the workbench (a risk).
+PaneQueued == \E i \in IntentIds : intent[i].state = "queued" /\ intent[i].kind = "pane"
+Reopen == "workbench" \in Adapters /\ ~wbOpen /\ PaneQueued /\ AdapterAttaching("workbench")
+
+\* Weak fairness of the adapters (an adapter with an open lane attaches, and a closed lane holding a
+\* pane intent is reopened) and of the intent queue (an intent its adapter can take is taken).
 Fairness ==
   /\ \A a \in Adapters : WF_vars(Reattach(a)) /\ WF_vars(AdapterAttached(a))
+  /\ WF_vars(Reopen)
   /\ \A i \in IntentIds : WF_vars(IntentApplied(i))
 
 LiveSpec == Spec /\ Fairness
@@ -540,6 +557,11 @@ IntentAccounted ==
        /\ gh'.applications[i] <= 1
        /\ (intent[i].state = "queued" /\ intent'[i].state # "queued") => intent'[i].state \in Settled
        /\ intent[i].state \in Settled => intent'[i].state = intent[i].state]_vars
+
+\* I11, A0.3 row 1c: a lane close never drops a queued pane intent.
+PaneIntentKept ==
+  [][(wbOpen /\ ~wbOpen') =>
+       \A i \in IntentIds : (intent[i].state = "queued" /\ intent[i].kind = "pane") => intent'[i].state = "queued"]_vars
 
 \* I11: after `RouteKeyChanged`, every intent queued before it is `dropped{routeChanged}`.
 RouteChangeDrops ==

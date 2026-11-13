@@ -163,7 +163,15 @@ const roundTripThroughB = async (settleOnB: boolean): Promise<RoundTrip> =>
 type Settled = 'A' | 'B' | 'unsettled';
 
 /**
- * Where a trip came to rest, read the same way for both projects: the pathname unchanged for a second and
+ * How long the pathname must stay unchanged before a trip counts as at rest. B's `?chat=` correction can land more
+ * than a second after B's path commits, so a 1 s window could count as A a trip that a later correction then moves
+ * to B. The A0.1 handoff asks for a window past 2.1 s before the I2 row is asserted; 3 s is that window (A5c).
+ */
+const settledQuietMilliseconds = 3000;
+
+/**
+ * Where a trip came to rest, read the same way for both projects: the pathname unchanged for
+ * `settledQuietMilliseconds` and
  * that project's entry tab on screen. A navigation still in the route gate's pending state (`project-route.tsx`
  * `pending`: the resolved project is not yet the requested one) is not yet either.
  */
@@ -183,7 +191,7 @@ const readSettledProject = async (routes: Readonly<{ a: RegExp; b: RegExp }>): P
     /* A tab detached between the read's count and its attribute read times the read out: that is not on screen. */
     if (
       key &&
-      performance.now() - since >= 1000 &&
+      performance.now() - since >= settledQuietMilliseconds &&
       // oxlint-disable-next-line no-await-in-loop -- A bounded poll reads in order.
       (await target.isVisible(dockTab(entryPaths[key])).catch(() => false))
     ) {

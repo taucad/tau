@@ -3,7 +3,12 @@ import type { ActorRefFrom, EnqueueObject, SystemRegistry } from 'xstate';
 
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
-import type { ProjectSessionCloseReason, ProjectSessionState } from '#machines/project-session.machine.js';
+import type {
+  ProjectSessionAvailability,
+  ProjectSessionCloseReason,
+  ProjectSessionOpenRequest,
+  ProjectSessionState,
+} from '#machines/project-session.machine.js';
 
 /**
  * The client's live set (S44, A35).
@@ -57,7 +62,18 @@ export type SessionsProjectStatus = Readonly<{
   pushed: boolean;
   /** Refs this device has not had acknowledged — quit's `Backing up n`. */
   pending: number;
+  /** The session's chat session is ready (focus's `opening` join). `true` until A6d makes it real. */
+  chatReady: boolean;
+  /** The session's first file check (the same join). `settled` until A14 makes it real. */
+  availability: ProjectSessionAvailability;
 }>;
+
+/**
+ * An open waiting for a closing session to release its slot, with the request it will open with (R3-F2).
+ *
+ * @public
+ */
+export type SessionsPendingOpen = Readonly<{ projectId: string; request: ProjectSessionOpenRequest | undefined }>;
 
 /** Why a project is no longer live, for the row that shows the reason. @public */
 export type SessionsClosedRecord = Readonly<{ reason: ProjectSessionCloseReason; at: number }>;
@@ -97,18 +113,41 @@ export type SessionsMachineContext = Readonly<{
    * The project waiting for a closing session to release its slot (P47).
    *
    * The slot only exists once the closing session has flushed and released, so
-   * a new destination or reopen is remembered here and resumed on `sessionClosed`.
+   * a new destination or reopen is remembered here and resumed on `sessionClosed`,
+   * with the request it came with. A newer open replaces both: one slot.
    */
-  pendingOpen: string | undefined;
+  pendingOpen: SessionsPendingOpen | undefined;
+  /**
+   * The newest library epoch the registry has heard of (`libraryChanged`), or `undefined` before the first.
+   *
+   * A resumed open whose request names an older epoch was built from an answer the library has since moved past, so
+   * the registry drops it instead of spawning it and says so (`pendingOpenDropped`, spec-pf `RegistryChecksEpoch`).
+   */
+  libraryEpoch: number | undefined;
   /** An effect or child failure no transition modelled; the registry keeps answering (MC-R12). */
   fault: string | undefined;
 }>;
 
 /** Events accepted by sessionsMachine. @public */
 export type SessionsMachineEvent =
-  | { readonly type: 'open'; readonly projectId: string; readonly reason?: string }
+  /** `request` is optional until A10: the sidebar and the notice send bare opens until A5b. */
+  | {
+      readonly type: 'open';
+      readonly projectId: string;
+      readonly request?: ProjectSessionOpenRequest;
+      readonly reason?: string;
+    }
   | { readonly type: 'close'; readonly projectId: string; readonly reason: ProjectSessionCloseReason }
   | { readonly type: 'touch'; readonly projectId: string }
+  /** Focus's request for a live project moved to another chat; forwarded to its session (R3-F1). */
+  | {
+      readonly type: 'chatRequested';
+      readonly projectId: string;
+      readonly chatId?: string;
+      readonly createdChatId?: string;
+    }
+  /** The library moved to `epoch`; a resumed open built at an older epoch is dropped (spec-pf, A5c). */
+  | { readonly type: 'libraryChanged'; readonly epoch: number }
   | { readonly type: 'idleExpired'; readonly projectId: string }
   /** Free memory: close every project a policy may close except the focused one (B-08). */
   | { readonly type: 'releaseMemory'; readonly keepProjectId?: string }
@@ -120,6 +159,8 @@ export type SessionsMachineEvent =
       readonly dirty: boolean;
       readonly pushed: boolean;
       readonly pending?: number;
+      readonly chatReady?: boolean;
+      readonly availability?: ProjectSessionAvailability;
     }
   | { readonly type: 'sessionClosed'; readonly projectId: string; readonly reason: ProjectSessionCloseReason }
   | { readonly type: 'cancelPendingOpen' }
@@ -136,6 +177,8 @@ export const sessionsEventTypes = [
   'open',
   'close',
   'touch',
+  'chatRequested',
+  'libraryChanged',
   'idleExpired',
   'releaseMemory',
   'sessionState',
@@ -149,7 +192,12 @@ export const sessionsEventTypes = [
 export type SessionsMachineEmitted =
   | { readonly type: 'liveSetChanged'; readonly projectIds: readonly string[] }
   | { readonly type: 'budgetRefused'; readonly projectId: string; readonly suggestions: readonly string[] }
-  | { readonly type: 'quiesced'; readonly forced: boolean };
+  | { readonly type: 'quiesced'; readonly forced: boolean }
+  /**
+   * The registry dropped a resumed open whose request's library epoch is stale, instead of spawning it. Focus
+   * clears its open and sends it again from its fresh answer (spec-pf `PendingOpenDropped`).
+   */
+  | { readonly type: 'pendingOpenDropped'; readonly projectId: string; readonly epoch: number | undefined };
 
 /** The app's sessions registry actor. @public */
 export type SessionsActorRef = ActorRefFrom<typeof sessionsMachine>;
@@ -231,6 +279,21 @@ const touchProject = (context: SessionsMachineContext, projectId: string): Parti
   touchOrder: { ...context.touchOrder, [projectId]: context.sequence + 1 },
 });
 
+/** The request carries a chat to forward to a live session: a chat id or a created chat id (R3-F1). */
+const carriesChat = (request: ProjectSessionOpenRequest | undefined): request is ProjectSessionOpenRequest =>
+  request?.chatId !== undefined || request?.createdChatId !== undefined;
+
+/**
+ * A waiting open built from an answer older than the newest library epoch the registry heard of (A5c).
+ *
+ * An open with no request or no epoch, or a registry that has heard of no epoch, cannot be judged and resumes as
+ * today.
+ */
+const isStalePendingOpen = (context: SessionsMachineContext, pending: SessionsPendingOpen): boolean => {
+  const epoch = pending.request?.epoch;
+  return epoch !== undefined && context.libraryEpoch !== undefined && epoch < context.libraryEpoch;
+};
+
 const withoutKey = <T>(record: Readonly<Record<string, T>>, key: string): Record<string, T> =>
   Object.fromEntries(Object.entries(record).filter(([id]) => id !== key));
 
@@ -243,7 +306,9 @@ const withoutKey = <T>(record: Readonly<Record<string, T>>, key: string): Record
  * @public
  */
 export const sessionsIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
-  ...['open', 'touch', 'close', 'idleExpired', 'releaseMemory', 'quit'].map((type) => ['quitting', type] as const),
+  ...['open', 'touch', 'chatRequested', 'close', 'idleExpired', 'releaseMemory', 'quit'].map(
+    (type) => ['quitting', type] as const,
+  ),
   ['ready', 'quitAnyway'],
 ];
 
@@ -288,6 +353,7 @@ export const sessionsMachine = setup({
     closed: {},
     refusals: {},
     pendingOpen: undefined,
+    libraryEpoch: undefined,
     fault: undefined,
   }),
   initial: 'ready',
@@ -299,9 +365,14 @@ export const sessionsMachine = setup({
        * holding for it becomes the refusal the person answers (I28). */
       const closeRefused =
         context.status[event.projectId]?.state === 'closing' && (event.state === 'live' || event.state === 'failed');
-      const reopenRetained = closeRefused && event.state === 'live' && context.pendingOpen === event.projectId;
+      const reopenRetained =
+        closeRefused && event.state === 'live' && context.pendingOpen?.projectId === event.projectId;
       if (context.pendingOpen !== undefined && closeRefused && !reopenRetained) {
-        enq.emit({ type: 'budgetRefused', projectId: context.pendingOpen, suggestions: Object.keys(context.refs) });
+        enq.emit({
+          type: 'budgetRefused',
+          projectId: context.pendingOpen.projectId,
+          suggestions: Object.keys(context.refs),
+        });
       }
       return {
         context: {
@@ -314,6 +385,8 @@ export const sessionsMachine = setup({
               dirty: event.dirty,
               pushed: event.pushed,
               pending: event.pending ?? 0,
+              chatReady: event.chatReady ?? true,
+              availability: event.availability ?? 'settled',
             },
           },
           /* R6: a refusal is about the facts at the time, not about the project.
@@ -330,6 +403,12 @@ export const sessionsMachine = setup({
     /* The person said *Not now* to the budget: forget the refused open, or the
      * next close would resume something nobody is waiting for any more. */
     cancelPendingOpen: { context: { pendingOpen: undefined } },
+    /* Monotonic: a late report of an older epoch never makes a stale request look current. */
+    libraryChanged: ({ context, event }) => ({
+      context: {
+        libraryEpoch: context.libraryEpoch === undefined ? event.epoch : Math.max(context.libraryEpoch, event.epoch),
+      },
+    }),
     /* The child finished its own `closing`; only now is the slot free. */
     sessionClosed: ({ context, event }, enq) => {
       const ref = context.refs[event.projectId];
@@ -342,9 +421,17 @@ export const sessionsMachine = setup({
         status: withoutKey(context.status, event.projectId),
         closed: { ...context.closed, [event.projectId]: { reason: event.reason, at: context.sequence } },
       };
-      /* The slot the budget close was making room for is free now (P47). */
+      /* The slot the budget close was making room for is free now (P47). The
+       * open resumes with the request it came with (R3-F2), unless a library
+       * change since made that request stale: then it is dropped and focus is
+       * told, so it re-sends from a fresh answer (spec-pf, A5c). */
       if (context.pendingOpen !== undefined) {
-        enq.raise({ type: 'open', projectId: context.pendingOpen });
+        const pending = context.pendingOpen;
+        if (isStalePendingOpen(context, pending)) {
+          enq.emit({ type: 'pendingOpenDropped', projectId: pending.projectId, epoch: pending.request?.epoch });
+        } else {
+          enq.raise({ type: 'open', projectId: pending.projectId, request: pending.request });
+        }
         announceLiveSet(liveSessions, enq);
         return { context: { ...patch, pendingOpen: undefined } };
       }
@@ -359,11 +446,21 @@ export const sessionsMachine = setup({
           /* A closing ref still owns its slot until flush and release finish.
            * Remember a return to it; any newer live destination supersedes that
            * intent. A live project itself only needs a touch (I22). */
+          const pendingOpen: SessionsPendingOpen = { projectId: event.projectId, request: event.request };
           if (guards.isLive(context, event.projectId)) {
+            /* A request with a chat reaches the session beside the touch (R3-F1). */
+            const ref = context.refs[event.projectId];
+            if (ref !== undefined && carriesChat(event.request)) {
+              enq.sendTo(ref, {
+                type: 'chatRequested',
+                chatId: event.request.chatId,
+                createdChatId: event.request.createdChatId,
+              });
+            }
             return {
               context: {
                 ...touchProject(context, event.projectId),
-                pendingOpen: context.status[event.projectId]?.state === 'closing' ? event.projectId : undefined,
+                pendingOpen: context.status[event.projectId]?.state === 'closing' ? pendingOpen : undefined,
               },
             };
           }
@@ -372,6 +469,7 @@ export const sessionsMachine = setup({
               id: `session:${event.projectId}`,
               input: {
                 projectId: event.projectId,
+                request: event.request,
                 parentRef: self,
                 idleWindowMilliseconds: context.idleWindowMilliseconds,
                 startBoundMilliseconds: context.startBoundMilliseconds,
@@ -394,7 +492,7 @@ export const sessionsMachine = setup({
            * cancel the active flush; selecting another victim would close more
            * projects than this open needs. Keep only the latest destination. */
           if (Object.values(context.status).some((status) => status.state === 'closing')) {
-            return { context: { pendingOpen: event.projectId } };
+            return { context: { pendingOpen } };
           }
           /* Over budget with something idle: close the least recently touched
            * idle project and say so on its row, then open (P47, AC24). The
@@ -405,7 +503,7 @@ export const sessionsMachine = setup({
             if (victim !== undefined) {
               enq.sendTo(context.refs[victim]!, { type: 'close', reason: 'budget' });
             }
-            return { context: { pendingOpen: event.projectId } };
+            return { context: { pendingOpen } };
           }
           /* One-project device (B-08): the dialog below could only offer
            * *Close X and open*, so the open takes that answer itself — the
@@ -415,7 +513,7 @@ export const sessionsMachine = setup({
           const [leaving] = switchCloseCandidates(context);
           if (leaving !== undefined) {
             enq.sendTo(context.refs[leaving]!, { type: 'close', reason: 'user' });
-            return { context: { pendingOpen: event.projectId } };
+            return { context: { pendingOpen } };
           }
           /* Nothing is idle: the budget refuses and names the candidates, so
            * the person picks (I28). Never a silent drop.
@@ -425,11 +523,19 @@ export const sessionsMachine = setup({
            * sends one close and not a close plus a second open that would take
            * the `hasIdleToClose` branch against the still-closing victim. */
           enq.emit({ type: 'budgetRefused', projectId: event.projectId, suggestions: Object.keys(context.refs) });
-          return { context: { pendingOpen: event.projectId } };
+          return { context: { pendingOpen } };
         },
         /* A touch or close for a project that is not live is stale (MC-R18). */
         touch: ({ context, event, guards }) =>
           guards.isLive(context, event.projectId) ? { context: touchProject(context, event.projectId) } : {},
+        /* Forwarded to the live session; for a project that is not live it is stale (MC-R18). */
+        chatRequested: ({ context, event }, enq) => {
+          const ref = context.refs[event.projectId];
+          if (ref !== undefined) {
+            enq.sendTo(ref, { type: 'chatRequested', chatId: event.chatId, createdChatId: event.createdChatId });
+          }
+          return {};
+        },
         close: ({ context, event, guards }, enq) => {
           if (!guards.isLive(context, event.projectId)) {
             return {};

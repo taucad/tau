@@ -1154,6 +1154,10 @@ export const createFocusMachine = (policy: FocusPolicy) => {
            * for an open that is not the last one sent is already displaced (rule 9). */
           const latest = context.lastSent?.openId === event.requestId;
           if ((event.result === 'waiting' || event.result === 'refused') && !latest) {
+            if (own && context.open.live) {
+              // The same open's `live` reply arrived first: it went live, and nothing displaced it.
+              return {};
+            }
             if (own) {
               patch.open = { ...context.open, openId: undefined };
               return result(value, patch, advance(patch, state, effects));

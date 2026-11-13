@@ -1226,4 +1226,27 @@ describe('focus: two replies to one open, and drops before the library change is
     expect(harness.opens()).toHaveLength(opens);
     expect(harness.lastAsked()).toMatchObject({ projectId: 'c' });
   });
+
+  it("should ignore a late wait reply for its live open after a person's open was sent", () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r0', 'b');
+    harness.route('r1', 'a');
+    harness.ready('r1', 'a');
+    harness.settleFlush(true);
+    const own = harness.lastOpen();
+    harness.settleOpen('live', own.requestId);
+    harness.facts('b', 'absent', unsettled);
+    harness.facts('a', 'live', unsettled);
+    harness.send({ type: 'openRequested', projectId: 'b' });
+    const person = harness.lastOpen();
+    harness.settleOpen('waiting', person.requestId);
+    harness.settleOpen('waiting', own.requestId);
+
+    expect(harness.opens().filter((open) => open.projectId === 'a')).toHaveLength(1);
+    expect(harness.context().pending).toMatchObject({ openId: person.requestId, projectId: 'b' });
+
+    harness.clock.increment(openPatienceMilliseconds);
+
+    expect(harness.state()).toBe('focused');
+  });
 });

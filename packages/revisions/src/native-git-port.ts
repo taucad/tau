@@ -1803,14 +1803,19 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   };
 
   /**
-   * Point one worktree's index at the tree its branch now names, unless the
-   * person staged something.
+   * Point one worktree's index at the tree its branch now names, carrying the
+   * person's staging forward onto it.
    *
-   * An index that differs from the tree of the head it replaced holds the
-   * person's own staging (`git add -p`, a resolved conflict), and is left
-   * alone: the work tree already carries those bytes, so the next capture
-   * records them either way, while the index is the one place Git keeps which
-   * of them the person meant to commit.
+   * Every path whose index entry differs from the tree of the head the move
+   * replaced holds the person's own staging (`git add -p`, a resolved
+   * conflict), and keeps that entry; every other path takes the new head's.
+   * So `git diff --cached` names only what the person staged, and a plain
+   * `git commit` records it on top of Tau's head instead of undoing Tau's
+   * saves of the paths they never staged. A path the person staged that the
+   * new head also changed keeps the person's entry, and `git status` shows it
+   * staged and modified: Tau never decides between the two, and never drops
+   * either. An index with unmerged entries, or one Git cannot compare, is
+   * left as it is.
    *
    * The comparison and the write happen under Git's own `index.lock`, taken
    * here, so the person's Git cannot stage between them. The new index is
@@ -1861,14 +1866,27 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         () => true,
         () => false,
       );
-      if (indexed && (await stagedSince(prefix, environment, replaced.head)) !== 0) {
+      const staged = indexed ? await stagedEntries(prefix, environment, replaced.head) : [];
+      if (staged === undefined) {
         return;
       }
-      const written = await run([...prefix, ...readTree], {
-        env: withVariable(environment, 'GIT_INDEX_FILE', temporary),
-      });
+      const writing = { env: withVariable(environment, 'GIT_INDEX_FILE', temporary) };
+      const written = await run([...prefix, ...readTree], writing);
       if (written.exitCode !== 0) {
         return;
+      }
+      if (staged.length > 0) {
+        const zero = await zeroObjectId();
+        const records = staged.map(({ mode, object, path }) =>
+          mode === undefined ? `0 ${zero}\t${path}\0` : `${mode} ${object}\t${path}\0`,
+        );
+        const carried = await run([...prefix, 'update-index', '-z', '--index-info'], {
+          ...writing,
+          input: [textEncoder.encode(records.join(''))],
+        });
+        if (carried.exitCode !== 0) {
+          return;
+        }
       }
       await rename(temporary, lock);
       await rename(lock, index);
@@ -1882,27 +1900,57 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   };
 
   /**
-   * Whether a worktree's index differs from the tree of one head.
+   * The index entries a worktree's index holds that differ from the tree of one head: what the person staged.
    *
    * @param prefix - The arguments that select the worktree.
    * @param environment - The environment its commands run under.
    * @param replaced - The head, or `undefined` for an unborn one (the empty tree).
-   * @returns `0` when the index is that tree, `1` when someone staged into it,
-   *   any other value when Git could not compare (and the index is not Tau's to replace).
+   * @returns One entry per staged path, its `mode` absent where the person
+   *   staged a removal; `undefined` when the index has unmerged entries or Git
+   *   could not compare, and the index is not Tau's to rebuild.
    */
-  const stagedSince = async (
+  const stagedEntries = async (
     prefix: readonly string[],
     environment: Record<string, string | undefined>,
     replaced: string | undefined,
-  ): Promise<number> => {
+  ): Promise<ReadonlyArray<Readonly<{ mode?: string; object: string; path: string }>> | undefined> => {
     const reading = { env: withVariable(environment, 'GIT_OPTIONAL_LOCKS', '0') };
+    const fields = (result: GitCommandResult): string[] | undefined =>
+      result.exitCode === 0 ? textDecoder.decode(result.stdout).split('\0') : undefined;
     if (replaced === undefined) {
-      /* Against an unborn head, any entry at all was staged by someone. */
-      const listed = await run([...prefix, 'ls-files', '--cached', '-z'], reading);
-      return listed.exitCode === 0 ? (listed.stdout.length > 0 ? 1 : 0) : listed.exitCode;
+      /* Against an unborn head, every entry was staged by someone: `<mode> <object> <stage>\t<path>`. */
+      const listed = fields(await run([...prefix, 'ls-files', '--stage', '-z'], reading));
+      if (listed === undefined) {
+        return undefined;
+      }
+      const entries = listed
+        .filter((record) => record !== '')
+        .map((record) => {
+          const [meta = '', path = ''] = record.split('\t');
+          const [mode = '', object = '', stage = ''] = meta.split(' ');
+          return { mode, object, stage, path };
+        });
+      return entries.some((entry) => entry.stage !== '0')
+        ? undefined
+        : entries.map(({ mode, object, path }) => ({ mode, object, path }));
     }
-    const compared = await run([...prefix, 'diff-index', '--cached', '--quiet', replaced, '--'], reading);
-    return compared.exitCode;
+    /* `:<old mode> <new mode> <old object> <new object> <status>`, then the path; the new side is the index's. */
+    const compared = fields(
+      await run([...prefix, 'diff-index', '--cached', '--raw', '-z', '--no-renames', replaced, '--'], reading),
+    );
+    if (compared === undefined) {
+      return undefined;
+    }
+    const entries: Array<Readonly<{ mode?: string; object: string; path: string }>> = [];
+    for (let at = 0; at + 1 < compared.length; at += 2) {
+      const [, mode = '', , object = '', status = ''] = (compared[at] ?? '').slice(1).split(' ');
+      const path = compared[at + 1] ?? '';
+      if (status.startsWith('U')) {
+        return undefined;
+      }
+      entries.push(status.startsWith('D') ? { object, path } : { mode, object, path });
+    }
+    return entries;
   };
 
   /**
@@ -1914,8 +1962,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * reversed and `git commit -a` record it undone. So after a branch moves,
    * every worktree that has it checked out gets `read-tree` of the new head:
    * the state `git reset` leaves, with stat data zero for Git to fill in on
-   * its own next refresh. An index the person staged into is kept (see
-   * `refreshIndex`).
+   * its own next refresh. What the person staged is carried onto the new
+   * head (see `refreshIndex`).
    *
    * One queue so the last refresh reads the last head, and every failure is
    * swallowed: the ref has already moved, and a held `index.lock` means the

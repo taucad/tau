@@ -9,6 +9,8 @@
  * | 4 | an `index.lock` the person's Git holds is neither replaced nor removed |
  * | 5 | `gitOperation` names a stopped merge, cherry-pick, revert or rebase, a detached head with the way back, and a held lock |
  * | 6 | a linked checkout answers for its own admin directory |
+ * | 7 | staging of one file is carried onto a Tau save of another: `git diff --cached` names only it, and `git commit` records it on top of Tau's head without undoing Tau's save |
+ * | 8 | a staged file the Tau save also changed keeps the person's entry, and `git status` shows it staged and modified |
  *
  * Every row drives stock `git` beside the port on a real repository.
  */
@@ -211,6 +213,50 @@ describe.runIf(gitToolchainOnPath)('native store beside stock Git', () => {
 
     await writeFile(join(path, '.git', 'index.lock'), '');
     expect(await port.gitOperation?.()).toEqual({ kind: 'locked' });
+  });
+
+  it('row 7: carries staging of one file onto a Tau save of another', async () => {
+    const original = lines(20);
+    const { path, port, mint } = await repository({ 'a.txt': original, 'b.txt': 'b one\n', 'c.txt': 'c\n' });
+    /* The person stages one hunk of `a.txt` and the removal of `c.txt`. */
+    await writeFile(
+      join(path, 'a.txt'),
+      original.replace('line 2\n', 'line 2 staged\n').replace('line 19\n', 'line 19 unstaged\n'),
+    );
+    gitOk(path, ['add', '-p', 'a.txt'], 'y\nn\n');
+    gitOk(path, ['rm', '--quiet', 'c.txt']);
+    const staged = gitOk(path, ['diff', '--cached']);
+
+    /* Tau saves `b.txt` alone. */
+    await writeFile(join(path, 'b.txt'), 'b two\n');
+    const tau = await mint({ 'a.txt': original, 'b.txt': 'b two\n', 'c.txt': 'c\n' });
+
+    expect(gitOk(path, ['diff', '--cached'])).toBe(staged);
+    expect(gitOk(path, ['diff', '--cached', '--name-only'])).toBe('a.txt\nc.txt\n');
+    gitOk(path, ['commit', '--quiet', '-m', 'Staged hunk']);
+    expect(gitOk(path, ['rev-parse', 'HEAD~1']).trim()).toBe(tau);
+    expect(gitOk(path, ['show', 'HEAD:b.txt'])).toBe('b two\n');
+    expect(gitOk(path, ['show', 'HEAD:a.txt'])).toContain('line 2 staged');
+    expect(gitOk(path, ['show', 'HEAD:a.txt'])).not.toContain('unstaged');
+    expect(git(path, ['cat-file', '-e', 'HEAD:c.txt']).status).not.toBe(0);
+    expect(await port.readRef('main')).toBe(revisionId(gitOk(path, ['rev-parse', 'HEAD']).trim()));
+  });
+
+  it('row 8: keeps the person\u2019s entry for a staged file the Tau save also changed, and shows both', async () => {
+    const original = lines(20);
+    const { path, mint } = await repository({ 'a.txt': original, 'b.txt': 'b one\n' });
+    const edited = original.replace('line 2\n', 'line 2 staged\n').replace('line 19\n', 'line 19 unstaged\n');
+    await writeFile(join(path, 'a.txt'), edited);
+    gitOk(path, ['add', '-p', 'a.txt'], 'y\nn\n');
+    const stagedBlob = gitOk(path, ['rev-parse', ':a.txt']);
+
+    /* Tau's save records the whole of `a.txt` and a change to `b.txt`. */
+    await writeFile(join(path, 'b.txt'), 'b two\n');
+    await mint({ 'a.txt': edited, 'b.txt': 'b two\n' });
+
+    expect(gitOk(path, ['rev-parse', ':a.txt'])).toBe(stagedBlob);
+    expect(gitOk(path, ['status', '--porcelain'])).toBe('MM a.txt\n');
+    expect(gitOk(path, ['diff', '--cached', '--name-only'])).toBe('a.txt\n');
   });
 
   it('row 6: answers for a linked checkout from its own admin directory', async () => {

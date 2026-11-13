@@ -4,6 +4,7 @@
  * | Row | Acceptance |
  * | --- | --- |
  * | 1 | with a partial `git add -p` staged, a Tau save lands and the staging is unchanged |
+ * | 3 | staging of one file survives a Tau save of another: `git diff --cached` names only the staged hunk, and `git commit` records it on top of Tau's head without undoing the save |
  * | 2 | during a conflicted `git merge`, no save is minted until the merge ends, and the status says why; the save then lands on the person's merge commit |
  *
  * The whole tree runs as a host runs it, over `NodeFsProvider` and the native
@@ -131,6 +132,37 @@ describe.runIf(gitToolchainOnPath)('Tau beside the person’s Git', () => {
     expect(await port.readRef('main')).not.toBe(before);
     expect(gitOk(root, ['write-tree'])).toBe(stagedTree);
     expect(gitOk(root, ['diff', '--cached', before])).toBe(staged);
+    /* The save recorded the unstaged hunk too: the person's entry stays, and Git shows both. */
+    expect(gitOk(root, ['status', '--porcelain', '--', 'part.txt'])).toBe('MM part.txt\n');
+    actor.stop();
+  }, 60_000);
+
+  it('row 3: a save of one file leaves the staged hunk of another for a plain `git commit`', async () => {
+    const original = lines(20);
+    const { root, filesystem, port, actor, save } = await started({ 'a.txt': original, 'b.txt': 'b one\n' });
+    /* The person stages one hunk of `a.txt` from a patch, leaving its file as it was. */
+    const patch = [
+      '--- a/a.txt',
+      '+++ b/a.txt',
+      '@@ -1,3 +1,3 @@',
+      ' line 1',
+      '-line 2',
+      '+line 2 staged',
+      ' line 3',
+      '',
+    ].join('\n');
+    gitOk(root, ['apply', '--cached'], patch);
+    const staged = gitOk(root, ['diff', '--cached']);
+
+    await filesystem.writeFile('b.txt', 'b two\n');
+    expect(await save()).toBe('revisionMinted');
+    const tau = String(await port.readRef('main'));
+
+    expect(gitOk(root, ['diff', '--cached'])).toBe(staged);
+    gitOk(root, ['commit', '--quiet', '-m', 'Staged hunk']);
+    expect(gitOk(root, ['rev-parse', 'HEAD~1']).trim()).toBe(tau);
+    expect(gitOk(root, ['show', 'HEAD:b.txt'])).toBe('b two\n');
+    expect(gitOk(root, ['show', 'HEAD:a.txt'])).toContain('line 2 staged');
     actor.stop();
   }, 60_000);
 

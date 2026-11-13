@@ -2,7 +2,6 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-<<<<<<< ours
 import type {
   HomeInspection,
   HomeLoadRecord,
@@ -23,9 +22,6 @@ import {
   firstDelayedRead,
   readWorkerReads,
 } from '#support/home-load-recorder.js';
-=======
-import type { HomeInspection, HomeLoadRecord } from '#support/home-load-recorder.js';
-import { inspectServerHtml, installHomeLoadRecorder, readHomeLoad } from '#support/home-load-recorder.js';
 import type { CloudLoadRecord, CloudStandInDelays } from '#support/cloud-stand-ins.js';
 import {
   cloudDefectRow,
@@ -35,7 +31,6 @@ import {
   readCloudLoadRecord,
   recordCloudLoad,
 } from '#support/cloud-stand-ins.js';
->>>>>>> theirs
 
 /**
  * R9 (home page loading audit): a load of Home is steady from its first frame. The target frame sequence's
@@ -189,7 +184,6 @@ test.each(
 );
 
 /*
-<<<<<<< ours
  * A0.10 (app state orchestration charter, D25): Home's loading defects for a returning visitor, frame by frame. Each
  * row forces its defect by answering a file-manager worker read late, so it is red on every run, and is written
  * `test.fails` so `main` stays green. The title names the defect; the failure names the frame and the node. The
@@ -316,7 +310,10 @@ knownDefect(
         `H5: after the chat listing was requested at ${since} ms, a sidebar project row moved between frames: ${moved.join(' | ')}`,
       ).toEqual([]);
     },
-=======
+  },
+);
+
+/*
  * N1 and H7 (lane A0.11), in the cloud-build tier only (`ui-e2e:test:e2e:cloud-load`): the self-host build has no
  * billing fence, so these cases cannot show the defect there. The stand-ins sign the owner in with no API
  * (`#support/cloud-stand-ins.js`). Each is an expected failure until side lane N1 flips it, by setting its
@@ -402,6 +399,5 @@ cloudDefectRow(
         `H7: the plain textarea replaced the rich composer (upgraded at ${String(record.composerUpgradedAt)} ms) at these times (ms)`,
       ).toEqual([]);
     });
->>>>>>> theirs
   },
 );

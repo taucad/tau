@@ -5,9 +5,10 @@
  * `sessions.machine.test.ts` keeps its own contract row over a narrower sample; both read the same table.
  *
  * The claim is bounded by the samples below, the projection (one snapshot per state value and live set) and the
- * traversal limit. The registry spawns real `projectSession` children; pure traversal never starts them, so their reports reach the
- * registry only as the sampled `sessionState` and `sessionClosed` events. `quiesced` and `forced` are final, so no
- * event is sampled there. Path table (the shortest path to each state value), kept current with `pathTable`:
+ * traversal limit. The registry spawns real `projectSession` children; pure traversal never starts them, so their
+ * reports reach the registry only as the sampled `sessionState` and `sessionClosed` events. `quiesced` and `forced`
+ * are final: the traversal still steps their snapshots (row 6), but `unansweredEvents` skips a done snapshot, so no
+ * answer is checked there. Path table (the shortest path to each state value), kept current with `pathTable`:
  *
  * 1. `ready`, nothing live: initial
  * 2. `ready`, `a` live: `open`

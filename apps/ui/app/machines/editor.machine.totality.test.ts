@@ -3,14 +3,17 @@
  * event is sampled in every reachable state, and each pair left unanswered must be on `editorIgnoredEvents`. A later
  * change that answers an event removes its pair; this file then fails until it does.
  *
- * The claim is bounded by the samples below, the projection (one snapshot per state value, registered materialiser,
- * set of open tab paths and failed write) and the traversal limit. The effects never settle, so the traversal
- * delivers their answers as built-in events, each only where it can arrive: an invoke's done or error event while its
- * state runs it (the two `ensuringFocusedChat` invokes answer only by event or error) and `storeDebounce` in
+ * A pair names a state where some sampled event of its type goes unanswered. Where another sample of that type is
+ * answered there (a mixed pair), the blanket pair cannot tell if that answer stops, so a dedicated row checks it.
+ *
+ * The claim is bounded by the samples below, the projection (one snapshot per state value, registered materialiser, set
+ * of open tab paths and failed write) and the traversal limit. The effects never settle, so the traversal delivers
+ * their answers as built-in events, each only where it can arrive: an invoke's done or error event while its state runs
+ * it (the two `ensuringFocusedChat` invokes answer only by event or error) and `storeDebounce` in
  * `ready.storing.pending`. `flushNow` is answered in `ready.storing.idle` only after a failed write, so the baseline
- * names that pair for the state as a whole. `registerMaterialiseModel` has one sample, since the traversal keys events
- * by their JSON. Path table (the shortest path to each state value, the first row of its projections), kept current
- * with `pathTable`:
+ * names that pair for the state as a whole and the mixed-pair row checks the answer after a failed write.
+ * `registerMaterialiseModel` has one sample, since the traversal keys events by their JSON. Path table (the shortest
+ * path to each state value, the first row of its projections), kept current with `pathTable`:
  *
  * 1. `idle`: initial
  * 2. `loading.hydrating`: `load`
@@ -28,6 +31,7 @@ import { pathTable, unansweredEvents, unreachedStates } from '@taucad/xstate-tes
 import type { UnansweredEvent } from '@taucad/xstate-testing/paths';
 import { describe, expect, it } from 'vitest';
 import { matchesState } from 'xstate';
+import { getShortestPaths } from 'xstate/graph';
 import type { AnyMachineSnapshot, StateValue } from 'xstate';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { editorEventTypes, editorIgnoredEvents, editorMachine } from '#machines/editor.machine.js';
@@ -39,7 +43,8 @@ type Samples = { [T in EditorStateEvent['type']]: ReadonlyArray<Extract<EditorSt
 const samples: Samples = {
   load: [{ type: 'load' }],
   openFile: [{ type: 'openFile', path: 'main.ts', source: 'user' }],
-  /* One sample: the traversal keys events by their JSON, which drops the function, so an `undefined` twin would replace it. */
+  /* One sample: the traversal keys events by their JSON, which drops the function, so an `undefined` twin would
+   * replace it. */
   registerMaterialiseModel: [{ type: 'registerMaterialiseModel', materialiseModel: async () => undefined }],
   closeFile: [{ type: 'closeFile', path: 'main.ts' }],
   setActiveFile: [{ type: 'setActiveFile', path: 'main.ts' }],
@@ -116,7 +121,8 @@ const options = {
   input: { projectId: 'proj_1' },
   events: (snapshot: AnyMachineSnapshot) => [...events, ...builtInsAt(snapshot)],
   limit: 50_000,
-  /* A registered materialiser, the open tabs and a failed write join the projection: each changes which branch answers. */
+  /* A registered materialiser, the open tabs and a failed write join the projection: each changes which branch
+   * answers. */
   serializeState: (snapshot: AnyMachineSnapshot) => {
     const context = snapshot.context as EditorStateContext;
     return JSON.stringify([
@@ -194,6 +200,24 @@ describe('editor machine totality baseline', () => {
 
   it('should answer every sampled event in every reachable state except the declared baseline', () => {
     expect(unansweredEvents(machine, { ...options, ignore: editorIgnoredEvents })).toEqual([]);
+  });
+
+  it('should flush after a failed write, which the blanket `flushNow` pair cannot check', () => {
+    const failed = getShortestPaths(machine, {
+      ...options,
+      serializeState: (snapshot: AnyMachineSnapshot) => `${snapshot.status}:${options.serializeState(snapshot)}`,
+    })
+      .map((path) => path.state)
+      .filter(
+        (snapshot) =>
+          snapshot.status === 'active' &&
+          snapshot.matches('ready.storing.idle') &&
+          (snapshot.context as EditorStateContext).error !== undefined,
+      );
+    expect(failed.length).toBeGreaterThan(0);
+    expect(failed.filter((snapshot) => !snapshot.can({ type: 'flushNow' })).map((snapshot) => snapshot.value)).toEqual(
+      [],
+    );
   });
 
   it('should declare no baseline pair that the machine now answers', () => {

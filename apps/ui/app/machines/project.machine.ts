@@ -314,9 +314,10 @@ const projectReadyOnlyEvents = [
 ] as const;
 
 /**
- * The (state, event) pairs this machine leaves unanswered today (MC-R17): the totality baseline, one pair per
- * state where no transition takes the event. The view, focus, refusal and runtime-closed reports are answered at the
- * root.
+ * The (state, event) pairs this machine leaves unanswered today (MC-R17): the totality baseline. A pair names a state
+ * where some event of its type goes unanswered; a mixed pair's type is also answered there with other context (a
+ * pair cannot say which), and the totality test checks that answer with its own row. The view, focus, refusal and
+ * runtime-closed reports are answered at the root.
  *
  * - Outside `ready`, every verb only `ready` answers.
  * - In `ready`, the metadata verbs return `undefined` when they would change nothing or the manifest is degraded

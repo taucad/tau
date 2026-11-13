@@ -240,8 +240,10 @@ const editorReadyOnlyEvents = [
 ] as const;
 
 /**
- * The (state, event) pairs this machine leaves unanswered today (MC-R17): the totality baseline, one pair per
- * state where no transition takes the event. `setRequestedChatId` and `focusKnownChat` are answered at the root.
+ * The (state, event) pairs this machine leaves unanswered today (MC-R17): the totality baseline. A pair names a state
+ * where some event of its type goes unanswered; a mixed pair's type is also answered there with other context (a
+ * pair cannot say which), and the totality test checks that answer with its own row. `setRequestedChatId` and
+ * `focusKnownChat` are answered at the root.
  *
  * - Before `ready` (`idle` and `loading`), every verb only `ready` answers: a tab, panel or chat change sent while the
  *   editor loads is dropped.

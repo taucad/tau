@@ -6,9 +6,10 @@
  *
  * The claim is bounded by the samples below, the projection (one snapshot per state value) and the traversal limit.
  * Each step's invoke answers with a built-in `xstate.done.actor` or `xstate.error.actor` event, offered only in the
- * state that runs it. `failed` is reached first from `registering`, so the traversal samples `retry` with
- * `failedPhase: 'registering'`; `retry` is a transition function that answers every phase. Path table (the shortest
- * path to each state value), kept current with `pathTable`:
+ * state that runs it. Every failed phase projects onto one `failed` vertex, and the traversal keeps the last snapshot
+ * it reaches there, so `retry` is sampled with one `failedPhase` only; every branch of its transition function returns
+ * a target, so it answers each phase. Path table (the shortest path to each state value), kept current with
+ * `pathTable`:
  *
  * 1. `idle`: initial
  * 2. `selecting`: `beginSelection`

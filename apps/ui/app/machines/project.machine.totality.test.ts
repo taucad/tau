@@ -3,11 +3,14 @@
  * event is sampled in every reachable state, and each pair left unanswered must be on `projectIgnoredEvents`. A
  * later change that answers an event removes its pair; this file then fails until it does.
  *
- * The claim is bounded by the samples below, the projection (one snapshot per state value, loaded name and manifest
- * issue) and the traversal limit. The effects never settle, so the traversal delivers their answers as built-in
- * events, each only where it can arrive: the load's done event after `projectRetrieved` (the load reports before it
- * completes) and its error, the write, repair and runtime-close invokes' done or error events while they run, and
- * `pendingToWriting` in `ready.storing.pending`. The host loads on demand (`shouldAutoLoad` false), so `idle` is
+ * A pair names a state where some sampled event of its type goes unanswered. Where another sample of that type is
+ * answered there (a mixed pair), the blanket pair cannot tell if that answer stops, so a dedicated row checks it.
+ *
+ * The claim is bounded by the samples below, the projection (one snapshot per state value, loaded name, manifest issue
+ * and failed write) and the traversal limit. The effects never settle, so the traversal delivers their answers as
+ * built-in events, each only where it can arrive: the load's done event after `projectRetrieved` (the load reports
+ * before it completes) and its error, the write, repair and runtime-close invokes' done or error events while they run,
+ * and `pendingToWriting` in `ready.storing.pending`. The host loads on demand (`shouldAutoLoad` false), so `idle` is
  * reached and `reloadProject` reaches the rest; an auto-loading browser starts at row 2. The cad, graphics and model
  * interaction children are the real logics, never started.
  *
@@ -190,10 +193,15 @@ const options = {
   input,
   events: (snapshot: AnyMachineSnapshot) => [...events, ...builtInsAt(snapshot)],
   limit: 20_000,
-  /* The loaded name and a degraded manifest join the projection: each changes which branch answers. */
+  /* The loaded name, a degraded manifest and a failed write join the projection: each changes which branch answers. */
   serializeState: (snapshot: AnyMachineSnapshot) => {
     const context = snapshot.context as ProjectContext;
-    return JSON.stringify([snapshot.value, context.project?.name, context.manifestIssue?.code]);
+    return JSON.stringify([
+      snapshot.value,
+      context.project?.name,
+      context.manifestIssue?.code,
+      context.error !== undefined,
+    ]);
   },
 };
 
@@ -222,6 +230,9 @@ const answers = (snapshot: AnyMachineSnapshot, event: ProjectEvent): boolean => 
   }
 };
 
+/** Built-in `xstate.*` and `@xstate.*` samples are never public, as in `unansweredEvents`. */
+const isBuiltIn = (type: string): boolean => type.startsWith('xstate.') || type.startsWith('@xstate.');
+
 /** `unansweredEvents` over {@link answers}: one row per (state value, event type) left unanswered and not ignored. */
 const gapsOf = (
   snapshots: readonly AnyMachineSnapshot[],
@@ -235,7 +246,7 @@ const gapsOf = (
     }
     for (const event of sampled(snapshot)) {
       const key = JSON.stringify([snapshot.value, event.type]);
-      if (event.type.startsWith('xstate.') || found.has(key) || answers(snapshot, event)) {
+      if (isBuiltIn(event.type) || found.has(key) || answers(snapshot, event)) {
         continue;
       }
       if (!isIgnoredPair(ignore, snapshot, event.type)) {
@@ -297,6 +308,50 @@ describe('project machine totality baseline', () => {
 
   it('should answer every sampled event in every reachable state except the declared baseline', () => {
     expect(gapsOf(reachable(), options.events, projectIgnoredEvents)).toEqual([]);
+  });
+
+  it('should answer the answering sample of every mixed `ready` pair, which the blanket pairs cannot check', () => {
+    const ready = reachable().filter((snapshot) => snapshot.status === 'active' && snapshot.matches('ready'));
+    const contextOf = (snapshot: AnyMachineSnapshot) => snapshot.context as ProjectContext;
+    const writable = ready.filter(
+      (snapshot) => contextOf(snapshot).project !== undefined && contextOf(snapshot).manifestIssue === undefined,
+    );
+    // Repair needs a degraded manifest that is not a JSON syntax error, and nothing being written.
+    const repairable = ready.filter(
+      (snapshot) =>
+        snapshot.matches('ready.storing.idle') &&
+        contextOf(snapshot).manifestIssue !== undefined &&
+        contextOf(snapshot).manifestIssue?.code !== 'manifest-invalid-json',
+    );
+    // A flush in `storing.idle` retries a failed write over a writable manifest.
+    const failedWrite = writable.filter(
+      (snapshot) => snapshot.matches('ready.storing.idle') && contextOf(snapshot).error !== undefined,
+    );
+    expect(writable.length).toBeGreaterThan(0);
+    expect(repairable.length).toBeGreaterThan(0);
+    expect(failedWrite.length).toBeGreaterThan(0);
+    const writes = (snapshot: AnyMachineSnapshot): readonly ProjectEvent[] => [
+      { type: 'updateName', name: `${contextOf(snapshot).project?.name ?? ''} renamed` },
+      ...samples.updateDescription,
+      ...samples.updateTags,
+      ...samples.setMainFile,
+    ];
+    const checks: ReadonlyArray<
+      readonly [readonly AnyMachineSnapshot[], (s: AnyMachineSnapshot) => readonly ProjectEvent[]]
+    > = [
+      [writable, writes],
+      [ready.filter((snapshot) => contextOf(snapshot).project !== undefined), () => [samples.projectFileActivity[0]!]],
+      [repairable, () => samples.repairManifest],
+      [failedWrite, () => samples.flushNow],
+    ];
+    const refused = checks.flatMap(([snapshots, sampled]) =>
+      snapshots.flatMap((snapshot) =>
+        sampled(snapshot)
+          .filter((event) => !answers(snapshot, event))
+          .map((event) => `${dotted(snapshot.value as StateValue)}: ${event.type}`),
+      ),
+    );
+    expect(refused).toEqual([]);
   });
 
   it('should declare no baseline pair that the machine now answers', () => {

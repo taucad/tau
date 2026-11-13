@@ -4,14 +4,17 @@
  * `fileManagerIgnoredEvents`. A later change that answers an event removes its pair; this file then fails until it
  * does.
  *
+ * A pair names a state where some sampled event of its type goes unanswered. Where another sample of that type is
+ * answered there (a mixed pair), the blanket pair cannot tell if that answer stops, so a dedicated row checks it.
+ *
  * The claim is bounded by the samples below, the projection (one snapshot per state value, root and reported webaccess
  * failure) and the traversal limit. The effects never settle, so the traversal delivers their answers as built-in
- * events, each only where it can arrive: the connect and init invokes' done or error events in `connectingWorker`
- * and `initializingServices`, and in `ready` the proxy watch's error and `restartWindow`. `setRoot` is sampled with
- * the current root and a new one; the live states answer only a new root, so the baseline names `setRoot` for each of
- * them. The worker and service payloads are opaque stand-ins: the machine only stores them. The input is a root
- * mount with the default `indexeddb` backend. Path table (the shortest path to each state value, the first row of its
- * projections), kept current with `pathTable`:
+ * events, each only where it can arrive: the connect and init invokes' done or error events in `connectingWorker` and
+ * `initializingServices`, and in `ready` the proxy watch's error and `restartWindow`. `setRoot` is sampled with the
+ * current root and a new one; the live states answer only a new root, so the baseline names `setRoot` for each of them,
+ * and the mixed-pair row checks that each answers a new root. The worker and service payloads are opaque stand-ins: the
+ * machine only stores them. The input is a root mount with the default `indexeddb` backend. Path table (the shortest
+ * path to each state value, the first row of its projections), kept current with `pathTable`:
  *
  * 1. `initializing`: initial
  * 2. `connectingWorker`: `initialize`
@@ -25,6 +28,7 @@ import type { UnansweredEvent } from '@taucad/xstate-testing/paths';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createCallbackLogic, matchesState } from 'xstate';
+import { getShortestPaths } from 'xstate/graph';
 import type { AnyMachineSnapshot } from 'xstate';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { fileManagerEventTypes, fileManagerIgnoredEvents, fileManagerMachine } from '#machines/file-manager.machine.js';
@@ -168,6 +172,23 @@ describe('file manager machine totality baseline', () => {
 
   it('should answer every sampled event in every reachable state except the declared baseline', () => {
     expect(unansweredEvents(machine, { ...options, ignore: fileManagerIgnoredEvents })).toEqual([]);
+  });
+
+  it('should answer a new root in every live state, which the blanket `setRoot` pairs cannot check', () => {
+    const live = ['connectingWorker', 'initializingServices', 'ready', 'webAccessUnavailable'];
+    const snapshots = getShortestPaths(machine, {
+      ...options,
+      serializeState: (snapshot: AnyMachineSnapshot) => `${snapshot.status}:${options.serializeState(snapshot)}`,
+    })
+      .map((path) => path.state)
+      .filter((snapshot) => snapshot.status === 'active' && live.some((state) => snapshot.matches(state)));
+    expect(new Set(snapshots.map((snapshot) => snapshot.value as string))).toEqual(new Set(live));
+    const refused = snapshots.filter((snapshot) => {
+      const { rootDirectory } = snapshot.context as { rootDirectory: string };
+      const elsewhere = `${rootDirectory}-elsewhere`;
+      return !snapshot.can({ type: 'setRoot', path: elsewhere, projectId: elsewhere });
+    });
+    expect(refused.map((snapshot) => snapshot.value)).toEqual([]);
   });
 
   it('should declare no baseline pair that the machine now answers', () => {

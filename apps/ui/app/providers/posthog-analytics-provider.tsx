@@ -180,7 +180,12 @@ function PostHogLifecycle({
         posthog.capture('$opt_in');
       }
       setAnalyticsLinkSource(readAnalyticsLink);
-      connectRemoteFlags(posthog);
+      // An SDK that did not initialise (no key) never answers for flags: their defaults are final then.
+      if (posthog.__loaded) {
+        connectRemoteFlags(posthog);
+      } else {
+        disconnectRemoteFlags();
+      }
       setConsoleClient(posthog);
       // The onboarding baseline (`first_seen` once per device, then first model and first export) follows admission.
       connectBaselineTelemetry(captureAdmitted);

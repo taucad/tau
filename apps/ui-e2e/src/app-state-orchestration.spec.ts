@@ -179,8 +179,13 @@ const readSettledProject = async (routes: Readonly<{ a: RegExp; b: RegExp }>): P
       since = performance.now();
     }
     const key = routes.a.test(url) ? 'a' : routes.b.test(url) ? 'b' : undefined;
-    // oxlint-disable-next-line no-await-in-loop -- A bounded poll reads in order.
-    if (key && performance.now() - since >= 1000 && (await target.isVisible(dockTab(entryPaths[key])))) {
+    /* A tab detached between the read's count and its attribute read times the read out: that is not on screen. */
+    if (
+      key &&
+      performance.now() - since >= 1000 &&
+      // oxlint-disable-next-line no-await-in-loop -- A bounded poll reads in order.
+      (await target.isVisible(dockTab(entryPaths[key])).catch(() => false))
+    ) {
       return key === 'a' ? 'A' : 'B';
     }
     // oxlint-disable-next-line no-await-in-loop -- A bounded poll reads in order.
